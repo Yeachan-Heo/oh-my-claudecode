@@ -26,6 +26,20 @@ export { lspTools, astTools, allCustomTools } from './tools/index.js';
 export { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
 export * from './shared/types.js';
 
+// Command expansion utilities for SDK integration
+export {
+  expandCommand,
+  expandCommandPrompt,
+  getCommand,
+  getAllCommands,
+  listCommands,
+  commandExists,
+  expandCommands,
+  getCommandsDir,
+  type CommandInfo,
+  type ExpandedCommand
+} from './commands/index.js';
+
 /**
  * Options for creating a Sisyphus session
  */
