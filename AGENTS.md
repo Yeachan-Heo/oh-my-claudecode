@@ -9,6 +9,7 @@
 Oh-My-ClaudeCode-Sisyphus is an enhancement system for Claude Code (Anthropic's official CLI) that adds multi-agent orchestration, persistence mechanisms, and advanced productivity features. Think "oh-my-zsh" for Claude Code.
 
 **Key Features:**
+
 - Multi-agent orchestration with specialized subagents
 - Persistent work loops (Ralph Loop)
 - Boulder state management for complex plans
@@ -67,63 +68,63 @@ oh-my-claude-sisyphus/
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| Add agent | `src/agents/` | Create .ts, add to agentDefinitions in definitions.ts |
-| Add hook | `src/hooks/` | Create dir, export from index.ts, add to bridge.ts |
-| Add feature | `src/features/` | Create dir, export from index.ts |
-| Add skill | `src/installer/index.ts` | Add to SKILL_DEFINITIONS |
-| Agent types | `src/agents/types.ts` | AgentDefinition, AgentMetadata interfaces |
-| Hook types | `src/hooks/<name>/types.ts` | Hook-specific types |
-| State mgmt | `src/features/boulder-state/` | BoulderState, plan progress |
-| Background tasks | `src/features/background-agent/` | BackgroundManager class |
-| Shell hooks | `src/hooks/bridge.ts` | processHook() entry point |
+| Task             | Location                         | Notes                                                 |
+| ---------------- | -------------------------------- | ----------------------------------------------------- |
+| Add agent        | `src/agents/`                    | Create .ts, add to agentDefinitions in definitions.ts |
+| Add hook         | `src/hooks/`                     | Create dir, export from index.ts, add to bridge.ts    |
+| Add feature      | `src/features/`                  | Create dir, export from index.ts                      |
+| Add skill        | `src/installer/index.ts`         | Add to SKILL_DEFINITIONS                              |
+| Agent types      | `src/agents/types.ts`            | AgentDefinition, AgentMetadata interfaces             |
+| Hook types       | `src/hooks/<name>/types.ts`      | Hook-specific types                                   |
+| State mgmt       | `src/features/boulder-state/`    | BoulderState, plan progress                           |
+| Background tasks | `src/features/background-agent/` | BackgroundManager class                               |
+| Shell hooks      | `src/hooks/bridge.ts`            | processHook() entry point                             |
 
 ## AGENTS
 
-| Agent | Model | Purpose | Key Traits |
-|-------|-------|---------|------------|
-| **oracle** | Opus | Architecture, debugging | Deep analysis, root cause finding |
-| **librarian** | Sonnet | Documentation, research | Multi-repo analysis, doc lookup |
-| **explore** | Haiku | Fast codebase search | Quick pattern matching |
-| **sisyphus-junior** | Sonnet | Focused execution | Direct task implementation |
-| **frontend-engineer** | Sonnet | UI/UX work | Component design, styling |
-| **document-writer** | Haiku | Technical docs | README, API docs |
-| **multimodal-looker** | Sonnet | Visual analysis | Screenshots, diagrams |
-| **momus** | Opus | Plan review | Critical evaluation |
-| **metis** | Opus | Pre-planning | Hidden requirements |
-| **orchestrator-sisyphus** | Sonnet | Todo coordination | Task delegation |
-| **prometheus** | Opus | Strategic planning | Interview-style planning |
+| Agent                     | Model  | Purpose                 | Key Traits                        |
+| ------------------------- | ------ | ----------------------- | --------------------------------- |
+| **oracle**                | Opus   | Architecture, debugging | Deep analysis, root cause finding |
+| **librarian**             | Sonnet | Documentation, research | Multi-repo analysis, doc lookup   |
+| **explore**               | Haiku  | Fast codebase search    | Quick pattern matching            |
+| **sisyphus-junior**       | Sonnet | Focused execution       | Direct task implementation        |
+| **frontend-engineer**     | Sonnet | UI/UX work              | Component design, styling         |
+| **document-writer**       | Haiku  | Technical docs          | README, API docs                  |
+| **multimodal-looker**     | Sonnet | Visual analysis         | Screenshots, diagrams             |
+| **momus**                 | Opus   | Plan review             | Critical evaluation               |
+| **metis**                 | Opus   | Pre-planning            | Hidden requirements               |
+| **orchestrator-sisyphus** | Sonnet | Todo coordination       | Task delegation                   |
+| **prometheus**            | Opus   | Strategic planning      | Interview-style planning          |
 
 ## HOOKS
 
-| Hook | Event | Purpose |
-|------|-------|---------|
-| **keyword-detector** | UserPromptSubmit | Detect ultrawork/ultrathink/search/analyze |
-| **ralph-loop** | Stop | Enforce work continuation until completion |
-| **todo-continuation** | Stop | Block stop if todos remain |
-| **edit-error-recovery** | PostToolUse | Inject recovery hints on edit failures |
-| **think-mode** | UserPromptSubmit | Activate extended thinking |
-| **rules-injector** | PostToolUse (Read/Edit) | Inject matching rule files |
-| **sisyphus-orchestrator** | PreToolUse, PostToolUse | Enforce delegation, add verification |
-| **auto-slash-command** | UserPromptSubmit | Detect and expand /commands |
+| Hook                      | Event                   | Purpose                                    |
+| ------------------------- | ----------------------- | ------------------------------------------ |
+| **keyword-detector**      | UserPromptSubmit        | Detect ultrawork/ultrathink/search/analyze |
+| **ralph-loop**            | Stop                    | Enforce work continuation until completion |
+| **todo-continuation**     | Stop                    | Block stop if todos remain                 |
+| **edit-error-recovery**   | PostToolUse             | Inject recovery hints on edit failures     |
+| **think-mode**            | UserPromptSubmit        | Activate extended thinking                 |
+| **rules-injector**        | PostToolUse (Read/Edit) | Inject matching rule files                 |
+| **sisyphus-orchestrator** | PreToolUse, PostToolUse | Enforce delegation, add verification       |
+| **auto-slash-command**    | UserPromptSubmit        | Detect and expand /commands                |
 
 ## SKILLS
 
-| Skill | Description |
-|-------|-------------|
-| **orchestrator** | Master coordinator for complex tasks |
-| **sisyphus** | Multi-agent orchestration mode |
-| **ralph-loop** | Self-referential loop until completion |
-| **frontend-ui-ux** | Designer-turned-developer aesthetic |
-| **git-master** | Atomic commits, rebasing, history search |
-| **ultrawork** | Maximum performance parallel mode |
+| Skill              | Description                              |
+| ------------------ | ---------------------------------------- |
+| **orchestrator**   | Master coordinator for complex tasks     |
+| **sisyphus**       | Multi-agent orchestration mode           |
+| **ralph-loop**     | Self-referential loop until completion   |
+| **frontend-ui-ux** | Designer-turned-developer aesthetic      |
+| **git-master**     | Atomic commits, rebasing, history search |
+| **ultrawork**      | Maximum performance parallel mode        |
 
 ## CONVENTIONS
 
-- **Runtime**: Node.js (not Bun)
+- **Runtime**: Bun
 - **Build**: TypeScript with ESM output
-- **Package**: npm
+- **Package**: bun
 - **Testing**: Manual verification (no test framework)
 - **Hooks**: Shell-based (Claude Code native)
 - **State**: JSON files in `~/.claude/.sisyphus/`
@@ -142,19 +143,19 @@ oh-my-claude-sisyphus/
 ## COMMANDS
 
 ```bash
-npm run build        # Build TypeScript
-npm run typecheck    # Type check only
-npm run install:dev  # Install to ~/.claude
+bun run build        # Build TypeScript
+bun run typecheck    # Type check only
+bun run install:dev  # Install to ~/.claude
 ```
 
 ## STATE FILES
 
-| File | Purpose |
-|------|---------|
-| `~/.claude/.sisyphus/boulder.json` | Active plan state |
-| `~/.claude/.sisyphus/ralph.json` | Ralph Loop state |
-| `~/.claude/.sisyphus/rules-injector/*.json` | Injected rules tracking |
-| `~/.claude/.sisyphus/background-tasks/*.json` | Background task state |
+| File                                          | Purpose                 |
+| --------------------------------------------- | ----------------------- |
+| `~/.claude/.sisyphus/boulder.json`            | Active plan state       |
+| `~/.claude/.sisyphus/ralph.json`              | Ralph Loop state        |
+| `~/.claude/.sisyphus/rules-injector/*.json`   | Injected rules tracking |
+| `~/.claude/.sisyphus/background-tasks/*.json` | Background task state   |
 
 ## CONFIGURATION
 
@@ -163,39 +164,35 @@ Settings live in `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [
-      "~/.claude/sisyphus/hooks/keyword-detector.sh"
-    ],
-    "Stop": [
-      "~/.claude/sisyphus/hooks/todo-continuation.sh"
-    ]
+    "UserPromptSubmit": ["~/.claude/sisyphus/hooks/keyword-detector.sh"],
+    "Stop": ["~/.claude/sisyphus/hooks/todo-continuation.sh"]
   }
 }
 ```
 
 ## SLASH COMMANDS
 
-| Command | Description |
-|---------|-------------|
-| `/sisyphus <task>` | Activate multi-agent orchestration |
-| `/ultrawork <task>` | Maximum performance mode |
-| `/plan <description>` | Start planning with Prometheus |
-| `/review [plan]` | Review plan with Momus |
-| `/ralph-loop <task>` | Self-referential loop |
-| `/cancel-ralph` | Cancel active Ralph Loop |
-| `/orchestrator <task>` | Complex task coordination |
-| `/deepsearch <query>` | Thorough codebase search |
-| `/analyze <target>` | Deep analysis |
-| `/update` | Check for updates |
+| Command                | Description                        |
+| ---------------------- | ---------------------------------- |
+| `/sisyphus <task>`     | Activate multi-agent orchestration |
+| `/ultrawork <task>`    | Maximum performance mode           |
+| `/plan <description>`  | Start planning with Prometheus     |
+| `/review [plan]`       | Review plan with Momus             |
+| `/ralph-loop <task>`   | Self-referential loop              |
+| `/cancel-ralph`        | Cancel active Ralph Loop           |
+| `/orchestrator <task>` | Complex task coordination          |
+| `/deepsearch <query>`  | Thorough codebase search           |
+| `/analyze <target>`    | Deep analysis                      |
+| `/update`              | Check for updates                  |
 
 ## COMPLEXITY HOTSPOTS
 
-| File | Lines | Description |
-|------|-------|-------------|
-| `src/installer/index.ts` | 2000+ | SKILL_DEFINITIONS, CLAUDE_MD_CONTENT |
-| `src/agents/definitions.ts` | 600+ | All agent configurations |
-| `src/hooks/bridge.ts` | 320+ | Main hook processor |
-| `src/features/boulder-state/storage.ts` | 200+ | Plan state management |
+| File                                    | Lines | Description                          |
+| --------------------------------------- | ----- | ------------------------------------ |
+| `src/installer/index.ts`                | 2000+ | SKILL_DEFINITIONS, CLAUDE_MD_CONTENT |
+| `src/agents/definitions.ts`             | 600+  | All agent configurations             |
+| `src/hooks/bridge.ts`                   | 320+  | Main hook processor                  |
+| `src/features/boulder-state/storage.ts` | 200+  | Plan state management                |
 
 ## NOTES
 

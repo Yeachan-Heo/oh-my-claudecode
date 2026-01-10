@@ -23,12 +23,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/index.js",
+    "start": "bun dist/index.js",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run build",
-    "postinstall": "node dist/cli/index.js postinstall || true"
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run build",
+    "postinstall": "bun dist/cli/index.js postinstall || true"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
@@ -48,7 +49,8 @@
     "prettier": "^3.4.2"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.0.0",
+    "bun": ">=1.0.0"
   },
   "repository": {
     "type": "git",
@@ -69,7 +71,8 @@
     "orchestration",
     "sisyphus",
     "anthropic",
-    "llm"
+    "llm",
+    "bun"
   ],
   "publishConfig": {
     "access": "public"
