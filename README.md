@@ -48,6 +48,14 @@ npm install -g oh-my-claude-sisyphus
 
 > **Windows Users**: This is the only supported installation method. Requires Node.js 18+.
 
+### Via bun (Alternative for bun users)
+
+```bash
+bun install -g oh-my-claude-sisyphus
+```
+
+> Bun is a fast JavaScript runtime. Both npm and bun are fully supported.
+
 ### Manual Install (macOS/Linux)
 
 ```bash
