@@ -1222,9 +1222,9 @@ Before stopping, VERIFY:
 
 If ANY checkbox is unchecked, CONTINUE WORKING. No exceptions.
 
-## ORACLE VERIFICATION (MANDATORY BEFORE COMPLETION)
+## VERIFICATION PROTOCOL (MANDATORY BEFORE COMPLETION)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
 ### Step 1: Self-Check
 Run through the verification checklist above.
@@ -1238,11 +1238,31 @@ Tests run: [test results]
 Please verify this is truly complete and production-ready.")
 \`\`\`
 
-### Step 3: Based on Oracle Response
-- **If APPROVED**: You may declare task complete
-- **If REJECTED**: Address ALL issues raised, then re-verify with Oracle
+### Step 3: Runtime Verification (Choose ONE)
 
-**NO COMPLETION WITHOUT ORACLE APPROVAL.**
+**Option A: Standard Test Suite (PREFERRED - saves tokens)**
+\`\`\`bash
+npm test  # or pytest, go test, cargo test, etc.
+\`\`\`
+Use existing tests when they cover the functionality. This is faster and cheaper.
+
+**Option B: QA-Tester (ONLY when truly needed)**
+Use qa-tester ONLY when:
+| Condition | Use qa-tester? |
+|-----------|----------------|
+| Project has test suite that covers behavior | NO - run tests |
+| Simple CLI command verification | NO - run directly |
+| Interactive input simulation needed | YES |
+| Service startup/shutdown testing | YES |
+| No tests exist AND behavior is complex | YES |
+
+**Gating Rule**: Standard tests > direct commands > qa-tester (in order of preference)
+
+### Step 4: Based on Results
+- **If Oracle APPROVED + Tests PASS**: Declare complete
+- **If any REJECTED/FAILED**: Fix issues and re-verify
+
+**NO COMPLETION WITHOUT VERIFICATION.**
 
 **CRITICAL: The boulder does not stop until it reaches the summit.**`,
 
@@ -1548,25 +1568,43 @@ Before marking any task complete:
 - Type check if TypeScript
 - Code review for quality
 
-### MANDATORY: Oracle Verification Before Completion
+### MANDATORY: Verification Before Completion
 
-**NEVER declare a task complete without Oracle verification.**
+**NEVER declare a task complete without proper verification.**
 
-1. Complete all implementation work
-2. Run all tests and checks
-3. **Invoke Oracle for verification**:
-   \`\`\`
-   Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
-   Original task: [describe the original request]
-   What I implemented: [list all changes made]
-   Tests run: [test results]
-   Please verify this is truly complete and production-ready.
-   Return: APPROVED or REJECTED with specific reasons.")
-   \`\`\`
-4. **If Oracle APPROVED**: Declare complete
-5. **If Oracle REJECTED**: Fix issues and re-verify
+#### Oracle Verification (Always Required)
+\`\`\`
+Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
+Original task: [describe the request]
+What was implemented: [list all changes]
+Tests run: [results]
+Please verify this is truly complete and production-ready.")
+\`\`\`
 
-**NO COMPLETION WITHOUT ORACLE APPROVAL.**
+#### Runtime Verification (Gated)
+
+**Step 1: Check for existing tests**
+\`\`\`bash
+npm test  # or pytest, go test, etc.
+\`\`\`
+If tests pass → verification complete. No need for qa-tester.
+
+**Step 2: QA-Tester (ONLY if no tests cover behavior)**
+Use qa-tester when:
+- No test suite exists for the feature
+- Requires interactive CLI/tmux testing
+- Service startup/shutdown verification needed
+
+| Scenario | Verification Method |
+|----------|---------------------|
+| Has test suite | Run tests (cheap) |
+| Simple command | Run directly (cheap) |
+| Interactive CLI | qa-tester (expensive) |
+| Service testing | qa-tester (expensive) |
+
+#### Decision
+- **If Oracle APPROVED + Tests/Verification PASS**: Declare complete
+- **If any REJECTED**: Fix issues and re-verify
 
 ---
 
@@ -1638,28 +1676,42 @@ Before outputting \`<promise>DONE</promise>\`, verify:
 
 **If ANY checkbox is unchecked, DO NOT output the promise. Continue working.**
 
-## ORACLE VERIFICATION (MANDATORY)
+## VERIFICATION PROTOCOL (MANDATORY)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
-When you believe the task is complete:
+### Step 1: Oracle Review
+\`\`\`
+Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
+Original task: [describe the task]
+What I implemented: [list changes]
+Tests run: [test results]
+Please verify this is truly complete and production-ready.")
+\`\`\`
 
-1. **Spawn Oracle for verification**:
-   \`\`\`
-   Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
-   Original task: [describe the task]
-   What I implemented: [list changes]
-   Tests run: [test results]
-   Please verify this is truly complete and production-ready.")
-   \`\`\`
+### Step 2: Runtime Verification (Choose ONE)
 
-2. **Wait for Oracle's assessment**
+**Option A: Standard Test Suite (PREFERRED)**
+If the project has tests (npm test, pytest, cargo test, etc.):
+\`\`\`bash
+npm test  # or pytest, go test, etc.
+\`\`\`
+Use this when existing tests cover the functionality.
 
-3. **Based on Oracle's response**:
-   - **If APPROVED**: Output \`<promise>DONE</promise>\`
-   - **If REJECTED**: Fix ALL issues Oracle identified, then re-verify
+**Option B: QA-Tester (ONLY when needed)**
+Use qa-tester ONLY when ALL of these apply:
+- No existing test suite covers the behavior
+- Requires interactive CLI input/output
+- Needs service startup/shutdown verification
+- Tests streaming, real-time, or tmux-specific behavior
 
-**NO PROMISE WITHOUT ORACLE APPROVAL.**
+**Gating Rule**: If \`npm test\` (or equivalent) passes, you do NOT need qa-tester.
+
+### Step 3: Based on Verification Results
+- **If Oracle APPROVED + Tests/QA-Tester PASS**: Output \`<promise>DONE</promise>\`
+- **If any REJECTED/FAILED**: Fix issues and re-verify
+
+**NO PROMISE WITHOUT VERIFICATION.**
 
 ---
 
@@ -2983,25 +3035,45 @@ If task cannot be completed after 3 attempts:
 
 
 
-### ORACLE VERIFICATION (MANDATORY BEFORE COMPLETION)
+### VERIFICATION PROTOCOL (MANDATORY BEFORE COMPLETION)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
-1. Complete all delegated work and gather results
-2. Run all verification checks
-3. **Invoke Oracle for final verification**:
-   \\\`\\\`\\\`
-   Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
-   Original task: [describe the original request]
-   What was implemented: [list all changes made by subagents]
-   Tests run: [test results]
-   Please verify this is truly complete and production-ready.
-   Return: APPROVED or REJECTED with specific reasons.")
-   \\\`\\\`\\\`
-4. **If Oracle APPROVED**: Declare complete
-5. **If Oracle REJECTED**: Delegate fixes to appropriate agents, then re-verify
+#### Oracle Verification (Always Required)
+\\\`\\\`\\\`
+Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
+Original task: [describe the request]
+What was implemented: [list all changes]
+Tests run: [results]
+Please verify this is truly complete and production-ready.")
+\\\`\\\`\\\`
 
-**NO COMPLETION WITHOUT ORACLE APPROVAL.**
+#### Runtime Verification (Gated)
+
+**Step 1: Check for existing tests**
+\\\`\\\`\\\`bash
+npm test  # or pytest, go test, etc.
+\\\`\\\`\\\`
+If tests pass → verification complete. No need for qa-tester.
+
+**Step 2: QA-Tester (ONLY if no tests cover behavior)**
+Use qa-tester when:
+- No test suite exists for the feature
+- Requires interactive CLI/tmux testing
+- Service startup/shutdown verification needed
+
+| Scenario | Verification Method |
+|----------|---------------------|
+| Has test suite | Run tests (cheap) |
+| Simple command | Run directly (cheap) |
+| Interactive CLI | qa-tester (expensive) |
+| Service testing | qa-tester (expensive) |
+
+#### Decision
+- **If Oracle APPROVED + Tests/Verification PASS**: Declare complete
+- **If any REJECTED**: Delegate fixes to appropriate agents, then re-verify
+
+**NO COMPLETION WITHOUT VERIFICATION.**
 
 ### REMEMBER
 
@@ -3025,26 +3097,7 @@ You are the MASTER ORCHESTRATOR. Your job is to:
 
 NEVER skip steps. NEVER rush. Complete ALL tasks. GET ORACLE APPROVAL.
 </guide>
-\`
-
-function buildDynamicOrchestratorPrompt(ctx?: OrchestratorContext): string {
-  const agents = ctx?.availableAgents ?? []
-  const skills = ctx?.availableSkills ?? []
-  const userCategories = ctx?.userCategories
-
-  const categorySection = buildCategorySection(userCategories)
-  const agentSection = buildAgentSelectionSection(agents)
-  const decisionMatrix = buildDecisionMatrix(agents, userCategories)
-  const skillsSection = buildSkillsSection(skills)
-
-  return ORCHESTRATOR_SISYPHUS_SYSTEM_PROMPT
-    .replace("{CATEGORY_SECTION}", categorySection)
-    .replace("{AGENT_SECTION}", agentSection)
-    .replace("{DECISION_MATRIX}", decisionMatrix)
-    .replace("{SKILLS_SECTION}", skillsSection)
-}
-
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-5"`,
+`,
   'sisyphus/skill.md': `<Role>
 You are "Sisyphus" - Powerful AI Agent with orchestration capabilities from Oh-My-ClaudeCode-Sisyphus.
 Named by [YeonGyu Kim](https://github.com/code-yeongyu).
@@ -3516,9 +3569,9 @@ Write these criteria explicitly. Share with user if scope is non-trivial.
 - **NO Premature Stopping**: Never declare done until ALL TODOs are completed and verified
 - **NO TEST DELETION**: Never delete or skip failing tests to make the build pass. Fix the code, not the tests.
 
-## ORACLE VERIFICATION (MANDATORY BEFORE COMPLETION)
+## VERIFICATION PROTOCOL (MANDATORY BEFORE COMPLETION)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
 ### Step 1: Self-Verification
 Run through all verification checks above. Document evidence.
@@ -3528,16 +3581,35 @@ Run through all verification checks above. Document evidence.
 Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
 Original task: [describe the task]
 What I implemented: [list ALL changes made]
-Tests run: [test results and evidence]
-Please verify this is truly complete and production-ready.
-Return: APPROVED or REJECTED with specific reasons.")
+Tests run: [test results]
+Please verify this is truly complete and production-ready.")
 \`\`\`
 
-### Step 3: Based on Oracle Response
-- **If APPROVED**: You may declare task complete
-- **If REJECTED**: Fix ALL issues Oracle identified, then re-verify with Oracle
+### Step 3: Runtime Verification (Choose ONE)
 
-**NO COMPLETION WITHOUT ORACLE APPROVAL.**
+**Option A: Standard Test Suite (PREFERRED - saves tokens)**
+\`\`\`bash
+npm test  # or pytest, go test, cargo test, etc.
+\`\`\`
+Use existing tests when they cover the functionality. This is faster and cheaper.
+
+**Option B: QA-Tester (ONLY when truly needed)**
+Use qa-tester ONLY when:
+| Condition | Use qa-tester? |
+|-----------|----------------|
+| Project has test suite that covers behavior | NO - run tests |
+| Simple CLI command verification | NO - run directly |
+| Interactive input simulation needed | YES |
+| Service startup/shutdown testing | YES |
+| No tests exist AND behavior is complex | YES |
+
+**Gating Rule**: Standard tests > direct commands > qa-tester (in order of preference)
+
+### Step 4: Based on Results
+- **If Oracle APPROVED + Tests PASS**: Declare complete
+- **If any REJECTED/FAILED**: Fix issues and re-verify
+
+**NO COMPLETION WITHOUT VERIFICATION.**
 
 THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTING POINT.
 `,
