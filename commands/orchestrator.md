@@ -66,10 +66,11 @@ Before marking any task complete:
 - Run tests if applicable
 - Check for errors in output
 
-## MANDATORY: Oracle Verification Before Completion
+## MANDATORY: Verification Before Completion
 
-**NEVER declare a task complete without Oracle verification.**
+**NEVER declare a task complete without proper verification.**
 
+### Oracle Verification (Always Required)
 ```
 Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
 Original task: [describe the request]
@@ -78,8 +79,26 @@ Tests run: [results]
 Please verify this is truly complete and production-ready.")
 ```
 
-- **If APPROVED**: Declare complete
-- **If REJECTED**: Fix issues and re-verify
+### QA-Tester Verification (For CLI/Service Tasks)
+
+**If the task involves CLI apps, services, or runtime behavior:**
+```
+Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
+VERIFY: [expected behavior]
+SETUP: [prerequisites]
+COMMANDS:
+1. [command] → expect [output]
+FAIL_IF: [failure conditions]")
+```
+
+| Verifier | Purpose |
+|----------|---------|
+| Oracle | Code quality, architecture, correctness |
+| QA-Tester | Runtime behavior, "works as intended" |
+
+### Decision
+- **If Oracle APPROVED + QA-Tester VERIFIED**: Declare complete
+- **If either REJECTED**: Fix issues and re-verify
 
 ---
 

@@ -64,28 +64,41 @@ Before outputting `<promise>DONE</promise>`, verify:
 
 **If ANY checkbox is unchecked, DO NOT output the promise. Continue working.**
 
-## ORACLE VERIFICATION (MANDATORY)
+## VERIFICATION PROTOCOL (MANDATORY)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
-When you believe the task is complete:
+### Step 1: Oracle Review
+```
+Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
+Original task: [describe the task]
+What I implemented: [list changes]
+Tests run: [test results]
+Please verify this is truly complete and production-ready.")
+```
 
-1. **Spawn Oracle for verification**:
-   ```
-   Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
-   Original task: [describe the task]
-   What I implemented: [list changes]
-   Tests run: [test results]
-   Please verify this is truly complete and production-ready.")
-   ```
+### Step 2: QA-Tester Verification (For CLI/Service Tasks)
 
-2. **Wait for Oracle's assessment**
+**If your task involves CLI applications, services, or behavior that requires runtime verification:**
 
-3. **Based on Oracle's response**:
-   - **If APPROVED**: Output `<promise>DONE</promise>`
-   - **If REJECTED**: Fix ALL issues Oracle identified, then re-verify
+```
+Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
+VERIFY: [what the implementation should do]
+SETUP: [build commands, prerequisites]
+COMMANDS:
+1. [start service] → expect [startup message]
+2. [test command] → expect [expected output]
+3. [edge case] → expect [correct handling]
+FAIL_IF: [conditions indicating failure]")
+```
 
-**NO PROMISE WITHOUT ORACLE APPROVAL.**
+QA-Tester verifies that code **works as intended**, not just that it compiles.
+
+### Step 3: Based on Verification Results
+- **If Oracle APPROVED + QA-Tester VERIFIED**: Output `<promise>DONE</promise>`
+- **If either REJECTED/NOT VERIFIED**: Fix issues and re-verify
+
+**NO PROMISE WITHOUT VERIFICATION.**
 
 ---
 

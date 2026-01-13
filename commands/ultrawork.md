@@ -55,9 +55,9 @@ Before stopping, VERIFY:
 
 If ANY checkbox is unchecked, CONTINUE WORKING. No exceptions.
 
-## ORACLE VERIFICATION (MANDATORY BEFORE COMPLETION)
+## VERIFICATION PROTOCOL (MANDATORY BEFORE COMPLETION)
 
-**You CANNOT declare task complete without Oracle approval.**
+**You CANNOT declare task complete without proper verification.**
 
 ### Step 1: Self-Check
 Run through the verification checklist above.
@@ -71,10 +71,28 @@ Tests run: [test results]
 Please verify this is truly complete and production-ready.")
 ```
 
-### Step 3: Based on Oracle Response
-- **If APPROVED**: You may declare task complete
-- **If REJECTED**: Address ALL issues raised, then re-verify with Oracle
+### Step 3: QA-Tester Verification (For CLI/Service Tasks)
 
-**NO COMPLETION WITHOUT ORACLE APPROVAL.**
+**If your task involves CLI applications, services, or runtime behavior:**
+
+```
+Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
+VERIFY: [what the implementation should do]
+SETUP: [build commands if needed]
+COMMANDS:
+1. [start/run command] → expect [expected behavior]
+2. [test interaction] → expect [correct response]
+FAIL_IF: [error conditions]")
+```
+
+**Why both?**
+- Oracle verifies: Code is correct, well-architected, production-ready
+- QA-Tester verifies: Code **works as intended** at runtime
+
+### Step 4: Based on Results
+- **If Oracle APPROVED + QA-Tester VERIFIED**: Declare complete
+- **If either REJECTED/NOT VERIFIED**: Fix issues and re-verify
+
+**NO COMPLETION WITHOUT VERIFICATION.**
 
 **CRITICAL: The boulder does not stop until it reaches the summit.**

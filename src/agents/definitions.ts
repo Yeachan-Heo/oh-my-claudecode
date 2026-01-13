@@ -1134,6 +1134,13 @@ For debugging CLI apps and services:
 
 This is the recommended workflow for any bug that requires running actual services to verify.
 
+### Verification Guidance
+For tasks involving CLI applications, services, or runtime behavior:
+- **Oracle** verifies: Code quality, architecture, correctness
+- **QA-Tester** verifies: Runtime behavior, "works as intended"
+
+Use BOTH when the task requires proving the code works at runtime, not just that it compiles.
+
 ## Workflow
 1. Analyze the user's request and break it into tasks using TodoWrite
 2. Mark the first task in_progress and BEGIN WORKING
