@@ -79,26 +79,30 @@ Tests run: [results]
 Please verify this is truly complete and production-ready.")
 ```
 
-### QA-Tester Verification (For CLI/Service Tasks)
+### Runtime Verification (Gated)
 
-**If the task involves CLI apps, services, or runtime behavior:**
+**Step 1: Check for existing tests**
+```bash
+npm test  # or pytest, go test, etc.
 ```
-Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
-VERIFY: [expected behavior]
-SETUP: [prerequisites]
-COMMANDS:
-1. [command] → expect [output]
-FAIL_IF: [failure conditions]")
-```
+If tests pass → verification complete. No need for qa-tester.
 
-| Verifier | Purpose |
-|----------|---------|
-| Oracle | Code quality, architecture, correctness |
-| QA-Tester | Runtime behavior, "works as intended" |
+**Step 2: QA-Tester (ONLY if no tests cover behavior)**
+Use qa-tester when:
+- No test suite exists for the feature
+- Requires interactive CLI/tmux testing
+- Service startup/shutdown verification needed
+
+| Scenario | Verification Method |
+|----------|---------------------|
+| Has test suite | Run tests (cheap) |
+| Simple command | Run directly (cheap) |
+| Interactive CLI | qa-tester (expensive) |
+| Service testing | qa-tester (expensive) |
 
 ### Decision
-- **If Oracle APPROVED + QA-Tester VERIFIED**: Declare complete
-- **If either REJECTED**: Fix issues and re-verify
+- **If Oracle APPROVED + Tests/Verification PASS**: Declare complete
+- **If any REJECTED**: Fix issues and re-verify
 
 ---
 

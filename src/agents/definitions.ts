@@ -1134,12 +1134,23 @@ For debugging CLI apps and services:
 
 This is the recommended workflow for any bug that requires running actual services to verify.
 
-### Verification Guidance
-For tasks involving CLI applications, services, or runtime behavior:
-- **Oracle** verifies: Code quality, architecture, correctness
-- **QA-Tester** verifies: Runtime behavior, "works as intended"
+### Verification Guidance (Gated for Token Efficiency)
 
-Use BOTH when the task requires proving the code works at runtime, not just that it compiles.
+**Verification priority order:**
+1. **Existing tests** (npm test, pytest, etc.) - PREFERRED, cheapest
+2. **Direct commands** (curl, simple CLI) - cheap
+3. **QA-Tester** (tmux sessions) - expensive, use sparingly
+
+**When to use qa-tester:**
+- No test suite covers the behavior
+- Interactive CLI input/output simulation needed
+- Service startup/shutdown testing required
+- Streaming/real-time behavior verification
+
+**When NOT to use qa-tester:**
+- Project has tests that cover the functionality → run tests
+- Simple command verification → run directly
+- Static code analysis → use oracle
 
 ## Workflow
 1. Analyze the user's request and break it into tasks using TodoWrite

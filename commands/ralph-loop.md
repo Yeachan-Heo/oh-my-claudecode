@@ -77,26 +77,31 @@ Tests run: [test results]
 Please verify this is truly complete and production-ready.")
 ```
 
-### Step 2: QA-Tester Verification (For CLI/Service Tasks)
+### Step 2: Runtime Verification (Choose ONE)
 
-**If your task involves CLI applications, services, or behavior that requires runtime verification:**
+**Option A: Standard Test Suite (PREFERRED)**
+If the project has tests (npm test, pytest, cargo test, etc.):
+```bash
+npm test  # or pytest, go test, etc.
+```
+Use this when existing tests cover the functionality.
+
+**Option B: QA-Tester (ONLY when needed)**
+Use qa-tester ONLY when ALL of these apply:
+- ✗ No existing test suite covers the behavior
+- ✓ Requires interactive CLI input/output
+- ✓ Needs service startup/shutdown verification
+- ✓ Tests streaming, real-time, or tmux-specific behavior
 
 ```
-Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
-VERIFY: [what the implementation should do]
-SETUP: [build commands, prerequisites]
-COMMANDS:
-1. [start service] → expect [startup message]
-2. [test command] → expect [expected output]
-3. [edge case] → expect [correct handling]
-FAIL_IF: [conditions indicating failure]")
+Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR: ...")
 ```
 
-QA-Tester verifies that code **works as intended**, not just that it compiles.
+**Gating Rule**: If `npm test` (or equivalent) passes, you do NOT need qa-tester.
 
 ### Step 3: Based on Verification Results
-- **If Oracle APPROVED + QA-Tester VERIFIED**: Output `<promise>DONE</promise>`
-- **If either REJECTED/NOT VERIFIED**: Fix issues and re-verify
+- **If Oracle APPROVED + Tests/QA-Tester PASS**: Output `<promise>DONE</promise>`
+- **If any REJECTED/FAILED**: Fix issues and re-verify
 
 **NO PROMISE WITHOUT VERIFICATION.**
 

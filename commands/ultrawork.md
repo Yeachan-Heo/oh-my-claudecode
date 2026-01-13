@@ -71,27 +71,29 @@ Tests run: [test results]
 Please verify this is truly complete and production-ready.")
 ```
 
-### Step 3: QA-Tester Verification (For CLI/Service Tasks)
+### Step 3: Runtime Verification (Choose ONE)
 
-**If your task involves CLI applications, services, or runtime behavior:**
-
+**Option A: Standard Test Suite (PREFERRED - saves tokens)**
+```bash
+npm test  # or pytest, go test, cargo test, etc.
 ```
-Task(subagent_type="qa-tester", prompt="VERIFY BEHAVIOR:
-VERIFY: [what the implementation should do]
-SETUP: [build commands if needed]
-COMMANDS:
-1. [start/run command] → expect [expected behavior]
-2. [test interaction] → expect [correct response]
-FAIL_IF: [error conditions]")
-```
+Use existing tests when they cover the functionality. This is faster and cheaper.
 
-**Why both?**
-- Oracle verifies: Code is correct, well-architected, production-ready
-- QA-Tester verifies: Code **works as intended** at runtime
+**Option B: QA-Tester (ONLY when truly needed)**
+Use qa-tester ONLY when:
+| Condition | Use qa-tester? |
+|-----------|----------------|
+| Project has test suite that covers behavior | NO - run tests |
+| Simple CLI command verification | NO - run directly |
+| Interactive input simulation needed | YES |
+| Service startup/shutdown testing | YES |
+| No tests exist AND behavior is complex | YES |
+
+**Gating Rule**: Standard tests > direct commands > qa-tester (in order of preference)
 
 ### Step 4: Based on Results
-- **If Oracle APPROVED + QA-Tester VERIFIED**: Declare complete
-- **If either REJECTED/NOT VERIFIED**: Fix issues and re-verify
+- **If Oracle APPROVED + Tests PASS**: Declare complete
+- **If any REJECTED/FAILED**: Fix issues and re-verify
 
 **NO COMPLETION WITHOUT VERIFICATION.**
 
