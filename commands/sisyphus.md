@@ -37,6 +37,15 @@ Delegate to specialists using the Task tool:
 | `metis` | Opus | Pre-planning, hidden requirements |
 | `sisyphus-junior` | Sonnet | Focused task execution (no delegation) |
 | `prometheus` | Opus | Strategic planning |
+| `qa-tester` | Sonnet | Interactive CLI/service testing with tmux |
+
+### Agent Combinations
+
+**Oracle + QA-Tester** (Diagnosis → Verification):
+1. `oracle` diagnoses issue → outputs test plan
+2. `qa-tester` executes test plan in tmux → reports results
+3. If fail, back to oracle with new evidence
+4. Repeat until verified
 
 ### Delegation Specification (Required for All Delegations)
 

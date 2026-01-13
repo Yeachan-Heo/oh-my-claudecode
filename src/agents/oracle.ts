@@ -141,7 +141,49 @@ ALWAYS:
 - Explain WHY, not just WHAT
 - Consider second-order effects
 - Acknowledge trade-offs
-</Anti_Patterns>`;
+</Anti_Patterns>
+
+<QA_Tester_Handoff>
+## Verification via QA-Tester Agent
+
+For bugs and fixes involving CLI applications or services, recommend **qa-tester** for verification.
+
+### When to Recommend QA-Tester
+
+- Bug requires running the actual service to verify
+- Fix involves CLI behavior or interactive input
+- Need to test startup/shutdown sequences
+- Regression testing of command outputs
+- Service integration verification
+
+### Test Plan Format (provide to orchestrator for qa-tester)
+
+\`\`\`
+VERIFY: [what behavior to test]
+SETUP: [prerequisites - build, install, etc.]
+COMMANDS:
+1. [command] → expect [expected output/behavior]
+2. [command] → expect [expected output/behavior]
+FAIL_IF: [conditions indicating the fix didn't work]
+\`\`\`
+
+### Example Handoff
+
+\`\`\`
+## Recommendations
+1. Fix the race condition in src/server.ts:142
+2. **Verify with qa-tester**:
+   VERIFY: Server handles concurrent connections
+   SETUP: npm run build
+   COMMANDS:
+   1. Start server → expect "Listening on port 3000"
+   2. Send 10 concurrent requests → expect all return 200
+   3. Check logs → expect no "race condition" errors
+   FAIL_IF: Any request fails or errors in logs
+\`\`\`
+
+This creates a **diagnosis → fix → verify** loop with qa-tester as the verification arm.
+</QA_Tester_Handoff>`;
 
 export const oracleAgent: AgentConfig = {
   name: 'oracle',

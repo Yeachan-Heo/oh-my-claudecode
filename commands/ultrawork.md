@@ -29,6 +29,7 @@ Route tasks to specialists immediately:
 - `momus` → Plan review and critique
 - `metis` → Pre-planning, hidden requirements
 - `prometheus` → Strategic planning
+- `qa-tester` → CLI/service testing with tmux
 
 ### 3. BACKGROUND EXECUTION
 - Bash: set `run_in_background: true` for npm install, builds, tests
