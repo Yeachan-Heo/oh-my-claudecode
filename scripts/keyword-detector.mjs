@@ -91,6 +91,38 @@ SYNTHESIZE findings before proceeding.
 ---
 `;
 
+const CHILLWORK_MESSAGE = `<chillwork-mode>
+
+**CHILLWORK MODE ENABLED** - Cost-optimized execution.
+
+You are now in cost-optimized mode. Same parallelization, cheaper models.
+
+## ROUTING RULES (MANDATORY)
+When delegating to agents, ALWAYS use -low variants:
+- Use \`oh-my-claude-sisyphus:oracle-low\` NOT oracle-medium
+- Use \`oh-my-claude-sisyphus:sisyphus-junior-low\` NOT sisyphus-junior
+- Use \`oh-my-claude-sisyphus:librarian-low\` NOT librarian
+- Use \`oh-my-claude-sisyphus:frontend-engineer-low\` NOT frontend-engineer
+- Use \`oh-my-claude-sisyphus:explore\` (already low tier)
+
+## EXECUTION (Same as default)
+- Parallelize when profitable (up to 5 concurrent)
+- Delegate specialized work normally
+- Background execution for long operations
+
+## ESCALATION (Only when needed)
+Upgrade to higher tier ONLY when:
+- LOW tier produces incorrect results
+- Security-sensitive code
+- Complex architectural decisions
+
+Same speed. Lower cost. The efficient boulder.
+
+</chillwork-mode>
+
+---
+`;
+
 // Read all stdin
 async function readStdin() {
   const chunks = [];
@@ -177,6 +209,12 @@ async function main() {
     if (/\b(ultrawork|ulw|uw)\b/.test(cleanPrompt)) {
       activateUltraworkState(directory, prompt);
       console.log(JSON.stringify({ continue: true, message: ULTRAWORK_MESSAGE }));
+      return;
+    }
+
+    // Check for chillwork keywords (cost-optimized mode)
+    if (/\b(chillwork|chill\s*work|budget|cheap|save\s*tokens?|cost.?optim)/i.test(cleanPrompt)) {
+      console.log(JSON.stringify({ continue: true, message: CHILLWORK_MESSAGE }));
       return;
     }
 

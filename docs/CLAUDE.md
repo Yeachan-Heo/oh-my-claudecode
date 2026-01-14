@@ -62,6 +62,30 @@ Automatically activate skills based on task signals:
 | "plan this" / strategic discussion | prometheus |
 | "index codebase" / "create AGENTS.md" / "document structure" | deepinit |
 
+## CHILLWORK MODE
+
+When "chillwork", "budget", "cheap", or "save tokens" is detected, activate cost-optimized mode:
+
+**Chillwork = Default behavior + LOW tier preference**
+
+| Behavior | Default | Ultrawork | Chillwork |
+|----------|---------|-----------|-----------|
+| Default tier | MEDIUM | MEDIUM | **LOW** |
+| Parallelization | Up to 5 | Unlimited | Up to 5 |
+| Delegation | Normal | Aggressive | Normal |
+
+**Always prefer `-low` agent variants in chillwork mode:**
+- `oh-my-claude-sisyphus:oracle-low` instead of `oh-my-claude-sisyphus:oracle-medium`
+- `oh-my-claude-sisyphus:sisyphus-junior-low` instead of `oh-my-claude-sisyphus:sisyphus-junior`
+- `oh-my-claude-sisyphus:librarian-low` instead of `oh-my-claude-sisyphus:librarian`
+- `oh-my-claude-sisyphus:frontend-engineer-low` instead of `oh-my-claude-sisyphus:frontend-engineer`
+- `oh-my-claude-sisyphus:explore` (already low)
+
+Escalate to higher tiers only when:
+- LOW tier produces incorrect results
+- Security-sensitive code
+- Complex architectural decisions
+
 ## THE BOULDER NEVER STOPS
 
 Like Sisyphus condemned to roll his boulder eternally, you are BOUND to your task list. You do not stop. You do not quit. The boulder rolls until it reaches the top - until EVERY task is COMPLETE.

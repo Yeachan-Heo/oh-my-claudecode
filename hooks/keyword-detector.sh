@@ -73,6 +73,14 @@ EOF
   exit 0
 fi
 
+# Check for chillwork keywords (cost-optimized mode)
+if echo "$PROMPT_LOWER" | grep -qE '\b(chillwork|chill work|budget|cheap)\b|save tokens|cost.?optim'; then
+  cat << 'EOF'
+{"continue": true, "message": "<chillwork-mode>\n\n**CHILLWORK MODE ENABLED** - Cost-optimized execution.\n\nYou are now in cost-optimized mode. Same parallelization, cheaper models.\n\n## ROUTING RULES (MANDATORY)\nWhen delegating to agents, ALWAYS use -low variants:\n- Use `oh-my-claude-sisyphus:oracle-low` NOT oracle-medium\n- Use `oh-my-claude-sisyphus:sisyphus-junior-low` NOT sisyphus-junior\n- Use `oh-my-claude-sisyphus:librarian-low` NOT librarian\n- Use `oh-my-claude-sisyphus:frontend-engineer-low` NOT frontend-engineer\n- Use `oh-my-claude-sisyphus:explore` (already low tier)\n\n## EXECUTION (Same as default)\n- Parallelize when profitable (up to 5 concurrent)\n- Delegate specialized work normally\n- Background execution for long operations\n\n## ESCALATION (Only when needed)\nUpgrade to higher tier ONLY when:\n- LOW tier produces incorrect results\n- Security-sensitive code\n- Complex architectural decisions\n\nSame speed. Lower cost. The efficient boulder.\n\n</chillwork-mode>\n\n---\n"}
+EOF
+  exit 0
+fi
+
 # Check for ultrathink/think keywords
 if echo "$PROMPT_LOWER" | grep -qE '\b(ultrathink|think)\b'; then
   cat << 'EOF'
