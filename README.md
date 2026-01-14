@@ -2,9 +2,9 @@
 
 ![oh-my-claude-sisyphus](https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus-website/main/social-preview.png)
 
-# 🚀 v2.2.0 - Claude Code Native Multi-Agent Orchestration
+# 🚀 v2.3.0 - Claude Code Native Multi-Agent Orchestration
 
-[![Version](https://img.shields.io/badge/version-2.2.0-ff6b6b)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/releases)
+[![Version](https://img.shields.io/badge/version-2.3.0-ff6b6b)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/releases)
 [![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
 [![Downloads](https://img.shields.io/npm/dt/oh-my-claude-sisyphus?color=00d4aa)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
 [![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claude-sisyphus?style=flat&color=ffd700)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/stargazers)
@@ -19,7 +19,7 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/pulls)
 
 [![Agents](https://img.shields.io/badge/Agents-19-ff0040)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
-[![Skills](https://img.shields.io/badge/Skills-8-ff6600)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
+[![Skills](https://img.shields.io/badge/Skills-9-ff6600)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
 [![Hooks](https://img.shields.io/badge/Hooks-18-0088ff)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
 [![Days Since Ban](https://img.shields.io/badge/Days%20Since%20Ban-0-00ffff)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
 [![Resurrections](https://img.shields.io/badge/Resurrections-∞-ff00ff)](https://github.com/Yeachan-Heo/oh-my-claude-sisyphus)
@@ -169,7 +169,7 @@ oh-my-claude-sisyphus/
 │   └── plugin.json            # Plugin manifest
 ├── agents/                    # 12 specialized subagents
 ├── commands/                  # 12 slash commands
-├── skills/                    # 4 skills (ultrawork, deepinit, git-master, frontend-ui-ux)
+├── skills/                    # 5 skills (ultrawork, chillwork, deepinit, git-master, frontend-ui-ux)
 ├── hooks/
 │   └── hooks.json             # Hook configuration
 └── scripts/                   # Hook scripts
@@ -207,6 +207,7 @@ The installer adds to your Claude Code config (`~/.claude/`):
 │   └── cancel-ralph.md     # /cancel-ralph command
 ├── skills/
 │   ├── ultrawork/SKILL.md  # Maximum performance mode
+│   ├── chillwork/SKILL.md  # Cost-optimized mode
 │   ├── deepinit/SKILL.md   # Hierarchical AGENTS.md generation
 │   ├── git-master/SKILL.md # Git expert skill
 │   └── frontend-ui-ux/SKILL.md # UI/UX design skill
@@ -230,6 +231,7 @@ claude
 | `/sisyphus <task>` | Activate Sisyphus multi-agent orchestration mode |
 | `/sisyphus-default` | Set Sisyphus as your permanent default mode |
 | `/ultrawork <task>` | Maximum performance mode with parallel agents |
+| `/chillwork <task>` | Cost-optimized mode with -low model variants |
 | `/deepsearch <query>` | Thorough multi-strategy codebase search |
 | `/deepinit [path]` | Index codebase with hierarchical AGENTS.md files |
 | `/analyze <target>` | Deep analysis and investigation |
@@ -269,6 +271,7 @@ Just include these words anywhere in your prompt:
 | Keyword | Effect |
 |---------|--------|
 | `ultrawork`, `ulw`, `uw` | Activates parallel agent orchestration |
+| `chillwork`, `budget`, `cheap` | Activates cost-optimized mode |
 | `search`, `find`, `locate` | Enhanced search mode |
 | `analyze`, `investigate` | Deep analysis mode |
 
@@ -341,13 +344,14 @@ Oh-my-claude-sisyphus includes 18 lifecycle hooks that enhance Claude Code's beh
 
 ## Builtin Skills
 
-Eight builtin skills provide specialized capabilities:
+Nine builtin skills provide specialized capabilities:
 
 | Skill | Description |
 |-------|-------------|
 | **sisyphus** | Multi-agent orchestration mode |
 | **orchestrator** | Master coordinator for complex tasks |
 | **ultrawork** | Maximum performance with parallel agents |
+| **chillwork** | Cost-optimized mode with -low model variants |
 | **deepinit** | Hierarchical AGENTS.md codebase documentation |
 | **ralph-loop** | Self-referential development until completion |
 | **frontend-ui-ux** | Designer-turned-developer UI/UX expertise |
@@ -369,7 +373,7 @@ Skills work in **three composable layers**:
 | Layer | Skills | Purpose |
 |-------|--------|---------|
 | **Execution** | sisyphus, orchestrator, prometheus | HOW you work (pick primary) |
-| **Enhancement** | ultrawork, git-master, frontend-ui-ux | ADD capabilities (stack multiple) |
+| **Enhancement** | ultrawork, chillwork, git-master, frontend-ui-ux | ADD capabilities (stack multiple) |
 | **Guarantee** | ralph-loop | ENSURE completion |
 
 **Combination Formula:** `[Execution] + [0-N Enhancements] + [Optional Guarantee]`
@@ -388,6 +392,7 @@ Claude uses judgment to detect task type and activate appropriate skill combinat
 | Complex debugging | `oracle` → `sisyphus` | Root cause → fix |
 | Strategic planning | `prometheus` | Need plan first |
 | Maximum performance | `ultrawork` (stacks) | Speed critical |
+| Cost-conscious work | `chillwork` (stacks) | Budget, simple tasks |
 
 ### Examples
 
@@ -403,6 +408,9 @@ Claude uses judgment to detect task type and activate appropriate skill combinat
 
 "Fix this bug, don't stop until it's done"
 → sisyphus + ralph-loop
+
+"chillwork: add some comments to this file"
+→ chillwork + sisyphus (cost-optimized)
 ```
 
 ---
@@ -637,9 +645,9 @@ The original oh-my-opencode used multiple AI providers. This project uses Claude
 |---------|-------------|
 | **12 Specialized Agents** | Oracle, Librarian, Explore, Frontend Engineer, Document Writer, Multimodal Looker, QA Tester, Momus, Metis, Orchestrator-Sisyphus, Sisyphus-Junior, Prometheus |
 | **18 Lifecycle Hooks** | rules-injector, sisyphus-orchestrator, auto-slash-command, keyword-detector, ralph-loop, todo-continuation, context-window-limit-recovery, preemptive-compaction, session-recovery, directory-readme-injector, comment-checker, thinking-block-validator, empty-message-sanitizer, edit-error-recovery, non-interactive-env, agent-usage-reminder, background-notification, think-mode |
-| **7 Builtin Skills** | sisyphus, orchestrator, ultrawork, deepinit, ralph-loop, frontend-ui-ux, git-master |
+| **8 Builtin Skills** | sisyphus, orchestrator, ultrawork, chillwork, deepinit, ralph-loop, frontend-ui-ux, git-master |
 | **Magic Keywords** | `ultrawork`, `search`, `analyze`, `ultrathink` trigger enhanced modes |
-| **Slash Commands** | `/sisyphus`, `/sisyphus-default`, `/ultrawork`, `/deepsearch`, `/deepinit`, `/analyze`, `/plan`, `/review`, `/prometheus`, `/orchestrator`, `/ralph-loop`, `/cancel-ralph` |
+| **Slash Commands** | `/sisyphus`, `/sisyphus-default`, `/ultrawork`, `/chillwork`, `/deepsearch`, `/deepinit`, `/analyze`, `/plan`, `/review`, `/prometheus`, `/orchestrator`, `/ralph-loop`, `/cancel-ralph` |
 | **Auto-Update System** | Updates via Claude Code's plugin system |
 | **Configuration System** | JSONC config with multi-source merging |
 | **Context Injection** | Auto-loads CLAUDE.md and AGENTS.md files |

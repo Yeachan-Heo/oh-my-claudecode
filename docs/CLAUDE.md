@@ -40,6 +40,7 @@ Stack these on top of default behavior when needed:
 | Skill | What It Adds | When to Use |
 |-------|--------------|-------------|
 | `/ultrawork` | Maximum intensity, parallel everything, don't wait | Speed critical, large tasks |
+| `/chillwork` | Cost-optimized, prefer -low model variants, same parallelization | Budget-conscious, routine work |
 | `/deepinit` | Hierarchical AGENTS.md generation, codebase indexing | New projects, documentation |
 | `/git-master` | Atomic commits, style detection, history expertise | Multi-file changes |
 | `/frontend-ui-ux` | Bold aesthetics, design sensibility | UI/component work |
@@ -56,6 +57,7 @@ Automatically activate skills based on task signals:
 | "don't stop until done" / "must complete" | + ralph-loop |
 | UI/component/styling work | + frontend-ui-ux |
 | "ultrawork" / "maximum speed" / "parallel" | + ultrawork |
+| "chillwork" / "save tokens" / "budget" / "cheap" | + chillwork |
 | Multi-file git changes | + git-master |
 | "plan this" / strategic discussion | prometheus |
 | "index codebase" / "create AGENTS.md" / "document structure" | deepinit |
@@ -105,6 +107,7 @@ All agent names require the `oh-my-claude-sisyphus:` prefix when calling via Tas
 | Command | Description |
 |---------|-------------|
 | `/ultrawork <task>` | Maximum performance mode - parallel everything |
+| `/chillwork <task>` | Cost-optimized mode - prefer cheaper models |
 | `/deepsearch <query>` | Thorough codebase search |
 | `/deepinit [path]` | Index codebase recursively with hierarchical AGENTS.md files |
 | `/analyze <target>` | Deep analysis and investigation |
