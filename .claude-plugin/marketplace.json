@@ -10,7 +10,7 @@
     {
       "name": "oh-my-claude-sisyphus",
       "description": "Claude Code native multi-agent orchestration with intelligent model routing, 19 agent variants, and 11 slash commands. Beyond the original fork - rebuilt for Claude's architecture.",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "author": {
         "name": "Yeachan Heo",
         "email": "hurrc04@gmail.com"

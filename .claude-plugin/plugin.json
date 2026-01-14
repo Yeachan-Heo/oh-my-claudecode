@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Claude Code native multi-agent orchestration - intelligent model routing, 19 agents, 11 commands, 231 tests",
   "author": {
     "name": "Yeachan Heo",

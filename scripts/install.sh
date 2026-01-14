@@ -1706,7 +1706,7 @@ else
 fi
 
 # Save version metadata for auto-update system
-VERSION="2.0.1-beta"
+VERSION="2.0.2"
 VERSION_FILE="$CLAUDE_CONFIG_DIR/.sisyphus-version.json"
 
 cat > "$VERSION_FILE" << VERSION_EOF
