@@ -6,8 +6,9 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 
 // Read all stdin
 async function readStdin() {
@@ -30,31 +31,57 @@ function extractJsonField(input, field, defaultValue = '') {
   }
 }
 
-// Get todo status from project
+// Get todo status from project and global todos
 function getTodoStatus(directory) {
-  const todoFile = join(directory, '.sisyphus', 'todos.json');
+  let pending = 0;
+  let inProgress = 0;
 
-  if (!existsSync(todoFile)) {
-    return '';
+  // Check project-local todos
+  const localPaths = [
+    join(directory, '.sisyphus', 'todos.json'),
+    join(directory, '.claude', 'todos.json')
+  ];
+
+  for (const todoFile of localPaths) {
+    if (existsSync(todoFile)) {
+      try {
+        const content = readFileSync(todoFile, 'utf-8');
+        const data = JSON.parse(content);
+        const todos = data.todos || data;
+        if (Array.isArray(todos)) {
+          pending += todos.filter(t => t.status === 'pending').length;
+          inProgress += todos.filter(t => t.status === 'in_progress').length;
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
   }
 
-  try {
-    const content = readFileSync(todoFile, 'utf-8');
-    const data = JSON.parse(content);
-    const todos = data.todos || data;
-
-    if (!Array.isArray(todos)) {
-      return '';
+  // Check global Claude Code todos directory
+  const globalTodosDir = join(homedir(), '.claude', 'todos');
+  if (existsSync(globalTodosDir)) {
+    try {
+      const files = readdirSync(globalTodosDir).filter(f => f.endsWith('.json'));
+      for (const file of files) {
+        try {
+          const content = readFileSync(join(globalTodosDir, file), 'utf-8');
+          const todos = JSON.parse(content);
+          if (Array.isArray(todos)) {
+            pending += todos.filter(t => t.status === 'pending').length;
+            inProgress += todos.filter(t => t.status === 'in_progress').length;
+          }
+        } catch {
+          // Ignore individual file errors
+        }
+      }
+    } catch {
+      // Ignore directory read errors
     }
+  }
 
-    const pending = todos.filter(t => t.status === 'pending').length;
-    const inProgress = todos.filter(t => t.status === 'in_progress').length;
-
-    if (pending + inProgress > 0) {
-      return `[${inProgress} active, ${pending} pending] `;
-    }
-  } catch {
-    // Ignore errors
+  if (pending + inProgress > 0) {
+    return `[${inProgress} active, ${pending} pending] `;
   }
 
   return '';

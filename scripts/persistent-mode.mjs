@@ -177,6 +177,17 @@ ${ralphState.prompt ? `Original task: ${ralphState.prompt}` : ''}
     // Priority 2: Ultrawork with incomplete todos
     if (ultraworkState?.active && incompleteCount > 0) {
       const newCount = (ultraworkState.reinforcement_count || 0) + 1;
+      const maxReinforcements = ultraworkState.max_reinforcements || 10;
+
+      // Escape mechanism: after max reinforcements, allow stopping
+      if (newCount > maxReinforcements) {
+        console.log(JSON.stringify({
+          continue: true,
+          reason: `[ULTRAWORK ESCAPE] Maximum reinforcements (${maxReinforcements}) reached. Allowing stop despite ${incompleteCount} incomplete todos. If tasks are genuinely stuck, consider cancelling them or asking the user for help.`
+        }));
+        return;
+      }
+
       ultraworkState.reinforcement_count = newCount;
       ultraworkState.last_checked_at = new Date().toISOString();
 
@@ -209,13 +220,31 @@ ${ultraworkState.original_prompt ? `Original task: ${ultraworkState.original_pro
       return;
     }
 
-    // Priority 3: Todo Continuation
+    // Priority 3: Todo Continuation (with escape mechanism)
     if (incompleteCount > 0) {
+      // Track continuation attempts in a lightweight way
+      const contFile = join(directory, '.sisyphus', 'continuation-count.json');
+      let contState = readJsonFile(contFile) || { count: 0 };
+      contState.count = (contState.count || 0) + 1;
+      contState.last_checked_at = new Date().toISOString();
+      writeJsonFile(contFile, contState);
+
+      const maxContinuations = 15;
+
+      // Escape mechanism: after max continuations, allow stopping
+      if (contState.count > maxContinuations) {
+        console.log(JSON.stringify({
+          continue: true,
+          reason: `[TODO ESCAPE] Maximum continuation attempts (${maxContinuations}) reached. Allowing stop despite ${incompleteCount} incomplete todos. Tasks may be stuck - consider reviewing and clearing them.`
+        }));
+        return;
+      }
+
       console.log(JSON.stringify({
         continue: false,
         reason: `<todo-continuation>
 
-[SYSTEM REMINDER - TODO CONTINUATION]
+[SYSTEM REMINDER - TODO CONTINUATION ${contState.count}/${maxContinuations}]
 
 Incomplete tasks remain in your todo list (${incompleteCount} remaining). Continue working on the next pending task.
 
