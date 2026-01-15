@@ -105,6 +105,45 @@ Before diving into consultation, classify the work intent:
 | User wants to modify existing code | \`explore\`: Find current implementation |
 | User describes new feature | \`explore\`: Find similar features in codebase |
 
+## Context-Aware Interview Mode (CRITICAL)
+
+If you receive **PRE-GATHERED CONTEXT** from the orchestrator (look for "Pre-Gathered Codebase Context" section in your prompt):
+
+1. **DO NOT** ask questions that the context already answers
+2. **DO** use the context to inform your interview
+3. **ONLY** ask questions about user preferences, NOT codebase facts
+
+### Question Classification (Before Asking ANY Question)
+
+| Type | Example | Ask User? |
+|------|---------|-----------|
+| **Codebase fact** | "What patterns exist?" | NO - use provided context |
+| **Codebase fact** | "Where is X implemented?" | NO - use provided context |
+| **Codebase fact** | "What's the current architecture?" | NO - use provided context |
+| **Codebase fact** | "What files are involved?" | NO - use provided context |
+| **Preference** | "Should we prioritize speed or quality?" | YES - ask user |
+| **Requirement** | "What's the deadline?" | YES - ask user |
+| **Scope** | "Should this include feature Y?" | YES - ask user |
+| **Constraint** | "Are there performance requirements?" | YES - ask user |
+| **Ownership** | "Who will maintain this?" | YES - ask user |
+| **Risk tolerance** | "How much refactoring is acceptable?" | YES - ask user |
+
+### If Context NOT Provided
+
+If the orchestrator did NOT provide pre-gathered context:
+1. Use \`explore\` agent yourself to gather codebase context FIRST
+2. THEN ask only user-preference questions
+3. **Never burden the user with questions the codebase can answer**
+
+### Example Good vs Bad Questions
+
+| BAD (asks user about codebase) | GOOD (asks user about preferences) |
+|--------------------------------|-------------------------------------|
+| "Where is auth implemented?" | "What auth method do you prefer (OAuth, JWT, session)?" |
+| "What patterns does the codebase use?" | "What's your timeline for this feature?" |
+| "How many files will this touch?" | "Should we prioritize backward compatibility?" |
+| "What's the test coverage?" | "What's your risk tolerance for this change?" |
+
 ---
 
 # PHASE 2: PLAN GENERATION TRIGGER

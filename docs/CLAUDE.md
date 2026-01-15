@@ -59,6 +59,22 @@ Automatically activate skills based on task signals:
 | Multi-file git changes | + git-master |
 | "plan this" / strategic discussion | prometheus |
 | "index codebase" / "create AGENTS.md" / "document structure" | deepinit |
+| **BROAD REQUEST**: unbounded scope, vague verbs, no specific files | **prometheus (with context brokering)** |
+
+### Broad Request Detection Heuristic
+
+A request is **BROAD** and needs planning if ANY of:
+- Uses scope-less verbs: "improve", "enhance", "fix", "refactor", "add", "implement" without specific targets
+- No specific file or function mentioned
+- Touches multiple unrelated areas (3+ components)
+- Single sentence without clear deliverable
+- You cannot immediately identify which files to modify
+
+**When BROAD REQUEST detected:**
+1. First invoke `oh-my-claude-sisyphus:explore` to understand relevant codebase areas
+2. Optionally invoke `oh-my-claude-sisyphus:oracle` for architectural guidance
+3. THEN invoke `oh-my-claude-sisyphus:prometheus` **with gathered context**
+4. Prometheus asks ONLY user-preference questions (not codebase questions)
 
 ## THE BOULDER NEVER STOPS
 
@@ -170,6 +186,64 @@ Important project-specific information here...
 3. Say "Create the plan" when ready
 4. Use `/review` to have Momus evaluate the plan
 5. Start implementation (default mode handles execution)
+
+## Prometheus Context Brokering
+
+When invoking Prometheus for planning (whether auto-triggered by broad request or via /plan), **ALWAYS** follow this protocol to avoid burdening the user with codebase-answerable questions:
+
+### Pre-Gathering Phase
+
+Before invoking Prometheus, gather codebase context:
+
+1. **Invoke explore agent** to gather codebase context:
+```
+Task(subagent_type="oh-my-claude-sisyphus:explore", prompt="Find all files and patterns related to: {user request}. Return key files, existing implementations, and patterns.")
+```
+
+2. **Optionally invoke oracle** for architectural overview (if complex):
+```
+Task(subagent_type="oh-my-claude-sisyphus:oracle", prompt="Analyze architecture for: {user request}. Identify patterns, dependencies, and constraints.")
+```
+
+### Invoking Prometheus With Context
+
+Pass pre-gathered context TO Prometheus so it doesn't ask codebase questions:
+
+```
+Task(subagent_type="oh-my-claude-sisyphus:prometheus", prompt="""
+## Pre-Gathered Codebase Context
+
+### Relevant Files (from explore):
+{explore results}
+
+### Architecture Notes (from oracle):
+{oracle analysis if gathered}
+
+## User Request
+{original request}
+
+## CRITICAL Instructions
+- DO NOT ask questions about codebase structure (already answered above)
+- DO NOT ask "where is X implemented?" (see context above)
+- DO NOT ask "what patterns exist?" (see context above)
+- ONLY ask questions about:
+  - User preferences and priorities
+  - Business requirements and constraints
+  - Scope decisions (what to include/exclude)
+  - Timeline and quality trade-offs
+  - Ownership and maintenance
+""")
+```
+
+### Why Context Brokering Matters
+
+| Without Context Brokering | With Context Brokering |
+|---------------------------|------------------------|
+| Prometheus asks: "What patterns exist in the codebase?" | Prometheus receives: "Auth uses JWT pattern in src/auth/" |
+| Prometheus asks: "Where is authentication implemented?" | Prometheus asks: "What's your timeline for this feature?" |
+| User must research their own codebase | User only answers preference questions |
+
+**This dramatically improves planning UX** by ensuring the user is only asked questions that require human judgment.
 
 ## Orchestration Principles
 
