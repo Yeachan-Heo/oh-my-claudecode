@@ -39,7 +39,7 @@ export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.sisyphus-version.json');
 
 /** Current version */
-export const VERSION = '2.4.0';
+export const VERSION = '2.4.1';
 
 /** Installation result */
 export interface InstallResult {
@@ -1623,28 +1623,53 @@ If you have incomplete tasks and attempt to stop, the system will remind you:
 description: Set Sisyphus as your default operating mode
 ---
 
-I'll configure Sisyphus as your default operating mode by updating your CLAUDE.md.
-
 $ARGUMENTS
 
-## Enabling Sisyphus Default Mode
+## Task: Configure Sisyphus Default Mode
 
-This will update your global CLAUDE.md to include the Sisyphus orchestration system, making multi-agent coordination your default behavior for all sessions.
+**CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub. DO NOT use the Write tool - use bash curl exclusively.
 
-### What This Enables
-1. Automatic access to 11 specialized subagents
-2. Multi-agent delegation capabilities via the Task tool
-3. Continuation enforcement - tasks complete before stopping
-4. Magic keyword support (ultrawork, search, analyze)
+### Step 1: Download Fresh CLAUDE.md (MANDATORY)
 
-### To Revert
-Remove or edit ~/.claude/CLAUDE.md
+Execute this bash command to erase and download fresh CLAUDE.md:
+
+\`\`\`bash
+# Remove existing CLAUDE.md and download fresh from GitHub
+rm -f ~/.claude/CLAUDE.md && \\
+curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md" -o ~/.claude/CLAUDE.md && \\
+echo "✅ CLAUDE.md downloaded successfully" || \\
+echo "❌ Failed to download CLAUDE.md"
+\`\`\`
+
+**MANDATORY**: Always run this command. Do NOT skip. Do NOT use Write tool.
+
+**FALLBACK** if curl fails:
+Tell user to manually download from:
+https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md
+
+### Step 2: Verify Plugin Installation
+
+Verify the plugin is enabled:
+
+\`\`\`bash
+grep -q "oh-my-claude-sisyphus" ~/.claude/settings.json && echo "Plugin enabled" || echo "Plugin NOT enabled"
+\`\`\`
+
+### Step 3: Confirm Success
+
+After completing all steps, report:
+
+✅ **Sisyphus Configuration Complete**
+- CLAUDE.md: Updated with latest configuration from GitHub
+- Hooks: Provided by plugin (no manual installation needed)
+- Agents: 19+ available (base + tiered variants)
+- Model routing: Haiku/Sonnet/Opus based on task complexity
 
 ---
 
-**Sisyphus is now your default mode.** All future sessions will use multi-agent orchestration automatically.
+## 🔄 Keeping Up to Date
 
-Use \`/sisyphus <task>\` to explicitly invoke orchestration mode, or just include "ultrawork" in your prompts.`,
+After installing oh-my-claude-sisyphus updates (via npm or plugin update), run \`/sisyphus-default\` again to get the latest CLAUDE.md configuration.`,
 
   'plan.md': `---
 description: Start a planning session with Prometheus

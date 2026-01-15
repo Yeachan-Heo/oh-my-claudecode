@@ -4,19 +4,27 @@ description: Set Sisyphus as your default operating mode
 
 $ARGUMENTS
 
-## Task: Configure Sisyphus
+## Task: Configure Sisyphus Default Mode
 
-### Step 1: Fetch and Write CLAUDE.md
+**CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub. DO NOT use the Write tool - use bash curl exclusively.
 
-1. Use WebFetch to get the latest CLAUDE.md:
+### Step 1: Download Fresh CLAUDE.md (MANDATORY)
+
+Execute this bash command to erase and download fresh CLAUDE.md:
+
+```bash
+# Remove existing CLAUDE.md and download fresh from GitHub
+rm -f ~/.claude/CLAUDE.md && \
+curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md" -o ~/.claude/CLAUDE.md && \
+echo "✅ CLAUDE.md downloaded successfully" || \
+echo "❌ Failed to download CLAUDE.md"
 ```
-WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
-```
 
-2. Use the Write tool to write the fetched content to `~/.claude/CLAUDE.md` (ALWAYS overwrite)
+**MANDATORY**: Always run this command. Do NOT skip. Do NOT use Write tool.
 
-**FALLBACK** if WebFetch fails:
-Tell user to visit https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md and copy the content manually.
+**FALLBACK** if curl fails:
+Tell user to manually download from:
+https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md
 
 ### Step 2: Clean Up Legacy Hooks (if present)
 
@@ -50,9 +58,15 @@ If plugin is not enabled, instruct user:
 After completing all steps, report:
 
 ✅ **Sisyphus Configuration Complete**
-- CLAUDE.md: Updated with latest configuration
+- CLAUDE.md: Updated with latest configuration from GitHub
 - Hooks: Provided by plugin (no manual installation needed)
 - Agents: 19+ available (base + tiered variants)
 - Model routing: Haiku/Sonnet/Opus based on task complexity
 
 **Note**: Hooks are now managed by the plugin system automatically. No manual hook installation required.
+
+---
+
+## 🔄 Keeping Up to Date
+
+After installing oh-my-claude-sisyphus updates (via npm or plugin update), run `/sisyphus-default` again to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
