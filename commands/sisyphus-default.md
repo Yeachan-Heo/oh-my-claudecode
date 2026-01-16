@@ -1,22 +1,30 @@
 ---
-description: Set Sisyphus as your default operating mode
+description: Configure Sisyphus in local project (.claude/CLAUDE.md)
 ---
 
 $ARGUMENTS
 
-## Task: Configure Sisyphus Default Mode
+## Task: Configure Sisyphus Default Mode (Project-Scoped)
 
-**CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub. DO NOT use the Write tool - use bash curl exclusively.
+**CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub to your local project. DO NOT use the Write tool - use bash curl exclusively.
 
-### Step 1: Download Fresh CLAUDE.md (MANDATORY)
+### Step 1: Create Local .claude Directory
 
-Execute this bash command to erase and download fresh CLAUDE.md:
+Ensure the local project has a .claude directory:
 
 ```bash
-# Remove existing CLAUDE.md and download fresh from GitHub
-rm -f ~/.claude/CLAUDE.md && \
-curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md" -o ~/.claude/CLAUDE.md && \
-echo "✅ CLAUDE.md downloaded successfully" || \
+# Create .claude directory in current project
+mkdir -p .claude && echo "✅ .claude directory created" || echo "❌ Failed to create .claude directory"
+```
+
+### Step 2: Download Fresh CLAUDE.md (MANDATORY)
+
+Execute this bash command to download fresh CLAUDE.md to local project config:
+
+```bash
+# Download fresh CLAUDE.md to project-local .claude/
+curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md" -o .claude/CLAUDE.md && \
+echo "✅ CLAUDE.md downloaded successfully to .claude/CLAUDE.md" || \
 echo "❌ Failed to download CLAUDE.md"
 ```
 
@@ -25,22 +33,6 @@ echo "❌ Failed to download CLAUDE.md"
 **FALLBACK** if curl fails:
 Tell user to manually download from:
 https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md
-
-### Step 2: Clean Up Legacy Hooks (if present)
-
-Check if old manual hooks exist and remove them to prevent duplicates:
-
-```bash
-# Remove legacy bash hook scripts (now handled by plugin system)
-rm -f ~/.claude/hooks/keyword-detector.sh
-rm -f ~/.claude/hooks/stop-continuation.sh
-rm -f ~/.claude/hooks/persistent-mode.sh
-rm -f ~/.claude/hooks/session-start.sh
-```
-
-Check `~/.claude/settings.json` for manual hook entries. If the "hooks" key exists with UserPromptSubmit, Stop, or SessionStart entries pointing to bash scripts, inform the user:
-
-> **Note**: Found legacy hooks in settings.json. These should be removed since the plugin now provides hooks automatically. Remove the "hooks" section from ~/.claude/settings.json to prevent duplicate hook execution.
 
 ### Step 3: Verify Plugin Installation
 
@@ -57,16 +49,26 @@ If plugin is not enabled, instruct user:
 
 After completing all steps, report:
 
-✅ **Sisyphus Configuration Complete**
-- CLAUDE.md: Updated with latest configuration from GitHub
+✅ **Sisyphus Project Configuration Complete**
+- CLAUDE.md: Updated with latest configuration from GitHub at ./.claude/CLAUDE.md
+- Scope: **PROJECT** - applies only to this project
 - Hooks: Provided by plugin (no manual installation needed)
 - Agents: 19+ available (base + tiered variants)
 - Model routing: Haiku/Sonnet/Opus based on task complexity
 
-**Note**: Hooks are now managed by the plugin system automatically. No manual hook installation required.
+**Note**: This configuration is project-specific and won't affect other projects or global settings.
 
 ---
 
 ## 🔄 Keeping Up to Date
 
-After installing oh-my-claude-sisyphus updates (via npm or plugin update), run `/sisyphus-default` again to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
+After installing oh-my-claude-sisyphus updates (via npm or plugin update), run `/sisyphus-default` again in your project to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
+
+---
+
+## 🌍 Global vs Project Configuration
+
+- **`/sisyphus-default`** (this command): Creates `./.claude/CLAUDE.md` in your current project
+- **`/sisyphus-default-global`**: Creates `~/.claude/CLAUDE.md` for all projects
+
+Project-scoped configuration takes precedence over global configuration.

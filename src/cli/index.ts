@@ -489,7 +489,8 @@ program
         console.log('');
         console.log(chalk.yellow('Slash Commands:'));
         console.log('  /sisyphus <task>              # Activate Sisyphus orchestration mode');
-        console.log('  /sisyphus-default             # Set Sisyphus as default behavior');
+        console.log('  /sisyphus-default             # Configure for current project');
+        console.log('  /sisyphus-default-global      # Configure globally');
         console.log('  /ultrawork <task>             # Maximum performance mode');
         console.log('  /deepsearch <query>           # Thorough codebase search');
         console.log('  /analyze <target>             # Deep analysis mode');
@@ -521,12 +522,13 @@ program
         console.log('    frontend-engineer-low  - Simple styling (Haiku)');
         console.log('');
         console.log(chalk.yellow('After Updates:'));
-        console.log('  Run \'/sisyphus-default\' to download the latest CLAUDE.md configuration.');
+        console.log('  Run \'/sisyphus-default\' (project) or \'/sisyphus-default-global\' (global)');
+        console.log('  to download the latest CLAUDE.md configuration.');
         console.log('  This ensures you get the newest features and agent behaviors.');
         console.log('');
         console.log(chalk.blue('Quick Start:'));
         console.log('  1. Run \'claude\' to start Claude Code');
-        console.log('  2. Type \'/sisyphus-default\' to enable Sisyphus permanently');
+        console.log('  2. Type \'/sisyphus-default\' for project or \'/sisyphus-default-global\' for global');
         console.log('  3. Or use \'/sisyphus <task>\' for one-time activation');
       }
     } else {
@@ -555,7 +557,7 @@ program
     if (result.success) {
       console.log(chalk.green('✓ Oh-My-Claude-Sisyphus installed successfully!'));
       console.log(chalk.gray('  Run "oh-my-claude-sisyphus info" to see available agents.'));
-      console.log(chalk.yellow('  Run "/sisyphus-default" in Claude Code to get the latest CLAUDE.md.'));
+      console.log(chalk.yellow('  Run "/sisyphus-default" (project) or "/sisyphus-default-global" (global) in Claude Code.'));
     } else {
       // Don't fail the npm install, just warn
       console.warn(chalk.yellow('⚠ Could not complete Sisyphus setup:'), result.message);

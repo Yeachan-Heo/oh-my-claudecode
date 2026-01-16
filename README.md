@@ -111,49 +111,71 @@ chmod +x scripts/install.sh
 
 ---
 
-## 🎯 REQUIRED: Run /sisyphus-default for Best Performance
+## 🎯 Configuration: Choose Global or Project Scope
 
-**After ANY installation method**, run this command in Claude Code:
+**After ANY installation method**, choose how you want to configure Sisyphus:
+
+### Option A: Project-Scoped (Recommended)
+
+Configure Sisyphus for the current project only:
 
 ```
 /sisyphus-default
 ```
 
+- Creates `./.claude/CLAUDE.md` in your current project
+- Configuration applies only to this project
+- Won't affect other projects or global settings
+- **Safe**: Preserves your global CLAUDE.md
+
+### Option B: Global Configuration
+
+Configure Sisyphus for all Claude Code sessions:
+
+```
+/sisyphus-default-global
+```
+
+- Creates `~/.claude/CLAUDE.md` globally
+- Configuration applies to all projects
+- **Warning**: Completely overwrites existing `~/.claude/CLAUDE.md`
+
 ### Why This Matters
 
-Without `/sisyphus-default`, Claude operates with basic capabilities. Running it enables:
+Without running one of these commands, Claude operates with basic capabilities. Running either enables:
 
-| Feature | Without | With `/sisyphus-default` |
-|---------|---------|--------------------------|
+| Feature | Without | With Sisyphus Config |
+|---------|---------|---------------------|
 | Agent delegation | Manual only | Automatic based on task |
 | Keyword detection | Disabled | ultrawork, search, analyze |
 | Todo continuation | Basic | Enforced completion |
 | Model routing | Default | Smart tier selection |
 | Skill composition | None | Auto-combines skills |
 
-### What It Does
+### What These Commands Do
 
-1. ✅ Updates `~/.claude/CLAUDE.md` with full Sisyphus orchestration prompt
-2. ✅ Configures 19 agents with intelligent model routing
-3. ✅ Enables magic keyword detection (ultrawork, search, analyze)
-4. ✅ Activates continuation enforcement (tasks complete before stopping)
-5. ✅ Sets up skill composition (sisyphus + ultrawork + git-master, etc.)
+1. ✅ Download latest CLAUDE.md with full Sisyphus orchestration prompt
+2. ✅ Configure 19 agents with intelligent model routing
+3. ✅ Enable magic keyword detection (ultrawork, search, analyze)
+4. ✅ Activate continuation enforcement (tasks complete before stopping)
+5. ✅ Set up skill composition (sisyphus + ultrawork + git-master, etc.)
 
-> **WARNING: This command COMPLETELY OVERWRITES `~/.claude/CLAUDE.md`**
->
-> Any custom content you've added to your global CLAUDE.md will be replaced. If you have customizations, back them up first:
-> ```bash
-> cp ~/.claude/CLAUDE.md ~/.claude/CLAUDE.md.backup
-> ```
-> After running `/sisyphus-default`, you can manually merge your custom content back.
+### When to Run Them
 
-### When to Run It
-
-- **First time**: Always run after installation
-- **After updates**: Run `/sisyphus-default` to get the latest configuration (required after each plugin update)
+- **First time**: Run after installation (choose project or global)
+- **After updates**: Re-run to get the latest configuration
 - **Different machines**: Run on each machine where you use Claude Code
+- **New projects**: Run `/sisyphus-default` in each project that needs Sisyphus
 
-> **NOTE**: After updating the plugin (via `npm update`, `git pull`, or Claude Code's plugin update), you MUST re-run `/sisyphus-default` to apply the latest CLAUDE.md changes. The plugin update does NOT automatically update your global CLAUDE.md.
+### Configuration Precedence
+
+If both configurations exist, **project-scoped takes precedence** over global:
+
+```
+./.claude/CLAUDE.md  (project)   →  Overrides  →  ~/.claude/CLAUDE.md  (global)
+```
+
+> **NOTE**: After updating the plugin (via `npm update`, `git pull`, or Claude Code's plugin update), you MUST re-run `/sisyphus-default` or `/sisyphus-default-global` to apply the latest CLAUDE.md changes. The plugin update does NOT automatically update your CLAUDE.md files.
 
 ---
 
@@ -195,7 +217,8 @@ The installer adds to your Claude Code config (`~/.claude/`):
 │   └── qa-tester.md           # CLI/service testing (Sonnet)
 ├── commands/
 │   ├── sisyphus.md         # /sisyphus command
-│   ├── sisyphus-default.md # /sisyphus-default command
+│   ├── sisyphus-default.md # /sisyphus-default command (project-scoped)
+│   ├── sisyphus-default-global.md # /sisyphus-default-global command (global)
 │   ├── ultrawork.md        # /ultrawork command
 │   ├── deepsearch.md       # /deepsearch command
 │   ├── analyze.md          # /analyze command
@@ -228,7 +251,8 @@ claude
 | Command | Description |
 |---------|-------------|
 | `/sisyphus <task>` | Activate Sisyphus multi-agent orchestration mode |
-| `/sisyphus-default` | Set Sisyphus as your permanent default mode |
+| `/sisyphus-default` | Configure Sisyphus for current project (./.claude/CLAUDE.md) |
+| `/sisyphus-default-global` | Configure Sisyphus globally (~/.claude/CLAUDE.md) |
 | `/ultrawork <task>` | Maximum performance mode with parallel agents |
 | `/deepsearch <query>` | Thorough multi-strategy codebase search |
 | `/deepinit [path]` | Index codebase with hierarchical AGENTS.md files |
@@ -249,8 +273,11 @@ claude
 # Activate Sisyphus for a task
 /sisyphus refactor the authentication module
 
-# Set as default mode (persistent)
+# Configure for current project
 /sisyphus-default
+
+# Or configure globally for all projects
+/sisyphus-default-global
 
 # Use ultrawork for maximum performance
 /ultrawork implement user dashboard with charts

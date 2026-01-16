@@ -90,7 +90,7 @@ ls -la ~/.claude/skills/ 2>/dev/null
 
 Look for files like:
 - `oracle.md`, `librarian.md`, `explore.md`, `sisyphus-junior.md`, etc. in agents/
-- `ultrawork.md`, `sisyphus-default.md`, `deepsearch.md`, etc. in commands/
+- `ultrawork.md`, `sisyphus-default.md`, `sisyphus-default-global.md`, `deepsearch.md`, etc. in commands/
 - Any sisyphus-related `.md` files in skills/
 
 ---
