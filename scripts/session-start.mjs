@@ -46,6 +46,33 @@ function countIncompleteTodos(todosDir) {
   return count;
 }
 
+// Check if HUD is properly installed
+function checkHudInstallation() {
+  const hudScript = join(homedir(), '.claude', 'hud', 'sisyphus-hud.mjs');
+  const settingsFile = join(homedir(), '.claude', 'settings.json');
+
+  // Check if HUD script exists
+  if (!existsSync(hudScript)) {
+    return { installed: false, reason: 'HUD script missing' };
+  }
+
+  // Check if statusLine is configured
+  try {
+    if (existsSync(settingsFile)) {
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf-8'));
+      if (!settings.statusLine) {
+        return { installed: false, reason: 'statusLine not configured' };
+      }
+    } else {
+      return { installed: false, reason: 'settings.json missing' };
+    }
+  } catch {
+    return { installed: false, reason: 'Could not read settings' };
+  }
+
+  return { installed: true };
+}
+
 // Main
 async function main() {
   try {
@@ -55,6 +82,14 @@ async function main() {
 
     const directory = data.directory || process.cwd();
     const messages = [];
+
+    // Check HUD installation (one-time setup guidance)
+    const hudCheck = checkHudInstallation();
+    if (!hudCheck.installed) {
+      messages.push(`<system-reminder>
+[Sisyphus] HUD not configured (${hudCheck.reason}). Run /hud setup then restart Claude Code.
+</system-reminder>`);
+    }
 
     // Check for ultrawork state
     const ultraworkState = readJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'))

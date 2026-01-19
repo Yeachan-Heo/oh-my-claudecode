@@ -2517,7 +2517,7 @@ Mnemosyne (named after the Greek goddess of memory) saves knowledge you've disco
    - No duplicate skill exists with similar triggers
 
 4. **Save Location**:
-   - **User-level**: ~/.claude/skills/sisyphus-learned/ - Available in all projects
+   - **User-level**: ~/.claude/commands/sisyphus-learned/ - Available in all projects (loaded by Claude Code)
    - **Project-level**: .sisyphus/skills/ - Specific to this project, version-controllable
 
 ## When to Use

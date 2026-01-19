@@ -5,8 +5,8 @@
 import { join } from 'path';
 import { homedir } from 'os';
 
-/** User-level skills directory */
-export const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'sisyphus-learned');
+/** User-level skills directory (in commands/ so Claude Code loads them) */
+export const USER_SKILLS_DIR = join(homedir(), '.claude', 'commands', 'sisyphus-learned');
 
 /** Project-level skills subdirectory */
 export const PROJECT_SKILLS_SUBDIR = '.sisyphus/skills';
