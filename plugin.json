@@ -1,0 +1,25 @@
+{
+  "name": "oh-my-claude-sisyphus",
+  "version": "3.0.0-beta",
+  "description": "Multi-agent orchestration system for Claude Code",
+  "hooks": {
+    "PreToolUse": [
+      "scripts/pre-tool-enforcer.mjs"
+    ],
+    "PostToolUse": [
+      "scripts/post-tool-verifier.mjs"
+    ],
+    "SessionStart": [
+      "scripts/session-start.mjs"
+    ]
+  },
+  "agents": [
+    "agents/*.md"
+  ],
+  "commands": [
+    "commands/**/*.md"
+  ],
+  "skills": [
+    "skills/*.md"
+  ]
+}
