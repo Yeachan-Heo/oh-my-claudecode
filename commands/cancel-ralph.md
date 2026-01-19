@@ -14,6 +14,7 @@ Execute this command to fully cancel ALL persistent modes:
 mkdir -p .sisyphus ~/.claude && \
 echo '{"active": false, "cancelled_at": "'$(date -Iseconds)'", "reason": "User cancelled via /cancel-ralph"}' > .sisyphus/ralph-state.json && \
 echo '{"active": false, "cancelled_at": "'$(date -Iseconds)'", "reason": "User cancelled via /cancel-ralph"}' > .sisyphus/ultrawork-state.json && \
+echo '{"active": false, "cancelled_at": "'$(date -Iseconds)'", "reason": "User cancelled via /cancel-ralph"}' > .sisyphus/ralph-plan-state.json && \
 echo '{"active": false, "cancelled_at": "'$(date -Iseconds)'", "reason": "User cancelled via /cancel-ralph"}' > ~/.claude/ralph-state.json && \
 echo '{"active": false, "cancelled_at": "'$(date -Iseconds)'", "reason": "User cancelled via /cancel-ralph"}' > ~/.claude/ultrawork-state.json && \
 rm -f .sisyphus/ralph-verification.json
@@ -24,6 +25,7 @@ After running this command, you are free to stop working. The persistent mode ho
 ## What Was Cancelled
 
 - **Ralph Loop**: Self-referential completion loop
+- **Ralph Plan**: Iterative planning loop (if active via /ralph-plan)
 - **Ultrawork State**: Maximum intensity mode (if active via /ultrawork-ralph)
 - **Verification State**: Any pending oracle verification
 
