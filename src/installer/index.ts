@@ -2836,11 +2836,10 @@ export function install(options: InstallOptions = {}): InstallResult {
   // Check if running as a plugin
   const runningAsPlugin = isRunningAsPlugin();
   if (runningAsPlugin) {
-    log('Detected Claude Code plugin context - skipping file installation');
+    log('Detected Claude Code plugin context - skipping agent/command file installation');
     log('Plugin files are managed by Claude Code plugin system');
-    result.success = true;
-    result.message = 'Running as plugin - no installation needed (managed by plugin system)';
-    return result;
+    log('Will still install HUD statusline...');
+    // Don't return early - continue to install HUD
   }
 
   // Check Claude installation (optional)
@@ -2855,135 +2854,143 @@ export function install(options: InstallOptions = {}): InstallResult {
   }
 
   try {
-    // Create directories
-    log('Creating directories...');
+    // Ensure base config directory exists
     if (!existsSync(CLAUDE_CONFIG_DIR)) {
       mkdirSync(CLAUDE_CONFIG_DIR, { recursive: true });
     }
-    if (!existsSync(AGENTS_DIR)) {
-      mkdirSync(AGENTS_DIR, { recursive: true });
-    }
-    if (!existsSync(COMMANDS_DIR)) {
-      mkdirSync(COMMANDS_DIR, { recursive: true });
-    }
-    if (!existsSync(SKILLS_DIR)) {
-      mkdirSync(SKILLS_DIR, { recursive: true });
-    }
-    if (!existsSync(HOOKS_DIR)) {
-      mkdirSync(HOOKS_DIR, { recursive: true });
-    }
 
-    // Install agents
-    log('Installing agent definitions...');
-    for (const [filename, content] of Object.entries(AGENT_DEFINITIONS)) {
-      const filepath = join(AGENTS_DIR, filename);
-      if (existsSync(filepath) && !options.force) {
-        log(`  Skipping ${filename} (already exists)`);
-      } else {
-        writeFileSync(filepath, content);
-        result.installedAgents.push(filename);
-        log(`  Installed ${filename}`);
+    // Skip agent/command/hook file installation when running as plugin
+    // Plugin system handles these via ${CLAUDE_PLUGIN_ROOT}
+    if (!runningAsPlugin) {
+      // Create directories
+      log('Creating directories...');
+      if (!existsSync(AGENTS_DIR)) {
+        mkdirSync(AGENTS_DIR, { recursive: true });
       }
-    }
+      if (!existsSync(COMMANDS_DIR)) {
+        mkdirSync(COMMANDS_DIR, { recursive: true });
+      }
+      if (!existsSync(SKILLS_DIR)) {
+        mkdirSync(SKILLS_DIR, { recursive: true });
+      }
+      if (!existsSync(HOOKS_DIR)) {
+        mkdirSync(HOOKS_DIR, { recursive: true });
+      }
 
-    // Install commands
-    log('Installing slash commands...');
-    for (const [filename, content] of Object.entries(COMMAND_DEFINITIONS)) {
-      const filepath = join(COMMANDS_DIR, filename);
-
-      // Create command directory if needed (only for nested paths like 'ultrawork/skill.md')
-      if (filename.includes('/')) {
-        const commandDir = join(COMMANDS_DIR, filename.split('/')[0]);
-        if (!existsSync(commandDir)) {
-          mkdirSync(commandDir, { recursive: true });
+      // Install agents
+      log('Installing agent definitions...');
+      for (const [filename, content] of Object.entries(AGENT_DEFINITIONS)) {
+        const filepath = join(AGENTS_DIR, filename);
+        if (existsSync(filepath) && !options.force) {
+          log(`  Skipping ${filename} (already exists)`);
+        } else {
+          writeFileSync(filepath, content);
+          result.installedAgents.push(filename);
+          log(`  Installed ${filename}`);
         }
       }
 
-      if (existsSync(filepath) && !options.force) {
-        log(`  Skipping ${filename} (already exists)`);
-      } else {
-        writeFileSync(filepath, content);
-        result.installedCommands.push(filename);
-        log(`  Installed ${filename}`);
+      // Install commands
+      log('Installing slash commands...');
+      for (const [filename, content] of Object.entries(COMMAND_DEFINITIONS)) {
+        const filepath = join(COMMANDS_DIR, filename);
+
+        // Create command directory if needed (only for nested paths like 'ultrawork/skill.md')
+        if (filename.includes('/')) {
+          const commandDir = join(COMMANDS_DIR, filename.split('/')[0]);
+          if (!existsSync(commandDir)) {
+            mkdirSync(commandDir, { recursive: true });
+          }
+        }
+
+        if (existsSync(filepath) && !options.force) {
+          log(`  Skipping ${filename} (already exists)`);
+        } else {
+          writeFileSync(filepath, content);
+          result.installedCommands.push(filename);
+          log(`  Installed ${filename}`);
+        }
       }
-    }
 
-    // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
-    // to avoid duplicate entries in Claude Code's available skills list
+      // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
+      // to avoid duplicate entries in Claude Code's available skills list
 
-    // Install CLAUDE.md (only if it doesn't exist)
-    const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
-    const homeMdPath = join(homedir(), 'CLAUDE.md');
+      // Install CLAUDE.md (only if it doesn't exist)
+      const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
+      const homeMdPath = join(homedir(), 'CLAUDE.md');
 
-    if (!existsSync(homeMdPath)) {
-      if (!existsSync(claudeMdPath) || options.force) {
-        writeFileSync(claudeMdPath, CLAUDE_MD_CONTENT);
-        log('Created CLAUDE.md');
+      if (!existsSync(homeMdPath)) {
+        if (!existsSync(claudeMdPath) || options.force) {
+          writeFileSync(claudeMdPath, CLAUDE_MD_CONTENT);
+          log('Created CLAUDE.md');
+        } else {
+          log('CLAUDE.md already exists, skipping');
+        }
       } else {
-        log('CLAUDE.md already exists, skipping');
+        log('CLAUDE.md exists in home directory, skipping');
+      }
+
+      // Install hook scripts (platform-aware)
+      const hookScripts = getHookScripts();
+      const hookType = shouldUseNodeHooks() ? 'Node.js' : 'Bash';
+      log(`Installing ${hookType} hook scripts...`);
+
+      for (const [filename, content] of Object.entries(hookScripts)) {
+        const filepath = join(HOOKS_DIR, filename);
+        if (existsSync(filepath) && !options.force) {
+          log(`  Skipping ${filename} (already exists)`);
+        } else {
+          writeFileSync(filepath, content);
+          // Make script executable (skip on Windows - not needed)
+          if (!isWindows()) {
+            chmodSync(filepath, 0o755);
+          }
+          log(`  Installed ${filename}`);
+        }
+      }
+
+      // Configure settings.json for hooks (merge with existing settings)
+      log('Configuring hooks in settings.json...');
+      try {
+        let existingSettings: Record<string, unknown> = {};
+        if (existsSync(SETTINGS_FILE)) {
+          const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
+          existingSettings = JSON.parse(settingsContent);
+        }
+
+        // Merge hooks configuration (platform-aware)
+        const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
+        const hooksConfig = getHooksSettingsConfig();
+        const newHooks = hooksConfig.hooks;
+
+        // Deep merge: add our hooks, or update if --force is used
+        for (const [eventType, eventHooks] of Object.entries(newHooks)) {
+          if (!existingHooks[eventType]) {
+            existingHooks[eventType] = eventHooks;
+            log(`  Added ${eventType} hook`);
+          } else if (options.force) {
+            existingHooks[eventType] = eventHooks;
+            log(`  Updated ${eventType} hook (--force)`);
+          } else {
+            log(`  ${eventType} hook already configured, skipping`);
+          }
+        }
+
+        existingSettings.hooks = existingHooks;
+
+        // Write back settings
+        writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
+        log('  Hooks configured in settings.json');
+        result.hooksConfigured = true;
+      } catch (_e) {
+        log('  Warning: Could not configure hooks in settings.json (non-fatal)');
+        result.hooksConfigured = false;
       }
     } else {
-      log('CLAUDE.md exists in home directory, skipping');
+      log('Skipping agent/command/hook files (managed by plugin system)');
     }
 
-    // Install hook scripts (platform-aware)
-    const hookScripts = getHookScripts();
-    const hookType = shouldUseNodeHooks() ? 'Node.js' : 'Bash';
-    log(`Installing ${hookType} hook scripts...`);
-
-    for (const [filename, content] of Object.entries(hookScripts)) {
-      const filepath = join(HOOKS_DIR, filename);
-      if (existsSync(filepath) && !options.force) {
-        log(`  Skipping ${filename} (already exists)`);
-      } else {
-        writeFileSync(filepath, content);
-        // Make script executable (skip on Windows - not needed)
-        if (!isWindows()) {
-          chmodSync(filepath, 0o755);
-        }
-        log(`  Installed ${filename}`);
-      }
-    }
-
-    // Configure settings.json for hooks (merge with existing settings)
-    log('Configuring hooks in settings.json...');
-    try {
-      let existingSettings: Record<string, unknown> = {};
-      if (existsSync(SETTINGS_FILE)) {
-        const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
-        existingSettings = JSON.parse(settingsContent);
-      }
-
-      // Merge hooks configuration (platform-aware)
-      const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
-      const hooksConfig = getHooksSettingsConfig();
-      const newHooks = hooksConfig.hooks;
-
-      // Deep merge: add our hooks, or update if --force is used
-      for (const [eventType, eventHooks] of Object.entries(newHooks)) {
-        if (!existingHooks[eventType]) {
-          existingHooks[eventType] = eventHooks;
-          log(`  Added ${eventType} hook`);
-        } else if (options.force) {
-          existingHooks[eventType] = eventHooks;
-          log(`  Updated ${eventType} hook (--force)`);
-        } else {
-          log(`  ${eventType} hook already configured, skipping`);
-        }
-      }
-
-      existingSettings.hooks = existingHooks;
-
-      // Write back settings
-      writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-      log('  Hooks configured in settings.json');
-      result.hooksConfigured = true;
-    } catch (_e) {
-      log('  Warning: Could not configure hooks in settings.json (non-fatal)');
-      result.hooksConfigured = false;
-    }
-
-    // Install HUD statusline
+    // Install HUD statusline (always, even in plugin mode)
     log('Installing HUD statusline...');
     try {
       if (!existsSync(HUD_DIR)) {
@@ -2997,43 +3004,55 @@ export function install(options: InstallOptions = {}): InstallResult {
         '#!/usr/bin/env node',
         '/**',
         ' * Sisyphus HUD - Statusline Script',
-        ' * Wrapper that imports from installed or development locations',
+        ' * Wrapper that imports from plugin cache, dev paths, or npm package',
         ' */',
         '',
-        'import { existsSync } from "node:fs";',
+        'import { existsSync, readdirSync } from "node:fs";',
         'import { homedir } from "node:os";',
         'import { join } from "node:path";',
         '',
-        '// Check development paths first, then npm package',
         'async function main() {',
         '  const home = homedir();',
         '  ',
-        '  // Common development locations to check',
+        '  // 1. Try plugin cache first (preferred for 3.0.0+)',
+        '  const pluginCacheBase = join(home, ".claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus");',
+        '  if (existsSync(pluginCacheBase)) {',
+        '    try {',
+        '      const versions = readdirSync(pluginCacheBase);',
+        '      if (versions.length > 0) {',
+        '        const latestVersion = versions.sort().reverse()[0];',
+        '        const pluginPath = join(pluginCacheBase, latestVersion, "dist/hud/index.js");',
+        '        if (existsSync(pluginPath)) {',
+        '          await import(pluginPath);',
+        '          return;',
+        '        }',
+        '      }',
+        '    } catch { /* continue */ }',
+        '  }',
+        '  ',
+        '  // 2. Development paths',
         '  const devPaths = [',
         '    join(home, "Workspace/oh-my-claude-sisyphus/dist/hud/index.js"),',
         '    join(home, "workspace/oh-my-claude-sisyphus/dist/hud/index.js"),',
         '    join(home, "projects/oh-my-claude-sisyphus/dist/hud/index.js"),',
-        '    join(home, "dev/oh-my-claude-sisyphus/dist/hud/index.js"),',
-        '    join(home, "code/oh-my-claude-sisyphus/dist/hud/index.js"),',
         '  ];',
         '  ',
-        '  // Try development paths first',
         '  for (const devPath of devPaths) {',
         '    if (existsSync(devPath)) {',
         '      try {',
         '        await import(devPath);',
         '        return;',
-        '      } catch { /* continue to next */ }',
+        '      } catch { /* continue */ }',
         '    }',
         '  }',
         '  ',
-        '  // Try npm package (global or local install)',
+        '  // 3. npm package (global or local install)',
         '  try {',
         '    await import("oh-my-claude-sisyphus/dist/hud/index.js");',
         '    return;',
-        '  } catch { /* continue to fallback */ }',
+        '  } catch { /* continue */ }',
         '  ',
-        '  // Fallback: minimal HUD',
+        '  // 4. Fallback: minimal HUD',
         '  console.log("[SISYPHUS] active");',
         '}',
         '',
