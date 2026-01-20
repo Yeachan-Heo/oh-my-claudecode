@@ -43,7 +43,7 @@ The plugin requires a `plugin.json` manifest:
 ```json
 {
   "name": "oh-my-claudecode",
-  "version": "3.0.0-beta",
+  "version": "3.0.0",
   "description": "Multi-agent orchestration system for Claude Code",
   "hooks": {
     "PreToolUse": ["scripts/pre-tool-enforcer.mjs"],
