@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { loadAllSkills, findMatchingSkills } from '../../hooks/mnemosyne/loader.js';
+import { loadAllSkills, findMatchingSkills } from '../../hooks/learner/loader.js';
 
 describe('Skill Loader', () => {
   let testDir: string;
@@ -11,7 +11,7 @@ describe('Skill Loader', () => {
   beforeEach(() => {
     testDir = join(tmpdir(), `skill-loader-test-${Date.now()}`);
     projectRoot = join(testDir, 'project');
-    mkdirSync(join(projectRoot, '.sisyphus', 'skills'), { recursive: true });
+    mkdirSync(join(projectRoot, '.omc', 'skills'), { recursive: true });
   });
 
   afterEach(() => {
@@ -33,7 +33,7 @@ ${(metadata.triggers as string[] || ['test']).map(t => `  - "${t}"`).join('\n')}
 
 Test content for ${name}.
 `;
-    const skillPath = join(projectRoot, '.sisyphus', 'skills', `${name}.md`);
+    const skillPath = join(projectRoot, '.omc', 'skills', `${name}.md`);
     writeFileSync(skillPath, content);
     return skillPath;
   };

@@ -2,7 +2,7 @@
  * Ralph Progress Log Support
  *
  * Implements append-only progress tracking using progress.txt format from original Ralph.
- * This provides memory persistence between ralph-loop iterations.
+ * This provides memory persistence between ralph iterations.
  *
  * Structure:
  * - Codebase Patterns section at top (consolidated learnings)
@@ -69,7 +69,7 @@ export function getProgressPath(directory: string): string {
  * Get the path to progress.txt in .sisyphus subdirectory
  */
 export function getSisyphusProgressPath(directory: string): string {
-  return join(directory, '.sisyphus', PROGRESS_FILENAME);
+  return join(directory, '.omc', PROGRESS_FILENAME);
 }
 
 /**
@@ -225,7 +225,7 @@ export function readProgress(directory: string): ProgressLog | null {
  * Initialize a new progress.txt file
  */
 export function initProgress(directory: string): boolean {
-  const sisyphusDir = join(directory, '.sisyphus');
+  const sisyphusDir = join(directory, '.omc');
   if (!existsSync(sisyphusDir)) {
     try {
       mkdirSync(sisyphusDir, { recursive: true });
@@ -495,7 +495,7 @@ export function formatLearningsForContext(directory: string): string {
 }
 
 /**
- * Get full context injection for ralph-loop
+ * Get full context injection for ralph
  */
 export function getProgressContext(directory: string): string {
   const patterns = formatPatternsForContext(directory);

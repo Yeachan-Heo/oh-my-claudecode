@@ -1,5 +1,5 @@
 ---
-description: Guide on using oh-my-claude-sisyphus plugin
+description: Guide on using oh-my-claudecode plugin
 ---
 
 # Oh My Claude Sisyphus - Help Guide
@@ -16,15 +16,14 @@ $ARGUMENTS
 |---------|---------|-------------|
 | `/sisyphus` | Default orchestration mode | Complex multi-step tasks with delegation |
 | `/ultrawork` | Maximum intensity parallel mode | High-throughput tasks, aggressive delegation |
-| `/ralph-loop` | Self-referential development loop | Complete features end-to-end until done |
-| `/ultrawork-ralph` | Combined ultrawork + ralph | Maximum intensity with completion guarantee |
+| `/ralph` | Self-referential development loop | Complete features end-to-end until done |
 
 ### Planning & Analysis
 
 | Command | Purpose |
 |---------|---------|
 | `/plan` | Start planning session with Prometheus |
-| `/prometheus` | Strategic planning consultant |
+| `/planner` | Strategic planning consultant |
 | `/review` | Review plans with Momus critic |
 | `/analyze` | Deep analysis and investigation |
 
@@ -72,20 +71,20 @@ $ARGUMENTS
 The plugin provides 19 specialized agents with intelligent model routing:
 
 ### General Purpose
-- `sisyphus-junior` - Focused task executor
-- `sisyphus-junior-low` - Simple tasks (Haiku)
-- `sisyphus-junior-high` - Complex tasks (Opus)
+- `executor` - Focused task executor
+- `executor-low` - Simple tasks (Haiku)
+- `executor-high` - Complex tasks (Opus)
 
 ### Specialized
-- `oracle` - Architecture & debugging advisor (read-only)
-- `frontend-engineer` - UI/UX development
-- `document-writer` - Technical documentation
-- `librarian` - External documentation research
+- `architect` - Architecture & debugging advisor (read-only)
+- `designer` - UI/UX development
+- `writer` - Technical documentation
+- `researcher` - External documentation research
 - `explore` - Fast codebase exploration
 - `qa-tester` - Interactive CLI testing
-- `metis` - Requirements analysis
-- `prometheus` - Strategic planning
-- `momus` - Plan review expert
+- `analyst` - Requirements analysis
+- `planner` - Strategic planning
+- `critic` - Plan review expert
 
 ## Tips
 
@@ -127,8 +126,8 @@ The plugin provides 19 specialized agents with intelligent model routing:
 
 ## Need More Help?
 
-- **README**: Full documentation at https://github.com/Yeachan-Heo/oh-my-claude-sisyphus
-- **Issues**: Report bugs at https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/issues
+- **README**: Full documentation at https://github.com/Yeachan-Heo/oh-my-claudecode
+- **Issues**: Report bugs at https://github.com/Yeachan-Heo/oh-my-claudecode/issues
 - **Examples**: See examples/ directory in plugin
 
 ## Version

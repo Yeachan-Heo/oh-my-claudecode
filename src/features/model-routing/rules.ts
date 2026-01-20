@@ -27,7 +27,7 @@ export const DEFAULT_ROUTING_RULES: RoutingRule[] = [
 
   // NOTE: ALL agents are now ADAPTIVE based on task complexity
   // Only orchestrators (orchestrator-sisyphus) are fixed to Opus
-  // This includes: oracle, prometheus, momus, metis, explore, document-writer, etc.
+  // This includes: architect, planner, critic, analyst, explore, writer, etc.
 
   // ============ Orchestrator Rule (Fixed Tier) ============
 
@@ -40,91 +40,91 @@ export const DEFAULT_ROUTING_RULES: RoutingRule[] = [
 
   // ============ Advisory Agent Adaptive Rules ============
 
-  // Oracle: Simple lookups → LOW, tracing → MEDIUM, debugging/architecture → HIGH
+  // Architect: Simple lookups → LOW, tracing → MEDIUM, debugging/architecture → HIGH
   // Higher priority (85) to override generic rules like short-local-change
   {
-    name: 'oracle-complex-debugging',
+    name: 'architect-complex-debugging',
     condition: (ctx, signals) =>
-      ctx.agentType === 'oracle' &&
+      ctx.agentType === 'architect' &&
       (signals.lexical.hasDebuggingKeywords ||
        signals.lexical.hasArchitectureKeywords ||
        signals.lexical.hasRiskKeywords),
-    action: { tier: 'HIGH', reason: 'Oracle: Complex debugging/architecture decision' },
+    action: { tier: 'HIGH', reason: 'Architect: Complex debugging/architecture decision' },
     priority: 85,
   },
 
   {
-    name: 'oracle-simple-lookup',
+    name: 'architect-simple-lookup',
     condition: (ctx, signals) =>
-      ctx.agentType === 'oracle' &&
+      ctx.agentType === 'architect' &&
       signals.lexical.hasSimpleKeywords &&
       !signals.lexical.hasDebuggingKeywords &&
       !signals.lexical.hasArchitectureKeywords &&
       !signals.lexical.hasRiskKeywords,
-    action: { tier: 'LOW', reason: 'Oracle: Simple lookup query' },
+    action: { tier: 'LOW', reason: 'Architect: Simple lookup query' },
     priority: 80,
   },
 
-  // Prometheus: Simple breakdown → LOW, moderate planning → MEDIUM, cross-domain → HIGH
+  // Planner: Simple breakdown → LOW, moderate planning → MEDIUM, cross-domain → HIGH
   {
-    name: 'prometheus-simple-breakdown',
+    name: 'planner-simple-breakdown',
     condition: (ctx, signals) =>
-      ctx.agentType === 'prometheus' &&
+      ctx.agentType === 'planner' &&
       signals.structural.estimatedSubtasks <= 3 &&
       !signals.lexical.hasRiskKeywords &&
       signals.structural.impactScope === 'local',
-    action: { tier: 'LOW', reason: 'Prometheus: Simple task breakdown' },
+    action: { tier: 'LOW', reason: 'Planner: Simple task breakdown' },
     priority: 75,
   },
 
   {
-    name: 'prometheus-strategic-planning',
+    name: 'planner-strategic-planning',
     condition: (ctx, signals) =>
-      ctx.agentType === 'prometheus' &&
+      ctx.agentType === 'planner' &&
       (signals.structural.impactScope === 'system-wide' ||
        signals.lexical.hasArchitectureKeywords ||
        signals.structural.estimatedSubtasks > 10),
-    action: { tier: 'HIGH', reason: 'Prometheus: Cross-domain strategic planning' },
+    action: { tier: 'HIGH', reason: 'Planner: Cross-domain strategic planning' },
     priority: 75,
   },
 
-  // Momus: Checklist → LOW, gap analysis → MEDIUM, adversarial review → HIGH
+  // Critic: Checklist → LOW, gap analysis → MEDIUM, adversarial review → HIGH
   {
-    name: 'momus-checklist-review',
+    name: 'critic-checklist-review',
     condition: (ctx, signals) =>
-      ctx.agentType === 'momus' &&
+      ctx.agentType === 'critic' &&
       signals.lexical.wordCount < 30 &&
       !signals.lexical.hasRiskKeywords,
-    action: { tier: 'LOW', reason: 'Momus: Checklist verification' },
+    action: { tier: 'LOW', reason: 'Critic: Checklist verification' },
     priority: 75,
   },
 
   {
-    name: 'momus-adversarial-review',
+    name: 'critic-adversarial-review',
     condition: (ctx, signals) =>
-      ctx.agentType === 'momus' &&
+      ctx.agentType === 'critic' &&
       (signals.lexical.hasRiskKeywords || signals.structural.impactScope === 'system-wide'),
-    action: { tier: 'HIGH', reason: 'Momus: Adversarial review for critical system' },
+    action: { tier: 'HIGH', reason: 'Critic: Adversarial review for critical system' },
     priority: 75,
   },
 
-  // Metis: Simple impact → LOW, dependency mapping → MEDIUM, risk analysis → HIGH
+  // Analyst: Simple impact → LOW, dependency mapping → MEDIUM, risk analysis → HIGH
   {
-    name: 'metis-simple-impact',
+    name: 'analyst-simple-impact',
     condition: (ctx, signals) =>
-      ctx.agentType === 'metis' &&
+      ctx.agentType === 'analyst' &&
       signals.structural.impactScope === 'local' &&
       !signals.lexical.hasRiskKeywords,
-    action: { tier: 'LOW', reason: 'Metis: Simple impact analysis' },
+    action: { tier: 'LOW', reason: 'Analyst: Simple impact analysis' },
     priority: 75,
   },
 
   {
-    name: 'metis-risk-analysis',
+    name: 'analyst-risk-analysis',
     condition: (ctx, signals) =>
-      ctx.agentType === 'metis' &&
+      ctx.agentType === 'analyst' &&
       (signals.lexical.hasRiskKeywords || signals.structural.impactScope === 'system-wide'),
-    action: { tier: 'HIGH', reason: 'Metis: Risk analysis and unknown-unknowns detection' },
+    action: { tier: 'HIGH', reason: 'Analyst: Risk analysis and unknown-unknowns detection' },
     priority: 75,
   },
 

@@ -10,7 +10,7 @@
  * Structure:
  * ```markdown
  * # Notepad
- * <!-- Auto-managed by Sisyphus. Manual edits preserved in MANUAL section. -->
+ * <!-- Auto-managed by OMC. Manual edits preserved in MANUAL section. -->
  *
  * ## Priority Context
  * <!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->
@@ -87,20 +87,20 @@ export const MANUAL_HEADER = '## MANUAL';
 // ============================================================================
 
 /**
- * Get the path to notepad.md in .sisyphus subdirectory
+ * Get the path to notepad.md in .omc subdirectory
  */
 export function getNotepadPath(directory: string): string {
-  return join(directory, '.sisyphus', NOTEPAD_FILENAME);
+  return join(directory, '.omc', NOTEPAD_FILENAME);
 }
 
 /**
  * Initialize notepad.md if it doesn't exist
  */
 export function initNotepad(directory: string): boolean {
-  const sisyphusDir = join(directory, '.sisyphus');
-  if (!existsSync(sisyphusDir)) {
+  const omcDir = join(directory, '.omc');
+  if (!existsSync(omcDir)) {
     try {
-      mkdirSync(sisyphusDir, { recursive: true });
+      mkdirSync(omcDir, { recursive: true });
     } catch {
       return false;
     }
@@ -112,7 +112,7 @@ export function initNotepad(directory: string): boolean {
   }
 
   const content = `# Notepad
-<!-- Auto-managed by Sisyphus. Manual edits preserved in MANUAL section. -->
+<!-- Auto-managed by OMC. Manual edits preserved in MANUAL section. -->
 
 ${PRIORITY_HEADER}
 <!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->

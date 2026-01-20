@@ -49,7 +49,7 @@ try {
 const program = new Command();
 
 program
-  .name('oh-my-claude-sisyphus')
+  .name('oh-my-claudecode')
   .description('Multi-agent orchestration system for Claude Agent SDK')
   .version(version);
 
@@ -66,7 +66,7 @@ program
     const targetPath = options.global ? paths.user : paths.project;
     const targetDir = dirname(targetPath);
 
-    console.log(chalk.blue('Oh-My-Claude-Sisyphus Configuration Setup\n'));
+    console.log(chalk.blue('Oh-My-ClaudeCode Configuration Setup\n'));
 
     // Check if config already exists
     if (existsSync(targetPath) && !options.force) {
@@ -82,8 +82,8 @@ program
     }
 
     // Generate config content
-    const configContent = `// Oh-My-Claude-Sisyphus Configuration
-// See: https://github.com/your-repo/oh-my-claude-sisyphus for documentation
+    const configContent = `// Oh-My-ClaudeCode Configuration
+// See: https://github.com/your-repo/oh-my-claudecode for documentation
 {
   "$schema": "./sisyphus-schema.json",
 
@@ -93,12 +93,12 @@ program
       // Main orchestrator - uses the most capable model
       "model": "claude-opus-4-5-20251101"
     },
-    "oracle": {
+    "architect": {
       // Architecture and debugging expert
       "model": "claude-opus-4-5-20251101",
       "enabled": true
     },
-    "librarian": {
+    "researcher": {
       // Documentation and codebase analysis
       "model": "claude-sonnet-4-5-20250514"
     },
@@ -271,7 +271,7 @@ program
   .action(async () => {
     const session = createSisyphusSession();
 
-    console.log(chalk.blue.bold('\nOh-My-Claude-Sisyphus System Information\n'));
+    console.log(chalk.blue.bold('\nOh-My-ClaudeCode System Information\n'));
     console.log(chalk.gray('━'.repeat(50)));
 
     console.log(chalk.blue('\nAvailable Agents:'));
@@ -339,7 +339,7 @@ program
   .option('-q, --quiet', 'Suppress output except for errors')
   .action(async (options) => {
     if (!options.quiet) {
-      console.log(chalk.blue('Oh-My-Claude-Sisyphus Update\n'));
+      console.log(chalk.blue('Oh-My-ClaudeCode Update\n'));
     }
 
     try {
@@ -412,7 +412,7 @@ program
   .action(async () => {
     const installed = getInstalledVersion();
 
-    console.log(chalk.blue.bold('\nOh-My-Claude-Sisyphus Version Information\n'));
+    console.log(chalk.blue.bold('\nOh-My-ClaudeCode Version Information\n'));
     console.log(chalk.gray('━'.repeat(50)));
 
     console.log(`\n  Package version:   ${chalk.green(version)}`);
@@ -433,7 +433,7 @@ program
     }
 
     console.log(chalk.gray('\n━'.repeat(50)));
-    console.log(chalk.gray('\nTo check for updates, run: oh-my-claude-sisyphus update --check'));
+    console.log(chalk.gray('\nTo check for updates, run: oh-my-claudecode update --check'));
   });
 
 /**
@@ -448,7 +448,7 @@ program
   .action(async (options) => {
     if (!options.quiet) {
       console.log(chalk.blue('╔═══════════════════════════════════════════════════════════╗'));
-      console.log(chalk.blue('║         Oh-My-Claude-Sisyphus Installer                   ║'));
+      console.log(chalk.blue('║         Oh-My-ClaudeCode Installer                        ║'));
       console.log(chalk.blue('║   Multi-Agent Orchestration for Claude Code               ║'));
       console.log(chalk.blue('╚═══════════════════════════════════════════════════════════╝'));
       console.log('');
@@ -494,32 +494,32 @@ program
         console.log('  /ultrawork <task>             # Maximum performance mode');
         console.log('  /deepsearch <query>           # Thorough codebase search');
         console.log('  /analyze <target>             # Deep analysis mode');
-        console.log('  /plan <description>           # Start planning with Prometheus');
-        console.log('  /review [plan-path]           # Review plan with Momus');
+        console.log('  /plan <description>           # Start planning with Planner');
+        console.log('  /review [plan-path]           # Review plan with Critic');
         console.log('');
         console.log(chalk.yellow('Available Agents (via Task tool):'));
         console.log(chalk.gray('  Base Agents:'));
-        console.log('    oracle              - Architecture & debugging (Opus)');
-        console.log('    librarian           - Documentation & research (Sonnet)');
+        console.log('    architect              - Architecture & debugging (Opus)');
+        console.log('    researcher           - Documentation & research (Sonnet)');
         console.log('    explore             - Fast pattern matching (Haiku)');
-        console.log('    frontend-engineer   - UI/UX specialist (Sonnet)');
-        console.log('    document-writer     - Technical writing (Haiku)');
-        console.log('    multimodal-looker   - Visual analysis (Sonnet)');
-        console.log('    momus               - Plan review (Opus)');
-        console.log('    metis               - Pre-planning analysis (Opus)');
+        console.log('    designer            - UI/UX specialist (Sonnet)');
+        console.log('    writer              - Technical writing (Haiku)');
+        console.log('    vision              - Visual analysis (Sonnet)');
+        console.log('    critic               - Plan review (Opus)');
+        console.log('    analyst               - Pre-planning analysis (Opus)');
         console.log('    orchestrator-sisyphus - Todo coordination (Opus)');
-        console.log('    sisyphus-junior     - Focused execution (Sonnet)');
-        console.log('    prometheus          - Strategic planning (Opus)');
+        console.log('    executor            - Focused execution (Sonnet)');
+        console.log('    planner          - Strategic planning (Opus)');
         console.log('    qa-tester           - Interactive CLI testing (Sonnet)');
         console.log(chalk.gray('  Tiered Variants (for smart routing):'));
-        console.log('    oracle-medium       - Simpler analysis (Sonnet)');
-        console.log('    oracle-low          - Quick questions (Haiku)');
-        console.log('    sisyphus-junior-high - Complex tasks (Opus)');
-        console.log('    sisyphus-junior-low  - Trivial tasks (Haiku)');
-        console.log('    librarian-low       - Quick lookups (Haiku)');
+        console.log('    architect-medium       - Simpler analysis (Sonnet)');
+        console.log('    architect-low          - Quick questions (Haiku)');
+        console.log('    executor-high       - Complex tasks (Opus)');
+        console.log('    executor-low        - Trivial tasks (Haiku)');
+        console.log('    researcher-low       - Quick lookups (Haiku)');
         console.log('    explore-medium      - Thorough search (Sonnet)');
-        console.log('    frontend-engineer-high - Design systems (Opus)');
-        console.log('    frontend-engineer-low  - Simple styling (Haiku)');
+        console.log('    designer-high       - Design systems (Opus)');
+        console.log('    designer-low        - Simple styling (Haiku)');
         console.log('');
         console.log(chalk.yellow('After Updates:'));
         console.log('  Run \'/sisyphus-default\' (project) or \'/sisyphus-default-global\' (global)');
@@ -555,13 +555,13 @@ program
     });
 
     if (result.success) {
-      console.log(chalk.green('✓ Oh-My-Claude-Sisyphus installed successfully!'));
-      console.log(chalk.gray('  Run "oh-my-claude-sisyphus info" to see available agents.'));
+      console.log(chalk.green('✓ Oh-My-ClaudeCode installed successfully!'));
+      console.log(chalk.gray('  Run "oh-my-claudecode info" to see available agents.'));
       console.log(chalk.yellow('  Run "/sisyphus-default" (project) or "/sisyphus-default-global" (global) in Claude Code.'));
     } else {
       // Don't fail the npm install, just warn
       console.warn(chalk.yellow('⚠ Could not complete Sisyphus setup:'), result.message);
-      console.warn(chalk.gray('  Run "oh-my-claude-sisyphus install" manually to complete setup.'));
+      console.warn(chalk.gray('  Run "oh-my-claudecode install" manually to complete setup.'));
     }
   });
 

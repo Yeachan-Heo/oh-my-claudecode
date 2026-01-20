@@ -1,6 +1,6 @@
 # Agent Architecture: OpenCode vs Claude Code
 
-This document explains the architectural differences between OpenCode's swappable master agent system and Claude Code's skill-based routing, and how Oh-My-Claude-Sisyphus bridges this gap elegantly.
+This document explains the architectural differences between OpenCode's swappable master agent system and Claude Code's skill-based routing, and how oh-my-claudecode bridges this gap elegantly.
 
 ---
 
@@ -30,7 +30,7 @@ In OpenCode (oh-my-opencode), the master agent can be dynamically swapped based 
               │               │               │
               ▼               ▼               ▼
        ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-       │  SISYPHUS   │ │   ORACLE    │ │ PROMETHEUS  │
+       │   DEFAULT   │ │  ARCHITECT  │ │   PLANNER   │
        │  (Default)  │ │  (Debug)    │ │  (Planning) │
        │             │ │             │ │             │
        │ Can become  │ │ Can become  │ │ Can become  │
@@ -54,7 +54,7 @@ class AgentOrchestrator {
   private masterAgent: Agent;
 
   // Can swap master at runtime
-  switchMaster(agentType: 'sisyphus' | 'oracle' | 'prometheus') {
+  switchMaster(agentType: 'default' | 'architect' | 'planner') {
     this.masterAgent = AgentFactory.create(agentType);
   }
 
@@ -67,10 +67,10 @@ class AgentOrchestrator {
 }
 
 // Usage
-orchestrator.switchMaster('prometheus');  // Planning mode
+orchestrator.switchMaster('planner');  // Planning mode
 await orchestrator.execute('Design auth system');
 
-orchestrator.switchMaster('sisyphus');    // Implementation mode
+orchestrator.switchMaster('default');    // Implementation mode
 await orchestrator.execute('Implement the plan');
 ```
 
@@ -107,7 +107,7 @@ Claude Code has a **fixed master agent** - you cannot swap which agent is the "m
               │              │              │
               ▼              ▼              ▼
        ┌───────────┐  ┌───────────┐  ┌───────────┐
-       │  oracle   │  │ librarian │  │  explore  │
+       │ architect │  │ researcher│  │  explore  │
        │ (Opus)    │  │ (Sonnet)  │  │ (Haiku)   │
        └───────────┘  └───────────┘  └───────────┘
               ↑              ↑              ↑
@@ -150,9 +150,9 @@ Skills are **behavior injections** that modify how the master agent operates:
 
 1. CLAUDE.md contains routing rules
 2. Claude detects "plan" → planning task
-3. Claude invokes Skill(skill: "prometheus")
-4. Prometheus skill template is injected
-5. Claude now BEHAVES like Prometheus
+3. Claude invokes Skill(skill: "planner")
+4. Planner skill template is injected
+5. Claude now BEHAVES like Planner
 6. But it's still the same master agent
 ```
 
@@ -172,7 +172,7 @@ We solved the "can't swap master" limitation by creating **composable skill laye
   ┌─────────────────────────────────────────────────────────┐
   │  GUARANTEE LAYER (optional)                              │
   │  ┌─────────────┐                                        │
-  │  │ ralph-loop  │  "Cannot stop until verified done"     │
+  │  │ ralph  │  "Cannot stop until verified done"     │
   │  └─────────────┘                                        │
   └─────────────────────────────────────────────────────────┘
                               │
@@ -189,7 +189,7 @@ We solved the "can't swap master" limitation by creating **composable skill laye
   ┌─────────────────────────────────────────────────────────┐
   │  EXECUTION LAYER (pick one primary)                      │
   │  ┌───────────┐ ┌─────────────┐ ┌────────────┐           │
-  │  │ sisyphus  │ │ orchestrator│ │ prometheus │           │
+  │  │  default  │ │ orchestrator│ │  planner   │           │
   │  │ (build)   │ │ (coordinate)│ │  (plan)    │           │
   │  └───────────┘ └─────────────┘ └────────────┘           │
   └─────────────────────────────────────────────────────────┘
@@ -205,16 +205,16 @@ We solved the "can't swap master" limitation by creating **composable skill laye
 
 ```
 Task: "Add dark mode with proper commits"
-Skills: sisyphus + frontend-ui-ux + git-master
+Skills: default + frontend-ui-ux + git-master
 
 Task: "ultrawork: refactor entire API"
-Skills: ultrawork + sisyphus + git-master
+Skills: ultrawork + default + git-master
 
 Task: "Plan auth, then implement completely"
-Skills: prometheus → sisyphus + ralph-loop (transition)
+Skills: planner → default + ralph (transition)
 
 Task: "Fix bug, don't stop until done"
-Skills: sisyphus + ralph-loop
+Skills: default + ralph
 ```
 
 ---
@@ -226,21 +226,21 @@ Skills: sisyphus + ralph-loop
 **OpenCode Approach (Agent Swap):**
 ```
 1. User: "Plan the authentication system"
-2. System: Switch master to Prometheus
-3. Prometheus: Creates comprehensive plan
+2. System: Switch master to Planner
+3. Planner: Creates comprehensive plan
 4. User: "Now implement it"
-5. System: Switch master to Sisyphus  ← Context may be lost
-6. Sisyphus: Implements (needs to re-read plan)
+5. System: Switch master to Default  ← Context may be lost
+6. Default: Implements (needs to re-read plan)
 ```
 
 **Claude Code Approach (Skill Activation):**
 ```
 1. User: "Plan the authentication system"
-2. Claude: Activates prometheus skill
-3. Claude (as Prometheus): Creates comprehensive plan
+2. Claude: Activates planner skill
+3. Claude (as Planner): Creates comprehensive plan
 4. User: "Now implement it"
-5. Claude: Transitions to sisyphus skill  ← Same context!
-6. Claude (as Sisyphus): Implements (already has plan in context)
+5. Claude: Transitions to default skill  ← Same context!
+6. Claude (as Default): Implements (already has plan in context)
 ```
 
 ### Why Skills Are More Elegant
@@ -259,7 +259,7 @@ Skills: sisyphus + ralph-loop
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         OH-MY-CLAUDE-SISYPHUS                            │
+│                         OH-MY-CLAUDECODE                                 │
 │                     Intelligent Skill Activation                         │
 └─────────────────────────────────────────────────────────────────────────┘
 
@@ -271,14 +271,14 @@ Skills: sisyphus + ralph-loop
 │  "ultrawork │              │   CLAUDE.md      │           │ SKILL ACTIVATED │
 │   refactor  │─────────────▶│   Auto-Routing   │──────────▶│                 │
 │   the API"  │              │                  │           │ ultrawork +     │
-└─────────────┘              │ Task Type:       │           │ sisyphus +      │
+└─────────────┘              │ Task Type:       │           │ default +       │
                              │  - Implementation│           │ git-master      │
                              │  - Multi-file    │           │                 │
                              │  - Parallel OK   │           │ ┌─────────────┐ │
                              │                  │           │ │ Parallel    │ │
                              │ Skills:          │           │ │ agents      │ │
                              │  - ultrawork ✓   │           │ │ launched    │ │
-                             │  - sisyphus ✓    │           │ └─────────────┘ │
+                             │  - default ✓     │           │ └─────────────┘ │
                              │  - git-master ✓  │           │                 │
                              └──────────────────┘           │ ┌─────────────┐ │
                                                             │ │ Atomic      │ │
@@ -305,12 +305,12 @@ Use your judgment to detect task type and activate appropriate skills:
 
 | Task Type | Skill Combination | When |
 |-----------|-------------------|------|
-| Multi-step implementation | `sisyphus` | Building features |
+| Multi-step implementation | `default` | Building features |
 | + parallel subtasks | `+ ultrawork` | 3+ independent tasks |
 | + multi-file changes | `+ git-master` | 3+ files |
 | UI/frontend work | `+ frontend-ui-ux` | Components, styling |
-| Strategic planning | `prometheus` | Need plan first |
-| Must complete | `+ ralph-loop` | Completion critical |
+| Strategic planning | `planner` | Need plan first |
+| Must complete | `+ ralph` | Completion critical |
 
 ### Activation Guidance
 
@@ -331,7 +331,7 @@ function handleUserRequest(request: string) {
 
   // 2. Select skill combination
   const skills = selectSkills(taskType);
-  // e.g., ['sisyphus', 'ultrawork', 'git-master']
+  // e.g., ['default', 'ultrawork', 'git-master']
 
   // 3. Invoke skills (stacked)
   for (const skill of skills) {
@@ -351,9 +351,9 @@ If you're coming from oh-my-opencode with agent switching:
 
 | OpenCode Pattern | Claude Code Equivalent |
 |------------------|------------------------|
-| `switchMaster('prometheus')` | Invoke `prometheus` skill |
-| `switchMaster('sisyphus')` | Invoke `sisyphus` skill |
-| `switchMaster('oracle')` | Use `oracle` sub-agent via Task |
+| `switchMaster('planner')` | Invoke `planner` skill |
+| `switchMaster('default')` | Invoke `default` skill |
+| `switchMaster('architect')` | Use `architect` sub-agent via Task |
 | Multiple masters | Skill composition |
 | Master + sub-agents | Execution skill + sub-agents |
 
@@ -362,7 +362,7 @@ If you're coming from oh-my-opencode with agent switching:
 1. **No explicit "switch"** - Skills activate based on task type
 2. **Context preserved** - Same conversation, different behaviors
 3. **Composition** - Multiple skills can be active simultaneously
-4. **Fluid transitions** - `prometheus` → `sisyphus` happens naturally
+4. **Fluid transitions** - `planner` → `default` happens naturally
 
 ---
 

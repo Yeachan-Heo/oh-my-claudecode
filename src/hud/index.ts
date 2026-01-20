@@ -2,7 +2,7 @@
 /**
  * Sisyphus HUD - Main Entry Point
  *
- * Statusline command that visualizes oh-my-claude-sisyphus state.
+ * Statusline command that visualizes oh-my-claudecode state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
 
@@ -13,7 +13,7 @@ import {
   readRalphStateForHud,
   readUltraworkStateForHud,
   readPrdStateForHud,
-} from './sisyphus-state.js';
+} from './omc-state.js';
 import { getUsage } from './usage-api.js';
 import { render } from './render.js';
 import type { HudRenderContext, SessionHealth } from './types.js';

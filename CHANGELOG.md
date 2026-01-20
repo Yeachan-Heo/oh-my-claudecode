@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-01-20
+
+### 🎨 Complete Rebrand - From Mythology to Intuition
+
+This is a **breaking release** that renames the entire project and all agent names for clarity and accessibility.
+
+### Breaking Changes
+
+- **Package Renamed**: `oh-my-claude-sisyphus` → `oh-my-claudecode`
+  - Installation: `npx oh-my-claudecode install` (previously `npx oh-my-claude-sisyphus install`)
+  - All references updated in documentation and code
+
+- **Agent Names Changed**: Greek mythology → Intuitive names
+  - `prometheus` → `planner` (strategic planning)
+  - `momus` → `critic` (plan review)
+  - `oracle` → `architect` (architecture & debugging)
+  - `metis` → `analyst` (pre-planning analysis)
+  - `mnemosyne` → `learner` (learned skills system)
+  - `sisyphus-junior` → `executor` (focused execution)
+  - `librarian` → `researcher` (documentation research)
+  - `frontend-engineer` → `designer` (UI/UX work)
+  - `document-writer` → `writer` (technical documentation)
+  - `multimodal-looker` → `vision` (visual analysis)
+  - `orchestrator-sisyphus` → `orchestrator` (task coordination)
+
+- **Directory Structure**: `.sisyphus/` → `.omc/` (oh-my-claudecode)
+  - State files now in `~/.claude/.omc/`
+  - Runtime plans in `.omc/plans/`
+  - Session notes in `.omc/notepads/`
+
+- **Environment Variables**: `SISYPHUS_*` → `OMC_*`
+  - All environment variable prefixes updated for consistency
+
+- **Slash Commands Updated**: Agent-referencing commands now use new names
+  - `/plan` now uses `planner` agent (was `prometheus`)
+  - `/review` now uses `critic` agent (was `momus`)
+  - `/mnemosyne` → `/learner` for skill extraction
+
+### Migration Guide
+
+For existing users upgrading from 2.x:
+
+1. **Reinstall**: Run `npx oh-my-claudecode install` to update hooks and configs
+2. **State Migration**: Old `.sisyphus/` directories will continue to work, but new state saves to `.omc/`
+3. **Agent References**: Update any custom scripts/configs that referenced old agent names
+4. **Environment Variables**: Rename any `SISYPHUS_*` variables to `OMC_*`
+
+### Rationale
+
+The Greek mythology naming convention, while elegant, created barriers for new users:
+- Non-obvious agent purposes ("What does Prometheus do?")
+- Cultural accessibility concerns
+- Increased cognitive load for remembering agent roles
+
+The new intuitive names (`planner`, `architect`, `critic`) make the system immediately understandable.
+
+### Note on Historical Entries
+
+All changelog entries below v3.0.0 reference the old names (`prometheus`, `sisyphus-junior`, etc.) - this is intentional and accurate for those versions.
+
+---
+
 ## [3.0.0-beta] - 2026-01-19
 
 ### 🧠 Mnemosyne - Learned Skills System (Major Feature)

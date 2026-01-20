@@ -1,5 +1,5 @@
 {
-  "name": "oh-my-claude-sisyphus",
+  "name": "oh-my-claudecode",
   "version": "3.0.0-beta",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "oh-my-claude-sisyphus": "dist/cli/index.js"
+    "oh-my-claudecode": "dist/cli/index.js"
   },
   "files": [
     "dist",
@@ -65,11 +65,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Yeachan-Heo/oh-my-claude-sisyphus.git"
+    "url": "git+https://github.com/Yeachan-Heo/oh-my-claudecode.git"
   },
-  "homepage": "https://github.com/Yeachan-Heo/oh-my-claude-sisyphus#readme",
+  "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode#readme",
   "bugs": {
-    "url": "https://github.com/Yeachan-Heo/oh-my-claude-sisyphus/issues"
+    "url": "https://github.com/Yeachan-Heo/oh-my-claudecode/issues"
   },
   "author": "Yeachan Heo",
   "license": "MIT",
@@ -80,7 +80,8 @@
     "agent",
     "multi-agent",
     "orchestration",
-    "sisyphus",
+    "omc",
+    "claudecode",
     "anthropic",
     "llm"
   ],

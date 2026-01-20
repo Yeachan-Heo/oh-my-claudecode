@@ -1,5 +1,5 @@
 #!/bin/bash
-# Oh-My-Claude-Sisyphus Installation Script
+# Oh-My-ClaudeCode Installation Script
 # Installs the multi-agent orchestration system for Claude Code
 
 set -e
@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║         Oh-My-Claude-Sisyphus Installer                   ║"
+echo "║         Oh-My-ClaudeCode Installer                        ║"
 echo "║   Multi-Agent Orchestration for Claude Code               ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -295,8 +295,8 @@ You are Sisyphus-Junior, a focused task executor.
 
 Your responsibilities:
 1. **Direct Execution**: Implement tasks directly without delegating
-2. **Plan Following**: Read and follow plans from `.sisyphus/plans/`
-3. **Learning Recording**: Document learnings in `.sisyphus/notepads/`
+2. **Plan Following**: Read and follow plans from `.omc/plans/`
+3. **Learning Recording**: Document learnings in `.omc/notepads/`
 4. **Todo Discipline**: Mark todos in_progress before starting, completed when done
 
 Restrictions:
@@ -311,10 +311,10 @@ Work Style:
 4. Record any learnings or issues discovered
 
 When Reading Plans:
-- Plans are in `.sisyphus/plans/{plan-name}.md`
+- Plans are in `.omc/plans/{plan-name}.md`
 - Follow steps in order unless dependencies allow parallel work
 - If a step is unclear, check the plan for clarification
-- Record blockers in `.sisyphus/notepads/{plan-name}/blockers.md`
+- Record blockers in `.omc/notepads/{plan-name}/blockers.md`
 
 Recording Learnings:
 - What worked well?
@@ -344,7 +344,7 @@ Your responsibilities:
 1. **Interview Mode**: Ask clarifying questions to understand requirements fully
 2. **Plan Generation**: Create detailed, actionable work plans
 3. **Metis Consultation**: Analyze requests for hidden requirements before planning
-4. **Plan Storage**: Save plans to `.sisyphus/plans/{name}.md`
+4. **Plan Storage**: Save plans to `.omc/plans/{name}.md`
 
 Workflow:
 1. **Start in Interview Mode** - Ask questions, don't plan yet
@@ -352,7 +352,7 @@ Workflow:
 3. **Pre-Planning** - Consult Metis for analysis before generating
 4. **Optional Review** - Consult Momus for plan review if requested
 5. **Single Plan** - Create ONE comprehensive plan (not multiple)
-6. **Draft Storage** - Save drafts to `.sisyphus/drafts/{name}.md` during iteration
+6. **Draft Storage** - Save drafts to `.omc/drafts/{name}.md` during iteration
 
 Plan Structure:
 ```markdown
@@ -700,15 +700,15 @@ Delegate tasks to specialized agents using the Task tool:
 - NEVER leave work incomplete
 CMD_EOF
 
-# Sisyphus default mode command (project-scoped)
-cat > "$CLAUDE_CONFIG_DIR/commands/sisyphus-default.md" << 'CMD_EOF'
+# omc-default mode command (project-scoped)
+cat > "$CLAUDE_CONFIG_DIR/commands/omc-default.md" << 'CMD_EOF'
 ---
-description: Configure Sisyphus in local project (.claude/CLAUDE.md)
+description: Configure oh-my-claudecode in local project (.claude/CLAUDE.md)
 ---
 
 $ARGUMENTS
 
-## Task: Configure Sisyphus Default Mode (Project-Scoped)
+## Task: Configure oh-my-claudecode Default Mode (Project-Scoped)
 
 **CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub to your local project. DO NOT use the Write tool - use bash curl exclusively.
 
@@ -740,20 +740,20 @@ https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CL
 
 ### Step 3: Verify Plugin Installation
 
-The oh-my-claude-sisyphus plugin provides all hooks automatically via the plugin system. Verify the plugin is enabled:
+The oh-my-claudecode plugin provides all hooks automatically via the plugin system. Verify the plugin is enabled:
 
 ```bash
-grep -q "oh-my-claude-sisyphus" ~/.claude/settings.json && echo "Plugin enabled" || echo "Plugin NOT enabled"
+grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin enabled" || echo "Plugin NOT enabled"
 ```
 
 If plugin is not enabled, instruct user:
-> Run: `claude /install-plugin oh-my-claude-sisyphus` to enable the plugin.
+> Run: `claude /install-plugin oh-my-claudecode` to enable the plugin.
 
 ### Step 4: Confirm Success
 
 After completing all steps, report:
 
-✅ **Sisyphus Project Configuration Complete**
+✅ **oh-my-claudecode Project Configuration Complete**
 - CLAUDE.md: Updated with latest configuration from GitHub at ./.claude/CLAUDE.md
 - Scope: **PROJECT** - applies only to this project
 - Hooks: Provided by plugin (no manual installation needed)
@@ -766,27 +766,27 @@ After completing all steps, report:
 
 ## 🔄 Keeping Up to Date
 
-After installing oh-my-claude-sisyphus updates (via npm or plugin update), run `/sisyphus-default` again in your project to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
+After installing oh-my-claudecode updates (via npm or plugin update), run `/omc-default` again in your project to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
 
 ---
 
 ## 🌍 Global vs Project Configuration
 
-- **`/sisyphus-default`** (this command): Creates `./.claude/CLAUDE.md` in your current project
-- **`/sisyphus-default-global`**: Creates `~/.claude/CLAUDE.md` for all projects
+- **`/omc-default`** (this command): Creates `./.claude/CLAUDE.md` in your current project
+- **`/omc-default-global`**: Creates `~/.claude/CLAUDE.md` for all projects
 
 Project-scoped configuration takes precedence over global configuration.
 CMD_EOF
 
-# Sisyphus default mode command (global)
-cat > "$CLAUDE_CONFIG_DIR/commands/sisyphus-default-global.md" << 'CMD_EOF'
+# omc-default-global mode command (global)
+cat > "$CLAUDE_CONFIG_DIR/commands/omc-default-global.md" << 'CMD_EOF'
 ---
-description: Configure Sisyphus globally in ~/.claude/CLAUDE.md
+description: Configure oh-my-claudecode globally in ~/.claude/CLAUDE.md
 ---
 
 $ARGUMENTS
 
-## Task: Configure Sisyphus Default Mode (Global)
+## Task: Configure oh-my-claudecode Default Mode (Global)
 
 **CRITICAL**: This skill ALWAYS downloads fresh CLAUDE.md from GitHub to your global config. DO NOT use the Write tool - use bash curl exclusively.
 
@@ -826,20 +826,20 @@ Check `~/.claude/settings.json` for manual hook entries. If the "hooks" key exis
 
 ### Step 3: Verify Plugin Installation
 
-The oh-my-claude-sisyphus plugin provides all hooks automatically via the plugin system. Verify the plugin is enabled:
+The oh-my-claudecode plugin provides all hooks automatically via the plugin system. Verify the plugin is enabled:
 
 ```bash
-grep -q "oh-my-claude-sisyphus" ~/.claude/settings.json && echo "Plugin enabled" || echo "Plugin NOT enabled"
+grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin enabled" || echo "Plugin NOT enabled"
 ```
 
 If plugin is not enabled, instruct user:
-> Run: `claude /install-plugin oh-my-claude-sisyphus` to enable the plugin.
+> Run: `claude /install-plugin oh-my-claudecode` to enable the plugin.
 
 ### Step 4: Confirm Success
 
 After completing all steps, report:
 
-✅ **Sisyphus Global Configuration Complete**
+✅ **oh-my-claudecode Global Configuration Complete**
 - CLAUDE.md: Updated with latest configuration from GitHub at ~/.claude/CLAUDE.md
 - Scope: **GLOBAL** - applies to all Claude Code sessions
 - Hooks: Provided by plugin (no manual installation needed)
@@ -852,7 +852,7 @@ After completing all steps, report:
 
 ## 🔄 Keeping Up to Date
 
-After installing oh-my-claude-sisyphus updates (via npm or plugin update), run `/sisyphus-default-global` again to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
+After installing oh-my-claudecode updates (via npm or plugin update), run `/omc-default-global` again to get the latest CLAUDE.md configuration. This ensures you have the newest features and agent configurations.
 CMD_EOF
 
 # Plan command (Prometheus planning system)
@@ -886,8 +886,8 @@ Say one of these when you're ready to generate the plan:
 - "I'm ready to plan"
 
 ### Plan Storage
-- Drafts are saved to `.sisyphus/drafts/`
-- Final plans are saved to `.sisyphus/plans/`
+- Drafts are saved to `.omc/drafts/`
+- Final plans are saved to `.omc/plans/`
 
 ---
 
@@ -921,7 +921,7 @@ I will critically evaluate the specified plan using Momus, the ruthless plan rev
 
 ### Usage
 ```
-/review .sisyphus/plans/my-feature.md
+/review .omc/plans/my-feature.md
 /review  # Review the most recent plan
 ```
 
@@ -935,7 +935,7 @@ I will critically evaluate the specified plan using Momus, the ruthless plan rev
 
 ---
 
-Provide a plan file path to review, or I'll review the most recent plan in `.sisyphus/plans/`.
+Provide a plan file path to review, or I'll review the most recent plan in `.omc/plans/`.
 CMD_EOF
 
 # Prometheus Command
@@ -968,7 +968,7 @@ Say any of these when you're ready to generate the plan:
 
 ### Plan Storage
 
-Plans are saved to `.sisyphus/plans/` for later execution with `/sisyphus`.
+Plans are saved to `.omc/plans/` for later execution with `/sisyphus`.
 
 ### What Makes a Good Plan
 
@@ -1039,12 +1039,12 @@ echo -e "${BLUE}[5/6]${NC} Installing hook scripts..."
 mkdir -p "$CLAUDE_CONFIG_DIR/hooks"
 
 # Ask user about silent auto-update preference (opt-in for security)
-CONFIG_FILE="$CLAUDE_CONFIG_DIR/.sisyphus-config.json"
+CONFIG_FILE="$CLAUDE_CONFIG_DIR/.omc-config.json"
 ENABLE_SILENT_UPDATE="false"
 
 echo ""
 echo -e "${YELLOW}Silent Auto-Update Configuration${NC}"
-echo "  Sisyphus can automatically check for and install updates in the background."
+echo "  oh-my-claudecode can automatically check for and install updates in the background."
 echo "  This runs without user interaction when you start Claude Code."
 echo ""
 echo -e "${YELLOW}Security Note:${NC} Silent updates download and execute code from GitHub."
@@ -1081,7 +1081,7 @@ echo ""
 # Keyword detector hook - detects ultrawork/ultrathink/search/analyze keywords
 cat > "$CLAUDE_CONFIG_DIR/hooks/keyword-detector.sh" << 'HOOK_EOF'
 #!/bin/bash
-# Sisyphus Keyword Detector Hook
+# oh-my-claudecode Keyword Detector Hook
 # Detects ultrawork/ultrathink/search/analyze keywords and injects enhanced mode messages
 # Ported from oh-my-opencode's keyword-detector hook
 
@@ -1159,7 +1159,7 @@ chmod +x "$CLAUDE_CONFIG_DIR/hooks/keyword-detector.sh"
 # Stop continuation hook - enforces todo completion
 cat > "$CLAUDE_CONFIG_DIR/hooks/stop-continuation.sh" << 'HOOK_EOF'
 #!/bin/bash
-# Sisyphus Stop Continuation Hook
+# oh-my-claudecode Stop Continuation Hook
 # Checks for incomplete todos and injects continuation prompt
 # Ported from oh-my-opencode's todo-continuation-enforcer
 
@@ -1196,11 +1196,11 @@ chmod +x "$CLAUDE_CONFIG_DIR/hooks/stop-continuation.sh"
 # Silent auto-update hook - checks and applies updates only if enabled
 cat > "$CLAUDE_CONFIG_DIR/hooks/silent-auto-update.sh" << 'HOOK_EOF'
 #!/bin/bash
-# Sisyphus Silent Auto-Update Hook
+# oh-my-claudecode Silent Auto-Update Hook
 # Runs completely in the background to check for and apply updates.
 #
 # SECURITY: This hook only runs if the user has explicitly enabled
-# silent auto-updates in ~/.claude/.sisyphus-config.json
+# silent auto-updates in ~/.claude/.omc-config.json
 #
 # This hook is designed to be called on UserPromptSubmit events
 # but runs asynchronously so it doesn't block the user experience.
@@ -1212,10 +1212,10 @@ INPUT=$(cat)
 # The actual update check happens in the background
 (
   # Configuration
-  CONFIG_FILE="$HOME/.claude/.sisyphus-config.json"
-  VERSION_FILE="$HOME/.claude/.sisyphus-version.json"
-  STATE_FILE="$HOME/.claude/.sisyphus-silent-update.json"
-  LOG_FILE="$HOME/.claude/.sisyphus-update.log"
+  CONFIG_FILE="$HOME/.claude/.omc-config.json"
+  VERSION_FILE="$HOME/.claude/.omc-version.json"
+  STATE_FILE="$HOME/.claude/.omc-silent-update.json"
+  LOG_FILE="$HOME/.claude/.omc-update.log"
   CHECK_INTERVAL_HOURS=24
   REPO_URL="https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main"
 
@@ -1375,7 +1375,7 @@ EOF
   }
 
   # Lock file management for concurrent install protection
-  LOCK_FILE="$HOME/.claude/.sisyphus-update.lock"
+  LOCK_FILE="$HOME/.claude/.omc-update.lock"
   LOCK_TIMEOUT=300  # 5 minutes - stale lock threshold
 
   acquire_lock() {
@@ -1791,7 +1791,7 @@ fi
 
 # Save version metadata for auto-update system
 VERSION="2.0.6"
-VERSION_FILE="$CLAUDE_CONFIG_DIR/.sisyphus-version.json"
+VERSION_FILE="$CLAUDE_CONFIG_DIR/.omc-version.json"
 
 cat > "$VERSION_FILE" << VERSION_EOF
 {
@@ -1805,7 +1805,7 @@ echo -e "${GREEN}✓ Saved version metadata${NC}"
 
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         Installation Complete!                            ║${NC}"
+echo -e "${GREEN}║         oh-my-claudecode Installation Complete!           ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "Installed to: ${BLUE}$CLAUDE_CONFIG_DIR${NC}"
@@ -1815,8 +1815,8 @@ echo "  claude                        # Start Claude Code normally"
 echo ""
 echo -e "${YELLOW}Slash Commands:${NC}"
 echo "  /sisyphus <task>              # Activate Sisyphus orchestration mode"
-echo "  /sisyphus-default             # Configure for current project"
-echo "  /sisyphus-default-global      # Configure globally"
+echo "  /omc-default                  # Configure for current project"
+echo "  /omc-default-global           # Configure globally"
 echo "  /ultrawork <task>             # Maximum performance mode"
 echo "  /deepsearch <query>           # Thorough codebase search"
 echo "  /analyze <target>             # Deep analysis mode"
@@ -1853,12 +1853,12 @@ echo "  # Or run this install script again:"
 echo "  curl -fsSL https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/scripts/install.sh | bash"
 echo ""
 echo -e "${YELLOW}After Updates:${NC}"
-echo "  Run '/sisyphus-default' (project) or '/sisyphus-default-global' (global)"
+echo "  Run '/omc-default' (project) or '/omc-default-global' (global)"
 echo "  to download the latest CLAUDE.md configuration."
 echo "  This ensures you get the newest features and agent behaviors."
 echo ""
 echo -e "${BLUE}Quick Start:${NC}"
 echo "  1. Run 'claude' to start Claude Code"
-echo "  2. Type '/sisyphus-default' for project config or '/sisyphus-default-global' for global"
+echo "  2. Type '/omc-default' for project config or '/omc-default-global' for global"
 echo "  3. Or use '/sisyphus <task>' for one-time activation"
 echo ""

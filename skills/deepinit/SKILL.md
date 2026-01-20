@@ -153,7 +153,7 @@ grep -r "<!-- Parent:" --include="AGENTS.md" .
 | Directory mapping | `explore` |
 | File analysis | `oracle-low` |
 | Content generation | `document-writer` |
-| Multi-file writes | `sisyphus-junior` |
+| Multi-file writes | `junior` |
 
 ## Empty Directory Handling
 

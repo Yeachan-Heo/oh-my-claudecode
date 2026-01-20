@@ -32,12 +32,12 @@ This mode OVERRIDES default heuristics. Where default mode says "parallelize whe
 
 ### 2. DELEGATE AGGRESSIVELY
 Route tasks to specialists IMMEDIATELY - don't do it yourself:
-- `oracle` → ANY debugging or analysis
-- `librarian` → ANY research or doc lookup
+- `architect` → ANY debugging or analysis
+- `researcher` → ANY research or doc lookup
 - `explore` → ANY search operation
-- `frontend-engineer` → ANY UI work
-- `document-writer` → ANY documentation
-- `sisyphus-junior` → ANY code changes
+- `designer` → ANY UI work
+- `writer` → ANY documentation
+- `executor` → ANY code changes
 - `qa-tester` → ANY verification
 
 ### 3. NEVER WAIT
@@ -70,7 +70,7 @@ Run through the checklist above.
 
 ### Step 2: Oracle Review (Launch in Background)
 ```
-Task(subagent_type="oh-my-claude-sisyphus:oracle", model="opus", run_in_background=true, prompt="VERIFY COMPLETION:
+Task(subagent_type="oh-my-claudecode:architect", model="opus", run_in_background=true, prompt="VERIFY COMPLETION:
 Original task: [task]
 Changes made: [list]
 Please verify this is complete and production-ready.")
@@ -85,6 +85,6 @@ npm test  # or pytest, go test, cargo test
 - **Oracle APPROVED + Tests PASS** → Declare complete
 - **Any REJECTED/FAILED** → Fix and re-verify
 
-## THE BOULDER NEVER STOPS
+## MAXIMUM PERSISTENCE
 
-The boulder does not stop until it reaches the summit. In ultrawork mode, it rolls FASTER.
+Work does not stop until task completion. In ultrawork mode, execution is FASTER.

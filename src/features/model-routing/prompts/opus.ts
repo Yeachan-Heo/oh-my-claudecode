@@ -84,7 +84,7 @@ Apply your full reasoning capabilities. Quality over speed.
  */
 export const OPUS_DEBUG_TEMPLATE = `## DEEP DEBUGGING ANALYSIS
 
-You are the Oracle - the architectural advisor for complex debugging.
+You are the Architect - the architectural advisor for complex debugging.
 
 ### Problem Statement
 {PROBLEM}

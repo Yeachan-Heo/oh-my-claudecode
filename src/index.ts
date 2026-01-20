@@ -14,7 +14,7 @@
  */
 
 import { loadConfig, findContextFiles, loadContextFromFiles } from './config/loader.js';
-import { getAgentDefinitions, sisyphusSystemPrompt } from './agents/definitions.js';
+import { getAgentDefinitions, omcSystemPrompt } from './agents/definitions.js';
 import { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
 import { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
 import { continuationSystemPromptAddition } from './features/continuation-enforcement.js';
@@ -26,7 +26,7 @@ import {
 } from './features/background-tasks.js';
 import type { PluginConfig, SessionState } from './shared/types.js';
 
-export { loadConfig, getAgentDefinitions, sisyphusSystemPrompt };
+export { loadConfig, getAgentDefinitions, omcSystemPrompt };
 export { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
 export { lspTools, astTools, allCustomTools } from './tools/index.js';
 export { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
@@ -78,14 +78,14 @@ export {
   BOULDER_STATE_PATH,
   NOTEPAD_DIR,
   NOTEPAD_BASE_PATH,
-  PROMETHEUS_PLANS_DIR,
+  PLANNER_PLANS_DIR,
   PLAN_EXTENSION,
   getBoulderFilePath,
   readBoulderState,
   writeBoulderState,
   appendSessionId,
   clearBoulderState,
-  findPrometheusPlans,
+  findPlannerPlans,
   getPlanProgress,
   getPlanName,
   createBoulderState,
@@ -136,28 +136,29 @@ export {
   buildKeyTriggersSection,
   validateAgentConfig,
   deepMerge,
-  // Individual agents with metadata
-  oracleAgent,
-  ORACLE_PROMPT_METADATA,
+  // Individual agents with metadata (rebranded intuitive names)
+  architectAgent,
+  ARCHITECT_PROMPT_METADATA,
   exploreAgent,
   EXPLORE_PROMPT_METADATA,
-  librarianAgent,
-  LIBRARIAN_PROMPT_METADATA,
-  sisyphusJuniorAgent,
+  researcherAgent,
+  RESEARCHER_PROMPT_METADATA,
+  executorAgent,
   SISYPHUS_JUNIOR_PROMPT_METADATA,
-  frontendEngineerAgent,
+  designerAgent,
   FRONTEND_ENGINEER_PROMPT_METADATA,
-  documentWriterAgent,
+  writerAgent,
   DOCUMENT_WRITER_PROMPT_METADATA,
-  multimodalLookerAgent,
+  visionAgent,
   MULTIMODAL_LOOKER_PROMPT_METADATA,
-  momusAgent,
-  MOMUS_PROMPT_METADATA,
-  metisAgent,
-  METIS_PROMPT_METADATA,
-  // orchestrator-sisyphus: DEPRECATED - merged into default mode
-  prometheusAgent,
-  PROMETHEUS_PROMPT_METADATA
+  criticAgent,
+  CRITIC_PROMPT_METADATA,
+  analystAgent,
+  ANALYST_PROMPT_METADATA,
+  coordinatorAgent,
+  ORCHESTRATOR_SISYPHUS_PROMPT_METADATA,
+  plannerAgent,
+  PLANNER_PROMPT_METADATA
 } from './agents/index.js';
 
 // Command expansion utilities for SDK integration
@@ -242,7 +243,7 @@ export interface SisyphusSession {
  *
  * @example
  * ```typescript
- * import { createSisyphusSession } from 'oh-my-claude-sisyphus';
+ * import { createOmcSession } from 'oh-my-claudecode';
  * import { query } from '@anthropic-ai/claude-agent-sdk';
  *
  * const session = createSisyphusSession();
@@ -274,7 +275,7 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   }
 
   // Build system prompt
-  let systemPrompt = sisyphusSystemPrompt;
+  let systemPrompt = omcSystemPrompt;
 
   // Add continuation enforcement
   if (config.features?.continuationEnforcement !== false) {
@@ -369,13 +370,13 @@ export function enhancePrompt(prompt: string, config?: PluginConfig): string {
 }
 
 /**
- * Get the system prompt for Sisyphus (for direct use)
+ * Get the system prompt for the orchestrator (for direct use)
  */
-export function getSisyphusSystemPrompt(options?: {
+export function getOmcSystemPrompt(options?: {
   includeContinuation?: boolean;
   customAddition?: string;
 }): string {
-  let prompt = sisyphusSystemPrompt;
+  let prompt = omcSystemPrompt;
 
   if (options?.includeContinuation !== false) {
     prompt += continuationSystemPromptAddition;

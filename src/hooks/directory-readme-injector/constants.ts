@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 /** Storage directory for directory-readme-injector state */
-export const SISYPHUS_STORAGE_DIR = join(homedir(), '.sisyphus');
+export const OMC_STORAGE_DIR = join(homedir(), '.omc');
 export const README_INJECTOR_STORAGE = join(
-  SISYPHUS_STORAGE_DIR,
+  OMC_STORAGE_DIR,
   'directory-readme',
 );
 

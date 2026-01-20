@@ -10,7 +10,7 @@ $ARGUMENTS
 
 You are now in **ULTRAQA** mode - an autonomous QA cycling workflow that runs until your quality goal is met.
 
-**Cycle**: qa-tester → oracle verification → fix → repeat
+**Cycle**: qa-tester → architect verification → fix → repeat
 
 ## GOAL PARSING
 
@@ -38,7 +38,7 @@ If no structured goal provided, interpret the argument as a custom goal.
    - `--custom`: Run appropriate command and check for pattern
    - `--interactive`: Use qa-tester for interactive CLI/service testing:
      ```
-     Task(subagent_type="oh-my-claude-sisyphus:qa-tester", model="sonnet", prompt="TEST:
+     Task(subagent_type="oh-my-claudecode:qa-tester", model="sonnet", prompt="TEST:
      Goal: [describe what to verify]
      Service: [how to start]
      Test cases: [specific scenarios to verify]")
@@ -48,18 +48,18 @@ If no structured goal provided, interpret the argument as a custom goal.
    - **YES** → Exit with success message
    - **NO** → Continue to step 3
 
-3. **ORACLE DIAGNOSIS**: Spawn oracle to analyze failure
+3. **ARCHITECT DIAGNOSIS**: Spawn architect to analyze failure
    ```
-   Task(subagent_type="oh-my-claude-sisyphus:oracle", model="opus", prompt="DIAGNOSE FAILURE:
+   Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="DIAGNOSE FAILURE:
    Goal: [goal type]
    Output: [test/build output]
    Provide root cause and specific fix recommendations.")
    ```
 
-4. **FIX ISSUES**: Apply oracle's recommendations
+4. **FIX ISSUES**: Apply architect's recommendations
    ```
-   Task(subagent_type="oh-my-claude-sisyphus:sisyphus-junior", model="sonnet", prompt="FIX:
-   Issue: [oracle diagnosis]
+   Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="FIX:
+   Issue: [architect diagnosis]
    Files: [affected files]
    Apply the fix precisely as recommended.")
    ```
@@ -81,7 +81,7 @@ Output progress each cycle:
 ```
 [ULTRAQA Cycle 1/5] Running tests...
 [ULTRAQA Cycle 1/5] FAILED - 3 tests failing
-[ULTRAQA Cycle 1/5] Oracle diagnosing...
+[ULTRAQA Cycle 1/5] Architect diagnosing...
 [ULTRAQA Cycle 1/5] Fixing: auth.test.ts - missing mock
 [ULTRAQA Cycle 2/5] Running tests...
 [ULTRAQA Cycle 2/5] PASSED - All 47 tests pass

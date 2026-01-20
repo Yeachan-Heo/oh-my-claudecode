@@ -1,5 +1,5 @@
 {
-  "name": "oh-my-claude-sisyphus",
+  "name": "oh-my-claudecode",
   "version": "3.0.0-beta",
   "description": "Multi-agent orchestration system for Claude Code",
   "postInstall": "scripts/plugin-setup.mjs",

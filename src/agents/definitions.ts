@@ -5,7 +5,7 @@
  * 1. Re-exports of base agents from individual files
  * 2. Tiered agent variants with dynamically loaded prompts from /agents/*.md
  * 3. getAgentDefinitions() for agent registry
- * 4. sisyphusSystemPrompt for the main orchestrator
+ * 4. omcSystemPrompt for the main orchestrator
  */
 
 import { readFileSync } from 'fs';
@@ -14,30 +14,30 @@ import { fileURLToPath } from 'url';
 
 import type { AgentConfig, ModelType } from '../shared/types.js';
 
-// Re-export base agents from individual files
-export { oracleAgent } from './oracle.js';
-export { librarianAgent } from './librarian.js';
+// Re-export base agents from individual files (rebranded names)
+export { architectAgent } from './architect.js';
+export { researcherAgent } from './researcher.js';
 export { exploreAgent } from './explore.js';
-export { frontendEngineerAgent } from './frontend-engineer.js';
-export { documentWriterAgent } from './document-writer.js';
-export { multimodalLookerAgent } from './multimodal-looker.js';
-export { momusAgent } from './momus.js';
-export { metisAgent } from './metis.js';
-export { sisyphusJuniorAgent } from './sisyphus-junior.js';
-export { prometheusAgent } from './prometheus.js';
+export { designerAgent } from './designer.js';
+export { writerAgent } from './writer.js';
+export { visionAgent } from './vision.js';
+export { criticAgent } from './critic.js';
+export { analystAgent } from './analyst.js';
+export { executorAgent } from './executor.js';
+export { plannerAgent } from './planner.js';
 export { qaTesterAgent } from './qa-tester.js';
 
 // Import base agents for use in getAgentDefinitions
-import { oracleAgent } from './oracle.js';
-import { librarianAgent } from './librarian.js';
+import { architectAgent } from './architect.js';
+import { researcherAgent } from './researcher.js';
 import { exploreAgent } from './explore.js';
-import { frontendEngineerAgent } from './frontend-engineer.js';
-import { documentWriterAgent } from './document-writer.js';
-import { multimodalLookerAgent } from './multimodal-looker.js';
-import { momusAgent } from './momus.js';
-import { metisAgent } from './metis.js';
-import { sisyphusJuniorAgent } from './sisyphus-junior.js';
-import { prometheusAgent } from './prometheus.js';
+import { designerAgent } from './designer.js';
+import { writerAgent } from './writer.js';
+import { visionAgent } from './vision.js';
+import { criticAgent } from './critic.js';
+import { analystAgent } from './analyst.js';
+import { executorAgent } from './executor.js';
+import { plannerAgent } from './planner.js';
 import { qaTesterAgent } from './qa-tester.js';
 
 // ============================================================
@@ -80,56 +80,56 @@ function loadAgentPrompt(agentName: string): string {
 // ============================================================
 
 /**
- * Oracle-Medium Agent - Standard Analysis (Sonnet)
+ * Architect-Medium Agent - Standard Analysis (Sonnet)
  */
-export const oracleMediumAgent: AgentConfig = {
-  name: 'oracle-medium',
+export const architectMediumAgent: AgentConfig = {
+  name: 'architect-medium',
   description: 'Architecture & Debugging Advisor - Medium complexity (Sonnet). Use for moderate analysis.',
-  prompt: loadAgentPrompt('oracle-medium'),
+  prompt: loadAgentPrompt('architect-medium'),
   tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
   model: 'sonnet'
 };
 
 /**
- * Oracle-Low Agent - Quick Analysis (Haiku)
+ * Architect-Low Agent - Quick Analysis (Haiku)
  */
-export const oracleLowAgent: AgentConfig = {
-  name: 'oracle-low',
+export const architectLowAgent: AgentConfig = {
+  name: 'architect-low',
   description: 'Quick code questions & simple lookups (Haiku). Use for simple questions that need fast answers.',
-  prompt: loadAgentPrompt('oracle-low'),
+  prompt: loadAgentPrompt('architect-low'),
   tools: ['Read', 'Glob', 'Grep'],
   model: 'haiku'
 };
 
 /**
- * Sisyphus-Junior-High Agent - Complex Execution (Opus)
+ * Executor-High Agent - Complex Execution (Opus)
  */
-export const sisyphusJuniorHighAgent: AgentConfig = {
-  name: 'sisyphus-junior-high',
+export const executorHighAgent: AgentConfig = {
+  name: 'executor-high',
   description: 'Complex task executor for multi-file changes (Opus). Use for tasks requiring deep reasoning.',
-  prompt: loadAgentPrompt('sisyphus-junior-high'),
+  prompt: loadAgentPrompt('executor-high'),
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite'],
   model: 'opus'
 };
 
 /**
- * Sisyphus-Junior-Low Agent - Simple Execution (Haiku)
+ * Executor-Low Agent - Simple Execution (Haiku)
  */
-export const sisyphusJuniorLowAgent: AgentConfig = {
-  name: 'sisyphus-junior-low',
+export const executorLowAgent: AgentConfig = {
+  name: 'executor-low',
   description: 'Simple single-file task executor (Haiku). Use for trivial tasks.',
-  prompt: loadAgentPrompt('sisyphus-junior-low'),
+  prompt: loadAgentPrompt('executor-low'),
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite'],
   model: 'haiku'
 };
 
 /**
- * Librarian-Low Agent - Quick Lookups (Haiku)
+ * Researcher-Low Agent - Quick Lookups (Haiku)
  */
-export const librarianLowAgent: AgentConfig = {
-  name: 'librarian-low',
+export const researcherLowAgent: AgentConfig = {
+  name: 'researcher-low',
   description: 'Quick documentation lookups (Haiku). Use for simple documentation queries.',
-  prompt: loadAgentPrompt('librarian-low'),
+  prompt: loadAgentPrompt('researcher-low'),
   tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
   model: 'haiku'
 };
@@ -146,23 +146,23 @@ export const exploreMediumAgent: AgentConfig = {
 };
 
 /**
- * Frontend-Engineer-Low Agent - Simple UI Tasks (Haiku)
+ * Designer-Low Agent - Simple UI Tasks (Haiku)
  */
-export const frontendEngineerLowAgent: AgentConfig = {
-  name: 'frontend-engineer-low',
+export const designerLowAgent: AgentConfig = {
+  name: 'designer-low',
   description: 'Simple styling and minor UI tweaks (Haiku). Use for trivial frontend work.',
-  prompt: loadAgentPrompt('frontend-engineer-low'),
+  prompt: loadAgentPrompt('designer-low'),
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   model: 'haiku'
 };
 
 /**
- * Frontend-Engineer-High Agent - Complex UI Architecture (Opus)
+ * Designer-High Agent - Complex UI Architecture (Opus)
  */
-export const frontendEngineerHighAgent: AgentConfig = {
-  name: 'frontend-engineer-high',
+export const designerHighAgent: AgentConfig = {
+  name: 'designer-high',
   description: 'Complex UI architecture and design systems (Opus). Use for sophisticated frontend work.',
-  prompt: loadAgentPrompt('frontend-engineer-high'),
+  prompt: loadAgentPrompt('designer-high'),
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   model: 'opus'
 };
@@ -327,26 +327,26 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
 }> {
   const agents = {
     // Base agents (from individual files)
-    oracle: oracleAgent,
-    librarian: librarianAgent,
+    architect: architectAgent,
+    researcher: researcherAgent,
     explore: exploreAgent,
-    'frontend-engineer': frontendEngineerAgent,
-    'document-writer': documentWriterAgent,
-    'multimodal-looker': multimodalLookerAgent,
-    momus: momusAgent,
-    metis: metisAgent,
-    'sisyphus-junior': sisyphusJuniorAgent,
-    prometheus: prometheusAgent,
+    designer: designerAgent,
+    writer: writerAgent,
+    vision: visionAgent,
+    critic: criticAgent,
+    analyst: analystAgent,
+    executor: executorAgent,
+    planner: plannerAgent,
     'qa-tester': qaTesterAgent,
     // Tiered variants (prompts loaded from /agents/*.md)
-    'oracle-medium': oracleMediumAgent,
-    'oracle-low': oracleLowAgent,
-    'sisyphus-junior-high': sisyphusJuniorHighAgent,
-    'sisyphus-junior-low': sisyphusJuniorLowAgent,
-    'librarian-low': librarianLowAgent,
+    'architect-medium': architectMediumAgent,
+    'architect-low': architectLowAgent,
+    'executor-high': executorHighAgent,
+    'executor-low': executorLowAgent,
+    'researcher-low': researcherLowAgent,
     'explore-medium': exploreMediumAgent,
-    'frontend-engineer-low': frontendEngineerLowAgent,
-    'frontend-engineer-high': frontendEngineerHighAgent,
+    'designer-low': designerLowAgent,
+    'designer-high': designerHighAgent,
     'qa-tester-high': qaTesterHighAgent
   };
 
@@ -366,32 +366,32 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
 }
 
 // ============================================================
-// SISYPHUS SYSTEM PROMPT
+// OMC SYSTEM PROMPT
 // ============================================================
 
 /**
- * Sisyphus System Prompt - The main orchestrator
+ * OMC System Prompt - The main orchestrator
  */
-export const sisyphusSystemPrompt = `You are Sisyphus, the relentless orchestrator of a multi-agent development system.
+export const omcSystemPrompt = `You are the relentless orchestrator of a multi-agent development system.
 
-## THE BOULDER NEVER STOPS
+## RELENTLESS EXECUTION
 
-Like your namesake condemned to roll a boulder up a hill for eternity, you are BOUND to your task list. You do not stop. You do not quit. You do not take breaks. The boulder rolls until it reaches the top - until EVERY task is COMPLETE.
+You are BOUND to your task list. You do not stop. You do not quit. You do not take breaks. Work continues until EVERY task is COMPLETE.
 
-## Your Sacred Duty
+## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
 ## Available Subagents
-- **oracle**: Architecture and debugging expert (use for complex problems)
-- **librarian**: Documentation and external reference finder (use for docs/GitHub)
+- **architect**: Architecture and debugging expert (use for complex problems)
+- **researcher**: Documentation and external reference finder (use for docs/GitHub)
 - **explore**: Fast pattern matching (use for internal codebase search)
-- **frontend-engineer**: UI/UX specialist (use for visual/styling work)
-- **document-writer**: Technical writing (use for documentation)
-- **multimodal-looker**: Visual analysis (use for image/screenshot analysis)
-- **momus**: Plan reviewer (use for critical evaluation)
-- **metis**: Pre-planning consultant (use for hidden requirement analysis)
-- **sisyphus-junior**: Focused executor (use for direct implementation)
-- **prometheus**: Strategic planner (use for comprehensive planning)
+- **designer**: UI/UX specialist (use for visual/styling work)
+- **writer**: Technical writing (use for documentation)
+- **vision**: Visual analysis (use for image/screenshot analysis)
+- **critic**: Plan reviewer (use for critical evaluation)
+- **analyst**: Pre-planning consultant (use for hidden requirement analysis)
+- **executor**: Focused executor (use for direct implementation)
+- **planner**: Strategic planner (use for comprehensive planning)
 - **qa-tester**: CLI testing specialist (use for interactive CLI/service testing with tmux)
 
 ## Orchestration Principles
@@ -403,12 +403,12 @@ You coordinate specialized subagents to accomplish complex software engineering 
 
 ## Agent Combinations
 
-### Oracle + QA-Tester (Diagnosis -> Verification Loop)
+### Architect + QA-Tester (Diagnosis -> Verification Loop)
 For debugging CLI apps and services:
-1. **oracle** diagnoses the issue, provides root cause analysis
-2. **oracle** outputs a test plan with specific commands and expected outputs
+1. **architect** diagnoses the issue, provides root cause analysis
+2. **architect** outputs a test plan with specific commands and expected outputs
 3. **qa-tester** executes the test plan in tmux, captures real outputs
-4. If verification fails, feed results back to oracle for re-diagnosis
+4. If verification fails, feed results back to architect for re-diagnosis
 5. Repeat until verified
 
 This is the recommended workflow for any bug that requires running actual services to verify.
@@ -429,7 +429,7 @@ This is the recommended workflow for any bug that requires running actual servic
 **When NOT to use qa-tester:**
 - Project has tests that cover the functionality -> run tests
 - Simple command verification -> run directly
-- Static code analysis -> use oracle
+- Static code analysis -> use architect
 
 ## Workflow
 1. Analyze the user's request and break it into tasks using TodoWrite
@@ -451,7 +451,7 @@ This is the recommended workflow for any bug that requires running actual servic
 6. **WHEN BLOCKED, UNBLOCK** - Don't stop because something is hard; find another way
 7. **ASK ONLY WHEN NECESSARY** - Clarifying questions are for ambiguity, not for avoiding work
 
-## The Sisyphean Promise
+## Completion Checklist
 Before concluding, you MUST verify:
 - [ ] Every todo item is marked 'completed'
 - [ ] All requested functionality is implemented

@@ -21,4 +21,3 @@ After running this command, ultrawork mode will be deactivated and the HUD will 
 ## To Start Fresh
 
 - `/ultrawork "task"` - Start ultrawork only
-- `/ultrawork-ralph "task"` - Start combined mode with completion guarantee

@@ -20,7 +20,7 @@ export const SLASH_COMMAND_PATTERN = /^\/([a-zA-Z][\w-]*)\s*(.*)/;
  * (they have special handling elsewhere)
  */
 export const EXCLUDED_COMMANDS = new Set([
-  'ralph-loop',
+  'ralph',
   'cancel-ralph',
   // Claude Code built-in commands that shouldn't be expanded
   'help',

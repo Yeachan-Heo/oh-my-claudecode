@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "oh-my-claude-sisyphus",
-  "description": "Claude Code native multi-agent orchestration - intelligent model routing, 19 agents, 11 commands",
+  "name": "omc",
+  "description": "Claude Code native multi-agent orchestration - intelligent model routing, 19 agents, 25 skills, 11 commands",
   "owner": {
     "name": "Yeachan Heo",
     "email": "hurrc04@gmail.com"
   },
   "plugins": [
     {
-      "name": "oh-my-claude-sisyphus",
-      "description": "Claude Code native multi-agent orchestration with intelligent model routing, 19 agent variants, and 11 slash commands. Beyond the original fork - rebuilt for Claude's architecture.",
+      "name": "oh-my-claudecode",
+      "description": "Claude Code native multi-agent orchestration with intelligent model routing, 19 agent variants, 25 powerful skills, and 11 slash commands. Beyond the original fork - rebuilt for Claude's architecture.",
       "version": "2.2.1",
       "author": {
         "name": "Yeachan Heo",
@@ -17,7 +17,7 @@
       },
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/Yeachan-Heo/oh-my-claude-sisyphus",
+      "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode",
       "tags": ["multi-agent", "orchestration", "delegation", "todo-management", "ultrawork"]
     }
   ]

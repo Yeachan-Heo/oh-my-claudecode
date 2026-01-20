@@ -154,7 +154,7 @@ Always:
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { createSisyphusSession } from 'oh-my-claude-sisyphus';
+import { createOmcSession } from 'oh-my-claudecode';
 
 // Create custom MCP server with your tools
 const customTools = createSdkMcpServer({

@@ -1,7 +1,7 @@
 /**
  * UltraQA Loop Hook
  *
- * QA cycling workflow that runs test → oracle verify → fix → repeat
+ * QA cycling workflow that runs test → architect verify → fix → repeat
  * until the QA goal is met or max cycles reached.
  */
 

@@ -1,7 +1,7 @@
 /**
  * Auto-Update System
  *
- * Provides version checking and auto-update functionality for Oh-My-Claude-Sisyphus.
+ * Provides version checking and auto-update functionality for oh-my-claudecode.
  *
  * Features:
  * - Check for new versions from GitHub releases
@@ -17,13 +17,13 @@ import { execSync } from 'child_process';
 
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
-export const REPO_NAME = 'oh-my-claude-sisyphus';
+export const REPO_NAME = 'oh-my-claudecode';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
 
 /** Installation paths */
 export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
-export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.sisyphus-version.json');
+export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CONFIG_FILE = join(CLAUDE_CONFIG_DIR, '.sisyphus-config.json');
 
 /**
@@ -127,15 +127,15 @@ export function getInstalledVersion(): VersionMetadata | null {
     // Try to detect version from package.json if installed via npm
     try {
       // Check if we can find the package in node_modules
-      const result = execSync('npm list -g oh-my-claude-sisyphus --json', {
+      const result = execSync('npm list -g oh-my-claudecode --json', {
         encoding: 'utf-8',
         timeout: 5000,
         stdio: 'pipe'
       });
       const data = JSON.parse(result);
-      if (data.dependencies?.['oh-my-claude-sisyphus']?.version) {
+      if (data.dependencies?.['oh-my-claudecode']?.version) {
         return {
-          version: data.dependencies['oh-my-claude-sisyphus'].version,
+          version: data.dependencies['oh-my-claudecode'].version,
           installedAt: new Date().toISOString(),
           installMethod: 'npm'
         };
@@ -184,7 +184,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo> {
   const response = await fetch(`${GITHUB_API_URL}/releases/latest`, {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'oh-my-claude-sisyphus-updater'
+      'User-Agent': 'oh-my-claudecode-updater'
     }
   });
 
@@ -192,7 +192,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo> {
     // No releases found - try to get version from package.json in repo
     const pkgResponse = await fetch(`${GITHUB_RAW_URL}/main/package.json`, {
       headers: {
-        'User-Agent': 'oh-my-claude-sisyphus-updater'
+        'User-Agent': 'oh-my-claudecode-updater'
       }
     });
 
@@ -310,8 +310,8 @@ export async function performUpdate(options?: {
         throw new Error(
           'Automated updates are not yet supported on Windows. ' +
           'Please run the installer manually:\n' +
-          '  npm install -g oh-my-claude-sisyphus\n' +
-          'Or visit: https://github.com/Yeachan-Heo/oh-my-claude-sisyphus'
+          '  npm install -g oh-my-claudecode\n' +
+          'Or visit: https://github.com/Yeachan-Heo/oh-my-claudecode'
         );
       }
 
@@ -368,19 +368,19 @@ export async function performUpdate(options?: {
  */
 export function formatUpdateNotification(checkResult: UpdateCheckResult): string {
   if (!checkResult.updateAvailable) {
-    return `Oh-My-Claude-Sisyphus is up to date (v${checkResult.currentVersion ?? 'unknown'})`;
+    return `oh-my-claudecode is up to date (v${checkResult.currentVersion ?? 'unknown'})`;
   }
 
   const lines = [
     '╔═══════════════════════════════════════════════════════════╗',
-    '║           Oh-My-Claude-Sisyphus Update Available!         ║',
+    '║           oh-my-claudecode Update Available!              ║',
     '╚═══════════════════════════════════════════════════════════╝',
     '',
     `  Current version: ${checkResult.currentVersion ?? 'unknown'}`,
     `  Latest version:  ${checkResult.latestVersion}`,
     '',
     '  To update, run: /update',
-    '  Or run: curl -fsSL https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/scripts/install.sh | bash',
+    '  Or run: curl -fsSL https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/scripts/install.sh | bash',
     ''
   ];
 
@@ -435,7 +435,7 @@ export function backgroundUpdateCheck(callback?: (result: UpdateCheckResult) => 
     })
     .catch(error => {
       // Silently ignore errors in background checks
-      if (process.env.SISYPHUS_DEBUG) {
+      if (process.env.OMC_DEBUG) {
         console.error('Background update check failed:', error);
       }
     });

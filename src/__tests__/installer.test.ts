@@ -85,16 +85,16 @@ describe('Installer Constants', () => {
   describe('AGENT_DEFINITIONS', () => {
     it('should contain expected core agents', () => {
       const expectedAgents = [
-        'oracle.md',
-        'librarian.md',
+        'architect.md',
+        'researcher.md',
         'explore.md',
-        'frontend-engineer.md',
-        'document-writer.md',
-        'multimodal-looker.md',
-        'momus.md',
-        'metis.md',
-        'sisyphus-junior.md',
-        'prometheus.md',
+        'designer.md',
+        'writer.md',
+        'vision.md',
+        'critic.md',
+        'analyst.md',
+        'executor.md',
+        'planner.md',
         'qa-tester.md',
       ];
 
@@ -107,14 +107,14 @@ describe('Installer Constants', () => {
 
     it('should contain tiered agent variants', () => {
       const tieredAgents = [
-        'oracle-medium.md',
-        'oracle-low.md',
-        'sisyphus-junior-high.md',
-        'sisyphus-junior-low.md',
-        'librarian-low.md',
+        'architect-medium.md',
+        'architect-low.md',
+        'executor-high.md',
+        'executor-low.md',
+        'researcher-low.md',
         'explore-medium.md',
-        'frontend-engineer-low.md',
-        'frontend-engineer-high.md',
+        'designer-low.md',
+        'designer-high.md',
       ];
 
       for (const agent of tieredAgents) {
@@ -158,24 +158,24 @@ describe('Installer Constants', () => {
 
     it('should have consistent model assignments', () => {
       const modelExpectations: Record<string, string> = {
-        'oracle.md': 'opus',
-        'oracle-medium.md': 'sonnet',
-        'oracle-low.md': 'haiku',
-        'librarian.md': 'sonnet',
-        'librarian-low.md': 'haiku',
+        'architect.md': 'opus',
+        'architect-medium.md': 'sonnet',
+        'architect-low.md': 'haiku',
+        'researcher.md': 'sonnet',
+        'researcher-low.md': 'haiku',
         'explore.md': 'haiku',
         'explore-medium.md': 'sonnet',
-        'sisyphus-junior.md': 'sonnet',
-        'sisyphus-junior-high.md': 'opus',
-        'sisyphus-junior-low.md': 'haiku',
-        'frontend-engineer.md': 'sonnet',
-        'frontend-engineer-low.md': 'haiku',
-        'frontend-engineer-high.md': 'opus',
-        'document-writer.md': 'haiku',
-        'multimodal-looker.md': 'sonnet',
-        'momus.md': 'opus',
-        'metis.md': 'opus',
-        'prometheus.md': 'opus',
+        'executor.md': 'sonnet',
+        'executor-high.md': 'opus',
+        'executor-low.md': 'haiku',
+        'designer.md': 'sonnet',
+        'designer-low.md': 'haiku',
+        'designer-high.md': 'opus',
+        'writer.md': 'haiku',
+        'vision.md': 'sonnet',
+        'critic.md': 'opus',
+        'analyst.md': 'opus',
+        'planner.md': 'opus',
         'qa-tester.md': 'sonnet',
       };
 
@@ -199,13 +199,13 @@ describe('Installer Constants', () => {
         'ultrawork.md',
         'deepsearch.md',
         'analyze.md',
-        'sisyphus.md',
-        'sisyphus-default.md',
-        'sisyphus-default-global.md',
+        'orchestrate.md',
+        'omc-default.md',
+        'omc-default-global.md',
         'plan.md',
         'review.md',
-        'prometheus.md',
-        'ralph-loop.md',
+        'planner.md',
+        'ralph.md',
         'cancel-ralph.md',
       ];
 
@@ -244,13 +244,13 @@ describe('Installer Constants', () => {
         'ultrawork.md',
         'deepsearch.md',
         'analyze.md',
-        'sisyphus.md',
-        'sisyphus-default.md',
-        'sisyphus-default-global.md',
+        'orchestrate.md',
+        'omc-default.md',
+        'omc-default-global.md',
         'plan.md',
         'review.md',
-        'prometheus.md',
-        'ralph-loop.md',
+        'planner.md',
+        'ralph.md',
       ];
 
       for (const command of commandsWithArgs) {
@@ -269,7 +269,7 @@ describe('Installer Constants', () => {
 
     it('should contain essential sections', () => {
       const essentialSections = [
-        'Sisyphus Multi-Agent System',
+        'OMC Multi-Agent System',
         'DEFAULT OPERATING MODE',
         'Available Subagents',
         'Slash Commands',
@@ -283,31 +283,31 @@ describe('Installer Constants', () => {
 
     it('should reference all core agents', () => {
       const coreAgents = [
-        'oracle',
-        'librarian',
+        'architect',
+        'researcher',
         'explore',
-        'frontend-engineer',
-        'document-writer',
-        'multimodal-looker',
-        'momus',
-        'metis',
-        'sisyphus-junior',
-        'prometheus',
+        'designer',
+        'writer',
+        'vision',
+        'critic',
+        'analyst',
+        'executor',
+        'planner',
         'qa-tester',
       ];
 
       for (const agent of coreAgents) {
-        // Agents are prefixed with oh-my-claude-sisyphus: in the content
-        expect(CLAUDE_MD_CONTENT).toMatch(new RegExp(`oh-my-claude-sisyphus:${agent}`));
+        // Agents are prefixed with oh-my-claudecode: in the content
+        expect(CLAUDE_MD_CONTENT).toMatch(new RegExp(`oh-my-claudecode:${agent}`));
       }
     });
 
     it('should include tiered agent routing table', () => {
       expect(CLAUDE_MD_CONTENT).toContain('Smart Model Routing');
-      expect(CLAUDE_MD_CONTENT).toContain('oracle-low');
-      expect(CLAUDE_MD_CONTENT).toContain('oracle-medium');
-      expect(CLAUDE_MD_CONTENT).toContain('sisyphus-junior-low');
-      expect(CLAUDE_MD_CONTENT).toContain('sisyphus-junior-high');
+      expect(CLAUDE_MD_CONTENT).toContain('explore');
+      expect(CLAUDE_MD_CONTENT).toContain('explore-medium');
+      expect(CLAUDE_MD_CONTENT).toContain('executor-low');
+      expect(CLAUDE_MD_CONTENT).toContain('executor-high');
     });
 
     it('should document all slash commands', () => {
@@ -317,8 +317,8 @@ describe('Installer Constants', () => {
         '/analyze',
         '/plan',
         '/review',
-        '/prometheus',
-        '/ralph-loop',
+        '/planner',
+        '/ralph',
         '/cancel-ralph',
         '/deepinit',
       ];
@@ -423,7 +423,7 @@ describe('Installer Constants', () => {
     });
 
     it('should have read-only agents not include Edit/Write tools', () => {
-      const readOnlyAgents = ['oracle.md', 'oracle-medium.md', 'oracle-low.md', 'momus.md', 'metis.md'];
+      const readOnlyAgents = ['architect.md', 'architect-medium.md', 'architect-low.md', 'critic.md', 'analyst.md'];
 
       for (const agent of readOnlyAgents) {
         const content = AGENT_DEFINITIONS[agent];
@@ -438,11 +438,11 @@ describe('Installer Constants', () => {
 
     it('should have implementation agents include Edit/Write tools', () => {
       const implementationAgents = [
-        'sisyphus-junior.md',
-        'sisyphus-junior-high.md',
-        'sisyphus-junior-low.md',
-        'frontend-engineer.md',
-        'document-writer.md',
+        'executor.md',
+        'executor-high.md',
+        'executor-low.md',
+        'designer.md',
+        'writer.md',
       ];
 
       for (const agent of implementationAgents) {
@@ -479,7 +479,7 @@ describe('Installer Constants', () => {
     });
 
     it('should return true when CLAUDE_PLUGIN_ROOT is set', () => {
-      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/.claude/plugins/marketplaces/oh-my-claude-sisyphus';
+      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/.claude/plugins/marketplaces/oh-my-claudecode';
       expect(isRunningAsPlugin()).toBe(true);
     });
 

@@ -92,7 +92,7 @@ async function main() {
     }
 
     // Check for ultrawork state
-    const ultraworkState = readJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'))
+    const ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
       || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
 
     if (ultraworkState?.active) {
@@ -112,7 +112,7 @@ Continue working in ultrawork mode until all tasks are complete.
     }
 
     // Check for ralph loop state
-    const ralphState = readJsonFile(join(directory, '.sisyphus', 'ralph-state.json'));
+    const ralphState = readJsonFile(join(directory, '.omc', 'ralph-state.json'));
     if (ralphState?.active) {
       messages.push(`<session-restore>
 
@@ -149,7 +149,7 @@ Please continue working on these tasks.
     }
 
     // Check for notepad Priority Context
-    const notepadPath = join(directory, '.sisyphus', 'notepad.md');
+    const notepadPath = join(directory, '.omc', 'notepad.md');
     if (existsSync(notepadPath)) {
       try {
         const notepadContent = readFileSync(notepadPath, 'utf-8');

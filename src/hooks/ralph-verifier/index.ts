@@ -1,16 +1,16 @@
 /**
- * Ralph Loop Verifier
+ * Ralph Verifier
  *
- * Adds oracle verification to ralph-loop completion claims.
- * When ralph-loop outputs a completion promise, instead of immediately
- * accepting it, we trigger an oracle verification phase.
+ * Adds architect verification to ralph completion claims.
+ * When ralph outputs a completion promise, instead of immediately
+ * accepting it, we trigger an architect verification phase.
  *
  * Flow:
- * 1. Ralph-loop outputs <promise>TASK_COMPLETE</promise>
+ * 1. Ralph outputs <promise>TASK_COMPLETE</promise>
  * 2. System detects this and enters verification mode
- * 3. Oracle agent is invoked to verify the work
- * 4. If oracle approves -> truly complete
- * 5. If oracle finds flaws -> continue ralph-loop with oracle feedback
+ * 3. Architect agent is invoked to verify the work
+ * 4. If architect approves -> truly complete
+ * 5. If architect finds flaws -> continue ralph with architect feedback
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
@@ -25,13 +25,13 @@ export interface VerificationState {
   verification_attempts: number;
   /** Max verification attempts before force-accepting */
   max_verification_attempts: number;
-  /** Oracle feedback from last verification */
-  oracle_feedback?: string;
-  /** Whether oracle approved */
-  oracle_approved?: boolean;
+  /** Architect feedback from last verification */
+  architect_feedback?: string;
+  /** Whether architect approved */
+  architect_approved?: boolean;
   /** Timestamp of verification request */
   requested_at: string;
-  /** Original ralph-loop task */
+  /** Original ralph task */
   original_task: string;
 }
 
@@ -41,7 +41,7 @@ const DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
  * Get verification state file path
  */
 function getVerificationStatePath(directory: string): string {
-  return join(directory, '.sisyphus', 'ralph-verification.json');
+  return join(directory, '.omc', 'ralph-verification.json');
 }
 
 /**
@@ -64,7 +64,7 @@ export function readVerificationState(directory: string): VerificationState | nu
  */
 export function writeVerificationState(directory: string, state: VerificationState): boolean {
   const statePath = getVerificationStatePath(directory);
-  const stateDir = join(directory, '.sisyphus');
+  const stateDir = join(directory, '.omc');
 
   if (!existsSync(stateDir)) {
     try {
@@ -120,9 +120,9 @@ export function startVerification(
 }
 
 /**
- * Record oracle feedback
+ * Record architect feedback
  */
-export function recordOracleFeedback(
+export function recordArchitectFeedback(
   directory: string,
   approved: boolean,
   feedback: string
@@ -133,8 +133,8 @@ export function recordOracleFeedback(
   }
 
   state.verification_attempts += 1;
-  state.oracle_approved = approved;
-  state.oracle_feedback = feedback;
+  state.architect_approved = approved;
+  state.architect_feedback = feedback;
 
   if (approved) {
     // Clear state on approval
@@ -154,14 +154,14 @@ export function recordOracleFeedback(
 }
 
 /**
- * Generate oracle verification prompt
+ * Generate architect verification prompt
  */
-export function getOracleVerificationPrompt(state: VerificationState): string {
+export function getArchitectVerificationPrompt(state: VerificationState): string {
   return `<ralph-verification>
 
-[ORACLE VERIFICATION REQUIRED - Attempt ${state.verification_attempts + 1}/${state.max_verification_attempts}]
+[ARCHITECT VERIFICATION REQUIRED - Attempt ${state.verification_attempts + 1}/${state.max_verification_attempts}]
 
-The agent claims the task is complete. Before accepting, YOU MUST verify with Oracle.
+The agent claims the task is complete. Before accepting, YOU MUST verify with Architect.
 
 **Original Task:**
 ${state.original_task}
@@ -169,27 +169,27 @@ ${state.original_task}
 **Completion Claim:**
 ${state.completion_claim}
 
-${state.oracle_feedback ? `**Previous Oracle Feedback (rejected):**\n${state.oracle_feedback}\n` : ''}
+${state.architect_feedback ? `**Previous Architect Feedback (rejected):**\n${state.architect_feedback}\n` : ''}
 
 ## MANDATORY VERIFICATION STEPS
 
-1. **Spawn Oracle Agent** for verification:
+1. **Spawn Architect Agent** for verification:
    \`\`\`
-   Task(subagent_type="oracle", prompt="Verify this task completion claim...")
+   Task(subagent_type="architect", prompt="Verify this task completion claim...")
    \`\`\`
 
-2. **Oracle must check:**
+2. **Architect must check:**
    - Are ALL requirements from the original task met?
    - Is the implementation complete, not partial?
    - Are there any obvious bugs or issues?
    - Does the code compile/run without errors?
    - Are tests passing (if applicable)?
 
-3. **Based on Oracle's response:**
-   - If APPROVED: Output \`<oracle-approved>VERIFIED_COMPLETE</oracle-approved>\`
+3. **Based on Architect's response:**
+   - If APPROVED: Output \`<architect-approved>VERIFIED_COMPLETE</architect-approved>\`
    - If REJECTED: Continue working on the identified issues
 
-DO NOT output the completion promise again until Oracle approves.
+DO NOT output the completion promise again until Architect approves.
 
 </ralph-verification>
 
@@ -199,27 +199,27 @@ DO NOT output the completion promise again until Oracle approves.
 }
 
 /**
- * Generate continuation prompt after oracle rejection
+ * Generate continuation prompt after architect rejection
  */
-export function getOracleRejectionContinuationPrompt(state: VerificationState): string {
+export function getArchitectRejectionContinuationPrompt(state: VerificationState): string {
   return `<ralph-continuation-after-rejection>
 
-[ORACLE REJECTED - Continue Working]
+[ARCHITECT REJECTED - Continue Working]
 
-Oracle found issues with your completion claim. You must address them.
+Architect found issues with your completion claim. You must address them.
 
-**Oracle Feedback:**
-${state.oracle_feedback}
+**Architect Feedback:**
+${state.architect_feedback}
 
 **Original Task:**
 ${state.original_task}
 
 ## INSTRUCTIONS
 
-1. Address ALL issues identified by Oracle
+1. Address ALL issues identified by Architect
 2. Do NOT claim completion again until issues are fixed
 3. When truly done, output the completion promise again
-4. Another Oracle verification will be triggered
+4. Another Architect verification will be triggered
 
 Continue working now.
 
@@ -231,19 +231,19 @@ Continue working now.
 }
 
 /**
- * Check if text contains oracle approval
+ * Check if text contains architect approval
  */
-export function detectOracleApproval(text: string): boolean {
-  return /<oracle-approved>.*?VERIFIED_COMPLETE.*?<\/oracle-approved>/is.test(text);
+export function detectArchitectApproval(text: string): boolean {
+  return /<architect-approved>.*?VERIFIED_COMPLETE.*?<\/architect-approved>/is.test(text);
 }
 
 /**
- * Check if text contains oracle rejection indicators
+ * Check if text contains architect rejection indicators
  */
-export function detectOracleRejection(text: string): { rejected: boolean; feedback: string } {
+export function detectArchitectRejection(text: string): { rejected: boolean; feedback: string } {
   // Look for explicit rejection patterns
   const rejectionPatterns = [
-    /oracle.*?(rejected|found issues|not complete|incomplete)/i,
+    /architect.*?(rejected|found issues|not complete|incomplete)/i,
     /issues? (found|identified|detected)/i,
     /not yet complete/i,
     /missing.*?(implementation|feature|test)/i,
@@ -254,10 +254,10 @@ export function detectOracleRejection(text: string): { rejected: boolean; feedba
   for (const pattern of rejectionPatterns) {
     if (pattern.test(text)) {
       // Extract feedback (rough heuristic)
-      const feedbackMatch = text.match(/(?:oracle|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
+      const feedbackMatch = text.match(/(?:architect|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
       return {
         rejected: true,
-        feedback: feedbackMatch ? feedbackMatch[1] : 'Oracle found issues with the implementation.'
+        feedback: feedbackMatch ? feedbackMatch[1] : 'Architect found issues with the implementation.'
       };
     }
   }

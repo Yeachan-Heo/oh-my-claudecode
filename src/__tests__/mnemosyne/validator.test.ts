@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateExtractionRequest, validateSkillMetadata } from '../../hooks/mnemosyne/validator.js';
+import { validateExtractionRequest, validateSkillMetadata } from '../../hooks/learner/validator.js';
 
 describe('Skill Validator', () => {
   describe('validateExtractionRequest', () => {

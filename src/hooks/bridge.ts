@@ -9,7 +9,7 @@
  * ```bash
  * #!/bin/bash
  * INPUT=$(cat)
- * echo "$INPUT" | node ~/.claude/sisyphus/hook-bridge.mjs --hook=keyword-detector
+ * echo "$INPUT" | node ~/.claude/omc/hook-bridge.mjs --hook=keyword-detector
  * ```
  */
 
@@ -19,7 +19,7 @@ import { addBackgroundTask, completeBackgroundTask } from '../hud/background-tas
 import {
   readVerificationState,
   startVerification,
-  getOracleVerificationPrompt,
+  getArchitectVerificationPrompt,
   clearVerificationState
 } from './ralph-verifier/index.js';
 import { checkIncompleteTodos } from './todo-continuation/index.js';
@@ -80,7 +80,7 @@ export interface HookOutput {
 export type HookType =
   | 'keyword-detector'
   | 'stop-continuation'
-  | 'ralph-loop'
+  | 'ralph'
   | 'persistent-mode'
   | 'session-start'
   | 'pre-tool-use'
@@ -190,10 +190,10 @@ async function processStopContinuation(input: HookInput): Promise<HookOutput> {
 }
 
 /**
- * Process Ralph Loop hook (session.idle event)
- * Continues work loops until completion promise is detected and oracle verifies
+ * Process Ralph hook (session.idle event)
+ * Continues work loops until completion promise is detected and architect verifies
  */
-async function processRalphLoop(input: HookInput): Promise<HookOutput> {
+async function processRalph(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
   const directory = input.directory || process.cwd();
 
@@ -213,14 +213,14 @@ async function processRalphLoop(input: HookInput): Promise<HookOutput> {
     return { continue: true };
   }
 
-  // Check for existing verification state (oracle verification in progress)
+  // Check for existing verification state (architect verification in progress)
   const verificationState = readVerificationState(directory);
 
   if (verificationState?.pending) {
-    // Check if oracle has approved (by looking for the tag in transcript)
+    // Check if architect has approved (by looking for the tag in transcript)
     // This is handled more thoroughly in persistent-mode hook
-    // Here we just remind to spawn oracle if verification is pending
-    const verificationPrompt = getOracleVerificationPrompt(verificationState);
+    // Here we just remind to spawn architect if verification is pending
+    const verificationPrompt = getArchitectVerificationPrompt(verificationState);
     return {
       continue: true,
       message: verificationPrompt
@@ -231,12 +231,12 @@ async function processRalphLoop(input: HookInput): Promise<HookOutput> {
   const completed = detectCompletionPromise(sessionId, state.completion_promise);
 
   if (completed) {
-    // Start oracle verification instead of completing immediately
+    // Start architect verification instead of completing immediately
     startVerification(directory, state.completion_promise, state.prompt);
     const newVerificationState = readVerificationState(directory);
 
     if (newVerificationState) {
-      const verificationPrompt = getOracleVerificationPrompt(newVerificationState);
+      const verificationPrompt = getArchitectVerificationPrompt(newVerificationState);
       return {
         continue: true,
         message: verificationPrompt
@@ -288,7 +288,7 @@ ${newState.prompt}`;
 
 /**
  * Process persistent mode hook (enhanced stop continuation)
- * Unified handler for ultrawork, ralph-loop, and todo-continuation
+ * Unified handler for ultrawork, ralph, and todo-continuation
  */
 async function processPersistentMode(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
@@ -422,8 +422,8 @@ export async function processHook(
       case 'stop-continuation':
         return await processStopContinuation(input);
 
-      case 'ralph-loop':
-        return await processRalphLoop(input);
+      case 'ralph':
+        return await processRalph(input);
 
       case 'persistent-mode':
         return await processPersistentMode(input);

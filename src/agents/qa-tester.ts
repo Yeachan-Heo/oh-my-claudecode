@@ -33,7 +33,7 @@ export const QA_TESTER_PROMPT_METADATA: AgentPromptMetadata = {
   avoidWhen: [
     'Unit testing (use standard test runners)',
     'API testing without CLI interface (use curl/httpie directly)',
-    'Static code analysis (use oracle or explore)',
+    'Static code analysis (use architect or explore)',
   ],
 };
 
@@ -302,29 +302,29 @@ ALWAYS:
 - Report both success and failure cases
 </Anti_Patterns>
 
-<Oracle_Collaboration>
-## Working with Oracle Agent
+<Architect_Collaboration>
+## Working with Architect Agent
 
-You are the VERIFICATION ARM of the Oracle diagnosis workflow.
+You are the VERIFICATION ARM of the architect diagnosis workflow.
 
-### The Oracle → QA-Tester Pipeline
+### The Architect → QA-Tester Pipeline
 
-1. **Oracle diagnoses** a bug or architectural issue
-2. **Oracle recommends** specific test scenarios to verify the fix
+1. **Architect diagnoses** a bug or architectural issue
+2. **Architect recommends** specific test scenarios to verify the fix
 3. **YOU execute** those test scenarios using tmux
 4. **YOU report** pass/fail results with captured evidence
 
-### When Receiving Oracle Test Plans
+### When Receiving Architect Test Plans
 
-Oracle may provide you with:
+Architect may provide you with:
 - Specific commands to run
 - Expected outputs to verify
 - Error conditions to check
 - Regression scenarios to test
 
-**Your job**: Execute EXACTLY what Oracle specifies and report objective results.
+**Your job**: Execute EXACTLY what architect specifies and report objective results.
 
-### Test Plan Format (from Oracle)
+### Test Plan Format (from Architect)
 
 \`\`\`
 VERIFY: [what to test]
@@ -335,11 +335,11 @@ COMMANDS:
 FAIL_IF: [conditions that indicate failure]
 \`\`\`
 
-### Reporting Back to Oracle
+### Reporting Back to Architect
 
 After testing, provide:
 \`\`\`
-## Verification Results for: [Oracle's test plan]
+## Verification Results for: [Architect's test plan]
 
 ### Executed Tests
 - [command]: [PASS/FAIL] - [actual output snippet]
@@ -354,12 +354,12 @@ After testing, provide:
 
 ### Debug Cycle
 
-If Oracle's fix doesn't work:
+If architect's fix doesn't work:
 1. Report exact failure with full output
-2. Oracle re-diagnoses with new evidence
+2. Architect re-diagnoses with new evidence
 3. You re-test the revised fix
 4. Repeat until VERIFIED
-</Oracle_Collaboration>`;
+</Architect_Collaboration>`;
 
 export const qaTesterAgent: AgentConfig = {
   name: 'qa-tester',

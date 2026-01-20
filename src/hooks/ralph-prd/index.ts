@@ -84,7 +84,7 @@ export function getPrdPath(directory: string): string {
  * Get the path to the prd.json in .sisyphus subdirectory
  */
 export function getSisyphusPrdPath(directory: string): string {
-  return join(directory, '.sisyphus', PRD_FILENAME);
+  return join(directory, '.omc', PRD_FILENAME);
 }
 
 /**
@@ -136,7 +136,7 @@ export function writePrd(directory: string, prd: PRD): boolean {
   let prdPath = findPrdPath(directory);
 
   if (!prdPath) {
-    const sisyphusDir = join(directory, '.sisyphus');
+    const sisyphusDir = join(directory, '.omc');
     if (!existsSync(sisyphusDir)) {
       try {
         mkdirSync(sisyphusDir, { recursive: true });
@@ -410,7 +410,7 @@ export function formatPrd(prd: PRD): string {
 }
 
 /**
- * Format next story prompt for injection into ralph-loop
+ * Format next story prompt for injection into ralph
  */
 export function formatNextStoryPrompt(story: UserStory): string {
   return `<current-story>

@@ -1,5 +1,5 @@
 /**
- * Ralph Loop Hook
+ * Ralph Hook
  *
  * Self-referential work loop that continues until a completion promise is detected.
  * Named after the character who keeps working until the job is done.
@@ -7,7 +7,7 @@
  * Enhanced with PRD (Product Requirements Document) support for structured task tracking.
  * When a prd.json exists, completion is based on all stories having passes: true.
  *
- * Ported from oh-my-opencode's ralph-loop hook.
+ * Ported from oh-my-opencode's ralph hook.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
@@ -30,7 +30,7 @@ import {
 
 // Forward declaration to avoid circular import - check ultraqa state file directly
 export function isUltraQAActive(directory: string): boolean {
-  const sisyphusDir = join(directory, '.sisyphus');
+  const sisyphusDir = join(directory, '.omc');
   const stateFile = join(sisyphusDir, 'ultraqa-state.json');
   if (!existsSync(stateFile)) {
     return false;
@@ -85,7 +85,7 @@ const DEFAULT_COMPLETION_PROMISE = 'TASK_COMPLETE';
  * Get the state file path for Ralph Loop
  */
 function getStateFilePath(directory: string): string {
-  const sisyphusDir = join(directory, '.sisyphus');
+  const sisyphusDir = join(directory, '.omc');
   return join(sisyphusDir, 'ralph-state.json');
 }
 
@@ -93,7 +93,7 @@ function getStateFilePath(directory: string): string {
  * Ensure the .sisyphus directory exists
  */
 function ensureStateDir(directory: string): void {
-  const sisyphusDir = join(directory, '.sisyphus');
+  const sisyphusDir = join(directory, '.omc');
   if (!existsSync(sisyphusDir)) {
     mkdirSync(sisyphusDir, { recursive: true });
   }
@@ -269,7 +269,7 @@ export function hasPrd(directory: string): boolean {
 }
 
 /**
- * Get PRD completion status for ralph-loop
+ * Get PRD completion status for ralph
  */
 export function getPrdCompletionStatus(directory: string): {
   hasPrd: boolean;
@@ -299,7 +299,7 @@ export function getPrdCompletionStatus(directory: string): {
 }
 
 /**
- * Get context injection for ralph-loop continuation
+ * Get context injection for ralph continuation
  * Includes PRD current story and progress memory
  */
 export function getRalphContext(directory: string): string {
@@ -381,7 +381,7 @@ export function recordPattern(directory: string, pattern: string): boolean {
 }
 
 /**
- * Check if ralph-loop should complete based on PRD status
+ * Check if ralph should complete based on PRD status
  */
 export function shouldCompleteByPrd(directory: string): boolean {
   const status = getPrdCompletionStatus(directory);

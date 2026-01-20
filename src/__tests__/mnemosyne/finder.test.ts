@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { findSkillFiles, getSkillsDir, ensureSkillsDir } from '../../hooks/mnemosyne/finder.js';
+import { findSkillFiles, getSkillsDir, ensureSkillsDir } from '../../hooks/learner/finder.js';
 
 describe('Skill Finder', () => {
   let testDir: string;
@@ -11,7 +11,7 @@ describe('Skill Finder', () => {
   beforeEach(() => {
     testDir = join(tmpdir(), `skill-test-${Date.now()}`);
     projectRoot = join(testDir, 'project');
-    mkdirSync(join(projectRoot, '.sisyphus', 'skills'), { recursive: true });
+    mkdirSync(join(projectRoot, '.omc', 'skills'), { recursive: true });
   });
 
   afterEach(() => {
@@ -19,7 +19,7 @@ describe('Skill Finder', () => {
   });
 
   it('should find project-level skills', () => {
-    const skillPath = join(projectRoot, '.sisyphus', 'skills', 'test-skill.md');
+    const skillPath = join(projectRoot, '.omc', 'skills', 'test-skill.md');
     writeFileSync(skillPath, '# Test Skill');
 
     const candidates = findSkillFiles(projectRoot);
@@ -33,7 +33,7 @@ describe('Skill Finder', () => {
 
   it('should prioritize project skills over user skills', () => {
     // Create project skill
-    const projectSkillPath = join(projectRoot, '.sisyphus', 'skills', 'skill.md');
+    const projectSkillPath = join(projectRoot, '.omc', 'skills', 'skill.md');
     writeFileSync(projectSkillPath, '# Project Skill');
 
     const candidates = findSkillFiles(projectRoot);
@@ -56,12 +56,12 @@ describe('Skill Finder', () => {
   it('should get skills directory for user scope', () => {
     const userDir = getSkillsDir('user');
     expect(userDir).toContain('.claude');
-    expect(userDir).toContain('sisyphus-learned');
+    expect(userDir).toContain('omc-learned');
   });
 
   it('should get skills directory for project scope', () => {
     const projectDir = getSkillsDir('project', projectRoot);
-    expect(projectDir).toContain('.sisyphus');
+    expect(projectDir).toContain('.omc');
     expect(projectDir).toContain('skills');
   });
 

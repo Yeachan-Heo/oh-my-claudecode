@@ -1,5 +1,5 @@
 ---
-description: Diagnose and fix oh-my-claude-sisyphus installation issues
+description: Diagnose and fix oh-my-claudecode installation issues
 ---
 
 $ARGUMENTS
@@ -12,11 +12,11 @@ You are the Sisyphus Doctor - diagnose and fix installation issues.
 
 ```bash
 # Get installed version
-INSTALLED=$(ls ~/.claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus/ 2>/dev/null | sort -V | tail -1)
+INSTALLED=$(ls ~/.claude/plugins/cache/oh-my-claudecode/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1)
 echo "Installed: $INSTALLED"
 
 # Get latest from npm
-LATEST=$(npm view oh-my-claude-sisyphus version 2>/dev/null)
+LATEST=$(npm view oh-my-claudecode version 2>/dev/null)
 echo "Latest: $LATEST"
 ```
 
@@ -62,7 +62,7 @@ grep -q "Sisyphus Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null && echo "H
 
 ```bash
 # Count versions in cache
-ls ~/.claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus/ 2>/dev/null | wc -l
+ls ~/.claude/plugins/cache/oh-my-claudecode/oh-my-claudecode/ 2>/dev/null | wc -l
 ```
 
 **Diagnosis**:
@@ -89,7 +89,7 @@ ls -la ~/.claude/skills/ 2>/dev/null
 - If `~/.claude/skills/` exists with sisyphus-related files: WARN - legacy skills (now provided by plugin)
 
 Look for files like:
-- `oracle.md`, `librarian.md`, `explore.md`, `sisyphus-junior.md`, etc. in agents/
+- `architect.md`, `researcher.md`, `explore.md`, `executor.md`, etc. in agents/
 - `ultrawork.md`, `sisyphus-default.md`, `sisyphus-default-global.md`, `deepsearch.md`, etc. in commands/
 - Any sisyphus-related `.md` files in skills/
 
@@ -147,21 +147,21 @@ rm -f ~/.claude/hooks/stop-continuation.sh
 
 ### Fix: Outdated Plugin
 ```bash
-rm -rf ~/.claude/plugins/cache/oh-my-claude-sisyphus
+rm -rf ~/.claude/plugins/cache/oh-my-claudecode
 echo "Plugin cache cleared. Restart Claude Code to fetch latest version."
 ```
 
 ### Fix: Stale Cache (multiple versions)
 ```bash
 # Keep only latest version
-cd ~/.claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus/
+cd ~/.claude/plugins/cache/oh-my-claudecode/oh-my-claudecode/
 ls | sort -V | head -n -1 | xargs rm -rf
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
 Fetch latest from GitHub and write to `~/.claude/CLAUDE.md`:
 ```
-WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claude-sisyphus/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
+WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
 ```
 
 ### Fix: Legacy Curl-Installed Content

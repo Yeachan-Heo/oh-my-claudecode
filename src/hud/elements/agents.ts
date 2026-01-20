@@ -4,7 +4,7 @@
  * Renders active agent count display with multiple format options:
  * - count: agents:2
  * - codes: agents:Oes (type-coded with model tier casing)
- * - detailed: agents:[oracle(2m),explore,sj]
+ * - detailed: agents:[architect(2m),explore,sj]
  */
 
 import type { ActiveAgent, AgentsFormat } from '../types.js';
@@ -21,32 +21,32 @@ const CYAN = '\x1b[36m';
  * Case indicates model tier: Uppercase = Opus, lowercase = Sonnet/Haiku
  */
 const AGENT_TYPE_CODES: Record<string, string> = {
-  oracle: 'O',
-  'oracle-low': 'o',
-  'oracle-medium': 'o',
+  architect: 'O',
+  'architect-low': 'o',
+  'architect-medium': 'o',
   explore: 'E',
   'explore-medium': 'e',
-  'sisyphus-junior': 'S',
-  'sisyphus-junior-low': 's',
-  'sisyphus-junior-high': 'S',
-  'frontend-engineer': 'F',
-  'frontend-engineer-low': 'f',
-  'frontend-engineer-high': 'F',
-  librarian: 'L',
-  'librarian-low': 'l',
-  'document-writer': 'd', // Always haiku
-  prometheus: 'P', // Always opus
-  momus: 'M', // Always opus
-  metis: 'T', // Me**t**is (M taken)
+  'executor': 'S',
+  'executor-low': 's',
+  'executor-high': 'S',
+  'designer': 'F',
+  'designer-low': 'f',
+  'designer-high': 'F',
+  researcher: 'L',
+  'researcher-low': 'l',
+  'writer': 'd', // Always haiku
+  planner: 'P', // Always opus
+  critic: 'M', // Always opus
+  analyst: 'T', // Me**t**is (M taken)
   'qa-tester': 'q', // Always sonnet
-  'multimodal-looker': 'v', // **V**isual (always sonnet)
+  'vision': 'v', // **V**isual (always sonnet)
 };
 
 /**
  * Get single-character code for an agent type.
  */
 function getAgentCode(agentType: string, model?: string): string {
-  // Extract the short name from full type (e.g., "oh-my-claude-sisyphus:oracle" -> "oracle")
+  // Extract the short name from full type (e.g., "oh-my-claudecode:architect" -> "architect")
   const parts = agentType.split(':');
   const shortName = parts[parts.length - 1] || agentType;
 
@@ -184,7 +184,7 @@ export function renderAgentsCodedWithDuration(agents: ActiveAgent[]): string | n
 /**
  * Render detailed agent list (for full mode).
  *
- * Format: agents:[oracle(2m),explore,sj]
+ * Format: agents:[architect(2m),explore,sj]
  */
 export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
   const running = sortByFreshest(agents.filter((a) => a.status === 'running'));
@@ -197,19 +197,19 @@ export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
 
   // Extract short agent type names with duration
   const names = running.map((a) => {
-    // Extract last part of agent type (e.g., "oh-my-claude-sisyphus:explore" -> "explore")
+    // Extract last part of agent type (e.g., "oh-my-claudecode:explore" -> "explore")
     const parts = a.type.split(':');
     let name = parts[parts.length - 1] || a.type;
 
     // Abbreviate common names
-    if (name === 'sisyphus-junior') name = 'sj';
-    if (name === 'sisyphus-junior-low') name = 'sj-l';
-    if (name === 'sisyphus-junior-high') name = 'sj-h';
-    if (name === 'frontend-engineer') name = 'fe';
-    if (name === 'frontend-engineer-low') name = 'fe-l';
-    if (name === 'frontend-engineer-high') name = 'fe-h';
-    if (name === 'document-writer') name = 'doc';
-    if (name === 'multimodal-looker') name = 'visual';
+    if (name === 'executor') name = 'sj';
+    if (name === 'executor-low') name = 'sj-l';
+    if (name === 'executor-high') name = 'sj-h';
+    if (name === 'designer') name = 'fe';
+    if (name === 'designer-low') name = 'fe-l';
+    if (name === 'designer-high') name = 'fe-h';
+    if (name === 'writer') name = 'doc';
+    if (name === 'vision') name = 'visual';
 
     // Add duration if significant
     const durationMs = now - a.startTime.getTime();
@@ -239,18 +239,18 @@ function getShortAgentName(agentType: string): string {
 
   // Abbreviate common names
   const abbrevs: Record<string, string> = {
-    'sisyphus-junior': 'sj',
-    'sisyphus-junior-low': 'sj',
-    'sisyphus-junior-high': 'sj',
-    'frontend-engineer': 'fe',
-    'frontend-engineer-low': 'fe',
-    'frontend-engineer-high': 'fe',
-    'document-writer': 'doc',
-    'multimodal-looker': 'visual',
-    'oracle-low': 'oracle',
-    'oracle-medium': 'oracle',
+    'executor': 'sj',
+    'executor-low': 'sj',
+    'executor-high': 'sj',
+    'designer': 'fe',
+    'designer-low': 'fe',
+    'designer-high': 'fe',
+    'writer': 'doc',
+    'vision': 'visual',
+    'architect-low': 'architect',
+    'architect-medium': 'architect',
     'explore-medium': 'explore',
-    'librarian-low': 'lib',
+    'researcher-low': 'lib',
   };
 
   return abbrevs[name] || name;
@@ -360,7 +360,7 @@ export interface MultiLineRenderResult {
  * Returns header addition + multiple detail lines.
  *
  * Format:
- * ├─ O oracle     2m   analyzing architecture patterns...
+ * ├─ O architect     2m   analyzing architecture patterns...
  * ├─ e explore    45s  searching for test files
  * └─ s sj-junior  1m   implementing validation logic
  */

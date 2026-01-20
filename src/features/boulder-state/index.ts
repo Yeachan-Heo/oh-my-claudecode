@@ -21,7 +21,7 @@ export {
   BOULDER_STATE_PATH,
   NOTEPAD_DIR,
   NOTEPAD_BASE_PATH,
-  PROMETHEUS_PLANS_DIR,
+  PLANNER_PLANS_DIR,
   PLAN_EXTENSION
 } from './constants.js';
 
@@ -32,7 +32,7 @@ export {
   writeBoulderState,
   appendSessionId,
   clearBoulderState,
-  findPrometheusPlans,
+  findPlannerPlans,
   getPlanProgress,
   getPlanName,
   createBoulderState,

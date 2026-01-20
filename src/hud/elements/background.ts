@@ -43,7 +43,7 @@ export function renderBackground(tasks: BackgroundTask[]): string | null {
 /**
  * Render background tasks with descriptions (for full mode).
  *
- * Format: bg:3/5 [explore,oracle,...]
+ * Format: bg:3/5 [explore,architect,...]
  */
 export function renderBackgroundDetailed(tasks: BackgroundTask[]): string | null {
   const running = tasks.filter((t) => t.status === 'running');

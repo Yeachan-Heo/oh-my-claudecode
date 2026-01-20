@@ -11,7 +11,7 @@ describe('Builtin Skills', () => {
     it('should return correct number of skills (12)', () => {
       const skills = createBuiltinSkills();
       // 12 skills: analyze, deepinit, deepsearch, frontend-ui-ux, git-master,
-      // prometheus, ralph-init, ralph-loop, release, review, sisyphus, ultrawork
+      // planner, ralph-init, ralph, release, review, sisyphus, ultrawork
       expect(skills).toHaveLength(12);
     });
 
@@ -62,15 +62,15 @@ describe('Builtin Skills', () => {
     it('should have valid skill names', () => {
       const skills = createBuiltinSkills();
       const expectedSkills = [
-        'sisyphus',
-        'ralph-loop',
+        'orchestrate',
+        'ralph',
         'ralph-init',
         'frontend-ui-ux',
         'git-master',
         'ultrawork',
         'analyze',
         'deepsearch',
-        'prometheus',
+        'planner',
         'review',
         'deepinit',
         'release',
@@ -91,15 +91,15 @@ describe('Builtin Skills', () => {
 
   describe('getBuiltinSkill()', () => {
     it('should retrieve a skill by name', () => {
-      const skill = getBuiltinSkill('sisyphus');
+      const skill = getBuiltinSkill('orchestrate');
       expect(skill).toBeDefined();
-      expect(skill?.name).toBe('sisyphus');
+      expect(skill?.name).toBe('orchestrate');
     });
 
     it('should be case-insensitive', () => {
-      const skillLower = getBuiltinSkill('sisyphus');
-      const skillUpper = getBuiltinSkill('SISYPHUS');
-      const skillMixed = getBuiltinSkill('SiSyPhUs');
+      const skillLower = getBuiltinSkill('orchestrate');
+      const skillUpper = getBuiltinSkill('ORCHESTRATE');
+      const skillMixed = getBuiltinSkill('OrChEsTrAtE');
 
       expect(skillLower).toBeDefined();
       expect(skillUpper).toBeDefined();
@@ -118,15 +118,15 @@ describe('Builtin Skills', () => {
     it('should return all skill names', () => {
       const names = listBuiltinSkillNames();
       expect(names).toHaveLength(12);
-      expect(names).toContain('sisyphus');
-      expect(names).toContain('ralph-loop');
+      expect(names).toContain('orchestrate');
+      expect(names).toContain('ralph');
       expect(names).toContain('ralph-init');
       expect(names).toContain('frontend-ui-ux');
       expect(names).toContain('git-master');
       expect(names).toContain('ultrawork');
       expect(names).toContain('analyze');
       expect(names).toContain('deepsearch');
-      expect(names).toContain('prometheus');
+      expect(names).toContain('planner');
       expect(names).toContain('review');
       expect(names).toContain('deepinit');
       expect(names).toContain('release');

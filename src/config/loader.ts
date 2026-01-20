@@ -19,18 +19,18 @@ import type { PluginConfig } from '../shared/types.js';
 export const DEFAULT_CONFIG: PluginConfig = {
   agents: {
     sisyphus: { model: 'claude-opus-4-5-20251101' },
-    oracle: { model: 'claude-opus-4-5-20251101', enabled: true },
-    librarian: { model: 'claude-sonnet-4-5-20250929' },
+    architect: { model: 'claude-opus-4-5-20251101', enabled: true },
+    researcher: { model: 'claude-sonnet-4-5-20250929' },
     explore: { model: 'claude-haiku-4-5-20251001' },
     frontendEngineer: { model: 'claude-sonnet-4-5-20250929', enabled: true },
     documentWriter: { model: 'claude-haiku-4-5-20251001', enabled: true },
     multimodalLooker: { model: 'claude-sonnet-4-5-20250929', enabled: true },
     // New agents from oh-my-opencode
-    momus: { model: 'claude-opus-4-5-20251101', enabled: true },
-    metis: { model: 'claude-opus-4-5-20251101', enabled: true },
+    critic: { model: 'claude-opus-4-5-20251101', enabled: true },
+    analyst: { model: 'claude-opus-4-5-20251101', enabled: true },
     orchestratorSisyphus: { model: 'claude-sonnet-4-5-20250929', enabled: true },
     sisyphusJunior: { model: 'claude-sonnet-4-5-20250929', enabled: true },
-    prometheus: { model: 'claude-opus-4-5-20251101', enabled: true }
+    planner: { model: 'claude-opus-4-5-20251101', enabled: true }
   },
   features: {
     parallelExecution: true,
@@ -68,12 +68,12 @@ export const DEFAULT_CONFIG: PluginConfig = {
       HIGH: 'claude-opus-4-5-20251101'
     },
     agentOverrides: {
-      oracle: { tier: 'HIGH', reason: 'Advisory agent requires deep reasoning' },
-      prometheus: { tier: 'HIGH', reason: 'Strategic planning requires deep reasoning' },
-      momus: { tier: 'HIGH', reason: 'Critical review requires deep reasoning' },
-      metis: { tier: 'HIGH', reason: 'Pre-planning analysis requires deep reasoning' },
+      architect: { tier: 'HIGH', reason: 'Advisory agent requires deep reasoning' },
+      planner: { tier: 'HIGH', reason: 'Strategic planning requires deep reasoning' },
+      critic: { tier: 'HIGH', reason: 'Critical review requires deep reasoning' },
+      analyst: { tier: 'HIGH', reason: 'Pre-planning analysis requires deep reasoning' },
       explore: { tier: 'LOW', reason: 'Exploration is search-focused' },
-      'document-writer': { tier: 'LOW', reason: 'Documentation is straightforward' }
+      'writer': { tier: 'LOW', reason: 'Documentation is straightforward' }
     },
     escalationKeywords: [
       'critical', 'production', 'urgent', 'security', 'breaking',
@@ -170,22 +170,22 @@ export function loadEnvConfig(): Partial<PluginConfig> {
   }
 
   // Feature flags from environment
-  if (process.env.SISYPHUS_PARALLEL_EXECUTION !== undefined) {
+  if (process.env.OMC_PARALLEL_EXECUTION !== undefined) {
     config.features = {
       ...config.features,
-      parallelExecution: process.env.SISYPHUS_PARALLEL_EXECUTION === 'true'
+      parallelExecution: process.env.OMC_PARALLEL_EXECUTION === 'true'
     };
   }
 
-  if (process.env.SISYPHUS_LSP_TOOLS !== undefined) {
+  if (process.env.OMC_LSP_TOOLS !== undefined) {
     config.features = {
       ...config.features,
-      lspTools: process.env.SISYPHUS_LSP_TOOLS === 'true'
+      lspTools: process.env.OMC_LSP_TOOLS === 'true'
     };
   }
 
-  if (process.env.SISYPHUS_MAX_BACKGROUND_TASKS) {
-    const maxTasks = parseInt(process.env.SISYPHUS_MAX_BACKGROUND_TASKS, 10);
+  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
+    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
     if (!isNaN(maxTasks)) {
       config.permissions = {
         ...config.permissions,
@@ -195,15 +195,15 @@ export function loadEnvConfig(): Partial<PluginConfig> {
   }
 
   // Routing configuration from environment
-  if (process.env.SISYPHUS_ROUTING_ENABLED !== undefined) {
+  if (process.env.OMC_ROUTING_ENABLED !== undefined) {
     config.routing = {
       ...config.routing,
-      enabled: process.env.SISYPHUS_ROUTING_ENABLED === 'true'
+      enabled: process.env.OMC_ROUTING_ENABLED === 'true'
     };
   }
 
-  if (process.env.SISYPHUS_ROUTING_DEFAULT_TIER) {
-    const tier = process.env.SISYPHUS_ROUTING_DEFAULT_TIER.toUpperCase();
+  if (process.env.OMC_ROUTING_DEFAULT_TIER) {
+    const tier = process.env.OMC_ROUTING_DEFAULT_TIER.toUpperCase();
     if (tier === 'LOW' || tier === 'MEDIUM' || tier === 'HIGH') {
       config.routing = {
         ...config.routing,
@@ -212,10 +212,10 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     }
   }
 
-  if (process.env.SISYPHUS_ESCALATION_ENABLED !== undefined) {
+  if (process.env.OMC_ESCALATION_ENABLED !== undefined) {
     config.routing = {
       ...config.routing,
-      escalationEnabled: process.env.SISYPHUS_ESCALATION_ENABLED === 'true'
+      escalationEnabled: process.env.OMC_ESCALATION_ENABLED === 'true'
     };
   }
 
@@ -324,14 +324,14 @@ export function generateConfigSchema(): object {
               model: { type: 'string', description: 'Model ID for the main orchestrator' }
             }
           },
-          oracle: {
+          architect: {
             type: 'object',
             properties: {
               model: { type: 'string' },
               enabled: { type: 'boolean' }
             }
           },
-          librarian: {
+          researcher: {
             type: 'object',
             properties: { model: { type: 'string' } }
           },

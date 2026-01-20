@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sisyphus Session Start Hook (Node.js)
+// OMC Session Start Hook (Node.js)
 // Restores persistent mode states when session starts
 // Cross-platform: Windows, macOS, Linux
 
@@ -50,7 +50,7 @@ async function main() {
     const messages = [];
 
     // Check for ultrawork state
-    const ultraworkState = readJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'))
+    const ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
       || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
 
     if (ultraworkState?.active) {

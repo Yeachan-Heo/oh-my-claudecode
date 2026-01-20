@@ -10,8 +10,8 @@
  * - Node.js scripts (.mjs) for cross-platform support (Windows, macOS, Linux)
  *
  * The platform is detected at install time, or can be overridden with:
- *   SISYPHUS_USE_NODE_HOOKS=1  - Force Node.js hooks on any platform
- *   SISYPHUS_USE_BASH_HOOKS=1  - Force Bash hooks (Unix only)
+ *   OMC_USE_NODE_HOOKS=1  - Force Node.js hooks on any platform
+ *   OMC_USE_BASH_HOOKS=1  - Force Bash hooks (Unix only)
  */
 
 import { homedir } from 'os';
@@ -64,10 +64,10 @@ export function isWindows(): boolean {
 /** Check if Node.js hooks should be used (env override or Windows) */
 export function shouldUseNodeHooks(): boolean {
   // Environment variable overrides
-  if (process.env.SISYPHUS_USE_NODE_HOOKS === '1') {
+  if (process.env.OMC_USE_NODE_HOOKS === '1') {
     return true;
   }
-  if (process.env.SISYPHUS_USE_BASH_HOOKS === '1') {
+  if (process.env.OMC_USE_BASH_HOOKS === '1') {
     return false;
   }
   // Default: use Node.js on Windows, Bash elsewhere
@@ -107,7 +107,7 @@ TELL THE USER WHAT AGENTS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUEST.
 
 ## AGENT UTILIZATION PRINCIPLES (by capability, not by name)
 - **Codebase Exploration**: Spawn exploration agents using BACKGROUND TASKS for file patterns, internal implementations, project structure
-- **Documentation & References**: Use librarian-type agents via BACKGROUND TASKS for API references, examples, external library docs
+- **Documentation & References**: Use researcher-type agents via BACKGROUND TASKS for API references, examples, external library docs
 - **Planning & Strategy**: NEVER plan yourself - ALWAYS spawn a dedicated planning agent for work breakdown
 - **High-IQ Reasoning**: Leverage specialized agents for architecture decisions, code review, strategic planning
 - **Frontend/UI Tasks**: Delegate to UI-specialized agents for design and implementation
@@ -121,7 +121,7 @@ TELL THE USER WHAT AGENTS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUEST.
 
 ## WORKFLOW
 1. Analyze the request and identify required capabilities
-2. Spawn exploration/librarian agents via Task(run_in_background=true) in PARALLEL (10+ if needed)
+2. Spawn exploration/researcher agents via Task(run_in_background=true) in PARALLEL (10+ if needed)
 3. Always Use Plan agent with gathered context to create detailed work breakdown
 4. Execute with continuous verification against original requirements
 
@@ -218,7 +218,7 @@ Use your extended thinking capabilities to provide the most thorough and well-re
 export const SEARCH_MESSAGE = `<search-mode>
 MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:
 - explore agents (codebase patterns, file structures)
-- librarian agents (remote repos, official docs, GitHub examples)
+- researcher agents (remote repos, official docs, GitHub examples)
 Plus direct tools: Grep, Glob
 NEVER stop at first result - be exhaustive.
 </search-mode>
@@ -236,11 +236,11 @@ ANALYSIS MODE. Gather context before diving deep:
 
 CONTEXT GATHERING (parallel):
 - 1-2 explore agents (codebase patterns, implementations)
-- 1-2 librarian agents (if external library involved)
+- 1-2 researcher agents (if external library involved)
 - Direct tools: Grep, Glob, LSP for targeted searches
 
 IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
-- Consult oracle agent for strategic guidance
+- Consult architect agent for strategic guidance
 
 SYNTHESIZE findings before proceeding.
 </analyze-mode>

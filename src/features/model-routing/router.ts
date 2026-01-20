@@ -211,16 +211,16 @@ export function explainRouting(
  */
 export function quickTierForAgent(agentType: string): ComplexityTier | null {
   const agentTiers: Record<string, ComplexityTier> = {
-    oracle: 'HIGH',
-    prometheus: 'HIGH',
-    momus: 'HIGH',
-    metis: 'HIGH',
+    architect: 'HIGH',
+    planner: 'HIGH',
+    critic: 'HIGH',
+    analyst: 'HIGH',
     explore: 'LOW',
-    'document-writer': 'LOW',
-    librarian: 'MEDIUM',
-    'sisyphus-junior': 'MEDIUM',
-    'frontend-engineer': 'MEDIUM',
-    'multimodal-looker': 'MEDIUM',
+    'writer': 'LOW',
+    researcher: 'MEDIUM',
+    'executor': 'MEDIUM',
+    'designer': 'MEDIUM',
+    'vision': 'MEDIUM',
     // DEPRECATED: orchestrator-sisyphus merged into default mode (v2.0)
     // Kept for backward compatibility if users still have it installed
     'orchestrator-sisyphus': 'MEDIUM',

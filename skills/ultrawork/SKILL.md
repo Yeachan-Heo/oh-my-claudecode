@@ -26,13 +26,13 @@ This skill enhances Claude's capabilities by:
 | Domain | LOW (Haiku) | MEDIUM (Sonnet) | HIGH (Opus) |
 |--------|-------------|-----------------|-------------|
 | **Analysis** | `oracle-low` | `oracle-medium` | `oracle` |
-| **Execution** | `sisyphus-junior-low` | `sisyphus-junior` | `sisyphus-junior-high` |
+| **Execution** | `junior-low` | `junior` | `junior-high` |
 | **Search** | `explore` | `explore-medium` | - |
 | **Research** | `librarian-low` | `librarian` | - |
 | **Frontend** | `frontend-engineer-low` | `frontend-engineer` | `frontend-engineer-high` |
 | **Docs** | `document-writer` | - | - |
 | **Visual** | - | `multimodal-looker` | - |
-| **Planning** | - | - | `prometheus`, `momus`, `metis` |
+| **Planning** | - | - | `planner`, `momus`, `metis` |
 | **Testing** | - | `qa-tester` | - |
 
 ### Tier Selection Guide
@@ -52,10 +52,10 @@ This skill enhances Claude's capabilities by:
 Task(subagent_type="oracle-low", model="haiku", prompt="What does this function return?")
 
 // Standard implementation → MEDIUM tier
-Task(subagent_type="sisyphus-junior", model="sonnet", prompt="Add error handling to login")
+Task(subagent_type="junior", model="sonnet", prompt="Add error handling to login")
 
 // Complex refactoring → HIGH tier
-Task(subagent_type="sisyphus-junior-high", model="opus", prompt="Refactor auth module using JWT across 5 files")
+Task(subagent_type="junior-high", model="opus", prompt="Refactor auth module using JWT across 5 files")
 
 // Quick file lookup → LOW tier
 Task(subagent_type="explore", model="haiku", prompt="Find where UserService is defined")

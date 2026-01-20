@@ -5,7 +5,7 @@
  * with the Claude Agent SDK.
  */
 
-// Note: In real usage, import from 'oh-my-claude-sisyphus'
+// Note: In real usage, import from 'oh-my-claudecode'
 import { createSisyphusSession, enhancePrompt } from '../src/index.js';
 
 // For demonstration - in real usage, import from '@anthropic-ai/claude-agent-sdk'

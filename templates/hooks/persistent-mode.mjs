@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sisyphus Persistent Mode Hook (Node.js)
+// OMC Persistent Mode Hook (Node.js)
 // Unified handler for ultrawork, ralph-loop, and todo continuation
 // Cross-platform: Windows, macOS, Linux
 
@@ -51,7 +51,7 @@ function countIncompleteTodos(todosDir, projectDir) {
 
   // Check project todos
   for (const path of [
-    join(projectDir, '.sisyphus', 'todos.json'),
+    join(projectDir, '.omc', 'todos.json'),
     join(projectDir, '.claude', 'todos.json')
   ]) {
     const todos = readJsonFile(path);
@@ -73,14 +73,14 @@ async function main() {
     const todosDir = join(homedir(), '.claude', 'todos');
 
     // Check for ultrawork state
-    let ultraworkState = readJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'))
+    let ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
       || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
 
     // Check for ralph loop state
-    const ralphState = readJsonFile(join(directory, '.sisyphus', 'ralph-state.json'));
+    const ralphState = readJsonFile(join(directory, '.omc', 'ralph-state.json'));
 
     // Check for verification state (oracle verification)
-    const verificationState = readJsonFile(join(directory, '.sisyphus', 'ralph-verification.json'));
+    const verificationState = readJsonFile(join(directory, '.omc', 'ralph-verification.json'));
 
     // Count incomplete todos
     const incompleteCount = countIncompleteTodos(todosDir, directory);
@@ -144,7 +144,7 @@ DO NOT output the completion promise again until Oracle approves.
       if (iteration < maxIter) {
         const newIter = iteration + 1;
         ralphState.iteration = newIter;
-        writeJsonFile(join(directory, '.sisyphus', 'ralph-state.json'), ralphState);
+        writeJsonFile(join(directory, '.omc', 'ralph-state.json'), ralphState);
 
         console.log(JSON.stringify({
           continue: false,
@@ -178,7 +178,7 @@ ${ralphState.prompt ? `Original task: ${ralphState.prompt}` : ''}
       ultraworkState.reinforcement_count = newCount;
       ultraworkState.last_checked_at = new Date().toISOString();
 
-      writeJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'), ultraworkState);
+      writeJsonFile(join(directory, '.omc', 'ultrawork-state.json'), ultraworkState);
 
       console.log(JSON.stringify({
         continue: false,

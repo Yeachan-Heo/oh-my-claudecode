@@ -165,7 +165,7 @@ export {
 } from './rules-injector/index.js';
 
 export {
-  // Sisyphus Orchestrator
+  // OMC Orchestrator
   createSisyphusOrchestratorHook,
   isAllowedPath,
   isWriteEditTool,
@@ -177,7 +177,7 @@ export {
   checkBoulderContinuation,
   processOrchestratorPreTool,
   processOrchestratorPostTool,
-  HOOK_NAME as SISYPHUS_ORCHESTRATOR_HOOK_NAME,
+  HOOK_NAME as OMC_ORCHESTRATOR_HOOK_NAME,
   ALLOWED_PATH_PREFIX,
   WRITE_EDIT_TOOLS,
   DIRECT_WORK_REMINDER,
@@ -187,7 +187,7 @@ export {
   SINGLE_TASK_DIRECTIVE,
   type ToolExecuteInput as OrchestratorToolInput,
   type ToolExecuteOutput as OrchestratorToolOutput
-} from './sisyphus-orchestrator/index.js';
+} from './omc-orchestrator/index.js';
 
 export {
   // Auto Slash Command
@@ -436,16 +436,16 @@ export {
 } from './plugin-patterns/index.js';
 
 export {
-  // Ralph Verifier (Oracle-verified completion)
+  // Ralph Verifier (Architect-verified completion)
   readVerificationState,
   writeVerificationState,
   clearVerificationState,
   startVerification,
-  recordOracleFeedback,
-  getOracleVerificationPrompt,
-  getOracleRejectionContinuationPrompt,
-  detectOracleApproval,
-  detectOracleRejection,
+  recordArchitectFeedback,
+  getArchitectVerificationPrompt,
+  getArchitectRejectionContinuationPrompt,
+  detectArchitectApproval,
+  detectArchitectRejection,
   type VerificationState
 } from './ralph-verifier/index.js';
 
@@ -494,10 +494,10 @@ export {
 } from './notepad/index.js';
 
 export {
-  // Learned Skills (Mnemosyne)
+  // Learned Skills (Learner)
   createLearnedSkillsHook,
   processMessageForSkills,
-  isMnemosyneEnabled,
+  isLearnerEnabled,
   getAllSkills,
   clearSkillSession,
   findMatchingSkills,
@@ -522,10 +522,10 @@ export {
   getPromotionCandidates,
   promoteLearning,
   listPromotableLearnings,
-  loadConfig as loadMnemosyneConfig,
-  saveConfig as saveMnemosyneConfig,
-  getConfigValue as getMnemosyneConfigValue,
-  setConfigValue as setMnemosyneConfigValue,
+  loadConfig as loadLearnerConfig,
+  saveConfig as saveLearnerConfig,
+  getConfigValue as getLearnerConfigValue,
+  setConfigValue as setLearnerConfigValue,
   // Constants
   USER_SKILLS_DIR,
   PROJECT_SKILLS_SUBDIR,
@@ -545,7 +545,7 @@ export {
   type DetectionResult,
   type DetectionConfig,
   type PromotionCandidate,
-  type MnemosyneConfig,
+  type LearnerConfig,
   type WriteSkillResult,
   type SkillParseResult
-} from './mnemosyne/index.js';
+} from './learner/index.js';

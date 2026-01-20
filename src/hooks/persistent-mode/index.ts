@@ -1,13 +1,13 @@
 /**
  * Persistent Mode Hook
  *
- * Unified handler for persistent work modes: ultrawork, ralph-loop, and todo-continuation.
+ * Unified handler for persistent work modes: ultrawork, ralph, and todo-continuation.
  * This hook intercepts Stop events and enforces work continuation based on:
  * 1. Active ultrawork mode with pending todos
- * 2. Active ralph-loop with incomplete promise
+ * 2. Active ralph with incomplete promise
  * 3. Any pending todos (general enforcement)
  *
- * Priority order: Ralph Loop > Ultrawork > Todo Continuation
+ * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -30,11 +30,11 @@ import {
 import {
   readVerificationState,
   startVerification,
-  recordOracleFeedback,
-  getOracleVerificationPrompt,
-  getOracleRejectionContinuationPrompt,
-  detectOracleApproval,
-  detectOracleRejection,
+  recordArchitectFeedback,
+  getArchitectVerificationPrompt,
+  getArchitectRejectionContinuationPrompt,
+  detectArchitectApproval,
+  detectArchitectRejection,
   clearVerificationState
 } from '../ralph-verifier/index.js';
 import { checkIncompleteTodos, getNextPendingTodo } from '../todo-continuation/index.js';
@@ -46,7 +46,7 @@ export interface PersistentModeResult {
   /** Message to inject into context */
   message: string;
   /** Which mode triggered the block */
-  mode: 'ralph-loop' | 'ultrawork' | 'todo-continuation' | 'none';
+  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'none';
   /** Additional metadata */
   metadata?: {
     todoCount?: number;
@@ -81,9 +81,9 @@ export function resetTodoContinuationAttempts(sessionId: string): void {
 }
 
 /**
- * Check for oracle approval in session transcript
+ * Check for architect approval in session transcript
  */
-function checkOracleApprovalInTranscript(sessionId: string): boolean {
+function checkArchitectApprovalInTranscript(sessionId: string): boolean {
   const claudeDir = join(homedir(), '.claude');
   const possiblePaths = [
     join(claudeDir, 'sessions', sessionId, 'transcript.md'),
@@ -95,7 +95,7 @@ function checkOracleApprovalInTranscript(sessionId: string): boolean {
     if (existsSync(transcriptPath)) {
       try {
         const content = readFileSync(transcriptPath, 'utf-8');
-        if (detectOracleApproval(content)) {
+        if (detectArchitectApproval(content)) {
           return true;
         }
       } catch {
@@ -107,9 +107,9 @@ function checkOracleApprovalInTranscript(sessionId: string): boolean {
 }
 
 /**
- * Check for oracle rejection in session transcript
+ * Check for architect rejection in session transcript
  */
-function checkOracleRejectionInTranscript(sessionId: string): { rejected: boolean; feedback: string } {
+function checkArchitectRejectionInTranscript(sessionId: string): { rejected: boolean; feedback: string } {
   const claudeDir = join(homedir(), '.claude');
   const possiblePaths = [
     join(claudeDir, 'sessions', sessionId, 'transcript.md'),
@@ -121,7 +121,7 @@ function checkOracleRejectionInTranscript(sessionId: string): { rejected: boolea
     if (existsSync(transcriptPath)) {
       try {
         const content = readFileSync(transcriptPath, 'utf-8');
-        const result = detectOracleRejection(content);
+        const result = detectArchitectRejection(content);
         if (result.rejected) {
           return result;
         }
@@ -135,7 +135,7 @@ function checkOracleRejectionInTranscript(sessionId: string): { rejected: boolea
 
 /**
  * Check Ralph Loop state and determine if it should continue
- * Now includes Oracle verification for completion claims
+ * Now includes Architect verification for completion claims
  */
 async function checkRalphLoop(
   sessionId?: string,
@@ -167,39 +167,39 @@ async function checkRalphLoop(
     };
   }
 
-  // Check for existing verification state (oracle verification in progress)
+  // Check for existing verification state (architect verification in progress)
   const verificationState = readVerificationState(workingDir);
 
   if (verificationState?.pending) {
-    // Verification is in progress - check for oracle's response
+    // Verification is in progress - check for architect's response
     if (sessionId) {
-      // Check for oracle approval
-      if (checkOracleApprovalInTranscript(sessionId)) {
-        // Oracle approved - truly complete
-        // Also deactivate ultrawork if it was part of ultrawork-ralph
+      // Check for architect approval
+      if (checkArchitectApprovalInTranscript(sessionId)) {
+        // Architect approved - truly complete
+        // Also deactivate ultrawork if it was active alongside ralph
         clearVerificationState(workingDir);
         clearRalphState(workingDir);
         deactivateUltrawork(workingDir);
         return {
           shouldBlock: false,
-          message: `[RALPH LOOP VERIFIED COMPLETE] Oracle verified task completion after ${state.iteration} iteration(s). Excellent work!`,
+          message: `[RALPH LOOP VERIFIED COMPLETE] Architect verified task completion after ${state.iteration} iteration(s). Excellent work!`,
           mode: 'none'
         };
       }
 
-      // Check for oracle rejection
-      const rejection = checkOracleRejectionInTranscript(sessionId);
+      // Check for architect rejection
+      const rejection = checkArchitectRejectionInTranscript(sessionId);
       if (rejection.rejected) {
-        // Oracle rejected - continue with feedback
-        recordOracleFeedback(workingDir, false, rejection.feedback);
+        // Architect rejected - continue with feedback
+        recordArchitectFeedback(workingDir, false, rejection.feedback);
         const updatedVerification = readVerificationState(workingDir);
 
         if (updatedVerification) {
-          const continuationPrompt = getOracleRejectionContinuationPrompt(updatedVerification);
+          const continuationPrompt = getArchitectRejectionContinuationPrompt(updatedVerification);
           return {
             shouldBlock: true,
             message: continuationPrompt,
-            mode: 'ralph-loop',
+            mode: 'ralph',
             metadata: {
               iteration: state.iteration,
               maxIterations: state.max_iterations
@@ -209,12 +209,12 @@ async function checkRalphLoop(
       }
     }
 
-    // Verification still pending - remind to spawn oracle
-    const verificationPrompt = getOracleVerificationPrompt(verificationState);
+    // Verification still pending - remind to spawn architect
+    const verificationPrompt = getArchitectVerificationPrompt(verificationState);
     return {
       shouldBlock: true,
       message: verificationPrompt,
-      mode: 'ralph-loop',
+      mode: 'ralph',
       metadata: {
         iteration: state.iteration,
         maxIterations: state.max_iterations
@@ -226,16 +226,16 @@ async function checkRalphLoop(
   const completed = detectCompletionPromise(sessionId || '', state.completion_promise);
 
   if (completed) {
-    // Completion promise detected - START oracle verification instead of completing
+    // Completion promise detected - START architect verification instead of completing
     startVerification(workingDir, state.completion_promise, state.prompt);
     const newVerificationState = readVerificationState(workingDir);
 
     if (newVerificationState) {
-      const verificationPrompt = getOracleVerificationPrompt(newVerificationState);
+      const verificationPrompt = getArchitectVerificationPrompt(newVerificationState);
       return {
         shouldBlock: true,
         message: verificationPrompt,
-        mode: 'ralph-loop',
+        mode: 'ralph',
         metadata: {
           iteration: state.iteration,
           maxIterations: state.max_iterations
@@ -244,7 +244,7 @@ async function checkRalphLoop(
     }
 
     // Fallback if verification state couldn't be created
-    // Also deactivate ultrawork if it was part of ultrawork-ralph
+    // Also deactivate ultrawork if it was active alongside ralph
     clearRalphState(workingDir);
     deactivateUltrawork(workingDir);
     return {
@@ -256,7 +256,7 @@ async function checkRalphLoop(
 
   // Check max iterations
   if (state.iteration >= state.max_iterations) {
-    // Also deactivate ultrawork if it was part of ultrawork-ralph
+    // Also deactivate ultrawork if it was active alongside ralph
     clearRalphState(workingDir);
     clearVerificationState(workingDir);
     deactivateUltrawork(workingDir);
@@ -279,9 +279,9 @@ async function checkRalphLoop(
     ? `2. Check prd.json - are ALL stories marked passes: true?`
     : `2. Check your todo list - are ALL items marked complete?`;
 
-  const continuationPrompt = `<ralph-loop-continuation>
+  const continuationPrompt = `<ralph-continuation>
 
-[RALPH LOOP - ITERATION ${newState.iteration}/${newState.max_iterations}]
+[RALPH - ITERATION ${newState.iteration}/${newState.max_iterations}]
 
 Your previous attempt did not output the completion promise. The work is NOT done yet.
 ${ralphContext}
@@ -294,7 +294,7 @@ ${prdInstruction}
 
 ${newState.prompt ? `Original task: ${newState.prompt}` : ''}
 
-</ralph-loop-continuation>
+</ralph-continuation>
 
 ---
 
@@ -303,7 +303,7 @@ ${newState.prompt ? `Original task: ${newState.prompt}` : ''}
   return {
     shouldBlock: true,
     message: continuationPrompt,
-    mode: 'ralph-loop',
+    mode: 'ralph',
     metadata: {
       iteration: newState.iteration,
       maxIterations: newState.max_iterations
@@ -438,7 +438,7 @@ export async function checkPersistentModes(
   const todoResult = await checkIncompleteTodos(sessionId, workingDir);
   const hasIncompleteTodos = todoResult.count > 0;
 
-  // Priority 1: Ralph Loop (explicit loop mode)
+  // Priority 1: Ralph (explicit loop mode)
   const ralphResult = await checkRalphLoop(sessionId, workingDir);
   if (ralphResult?.shouldBlock) {
     return ralphResult;

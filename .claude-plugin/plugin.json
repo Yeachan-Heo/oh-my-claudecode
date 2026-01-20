@@ -1,5 +1,5 @@
 {
-  "name": "oh-my-claude-sisyphus",
+  "name": "oh-my-claudecode",
   "version": "2.6.1",
   "description": "Claude Code native multi-agent orchestration - compaction-resilient memory, PRD support, 19 agents, 19 commands, 358 tests",
   "author": {
@@ -13,7 +13,6 @@
   "keywords": [
     "multi-agent",
     "orchestration",
-    "sisyphus",
     "ultrawork",
     "delegation",
     "todo-management",

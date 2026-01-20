@@ -19,7 +19,7 @@ toolName=$(extract_json_field "toolName" "unknown")
 directory=$(extract_json_field "directory" "")
 
 # Try to get todo count from todo list file (if exists)
-todo_file="${directory}/.sisyphus/todos.json"
+todo_file="${directory}/.omc/todos.json"
 todo_status=""
 if [[ -f "$todo_file" ]] && command -v jq &> /dev/null; then
     pending=$(jq -r '[.todos[] | select(.status == "pending")] | length' "$todo_file" 2>/dev/null || echo "0")

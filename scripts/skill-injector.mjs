@@ -14,7 +14,7 @@ import { homedir } from 'os';
 
 // Constants
 const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'sisyphus-learned');
-const PROJECT_SKILLS_SUBDIR = '.sisyphus/skills';
+const PROJECT_SKILLS_SUBDIR = '.omc/skills';
 const SKILL_EXTENSION = '.md';
 const MAX_SKILLS_PER_SESSION = 5;
 

@@ -48,17 +48,17 @@ describe('Ralph PRD Module', () => {
       expect(findPrdPath(testDir)).toBe(prdPath);
     });
 
-    it('should find prd.json in .sisyphus directory', () => {
-      const sisyphusDir = join(testDir, '.sisyphus');
+    it('should find prd.json in .omc directory', () => {
+      const sisyphusDir = join(testDir, '.omc');
       mkdirSync(sisyphusDir, { recursive: true });
       const prdPath = join(sisyphusDir, PRD_FILENAME);
       writeFileSync(prdPath, '{}');
       expect(findPrdPath(testDir)).toBe(prdPath);
     });
 
-    it('should prefer root over .sisyphus', () => {
+    it('should prefer root over .omc', () => {
       const rootPath = join(testDir, PRD_FILENAME);
-      const sisyphusDir = join(testDir, '.sisyphus');
+      const sisyphusDir = join(testDir, '.omc');
       mkdirSync(sisyphusDir, { recursive: true });
       const sisyphusPath = join(sisyphusDir, PRD_FILENAME);
 
@@ -104,9 +104,9 @@ describe('Ralph PRD Module', () => {
       expect(read).toEqual(samplePrd);
     });
 
-    it('should create .sisyphus directory when writing', () => {
+    it('should create .omc directory when writing', () => {
       writePrd(testDir, samplePrd);
-      expect(existsSync(join(testDir, '.sisyphus'))).toBe(true);
+      expect(existsSync(join(testDir, '.omc'))).toBe(true);
     });
 
     it('should return null for malformed JSON', () => {
@@ -225,7 +225,7 @@ describe('Ralph PRD Module', () => {
     });
 
     it('should return false when no prd exists', () => {
-      rmSync(join(testDir, '.sisyphus'), { recursive: true, force: true });
+      rmSync(join(testDir, '.omc'), { recursive: true, force: true });
       expect(markStoryComplete(testDir, 'US-001')).toBe(false);
     });
   });

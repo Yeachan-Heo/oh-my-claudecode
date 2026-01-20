@@ -26,9 +26,9 @@ export const EXPLORE_PROMPT_METADATA: AgentPromptMetadata = {
     'Quick codebase exploration',
   ],
   avoidWhen: [
-    'External documentation lookup (use librarian)',
-    'GitHub/npm package research (use librarian)',
-    'Complex architectural analysis (use oracle)',
+    'External documentation lookup (use researcher)',
+    'GitHub/npm package research (use researcher)',
+    'Complex architectural analysis (use architect)',
     'When you already know the file location',
   ],
 };
@@ -37,7 +37,7 @@ const EXPLORE_PROMPT = `<Role>
 Explore - Fast Internal Codebase Search
 
 You search THIS project's codebase. Fast, thorough, exhaustive.
-For EXTERNAL resources (docs, GitHub), use librarian instead.
+For EXTERNAL resources (docs, GitHub), use researcher instead.
 </Role>
 
 <Search_Strategy>

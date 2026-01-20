@@ -90,10 +90,10 @@ rm -f "$CLAUDE_CONFIG_DIR/hooks/silent-auto-update.sh"
 
 # Remove version, state, and config files
 echo -e "${BLUE}Removing state and config files...${NC}"
-rm -f "$CLAUDE_CONFIG_DIR/.sisyphus-version.json"
-rm -f "$CLAUDE_CONFIG_DIR/.sisyphus-silent-update.json"
-rm -f "$CLAUDE_CONFIG_DIR/.sisyphus-update.log"
-rm -f "$CLAUDE_CONFIG_DIR/.sisyphus-config.json"
+rm -f "$CLAUDE_CONFIG_DIR/.omc-version.json"
+rm -f "$CLAUDE_CONFIG_DIR/.omc-silent-update.json"
+rm -f "$CLAUDE_CONFIG_DIR/.omc-update.log"
+rm -f "$CLAUDE_CONFIG_DIR/.omc-config.json"
 
 # Remove hook configurations from settings.json
 SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
@@ -154,11 +154,11 @@ else
     fi
 fi
 
-# Remove .sisyphus directory if it exists (plans, notepads, drafts)
-if [ -d "$CLAUDE_CONFIG_DIR/../.sisyphus" ] || [ -d ".sisyphus" ]; then
-    echo -e "${YELLOW}Note: .sisyphus directory (plans/notepads) was not removed.${NC}"
+# Remove .omc directory if it exists (plans, notepads, drafts)
+if [ -d "$CLAUDE_CONFIG_DIR/../.omc" ] || [ -d ".omc" ]; then
+    echo -e "${YELLOW}Note: .omc directory (plans/notepads) was not removed.${NC}"
     echo "  To remove project plans and notepads, run:"
-    echo "    rm -rf .sisyphus"
+    echo "    rm -rf .omc"
 fi
 
 echo ""

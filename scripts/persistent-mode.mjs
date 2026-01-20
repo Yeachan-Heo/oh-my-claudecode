@@ -58,7 +58,7 @@ function getPrdStatus(projectDir) {
   // Check both root and .sisyphus for prd.json
   const paths = [
     join(projectDir, 'prd.json'),
-    join(projectDir, '.sisyphus', 'prd.json')
+    join(projectDir, '.omc', 'prd.json')
   ];
 
   for (const prdPath of paths) {
@@ -88,7 +88,7 @@ function getPrdStatus(projectDir) {
 function getProgressPatterns(projectDir) {
   const paths = [
     join(projectDir, 'progress.txt'),
-    join(projectDir, '.sisyphus', 'progress.txt')
+    join(projectDir, '.omc', 'progress.txt')
   ];
 
   for (const progressPath of paths) {
@@ -143,7 +143,7 @@ function countIncompleteTodos(todosDir, projectDir) {
 
   // Check project todos
   for (const path of [
-    join(projectDir, '.sisyphus', 'todos.json'),
+    join(projectDir, '.omc', 'todos.json'),
     join(projectDir, '.claude', 'todos.json')
   ]) {
     const data = readJsonFile(path);
@@ -166,14 +166,14 @@ async function main() {
     const todosDir = join(homedir(), '.claude', 'todos');
 
     // Check for ultrawork state
-    let ultraworkState = readJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'))
+    let ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
       || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
 
     // Check for ralph loop state
-    const ralphState = readJsonFile(join(directory, '.sisyphus', 'ralph-state.json'));
+    const ralphState = readJsonFile(join(directory, '.omc', 'ralph-state.json'));
 
     // Check for verification state
-    const verificationState = readJsonFile(join(directory, '.sisyphus', 'ralph-verification.json'));
+    const verificationState = readJsonFile(join(directory, '.omc', 'ralph-verification.json'));
 
     // Count incomplete todos
     const incompleteCount = countIncompleteTodos(todosDir, directory);
@@ -256,7 +256,7 @@ ${verificationState.oracle_feedback}
       if (iteration < maxIter) {
         const newIter = iteration + 1;
         ralphState.iteration = newIter;
-        writeJsonFile(join(directory, '.sisyphus', 'ralph-state.json'), ralphState);
+        writeJsonFile(join(directory, '.omc', 'ralph-state.json'), ralphState);
 
         // Build continuation message with PRD context if available
         let prdContext = '';
@@ -349,7 +349,7 @@ ${ralphState.prompt ? `Original task: ${ralphState.prompt}` : ''}
       ultraworkState.reinforcement_count = newCount;
       ultraworkState.last_checked_at = new Date().toISOString();
 
-      writeJsonFile(join(directory, '.sisyphus', 'ultrawork-state.json'), ultraworkState);
+      writeJsonFile(join(directory, '.omc', 'ultrawork-state.json'), ultraworkState);
 
       console.log(JSON.stringify({
         continue: false,
@@ -381,7 +381,7 @@ ${ultraworkState.original_prompt ? `Original task: ${ultraworkState.original_pro
     // Priority 3: Todo Continuation (with escape mechanism)
     if (incompleteCount > 0) {
       // Track continuation attempts in a lightweight way
-      const contFile = join(directory, '.sisyphus', 'continuation-count.json');
+      const contFile = join(directory, '.omc', 'continuation-count.json');
       let contState = readJsonFile(contFile) || { count: 0 };
       contState.count = (contState.count || 0) + 1;
       contState.last_checked_at = new Date().toISOString();

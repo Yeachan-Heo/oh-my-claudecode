@@ -38,7 +38,7 @@ function getTodoStatus(directory) {
 
   // Check project-local todos
   const localPaths = [
-    join(directory, '.sisyphus', 'todos.json'),
+    join(directory, '.omc', 'todos.json'),
     join(directory, '.claude', 'todos.json')
   ];
 

@@ -16,18 +16,18 @@ export interface PluginConfig {
   // Agent model overrides
   agents?: {
     sisyphus?: { model?: string };
-    oracle?: { model?: string; enabled?: boolean };
-    librarian?: { model?: string };
+    architect?: { model?: string; enabled?: boolean };
+    researcher?: { model?: string };
     explore?: { model?: string };
     frontendEngineer?: { model?: string; enabled?: boolean };
     documentWriter?: { model?: string; enabled?: boolean };
     multimodalLooker?: { model?: string; enabled?: boolean };
     // New agents from oh-my-opencode
-    momus?: { model?: string; enabled?: boolean };
-    metis?: { model?: string; enabled?: boolean };
+    critic?: { model?: string; enabled?: boolean };
+    analyst?: { model?: string; enabled?: boolean };
     orchestratorSisyphus?: { model?: string; enabled?: boolean };
     sisyphusJunior?: { model?: string; enabled?: boolean };
-    prometheus?: { model?: string; enabled?: boolean };
+    planner?: { model?: string; enabled?: boolean };
   };
 
   // Feature toggles

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sisyphus Stop Continuation Hook (Node.js)
+// OMC Stop Continuation Hook (Node.js)
 // Checks for incomplete todos and injects continuation prompt
 // Cross-platform: Windows, macOS, Linux
 

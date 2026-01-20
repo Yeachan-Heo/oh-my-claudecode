@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sisyphus Session Start Hook
+# OMC Session Start Hook
 # Restores persistent mode states and injects context when session starts
 
 # Read stdin
@@ -18,9 +18,9 @@ fi
 MESSAGES=""
 
 # Check for active ultrawork state
-if [ -f "$DIRECTORY/.sisyphus/ultrawork-state.json" ] || [ -f "$HOME/.claude/ultrawork-state.json" ]; then
-  if [ -f "$DIRECTORY/.sisyphus/ultrawork-state.json" ]; then
-    ULTRAWORK_STATE=$(cat "$DIRECTORY/.sisyphus/ultrawork-state.json" 2>/dev/null)
+if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ] || [ -f "$HOME/.claude/ultrawork-state.json" ]; then
+  if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ]; then
+    ULTRAWORK_STATE=$(cat "$DIRECTORY/.omc/ultrawork-state.json" 2>/dev/null)
   else
     ULTRAWORK_STATE=$(cat "$HOME/.claude/ultrawork-state.json" 2>/dev/null)
   fi

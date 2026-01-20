@@ -138,7 +138,7 @@ function activateUltraworkState(directory, prompt) {
   };
 
   // Write to local .sisyphus directory
-  const localDir = join(directory, '.sisyphus');
+  const localDir = join(directory, '.omc');
   if (!existsSync(localDir)) {
     try { mkdirSync(localDir, { recursive: true }); } catch {}
   }

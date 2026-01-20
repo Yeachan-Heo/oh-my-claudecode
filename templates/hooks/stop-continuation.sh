@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sisyphus Stop Continuation Hook
+# OMC Stop Continuation Hook
 # Checks for incomplete todos and injects continuation prompt
 # Ported from oh-my-opencode's todo-continuation-enforcer
 

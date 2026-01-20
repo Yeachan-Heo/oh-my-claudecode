@@ -19,7 +19,7 @@ export type ContextSourceType =
   | 'directory-readme'
   | 'boulder-state'
   | 'session-context'
-  | 'mnemosyne'
+  | 'learner'
   | 'custom';
 
 /**

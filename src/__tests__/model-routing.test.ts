@@ -504,28 +504,28 @@ describe('Routing Rules', () => {
       expect(result.ruleName).toBe('orchestrator-fixed-opus');
     });
 
-    it('should evaluate oracle complex debugging rule', () => {
+    it('should evaluate architect complex debugging rule', () => {
       const context: RoutingContext = {
         taskPrompt: 'Debug this issue and find the root cause',
-        agentType: 'oracle',
+        agentType: 'architect',
       };
       const signals = extractAllSignals(context.taskPrompt, context);
       const result = evaluateRules(context, signals);
 
       expect(result.tier).toBe('HIGH');
-      expect(result.ruleName).toBe('oracle-complex-debugging');
+      expect(result.ruleName).toBe('architect-complex-debugging');
     });
 
-    it('should evaluate oracle simple lookup rule', () => {
+    it('should evaluate architect simple lookup rule', () => {
       const context: RoutingContext = {
         taskPrompt: 'Find the file location',
-        agentType: 'oracle',
+        agentType: 'architect',
       };
       const signals = extractAllSignals(context.taskPrompt, context);
       const result = evaluateRules(context, signals);
 
       expect(result.tier).toBe('LOW');
-      expect(result.ruleName).toBe('oracle-simple-lookup');
+      expect(result.ruleName).toBe('architect-simple-lookup');
     });
 
     it('should evaluate security domain rule', () => {
@@ -580,7 +580,7 @@ describe('Routing Rules', () => {
     it('should return all matching rules', () => {
       const context: RoutingContext = {
         taskPrompt: 'Fix the authentication security vulnerability in production',
-        agentType: 'oracle',
+        agentType: 'architect',
       };
       const signals = extractAllSignals(context.taskPrompt, context);
       const matches = getMatchingRules(context, signals);
@@ -755,20 +755,20 @@ describe('Router', () => {
   });
 
   describe('quickTierForAgent', () => {
-    it('should return HIGH for oracle', () => {
-      expect(quickTierForAgent('oracle')).toBe('HIGH');
+    it('should return HIGH for architect', () => {
+      expect(quickTierForAgent('architect')).toBe('HIGH');
     });
 
-    it('should return HIGH for prometheus', () => {
-      expect(quickTierForAgent('prometheus')).toBe('HIGH');
+    it('should return HIGH for planner', () => {
+      expect(quickTierForAgent('planner')).toBe('HIGH');
     });
 
     it('should return LOW for explore', () => {
       expect(quickTierForAgent('explore')).toBe('LOW');
     });
 
-    it('should return MEDIUM for sisyphus-junior', () => {
-      expect(quickTierForAgent('sisyphus-junior')).toBe('MEDIUM');
+    it('should return MEDIUM for executor', () => {
+      expect(quickTierForAgent('executor')).toBe('MEDIUM');
     });
 
     it('should return null for unknown agent', () => {
@@ -781,12 +781,12 @@ describe('Router', () => {
       expect(isFixedTierAgent('orchestrator-sisyphus')).toBe(true);
     });
 
-    it('should return false for oracle', () => {
-      expect(isFixedTierAgent('oracle')).toBe(false);
+    it('should return false for architect', () => {
+      expect(isFixedTierAgent('architect')).toBe(false);
     });
 
-    it('should return false for sisyphus-junior', () => {
-      expect(isFixedTierAgent('sisyphus-junior')).toBe(false);
+    it('should return false for executor', () => {
+      expect(isFixedTierAgent('executor')).toBe(false);
     });
 
     it('should return false for unknown agent', () => {
@@ -801,14 +801,14 @@ describe('Router', () => {
       expect(result.tier).toBe('HIGH');
     });
 
-    it('should return adaptive model for oracle with simple task', () => {
-      const result = getModelForTask('oracle', 'find the file');
+    it('should return adaptive model for architect with simple task', () => {
+      const result = getModelForTask('architect', 'find the file');
       expect(result.model).toBe('haiku');
       expect(result.tier).toBe('LOW');
     });
 
-    it('should return adaptive model for oracle with complex task', () => {
-      const result = getModelForTask('oracle', 'debug the root cause of this architecture issue');
+    it('should return adaptive model for architect with complex task', () => {
+      const result = getModelForTask('architect', 'debug the root cause of this architecture issue');
       expect(result.model).toBe('opus');
       expect(result.tier).toBe('HIGH');
     });
@@ -820,7 +820,7 @@ describe('Router', () => {
     });
 
     it('should provide reasoning', () => {
-      const result = getModelForTask('sisyphus-junior', 'implement feature');
+      const result = getModelForTask('executor', 'implement feature');
       expect(result.reason).toBeDefined();
       expect(result.reason.length).toBeGreaterThan(0);
     });
@@ -845,7 +845,7 @@ describe('Router', () => {
     });
 
     it('should work with agent type', () => {
-      const analysis = analyzeTaskComplexity('test task', 'oracle');
+      const analysis = analyzeTaskComplexity('test task', 'architect');
 
       expect(analysis).toBeDefined();
       expect(analysis.tier).toBeDefined();
@@ -947,7 +947,7 @@ describe('Integration Scenarios', () => {
   it('should handle real-world debugging task', () => {
     const context: RoutingContext = {
       taskPrompt: 'Investigate why the authentication system is failing in production. Need root cause analysis.',
-      agentType: 'oracle',
+      agentType: 'architect',
     };
     const decision = routeTask(context);
 
@@ -958,7 +958,7 @@ describe('Integration Scenarios', () => {
   it('should handle real-world refactoring task', () => {
     const context: RoutingContext = {
       taskPrompt: 'Refactor the API layer to separate concerns and improve maintainability across auth, user, and admin modules',
-      agentType: 'sisyphus-junior',
+      agentType: 'executor',
     };
     const decision = routeTask(context);
 
@@ -969,7 +969,7 @@ describe('Integration Scenarios', () => {
   it('should handle real-world simple change', () => {
     const context: RoutingContext = {
       taskPrompt: 'Add a console.log statement in utils.ts',
-      agentType: 'sisyphus-junior',
+      agentType: 'executor',
     };
     const decision = routeTask(context);
 
@@ -979,7 +979,7 @@ describe('Integration Scenarios', () => {
   it('should handle strategic planning task', () => {
     const context: RoutingContext = {
       taskPrompt: 'Create a comprehensive strategic plan for refactoring the entire system architecture to migrate our monolith to microservices across all domains with minimal production downtime',
-      agentType: 'prometheus',
+      agentType: 'planner',
     };
     const decision = routeTask(context);
 

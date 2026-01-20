@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sisyphus Keyword Detector Hook
+# OMC Keyword Detector Hook
 # Detects ultrawork/ultrathink/search/analyze keywords and injects enhanced mode messages
 # Also activates persistent ultrawork state when ultrawork keyword is detected
 
@@ -48,7 +48,7 @@ PROMPT_LOWER=$(echo "$PROMPT_NO_CODE" | tr '[:upper:]' '[:lower:]')
 # Check for ultrawork keywords (highest priority)
 if echo "$PROMPT_LOWER" | grep -qE '\b(ultrawork|ulw|uw)\b'; then
   # Create persistent ultrawork state
-  mkdir -p "$DIRECTORY/.sisyphus" 2>/dev/null
+  mkdir -p "$DIRECTORY/.omc" 2>/dev/null
   mkdir -p "$HOME/.claude" 2>/dev/null
 
   # Escape prompt for JSON
@@ -63,7 +63,7 @@ if echo "$PROMPT_LOWER" | grep -qE '\b(ultrawork|ulw|uw)\b'; then
 }"
 
   # Write state to both local and global locations
-  echo "$STATE_JSON" > "$DIRECTORY/.sisyphus/ultrawork-state.json" 2>/dev/null
+  echo "$STATE_JSON" > "$DIRECTORY/.omc/ultrawork-state.json" 2>/dev/null
   echo "$STATE_JSON" > "$HOME/.claude/ultrawork-state.json" 2>/dev/null
 
   # Return ultrawork mode injection

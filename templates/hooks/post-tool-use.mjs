@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Sisyphus Post-Tool-Use Hook (Node.js)
+// OMC Post-Tool-Use Hook (Node.js)
 // Processes <remember> tags from Task agent output
-// Saves to .sisyphus/notepad.md for compaction-resilient memory
+// Saves to .omc/notepad.md for compaction-resilient memory
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 // Constants
 const NOTEPAD_TEMPLATE = '# Notepad\n' +
-  '<!-- Auto-managed by Sisyphus. Manual edits preserved in MANUAL section. -->\n\n' +
+  '<!-- Auto-managed by OMC. Manual edits preserved in MANUAL section. -->\n\n' +
   '## Priority Context\n' +
   '<!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->\n\n' +
   '## Working Memory\n' +
@@ -27,7 +27,7 @@ async function readStdin() {
 
 // Initialize notepad.md if needed
 function initNotepad(directory) {
-  const sisyphusDir = join(directory, '.sisyphus');
+  const sisyphusDir = join(directory, '.omc');
   const notepadPath = join(sisyphusDir, 'notepad.md');
 
   if (!existsSync(sisyphusDir)) {

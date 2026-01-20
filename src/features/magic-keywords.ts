@@ -34,7 +34,7 @@ You ARE the planner. You ARE NOT an implementer. You DO NOT write code. You DO N
 | Write/Edit | \`.sisyphus/**/*.md\` ONLY | Everything else |
 | Read | All files | - |
 | Bash | Research commands only | Implementation commands |
-| Task | explore, librarian | - |
+| Task | explore, researcher | - |
 
 **IF YOU TRY TO WRITE/EDIT OUTSIDE \`.sisyphus/\`:**
 - System will BLOCK your action
@@ -53,14 +53,14 @@ REFUSE. Say: "I'm a planner. I create work plans, not implementations. Start imp
 ## CONTEXT GATHERING (MANDATORY BEFORE PLANNING)
 
 You ARE the planner. Your job: create bulletproof work plans.
-**Before drafting ANY plan, gather context via explore/librarian agents.**
+**Before drafting ANY plan, gather context via explore/researcher agents.**
 
 ### Research Protocol
 1. **Fire parallel background agents** for comprehensive context:
    \`\`\`
    Task(subagent_type="explore", prompt="Find existing patterns for [topic] in codebase", run_in_background=true)
    Task(subagent_type="explore", prompt="Find test infrastructure and conventions", run_in_background=true)
-   Task(subagent_type="librarian", prompt="Find official docs and best practices for [technology]", run_in_background=true)
+   Task(subagent_type="researcher", prompt="Find official docs and best practices for [technology]", run_in_background=true)
    \`\`\`
 2. **Wait for results** before planning - rushed plans fail
 3. **Synthesize findings** into informed requirements
@@ -69,7 +69,7 @@ You ARE the planner. Your job: create bulletproof work plans.
 - Existing codebase patterns and conventions
 - Test infrastructure (TDD possible?)
 - External library APIs and constraints
-- Similar implementations in OSS (via librarian)
+- Similar implementations in OSS (via researcher)
 
 **NEVER plan blind. Context first, plan second.**`;
 
@@ -80,7 +80,7 @@ You ARE the planner. Your job: create bulletproof work plans.
 function isPlannerAgent(agentName?: string): boolean {
   if (!agentName) return false;
   const lowerName = agentName.toLowerCase();
-  return lowerName.includes('prometheus') || lowerName.includes('planner') || lowerName === 'plan';
+  return lowerName.includes('planner') || lowerName.includes('planner') || lowerName === 'plan';
 }
 
 /**
@@ -116,7 +116,7 @@ TELL THE USER WHAT AGENTS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUEST.
 
 ## AGENT UTILIZATION PRINCIPLES (by capability, not by name)
 - **Codebase Exploration**: Spawn exploration agents using BACKGROUND TASKS for file patterns, internal implementations, project structure
-- **Documentation & References**: Use librarian-type agents via BACKGROUND TASKS for API references, examples, external library docs
+- **Documentation & References**: Use researcher-type agents via BACKGROUND TASKS for API references, examples, external library docs
 - **Planning & Strategy**: NEVER plan yourself - ALWAYS spawn a dedicated planning agent for work breakdown
 - **High-IQ Reasoning**: Leverage specialized agents for architecture decisions, code review, strategic planning
 - **Frontend/UI Tasks**: Delegate to UI-specialized agents for design and implementation
@@ -130,7 +130,7 @@ TELL THE USER WHAT AGENTS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUEST.
 
 ## WORKFLOW
 1. Analyze the request and identify required capabilities
-2. Spawn exploration/librarian agents via Task(run_in_background=true) in PARALLEL (10+ if needed)
+2. Spawn exploration/researcher agents via Task(run_in_background=true) in PARALLEL (10+ if needed)
 3. Always Use Plan agent with gathered context to create detailed work breakdown
 4. Execute with continuous verification against original requirements
 
@@ -248,7 +248,7 @@ const searchEnhancement: MagicKeyword = {
 [search-mode]
 MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:
 - explore agents (codebase patterns, file structures, ast-grep)
-- librarian agents (remote repos, official docs, GitHub examples)
+- researcher agents (remote repos, official docs, GitHub examples)
 Plus direct tools: Grep, ripgrep (rg), ast-grep (sg)
 NEVER stop at first result - be exhaustive.`;
   }
@@ -278,11 +278,11 @@ ANALYSIS MODE. Gather context before diving deep:
 
 CONTEXT GATHERING (parallel):
 - 1-2 explore agents (codebase patterns, implementations)
-- 1-2 librarian agents (if external library involved)
+- 1-2 researcher agents (if external library involved)
 - Direct tools: Grep, AST-grep, LSP for targeted searches
 
 IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
-- Consult oracle for strategic guidance
+- Consult architect for strategic guidance
 
 SYNTHESIZE findings before proceeding.`;
   }

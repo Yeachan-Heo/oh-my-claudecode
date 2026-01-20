@@ -9,7 +9,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { dirname, join, basename } from 'path';
 import type { BoulderState, PlanProgress, PlanSummary } from './types.js';
-import { BOULDER_DIR, BOULDER_FILE, PROMETHEUS_PLANS_DIR, PLAN_EXTENSION } from './constants.js';
+import { BOULDER_DIR, BOULDER_FILE, PLANNER_PLANS_DIR, PLAN_EXTENSION } from './constants.js';
 
 /**
  * Get the full path to the boulder state file
@@ -89,11 +89,11 @@ export function clearBoulderState(directory: string): boolean {
 }
 
 /**
- * Find Prometheus plan files for this project.
- * Prometheus stores plans at: {project}/.sisyphus/plans/{name}.md
+ * Find Planner plan files for this project.
+ * Planner stores plans at: {project}/.omc/plans/{name}.md
  */
-export function findPrometheusPlans(directory: string): string[] {
-  const plansDir = join(directory, PROMETHEUS_PLANS_DIR);
+export function findPlannerPlans(directory: string): string[] {
+  const plansDir = join(directory, PLANNER_PLANS_DIR);
 
   if (!existsSync(plansDir)) {
     return [];
@@ -169,7 +169,7 @@ export function createBoulderState(
  * Get summaries of all available plans
  */
 export function getPlanSummaries(directory: string): PlanSummary[] {
-  const plans = findPrometheusPlans(directory);
+  const plans = findPlannerPlans(directory);
 
   return plans.map((planPath) => {
     const stat = statSync(planPath);

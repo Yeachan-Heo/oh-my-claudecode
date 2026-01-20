@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSkillFile, generateSkillFrontmatter } from '../../hooks/mnemosyne/parser.js';
+import { parseSkillFile, generateSkillFrontmatter } from '../../hooks/learner/parser.js';
 
 describe('Skill Parser', () => {
   it('should parse valid skill frontmatter', () => {

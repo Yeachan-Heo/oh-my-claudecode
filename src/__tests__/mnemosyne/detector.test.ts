@@ -3,7 +3,7 @@ import {
   detectExtractableMoment,
   shouldPromptExtraction,
   generateExtractionPrompt,
-} from '../../hooks/mnemosyne/detector.js';
+} from '../../hooks/learner/detector.js';
 
 describe('Skill Detector', () => {
   describe('detectExtractableMoment', () => {
@@ -126,7 +126,7 @@ describe('Skill Detector', () => {
       expect(prompt).toContain('useful technique');
       expect(prompt).toContain('80%');
       expect(prompt).toContain('react, hooks');
-      expect(prompt).toContain('/mnemosyne');
+      expect(prompt).toContain('/learner');
     });
   });
 });

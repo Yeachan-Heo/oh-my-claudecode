@@ -30,15 +30,15 @@ When you run `/hud` or `/hud setup`, the system will automatically:
 **IMPORTANT**: If the argument is `setup` OR if the HUD script doesn't exist at `~/.claude/hud/sisyphus-hud.mjs`, you MUST run the setup by:
 1. First check if the files exist using Bash: `ls ~/.claude/hud/sisyphus-hud.mjs 2>/dev/null && echo EXISTS || echo MISSING`
 2. If MISSING or argument is `setup`, find the plugin path and run: `node <plugin-path>/scripts/plugin-setup.mjs`
-3. The plugin path can be found at: `~/.claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus/<version>/` or the local dev path
+3. The plugin path can be found at: `~/.claude/plugins/cache/oh-my-claudecode/oh-my-claudecode/<version>/` or the local dev path
 
 To find and run setup automatically:
 ```bash
 # Try plugin cache first, then dev paths
-PLUGIN_SETUP=$(find ~/.claude/plugins/cache/oh-my-claude-sisyphus -name "plugin-setup.mjs" 2>/dev/null | head -1)
+PLUGIN_SETUP=$(find ~/.claude/plugins/cache/oh-my-claudecode -name "plugin-setup.mjs" 2>/dev/null | head -1)
 if [ -z "$PLUGIN_SETUP" ]; then
   # Try common dev paths
-  for p in ~/Workspace/oh-my-claude-sisyphus ~/workspace/oh-my-claude-sisyphus ~/projects/oh-my-claude-sisyphus; do
+  for p in ~/Workspace/oh-my-claudecode ~/workspace/oh-my-claudecode ~/projects/oh-my-claudecode; do
     if [ -f "$p/scripts/plugin-setup.mjs" ]; then PLUGIN_SETUP="$p/scripts/plugin-setup.mjs"; break; fi
   done
 fi
@@ -50,20 +50,20 @@ if [ -n "$PLUGIN_SETUP" ]; then node "$PLUGIN_SETUP"; else echo "Could not find 
 ### Minimal
 Shows only the essentials:
 ```
-[SISYPHUS] ralph | ultrawork | todos:2/5
+[OMC] ralph | ultrawork | todos:2/5
 ```
 
 ### Focused (Default)
 Shows all relevant elements:
 ```
-[SISYPHUS] ralph:3/10 | US-002 | ultrawork skill:prometheus | ctx:67% | agents:2 | bg:3/5 | todos:2/5
+[OMC] ralph:3/10 | US-002 | ultrawork skill:planner | ctx:67% | agents:2 | bg:3/5 | todos:2/5
 ```
 
 ### Full
 Shows everything including multi-line agent details:
 ```
-[SISYPHUS] ralph:3/10 | US-002 (2/5) | ultrawork | ctx:[████░░]67% | agents:3 | bg:3/5 | todos:2/5
-├─ O oracle       2m   analyzing architecture patterns...
+[OMC] ralph:3/10 | US-002 (2/5) | ultrawork | ctx:[████░░]67% | agents:3 | bg:3/5 | todos:2/5
+├─ O architect    2m   analyzing architecture patterns...
 ├─ e explore     45s   searching for test files
 └─ s sj-junior    1m   implementing validation logic
 ```
@@ -80,7 +80,7 @@ When agents are running, the HUD shows detailed information on separate lines:
 
 | Element | Description |
 |---------|-------------|
-| `[SISYPHUS]` | Mode identifier |
+| `[OMC]` | Mode identifier |
 | `ralph:3/10` | Ralph loop iteration/max |
 | `US-002` | Current PRD story ID |
 | `ultrawork` | Active mode badge |

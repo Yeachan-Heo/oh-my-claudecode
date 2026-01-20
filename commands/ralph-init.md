@@ -1,5 +1,5 @@
 ---
-description: Initialize a PRD (Product Requirements Document) for structured ralph-loop execution
+description: Initialize a PRD (Product Requirements Document) for structured ralph execution
 ---
 
 [RALPH-INIT - PRD CREATION MODE]
@@ -97,7 +97,7 @@ Stories to implement:
 2. [US-002] - [title]
 ...
 
-Run `/ralph-loop` to start working through these stories.
+Run `/ralph` to start working through these stories.
 ```
 
 ## Quality Guidelines

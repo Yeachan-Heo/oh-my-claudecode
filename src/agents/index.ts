@@ -21,36 +21,35 @@ export {
   deepMerge
 } from './utils.js';
 
-// Individual agent exports (new modular structure)
-export { oracleAgent, ORACLE_PROMPT_METADATA } from './oracle.js';
+// Individual agent exports (rebranded intuitive names)
+export { architectAgent, ARCHITECT_PROMPT_METADATA } from './architect.js';
 export { exploreAgent, EXPLORE_PROMPT_METADATA } from './explore.js';
-export { librarianAgent, LIBRARIAN_PROMPT_METADATA } from './librarian.js';
-export { sisyphusJuniorAgent, SISYPHUS_JUNIOR_PROMPT_METADATA } from './sisyphus-junior.js';
-export { frontendEngineerAgent, FRONTEND_ENGINEER_PROMPT_METADATA } from './frontend-engineer.js';
-export { documentWriterAgent, DOCUMENT_WRITER_PROMPT_METADATA } from './document-writer.js';
-export { multimodalLookerAgent, MULTIMODAL_LOOKER_PROMPT_METADATA } from './multimodal-looker.js';
-export { momusAgent, MOMUS_PROMPT_METADATA } from './momus.js';
-export { metisAgent, METIS_PROMPT_METADATA } from './metis.js';
-// orchestrator-sisyphus: DEPRECATED - merged into default mode
-// export { orchestratorSisyphusAgent, ORCHESTRATOR_SISYPHUS_PROMPT_METADATA } from './orchestrator-sisyphus.js';
-export { prometheusAgent, PROMETHEUS_PROMPT_METADATA } from './prometheus.js';
+export { researcherAgent, RESEARCHER_PROMPT_METADATA } from './researcher.js';
+export { executorAgent, SISYPHUS_JUNIOR_PROMPT_METADATA } from './executor.js';
+export { designerAgent, FRONTEND_ENGINEER_PROMPT_METADATA } from './designer.js';
+export { writerAgent, DOCUMENT_WRITER_PROMPT_METADATA } from './writer.js';
+export { visionAgent, MULTIMODAL_LOOKER_PROMPT_METADATA } from './vision.js';
+export { criticAgent, CRITIC_PROMPT_METADATA } from './critic.js';
+export { analystAgent, ANALYST_PROMPT_METADATA } from './analyst.js';
+export { coordinatorAgent, ORCHESTRATOR_SISYPHUS_PROMPT_METADATA } from './coordinator.js';
+export { plannerAgent, PLANNER_PROMPT_METADATA } from './planner.js';
 export { qaTesterAgent, QA_TESTER_PROMPT_METADATA } from './qa-tester.js';
 
 // Tiered agent variants (prompts loaded dynamically from /agents/*.md)
 export {
-  oracleMediumAgent,
-  oracleLowAgent,
-  sisyphusJuniorHighAgent,
-  sisyphusJuniorLowAgent,
-  librarianLowAgent,
+  architectMediumAgent,
+  architectLowAgent,
+  executorHighAgent,
+  executorLowAgent,
+  researcherLowAgent,
   exploreMediumAgent,
-  frontendEngineerLowAgent,
-  frontendEngineerHighAgent,
+  designerLowAgent,
+  designerHighAgent,
   qaTesterHighAgent
 } from './definitions.js';
 
-// Legacy exports (backward compatibility - getAgentDefinitions and sisyphusSystemPrompt)
+// Core exports (getAgentDefinitions and omcSystemPrompt)
 export {
   getAgentDefinitions,
-  sisyphusSystemPrompt
+  omcSystemPrompt
 } from './definitions.js';

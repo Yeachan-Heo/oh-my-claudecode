@@ -1,7 +1,7 @@
 #!/bin/bash
-# Sisyphus Post-Tool-Use Hook
+# OMC Post-Tool-Use Hook
 # Processes <remember> tags from Task agent output
-# Saves to .sisyphus/notepad.md for compaction-resilient memory
+# Saves to .omc/notepad.md for compaction-resilient memory
 
 # Read stdin
 INPUT=$(cat)
@@ -37,16 +37,16 @@ if ! echo "$TOOL_OUTPUT" | grep -q '<remember'; then
   exit 0
 fi
 
-# Create .sisyphus directory if needed
-SISYPHUS_DIR="$DIRECTORY/.sisyphus"
-NOTEPAD_FILE="$SISYPHUS_DIR/notepad.md"
-mkdir -p "$SISYPHUS_DIR" 2>/dev/null
+# Create .omc directory if needed
+OMC_DIR="$DIRECTORY/.omc"
+NOTEPAD_FILE="$OMC_DIR/notepad.md"
+mkdir -p "$OMC_DIR" 2>/dev/null
 
 # Initialize notepad.md if it doesn't exist
 if [ ! -f "$NOTEPAD_FILE" ]; then
   cat > "$NOTEPAD_FILE" << 'NOTEPAD_INIT'
 # Notepad
-<!-- Auto-managed by Sisyphus. Manual edits preserved in MANUAL section. -->
+<!-- Auto-managed by OMC. Manual edits preserved in MANUAL section. -->
 
 ## Priority Context
 <!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->

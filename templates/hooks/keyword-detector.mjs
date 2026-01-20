@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sisyphus Keyword Detector Hook (Node.js)
+// OMC Keyword Detector Hook (Node.js)
 // Detects ultrawork/ultrathink/search/analyze keywords and injects enhanced mode messages
 // Cross-platform: Windows, macOS, Linux
 
@@ -133,7 +133,7 @@ function activateUltraworkState(directory, prompt) {
     reinforcement_count: 0,
     last_checked_at: new Date().toISOString()
   };
-  const localDir = join(directory, '.sisyphus');
+  const localDir = join(directory, '.omc');
   if (!existsSync(localDir)) { try { mkdirSync(localDir, { recursive: true }); } catch {} }
   try { writeFileSync(join(localDir, 'ultrawork-state.json'), JSON.stringify(state, null, 2)); } catch {}
   const globalDir = join(homedir(), '.claude');

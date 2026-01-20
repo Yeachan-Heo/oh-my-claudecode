@@ -192,7 +192,7 @@ export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense';
  * - count: agents:2
  * - codes: agents:Oes (type-coded with model tier casing)
  * - codes-duration: agents:O(2m)es (codes with duration)
- * - detailed: agents:[oracle(2m),explore,sj]
+ * - detailed: agents:[architect(2m),explore,sj]
  * - descriptions: O:analyzing code | e:searching (codes + what they're doing)
  * - tasks: [analyzing code, searching...] (just descriptions - most readable)
  * - multiline: Multi-line display with full agent details on separate lines

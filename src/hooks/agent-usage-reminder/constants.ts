@@ -10,9 +10,9 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 /** Storage directory for agent usage reminder state */
-export const SISYPHUS_STORAGE_DIR = join(homedir(), '.sisyphus');
+export const OMC_STORAGE_DIR = join(homedir(), '.omc');
 export const AGENT_USAGE_REMINDER_STORAGE = join(
-  SISYPHUS_STORAGE_DIR,
+  OMC_STORAGE_DIR,
   'agent-usage-reminder',
 );
 
@@ -43,13 +43,13 @@ export const REMINDER_MESSAGE = `
 
 You called a search/fetch tool directly without leveraging specialized agents.
 
-RECOMMENDED: Use Task tool with explore/librarian agents for better results:
+RECOMMENDED: Use Task tool with explore/researcher agents for better results:
 
 \`\`\`
 // Parallel exploration - fire multiple agents simultaneously
 Task(agent="explore", prompt="Find all files matching pattern X")
 Task(agent="explore", prompt="Search for implementation of Y")
-Task(agent="librarian", prompt="Lookup documentation for Z")
+Task(agent="researcher", prompt="Lookup documentation for Z")
 
 // Then continue your work while they run in background
 // System will notify you when each completes

@@ -1,7 +1,7 @@
 /**
  * Installer Module
  *
- * Handles installation of Sisyphus agents, commands, and configuration
+ * Handles installation of OMC agents, commands, and configuration
  * into the Claude Code config directory (~/.claude/).
  *
  * This replicates the functionality of scripts/install.sh but in TypeScript,
@@ -12,8 +12,8 @@
  * - Unix (macOS, Linux): Uses Bash scripts (.sh) by default
  *
  * Environment variables:
- * - SISYPHUS_USE_NODE_HOOKS=1: Force Node.js hooks on any platform
- * - SISYPHUS_USE_BASH_HOOKS=1: Force Bash hooks (Unix only)
+ * - OMC_USE_NODE_HOOKS=1: Force Node.js hooks on any platform
+ * - OMC_USE_BASH_HOOKS=1: Force Bash hooks (Unix only)
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, readdirSync } from 'fs';
@@ -38,7 +38,7 @@ export const SKILLS_DIR = join(CLAUDE_CONFIG_DIR, 'skills');
 export const HOOKS_DIR = join(CLAUDE_CONFIG_DIR, 'hooks');
 export const HUD_DIR = join(CLAUDE_CONFIG_DIR, 'hud');
 export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
-export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.sisyphus-version.json');
+export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 
 /** Current version */
 export const VERSION = '3.0.0-beta';
@@ -173,7 +173,7 @@ function loadClaudeMdContent(): string {
 }
 
 /**
- * Install Sisyphus agents, commands, skills, and hooks
+ * Install OMC agents, commands, skills, and hooks
  */
 export function install(options: InstallOptions = {}): InstallResult {
   const result: InstallResult = {
@@ -373,11 +373,11 @@ export function install(options: InstallOptions = {}): InstallResult {
 
       // Build the HUD script content (compiled from src/hud/index.ts)
       // Create a wrapper that checks multiple locations for the HUD module
-      const hudScriptPath = join(HUD_DIR, 'sisyphus-hud.mjs');
+      const hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
       const hudScriptLines = [
         '#!/usr/bin/env node',
         '/**',
-        ' * Sisyphus HUD - Statusline Script',
+        ' * OMC HUD - Statusline Script',
         ' * Wrapper that imports from dev paths, plugin cache, or npm package',
         ' */',
         '',
@@ -390,9 +390,9 @@ export function install(options: InstallOptions = {}): InstallResult {
         '  ',
         '  // 1. Development paths (preferred for local development)',
         '  const devPaths = [',
-        '    join(home, "Workspace/oh-my-claude-sisyphus/dist/hud/index.js"),',
-        '    join(home, "workspace/oh-my-claude-sisyphus/dist/hud/index.js"),',
-        '    join(home, "projects/oh-my-claude-sisyphus/dist/hud/index.js"),',
+        '    join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),',
+        '    join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),',
+        '    join(home, "projects/oh-my-claudecode/dist/hud/index.js"),',
         '  ];',
         '  ',
         '  for (const devPath of devPaths) {',
@@ -405,7 +405,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         '  }',
         '  ',
         '  // 2. Plugin cache (for production installs)',
-        '  const pluginCacheBase = join(home, ".claude/plugins/cache/oh-my-claude-sisyphus/oh-my-claude-sisyphus");',
+        '  const pluginCacheBase = join(home, ".claude/plugins/cache/oh-my-claudecode/oh-my-claudecode");',
         '  if (existsSync(pluginCacheBase)) {',
         '    try {',
         '      const versions = readdirSync(pluginCacheBase);',
@@ -422,7 +422,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         '  ',
         '  // 3. npm package (global or local install)',
         '  try {',
-        '    await import("oh-my-claude-sisyphus/dist/hud/index.js");',
+        '    await import("oh-my-claudecode/dist/hud/index.js");',
         '    return;',
         '  } catch { /* continue */ }',
         '  ',
@@ -438,7 +438,7 @@ export function install(options: InstallOptions = {}): InstallResult {
       if (!isWindows()) {
         chmodSync(hudScriptPath, 0o755);
       }
-      log('  Installed sisyphus-hud.mjs');
+      log('  Installed omc-hud.mjs');
 
       // Configure statusLine in settings.json if not already set
       try {
@@ -498,7 +498,7 @@ export function install(options: InstallOptions = {}): InstallResult {
 }
 
 /**
- * Check if Sisyphus is already installed
+ * Check if OMC is already installed
  */
 export function isInstalled(): boolean {
   return existsSync(VERSION_FILE) && existsSync(AGENTS_DIR) && existsSync(COMMANDS_DIR);

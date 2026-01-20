@@ -44,7 +44,7 @@ interface UsageApiResponse {
  * Get the cache file path
  */
 function getCachePath(): string {
-  return join(homedir(), '.claude/plugins/oh-my-claude-sisyphus/.usage-cache.json');
+  return join(homedir(), '.claude/plugins/oh-my-claudecode/.usage-cache.json');
 }
 
 /**

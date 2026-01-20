@@ -26,8 +26,8 @@ function isActiveMode(
   ralph: RalphStateForHud | null
 ): boolean {
   if (skillName === 'ultrawork' && ultrawork?.active) return true;
-  if (skillName === 'ralph-loop' && ralph?.active) return true;
-  if (skillName === 'ultrawork-ralph' && ultrawork?.active && ralph?.active) return true;
+  if (skillName === 'ralph' && ralph?.active) return true;
+  if (skillName === 'ultrawork+ralph' && ultrawork?.active && ralph?.active) return true;
   return false;
 }
 
@@ -35,7 +35,7 @@ function isActiveMode(
  * Render active skill badges with optional last skill.
  * Returns null if no skills are active.
  *
- * Format: ultrawork or ultrawork-ralph | skill:prometheus
+ * Format: ultrawork or ultrawork + ralph | skill:planner
  */
 export function renderSkills(
   ultrawork: UltraworkStateForHud | null,
@@ -47,7 +47,7 @@ export function renderSkills(
   // Active modes (ultrawork, ralph)
   if (ralph?.active && ultrawork?.active) {
     // Combined mode
-    parts.push(`${BRIGHT_MAGENTA}ultrawork-ralph${RESET}`);
+    parts.push(`${BRIGHT_MAGENTA}ultrawork+ralph${RESET}`);
   } else if (ultrawork?.active) {
     parts.push(`${MAGENTA}ultrawork${RESET}`);
   } else if (ralph?.active) {

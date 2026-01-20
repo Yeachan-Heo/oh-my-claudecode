@@ -30,7 +30,7 @@ You are performing a **deep codebase initialization** - creating hierarchical AG
 
 ### Execution Strategy
 
-Use **parallel exploration** with the explore agent to analyze directories, then use **sisyphus-junior** agents to create the AGENTS.md files.
+Use **parallel exploration** with the explore agent to analyze directories, then use **executor** agents to create the AGENTS.md files.
 
 #### Phase 1: Discovery
 
@@ -99,7 +99,7 @@ When `--dry-run` is specified:
 
 - **Batch Processing**: Process directories at the same level in parallel
 - **Level Order**: Complete one level before starting the next (ensures parent references exist)
-- **Use Multiple Agents**: Spawn sisyphus-junior agents for parallel file creation
+- **Use Multiple Agents**: Spawn executor agents for parallel file creation
 
 ### Quality Checks
 
