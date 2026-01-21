@@ -69,6 +69,16 @@ async function main() {
     let data = {};
     try { data = JSON.parse(input); } catch {}
 
+    const stopReason = data.stop_reason || data.stopReason || '';
+    const userRequested = data.user_requested || data.userRequested || false;
+
+    // Check for user abort - skip all continuation enforcement
+    // NOTE: Abort patterns are assumed - verify against actual Claude Code API values
+    if (userRequested || /abort|cancel|interrupt|ctrl_c|manual_stop/i.test(stopReason)) {
+      console.log(JSON.stringify({ continue: true }));
+      return;
+    }
+
     const directory = data.directory || process.cwd();
     const todosDir = join(homedir(), '.claude', 'todos');
 

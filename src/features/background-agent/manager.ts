@@ -108,6 +108,9 @@ export class BackgroundManager {
 
           // Restore dates
           task.startedAt = new Date(task.startedAt);
+          if (task.queuedAt) {
+            task.queuedAt = new Date(task.queuedAt);
+          }
           if (task.completedAt) {
             task.completedAt = new Date(task.completedAt);
           }
@@ -163,7 +166,7 @@ export class BackgroundManager {
 
     for (const [taskId, task] of this.tasks.entries()) {
       const age = now - task.startedAt.getTime();
-      if (age > ttl && task.status === 'running') {
+      if (age > ttl && (task.status === 'running' || task.status === 'queued')) {
         task.status = 'error';
         task.error = `Task timed out after ${Math.round(ttl / 60000)} minutes`;
         task.completedAt = new Date();
@@ -191,6 +194,33 @@ export class BackgroundManager {
         this.notifications.set(sessionId, validNotifications);
       }
     }
+
+    // Detect stale sessions (no recent activity)
+    this.detectAndHandleStaleSessions();
+  }
+
+  /**
+   * Detect sessions with no recent activity and invoke callback
+   */
+  private detectAndHandleStaleSessions(): void {
+    const now = Date.now();
+    const threshold = this.config.staleThresholdMs ?? 5 * 60 * 1000; // 5 min default
+
+    for (const task of this.tasks.values()) {
+      // Only check running tasks (not queued, completed, etc.)
+      if (task.status !== 'running') continue;
+
+      // Check last activity (progress.lastUpdate or startedAt as fallback)
+      const lastActivity = task.progress?.lastUpdate ?? task.startedAt;
+      const timeSinceActivity = now - lastActivity.getTime();
+
+      if (timeSinceActivity > threshold) {
+        // Invoke callback if configured (allows caller to auto-interrupt)
+        if (this.config.onStaleSession) {
+          this.config.onStaleSession(task);
+        }
+      }
+    }
   }
 
   /**
@@ -199,24 +229,42 @@ export class BackgroundManager {
   async launch(input: LaunchInput): Promise<BackgroundTask> {
     const concurrencyKey = input.agent;
 
-    // Check max total tasks
-    const maxTotal = this.config.maxTotalTasks ?? 10;
-    const runningCount = Array.from(this.tasks.values()).filter(
+    // Count running and queued tasks for capacity check
+    const runningTasks = Array.from(this.tasks.values()).filter(
       (t) => t.status === 'running'
-    ).length;
+    );
+    const queuedTasks = Array.from(this.tasks.values()).filter(
+      (t) => t.status === 'queued'
+    );
+    const runningCount = runningTasks.length;
+    const queuedCount = queuedTasks.length;
 
-    if (runningCount >= maxTotal) {
+    // Check maxTotalTasks (running + queued = tasks in flight)
+    const maxTotal = this.config.maxTotalTasks ?? 10;
+    const tasksInFlight = runningCount + queuedCount;
+
+    if (tasksInFlight >= maxTotal) {
       throw new Error(
-        `Maximum concurrent background tasks (${maxTotal}) reached. Wait for some tasks to complete.`
+        `Maximum tasks in flight (${maxTotal}) reached. ` +
+        `Currently: ${runningCount} running, ${queuedCount} queued. ` +
+        `Wait for some tasks to complete.`
       );
     }
 
-    // Acquire concurrency slot
-    await this.concurrencyManager.acquire(concurrencyKey);
+    // Check explicit maxQueueSize if configured
+    const maxQueueSize = this.config.maxQueueSize;
+    if (maxQueueSize !== undefined && queuedCount >= maxQueueSize) {
+      throw new Error(
+        `Maximum queue size (${maxQueueSize}) reached. ` +
+        `Currently: ${runningCount} running, ${queuedCount} queued. ` +
+        `Wait for some tasks to start or complete.`
+      );
+    }
 
     const taskId = this.generateTaskId();
-    const sessionId = `ses_${this.generateTaskId()}`; // Mock session ID
+    const sessionId = `ses_${this.generateTaskId()}`;
 
+    // Create task in QUEUED state FIRST (non-blocking - visible immediately)
     const task: BackgroundTask = {
       id: taskId,
       sessionId,
@@ -224,16 +272,27 @@ export class BackgroundManager {
       description: input.description,
       prompt: input.prompt,
       agent: input.agent,
-      status: 'running',
-      startedAt: new Date(),
+      status: 'queued',
+      queuedAt: new Date(),
+      startedAt: new Date(), // Placeholder for backward compat, updated when running
       progress: {
         toolCalls: 0,
         lastUpdate: new Date(),
       },
       concurrencyKey,
+      parentModel: input.model, // Preserve parent model
     };
 
+    // Store immediately so task is visible while waiting for slot
     this.tasks.set(taskId, task);
+    this.persistTask(task);
+
+    // Wait for concurrency slot (may resolve immediately or block)
+    await this.concurrencyManager.acquire(concurrencyKey);
+
+    // Transition to RUNNING once slot acquired
+    task.status = 'running';
+    task.startedAt = new Date();
     this.persistTask(task);
 
     return task;
@@ -426,6 +485,7 @@ export class BackgroundManager {
    */
   getStatusSummary(): string {
     const running = this.getRunningTasks();
+    const queued = Array.from(this.tasks.values()).filter((t) => t.status === 'queued');
     const all = this.getAllTasks();
 
     if (all.length === 0) {
@@ -433,7 +493,7 @@ export class BackgroundManager {
     }
 
     const lines: string[] = [
-      `Background Tasks: ${running.length} running, ${all.length} total`,
+      `Background Tasks: ${running.length} running, ${queued.length} queued, ${all.length} total`,
       '',
     ];
 

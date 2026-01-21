@@ -37,7 +37,7 @@ import {
   detectArchitectRejection,
   clearVerificationState
 } from '../ralph-verifier/index.js';
-import { checkIncompleteTodos, getNextPendingTodo } from '../todo-continuation/index.js';
+import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 
 export interface PersistentModeResult {
@@ -430,12 +430,23 @@ ${TODO_CONTINUATION_PROMPT}
  */
 export async function checkPersistentModes(
   sessionId?: string,
-  directory?: string
+  directory?: string,
+  stopContext?: StopContext  // NEW: from todo-continuation types
 ): Promise<PersistentModeResult> {
   const workingDir = directory || process.cwd();
 
+  // Check for user abort first - skip all continuation enforcement
+  if (isUserAbort(stopContext)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
   // First, check for incomplete todos (we need this info for ultrawork)
-  const todoResult = await checkIncompleteTodos(sessionId, workingDir);
+  // Note: stopContext already checked above, but pass it for consistency
+  const todoResult = await checkIncompleteTodos(sessionId, workingDir, stopContext);
   const hasIncompleteTodos = todoResult.count > 0;
 
   // Priority 1: Ralph (explicit loop mode)

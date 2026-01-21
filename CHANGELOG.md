@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.1] - 2026-01-21
+
+### Added
+- **Non-blocking queue system**: Background tasks now enter `'queued'` status when waiting for concurrency slot
+- **Stale session detection**: New `staleThresholdMs` and `onStaleSession` callback detect hung tasks (default: 5 min)
+- **Model preservation**: Background tasks inherit parent session's model via `parentModel` field
+- **User abort detection**: New `StopContext` and `isUserAbort()` detect user-initiated stops (Ctrl+C, cancel)
+
+### Changed
+- **Capacity enforcement**: `maxTotalTasks` now counts both running AND queued tasks
+- **Status display**: `getStatusSummary()` shows queued count and wait times
+- **Continuation hooks**: Ralph-loop, ultrawork, and todo-continuation now respect user aborts
+
+### Fixed
+- **Graceful stop handling**: Users can now cleanly exit persistent modes without forced continuation
+
+---
+
 ## [3.1.0] - 2026-01-21
 
 ### Added

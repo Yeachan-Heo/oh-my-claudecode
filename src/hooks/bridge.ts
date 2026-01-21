@@ -22,7 +22,7 @@ import {
   getArchitectVerificationPrompt,
   clearVerificationState
 } from './ralph-verifier/index.js';
-import { checkIncompleteTodos } from './todo-continuation/index.js';
+import { checkIncompleteTodos, StopContext } from './todo-continuation/index.js';
 import { checkPersistentModes, createHookOutput } from './persistent-mode/index.js';
 import { activateUltrawork, readUltraworkState } from './ultrawork-state/index.js';
 import {
@@ -191,8 +191,16 @@ async function processStopContinuation(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
   const directory = input.directory || process.cwd();
 
-  // Check for incomplete todos
-  const incompleteTodos = await checkIncompleteTodos(sessionId, directory);
+  // Extract stop context for abort detection (supports both camelCase and snake_case)
+  const stopContext: StopContext = {
+    stop_reason: (input as Record<string, unknown>).stop_reason as string | undefined,
+    stopReason: (input as Record<string, unknown>).stopReason as string | undefined,
+    user_requested: (input as Record<string, unknown>).user_requested as boolean | undefined,
+    userRequested: (input as Record<string, unknown>).userRequested as boolean | undefined,
+  };
+
+  // Check for incomplete todos (respects user abort)
+  const incompleteTodos = await checkIncompleteTodos(sessionId, directory, stopContext);
 
   if (incompleteTodos.count > 0) {
     return {
@@ -309,7 +317,15 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
   const directory = input.directory || process.cwd();
 
-  const result = await checkPersistentModes(sessionId, directory);
+  // Extract stop context for abort detection (supports both camelCase and snake_case)
+  const stopContext: StopContext = {
+    stop_reason: (input as Record<string, unknown>).stop_reason as string | undefined,
+    stopReason: (input as Record<string, unknown>).stopReason as string | undefined,
+    user_requested: (input as Record<string, unknown>).user_requested as boolean | undefined,
+    userRequested: (input as Record<string, unknown>).userRequested as boolean | undefined,
+  };
+
+  const result = await checkPersistentModes(sessionId, directory, stopContext);
   return createHookOutput(result);
 }
 

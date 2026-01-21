@@ -19,6 +19,21 @@ if [ -z "$DIRECTORY" ]; then
   DIRECTORY=$(pwd)
 fi
 
+# Extract stop reason for abort detection
+STOP_REASON=""
+USER_REQUESTED=""
+if command -v jq &> /dev/null; then
+  STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // .stopReason // ""' 2>/dev/null)
+  USER_REQUESTED=$(echo "$INPUT" | jq -r '.user_requested // .userRequested // "false"' 2>/dev/null)
+fi
+
+# Check for user abort before continuation checks
+# NOTE: Abort patterns are assumed - verify against actual Claude Code API values
+if [ "$USER_REQUESTED" = "true" ] || echo "$STOP_REASON" | grep -qiE "(abort|cancel|interrupt|ctrl_c|manual_stop)"; then
+  echo '{"continue": true}'
+  exit 0
+fi
+
 # Check for active ultrawork state
 ULTRAWORK_STATE=""
 if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ]; then

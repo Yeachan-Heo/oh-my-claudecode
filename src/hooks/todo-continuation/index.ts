@@ -24,8 +24,62 @@ export interface IncompleteTodosResult {
   total: number;
 }
 
+/**
+ * Context from Stop hook event
+ *
+ * NOTE: Field names support both camelCase and snake_case variants
+ * for compatibility with different Claude Code versions.
+ *
+ * IMPORTANT: The abort detection patterns below are assumed. Verify
+ * actual stop_reason values from Claude Code before finalizing.
+ */
+export interface StopContext {
+  /** Reason for stop (from Claude Code) - snake_case variant */
+  stop_reason?: string;
+  /** Reason for stop (from Claude Code) - camelCase variant */
+  stopReason?: string;
+  /** End turn reason (from API) - snake_case variant */
+  end_turn_reason?: string;
+  /** End turn reason (from API) - camelCase variant */
+  endTurnReason?: string;
+  /** Whether user explicitly requested stop - snake_case variant */
+  user_requested?: boolean;
+  /** Whether user explicitly requested stop - camelCase variant */
+  userRequested?: boolean;
+}
+
 export interface TodoContinuationHook {
   checkIncomplete: (sessionId?: string) => Promise<IncompleteTodosResult>;
+}
+
+/**
+ * Detect if stop was due to user abort (not natural completion)
+ *
+ * NOTE: These patterns are ASSUMED. Verify against actual Claude Code
+ * API responses and update as needed.
+ */
+export function isUserAbort(context?: StopContext): boolean {
+  if (!context) return false;
+
+  // User explicitly requested stop (supports both camelCase and snake_case)
+  if (context.user_requested || context.userRequested) return true;
+
+  // Check stop_reason patterns indicating user abort
+  // Unified patterns: includes both specific (user_cancel) and generic (cancel)
+  const abortPatterns = [
+    'user_cancel',
+    'user_interrupt',
+    'ctrl_c',
+    'manual_stop',
+    'aborted',
+    'abort',      // generic patterns from shell/Node.js templates
+    'cancel',
+    'interrupt',
+  ];
+
+  // Support both snake_case and camelCase field names
+  const reason = (context.stop_reason ?? context.stopReason ?? '').toLowerCase();
+  return abortPatterns.some(pattern => reason.includes(pattern));
 }
 
 /**
@@ -112,8 +166,18 @@ function isIncomplete(todo: Todo): boolean {
  */
 export async function checkIncompleteTodos(
   sessionId?: string,
-  directory?: string
+  directory?: string,
+  stopContext?: StopContext  // NEW parameter
 ): Promise<IncompleteTodosResult> {
+  // If user aborted, don't force continuation (return count: 0)
+  if (isUserAbort(stopContext)) {
+    return {
+      count: 0,
+      todos: [],
+      total: 0
+    };
+  }
+
   const paths = getTodoFilePaths(sessionId, directory);
   const seenContents = new Set<string>();
   const allTodos: Todo[] = [];
