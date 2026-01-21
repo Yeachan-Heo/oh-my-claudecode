@@ -135,6 +135,10 @@ export interface RateLimits {
   fiveHourPercent: number;
   /** Weekly usage percentage (0-100) */
   weeklyPercent: number;
+  /** When the 5-hour limit resets (null if unavailable) */
+  fiveHourResetsAt?: Date | null;
+  /** When the weekly limit resets (null if unavailable) */
+  weeklyResetsAt?: Date | null;
 }
 
 export interface HudRenderContext {

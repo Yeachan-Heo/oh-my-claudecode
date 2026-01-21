@@ -20,9 +20,9 @@ import https from 'https';
 import type { RateLimits } from './types.js';
 
 // Cache configuration
-const CACHE_TTL_SUCCESS_MS = 60 * 1000; // 60 seconds for successful responses
+const CACHE_TTL_SUCCESS_MS = 30 * 1000; // 30 seconds for successful responses
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for failures
-const API_TIMEOUT_MS = 5000;
+const API_TIMEOUT_MS = 10000;
 
 interface UsageCache {
   timestamp: number;
@@ -56,7 +56,19 @@ function readCache(): UsageCache | null {
     if (!existsSync(cachePath)) return null;
 
     const content = readFileSync(cachePath, 'utf-8');
-    return JSON.parse(content);
+    const cache = JSON.parse(content) as UsageCache;
+
+    // Re-hydrate Date objects from JSON strings
+    if (cache.data) {
+      if (cache.data.fiveHourResetsAt) {
+        cache.data.fiveHourResetsAt = new Date(cache.data.fiveHourResetsAt as unknown as string);
+      }
+      if (cache.data.weeklyResetsAt) {
+        cache.data.weeklyResetsAt = new Date(cache.data.weeklyResetsAt as unknown as string);
+      }
+    }
+
+    return cache;
   } catch {
     return null;
   }
@@ -133,10 +145,13 @@ function readFileCredentials(): OAuthCredentials | null {
     const content = readFileSync(credPath, 'utf-8');
     const parsed = JSON.parse(content);
 
-    if (parsed.accessToken) {
+    // Handle nested structure (claudeAiOauth wrapper)
+    const creds = parsed.claudeAiOauth || parsed;
+
+    if (creds.accessToken) {
       return {
-        accessToken: parsed.accessToken,
-        expiresAt: parsed.expiresAt,
+        accessToken: creds.accessToken,
+        expiresAt: creds.expiresAt,
       };
     }
   } catch {
@@ -236,9 +251,22 @@ function parseUsageResponse(response: UsageApiResponse): RateLimits | null {
     return Math.max(0, Math.min(100, v));
   };
 
+  // Parse ISO 8601 date strings to Date objects
+  const parseDate = (dateStr: string | undefined): Date | null => {
+    if (!dateStr) return null;
+    try {
+      const date = new Date(dateStr);
+      return isNaN(date.getTime()) ? null : date;
+    } catch {
+      return null;
+    }
+  };
+
   return {
     fiveHourPercent: clamp(fiveHour),
     weeklyPercent: clamp(sevenDay),
+    fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
+    weeklyResetsAt: parseDate(response.seven_day?.resets_at),
   };
 }
 

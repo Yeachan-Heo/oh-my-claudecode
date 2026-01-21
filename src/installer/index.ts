@@ -48,7 +48,7 @@ export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CORE_COMMANDS: string[] = [];
 
 /** Current version */
-export const VERSION = '3.0.9';
+export const VERSION = '3.1.0';
 
 /** Installation result */
 export interface InstallResult {
@@ -427,7 +427,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         '    try {',
         '      const versions = readdirSync(pluginCacheBase);',
         '      if (versions.length > 0) {',
-        '        const latestVersion = versions.sort().reverse()[0];',
+        '        const latestVersion = versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()[0];',
         '        const pluginPath = join(pluginCacheBase, latestVersion, "dist/hud/index.js");',
         '        if (existsSync(pluginPath)) {',
         '          await import(pluginPath);',

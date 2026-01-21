@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-01-21
+
+### Added
+- **8 new specialized agents** (ECC integration):
+  - `security-reviewer` / `security-reviewer-low`: Security vulnerability analysis
+  - `build-fixer` / `build-fixer-low`: Build error diagnosis and fixes
+  - `tdd-guide` / `tdd-guide-low`: Test-driven development guidance
+  - `code-reviewer` / `code-reviewer-low`: Code review and quality feedback
+- **Update notification**: omc-setup now checks for and notifies about available updates
+- **Rate limit reset times**: HUD shows when limits reset (e.g., `5h:0% wk:100%(1d6h)`)
+- **Todos on second line**: HUD now displays todos separately as `todos:3/5 (working: task)`
+
+### Changed
+- **omc-setup rebuild behavior**: Now shows version changes when refreshing CLAUDE.md
+- **Cache clearing**: omc-setup automatically removes stale plugin cache versions
+- **API timeout**: Increased from 5s to 10s for slower connections
+- **Cache TTL**: Reduced from 60s to 30s for fresher rate limit data
+
+### Fixed
+- **Credential reading**: Handle nested `claudeAiOauth` wrapper in credentials.json
+- **HUD semver sorting**: Fixed version comparison to use numeric sort instead of alphabetical
+- **ESLint**: Disabled `no-control-regex` for ANSI escape code handling in tests
+
 ## [3.0.11] - 2026-01-20
 
 ### Changed

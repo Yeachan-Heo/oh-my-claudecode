@@ -79,11 +79,33 @@ I'll intelligently determine what to stop based on context.
 
 ## What's Under the Hood
 
-- **19 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester (with tier variants)
+- **27 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester (with tier variants)
 - **26 Skills** - orchestrate, ultrawork, ralph, planner, deepsearch, deepinit, git-master, frontend-ui-ux, learner, and more
 - **HUD Statusline** - Real-time visualization of orchestration state
 - **Learned Skills** - Extract reusable insights from sessions with `/learner`
 - **Memory System** - Persistent context that survives compaction
+
+---
+
+## HUD Statusline
+
+The HUD displays real-time orchestration status in Claude Code's status bar:
+
+```
+[OMC] | 5h:0% wk:100%(1d6h) | ctx:45% | agents:Ae
+todos:3/5 (working: Implementing feature)
+```
+
+**Line 1:** Core metrics
+- Rate limits with reset times (e.g., `wk:100%(1d6h)` = resets in 1 day 6 hours)
+- Context window usage
+- Active agents (coded by type and model tier)
+
+**Line 2:** Todo progress
+- Completion ratio (`3/5`)
+- Current task in progress
+
+Run `/oh-my-claudecode:hud setup` to configure display options.
 
 ---
 

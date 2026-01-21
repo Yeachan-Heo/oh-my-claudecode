@@ -86,15 +86,16 @@ describe('Agents Element', () => {
     });
 
     it('should handle multiple agents', () => {
+      const now = Date.now();
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
-        createAgent('oh-my-claudecode:explore', 'haiku'),
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
+        createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 2000)),
+        createAgent('oh-my-claudecode:explore', 'haiku', new Date(now - 1000)),
+        createAgent('oh-my-claudecode:executor', 'sonnet', new Date(now)),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toBeDefined();
-      // Should contain codes for all three
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:Aex');
+      // Should contain codes for all three (freshest first: x, e, A)
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:xeA');
     });
 
     it('should handle agents without model info', () => {
@@ -199,9 +200,10 @@ describe('Agents Element', () => {
   });
 
   describe('renderAgentsByFormat (format router)', () => {
+    const now = Date.now();
     const agents: ActiveAgent[] = [
-      createAgent('oh-my-claudecode:architect', 'opus'),
-      createAgent('oh-my-claudecode:explore', 'haiku'),
+      createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 1000)),
+      createAgent('oh-my-claudecode:explore', 'haiku', new Date(now)),
     ];
 
     it('should route to count format', () => {
@@ -212,7 +214,8 @@ describe('Agents Element', () => {
     it('should route to codes format', () => {
       const result = renderAgentsByFormat(agents, 'codes');
       expect(result).toContain('agents:');
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:Ae');
+      // Freshest first: explore (e), then architect (A)
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eA');
     });
 
     it('should route to codes-duration format', () => {
@@ -252,9 +255,9 @@ describe('Agents Element', () => {
 
     it('should default to codes for unknown format', () => {
       const result = renderAgentsByFormat(agents, 'unknown' as any);
-      // Should fall back to codes format
+      // Should fall back to codes format (freshest first: e, A)
       expect(result).toContain('agents:');
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:Ae');
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eA');
     });
   });
 

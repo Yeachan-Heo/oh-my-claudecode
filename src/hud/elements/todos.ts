@@ -44,7 +44,7 @@ export function renderTodos(todos: TodoItem[]): string | null {
 /**
  * Render current in-progress todo (for full mode).
  *
- * Format: todos:2/5 "Implementing feature"
+ * Format: todos:2/5 (working: Implementing feature)
  */
 export function renderTodosWithCurrent(todos: TodoItem[]): string | null {
   if (todos.length === 0) {
@@ -73,8 +73,8 @@ export function renderTodosWithCurrent(todos: TodoItem[]): string | null {
     // Truncate long active form
     const activeText = inProgress.activeForm || inProgress.content;
     const truncated =
-      activeText.length > 25 ? activeText.slice(0, 22) + '...' : activeText;
-    result += ` ${DIM}"${truncated}"${RESET}`;
+      activeText.length > 30 ? activeText.slice(0, 27) + '...' : activeText;
+    result += ` ${DIM}(working: ${truncated})${RESET}`;
   }
 
   return result;
