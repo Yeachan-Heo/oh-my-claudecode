@@ -8,9 +8,11 @@
 import { z } from 'zod';
 import { lspTools } from './lsp-tools.js';
 import { astTools } from './ast-tools.js';
+import { pythonReplTool } from './python-repl/index.js';
 
 export { lspTools } from './lsp-tools.js';
 export { astTools } from './ast-tools.js';
+export { pythonReplTool } from './python-repl/index.js';
 
 /**
  * Generic tool definition type
@@ -27,7 +29,8 @@ export interface GenericToolDefinition {
  */
 export const allCustomTools: GenericToolDefinition[] = [
   ...lspTools as unknown as GenericToolDefinition[],
-  ...astTools as unknown as GenericToolDefinition[]
+  ...astTools as unknown as GenericToolDefinition[],
+  pythonReplTool as unknown as GenericToolDefinition
 ];
 
 /**

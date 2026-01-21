@@ -26,6 +26,7 @@ export { analystAgent } from './analyst.js';
 export { executorAgent } from './executor.js';
 export { plannerAgent } from './planner.js';
 export { qaTesterAgent } from './qa-tester.js';
+export { scientistAgent } from './scientist.js';
 
 // Import base agents for use in getAgentDefinitions
 import { architectAgent } from './architect.js';
@@ -39,6 +40,7 @@ import { analystAgent } from './analyst.js';
 import { executorAgent } from './executor.js';
 import { plannerAgent } from './planner.js';
 import { qaTesterAgent } from './qa-tester.js';
+import { scientistAgent } from './scientist.js';
 
 // ============================================================
 // DYNAMIC PROMPT LOADING
@@ -312,6 +314,28 @@ done
   model: 'opus'
 };
 
+/**
+ * Scientist-Low Agent - Quick Data Inspection (Haiku)
+ */
+export const scientistLowAgent: AgentConfig = {
+  name: 'scientist-low',
+  description: 'Quick data inspection and simple statistics (Haiku). Use for fast, simple queries.',
+  prompt: loadAgentPrompt('scientist-low'),
+  tools: ['Read', 'Glob', 'Grep', 'Bash', 'python_repl'],
+  model: 'haiku'
+};
+
+/**
+ * Scientist-High Agent - Complex Research (Opus)
+ */
+export const scientistHighAgent: AgentConfig = {
+  name: 'scientist-high',
+  description: 'Complex research, hypothesis testing, and ML specialist (Opus). Use for deep analysis.',
+  prompt: loadAgentPrompt('scientist-high'),
+  tools: ['Read', 'Glob', 'Grep', 'Bash', 'python_repl'],
+  model: 'opus'
+};
+
 // ============================================================
 // SPECIALIZED AGENTS (Security, Build, TDD, Code Review)
 // ============================================================
@@ -430,6 +454,7 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     executor: executorAgent,
     planner: plannerAgent,
     'qa-tester': qaTesterAgent,
+    scientist: scientistAgent,
     // Tiered variants (prompts loaded from /agents/*.md)
     'architect-medium': architectMediumAgent,
     'architect-low': architectLowAgent,
@@ -440,6 +465,8 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     'designer-low': designerLowAgent,
     'designer-high': designerHighAgent,
     'qa-tester-high': qaTesterHighAgent,
+    'scientist-low': scientistLowAgent,
+    'scientist-high': scientistHighAgent,
     // Specialized agents (Security, Build, TDD, Code Review)
     'security-reviewer': securityReviewerAgent,
     'security-reviewer-low': securityReviewerLowAgent,

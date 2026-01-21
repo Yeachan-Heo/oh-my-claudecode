@@ -68,6 +68,30 @@ Want explicit control? Include these words anywhere in your message:
 
 ---
 
+## Data Analysis with Scientist Agent (v3.3.0)
+
+The scientist agent provides persistent Python execution for data analysis:
+
+```
+# Variables persist across calls - no need to reload data!
+python_repl(action="execute", researchSessionID="analysis",
+            code="import pandas as pd; df = pd.read_csv('data.csv')")
+
+# df still exists in the next call
+python_repl(action="execute", researchSessionID="analysis",
+            code="print(df.describe())")
+```
+
+**Features:**
+- Variable persistence via Unix socket bridge
+- Structured markers: `[FINDING]`, `[STAT:*]`, `[DATA]`, `[LIMITATION]`
+- Memory tracking (RSS/VMS)
+- Session locking for safe concurrent access
+
+Use `/research` to orchestrate parallel scientist agents for complex research tasks.
+
+---
+
 ## Stopping Things
 
 Just say:
@@ -81,8 +105,9 @@ I'll intelligently determine what to stop based on context.
 
 ## What's Under the Hood
 
-- **27 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester (with tier variants)
-- **28 Skills** - orchestrate, ultrawork, ralph, planner, deepsearch, deepinit, git-master, frontend-ui-ux, learner, and more
+- **28 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester, scientist (with tier variants)
+- **29 Skills** - orchestrate, ultrawork, ralph, planner, deepsearch, deepinit, git-master, frontend-ui-ux, learner, research, and more
+- **Persistent Python REPL** - True variable persistence for data analysis (new in 3.3.0)
 - **HUD Statusline** - Real-time visualization of orchestration state
 - **Learned Skills** - Extract reusable insights from sessions with `/learner`
 - **Memory System** - Persistent context that survives compaction

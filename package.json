@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "3.2.5",
+  "version": "3.3.0",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "agents",
+    "bridge",
     "commands",
     "hooks",
     "scripts",

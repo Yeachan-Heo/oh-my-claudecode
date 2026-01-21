@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-01-21
+
+### Added
+
+- **Scientist Agent**: New specialized agent for data analysis and research execution
+  - Three tiers: `scientist` (Sonnet), `scientist-low` (Haiku), `scientist-high` (Opus)
+  - Structured output markers: `[OBJECTIVE]`, `[DATA]`, `[FINDING]`, `[STAT:*]`, `[LIMITATION]`
+  - Stage execution markers for multi-phase research workflows
+  - Quality gates ensuring statistical evidence for all findings
+
+- **Persistent Python REPL Tool** (`python_repl`): True variable persistence for data analysis
+  - Unix socket-based Python bridge server (`bridge/gyoshu_bridge.py`)
+  - Actions: `execute`, `reset`, `get_state`, `interrupt`
+  - Variables persist across tool invocations - no file-based state needed
+  - JSON-RPC 2.0 protocol with structured marker parsing
+  - Memory tracking (RSS/VMS) in output
+  - Session locking with PID verification for safe concurrent access
+  - Security: Socket mode 0600, path validation, symlink protection, signal escalation
+
+- **Research Skill** (`/research`): Orchestrate parallel scientist agents for complex research
+  - Session management with state tracking
+  - Promise tags for AUTO mode loop control
+  - Tag extraction for findings aggregation
+
+### Technical Details
+
+**New Files Created:**
+- `src/tools/python-repl/` - Complete MCP tool implementation (~2,100 lines)
+  - `types.ts` - TypeScript interfaces
+  - `paths.ts` - Path utilities with security validation
+  - `session-lock.ts` - File-based locks with PID verification
+  - `socket-client.ts` - JSON-RPC 2.0 client
+  - `bridge-manager.ts` - Python process lifecycle management
+  - `tool.ts` - Main tool handler
+  - `index.ts` - Tool export
+- `src/lib/atomic-write.ts` - Atomic file operations
+- `bridge/gyoshu_bridge.py` - Python JSON-RPC 2.0 server (~850 lines)
+- `src/agents/scientist.ts` - Scientist agent definition
+- `agents/scientist.md`, `scientist-low.md`, `scientist-high.md` - Agent prompts
+- `skills/research/SKILL.md` - Research orchestration skill
+
+**Usage Example:**
+```
+# Variables persist across calls!
+python_repl(action="execute", researchSessionID="analysis",
+            code="import pandas as pd; df = pd.read_csv('data.csv')")
+
+# df still exists - no need to reload
+python_repl(action="execute", researchSessionID="analysis",
+            code="print(df.describe())")
+```
+
+### Changed
+
+- Agent count: 28 (added scientist, scientist-low, scientist-high)
+- Skill count: 29 (added research)
+- Updated `src/tools/index.ts` to include `pythonReplTool`
+- Updated `package.json` to include `bridge/` in published files
+
+---
+
 ## [3.2.5] - 2026-01-21
 
 ### Added
