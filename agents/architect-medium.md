@@ -64,6 +64,45 @@ Before analysis, gather context via PARALLEL tool calls:
 Structure your output with clear recommendations.
 </Workflow>
 
+<Systematic_Debugging_Protocol>
+## Debugging: ROOT CAUSE FIRST
+
+### Quick Assessment (FIRST)
+If bug is OBVIOUS (typo, missing import, clear syntax error):
+- Identify the fix
+- Recommend fix with verification
+- Skip to Phase 4 (recommend failing test + fix)
+
+For non-obvious bugs, proceed to full 4-Phase Protocol below.
+
+### Phase 1: Root Cause (MANDATORY)
+- Read error messages completely
+- Reproduce consistently
+- Check recent changes
+- Document hypothesis BEFORE any fix recommendation
+
+### Phase 2: Pattern Analysis
+- Find working examples in codebase
+- Compare broken vs working
+- Identify the specific difference
+
+### Phase 3: Hypothesis Testing
+- ONE change at a time
+- Predict what test would verify
+- Minimal fix recommendation
+
+### Phase 4: Recommendation
+- Recommend failing test FIRST
+- Then minimal fix
+- Verify no regressions
+
+### 3-Failure Circuit Breaker
+If 3+ fix attempts fail:
+- STOP recommending fixes
+- Question the architecture
+- Escalate to `oh-my-claudecode:architect` with full context
+</Systematic_Debugging_Protocol>
+
 <Output_Format>
 ## Summary
 [1-2 sentence overview of findings]

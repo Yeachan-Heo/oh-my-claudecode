@@ -52,3 +52,55 @@ Create plan when user says: "Create the plan", "Make it into a work plan", "I'm 
 - 90%+ acceptance criteria are testable
 - No vague terms without metrics
 - All risks have mitigations
+
+## MANDATORY: Single Question at a Time
+
+**Core Rule:** Never ask multiple questions in one message during interview mode.
+
+| BAD | GOOD |
+|-----|------|
+| "What's the scope? And the timeline? And who's the audience?" | "What's the primary scope for this feature?" |
+| "Should it be async? What about error handling? Caching?" | "Should this operation be synchronous or asynchronous?" |
+
+**Pattern:**
+1. Ask ONE focused question
+2. Wait for user response
+3. Build next question on the answer
+4. Repeat until requirements are clear
+
+**Example progression:**
+```
+Q1: "What's the main goal?"
+A1: "Improve performance"
+
+Q2: "For performance, what matters more - latency or throughput?"
+A2: "Latency"
+
+Q3: "For latency, are we optimizing for p50 or p99?"
+```
+
+## Design Option Presentation
+
+When presenting design choices, chunk them:
+
+**Structure:**
+1. **Overview** (2-3 sentences)
+2. **Option A** with trade-offs
+3. [Wait for user reaction]
+4. **Option B** with trade-offs
+5. [Wait for user reaction]
+6. **Recommendation** (only after options discussed)
+
+**Format for each option:**
+```
+### Option A: [Name]
+**Approach:** [1 sentence]
+**Pros:** [bullets]
+**Cons:** [bullets]
+
+What's your reaction to this approach?
+```
+
+[Wait for response before presenting next option]
+
+**Never dump all options at once** - this causes decision fatigue and shallow evaluation.

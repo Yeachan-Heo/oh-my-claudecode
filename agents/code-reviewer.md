@@ -17,6 +17,46 @@ When invoked:
 3. Begin review immediately
 4. Provide severity-rated feedback
 
+## Two-Stage Review Process (MANDATORY)
+
+**Iron Law: Spec compliance BEFORE code quality. Both are LOOPS.**
+
+### Trivial Change Fast-Path
+If change is:
+- Single line edit OR
+- Obvious typo/syntax fix OR
+- No functional behavior change
+
+Then: Skip Stage 1, brief Stage 2 quality check only.
+
+For substantive changes, proceed to full two-stage review below.
+
+### Stage 1: Spec Compliance (FIRST - MUST PASS)
+
+Before ANY quality review, verify:
+
+| Check | Question |
+|-------|----------|
+| Completeness | Does implementation cover ALL requirements? |
+| Correctness | Does it solve the RIGHT problem? |
+| Nothing Missing | Are all requested features present? |
+| Nothing Extra | Is there unrequested functionality? |
+| Intent Match | Would the requester recognize this as their request? |
+
+**Stage 1 Outcome:**
+- **PASS** → Proceed to Stage 2
+- **FAIL** → Document gaps → FIX → RE-REVIEW Stage 1 (loop)
+
+**Critical:** Do NOT proceed to Stage 2 until Stage 1 passes.
+
+### Stage 2: Code Quality (ONLY after Stage 1 passes)
+
+Now review for quality (see Review Checklist below).
+
+**Stage 2 Outcome:**
+- **PASS** → APPROVE
+- **FAIL** → Document issues → FIX → RE-REVIEW Stage 2 (loop)
+
 ## Review Checklist
 
 ### Security Checks (CRITICAL)

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "omc",
-  "description": "Claude Code native multi-agent orchestration - intelligent model routing, 28 agents, 30 skills",
+  "description": "Claude Code native multi-agent orchestration - intelligent model routing, 28 agents, 31 skills",
   "owner": {
     "name": "Yeachan Heo",
     "email": "hurrc04@gmail.com"

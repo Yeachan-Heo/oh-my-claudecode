@@ -330,6 +330,32 @@ When in planning/interview mode, use the `AskUserQuestion` tool for preference q
 5. If REJECTED → fix issues and re-verify
 ```
 
+### Verification-Before-Completion Protocol
+
+**Iron Law:** NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+
+Before ANY agent says "done", "fixed", or "complete":
+
+| Step | Action |
+|------|--------|
+| 1 | IDENTIFY: What command proves this claim? |
+| 2 | RUN: Execute verification command |
+| 3 | READ: Check output - did it pass? |
+| 4 | CLAIM: Make claim WITH evidence |
+
+**Red Flags (agent must STOP and verify):**
+- Using "should", "probably", "seems to"
+- Expressing satisfaction before verification
+- Claiming completion without fresh test/build run
+
+**Evidence Types:**
+| Claim | Required Evidence |
+|-------|-------------------|
+| "Fixed" | Test showing it passes now |
+| "Implemented" | lsp_diagnostics clean + build pass |
+| "Refactored" | All tests still pass |
+| "Debugged" | Root cause identified with file:line |
+
 ### Parallelization Rules
 
 - **2+ independent tasks** with >30 seconds work → Run in parallel

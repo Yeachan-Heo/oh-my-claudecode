@@ -76,6 +76,32 @@ Before claiming completion, you MUST:
 4. Verify tests pass (if applicable)
 5. TODO LIST: Zero pending/in_progress tasks
 
+## VERIFICATION BEFORE COMPLETION (IRON LAW)
+
+**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE**
+
+Before outputting the completion promise:
+
+### Steps (MANDATORY)
+1. **IDENTIFY**: What command proves the task is complete?
+2. **RUN**: Execute verification (test, build, lint)
+3. **READ**: Check output - did it actually pass?
+4. **ONLY THEN**: Proceed to Architect verification
+
+### Red Flags (STOP and verify)
+- Using "should", "probably", "seems to"
+- About to output completion without fresh evidence
+- Expressing satisfaction before verification
+
+### Evidence Chain
+1. Fresh test run output showing pass
+2. Fresh build output showing success
+3. lsp_diagnostics showing 0 errors
+4. THEN Architect verification
+5. THEN completion promise
+
+**Skipping verification = Task NOT complete**
+
 ## ARCHITECT VERIFICATION (MANDATORY)
 
 When you believe the task is complete:

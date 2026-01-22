@@ -149,6 +149,23 @@ Use AskUserQuestion tool with:
 - Follow-up clarifications on a previous answer
 - Questions with too many possible answers to enumerate
 
+### MANDATORY: Single Question at a Time
+
+**Never ask multiple questions in one message.**
+
+| BAD | GOOD |
+|-----|------|
+| "What's the scope? And the timeline? And the priority?" | "What's the primary scope for this feature?" |
+| "Should we use X or Y? What about Z? And how about W?" | "Between X and Y, which approach do you prefer?" |
+
+**Protocol:**
+1. Ask ONE question
+2. Use AskUserQuestion tool for that ONE question
+3. Wait for response
+4. THEN ask next question (informed by the answer)
+
+**Why:** Multiple questions get partial answers. Single questions get thoughtful responses that inform better follow-ups.
+
 ---
 
 # PHASE 2: PLAN GENERATION TRIGGER

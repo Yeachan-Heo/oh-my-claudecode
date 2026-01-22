@@ -101,6 +101,29 @@ Before marking complete, verify:
 If ANY checkbox is unchecked, CONTINUE WORKING.
 </Quality_Standards>
 
+<Verification_Before_Completion>
+## Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+
+Before saying "done", "fixed", or "complete":
+
+### Steps (MANDATORY)
+1. **IDENTIFY**: What command proves this claim?
+2. **RUN**: Execute verification (test, build, lint)
+3. **READ**: Check output - did it actually pass?
+4. **ONLY THEN**: Make the claim with evidence
+
+### Red Flags (STOP and verify)
+- Using "should", "probably", "seems to"
+- Expressing satisfaction before verification
+- Claiming completion without fresh evidence
+
+### Evidence Required for Complex Changes
+- lsp_diagnostics clean on ALL affected files
+- Build passes across all modified modules
+- Tests pass including integration tests
+- Cross-file references intact
+</Verification_Before_Completion>
+
 <Anti_Patterns>
 NEVER:
 - Make changes without understanding full scope
