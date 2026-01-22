@@ -75,6 +75,38 @@ Ralplan maintains persistent state in `.omc/ralplan-state.json` to track progres
 
 **Phases**: `planner_planning` → `architect_consultation` → `critic_review` → `handling_verdict` → `complete`
 
+## Plan Mode Interaction (CRITICAL)
+
+**When ralplan is invoked while Plan mode is active:**
+
+The Planner agent has a PHASE 3.5 (CONFIRMATION) that normally requires user confirmation before proceeding. **This MUST be bypassed within ralplan because the Critic serves as the reviewer, not the user.**
+
+### Mandatory Constraints
+
+| Constraint | Rationale |
+|------------|-----------|
+| **Planner MUST skip PHASE 3.5 confirmation** | Critic reviews the plan, not the user |
+| **Critic MUST run before any plan approval** | No plan is approved without Critic verdict |
+| **DO NOT exit plan mode until Critic has rendered verdict** | Premature exit skips the review step |
+| **Log `[RALPLAN] Critic review required before approval`** | Observability for debugging |
+
+### Flow When Plan Mode Is Active
+
+```
+1. Orchestrator invokes ralplan skill
+2. Log: [RALPLAN] Starting - Critic review will be required
+3. Spawn Planner in DIRECT PLANNING MODE (no interview, no confirmation)
+4. Planner outputs PLAN_READY: <path>
+5. Log: [RALPLAN] Plan ready, invoking Critic for review
+6. Spawn Critic with plan path  <-- MUST HAPPEN
+7. Critic renders OKAY or REJECT
+8. ONLY THEN can plan be approved or refined
+```
+
+**CRITICAL: The Critic invocation is MANDATORY. If the Planner completes and signals plan ready, the orchestrator MUST invoke the Critic before any form of plan approval or user confirmation.**
+
+---
+
 ## Execution Protocol
 
 ### Initialization
@@ -96,12 +128,15 @@ The skill begins by establishing the planning environment:
 The Planner creates an initial plan based on task context:
 
 - Invoke Planner in **direct planning mode** (bypassing interview since task context is pre-gathered)
+- **CRITICAL: Planner MUST skip PHASE 3.5 (CONFIRMATION)** - the Critic will review, not the user
 - Planner receives task context directly without preliminary questioning
 - Planner mandatorily consults with Metis for gap detection
 - Planner generates plan directly to `.omc/plans/[feature-name].md`
 - Plan includes: requirements summary, concrete acceptance criteria, specific implementation steps with file references, risk identification with mitigations, and verification steps
 - Signal completion with `PLAN_READY: .omc/plans/[filename].md`
+- **After PLAN_READY: DO NOT approve or confirm the plan. Proceed to Critic Review.**
 - Extract plan path from completion signal and update state
+- Log: `[RALPLAN] Critic review required before approval`
 
 ### Architect Consultation (Conditional)
 
@@ -112,13 +147,25 @@ The Architect provides strategic guidance in two scenarios:
 
 When invoked, the Architect receives file paths to read for analysis, not summaries. This enables thorough examination of the existing codebase context before providing recommendations.
 
-### Critic Review
+### Critic Review (MANDATORY - CANNOT BE SKIPPED)
+
+**CRITICAL: This phase MUST execute. The Critic is the gatekeeper for plan approval.**
+
+Log at start: `[RALPLAN] Invoking Critic for plan review`
 
 The Critic examines the plan against quality standards:
 
 - Critic receives the plan file path (per its design)
 - Critic conducts thorough review of plan completeness and feasibility
 - Critic emits verdict: either `OKAY` (approval) or `REJECT` with specific issues
+
+**Enforcement Rules:**
+1. If Planner signals PLAN_READY, Critic MUST be invoked immediately
+2. DO NOT exit ralplan loop before Critic verdict
+3. DO NOT request user confirmation before Critic verdict
+4. DO NOT trigger any plan mode exit behavior before Critic verdict
+
+Log after Critic completes: `[RALPLAN] Critic verdict: <OKAY|REJECT>`
 
 ### Verdict Handling and Iteration
 
@@ -210,8 +257,14 @@ To stop an active ralplan session:
 
 1. **Initialize state** and log: `[RALPLAN Iteration 0/5] Initializing...`
 2. **Parse task** from user input
-3. **Spawn Planner** in direct planning mode
-4. **Iterate** through planning loop with observability logging at each phase
-5. **Complete** when Critic approves or max iterations reached with warnings
+3. **Spawn Planner** in direct planning mode (SKIP Planner's PHASE 3.5 confirmation)
+4. **Wait for PLAN_READY** signal from Planner
+5. **Log:** `[RALPLAN] Critic review required before approval`
+6. **Invoke Critic** with plan file path (MANDATORY - CANNOT BE SKIPPED)
+7. **Log:** `[RALPLAN] Critic verdict: <verdict>`
+8. **Handle verdict** - if REJECT, loop back to step 3 with feedback
+9. **Complete** ONLY when Critic approves or max iterations reached with warnings
+
+**HARD RULE:** Steps 5-7 are NON-NEGOTIABLE. No plan approval, user confirmation, or plan mode exit can occur before the Critic has rendered its verdict. This prevents the plan mode confirmation flow from short-circuiting the ralplan review loop.
 
 The iterative loop refines the plan until it meets the rigorous standards of all three agents, ensuring comprehensive, architecturally sound work plans ready for execution.
