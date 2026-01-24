@@ -62,11 +62,76 @@ Include these words anywhere in your message:
 |---------|--------|
 | `ralph` | Persistence mode - won't stop until done |
 | `ralplan` | Iterative planning with consensus |
-| `ulw` | Maximum parallel execution |
+| `ulw` / `ultrawork` | Maximum parallel execution |
+| `ultrapilot` | Parallel autopilot (3-5x faster) |
+| `swarm` | N coordinated agents |
+| `pipeline` | Sequential agent chaining |
+| `eco` / `ecomode` | Token-efficient parallel execution |
 | `plan` | Start a planning interview |
 | `autopilot` / `ap` | Full autonomous execution |
 
-**Combine them:** `ralph ulw: migrate the database`
+**Combine them:** `ralph ulw: migrate the database` or `eco: refactor auth system`
+
+---
+
+## Execution Modes (v3.4.0)
+
+### Ultrapilot: Parallel Autopilot
+
+3-5x faster execution with up to 5 parallel workers. Perfect for multi-component systems and large refactoring:
+
+```
+/oh-my-claudecode:ultrapilot "build a fullstack todo app"
+```
+
+**How it works:**
+- Automatic task decomposition into parallelizable subtasks
+- Non-overlapping file ownership prevents conflicts
+- Parallel execution with intelligent coordination
+- Automatic conflict detection and resolution
+
+---
+
+### Swarm: Coordinated Agents
+
+N independent agents claiming tasks from a shared pool:
+
+```
+/oh-my-claudecode:swarm 5:executor "fix all TypeScript errors"
+```
+
+**Features:**
+- Atomic task claiming prevents duplicate work
+- 5-minute timeout per task with auto-release
+- Scales from 2 to 10 workers
+
+---
+
+### Pipeline: Sequential Chaining
+
+Chain agents together with data passing between stages:
+
+```
+/oh-my-claudecode:pipeline explore:haiku -> architect:opus -> executor:sonnet
+```
+
+**Built-in Presets:**
+- `review` - explore → architect → critic → executor
+- `implement` - planner → executor → tdd-guide
+- `debug` - explore → architect → build-fixer
+- `security` - explore → security-reviewer → executor
+
+---
+
+### Ecomode: Token-Efficient
+
+Maximum parallelism with Haiku where possible, falling back to Sonnet/Opus for complex reasoning:
+
+```
+/oh-my-claudecode:ecomode "refactor the authentication system"
+```
+
+**30-50% token savings** compared to standard ultrawork while maintaining quality.
 
 ---
 
@@ -187,11 +252,12 @@ After configuration, restart Claude Code for changes to take effect.
 
 ## What's Under the Hood
 
-- **28 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester, scientist (with tier variants)
-- **31 Skills** - orchestrate, ultrawork, ralph, planner, deepsearch, deepinit, git-master, frontend-ui-ux, learner, research, mcp-setup, and more
+- **32 Specialized Agents** - architect, researcher, explore, designer, writer, vision, critic, analyst, executor, planner, qa-tester, scientist (with tier variants including explore-high)
+- **40 Skills** - orchestrate, autopilot, ultrawork, ultrapilot, swarm, pipeline, ecomode, ralph, planner, ralplan, deepsearch, analyze, research, tdd, build-fix, code-review, security-review, git-master, frontend-ui-ux, learner, mcp-setup, cancel (unified), and more
+- **5 Execution Modes** - Autopilot (autonomous), Ultrapilot (3-5x parallel), Swarm (coordinated), Pipeline (sequential), Ecomode (token-efficient)
 - **MCP Server Support** - Easy configuration of Context7, Exa, GitHub, and custom MCP servers
 - **Persistent Python REPL** - True variable persistence for data analysis
-- **Research Workflow** - Parallel scientist orchestration with `/oh-my-claudecode:research` command (new in 3.3.x)
+- **Research Workflow** - Parallel scientist orchestration with `/oh-my-claudecode:research` command
 - **HUD Statusline** - Real-time visualization of orchestration state
 - **Learned Skills** - Extract reusable insights from sessions with `/oh-my-claudecode:learner`
 - **Memory System** - Persistent context that survives compaction

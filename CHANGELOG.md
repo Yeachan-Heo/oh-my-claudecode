@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.1] - 2026-01-24
+
+### Added
+
+#### New Features
+- **Metadata Sync System**: Automated documentation synchronization tool
+  - `scripts/sync-metadata.ts` - Syncs version, agent count, skill count across all docs
+  - npm scripts: `sync-metadata`, `sync-metadata:verify`, `sync-metadata:dry-run`
+  - `docs/SYNC-SYSTEM.md` - Comprehensive documentation (528 lines)
+  - Dynamically counts agents (32) and skills (40) from filesystem
+  - Single source of truth: package.json
+
+- **New Skills** (3):
+  - `build-fix` - Fix build and TypeScript errors with minimal changes
+  - `code-review` - Comprehensive code review with severity ratings
+  - `security-review` - OWASP Top 10 security vulnerability detection
+
+- **New Commands** (5):
+  - `cancel` - Unified cancellation for all modes
+  - `cancel-ecomode` - Cancel ecomode (deprecated, use unified cancel)
+  - `pipeline` - Sequential agent chaining with built-in presets
+  - `planner` - Strategic planning with interview workflow
+  - `swarm` - N coordinated agents with atomic task claiming
+
+### Fixed
+
+- **Documentation Consistency** (33 issues):
+  - Updated all agent counts from 19/28 to 32 across all documentation
+  - Updated skill counts from 21/31/37 to 40 across all documentation
+  - Added v3.4.0 features section to docs/FULL-README.md
+  - Added v3.3.x → v3.4.0 migration guide (220 lines)
+  - Fixed section titles ("The Twelve Agents" → "The 32 Specialized Agents")
+  - Documented unified cancel command with deprecation notices
+  - Fixed cross-reference inconsistencies
+
+- **Skill/Command Discrepancies**:
+  - Fixed 13 mismatches between skills/ and commands/ directories
+  - All user-invocable skills now have matching command files
+  - Documented 5 internal/silent skills (frontend-ui-ux, git-master, orchestrate, omc-default, omc-default-global)
+
+- **GitHub Metadata**:
+  - Updated repository description to highlight all 5 execution modes
+  - Added topics: multi-agent-systems, parallel-execution, automation
+  - Updated counts: 32 agents, 31+ skills → 40 skills
+
+- **Website Repository**:
+  - Updated oh-my-claudecode-website to v3.4.0
+  - Added ultrapilot, swarm, pipeline, ecomode features
+  - Updated agent count from 28 to 32
+
+### Changed
+
+- Total skill count: 37 → 40 (build-fix, code-review, security-review added)
+- Total command count: 32 → 35 (cancel, cancel-ecomode, pipeline, planner, swarm added)
+- Package.json: Added sync-metadata scripts and tsx dependency
+
 ## [3.4.0] - 2026-01-23
 
 ### Added

@@ -8,7 +8,7 @@
 
 import { readStdin, getContextPercent, getModelName } from './stdin.js';
 import { parseTranscript } from './transcript.js';
-import { readHudState, readHudConfig, getRunningTasks } from './state.js';
+import { readHudState, readHudConfig, getRunningTasks, initializeHUDState } from './state.js';
 import {
   readRalphStateForHud,
   readUltraworkStateForHud,
@@ -46,6 +46,9 @@ function calculateSessionHealth(
  */
 async function main(): Promise<void> {
   try {
+    // Initialize HUD state (cleanup stale/orphaned tasks)
+    await initializeHUDState();
+
     // Read stdin from Claude Code
     const stdin = await readStdin();
 
@@ -98,7 +101,7 @@ async function main(): Promise<void> {
     };
 
     // Render and output
-    const output = render(context, config);
+    const output = await render(context, config);
 
     // Replace spaces with non-breaking spaces for terminal alignment
     const formattedOutput = output.replace(/ /g, '\u00A0');

@@ -10,6 +10,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type { OmcHudState, BackgroundTask, HudConfig } from './types.js';
 import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from './types.js';
+import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './background-cleanup.js';
 
 // ============================================================================
 // Path Helpers
@@ -224,4 +225,18 @@ export function applyPreset(preset: HudConfig['preset']): HudConfig {
 
   writeHudConfig(newConfig);
   return newConfig;
+}
+
+/**
+ * Initialize HUD state with cleanup of stale/orphaned tasks.
+ * Should be called on HUD startup.
+ */
+export async function initializeHUDState(): Promise<void> {
+  // Clean up stale background tasks from previous sessions
+  const removedStale = await cleanupStaleBackgroundTasks();
+  const markedOrphaned = await markOrphanedTasksAsStale();
+
+  if (removedStale > 0 || markedOrphaned > 0) {
+    console.error(`HUD cleanup: removed ${removedStale} stale tasks, marked ${markedOrphaned} orphaned tasks`);
+  }
 }

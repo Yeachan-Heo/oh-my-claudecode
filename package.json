@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",
@@ -12,7 +12,9 @@
     }
   },
   "bin": {
-    "oh-my-claudecode": "dist/cli/index.js"
+    "oh-my-claudecode": "dist/cli/index.js",
+    "omc-analytics": "dist/cli/analytics.js",
+    "omc-cli": "dist/cli/index.js"
   },
   "files": [
     "dist",
@@ -37,6 +39,9 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src",
     "format": "prettier --write src/**/*.ts",
+    "sync-metadata": "tsx scripts/sync-metadata.ts",
+    "sync-metadata:verify": "tsx scripts/sync-metadata.ts --verify",
+    "sync-metadata:dry-run": "tsx scripts/sync-metadata.ts --dry-run",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
@@ -57,6 +62,7 @@
     "@vitest/ui": "^4.0.17",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.53.0",
     "vitest": "^4.0.17"

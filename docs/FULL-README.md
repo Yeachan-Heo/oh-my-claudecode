@@ -10,21 +10,21 @@
 
 # oh-my-claudecode
 
-[![Version](https://img.shields.io/badge/version-3.4.0-ff6b6b)](https://github.com/Yeachan-Heo/oh-my-claudecode)
-[![npm version](https://img.shields.io/npm/v/oh-my-claudecode?color=cb3837)](https://www.npmjs.com/package/oh-my-claudecode)
+[![Version](https://img.shields.io/badge/version-3.4.1-ff6b6b)](https://github.com/Yeachan-Heo/oh-my-claudecode)
+[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claudecode)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 **Multi-agent orchestration system for [Claude Code](https://docs.anthropic.com/claude-code)**
 
-[Install](#quick-install) • [Usage](#usage) • [Agents](#the-twelve-agents) • [Architecture](docs/ARCHITECTURE.md) • [Website](https://yeachan-heo.github.io/oh-my-claudecode-website)
+[Install](#quick-install) • [Usage](#usage) • [Agents](#the-32-specialized-agents) • [Architecture](docs/ARCHITECTURE.md) • [Website](https://yeachan-heo.github.io/oh-my-claudecode-website)
 
 </div>
 
 ---
 
-## ⚡ NEW in 3.0: HUD Statusline, Learned Skills & Enhanced Orchestration
+## ⚡ NEW in 3.4: HUD Statusline, Learned Skills & Enhanced Orchestration
 
 **Game-changing release:** Claude never forgets critical project knowledge, even through context compaction.
 
@@ -143,6 +143,102 @@ Background agent resumption with context preservation via `resumeSession()`.
 
 ---
 
+## NEW in 3.4.1: Parallel Execution & Advanced Workflows
+
+**Game-changing features:** Ultrapilot, swarm orchestration, and pipeline workflows for 3-5x faster execution.
+
+### 🚀 Ultrapilot: Parallel Autopilot
+
+Execute complex tasks with **up to 5 concurrent workers** for 3-5x speedup:
+
+```bash
+/oh-my-claudecode:ultrapilot "build a fullstack todo app"
+```
+
+**How it works:**
+- **Task decomposition engine** breaks complex tasks into parallelizable subtasks
+- **File ownership coordinator** assigns non-overlapping file sets to workers
+- **Workers execute in parallel**, coordinator manages shared files
+- **Automatic conflict detection** and resolution
+
+**Best for:** Multi-component systems, fullstack apps, large refactoring
+
+**State files:**
+- `.omc/state/ultrapilot-state.json` - Session state
+- `.omc/state/ultrapilot-ownership.json` - File ownership
+
+### 🐝 Swarm: Coordinated Agent Teams
+
+N coordinated agents with atomic task claiming from shared pool:
+
+```bash
+/oh-my-claudecode:swarm 5:executor "fix all TypeScript errors"
+```
+
+**Features:**
+- Shared task list with pending/claimed/done status
+- 5-minute timeout per task with auto-release
+- Clean completion when all tasks done
+- Scales from 2 to 10 workers
+
+### 🔗 Pipeline: Sequential Agent Chaining
+
+Chain agents with data passing between stages:
+
+```bash
+/oh-my-claudecode:pipeline explore:haiku -> architect:opus -> executor:sonnet
+```
+
+**Built-in Presets:**
+| Preset | Stages |
+|--------|--------|
+| `review` | explore → architect → critic → executor |
+| `implement` | planner → executor → tdd-guide |
+| `debug` | explore → architect → build-fixer |
+| `research` | parallel(researcher, explore) → architect → writer |
+| `refactor` | explore → architect-medium → executor-high → qa-tester |
+| `security` | explore → security-reviewer → executor → security-reviewer-low |
+
+### 💰 Ecomode: Token-Efficient Execution
+
+Maximum parallelism with **30-50% token savings**:
+
+```bash
+/oh-my-claudecode:ecomode "refactor the authentication system"
+```
+
+Smart model routing:
+- Simple tasks → Haiku (ultra-cheap)
+- Standard work → Sonnet (balanced)
+- Complex reasoning → Opus (when needed)
+
+### 🎯 Unified Cancel
+
+Smart cancellation that auto-detects active mode:
+
+```bash
+/oh-my-claudecode:cancel
+# Or just say: "stop", "cancel", "abort"
+```
+
+**Auto-detects and cancels:** autopilot, ultrapilot, ralph, ultrawork, ultraqa, ecomode, swarm, pipeline
+
+**Deprecation notice:** Individual cancel commands (`cancel-ralph`, `cancel-ultraqa`, `cancel-ultrawork`, `cancel-ecomode`) still work but are deprecated. Use `/oh-my-claudecode:cancel` instead.
+
+### 🔍 Explore-High Agent
+
+Opus-powered architectural search for complex codebase exploration:
+
+```bash
+Task(subagent_type="oh-my-claudecode:explore-high",
+     model="opus",
+     prompt="Find all authentication-related code patterns...")
+```
+
+**Best for:** Architectural analysis, cross-cutting concerns, complex refactoring planning
+
+---
+
 ## Quick Install
 
 Choose **ONE** installation method below. Do not mix methods.
@@ -232,7 +328,7 @@ Without running one of these commands, Claude operates with basic capabilities. 
 ### What These Commands Do
 
 1. ✅ Download latest CLAUDE.md with full omc orchestration prompt
-2. ✅ Configure 19 agents with intelligent model routing
+2. ✅ Configure 32 agents with intelligent model routing
 3. ✅ Enable magic keyword detection (ultrawork, search, analyze)
 4. ✅ Activate continuation enforcement (tasks complete before stopping)
 5. ✅ Set up skill composition (orchestrate + ultrawork + git-master, etc.)
@@ -266,9 +362,9 @@ The repository is also a Claude Code plugin with this structure:
 oh-my-claudecode/
 ├── .claude-plugin/
 │   └── plugin.json            # Plugin manifest
-├── agents/                    # 12 specialized subagents
-├── commands/                  # 12 slash commands
-├── skills/                    # 4 skills (ultrawork, deepinit, git-master, frontend-ui-ux)
+├── agents/                    # 32 specialized agents (tiered: architect, executor, explore, etc.)
+├── commands/                  # 37 slash commands
+├── skills/                    # 40 skills (orchestrate, ultrawork, ultrapilot, swarm, pipeline, ecomode, ralph, planner, research, tdd, build-fix, code-review, security-review, and more)
 ├── hooks/
 │   └── hooks.json             # Hook configuration
 └── scripts/                   # Hook scripts
@@ -462,19 +558,24 @@ Oh-my-claudecode includes 19 lifecycle hooks that enhance Claude Code's behavior
 
 ## Builtin Skills
 
-21 builtin skills provide specialized capabilities:
+40 builtin skills provide specialized capabilities:
 
 ### Core Skills
 | Skill | Description |
 |-------|-------------|
 | **orchestrate** | Multi-agent orchestration mode |
+| **autopilot** | Full autonomous execution from idea to working code |
 | **ultrawork** | Maximum performance with parallel agents |
-| **ralph-loop** | Self-referential development until completion |
+| **ultrapilot** | Parallel autopilot with 3-5x speedup (v3.4.0) |
+| **swarm** | N coordinated agents with task claiming (v3.4.0) |
+| **pipeline** | Sequential agent chaining (v3.4.0) |
+| **ecomode** | Token-efficient parallel execution (v3.4.0) |
+| **ralph** | Self-referential development until completion |
 | **ralph-init** | Initialize PRD for structured task tracking |
-| **ultrawork-ralph** | Maximum intensity + completion guarantee |
 | **ultraqa** | Autonomous QA cycling workflow |
 | **planner** | Strategic planning with interview workflow |
 | **plan** | Start planning session |
+| **ralplan** | Iterative planning (Planner+Architect+Critic) |
 | **review** | Review work plans with critic |
 
 ### Enhancement Skills
@@ -483,21 +584,34 @@ Oh-my-claudecode includes 19 lifecycle hooks that enhance Claude Code's behavior
 | **deepinit** | Hierarchical AGENTS.md codebase documentation |
 | **deepsearch** | Thorough multi-strategy codebase search |
 | **analyze** | Deep analysis and investigation |
+| **research** | Parallel scientist orchestration (v3.4.0) |
 | **frontend-ui-ux** | Designer-turned-developer UI/UX expertise |
 | **git-master** | Git expert for atomic commits and history |
+| **tdd** | TDD enforcement: test-first development (v3.4.0) |
+| **learner** | Extract reusable skill from session |
 
 ### Utility Skills
 | Skill | Description |
 |-------|-------------|
 | **note** | Save notes to compaction-resilient notepad |
-| **cancel-ralph** | Cancel Ralph Loop or ultrawork-ralph |
-| **cancel-ultraqa** | Cancel UltraQA cycling workflow |
+| **cancel** | Unified cancellation for all modes (v3.4.0) |
+| **cancel-autopilot** | Cancel autopilot (deprecated - use cancel) |
+| **cancel-ralph** | Cancel Ralph Loop (deprecated - use cancel) |
+| **cancel-ultraqa** | Cancel UltraQA (deprecated - use cancel) |
+| **cancel-ultrawork** | Cancel ultrawork (deprecated - use cancel) |
+| **cancel-ecomode** | Cancel ecomode (deprecated - use cancel) |
 | **omc-default** | Configure omc for current project |
 | **omc-default-global** | Configure omc globally |
+| **omc-setup** | One-time setup wizard |
 | **doctor** | Diagnose and fix installation issues |
+| **help** | Show OMC usage guide |
+| **hud** | Configure HUD statusline |
 | **release** | Automated release workflow |
+| **mcp-setup** | Configure MCP servers (v3.4.0) |
 
 Skills are automatically activated via slash commands or magic keywords.
+
+**Note:** Individual cancel commands (`cancel-ralph`, `cancel-ultraqa`, `cancel-ultrawork`, `cancel-ecomode`, `cancel-autopilot`) are deprecated in v3.4.0. Use the unified `/oh-my-claudecode:cancel` command instead, which auto-detects the active mode.
 
 ---
 
@@ -550,7 +664,7 @@ Claude uses judgment to detect task type and activate appropriate skill combinat
 
 ---
 
-## The Twelve Agents
+## The 32 Specialized Agents
 
 Claude will automatically delegate to these specialized agents:
 
@@ -778,9 +892,9 @@ The original oh-my-opencode used multiple AI providers. This project uses Claude
 
 | Feature | Description |
 |---------|-------------|
-| **19 Specialized Agents** | architect, researcher, explore, designer, writer, vision, qa-tester, critic, analyst, orchestrator, executor, planner (+ tiered variants) |
+| **32 Specialized Agents** | architect, researcher, explore, designer, writer, vision, qa-tester, critic, analyst, executor, planner (+ tiered variants: -low, -medium, -high) + security-reviewer, build-fixer, tdd-guide, code-reviewer, scientist (all with tier variants) |
 | **19 Lifecycle Hooks** | rules-injector, omc-orchestrator, auto-slash-command, keyword-detector, ralph-loop, todo-continuation, notepad, post-tool-use, context-window-limit-recovery, preemptive-compaction, session-recovery, directory-readme-injector, comment-checker, thinking-block-validator, empty-message-sanitizer, edit-error-recovery, non-interactive-env, agent-usage-reminder, background-notification |
-| **21 Builtin Skills** | orchestrate, ultrawork, ralph-loop, ralph-init, ultrawork-ralph, ultraqa, planner, plan, review, deepinit, deepsearch, analyze, frontend-ui-ux, git-master, note, cancel-ralph, cancel-ultraqa, omc-default, omc-default-global, doctor, release |
+| **37 Builtin Skills** | orchestrate, autopilot, ultrawork, ultrapilot, swarm, pipeline, ecomode, ralph, ralph-init, ultraqa, planner, plan, ralplan, review, deepinit, deepsearch, analyze, research, frontend-ui-ux, git-master, tdd, learner, note, cancel (unified), cancel-autopilot, cancel-ralph, cancel-ultraqa, cancel-ultrawork, cancel-ecomode, omc-default, omc-default-global, omc-setup, doctor, help, hud, release, mcp-setup |
 | **Magic Keywords** | `ultrawork`, `search`, `analyze`, `ultrathink` trigger enhanced modes |
 | **Slash Commands** | All skills available via `/oh-my-claudecode:skill-name` (e.g., `/oh-my-claudecode:ultrawork`, `/oh-my-claudecode:ralph`, `/oh-my-claudecode:plan`) |
 | **Compaction-Resilient Memory** | Three-tier notepad system (Priority Context, Working Memory, MANUAL) |

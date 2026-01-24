@@ -257,7 +257,7 @@ In Claude Code, just say "setup omc", "omc setup", or any natural language equiv
 
 This:
 - Downloads latest CLAUDE.md
-- Configures 19 agents
+- Configures 32 agents
 - Enables auto-behavior detection
 - Activates continuation enforcement
 - Sets up skill composition
@@ -464,6 +464,227 @@ Once upgraded, agents automatically gain access to:
 - Delegation categories (automatic categorization)
 - Directory diagnostics (project-level type checking)
 - Session resume (recover background agent state)
+
+---
+
+## v3.3.x → v3.4.0: Parallel Execution & Advanced Workflows
+
+### Overview
+
+Version 3.4.0 introduces powerful parallel execution modes and advanced workflow orchestration while maintaining full backward compatibility with v3.3.x.
+
+### What's New
+
+#### 1. Ultrapilot: Parallel Autopilot
+
+Execute complex tasks with up to 5 concurrent workers for 3-5x speedup:
+
+```bash
+/oh-my-claudecode:ultrapilot "build a fullstack todo app"
+```
+
+**Key Features:**
+- Automatic task decomposition into parallelizable subtasks
+- File ownership coordination to prevent conflicts
+- Parallel execution with intelligent coordination
+- State files: `.omc/state/ultrapilot-state.json`, `.omc/state/ultrapilot-ownership.json`
+
+**Best for:** Multi-component systems, fullstack apps, large refactoring
+
+#### 2. Swarm: Coordinated Agent Teams
+
+N coordinated agents with atomic task claiming:
+
+```bash
+/oh-my-claudecode:swarm 5:executor "fix all TypeScript errors"
+```
+
+**Key Features:**
+- Shared task pool with atomic claiming (prevents duplicate work)
+- 5-minute timeout per task with auto-release
+- Scales from 2 to 10 workers
+- Clean completion when all tasks done
+
+#### 3. Pipeline: Sequential Agent Chaining
+
+Chain agents with data passing between stages:
+
+```bash
+/oh-my-claudecode:pipeline explore:haiku -> architect:opus -> executor:sonnet
+```
+
+**Built-in Presets:**
+- `review` - explore → architect → critic → executor
+- `implement` - planner → executor → tdd-guide
+- `debug` - explore → architect → build-fixer
+- `research` - parallel(researcher, explore) → architect → writer
+- `refactor` - explore → architect-medium → executor-high → qa-tester
+- `security` - explore → security-reviewer → executor → security-reviewer-low
+
+#### 4. Ecomode: Token-Efficient Execution
+
+Maximum parallelism with 30-50% token savings:
+
+```bash
+/oh-my-claudecode:ecomode "refactor the authentication system"
+```
+
+**Smart model routing:**
+- Simple tasks → Haiku (ultra-cheap)
+- Standard work → Sonnet (balanced)
+- Complex reasoning → Opus (when needed)
+
+#### 5. Unified Cancel Command
+
+Smart cancellation that auto-detects active mode:
+
+```bash
+/oh-my-claudecode:cancel
+# Or just say: "stop", "cancel", "abort"
+```
+
+**Auto-detects and cancels:** autopilot, ultrapilot, ralph, ultrawork, ultraqa, ecomode, swarm, pipeline
+
+**Deprecation Notice:**
+Individual cancel commands are deprecated but still work:
+- `/oh-my-claudecode:cancel-ralph` (deprecated)
+- `/oh-my-claudecode:cancel-ultraqa` (deprecated)
+- `/oh-my-claudecode:cancel-ultrawork` (deprecated)
+- `/oh-my-claudecode:cancel-ecomode` (deprecated)
+- `/oh-my-claudecode:cancel-autopilot` (deprecated)
+
+Use `/oh-my-claudecode:cancel` instead.
+
+#### 6. Explore-High Agent
+
+Opus-powered architectural search for complex codebase exploration:
+
+```typescript
+Task(subagent_type="oh-my-claudecode:explore-high",
+     model="opus",
+     prompt="Find all authentication-related code patterns...")
+```
+
+**Best for:** Architectural analysis, cross-cutting concerns, complex refactoring planning
+
+#### 7. State Management Standardization
+
+State files now use standardized paths:
+
+**Standard paths:**
+- Local: `.omc/state/{name}.json`
+- Global: `~/.omc/state/{name}.json`
+
+Legacy locations are auto-migrated on read.
+
+#### 8. Keyword Conflict Resolution
+
+When multiple execution mode keywords are present:
+
+**Conflict Resolution Priority:**
+| Priority | Condition | Result |
+|----------|-----------|--------|
+| 1 (highest) | Both explicit keywords present (e.g., "ulw eco fix errors") | `ecomode` wins (more token-restrictive) |
+| 2 | Single explicit keyword | That mode wins |
+| 3 | Generic "fast"/"parallel" only | Read from config (`defaultExecutionMode`) |
+| 4 (lowest) | No config file | Default to `ultrawork` |
+
+**Explicit mode keywords:** `ulw`, `ultrawork`, `eco`, `ecomode`
+**Generic keywords:** `fast`, `parallel`
+
+Users set their default mode preference via `/oh-my-claudecode:omc-setup`.
+
+### Migration Steps
+
+Version 3.4.0 is a drop-in upgrade. No migration required!
+
+```bash
+npm update -g oh-my-claudecode
+```
+
+All existing configurations, plans, and workflows continue working unchanged.
+
+### New Configuration Options
+
+#### Default Execution Mode
+
+Set your preferred execution mode in `~/.claude/.omc-config.json`:
+
+```json
+{
+  "defaultExecutionMode": "ultrawork"  // or "ecomode"
+}
+```
+
+When you use generic keywords like "fast" or "parallel" without explicit mode keywords, this setting determines which mode activates.
+
+### Breaking Changes
+
+None. All v3.3.x features and commands continue to work in v3.4.0.
+
+### New Tools Available
+
+Once upgraded, you automatically gain access to:
+- Ultrapilot (parallel autopilot)
+- Swarm coordination
+- Pipeline workflows
+- Ecomode execution
+- Unified cancel command
+- Explore-high agent
+
+### Best Practices for v3.4.0
+
+#### When to Use Each Mode
+
+| Scenario | Recommended Mode | Why |
+|----------|------------------|-----|
+| Multi-component systems | `ultrapilot` | Parallel workers handle independent components |
+| Many small fixes | `swarm` | Atomic task claiming prevents duplicate work |
+| Sequential dependencies | `pipeline` | Data passes between stages |
+| Budget-conscious | `ecomode` | 30-50% token savings with smart routing |
+| Single complex task | `autopilot` | Full autonomous execution |
+| Must complete | `ralph` | Persistence guarantee |
+
+#### Keyword Usage
+
+**Explicit mode control (v3.4.0):**
+```bash
+"ulw: fix all errors"           # ultrawork (explicit)
+"eco: refactor auth system"     # ecomode (explicit)
+"ulw eco: migrate database"     # ecomode wins (conflict resolution)
+"fast: implement feature"       # reads defaultExecutionMode config
+```
+
+**Natural language (still works):**
+```bash
+"don't stop until done"         # ralph
+"parallel execution"            # reads defaultExecutionMode
+"build me a todo app"           # autopilot
+```
+
+### Verification
+
+After upgrading, verify new features:
+
+1. **Check installation**:
+   ```bash
+   npm list -g oh-my-claudecode
+   ```
+
+2. **Test ultrapilot**:
+   ```bash
+   /oh-my-claudecode:ultrapilot "create a simple React component"
+   ```
+
+3. **Test unified cancel**:
+   ```bash
+   /oh-my-claudecode:cancel
+   ```
+
+4. **Check state directory**:
+   ```bash
+   ls -la .omc/state/  # Should see ultrapilot-state.json after running ultrapilot
+   ```
 
 ---
 

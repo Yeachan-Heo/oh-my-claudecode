@@ -18,14 +18,38 @@ import { renderPermission } from './elements/permission.js';
 import { renderThinking } from './elements/thinking.js';
 import { renderSession } from './elements/session.js';
 import { renderAutopilot } from './elements/autopilot.js';
+import { getAnalyticsDisplay, renderAnalyticsLine, getSessionInfo } from './analytics-display.js';
 
 /**
  * Render the complete statusline (single or multi-line)
  */
-export function render(context: HudRenderContext, config: HudConfig): string {
+export async function render(context: HudRenderContext, config: HudConfig): Promise<string> {
   const elements: string[] = [];
   const detailLines: string[] = [];
   const { elements: enabledElements } = config;
+
+  // Check if analytics preset is active
+  if (config.preset === 'analytics') {
+    const analytics = await getAnalyticsDisplay();
+    const sessionInfo = await getSessionInfo();
+
+    // Render analytics-focused layout
+    const lines = [sessionInfo, renderAnalyticsLine(analytics)];
+
+    // Add agents if available
+    if (context.activeAgents.length > 0) {
+      const agents = renderAgentsByFormat(context.activeAgents, enabledElements.agentsFormat || 'codes');
+      if (agents) lines.push(agents);
+    }
+
+    // Add todos if available
+    if (enabledElements.todos) {
+      const todos = renderTodosWithCurrent(context.todos);
+      if (todos) lines.push(todos);
+    }
+
+    return lines.join('\n');
+  }
 
   // [OMC] label
   if (enabledElements.omcLabel) {
@@ -130,6 +154,16 @@ export function render(context: HudRenderContext, config: HudConfig): string {
   if (enabledElements.todos) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
+  }
+
+  // Optionally add analytics line for full/dense presets
+  if (config.preset === 'full' || config.preset === 'dense') {
+    try {
+      const analytics = await getAnalyticsDisplay();
+      detailLines.push(renderAnalyticsLine(analytics));
+    } catch {
+      // Analytics not available, skip
+    }
   }
 
   // If we have detail lines, output multi-line

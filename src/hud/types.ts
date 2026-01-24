@@ -20,6 +20,8 @@ export interface BackgroundTask {
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'completed' | 'failed';
+  startTime?: string; // Alias for compatibility
+  exitCode?: number; // For tracking abnormal termination
 }
 
 export interface OmcHudState {
@@ -97,6 +99,12 @@ export interface SessionHealth {
   durationMinutes: number;
   messageCount: number;
   health: 'healthy' | 'warning' | 'critical';
+
+  // Analytics fields
+  sessionCost?: number;
+  totalTokens?: number;
+  cacheHitRate?: number;
+  topAgents?: Array<{ agent: string; cost: number }>;
 }
 
 export interface TranscriptData {
@@ -198,7 +206,7 @@ export interface HudRenderContext {
 // Configuration
 // ============================================================================
 
-export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense';
+export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense' | 'analytics';
 
 /**
  * Agent display format options:
@@ -247,6 +255,7 @@ export interface HudConfig {
   preset: HudPreset;
   elements: HudElementConfig;
   thresholds: HudThresholds;
+  staleTaskThresholdMinutes?: number; // Default 30
 }
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
@@ -290,6 +299,25 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     contextBar: false,
     agents: true,
     agentsFormat: 'count', // Just count for minimal mode
+    agentsMaxLines: 0,
+    backgroundTasks: false,
+    todos: true,
+    permissionStatus: false,
+    thinking: false,
+    sessionHealth: false,
+    useBars: false,
+  },
+  analytics: {
+    omcLabel: false,
+    rateLimits: false,
+    ralph: false,
+    autopilot: false,
+    prdStory: false,
+    activeSkills: false,
+    lastSkill: false,
+    contextBar: false,
+    agents: true,
+    agentsFormat: 'codes',
     agentsMaxLines: 0,
     backgroundTasks: false,
     todos: true,
