@@ -325,6 +325,30 @@ export const codeReviewerLowAgent: AgentConfig = {
   defaultModel: 'haiku'
 };
 
+/**
+ * Malware-Detector Agent - Comprehensive Threat Detection (Opus)
+ */
+export const malwareDetectorAgent: AgentConfig = {
+  name: 'malware-detector',
+  description: 'Malware, virus, spyware, and malicious code detection specialist (Opus). Use for comprehensive threat scanning.',
+  prompt: loadAgentPrompt('malware-detector'),
+  tools: ['Read', 'Grep', 'Glob', 'Bash', 'WebSearch'],
+  model: 'opus',
+  defaultModel: 'opus'
+};
+
+/**
+ * Malware-Detector-Low Agent - Quick Threat Scan (Haiku)
+ */
+export const malwareDetectorLowAgent: AgentConfig = {
+  name: 'malware-detector-low',
+  description: 'Quick malware scan specialist (Haiku). Use for fast threat checks on small code changes.',
+  prompt: loadAgentPrompt('malware-detector-low'),
+  tools: ['Read', 'Grep', 'Glob', 'Bash'],
+  model: 'haiku',
+  defaultModel: 'haiku'
+};
+
 // ============================================================
 // AGENT REGISTRY
 // ============================================================
@@ -374,7 +398,10 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     'tdd-guide': tddGuideAgent,
     'tdd-guide-low': tddGuideLowAgent,
     'code-reviewer': codeReviewerAgent,
-    'code-reviewer-low': codeReviewerLowAgent
+    'code-reviewer-low': codeReviewerLowAgent,
+    // Malware detection agents
+    'malware-detector': malwareDetectorAgent,
+    'malware-detector-low': malwareDetectorLowAgent
   };
 
   const result: Record<string, { description: string; prompt: string; tools: string[]; model?: ModelType; defaultModel?: ModelType }> = {};

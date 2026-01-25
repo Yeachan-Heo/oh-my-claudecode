@@ -301,3 +301,31 @@ export {
   type FileOwnership,
   type DecompositionStrategy
 } from './task-decomposer/index.js';
+
+// Malware Detection - malware, virus, spyware, trojan detection
+export {
+  // Functions
+  calculateRiskScore,
+  getVerdict,
+  getThreatSummary,
+  checkTyposquatting,
+  isSuspiciousScript,
+  formatScanReport,
+  getPatternsBySeverity,
+  getAllPatterns,
+  // Patterns
+  allPatterns,
+  criticalPatterns,
+  highPatterns,
+  mediumPatterns,
+  lowPatterns,
+  typosquatPatterns,
+  suspiciousScripts,
+  // Types
+  type ThreatSeverity,
+  type ThreatCategory,
+  type ThreatPattern,
+  type ThreatMatch,
+  type ScanResult,
+  type SupplyChainRisk
+} from './malware-detection/index.js';
