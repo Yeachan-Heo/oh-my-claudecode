@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claudecode",
-  "version": "3.5.3",
+  "version": "3.5.4",
   "description": "Multi-agent orchestration system for Claude Code",
   "skills": "./skills/"
 }

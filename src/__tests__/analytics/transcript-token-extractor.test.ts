@@ -58,7 +58,9 @@ describe('extractTokenUsage', () => {
     expect(result).toBeNull();
   });
 
-  it('should detect agent name from agentId and slug', () => {
+  it('should return undefined agentName for assistant entries (main session)', () => {
+    // Assistant entries are main session responses - they don't have agent names
+    // The slug field is the SESSION slug, not an agent identifier
     const entry: TranscriptEntry = {
       type: 'assistant',
       timestamp: '2026-01-24T05:07:46.325Z',
@@ -77,7 +79,7 @@ describe('extractTokenUsage', () => {
     const result = extractTokenUsage(entry, 'test-session-123', 'test.jsonl');
 
     expect(result).not.toBeNull();
-    expect(result?.usage.agentName).toBe('smooth-swinging-avalanche');
+    expect(result?.usage.agentName).toBeUndefined();
   });
 
   it('should normalize model names correctly', () => {
@@ -106,7 +108,9 @@ describe('extractTokenUsage', () => {
     });
   });
 
-  it('should detect agent from Task tool usage', () => {
+  it('should return undefined agentName for assistant entries with Task tool calls', () => {
+    // Task tool calls in assistant entries are the COST OF SPAWNING the agent,
+    // not the spawned agent's usage. The actual agent usage comes in progress entries.
     const entry: TranscriptEntry = {
       type: 'assistant',
       timestamp: '2026-01-24T05:07:46.325Z',
@@ -132,8 +136,9 @@ describe('extractTokenUsage', () => {
 
     const result = extractTokenUsage(entry, 'test-session-123', 'test.jsonl');
 
+    // This is main session cost (generating the Task call), NOT the agent's cost
     expect(result).not.toBeNull();
-    expect(result?.usage.agentName).toBe('oh-my-claudecode:executor');
+    expect(result?.usage.agentName).toBeUndefined();
   });
 
   it('should use ACTUAL output_tokens from transcript', () => {
