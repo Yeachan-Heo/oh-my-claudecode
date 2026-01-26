@@ -349,7 +349,8 @@ describe('Installer Constants', () => {
       ];
 
       for (const path of paths) {
-        expect(path).toMatch(/^[/~]/); // Starts with / or ~ (absolute)
+        // Absolute path: starts with / or ~ (Unix) or drive letter like C: (Windows)
+        expect(path).toMatch(/^([/~]|[A-Za-z]:)/);
       }
     });
   });

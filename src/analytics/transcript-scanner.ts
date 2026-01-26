@@ -1,7 +1,24 @@
 import { readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, sep } from 'path';
 import { homedir } from 'os';
+
+/**
+ * Check if the encoded path looks like a Windows path (starts with drive letter)
+ * Examples: "C--Users-user-project" or "D--work-project"
+ */
+function isWindowsEncodedPath(dirName: string): boolean {
+  return /^[A-Za-z]-/.test(dirName);
+}
+
+/**
+ * Normalize decoded path to use OS-native separators consistently
+ */
+function normalizePathForOS(decodedPath: string): string {
+  // On Windows, convert forward slashes to backslashes for consistency
+  // But existsSync works with both, so we normalize to forward slashes for cross-platform
+  return decodedPath.replace(/\\/g, '/');
+}
 
 /**
  * Metadata for a discovered transcript file
@@ -41,35 +58,97 @@ const UUID_REGEX = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12
  * Decode project directory name back to original path.
  *
  * The encoding scheme used by Claude Code is lossy - it converts all path
- * separators (/) to dashes (-), but legitimate dashes in directory names
+ * separators (/ or \) to dashes (-), but legitimate dashes in directory names
  * also become dashes, making them indistinguishable.
  *
- * Strategy:
- * 1. Try simple decode (all dashes -> slashes) and check if path exists
- * 2. If not, try to reconstruct by checking filesystem for partial matches
- * 3. Fall back to simple decode if nothing else works
+ * Encoding patterns:
+ *   - Unix: "/home/user/project" → "-home-user-project"
+ *   - Windows: "C:\Users\user\project" → "C--Users-user-project"
  *
- * Example: "-home-bellman-my-project"
- *   - Simple decode: "/home/bellman/my/project" (WRONG if "my-project" is one dir)
- *   - Smart decode: "/home/bellman/my-project" (checks filesystem)
+ * Strategy:
+ * 1. Detect if it's a Windows or Unix encoded path
+ * 2. Try simple decode (all dashes -> slashes) and check if path exists
+ * 3. If not, try to reconstruct by checking filesystem for partial matches
+ * 4. Fall back to simple decode if nothing else works
  *
  * @internal Exported for testing
  */
 export function decodeProjectPath(dirName: string): string {
-  if (!dirName.startsWith('-')) {
-    return dirName;
+  // Handle Windows encoded paths (e.g., "C--Users-user-project")
+  if (isWindowsEncodedPath(dirName)) {
+    return decodeWindowsPath(dirName);
   }
 
-  // Simple decode: replace all dashes with slashes
-  const simplePath = '/' + dirName.slice(1).replace(/-/g, '/');
+  // Handle Unix encoded paths (e.g., "-home-user-project")
+  if (dirName.startsWith('-')) {
+    return decodeUnixPath(dirName);
+  }
+
+  // Not an encoded path, return as-is
+  return dirName;
+}
+
+/**
+ * Split path string preserving consecutive hyphens as single segments.
+ * e.g., "a--b-c" → ["a", "-", "b", "c"] (the "-" represents a hyphen in original name)
+ */
+function splitPreservingConsecutiveHyphens(str: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let i = 0;
+
+  while (i < str.length) {
+    if (str[i] === '-') {
+      if (current) {
+        result.push(current);
+        current = '';
+      }
+      // Check for consecutive hyphens
+      if (i + 1 < str.length && str[i + 1] === '-') {
+        // Consecutive hyphens - this means the original had a hyphen
+        // Push empty string as marker, will be joined with hyphen later
+        result.push('');
+        i++; // Skip the second hyphen
+      }
+      i++;
+    } else {
+      current += str[i];
+      i++;
+    }
+  }
+
+  if (current) {
+    result.push(current);
+  }
+
+  return result;
+}
+
+/**
+ * Decode Windows encoded path (e.g., "C--Users-user-project" → "C:/Users/user/project")
+ */
+function decodeWindowsPath(dirName: string): string {
+  const driveLetter = dirName[0];
+  const rest = dirName.slice(2); // Skip "X-"
+
+  // Simple decode: drive letter + colon + rest with dashes as slashes
+  const simplePath = `${driveLetter}:/${rest.replace(/-/g, '/')}`;
+
+  // Normalize double slashes that might occur from empty segments
+  const normalizedSimple = simplePath.replace(/\/+/g, '/');
 
   // If simple decode exists, we're done
-  if (existsSync(simplePath)) {
-    return simplePath;
+  if (existsSync(normalizedSimple)) {
+    return normalizedSimple;
   }
 
   // Try to reconstruct by checking filesystem for partial matches
-  const segments = dirName.slice(1).split('-');
+  // Use special splitting to handle consecutive hyphens
+  const segments = splitPreservingConsecutiveHyphens(rest);
+  if (segments.length === 0) {
+    return `${driveLetter}:/`;
+  }
+
   const possiblePaths: string[] = [];
 
   // Generate all possible interpretations by trying different hyphen positions
@@ -79,14 +158,89 @@ export function decodeProjectPath(dirName: string): string {
       return;
     }
 
+    const part = parts[index];
+
+    // Empty string means this was a consecutive hyphen - must join with previous
+    if (part === '' && currentPath) {
+      const pathParts = currentPath.split('/');
+      const lastPart = pathParts.pop() || '';
+      const newPath = pathParts.join('/') + '/' + lastPart + '-';
+      generatePaths(parts, index + 1, newPath);
+      return;
+    }
+
     // Try adding next segment as a new directory
-    generatePaths(parts, index + 1, currentPath + '/' + parts[index]);
+    const newDir = currentPath + '/' + part;
+    generatePaths(parts, index + 1, newDir);
 
     // Try combining with previous segment using hyphen (if not first segment)
     if (index > 0 && currentPath) {
       const pathParts = currentPath.split('/');
       const lastPart = pathParts.pop() || '';
-      const newPath = pathParts.join('/') + '/' + lastPart + '-' + parts[index];
+      const newPath = pathParts.join('/') + '/' + lastPart + '-' + part;
+      generatePaths(parts, index + 1, newPath);
+    }
+  }
+
+  generatePaths(segments, 0, `${driveLetter}:`);
+
+  // Find the first path that exists on filesystem
+  for (const path of possiblePaths) {
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+
+  // Fall back to simple decode
+  return normalizedSimple;
+}
+
+/**
+ * Decode Unix encoded path (e.g., "-home-user-project" → "/home/user/project")
+ */
+function decodeUnixPath(dirName: string): string {
+  // Simple decode: replace all dashes with slashes
+  const simplePath = '/' + dirName.slice(1).replace(/-/g, '/');
+
+  // Normalize double slashes
+  const normalizedSimple = simplePath.replace(/\/+/g, '/');
+
+  // If simple decode exists, we're done
+  if (existsSync(normalizedSimple)) {
+    return normalizedSimple;
+  }
+
+  // Try to reconstruct by checking filesystem for partial matches
+  // Use special splitting to handle consecutive hyphens
+  const segments = splitPreservingConsecutiveHyphens(dirName.slice(1));
+  const possiblePaths: string[] = [];
+
+  // Generate all possible interpretations by trying different hyphen positions
+  function generatePaths(parts: string[], index: number, currentPath: string): void {
+    if (index >= parts.length) {
+      possiblePaths.push(currentPath);
+      return;
+    }
+
+    const part = parts[index];
+
+    // Empty string means this was a consecutive hyphen - must join with previous
+    if (part === '' && currentPath) {
+      const pathParts = currentPath.split('/');
+      const lastPart = pathParts.pop() || '';
+      const newPath = pathParts.join('/') + '/' + lastPart + '-';
+      generatePaths(parts, index + 1, newPath);
+      return;
+    }
+
+    // Try adding next segment as a new directory
+    generatePaths(parts, index + 1, currentPath + '/' + part);
+
+    // Try combining with previous segment using hyphen (if not first segment)
+    if (index > 0 && currentPath) {
+      const pathParts = currentPath.split('/');
+      const lastPart = pathParts.pop() || '';
+      const newPath = pathParts.join('/') + '/' + lastPart + '-' + part;
       generatePaths(parts, index + 1, newPath);
     }
   }
@@ -101,7 +255,7 @@ export function decodeProjectPath(dirName: string): string {
   }
 
   // Fall back to simple decode
-  return simplePath;
+  return normalizedSimple;
 }
 
 /**

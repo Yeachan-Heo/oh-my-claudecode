@@ -2,9 +2,45 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { homedir, tmpdir } from 'os';
+import { homedir, tmpdir, platform } from 'os';
 import { scanTranscripts, decodeProjectPath } from '../../analytics/transcript-scanner.js';
 import type { Dirent, Stats } from 'fs';
+
+/**
+ * Helper to encode a path the same way Claude Code does.
+ * - Unix: "/home/user/project" → "-home-user-project"
+ * - Windows: "C:\Users\user\project" → "C--Users-user-project"
+ */
+function encodePathForTest(absolutePath: string): string {
+  // Normalize path separators to forward slashes
+  const normalized = absolutePath.replace(/\\/g, '/');
+
+  // Check for Windows drive letter (e.g., "C:/...")
+  const windowsDriveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  if (windowsDriveMatch) {
+    const driveLetter = windowsDriveMatch[1];
+    const rest = windowsDriveMatch[2];
+    // Encode as "C--Users-user-project"
+    return `${driveLetter}-${rest.replace(/\//g, '-')}`;
+  }
+
+  // Unix path (e.g., "/home/user/project")
+  if (normalized.startsWith('/')) {
+    return `-${normalized.slice(1).replace(/\//g, '-')}`;
+  }
+
+  // Relative path - return as-is
+  return normalized.replace(/\//g, '-');
+}
+
+/**
+ * Helper to get expected decoded path format.
+ * Windows paths are returned with forward slashes for consistency.
+ */
+function expectedDecodedPath(absolutePath: string): string {
+  // Normalize to forward slashes (the decoder always uses forward slashes)
+  return absolutePath.replace(/\\/g, '/');
+}
 
 vi.mock('fs/promises');
 vi.mock('os');
@@ -391,48 +427,52 @@ describe('decodeProjectPath (filesystem-aware)', () => {
   });
 
   it('should decode simple paths without hyphens when path exists', () => {
-    // Create: /tmp/test-xxx/home/user/project
+    // Create: {testDir}/home/user/project
     const projectPath = join(testDir, 'home', 'user', 'project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-home-user-project`;
+    const fullPath = join(testDir, 'home', 'user', 'project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/home/user/project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should decode paths with legitimate hyphens in directory names', () => {
-    // Create: /tmp/test-xxx/home/user/my-project
+    // Create: {testDir}/home/user/my-project
     const projectPath = join(testDir, 'home', 'user', 'my-project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-home-user-my-project`;
+    const fullPath = join(testDir, 'home', 'user', 'my-project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
     // Should preserve "my-project" as one directory
-    expect(result).toBe(`${testDir}/home/user/my-project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should handle multiple hyphens in a single directory name', () => {
-    // Create: /tmp/test-xxx/home/user/my-cool-project
+    // Create: {testDir}/home/user/my-cool-project
     const projectPath = join(testDir, 'home', 'user', 'my-cool-project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-home-user-my-cool-project`;
+    const fullPath = join(testDir, 'home', 'user', 'my-cool-project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/home/user/my-cool-project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should handle hyphens at multiple levels', () => {
-    // Create: /tmp/test-xxx/my-workspace/my-project
+    // Create: {testDir}/my-workspace/my-project
     const projectPath = join(testDir, 'my-workspace', 'my-project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-my-workspace-my-project`;
+    const fullPath = join(testDir, 'my-workspace', 'my-project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/my-workspace/my-project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should fall back to simple decode if no matching filesystem path exists', () => {
@@ -445,49 +485,53 @@ describe('decodeProjectPath (filesystem-aware)', () => {
   });
 
   it('should handle root-level project directories', () => {
-    // Create: /tmp/test-xxx/my-project
+    // Create: {testDir}/my-project
     const projectPath = join(testDir, 'my-project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-my-project`;
+    const fullPath = join(testDir, 'my-project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/my-project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should prefer filesystem-verified paths over simple decode', () => {
-    // Create: /tmp/test-xxx/a/b-c (the correct interpretation)
-    // Don't create /tmp/test-xxx/a/b/c
+    // Create: {testDir}/a/b-c (the correct interpretation)
+    // Don't create {testDir}/a/b/c
     const correctPath = join(testDir, 'a', 'b-c');
     mkdirSync(correctPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-a-b-c`;
+    const fullPath = join(testDir, 'a', 'b-c');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
     // Should choose /a/b-c over /a/b/c
-    expect(result).toBe(`${testDir}/a/b-c`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should handle deeply nested paths with hyphens', () => {
-    // Create: /tmp/test-xxx/home/user/workspace/my-project/sub-folder
+    // Create: {testDir}/home/user/workspace/my-project/sub-folder
     const projectPath = join(testDir, 'home', 'user', 'workspace', 'my-project', 'sub-folder');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-home-user-workspace-my-project-sub-folder`;
+    const fullPath = join(testDir, 'home', 'user', 'workspace', 'my-project', 'sub-folder');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/home/user/workspace/my-project/sub-folder`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should handle paths with consecutive hyphens', () => {
-    // Create: /tmp/test-xxx/my--project (unusual but valid)
+    // Create: {testDir}/my--project (unusual but valid)
     const projectPath = join(testDir, 'my--project');
     mkdirSync(projectPath, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-my--project`;
+    const fullPath = join(testDir, 'my--project');
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
-    expect(result).toBe(`${testDir}/my--project`);
+    expect(result).toBe(expectedDecodedPath(fullPath));
   });
 
   it('should find first matching path when multiple interpretations exist', () => {
@@ -497,11 +541,14 @@ describe('decodeProjectPath (filesystem-aware)', () => {
     mkdirSync(path1, { recursive: true });
     mkdirSync(path2, { recursive: true });
 
-    const encoded = `-${testDir.slice(1)}-a-b-c`;
+    const fullPath = join(testDir, 'a', 'b-c'); // Use one as reference for encoding
+    const encoded = encodePathForTest(fullPath);
     const result = decodeProjectPath(encoded);
 
     // Should match one of the valid paths
-    const isValid = result === `${testDir}/a-b/c` || result === `${testDir}/a/b-c`;
+    const expected1 = expectedDecodedPath(path1);
+    const expected2 = expectedDecodedPath(path2);
+    const isValid = result === expected1 || result === expected2;
     expect(isValid).toBe(true);
   });
 });
