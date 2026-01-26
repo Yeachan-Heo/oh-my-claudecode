@@ -32,6 +32,8 @@
  */
 
 import { randomUUID } from 'crypto';
+import { existsSync, statSync } from 'fs';
+import { join } from 'path';
 import type {
   SwarmConfig,
   SwarmState,
@@ -70,6 +72,7 @@ import {
   getActiveAgentCount,
   reclaimFailedTask
 } from './claiming.js';
+import { canStartMode, createModeMarker, removeModeMarker } from '../mode-registry/index.js';
 
 // Current working directory for the swarm
 let currentCwd: string | null = null;
@@ -104,12 +107,25 @@ export async function startSwarm(config: SwarmConfig): Promise<boolean> {
     return false;
   }
 
+  // Mutual exclusion check via mode-registry
+  const canStart = canStartMode('swarm', cwd);
+  if (!canStart.allowed) {
+    console.error(canStart.message);
+    return false;
+  }
+
   // Initialize database
   const dbInitialized = await initDb(cwd);
   if (!dbInitialized) {
     console.error('Failed to initialize swarm database');
     return false;
   }
+
+  // Create marker file to indicate swarm is active
+  createModeMarker('swarm', cwd, {
+    agentCount,
+    taskCount: tasks.length
+  });
 
   currentCwd = cwd;
 
@@ -166,6 +182,11 @@ export function stopSwarm(deleteDatabase: boolean = false): boolean {
   // Optionally delete database
   if (deleteDatabase && currentCwd) {
     deleteDb(currentCwd);
+  }
+
+  // Remove marker file
+  if (currentCwd) {
+    removeModeMarker('swarm', currentCwd);
   }
 
   currentCwd = null;
@@ -390,6 +411,80 @@ export function disconnectFromSwarm(): boolean {
   closeDb();
   currentCwd = null;
   return true;
+}
+
+/**
+ * Check if swarm is currently active
+ *
+ * Used by cancel skill to detect active swarm.
+ * Checks if database exists and session is active.
+ *
+ * @param cwd - Working directory to check
+ * @returns true if swarm is active
+ */
+export function isSwarmActive(cwd: string): boolean {
+  // If database is already connected, check state directly
+  if (isDbInitialized()) {
+    const state = loadState();
+    return state !== null && state.active === true;
+  }
+
+  // Otherwise, check if database file exists and is non-empty
+  const dbPath = join(cwd, '.omc', 'state', 'swarm.db');
+  if (!existsSync(dbPath)) {
+    return false;
+  }
+
+  try {
+    const stats = statSync(dbPath);
+    return stats.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cancel active swarm
+ *
+ * Used by cancel skill to stop swarm cleanly.
+ *
+ * @param cwd - Working directory
+ * @returns CancelResult with success status and message
+ */
+export async function cancelSwarm(cwd: string): Promise<{
+  success: boolean;
+  message: string;
+  stats?: SwarmStats | null;
+}> {
+  // Connect if not already connected
+  if (!isDbInitialized()) {
+    const connected = await connectToSwarm(cwd);
+    if (!connected) {
+      return {
+        success: false,
+        message: 'Failed to connect to swarm database'
+      };
+    }
+  }
+
+  const state = getSwarmStatus();
+  if (!state || !state.active) {
+    return {
+      success: false,
+      message: 'No active swarm session found'
+    };
+  }
+
+  const stats = getSwarmStats();
+
+  // Stop the swarm (preserves database for analysis)
+  stopSwarm(false);
+
+  return {
+    success: true,
+    message: `Swarm cancelled. ${stats?.doneTasks ?? 0}/${stats?.totalTasks ?? 0} tasks completed.`,
+    stats
+  };
 }
 
 // Re-export types

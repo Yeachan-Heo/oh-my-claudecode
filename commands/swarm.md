@@ -94,6 +94,14 @@ From `{{ARGUMENTS}}`, extract:
 - Each agent connects to the SQLite database
 - Agents enter claiming loop automatically
 
+**Important:** Use worker preamble when spawning agents to prevent sub-agent recursion:
+
+```typescript
+import { wrapWithPreamble } from '../agents/preamble.js';
+
+const prompt = wrapWithPreamble(`Your task: ${taskDescription}`);
+```
+
 ### 4. Task Claiming Protocol (SQLite Transactional)
 Each agent follows this loop:
 

@@ -665,8 +665,8 @@ export {
   type FileOwnership
 } from './ultrapilot/index.js';
 
+// Mode Registry (Centralized State Management)
 export {
-  // Mode Registry (Centralized State Management)
   MODE_CONFIGS,
   getStateDir,
   ensureStateDir as ensureModeStateDir,
@@ -677,6 +677,51 @@ export {
   hasModeState,
   getActiveModes,
   clearAllModeStates,
+  // Additional functions from PR #111
+  isModeActive,
+  getActiveExclusiveMode,
+  canStartMode,
+  getAllModeStatuses,
+  createModeMarker,
+  removeModeMarker,
+  readModeMarker,
   type ExecutionMode,
-  type ModeConfig
+  type ModeConfig,
+  type ModeStatus,
+  type CanStartResult
 } from './mode-registry/index.js';
+
+export {
+  // Swarm Coordination
+  startSwarm,
+  stopSwarm,
+  getSwarmStatus,
+  getSwarmStats,
+  claimTask,
+  releaseTask,
+  completeTask,
+  failTask,
+  heartbeat,
+  cleanupStaleClaims,
+  hasPendingWork,
+  isSwarmComplete,
+  getActiveAgents,
+  getAllTasks,
+  getTasksWithStatus,
+  getTaskById,
+  getAgentTasks,
+  getAllHeartbeats,
+  retryTask,
+  isSwarmReady,
+  connectToSwarm,
+  disconnectFromSwarm,
+  isSwarmActive,
+  cancelSwarm,
+  DEFAULT_SWARM_CONFIG,
+  type SwarmTask,
+  type SwarmState,
+  type SwarmConfig,
+  type SwarmStats,
+  type ClaimResult,
+  type AgentHeartbeat
+} from './swarm/index.js';

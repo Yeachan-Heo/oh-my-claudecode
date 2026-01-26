@@ -45,7 +45,7 @@ Force clear ALL state files:
 - `.omc/state/ultrawork-state.json` → Ultrawork
 - `.omc/state/ecomode-state.json` → Ecomode
 - `.omc/state/ultraqa-state.json` → UltraQA
-- `.omc/state/swarm-state.json` → Swarm
+- `.omc/state/swarm.db` (SQLite) or `.omc/state/swarm-active.marker` → Swarm
 - `.omc/state/ultrapilot-state.json` → Ultrapilot
 - `.omc/state/pipeline-state.json` → Pipeline
 

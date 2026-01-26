@@ -87,6 +87,34 @@ User: "/swarm 5:executor fix all TypeScript errors"
 - Each agent connects to the SQLite database
 - Agents enter claiming loop automatically
 
+### 3.1. Agent Preamble (IMPORTANT)
+
+When spawning swarm agents, ALWAYS wrap the task with the worker preamble to prevent recursive sub-agent spawning:
+
+```typescript
+import { wrapWithPreamble } from '../agents/preamble.js';
+
+// When spawning each agent:
+const agentPrompt = wrapWithPreamble(`
+Connect to swarm at ${cwd}/.omc/state/swarm.db
+Claim tasks with claimTask('agent-${n}')
+Complete work with completeTask() or failTask()
+Send heartbeat every 60 seconds
+Exit when hasPendingWork() returns false
+`);
+
+Task({
+  subagent_type: 'oh-my-claudecode:executor',
+  prompt: agentPrompt,
+  run_in_background: true
+});
+```
+
+The worker preamble ensures agents:
+- Execute tasks directly using tools (Read, Write, Edit, Bash)
+- Do NOT spawn sub-agents (prevents recursive agent storms)
+- Report results with absolute file paths
+
 ### 4. Task Claiming Protocol (SQLite Transactional)
 Each agent follows this loop:
 
@@ -128,13 +156,13 @@ LOOP:
 Exit when ANY of:
 - isSwarmComplete() returns true (all tasks done or failed)
 - All agents idle (no pending tasks, no claimed tasks)
-- User cancels via `/cancel-swarm`
+- User cancels via `/oh-my-claudecode:cancel`
 
 ## Storage
 
-### SQLite Database (`.omc/swarm.db`)
+### SQLite Database (`.omc/state/swarm.db`)
 
-The swarm uses a single SQLite database stored at `.omc/swarm.db`. This provides:
+The swarm uses a single SQLite database stored at `.omc/state/swarm.db`. This provides:
 - **ACID compliance** - All task state transitions are atomic
 - **Concurrent access** - Multiple agents query/update safely
 - **Persistence** - State survives agent crashes
@@ -518,7 +546,7 @@ interface SwarmStats {
   - Prevents false timeout while working on long tasks
 - **Cleanup Interval:** 60 seconds
   - Orchestrator automatically runs `cleanupStaleClaims()` to release orphaned tasks
-- **Database:** SQLite (stored at `.omc/swarm.db`)
+- **Database:** SQLite (stored at `.omc/state/swarm.db`)
   - One database per swarm session
   - Survives agent crashes
   - Provides ACID guarantees
@@ -554,11 +582,11 @@ interface SwarmStats {
 
 ## Cancel Swarm
 
-User can cancel via `/cancel-swarm`:
+User can cancel via `/oh-my-claudecode:cancel`:
 - Stops orchestrator monitoring
 - Signals all background agents to exit
-- Preserves partial progress in swarm-tasks.json
-- Marks session as "cancelled" in swarm-state.json
+- Preserves partial progress in SQLite database
+- Marks session as "cancelled" in database
 
 ## Use Cases
 

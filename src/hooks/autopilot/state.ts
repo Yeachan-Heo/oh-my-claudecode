@@ -21,6 +21,7 @@ import {
   clearUltraQAState,
   readUltraQAState
 } from '../ultraqa/index.js';
+import { canStartMode } from '../mode-registry/index.js';
 
 const STATE_FILE = 'autopilot-state.json';
 const SPEC_DIR = 'autopilot';
@@ -125,7 +126,14 @@ export function initAutopilot(
   idea: string,
   sessionId?: string,
   config?: Partial<AutopilotConfig>
-): AutopilotState {
+): AutopilotState | null {
+  // Mutual exclusion check via mode-registry
+  const canStart = canStartMode('autopilot', directory);
+  if (!canStart.allowed) {
+    console.error(canStart.message);
+    return null;
+  }
+
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
   const now = new Date().toISOString();
 

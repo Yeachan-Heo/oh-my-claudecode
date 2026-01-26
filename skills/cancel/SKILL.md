@@ -35,7 +35,7 @@ The skill checks state files to determine what's active:
 - `.omc/state/ultrawork-state.json` → Ultrawork detected
 - `.omc/state/ecomode-state.json` → Ecomode detected
 - `.omc/state/ultraqa-state.json` → UltraQA detected
-- `.omc/state/swarm-state.json` → Swarm detected
+- `.omc/state/swarm.db` → Swarm detected (SQLite database)
 - `.omc/state/ultrapilot-state.json` → Ultrapilot detected
 - `.omc/state/pipeline-state.json` → Pipeline detected
 - `.omc/state/plan-consensus.json` → Plan Consensus detected
@@ -72,8 +72,10 @@ This removes all state files:
 - `.omc/state/ultrawork-state.json`
 - `.omc/state/ecomode-state.json`
 - `.omc/state/ultraqa-state.json`
-- `.omc/state/swarm-state.json`
-- `.omc/state/swarm-tasks.json`
+- `.omc/state/swarm.db`
+- `.omc/state/swarm.db-wal`
+- `.omc/state/swarm.db-shm`
+- `.omc/state/swarm-active.marker`
 - `.omc/state/ultrapilot-state.json`
 - `.omc/state/pipeline-state.json`
 - `.omc/state/plan-consensus.json`
@@ -150,8 +152,10 @@ if [[ "$FORCE_MODE" == "true" ]]; then
   rm -f .omc/state/ultraqa-state.json
   rm -f .omc/state/ralph-plan-state.json
   rm -f .omc/state/ralph-verification.json
-  rm -f .omc/state/swarm-state.json
-  rm -f .omc/state/swarm-tasks.json
+  rm -f .omc/state/swarm.db
+  rm -f .omc/state/swarm.db-wal
+  rm -f .omc/state/swarm.db-shm
+  rm -f .omc/state/swarm-active.marker
   rm -f .omc/state/ultrapilot-state.json
   rm -f .omc/state/pipeline-state.json
   rm -f .omc/state/plan-consensus.json
@@ -320,8 +324,10 @@ if [[ "$FORCE_MODE" == "true" ]]; then
   rm -f .omc/state/ultraqa-state.json
   rm -f .omc/state/ralph-plan-state.json
   rm -f .omc/state/ralph-verification.json
-  rm -f .omc/state/swarm-state.json
-  rm -f .omc/state/swarm-tasks.json
+  rm -f .omc/state/swarm.db
+  rm -f .omc/state/swarm.db-wal
+  rm -f .omc/state/swarm.db-shm
+  rm -f .omc/state/swarm-active.marker
   rm -f .omc/state/ultrapilot-state.json
   rm -f .omc/state/pipeline-state.json
   rm -f .omc/state/plan-consensus.json
@@ -504,17 +510,36 @@ if [[ -f .omc/state/ultraqa-state.json ]]; then
   fi
 fi
 
-# 6. Check Swarm (standalone)
-if [[ -f .omc/state/swarm-state.json ]]; then
-  SWARM_STATE=$(cat .omc/state/swarm-state.json)
-  SWARM_ACTIVE=$(echo "$SWARM_STATE" | jq -r '.active // false')
+# 6. Check Swarm (SQLite-based)
+SWARM_DB=".omc/state/swarm.db"
+if [[ -f "$SWARM_DB" ]]; then
+  # Check if sqlite3 CLI is available
+  if command -v sqlite3 &>/dev/null; then
+    # Query SQLite to check if swarm is active
+    SWARM_ACTIVE=$(sqlite3 "$SWARM_DB" "SELECT active FROM swarm_session WHERE id = 1;" 2>/dev/null || echo "0")
 
-  if [[ "$SWARM_ACTIVE" == "true" ]]; then
-    rm -f .omc/state/swarm-state.json
-    rm -f .omc/state/swarm-tasks.json
-    echo "Swarm cancelled. Coordinated agents stopped."
-    CANCELLED_ANYTHING=true
-    exit 0
+    if [[ "$SWARM_ACTIVE" == "1" ]]; then
+      # Get stats before cancelling
+      DONE_TASKS=$(sqlite3 "$SWARM_DB" "SELECT COUNT(*) FROM tasks WHERE status = 'done';" 2>/dev/null || echo "0")
+      TOTAL_TASKS=$(sqlite3 "$SWARM_DB" "SELECT COUNT(*) FROM tasks;" 2>/dev/null || echo "0")
+
+      # Mark swarm as inactive
+      sqlite3 "$SWARM_DB" "UPDATE swarm_session SET active = 0, completed_at = $(date +%s000) WHERE id = 1;"
+
+      echo "Swarm cancelled. $DONE_TASKS/$TOTAL_TASKS tasks completed."
+      echo "Database preserved at $SWARM_DB for analysis."
+      CANCELLED_ANYTHING=true
+      exit 0
+    fi
+  else
+    # Fallback: Check marker file if sqlite3 is not available
+    MARKER_FILE=".omc/state/swarm-active.marker"
+    if [[ -f "$MARKER_FILE" ]]; then
+      rm -f "$MARKER_FILE"
+      echo "Swarm cancelled (marker file removed). Database at $SWARM_DB may need manual cleanup."
+      CANCELLED_ANYTHING=true
+      exit 0
+    fi
   fi
 fi
 
@@ -568,7 +593,7 @@ if [[ "$CANCELLED_ANYTHING" == "false" ]]; then
   echo "  - Ultrawork (.omc/state/ultrawork-state.json)"
   echo "  - Ecomode (.omc/state/ecomode-state.json)"
   echo "  - UltraQA (.omc/state/ultraqa-state.json)"
-  echo "  - Swarm (.omc/state/swarm-state.json)"
+  echo "  - Swarm (.omc/state/swarm.db)"
   echo "  - Ultrapilot (.omc/state/ultrapilot-state.json)"
   echo "  - Pipeline (.omc/state/pipeline-state.json)"
   echo "  - Plan Consensus (.omc/state/plan-consensus.json)"
