@@ -1,10 +1,103 @@
 import { readState, writeState, StateLocation } from '../features/state-manager/index.js';
 import { SessionMetadata, SessionAnalytics, SessionHistory, SessionSummary, SessionTag } from './session-types.js';
 import { getTokenTracker } from './token-tracker.js';
+import { getGitDiffStats } from '../hooks/omc-orchestrator/index.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
 const SESSION_HISTORY_FILE = 'session-history';
+
+/**
+ * Source file extensions to track for filesModified
+ */
+const SOURCE_FILE_EXTENSIONS = new Set([
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.scala',
+  '.c', '.cpp', '.cc', '.h', '.hpp',
+  '.cs', '.fs', '.vb',
+  '.swift', '.m', '.mm',
+  '.php', '.lua', '.pl', '.pm',
+  '.sh', '.bash', '.zsh', '.fish',
+  '.sql', '.graphql', '.gql',
+  '.html', '.css', '.scss', '.sass', '.less',
+  '.json', '.yaml', '.yml', '.toml', '.xml',
+  '.md', '.mdx', '.txt',
+  '.vue', '.svelte', '.astro',
+]);
+
+/**
+ * Session activity tracker for tasks and errors
+ */
+interface SessionActivity {
+  tasksCompleted: number;
+  errorCount: number;
+}
+
+/**
+ * Internal storage for session activity tracking
+ */
+const sessionActivity = new Map<string, SessionActivity>();
+
+/**
+ * Record a completed task for a session
+ */
+export function recordTaskCompleted(sessionId: string): void {
+  const activity = sessionActivity.get(sessionId) || { tasksCompleted: 0, errorCount: 0 };
+  activity.tasksCompleted++;
+  sessionActivity.set(sessionId, activity);
+}
+
+/**
+ * Record an error for a session
+ */
+export function recordError(sessionId: string): void {
+  const activity = sessionActivity.get(sessionId) || { tasksCompleted: 0, errorCount: 0 };
+  activity.errorCount++;
+  sessionActivity.set(sessionId, activity);
+}
+
+/**
+ * Get session activity metrics
+ */
+export function getSessionActivity(sessionId: string): SessionActivity {
+  return sessionActivity.get(sessionId) || { tasksCompleted: 0, errorCount: 0 };
+}
+
+/**
+ * Clear session activity (called when session ends)
+ */
+export function clearSessionActivity(sessionId: string): void {
+  sessionActivity.delete(sessionId);
+}
+
+/**
+ * Get modified files from git diff, filtered to source files
+ */
+function getModifiedSourceFiles(projectPath: string): string[] {
+  try {
+    const gitStats = getGitDiffStats(projectPath);
+    return gitStats
+      .map(stat => stat.path)
+      .filter(filePath => {
+        const ext = path.extname(filePath).toLowerCase();
+        return SOURCE_FILE_EXTENSIONS.has(ext);
+      });
+  } catch {
+    // Git might not be available or not a git repo
+    return [];
+  }
+}
+
+/**
+ * Calculate success rate from tasks and errors
+ */
+function calculateSuccessRate(tasksCompleted: number, errorCount: number): number {
+  const total = tasksCompleted + errorCount;
+  if (total === 0) {
+    return 1.0; // Default to 100% when no tasks tracked
+  }
+  return tasksCompleted / total;
+}
 
 export class SessionManager {
   private currentSession: SessionMetadata | null = null;
@@ -87,18 +180,32 @@ export class SessionManager {
     const tracker = getTokenTracker();
     const stats = await tracker.loadSessionStats(sessionId);
 
+    // Get session activity metrics
+    const activity = getSessionActivity(sessionId);
+
+    // Get session metadata to find project path
+    const history = await this.loadHistory();
+    const sessionMeta = history.sessions.find(s => s.id === sessionId);
+    const projectPath = sessionMeta?.projectPath || this.currentSession?.projectPath || process.cwd();
+
+    // Get modified files from git
+    const filesModified = getModifiedSourceFiles(projectPath);
+
+    // Calculate success rate
+    const successRate = calculateSuccessRate(activity.tasksCompleted, activity.errorCount);
+
     if (!stats) {
-      // Return empty analytics
+      // Return analytics with activity tracking but no token stats
       return {
         sessionId,
         totalTokens: 0,
         totalCost: 0,
         agentUsage: {},
         modelUsage: {},
-        filesModified: [],
-        tasksCompleted: 0,
-        errorCount: 0,
-        successRate: 0
+        filesModified,
+        tasksCompleted: activity.tasksCompleted,
+        errorCount: activity.errorCount,
+        successRate
       };
     }
 
@@ -122,10 +229,10 @@ export class SessionManager {
       totalCost: stats.totalCost,
       agentUsage,
       modelUsage,
-      filesModified: [], // TODO: Track via git or file watcher
-      tasksCompleted: 0, // TODO: Integrate with task list
-      errorCount: 0, // TODO: Track errors
-      successRate: 1.0 // TODO: Calculate based on tasks/errors
+      filesModified,
+      tasksCompleted: activity.tasksCompleted,
+      errorCount: activity.errorCount,
+      successRate
     };
   }
 
