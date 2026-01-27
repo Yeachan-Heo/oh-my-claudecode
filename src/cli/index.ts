@@ -48,6 +48,7 @@ import {
   getInstallInstructions
 } from './utils/tokscale-launcher.js';
 import {
+  waitCommand,
   waitStatusCommand,
   waitDaemonCommand,
   waitDetectCommand
@@ -788,14 +789,26 @@ program
 
 /**
  * Wait command - Rate limit wait and auto-resume
+ *
+ * Zero learning curve design:
+ * - `omc wait` alone shows status and suggests next action
+ * - `omc wait --start` starts the daemon (shortcut)
+ * - `omc wait --stop` stops the daemon (shortcut)
+ * - Subcommands available for power users
  */
 const waitCmd = program
   .command('wait')
-  .description('Rate limit wait and auto-resume functionality');
+  .description('Rate limit wait and auto-resume (just run "omc wait" to get started)')
+  .option('--json', 'Output as JSON')
+  .option('--start', 'Start the auto-resume daemon')
+  .option('--stop', 'Stop the auto-resume daemon')
+  .action(async (options) => {
+    await waitCommand(options);
+  });
 
 waitCmd
   .command('status')
-  .description('Show current rate limit and daemon status')
+  .description('Show detailed rate limit and daemon status')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     await waitStatusCommand(options);

@@ -3,11 +3,17 @@
  *
  * CLI commands for rate limit wait and auto-resume functionality.
  *
+ * Design Philosophy (aligned with oh-my-claudecode values):
+ * - Zero learning curve: `omc wait` just works
+ * - Smart defaults: Auto-detects tmux and daemon status
+ * - Minimal commands: Most users only need `omc wait`
+ *
  * Commands:
- *   omc wait status         - Show current rate limit and daemon status
- *   omc wait daemon start   - Start the background daemon
- *   omc wait daemon stop    - Stop the daemon
- *   omc wait detect         - Scan for blocked Claude Code sessions
+ *   omc wait               - Smart command: shows status, offers to start daemon if needed
+ *   omc wait status        - Show current rate limit and daemon status
+ *   omc wait daemon start  - Start the background daemon
+ *   omc wait daemon stop   - Stop the daemon
+ *   omc wait detect        - Scan for blocked Claude Code sessions
  */
 
 import chalk from 'chalk';
@@ -23,8 +29,15 @@ import {
   detectBlockedPanes,
   formatDaemonState,
   runDaemonForeground,
+  isDaemonRunning,
 } from '../../features/rate-limit-wait/index.js';
 import type { DaemonConfig } from '../../features/rate-limit-wait/types.js';
+
+export interface WaitOptions {
+  json?: boolean;
+  start?: boolean;
+  stop?: boolean;
+}
 
 export interface WaitStatusOptions {
   json?: boolean;
@@ -39,6 +52,71 @@ export interface WaitDaemonOptions {
 export interface WaitDetectOptions {
   json?: boolean;
   lines?: number;
+}
+
+/**
+ * Smart wait command - the main entry point
+ * Follows "zero learning curve" philosophy
+ */
+export async function waitCommand(options: WaitOptions): Promise<void> {
+  // Handle explicit start/stop flags
+  if (options.start) {
+    await waitDaemonCommand('start', {});
+    return;
+  }
+  if (options.stop) {
+    await waitDaemonCommand('stop', {});
+    return;
+  }
+
+  const rateLimitStatus = await checkRateLimitStatus();
+  const daemonRunning = isDaemonRunning();
+  const tmuxAvailable = isTmuxAvailable();
+
+  if (options.json) {
+    console.log(JSON.stringify({
+      rateLimit: rateLimitStatus,
+      daemon: { running: daemonRunning },
+      tmux: { available: tmuxAvailable, insideSession: isInsideTmux() },
+    }, null, 2));
+    return;
+  }
+
+  // Smart output based on current state
+  console.log(chalk.bold('\n🕐 Rate Limit Status\n'));
+
+  if (!rateLimitStatus) {
+    console.log(chalk.yellow('Unable to check rate limits (OAuth credentials required)\n'));
+    console.log(chalk.gray('Rate limit monitoring requires Claude Pro/Max subscription.'));
+    return;
+  }
+
+  if (rateLimitStatus.isLimited) {
+    // Rate limited - provide helpful guidance
+    console.log(chalk.red.bold('⚠️  Rate Limited'));
+    console.log(chalk.yellow(`\n${formatRateLimitStatus(rateLimitStatus)}\n`));
+
+    if (!tmuxAvailable) {
+      console.log(chalk.gray('💡 Install tmux to enable auto-resume when limit clears'));
+      console.log(chalk.gray('   brew install tmux  (macOS)'));
+      console.log(chalk.gray('   apt install tmux   (Linux)\n'));
+    } else if (!daemonRunning) {
+      console.log(chalk.cyan('💡 Want to auto-resume when the limit clears?'));
+      console.log(chalk.white('   Run: ') + chalk.green('omc wait --start'));
+      console.log(chalk.gray('   (or: omc wait daemon start)\n'));
+    } else {
+      console.log(chalk.green('✓ Auto-resume daemon is running'));
+      console.log(chalk.gray('  Your session will resume automatically when the limit clears.\n'));
+    }
+  } else {
+    // Not rate limited
+    console.log(chalk.green('✓ Not rate limited\n'));
+
+    if (daemonRunning) {
+      console.log(chalk.gray('Auto-resume daemon is running (not needed when not rate limited)'));
+      console.log(chalk.gray('Stop with: omc wait --stop\n'));
+    }
+  }
 }
 
 /**
