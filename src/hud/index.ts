@@ -192,6 +192,19 @@ async function calculateSessionHealth(
     // Cost calculation failed - continue with zeros
   }
 
+  // Get top agents from tracker
+  let topAgents: Array<{ agent: string; cost: number }> = [];
+  try {
+    const sessionId = extractSessionId(stdin.transcript_path);
+    if (sessionId) {
+      const tracker = getTokenTracker(sessionId);
+      const agents = await tracker.getTopAgents(3);
+      topAgents = agents.map(a => ({ agent: a.agent, cost: a.cost }));
+    }
+  } catch {
+    // Top agents fetch failed - continue with empty
+  }
+
   return {
     durationMinutes,
     messageCount: 0,
@@ -199,7 +212,7 @@ async function calculateSessionHealth(
     sessionCost,
     totalTokens,
     cacheHitRate,
-    topAgents: [],
+    topAgents,
     costPerHour,
     isEstimated
   };
