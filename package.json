@@ -13,6 +13,7 @@
   },
   "bin": {
     "oh-my-claudecode": "dist/cli/index.js",
+    "omc": "dist/cli/index.js",
     "omc-analytics": "dist/cli/analytics.js",
     "omc-cli": "dist/cli/index.js"
   },
@@ -24,6 +25,7 @@
     "hooks",
     "scripts",
     "skills",
+    "templates",
     "docs",
     "plugin.json",
     "README.md",
