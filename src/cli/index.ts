@@ -47,6 +47,11 @@ import {
   isTokscaleCLIAvailable,
   getInstallInstructions
 } from './utils/tokscale-launcher.js';
+import {
+  waitStatusCommand,
+  waitDaemonCommand,
+  waitDetectCommand
+} from './commands/wait.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -779,6 +784,51 @@ program
       }
       process.exit(1);
     }
+  });
+
+/**
+ * Wait command - Rate limit wait and auto-resume
+ */
+const waitCmd = program
+  .command('wait')
+  .description('Rate limit wait and auto-resume functionality');
+
+waitCmd
+  .command('status')
+  .description('Show current rate limit and daemon status')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    await waitStatusCommand(options);
+  });
+
+waitCmd
+  .command('daemon <action>')
+  .description('Start or stop the auto-resume daemon')
+  .option('-v, --verbose', 'Enable verbose logging')
+  .option('-f, --foreground', 'Run in foreground (blocking)')
+  .option('-i, --interval <seconds>', 'Poll interval in seconds', '60')
+  .action(async (action: string, options) => {
+    if (action !== 'start' && action !== 'stop') {
+      console.error('Invalid action. Use: start or stop');
+      process.exit(1);
+    }
+    await waitDaemonCommand(action as 'start' | 'stop', {
+      verbose: options.verbose,
+      foreground: options.foreground,
+      interval: parseInt(options.interval),
+    });
+  });
+
+waitCmd
+  .command('detect')
+  .description('Scan for blocked Claude Code sessions in tmux')
+  .option('--json', 'Output as JSON')
+  .option('-l, --lines <number>', 'Number of pane lines to analyze', '15')
+  .action(async (options) => {
+    await waitDetectCommand({
+      json: options.json,
+      lines: parseInt(options.lines),
+    });
   });
 
 /**
