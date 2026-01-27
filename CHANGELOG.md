@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-01-27
+
+### Fixed
+
+#### Security & Stability Fixes
+- **fix(daemon):** Filter environment variables to prevent credential leakage (#155)
+  - New `createMinimalDaemonEnv()` function with allowlist approach
+  - Blocks `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, AWS credentials from daemon subprocess
+  - Adds proxy variable support (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`)
+
+- **fix(permission-handler):** Remove dead code and add swarm marker support (#157)
+  - Removed unreachable `isActiveModeRunning && isSafeCommand` code block
+  - Added `swarm-active.marker` detection for swarm mode auto-approval
+  - Generic `.marker` suffix support for future marker-based state files
+
+- **fix(subagent-tracker):** Replace CPU busy-wait loops with syncSleep (#159)
+  - `Atomics.wait`-based sleep instead of spinning loops
+  - Fixed race condition in `cleanupStaleAgents` with proper lock acquisition
+  - Complete state path migration to `.omc/state/` across all hooks and templates
+
+- **fix(session-end):** Simplify HookOutput to avoid JSON validation errors (#161)
+  - Removed `hookSpecificOutput` with unrecognized `SessionEnd` event
+  - Metrics still persist to disk, cleanup still runs
+
+- **fix(omc-setup):** Use cross-platform date conversion for state age check (#151)
+  - New `iso_to_epoch()` function with GNU/BSD fallback chain
+  - Safer jq usage with `// empty` for missing timestamps
+
+### Removed
+- Closed PR #153 in favor of PR #158 (superset with better design decisions)
+
+---
+
 ## [3.7.0] - 2026-01-27
 
 ### Added
