@@ -47,7 +47,7 @@ const SAFE_PATTERNS = [
 // See GitHub Issue #146 for full list of dangerous characters
 // Note: Quotes ("') intentionally excluded - they're needed for paths with spaces
 // and command substitution is already caught by $ detection
-const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\0\\{}\[\]*?~!#]/;
+const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\t\0\\{}\[\]*?~!#]/;
 
 /**
  * Check if a command matches safe patterns

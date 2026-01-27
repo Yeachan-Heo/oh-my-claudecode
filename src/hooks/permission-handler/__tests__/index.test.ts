@@ -78,6 +78,9 @@ describe('permission-handler', () => {
         'git status\nrm -rf /',
         'git status\n\nrm -rf /',
 
+        // Tab character injection
+        'git status\tmalicious_command',
+
         // Backslash escapes
         'git status\\nrm -rf /',
       ];

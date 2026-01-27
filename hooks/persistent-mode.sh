@@ -21,22 +21,22 @@ fi
 
 # Check for active ultrawork state
 ULTRAWORK_STATE=""
-if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ]; then
-  ULTRAWORK_STATE=$(cat "$DIRECTORY/.omc/ultrawork-state.json" 2>/dev/null)
-elif [ -f "$HOME/.claude/ultrawork-state.json" ]; then
-  ULTRAWORK_STATE=$(cat "$HOME/.claude/ultrawork-state.json" 2>/dev/null)
+if [ -f "$DIRECTORY/.omc/state/ultrawork-state.json" ]; then
+  ULTRAWORK_STATE=$(cat "$DIRECTORY/.omc/state/ultrawork-state.json" 2>/dev/null)
+elif [ -f "$HOME/.omc/state/ultrawork-state.json" ]; then
+  ULTRAWORK_STATE=$(cat "$HOME/.omc/state/ultrawork-state.json" 2>/dev/null)
 fi
 
 # Check for active ralph loop
 RALPH_STATE=""
-if [ -f "$DIRECTORY/.omc/ralph-state.json" ]; then
-  RALPH_STATE=$(cat "$DIRECTORY/.omc/ralph-state.json" 2>/dev/null)
+if [ -f "$DIRECTORY/.omc/state/ralph-state.json" ]; then
+  RALPH_STATE=$(cat "$DIRECTORY/.omc/state/ralph-state.json" 2>/dev/null)
 fi
 
 # Check for verification state (oracle verification)
 VERIFICATION_STATE=""
-if [ -f "$DIRECTORY/.omc/ralph-verification.json" ]; then
-  VERIFICATION_STATE=$(cat "$DIRECTORY/.omc/ralph-verification.json" 2>/dev/null)
+if [ -f "$DIRECTORY/.omc/state/ralph-verification.json" ]; then
+  VERIFICATION_STATE=$(cat "$DIRECTORY/.omc/state/ralph-verification.json" 2>/dev/null)
 fi
 
 # Check for incomplete todos
@@ -106,7 +106,7 @@ EOF
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       # Increment iteration
       NEW_ITER=$((ITERATION + 1))
-      echo "$RALPH_STATE" | jq ".iteration = $NEW_ITER" > "$DIRECTORY/.omc/ralph-state.json" 2>/dev/null
+      echo "$RALPH_STATE" | jq ".iteration = $NEW_ITER" > "$DIRECTORY/.omc/state/ralph-state.json" 2>/dev/null
 
       cat << EOF
 {"continue": false, "reason": "<ralph-loop-continuation>\n\n[RALPH LOOP - ITERATION $NEW_ITER/$MAX_ITER]\n\nYour previous attempt did not output the completion promise. The work is NOT done yet.\n\nCRITICAL INSTRUCTIONS:\n1. Review your progress and the original task\n2. Check your todo list - are ALL items marked complete?\n3. Continue from where you left off\n4. When FULLY complete, output: <promise>$PROMISE</promise>\n5. Do NOT stop until the task is truly done\n\nOriginal task: $PROMPT\n\n</ralph-loop-continuation>\n\n---\n"}
@@ -149,7 +149,7 @@ if [ -n "$ULTRAWORK_STATE" ] && [ "$INCOMPLETE_COUNT" -gt 0 ]; then
 
     # Update state file (best effort)
     if command -v jq &> /dev/null; then
-      echo "$ULTRAWORK_STATE" | jq ".reinforcement_count = $NEW_COUNT | .last_checked_at = \"$(date -Iseconds)\"" > "$DIRECTORY/.omc/ultrawork-state.json" 2>/dev/null
+      echo "$ULTRAWORK_STATE" | jq ".reinforcement_count = $NEW_COUNT | .last_checked_at = \"$(date -Iseconds)\"" > "$DIRECTORY/.omc/state/ultrawork-state.json" 2>/dev/null
     fi
 
     cat << EOF

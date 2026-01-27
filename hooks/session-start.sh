@@ -18,11 +18,11 @@ fi
 MESSAGES=""
 
 # Check for active ultrawork state
-if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ] || [ -f "$HOME/.claude/ultrawork-state.json" ]; then
-  if [ -f "$DIRECTORY/.omc/ultrawork-state.json" ]; then
-    ULTRAWORK_STATE=$(cat "$DIRECTORY/.omc/ultrawork-state.json" 2>/dev/null)
+if [ -f "$DIRECTORY/.omc/state/ultrawork-state.json" ] || [ -f "$HOME/.omc/state/ultrawork-state.json" ]; then
+  if [ -f "$DIRECTORY/.omc/state/ultrawork-state.json" ]; then
+    ULTRAWORK_STATE=$(cat "$DIRECTORY/.omc/state/ultrawork-state.json" 2>/dev/null)
   else
-    ULTRAWORK_STATE=$(cat "$HOME/.claude/ultrawork-state.json" 2>/dev/null)
+    ULTRAWORK_STATE=$(cat "$HOME/.omc/state/ultrawork-state.json" 2>/dev/null)
   fi
 
   IS_ACTIVE=$(echo "$ULTRAWORK_STATE" | jq -r '.active // false' 2>/dev/null)
