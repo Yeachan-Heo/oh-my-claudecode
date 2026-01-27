@@ -1,0 +1,37 @@
+# SWE-bench Evaluation Dependencies
+# Core SWE-bench package
+swebench>=2.0
+
+# Anthropic SDK for direct API access if needed
+anthropic>=0.25.0
+
+# Dataset loading
+datasets>=2.18.0
+
+# Testing framework
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# Data analysis and reporting
+pandas>=2.2.0
+numpy>=1.26.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Results serialization
+jsonlines>=4.0.0
+
+# Progress tracking
+tqdm>=4.66.0
+
+# HTTP client for API calls
+httpx>=0.27.0
+
+# Async support
+aiofiles>=23.2.0
+
+# Rich console output
+rich>=13.7.0
+
+# YAML config support
+pyyaml>=6.0.1
