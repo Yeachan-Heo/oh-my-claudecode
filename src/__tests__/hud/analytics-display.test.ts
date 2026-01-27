@@ -129,7 +129,6 @@ describe('renderAnalyticsLineWithConfig', () => {
     it('renders all elements', () => {
       const result = renderAnalyticsLineWithConfig(baseAnalytics, true, true);
       expect(result).toContain('Cost: $1.2345');
-      expect(result).toContain('Tokens: 50.0k');
       expect(result).toContain('Cache: 45.6%');
       expect(result).toContain('Top: executor:$0.80 architect:$0.30');
     });
@@ -154,7 +153,6 @@ describe('renderAnalyticsLineWithConfig', () => {
     it('hides cost but shows cache', () => {
       const result = renderAnalyticsLineWithConfig(baseAnalytics, false, true);
       expect(result).not.toContain('Cost:');
-      expect(result).toContain('Tokens: 50.0k');
       expect(result).toContain('Cache: 45.6%');
       expect(result).toContain('Top:');
     });
@@ -164,25 +162,22 @@ describe('renderAnalyticsLineWithConfig', () => {
     it('shows cost but hides cache', () => {
       const result = renderAnalyticsLineWithConfig(baseAnalytics, true, false);
       expect(result).toContain('Cost: $1.2345');
-      expect(result).toContain('Tokens: 50.0k');
       expect(result).not.toContain('Cache:');
       expect(result).toContain('Top:');
     });
   });
 
   describe('showCost=false, showCache=false (minimal)', () => {
-    it('shows only tokens and top agents', () => {
+    it('shows only top agents', () => {
       const result = renderAnalyticsLineWithConfig(baseAnalytics, false, false);
       expect(result).not.toContain('Cost:');
       expect(result).not.toContain('Cache:');
-      expect(result).toContain('Tokens: 50.0k');
       expect(result).toContain('Top:');
     });
 
-    it('formats with pipe separators', () => {
+    it('formats without pipe separators when minimal', () => {
       const result = renderAnalyticsLineWithConfig(baseAnalytics, false, false);
-      const parts = result.split(' | ');
-      expect(parts).toHaveLength(2);
+      expect(result).toBe('Top: executor:$0.80 architect:$0.30');
     });
   });
 });

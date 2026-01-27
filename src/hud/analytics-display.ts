@@ -127,8 +127,6 @@ export function renderAnalyticsLineWithConfig(
     parts.push(`${costIndicator} Cost: ${analytics.sessionCost}`);
   }
 
-  parts.push(`Tokens: ${analytics.sessionTokens}`);
-
   if (showCache) {
     parts.push(`Cache: ${analytics.cacheEfficiency}`);
   }
