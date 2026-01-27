@@ -62,7 +62,7 @@ export function isSafeCommand(command: string): boolean {
 }
 
 /**
- * Check if an active mode (autopilot/ultrawork/ralph) is running
+ * Check if an active mode (autopilot/ultrawork/ralph/swarm) is running
  */
 export function isActiveModeRunning(directory: string): boolean {
   const stateDir = path.join(directory, '.omc', 'state');
@@ -76,11 +76,18 @@ export function isActiveModeRunning(directory: string): boolean {
     'ultrapilot-state.json',
     'ralph-state.json',
     'ultrawork-state.json',
+    'swarm-active.marker',
   ];
 
   for (const stateFile of activeStateFiles) {
     const statePath = path.join(stateDir, stateFile);
     if (fs.existsSync(statePath)) {
+      // Marker files: existence alone indicates active mode
+      if (stateFile.endsWith('.marker')) {
+        return true;
+      }
+
+      // JSON state files: check active/status fields
       try {
         const content = fs.readFileSync(statePath, 'utf-8');
         const state = JSON.parse(content);
@@ -122,20 +129,6 @@ export function processPermissionRequest(input: PermissionRequestInput): HookOut
         decision: {
           behavior: 'allow',
           reason: 'Safe read-only or test command',
-        },
-      },
-    };
-  }
-
-  // Auto-allow safe commands during active mode (NOT all commands!)
-  if (isActiveModeRunning(input.cwd) && isSafeCommand(command)) {
-    return {
-      continue: true,
-      hookSpecificOutput: {
-        hookEventName: 'PermissionRequest',
-        decision: {
-          behavior: 'allow',
-          reason: 'Safe command during active autonomous mode',
         },
       },
     };
