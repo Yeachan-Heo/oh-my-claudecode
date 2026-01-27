@@ -47,6 +47,45 @@ const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
 const SECURE_FILE_MODE = 0o600;
 
 /**
+ * Allowlist of environment variables safe to pass to daemon child process.
+ * This prevents leaking sensitive variables like ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.
+ */
+const DAEMON_ENV_ALLOWLIST = [
+  // Core system paths
+  'PATH', 'HOME', 'USERPROFILE',
+  // User identification
+  'USER', 'USERNAME', 'LOGNAME',
+  // Locale settings
+  'LANG', 'LC_ALL', 'LC_CTYPE',
+  // Terminal/tmux (required for tmux integration)
+  'TERM', 'TMUX', 'TMUX_PANE',
+  // Temp directories
+  'TMPDIR', 'TMP', 'TEMP',
+  // XDG directories (Linux)
+  'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
+  // Shell
+  'SHELL',
+  // Node.js
+  'NODE_ENV',
+  // Windows system
+  'SystemRoot', 'SYSTEMROOT', 'windir', 'COMSPEC',
+] as const;
+
+/**
+ * Create a minimal environment for daemon child processes.
+ * Only includes allowlisted variables to prevent credential leakage.
+ */
+function createMinimalDaemonEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of DAEMON_ENV_ALLOWLIST) {
+    if (process.env[key] !== undefined) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
+
+/**
  * Get effective configuration by merging with defaults
  */
 function getConfig(config?: DaemonConfig): Required<DaemonConfig> {
@@ -386,11 +425,12 @@ export function startDaemon(config?: DaemonConfig): DaemonResponse {
 
   try {
     // Use node to run the daemon in background
+    // Note: Using minimal env to prevent leaking sensitive credentials
     const child = spawn('node', ['-e', daemonScript], {
       detached: true,
       stdio: 'ignore',
       cwd: process.cwd(),
-      env: process.env,
+      env: createMinimalDaemonEnv(),
     });
 
     child.unref();
