@@ -6,6 +6,38 @@ description: One-time setup for oh-my-claudecode (the ONLY command you need to l
 
 This is the **only command you need to learn**. After running this, everything else is automatic.
 
+## Graceful Interrupt Handling
+
+**IMPORTANT**: This setup process saves progress after each step. If interrupted (Ctrl+C or connection loss), the setup can resume from where it left off.
+
+### Resume Detection (Step 0)
+
+Before starting any step, check for existing state:
+
+```bash
+# Check for existing setup state
+STATE_FILE=".omc/state/setup-state.json"
+if [ -f "$STATE_FILE" ]; then
+  LAST_STEP=$(cat "$STATE_FILE" | grep -oE '"lastCompletedStep":\s*[0-9]+' | grep -oE '[0-9]+' || echo "0")
+  TIMESTAMP=$(cat "$STATE_FILE" | grep -oE '"timestamp":\s*"[^"]+"' | cut -d'"' -f4 || echo "unknown")
+  echo "Found previous setup session (Step $LAST_STEP completed at $TIMESTAMP)"
+fi
+```
+
+If state exists, use AskUserQuestion to prompt:
+
+**Question:** "Found a previous setup session. Would you like to resume or start fresh?"
+
+**Options:**
+1. **Resume from step $LAST_STEP** - Continue where you left off
+2. **Start fresh** - Begin from the beginning (clears saved state)
+
+If user chooses "Start fresh":
+```bash
+rm -f ".omc/state/setup-state.json"
+echo "Previous state cleared. Starting fresh setup."
+```
+
 ## Step 1: Ask User Preference
 
 Use the AskUserQuestion tool to prompt the user:
