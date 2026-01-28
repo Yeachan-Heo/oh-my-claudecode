@@ -18,6 +18,7 @@
 import { execSync, ExecSyncOptions } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { fileURLToPath } from 'url';
 import {
   initHandoff,
   readHandoff,
@@ -28,6 +29,66 @@ import {
 } from '../src/hooks/ralph/fresh-handoff.js';
 import { generateIterationPrompt } from '../src/hooks/ralph/fresh-prompt.js';
 import { isStandardRalphActive } from '../src/hooks/ralph/fresh.js';
+
+// ============================================================================
+// State File Management
+// ============================================================================
+
+export interface RalphFreshState {
+  active: boolean;
+  started_at: string;
+  iteration: number;
+}
+
+function getStateFilePath(directory: string): string {
+  return join(directory, '.omc', 'state', 'ralph-fresh-state.json');
+}
+
+function ensureStateDir(directory: string): void {
+  const stateDir = join(directory, '.omc', 'state');
+  if (!existsSync(stateDir)) {
+    mkdirSync(stateDir, { recursive: true });
+  }
+}
+
+export function writeStateFile(config: RalphFreshScriptConfig, iteration: number): void {
+  ensureStateDir(config.workingDir);
+  const stateFile = getStateFilePath(config.workingDir);
+
+  let startedAt: string;
+
+  // Try to preserve started_at from existing state
+  if (existsSync(stateFile)) {
+    try {
+      const existing = JSON.parse(readFileSync(stateFile, 'utf-8'));
+      startedAt = existing.started_at || new Date().toISOString();
+    } catch {
+      startedAt = new Date().toISOString();
+    }
+  } else {
+    startedAt = new Date().toISOString();
+  }
+
+  const state: RalphFreshState = {
+    active: true,
+    started_at: startedAt,
+    iteration
+  };
+
+  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+}
+
+export function clearStateFile(directory: string): void {
+  const stateFile = getStateFilePath(directory);
+
+  const state: RalphFreshState = {
+    active: false,
+    started_at: new Date().toISOString(),
+    iteration: 0
+  };
+
+  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+}
 
 // ============================================================================
 // Configuration
@@ -148,6 +209,7 @@ function cleanup(dir: string): void {
   // Clear handoff state on successful completion
   clearHandoff(dir);
   console.log('[Ralph Fresh] Cleaned up handoff state');
+  // Note: state file is cleared by caller
 }
 
 // ============================================================================
@@ -276,12 +338,18 @@ async function main(): Promise<void> {
 
   let handoff = initOrLoadHandoff(config);
 
+  // Write initial state file at start
+  writeStateFile(config, handoff.iteration);
+
   while (
     handoff.iteration <= handoff.max_iterations &&
     !handoff.completed &&
     !shutdownRequested
   ) {
     console.log(`\n[Ralph Fresh] === Iteration ${handoff.iteration}/${handoff.max_iterations} ===`);
+
+    // Update state file with current iteration
+    writeStateFile(config, handoff.iteration);
 
     // Refresh state from files (PRD, progress, git)
     handoff = refreshHandoffFromFiles(handoff, config.workingDir);
@@ -338,9 +406,10 @@ async function main(): Promise<void> {
   // Save final state
   writeHandoff(handoff, config.workingDir);
 
-  // Report result
+  // Report result and clear/update state file
   if (shutdownRequested) {
     console.log('\n[Ralph Fresh] Shutdown requested. State saved for resume.');
+    // Keep state file active for resume
     process.exit(130); // Standard exit code for SIGINT
   } else if (handoff.completed) {
     console.log(`\n[Ralph Fresh] ✅ COMPLETE after ${handoff.iteration} iterations`);
@@ -348,9 +417,13 @@ async function main(): Promise<void> {
       console.log(`\nCompletion message:\n${handoff.completion_message}`);
     }
     cleanup(config.workingDir);
+    // Clear state file on successful completion
+    clearStateFile(config.workingDir);
     process.exit(0);
   } else {
     console.log(`\n[Ralph Fresh] ⚠️ Max iterations (${handoff.max_iterations}) reached without completion`);
+    // Clear state file on max iterations reached
+    clearStateFile(config.workingDir);
     process.exit(1);
   }
 }
@@ -359,7 +432,8 @@ async function main(): Promise<void> {
 // Entry Point
 // ============================================================================
 
-if (require.main === module) {
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMainModule) {
   main().catch(err => {
     console.error('[Ralph Fresh] Fatal error:', err);
     process.exit(1);

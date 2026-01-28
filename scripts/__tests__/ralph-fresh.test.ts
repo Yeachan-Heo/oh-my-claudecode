@@ -18,7 +18,9 @@ import {
   setupSignalHandlers,
   extractCompletionMessage,
   escapeRegex,
-  initOrLoadHandoff
+  initOrLoadHandoff,
+  writeStateFile,
+  clearStateFile
 } from '../ralph-fresh.js';
 
 describe('parseArgs', () => {
@@ -299,5 +301,121 @@ describe('initOrLoadHandoff', () => {
 
     expect(handoff.iteration).toBe(5);
     expect(handoff.progress.patterns).toContain('Test pattern');
+  });
+});
+
+describe('State file management', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    testDir = '/test/state-dir';
+  });
+
+  it('should write state file with correct structure', () => {
+    const mockConfig = {
+      maxIterations: 20,
+      maxTurnsPerIteration: 100,
+      completionPromise: 'TASK_COMPLETE',
+      workingDir: testDir,
+      verbose: false,
+      retryAttempts: 3,
+      retryDelayMs: 5000,
+      stuckThreshold: 3
+    };
+
+    vi.mocked(existsSync).mockReturnValue(false); // No existing state
+    vi.mocked(mkdirSync).mockReturnValue(undefined);
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+
+    writeStateFile(mockConfig, 1);
+
+    const stateFilePath = join(testDir, '.omc', 'state', 'ralph-fresh-state.json');
+
+    // Verify state structure
+    const calls = vi.mocked(writeFileSync).mock.calls;
+    const lastCall = calls[calls.length - 1];
+
+    expect(lastCall[0]).toBe(stateFilePath);
+
+    const stateJson = JSON.parse(lastCall[1] as string);
+
+    expect(stateJson.active).toBe(true);
+    expect(stateJson.iteration).toBe(1);
+    expect(stateJson.started_at).toBeTruthy();
+  });
+
+  it('should update state file with iteration number', () => {
+    const mockConfig = {
+      maxIterations: 20,
+      maxTurnsPerIteration: 100,
+      completionPromise: 'TASK_COMPLETE',
+      workingDir: testDir,
+      verbose: false,
+      retryAttempts: 3,
+      retryDelayMs: 5000,
+      stuckThreshold: 3
+    };
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(mkdirSync).mockReturnValue(undefined);
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+
+    writeStateFile(mockConfig, 5);
+
+    const calls = vi.mocked(writeFileSync).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    const stateJson = JSON.parse(lastCall[1] as string);
+
+    expect(stateJson.iteration).toBe(5);
+  });
+
+  it('should clear state file on completion', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+
+    clearStateFile(testDir);
+
+    const stateFilePath = join(testDir, '.omc', 'state', 'ralph-fresh-state.json');
+
+    const calls = vi.mocked(writeFileSync).mock.calls;
+    const lastCall = calls[calls.length - 1];
+
+    expect(lastCall[0]).toBe(stateFilePath);
+
+    const stateJson = JSON.parse(lastCall[1] as string);
+    expect(stateJson.active).toBe(false);
+  });
+
+  it('should preserve started_at when updating state', () => {
+    const mockConfig = {
+      maxIterations: 20,
+      maxTurnsPerIteration: 100,
+      completionPromise: 'TASK_COMPLETE',
+      workingDir: testDir,
+      verbose: false,
+      retryAttempts: 3,
+      retryDelayMs: 5000,
+      stuckThreshold: 3
+    };
+
+    const startedAt = '2024-01-01T00:00:00Z';
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+      active: true,
+      started_at: startedAt,
+      iteration: 1
+    }));
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+
+    writeStateFile(mockConfig, 2);
+
+    const calls = vi.mocked(writeFileSync).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    const stateJson = JSON.parse(lastCall[1] as string);
+
+    expect(stateJson.started_at).toBe(startedAt);
+    expect(stateJson.iteration).toBe(2);
   });
 });

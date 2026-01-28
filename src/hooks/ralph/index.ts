@@ -139,3 +139,40 @@ export {
   // Types
   type VerificationState
 } from './verifier.js';
+
+// ============================================================================
+// Ralph Fresh-Context (Fresh Subagent per Iteration)
+// ============================================================================
+
+export {
+  // Helper functions
+  isRalphFreshActive,
+  isStandardRalphActive,
+
+  // Configuration
+  DEFAULT_FRESH_CONFIG,
+
+  // Core types
+  type RalphFreshHandoff,
+  type RalphFreshConfig,
+  type RalphFreshPrd,
+  type RalphFreshProgress,
+  type RalphFreshGit,
+  type RalphFreshStuckDetection,
+  type RalphFreshError
+} from './fresh.js';
+
+export {
+  // Handoff operations
+  initHandoff,
+  readHandoff,
+  writeHandoff,
+  refreshHandoffFromFiles,
+  getHandoffPath,
+  clearHandoff
+} from './fresh-handoff.js';
+
+export {
+  // Prompt generation
+  generateIterationPrompt
+} from './fresh-prompt.js';
