@@ -1,6 +1,6 @@
 ---
 name: cancel
-description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ecomode, ultraqa, swarm, ultrapilot, pipeline)
+description: Cancel any active OMC mode (autopilot, ralph, ralph-fresh, ultrawork, ecomode, ultraqa, swarm, ultrapilot, pipeline)
 ---
 
 # Cancel Skill
@@ -12,6 +12,7 @@ Intelligent cancellation that detects and cancels the active OMC mode.
 Automatically detects which mode is active and cancels it:
 - **Autopilot**: Stops workflow, preserves progress for resume
 - **Ralph**: Stops persistence loop, clears linked ultrawork if applicable
+- **Ralph-Fresh**: Stops fresh-context loop, resets state for next cycle
 - **Ultrawork**: Stops parallel execution (standalone or linked)
 - **Ecomode**: Stops token-efficient parallel execution (standalone or linked to ralph)
 - **UltraQA**: Stops QA cycling workflow
@@ -32,6 +33,7 @@ Or say: "stop", "cancel", "abort"
 The skill checks state files to determine what's active:
 - `.omc/state/autopilot-state.json` → Autopilot detected
 - `.omc/state/ralph-state.json` → Ralph detected
+- `.omc/state/ralph-fresh-state.json` → Ralph-Fresh detected
 - `.omc/state/ultrawork-state.json` → Ultrawork detected
 - `.omc/state/ecomode-state.json` → Ecomode detected
 - `.omc/state/ultraqa-state.json` → UltraQA detected
@@ -44,13 +46,14 @@ The skill checks state files to determine what's active:
 If multiple modes are active, they're cancelled in order of dependency:
 1. Autopilot (includes ralph/ultraqa/ecomode cleanup)
 2. Ralph (includes linked ultrawork OR ecomode cleanup)
-3. Ultrawork (standalone)
-4. Ecomode (standalone)
-5. UltraQA (standalone)
-6. Swarm (standalone)
-7. Ultrapilot (standalone)
-8. Pipeline (standalone)
-9. Plan Consensus (standalone)
+3. Ralph-Fresh (standalone, mutually exclusive with ralph)
+4. Ultrawork (standalone)
+5. Ecomode (standalone)
+6. UltraQA (standalone)
+7. Swarm (standalone)
+8. Ultrapilot (standalone)
+9. Pipeline (standalone)
+10. Plan Consensus (standalone)
 
 ## Force Clear All
 
@@ -69,6 +72,7 @@ Or use the `--all` alias:
 This removes all state files:
 - `.omc/state/autopilot-state.json`
 - `.omc/state/ralph-state.json`
+- `.omc/state/ralph-fresh-state.json`
 - `.omc/state/ultrawork-state.json`
 - `.omc/state/ecomode-state.json`
 - `.omc/state/ultraqa-state.json`
@@ -147,6 +151,7 @@ if [[ "$FORCE_MODE" == "true" ]]; then
   # Remove local state files
   rm -f .omc/state/autopilot-state.json
   rm -f .omc/state/ralph-state.json
+  rm -f .omc/state/ralph-fresh-state.json
   rm -f .omc/state/ultrawork-state.json
   rm -f .omc/state/ecomode-state.json
   rm -f .omc/state/ultraqa-state.json
@@ -319,6 +324,7 @@ if [[ "$FORCE_MODE" == "true" ]]; then
   # Remove local state files
   rm -f .omc/state/autopilot-state.json
   rm -f .omc/state/ralph-state.json
+  rm -f .omc/state/ralph-fresh-state.json
   rm -f .omc/state/ultrawork-state.json
   rm -f .omc/state/ecomode-state.json
   rm -f .omc/state/ultraqa-state.json
@@ -451,7 +457,22 @@ if [[ -f .omc/state/ralph-state.json ]]; then
   fi
 fi
 
-# 3. Check Ultrawork (standalone, not linked)
+# 3. Check Ralph-Fresh (standalone, mutually exclusive with ralph)
+if [[ -f .omc/state/ralph-fresh-state.json ]]; then
+  RALPH_FRESH_STATE=$(cat .omc/state/ralph-fresh-state.json)
+  RALPH_FRESH_ACTIVE=$(echo "$RALPH_FRESH_STATE" | jq -r '.active // false')
+
+  if [[ "$RALPH_FRESH_ACTIVE" == "true" ]]; then
+    # Remove ralph-fresh state (local only, no global state file)
+    rm -f .omc/state/ralph-fresh-state.json
+
+    echo "Ralph-Fresh cancelled. Fresh-context loop stopped."
+    CANCELLED_ANYTHING=true
+    exit 0
+  fi
+fi
+
+# 4. Check Ultrawork (standalone, not linked)
 if [[ -f .omc/state/ultrawork-state.json ]]; then
   UW_STATE=$(cat .omc/state/ultrawork-state.json)
   UW_ACTIVE=$(echo "$UW_STATE" | jq -r '.active // false')
@@ -474,7 +495,7 @@ if [[ -f .omc/state/ultrawork-state.json ]]; then
   fi
 fi
 
-# 4. Check Ecomode (standalone, not linked)
+# 5. Check Ecomode (standalone, not linked)
 if [[ -f .omc/state/ecomode-state.json ]]; then
   ECO_STATE=$(cat .omc/state/ecomode-state.json)
   ECO_ACTIVE=$(echo "$ECO_STATE" | jq -r '.active // false')
@@ -497,7 +518,7 @@ if [[ -f .omc/state/ecomode-state.json ]]; then
   fi
 fi
 
-# 5. Check UltraQA (standalone)
+# 6. Check UltraQA (standalone)
 if [[ -f .omc/state/ultraqa-state.json ]]; then
   ULTRAQA_STATE=$(cat .omc/state/ultraqa-state.json)
   ULTRAQA_ACTIVE=$(echo "$ULTRAQA_STATE" | jq -r '.active // false')
@@ -510,7 +531,7 @@ if [[ -f .omc/state/ultraqa-state.json ]]; then
   fi
 fi
 
-# 6. Check Swarm (SQLite-based)
+# 7. Check Swarm (SQLite-based)
 SWARM_DB=".omc/state/swarm.db"
 if [[ -f "$SWARM_DB" ]]; then
   # Check if sqlite3 CLI is available
@@ -543,7 +564,7 @@ if [[ -f "$SWARM_DB" ]]; then
   fi
 fi
 
-# 7. Check Ultrapilot (standalone)
+# 8. Check Ultrapilot (standalone)
 if [[ -f .omc/state/ultrapilot-state.json ]]; then
   ULTRAPILOT_STATE=$(cat .omc/state/ultrapilot-state.json)
   ULTRAPILOT_ACTIVE=$(echo "$ULTRAPILOT_STATE" | jq -r '.active // false')
@@ -556,7 +577,7 @@ if [[ -f .omc/state/ultrapilot-state.json ]]; then
   fi
 fi
 
-# 8. Check Pipeline (standalone)
+# 9. Check Pipeline (standalone)
 if [[ -f .omc/state/pipeline-state.json ]]; then
   PIPELINE_STATE=$(cat .omc/state/pipeline-state.json)
   PIPELINE_ACTIVE=$(echo "$PIPELINE_STATE" | jq -r '.active // false')
@@ -569,7 +590,7 @@ if [[ -f .omc/state/pipeline-state.json ]]; then
   fi
 fi
 
-# 9. Check Plan Consensus (standalone)
+# 10. Check Plan Consensus (standalone)
 if [[ "$PLAN_CONSENSUS_ACTIVE" == "true" ]]; then
   echo "Cancelling Plan Consensus mode..."
 
@@ -590,6 +611,7 @@ if [[ "$CANCELLED_ANYTHING" == "false" ]]; then
   echo "Checked for:"
   echo "  - Autopilot (.omc/state/autopilot-state.json)"
   echo "  - Ralph (.omc/state/ralph-state.json)"
+  echo "  - Ralph-Fresh (.omc/state/ralph-fresh-state.json)"
   echo "  - Ultrawork (.omc/state/ultrawork-state.json)"
   echo "  - Ecomode (.omc/state/ecomode-state.json)"
   echo "  - UltraQA (.omc/state/ultraqa-state.json)"
@@ -608,6 +630,7 @@ fi
 |------|-----------------|
 | Autopilot | "Autopilot cancelled at phase: {phase}. Progress preserved for resume." |
 | Ralph | "Ralph cancelled. Persistent mode deactivated." |
+| Ralph-Fresh | "Ralph-Fresh cancelled. Fresh-context loop stopped." |
 | Ultrawork | "Ultrawork cancelled. Parallel execution mode deactivated." |
 | Ecomode | "Ecomode cancelled. Token-efficient execution mode deactivated." |
 | UltraQA | "UltraQA cancelled. QA cycling workflow stopped." |
