@@ -207,9 +207,23 @@ Run UltraQA cycles until build/lint/tests pass.
 
 ### QA Sequence
 
-1. **Build**: npm run build (or equivalent for the project type)
-2. **Lint**: npm run lint (or equivalent)
-3. **Test**: npm test (or equivalent)
+1. **Build**: Run the project's build command:
+   - JavaScript/TypeScript: \`npm run build\` (or yarn/pnpm equivalent)
+   - Python: \`python -m build\` (if applicable)
+   - Go: \`go build ./...\`
+   - Rust: \`cargo build\`
+   - Java: \`mvn compile\` or \`gradle build\`
+2. **Lint**: Run the project's linter:
+   - JavaScript/TypeScript: \`npm run lint\`
+   - Python: \`ruff check .\` or \`flake8\`
+   - Go: \`golangci-lint run\`
+   - Rust: \`cargo clippy\`
+3. **Test**: Run the project's tests:
+   - JavaScript/TypeScript: \`npm test\`
+   - Python: \`pytest\`
+   - Go: \`go test ./...\`
+   - Rust: \`cargo test\`
+   - Java: \`mvn test\` or \`gradle test\`
 
 ### Fix Cycle
 

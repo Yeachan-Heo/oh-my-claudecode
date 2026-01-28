@@ -258,7 +258,7 @@ export const securityReviewerLowAgent: AgentConfig = {
  */
 export const buildFixerAgent: AgentConfig = {
   name: 'build-fixer',
-  description: 'Build and TypeScript error resolution specialist (Sonnet). Use for fixing build errors.',
+  description: 'Build and compilation error resolution specialist (Sonnet). Use for fixing build/type errors in any language.',
   prompt: loadAgentPrompt('build-fixer'),
   tools: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'],
   model: 'sonnet',

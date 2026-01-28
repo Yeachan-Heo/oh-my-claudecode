@@ -43,6 +43,17 @@ If you observe code-before-test:
 4. **VERIFY** it fails for the right reason
 5. **THEN** implement
 
+## Test Framework Detection
+
+Detect the project's test framework before writing tests:
+- `jest.config.*` or `vitest.config.*` or `package.json` with jest/vitest → **Jest/Vitest** (JavaScript/TypeScript)
+- `pytest.ini`, `pyproject.toml` with `[tool.pytest]`, `conftest.py` → **Pytest** (Python)
+- `*_test.go` files or `go.mod` → **Go testing** (built-in)
+- `Cargo.toml` → **Rust testing** (built-in `cargo test`)
+- `pom.xml` or `build.gradle` with JUnit → **JUnit** (Java)
+
+Use the detected framework for all test commands and patterns below.
+
 ## TDD Workflow
 
 ### Step 1: Write Test First (RED)
@@ -56,11 +67,51 @@ describe('calculateTotal', () => {
 })
 ```
 
+**Python (Pytest):**
+```python
+def test_calculate_total_returns_sum():
+    items = [{"price": 10}, {"price": 20}]
+    assert calculate_total(items) == 30
+```
+
+**Go:**
+```go
+func TestCalculateTotal(t *testing.T) {
+    items := []Item{{Price: 10}, {Price: 20}}
+    got := CalculateTotal(items)
+    if got != 30 {
+        t.Errorf("CalculateTotal() = %d, want 30", got)
+    }
+}
+```
+
+**Rust:**
+```rust
+#[test]
+fn test_calculate_total() {
+    let items = vec![Item { price: 10 }, Item { price: 20 }];
+    assert_eq!(calculate_total(&items), 30);
+}
+```
+
 ### Step 2: Run Test (Verify it FAILS)
 ```bash
-npm test
-# Test should fail - we haven't implemented yet
+# JavaScript/TypeScript
+npm test        # or: npx vitest run
+
+# Python
+pytest          # or: python -m pytest
+
+# Go
+go test ./...
+
+# Rust
+cargo test
+
+# Java
+mvn test        # or: gradle test
 ```
+# Test should fail - we haven't implemented yet
 
 ### Step 3: Write Minimal Implementation (GREEN)
 ```typescript
@@ -71,9 +122,22 @@ export function calculateTotal(items: { price: number }[]): number {
 
 ### Step 4: Run Test (Verify it PASSES)
 ```bash
-npm test
-# Test should now pass
+# JavaScript/TypeScript
+npm test        # or: npx vitest run
+
+# Python
+pytest          # or: python -m pytest
+
+# Go
+go test ./...
+
+# Rust
+cargo test
+
+# Java
+mvn test        # or: gradle test
 ```
+# Test should now pass
 
 ### Step 5: Refactor (IMPROVE)
 - Remove duplication
@@ -83,9 +147,22 @@ npm test
 
 ### Step 6: Verify Coverage
 ```bash
-npm run test:coverage
-# Verify 80%+ coverage
+# JavaScript/TypeScript
+npm run test:coverage   # or: npx vitest run --coverage
+
+# Python
+pytest --cov=. --cov-report=term-missing
+
+# Go
+go test -cover ./...    # or: go test -coverprofile=coverage.out ./...
+
+# Rust
+cargo tarpaulin         # or: cargo llvm-cov
+
+# Java
+mvn test jacoco:report  # or: gradle test jacocoTestReport
 ```
+# Verify 80%+ coverage
 
 ## Test Types You Must Write
 
@@ -105,6 +182,35 @@ describe('formatCurrency', () => {
     expect(() => formatCurrency(null)).toThrow()
   })
 })
+```
+
+**Python (Pytest):**
+```python
+def test_format_currency_positive():
+    assert format_currency(1234.56) == "$1,234.56"
+
+def test_format_currency_zero():
+    assert format_currency(0) == "$0.00"
+
+def test_format_currency_null_raises():
+    with pytest.raises(TypeError):
+        format_currency(None)
+```
+
+**Go:**
+```go
+func TestFormatCurrency(t *testing.T) {
+    tests := []struct{ input float64; want string }{
+        {1234.56, "$1,234.56"},
+        {0, "$0.00"},
+    }
+    for _, tt := range tests {
+        got := FormatCurrency(tt.input)
+        if got != tt.want {
+            t.Errorf("FormatCurrency(%v) = %q, want %q", tt.input, got, tt.want)
+        }
+    }
+}
 ```
 
 ### 2. Integration Tests (Mandatory)
@@ -175,17 +281,50 @@ jest.mock('./db', () => ({
 }))
 ```
 
+**Python (Pytest):**
+```python
+from unittest.mock import patch, MagicMock
+
+@patch('module.api.fetch_user')
+def test_with_mock(mock_fetch):
+    mock_fetch.return_value = {"id": 1, "name": "Test"}
+    # test code
+```
+
+**Go:**
+```go
+type MockAPI struct {
+    FetchUserFunc func() (*User, error)
+}
+func (m *MockAPI) FetchUser() (*User, error) {
+    return m.FetchUserFunc()
+}
+```
+
 ## Coverage Report
 
 ```bash
-# Run tests with coverage
+# JavaScript/TypeScript
 npm run test:coverage
 
-# Required thresholds:
-# - Branches: 80%
-# - Functions: 80%
-# - Lines: 80%
-# - Statements: 80%
+# Python
+pytest --cov=. --cov-report=html
+
+# Go
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Rust
+cargo tarpaulin --out Html
+
+# Java
+mvn test jacoco:report
 ```
+
+Required thresholds (all languages):
+- Branches: 80%
+- Functions: 80%
+- Lines: 80%
+- Statements: 80%
 
 **Remember**: No code without tests. Tests are not optional. They are the safety net that enables confident refactoring, rapid development, and production reliability.

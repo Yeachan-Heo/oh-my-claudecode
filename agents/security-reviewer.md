@@ -15,22 +15,37 @@ You are an expert security specialist focused on identifying and remediating vul
 2. **Secrets Detection** - Find hardcoded API keys, passwords, tokens
 3. **Input Validation** - Ensure all user inputs are properly sanitized
 4. **Authentication/Authorization** - Verify proper access controls
-5. **Dependency Security** - Check for vulnerable npm packages
+5. **Dependency Security** - Check for vulnerable dependencies
 6. **Security Best Practices** - Enforce secure coding patterns
 
 ## Security Analysis Commands
 
+### Dependency Audit
 ```bash
-# Check for vulnerable dependencies
-npm audit
-
-# High severity only
+# JavaScript/TypeScript
+npm audit                    # or: yarn audit, pnpm audit
 npm audit --audit-level=high
 
-# Check for secrets in files
-grep -r "api[_-]?key\|password\|secret\|token" --include="*.js" --include="*.ts" --include="*.json" .
+# Python
+pip-audit                    # or: safety check
+pip-audit --strict
 
-# Check git history for secrets
+# Go
+govulncheck ./...
+
+# Rust
+cargo audit
+
+# Java
+mvn dependency-check:check   # or: gradle dependencyCheckAnalyze
+```
+
+### Secrets Scan
+```bash
+# Universal (all languages)
+grep -rn "api[_-]?key\|password\|secret\|token" --include="*.{js,ts,py,go,rs,java,json,yaml,yml,env}" .
+
+# Check git history
 git log -p | grep -i "password\|api_key\|secret"
 ```
 
@@ -81,7 +96,7 @@ For each category, check:
 
 ### 9. Using Components with Known Vulnerabilities
 - Are all dependencies up to date?
-- Is npm audit clean?
+- Is dependency audit clean?
 - Are CVEs monitored?
 
 ### 10. Insufficient Logging & Monitoring
@@ -93,30 +108,84 @@ For each category, check:
 
 ### Hardcoded Secrets (CRITICAL)
 ```javascript
-// BAD: Hardcoded secrets
+// BAD: Hardcoded secrets (JavaScript/TypeScript)
 const apiKey = "sk-proj-xxxxx"
-
 // GOOD: Environment variables
 const apiKey = process.env.OPENAI_API_KEY
-if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+```
+
+```python
+# BAD: Hardcoded secrets (Python)
+api_key = "sk-proj-xxxxx"
+# GOOD: Environment variables
+import os
+api_key = os.environ["OPENAI_API_KEY"]
+```
+
+```go
+// BAD: Hardcoded secrets (Go)
+apiKey := "sk-proj-xxxxx"
+// GOOD: Environment variables
+apiKey := os.Getenv("OPENAI_API_KEY")
+```
+
+```rust
+// BAD: Hardcoded secrets (Rust)
+let api_key = "sk-proj-xxxxx";
+// GOOD: Environment variables
+let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
 ```
 
 ### SQL Injection (CRITICAL)
 ```javascript
-// BAD: SQL injection vulnerability
+// BAD (JavaScript)
 const query = `SELECT * FROM users WHERE id = ${userId}`
-
 // GOOD: Parameterized queries
 const { data } = await db.query('SELECT * FROM users WHERE id = $1', [userId])
 ```
 
+```python
+# BAD (Python)
+cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")
+# GOOD: Parameterized queries
+cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+```
+
+```go
+// BAD (Go)
+query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", userId)
+// GOOD: Parameterized queries
+db.Query("SELECT * FROM users WHERE id = $1", userId)
+```
+
+```java
+// BAD (Java)
+String query = "SELECT * FROM users WHERE id = " + userId;
+// GOOD: PreparedStatement
+PreparedStatement stmt = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+stmt.setString(1, userId);
+```
+
 ### Command Injection (CRITICAL)
 ```javascript
-// BAD: Command injection
+// BAD (JavaScript)
 exec(`ping ${userInput}`, callback)
-
-// GOOD: Use libraries, not shell commands
+// GOOD: Use libraries, avoid shell
 dns.lookup(userInput, callback)
+```
+
+```python
+# BAD (Python)
+os.system(f"ping {user_input}")
+# GOOD: Use subprocess with list args
+subprocess.run(["ping", user_input], check=True)
+```
+
+```go
+// BAD (Go)
+exec.Command("sh", "-c", "ping " + userInput).Run()
+// GOOD: Pass args separately
+exec.Command("ping", userInput).Run()
 ```
 
 ### Cross-Site Scripting (XSS) (HIGH)

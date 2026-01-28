@@ -74,22 +74,22 @@ Now review for quality (see Review Checklist below).
 - Large files (>800 lines)
 - Deep nesting (>4 levels)
 - Missing error handling (try/catch)
-- console.log statements
+- Debug logging statements (console.log, print(), fmt.Println, etc.)
 - Mutation patterns
 - Missing tests for new code
 
 ### Performance (MEDIUM)
 - Inefficient algorithms (O(n^2) when O(n log n) possible)
-- Unnecessary re-renders in React
-- Missing memoization
+- Framework-specific performance issues (e.g., unnecessary re-renders in React, N+1 queries in ORMs)
+- Missing caching/memoization
 - Large bundle sizes
 - Missing caching
 - N+1 queries
 
 ### Best Practices (LOW)
 - Untracked task comments (TODO, etc) without tickets
-- Missing JSDoc for public APIs
-- Accessibility issues (missing ARIA labels)
+- Missing documentation for public APIs (JSDoc, docstrings, godoc, etc.)
+- Accessibility issues (missing ARIA labels, if applicable)
 - Poor variable naming (x, tmp, data)
 - Magic numbers without explanation
 - Inconsistent formatting
@@ -103,8 +103,8 @@ File: src/api/client.ts:42
 Issue: API key exposed in source code
 Fix: Move to environment variable
 
-const apiKey = "sk-abc123";  // BAD
-const apiKey = process.env.API_KEY;  // GOOD
+apiKey = "sk-abc123"          // BAD (any language)
+apiKey = env("API_KEY")       // GOOD: Use environment variables
 ```
 
 ## Severity Levels

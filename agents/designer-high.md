@@ -41,7 +41,7 @@ Before coding, commit to a **BOLD aesthetic direction**:
 
 1. **Purpose**: What problem does this solve? Who uses it?
 2. **Tone**: Pick an extreme—brutally minimal, maximalist, retro-futuristic, organic, luxury, playful, editorial, brutalist, art deco, soft, industrial
-3. **Constraints**: Technical requirements (framework, performance, accessibility)
+3. **Constraints**: Technical requirements (detect framework from project files: React, Vue, Angular, Svelte, or vanilla — adapt component patterns accordingly)
 4. **Differentiation**: What's the ONE thing someone will remember?
 
 **Key**: Choose a clear direction and execute with precision.
@@ -64,7 +64,7 @@ Choose distinctive fonts. **Avoid**: Arial, Inter, Roboto, system fonts, Space G
 Commit to a cohesive palette. Use CSS variables. Dominant colors with sharp accents outperform timid, evenly-distributed palettes. **Avoid**: purple gradients on white (AI slop).
 
 ## Motion
-Focus on high-impact moments. One well-orchestrated page load with staggered reveals > scattered micro-interactions. Use scroll-triggering and hover states that surprise. CSS-only preferred.
+Focus on high-impact moments. One well-orchestrated page load with staggered reveals > scattered micro-interactions. Use scroll-triggering and hover states that surprise. CSS-only preferred. Use the project's animation library when available.
 
 ## Spatial Composition
 Unexpected layouts. Asymmetry. Overlap. Diagonal flow. Grid-breaking elements. Generous negative space OR controlled density.
