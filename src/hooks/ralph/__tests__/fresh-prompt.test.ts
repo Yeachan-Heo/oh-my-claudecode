@@ -3,29 +3,44 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateIterationPrompt, type RalphFreshHandoff } from '../fresh-prompt.js';
+import { generateIterationPrompt } from '../fresh-prompt.js';
+import type { RalphFreshHandoff } from '../fresh-handoff.js';
+
+// Helper to create minimal valid handoff
+function createHandoff(overrides: Partial<RalphFreshHandoff>): RalphFreshHandoff {
+  return {
+    version: '1.0',
+    created_at: new Date().toISOString(),
+    iteration: 1,
+    max_iterations: 10,
+    original_prompt: 'Test task',
+    completion_promise: 'TASK_COMPLETE',
+    completed: false,
+    progress: {
+      patterns: [],
+      recentLearnings: []
+    },
+    git: {
+      recentCommits: [],
+      branch: 'main',
+      hasUncommittedChanges: false
+    },
+    stuckDetection: {
+      lastPrdStatus: [],
+      iterationsOnSameStory: 0
+    },
+    ...overrides
+  };
+}
 
 describe('generateIterationPrompt', () => {
   it('should generate prompt with basic iteration info', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 3,
-      maxIterations: 10,
-      originalPrompt: 'Build a todo app',
-      completionPromise: 'TASK_COMPLETE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      max_iterations: 10,
+      original_prompt: 'Build a todo app',
+      completion_promise: 'TASK_COMPLETE'
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -35,15 +50,17 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should include PRD status when available', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 2,
-      maxIterations: 10,
-      originalPrompt: 'Build a todo app',
-      completionPromise: 'DONE',
+      max_iterations: 10,
+      original_prompt: 'Build a todo app',
+      completion_promise: 'DONE',
       prd: {
         project: 'Todo App',
-        storiesCompleted: 2,
+        branchName: 'feature/todo',
+        description: 'A todo app',
         storiesTotal: 5,
+        storiesCompleted: 2,
         nextStoryId: 'US-003',
         incompleteIds: ['US-003', 'US-004', 'US-005']
       },
@@ -51,17 +68,10 @@ describe('generateIterationPrompt', () => {
         recentCommits: [
           { hash: 'abc123', message: 'feat: add user model' }
         ],
+        branch: 'feature/todo',
         hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -72,25 +82,12 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should show free-form mode when no PRD', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 1,
-      maxIterations: 5,
-      originalPrompt: 'Quick fix',
-      completionPromise: 'DONE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      max_iterations: 5,
+      original_prompt: 'Quick fix',
+      completion_promise: 'DONE'
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -98,28 +95,20 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should include git history', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 2,
-      maxIterations: 10,
-      originalPrompt: 'Build features',
-      completionPromise: 'DONE',
-      prd: null,
+      max_iterations: 10,
+      original_prompt: 'Build features',
+      completion_promise: 'DONE',
       git: {
         recentCommits: [
           { hash: 'abc123', message: 'feat: add authentication' },
           { hash: 'def456', message: 'fix: update validation' }
         ],
+        branch: 'main',
         hasUncommittedChanges: true
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -130,28 +119,19 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should include patterns learned', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 3,
-      maxIterations: 10,
-      originalPrompt: 'Build system',
-      completionPromise: 'DONE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
+      max_iterations: 10,
+      original_prompt: 'Build system',
+      completion_promise: 'DONE',
       progress: {
         patterns: [
           'All tests are in __tests__ directories',
           'Use TypeScript strict mode'
         ],
         recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -161,28 +141,19 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should include recent learnings', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 4,
-      maxIterations: 10,
-      originalPrompt: 'Complete tasks',
-      completionPromise: 'DONE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
+      max_iterations: 10,
+      original_prompt: 'Complete tasks',
+      completion_promise: 'DONE',
       progress: {
         patterns: [],
         recentLearnings: [
           'Need to run npm install after package changes',
           'Tests must be run before committing'
         ]
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -192,31 +163,25 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should show stuck detection warning', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 5,
-      maxIterations: 10,
-      originalPrompt: 'Build feature',
-      completionPromise: 'DONE',
+      max_iterations: 10,
+      original_prompt: 'Build feature',
+      completion_promise: 'DONE',
       prd: {
         project: 'My Project',
-        storiesCompleted: 1,
+        branchName: 'feature/test',
+        description: 'Test project',
         storiesTotal: 3,
+        storiesCompleted: 1,
         nextStoryId: 'US-002',
         incompleteIds: ['US-002', 'US-003']
       },
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
       stuckDetection: {
+        lastPrdStatus: ['US-002'],
         iterationsOnSameStory: 3
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -226,29 +191,17 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should include last error when present', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 3,
-      maxIterations: 10,
-      originalPrompt: 'Fix bugs',
-      completionPromise: 'DONE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
+      max_iterations: 10,
+      original_prompt: 'Fix bugs',
+      completion_promise: 'DONE',
       lastError: {
         iteration: 2,
         message: 'Build failed: TypeScript errors',
         recoveryAttempt: 'Fixed type definitions'
       }
-    };
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -258,15 +211,17 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should handle complete handoff with all sections', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 6,
-      maxIterations: 10,
-      originalPrompt: 'Implement full system',
-      completionPromise: 'ALL_DONE',
+      max_iterations: 10,
+      original_prompt: 'Implement full system',
+      completion_promise: 'ALL_DONE',
       prd: {
         project: 'Full System',
-        storiesCompleted: 3,
+        branchName: 'feature/full',
+        description: 'Full system implementation',
         storiesTotal: 5,
+        storiesCompleted: 3,
         nextStoryId: 'US-004',
         incompleteIds: ['US-004', 'US-005']
       },
@@ -275,6 +230,7 @@ describe('generateIterationPrompt', () => {
           { hash: 'aaa111', message: 'feat: add API' },
           { hash: 'bbb222', message: 'test: add unit tests' }
         ],
+        branch: 'feature/full',
         hasUncommittedChanges: true
       },
       progress: {
@@ -288,6 +244,7 @@ describe('generateIterationPrompt', () => {
         ]
       },
       stuckDetection: {
+        lastPrdStatus: ['US-004'],
         iterationsOnSameStory: 3
       },
       lastError: {
@@ -295,7 +252,7 @@ describe('generateIterationPrompt', () => {
         message: 'Test failure',
         recoveryAttempt: 'Updated test expectations'
       }
-    };
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -313,25 +270,12 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should handle empty git commits gracefully', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 1,
-      maxIterations: 5,
-      originalPrompt: 'Start project',
-      completionPromise: 'DONE',
-      prd: null,
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      max_iterations: 5,
+      original_prompt: 'Start project',
+      completion_promise: 'DONE'
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
@@ -340,31 +284,21 @@ describe('generateIterationPrompt', () => {
   });
 
   it('should focus on next story in instructions', () => {
-    const handoff: RalphFreshHandoff = {
+    const handoff = createHandoff({
       iteration: 2,
-      maxIterations: 10,
-      originalPrompt: 'Build features',
-      completionPromise: 'DONE',
+      max_iterations: 10,
+      original_prompt: 'Build features',
+      completion_promise: 'DONE',
       prd: {
         project: 'My App',
-        storiesCompleted: 1,
+        branchName: 'feature/app',
+        description: 'My app',
         storiesTotal: 3,
+        storiesCompleted: 1,
         nextStoryId: 'US-002',
         incompleteIds: ['US-002', 'US-003']
-      },
-      git: {
-        recentCommits: [],
-        hasUncommittedChanges: false
-      },
-      progress: {
-        patterns: [],
-        recentLearnings: []
-      },
-      stuckDetection: {
-        iterationsOnSameStory: 0
-      },
-      lastError: null
-    };
+      }
+    });
 
     const prompt = generateIterationPrompt(handoff);
 
