@@ -45,10 +45,8 @@ export interface CompactCheckpoint {
 
 export interface HookOutput {
   continue: boolean;
-  hookSpecificOutput: {
-    hookEventName: 'PreCompact';
-    additionalContext: string;
-  };
+  /** System message for context injection (Claude Code compatible) */
+  systemMessage?: string;
 }
 
 // ============================================================================
@@ -324,12 +322,11 @@ export async function processPreCompact(input: PreCompactInput): Promise<HookOut
   // Format summary for context injection
   const summary = formatCompactSummary(checkpoint);
 
+  // Note: hookSpecificOutput only supports PreToolUse, UserPromptSubmit, PostToolUse
+  // Use systemMessage for custom hook events like PreCompact
   return {
     continue: true,
-    hookSpecificOutput: {
-      hookEventName: 'PreCompact',
-      additionalContext: summary
-    }
+    systemMessage: summary
   };
 }
 
