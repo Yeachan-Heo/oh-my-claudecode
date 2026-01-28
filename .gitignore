@@ -8,3 +8,4 @@ dist/
 # Windows reserved names (prevent accidental creation)
 nul
 NUL
+.claude/settings.local.json

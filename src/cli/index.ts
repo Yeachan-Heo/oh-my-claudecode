@@ -53,6 +53,7 @@ import {
   waitDaemonCommand,
   waitDetectCommand
 } from './commands/wait.js';
+import { ralphFreshCommand } from './commands/ralph-fresh.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -841,6 +842,25 @@ waitCmd
     await waitDetectCommand({
       json: options.json,
       lines: parseInt(options.lines),
+    });
+  });
+
+/**
+ * Ralph-Fresh command - Fresh context Ralph loop
+ */
+program
+  .command('ralph-fresh <prompt>')
+  .description('Run Ralph loop with fresh context each iteration (use within Claude Code)')
+  .option('--max-iterations <n>', 'Maximum iterations (default: 20)', '20')
+  .option('--prd', 'Initialize PRD mode for structured tracking')
+  .option('--verbose', 'Enable verbose output')
+  .option('--json', 'Output as JSON')
+  .action(async (prompt, options) => {
+    await ralphFreshCommand(prompt, {
+      maxIterations: parseInt(options.maxIterations),
+      prd: options.prd,
+      verbose: options.verbose,
+      json: options.json
     });
   });
 
