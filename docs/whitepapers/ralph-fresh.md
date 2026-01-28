@@ -2,7 +2,7 @@
 
 A Whitepaper on Fresh-Context Iteration for Long-Running Agent Tasks
 
-**Version**: 1.2
+**Version**: 1.3
 **Date**: January 2026
 **Status**: Published
 
@@ -52,7 +52,9 @@ omc ralph-fresh --prd "task" --max-iterations 50
 |------|---------|
 | `.omc/prd.json` | User stories and completion status |
 | `.omc/progress.txt` | Learnings and patterns discovered |
-| `.omc/state/ralph-fresh-state.json` | Handoff object (iteration state) |
+| `.omc/state/ralph-fresh-state.json` | Active mode state (iteration tracking) |
+| `.omc/state/ralph-fresh-handoff.json` | Full handoff object (context transfer) |
+| `.omc/state/iteration-prompt.txt` | Current iteration prompt (temp file) |
 
 ### Key Concepts
 - **Fresh Context**: Each iteration starts with no conversation history—only essential state from files
@@ -823,7 +825,7 @@ Next story: {{nextStoryId}}
 The orchestrator spawns Claude via:
 
 ```bash
-claude -p "$(cat .omc/state/iteration-prompt.txt)" \
+cat ".omc/state/iteration-prompt.txt" | claude -p \
   --allowedTools "Read,Edit,Write,Bash,Glob,Grep" \
   --output-format json \
   --max-turns 100
@@ -835,15 +837,40 @@ claude -p "$(cat .omc/state/iteration-prompt.txt)" \
 - `--max-turns` = Limit API calls per iteration (cost control)
 - `--output-format json` = Structured output for parsing
 
+**TypeScript Runner Detection**:
+
+The CLI handler (`src/cli/commands/ralph-fresh.ts`) detects the appropriate runner with this priority:
+
+1. **Compiled JavaScript** (`scripts/ralph-fresh.js`) - Most reliable for production
+2. **Bun** (`bun scripts/ralph-fresh.ts`) - Fast, native TypeScript support
+3. **tsx** (`tsx scripts/ralph-fresh.ts`) - Fallback TypeScript runner
+
+If only the TypeScript source exists and no runner is available, the CLI displays installation instructions for bun or tsx.
+
 ### 7.4 State File Management
 
-Ralph-Fresh uses three state files:
+Ralph-Fresh uses a layered state system:
 
 | File | Purpose | Format | Created By |
 |------|---------|--------|-----------|
 | `.omc/prd.json` | User stories + completion status | JSON | Initial PRD generation |
 | `.omc/progress.txt` | Learnings and patterns | Markdown | Claude (each iteration) |
-| `.omc/state/ralph-fresh-state.json` | Handoff object | JSON | Orchestrator |
+| `.omc/state/ralph-fresh-state.json` | Active mode tracking | JSON | Orchestrator |
+| `.omc/state/ralph-fresh-handoff.json` | Full context handoff | JSON | Orchestrator |
+| `.omc/state/iteration-prompt.txt` | Current iteration prompt | Text | Orchestrator (temp) |
+
+**State vs. Handoff Files**:
+
+The state file (`ralph-fresh-state.json`) is a lightweight marker:
+```json
+{
+  "active": true,
+  "started_at": "2026-01-28T15:14:03.376Z",
+  "iteration": 1
+}
+```
+
+The handoff file (`ralph-fresh-handoff.json`) contains the full context snapshot (see Section 7.1).
 
 **Update flow per iteration**:
 
@@ -866,7 +893,44 @@ Claude exits
 Orchestrator reads updated files to build next handoff
 ```
 
-### 7.5 Error Handling and Recovery
+### 7.5 Mode Registry Integration
+
+Ralph-Fresh is registered in the centralized mode registry (`src/hooks/mode-registry/index.ts`), which provides:
+
+**Mutual Exclusion**:
+Ralph-Fresh cannot run while these modes are active:
+- `autopilot` - Full autonomous execution
+- `ultrapilot` - Parallel autopilot
+- `swarm` - Coordinated agent swarm
+- `pipeline` - Sequential agent chain
+- `ralph` - Standard Ralph (same-context)
+
+The CLI handler checks for conflicts before starting:
+```typescript
+if (isModeActive('ralph', cwd)) {
+  console.error('Standard Ralph is currently active');
+  console.error('Cancel first with: /oh-my-claudecode:cancel');
+  process.exit(1);
+}
+```
+
+**State Detection**:
+Other modes can check if Ralph-Fresh is active via:
+```typescript
+import { isModeActive } from './mode-registry';
+
+if (isModeActive('ralph-fresh', cwd)) {
+  // Ralph-Fresh is running
+}
+```
+
+**Unified Cancellation**:
+Ralph-Fresh can be cancelled via the unified cancel skill:
+```bash
+/oh-my-claudecode:cancel
+```
+
+### 7.6 Error Handling and Recovery
 
 Ralph-Fresh handles several failure modes:
 
@@ -879,7 +943,7 @@ Ralph-Fresh handles several failure modes:
 | **Git corruption** | `git status` fails | Log error, continue with last known state |
 | **PRD parse failure** | JSON parse error | Use last known PRD state |
 
-### 7.6 Known Limitations (v0.1)
+### 7.7 Known Limitations (v0.1)
 
 1. **No Resume Support**: State is saved but requires re-running from iteration 1
 2. **PRD Mode Only**: Free-form task mode deferred to v0.2
@@ -888,7 +952,7 @@ Ralph-Fresh handles several failure modes:
 5. **No SDK Fallback**: Uses CLI only; Agent SDK integration deferred
 6. **No Per-Iteration Verification**: Final verification only, not per-iteration
 
-### 7.7 Future Enhancements (v0.2+)
+### 7.8 Future Enhancements (v0.2+)
 
 | Feature | Scope | Impact |
 |---------|-------|--------|
@@ -1052,12 +1116,12 @@ omc ralph-fresh "task" \
 
 | Component | File | Lines | Purpose |
 |-----------|------|-------|---------|
-| Core Types | `src/hooks/ralph/fresh.ts` | ~250 | Handoff and config interfaces |
-| State Ops | `src/hooks/ralph/fresh-handoff.ts` | ~300 | Read/write/refresh handoff |
-| Prompts | `src/hooks/ralph/fresh-prompt.ts` | ~200 | Iteration prompt generation |
-| Orchestrator | `scripts/ralph-fresh.ts` | ~600 | Main loop, CLI spawning, error handling |
-| CLI Wrapper | `src/cli/commands/ralph-fresh.ts` | ~150 | User-facing command |
-| CLI Registration | `src/cli/index.ts` | ~50 | Register command with commander.js |
+| Core Types | `src/hooks/ralph/fresh.ts` | ~247 | Handoff and config interfaces, detection helpers |
+| State Ops | `src/hooks/ralph/fresh-handoff.ts` | ~296 | Read/write/refresh handoff, PRD/git integration |
+| Prompts | `src/hooks/ralph/fresh-prompt.ts` | ~176 | Iteration prompt generation |
+| Orchestrator | `scripts/ralph-fresh.ts` | ~442 | Main loop, CLI spawning, error handling |
+| CLI Wrapper | `src/cli/commands/ralph-fresh.ts` | ~182 | User-facing command, runner detection |
+| Mode Registry | `src/hooks/mode-registry/index.ts` | ~492 | Centralized mode state, mutual exclusion |
 
 ### C. Configuration Files
 
@@ -1066,22 +1130,29 @@ Files created/used by Ralph-Fresh:
 ```
 Project Root
 ├── .omc/
-│   ├── prd.json              # User stories + status
-│   ├── progress.txt          # Learnings and patterns
+│   ├── prd.json                      # User stories + status
+│   ├── progress.txt                  # Learnings and patterns
 │   └── state/
-│       ├── ralph-fresh-state.json    # Handoff object
+│       ├── ralph-fresh-state.json    # Active mode marker
+│       ├── ralph-fresh-handoff.json  # Full context handoff
 │       └── iteration-prompt.txt      # Temp prompt file
 ├── scripts/
-│   └── ralph-fresh.ts        # Orchestrator script
+│   ├── ralph-fresh.ts                # Orchestrator script (TypeScript)
+│   └── ralph-fresh.js                # Orchestrator script (compiled)
 └── src/
-    ├── hooks/ralph/
-    │   ├── fresh.ts          # Types
-    │   ├── fresh-handoff.ts  # State ops
-    │   └── fresh-prompt.ts   # Prompt generation
+    ├── hooks/
+    │   ├── ralph/
+    │   │   ├── fresh.ts              # Types + detection helpers
+    │   │   ├── fresh-handoff.ts      # State operations
+    │   │   ├── fresh-prompt.ts       # Prompt generation
+    │   │   ├── prd.ts                # PRD reading
+    │   │   └── progress.ts           # Progress/learnings
+    │   └── mode-registry/
+    │       ├── index.ts              # Mode state detection
+    │       └── types.ts              # Mode registry types
     └── cli/
-        ├── commands/
-        │   └── ralph-fresh.ts    # CLI wrapper
-        └── index.ts          # CLI registration
+        └── commands/
+            └── ralph-fresh.ts        # CLI wrapper + runner detection
 ```
 
 ### D. Research & Design Documents
@@ -1182,7 +1253,8 @@ For tasks of moderate-to-high complexity (8+ hours of work), Ralph-Fresh provide
 
 ---
 
-**Document Version**: 1.2
+**Document Version**: 1.3
 **Last Updated**: January 2026
-**Status**: Published (Final Polish)
+**Status**: Published (Implementation Sync)
+**Changes in 1.3**: Updated to reflect actual implementation - TypeScript runner detection, mode registry integration, state file separation (state vs. handoff), accurate file paths
 **Next Review**: v0.2 release (post-implementation feedback)
