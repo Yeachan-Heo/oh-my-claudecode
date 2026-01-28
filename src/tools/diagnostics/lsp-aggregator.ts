@@ -28,9 +28,11 @@ export interface LspAggregationResult {
 let _cachedExtensions: string[] | null = null;
 
 /**
- * Get all file extensions supported by configured LSP servers
+ * Get all file extensions supported by configured LSP servers.
+ * Cached at module level because LSP_SERVERS is a static configuration.
+ * Call invalidateExtensionCache() if LSP_SERVERS is ever made dynamic.
  */
-function getAllSupportedExtensions(): string[] {
+export function getAllSupportedExtensions(): string[] {
   if (_cachedExtensions) return _cachedExtensions;
 
   const extensions = new Set<string>();
@@ -41,6 +43,15 @@ function getAllSupportedExtensions(): string[] {
   }
   _cachedExtensions = Array.from(extensions);
   return _cachedExtensions;
+}
+
+/**
+ * Invalidate the cached extensions list.
+ * Call this if LSP_SERVERS is modified at runtime.
+ * Currently LSP_SERVERS is a static const, so this is for future-proofing.
+ */
+export function invalidateExtensionCache(): void {
+  _cachedExtensions = null;
 }
 
 /**

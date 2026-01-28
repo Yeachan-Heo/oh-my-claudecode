@@ -31,6 +31,28 @@ pkg/util.go:25:12: result of fmt.Sprintf call not used`;
     expect(result.diagnostics).toHaveLength(0);
     expect(result.success).toBe(true);
   });
+
+  it('parses Windows-style paths correctly', () => {
+    const output = `C:\\Users\\dev\\project\\main.go:10:5: unreachable code`;
+    const result = parseGoOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('C:\\Users\\dev\\project\\main.go');
+    expect(result.diagnostics[0].line).toBe(10);
+    expect(result.diagnostics[0].column).toBe(5);
+  });
+
+  it('handles Unicode filenames', () => {
+    const output = `pkg/日本語.go:5:3: unreachable code`;
+    const result = parseGoOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('pkg/日本語.go');
+  });
+
+  it('handles malformed output gracefully', () => {
+    const result = parseGoOutput('not valid output\nrandom noise\n');
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.success).toBe(true);
+  });
 });
 
 describe('parseTscOutput', () => {
@@ -70,6 +92,13 @@ src/utils.ts(25,12): error TS2304: Cannot find name 'foo'.`;
     expect(result.diagnostics).toHaveLength(0);
     expect(result.success).toBe(true);
   });
+
+  it('parses Windows-style paths correctly', () => {
+    const output = `C:\\Users\\dev\\src\\index.ts(10,5): error TS2345: Type mismatch.`;
+    const result = parseTscOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('C:\\Users\\dev\\src\\index.ts');
+  });
 });
 
 describe('parseRustOutput', () => {
@@ -98,6 +127,37 @@ warning: unused variable: \`y\`
     expect(result.diagnostics).toHaveLength(0);
     expect(result.success).toBe(true);
   });
+
+  it('parses cargo output with intermediate lines', () => {
+    const output = `error[E0382]: borrow of moved value: \`x\`
+  |
+5 |     let y = x;
+  |             - value moved here
+ --> src/main.rs:5:20`;
+    const result = parseRustOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('src/main.rs');
+    expect(result.diagnostics[0].line).toBe(5);
+    expect(result.diagnostics[0].column).toBe(20);
+    expect(result.diagnostics[0].code).toBe('E0382');
+  });
+
+  it('parses warnings without error codes', () => {
+    const output = `warning: unused variable: \`x\`
+ --> src/lib.rs:3:9`;
+    const result = parseRustOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].code).toBe('');
+    expect(result.diagnostics[0].severity).toBe('warning');
+  });
+
+  it('handles CRLF line endings', () => {
+    const output = "error[E0308]: mismatched types\r\n  |\r\n3 |     let x: i32 = \"hello\";\r\n  |                  ^^^^^^^ expected `i32`, found `&str`\r\n --> src/main.rs:3:18";
+    const result = parseRustOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('src/main.rs');
+    expect(result.diagnostics[0].code).toBe('E0308');
+  });
 });
 
 describe('parseMypyOutput', () => {
@@ -119,6 +179,13 @@ main.py:15:1: note: See docs for details`;
     expect(result.diagnostics).toHaveLength(0);
     expect(result.success).toBe(true);
   });
+
+  it('parses Windows-style mypy paths', () => {
+    const output = `C:\\Users\\dev\\main.py:10:5: error: Incompatible types [arg-type]`;
+    const result = parseMypyOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('C:\\Users\\dev\\main.py');
+  });
 });
 
 describe('parsePylintOutput', () => {
@@ -138,5 +205,20 @@ main.py:20:0: W0611: Unused import`;
     const result = parsePylintOutput('');
     expect(result.diagnostics).toHaveLength(0);
     expect(result.success).toBe(true);
+  });
+
+  it('classifies F (Fatal) codes as errors', () => {
+    const output = `main.py:1:0: F0001: error in module (fatal)`;
+    const result = parsePylintOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].severity).toBe('error');
+    expect(result.errorCount).toBe(1);
+  });
+
+  it('parses Windows-style pylint paths', () => {
+    const output = `C:\\Users\\dev\\main.py:10:5: E0001: syntax error`;
+    const result = parsePylintOutput(output);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].file).toBe('C:\\Users\\dev\\main.py');
   });
 });

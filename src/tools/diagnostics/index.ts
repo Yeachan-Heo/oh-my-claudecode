@@ -9,7 +9,7 @@
  * - Fallback: LSP iteration
  */
 
-import { existsSync, statSync } from 'fs';
+import { existsSync, statSync, realpathSync } from 'fs';
 import { join } from 'path';
 import { runTscDiagnostics, TscDiagnostic, TscResult } from './tsc-runner.js';
 import { runLspAggregatedDiagnostics, LspDiagnosticWithFile, LspAggregationResult } from './lsp-aggregator.js';
@@ -24,7 +24,7 @@ export const EXTERNAL_PROCESS_TIMEOUT_MS = 300000; // 5 minutes
 export type DiagnosticsStrategy = 'tsc' | 'go' | 'rust' | 'python' | 'lsp' | 'auto';
 
 export interface DirectoryDiagnosticResult {
-  strategy: 'tsc' | 'go' | 'rust' | 'python' | 'lsp';
+  strategy: 'tsc' | 'go' | 'rust' | 'python' | 'lsp' | 'skipped';
   success: boolean;
   errorCount: number;
   warningCount: number;
@@ -85,8 +85,8 @@ function formatDiagnosticResult<D extends BaseDiagnostic>(
       let fileOutput = `${file}:\n`;
       for (const diag of diags) {
         // Use runtime check for 'code' since GoDiagnostic doesn't have it
-        const code = 'code' in diag && diag.code ? `[${diag.code}] ` : '';
-        fileOutput += `  ${diag.line}:${diag.column} - ${diag.severity} ${code}: ${diag.message}\n`;
+        const code = 'code' in diag && diag.code ? ` [${diag.code}]` : '';
+        fileOutput += `  ${diag.line}:${diag.column} - ${diag.severity}${code}: ${diag.message}\n`;
       }
       fileOutputs.push(fileOutput);
     }
@@ -142,31 +142,46 @@ export async function runDirectoryDiagnostics(
   // Validate directory exists
   if (!existsSync(directory)) {
     return {
-      strategy: strategy === 'auto' ? 'lsp' : strategy,
-      success: false,
-      errorCount: 1,
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
       warningCount: 0,
-      diagnostics: `Directory does not exist: ${directory}`,
-      summary: 'Diagnostics failed: directory not found'
+      diagnostics: '',
+      summary: `Diagnostics skipped: directory does not exist: ${directory}`
     };
   }
 
   // Check if it's actually a directory (not a file)
   if (!statSync(directory).isDirectory()) {
     return {
-      strategy: strategy === 'auto' ? 'lsp' : strategy,
-      success: false,
-      errorCount: 1,
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
       warningCount: 0,
-      diagnostics: `Path is not a directory: ${directory}`,
-      summary: 'Diagnostics failed: path is not a directory'
+      diagnostics: '',
+      summary: `Diagnostics skipped: path is not a directory: ${directory}`
+    };
+  }
+
+  // Resolve symlinks to normalize the path
+  let resolvedDirectory: string;
+  try {
+    resolvedDirectory = realpathSync(directory);
+  } catch {
+    return {
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
+      warningCount: 0,
+      diagnostics: '',
+      summary: `Diagnostics skipped: cannot resolve directory path: ${directory}`
     };
   }
 
   let useStrategy: 'tsc' | 'go' | 'rust' | 'python' | 'lsp';
 
   if (strategy === 'auto') {
-    const projectType = detectProjectType(directory);
+    const projectType = detectProjectType(resolvedDirectory);
     switch (projectType) {
       case 'typescript': useStrategy = 'tsc'; break;
       case 'go': useStrategy = 'go'; break;
@@ -183,16 +198,16 @@ export async function runDirectoryDiagnostics(
 
   switch (useStrategy) {
     case 'tsc':
-      return formatTscResult(runTscDiagnostics(directory));
+      return formatTscResult(runTscDiagnostics(resolvedDirectory));
     case 'go':
-      return formatGoResult(runGoDiagnostics(directory));
+      return formatGoResult(runGoDiagnostics(resolvedDirectory));
     case 'rust':
-      return formatRustResult(runRustDiagnostics(directory));
+      return formatRustResult(runRustDiagnostics(resolvedDirectory));
     case 'python':
-      return formatPythonResult(runPythonDiagnostics(directory));
+      return formatPythonResult(runPythonDiagnostics(resolvedDirectory));
     case 'lsp':
     default:
-      return formatLspResult(await runLspAggregatedDiagnostics(directory));
+      return formatLspResult(await runLspAggregatedDiagnostics(resolvedDirectory));
   }
 }
 
@@ -248,6 +263,16 @@ function formatLspResult(result: LspAggregationResult): DirectoryDiagnosticResul
  * Format Go vet results into standard format
  */
 function formatGoResult(result: GoResult): DirectoryDiagnosticResult {
+  if (result.skipped) {
+    return {
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
+      warningCount: 0,
+      diagnostics: '',
+      summary: `Go diagnostics skipped: ${result.skipped}`
+    };
+  }
   return formatDiagnosticResult(result, 'go', 'Go vet');
 }
 
@@ -255,6 +280,16 @@ function formatGoResult(result: GoResult): DirectoryDiagnosticResult {
  * Format Cargo check results into standard format
  */
 function formatRustResult(result: RustResult): DirectoryDiagnosticResult {
+  if (result.skipped) {
+    return {
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
+      warningCount: 0,
+      diagnostics: '',
+      summary: `Rust diagnostics skipped: ${result.skipped}`
+    };
+  }
   return formatDiagnosticResult(result, 'rust', 'Cargo check');
 }
 
@@ -262,6 +297,16 @@ function formatRustResult(result: RustResult): DirectoryDiagnosticResult {
  * Format Python diagnostics results into standard format
  */
 function formatPythonResult(result: PythonResult): DirectoryDiagnosticResult {
+  if (result.skipped) {
+    return {
+      strategy: 'skipped',
+      success: true,
+      errorCount: 0,
+      warningCount: 0,
+      diagnostics: '',
+      summary: `Python diagnostics skipped: ${result.skipped}`
+    };
+  }
   const toolName = result.tool === 'mypy' ? 'Mypy' : result.tool === 'pylint' ? 'Pylint' : 'Python';
   return formatDiagnosticResult(result, 'python', toolName);
 }

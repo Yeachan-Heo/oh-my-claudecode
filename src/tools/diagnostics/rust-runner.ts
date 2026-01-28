@@ -23,6 +23,7 @@ export interface RustResult {
   diagnostics: RustDiagnostic[];
   errorCount: number;
   warningCount: number;
+  skipped?: string;
 }
 
 /**
@@ -56,6 +57,15 @@ export function runRustDiagnostics(directory: string): RustResult {
       warningCount: 0
     };
   } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return {
+        success: true,
+        diagnostics: [],
+        errorCount: 0,
+        warningCount: 0,
+        skipped: '`cargo` binary not found in PATH'
+      };
+    }
     const output = error.stderr || error.stdout || '';
     return parseRustOutput(output);
   }
@@ -69,7 +79,7 @@ export function runRustDiagnostics(directory: string): RustResult {
 export function parseRustOutput(output: string): RustResult {
   const diagnostics: RustDiagnostic[] = [];
 
-  const regex = /(error|warning)(?:\[([A-Z]\d+)\])?: ([^\n]+)\n\s+-->\s+([^\n:]+):(\d+):(\d+)/g;
+  const regex = /(error|warning)(?:\[([A-Z]\d+)\])?: ([^\n]+)\n(?:[^\n]*\n)*?\s+-->\s+([^\n:]+):(\d+):(\d+)/g;
   let match;
 
   while ((match = regex.exec(output)) !== null) {

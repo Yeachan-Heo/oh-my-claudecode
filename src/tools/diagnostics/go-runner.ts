@@ -22,6 +22,7 @@ export interface GoResult {
   diagnostics: GoDiagnostic[];
   errorCount: number;
   warningCount: number;
+  skipped?: string;
 }
 
 /**
@@ -55,6 +56,15 @@ export function runGoDiagnostics(directory: string): GoResult {
       warningCount: 0
     };
   } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return {
+        success: true,
+        diagnostics: [],
+        errorCount: 0,
+        warningCount: 0,
+        skipped: '`go` binary not found in PATH'
+      };
+    }
     const output = error.stderr || error.stdout || '';
     return parseGoOutput(output);
   }
@@ -66,7 +76,7 @@ export function runGoDiagnostics(directory: string): GoResult {
  */
 export function parseGoOutput(output: string): GoResult {
   const diagnostics: GoDiagnostic[] = [];
-  const regex = /^(.+\.go):(\d+):(\d+):\s+(.+)$/gm;
+  const regex = /^(.+?\.go):(\d+):(\d+):\s+(.+)$/gm;
   let match;
 
   while ((match = regex.exec(output)) !== null) {

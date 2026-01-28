@@ -183,7 +183,7 @@ export const LSP_SERVERS: Record<string, LspServerConfig> = {
  */
 export function commandExists(command: string): boolean {
   // Input validation - only allow safe command names (alphanumeric, dot, underscore, hyphen)
-  if (!command || !/^[a-zA-Z0-9._-]+$/.test(command)) {
+  if (!command || !/^[a-zA-Z][a-zA-Z0-9._-]*$/.test(command)) {
     return false;
   }
   try {
