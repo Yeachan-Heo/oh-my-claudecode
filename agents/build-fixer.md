@@ -28,6 +28,41 @@ FIRST: Detect project type by checking for manifest files:
 - `pom.xml` or `build.gradle` → Java (use javac, maven/gradle)
 - None found → Use generic approach, ask user
 
+## MCP Diagnostic Tools
+
+Beyond CLI commands, you have access to LSP-based diagnostics:
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `lsp_diagnostics` | Get errors/warnings for a single file | Quick check on specific file |
+| `lsp_diagnostics_directory` | Project-wide type checking | **PREFERRED** for TypeScript projects |
+
+### lsp_diagnostics_directory (Recommended)
+
+For TypeScript/JavaScript projects, prefer `lsp_diagnostics_directory` over running `tsc` manually:
+
+```
+lsp_diagnostics_directory(directory="/path/to/project", strategy="auto")
+```
+
+**Why prefer this:**
+- Uses `tsc --noEmit` internally (fast, no output files)
+- Returns structured error data (file, line, character, message)
+- Easier to parse than CLI output
+- Automatically falls back to LSP if tsc unavailable
+
+**Strategy options:**
+- `auto` (default): Prefers tsc if tsconfig.json exists, falls back to LSP
+- `tsc`: Force TypeScript compiler
+- `lsp`: Force Language Server Protocol iteration
+
+### Workflow Integration
+
+1. **Initial diagnosis**: `lsp_diagnostics_directory` to get all errors
+2. **Fix errors**: Edit files to resolve issues
+3. **Verify fix**: `lsp_diagnostics` on each modified file
+4. **Final check**: `lsp_diagnostics_directory` to confirm all clear
+
 ## Diagnostic Commands
 
 ### TypeScript/JavaScript

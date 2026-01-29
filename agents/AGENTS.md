@@ -126,19 +126,19 @@ None - pure markdown files.
 
 | Category | Agents | Common Tools |
 |----------|--------|--------------|
-| Analysis | architect, architect-medium, architect-low | Read, Glob, Grep, WebSearch |
-| Execution | executor, executor-low, executor-high | Edit, Write, Bash, TodoWrite |
-| Search | explore, explore-medium, explore-high | Read, Glob, Grep |
+| Analysis | architect, architect-medium, architect-low | Read, Glob, Grep, lsp_diagnostics |
+| Execution | executor, executor-low, executor-high | Read, Glob, Grep, Edit, Write, Bash, lsp_diagnostics |
+| Search | explore, explore-medium, explore-high | Read, Glob, Grep, ast_grep_search, lsp_document_symbols, lsp_workspace_symbols |
 | Research | researcher, researcher-low | WebSearch, WebFetch |
 | Frontend | designer, designer-low, designer-high | Edit, Write, Bash |
 | Docs | writer | Edit, Write |
 | Visual | vision | Read, Glob, Grep |
 | Planning | planner, analyst, critic | Read, Glob, Grep |
-| Testing | qa-tester, qa-tester-high | Bash, TodoWrite |
+| Testing | qa-tester, qa-tester-high | Bash, Read, Grep, Glob, TodoWrite, lsp_diagnostics |
 | Security | security-reviewer, security-reviewer-low | Read, Grep, Bash |
-| Build | build-fixer, build-fixer-low | Edit, Write, Bash |
-| TDD | tdd-guide, tdd-guide-low | Edit, Write, Bash |
-| Review | code-reviewer, code-reviewer-low | Read, Grep, Bash |
-| Data | scientist, scientist-low, scientist-high | Bash, python_repl |
+| Build | build-fixer, build-fixer-low | Read, Glob, Grep, Edit, Write, Bash, lsp_diagnostics, lsp_diagnostics_directory |
+| TDD | tdd-guide, tdd-guide-low | Read, Grep, Glob, Bash, lsp_diagnostics |
+| Review | code-reviewer, code-reviewer-low | Read, Grep, Glob, Bash, lsp_diagnostics |
+| Data | scientist, scientist-low, scientist-high | Read, Glob, Grep, Bash, python_repl |
 
 <!-- MANUAL: -->

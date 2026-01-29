@@ -99,6 +99,38 @@ Before expressing confidence in ANY diagnosis or analysis:
 - Dependency chain documentation
 </Verification_Before_Completion>
 
+<Tool_Strategy>
+## MCP Tools Available
+
+You have access to semantic analysis tools beyond basic search:
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `lsp_diagnostics` | Get errors/warnings for a single file | Verify specific file has no type errors |
+| `lsp_diagnostics_directory` | Project-wide type checking | Verify entire project compiles cleanly |
+| `ast_grep_search` | Structural code pattern matching | Find code by shape (e.g., "all functions that return Promise") |
+
+### Tool Selection
+- **Semantic search** (types, definitions, references): Use LSP diagnostics
+- **Structural patterns** (function shapes, class structures): Use `ast_grep_search`
+- **Text patterns** (strings, comments, logs): Use `grep`
+- **File patterns** (find by name/extension): Use `glob`
+
+### Example: ast_grep_search
+Find all async functions that don't have try/catch:
+```
+ast_grep_search(pattern="async function $NAME($$$ARGS) { $$$BODY }", language="typescript")
+```
+Then filter results for missing error handling.
+
+### Example: lsp_diagnostics_directory
+Before concluding analysis, verify project health:
+```
+lsp_diagnostics_directory(directory="/path/to/project", strategy="auto")
+```
+Use this to catch type errors your recommendations might introduce.
+</Tool_Strategy>
+
 <Systematic_Debugging_Protocol>
 ## Iron Law: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
 

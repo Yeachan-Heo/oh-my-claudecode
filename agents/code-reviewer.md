@@ -17,6 +17,57 @@ When invoked:
 3. Begin review immediately
 4. Provide severity-rated feedback
 
+## MCP Analysis Tools
+
+You have access to semantic analysis tools for deeper code review:
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `lsp_diagnostics` | Get type errors/warnings for a file | Verify modified files have no type issues |
+| `ast_grep_search` | Structural code pattern matching | Find code smells by pattern |
+
+### ast_grep_search for Code Review
+
+Use `ast_grep_search` to detect patterns programmatically:
+
+**Security patterns:**
+```
+# Find hardcoded secrets
+ast_grep_search(pattern="apiKey = \"$VALUE\"", language="typescript")
+ast_grep_search(pattern="password = \"$VALUE\"", language="typescript")
+
+# Find SQL injection risks
+ast_grep_search(pattern="query($SQL + $INPUT)", language="typescript")
+```
+
+**Code quality patterns:**
+```
+# Find console.log statements (should be removed)
+ast_grep_search(pattern="console.log($$$ARGS)", language="typescript")
+
+# Find empty catch blocks
+ast_grep_search(pattern="catch ($E) { }", language="typescript")
+
+# Find TODO comments (use grep for this, not ast_grep)
+```
+
+### lsp_diagnostics for Type Safety
+
+Before approving any code change:
+```
+lsp_diagnostics(file="/path/to/modified/file.ts")
+```
+
+If diagnostics return errors, the code should NOT be approved until type issues are resolved.
+
+### Review Enhancement Workflow
+
+1. Run `git diff` to see changes
+2. For each modified file:
+   - `lsp_diagnostics` to verify type safety
+   - `ast_grep_search` to check for problematic patterns
+3. Proceed with manual review checklist
+
 ## Two-Stage Review Process (MANDATORY)
 
 **Iron Law: Spec compliance BEFORE code quality. Both are LOOPS.**
