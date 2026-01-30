@@ -12,7 +12,7 @@
  * Response: { five_hour: { utilization }, seven_day: { utilization } }
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { execSync } from 'child_process';
@@ -23,6 +23,14 @@ import type { RateLimits } from './types.js';
 const CACHE_TTL_SUCCESS_MS = 30 * 1000; // 30 seconds for successful responses
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for failures
 const API_TIMEOUT_MS = 10000;
+const TOKEN_REFRESH_URL_HOSTNAME = 'platform.claude.com';
+const TOKEN_REFRESH_URL_PATH = '/v1/oauth/token';
+
+/**
+ * OAuth client_id for Claude Code (public client).
+ * This is the production value; can be overridden via CLAUDE_CODE_OAUTH_CLIENT_ID env var.
+ */
+const DEFAULT_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
 interface UsageCache {
   timestamp: number;
@@ -33,6 +41,9 @@ interface UsageCache {
 interface OAuthCredentials {
   accessToken: string;
   expiresAt?: number;
+  refreshToken?: string;
+  /** Where the credentials were read from, needed for write-back */
+  source?: 'keychain' | 'file';
 }
 
 interface UsageApiResponse {
@@ -132,6 +143,8 @@ function readKeychainCredentials(): OAuthCredentials | null {
       return {
         accessToken: creds.accessToken,
         expiresAt: creds.expiresAt,
+        refreshToken: creds.refreshToken,
+        source: 'keychain' as const,
       };
     }
   } catch {
@@ -159,6 +172,8 @@ function readFileCredentials(): OAuthCredentials | null {
       return {
         accessToken: creds.accessToken,
         expiresAt: creds.expiresAt,
+        refreshToken: creds.refreshToken,
+        source: 'file' as const,
       };
     }
   } catch {
@@ -192,6 +207,65 @@ function validateCredentials(creds: OAuthCredentials): boolean {
   }
 
   return true;
+}
+
+/**
+ * Attempt to refresh an expired OAuth access token using the refresh token.
+ * Returns updated credentials on success, null on failure.
+ */
+function refreshAccessToken(refreshToken: string): Promise<OAuthCredentials | null> {
+  return new Promise((resolve) => {
+    const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID;
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+    }).toString();
+
+    const req = https.request(
+      {
+        hostname: TOKEN_REFRESH_URL_HOSTNAME,
+        path: TOKEN_REFRESH_URL_PATH,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: API_TIMEOUT_MS,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.access_token) {
+                resolve({
+                  accessToken: parsed.access_token,
+                  refreshToken: parsed.refresh_token || refreshToken,
+                  expiresAt: parsed.expires_in
+                    ? Date.now() + parsed.expires_in * 1000
+                    : parsed.expires_at,
+                });
+                return;
+              }
+            } catch {
+              // JSON parse failed
+            }
+          }
+          if (process.env.OMC_DEBUG) {
+            console.error(`[usage-api] Token refresh failed: HTTP ${res.statusCode}`);
+          }
+          resolve(null);
+        });
+      }
+    );
+
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.end(body);
+  });
 }
 
 /**
@@ -240,6 +314,63 @@ function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | null
 
     req.end();
   });
+}
+
+/**
+ * Persist refreshed credentials back to the file-based credential store.
+ * Keychain write-back is not supported (read-only for HUD).
+ * Updates only the claudeAiOauth fields, preserving other data.
+ */
+function writeBackCredentials(creds: OAuthCredentials): void {
+  try {
+    const credPath = join(homedir(), '.claude/.credentials.json');
+    if (!existsSync(credPath)) return;
+
+    const content = readFileSync(credPath, 'utf-8');
+    const parsed = JSON.parse(content);
+
+    // Update the nested structure
+    if (parsed.claudeAiOauth) {
+      parsed.claudeAiOauth.accessToken = creds.accessToken;
+      if (creds.expiresAt != null) {
+        parsed.claudeAiOauth.expiresAt = creds.expiresAt;
+      }
+      if (creds.refreshToken) {
+        parsed.claudeAiOauth.refreshToken = creds.refreshToken;
+      }
+    } else {
+      // Flat structure
+      parsed.accessToken = creds.accessToken;
+      if (creds.expiresAt != null) {
+        parsed.expiresAt = creds.expiresAt;
+      }
+      if (creds.refreshToken) {
+        parsed.refreshToken = creds.refreshToken;
+      }
+    }
+
+    // Atomic write: write to tmp file, then rename (atomic on POSIX, best-effort on Windows)
+    const tmpPath = `${credPath}.tmp.${process.pid}`;
+    try {
+      writeFileSync(tmpPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, credPath);
+    } catch (writeErr) {
+      // Clean up orphaned tmp file on failure
+      try {
+        if (existsSync(tmpPath)) {
+          unlinkSync(tmpPath);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw writeErr;
+    }
+  } catch {
+    // Silent failure - credential write-back is best-effort
+    if (process.env.OMC_DEBUG) {
+      console.error('[usage-api] Failed to write back refreshed credentials');
+    }
+  }
 }
 
 /**
@@ -308,10 +439,31 @@ export async function getUsage(): Promise<RateLimits | null> {
   }
 
   // Get credentials
-  const creds = getCredentials();
-  if (!creds || !validateCredentials(creds)) {
+  let creds = getCredentials();
+  if (!creds) {
     writeCache(null, true);
     return null;
+  }
+
+  // If credentials are expired, attempt token refresh
+  if (!validateCredentials(creds)) {
+    if (creds.refreshToken) {
+      const refreshed = await refreshAccessToken(creds.refreshToken);
+      if (refreshed) {
+        // Update in-memory credentials
+        creds = { ...creds, ...refreshed };
+        // Persist refreshed credentials back to store
+        writeBackCredentials(creds);
+      } else {
+        // Refresh failed - fall through to return null
+        writeCache(null, true);
+        return null;
+      }
+    } else {
+      // No refresh token available
+      writeCache(null, true);
+      return null;
+    }
   }
 
   // Fetch from API
