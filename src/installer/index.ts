@@ -151,8 +151,8 @@ function loadCommandDefinitions(): Record<string, string> {
   const definitions: Record<string, string> = {};
 
   if (!existsSync(commandsDir)) {
-    console.error(`FATAL: commands directory not found: ${commandsDir}`);
-    process.exit(1);
+    // commands/ directory is optional - all commands are now plugin-scoped skills
+    return {};
   }
 
   for (const file of readdirSync(commandsDir)) {
