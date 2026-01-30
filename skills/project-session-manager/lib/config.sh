@@ -62,6 +62,53 @@ psm_get_project() {
     echo "${repo}|${local_path}|${default_base}"
 }
 
+# Get provider for a project alias
+# Usage: psm_get_project_provider "mywork"
+# Returns: "github" | "jira" | empty (defaults to github)
+psm_get_project_provider() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        echo "github"
+        return
+    fi
+    local provider
+    provider=$(jq -r ".aliases[\"$alias\"].provider // \"github\"" "$PSM_PROJECTS")
+    echo "$provider"
+}
+
+# Get Jira project key for alias
+# Usage: psm_get_project_jira_project "mywork"
+# Returns: "MYPROJ" or empty
+psm_get_project_jira_project() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r ".aliases[\"$alias\"].jira_project // empty" "$PSM_PROJECTS"
+}
+
+# Get explicit clone_url for alias (for non-GitHub repos)
+# Usage: psm_get_project_clone_url "mywork"
+# Returns: URL or empty
+psm_get_project_clone_url() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r ".aliases[\"$alias\"].clone_url // empty" "$PSM_PROJECTS"
+}
+
+# Get repo field for alias
+# Usage: psm_get_project_repo "mywork"
+# Returns: "owner/repo" or empty
+psm_get_project_repo() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r ".aliases[\"$alias\"].repo // empty" "$PSM_PROJECTS"
+}
+
 # Add or update project alias
 psm_set_project() {
     local alias="$1"
