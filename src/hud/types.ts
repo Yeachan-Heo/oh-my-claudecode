@@ -267,6 +267,7 @@ export interface HudConfig {
   elements: HudElementConfig;
   thresholds: HudThresholds;
   staleTaskThresholdMinutes?: number; // Default 30
+  maxOutputLines?: number; // Max total output lines to prevent input field shrinkage (default: 4)
 }
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
@@ -298,6 +299,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     contextCritical: 85,
     ralphWarning: 7,
   },
+  maxOutputLines: 4, // Prevent input field shrinkage in long sessions
 };
 
 export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
