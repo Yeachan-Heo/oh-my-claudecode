@@ -30,7 +30,7 @@ Maintenance release fixing test suite issues and continuing skill consolidation 
 **Skill Consolidation:**
 - Continued cleanup from v3.5.3
 - Removed deprecated `cancel-*` skills (use `/cancel` instead)
-- Final skill count: 35 core skills
+- Final skill count: 37 core skills
 
 ### Migration Steps
 
@@ -103,7 +103,7 @@ The following skills have been **completely removed** in v3.5.3:
 ### Skill Count
 
 - v3.5: 42 skills
-- v3.5.3: 35 skills (8 removed, 1 added)
+- v3.5.3: 37 skills (8 removed, 3 added)
 
 ---
 
@@ -254,11 +254,11 @@ Include these anywhere in your message to explicitly activate behaviors. Use key
 | `ulw` / `ultrawork` | Maximum parallel execution | "ulw: fix all type errors" |
 | `plan` | Planning interview | "plan: new API design" |
 
-**Combine them for superpowers:**
+**ralph includes ultrawork:**
 ```
-ralph ulw: migrate the entire database
+ralph: migrate the entire database
     ↓
-Persistence (won't stop) + Ultrawork (maximum parallelism)
+Persistence (won't stop) + Ultrawork (maximum parallelism) built-in
 ```
 
 **No keywords?** Claude still auto-detects:

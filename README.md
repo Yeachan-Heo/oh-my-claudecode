@@ -102,7 +102,7 @@ Optional shortcuts for power users. Natural language works fine without them.
 | `eco` | Token-efficient execution | `eco: migrate database` |
 | `plan` | Planning interview | `plan the API` |
 
-**Combine them:** `ralph ulw: migrate database` = persistence + parallelism
+**ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
 
 ---
 

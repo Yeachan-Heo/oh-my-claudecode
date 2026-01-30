@@ -138,6 +138,7 @@ export {
   buildKeyTriggersSection,
   validateAgentConfig,
   deepMerge,
+  loadAgentPrompt,
   // Individual agents with metadata (rebranded intuitive names)
   architectAgent,
   ARCHITECT_PROMPT_METADATA,
@@ -157,10 +158,11 @@ export {
   CRITIC_PROMPT_METADATA,
   analystAgent,
   ANALYST_PROMPT_METADATA,
-  coordinatorAgent,
-  ORCHESTRATOR_SISYPHUS_PROMPT_METADATA,
   plannerAgent,
-  PLANNER_PROMPT_METADATA
+  PLANNER_PROMPT_METADATA,
+  // Deprecated (backward compat - will be removed in v4.0.0)
+  coordinatorAgent,
+  ORCHESTRATOR_SISYPHUS_PROMPT_METADATA
 } from './agents/index.js';
 
 // Command expansion utilities for SDK integration

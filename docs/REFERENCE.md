@@ -9,7 +9,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Agents (32 Total)](#agents-32-total)
-- [Skills (35 Total)](#skills-35-total)
+- [Skills (37 Total)](#skills-37-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -195,7 +195,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (35 Total)
+## Skills (37 Total)
 
 ### Core Skills
 
@@ -241,6 +241,10 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `mcp-setup` | Configure MCP servers | `/oh-my-claudecode:mcp-setup` |
 | `learn-about-omc` | Usage pattern analysis | `/oh-my-claudecode:learn-about-omc` |
+| `writer-memory` | Agentic memory system for writers | `/oh-my-claudecode:writer-memory` |
+| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux) | `/oh-my-claudecode:project-session-manager` |
+| `local-skills-setup` | Set up and manage local skills | `/oh-my-claudecode:local-skills-setup` |
+| `skill` | Manage local skills (list, add, remove, search, edit) | `/oh-my-claudecode:skill` |
 
 ---
 

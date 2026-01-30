@@ -1,0 +1,40 @@
+/**
+ * Coordinator Agent - DEPRECATED
+ *
+ * This file provides deprecated stubs for backward compatibility.
+ * The coordinator agent was never registered in the runtime agent registry.
+ *
+ * @deprecated Will be removed in v4.0.0
+ */
+
+import type { AgentConfig, AgentPromptMetadata } from './types.js';
+
+// Emit deprecation warning on first import
+console.warn(
+  '[oh-my-claudecode] coordinatorAgent and ORCHESTRATOR_SISYPHUS_PROMPT_METADATA are deprecated ' +
+  'and will be removed in v4.0.0. The coordinator agent was never registered in the runtime agent registry.'
+);
+
+/**
+ * @deprecated Will be removed in v4.0.0. The coordinator was never a runtime agent.
+ */
+export const ORCHESTRATOR_SISYPHUS_PROMPT_METADATA: AgentPromptMetadata = {
+  category: 'orchestration',
+  cost: 'CHEAP',
+  promptAlias: 'coordinator',
+  triggers: [],
+  useWhen: [],
+  avoidWhen: [],
+};
+
+/**
+ * @deprecated Will be removed in v4.0.0. The coordinator was never a runtime agent.
+ */
+export const coordinatorAgent: AgentConfig = {
+  name: 'coordinator',
+  description: 'DEPRECATED: The coordinator agent was removed. This stub exists for backward compatibility.',
+  prompt: '',
+  tools: [],
+  model: 'opus',
+  metadata: ORCHESTRATOR_SISYPHUS_PROMPT_METADATA,
+};

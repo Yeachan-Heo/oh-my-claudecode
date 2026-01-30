@@ -221,28 +221,9 @@ export function quickTierForAgent(agentType: string): ComplexityTier | null {
     'executor': 'MEDIUM',
     'designer': 'MEDIUM',
     'vision': 'MEDIUM',
-    // DEPRECATED: coordinator merged into default mode (v2.0)
-    // Kept for backward compatibility if users still have it installed
-    'coordinator': 'MEDIUM',
   };
 
   return agentTiers[agentType] ?? null;
-}
-
-/**
- * Check if an agent has a fixed tier (cannot be overridden)
- *
- * Only ORCHESTRATOR agents are fixed to Opus - they need to analyze
- * complexity and delegate. All other agents are adaptive.
- *
- * NOTE: coordinator was deprecated in v2.0 (merged into default mode)
- * but kept here for backward compatibility if users still have it installed.
- */
-export function isFixedTierAgent(agentType: string): boolean {
-  // Only orchestrators are fixed - they need Opus to analyze and delegate
-  // DEPRECATED: coordinator merged into default mode (v2.0)
-  const fixedAgents = ['coordinator'];
-  return fixedAgents.includes(agentType);
 }
 
 
@@ -252,11 +233,7 @@ export function isFixedTierAgent(agentType: string): boolean {
  * This is the main entry point for orchestrator model routing.
  * The orchestrator calls this to determine which model to use when delegating.
  *
- * ALL agents are adaptive EXCEPT orchestrators (which need Opus to analyze and delegate).
- *
- * Routing hierarchy:
- * 1. Fixed-tier (orchestrators only) → always Opus (they analyze complexity)
- * 2. All other agents → adaptive based on task complexity
+ * ALL agents are adaptive based on task complexity.
  *
  * @param agentType - The agent to delegate to
  * @param taskPrompt - The task description
@@ -267,17 +244,7 @@ export function getModelForTask(
   taskPrompt: string,
   config: Partial<RoutingConfig> = {}
 ): { model: 'haiku' | 'sonnet' | 'opus'; tier: ComplexityTier; reason: string } {
-  // Fixed-tier agents (orchestrators only) always use Opus
-  // They need to analyze complexity and delegate - can't use a simpler model
-  if (isFixedTierAgent(agentType)) {
-    return {
-      model: 'opus',
-      tier: 'HIGH',
-      reason: `${agentType} is an orchestrator (always Opus - analyzes and delegates)`,
-    };
-  }
-
-  // All other agents are adaptive based on task complexity
+  // All agents are adaptive based on task complexity
   // Use agent-specific rules for advisory agents, general rules for others
   const decision = routeTask({ taskPrompt, agentType }, config);
 

@@ -9,7 +9,6 @@ import {
   routeTask,
   getModelForTask,
   analyzeTaskComplexity,
-  isFixedTierAgent,
   adaptPromptForTier,
   quickTierForAgent,
   explainRouting,
@@ -117,16 +116,7 @@ for (const test of modelTestCases) {
   console.log('');
 }
 
-console.log('--- Test 3b: Fixed vs Adaptive Agents ---\n');
-
-const allAgents = ['orchestrator-sisyphus', 'oracle', 'prometheus', 'momus', 'metis', 'explore', 'sisyphus-junior', 'frontend-engineer'];
-console.log('Only orchestrators are fixed to Opus. All others are adaptive:\n');
-for (const agent of allAgents) {
-  const isFixed = isFixedTierAgent(agent);
-  console.log(`  ${agent}: ${isFixed ? '🔒 FIXED (always Opus - analyzes & delegates)' : '🔄 ADAPTIVE (complexity-based)'}`);
-}
-
-console.log('\n--- Test 4: Prompt Adaptation ---\n');
+console.log('--- Test 4: Prompt Adaptation ---\n');
 
 const samplePrompt = 'Implement user authentication with JWT tokens';
 

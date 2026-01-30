@@ -227,7 +227,7 @@ Users don't need to learn commands. You detect intent and activate behaviors aut
 | `ralplan` | Iterative planning consensus | "ralplan this feature" |
 | `eco` | Token-efficient parallelism | "eco fix all errors" |
 
-**Combine them:** "ralph ulw: migrate database" = persistence + parallelism
+**ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
 
 ### Stopping and Cancelling
 
@@ -274,6 +274,32 @@ User says "cancelomc", "stopomc" → Invoke unified `cancel` skill (automaticall
 | `tdd` | TDD enforcement: test-first development | "tdd", "test first" | `/oh-my-claudecode:tdd` |
 | `mcp-setup` | Configure MCP servers for extended capabilities | "setup mcp", "configure mcp" | `/oh-my-claudecode:mcp-setup` |
 | `learn-about-omc` | Usage pattern analysis | - | `/oh-my-claudecode:learn-about-omc` |
+| `build-fix` | Fix build and TypeScript errors with minimal changes | - | `/oh-my-claudecode:build-fix` |
+| `code-review` | Run a comprehensive code review | - | `/oh-my-claudecode:code-review` |
+| `security-review` | Run a comprehensive security review on code | - | `/oh-my-claudecode:security-review` |
+| `writer-memory` | Agentic memory system for writers - track characters, relationships, scenes | - | `/oh-my-claudecode:writer-memory` |
+| `project-session-manager` | Manage isolated dev environments with git worktrees and tmux | - | `/oh-my-claudecode:project-session-manager` |
+| `local-skills-setup` | Set up and manage local skills for automatic matching and invocation | - | `/oh-my-claudecode:local-skills-setup` |
+| `skill` | Manage local skills - list, add, remove, search, edit | - | `/oh-my-claudecode:skill` |
+
+### Choosing the Right Mode
+
+| If you want... | Use this mode | Trigger keyword |
+|----------------|---------------|-----------------|
+| Full autonomous build from idea | `autopilot` | "autopilot", "build me", "I want a" |
+| Parallel autopilot (3-5x faster) | `ultrapilot` | "ultrapilot", "parallel build" |
+| Persistence until verified done | `ralph` | "ralph", "don't stop", "must complete" |
+| Maximum parallelism, manual verify | `ultrawork` | "ulw", "ultrawork" |
+| Cost-efficient parallel execution | `ecomode` | "eco", "ecomode", "budget" |
+| Coordinated N agents on task pool | `swarm` | "swarm N agents" |
+| Sequential agent chaining | `pipeline` | "pipeline", "chain agents" |
+| QA cycling: test, fix, repeat | `ultraqa` | via autopilot transition |
+
+#### Mode Relationships
+
+- **ralph includes ultrawork**: When ralph is activated, it automatically enables ultrawork's parallel execution. No need to combine keywords.
+- **autopilot can transition**: Autopilot may transition to ralph (for persistence) or ultraqa (for QA cycling) during execution.
+- **ecomode = ultrawork + cheaper models**: Same parallel behavior but routes to haiku/sonnet agents for cost savings.
 
 ### All 32 Agents
 
@@ -528,9 +554,23 @@ Reusable verification protocol for workflows.
 
 Standardized state file locations.
 
-**Standard paths:**
-- Local: `.omc/state/{name}.json`
-- Global: `~/.omc/state/{name}.json`
+**Standard paths for all mode state files:**
+- Primary: `.omc/state/{name}.json` (local, per-project)
+- Global backup: `~/.omc/state/{name}.json` (global, session continuity)
+
+**Mode State Files:**
+| Mode | State File |
+|------|-----------|
+| ralph | `ralph-state.json` |
+| autopilot | `autopilot-state.json` |
+| ultrapilot | `ultrapilot-state.json` |
+| ultrawork | `ultrawork-state.json` |
+| ecomode | `ecomode-state.json` |
+| ultraqa | `ultraqa-state.json` |
+| pipeline | `pipeline-state.json` |
+| swarm | `swarm-summary.json` + `swarm-active.marker` |
+
+**Important:** Never store OMC state in `~/.claude/` - that directory is reserved for Claude Code itself.
 
 Legacy locations auto-migrated on read.
 

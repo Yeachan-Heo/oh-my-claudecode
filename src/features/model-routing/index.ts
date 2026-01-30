@@ -74,7 +74,6 @@ export {
   getRoutingRecommendation,
   getModelForTask,
   analyzeTaskComplexity,
-  isFixedTierAgent,
   escalateModel,
   canEscalate,
   explainRouting,

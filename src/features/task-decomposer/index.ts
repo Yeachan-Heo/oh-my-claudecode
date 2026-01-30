@@ -220,7 +220,7 @@ export function assignFileOwnership(
 }
 
 /**
- * Identify files that should be managed by coordinator
+ * Identify files that require orchestration (shared across components)
  */
 export function identifySharedFiles(
   components: Component[],
@@ -244,16 +244,14 @@ export function identifySharedFiles(
   ];
 
   for (const file of commonShared) {
-    const sharedBy = components
-      .filter((c) => c.role !== 'coordinator')
-      .map((c) => c.id);
+    const sharedBy = components.map((c) => c.id);
 
     if (sharedBy.length > 0) {
       sharedFiles.push({
         pattern: file,
         reason: 'Common configuration file',
         sharedBy,
-        requiresCoordinator: true
+        requiresOrchestration: true
       });
     }
   }
@@ -264,7 +262,7 @@ export function identifySharedFiles(
       pattern: 'src/types/**',
       reason: 'Shared TypeScript types',
       sharedBy: components.map((c) => c.id),
-      requiresCoordinator: false
+      requiresOrchestration: false
     });
   }
 
@@ -557,7 +555,7 @@ const fullstackStrategy: DecompositionStrategy = {
       });
     }
 
-    // Shared/coordinator component
+    // Shared component
     components.push({
       id: 'shared',
       name: 'Shared',
@@ -704,7 +702,6 @@ function selectAgentType(component: Component): string {
     api: 'oh-my-claudecode:executor',
     ui: 'oh-my-claudecode:designer',
     shared: 'oh-my-claudecode:executor',
-    coordinator: 'oh-my-claudecode:architect',
     testing: 'oh-my-claudecode:qa-tester',
     docs: 'oh-my-claudecode:writer',
     config: 'oh-my-claudecode:executor',

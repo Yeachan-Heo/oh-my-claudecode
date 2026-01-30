@@ -8,11 +8,8 @@
  * 4. omcSystemPrompt for the main orchestrator
  */
 
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
 import type { AgentConfig, ModelType } from '../shared/types.js';
+import { loadAgentPrompt } from './utils.js';
 
 // Re-export base agents from individual files (rebranded names)
 export { architectAgent } from './architect.js';
@@ -42,36 +39,8 @@ import { plannerAgent } from './planner.js';
 import { qaTesterAgent } from './qa-tester.js';
 import { scientistAgent } from './scientist.js';
 
-// ============================================================
-// DYNAMIC PROMPT LOADING
-// ============================================================
-
-/**
- * Get the package root directory (where agents/ folder lives)
- */
-function getPackageDir(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // From src/agents/ go up to package root
-  return join(__dirname, '..', '..');
-}
-
-/**
- * Load an agent prompt from /agents/{agentName}.md
- * Strips YAML frontmatter and returns the content
- */
-function loadAgentPrompt(agentName: string): string {
-  try {
-    const agentPath = join(getPackageDir(), 'agents', `${agentName}.md`);
-    const content = readFileSync(agentPath, 'utf-8');
-    // Extract content after YAML frontmatter (---\n...\n---\n)
-    const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
-    return match ? match[1].trim() : content.trim();
-  } catch (error) {
-    console.warn(`Warning: Could not load prompt for ${agentName}, using fallback`);
-    return `Agent: ${agentName}\n\nPrompt file not found. Please ensure agents/${agentName}.md exists.`;
-  }
-}
+// Re-export loadAgentPrompt (also exported from index.ts)
+export { loadAgentPrompt };
 
 // ============================================================
 // TIERED AGENT VARIANTS

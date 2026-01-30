@@ -562,7 +562,7 @@ if (validationStatus?.allApproved) {
 
 ### State Persistence
 
-All state is persisted to `.omc/autopilot-state.json` and includes:
+All state is persisted to `.omc/state/autopilot-state.json` and includes:
 
 - Active status and current phase
 - Original user idea

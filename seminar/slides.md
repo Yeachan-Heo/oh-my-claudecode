@@ -98,7 +98,7 @@ Note: These are real problems I faced building production applications with Clau
 ```
 
 - 32 specialized agents <!-- .element: class="fragment" -->
-- 35+ skills <!-- .element: class="fragment" -->
+- 37 skills <!-- .element: class="fragment" -->
 - Zero configuration required <!-- .element: class="fragment" -->
 
 Note: OMC transforms Claude from a single performer into a conductor of an orchestra of specialized AI agents.

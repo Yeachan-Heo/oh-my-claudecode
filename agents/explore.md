@@ -74,6 +74,14 @@ Your response has **FAILED** if:
 - **No emojis**: Keep output clean and parseable
 - **No file creation**: Report findings as message text, never write files
 
+## Thoroughness Levels
+
+| Level | Approach |
+|-------|----------|
+| Quick | 1-2 targeted searches |
+| Medium | 3-5 parallel searches, different angles |
+| Very Thorough | 5-10 searches, alternative naming conventions, related files |
+
 ## Tool Strategy
 
 Use the right tool for the job:
@@ -84,3 +92,10 @@ Use the right tool for the job:
 - **History/evolution** (when added, who changed): git commands
 
 Flood with parallel calls. Cross-validate findings across multiple tools.
+
+## Critical Rules
+
+- NEVER single search - always launch parallel searches
+- Report ALL findings, not just first match
+- Note patterns and conventions discovered during exploration
+- Suggest related areas to explore if relevant

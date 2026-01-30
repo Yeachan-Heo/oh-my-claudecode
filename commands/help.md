@@ -27,7 +27,7 @@ You can include these words naturally in your request for explicit control:
 | **ulw** | Max parallelism | "ulw refactor the API" |
 | **plan** | Planning interview | "plan the new endpoints" |
 
-**Combine them:** "ralph ulw: migrate the database"
+**ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
 
 ## Stopping Things
 

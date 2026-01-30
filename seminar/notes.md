@@ -91,7 +91,7 @@
 
 **The Numbers** (Slide 7)
 - "32 specialized agents across 13 domains - architecture, execution, search, frontend, testing, security, documentation, and more"
-- "35 skills that combine these agents into workflows - autopilot, planning, persistence, parallelism"
+- "37 skills that combine these agents into workflows - autopilot, planning, persistence, parallelism"
 - "3 model tiers - Haiku for speed and cost, Sonnet for balance, Opus for complex reasoning"
 - "Zero configuration files, zero setup beyond installation"
 

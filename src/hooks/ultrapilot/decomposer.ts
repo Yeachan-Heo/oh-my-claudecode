@@ -59,7 +59,7 @@ export interface DecompositionOptions {
 }
 
 /**
- * Default shared file patterns that should be handled by coordinator
+ * Default shared file patterns that should be handled by the orchestrator
  */
 export const DEFAULT_SHARED_FILE_PATTERNS = [
   'package.json',
@@ -174,7 +174,7 @@ DECOMPOSITION RULES:
    - Subtask description should be actionable and specific
    - Include all files the subtask will CREATE or MODIFY
 
-6. SHARED FILES (coordinator handles):
+6. SHARED FILES (orchestrator handles):
    - package.json, lock files
    - tsconfig.json, config files
    - Root README.md

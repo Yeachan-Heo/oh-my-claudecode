@@ -26,17 +26,7 @@ export const DEFAULT_ROUTING_RULES: RoutingRule[] = [
   },
 
   // NOTE: ALL agents are now ADAPTIVE based on task complexity
-  // Only orchestrators (coordinator) are fixed to Opus
   // This includes: architect, planner, critic, analyst, explore, writer, etc.
-
-  // ============ Orchestrator Rule (Fixed Tier) ============
-
-  {
-    name: 'orchestrator-fixed-opus',
-    condition: (ctx) => ctx.agentType === 'coordinator',
-    action: { tier: 'HIGH', reason: 'Orchestrator requires Opus to analyze complexity and delegate' },
-    priority: 90,
-  },
 
   // ============ Advisory Agent Adaptive Rules ============
 

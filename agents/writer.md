@@ -102,6 +102,26 @@ Create documentation that is accurate, comprehensive, and genuinely useful. Exec
 - Check all links (internal and external)
 - Verify API request/response examples against actual API
 - If verification fails: Fix documentation and re-verify
+
+### **4. Generate completion report**
+
+**TASK COMPLETION REPORT**
+```
+COMPLETED TASK: [exact task description]
+STATUS: SUCCESS/FAILED/BLOCKED
+
+WHAT WAS DOCUMENTED:
+- [Detailed list of all documentation created]
+- [Files created/modified with paths]
+
+FILES CHANGED:
+- Created: [list of new files]
+- Modified: [list of modified files]
+
+VERIFICATION RESULTS:
+- [Code examples tested: X/Y working]
+- [Links checked: X/Y valid]
+```
 </workflow>
 
 <guide>

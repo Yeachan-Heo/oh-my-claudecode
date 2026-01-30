@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Deprecated
+
+- **Coordinator Agent** - `coordinatorAgent` and `ORCHESTRATOR_SISYPHUS_PROMPT_METADATA` are deprecated and will be removed in v4.0.0. The coordinator agent was never registered in the runtime agent registry and had zero internal consumers. Deprecated stubs are provided for backward compatibility.
+
+### Fixed
+
+- **Documentation Consistency** - Fixed misleading "Combine them" multi-skill documentation
+  - Clarified that ralph includes ultrawork automatically
+  - Updated 7 documentation files with accurate skill composition guidance
+- **Skill Count** - Fixed documented skill count from 35 to 37 across all documentation
+- **Missing Agent Exports** - Fixed 9 missing agent exports from index.ts:
+  - `explore-high`, `security-reviewer`, `security-reviewer-low`
+  - `build-fixer`, `build-fixer-low`
+  - `tdd-guide`, `tdd-guide-low`
+  - `code-reviewer`, `code-reviewer-low`
+
+### Changed
+
+- **Agent Prompt Architecture** - Migrated all 12 base agent prompts from hardcoded TypeScript constants to dynamic loading from markdown files
+  - Implemented `loadAgentPrompt()` utility function for runtime prompt loading
+  - Moved utility to `src/agents/utils.ts` to avoid circular dependency issues
+  - Affected agents: planner, architect, executor, explore, researcher, designer, writer, qa-tester, vision, critic, analyst, scientist
+- **Agent Prompt Enhancement** - Enhanced agent prompts with improved instructions and domain-specific guidance. Prompts are now maintained as standalone markdown files in `agents/`.
+- **Public API** - `loadAgentPrompt()` is now exported from the main entry point for external consumers
+- **Model Routing** - Removed dead coordinator references and `isFixedTierAgent()` function (was only used for deprecated coordinator)
+- **Task Decomposer** - Renamed `requiresCoordinator` to `requiresOrchestration` in SharedFile type
+- **Documentation Enhancement** - Added "Choosing the Right Mode" decision tree to clarify execution mode selection
+- **State Management** - Standardized path documentation for state files across all modes
+
+### Added
+
+- **CI Validation Tests** - New comprehensive validation tests for agent registry
+  - Validates agent count, markdown file presence, exports, and absence of hardcoded prompts
+  - Prevents regressions in agent configuration
+
+---
+
 ## [3.7.10] - 2026-01-28
 
 ### Fixed
@@ -458,7 +497,7 @@ All skill files now include explicit "STATE CLEANUP ON COMPLETION" sections inst
 - feat(skills): add learn-about-omc skill for usage pattern analysis
 
 ### Changed
-- feat(skills): consolidate 42 skills to 35 (removed deprecated cancel-* skills)
+- feat(skills): consolidate 42 skills to 37 (removed deprecated cancel-* skills, added build-fix, code-review, security-review, writer-memory, project-session-manager, local-skills-setup, skill)
 
 ### Fixed
 - fix(tests): skip unimplemented delegation-enforcer tests
