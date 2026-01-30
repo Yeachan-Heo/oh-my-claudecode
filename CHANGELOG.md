@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.14] - 2026-01-30
+
+### Added
+
+- **Bun Package Manager Support** (PR #219) - OMC setup now prefers Bun over npm when available, with automatic fallback. Includes duplicate cleanup logic and per-manager verification.
+- **MCP Skill Loading Tools** (PR #225) - Three new MCP tools (`load_omc_skills_local`, `load_omc_skills_global`, `list_omc_skills`) with 5-layer security hardening: path validation, symlink boundary checks, depth limits, content sanitization, and relative path output.
+
+### Fixed
+
+- **HUD OAuth Token Refresh** (PR #206) - Expired OAuth tokens now auto-refresh using RFC 6749 compliant refresh token grant, restoring rate limit display. Credentials persisted with atomic writes and 0o600 permissions.
+
+---
+
 ## [3.8.10] - 2026-01-30
 
 ### Deprecated
