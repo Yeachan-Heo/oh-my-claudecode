@@ -106,6 +106,12 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
       if (todos) lines.push(todos);
     }
 
+    // Apply maxOutputLines limit for analytics preset too (Issue #222)
+    const maxLines = config.maxOutputLines ?? 4;
+    if (lines.length > maxLines) {
+      return lines.slice(0, maxLines).join('\n');
+    }
+
     return lines.join('\n');
   }
 
@@ -240,9 +246,19 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     }
   }
 
+  // Apply maxOutputLines limit to prevent input field shrinkage (Issue #222)
+  // The limit applies to total output lines (header + detail lines)
+  const maxLines = config.maxOutputLines ?? 4;
+  let outputLines = [headerLine, ...detailLines];
+
+  if (outputLines.length > maxLines) {
+    // Keep header line, trim detail lines from the end
+    outputLines = outputLines.slice(0, maxLines);
+  }
+
   // If we have detail lines, output multi-line
-  if (detailLines.length > 0) {
-    return [headerLine, ...detailLines].join('\n');
+  if (outputLines.length > 1) {
+    return outputLines.join('\n');
   }
 
   return headerLine;
