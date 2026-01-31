@@ -277,6 +277,5 @@ No migration needed! The enforcer is backward compatible:
 
 ## Related
 
-- [Model Routing](./MODEL-ROUTING.md) - Intelligent task complexity analysis
 - [Agent Definitions](./AGENTS.md) - Complete agent reference
-- [Delegation Categories](./DELEGATION-CATEGORIES.md) - Semantic task grouping
+- [Features Reference](./FEATURES.md) - Model routing and delegation categories
