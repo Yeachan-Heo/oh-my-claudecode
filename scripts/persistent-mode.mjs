@@ -331,10 +331,11 @@ async function main() {
       writeJsonFile(ultrawork.path, ultrawork.state);
 
       // Build continuation message
-      let reason = `[ULTRAWORK #${newCount}] Mode active - continue working.`;
+      const promise = ultrawork.state.completion_promise || 'DONE';
+      let reason = `[ULTRAWORK #${newCount}] Mode active - continue working. When complete, output: <promise>${promise}</promise>`;
       if (totalIncomplete > 0) {
         const itemType = taskCount > 0 ? 'Tasks' : 'todos';
-        reason = `[ULTRAWORK #${newCount}] ${totalIncomplete} incomplete ${itemType}. Continue working.`;
+        reason = `[ULTRAWORK #${newCount}] ${totalIncomplete} incomplete ${itemType}. Continue working. When complete, output: <promise>${promise}</promise>`;
       }
       if (ultrawork.state.original_prompt) {
         reason += `\nTask: ${ultrawork.state.original_prompt}`;
@@ -361,10 +362,14 @@ async function main() {
       ecomode.state.reinforcement_count = newCount;
       writeJsonFile(ecomode.path, ecomode.state);
 
-      let reason = `[ECOMODE #${newCount}] Mode active - continue working.`;
+      const promise = ecomode.state.completion_promise || 'DONE';
+      let reason = `[ECOMODE #${newCount}] Mode active - continue working. When complete, output: <promise>${promise}</promise>`;
       if (totalIncomplete > 0) {
         const itemType = taskCount > 0 ? 'Tasks' : 'todos';
-        reason = `[ECOMODE #${newCount}] ${totalIncomplete} incomplete ${itemType}. Continue working.`;
+        reason = `[ECOMODE #${newCount}] ${totalIncomplete} incomplete ${itemType}. Continue working. When complete, output: <promise>${promise}</promise>`;
+      }
+      if (ecomode.state.original_prompt) {
+        reason += `\nTask: ${ecomode.state.original_prompt}`;
       }
 
       console.log(JSON.stringify({
