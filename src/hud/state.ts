@@ -9,7 +9,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { OmcHudState, BackgroundTask, HudConfig } from './types.js';
-import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS, PRESET_MAX_OUTPUT_LINES } from './types.js';
+import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from './types.js';
 import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './background-cleanup.js';
 
 // ============================================================================
@@ -189,9 +189,8 @@ export function readHudConfig(): HudConfig {
     const config = JSON.parse(content) as Partial<HudConfig>;
 
     // Merge with defaults to ensure all fields exist
-    const preset = config.preset ?? DEFAULT_HUD_CONFIG.preset;
     return {
-      preset,
+      preset: config.preset ?? DEFAULT_HUD_CONFIG.preset,
       elements: {
         ...DEFAULT_HUD_CONFIG.elements,
         ...config.elements,
@@ -200,7 +199,6 @@ export function readHudConfig(): HudConfig {
         ...DEFAULT_HUD_CONFIG.thresholds,
         ...config.thresholds,
       },
-      maxOutputLines: config.maxOutputLines ?? PRESET_MAX_OUTPUT_LINES[preset],
     };
   } catch {
     return DEFAULT_HUD_CONFIG;
@@ -235,7 +233,6 @@ export function applyPreset(preset: HudConfig['preset']): HudConfig {
       ...config.elements,
       ...presetElements,
     },
-    maxOutputLines: PRESET_MAX_OUTPUT_LINES[preset],
   };
 
   writeHudConfig(newConfig);

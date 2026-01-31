@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { limitOutputLines } from '../../hud/render.js';
-import { DEFAULT_HUD_CONFIG, PRESET_MAX_OUTPUT_LINES } from '../../hud/types.js';
+import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from '../../hud/types.js';
 
 describe('limitOutputLines', () => {
   describe('basic functionality', () => {
@@ -61,15 +61,15 @@ describe('limitOutputLines', () => {
   });
 
   describe('default value usage', () => {
-    it('uses DEFAULT_HUD_CONFIG.maxOutputLines when maxLines not specified', () => {
-      const defaultLimit = DEFAULT_HUD_CONFIG.maxOutputLines;
+    it('uses DEFAULT_HUD_CONFIG.elements.maxOutputLines when maxLines not specified', () => {
+      const defaultLimit = DEFAULT_HUD_CONFIG.elements.maxOutputLines;
       const lines = Array.from({ length: 10 }, (_, i) => `line${i + 1}`);
       const result = limitOutputLines(lines);
       expect(result).toHaveLength(defaultLimit);
     });
 
-    it('uses DEFAULT_HUD_CONFIG.maxOutputLines when maxLines is undefined', () => {
-      const defaultLimit = DEFAULT_HUD_CONFIG.maxOutputLines;
+    it('uses DEFAULT_HUD_CONFIG.elements.maxOutputLines when maxLines is undefined', () => {
+      const defaultLimit = DEFAULT_HUD_CONFIG.elements.maxOutputLines;
       const lines = Array.from({ length: 10 }, (_, i) => `line${i + 1}`);
       const result = limitOutputLines(lines, undefined);
       expect(result).toHaveLength(defaultLimit);
@@ -126,12 +126,12 @@ describe('limitOutputLines', () => {
 
   describe('preset-specific defaults', () => {
     it('has correct maxOutputLines for each preset', () => {
-      expect(PRESET_MAX_OUTPUT_LINES.minimal).toBe(2);
-      expect(PRESET_MAX_OUTPUT_LINES.focused).toBe(4);
-      expect(PRESET_MAX_OUTPUT_LINES.full).toBe(8);
-      expect(PRESET_MAX_OUTPUT_LINES.dense).toBe(6);
-      expect(PRESET_MAX_OUTPUT_LINES.opencode).toBe(4);
-      expect(PRESET_MAX_OUTPUT_LINES.analytics).toBe(4);
+      expect(PRESET_CONFIGS.minimal.maxOutputLines).toBe(2);
+      expect(PRESET_CONFIGS.focused.maxOutputLines).toBe(4);
+      expect(PRESET_CONFIGS.full.maxOutputLines).toBe(12);
+      expect(PRESET_CONFIGS.dense.maxOutputLines).toBe(6);
+      expect(PRESET_CONFIGS.opencode.maxOutputLines).toBe(4);
+      expect(PRESET_CONFIGS.analytics.maxOutputLines).toBe(4);
     });
   });
 
@@ -155,8 +155,8 @@ describe('limitOutputLines', () => {
       expect(result[3]).toBe('... (+5 lines)');
     });
 
-    it('works with DEFAULT_HUD_CONFIG maxOutputLines value of 4', () => {
-      expect(DEFAULT_HUD_CONFIG.maxOutputLines).toBe(4);
+    it('works with DEFAULT_HUD_CONFIG elements.maxOutputLines value of 4', () => {
+      expect(DEFAULT_HUD_CONFIG.elements.maxOutputLines).toBe(4);
     });
   });
 });

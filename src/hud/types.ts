@@ -249,6 +249,7 @@ export interface HudElementConfig {
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
   showCache: boolean;         // Show cache hit rate in analytics displays
   showCost: boolean;          // Show cost/dollar amounts in analytics displays
+  maxOutputLines: number;     // Max total output lines to prevent input field shrinkage
 }
 
 export interface HudThresholds {
@@ -267,7 +268,6 @@ export interface HudConfig {
   elements: HudElementConfig;
   thresholds: HudThresholds;
   staleTaskThresholdMinutes?: number; // Default 30
-  maxOutputLines: number;
 }
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
@@ -292,6 +292,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     useBars: false,  // Disabled by default for backwards compatibility
     showCache: true,
     showCost: true,
+    maxOutputLines: 4,
   },
   thresholds: {
     contextWarning: 70,
@@ -299,16 +300,6 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     contextCritical: 85,
     ralphWarning: 7,
   },
-  maxOutputLines: 4,
-};
-
-export const PRESET_MAX_OUTPUT_LINES: Record<HudPreset, number> = {
-  minimal: 2,
-  analytics: 4,
-  focused: 4,
-  full: 8,
-  opencode: 4,
-  dense: 6,
 };
 
 export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
@@ -322,7 +313,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     lastSkill: true,
     contextBar: false,
     agents: true,
-    agentsFormat: 'count', // Just count for minimal mode
+    agentsFormat: 'count',
     agentsMaxLines: 0,
     backgroundTasks: false,
     todos: true,
@@ -332,6 +323,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useBars: false,
     showCache: false,
     showCost: false,
+    maxOutputLines: 2,
   },
   analytics: {
     omcLabel: false,
@@ -353,6 +345,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useBars: false,
     showCache: true,
     showCost: true,
+    maxOutputLines: 4,
   },
   focused: {
     omcLabel: true,
@@ -364,16 +357,17 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     lastSkill: true,
     contextBar: true,
     agents: true,
-    agentsFormat: 'multiline', // Multi-line for rich visualization
-    agentsMaxLines: 3, // Show up to 3 agents
+    agentsFormat: 'multiline',
+    agentsMaxLines: 3,
     backgroundTasks: true,
     todos: true,
-    permissionStatus: false,  // Disabled: heuristic unreliable
+    permissionStatus: false,
     thinking: true,
     sessionHealth: true,
     useBars: true,
     showCache: true,
     showCost: true,
+    maxOutputLines: 4,
   },
   full: {
     omcLabel: true,
@@ -385,16 +379,17 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     lastSkill: true,
     contextBar: true,
     agents: true,
-    agentsFormat: 'multiline', // Multi-line with more details
-    agentsMaxLines: 10, // Show many agents in full mode
+    agentsFormat: 'multiline',
+    agentsMaxLines: 10,
     backgroundTasks: true,
     todos: true,
-    permissionStatus: false,  // Disabled: heuristic unreliable
+    permissionStatus: false,
     thinking: true,
     sessionHealth: true,
     useBars: true,
     showCache: true,
     showCost: true,
+    maxOutputLines: 12,
   },
   opencode: {
     omcLabel: true,
@@ -410,12 +405,13 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     agentsMaxLines: 0,
     backgroundTasks: false,
     todos: true,
-    permissionStatus: false,  // Disabled: heuristic unreliable
+    permissionStatus: false,
     thinking: true,
     sessionHealth: true,
     useBars: false,
     showCache: true,
     showCost: true,
+    maxOutputLines: 4,
   },
   dense: {
     omcLabel: true,
@@ -431,11 +427,12 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     agentsMaxLines: 5,
     backgroundTasks: true,
     todos: true,
-    permissionStatus: false,  // Disabled: heuristic unreliable
+    permissionStatus: false,
     thinking: true,
     sessionHealth: true,
     useBars: true,
     showCache: true,
     showCost: true,
+    maxOutputLines: 6,
   },
 };

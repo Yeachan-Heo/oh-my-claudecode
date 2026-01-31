@@ -259,14 +259,14 @@ You can manually edit the config file. Each option can be set individually - any
     "backgroundTasks": true,
     "todos": true,
     "showCache": true,
-    "showCost": true
+    "showCost": true,
+    "maxOutputLines": 4
   },
   "thresholds": {
     "contextWarning": 70,
     "contextCritical": 85,
     "ralphWarning": 7
-  },
-  "maxOutputLines": 4
+  }
 }
 ```
 

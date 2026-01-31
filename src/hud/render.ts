@@ -38,7 +38,7 @@ import type { SessionHealth, HudElementConfig } from './types.js';
  * @returns Trimmed array of lines
  */
 export function limitOutputLines(lines: string[], maxLines?: number): string[] {
-  const limit = Math.max(1, maxLines ?? DEFAULT_HUD_CONFIG.maxOutputLines);
+  const limit = Math.max(1, maxLines ?? DEFAULT_HUD_CONFIG.elements.maxOutputLines);
   if (lines.length <= limit) {
     return lines;
   }
@@ -124,7 +124,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
       if (todos) lines.push(todos);
     }
 
-    return limitOutputLines(lines, config.maxOutputLines).join('\n');
+    return limitOutputLines(lines, config.elements.maxOutputLines).join('\n');
   }
 
   // [OMC] label
@@ -258,5 +258,5 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     }
   }
 
-  return limitOutputLines([headerLine, ...detailLines], config.maxOutputLines).join('\n');
+  return limitOutputLines([headerLine, ...detailLines], config.elements.maxOutputLines).join('\n');
 }
