@@ -292,7 +292,7 @@ export interface HudConfig {
 export const DEFAULT_HUD_CONFIG: HudConfig = {
   preset: 'focused',
   elements: {
-    cwd: true,                // Show working directory by default
+    cwd: false,               // Disabled by default for backward compatibility
     cwdFormat: 'relative',
     omcLabel: true,
     rateLimits: true,  // Show rate limits by default
@@ -309,7 +309,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     lastSkill: true,
     permissionStatus: false,  // Disabled: heuristic-based, causes false positives
     thinking: true,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',   // Text format for backward compatibility
     sessionHealth: true,
     useBars: false,  // Disabled by default for backwards compatibility
     showCache: true,
@@ -342,7 +342,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,
     thinking: false,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: false,
     useBars: false,
     showCache: false,
@@ -366,14 +366,14 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,
     thinking: false,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: false,
     useBars: false,
     showCache: true,
     showCost: true,
   },
   focused: {
-    cwd: true,
+    cwd: false,
     cwdFormat: 'relative',
     omcLabel: true,
     rateLimits: true,
@@ -390,14 +390,14 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,  // Disabled: heuristic unreliable
     thinking: true,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: true,
     useBars: true,
     showCache: true,
     showCost: true,
   },
   full: {
-    cwd: true,
+    cwd: false,
     cwdFormat: 'relative',
     omcLabel: true,
     rateLimits: true,
@@ -414,14 +414,14 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,  // Disabled: heuristic unreliable
     thinking: true,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: true,
     useBars: true,
     showCache: true,
     showCost: true,
   },
   opencode: {
-    cwd: true,
+    cwd: false,
     cwdFormat: 'relative',
     omcLabel: true,
     rateLimits: false,
@@ -438,14 +438,14 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,  // Disabled: heuristic unreliable
     thinking: true,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: true,
     useBars: false,
     showCache: true,
     showCost: true,
   },
   dense: {
-    cwd: true,
+    cwd: false,
     cwdFormat: 'relative',
     omcLabel: true,
     rateLimits: true,
@@ -462,7 +462,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     todos: true,
     permissionStatus: false,  // Disabled: heuristic unreliable
     thinking: true,
-    thinkingFormat: 'bubble',
+    thinkingFormat: 'text',
     sessionHealth: true,
     useBars: true,
     showCache: true,
