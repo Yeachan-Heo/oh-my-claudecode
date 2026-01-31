@@ -1,9 +1,9 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-28 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
 
 # skills
 
-32 skill definitions for workflow automation and specialized behaviors.
+37 skill definitions for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -15,62 +15,71 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 ## Key Files
 
 ### Execution Mode Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `autopilot.md` | autopilot | Full autonomous execution from idea to working code |
-| `ultrawork.md` | ultrawork | Maximum parallel agent execution |
-| `ralph.md` | ralph | Persistence until verified complete |
-| `ultrapilot.md` | ultrapilot | Parallel autopilot with file ownership |
-| `swarm.md` | swarm | N coordinated agents with task claiming |
-| `pipeline.md` | pipeline | Sequential agent chaining |
-| `ecomode.md` | ecomode | Token-efficient parallel execution |
-| `ultraqa.md` | ultraqa | QA cycling until goal met |
+|-----------|-------|---------|
+| `autopilot/SKILL.md` | autopilot | Full autonomous execution from idea to working code |
+| `ultrawork/SKILL.md` | ultrawork | Maximum parallel agent execution |
+| `ralph/SKILL.md` | ralph | Persistence until verified complete |
+| `ultrapilot/SKILL.md` | ultrapilot | Parallel autopilot with file ownership |
+| `swarm/SKILL.md` | swarm | N coordinated agents with task claiming |
+| `pipeline/SKILL.md` | pipeline | Sequential agent chaining |
+| `ecomode/SKILL.md` | ecomode | Token-efficient parallel execution |
+| `ultraqa/SKILL.md` | ultraqa | QA cycling until goal met |
 
 ### Planning Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `plan.md` | plan | Strategic planning with interview workflow |
-| `ralplan.md` | ralplan | Iterative planning (Planner+Architect+Critic) |
-| `review.md` | review | Review plan with Critic |
-| `analyze.md` | analyze | Deep analysis and investigation |
-| `ralph-init.md` | ralph-init | Initialize PRD for structured ralph |
+|-----------|-------|---------|
+| `plan/SKILL.md` | plan | Strategic planning with interview workflow |
+| `ralplan/SKILL.md` | ralplan | Iterative planning (Planner+Architect+Critic) |
+| `review/SKILL.md` | review | Review plan with Critic |
+| `analyze/SKILL.md` | analyze | Deep analysis and investigation |
+| `ralph-init/SKILL.md` | ralph-init | Initialize PRD for structured ralph |
 
 ### Code Quality Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `code-review.md` | code-review | Comprehensive code review |
-| `security-review.md` | security-review | Security vulnerability detection |
-| `tdd.md` | tdd | Test-driven development workflow |
-| `build-fix.md` | build-fix | Fix build and TypeScript errors |
+|-----------|-------|---------|
+| `code-review/SKILL.md` | code-review | Comprehensive code review |
+| `security-review/SKILL.md` | security-review | Security vulnerability detection |
+| `tdd/SKILL.md` | tdd | Test-driven development workflow |
+| `build-fix/SKILL.md` | build-fix | Fix build and TypeScript errors |
 
 ### Exploration Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `deepsearch.md` | deepsearch | Thorough codebase search |
-| `deepinit.md` | deepinit | Generate hierarchical AGENTS.md |
-| `research.md` | research | Parallel scientist orchestration |
+|-----------|-------|---------|
+| `deepsearch/SKILL.md` | deepsearch | Thorough codebase search |
+| `deepinit/SKILL.md` | deepinit | Generate hierarchical AGENTS.md |
+| `research/SKILL.md` | research | Parallel scientist orchestration |
 
 ### Utility Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `learner.md` | learner | Extract reusable skill from session |
-| `note.md` | note | Save notes for compaction resilience |
-| `cancel.md` | cancel | Cancel any active OMC mode |
-| `hud.md` | hud | Configure HUD display |
-| `doctor.md` | doctor | Diagnose installation issues |
-| `omc-setup.md` | omc-setup | One-time setup wizard |
-| `mcp-setup.md` | mcp-setup | Configure MCP servers |
-| `help.md` | help | Usage guide |
+|-----------|-------|---------|
+| `orchestrate/SKILL.md` | orchestrate | Core multi-agent orchestration (always active) |
+| `learner/SKILL.md` | learner | Extract reusable skill from session |
+| `note/SKILL.md` | note | Save notes for compaction resilience |
+| `cancel/SKILL.md` | cancel | Cancel any active OMC mode |
+| `hud/SKILL.md` | hud | Configure HUD display |
+| `doctor/SKILL.md` | doctor | Diagnose installation issues |
+| `omc-setup/SKILL.md` | omc-setup | One-time setup wizard |
+| `mcp-setup/SKILL.md` | mcp-setup | Configure MCP servers |
+| `help/SKILL.md` | help | Usage guide |
+| `learn-about-omc/SKILL.md` | learn-about-omc | Usage pattern analysis |
+| `skill/SKILL.md` | skill | Manage local skills |
 
 ### Domain Skills
+
 | File | Skill | Purpose |
-|------|-------|---------|
-| `frontend-ui-ux.md` | frontend-ui-ux | Designer-developer aesthetic |
-| `git-master.md` | git-master | Git expertise, atomic commits |
-| `project-session-manager.md` | psm | Isolated dev environments |
-| `writer-memory.md` | writer-memory | Agentic memory for writers |
-| `release.md` | release | Automated release workflow |
-| `local-skills-setup.md` | local-skills-setup | Manage local skills |
+|-----------|-------|---------|
+| `frontend-ui-ux/SKILL.md` | frontend-ui-ux | Designer-developer aesthetic |
+| `git-master/SKILL.md` | git-master | Git expertise, atomic commits |
+| `project-session-manager/SKILL.md` | psm | Isolated dev environments |
+| `writer-memory/SKILL.md` | writer-memory | Agentic memory for writers |
+| `release/SKILL.md` | release | Automated release workflow |
+| `local-skills-setup/SKILL.md` | local-skills-setup | Manage local skills |
 
 ## For AI Agents
 
@@ -121,10 +130,13 @@ Any configurable options.
 
 #### Creating a New Skill
 
-1. Create `new-skill.md` with YAML frontmatter
+1. Create `new-skill/SKILL.md` directory and file with YAML frontmatter
 2. Define purpose, workflow, and usage
 3. Add to skill registry (auto-detected from frontmatter)
 4. Optionally add activation triggers
+5. Create corresponding `commands/new-skill.md` file (mirror)
+6. Update `docs/REFERENCE.md` (Skills section, count)
+7. If execution mode skill, also create `src/hooks/new-skill/` hook
 
 ### Common Patterns
 
@@ -148,7 +160,10 @@ Any configurable options.
 
 ### Testing Requirements
 
-Skills are tested via integration tests that invoke skills and verify behavior.
+- Skills are verified via integration tests
+- Test skill invocation with `/oh-my-claudecode:skill-name`
+- Verify trigger keywords activate correct skill
+- For git-related skills, follow `templates/rules/git-workflow.md`
 
 ## Dependencies
 

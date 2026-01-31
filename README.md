@@ -1,7 +1,3 @@
-
-
-
-
 # oh-my-claudecode
 
 [![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
@@ -15,8 +11,6 @@
 *Don't learn Claude Code. Just use OMC.*
 
 [Get Started](#quick-start) • [Documentation](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Migration Guide](docs/MIGRATION.md)
-
-</div>
 
 ---
 
@@ -40,13 +34,11 @@ autopilot: build a REST API for managing tasks
 
 That's it. Everything else is automatic.
 
-
 <h1 align="center">Your Claude Just Have been Steroided.</h1>
 
 <p align="center">
   <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
 </p>
-
 
 ---
 
@@ -70,17 +62,21 @@ Multiple strategies for different use cases - from fully autonomous builds to to
 | Mode | Speed | Use For |
 |------|-------|---------|
 | **Autopilot** | Fast | Full autonomous workflows |
+| **Ultrawork** | Parallel | Maximum parallelism for any task |
+| **Ralph** | Persistent | Tasks that must complete fully |
 | **Ultrapilot** | 3-5x faster | Multi-component systems |
 | **Ecomode** | Fast + 30-50% cheaper | Budget-conscious projects |
 | **Swarm** | Coordinated | Parallel independent tasks |
 | **Pipeline** | Sequential | Multi-stage processing |
 
 ### Intelligent Orchestration
+
 - **32 specialized agents** for architecture, research, design, testing, data science
 - **Smart model routing** - Haiku for simple tasks, Opus for complex reasoning
 - **Automatic delegation** - Right agent for the job, every time
 
 ### Developer Experience
+
 - **Magic keywords** - `ralph`, `ulw`, `eco`, `plan` for explicit control
 - **HUD statusline** - Real-time orchestration metrics in your status bar
 - **Skill learning** - Extract reusable patterns from your sessions
@@ -101,6 +97,7 @@ Optional shortcuts for power users. Natural language works fine without them.
 | `ulw` | Maximum parallelism | `ulw fix all errors` |
 | `eco` | Token-efficient execution | `eco: migrate database` |
 | `plan` | Planning interview | `plan the API` |
+| `ralplan` | Iterative planning consensus | `ralplan this feature` |
 
 **ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
 
@@ -162,15 +159,16 @@ If Oh-My-ClaudeCode helps your workflow, consider sponsoring:
 
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-❤️-red?style=for-the-badge&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 
-**Why sponsor?**
+### Why sponsor?
+
 - Keep development active
 - Priority support for sponsors
 - Influence roadmap & features
 - Help maintain free & open source
 
-**Other ways to help:**
+### Other ways to help
+
 - ⭐ Star the repo
 - 🐛 Report bugs
 - 💡 Suggest features
 - 📝 Contribute code
-

@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-28 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
 
 # features
 
@@ -127,9 +127,25 @@ const config = getCategoryConfig(category);
 // { tier: 'HIGH', temperature: 0.3, thinking: 'max' }
 ```
 
+### Modification Checklist
+
+#### When Adding a New Feature
+
+1. Create feature directory with `index.ts`, `types.ts`, `constants.ts`
+2. Export from `features/index.ts`
+3. Update `docs/FEATURES.md` with API documentation
+4. Update `docs/AGENTS.md` if architecture changes
+
+#### When Modifying State File Paths
+
+1. Update `state-manager/` for path standardization
+2. Consider migration logic for existing state files
+3. Document new paths in feature's README or AGENTS.md
+
 ### Common Patterns
 
-**Feature module structure:**
+#### Feature Module Structure
+
 ```
 feature-name/
 ├── index.ts     # Main exports

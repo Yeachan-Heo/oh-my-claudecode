@@ -523,6 +523,4 @@ Potential improvements:
 
 ## Related
 
-- [Release Workflow](./RELEASE-WORKFLOW.md)
-- [Version Management](./VERSIONING.md)
 - [CI/CD Pipeline](../.github/workflows/)

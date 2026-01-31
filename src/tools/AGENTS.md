@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-28 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
 
 # tools
 
@@ -126,6 +126,17 @@ The `lsp_diagnostics_directory` tool supports two strategies:
 | `auto` | Default | Varies | Picks best available |
 
 **Recommendation**: Use `strategy: "auto"` (default) - it prefers `tsc` when available.
+
+### Modification Checklist
+
+#### When Adding a New Tool
+
+1. Define tool in appropriate file (`lsp-tools.ts`, `ast-tools.ts`, or new file)
+2. Export from `index.ts` (add to `allCustomTools`)
+3. Update `src/mcp/omc-tools-server.ts` if exposed via MCP
+4. Update `docs/REFERENCE.md` (MCP Tools section)
+5. Update agent tool assignments in `src/agents/definitions.ts` if needed
+6. Update `docs/CLAUDE.md` (Agent Tool Matrix) if assigned to agents
 
 ### Testing Requirements
 
