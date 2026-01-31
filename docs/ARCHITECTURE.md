@@ -62,7 +62,7 @@ Skills: ultrawork + default + git-master
 | MEDIUM | Sonnet | Standard implementations |
 | HIGH | Opus | Complex reasoning, architecture |
 
-See [FEATURES.md](./FEATURES.md) for the complete agent roster.
+See [REFERENCE.md](./REFERENCE.md) for the complete agent roster.
 
 ### Delegation
 
@@ -118,13 +118,16 @@ Legacy locations are auto-migrated on read.
 
 ## Hooks
 
-oh-my-claudecode uses Claude Code's hooks system for lifecycle events:
+oh-my-claudecode includes 31 hooks in `src/hooks/` for lifecycle events:
 
-- **conversationStart**: Initialize OMC, check for active modes
-- **beforeRequest**: Task delegation, skill routing
-- **afterResponse**: State updates, verification checks
+| Event | Purpose |
+|-------|---------|
+| `UserPromptSubmit` | Keyword detection, mode activation |
+| `Stop` | Continuation enforcement, session end |
+| `PreToolUse` | Permission validation |
+| `PostToolUse` | Error recovery, rules injection |
 
-Hooks are defined in `.claude/hooks/` and managed through the plugin system.
+See [REFERENCE.md](./REFERENCE.md) for the complete hooks list.
 
 ## Verification Protocol
 
@@ -143,6 +146,7 @@ Evidence must be fresh (within 5 minutes) and include actual command output.
 
 ## For More Details
 
-- **API Reference**: See [FEATURES.md](./FEATURES.md)
+- **Complete Reference**: See [REFERENCE.md](./REFERENCE.md)
+- **Internal API**: See [FEATURES.md](./FEATURES.md)
 - **User Guide**: See [README.md](../README.md)
 - **Skills Reference**: See CLAUDE.md in your project

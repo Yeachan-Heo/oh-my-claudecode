@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-28 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
 
 # agents
 
@@ -8,8 +8,10 @@
 ## Purpose
 
 This directory defines all agents available in oh-my-claudecode:
+
 - **12 base agents** with default model assignments
-- **20 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
+- **4 specialized agents** (security-reviewer, build-fixer, tdd-guide, code-reviewer)
+- **16 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
 - Prompts loaded dynamically from `/agents/*.md` files
 - Tools assigned based on agent specialization
 
@@ -165,9 +167,38 @@ export const newAgentHigh: AgentConfig = {
 };
 ```
 
+### Modification Checklist
+
+#### When Adding a New Agent
+
+1. Create agent file (`src/agents/new-agent.ts`)
+2. Create prompt template (`agents/new-agent.md`)
+3. Add to `definitions.ts` (import + registry)
+4. Export from `index.ts`
+5. Update `docs/REFERENCE.md` (Agents section, count)
+6. Update `docs/CLAUDE.md` (Agent Selection Guide)
+7. Update root `/AGENTS.md` (Agent Summary if applicable)
+
+#### When Modifying an Agent
+
+1. Update agent file (`src/agents/*.ts`) if changing tools/model
+2. Update prompt template (`agents/*.md`) if changing behavior
+3. Update tiered variants (`-low`, `-medium`, `-high`) if applicable
+4. Update `docs/REFERENCE.md` if changing agent description/capabilities
+5. Update `docs/CLAUDE.md` (Agent Tool Matrix) if changing tool assignments
+
+#### When Removing an Agent
+
+1. Remove agent file from `src/agents/`
+2. Remove prompt template from `agents/`
+3. Remove from `definitions.ts` and `index.ts`
+4. Update agent counts in all documentation
+5. Check for skill/hook references to the removed agent
+
 ### Testing Requirements
 
 Agents are tested via integration tests:
+
 ```bash
 npm test -- --grep "agent"
 ```

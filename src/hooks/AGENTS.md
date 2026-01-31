@@ -1,14 +1,14 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-28 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
 
 # hooks
 
-30+ event-driven hooks that power execution modes and behaviors.
+31 event-driven hooks that power execution modes and behaviors.
 
 ## Purpose
 
 Hooks intercept Claude Code events to enable:
-- **Execution modes**: autopilot, ultrawork, ralph, ultrapilot, swarm, pipeline
+- **Execution modes**: autopilot, ultrawork, ralph, ultrapilot, swarm, pipeline (ecomode via mode-registry)
 - **Validation**: thinking blocks, empty messages, comments
 - **Recovery**: edit errors, session recovery, context window
 - **Enhancement**: rules injection, directory READMEs, notepad
@@ -19,6 +19,7 @@ Hooks intercept Claude Code events to enable:
 | File | Description |
 |------|-------------|
 | `index.ts` | Re-exports all hooks |
+| `bridge.ts` | Shell script entry point - `processHook()` routes events to handlers |
 
 ## Subdirectories
 
@@ -32,7 +33,8 @@ Hooks intercept Claude Code events to enable:
 | `ultrapilot/` | Parallel autopilot with file ownership | "ultrapilot" |
 | `swarm/` | N coordinated agents with task claiming | "swarm N agents" |
 | `ultraqa/` | QA cycling until goal met | test failures |
-| `mode-registry/` | Tracks active execution mode | internal |
+| `mode-registry/` | Tracks active execution mode (incl. ecomode) | internal |
+| `persistent-mode/` | Maintains mode state across sessions | internal |
 
 ### Validation Hooks
 
@@ -41,6 +43,7 @@ Hooks intercept Claude Code events to enable:
 | `thinking-block-validator/` | Validates thinking blocks in responses |
 | `empty-message-sanitizer/` | Handles empty/whitespace messages |
 | `comment-checker/` | Checks code comment quality |
+| `permission-handler/` | Handles permission requests and validation |
 
 ### Recovery Hooks
 
@@ -48,6 +51,7 @@ Hooks intercept Claude Code events to enable:
 |-----------|---------|
 | `recovery/` | Edit error recovery, session recovery |
 | `preemptive-compaction/` | Prevents context overflow |
+| `pre-compact/` | Pre-compaction processing |
 
 ### Enhancement Hooks
 
@@ -67,6 +71,7 @@ Hooks intercept Claude Code events to enable:
 | `think-mode/` | Extended thinking detection |
 | `auto-slash-command/` | Slash command expansion |
 | `non-interactive-env/` | Non-interactive environment detection |
+| `plugin-patterns/` | Plugin pattern detection |
 
 ### Coordination Hooks
 
@@ -74,6 +79,15 @@ Hooks intercept Claude Code events to enable:
 |-----------|---------|
 | `todo-continuation/` | Enforces task completion |
 | `omc-orchestrator/` | Orchestrator behavior |
+| `subagent-tracker/` | Tracks spawned sub-agents |
+| `session-end/` | Session termination handling |
+| `background-notification/` | Background task notifications |
+
+### Setup Hooks
+
+| Directory | Purpose |
+|-----------|---------|
+| `setup/` | Initial setup and configuration |
 
 ## For AI Agents
 
@@ -89,6 +103,14 @@ hook-name/
 ├── constants.ts # Configuration constants
 └── *.ts         # Supporting modules
 ```
+
+#### When Adding a New Hook
+
+1. Create hook directory with `index.ts`, `types.ts`, `constants.ts`
+2. Export from `index.ts` (hook re-exports)
+3. Register handler in `bridge.ts` if needed
+4. Update `docs/REFERENCE.md` (Hooks System section) with new hook entry
+5. If execution mode hook, also create `skills/*/SKILL.md` and `commands/*.md`
 
 #### Hook Implementation
 
@@ -145,7 +167,8 @@ export function createHook(config: HookConfig) {
 
 ### Common Patterns
 
-**State management:**
+#### State Management
+
 ```typescript
 import { readState, writeState } from '../features/state-manager';
 
@@ -154,7 +177,8 @@ state.phase = 'executing';
 writeState('autopilot-state', state);
 ```
 
-**Event handling:**
+#### Event Handling
+
 ```typescript
 // UserPromptSubmit - Before prompt is sent
 // Stop - Before session ends
@@ -164,13 +188,10 @@ writeState('autopilot-state', state);
 
 ### Testing Requirements
 
-```bash
-# Test specific hook
-npm test -- --grep "autopilot"
-
-# Test all hooks
-npm test -- --grep "hooks"
-```
+- Test specific hooks with `npm test -- --grep "hook-name"`
+- Test execution modes end-to-end with skill invocation
+- Verify state persistence in `.omc/state/`
+- For security hooks, follow `templates/rules/security.md` checklist
 
 ## Dependencies
 

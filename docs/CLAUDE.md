@@ -366,8 +366,6 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ### MCP Tools & Agent Capabilities
 
-*Source of truth: `src/agents/definitions.ts`*
-
 #### Tool Inventory
 
 | Tool | Category | Purpose | Assigned to Agents? |
@@ -717,4 +715,4 @@ Say "setup omc" or run `/oh-my-claudecode:omc-setup` to configure. After that, e
 
 ## Migration
 
-For migration guides from earlier versions, see [MIGRATION.md](./MIGRATION.md).
+For migration guides from earlier versions, see the [Migration Guide](https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/MIGRATION.md).
