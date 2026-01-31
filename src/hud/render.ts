@@ -38,11 +38,12 @@ import type { SessionHealth, HudElementConfig } from './types.js';
  * @returns Trimmed array of lines
  */
 export function limitOutputLines(lines: string[], maxLines?: number): string[] {
-  const limit = maxLines ?? DEFAULT_HUD_CONFIG.maxOutputLines;
+  const limit = Math.max(1, maxLines ?? DEFAULT_HUD_CONFIG.maxOutputLines);
   if (lines.length <= limit) {
     return lines;
   }
-  return lines.slice(0, limit);
+  const truncatedCount = lines.length - limit + 1;
+  return [...lines.slice(0, limit - 1), `... (+${truncatedCount} lines)`];
 }
 
 /**

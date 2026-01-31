@@ -302,6 +302,15 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
   maxOutputLines: 4,
 };
 
+export const PRESET_MAX_OUTPUT_LINES: Record<HudPreset, number> = {
+  minimal: 2,
+  analytics: 4,
+  focused: 4,
+  full: 8,
+  opencode: 4,
+  dense: 6,
+};
+
 export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   minimal: {
     omcLabel: true,

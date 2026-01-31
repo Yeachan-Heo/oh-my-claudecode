@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { limitOutputLines } from '../../hud/render.js';
-import { DEFAULT_HUD_CONFIG } from '../../hud/types.js';
+import { DEFAULT_HUD_CONFIG, PRESET_MAX_OUTPUT_LINES } from '../../hud/types.js';
 
 describe('limitOutputLines', () => {
   describe('basic functionality', () => {
@@ -18,10 +18,10 @@ describe('limitOutputLines', () => {
       expect(result).toHaveLength(4);
     });
 
-    it('truncates lines when count exceeds limit', () => {
+    it('truncates lines with indicator when count exceeds limit', () => {
       const lines = ['header', 'detail1', 'detail2', 'detail3', 'detail4', 'detail5'];
       const result = limitOutputLines(lines, 4);
-      expect(result).toEqual(['header', 'detail1', 'detail2', 'detail3']);
+      expect(result).toEqual(['header', 'detail1', 'detail2', '... (+3 lines)']);
       expect(result).toHaveLength(4);
     });
 
@@ -30,6 +30,7 @@ describe('limitOutputLines', () => {
       const result = limitOutputLines(lines, 3);
       expect(result[0]).toBe('[OMC] Header Line');
       expect(result).toHaveLength(3);
+      expect(result[2]).toBe('... (+3 lines)');
     });
 
     it('handles empty array', () => {
@@ -42,6 +43,20 @@ describe('limitOutputLines', () => {
       const result = limitOutputLines(['only line'], 4);
       expect(result).toEqual(['only line']);
       expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('truncation indicator', () => {
+    it('shows correct count of truncated lines', () => {
+      const lines = ['line1', 'line2', 'line3', 'line4', 'line5', 'line6'];
+      const result = limitOutputLines(lines, 3);
+      expect(result).toEqual(['line1', 'line2', '... (+4 lines)']);
+    });
+
+    it('shows +2 lines when truncating 5 lines to 4', () => {
+      const lines = ['a', 'b', 'c', 'd', 'e'];
+      const result = limitOutputLines(lines, 4);
+      expect(result[3]).toBe('... (+2 lines)');
     });
   });
 
@@ -64,7 +79,7 @@ describe('limitOutputLines', () => {
       const lines = Array.from({ length: 10 }, (_, i) => `line${i + 1}`);
       const result = limitOutputLines(lines, 2);
       expect(result).toHaveLength(2);
-      expect(result).toEqual(['line1', 'line2']);
+      expect(result).toEqual(['line1', '... (+9 lines)']);
     });
   });
 
@@ -72,15 +87,21 @@ describe('limitOutputLines', () => {
     it('handles maxLines of 1', () => {
       const lines = ['header', 'detail1', 'detail2'];
       const result = limitOutputLines(lines, 1);
-      expect(result).toEqual(['header']);
+      expect(result).toEqual(['... (+3 lines)']);
       expect(result).toHaveLength(1);
     });
 
-    it('handles maxLines of 0', () => {
+    it('clamps maxLines of 0 to 1', () => {
       const lines = ['header', 'detail1'];
       const result = limitOutputLines(lines, 0);
-      expect(result).toEqual([]);
-      expect(result).toHaveLength(0);
+      expect(result).toEqual(['... (+2 lines)']);
+      expect(result).toHaveLength(1);
+    });
+
+    it('clamps negative maxLines to 1', () => {
+      const lines = ['header', 'detail1', 'detail2'];
+      const result = limitOutputLines(lines, -5);
+      expect(result).toHaveLength(1);
     });
 
     it('does not mutate the original array', () => {
@@ -93,13 +114,24 @@ describe('limitOutputLines', () => {
     it('handles lines with multiline content (newlines within strings)', () => {
       const lines = ['header\nwith newline', 'detail1', 'detail2'];
       const result = limitOutputLines(lines, 2);
-      expect(result).toEqual(['header\nwith newline', 'detail1']);
+      expect(result).toEqual(['header\nwith newline', '... (+2 lines)']);
     });
 
     it('handles lines with empty strings', () => {
       const lines = ['header', '', 'detail', ''];
       const result = limitOutputLines(lines, 3);
-      expect(result).toEqual(['header', '', 'detail']);
+      expect(result).toEqual(['header', '', '... (+2 lines)']);
+    });
+  });
+
+  describe('preset-specific defaults', () => {
+    it('has correct maxOutputLines for each preset', () => {
+      expect(PRESET_MAX_OUTPUT_LINES.minimal).toBe(2);
+      expect(PRESET_MAX_OUTPUT_LINES.focused).toBe(4);
+      expect(PRESET_MAX_OUTPUT_LINES.full).toBe(8);
+      expect(PRESET_MAX_OUTPUT_LINES.dense).toBe(6);
+      expect(PRESET_MAX_OUTPUT_LINES.opencode).toBe(4);
+      expect(PRESET_MAX_OUTPUT_LINES.analytics).toBe(4);
     });
   });
 
@@ -120,6 +152,7 @@ describe('limitOutputLines', () => {
 
       expect(result).toHaveLength(4);
       expect(result[0]).toContain('[OMC]');
+      expect(result[3]).toBe('... (+5 lines)');
     });
 
     it('works with DEFAULT_HUD_CONFIG maxOutputLines value of 4', () => {
