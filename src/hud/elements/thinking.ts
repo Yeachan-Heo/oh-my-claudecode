@@ -1,21 +1,37 @@
 /**
  * OMC HUD - Thinking Indicator Element
  *
- * Renders extended thinking mode indicator.
+ * Renders extended thinking mode indicator with configurable format.
  */
 
-import type { ThinkingState } from '../types.js';
+import type { ThinkingState, ThinkingFormat } from '../types.js';
 import { RESET } from '../colors.js';
 
-// Local color constants (following context.ts pattern)
 const CYAN = '\x1b[36m';
 
 /**
- * Render thinking indicator.
+ * Render thinking indicator based on format.
  *
- * Format: 💭 (thought bubble emoji)
+ * @param state - Thinking state from transcript
+ * @param format - Display format (bubble, brain, face, text)
+ * @returns Formatted thinking indicator or null if not active
  */
-export function renderThinking(state: ThinkingState | null): string | null {
+export function renderThinking(
+  state: ThinkingState | null,
+  format: ThinkingFormat = 'bubble'
+): string | null {
   if (!state?.active) return null;
-  return '💭';
+
+  switch (format) {
+    case 'bubble':
+      return '💭';
+    case 'brain':
+      return '🧠';
+    case 'face':
+      return '🤔';
+    case 'text':
+      return `${CYAN}thinking${RESET}`;
+    default:
+      return '💭';
+  }
 }

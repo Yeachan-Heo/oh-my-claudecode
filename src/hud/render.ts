@@ -112,7 +112,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Working directory (first element)
   if (enabledElements.cwd) {
-    const cwdElement = renderCwd(context.cwd);
+    const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || 'relative');
     if (cwdElement) elements.push(cwdElement);
   }
 
@@ -137,7 +137,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Extended thinking indicator
   if (enabledElements.thinking && context.thinkingState) {
-    const thinking = renderThinking(context.thinkingState);
+    const thinking = renderThinking(context.thinkingState, enabledElements.thinkingFormat || 'bubble');
     if (thinking) elements.push(thinking);
   }
 
