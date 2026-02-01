@@ -388,6 +388,8 @@ export function getHookScripts(): Record<string, string> {
     'persistent-mode.mjs': loadTemplate('persistent-mode.mjs'),
     'session-start.mjs': loadTemplate('session-start.mjs'),
     'pre-tool-use.mjs': loadTemplate('pre-tool-use.mjs'),
-    'post-tool-use.mjs': loadTemplate('post-tool-use.mjs')
+    'post-tool-use.mjs': loadTemplate('post-tool-use.mjs'),
+    // Shared library modules (in lib/ subdirectory)
+    'lib/stdin.mjs': loadTemplate('lib/stdin.mjs')
   };
 }

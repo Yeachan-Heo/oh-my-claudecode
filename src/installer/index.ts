@@ -323,6 +323,11 @@ export function install(options: InstallOptions = {}): InstallResult {
 
       for (const [filename, content] of Object.entries(hookScripts)) {
         const filepath = join(HOOKS_DIR, filename);
+        // Create subdirectory if needed (e.g., lib/)
+        const dir = dirname(filepath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
         if (existsSync(filepath) && !options.force) {
           log(`  Skipping ${filename} (already exists)`);
         } else {
