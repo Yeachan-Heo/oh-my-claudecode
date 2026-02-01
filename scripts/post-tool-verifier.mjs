@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -85,6 +85,38 @@ function updateStats(toolName, sessionId) {
 
   saveStats(stats);
   return session.tool_counts[toolName];
+}
+
+// Read bash history config (default: enabled)
+function getBashHistoryConfig() {
+  try {
+    const configPath = join(homedir(), '.claude', '.omc-config.json');
+    if (existsSync(configPath)) {
+      const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+      if (config.bashHistory === false) return false;
+      if (typeof config.bashHistory === 'object' && config.bashHistory.enabled === false) return false;
+    }
+  } catch {}
+  return true; // Default: enabled
+}
+
+// Append command to ~/.bash_history
+function appendToBashHistory(command) {
+  if (!command || typeof command !== 'string') return;
+
+  // Clean command: trim, skip empty, skip if it's just whitespace
+  const cleaned = command.trim();
+  if (!cleaned) return;
+
+  // Skip internal/meta commands that aren't useful in history
+  if (cleaned.startsWith('#')) return;
+
+  try {
+    const historyPath = join(homedir(), '.bash_history');
+    appendFileSync(historyPath, cleaned + '\n');
+  } catch {
+    // Silently fail - history is best-effort
+  }
 }
 
 // Detect failures in Bash output
@@ -284,6 +316,13 @@ async function main() {
 
     // Update session statistics
     const toolCount = updateStats(toolName, sessionId);
+
+    // Append Bash commands to ~/.bash_history for terminal recall
+    if ((toolName === 'Bash' || toolName === 'bash') && getBashHistoryConfig()) {
+      const toolInput = data.toolInput || data.tool_input || {};
+      const command = typeof toolInput === 'string' ? toolInput : (toolInput.command || '');
+      appendToBashHistory(command);
+    }
 
     // Process <remember> tags from Task agent output
     if (toolName === 'Task' || toolName === 'task') {

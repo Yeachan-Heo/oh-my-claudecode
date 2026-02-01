@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.2] - 2026-02-01
+
+### Added
+
+- **Bash History Integration** (Issue #290) - Claude Code bash commands are now automatically appended to `~/.bash_history`, allowing users to recall them with arrow keys or Ctrl+R in their terminal. Enabled by default; disable with `"bashHistory": false` in `~/.claude/.omc-config.json`.
+
+---
+
 ## [3.9.1] - 2026-02-01
 
 ### Changed

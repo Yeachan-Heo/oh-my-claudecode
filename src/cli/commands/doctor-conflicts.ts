@@ -150,6 +150,7 @@ export function checkConfigIssues(): ConflictReport['configIssues'] {
       'taskTool',
       'taskToolConfig',
       'defaultExecutionMode',
+      'bashHistory',
     ]);
 
     for (const field of Object.keys(config)) {
