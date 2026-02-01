@@ -13,6 +13,11 @@ source "$SCRIPT_DIR/lib/worktree.sh"
 source "$SCRIPT_DIR/lib/tmux.sh"
 source "$SCRIPT_DIR/lib/session.sh"
 
+# Source provider files
+source "$SCRIPT_DIR/lib/providers/interface.sh"
+source "$SCRIPT_DIR/lib/providers/github.sh"
+source "$SCRIPT_DIR/lib/providers/jira.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,15 +43,14 @@ check_dependencies() {
         missing+=("jq")
     fi
 
-    if ! command -v gh &> /dev/null; then
-        missing+=("gh (GitHub CLI)")
-    fi
+    # Note: gh and jira are checked per-operation, not globally
+    # This allows users without gh to still use Jira, and vice versa
 
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing required dependencies: ${missing[*]}"
         log_info "Install with:"
-        log_info "  Ubuntu/Debian: sudo apt install git jq gh"
-        log_info "  macOS: brew install git jq gh"
+        log_info "  Ubuntu/Debian: sudo apt install git jq"
+        log_info "  macOS: brew install git jq"
         exit 1
     fi
 
@@ -106,7 +110,21 @@ cmd_review() {
         return 1
     fi
 
-    IFS='|' read -r type alias repo pr_number local_path base <<< "$parsed"
+    IFS='|' read -r type alias repo pr_number local_path base provider provider_ref <<< "$parsed"
+
+    # Provider guard: Jira doesn't have PRs
+    if [[ "$provider" == "jira" ]]; then
+        log_error "Jira issues cannot be 'reviewed' - Jira has no PR concept."
+        log_info "Use 'psm fix $ref' to work on a Jira issue instead."
+        log_info "Jira integration supports: fix, feature"
+        return 1
+    fi
+
+    # Check GitHub CLI availability
+    if ! provider_github_available; then
+        log_error "GitHub CLI (gh) not found. Install: brew install gh"
+        return 1
+    fi
 
     if [[ -z "$repo" ]]; then
         log_error "Could not determine repository"
@@ -117,7 +135,7 @@ cmd_review() {
 
     # Fetch PR info
     local pr_info
-    pr_info=$(gh pr view "$pr_number" --repo "$repo" --json number,title,author,headRefName,baseRefName,body,url 2>/dev/null) || {
+    pr_info=$(provider_call "github" fetch_pr "$pr_number" "$repo") || {
         log_error "Failed to fetch PR #${pr_number}. Check if the PR exists and you have access."
         return 1
     }
@@ -143,7 +161,9 @@ cmd_review() {
         local_path="${HOME}/Workspace/$(basename "$repo")"
         if [[ ! -d "$local_path" ]]; then
             log_info "Cloning repository to $local_path..."
-            git clone "https://github.com/${repo}.git" "$local_path" || {
+            local clone_url
+            clone_url=$(provider_call "github" clone_url "$repo")
+            git clone "$clone_url" "$local_path" || {
                 log_error "Failed to clone repository"
                 return 1
             }
@@ -209,7 +229,7 @@ EOF
 )
 
     # Add to registry
-    psm_add_session "$session_id" "review" "$alias" "pr-${pr_number}" "$head_branch" "$base_branch" "$session_name" "$worktree_path" "$local_path" "$metadata"
+    psm_add_session "$session_id" "review" "$alias" "pr-${pr_number}" "$head_branch" "$base_branch" "$session_name" "$worktree_path" "$local_path" "$metadata" "github" "${repo}#${pr_number}"
 
     # Output summary
     echo ""
@@ -242,24 +262,45 @@ cmd_fix() {
         return 1
     fi
 
-    IFS='|' read -r type alias repo issue_number local_path base <<< "$parsed"
+    IFS='|' read -r type alias repo issue_number local_path base provider provider_ref <<< "$parsed"
 
-    if [[ -z "$repo" ]]; then
+    # Check provider CLI availability
+    if [[ "$provider" == "jira" ]]; then
+        if ! provider_jira_available; then
+            log_error "Jira CLI not found. Install: brew install ankitpokhrel/jira-cli/jira-cli"
+            return 1
+        fi
+    else
+        if ! provider_github_available; then
+            log_error "GitHub CLI (gh) not found. Install: brew install gh"
+            return 1
+        fi
+    fi
+
+    if [[ -z "$repo" && "$provider" != "jira" ]]; then
         log_error "Could not determine repository"
         return 1
     fi
 
-    log_info "Fetching issue #${issue_number} from ${repo}..."
+    log_info "Fetching issue #${issue_number}..."
 
     # Fetch issue info
     local issue_info
-    issue_info=$(gh issue view "$issue_number" --repo "$repo" --json number,title,body,labels,url 2>/dev/null) || {
-        log_error "Failed to fetch issue #${issue_number}"
-        return 1
-    }
-
-    local issue_title=$(echo "$issue_info" | jq -r '.title')
-    local issue_url=$(echo "$issue_info" | jq -r '.url')
+    if [[ "$provider" == "jira" ]]; then
+        issue_info=$(provider_call "jira" fetch_issue "$provider_ref") || {
+            log_error "Failed to fetch Jira issue ${provider_ref}"
+            return 1
+        }
+        local issue_title=$(echo "$issue_info" | jq -r '.fields.summary')
+        local issue_url=$(echo "$issue_info" | jq -r '.self // empty')
+    else
+        issue_info=$(provider_call "github" fetch_issue "$issue_number" "$repo") || {
+            log_error "Failed to fetch issue #${issue_number}"
+            return 1
+        }
+        local issue_title=$(echo "$issue_info" | jq -r '.title')
+        local issue_url=$(echo "$issue_info" | jq -r '.url')
+    fi
     local slug=$(psm_slugify "$issue_title" 20)
 
     log_info "Issue: #${issue_number} - ${issue_title}"
@@ -271,10 +312,19 @@ cmd_fix() {
 
     # Determine local path
     if [[ -z "$local_path" || ! -d "$local_path" ]]; then
-        local_path="${HOME}/Workspace/$(basename "$repo")"
+        local_path="${HOME}/Workspace/$(basename "${repo:-$alias}")"
         if [[ ! -d "$local_path" ]]; then
             log_info "Cloning repository..."
-            git clone "https://github.com/${repo}.git" "$local_path" || return 1
+            local clone_url
+            if [[ "$provider" == "jira" ]]; then
+                clone_url=$(provider_call "jira" clone_url "$alias") || {
+                    log_error "Failed to get clone URL for '$alias'. Configure 'repo' or 'clone_url' in projects.json"
+                    return 1
+                }
+            else
+                clone_url=$(provider_call "github" clone_url "$repo")
+            fi
+            git clone "$clone_url" "$local_path" || return 1
         fi
     fi
 
@@ -318,7 +368,7 @@ cmd_fix() {
 EOF
 )
 
-    psm_add_session "$session_id" "fix" "$alias" "issue-${issue_number}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "$metadata"
+    psm_add_session "$session_id" "fix" "$alias" "issue-${issue_number}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "$metadata" "$provider" "$provider_ref"
 
     echo ""
     log_success "Session ready!"
@@ -473,15 +523,20 @@ cmd_cleanup() {
 
     local cleaned=0
 
-    # Check PR sessions (use process substitution to avoid subshell)
+    # Check PR sessions (GitHub only)
     while IFS='|' read -r id pr_number project; do
         if [[ -z "$id" ]]; then continue; fi
+
+        local session_json=$(psm_get_session "$id")
+        local provider=$(echo "$session_json" | jq -r '.provider // "github"')
+
+        # Only GitHub has PRs
+        if [[ "$provider" != "github" ]]; then continue; fi
 
         local repo=$(psm_get_project "$project" | cut -d'|' -f1)
 
         if [[ -n "$repo" && -n "$pr_number" ]]; then
-            local pr_state=$(gh pr view "$pr_number" --repo "$repo" --json merged 2>/dev/null | jq -r '.merged')
-            if [[ "$pr_state" == "true" ]]; then
+            if provider_github_available && provider_call "github" pr_merged "$pr_number" "$repo"; then
                 log_info "PR #${pr_number} is merged - cleaning up $id"
                 cmd_kill "$id"
                 ((cleaned++))
@@ -489,18 +544,32 @@ cmd_cleanup() {
         fi
     done < <(psm_get_review_sessions)
 
-    # Check issue sessions (use process substitution to avoid subshell)
+    # Check issue sessions (GitHub and Jira)
     while IFS='|' read -r id issue_number project; do
         if [[ -z "$id" ]]; then continue; fi
 
-        local repo=$(psm_get_project "$project" | cut -d'|' -f1)
+        local session_json=$(psm_get_session "$id")
+        local provider=$(echo "$session_json" | jq -r '.provider // "github"')
+        local provider_ref=$(echo "$session_json" | jq -r '.provider_ref // empty')
 
-        if [[ -n "$repo" && -n "$issue_number" ]]; then
-            local issue_state=$(gh issue view "$issue_number" --repo "$repo" --json closed 2>/dev/null | jq -r '.closed')
-            if [[ "$issue_state" == "true" ]]; then
-                log_info "Issue #${issue_number} is closed - cleaning up $id"
-                cmd_kill "$id"
-                ((cleaned++))
+        if [[ "$provider" == "jira" ]]; then
+            # Jira cleanup
+            if provider_jira_available && [[ -n "$provider_ref" ]]; then
+                if provider_call "jira" issue_closed "$provider_ref"; then
+                    log_info "Jira issue ${provider_ref} is done - cleaning up $id"
+                    cmd_kill "$id"
+                    ((cleaned++))
+                fi
+            fi
+        else
+            # GitHub cleanup
+            local repo=$(psm_get_project "$project" | cut -d'|' -f1)
+            if provider_github_available && [[ -n "$repo" && -n "$issue_number" ]]; then
+                if provider_call "github" issue_closed "$issue_number" "$repo"; then
+                    log_info "Issue #${issue_number} is closed - cleaning up $id"
+                    cmd_kill "$id"
+                    ((cleaned++))
+                fi
             fi
         fi
     done < <(psm_get_fix_sessions)

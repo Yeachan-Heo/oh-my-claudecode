@@ -2,7 +2,7 @@
 # PSM Session Registry Management
 
 # Add session to registry
-# Usage: psm_add_session <id> <type> <project> <ref> <branch> <base> <tmux> <worktree> <source_repo> <metadata_json>
+# Usage: psm_add_session <id> <type> <project> <ref> <branch> <base> <tmux> <worktree> <source_repo> <metadata_json> [provider] [provider_ref]
 psm_add_session() {
     local id="$1"
     local type="$2"
@@ -14,6 +14,8 @@ psm_add_session() {
     local worktree="$8"
     local source_repo="$9"
     local metadata="${10:-{}}"
+    local provider="${11:-github}"
+    local provider_ref="${12:-}"
 
     local now=$(date -Iseconds)
 
@@ -28,6 +30,8 @@ psm_add_session() {
        --arg worktree "$worktree" \
        --arg source "$source_repo" \
        --arg now "$now" \
+       --arg provider "$provider" \
+       --arg provider_ref "$provider_ref" \
        --argjson meta "$metadata" \
        '.sessions[$id] = {
           "id": $id,
@@ -42,6 +46,8 @@ psm_add_session() {
           "created_at": $now,
           "last_accessed": $now,
           "state": "active",
+          "provider": $provider,
+          "provider_ref": $provider_ref,
           "metadata": $meta
         } | .stats.total_created += 1' \
        "$PSM_SESSIONS" > "$tmp" && mv "$tmp" "$PSM_SESSIONS"
@@ -51,7 +57,7 @@ psm_add_session() {
 # Usage: psm_get_session <id>
 psm_get_session() {
     local id="$1"
-    jq -r ".sessions[\"$id\"] // empty" "$PSM_SESSIONS"
+    jq -r --arg i "$id" '.sessions[$i] // empty' "$PSM_SESSIONS"
 }
 
 # Update session state
@@ -86,7 +92,7 @@ psm_list_sessions() {
     local project="$1"
 
     if [[ -n "$project" ]]; then
-        jq -r ".sessions | to_entries[] | select(.value.project == \"$project\") | .value | \"\(.id)|\(.type)|\(.state)|\(.worktree)\"" "$PSM_SESSIONS"
+        jq -r --arg p "$project" '.sessions | to_entries[] | select(.value.project == $p) | .value | "\(.id)|\(.type)|\(.state)|\(.worktree)"' "$PSM_SESSIONS"
     else
         jq -r '.sessions | to_entries[] | .value | "\(.id)|\(.type)|\(.state)|\(.worktree)"' "$PSM_SESSIONS"
     fi
@@ -95,7 +101,7 @@ psm_list_sessions() {
 # Get sessions by state
 psm_get_sessions_by_state() {
     local state="$1"
-    jq -r ".sessions | to_entries[] | select(.value.state == \"$state\") | .value.id" "$PSM_SESSIONS"
+    jq -r --arg s "$state" '.sessions | to_entries[] | select(.value.state == $s) | .value.id' "$PSM_SESSIONS"
 }
 
 # Get session count
