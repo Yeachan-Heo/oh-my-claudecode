@@ -475,6 +475,99 @@ If yes, invoke the mcp-setup skill:
 
 If no, skip to next step.
 
+## Step 5.5: Configure ClawdCoder (Optional)
+
+ClawdCoder is a Discord/Telegram bot for managing multiple Claude Code sessions remotely via tmux.
+
+Use the AskUserQuestion tool:
+
+**Question:** "Would you like to configure ClawdCoder for remote Claude Code session management via Discord/Telegram?"
+
+**Options:**
+1. **Yes, configure now** - Set up Discord/Telegram tokens and session defaults
+2. **No, skip** - Can configure later with `/oh-my-claudecode:clawdcoder`
+
+### If user chooses "Yes, configure now":
+
+**Question 1:** "Which platforms do you want to use with ClawdCoder?"
+
+**Options:**
+1. **Discord only**
+2. **Telegram only**
+3. **Both Discord and Telegram**
+
+Based on platform choice, instruct user to set environment variables:
+
+For Discord:
+```bash
+export CLAWDCODER_DISCORD_TOKEN="your-discord-bot-token"
+```
+
+For Telegram:
+```bash
+export CLAWDCODER_TELEGRAM_TOKEN="your-telegram-bot-token"
+```
+
+**Question 2:** "What should be the default project directory for new sessions?" (Accept free text, default: home directory)
+
+**Question 3:** "Maximum concurrent sessions?"
+
+**Options:**
+1. **5 (default)**
+2. **10**
+3. **Custom** (accept number input)
+
+Then write config to `~/.claude/.omc-config.json`:
+
+```bash
+CONFIG_FILE="$HOME/.claude/.omc-config.json"
+mkdir -p "$(dirname "$CONFIG_FILE")"
+
+# Read existing or create empty
+EXISTING=$(cat "$CONFIG_FILE" 2>/dev/null || echo '{}')
+
+# Merge clawdcoder config (tokens stored as env var references, not plaintext)
+# Replace DISCORD_ENABLED, TELEGRAM_ENABLED, USER_PROJECT_DIR, MAX_SESSIONS with actual values
+echo "$EXISTING" | jq '. + {
+  clawdcoder: {
+    discord: { enabled: DISCORD_ENABLED, tokenEnv: "CLAWDCODER_DISCORD_TOKEN" },
+    telegram: { enabled: TELEGRAM_ENABLED, tokenEnv: "CLAWDCODER_TELEGRAM_TOKEN" },
+    defaultProjectDir: "USER_PROJECT_DIR",
+    maxSessions: MAX_SESSIONS,
+    autoCleanupHours: 24
+  }
+}' > "$CONFIG_FILE"
+
+echo "ClawdCoder configuration saved!"
+echo "Next steps:"
+echo "  1. Set your bot token(s) as environment variables"
+echo "  2. Start the bot: omc clawdcoder start"
+```
+
+Save progress: Update `.omc/state/setup-state.json` with `lastCompletedStep: 5.5`:
+
+```bash
+# Save progress - Step 5.5 complete (ClawdCoder config)
+mkdir -p .omc/state
+CONFIG_TYPE=$(cat ".omc/state/setup-state.json" 2>/dev/null | jq -r '.configType // "unknown"')
+cat > ".omc/state/setup-state.json" << EOF
+{
+  "lastCompletedStep": 5.5,
+  "timestamp": "$(date -Iseconds)",
+  "configType": "$CONFIG_TYPE"
+}
+EOF
+```
+
+### If user chooses "No, skip":
+
+```
+Skipping ClawdCoder configuration.
+You can configure it later with: /oh-my-claudecode:clawdcoder
+```
+
+Proceed to Step 6.
+
 ## Step 6: Detect Upgrade from 2.x
 
 Check if user has existing configuration:

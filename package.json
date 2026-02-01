@@ -33,8 +33,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs",
+    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-clawdcoder.mjs",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
+    "build:clawdcoder": "node scripts/build-clawdcoder.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "vitest",
@@ -59,7 +60,10 @@
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
+    "discord.js": "^14.25.1",
+    "grammy": "^1.39.3",
     "jsonc-parser": "^3.3.1",
+    "pino": "^9.14.0",
     "safe-regex": "^2.1.1",
     "vscode-languageserver-protocol": "^3.17.5",
     "zod": "^3.23.8"
@@ -67,6 +71,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.19.7",
+    "@types/pino": "^7.0.4",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
     "@vitest/ui": "^4.0.17",

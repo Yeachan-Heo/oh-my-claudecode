@@ -37,7 +37,7 @@ export const executorAgent: AgentConfig = {
   name: 'executor',
   description: 'Focused task executor. Execute tasks directly. NEVER delegate or spawn other agents. Same discipline as Sisyphus, no delegation.',
   prompt: loadAgentPrompt('executor'),
-  tools: ['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'lsp_diagnostics', 'lsp_diagnostics_directory'],
+  tools: ['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'clawdcoder_session_create', 'clawdcoder_session_list', 'clawdcoder_session_send', 'clawdcoder_session_output', 'clawdcoder_session_kill', 'clawdcoder_status'],
   model: 'sonnet',
   defaultModel: 'sonnet',
   metadata: SISYPHUS_JUNIOR_PROMPT_METADATA

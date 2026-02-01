@@ -53,6 +53,7 @@ import {
   waitDaemonCommand,
   waitDetectCommand
 } from './commands/wait.js';
+import { clawdcoderCommand } from './commands/clawdcoder.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -843,6 +844,16 @@ waitCmd
       lines: parseInt(options.lines),
     });
   });
+
+/**
+ * ClawdCoder command - Discord/Telegram bot for Claude Code sessions
+ */
+const ccCmd = program
+  .command('clawdcoder')
+  .alias('cc')
+  .description('Manage ClawdCoder bot (Discord/Telegram session manager)');
+
+clawdcoderCommand(ccCmd);
 
 /**
  * Postinstall command - Silent install for npm postinstall hook
