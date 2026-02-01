@@ -73,42 +73,6 @@ function checkHudInstallation() {
   return { installed: true };
 }
 
-// Check if ClawdCoder is configured but not running
-function checkClawdCoder() {
-  const configPath = join(homedir(), '.claude', '.omc-config.json');
-
-  // Fast path: no config file = no ClawdCoder = bail immediately
-  if (!existsSync(configPath)) return null;
-
-  try {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-
-    // Fast path: no clawdcoder section = not configured
-    if (!config.clawdcoder) return null;
-
-    // Check if at least one platform is enabled
-    const discordEnabled = config.clawdcoder.discord?.enabled;
-    const telegramEnabled = config.clawdcoder.telegram?.enabled;
-    if (!discordEnabled && !telegramEnabled) return null;
-
-    // Check if bot is running (PID file check)
-    const pidPath = join(homedir(), '.omc', 'state', 'clawdcoder.pid');
-    if (!existsSync(pidPath)) {
-      return 'ClawdCoder is configured but not running. Start with: omc clawdcoder start';
-    }
-
-    // Check if PID is stale
-    try {
-      const pid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
-      process.kill(pid, 0); // Check if alive
-      return null; // Running fine
-    } catch {
-      return 'ClawdCoder is configured but not running (stale PID). Start with: omc clawdcoder start';
-    }
-  } catch {
-    return null; // Config parse error = bail silently
-  }
-}
 
 // Main
 async function main() {
@@ -205,14 +169,6 @@ ${cleanContent}
       } catch (err) {
         // Silently ignore notepad read errors
       }
-    }
-
-    // Check ClawdCoder status
-    const clawdcoderHint = checkClawdCoder();
-    if (clawdcoderHint) {
-      messages.push(`<system-reminder>
-[ClawdCoder] ${clawdcoderHint}
-</system-reminder>`);
     }
 
     if (messages.length > 0) {

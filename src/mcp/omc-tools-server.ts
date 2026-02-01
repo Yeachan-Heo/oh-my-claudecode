@@ -10,7 +10,6 @@ import { lspTools } from "../tools/lsp-tools.js";
 import { astTools } from "../tools/ast-tools.js";
 import { pythonReplTool } from "../tools/python-repl/index.js";
 import { skillsTools } from "../tools/skills-tools.js";
-import { clawdcoderTools } from "../tools/clawdcoder-tools.js";
 
 // Type for our tool definitions
 interface ToolDef {
@@ -25,8 +24,7 @@ const allTools: ToolDef[] = [
   ...(lspTools as unknown as ToolDef[]),
   ...(astTools as unknown as ToolDef[]),
   pythonReplTool as unknown as ToolDef,
-  ...(skillsTools as unknown as ToolDef[]),
-  ...(clawdcoderTools as unknown as ToolDef[])
+  ...(skillsTools as unknown as ToolDef[])
 ];
 
 // Convert to SDK tool format
@@ -64,16 +62,14 @@ export function getOmcToolNames(options?: {
   includeAst?: boolean;
   includePython?: boolean;
   includeSkills?: boolean;
-  includeClawdcoder?: boolean;
 }): string[] {
-  const { includeLsp = true, includeAst = true, includePython = true, includeSkills = true, includeClawdcoder = true } = options || {};
+  const { includeLsp = true, includeAst = true, includePython = true, includeSkills = true } = options || {};
 
   return omcToolNames.filter(name => {
     if (!includeLsp && name.includes('lsp_')) return false;
     if (!includeAst && name.includes('ast_')) return false;
     if (!includePython && name.includes('python_repl')) return false;
     if (!includeSkills && (name.includes('load_omc_skills') || name.includes('list_omc_skills'))) return false;
-    if (!includeClawdcoder && name.includes('clawdcoder_')) return false;
     return true;
   });
 }

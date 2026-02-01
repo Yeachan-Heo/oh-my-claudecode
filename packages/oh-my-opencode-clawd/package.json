@@ -1,0 +1,32 @@
+{
+  "name": "oh-my-opencode-clawd",
+  "version": "0.1.0",
+  "description": "Telegram bot for remote Claude Code sessions - MCP server",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "oh-my-opencode-clawd": "dist/index.js",
+    "clawd": "bin/clawd.js"
+  },
+  "files": ["dist", "bin"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3",
+    "better-sqlite3": "^12.6.2",
+    "grammy": "^1.39.3",
+    "pino": "^9.14.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.7",
+    "esbuild": "^0.27.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": { "node": ">=20.0.0" },
+  "keywords": ["claude", "telegram", "mcp", "claude-code", "remote"],
+  "license": "MIT"
+}

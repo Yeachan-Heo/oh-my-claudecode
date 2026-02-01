@@ -83,7 +83,7 @@ export const executorHighAgent: AgentConfig = {
   name: 'executor-high',
   description: 'Complex task executor for multi-file changes (Opus). Use for tasks requiring deep reasoning.',
   prompt: loadAgentPrompt('executor-high'),
-  tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace', 'clawdcoder_session_create', 'clawdcoder_session_list', 'clawdcoder_session_send', 'clawdcoder_session_output', 'clawdcoder_session_kill', 'clawdcoder_status'],
+  tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace'],
   model: 'opus',
   defaultModel: 'opus'
 };
@@ -95,7 +95,7 @@ export const executorLowAgent: AgentConfig = {
   name: 'executor-low',
   description: 'Simple single-file task executor (Haiku). Use for trivial tasks.',
   prompt: loadAgentPrompt('executor-low'),
-  tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'clawdcoder_session_create', 'clawdcoder_session_list', 'clawdcoder_session_send', 'clawdcoder_session_output', 'clawdcoder_session_kill', 'clawdcoder_status'],
+  tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'lsp_diagnostics'],
   model: 'haiku',
   defaultModel: 'haiku'
 };
@@ -167,7 +167,7 @@ export const qaTesterHighAgent: AgentConfig = {
   name: 'qa-tester-high',
   description: 'Comprehensive production-ready QA testing with Opus. Use for thorough verification, edge case detection, security testing, and high-stakes releases.',
   prompt: loadAgentPrompt('qa-tester-high'),
-  tools: ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'lsp_diagnostics', 'clawdcoder_session_create', 'clawdcoder_session_list', 'clawdcoder_session_send', 'clawdcoder_session_output', 'clawdcoder_session_kill', 'clawdcoder_status'],
+  tools: ['Bash', 'Read', 'Grep', 'Glob', 'TodoWrite', 'lsp_diagnostics'],
   model: 'opus',
   defaultModel: 'opus'
 };
