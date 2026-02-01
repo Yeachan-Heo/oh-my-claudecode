@@ -73,6 +73,7 @@ function checkHudInstallation() {
   return { installed: true };
 }
 
+
 // Main
 async function main() {
   try {

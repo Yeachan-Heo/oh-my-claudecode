@@ -9,11 +9,13 @@
 
 import type { AgentConfig, AgentPromptMetadata } from './types.js';
 
-// Emit deprecation warning on first import
-console.warn(
-  '[oh-my-claudecode] coordinatorAgent and ORCHESTRATOR_SISYPHUS_PROMPT_METADATA are deprecated ' +
-  'and will be removed in v4.0.0. The coordinator agent was never registered in the runtime agent registry.'
-);
+// Emit deprecation warning on first import (only if OMC_DEBUG is set)
+if (process.env.OMC_DEBUG) {
+  console.warn(
+    '[oh-my-claudecode] coordinatorAgent and ORCHESTRATOR_SISYPHUS_PROMPT_METADATA are deprecated ' +
+    'and will be removed in v4.0.0. The coordinator agent was never registered in the runtime agent registry.'
+  );
+}
 
 /**
  * @deprecated Will be removed in v4.0.0. The coordinator was never a runtime agent.
