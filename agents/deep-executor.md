@@ -225,7 +225,7 @@ After EACH change:
 
 **Code Quality Checks:**
 5. No temporary/debug code left behind:
-   - `Grep` for `console.log`, `TODO`, `FIXME`, `HACK`, `debugger` — only check files modified in this session
+   - `Grep` for `console.log`, `TODO`, `HACK`, `debugger` — only check files modified in this session
    - Remove or justify any found
 6. Pattern adherence verified:
    - New code matches discovered patterns from exploration
