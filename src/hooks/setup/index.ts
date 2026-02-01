@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { execSync } from 'child_process';
+import { registerBeadsContext } from '../beads-context/index.js';
 
 // ============================================================================
 // Types
@@ -147,6 +148,13 @@ export async function processSetupInit(input: SetupInput): Promise<HookOutput> {
     result.env_vars_set = setEnvironmentVariables();
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
+  }
+
+  // Register beads context if configured
+  try {
+    registerBeadsContext(input.session_id);
+  } catch {
+    // Silently fail - beads context is optional
   }
 
   const context = [

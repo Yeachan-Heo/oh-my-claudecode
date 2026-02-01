@@ -53,6 +53,7 @@ import {
   waitDaemonCommand,
   waitDetectCommand
 } from './commands/wait.js';
+import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -842,6 +843,22 @@ waitCmd
       json: options.json,
       lines: parseInt(options.lines),
     });
+  });
+
+/**
+ * Doctor command - Diagnostic tools
+ */
+const doctorCmd = program
+  .command('doctor')
+  .description('Diagnostic tools for troubleshooting OMC installation');
+
+doctorCmd
+  .command('conflicts')
+  .description('Check for plugin coexistence issues and configuration conflicts')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const exitCode = await doctorConflictsCommand(options);
+    process.exit(exitCode);
   });
 
 /**

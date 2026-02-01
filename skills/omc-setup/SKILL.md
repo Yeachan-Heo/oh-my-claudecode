@@ -146,23 +146,60 @@ mkdir -p .claude && echo ".claude directory ready"
 ### Download Fresh CLAUDE.md
 
 ```bash
-# Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" .claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+# Define target path
+TARGET_PATH=".claude/CLAUDE.md"
 
-# Backup existing CLAUDE.md before overwriting (if it exists)
-if [ -f ".claude/CLAUDE.md" ]; then
+# Extract old version before download
+OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+
+# Backup existing
+if [ -f "$TARGET_PATH" ]; then
   BACKUP_DATE=$(date +%Y-%m-%d)
-  BACKUP_PATH=".claude/CLAUDE.md.backup.${BACKUP_DATE}"
-  cp .claude/CLAUDE.md "$BACKUP_PATH"
+  BACKUP_PATH="${TARGET_PATH}.backup.${BACKUP_DATE}"
+  cp "$TARGET_PATH" "$BACKUP_PATH"
   echo "Backed up existing CLAUDE.md to $BACKUP_PATH"
 fi
 
-# Download fresh CLAUDE.md from GitHub
-curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md" -o .claude/CLAUDE.md && \
-echo "Downloaded CLAUDE.md to .claude/CLAUDE.md"
+# Download fresh OMC content to temp file
+TEMP_OMC=$(mktemp /tmp/omc-claude-XXXXXX.md)
+curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md" -o "$TEMP_OMC"
+
+if [ ! -f "$TARGET_PATH" ]; then
+  # Fresh install: just use downloaded file as-is
+  mv "$TEMP_OMC" "$TARGET_PATH"
+  echo "Installed CLAUDE.md (fresh)"
+else
+  # Merge: preserve user content outside OMC markers
+  if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
+    # Has markers: replace OMC section, keep user content
+    BEFORE_OMC=$(sed -n '1,/<!-- OMC:START -->/{ /<!-- OMC:START -->/!p }' "$TARGET_PATH")
+    AFTER_OMC=$(sed -n '/<!-- OMC:END -->/,${  /<!-- OMC:END -->/!p }' "$TARGET_PATH")
+    {
+      [ -n "$BEFORE_OMC" ] && printf '%s\n' "$BEFORE_OMC"
+      echo '<!-- OMC:START -->'
+      cat "$TEMP_OMC"
+      echo '<!-- OMC:END -->'
+      [ -n "$AFTER_OMC" ] && printf '%s\n' "$AFTER_OMC"
+    } > "$TARGET_PATH"
+    echo "Updated OMC section (user customizations preserved)"
+  else
+    # No markers: wrap new content in markers, append old content as user section
+    OLD_CONTENT=$(cat "$TARGET_PATH")
+    {
+      echo '<!-- OMC:START -->'
+      cat "$TEMP_OMC"
+      echo '<!-- OMC:END -->'
+      echo ""
+      echo "<!-- User customizations (migrated from previous CLAUDE.md) -->"
+      printf '%s\n' "$OLD_CONTENT"
+    } > "$TARGET_PATH"
+    echo "Migrated existing CLAUDE.md (added OMC markers, preserved old content)"
+  fi
+  rm -f "$TEMP_OMC"
+fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" .claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -227,23 +264,60 @@ Do not continue to HUD setup or other steps.
 ### Download Fresh CLAUDE.md
 
 ```bash
-# Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" ~/.claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+# Define target path
+TARGET_PATH="$HOME/.claude/CLAUDE.md"
 
-# Backup existing CLAUDE.md before overwriting (if it exists)
-if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+# Extract old version before download
+OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+
+# Backup existing
+if [ -f "$TARGET_PATH" ]; then
   BACKUP_DATE=$(date +%Y-%m-%d)
-  BACKUP_PATH="$HOME/.claude/CLAUDE.md.backup.${BACKUP_DATE}"
-  cp "$HOME/.claude/CLAUDE.md" "$BACKUP_PATH"
+  BACKUP_PATH="${TARGET_PATH}.backup.${BACKUP_DATE}"
+  cp "$TARGET_PATH" "$BACKUP_PATH"
   echo "Backed up existing CLAUDE.md to $BACKUP_PATH"
 fi
 
-# Download fresh CLAUDE.md to global config
-curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md" -o ~/.claude/CLAUDE.md && \
-echo "Downloaded CLAUDE.md to ~/.claude/CLAUDE.md"
+# Download fresh OMC content to temp file
+TEMP_OMC=$(mktemp /tmp/omc-claude-XXXXXX.md)
+curl -fsSL "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md" -o "$TEMP_OMC"
+
+if [ ! -f "$TARGET_PATH" ]; then
+  # Fresh install: just use downloaded file as-is
+  mv "$TEMP_OMC" "$TARGET_PATH"
+  echo "Installed CLAUDE.md (fresh)"
+else
+  # Merge: preserve user content outside OMC markers
+  if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
+    # Has markers: replace OMC section, keep user content
+    BEFORE_OMC=$(sed -n '1,/<!-- OMC:START -->/{ /<!-- OMC:START -->/!p }' "$TARGET_PATH")
+    AFTER_OMC=$(sed -n '/<!-- OMC:END -->/,${  /<!-- OMC:END -->/!p }' "$TARGET_PATH")
+    {
+      [ -n "$BEFORE_OMC" ] && printf '%s\n' "$BEFORE_OMC"
+      echo '<!-- OMC:START -->'
+      cat "$TEMP_OMC"
+      echo '<!-- OMC:END -->'
+      [ -n "$AFTER_OMC" ] && printf '%s\n' "$AFTER_OMC"
+    } > "$TARGET_PATH"
+    echo "Updated OMC section (user customizations preserved)"
+  else
+    # No markers: wrap new content in markers, append old content as user section
+    OLD_CONTENT=$(cat "$TARGET_PATH")
+    {
+      echo '<!-- OMC:START -->'
+      cat "$TEMP_OMC"
+      echo '<!-- OMC:END -->'
+      echo ""
+      echo "<!-- User customizations (migrated from previous CLAUDE.md) -->"
+      printf '%s\n' "$OLD_CONTENT"
+    } > "$TARGET_PATH"
+    echo "Migrated existing CLAUDE.md (added OMC markers, preserved old content)"
+  fi
+  rm -f "$TEMP_OMC"
+fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" ~/.claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -455,6 +529,67 @@ All functionality is available through the plugin system:
 - Use `/oh-my-claudecode:doctor` for diagnostics
 
 Skip this step - the plugin provides all features.
+
+## Step 3.8.5: Select Task Management Tool
+
+First, detect available task tools:
+
+```bash
+# Detect beads (bd)
+BD_VERSION=""
+if command -v bd &>/dev/null; then
+  BD_VERSION=$(bd --version 2>/dev/null | head -1 || echo "installed")
+fi
+
+# Detect beads-rust (br)
+BR_VERSION=""
+if command -v br &>/dev/null; then
+  BR_VERSION=$(br --version 2>/dev/null | head -1 || echo "installed")
+fi
+
+# Report findings
+if [ -n "$BD_VERSION" ]; then
+  echo "Found beads (bd): $BD_VERSION"
+fi
+if [ -n "$BR_VERSION" ]; then
+  echo "Found beads-rust (br): $BR_VERSION"
+fi
+if [ -z "$BD_VERSION" ] && [ -z "$BR_VERSION" ]; then
+  echo "No external task tools found. Using built-in Tasks."
+fi
+```
+
+If **neither** beads nor beads-rust is detected, skip this step (default to built-in).
+
+If beads or beads-rust is detected, use AskUserQuestion:
+
+**Question:** "Which task management tool should I use for tracking work?"
+
+**Options:**
+1. **Built-in Tasks (default)** - Use Claude Code's native TaskCreate/TodoWrite. Tasks are session-only.
+2. **Beads (bd)** - Git-backed persistent tasks. Survives across sessions. [Only if detected]
+3. **Beads-Rust (br)** - Lightweight Rust port of beads. [Only if detected]
+
+(Only show options 2/3 if the corresponding tool is detected)
+
+Store the preference:
+
+```bash
+CONFIG_FILE="$HOME/.claude/.omc-config.json"
+mkdir -p "$(dirname "$CONFIG_FILE")"
+
+if [ -f "$CONFIG_FILE" ]; then
+  EXISTING=$(cat "$CONFIG_FILE")
+else
+  EXISTING='{}'
+fi
+
+# USER_CHOICE is "builtin", "beads", or "beads-rust" based on user selection
+echo "$EXISTING" | jq --arg tool "USER_CHOICE" '. + {taskTool: $tool, taskToolConfig: {injectInstructions: true, useMcp: false}}' > "$CONFIG_FILE"
+echo "Task tool set to: USER_CHOICE"
+```
+
+**Note:** The beads context instructions will be injected automatically on the next session start. No restart is needed for config to take effect.
 
 ## Step 4: Verify Plugin Installation
 

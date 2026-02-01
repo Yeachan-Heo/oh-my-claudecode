@@ -48,6 +48,7 @@ export interface InstallResult {
   installedCommands: string[];
   installedSkills: string[];
   hooksConfigured: boolean;
+  hookConflicts: Array<{ eventType: string; existingCommand: string }>;
   errors: string[];
 }
 
@@ -56,6 +57,25 @@ export interface InstallOptions {
   force?: boolean;
   verbose?: boolean;
   skipClaudeCheck?: boolean;
+  forceHooks?: boolean;
+}
+
+/**
+ * Detect whether a hook command belongs to oh-my-claudecode.
+ *
+ * Uses substring matching rather than word-boundary regex.
+ * Rationale: Real OMC hooks use compound names where "omc" is embedded
+ * (e.g., `omc-pre-tool-use.mjs`, `oh-my-claudecode-hook.mjs`). A word-boundary
+ * regex like /\bomc\b/ would fail to match "oh-my-claudecode" since "omc" appears
+ * as an interior substring. The theoretical false positives (words containing "omc"
+ * like "atomic", "socom") are extremely unlikely in real hook command paths.
+ *
+ * @param command - The hook command string
+ * @returns true if the command contains 'omc' or 'oh-my-claudecode'
+ */
+export function isOmcHook(command: string): boolean {
+  const lowerCommand = command.toLowerCase();
+  return lowerCommand.includes('omc') || lowerCommand.includes('oh-my-claudecode');
 }
 
 /**
@@ -170,6 +190,44 @@ function loadClaudeMdContent(): string {
 }
 
 /**
+ * Merge OMC content into existing CLAUDE.md using markers
+ * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
+ * @param omcContent - New OMC content to inject
+ * @returns Merged content with markers
+ */
+export function mergeClaudeMd(existingContent: string | null, omcContent: string): string {
+  const START_MARKER = '<!-- OMC:START -->';
+  const END_MARKER = '<!-- OMC:END -->';
+  const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
+
+  // Case 1: No existing content - wrap omcContent in markers
+  if (!existingContent) {
+    return `${START_MARKER}\n${omcContent}\n${END_MARKER}\n`;
+  }
+
+  // Case 2: Existing content has both markers - replace content between markers
+  const startIndex = existingContent.indexOf(START_MARKER);
+  const endIndex = existingContent.indexOf(END_MARKER);
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    // Extract content before START_MARKER and after END_MARKER
+    const beforeMarker = existingContent.substring(0, startIndex);
+    const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
+
+    return `${beforeMarker}${START_MARKER}\n${omcContent}\n${END_MARKER}${afterMarker}`;
+  }
+
+  // Case 3: Corrupted markers (START without END or vice versa)
+  if (startIndex !== -1 || endIndex !== -1) {
+    // Handle corrupted state - backup will be created by caller
+    return `${START_MARKER}\n${omcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+  }
+
+  // Case 4: No markers - wrap omcContent in markers, preserve existing after user customizations header
+  return `${START_MARKER}\n${omcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
+}
+
+/**
  * Install OMC agents, commands, skills, and hooks
  */
 export function install(options: InstallOptions = {}): InstallResult {
@@ -180,6 +238,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     installedCommands: [],
     installedSkills: [],
     hooksConfigured: false,
+    hookConflicts: [],
     errors: []
   };
 
@@ -294,24 +353,35 @@ export function install(options: InstallOptions = {}): InstallResult {
       // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
       // to avoid duplicate entries in Claude Code's available skills list
 
-      // Install CLAUDE.md (only if it doesn't exist)
+      // Install CLAUDE.md with merge support
       const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
       const homeMdPath = join(homedir(), 'CLAUDE.md');
 
       if (!existsSync(homeMdPath)) {
-        if (!existsSync(claudeMdPath) || options.force) {
-          // Backup existing CLAUDE.md before overwriting (if it exists and --force)
-          if (existsSync(claudeMdPath) && options.force) {
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${today}`);
-            const existingContent = readFileSync(claudeMdPath, 'utf-8');
-            writeFileSync(backupPath, existingContent);
-            log(`Backed up existing CLAUDE.md to ${backupPath}`);
-          }
-          writeFileSync(claudeMdPath, loadClaudeMdContent());
-          log('Created CLAUDE.md');
+        const omcContent = loadClaudeMdContent();
+
+        // Read existing content if it exists
+        let existingContent: string | null = null;
+        if (existsSync(claudeMdPath)) {
+          existingContent = readFileSync(claudeMdPath, 'utf-8');
+        }
+
+        // Always create backup before modification (if file exists)
+        if (existingContent !== null) {
+          const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
+          const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
+          writeFileSync(backupPath, existingContent);
+          log(`Backed up existing CLAUDE.md to ${backupPath}`);
+        }
+
+        // Merge OMC content with existing content
+        const mergedContent = mergeClaudeMd(existingContent, omcContent);
+        writeFileSync(claudeMdPath, mergedContent);
+
+        if (existingContent) {
+          log('Updated CLAUDE.md (merged with existing content)');
         } else {
-          log('CLAUDE.md already exists, skipping');
+          log('Created CLAUDE.md');
         }
       } else {
         log('CLAUDE.md exists in home directory, skipping');
@@ -354,16 +424,38 @@ export function install(options: InstallOptions = {}): InstallResult {
         const hooksConfig = getHooksSettingsConfig();
         const newHooks = hooksConfig.hooks;
 
-        // Deep merge: add our hooks, or update if --force is used
+        // Deep merge: add our hooks, check for conflicts, or update if --force/--forceHooks is used
         for (const [eventType, eventHooks] of Object.entries(newHooks)) {
           if (!existingHooks[eventType]) {
             existingHooks[eventType] = eventHooks;
             log(`  Added ${eventType} hook`);
-          } else if (options.force) {
-            existingHooks[eventType] = eventHooks;
-            log(`  Updated ${eventType} hook (--force)`);
           } else {
-            log(`  ${eventType} hook already configured, skipping`);
+            // Check if existing hook is owned by another plugin
+            const existingEventHooks = existingHooks[eventType] as Array<{ hooks: Array<{ type: string; command: string }> }>;
+            let hasNonOmcHook = false;
+            let nonOmcCommand = '';
+
+            for (const hookGroup of existingEventHooks) {
+              for (const hook of hookGroup.hooks) {
+                if (hook.type === 'command' && !isOmcHook(hook.command)) {
+                  hasNonOmcHook = true;
+                  nonOmcCommand = hook.command;
+                  break;
+                }
+              }
+              if (hasNonOmcHook) break;
+            }
+
+            if (hasNonOmcHook && !options.forceHooks) {
+              // Conflict detected - don't overwrite
+              log(`  [OMC] Warning: ${eventType} hook owned by another plugin. Skipping. Use --force-hooks to override.`);
+              result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
+            } else if (options.force || options.forceHooks) {
+              existingHooks[eventType] = eventHooks;
+              log(`  Updated ${eventType} hook (${options.forceHooks ? '--force-hooks' : '--force'})`);
+            } else {
+              log(`  ${eventType} hook already configured, skipping`);
+            }
           }
         }
 

@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from '
 import { join, dirname } from 'path';
 import { homedir, tmpdir } from 'os';
 import { execSync } from 'child_process';
+import { TaskTool } from '../hooks/beads-context/types.js';
 
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
@@ -36,6 +37,17 @@ export interface SisyphusConfig {
   configuredAt?: string;
   /** Configuration schema version */
   configVersion?: number;
+  /** Preferred task management tool */
+  taskTool?: TaskTool;
+  /** Configuration for the selected task tool */
+  taskToolConfig?: {
+    /** Use beads-mcp instead of CLI */
+    useMcp?: boolean;
+    /** Inject usage instructions at session start (default: true) */
+    injectInstructions?: boolean;
+  };
+  /** Preferred execution mode for parallel work (set by omc-setup Step 3.7) */
+  defaultExecutionMode?: 'ultrawork' | 'ecomode';
 }
 
 /**
@@ -53,7 +65,10 @@ export function getSisyphusConfig(): SisyphusConfig {
     return {
       silentAutoUpdate: config.silentAutoUpdate ?? false,
       configuredAt: config.configuredAt,
-      configVersion: config.configVersion
+      configVersion: config.configVersion,
+      taskTool: config.taskTool,
+      taskToolConfig: config.taskToolConfig,
+      defaultExecutionMode: config.defaultExecutionMode,
     };
   } catch {
     // If config file is invalid, default to disabled for security

@@ -530,6 +530,24 @@ function processAutopilot(input: HookInput): HookOutput {
 }
 
 /**
+ * Cached parsed OMC_SKIP_HOOKS for performance (env vars don't change during process lifetime)
+ */
+let _cachedSkipHooks: string[] | null = null;
+function getSkipHooks(): string[] {
+  if (_cachedSkipHooks === null) {
+    _cachedSkipHooks = process.env.OMC_SKIP_HOOKS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+  }
+  return _cachedSkipHooks;
+}
+
+/**
+ * Reset the skip hooks cache (for testing only)
+ */
+export function resetSkipHooksCache(): void {
+  _cachedSkipHooks = null;
+}
+
+/**
  * Main hook processor
  * Routes to specific hook handler based on type
  */
@@ -537,6 +555,15 @@ export async function processHook(
   hookType: HookType,
   input: HookInput
 ): Promise<HookOutput> {
+  // Environment kill-switches for plugin coexistence
+  if (process.env.DISABLE_OMC === '1' || process.env.DISABLE_OMC === 'true') {
+    return { continue: true };
+  }
+  const skipHooks = getSkipHooks();
+  if (skipHooks.includes(hookType)) {
+    return { continue: true };
+  }
+
   try {
     switch (hookType) {
       case 'keyword-detector':
