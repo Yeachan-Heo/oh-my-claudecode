@@ -249,6 +249,8 @@ export type CwdFormat = 'relative' | 'absolute' | 'folder';
 export interface HudElementConfig {
   cwd: boolean;              // Show working directory
   cwdFormat: CwdFormat;      // Path display format
+  gitRepo: boolean;          // Show git repository name
+  gitBranch: boolean;        // Show git branch
   omcLabel: boolean;
   rateLimits: boolean;  // Show 5h and weekly rate limits
   ralph: boolean;
@@ -295,6 +297,8 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
   elements: {
     cwd: false,               // Disabled by default for backward compatibility
     cwdFormat: 'relative',
+    gitRepo: false,           // Disabled by default for backward compatibility
+    gitBranch: false,         // Disabled by default for backward compatibility
     omcLabel: true,
     rateLimits: true,  // Show rate limits by default
     ralph: true,
@@ -330,6 +334,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   minimal: {
     cwd: false,
     cwdFormat: 'folder',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -355,6 +361,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   analytics: {
     cwd: false,
     cwdFormat: 'folder',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: false,
     rateLimits: false,
     ralph: false,
@@ -380,6 +388,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   focused: {
     cwd: false,
     cwdFormat: 'relative',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -405,6 +415,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   full: {
     cwd: false,
     cwdFormat: 'relative',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -430,6 +442,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   opencode: {
     cwd: false,
     cwdFormat: 'relative',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: true,
     rateLimits: false,
     ralph: true,
@@ -455,6 +469,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   dense: {
     cwd: false,
     cwdFormat: 'relative',
+    gitRepo: false,
+    gitBranch: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,

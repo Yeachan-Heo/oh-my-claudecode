@@ -20,6 +20,7 @@ import { renderThinking } from './elements/thinking.js';
 import { renderSession } from './elements/session.js';
 import { renderAutopilot } from './elements/autopilot.js';
 import { renderCwd } from './elements/cwd.js';
+import { renderGitRepo, renderGitBranch } from './elements/git.js';
 import {
   getAnalyticsDisplay,
   renderAnalyticsLineWithConfig,
@@ -128,10 +129,25 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     return limitOutputLines(lines, config.elements.maxOutputLines).join('\n');
   }
 
-  // Working directory (first element)
+  // Git info line (separate line above HUD)
+  const gitElements: string[] = [];
+
+  // Working directory
   if (enabledElements.cwd) {
     const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || 'relative');
-    if (cwdElement) elements.push(cwdElement);
+    if (cwdElement) gitElements.push(cwdElement);
+  }
+
+  // Git repository name
+  if (enabledElements.gitRepo) {
+    const gitRepoElement = renderGitRepo(context.cwd);
+    if (gitRepoElement) gitElements.push(gitRepoElement);
+  }
+
+  // Git branch
+  if (enabledElements.gitBranch) {
+    const gitBranchElement = renderGitBranch(context.cwd);
+    if (gitBranchElement) gitElements.push(gitBranchElement);
   }
 
   // [OMC] label
@@ -241,9 +257,18 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   }
 
   // Compose output
-  const headerLine = elements.join(dim(' | '));
+  const outputLines: string[] = [];
 
-  // Todos on second line (if available)
+  // Git info line (separate line above HUD header)
+  if (gitElements.length > 0) {
+    outputLines.push(gitElements.join(dim(' | ')));
+  }
+
+  // HUD header line
+  const headerLine = elements.join(dim(' | '));
+  outputLines.push(headerLine);
+
+  // Todos on next line (if available)
   if (enabledElements.todos) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
@@ -265,5 +290,5 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     }
   }
 
-  return limitOutputLines([headerLine, ...detailLines], config.elements.maxOutputLines).join('\n');
+  return limitOutputLines([...outputLines, ...detailLines], config.elements.maxOutputLines).join('\n');
 }

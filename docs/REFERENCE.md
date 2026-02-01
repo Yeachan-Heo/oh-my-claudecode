@@ -493,6 +493,37 @@ Checks for:
 
 Installs or repairs the HUD statusline for real-time status updates.
 
+### HUD Configuration (settings.json)
+
+Configure HUD elements in `~/.claude/settings.json`:
+
+```json
+{
+  "omcHud": {
+    "preset": "focused",
+    "elements": {
+      "cwd": true,
+      "gitRepo": true,
+      "gitBranch": true
+    }
+  }
+}
+```
+
+| Element | Description | Default |
+|---------|-------------|---------|
+| `cwd` | Show current working directory | `false` |
+| `gitRepo` | Show git repository name | `false` |
+| `gitBranch` | Show current git branch | `false` |
+| `omcLabel` | Show [OMC] label | `true` |
+| `contextBar` | Show context window usage | `true` |
+| `agents` | Show active agents count | `true` |
+| `todos` | Show todo progress | `true` |
+| `ralph` | Show ralph loop status | `true` |
+| `autopilot` | Show autopilot status | `true` |
+
+Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode`
+
 ### Common Issues
 
 | Issue | Solution |

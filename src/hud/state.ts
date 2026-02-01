@@ -27,7 +27,14 @@ function getLocalStateFilePath(directory?: string): string {
 
 
 /**
- * Get the HUD config file path
+ * Get Claude Code settings.json path
+ */
+function getSettingsFilePath(): string {
+  return join(homedir(), '.claude', 'settings.json');
+}
+
+/**
+ * Get the HUD config file path (legacy)
  */
 function getConfigFilePath(): string {
   return join(homedir(), '.claude', '.omc', 'hud-config.json');
@@ -44,15 +51,6 @@ function ensureStateDir(directory?: string): void {
   }
 }
 
-/**
- * Ensure the ~/.claude/.omc directory exists
- */
-function ensureGlobalConfigDir(): void {
-  const configDir = join(homedir(), '.claude', '.omc');
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
-  }
-}
 
 
 // ============================================================================
@@ -145,44 +143,76 @@ export function getBackgroundTaskCount(state: OmcHudState | null): {
 // ============================================================================
 
 /**
- * Read HUD configuration from disk
+ * Read HUD configuration from disk.
+ * Priority: settings.json > hud-config.json (legacy) > defaults
  */
 export function readHudConfig(): HudConfig {
+  // 1. Try reading from ~/.claude/settings.json (omcHud key)
+  const settingsFile = getSettingsFilePath();
+  if (existsSync(settingsFile)) {
+    try {
+      const content = readFileSync(settingsFile, 'utf-8');
+      const settings = JSON.parse(content);
+      if (settings.omcHud) {
+        const config = settings.omcHud as Partial<HudConfig>;
+        return mergeWithDefaults(config);
+      }
+    } catch {
+      // Fall through to legacy config
+    }
+  }
+
+  // 2. Try reading from ~/.claude/.omc/hud-config.json (legacy)
   const configFile = getConfigFilePath();
-  if (!existsSync(configFile)) {
-    return DEFAULT_HUD_CONFIG;
+  if (existsSync(configFile)) {
+    try {
+      const content = readFileSync(configFile, 'utf-8');
+      const config = JSON.parse(content) as Partial<HudConfig>;
+      return mergeWithDefaults(config);
+    } catch {
+      // Fall through to defaults
+    }
   }
 
-  try {
-    const content = readFileSync(configFile, 'utf-8');
-    const config = JSON.parse(content) as Partial<HudConfig>;
-
-    // Merge with defaults to ensure all fields exist
-    return {
-      preset: config.preset ?? DEFAULT_HUD_CONFIG.preset,
-      elements: {
-        ...DEFAULT_HUD_CONFIG.elements,
-        ...config.elements,
-      },
-      thresholds: {
-        ...DEFAULT_HUD_CONFIG.thresholds,
-        ...config.thresholds,
-      },
-      staleTaskThresholdMinutes: config.staleTaskThresholdMinutes ?? DEFAULT_HUD_CONFIG.staleTaskThresholdMinutes,
-    };
-  } catch {
-    return DEFAULT_HUD_CONFIG;
-  }
+  // 3. Return defaults
+  return DEFAULT_HUD_CONFIG;
 }
 
 /**
- * Write HUD configuration to disk
+ * Merge partial config with defaults
+ */
+function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
+  return {
+    preset: config.preset ?? DEFAULT_HUD_CONFIG.preset,
+    elements: {
+      ...DEFAULT_HUD_CONFIG.elements,
+      ...config.elements,
+    },
+    thresholds: {
+      ...DEFAULT_HUD_CONFIG.thresholds,
+      ...config.thresholds,
+    },
+    staleTaskThresholdMinutes: config.staleTaskThresholdMinutes ?? DEFAULT_HUD_CONFIG.staleTaskThresholdMinutes,
+  };
+}
+
+/**
+ * Write HUD configuration to ~/.claude/settings.json (omcHud key)
  */
 export function writeHudConfig(config: HudConfig): boolean {
   try {
-    ensureGlobalConfigDir();
-    const configFile = getConfigFilePath();
-    writeFileSync(configFile, JSON.stringify(config, null, 2));
+    const settingsFile = getSettingsFilePath();
+    let settings: Record<string, unknown> = {};
+
+    // Read existing settings
+    if (existsSync(settingsFile)) {
+      const content = readFileSync(settingsFile, 'utf-8');
+      settings = JSON.parse(content);
+    }
+
+    // Update omcHud key
+    settings.omcHud = config;
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
     return true;
   } catch {
     return false;
