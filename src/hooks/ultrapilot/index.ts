@@ -1,9 +1,17 @@
 /**
- * Ultrapilot Coordinator
+ * Ultrapilot Coordinator - Reference Utilities
  *
- * Manages parallel worker spawning and coordination for ultrapilot mode.
- * Decomposes tasks, spawns workers (max 5), tracks progress, and integrates results
- * while managing file ownership to avoid conflicts.
+ * NOTE: These are reference implementations for ultrapilot coordination.
+ * The actual ultrapilot execution happens through prompt-based coordination
+ * in the command/skill markdown files, using Claude Code's Task tool with
+ * `subagent_type: "general-purpose"`.
+ *
+ * These utilities can be used as:
+ * 1. Documentation of the decomposition algorithm
+ * 2. Reference for building custom orchestration tools
+ * 3. Type definitions for state management
+ *
+ * They are NOT directly invoked during ultrapilot execution.
  */
 
 import type {
@@ -29,11 +37,11 @@ import {
 } from './state.js';
 
 // AI-powered decomposition utilities
-// TODO: Use these with the Architect agent for intelligent task decomposition
-// Example integration:
+// These can be used to generate structured decomposition prompts
+// Example integration (conceptual - coordinator does decomposition inline):
 //   const prompt = generateDecompositionPrompt(task, codebaseContext);
-//   const response = await Task({ subagent_type: 'architect', prompt });
-//   const result = parseDecompositionResult(response);
+//   // Coordinator analyzes this prompt and produces decomposition
+//   const result = parseDecompositionResult(decompositionOutput);
 //   const subtasks = toSimpleSubtasks(result);
 export {
   generateDecompositionPrompt,
@@ -89,7 +97,7 @@ export async function startUltrapilot(
  * For more intelligent decomposition with file ownership and dependencies, use the
  * AI-powered decomposition functions:
  *
- * @example AI-powered decomposition (recommended for complex tasks):
+ * @example AI-powered decomposition (conceptual):
  * ```typescript
  * import {
  *   generateDecompositionPrompt,
@@ -97,18 +105,15 @@ export async function startUltrapilot(
  *   toSimpleSubtasks
  * } from './decomposer.js';
  *
- * // Generate prompt for Architect agent
+ * // Generate decomposition prompt
  * const prompt = generateDecompositionPrompt(task, codebaseContext);
  *
- * // Call Architect agent (via Task tool in orchestrator)
- * const response = await Task({
- *   subagent_type: 'oh-my-claudecode:architect',
- *   model: 'opus',
- *   prompt
- * });
+ * // In practice, the coordinator (main Claude) analyzes the task
+ * // and produces decomposition inline, then spawns workers with:
+ * // Task({ subagent_type: 'general-purpose', model: 'sonnet', ... })
  *
  * // Parse structured result with file ownership
- * const result = parseDecompositionResult(response);
+ * const result = parseDecompositionResult(decompositionOutput);
  *
  * // Use result.subtasks for full DecomposedTask objects with:
  * // - id, description, files, blockedBy, agentType, model

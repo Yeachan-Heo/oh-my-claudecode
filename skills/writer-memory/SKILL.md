@@ -231,10 +231,10 @@ Writer Memory integrates with `.omc/notepad.md`:
 - Character insights from analysis sessions are preserved
 - Cross-reference between notepad and memory
 
-### With Architect Agent
+### With Plan Agent
 For complex character analysis:
 ```
-Task(subagent_type="oh-my-claudecode:architect",
+Task(subagent_type="Plan",
      model="opus",
      prompt="Analyze 새랑's arc across all scenes...")
 ```

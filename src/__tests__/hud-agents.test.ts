@@ -69,17 +69,17 @@ describe('Agents Element', () => {
 
     it('should show single-character codes for known agents', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
+        createAgent('Plan', 'opus'),
       ];
       const result = renderAgentsCoded(agents);
-      // Architect with opus should be uppercase A in magenta
+      // Plan with opus should be uppercase P in magenta
       expect(result).toContain('agents:');
-      expect(result).toContain('A');
+      expect(result).toContain('P');
     });
 
     it('should use lowercase for sonnet/haiku tiers', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:explore', 'haiku'),
+        createAgent('Explore', 'haiku'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain('e');
@@ -88,25 +88,25 @@ describe('Agents Element', () => {
     it('should handle multiple agents', () => {
       const now = Date.now();
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 2000)),
-        createAgent('oh-my-claudecode:explore', 'haiku', new Date(now - 1000)),
-        createAgent('oh-my-claudecode:executor', 'sonnet', new Date(now)),
+        createAgent('Plan', 'opus', new Date(now - 2000)),
+        createAgent('Explore', 'haiku', new Date(now - 1000)),
+        createAgent('general-purpose', 'sonnet', new Date(now)),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toBeDefined();
-      // Should contain codes for all three (freshest first: x, e, A)
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:xeA');
+      // Should contain codes for all three (freshest first: g, e, P)
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:geP');
     });
 
     it('should handle agents without model info', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect')];
+      const agents: ActiveAgent[] = [createAgent('Plan')];
       const result = renderAgentsCoded(agents);
-      expect(result).toContain('A');
+      expect(result).toContain('P');
     });
 
     it('should use first letter for unknown agent types', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:unknown-agent', 'sonnet'),
+        createAgent('unknown-agent', 'sonnet'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:u');
@@ -120,50 +120,50 @@ describe('Agents Element', () => {
 
     it('should not show duration for very recent agents', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus', new Date()),
+        createAgent('Plan', 'opus', new Date()),
       ];
       const result = renderAgentsCodedWithDuration(agents);
       // No duration suffix for <10s
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:A');
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:P');
     });
 
     it('should show seconds for agents running 10-59s', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'Plan',
           'opus',
           new Date(Date.now() - 30000)
         ), // 30 seconds ago
       ];
       const result = renderAgentsCodedWithDuration(agents);
       const stripped = result!.replace(/\x1b\[[0-9;]*m/g, '');
-      expect(stripped).toMatch(/agents:A\(30s\)/);
+      expect(stripped).toMatch(/agents:P\(30s\)/);
     });
 
     it('should show minutes for agents running 1-9 min', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'Plan',
           'opus',
           new Date(Date.now() - 180000)
         ), // 3 minutes ago
       ];
       const result = renderAgentsCodedWithDuration(agents);
       const stripped = result!.replace(/\x1b\[[0-9;]*m/g, '');
-      expect(stripped).toMatch(/agents:A\(3m\)/);
+      expect(stripped).toMatch(/agents:P\(3m\)/);
     });
 
     it('should show alert for agents running 10+ min', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'Plan',
           'opus',
           new Date(Date.now() - 600000)
         ), // 10 minutes ago
       ];
       const result = renderAgentsCodedWithDuration(agents);
       const stripped = result!.replace(/\x1b\[[0-9;]*m/g, '');
-      expect(stripped).toMatch(/agents:A!/);
+      expect(stripped).toMatch(/agents:P!/);
     });
   });
 
@@ -173,23 +173,23 @@ describe('Agents Element', () => {
     });
 
     it('should show full agent names', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect')];
+      const agents: ActiveAgent[] = [createAgent('Plan')];
       const result = renderAgentsDetailed(agents);
-      expect(result).toContain('architect');
+      expect(result).toContain('Plan');
     });
 
     it('should abbreviate common long names', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
+        createAgent('general-purpose', 'sonnet'),
       ];
       const result = renderAgentsDetailed(agents);
-      expect(result).toContain('exec');
+      expect(result).toContain('general-purpose');
     });
 
     it('should include duration for long-running agents', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'Plan',
           'opus',
           new Date(Date.now() - 120000)
         ), // 2 minutes
@@ -202,8 +202,8 @@ describe('Agents Element', () => {
   describe('renderAgentsByFormat (format router)', () => {
     const now = Date.now();
     const agents: ActiveAgent[] = [
-      createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 1000)),
-      createAgent('oh-my-claudecode:explore', 'haiku', new Date(now)),
+      createAgent('Plan', 'opus', new Date(now - 1000)),
+      createAgent('Explore', 'haiku', new Date(now)),
     ];
 
     it('should route to count format', () => {
@@ -214,8 +214,8 @@ describe('Agents Element', () => {
     it('should route to codes format', () => {
       const result = renderAgentsByFormat(agents, 'codes');
       expect(result).toContain('agents:');
-      // Freshest first: explore (e), then architect (A)
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eA');
+      // Freshest first: explore (e), then Plan (P)
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eP');
     });
 
     it('should route to codes-duration format', () => {
@@ -225,67 +225,67 @@ describe('Agents Element', () => {
 
     it('should route to detailed format', () => {
       const result = renderAgentsByFormat(agents, 'detailed');
-      expect(result).toContain('architect');
+      expect(result).toContain('Plan');
     });
 
     it('should route to descriptions format', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('Plan', 'opus'),
           description: 'Analyzing code',
         },
       ];
       const result = renderAgentsByFormat(agentsWithDesc, 'descriptions');
-      expect(result).toContain('A');
+      expect(result).toContain('P');
       expect(result).toContain('Analyzing code');
     });
 
     it('should route to tasks format', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('Plan', 'opus'),
           description: 'Analyzing code',
         },
       ];
       const result = renderAgentsByFormat(agentsWithDesc, 'tasks');
       expect(result).toContain('[');
       expect(result).toContain('Analyzing code');
-      expect(result).not.toContain('A:'); // tasks format doesn't show codes
+      expect(result).not.toContain('P:'); // tasks format doesn't show codes
     });
 
     it('should default to codes for unknown format', () => {
       const result = renderAgentsByFormat(agents, 'unknown' as any);
-      // Should fall back to codes format (freshest first: e, A)
+      // Should fall back to codes format (freshest first: e, P)
       expect(result).toContain('agents:');
-      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eA');
+      expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:eP');
     });
   });
 
   describe('Agent type codes', () => {
     const testCases = [
-      { type: 'architect', model: 'opus', expected: 'A' },
-      { type: 'architect-low', model: 'haiku', expected: 'a' },
-      { type: 'architect-medium', model: 'sonnet', expected: 'a' },
-      { type: 'explore', model: 'haiku', expected: 'e' },
-      { type: 'explore-medium', model: 'sonnet', expected: 'e' },
-      { type: 'executor', model: 'sonnet', expected: 'x' },
-      { type: 'executor-low', model: 'haiku', expected: 'x' },
-      { type: 'executor-high', model: 'opus', expected: 'X' },
-      { type: 'designer', model: 'sonnet', expected: 'd' },
-      { type: 'designer-high', model: 'opus', expected: 'D' },
-      { type: 'researcher', model: 'sonnet', expected: 'r' },
-      { type: 'writer', model: 'haiku', expected: 'w' },
-      { type: 'planner', model: 'opus', expected: 'P' },
-      { type: 'critic', model: 'opus', expected: 'C' },
-      { type: 'analyst', model: 'opus', expected: 'T' },
-      { type: 'qa-tester', model: 'sonnet', expected: 'q' },
-      { type: 'vision', model: 'sonnet', expected: 'v' },
+      { type: 'Plan', model: 'opus', expected: 'P' },
+      { type: 'Plan', model: 'haiku', expected: 'p' },
+      { type: 'Plan', model: 'sonnet', expected: 'p' },
+      { type: 'Explore', model: 'haiku', expected: 'e' },
+      { type: 'Explore', model: 'sonnet', expected: 'e' },
+      { type: 'general-purpose', model: 'sonnet', expected: 'g' },
+      { type: 'general-purpose', model: 'haiku', expected: 'g' },
+      { type: 'general-purpose', model: 'opus', expected: 'G' },
+      { type: 'general-purpose', model: 'sonnet', expected: 'g' },
+      { type: 'general-purpose', model: 'opus', expected: 'G' },
+      { type: 'general-purpose', model: 'sonnet', expected: 'g' },
+      { type: 'general-purpose', model: 'haiku', expected: 'g' },
+      { type: 'Plan', model: 'opus', expected: 'P' },
+      { type: 'general-purpose', model: 'opus', expected: 'G' },
+      { type: 'general-purpose', model: 'opus', expected: 'G' },
+      { type: 'general-purpose', model: 'sonnet', expected: 'g' },
+      { type: 'general-purpose', model: 'sonnet', expected: 'g' },
     ];
 
     testCases.forEach(({ type, model, expected }) => {
       it(`should render ${type} (${model}) as '${expected}'`, () => {
         const agents: ActiveAgent[] = [
-          createAgent(`oh-my-claudecode:${type}`, model),
+          createAgent(type, model),
         ];
         const result = renderAgentsCoded(agents);
         const stripped = result!.replace(/\x1b\[[0-9;]*m/g, '');
@@ -297,7 +297,7 @@ describe('Agents Element', () => {
   describe('Model tier color coding', () => {
     it('should use magenta for opus tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
+        createAgent('Plan', 'opus'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(MAGENTA);
@@ -305,7 +305,7 @@ describe('Agents Element', () => {
 
     it('should use yellow for sonnet tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
+        createAgent('general-purpose', 'sonnet'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(YELLOW);
@@ -313,7 +313,7 @@ describe('Agents Element', () => {
 
     it('should use green for haiku tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:explore', 'haiku'),
+        createAgent('Explore', 'haiku'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(GREEN);
@@ -321,7 +321,7 @@ describe('Agents Element', () => {
 
     it('should use cyan for unknown model', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect'),
+        createAgent('Plan'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(CYAN);
@@ -337,7 +337,7 @@ describe('Agents Element', () => {
 
     it('should return empty for completed agents only', () => {
       const agents: ActiveAgent[] = [
-        { ...createAgent('oh-my-claudecode:architect'), status: 'completed' },
+        { ...createAgent('Plan'), status: 'completed' },
       ];
       const result = renderAgentsMultiLine(agents);
       expect(result.headerPart).toBeNull();
@@ -347,7 +347,7 @@ describe('Agents Element', () => {
     it('should render single agent with tree character (last)', () => {
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('Plan', 'opus'),
           description: 'analyzing code',
         },
       ];
@@ -357,18 +357,18 @@ describe('Agents Element', () => {
       expect(result.detailLines).toHaveLength(1);
       // Single agent should use └─ (last indicator)
       expect(result.detailLines[0]).toContain('└─');
-      expect(result.detailLines[0]).toContain('A');
+      expect(result.detailLines[0]).toContain('P');
       expect(result.detailLines[0]).toContain('analyzing code');
     });
 
     it('should render multiple agents with correct tree characters', () => {
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('Plan', 'opus'),
           description: 'analyzing code',
         },
         {
-          ...createAgent('oh-my-claudecode:explore', 'haiku'),
+          ...createAgent('Explore', 'haiku'),
           description: 'searching files',
         },
       ];
@@ -377,7 +377,7 @@ describe('Agents Element', () => {
       expect(result.detailLines).toHaveLength(2);
       // First agent uses ├─
       expect(result.detailLines[0]).toContain('├─');
-      expect(result.detailLines[0]).toContain('A');
+      expect(result.detailLines[0]).toContain('P');
       // Last agent uses └─
       expect(result.detailLines[1]).toContain('└─');
       expect(result.detailLines[1]).toContain('e');
@@ -385,10 +385,10 @@ describe('Agents Element', () => {
 
     it('should limit to maxLines and show overflow indicator', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
-        createAgent('oh-my-claudecode:explore', 'haiku'),
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
-        createAgent('oh-my-claudecode:researcher', 'haiku'),
+        createAgent('Plan', 'opus'),
+        createAgent('Explore', 'haiku'),
+        createAgent('general-purpose', 'sonnet'),
+        createAgent('general-purpose', 'haiku'),
       ];
       const result = renderAgentsMultiLine(agents, 2);
       // 2 agents + 1 overflow indicator
@@ -399,7 +399,7 @@ describe('Agents Element', () => {
     it('should include duration for long-running agents', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'Plan',
           'opus',
           new Date(Date.now() - 120000) // 2 minutes ago
         ),
@@ -412,7 +412,7 @@ describe('Agents Element', () => {
     it('should truncate long descriptions', () => {
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('Plan', 'opus'),
           description:
             'This is a very long description that should be truncated to fit in the display',
         },
@@ -426,14 +426,14 @@ describe('Agents Element', () => {
     });
 
     it('should handle agents without descriptions', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect', 'opus')];
+      const agents: ActiveAgent[] = [createAgent('Plan', 'opus')];
       const result = renderAgentsMultiLine(agents);
       expect(result.detailLines).toHaveLength(1);
       expect(result.detailLines[0]).toContain('...');
     });
 
     it('should route to multiline from renderAgentsByFormat', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect', 'opus')];
+      const agents: ActiveAgent[] = [createAgent('Plan', 'opus')];
       const result = renderAgentsByFormat(agents, 'multiline');
       // Should return the header part only (backward compatibility)
       expect(result).toContain('agents:');

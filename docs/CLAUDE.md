@@ -176,7 +176,7 @@ Direct file writes are enforced via path patterns:
 
 **How to Delegate Source File Changes:**
 ```
-Task(subagent_type="oh-my-claudecode:executor",
+Task(subagent_type="general-purpose",
      model="sonnet",
      prompt="Edit src/file.ts to add validation...")
 ```
@@ -605,7 +605,7 @@ When in planning/interview mode, use the `AskUserQuestion` tool for preference q
 
 ```
 1. Complete all work
-2. Spawn Architect: Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="Verify...")
+2. Spawn Architect: Task(subagent_type="Plan", model="opus", prompt="Verify...")
 3. WAIT for response
 4. If APPROVED → output completion
 5. If REJECTED → fix issues and re-verify

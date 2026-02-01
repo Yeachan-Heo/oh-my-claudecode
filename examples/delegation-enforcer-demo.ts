@@ -21,7 +21,7 @@ console.log('--------------------------------------');
 const taskWithoutModel: DelegationAgentInput = {
   description: 'Implement feature',
   prompt: 'Add error handling to the login function',
-  subagent_type: 'oh-my-claudecode:executor'
+  subagent_type: 'general-purpose'
 };
 
 console.log('Input:', JSON.stringify(taskWithoutModel, null, 2));
@@ -39,7 +39,7 @@ console.log('-----------------------------------');
 const taskWithModel: DelegationAgentInput = {
   description: 'Quick lookup',
   prompt: 'Find the definition of the User interface',
-  subagent_type: 'oh-my-claudecode:executor',
+  subagent_type: 'general-purpose',
   model: 'haiku'
 };
 
@@ -90,7 +90,7 @@ process.env.OMC_DEBUG = 'true';
 const result3 = enforceModel({
   description: 'Test',
   prompt: 'Test task',
-  subagent_type: 'architect'
+  subagent_type: 'Plan'
 });
 
 console.log('\nWarning message:', result3.warning);

@@ -32,7 +32,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test task',
           prompt: 'Do something',
-          subagent_type: 'oh-my-claudecode:executor'
+          subagent_type: 'general-purpose'
         }
       };
 
@@ -59,7 +59,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test task',
           prompt: 'Do something',
-          subagent_type: 'oh-my-claudecode:executor',
+          subagent_type: 'general-purpose',
           model: 'haiku'
         }
       };
@@ -82,7 +82,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test task',
           prompt: 'Do something',
-          subagent_type: 'executor-low'
+          subagent_type: 'general-purpose'
         }
       };
 
@@ -119,11 +119,11 @@ describe.skip('delegation-enforcer integration', () => {
 
     it('works with all agent tiers', async () => {
       const testCases = [
-        { agent: 'architect', expectedModel: 'opus' },
-        { agent: 'architect-low', expectedModel: 'haiku' },
-        { agent: 'executor-high', expectedModel: 'opus' },
-        { agent: 'executor-low', expectedModel: 'haiku' },
-        { agent: 'designer-high', expectedModel: 'opus' }
+        { agent: 'Plan', expectedModel: 'opus' },
+        { agent: 'Explore', expectedModel: 'haiku' },
+        { agent: 'general-purpose', expectedModel: 'opus' },
+        { agent: 'general-purpose', expectedModel: 'haiku' },
+        { agent: 'general-purpose', expectedModel: 'opus' }
       ];
 
       for (const testCase of testCases) {
@@ -156,7 +156,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test',
           prompt: 'Test',
-          subagent_type: 'executor'
+          subagent_type: 'general-purpose'
         }
       };
 
@@ -177,7 +177,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test',
           prompt: 'Test',
-          subagent_type: 'executor'
+          subagent_type: 'general-purpose'
         }
       };
 

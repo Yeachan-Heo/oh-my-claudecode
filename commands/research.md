@@ -36,13 +36,13 @@ Fire independent stages in parallel via Task tool:
 
 ```
 // Stage 1 - Simple data gathering
-Task(subagent_type="oh-my-claudecode:scientist-low", model="haiku", prompt="[RESEARCH_STAGE:1] Investigate...")
+Task(subagent_type="Explore", model="haiku", prompt="[RESEARCH_STAGE:1] Investigate...")
 
 // Stage 2 - Standard analysis
-Task(subagent_type="oh-my-claudecode:scientist", model="sonnet", prompt="[RESEARCH_STAGE:2] Analyze...")
+Task(subagent_type="general-purpose", model="sonnet", prompt="[RESEARCH_STAGE:2] Analyze...")
 
 // Stage 3 - Complex reasoning
-Task(subagent_type="oh-my-claudecode:scientist-high", model="opus", prompt="[RESEARCH_STAGE:3] Deep analysis of...")
+Task(subagent_type="general-purpose", model="opus", prompt="[RESEARCH_STAGE:3] Deep analysis of...")
 ```
 
 ### Smart Model Routing

@@ -70,7 +70,7 @@ Work is delegated through the Task tool with intelligent model routing:
 
 ```typescript
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="general-purpose",
   model="sonnet",
   prompt="Implement feature..."
 )

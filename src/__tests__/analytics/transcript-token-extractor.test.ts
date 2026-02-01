@@ -123,7 +123,7 @@ describe('extractTokenUsage', () => {
             type: 'tool_use',
             name: 'Task',
             input: {
-              subagent_type: 'oh-my-claudecode:executor',
+              subagent_type: 'general-purpose',
               model: 'sonnet'
             }
           }

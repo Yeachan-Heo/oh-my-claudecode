@@ -31,7 +31,7 @@ describe('delegation-enforcer', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'general-purpose',
         model: 'haiku'
       };
 
@@ -46,7 +46,7 @@ describe('delegation-enforcer', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor'
+        subagent_type: 'general-purpose'
       };
 
       const result = enforceModel(input);
@@ -60,13 +60,13 @@ describe('delegation-enforcer', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'executor-low'
+        subagent_type: 'Explore'
       };
 
       const result = enforceModel(input);
 
       expect(result.injected).toBe(true);
-      expect(result.modifiedInput.model).toBe('haiku'); // executor-low defaults to haiku
+      expect(result.modifiedInput.model).toBe('haiku'); // Explore defaults to haiku
     });
 
     it('throws error for unknown agent type', () => {
@@ -83,7 +83,7 @@ describe('delegation-enforcer', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       // Without debug flag
@@ -97,14 +97,14 @@ describe('delegation-enforcer', () => {
       expect(resultWithDebug.warning).toBeDefined();
       expect(resultWithDebug.warning).toContain('Auto-injecting model');
       expect(resultWithDebug.warning).toContain('sonnet');
-      expect(resultWithDebug.warning).toContain('executor');
+      expect(resultWithDebug.warning).toContain('general-purpose');
     });
 
     it('does not log warning when OMC_DEBUG is false', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       process.env.OMC_DEBUG = 'false';
@@ -114,17 +114,17 @@ describe('delegation-enforcer', () => {
 
     it('works with all tiered agents', () => {
       const testCases = [
-        { agent: 'architect', expectedModel: 'opus' },
-        { agent: 'architect-medium', expectedModel: 'sonnet' },
-        { agent: 'architect-low', expectedModel: 'haiku' },
-        { agent: 'executor', expectedModel: 'sonnet' },
-        { agent: 'executor-high', expectedModel: 'opus' },
-        { agent: 'executor-low', expectedModel: 'haiku' },
-        { agent: 'explore', expectedModel: 'haiku' },
-        { agent: 'explore-medium', expectedModel: 'sonnet' },
-        { agent: 'designer', expectedModel: 'sonnet' },
-        { agent: 'designer-high', expectedModel: 'opus' },
-        { agent: 'designer-low', expectedModel: 'haiku' }
+        { agent: 'Plan', expectedModel: 'opus' },
+        { agent: 'Plan', expectedModel: 'sonnet' },
+        { agent: 'Explore', expectedModel: 'haiku' },
+        { agent: 'general-purpose', expectedModel: 'sonnet' },
+        { agent: 'general-purpose', expectedModel: 'opus' },
+        { agent: 'general-purpose', expectedModel: 'haiku' },
+        { agent: 'Explore', expectedModel: 'haiku' },
+        { agent: 'Explore', expectedModel: 'sonnet' },
+        { agent: 'general-purpose', expectedModel: 'sonnet' },
+        { agent: 'general-purpose', expectedModel: 'opus' },
+        { agent: 'general-purpose', expectedModel: 'haiku' }
       ];
 
       for (const testCase of testCases) {
@@ -146,7 +146,7 @@ describe('delegation-enforcer', () => {
       const toolInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       expect(isAgentCall('Agent', toolInput)).toBe(true);
@@ -156,7 +156,7 @@ describe('delegation-enforcer', () => {
       const toolInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       expect(isAgentCall('Task', toolInput)).toBe(true);
@@ -166,7 +166,7 @@ describe('delegation-enforcer', () => {
       const toolInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       expect(isAgentCall('Bash', toolInput)).toBe(false);
@@ -195,7 +195,7 @@ describe('delegation-enforcer', () => {
       const toolInput: AgentInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       const result = processPreToolUse('Agent', toolInput);
@@ -207,7 +207,7 @@ describe('delegation-enforcer', () => {
       const toolInput: AgentInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor',
+        subagent_type: 'general-purpose',
         model: 'haiku'
       };
 
@@ -221,7 +221,7 @@ describe('delegation-enforcer', () => {
       const toolInput: AgentInput = {
         description: 'Test',
         prompt: 'Test',
-        subagent_type: 'executor'
+        subagent_type: 'general-purpose'
       };
 
       // Without debug
@@ -238,15 +238,15 @@ describe('delegation-enforcer', () => {
 
   describe('getModelForAgent', () => {
     it('returns correct model for agent with prefix', () => {
-      expect(getModelForAgent('oh-my-claudecode:executor')).toBe('sonnet');
-      expect(getModelForAgent('oh-my-claudecode:executor-low')).toBe('haiku');
-      expect(getModelForAgent('oh-my-claudecode:architect')).toBe('opus');
+      expect(getModelForAgent('general-purpose')).toBe('sonnet');
+      expect(getModelForAgent('Explore')).toBe('haiku');
+      expect(getModelForAgent('Plan')).toBe('opus');
     });
 
     it('returns correct model for agent without prefix', () => {
-      expect(getModelForAgent('executor')).toBe('sonnet');
-      expect(getModelForAgent('executor-low')).toBe('haiku');
-      expect(getModelForAgent('architect')).toBe('opus');
+      expect(getModelForAgent('general-purpose')).toBe('sonnet');
+      expect(getModelForAgent('Explore')).toBe('haiku');
+      expect(getModelForAgent('Plan')).toBe('opus');
     });
 
     it('throws error for unknown agent', () => {

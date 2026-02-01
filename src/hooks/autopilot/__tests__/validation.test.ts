@@ -452,9 +452,9 @@ describe('AutopilotValidation', () => {
 
       expect(prompt).toContain('SPAWN PARALLEL VALIDATION ARCHITECTS');
       expect(prompt).toContain(specPath);
-      expect(prompt).toContain('oh-my-claudecode:architect');
-      expect(prompt).toContain('oh-my-claudecode:security-reviewer');
-      expect(prompt).toContain('oh-my-claudecode:code-reviewer');
+      expect(prompt).toContain('Plan');
+      expect(prompt).toContain('Plan');
+      expect(prompt).toContain('Plan');
     });
 
     it('should include all three validation types', () => {

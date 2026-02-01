@@ -45,7 +45,7 @@ Delegates to the `code-reviewer` agent (Opus model) for deep analysis:
 
 ```
 Task(
-  subagent_type="oh-my-claudecode:code-reviewer",
+  subagent_type="general-purpose",
   model="opus",
   prompt="CODE REVIEW TASK
 

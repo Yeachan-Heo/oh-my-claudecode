@@ -13,9 +13,9 @@ Ultrapilot is the parallel evolution of autopilot. It decomposes your task into 
 
 **Key Capabilities:**
 1. **Decomposes** task into parallel-safe components
-2. **Partitions** files with exclusive ownership (no conflicts)
-3. **Spawns** up to 5 parallel workers (Claude Code limit)
-4. **Coordinates** progress via TaskOutput
+2. **Partitions** files with exclusive ownership (advisory, not enforced)
+3. **Spawns** up to 5 parallel workers using `general-purpose` agents
+4. **Coordinates** progress via TaskOutput polling
 5. **Integrates** changes with sequential handling of shared files
 6. **Validates** full system integrity
 
@@ -60,25 +60,24 @@ User Input: "Build a full-stack todo app"
            v
   [ULTRAPILOT COORDINATOR]
            |
-   Decomposition + File Partitioning
+   Decomposition (coordinator does this)
            |
    +-------+-------+-------+-------+
    |       |       |       |       |
    v       v       v       v       v
 [W-1]   [W-2]   [W-3]   [W-4]   [W-5]
+general-purpose agents (run_in_background)
 backend frontend database api-docs tests
-(src/  (src/   (src/    (docs/)  (tests/)
- api/)  ui/)    db/)
    |       |       |       |       |
    +---+---+---+---+---+---+---+---+
        |
        v
   [INTEGRATION PHASE]
-  (shared files: package.json, tsconfig.json, etc.)
+  (coordinator handles shared files)
        |
        v
   [VALIDATION PHASE]
-  (full system test)
+  (general-purpose agent)
 ```
 
 ## Phases
@@ -98,97 +97,43 @@ backend frontend database api-docs tests
 
 **Goal:** Break task into parallel-safe subtasks
 
-**Agent:** Architect (Opus)
-
-**Method:** AI-Powered Task Decomposition
-
-Ultrapilot uses the `decomposer` module to generate intelligent task breakdowns:
-
-```typescript
-import {
-  generateDecompositionPrompt,
-  parseDecompositionResult,
-  validateFileOwnership,
-  extractSharedFiles
-} from 'src/hooks/ultrapilot/decomposer';
-
-// 1. Generate prompt for Architect
-const prompt = generateDecompositionPrompt(task, codebaseContext, {
-  maxSubtasks: 5,
-  preferredModel: 'sonnet'
-});
-
-// 2. Call Architect agent
-const response = await Task({
-  subagent_type: 'oh-my-claudecode:architect',
-  model: 'opus',
-  prompt
-});
-
-// 3. Parse structured result
-const result = parseDecompositionResult(response);
-
-// 4. Validate no file conflicts
-const { isValid, conflicts } = validateFileOwnership(result.subtasks);
-
-// 5. Extract shared files from subtasks
-const finalResult = extractSharedFiles(result);
-```
+**Agent:** Coordinator does this directly (may use Explore agent for codebase understanding)
 
 **Process:**
-1. Analyze task requirements via Architect agent
+1. Analyze task requirements
 2. Identify independent components with file boundaries
-3. Assign agent type (executor-low/executor/executor-high) per complexity
-4. Map dependencies between subtasks (blockedBy)
-5. Generate parallel execution groups
+3. Assign model tier (haiku/sonnet) per complexity
+4. Map dependencies between subtasks
+5. Generate parallel execution plan
 6. Identify shared files (handled by coordinator)
 
-**Output:** Structured `DecompositionResult`:
+**Output:**
 
-```json
-{
-  "subtasks": [
-    {
-      "id": "1",
-      "description": "Backend API routes",
-      "files": ["src/api/routes.ts", "src/api/handlers.ts"],
-      "blockedBy": [],
-      "agentType": "executor",
-      "model": "sonnet"
-    },
-    {
-      "id": "2",
-      "description": "Frontend components",
-      "files": ["src/ui/App.tsx", "src/ui/TodoList.tsx"],
-      "blockedBy": [],
-      "agentType": "executor",
-      "model": "sonnet"
-    },
-    {
-      "id": "3",
-      "description": "Wire frontend to backend",
-      "files": ["src/client/api.ts"],
-      "blockedBy": ["1", "2"],
-      "agentType": "executor-low",
-      "model": "haiku"
-    }
-  ],
-  "sharedFiles": [
-    "package.json",
-    "tsconfig.json",
-    "README.md"
-  ],
-  "parallelGroups": [["1", "2"], ["3"]]
-}
 ```
+DECOMPOSITION COMPLETE
+======================
+Subtask 1: Create Express API routes for todo CRUD
+  Files: src/server/routes/**, src/server/controllers/**
+  Model: sonnet
 
-**Decomposition Types:**
+Subtask 2: Create React components for todo list UI
+  Files: src/client/components/**, src/client/hooks/**
+  Model: sonnet
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| `DecomposedTask` | Full task with id, files, blockedBy, agentType, model | Intelligent worker spawning |
-| `DecompositionResult` | Complete result with subtasks, sharedFiles, parallelGroups | Full decomposition output |
-| `toSimpleSubtasks()` | Convert to string[] for legacy compatibility | Simple task lists |
+Subtask 3: Create database schema and migrations
+  Files: src/db/**
+  Model: haiku
+
+Subtask 4: Wire up API client in frontend
+  Files: src/client/api/**
+  Model: haiku
+  Depends on: 1, 2
+
+SHARED FILES (coordinator handles):
+  - package.json
+  - tsconfig.json
+  - src/types/todo.ts
+```
 
 ### Phase 2: File Ownership Partitioning
 
@@ -196,152 +141,105 @@ const finalResult = extractSharedFiles(result);
 
 **Rules:**
 1. **Exclusive ownership** - No file in multiple worker sets
-2. **Shared files deferred** - Handled sequentially in integration
-3. **Boundary files tracked** - Files that import across boundaries
+2. **Shared files deferred** - Handled sequentially by coordinator
+3. **Advisory enforcement** - Workers are instructed not to cross boundaries
 
-**Data Structure:** `.omc/state/ultrapilot-ownership.json`
+**Data Structure:**
 
-```json
-{
-  "sessionId": "ultrapilot-20260123-1234",
-  "workers": {
-    "worker-1": {
-      "ownedFiles": ["src/api/routes.ts", "src/api/handlers.ts"],
-      "ownedGlobs": ["src/api/**"],
-      "boundaryImports": ["src/types.ts"]
-    },
-    "worker-2": {
-      "ownedFiles": ["src/ui/App.tsx", "src/ui/TodoList.tsx"],
-      "ownedGlobs": ["src/ui/**"],
-      "boundaryImports": ["src/types.ts"]
-    }
-  },
-  "sharedFiles": ["package.json", "tsconfig.json", "src/types.ts"],
-  "conflictPolicy": "coordinator-handles"
-}
+```
+Worker 1: src/server/**     (exclusive)
+Worker 2: src/client/components/**, src/client/hooks/**  (exclusive)
+Worker 3: src/db/**         (exclusive)
+Worker 4: src/client/api/** (exclusive)
+SHARED:   package.json, tsconfig.json, src/types/**
 ```
 
 ### Phase 3: Parallel Execution
 
 **Goal:** Run all workers simultaneously
 
-**Spawn Workers:**
+**CRITICAL: Spawn all workers in ONE message for true parallelism**
+
 ```javascript
-// Pseudocode
-workers = [];
-for (subtask in decomposition.subtasks) {
-  workers.push(
-    Task(
-      subagent_type: "oh-my-claudecode:executor",
-      model: "sonnet",
-      prompt: `ULTRAPILOT WORKER ${subtask.id}
+// All in single message:
+Task(
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  run_in_background: true,
+  prompt: "ULTRAPILOT WORKER [1/4]\n\nYOUR EXCLUSIVE FILES: src/server/**\n..."
+)
 
-Your exclusive file ownership: ${subtask.files}
+Task(
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  run_in_background: true,
+  prompt: "ULTRAPILOT WORKER [2/4]\n\nYOUR EXCLUSIVE FILES: src/client/components/**..."
+)
 
-Task: ${subtask.description}
-
-CRITICAL RULES:
-1. ONLY modify files in your ownership set
-2. If you need to modify a shared file, document the change in your output
-3. Do NOT create new files outside your ownership
-4. Track all imports from boundary files
-
-Deliver: Code changes + list of boundary dependencies`,
-      run_in_background: true
-    )
-  );
-}
+// ... more workers in same message
 ```
 
 **Monitoring:**
-- Poll TaskOutput for each worker
-- Track completion status
-- Detect conflicts early
-- Accumulate boundary dependencies
+- Use TaskOutput with `block: false` to check status
+- Poll periodically until all workers complete
+- Collect any SHARED_FILE_REQUESTs from outputs
 
-**Max Workers:** 5 (Claude Code limit)
+**Max Workers:** 5 (practical limit for coordination)
 
 ### Phase 4: Integration
 
 **Goal:** Merge all worker changes and handle shared files
 
 **Process:**
-1. **Collect outputs** - Gather all worker deliverables
-2. **Detect conflicts** - Check for unexpected overlaps
-3. **Handle shared files** - Sequential updates to package.json, etc.
-4. **Integrate boundary files** - Merge type definitions, shared utilities
-5. **Resolve imports** - Ensure cross-boundary imports are valid
-
-**Agent:** Executor (Sonnet) - sequential processing
+1. **Collect outputs** - Gather all worker deliverables via TaskOutput
+2. **Process SHARED_FILE_REQUESTs** - Apply requested changes to package.json, etc.
+3. **Handle shared files** - Coordinator makes sequential updates
+4. **Resolve conflicts** - If workers touched unexpected files, merge manually
 
 **Conflict Resolution:**
-- If workers unexpectedly touched same file → manual merge
-- If shared file needs multiple changes → sequential apply
-- If boundary file changed → validate all dependent workers
+- If workers unexpectedly touched same file → coordinator reviews and fixes
+- If shared file needs multiple changes → apply sequentially
+- If type definition changed → ensure all workers' code is compatible
 
 ### Phase 5: Validation
 
 **Goal:** Verify integrated system works
 
-**Checks (parallel):**
+**Checks:**
 1. **Build** - `npm run build` or equivalent
-2. **Lint** - `npm run lint`
-3. **Type check** - `tsc --noEmit`
-4. **Unit tests** - All tests pass
-5. **Integration tests** - Cross-component tests
+2. **Type check** - `tsc --noEmit`
+3. **Tests** - Run test suite if present
+4. **Lint** - Check for lint errors
 
-**Agents (parallel):**
-- Build-fixer (Sonnet) - Fix build errors
-- Architect (Opus) - Functional completeness
-- Security-reviewer (Opus) - Cross-component vulnerabilities
+**Agent:**
+
+```javascript
+Task(
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  prompt: "ULTRAPILOT VALIDATION\n\nVerify the complete implementation..."
+)
+```
 
 **Retry Policy:** Up to 3 validation rounds. If failures persist, detailed error report to user.
 
-## State Management
+## Valid Subagent Types
 
-### Session State
+**IMPORTANT:** Only use these built-in Claude Code agent types:
 
-**Location:** `.omc/ultrapilot-state.json`
+| Type | Use For |
+|------|---------|
+| `general-purpose` | Implementation work (DEFAULT for all workers) |
+| `Explore` | Codebase exploration, understanding structure |
+| `Plan` | Architecture planning, design decisions |
+| `Bash` | Running shell commands only |
 
-```json
-{
-  "sessionId": "ultrapilot-20260123-1234",
-  "taskDescription": "Build a full-stack todo app",
-  "phase": "execution",
-  "startTime": "2026-01-23T10:30:00Z",
-  "decomposition": { /* from Phase 1 */ },
-  "workers": {
-    "worker-1": {
-      "status": "running",
-      "taskId": "task-abc123",
-      "startTime": "2026-01-23T10:31:00Z",
-      "estimatedDuration": "5m"
-    }
-  },
-  "conflicts": [],
-  "validationAttempts": 0
-}
-```
-
-### File Ownership Map
-
-**Location:** `.omc/state/ultrapilot-ownership.json`
-
-Tracks which worker owns which files (see Phase 2 example above).
-
-### Progress Tracking
-
-**Location:** `.omc/ultrapilot/progress.json`
-
-```json
-{
-  "totalWorkers": 5,
-  "completedWorkers": 3,
-  "activeWorkers": 2,
-  "failedWorkers": 0,
-  "estimatedTimeRemaining": "2m30s"
-}
-```
+**Model tiers:**
+| Model | Use For |
+|-------|---------|
+| `haiku` | Simple tasks, tests, docs, low complexity |
+| `sonnet` | Standard implementation (DEFAULT) |
+| `opus` | Complex architectural decisions |
 
 ## Configuration
 
@@ -353,24 +251,20 @@ Optional settings in `.claude/settings.json`:
     "ultrapilot": {
       "maxWorkers": 5,
       "maxValidationRounds": 3,
-      "conflictPolicy": "coordinator-handles",
       "fallbackToAutopilot": true,
       "parallelThreshold": 2,
-      "pauseAfterDecomposition": false,
-      "verboseProgress": true
+      "pauseAfterDecomposition": false
     }
   }
 }
 ```
 
 **Settings Explained:**
-- `maxWorkers` - Max parallel workers (5 is Claude Code limit)
+- `maxWorkers` - Max parallel workers (5 is practical limit)
 - `maxValidationRounds` - Validation retry attempts
-- `conflictPolicy` - "coordinator-handles" or "abort-on-conflict"
 - `fallbackToAutopilot` - Auto-switch if task not parallelizable
 - `parallelThreshold` - Min subtasks to use ultrapilot (else fallback)
 - `pauseAfterDecomposition` - Confirm with user before execution
-- `verboseProgress` - Show detailed worker progress
 
 ## Cancellation
 
@@ -381,22 +275,9 @@ Optional settings in `.claude/settings.json`:
 Or say: "stop", "cancel ultrapilot", "abort"
 
 **Behavior:**
-- All active workers gracefully terminated
-- Partial progress saved to state file
-- Session can be resumed
-
-## Resume
-
-If ultrapilot was cancelled or a worker failed:
-
-```
-/oh-my-claudecode:ultrapilot resume
-```
-
-**Resume Logic:**
-- Restart failed workers only
-- Re-use completed worker outputs
-- Continue from last phase
+- Background workers continue until their current operation completes
+- Coordinator stops spawning new workers
+- Partial progress may be available
 
 ## Examples
 
@@ -407,15 +288,12 @@ If ultrapilot was cancelled or a worker failed:
 ```
 
 **Workers:**
-1. Frontend (src/client/)
-2. Backend (src/server/)
-3. Database (src/db/)
-4. Tests (tests/)
-5. Docs (docs/)
+1. Backend API (src/server/) - sonnet
+2. Frontend components (src/client/) - sonnet
+3. Database schema (src/db/) - haiku
+4. Tests (tests/) - haiku
 
 **Shared Files:** package.json, docker-compose.yml, README.md
-
-**Duration:** ~15 minutes (vs ~75 minutes sequential)
 
 ### Example 2: Multi-Service Refactor
 
@@ -424,14 +302,12 @@ If ultrapilot was cancelled or a worker failed:
 ```
 
 **Workers:**
-1. Auth service
-2. User service
-3. Payment service
-4. Notification service
+1. Auth service - sonnet
+2. User service - sonnet
+3. Payment service - sonnet
+4. Notification service - haiku
 
 **Shared Files:** src/types/services.ts, tsconfig.json
-
-**Duration:** ~8 minutes (vs ~32 minutes sequential)
 
 ### Example 3: Test Coverage
 
@@ -440,124 +316,66 @@ If ultrapilot was cancelled or a worker failed:
 ```
 
 **Workers:**
-1. API tests
-2. UI component tests
-3. Database tests
-4. Utility tests
-5. Integration tests
+1. API tests - haiku
+2. UI component tests - haiku
+3. Database tests - haiku
+4. Utility tests - haiku
+5. Integration tests - sonnet
 
 **Shared Files:** jest.config.js, test-utils.ts
-
-**Duration:** ~10 minutes (vs ~50 minutes sequential)
 
 ## Best Practices
 
 1. **Clear module boundaries** - Works best with well-separated code
 2. **Minimal shared state** - Reduces integration complexity
-3. **Trust the decomposition** - Architect knows what's parallel-safe
-4. **Monitor progress** - Check `.omc/ultrapilot/progress.json`
-5. **Review conflicts early** - Don't wait until integration
+3. **Trust the decomposition** - Review before spawning workers
+4. **Monitor progress** - Check TaskOutput periodically
+5. **Handle shared files last** - After all workers complete
 
 ## File Ownership Strategy
 
 ### Ownership Types
 
 **Exclusive Ownership:**
-- Worker has sole write access
-- No other worker can touch these files
+- Worker instructed to only modify these files
+- Advisory (relies on prompt instructions)
 - Worker can create new files in owned directories
 
 **Shared Files:**
-- No worker has exclusive access
-- Handled sequentially in integration phase
-- Includes: package.json, tsconfig.json, config files, root README
-
-**Boundary Files:**
-- Can be read by all workers
-- Write access determined by usage analysis
-- Typically: type definitions, shared utilities, interfaces
-
-### Ownership Detection Algorithm
-
-```
-For each file in codebase:
-  If file in shared_patterns (package.json, *.config.js):
-    → sharedFiles
-
-  Else if file imported by 2+ subtask modules:
-    → boundaryFiles
-    → Assign to most relevant worker OR defer to shared
-
-  Else if file in subtask directory:
-    → Assign to subtask worker
-
-  Else:
-    → sharedFiles (safe default)
-```
+- Coordinator handles exclusively
+- Includes: package.json, tsconfig.json, config files
+- Workers output SHARED_FILE_REQUEST if they need changes
 
 ### Shared File Patterns
 
 Automatically classified as shared:
-- `package.json`, `package-lock.json`
+- `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
 - `tsconfig.json`, `*.config.js`, `*.config.ts`
 - `.eslintrc.*`, `.prettierrc.*`
 - `README.md`, `CONTRIBUTING.md`, `LICENSE`
 - Docker files: `Dockerfile`, `docker-compose.yml`
 - CI files: `.github/**`, `.gitlab-ci.yml`
 
-## Conflict Handling
-
-### Conflict Types
-
-**Unexpected Overlap:**
-- Two workers modified the same file
-- **Resolution:** Coordinator merges with human confirmation
-
-**Shared File Contention:**
-- Multiple workers need to update package.json
-- **Resolution:** Sequential application in integration phase
-
-**Boundary File Conflict:**
-- Type definition needed by multiple workers
-- **Resolution:** First worker creates, others import
-
-### Conflict Policy
-
-**coordinator-handles (default):**
-- Coordinator attempts automatic merge
-- Falls back to user if complex
-
-**abort-on-conflict:**
-- Any conflict immediately cancels ultrapilot
-- User reviews conflict report
-- Can resume after manual fix
-
 ## Troubleshooting
 
-**Decomposition fails?**
-- Task may be too coupled
-- Fallback to autopilot triggered automatically
-- Review `.omc/ultrapilot/decomposition.json` for details
+**Decomposition produces too few subtasks?**
+- Task may be too coupled for parallelism
+- Consider using regular autopilot instead
 
-**Worker hangs?**
-- Check worker logs in `.omc/logs/ultrapilot-worker-N.log`
-- Cancel and restart that worker
-- May indicate file ownership issue
+**Workers touching each other's files?**
+- File ownership is advisory only
+- Review decomposition for clearer boundaries
+- Coordinator can fix conflicts in integration phase
 
-**Integration conflicts?**
-- Review `.omc/ultrapilot-state.json` conflicts array
-- Check if shared files were unexpectedly modified
-- Adjust ownership rules if needed
-
-**Validation loops?**
+**Validation keeps failing?**
 - Cross-component integration issue
-- Review boundary imports
-- May need sequential retry with full context
+- May need to run fixes sequentially
+- Check for missing type definitions or imports
 
-**Too slow?**
+**Workers seem slow?**
 - Check if workers are truly independent
-- Review decomposition quality
-- Consider if autopilot would be faster (high interdependency)
+- Background agents have some overhead
+- For simple tasks, autopilot may be faster
 
 ## Differences from Autopilot
 
@@ -567,66 +385,25 @@ Automatically classified as shared:
 | Best For | Single-threaded tasks | Multi-component systems |
 | Complexity | Lower | Higher |
 | Speed | Standard | 3-5x faster (suitable tasks) |
-| File Conflicts | N/A | Ownership partitioning |
+| File Conflicts | N/A | Advisory ownership |
 | Fallback | N/A | Can fallback to autopilot |
-| Setup | Instant | Decomposition phase (~1-2 min) |
+| Setup | Instant | Decomposition phase |
 
 **Rule of Thumb:** If task has 3+ independent components, use ultrapilot. Otherwise, use autopilot.
 
-## Advanced: Custom Decomposition
-
-You can provide a custom decomposition file to skip Phase 1:
-
-**Location:** `.omc/ultrapilot/custom-decomposition.json`
-
-```json
-{
-  "subtasks": [
-    {
-      "id": "worker-auth",
-      "description": "Add OAuth2 authentication",
-      "files": ["src/auth/**", "src/middleware/auth.ts"],
-      "dependencies": ["src/types/user.ts"]
-    },
-    {
-      "id": "worker-db",
-      "description": "Add user table and migrations",
-      "files": ["src/db/migrations/**", "src/db/models/user.ts"],
-      "dependencies": []
-    }
-  ],
-  "sharedFiles": ["package.json", "src/types/user.ts"]
-}
-```
-
-Then run:
-```
-/oh-my-claudecode:ultrapilot --custom-decomposition
-```
-
 ## STATE CLEANUP ON COMPLETION
 
-**IMPORTANT: Delete state files on completion - do NOT just set `active: false`**
-
-When all workers complete successfully:
+**Delete state files when done:**
 
 ```bash
-# Delete ultrapilot state files
-rm -f .omc/state/ultrapilot-state.json
-rm -f .omc/state/ultrapilot-ownership.json
+rm -f .omc/ultrapilot-state.json
 ```
 
-## Future Enhancements
+## TypeScript Utilities (Reference Only)
 
-**Planned for v4.1:**
-- Dynamic worker scaling (start with 2, spawn more if needed)
-- Predictive conflict detection (pre-integration analysis)
-- Worker-to-worker communication (for rare dependencies)
-- Speculative execution (optimistic parallelism)
-- Resume from integration phase (if validation fails)
+The `src/hooks/ultrapilot/` directory contains TypeScript utilities:
+- `decomposer.ts` - Decomposition prompt generation and parsing
+- `state.ts` - State management helpers
+- `types.ts` - TypeScript type definitions
 
-**Planned for v4.2:**
-- Multi-machine distribution (if Claude Code supports)
-- Real-time progress dashboard
-- Worker performance analytics
-- Auto-tuning of decomposition strategy
+**Note:** These are reference implementations. The actual ultrapilot execution uses prompt-based coordination through Claude Code's Task tool, not direct TypeScript invocation.

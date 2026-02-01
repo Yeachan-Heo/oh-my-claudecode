@@ -58,7 +58,7 @@ export interface ResumeSessionOutput {
  * if (result.success && result.context) {
  *   // Use result.context.continuationPrompt in your next Task delegation
  *   Task({
- *     subagent_type: "oh-my-claudecode:executor",
+ *     subagent_type: "general-purpose",
  *     model: "sonnet",
  *     prompt: result.context.continuationPrompt
  *   });

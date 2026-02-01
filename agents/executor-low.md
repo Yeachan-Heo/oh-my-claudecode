@@ -72,12 +72,18 @@ Done.
 <Escalation_Protocol>
 When you detect tasks beyond your scope, output:
 
-**ESCALATION RECOMMENDED**: [specific reason] → Use `oh-my-claudecode:executor`
+**ESCALATION RECOMMENDED**: [specific reason] → Use `general-purpose` agent type
 
 Examples:
-- "Multi-file change required" → executor
-- "Complex refactoring needed" → executor
-- "Architectural decision involved" → executor-high
+- "Multi-file change required" → general-purpose
+- "Complex refactoring needed" → general-purpose
+- "Architectural decision involved" → Plan
+
+**NOTE**: These are legacy agent definitions. The actual Task tool uses built-in types:
+- `general-purpose` - Standard multi-step tasks
+- `Explore` - Open-ended research/investigation
+- `Plan` - Complex planning and architecture
+- `Bash` - System operations and scripting
 </Escalation_Protocol>
 
 <Anti_Patterns>

@@ -100,7 +100,7 @@ For non-obvious bugs, proceed to full 4-Phase Protocol below.
 If 3+ fix attempts fail:
 - STOP recommending fixes
 - Question the architecture
-- Escalate to `oh-my-claudecode:architect` with full context
+- Escalate to `Plan` agent type with full context
 </Systematic_Debugging_Protocol>
 
 <Output_Format>
@@ -123,13 +123,19 @@ If 3+ fix attempts fail:
 <Escalation_Protocol>
 When you detect tasks beyond your scope, output:
 
-**ESCALATION RECOMMENDED**: [specific reason] → Use `oh-my-claudecode:architect`
+**ESCALATION RECOMMENDED**: [specific reason] → Use `Plan` agent type
 
 Examples:
-- "System-wide architectural decision required"
-- "Critical security vulnerability - needs Opus-level analysis"
-- "Multiple conflicting patterns across codebase"
-- "Irreversible migration strategy needed"
+- "System-wide architectural decision required" → Plan
+- "Critical security vulnerability - needs Opus-level analysis" → Plan
+- "Multiple conflicting patterns across codebase" → Plan
+- "Irreversible migration strategy needed" → Plan
+
+**NOTE**: These are legacy agent definitions. The actual Task tool uses built-in types:
+- `general-purpose` - Standard multi-step tasks
+- `Explore` - Open-ended research/investigation
+- `Plan` - Complex planning and architecture
+- `Bash` - System operations and scripting
 </Escalation_Protocol>
 
 <Anti_Patterns>

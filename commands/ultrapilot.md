@@ -36,14 +36,35 @@ Determine if task is suitable for parallel execution:
 
 ## Phase 1: Decomposition
 
-Break task into parallel-safe subtasks:
+YOU perform decomposition directly (no delegation needed):
 
-1. Identify independent components (e.g., frontend, backend, database, tests)
-2. Map each subtask to a non-overlapping file set
-3. Identify shared files (package.json, tsconfig.json) for sequential handling
-4. Create task list with clear ownership
+1. Use Explore agent or Glob/Grep to understand codebase structure
+2. Identify independent components (e.g., frontend, backend, database, tests)
+3. Map each subtask to a non-overlapping file set
+4. Identify shared files (package.json, tsconfig.json) for sequential handling
+5. Create task list with clear ownership
 
-**Output:** Subtask definitions with file ownership assignments
+**Output format:**
+
+```
+DECOMPOSITION COMPLETE
+======================
+Subtask 1: [description]
+  Files: src/api/**, src/types/api.ts
+  Model: sonnet
+
+Subtask 2: [description]
+  Files: src/ui/**, src/components/**
+  Model: sonnet
+
+Subtask 3: [description]
+  Files: tests/**
+  Model: haiku
+
+SHARED FILES (coordinator handles):
+  - package.json
+  - tsconfig.json
+```
 
 ## Phase 2: File Partitioning
 
@@ -55,62 +76,85 @@ Worker 2: src/ui/**      (exclusive)
 Worker 3: src/db/**      (exclusive)
 Worker 4: docs/**        (exclusive)
 Worker 5: tests/**       (exclusive)
-SHARED:   package.json, tsconfig.json (sequential)
+SHARED:   package.json, tsconfig.json (you handle these)
 ```
 
 **Rule:** No two workers can touch the same files
 
 ## Phase 3: Parallel Execution
 
-Spawn workers using Task tool with `run_in_background: true`:
+Spawn ALL workers in a SINGLE message using Task tool with `run_in_background: true`:
 
-```
+```javascript
+// IMPORTANT: Send all Task calls in ONE message for true parallelism
 Task(
-  subagent_type="oh-my-claudecode:executor",
-  model="sonnet",
-  run_in_background=true,
-  prompt="ULTRAPILOT WORKER [1/5]
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  run_in_background: true,
+  prompt: `ULTRAPILOT WORKER [1/N]
 
-OWNED FILES: src/api/**
-TASK: [specific subtask]
+YOUR EXCLUSIVE FILES: src/api/**
+YOUR TASK: [specific subtask description]
 
-You have EXCLUSIVE ownership of these files.
-DO NOT touch files outside your ownership.
-Signal WORKER_COMPLETE when done."
+CRITICAL RULES:
+1. ONLY create/modify files in your ownership set above
+2. Do NOT touch: package.json, tsconfig.json, or files outside your set
+3. If you need a shared file modified, output "SHARED_FILE_REQUEST: filename - changes needed"
+4. When complete, output "WORKER_COMPLETE" with summary of files changed
+
+Implement the task now.`
 )
+
+// Spawn remaining workers in SAME message...
+Task(subagent_type: "general-purpose", model: "sonnet", run_in_background: true, prompt: "ULTRAPILOT WORKER [2/N]...")
+Task(subagent_type: "general-purpose", model: "haiku", run_in_background: true, prompt: "ULTRAPILOT WORKER [3/N]...")
 ```
 
 **Critical Rules:**
-- Maximum 5 parallel workers (Claude Code limit)
+- Maximum 5 parallel workers
 - Each worker owns exclusive file set
-- Monitor via TaskOutput
-- Handle failures by reassigning or fixing
+- **ALL workers spawned in ONE message** (enables true parallelism)
+- Monitor via TaskOutput (check periodically, don't block)
 
-## Phase 4: Integration
+## Phase 4: Monitor & Integrate
 
-After all workers complete:
+After spawning all workers:
 
-1. Handle shared files (package.json, configs) sequentially
-2. Resolve any integration issues
-3. Ensure all pieces work together
+1. **Wait briefly** (10-20 seconds) then check TaskOutput for each worker
+2. **Continue checking** until all workers report WORKER_COMPLETE or fail
+3. **Collect SHARED_FILE_REQUESTs** from worker outputs
+4. **Handle shared files yourself** (package.json, configs) based on requests
+5. **Resolve integration issues** if workers report conflicts
+
+Example monitoring:
+```javascript
+// Check worker status (non-blocking)
+TaskOutput(task_id: "worker-1-id", block: false, timeout: 5000)
+TaskOutput(task_id: "worker-2-id", block: false, timeout: 5000)
+// ... repeat until all complete
+```
 
 ## Phase 5: Validation
 
-Spawn Architect for full system verification:
+After all workers complete, validate the full system:
 
-```
+```javascript
 Task(
-  subagent_type="oh-my-claudecode:architect",
-  model="opus",
-  prompt="ULTRAPILOT VALIDATION
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  prompt: `ULTRAPILOT VALIDATION
 
 Verify the complete implementation:
-1. All subtasks completed successfully
-2. No integration conflicts
-3. System works as a whole
-4. Tests pass (if applicable)"
+1. Run build command (npm run build, pnpm build, etc.)
+2. Run tests if they exist
+3. Check for TypeScript errors
+4. Verify all components integrate correctly
+
+Report any issues found.`
 )
 ```
+
+If validation fails, fix issues directly or spawn targeted fix agents.
 
 ## Delegation Rules (MANDATORY)
 
@@ -118,41 +162,57 @@ Verify the complete implementation:
 
 | Action | YOU Do | DELEGATE |
 |--------|--------|----------|
+| Analyze codebase | ✓ (Explore agent OK) | |
 | Decompose task | ✓ | |
 | Partition files | ✓ | |
 | Spawn workers | ✓ | |
 | Track progress | ✓ | |
-| **ANY code change** | ✗ NEVER | executor workers |
+| Handle shared files | ✓ | |
+| **Feature code changes** | ✗ NEVER | general-purpose workers |
 
-**Path Exception**: Only write to `.omc/`, `.claude/`, `CLAUDE.md`, `AGENTS.md`
+**Coordinator can write to**: `.omc/`, shared config files (package.json, tsconfig.json)
 
-## State Management
+## State Tracking (Optional)
 
-Track state in `.omc/ultrapilot-state.json`:
+You may track state in `.omc/ultrapilot-state.json` for your own reference:
 
 ```json
 {
-  "active": true,
-  "mode": "ultrapilot",
+  "task": "Build todo app",
+  "phase": "execution",
   "workers": [
-    {"id": "w1", "status": "running", "files": ["src/api/**"], "task_id": "..."},
-    {"id": "w2", "status": "complete", "files": ["src/ui/**"], "task_id": "..."}
+    {"id": "w1", "task_id": "abc123", "files": ["src/api/**"], "status": "running"},
+    {"id": "w2", "task_id": "def456", "files": ["src/ui/**"], "status": "complete"}
   ],
   "shared_files": ["package.json", "tsconfig.json"],
-  "phase": "parallel_execution"
+  "shared_file_requests": []
 }
 ```
 
 ## Completion
 
-When all phases complete and Architect validates:
+When all phases complete and validation passes:
 
 ```
-<promise>ULTRAPILOT_COMPLETE</promise>
+ULTRAPILOT_COMPLETE
+===================
+Task: [original task]
+Workers spawned: N
+Files modified: [list by worker]
+Shared files updated: [list]
+Validation: PASSED
+
+All subtasks completed successfully.
 ```
 
-Display summary with:
-- Time savings vs sequential
-- Workers spawned
-- Files modified per worker
-- Final validation status
+## Quick Reference: Valid Subagent Types
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | Implementation work (DEFAULT for workers) |
+| `Explore` | Codebase exploration, finding files |
+| `Plan` | Architecture planning |
+| `Bash` | Running commands only |
+| `haiku` model | Simple tasks, tests, docs |
+| `sonnet` model | Standard implementation |
+| `opus` model | Complex architectural work |

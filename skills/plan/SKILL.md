@@ -108,7 +108,7 @@ What's your reaction to this approach?
 #### Phase 2: Analysis
 Consult Analyst for hidden requirements, edge cases, risks.
 
-Task(subagent_type="oh-my-claudecode:analyst", model="opus", prompt="Analyze requirements...")
+Task(subagent_type="general-purpose", model="opus", prompt="Analyze requirements...")
 
 #### Phase 3: Plan Creation
 When user says "Create the plan", generate structured plan with:

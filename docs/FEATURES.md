@@ -344,7 +344,7 @@ if (result.success && result.context) {
 
   // Continue with Task delegation
   Task({
-    subagent_type: "oh-my-claudecode:executor",
+    subagent_type: "general-purpose",
     model: "sonnet",
     prompt: result.context.continuationPrompt
   });

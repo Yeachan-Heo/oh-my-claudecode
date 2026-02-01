@@ -17,12 +17,12 @@ describe('Prompt Generation', () => {
 
     it('should include analyst Task invocation', () => {
       const prompt = getExpansionPrompt('test');
-      expect(prompt).toContain('oh-my-claudecode:analyst');
+      expect(prompt).toContain('Plan');
     });
 
     it('should include architect Task invocation', () => {
       const prompt = getExpansionPrompt('test');
-      expect(prompt).toContain('oh-my-claudecode:architect');
+      expect(prompt).toContain('Plan');
     });
   });
 
@@ -41,7 +41,7 @@ describe('Prompt Generation', () => {
 
     it('should include critic Task for validation', () => {
       const prompt = getDirectPlanningPrompt('spec.md');
-      expect(prompt).toContain('oh-my-claudecode:critic');
+      expect(prompt).toContain('Plan');
     });
   });
 

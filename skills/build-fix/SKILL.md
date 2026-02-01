@@ -46,7 +46,7 @@ Delegates to the `build-fixer` agent (Sonnet model) to:
 
 ```
 Task(
-  subagent_type="oh-my-claudecode:build-fixer",
+  subagent_type="general-purpose",
   model="sonnet",
   prompt="BUILD FIX TASK
 

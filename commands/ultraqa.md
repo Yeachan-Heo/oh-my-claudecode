@@ -10,7 +10,7 @@ description: QA cycling workflow - test, verify, fix, repeat until goal met
 
 You are now in **ULTRAQA** mode - an autonomous QA cycling workflow that runs until your quality goal is met.
 
-**Cycle**: qa-tester → architect verification → fix → repeat
+**Cycle**: test → diagnosis → fix → repeat
 
 ## Goal Parsing
 
@@ -36,9 +36,9 @@ If no structured goal provided, interpret the argument as a custom goal.
    - `--lint`: Run `npm run lint` or equivalent
    - `--typecheck`: Run `npm run typecheck` or `tsc --noEmit`
    - `--custom`: Run appropriate command and check for pattern
-   - `--interactive`: Use qa-tester for interactive CLI/service testing:
+   - `--interactive`: Use general-purpose agent for interactive CLI/service testing:
      ```
-     Task(subagent_type="oh-my-claudecode:qa-tester", model="sonnet", prompt="TEST:
+     Task(subagent_type="general-purpose", model="sonnet", prompt="TEST:
      Goal: [describe what to verify]
      Service: [how to start]
      Test cases: [specific scenarios to verify]")
@@ -48,18 +48,18 @@ If no structured goal provided, interpret the argument as a custom goal.
    - **YES** → Exit with success message
    - **NO** → Continue to step 3
 
-3. **ARCHITECT DIAGNOSIS**: Spawn architect to analyze failure
+3. **DIAGNOSIS**: Spawn agent to analyze failure
    ```
-   Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="DIAGNOSE FAILURE:
+   Task(subagent_type="general-purpose", model="opus", prompt="DIAGNOSE FAILURE:
    Goal: [goal type]
    Output: [test/build output]
    Provide root cause and specific fix recommendations.")
    ```
 
-4. **FIX ISSUES**: Apply architect's recommendations
+4. **FIX ISSUES**: Apply recommendations
    ```
-   Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="FIX:
-   Issue: [architect diagnosis]
+   Task(subagent_type="general-purpose", model="sonnet", prompt="FIX:
+   Issue: [diagnosis]
    Files: [affected files]
    Apply the fix precisely as recommended.")
    ```
@@ -81,7 +81,7 @@ Output progress each cycle:
 ```
 [ULTRAQA Cycle 1/5] Running tests...
 [ULTRAQA Cycle 1/5] FAILED - 3 tests failing
-[ULTRAQA Cycle 1/5] Architect diagnosing...
+[ULTRAQA Cycle 1/5] Diagnosing...
 [ULTRAQA Cycle 1/5] Fixing: auth.test.ts - missing mock
 [ULTRAQA Cycle 2/5] Running tests...
 [ULTRAQA Cycle 2/5] PASSED - All 47 tests pass
@@ -115,6 +115,15 @@ User can cancel with `/oh-my-claudecode:cancel` which clears the state file.
 3. **EARLY EXIT on pattern** - 3x same failure = stop and surface
 4. **CLEAR OUTPUT** - User should always know current cycle and status
 5. **CLEAN UP** - Clear state file on completion or cancellation
+
+## Valid Agent Types
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | Implementation, fixes, testing (DEFAULT) |
+| `Explore` | Finding files, understanding codebase |
+| `Plan` | Architecture analysis |
+| `Bash` | Running commands |
 
 ---
 

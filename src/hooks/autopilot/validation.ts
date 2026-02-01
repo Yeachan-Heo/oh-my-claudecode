@@ -161,7 +161,7 @@ Spawn all three validation architects in parallel to review the implementation:
 \`\`\`
 // 1. Functional Completeness Review
 Task(
-  subagent_type="oh-my-claudecode:architect",
+  subagent_type="Plan",
   model="opus",
   prompt="FUNCTIONAL COMPLETENESS REVIEW
 
@@ -178,7 +178,7 @@ Output: APPROVED or REJECTED with specific gaps"
 
 // 2. Security Review
 Task(
-  subagent_type="oh-my-claudecode:security-reviewer",
+  subagent_type="general-purpose",
   model="opus",
   prompt="SECURITY REVIEW
 
@@ -195,7 +195,7 @@ Output: APPROVED or REJECTED with specific issues"
 
 // 3. Code Quality Review
 Task(
-  subagent_type="oh-my-claudecode:code-reviewer",
+  subagent_type="general-purpose",
   model="opus",
   prompt="CODE QUALITY REVIEW
 

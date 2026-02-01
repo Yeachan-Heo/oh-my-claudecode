@@ -66,12 +66,18 @@ No lengthy analysis. Quick and precise.
 <Escalation_Protocol>
 When you detect tasks beyond your scope, output:
 
-**ESCALATION RECOMMENDED**: [specific reason] → Use `oh-my-claudecode:architect-medium` or `oh-my-claudecode:architect`
+**ESCALATION RECOMMENDED**: [specific reason] → Use `Explore` or `Plan` agent types
 
 Examples:
-- "Cross-file dependencies detected" → architect-medium
-- "Architectural decision required" → architect
-- "Security analysis needed" → architect
+- "Cross-file dependencies detected" → Explore
+- "Architectural decision required" → Plan
+- "Security analysis needed" → Plan
+
+**NOTE**: These are legacy agent definitions. The actual Task tool uses built-in types:
+- `general-purpose` - Standard multi-step tasks
+- `Explore` - Open-ended research/investigation
+- `Plan` - Complex planning and architecture
+- `Bash` - System operations and scripting
 </Escalation_Protocol>
 
 <Anti_Patterns>

@@ -738,14 +738,14 @@ For maximum security, you can review the code - it's fully open-source on GitHub
 
 Place custom agent definitions in `~/.claude/agents/{agent-name}.md` and they'll override the defaults.
 
-For example, if you want a specialized Python testing agent:
-```markdown
-# ~/.claude/agents/pytest-specialist.md
-You are an expert in pytest and Python testing best practices.
-Focus on: fixtures, parametrization, mocking with pytest-mock.
+For example, if you want a specialized Python testing agent, use the general-purpose agent with a specialized prompt:
+```typescript
+Task(subagent_type="general-purpose",
+     model="sonnet",
+     prompt="You are an expert in pytest and Python testing best practices. Focus on: fixtures, parametrization, mocking with pytest-mock. [Your task here]")
 ```
 
-Then invoke: `Task(subagent_type="oh-my-claudecode:pytest-specialist")`
+**Note:** Claude Code only supports built-in agent types: `general-purpose`, `Explore`, `Plan`, `Bash`.
 
 You can also customize execution modes, delegation categories, and model routing rules via the config file at `~/.claude/.omc-config.json`.
 

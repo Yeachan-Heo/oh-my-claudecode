@@ -81,41 +81,30 @@ Ralph automatically activates Ultrawork for maximum parallel execution. You MUST
 ### Parallel Execution Rules
 - **PARALLEL**: Fire independent calls simultaneously - NEVER wait sequentially
 - **BACKGROUND FIRST**: Use Task(run_in_background=true) for long operations (10+ concurrent)
-- **DELEGATE**: Route tasks to specialist agents immediately
+- **DELEGATE**: Route tasks to agents immediately
 
 ### Smart Model Routing (SAVE TOKENS)
 
-| Task Complexity | Tier | Examples |
-|-----------------|------|----------|
-| Simple lookups | LOW (haiku) | "What does this function return?", "Find where X is defined" |
-| Standard work | MEDIUM (sonnet) | "Add error handling", "Implement this feature" |
-| Complex analysis | HIGH (opus) | "Debug this race condition", "Refactor auth module" |
+| Task Complexity | Model | Examples |
+|-----------------|-------|----------|
+| Simple lookups | haiku | "What does this function return?", "Find where X is defined" |
+| Standard work | sonnet | "Add error handling", "Implement this feature" |
+| Complex analysis | opus | "Debug this race condition", "Refactor auth module" |
 
-### Available Agents by Tier
+### Agent Types and Models
 
-| Domain | LOW (Haiku) | MEDIUM (Sonnet) | HIGH (Opus) |
-|--------|-------------|-----------------|-------------|
-| **Analysis** | `architect-low` | `architect-medium` | `architect` |
-| **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | - |
-| **Research** | `researcher-low` | `researcher` | - |
-| **Frontend** | `designer-low` | `designer` | `designer-high` |
-| **Docs** | `writer` | - | - |
-| **Visual** | - | `vision` | - |
-| **Planning** | - | - | `planner` |
-| **Critique** | - | - | `critic` |
-| **Pre-Planning** | - | - | `analyst` |
-| **Testing** | - | `qa-tester` | - |
-| **Security** | `security-reviewer-low` | - | `security-reviewer` |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
-| **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | `code-reviewer` |
+| Purpose | Agent Type | Model |
+|---------|------------|-------|
+| **Codebase Exploration** | `Explore` | haiku or sonnet |
+| **Architecture/Planning** | `Plan` | sonnet or opus |
+| **Implementation** | `general-purpose` | haiku/sonnet/opus based on complexity |
+| **Shell Commands** | `Bash` | N/A |
 
 **CRITICAL: Always pass `model` parameter explicitly!**
 ```
-Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="...")
-Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
-Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="...")
+Task(subagent_type="Explore", model="haiku", prompt="...")
+Task(subagent_type="general-purpose", model="sonnet", prompt="...")
+Task(subagent_type="Plan", model="opus", prompt="...")
 ```
 
 ### Background Execution Rules
@@ -150,7 +139,7 @@ Before outputting the completion promise:
 1. **IDENTIFY**: What command proves the task is complete?
 2. **RUN**: Execute verification (test, build, lint)
 3. **READ**: Check output - did it actually pass?
-4. **ONLY THEN**: Proceed to Architect verification
+4. **ONLY THEN**: Proceed to verification
 
 ### Red Flags (STOP and verify)
 - Using "should", "probably", "seems to"
@@ -161,7 +150,7 @@ Before outputting the completion promise:
 1. Fresh test run output showing pass
 2. Fresh build output showing success
 3. lsp_diagnostics showing 0 errors
-4. THEN Architect verification
+4. THEN Plan agent verification
 5. THEN completion promise
 
 **Skipping verification = Task NOT complete**
@@ -169,17 +158,17 @@ Before outputting the completion promise:
 ## ARCHITECT VERIFICATION (MANDATORY)
 
 When you believe the task is complete:
-1. **First**, spawn Architect to verify your work (ALWAYS pass model explicitly!):
+1. **First**, spawn Plan agent to verify your work (ALWAYS pass model explicitly!):
    ```
-   Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="Verify this implementation is complete: [describe what you did]")
+   Task(subagent_type="Plan", model="opus", prompt="Verify this implementation is complete: [describe what you did]")
    ```
 
-2. **Wait for Architect's assessment**
+2. **Wait for assessment**
 
-3. **If Architect approves**: Output `<promise>{{PROMISE}}</promise>`
-4. **If Architect finds issues**: Fix them, then repeat verification
+3. **If approved**: Output `<promise>{{PROMISE}}</promise>`
+4. **If issues found**: Fix them, then repeat verification
 
-DO NOT output the completion promise without Architect verification.
+DO NOT output the completion promise without verification.
 
 ## ZERO TOLERANCE
 
@@ -188,11 +177,20 @@ DO NOT output the completion promise without Architect verification.
 - NO Premature Stopping - ALL TODOs must be complete
 - NO TEST DELETION - fix code, not tests
 
+## Valid Agent Types
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | All implementation work (DEFAULT) |
+| `Explore` | Codebase exploration, finding files |
+| `Plan` | Architecture and planning, verification |
+| `Bash` | Shell commands only |
+
 ## STATE CLEANUP ON COMPLETION
 
 **IMPORTANT: Delete state files on successful completion - do NOT just set `active: false`**
 
-When outputting the completion promise after Architect verification:
+When outputting the completion promise after verification:
 
 ```bash
 # Delete ralph state file (and linked ultrawork if applicable)
@@ -212,7 +210,7 @@ This ensures clean state for future sessions. Stale state files with `active: fa
 - Review your progress so far
 - Continue from where you left off
 - Use parallel execution and background tasks
-- When FULLY complete AND Architect verified:
+- When FULLY complete AND verified:
   1. Clean up state files (delete ralph-state.json, ultrawork-state.json)
   2. Output: <promise>{{PROMISE}}</promise>
 - Do not stop until the task is truly done

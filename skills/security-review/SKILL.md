@@ -62,7 +62,7 @@ Delegates to the `security-reviewer` agent (Opus model) for deep security analys
 
 ```
 Task(
-  subagent_type="oh-my-claudecode:security-reviewer",
+  subagent_type="general-purpose",
   model="opus",
   prompt="SECURITY REVIEW TASK
 

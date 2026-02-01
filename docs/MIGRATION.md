@@ -654,12 +654,12 @@ Individual cancel commands are deprecated but still work:
 
 Use `/oh-my-claudecode:cancel` instead.
 
-#### 6. Explore-High Agent
+#### 6. Explore Agent with Opus
 
 Opus-powered architectural search for complex codebase exploration:
 
 ```typescript
-Task(subagent_type="oh-my-claudecode:explore-high",
+Task(subagent_type="Explore",
      model="opus",
      prompt="Find all authentication-related code patterns...")
 ```

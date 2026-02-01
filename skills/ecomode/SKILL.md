@@ -12,7 +12,7 @@ Activates token-efficient parallel execution for pro-plan users who prioritize c
 This skill enhances Claude's capabilities by:
 
 1. **Parallel Execution**: Running multiple agents simultaneously for independent tasks
-2. **Token-Conscious Routing**: Preferring Haiku and Sonnet agents, avoiding Opus
+2. **Token-Conscious Routing**: Preferring haiku, avoiding opus
 3. **Background Operations**: Using `run_in_background: true` for long operations
 4. **Persistence Enforcement**: Never stopping until all tasks are verified complete
 5. **Cost Optimization**: Minimizing token usage while maintaining quality
@@ -23,62 +23,50 @@ This skill enhances Claude's capabilities by:
 
 | Decision | Rule |
 |----------|------|
-| DEFAULT | Use LOW tier (Haiku) for all tasks |
-| UPGRADE | Use MEDIUM (Sonnet) only when task complexity warrants |
-| AVOID | HIGH tier (Opus) - only use for planning/critique if explicitly essential |
+| DEFAULT | Use haiku for all tasks |
+| UPGRADE | Use sonnet only when task complexity warrants |
+| AVOID | opus - only use for planning/critique if explicitly essential |
 
-## Smart Model Routing (PREFER LOW TIER)
+## Smart Model Routing (PREFER HAIKU)
 
-**Choose tier based on task complexity: LOW (haiku) preferred → MEDIUM (sonnet) fallback → HIGH (opus) AVOID**
+**Choose model based on task complexity: haiku preferred → sonnet fallback → opus AVOID**
 
-### Agent Routing Table
+### Model Selection Guide (Token-Conscious)
 
-| Domain | PREFERRED (Haiku) | FALLBACK (Sonnet) | AVOID (Opus) |
-|--------|-------------------|-------------------|--------------|
-| **Analysis** | `architect-low` | `architect-medium` | ~~`architect`~~ |
-| **Execution** | `executor-low` | `executor` | ~~`executor-high`~~ |
-| **Search** | `explore` | `explore-medium` | ~~`explore-high`~~ |
-| **Research** | `researcher-low` | `researcher` | - |
-| **Frontend** | `designer-low` | `designer` | ~~`designer-high`~~ |
-| **Docs** | `writer` | - | - |
-| **Visual** | - | `vision` | - |
-| **Planning** | - | - | `planner` (if essential) |
-| **Critique** | - | - | `critic` (if essential) |
-| **Testing** | - | `qa-tester` | ~~`qa-tester-high`~~ |
-| **Security** | `security-reviewer-low` | - | ~~`security-reviewer`~~ |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
-| **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | ~~`code-reviewer`~~ |
-| **Data Science** | `scientist-low` | `scientist` | ~~`scientist-high`~~ |
+| Task Complexity | Model | Examples |
+|-----------------|-------|----------|
+| Simple lookups | haiku | "What does this function return?", "Find where X is defined" |
+| Standard work | haiku first, sonnet if fails | "Add error handling", "Implement this feature" |
+| Complex analysis | sonnet | "Debug this issue", "Refactor this module" |
+| Planning only | opus (if essential) | "Design architecture for new system" |
 
-### Tier Selection Guide (Token-Conscious)
+### Agent Types and Models
 
-| Task Complexity | Tier | Examples |
-|-----------------|------|----------|
-| Simple lookups | LOW | "What does this function return?", "Find where X is defined" |
-| Standard work | LOW first, MEDIUM if fails | "Add error handling", "Implement this feature" |
-| Complex analysis | MEDIUM | "Debug this issue", "Refactor this module" |
-| Planning only | HIGH (if essential) | "Design architecture for new system" |
+| Purpose | Preferred (haiku) | Fallback (sonnet) | Avoid (opus) |
+|---------|-------------------|-------------------|--------------|
+| **Exploration** | `Explore` + haiku | `Explore` + sonnet | - |
+| **Implementation** | `general-purpose` + haiku | `general-purpose` + sonnet | - |
+| **Planning** | - | `Plan` + sonnet | `Plan` + opus (if essential) |
 
 ### Routing Examples
 
-**CRITICAL: Always pass `model` parameter explicitly - Claude Code does NOT auto-apply models from agent definitions!**
+**CRITICAL: Always pass `model` parameter explicitly!**
 
 ```
-// Simple question → LOW tier (DEFAULT)
-Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="What does this function return?")
+// Simple question → haiku (DEFAULT)
+Task(subagent_type="Explore", model="haiku", prompt="What does this function return?")
 
-// Standard implementation → TRY LOW first
-Task(subagent_type="oh-my-claudecode:executor-low", model="haiku", prompt="Add validation to login form")
+// Standard implementation → TRY haiku first
+Task(subagent_type="general-purpose", model="haiku", prompt="Add validation to login form")
 
-// If LOW fails, escalate to MEDIUM
-Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="Add error handling to login")
+// If haiku fails, escalate to sonnet
+Task(subagent_type="general-purpose", model="sonnet", prompt="Add error handling to login")
 
-// File lookup → ALWAYS LOW
-Task(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="Find where UserService is defined")
+// File lookup → ALWAYS haiku
+Task(subagent_type="Explore", model="haiku", prompt="Find where UserService is defined")
 
-// Only use MEDIUM for complex patterns
-Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Find all authentication patterns in the codebase")
+// Only use sonnet for complex patterns
+Task(subagent_type="Explore", model="sonnet", prompt="Find all authentication patterns in the codebase")
 ```
 
 ## DELEGATION ENFORCEMENT (CRITICAL)
@@ -90,9 +78,9 @@ Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Fi
 | Read files for context | ✓ | |
 | Track progress (TODO) | ✓ | |
 | Spawn parallel agents | ✓ | |
-| **ANY code change** | ✗ NEVER | executor-low/executor |
-| **UI work** | ✗ NEVER | designer-low/designer |
-| **Docs** | ✗ NEVER | writer |
+| **ANY code change** | ✗ NEVER | general-purpose agents |
+| **UI work** | ✗ NEVER | general-purpose agents |
+| **Docs** | ✗ NEVER | general-purpose (haiku) |
 
 **Path Exception**: Only write to `.omc/`, `.claude/`, `CLAUDE.md`, `AGENTS.md`
 
@@ -106,7 +94,7 @@ Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Fi
 
 **Run Blocking** (foreground):
 - Quick status checks: git status, ls, pwd
-- File reads (NOT edits - delegate edits to executor-low)
+- File reads (NOT edits - delegate edits to agents)
 - Simple commands
 
 ## Verification Checklist
@@ -122,10 +110,19 @@ Before stopping, verify:
 ## Token Savings Tips
 
 1. **Batch similar tasks** to one agent instead of spawning many
-2. **Use explore (haiku)** for file discovery, not architect
-3. **Prefer executor-low** for simple changes - only upgrade if it fails
+2. **Use Explore + haiku** for file discovery
+3. **Prefer haiku** for simple changes - only upgrade if it fails
 4. **Avoid opus agents** unless the task genuinely requires deep reasoning
-5. **Use writer (haiku)** for all documentation tasks
+5. **Use haiku** for all documentation tasks
+
+## Valid Agent Types
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | All implementation work (DEFAULT) |
+| `Explore` | Codebase exploration, finding files |
+| `Plan` | Architecture and planning (use sparingly) |
+| `Bash` | Shell commands only |
 
 ## STATE CLEANUP ON COMPLETION
 

@@ -685,7 +685,7 @@ Note: The tier system is central to OMC's cost efficiency. Always start low and 
 **Delegation Code:**
 ```javascript
 Task(
-  subagent_type="oh-my-claudecode:executor-low",
+  subagent_type="general-purpose",
   model="haiku",
   prompt="Add validation to the login form"
 )

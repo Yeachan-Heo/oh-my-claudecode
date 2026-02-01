@@ -33,7 +33,7 @@ Spawn the Analyst agent:
 
 ```
 Task(
-  subagent_type="oh-my-claudecode:analyst",
+  subagent_type="general-purpose",
   model="opus",
   prompt="REQUIREMENTS ANALYSIS
 
@@ -55,7 +55,7 @@ After Analyst completes, spawn Architect:
 
 ```
 Task(
-  subagent_type="oh-my-claudecode:architect",
+  subagent_type="Plan",
   model="opus",
   prompt="TECHNICAL SPECIFICATION
 
@@ -80,7 +80,7 @@ Then signal: **EXPANSION_COMPLETE**
 
 Create an implementation plan directly from the spec (no interview needed).
 
-Use the Architect to create the plan, then Critic to validate.
+Use the Plan agent to create the plan, then a Critic pass to validate.
 
 Signal when approved: **PLANNING_COMPLETE**
 
@@ -99,31 +99,31 @@ During execution, you MUST follow these rules:
 | Read files for context | ✓ | |
 | Track progress (TODO) | ✓ | |
 | Communicate status | ✓ | |
-| **ANY code change** | ✗ NEVER | executor-low/executor/executor-high |
-| **Multi-file refactor** | ✗ NEVER | executor-high |
-| **UI/frontend work** | ✗ NEVER | designer/designer-high |
-| **Documentation** | ✗ NEVER | writer |
+| **ANY code change** | ✗ NEVER | general-purpose agents |
+| **Multi-file refactor** | ✗ NEVER | general-purpose (opus) |
+| **UI/frontend work** | ✗ NEVER | general-purpose agents |
+| **Documentation** | ✗ NEVER | general-purpose (haiku) |
 
 **Path-Based Exception**: You may ONLY use Edit/Write for:
 - `.omc/**` (state files)
 - `.claude/**` (config)
 - `CLAUDE.md`, `AGENTS.md` (docs)
 
-**All source code changes MUST go through executor agents.**
+**All source code changes MUST go through general-purpose agents.**
 
 ### Execution Protocol
 
-1. Spawn parallel executors for independent tasks
+1. Spawn parallel agents for independent tasks
 2. Track progress via TODO list
-3. Use appropriate agent tiers:
-   - Simple/single-file → `executor-low` (haiku)
-   - Standard feature → `executor` (sonnet)
-   - Complex/multi-file → `executor-high` (opus)
+3. Use appropriate model tiers:
+   - Simple/single-file → `model: "haiku"`
+   - Standard feature → `model: "sonnet"`
+   - Complex/multi-file → `model: "opus"`
 
 ```
 // Example: Delegate implementation
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="general-purpose",
   model="sonnet",
   prompt="IMPLEMENT: [specific task from plan]
 
@@ -144,10 +144,10 @@ Signal when all pass: **QA_COMPLETE**
 
 ## Phase 4: Validation
 
-Spawn 3 parallel architects:
-1. Functional completeness
-2. Security review
-3. Code quality
+Spawn 3 parallel agents for validation:
+1. Functional completeness (general-purpose, opus)
+2. Security review (general-purpose, opus)
+3. Code quality (general-purpose, sonnet)
 
 All must APPROVE.
 
@@ -157,7 +157,7 @@ Signal: **AUTOPILOT_COMPLETE**
 
 ### Delegation Rules (MANDATORY)
 - **NEVER** use Edit/Write/Bash for source code changes
-- **ALWAYS** delegate implementation to executor agents
+- **ALWAYS** delegate implementation to general-purpose agents
 - **ONLY** write directly to `.omc/`, `.claude/`, `CLAUDE.md`, `AGENTS.md`
 - If you attempt direct code changes, the PreToolUse hook will warn you
 
@@ -177,3 +177,19 @@ When all phases complete successfully, output:
 ```
 
 And display the autopilot summary.
+
+## Valid Agent Types Reference
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | All implementation work (DEFAULT) |
+| `Explore` | Codebase exploration |
+| `Plan` | Architecture and planning |
+| `Bash` | Shell commands only |
+
+**Model tiers:**
+| Model | Use For |
+|-------|---------|
+| `haiku` | Simple tasks, docs, quick lookups |
+| `sonnet` | Standard implementation (DEFAULT) |
+| `opus` | Complex analysis, architecture, security |
