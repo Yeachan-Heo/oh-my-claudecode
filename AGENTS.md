@@ -4,7 +4,7 @@
 
 Multi-agent orchestration system for Claude Code CLI, providing intelligent delegation, parallel execution, and IDE-like capabilities through LSP/AST integration.
 
-**Version:** 3.9.2
+**Version:** 3.9.3
 **Purpose:** Transform Claude Code into a conductor of specialized AI agents
 **Inspired by:** oh-my-zsh / oh-my-opencode
 
