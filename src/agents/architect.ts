@@ -42,7 +42,7 @@ export const architectAgent: AgentConfig = {
   name: 'architect',
   description: 'Read-only consultation agent. High-IQ reasoning specialist for debugging hard problems and high-difficulty architecture design.',
   prompt: loadAgentPrompt('architect'),
-  tools: ['Read', 'Grep', 'Glob', 'Bash', 'WebSearch', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'clawdcoder_session_list', 'clawdcoder_session_output', 'clawdcoder_status'],
+  tools: ['Read', 'Grep', 'Glob', 'Bash', 'WebSearch', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search'],
   model: 'opus',
   defaultModel: 'opus',
   metadata: ARCHITECT_PROMPT_METADATA
