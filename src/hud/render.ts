@@ -21,6 +21,7 @@ import { renderSession } from './elements/session.js';
 import { renderAutopilot } from './elements/autopilot.js';
 import { renderCwd } from './elements/cwd.js';
 import { renderGitRepo, renderGitBranch } from './elements/git.js';
+import { renderModel } from './elements/model.js';
 import {
   getAnalyticsDisplay,
   renderAnalyticsLineWithConfig,
@@ -148,6 +149,12 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   if (enabledElements.gitBranch) {
     const gitBranchElement = renderGitBranch(context.cwd);
     if (gitBranchElement) gitElements.push(gitBranchElement);
+  }
+
+  // Model name
+  if (enabledElements.model && context.modelName) {
+    const modelElement = renderModel(context.modelName);
+    if (modelElement) gitElements.push(modelElement);
   }
 
   // [OMC] label

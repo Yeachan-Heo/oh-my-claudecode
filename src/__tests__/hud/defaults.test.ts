@@ -15,6 +15,10 @@ describe('HUD Default Configuration', () => {
       expect(DEFAULT_HUD_CONFIG.elements.gitBranch).toBe(false);
     });
 
+    it('should have model disabled by default for backward compatibility', () => {
+      expect(DEFAULT_HUD_CONFIG.elements.model).toBe(false);
+    });
+
     it('should use text format for thinking indicator by default', () => {
       expect(DEFAULT_HUD_CONFIG.elements.thinkingFormat).toBe('text');
     });
@@ -34,6 +38,10 @@ describe('HUD Default Configuration', () => {
 
       it(`${preset} preset should have gitBranch disabled`, () => {
         expect(PRESET_CONFIGS[preset].gitBranch).toBe(false);
+      });
+
+      it(`${preset} preset should have model disabled`, () => {
+        expect(PRESET_CONFIGS[preset].model).toBe(false);
       });
     });
   });

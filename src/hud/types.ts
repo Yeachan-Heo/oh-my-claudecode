@@ -251,6 +251,7 @@ export interface HudElementConfig {
   cwdFormat: CwdFormat;      // Path display format
   gitRepo: boolean;          // Show git repository name
   gitBranch: boolean;        // Show git branch
+  model: boolean;            // Show current model name
   omcLabel: boolean;
   rateLimits: boolean;  // Show 5h and weekly rate limits
   ralph: boolean;
@@ -299,6 +300,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     cwdFormat: 'relative',
     gitRepo: false,           // Disabled by default for backward compatibility
     gitBranch: false,         // Disabled by default for backward compatibility
+    model: false,             // Disabled by default for backward compatibility
     omcLabel: true,
     rateLimits: true,  // Show rate limits by default
     ralph: true,
@@ -336,6 +338,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'folder',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -363,6 +366,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'folder',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: false,
     rateLimits: false,
     ralph: false,
@@ -390,6 +394,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -417,6 +422,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
@@ -444,6 +450,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: true,
     rateLimits: false,
     ralph: true,
@@ -471,6 +478,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: false,
+    model: false,
     omcLabel: true,
     rateLimits: true,
     ralph: true,
