@@ -4,6 +4,7 @@ dist/
 .DS_Store
 .omc/
 .sisyphus/
+.idea/
 
 # Windows reserved names (prevent accidental creation)
 nul
