@@ -151,8 +151,8 @@ async function checkRalphLoop(
     return null;
   }
 
-  // Check if this is the right session
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 
@@ -296,8 +296,8 @@ async function checkUltrawork(
     return null;
   }
 
-  // If bound to a session, only reinforce for that session
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 

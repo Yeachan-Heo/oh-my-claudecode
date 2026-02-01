@@ -270,8 +270,8 @@ async function processRalph(input: HookInput): Promise<HookOutput> {
     return { continue: true };
   }
 
-  // Check if this is the right session
-  if (state.session_id && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return { continue: true };
   }
 
@@ -354,9 +354,9 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
 
   const messages: string[] = [];
 
-  // Check for active autopilot state
+  // Check for active autopilot state - only restore if it belongs to this session
   const autopilotState = readAutopilotState(directory);
-  if (autopilotState?.active) {
+  if (autopilotState?.active && autopilotState.session_id === sessionId) {
     messages.push(`<session-restore>
 
 [AUTOPILOT MODE RESTORED]
@@ -374,9 +374,9 @@ Continue autopilot execution until complete.
 `);
   }
 
-  // Check for active ultrawork state
+  // Check for active ultrawork state - only restore if it belongs to this session
   const ultraworkState = readUltraworkState(directory);
-  if (ultraworkState?.active) {
+  if (ultraworkState?.active && ultraworkState.session_id === sessionId) {
     messages.push(`<session-restore>
 
 [ULTRAWORK MODE RESTORED]

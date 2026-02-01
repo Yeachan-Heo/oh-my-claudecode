@@ -143,8 +143,8 @@ export async function checkAutopilot(
     return null;
   }
 
-  // Check session binding
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 

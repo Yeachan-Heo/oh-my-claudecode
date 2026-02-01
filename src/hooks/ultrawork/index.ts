@@ -159,8 +159,9 @@ export function shouldReinforceUltrawork(
     return false;
   }
 
-  // If bound to a session, only reinforce for that session
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: state must match the requesting session
+  // If state has session_id, caller must match. If caller has sessionId, state must match.
+  if (state.session_id !== sessionId) {
     return false;
   }
 
