@@ -299,6 +299,21 @@ export const codeReviewerLowAgent: AgentConfig = {
 // ============================================================
 
 /**
+ * Agent Role Disambiguation
+ *
+ * HIGH-tier review/planning agents have distinct, non-overlapping roles:
+ *
+ * | Agent | Role | What They Do | What They Don't Do |
+ * |-------|------|--------------|-------------------|
+ * | architect | code-analysis | Analyze code, debug, verify | Requirements, plan creation, plan review |
+ * | analyst | requirements-analysis | Find requirement gaps | Code analysis, planning, plan review |
+ * | planner | plan-creation | Create work plans | Requirements, code analysis, plan review |
+ * | critic | plan-review | Review plan quality | Requirements, code analysis, plan creation |
+ *
+ * Workflow: explore → analyst → planner → critic → executor → architect (verify)
+ */
+
+/**
  * Get all agent definitions as a record for use with Claude Agent SDK
  */
 export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<AgentConfig>>>): Record<string, {
@@ -310,15 +325,23 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
 }> {
   const agents = {
     // Base agents (from individual files)
+    // Role: code-analysis
+    // NotFor: requirements-gathering, plan-creation, plan-review
     architect: architectAgent,
     researcher: researcherAgent,
     explore: exploreAgent,
     designer: designerAgent,
     writer: writerAgent,
     vision: visionAgent,
+    // Role: plan-review
+    // NotFor: requirements-gathering, plan-creation, code-analysis
     critic: criticAgent,
+    // Role: requirements-analysis
+    // NotFor: code-analysis, plan-creation, plan-review
     analyst: analystAgent,
     executor: executorAgent,
+    // Role: plan-creation
+    // NotFor: requirements-gathering, code-analysis, plan-review
     planner: plannerAgent,
     'qa-tester': qaTesterAgent,
     scientist: scientistAgent,

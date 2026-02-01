@@ -1,71 +1,45 @@
 ---
 name: ultrawork
-description: Activate maximum performance mode with parallel agent orchestration for high-throughput task completion
+description: Parallel execution engine for high-throughput task completion
 ---
 
 # Ultrawork Skill
 
-Activates maximum performance mode with parallel agent orchestration.
+Parallel execution engine. This is a **COMPONENT**, not a standalone persistence mode.
 
-## When Activated
-
-This skill enhances Claude's capabilities by:
+## What Ultrawork Provides
 
 1. **Parallel Execution**: Running multiple agents simultaneously for independent tasks
-2. **Aggressive Delegation**: Routing tasks to specialist agents immediately
-3. **Background Operations**: Using `run_in_background: true` for long operations
-4. **Persistence Enforcement**: Never stopping until all tasks are verified complete
-5. **Smart Model Routing**: Using tiered agents to save tokens
+2. **Background Operations**: Using `run_in_background: true` for long operations
+3. **Smart Model Routing**: Using tiered agents to save tokens
 
-## Smart Model Routing (CRITICAL - SAVE TOKENS)
+## What Ultrawork Does NOT Provide
 
-**Choose tier based on task complexity: LOW (haiku) → MEDIUM (sonnet) → HIGH (opus)**
+- **Persistence**: Use `ralph` for "don't stop until done" behavior
+- **Verification Loop**: Use `ralph` for mandatory architect verification
+- **State Management**: Use `ralph` or `autopilot` for session persistence
 
-### Available Agents by Tier
+## Usage
 
-| Domain | LOW (Haiku) | MEDIUM (Sonnet) | HIGH (Opus) |
-|--------|-------------|-----------------|-------------|
-| **Analysis** | `architect-low` | `architect-medium` | `architect` |
-| **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | - |
-| **Research** | `researcher-low` | `researcher` | - |
-| **Frontend** | `designer-low` | `designer` | `designer-high` |
-| **Docs** | `writer` | - | - |
-| **Visual** | - | `vision` | - |
-| **Planning** | - | - | `planner`, `critic`, `analyst` |
-| **Testing** | - | `qa-tester` | - |
-| **Security** | `security-reviewer-low` | - | `security-reviewer` |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
-| **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | `code-reviewer` |
+Ultrawork is automatically activated by:
+- `ralph` (for persistent parallel work)
+- `autopilot` (for autonomous parallel work)
+- Direct invocation when you want parallel-only execution with manual oversight
 
-### Tier Selection Guide
+## Smart Model Routing
 
-| Task Complexity | Tier | Examples |
-|-----------------|------|----------|
-| Simple lookups | LOW | "What does this function return?", "Find where X is defined" |
-| Standard work | MEDIUM | "Add error handling", "Implement this feature" |
-| Complex analysis | HIGH | "Debug this race condition", "Refactor auth module across 5 files" |
+**FIRST ACTION:** Before delegating any work, read the agent reference file:
+```
+Read file: docs/shared/agent-tiers.md
+```
+This provides the complete agent tier matrix, MCP tool assignments, and selection guidance.
 
-### Routing Examples
-
-**CRITICAL: Always pass `model` parameter explicitly - Claude Code does NOT auto-apply models from agent definitions!**
+**CRITICAL: Always pass `model` parameter explicitly!**
 
 ```
-// Simple question → LOW tier (saves tokens!)
-Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="What does this function return?")
-
-// Standard implementation → MEDIUM tier
-Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="Add error handling to login")
-
-// Complex refactoring → HIGH tier
-Task(subagent_type="oh-my-claudecode:executor-high", model="opus", prompt="Refactor auth module using JWT across 5 files")
-
-// Quick file lookup → LOW tier
-Task(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="Find where UserService is defined")
-
-// Thorough search → MEDIUM tier
-Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Find all authentication patterns in the codebase")
+Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="...")
+Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
+Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="...")
 ```
 
 ## Background Execution Rules
@@ -74,32 +48,48 @@ Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Fi
 - Package installation: npm install, pip install, cargo build
 - Build processes: npm run build, make, tsc
 - Test suites: npm test, pytest, cargo test
-- Docker operations: docker build, docker pull
 
 **Run Blocking** (foreground):
 - Quick status checks: git status, ls, pwd
 - File reads, edits
 - Simple commands
 
-## Verification Checklist
+## Relationship to Other Modes
 
-Before stopping, verify:
-- [ ] TODO LIST: Zero pending/in_progress tasks
-- [ ] FUNCTIONALITY: All requested features work
-- [ ] TESTS: All tests pass (if applicable)
-- [ ] ERRORS: Zero unaddressed errors
+```
+ralph (persistence wrapper)
+└── includes: ultrawork (this skill)
+    └── provides: parallel execution only
 
-**If ANY checkbox is unchecked, CONTINUE WORKING.**
+autopilot (autonomous execution)
+└── includes: ralph
+    └── includes: ultrawork (this skill)
 
-## STATE CLEANUP ON COMPLETION
-
-**IMPORTANT: Delete state files on completion - do NOT just set `active: false`**
-
-When all verification passes and work is complete:
-
-```bash
-# Delete ultrawork state files
-rm -f .omc/state/ultrawork-state.json
+ecomode (token efficiency)
+└── modifies: ultrawork's model selection
 ```
 
-This ensures clean state for future sessions. Stale state files with `active: false` should not be left behind.
+## When to Use Ultrawork Directly
+
+Use ultrawork directly when you want:
+- Parallel execution without persistence guarantees
+- Manual oversight over completion
+- Quick parallel tasks where you'll verify yourself
+
+Use `ralph` instead when you want:
+- Verified completion (architect check)
+- Automatic retry on failure
+- Session persistence for resume
+
+## Completion Verification (Direct Invocations)
+
+When ultrawork is invoked directly (not via ralph), apply lightweight verification before claiming completion:
+
+### Quick Verification Checklist
+- [ ] **BUILD:** `tsc --noEmit` or equivalent passes
+- [ ] **TESTS:** Run affected tests, all pass
+- [ ] **ERRORS:** No new errors introduced
+
+This is lighter than ralph's full verification but ensures basic quality for direct ultrawork usage.
+
+For full persistence and comprehensive verification, use `ralph` mode instead.

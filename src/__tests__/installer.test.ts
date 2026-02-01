@@ -280,14 +280,14 @@ describe('Installer Constants', () => {
     });
 
     it('should include tiered agent routing table', () => {
-      // Verify the Smart Model Routing section and agent tiers exist
+      // Verify the Smart Model Routing section exists with model names
       expect(CLAUDE_MD_CONTENT).toContain('Smart Model Routing');
-      expect(CLAUDE_MD_CONTENT).toContain('LOW (Haiku)');
-      expect(CLAUDE_MD_CONTENT).toContain('MEDIUM (Sonnet)');
-      expect(CLAUDE_MD_CONTENT).toContain('HIGH (Opus)');
-      // Agent names appear in tier tables
-      expect(CLAUDE_MD_CONTENT).toContain('explore');
-      expect(CLAUDE_MD_CONTENT).toContain('executor-low');
+      expect(CLAUDE_MD_CONTENT).toContain('haiku');
+      expect(CLAUDE_MD_CONTENT).toContain('sonnet');
+      expect(CLAUDE_MD_CONTENT).toContain('opus');
+      // Agent tiers reference exists (detailed table moved to shared docs)
+      expect(CLAUDE_MD_CONTENT).toContain('Agent Tiers Reference');
+      expect(CLAUDE_MD_CONTENT).toContain('agent-tiers.md');
     });
 
     it('should document magic keywords and compatibility commands', () => {

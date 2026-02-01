@@ -33,8 +33,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs",
+    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && npm run compose-docs",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
+    "compose-docs": "node scripts/compose-docs.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "vitest",
@@ -47,7 +48,7 @@
     "sync-metadata:verify": "tsx scripts/sync-metadata.ts --verify",
     "sync-metadata:dry-run": "tsx scripts/sync-metadata.ts --dry-run",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm run compose-docs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",

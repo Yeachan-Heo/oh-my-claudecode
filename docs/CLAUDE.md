@@ -8,7 +8,7 @@ You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a per
 - [Part 1: Core Protocol](#part-1-core-protocol-critical)
 - [Part 2: User Experience](#part-2-user-experience)
 - [Part 3: Complete Reference](#part-3-complete-reference)
-- [Part 4: New Features](#part-4-new-features-v31---v34)
+- [Part 4: Shared Documentation](#part-4-shared-documentation)
 - [Part 5: Internal Protocols](#part-5-internal-protocols)
 - [Part 6: Announcements](#part-6-announcements)
 - [Part 7: Setup](#part-7-setup)
@@ -79,6 +79,7 @@ When implementing with any external tool (Claude Code hooks, React, database dri
 | **Research tasks** | NEVER | researcher |
 | **Data analysis** | NEVER | scientist / scientist-high |
 | **Visual analysis** | NEVER | vision |
+| **Strategic planning** | NEVER | planner |
 
 ### Mandatory Skill Invocation
 
@@ -241,337 +242,83 @@ User says "cancelomc", "stopomc" → Invoke unified `cancel` skill (automaticall
 
 ## PART 3: COMPLETE REFERENCE
 
-### All Skills
+### Core Skills
 
-| Skill | Purpose | Auto-Trigger | Manual |
-|-------|---------|--------------|--------|
-| `autopilot` | Full autonomous execution from idea to working code | "autopilot", "build me", "I want a" | `/oh-my-claudecode:autopilot` |
-| `orchestrate` | Core multi-agent orchestration | Always active | - |
-| `ralph` | Persistence until verified complete | "don't stop", "must complete" | `/oh-my-claudecode:ralph` |
-| `ultrawork` | Maximum parallel execution | "ulw", "ultrawork" (also "fast"/"parallel" per config) | `/oh-my-claudecode:ultrawork` |
-| `plan` | Planning session with interview workflow | "plan this", "plan the", broad requests | `/oh-my-claudecode:plan` |
-| `ralplan` | Iterative planning (Planner+Architect+Critic) | "ralplan" keyword | `/oh-my-claudecode:ralplan` |
-| `review` | Review plan with Critic | "review plan" | `/oh-my-claudecode:review` |
-| `analyze` | Deep analysis/investigation | "analyze", "debug", "why" | `/oh-my-claudecode:analyze` |
-| `deepsearch` | Thorough codebase search | "search", "find", "where" | `/oh-my-claudecode:deepsearch` |
-| `deepinit` | Generate AGENTS.md hierarchy | "index codebase" | `/oh-my-claudecode:deepinit` |
-| `frontend-ui-ux` | Design sensibility for UI | UI/component context | (silent) |
-| `git-master` | Git expertise, atomic commits | git/commit context | (silent) |
-| `ultraqa` | QA cycling: test/fix/repeat | "test", "QA", "verify" | `/oh-my-claudecode:ultraqa` |
-| `learner` | Extract reusable skill from session | "extract skill" | `/oh-my-claudecode:learner` |
-| `note` | Save to notepad for memory | "remember", "note" | `/oh-my-claudecode:note` |
-| `hud` | Configure HUD statusline | - | `/oh-my-claudecode:hud` |
-| `doctor` | Diagnose installation issues | - | `/oh-my-claudecode:doctor` |
-| `help` | Show OMC usage guide | - | `/oh-my-claudecode:help` |
-| `omc-setup` | One-time setup wizard | - | `/oh-my-claudecode:omc-setup` |
-| `ralph-init` | Initialize PRD for structured ralph | - | `/oh-my-claudecode:ralph-init` |
-| `release` | Automated release workflow | - | `/oh-my-claudecode:release` |
-| `ultrapilot` | Parallel autopilot (3-5x faster) | "ultrapilot", "parallel build", "swarm build" | `/oh-my-claudecode:ultrapilot` |
-| `swarm` | N coordinated agents with task claiming | "swarm N agents" | `/oh-my-claudecode:swarm` |
-| `pipeline` | Sequential agent chaining | "pipeline", "chain" | `/oh-my-claudecode:pipeline` |
-| `cancel` | Unified cancellation for all modes | "cancelomc", "stopomc" | `/oh-my-claudecode:cancel` |
-| `ecomode` | Token-efficient parallel execution | "eco", "efficient", "budget" | `/oh-my-claudecode:ecomode` |
-| `research` | Parallel scientist orchestration | "research", "analyze data", "statistics" | `/oh-my-claudecode:research` |
-| `tdd` | TDD enforcement: test-first development | "tdd", "test first" | `/oh-my-claudecode:tdd` |
-| `mcp-setup` | Configure MCP servers for extended capabilities | "setup mcp", "configure mcp" | `/oh-my-claudecode:mcp-setup` |
-| `learn-about-omc` | Usage pattern analysis | - | `/oh-my-claudecode:learn-about-omc` |
-| `build-fix` | Fix build and TypeScript errors with minimal changes | - | `/oh-my-claudecode:build-fix` |
-| `code-review` | Run a comprehensive code review | - | `/oh-my-claudecode:code-review` |
-| `security-review` | Run a comprehensive security review on code | - | `/oh-my-claudecode:security-review` |
-| `writer-memory` | Agentic memory system for writers - track characters, relationships, scenes | - | `/oh-my-claudecode:writer-memory` |
-| `project-session-manager` | Manage isolated dev environments with git worktrees and tmux | - | `/oh-my-claudecode:project-session-manager` |
-| `local-skills-setup` | Set up and manage local skills for automatic matching and invocation | - | `/oh-my-claudecode:local-skills-setup` |
-| `skill` | Manage local skills - list, add, remove, search, edit | - | `/oh-my-claudecode:skill` |
+**Execution modes:** `autopilot`, `ralph`, `ultrawork`, `ultrapilot`, `ecomode`, `swarm`, `pipeline`, `ultraqa`
+
+**Planning:** `plan`, `ralplan`, `review`, `analyze`
+
+**Search:** `deepsearch`, `deepinit`
+
+**Silent activators:** `frontend-ui-ux` (UI work), `git-master` (commits), `orchestrate` (always active)
+
+**Utilities:** `cancel`, `note`, `learner`, `tdd`, `research`, `build-fix`, `code-review`, `security-review`
+
+**Setup:** `omc-setup`, `mcp-setup`, `hud`, `doctor`, `help`
+
+Run `/oh-my-claudecode:help` for the complete skill reference with triggers.
 
 ### Choosing the Right Mode
 
-| If you want... | Use this mode | Trigger keyword |
-|----------------|---------------|-----------------|
-| Full autonomous build from idea | `autopilot` | "autopilot", "build me", "I want a" |
-| Parallel autopilot (3-5x faster) | `ultrapilot` | "ultrapilot", "parallel build" |
-| Persistence until verified done | `ralph` | "ralph", "don't stop", "must complete" |
-| Maximum parallelism, manual verify | `ultrawork` | "ulw", "ultrawork" |
-| Cost-efficient parallel execution | `ecomode` | "eco", "ecomode", "budget" |
-| Coordinated N agents on task pool | `swarm` | "swarm N agents" |
-| Sequential agent chaining | `pipeline` | "pipeline", "chain agents" |
-| QA cycling: test, fix, repeat | `ultraqa` | via autopilot transition |
+See [Mode Selection Guide](./shared/mode-selection-guide.md) for detailed decision flowcharts and examples.
 
 #### Mode Relationships
 
-- **ralph includes ultrawork**: When ralph is activated, it automatically enables ultrawork's parallel execution. No need to combine keywords.
-- **autopilot can transition**: Autopilot may transition to ralph (for persistence) or ultraqa (for QA cycling) during execution.
-- **ecomode = ultrawork + cheaper models**: Same parallel behavior but routes to haiku/sonnet agents for cost savings.
+See [Mode Hierarchy](./shared/mode-hierarchy.md) for the complete mode inheritance tree, decision flowchart, and combination rules.
+
+Key points:
+- **ralph includes ultrawork**: ralph is a persistence wrapper around ultrawork's parallelism
+- **ecomode is a modifier**: It only changes model routing, not execution behavior
+- **autopilot can transition**: To ralph (persistence) or ultraqa (QA cycling)
 
 ### All 32 Agents
 
-Always use `oh-my-claudecode:` prefix when calling via Task tool.
+See [Agent Tiers Reference](./shared/agent-tiers.md) for the complete agent tier matrix with all 32 agents organized by domain and tier.
 
-| Domain | LOW (Haiku) | MEDIUM (Sonnet) | HIGH (Opus) |
-|--------|-------------|-----------------|-------------|
-| **Analysis** | `architect-low` | `architect-medium` | `architect` |
-| **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | `explore-high` |
-| **Research** | `researcher-low` | `researcher` | - |
-| **Frontend** | `designer-low` | `designer` | `designer-high` |
-| **Docs** | `writer` | - | - |
-| **Visual** | - | `vision` | - |
-| **Planning** | - | - | `planner` |
-| **Critique** | - | - | `critic` |
-| **Pre-Planning** | - | - | `analyst` |
-| **Testing** | - | `qa-tester` | `qa-tester-high` |
-| **Security** | `security-reviewer-low` | - | `security-reviewer` |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
-| **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | `code-reviewer` |
-| **Data Science** | `scientist-low` | `scientist` | `scientist-high` |
+Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ### Agent Selection Guide
 
-| Task Type | Best Agent | Model |
-|-----------|------------|-------|
-| Quick code lookup | `explore` | haiku |
-| Find files/patterns | `explore` or `explore-medium` | haiku/sonnet |
-| Complex architectural search | `explore-high` | opus |
-| Simple code change | `executor-low` | haiku |
-| Feature implementation | `executor` | sonnet |
-| Complex refactoring | `executor-high` | opus |
-| Debug simple issue | `architect-low` | haiku |
-| Debug complex issue | `architect` | opus |
-| UI component | `designer` | sonnet |
-| Complex UI system | `designer-high` | opus |
-| Write docs/comments | `writer` | haiku |
-| Research docs/APIs | `researcher` | sonnet |
-| Analyze images/diagrams | `vision` | sonnet |
-| Strategic planning | `planner` | opus |
-| Review/critique plan | `critic` | opus |
-| Pre-planning analysis | `analyst` | opus |
-| Test CLI interactively | `qa-tester` | sonnet |
-| Security review | `security-reviewer` | opus |
-| Quick security scan | `security-reviewer-low` | haiku |
-| Fix build errors | `build-fixer` | sonnet |
-| Simple build fix | `build-fixer-low` | haiku |
-| TDD workflow | `tdd-guide` | sonnet |
-| Quick test suggestions | `tdd-guide-low` | haiku |
-| Code review | `code-reviewer` | opus |
-| Quick code check | `code-reviewer-low` | haiku |
-| Data analysis/stats | `scientist` | sonnet |
-| Quick data inspection | `scientist-low` | haiku |
-| Complex ML/hypothesis | `scientist-high` | opus |
-| Find symbol references | `explore-high` | opus |
-| Get file/workspace symbol outline | `explore` | haiku |
-| Structural code pattern search | `explore` | haiku |
-| Structural code transformation | `executor-high` | opus |
-| Project-wide type checking | `build-fixer` | sonnet |
-| Check single file for errors | `executor-low` | haiku |
-| Data analysis / computation | `scientist` | sonnet |
+See [Agent Tiers Reference](./shared/agent-tiers.md) for the complete agent-to-task selection guide.
 
 ### MCP Tools & Agent Capabilities
 
-#### Tool Inventory
+See [Agent Tiers Reference](./shared/agent-tiers.md) for the full MCP tool assignment matrix.
 
-| Tool | Category | Purpose | Assigned to Agents? |
-|------|----------|---------|---------------------|
-| `lsp_hover` | LSP | Get type info and documentation at a code position | NO (orchestrator-direct) |
-| `lsp_goto_definition` | LSP | Jump to where a symbol is defined | NO (orchestrator-direct) |
-| `lsp_find_references` | LSP | Find all usages of a symbol across the codebase | YES (`explore-high` only) |
-| `lsp_document_symbols` | LSP | Get outline of all symbols in a file | YES |
-| `lsp_workspace_symbols` | LSP | Search for symbols by name across the workspace | YES |
-| `lsp_diagnostics` | LSP | Get errors, warnings, and hints for a file | YES |
-| `lsp_diagnostics_directory` | LSP | Project-level type checking (tsc --noEmit or LSP) | YES |
-| `lsp_prepare_rename` | LSP | Check if a symbol can be renamed | NO (orchestrator-direct) |
-| `lsp_rename` | LSP | Rename a symbol across the entire project | NO (orchestrator-direct) |
-| `lsp_code_actions` | LSP | Get available refactorings and quick fixes | NO (orchestrator-direct) |
-| `lsp_code_action_resolve` | LSP | Get full edit details for a code action | NO (orchestrator-direct) |
-| `lsp_servers` | LSP | List available language servers and install status | NO (orchestrator-direct) |
-| `ast_grep_search` | AST | Pattern-based structural code search using AST | YES |
-| `ast_grep_replace` | AST | Pattern-based structural code transformation | YES (`executor-high` only) |
-| `python_repl` | Data | Persistent Python REPL for data analysis and computation | YES |
+**Key tools:**
+- LSP tools (hover, definition, references, diagnostics) for code intelligence
+- AST grep (search, replace) for structural code patterns
+- Python REPL for data analysis
 
-#### Agent Tool Matrix (MCP Tools Only)
-
-| Agent | LSP Diagnostics | LSP Dir Diagnostics | LSP Symbols | LSP References | AST Search | AST Replace | Python REPL |
-|-------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| `explore` | - | - | doc + workspace | - | yes | - | - |
-| `explore-medium` | - | - | doc + workspace | - | yes | - | - |
-| `explore-high` | - | - | doc + workspace | yes | yes | - | - |
-| `architect-low` | yes | - | - | - | - | - | - |
-| `architect-medium` | yes | yes | - | - | yes | - | - |
-| `architect` | yes | yes | - | - | yes | - | - |
-| `executor-low` | yes | - | - | - | - | - | - |
-| `executor` | yes | yes | - | - | - | - | - |
-| `executor-high` | yes | yes | - | - | yes | yes | - |
-| `build-fixer` | yes | yes | - | - | - | - | - |
-| `build-fixer-low` | yes | yes | - | - | - | - | - |
-| `tdd-guide` | yes | - | - | - | - | - | - |
-| `tdd-guide-low` | yes | - | - | - | - | - | - |
-| `code-reviewer` | yes | - | - | - | yes | - | - |
-| `code-reviewer-low` | yes | - | - | - | - | - | - |
-| `qa-tester` | yes | - | - | - | - | - | - |
-| `qa-tester-high` | yes | - | - | - | - | - | - |
-| `scientist-low` | - | - | - | - | - | - | yes |
-| `scientist` | - | - | - | - | - | - | yes |
-| `scientist-high` | - | - | - | - | - | - | yes |
-
-#### Unassigned Tools (Orchestrator-Direct)
-
-The following 7 MCP tools are NOT assigned to any agent. Use directly when needed:
-
-| Tool | When to Use Directly |
-|------|---------------------|
-| `lsp_hover` | Quick type lookups during conversation |
-| `lsp_goto_definition` | Navigating to symbol definitions during analysis |
-| `lsp_prepare_rename` | Checking rename feasibility before deciding on approach |
-| `lsp_rename` | Safe rename operations (returns edit preview, does not auto-apply) |
-| `lsp_code_actions` | Discovering available refactorings |
-| `lsp_code_action_resolve` | Getting details of a specific code action |
-| `lsp_servers` | Checking language server availability |
-
-For complex rename or refactoring tasks requiring implementation, delegate to `executor-high` which can use `ast_grep_replace` for structural transformations.
-
-#### Tool Selection Guidance
-
-- **Need file symbol outline or workspace search?** Use `lsp_document_symbols`/`lsp_workspace_symbols` via `explore`, `explore-medium`, or `explore-high`
-- **Need to find all usages of a symbol?** Use `lsp_find_references` via `explore-high` (only agent with it)
-- **Need structural code patterns?** (e.g., "find all functions matching X shape") Use `ast_grep_search` via `explore` family, `architect`/`architect-medium`, or `code-reviewer`
-- **Need to transform code structurally?** Use `ast_grep_replace` via `executor-high` (only agent with it)
-- **Need project-wide type checking?** Use `lsp_diagnostics_directory` via `architect`/`architect-medium`, `executor`/`executor-high`, or `build-fixer` family
-- **Need single-file error checking?** Use `lsp_diagnostics` via many agents (see matrix)
-- **Need data analysis / computation?** Use `python_repl` via `scientist` agents (all tiers)
-- **Need quick type info or definition lookup?** Use `lsp_hover`/`lsp_goto_definition` directly (orchestrator-direct tools)
+**Unassigned tools** (use directly): `lsp_hover`, `lsp_goto_definition`, `lsp_prepare_rename`, `lsp_rename`, `lsp_code_actions`, `lsp_code_action_resolve`, `lsp_servers`
 
 ---
 
-## PART 4: NEW FEATURES (v3.1 - v3.4)
+## PART 4: NEW FEATURES & SHARED DOCUMENTATION
 
-### Notepad Wisdom System
+### Features (v3.1 - v3.4)
 
-Plan-scoped wisdom capture for learnings, decisions, issues, and problems.
+See [Features Reference](./shared/features.md) for complete documentation of:
+- Notepad Wisdom System (plan-scoped learning capture)
+- Delegation Categories (auto-mapping to model tier/temperature)
+- Directory Diagnostics Tool (project-level type checking)
+- Session Resume (background agent continuation)
+- Ultrapilot (parallel autopilot, 3-5x faster)
+- Swarm (N-agent coordinated task pool)
+- Pipeline (sequential agent chaining with presets)
+- Unified Cancel (smart mode detection)
+- Verification Module (standard checks, evidence validation)
+- State Management (standardized paths, `~/.claude/` prohibition)
 
-**Location:** `.omc/notepads/{plan-name}/`
+### Shared Reference Documents
 
-| File | Purpose |
-|------|---------|
-| `learnings.md` | Technical discoveries and patterns |
-| `decisions.md` | Architectural and design decisions |
-| `issues.md` | Known issues and workarounds |
-| `problems.md` | Blockers and challenges |
-
-**API:** `initPlanNotepad()`, `addLearning()`, `addDecision()`, `addIssue()`, `addProblem()`, `getWisdomSummary()`, `readPlanWisdom()`
-
-### Delegation Categories
-
-Semantic task categorization that auto-maps to model tier, temperature, and thinking budget.
-
-| Category | Tier | Temperature | Thinking | Use For |
-|----------|------|-------------|----------|---------|
-| `visual-engineering` | HIGH | 0.7 | high | UI/UX, frontend, design systems |
-| `ultrabrain` | HIGH | 0.3 | max | Complex reasoning, architecture, deep debugging |
-| `artistry` | MEDIUM | 0.9 | medium | Creative solutions, brainstorming |
-| `quick` | LOW | 0.1 | low | Simple lookups, basic operations |
-| `writing` | MEDIUM | 0.5 | medium | Documentation, technical writing |
-
-**Auto-detection:** Categories detect from prompt keywords automatically.
-
-### Directory Diagnostics Tool
-
-Project-level type checking via `lsp_diagnostics_directory` tool.
-
-**Strategies:**
-- `auto` (default) - Auto-selects best strategy, prefers tsc when tsconfig.json exists
-- `tsc` - Fast, uses TypeScript compiler
-- `lsp` - Fallback, iterates files via Language Server
-
-**Usage:** Check entire project for errors before commits or after refactoring.
-
-### Session Resume
-
-Background agents can be resumed with full context via `resume-session` tool.
-
-### Ultrapilot (v3.4)
-
-Parallel autopilot with up to 5 concurrent workers for 3-5x faster execution.
-
-**Trigger:** "ultrapilot", "parallel build", "swarm build"
-
-**How it works:**
-1. Task decomposition engine breaks complex tasks into parallelizable subtasks
-2. File ownership coordinator assigns non-overlapping file sets to workers
-3. Workers execute in parallel, coordinator manages shared files
-4. Results integrated with conflict detection
-
-**Best for:** Multi-component systems, fullstack apps, large refactoring
-
-**State files:**
-- `.omc/state/ultrapilot-state.json` - Session state
-- `.omc/state/ultrapilot-ownership.json` - File ownership
-
-### Swarm (v3.4)
-
-N coordinated agents with atomic task claiming from shared pool.
-
-**Usage:** `/swarm 5:executor "fix all TypeScript errors"`
-
-**Features:**
-- Shared task list with pending/claimed/done status
-- 5-minute timeout per task with auto-release
-- Clean completion when all tasks done
-
-### Pipeline (v3.4)
-
-Sequential agent chaining with data passing between stages.
-
-**Built-in Presets:**
-| Preset | Stages |
-|--------|--------|
-| `review` | explore → architect → critic → executor |
-| `implement` | planner → executor → tdd-guide |
-| `debug` | explore → architect → build-fixer |
-| `research` | parallel(researcher, explore) → architect → writer |
-| `refactor` | explore → architect-medium → executor-high → qa-tester |
-| `security` | explore → security-reviewer → executor → security-reviewer-low |
-
-**Custom pipelines:** `/pipeline explore:haiku -> architect:opus -> executor:sonnet`
-
-### Unified Cancel (v3.4)
-
-Smart cancellation that auto-detects active mode.
-
-**Usage:** `/cancel` or just say "cancelomc", "stopomc"
-
-Auto-detects and cancels: autopilot, ultrapilot, ralph, ultrawork, ultraqa, ecomode, swarm, pipeline
-Use `--force` or `--all` to clear ALL states.
-
-### Verification Module (v3.4)
-
-Reusable verification protocol for workflows.
-
-**Standard Checks:** BUILD, TEST, LINT, FUNCTIONALITY, ARCHITECT, TODO, ERROR_FREE
-
-**Evidence validation:** 5-minute freshness detection, pass/fail tracking
-
-### State Management (v3.4)
-
-Standardized state file locations.
-
-**Standard paths for all mode state files:**
-- Primary: `.omc/state/{name}.json` (local, per-project)
-- Global backup: `~/.omc/state/{name}.json` (global, session continuity)
-
-**Mode State Files:**
-| Mode | State File |
-|------|-----------|
-| ralph | `ralph-state.json` |
-| autopilot | `autopilot-state.json` |
-| ultrapilot | `ultrapilot-state.json` |
-| ultrawork | `ultrawork-state.json` |
-| ecomode | `ecomode-state.json` |
-| ultraqa | `ultraqa-state.json` |
-| pipeline | `pipeline-state.json` |
-| swarm | `swarm-summary.json` + `swarm-active.marker` |
-
-**Important:** Never store OMC state in `~/.claude/` - that directory is reserved for Claude Code itself.
-
-Legacy locations auto-migrated on read.
+| Topic | Document |
+|-------|----------|
+| Agent Tiers & Selection | [agent-tiers.md](./shared/agent-tiers.md) |
+| Mode Hierarchy & Relationships | [mode-hierarchy.md](./shared/mode-hierarchy.md) |
+| Mode Selection Guide | [mode-selection-guide.md](./shared/mode-selection-guide.md) |
+| Verification Tiers | [verification-tiers.md](./shared/verification-tiers.md) |
+| Features Reference | [features.md](./shared/features.md) |
 
 ---
 
@@ -598,75 +345,33 @@ When in planning/interview mode, use the `AskUserQuestion` tool for preference q
 **Applies to**: Plan skill, planning interviews
 **Question types**: Preference, Requirement, Scope, Constraint, Risk tolerance
 
-### Mandatory Architect Verification
+### Tiered Architect Verification
 
-**HARD RULE: Never claim completion without Architect approval.**
+**HARD RULE: Never claim completion without verification.**
 
-```
-1. Complete all work
-2. Spawn Architect: Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="Verify...")
-3. WAIT for response
-4. If APPROVED → output completion
-5. If REJECTED → fix issues and re-verify
-```
+Verification scales with task complexity:
 
-### Verification-Before-Completion Protocol
+| Tier | When | Agent |
+|------|------|-------|
+| LIGHT | <5 files, <100 lines, full tests | architect-low (haiku) |
+| STANDARD | Default | architect-medium (sonnet) |
+| THOROUGH | >20 files, security/architectural | architect (opus) |
 
-**Iron Law:** NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+See [Verification Tiers](./shared/verification-tiers.md) for complete selection rules.
 
-Before ANY agent says "done", "fixed", or "complete":
+**Iron Law:** NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE. Always: IDENTIFY what proves the claim, RUN the verification, READ the output, then CLAIM with evidence. Red flags: "should", "probably", "seems to" without a fresh test/build run.
 
-| Step | Action |
-|------|--------|
-| 1 | IDENTIFY: What command proves this claim? |
-| 2 | RUN: Execute verification command |
-| 3 | READ: Check output - did it pass? |
-| 4 | CLAIM: Make claim WITH evidence |
+### Parallelization & Background Execution
 
-**Red Flags (agent must STOP and verify):**
-- Using "should", "probably", "seems to"
-- Expressing satisfaction before verification
-- Claiming completion without fresh test/build run
-
-**Evidence Types:**
-| Claim | Required Evidence |
-|-------|-------------------|
-| "Fixed" | Test showing it passes now |
-| "Implemented" | lsp_diagnostics clean + build pass |
-| "Refactored" | All tests still pass |
-| "Debugged" | Root cause identified with file:line |
-
-### Parallelization Rules
-
-- **2+ independent tasks** with >30 seconds work → Run in parallel
-- **Sequential dependencies** → Run in order
-- **Quick tasks** (<10 seconds) → Do directly (read, status check)
-
-### Background Execution
-
-**Run in Background** (`run_in_background: true`):
-- npm install, pip install, cargo build
-- npm run build, make, tsc
-- npm test, pytest, cargo test
-
-**Run Blocking** (foreground):
-- git status, ls, pwd
-- File reads/edits
-- Quick commands
-
-Maximum 5 concurrent background tasks.
+- **Parallel:** 2+ independent tasks with >30s work each
+- **Sequential:** Tasks with dependencies
+- **Direct:** Quick tasks (<10s) like reads, status checks
+- **Background** (`run_in_background: true`): installs, builds, tests (max 5 concurrent)
+- **Foreground:** git, file ops, quick commands
 
 ### Context Persistence
 
-Use `<remember>` tags to survive conversation compaction:
-
-| Tag | Lifetime | Use For |
-|-----|----------|---------|
-| `<remember>info</remember>` | 7 days | Session-specific context |
-| `<remember priority>info</remember>` | Permanent | Critical patterns/facts |
-
-**DO capture:** Architecture decisions, error resolutions, user preferences
-**DON'T capture:** Progress (use todos), temporary state, info in AGENTS.md
+Use `<remember>` tags to survive compaction: `<remember>info</remember>` (7 days) or `<remember priority>info</remember>` (permanent). Capture architecture decisions, error resolutions, user preferences. Do NOT capture progress (use todos) or info already in AGENTS.md.
 
 ### Continuation Enforcement
 
@@ -685,19 +390,7 @@ Before concluding ANY session, verify:
 
 ## PART 6: ANNOUNCEMENTS
 
-When you activate a major behavior, announce it:
-
-> "I'm activating **autopilot** for full autonomous execution from idea to working code."
-
-> "I'm activating **ralph-loop** to ensure this task completes fully."
-
-> "I'm activating **ultrawork** for maximum parallel execution."
-
-> "I'm starting a **planning session** - I'll interview you about requirements."
-
-> "I'm delegating this to the **architect** agent for deep analysis."
-
-This keeps users informed without requiring them to request features.
+Announce major behavior activations to keep users informed: autopilot, ralph-loop, ultrawork, planning sessions, architect delegation. Example: "I'm activating **autopilot** for full autonomous execution."
 
 ---
 

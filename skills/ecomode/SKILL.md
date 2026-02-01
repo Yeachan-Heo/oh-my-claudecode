@@ -1,23 +1,39 @@
 ---
 name: ecomode
-description: Token-efficient parallel execution mode using Haiku and Sonnet agents
+description: Token-efficient model routing modifier
 ---
 
 # Ecomode Skill
 
-Activates token-efficient parallel execution for pro-plan users who prioritize cost efficiency.
+Token-efficient model routing. This is a **MODIFIER**, not a standalone execution mode.
 
-## When Activated
+## What Ecomode Does
 
-This skill enhances Claude's capabilities by:
+Overrides default model selection to prefer cheaper tiers:
 
-1. **Parallel Execution**: Running multiple agents simultaneously for independent tasks
-2. **Token-Conscious Routing**: Preferring Haiku and Sonnet agents, avoiding Opus
-3. **Background Operations**: Using `run_in_background: true` for long operations
-4. **Persistence Enforcement**: Never stopping until all tasks are verified complete
-5. **Cost Optimization**: Minimizing token usage while maintaining quality
+| Default Tier | Ecomode Override |
+|--------------|------------------|
+| HIGH (opus) | MEDIUM (sonnet), HIGH only if essential |
+| MEDIUM (sonnet) | LOW (haiku) first, MEDIUM if fails |
+| LOW (haiku) | LOW (haiku) - no change |
 
-## Ecomode Routing Rules (CRITICAL)
+## What Ecomode Does NOT Do
+
+- **Persistence**: Use `ralph` for "don't stop until done"
+- **Parallel Execution**: Use `ultrawork` for parallel agents
+- **Delegation Enforcement**: Always active via core orchestration
+
+## Combining Ecomode with Other Modes
+
+Ecomode is a modifier that combines with execution modes:
+
+| Combination | Effect |
+|-------------|--------|
+| `eco ralph` | Ralph loop with cheaper agents |
+| `eco ultrawork` | Parallel execution with cheaper agents |
+| `eco autopilot` | Full autonomous with cost optimization |
+
+## Ecomode Routing Rules
 
 **ALWAYS prefer lower tiers. Only escalate when task genuinely requires it.**
 
@@ -25,117 +41,56 @@ This skill enhances Claude's capabilities by:
 |----------|------|
 | DEFAULT | Use LOW tier (Haiku) for all tasks |
 | UPGRADE | Use MEDIUM (Sonnet) only when task complexity warrants |
-| AVOID | HIGH tier (Opus) - only use for planning/critique if explicitly essential |
+| AVOID | HIGH tier (Opus) - only for planning/critique if essential |
 
-## Smart Model Routing (PREFER LOW TIER)
+## Agent Selection in Ecomode
 
-**Choose tier based on task complexity: LOW (haiku) preferred → MEDIUM (sonnet) fallback → HIGH (opus) AVOID**
+**FIRST ACTION:** Before delegating any work, read the agent reference file:
+```
+Read file: docs/shared/agent-tiers.md
+```
+This provides the complete agent tier matrix, MCP tool assignments, and selection guidance.
 
-### Agent Routing Table
-
-| Domain | PREFERRED (Haiku) | FALLBACK (Sonnet) | AVOID (Opus) |
-|--------|-------------------|-------------------|--------------|
-| **Analysis** | `architect-low` | `architect-medium` | ~~`architect`~~ |
-| **Execution** | `executor-low` | `executor` | ~~`executor-high`~~ |
-| **Search** | `explore` | `explore-medium` | ~~`explore-high`~~ |
-| **Research** | `researcher-low` | `researcher` | - |
-| **Frontend** | `designer-low` | `designer` | ~~`designer-high`~~ |
-| **Docs** | `writer` | - | - |
-| **Visual** | - | `vision` | - |
-| **Planning** | - | - | `planner` (if essential) |
-| **Critique** | - | - | `critic` (if essential) |
-| **Testing** | - | `qa-tester` | ~~`qa-tester-high`~~ |
-| **Security** | `security-reviewer-low` | - | ~~`security-reviewer`~~ |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
-| **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | ~~`code-reviewer`~~ |
-| **Data Science** | `scientist-low` | `scientist` | ~~`scientist-high`~~ |
-
-### Tier Selection Guide (Token-Conscious)
-
-| Task Complexity | Tier | Examples |
-|-----------------|------|----------|
-| Simple lookups | LOW | "What does this function return?", "Find where X is defined" |
-| Standard work | LOW first, MEDIUM if fails | "Add error handling", "Implement this feature" |
-| Complex analysis | MEDIUM | "Debug this issue", "Refactor this module" |
-| Planning only | HIGH (if essential) | "Design architecture for new system" |
-
-### Routing Examples
-
-**CRITICAL: Always pass `model` parameter explicitly - Claude Code does NOT auto-apply models from agent definitions!**
+**Ecomode preference order:**
 
 ```
-// Simple question → LOW tier (DEFAULT)
-Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="What does this function return?")
+// PREFERRED - Use for most tasks
+Task(subagent_type="oh-my-claudecode:executor-low", model="haiku", prompt="...")
+Task(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="...")
+Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="...")
 
-// Standard implementation → TRY LOW first
-Task(subagent_type="oh-my-claudecode:executor-low", model="haiku", prompt="Add validation to login form")
+// FALLBACK - Only if LOW fails
+Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
+Task(subagent_type="oh-my-claudecode:architect-medium", model="sonnet", prompt="...")
 
-// If LOW fails, escalate to MEDIUM
-Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="Add error handling to login")
-
-// File lookup → ALWAYS LOW
-Task(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="Find where UserService is defined")
-
-// Only use MEDIUM for complex patterns
-Task(subagent_type="oh-my-claudecode:explore-medium", model="sonnet", prompt="Find all authentication patterns in the codebase")
+// AVOID - Only for planning/critique if essential
+Task(subagent_type="oh-my-claudecode:planner", model="opus", prompt="...")
 ```
 
-## DELEGATION ENFORCEMENT (CRITICAL)
+## Delegation Enforcement
 
-**YOU ARE AN ORCHESTRATOR, NOT AN IMPLEMENTER.**
+Ecomode maintains all delegation rules from core protocol with cost-optimized routing:
 
-| Action | YOU Do | DELEGATE |
-|--------|--------|----------|
-| Read files for context | ✓ | |
-| Track progress (TODO) | ✓ | |
-| Spawn parallel agents | ✓ | |
-| **ANY code change** | ✗ NEVER | executor-low/executor |
-| **UI work** | ✗ NEVER | designer-low/designer |
-| **Docs** | ✗ NEVER | writer |
+| Action | Delegate To | Model |
+|--------|-------------|-------|
+| Code changes | executor-low / executor | haiku / sonnet |
+| Analysis | architect-low | haiku |
+| Search | explore | haiku |
+| Documentation | writer | haiku |
 
-**Path Exception**: Only write to `.omc/`, `.claude/`, `CLAUDE.md`, `AGENTS.md`
-
-## Background Execution Rules
-
-**Run in Background** (set `run_in_background: true`):
-- Package installation: npm install, pip install, cargo build
-- Build processes: npm run build, make, tsc
-- Test suites: npm test, pytest, cargo test
-- Docker operations: docker build, docker pull
-
-**Run Blocking** (foreground):
-- Quick status checks: git status, ls, pwd
-- File reads (NOT edits - delegate edits to executor-low)
-- Simple commands
-
-## Verification Checklist
-
-Before stopping, verify:
-- [ ] TODO LIST: Zero pending/in_progress tasks
-- [ ] FUNCTIONALITY: All requested features work
-- [ ] TESTS: All tests pass (if applicable)
-- [ ] ERRORS: Zero unaddressed errors
-
-**If ANY checkbox is unchecked, CONTINUE WORKING.**
+### Background Execution
+Long-running commands (install, build, test) run in background. Maximum 5 concurrent.
 
 ## Token Savings Tips
 
 1. **Batch similar tasks** to one agent instead of spawning many
 2. **Use explore (haiku)** for file discovery, not architect
 3. **Prefer executor-low** for simple changes - only upgrade if it fails
-4. **Avoid opus agents** unless the task genuinely requires deep reasoning
-5. **Use writer (haiku)** for all documentation tasks
+4. **Use writer (haiku)** for all documentation tasks
+5. **Avoid opus agents** unless the task genuinely requires deep reasoning
 
-## STATE CLEANUP ON COMPLETION
+## State Management
 
-**IMPORTANT: Delete state files on completion - do NOT just set `active: false`**
+Ecomode state is tracked in `.omc/state/ecomode-state.json`.
 
-When ecomode completes (all verification passes):
-
-```bash
-# Delete ecomode state files
-rm -f .omc/state/ecomode-state.json
-```
-
-This ensures clean state for future sessions. Stale state files with `active: false` should not be left behind.
+When work is complete, run `/oh-my-claudecode:cancel` for clean state cleanup.
