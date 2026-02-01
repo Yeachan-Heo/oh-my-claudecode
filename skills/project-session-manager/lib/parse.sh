@@ -9,7 +9,7 @@
 #   #123              -> number=123 (use current repo)
 #
 # Usage: psm_parse_ref "omc#123"
-# Returns: type|alias|repo|number|local_path|base
+# Returns: type|alias|repo|number|local_path|base|provider|provider_ref
 psm_parse_ref() {
     local ref="$1"
     local type=""
@@ -29,7 +29,7 @@ psm_parse_ref() {
         if [[ -n "$alias" ]]; then
             IFS='|' read -r _ local_path base <<< "$(psm_get_project "$alias")"
         fi
-        echo "pr|${alias:-}|$repo|$number|${local_path:-}|$base"
+        echo "pr|${alias:-}|$repo|$number|${local_path:-}|$base|github|${repo}#${number}"
         return 0
     fi
 
@@ -42,11 +42,24 @@ psm_parse_ref() {
         if [[ -n "$alias" ]]; then
             IFS='|' read -r _ local_path base <<< "$(psm_get_project "$alias")"
         fi
-        echo "issue|${alias:-}|$repo|$number|${local_path:-}|$base"
+        echo "issue|${alias:-}|$repo|$number|${local_path:-}|$base|github|${repo}#${number}"
         return 0
     fi
 
-    # alias#number format (e.g., omc#123)
+    # Jira direct reference (PROJ-123) - config-validated
+    local jira_info
+    if jira_info=$(psm_detect_jira_key "$ref"); then
+        IFS='|' read -r alias project_key issue_number <<< "$jira_info"
+        local project_info
+        project_info=$(psm_get_project "$alias")
+        if [[ $? -eq 0 ]]; then
+            IFS='|' read -r repo local_path base <<< "$project_info"
+            echo "issue|${alias}|${repo}|${issue_number}|${local_path}|${base}|jira|${project_key}-${issue_number}"
+            return 0
+        fi
+    fi
+
+    # alias#number format (e.g., omc#123 or mywork#123)
     if [[ "$ref" =~ ^([a-zA-Z][a-zA-Z0-9_-]*)#([0-9]+)$ ]]; then
         alias="${BASH_REMATCH[1]}"
         number="${BASH_REMATCH[2]}"
@@ -55,11 +68,22 @@ psm_parse_ref() {
         project_info=$(psm_get_project "$alias")
         if [[ $? -eq 0 ]]; then
             IFS='|' read -r repo local_path base <<< "$project_info"
-            # Determine type from context (default to issue, caller specifies)
-            echo "ref|$alias|$repo|$number|$local_path|$base"
+            local provider
+            provider=$(psm_get_project_provider "$alias")
+            local provider_ref=""
+
+            if [[ "$provider" == "jira" ]]; then
+                local jira_proj
+                jira_proj=$(psm_get_project_jira_project "$alias")
+                provider_ref="${jira_proj}-${number}"
+            else
+                provider_ref="${repo}#${number}"
+            fi
+
+            echo "ref|$alias|$repo|$number|$local_path|$base|$provider|$provider_ref"
             return 0
         else
-            echo "error|Unknown project alias: $alias|||"
+            echo "error|Unknown project alias: $alias|||||||"
             return 1
         fi
     fi
@@ -72,7 +96,7 @@ psm_parse_ref() {
         if [[ -n "$alias" ]]; then
             IFS='|' read -r _ local_path base <<< "$(psm_get_project "$alias")"
         fi
-        echo "ref|${alias:-}|$repo|$number|${local_path:-}|$base"
+        echo "ref|${alias:-}|$repo|$number|${local_path:-}|$base|github|${repo}#${number}"
         return 0
     fi
 
@@ -88,11 +112,11 @@ psm_parse_ref() {
                 alias=$(psm_find_alias_for_repo "$repo")
             fi
         fi
-        echo "ref|${alias:-}|${repo:-}|$number|${local_path:-}|$base"
+        echo "ref|${alias:-}|${repo:-}|$number|${local_path:-}|$base|github|${repo:+${repo}#${number}}"
         return 0
     fi
 
-    echo "error|Cannot parse reference: $ref|||"
+    echo "error|Cannot parse reference: $ref||||||"
     return 1
 }
 
@@ -103,7 +127,7 @@ psm_find_alias_for_repo() {
         return 1
     fi
 
-    jq -r ".aliases | to_entries[] | select(.value.repo == \"$target_repo\") | .key" "$PSM_PROJECTS" | head -1
+    jq -r --arg r "$target_repo" '.aliases | to_entries[] | select(.value.repo == $r) | .key' "$PSM_PROJECTS" | head -1
 }
 
 # Sanitize a string for use in filenames/session names
@@ -118,4 +142,34 @@ psm_slugify() {
     local title="$1"
     local max_len="${2:-30}"
     echo "$title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | head -c "$max_len"
+}
+
+# Check if input matches a configured Jira project
+# Usage: psm_detect_jira_key "PROJ-123"
+# Returns: alias|project_key|issue_number OR exits 1
+psm_detect_jira_key() {
+    local input="$1"
+
+    # Must match PROJ-123 pattern (uppercase project, dash, digits)
+    if [[ ! "$input" =~ ^([A-Z][A-Z0-9]*)-([0-9]+)$ ]]; then
+        return 1
+    fi
+
+    local project_prefix="${BASH_REMATCH[1]}"
+    local issue_number="${BASH_REMATCH[2]}"
+
+    # Verify this project prefix exists in config
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return 1
+    fi
+
+    local matching_alias
+    matching_alias=$(jq -r --arg p "$project_prefix" '.aliases | to_entries[] | select(.value.jira_project == $p) | .key' "$PSM_PROJECTS" | head -1)
+
+    if [[ -n "$matching_alias" ]]; then
+        echo "${matching_alias}|${project_prefix}|${issue_number}"
+        return 0
+    fi
+
+    return 1
 }

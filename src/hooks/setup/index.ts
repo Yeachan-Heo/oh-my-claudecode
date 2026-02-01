@@ -7,9 +7,10 @@
  * - maintenance: Prune old state files, cleanup orphaned state, vacuum SQLite
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
+import { registerBeadsContext } from '../beads-context/index.js';
 
 // ============================================================================
 // Types
@@ -114,7 +115,6 @@ export function setEnvironmentVariables(): string[] {
   if (process.env.CLAUDE_ENV_FILE) {
     try {
       const envContent = `export OMC_INITIALIZED=true\n`;
-      const { appendFileSync } = require('fs');
       appendFileSync(process.env.CLAUDE_ENV_FILE, envContent);
       envVars.push('OMC_INITIALIZED');
     } catch {
@@ -147,6 +147,13 @@ export async function processSetupInit(input: SetupInput): Promise<HookOutput> {
     result.env_vars_set = setEnvironmentVariables();
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
+  }
+
+  // Register beads context if configured
+  try {
+    registerBeadsContext(input.session_id);
+  } catch {
+    // Silently fail - beads context is optional
   }
 
   const context = [
@@ -282,8 +289,8 @@ export function vacuumSwarmDb(directory: string): boolean {
     // Check if sqlite3 is available
     execSync('which sqlite3', { stdio: 'pipe' });
 
-    // Run VACUUM
-    execSync(`sqlite3 "${swarmDbPath}" "VACUUM;"`, {
+    // Run VACUUM using execFileSync to prevent command injection
+    execFileSync('sqlite3', [swarmDbPath, 'VACUUM;'], {
       stdio: 'pipe',
       timeout: 5000, // 5 second timeout
     });

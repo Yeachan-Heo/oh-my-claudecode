@@ -114,7 +114,9 @@ export function isActiveModeRunning(directory: string): boolean {
  */
 export function processPermissionRequest(input: PermissionRequestInput): HookOutput {
   // Only process Bash tool for command auto-approval
-  if (input.tool_name !== 'proxy_Bash') {
+  // Normalize tool name - handle both proxy_ prefixed and unprefixed versions
+  const toolName = input.tool_name.replace(/^proxy_/, '');
+  if (toolName !== 'Bash') {
     return { continue: true };
   }
 

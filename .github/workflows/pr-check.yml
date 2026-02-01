@@ -1,0 +1,70 @@
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  size-check:
+    name: Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const additions = files.reduce((acc, f) => acc + f.additions, 0);
+            const deletions = files.reduce((acc, f) => acc + f.deletions, 0);
+            const changedFiles = files.length;
+
+            let sizeLabel = 'size/S';
+            if (additions + deletions > 1000) sizeLabel = 'size/XL';
+            else if (additions + deletions > 500) sizeLabel = 'size/L';
+            else if (additions + deletions > 100) sizeLabel = 'size/M';
+
+            // Add size label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [sizeLabel]
+            });
+
+            // Comment if PR is too large
+            if (additions + deletions > 1000) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `⚠️ **Large PR Alert**\n\nThis PR has ${additions} additions and ${deletions} deletions across ${changedFiles} files.\n\nConsider breaking it into smaller PRs for easier review.`
+              });
+            }
+
+            console.log(`PR Stats: +${additions} -${deletions} (${changedFiles} files) → ${sizeLabel}`);
+
+  draft-check:
+    name: Draft PR Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if PR is draft
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (pr.draft) {
+              core.notice('This is a draft PR - CI will run but merge is blocked');
+            }

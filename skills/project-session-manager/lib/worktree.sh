@@ -1,6 +1,32 @@
 #!/bin/bash
 # PSM Worktree Management
 
+# Validate worktree path is under PSM worktree root before deletion
+# Returns 0 if valid, 1 if invalid
+# Usage: validate_worktree_path <path>
+validate_worktree_path() {
+    local path="$1"
+    local worktree_root
+    worktree_root=$(psm_get_worktree_root 2>/dev/null) || return 1
+
+    # Path must exist and be a directory
+    if [[ ! -d "$path" ]]; then
+        return 1
+    fi
+
+    # Resolve to absolute paths for comparison
+    local abs_path abs_root
+    abs_path=$(cd "$path" 2>/dev/null && pwd) || return 1
+    abs_root=$(cd "$worktree_root" 2>/dev/null && pwd) || return 1
+
+    # Check path is under root and doesn't contain ..
+    if [[ "$abs_path" != "$abs_root"/* ]] || [[ "$path" == *".."* ]]; then
+        echo "error|Invalid worktree path: not under PSM root" >&2
+        return 1
+    fi
+    return 0
+}
+
 # Create a worktree for PR review
 # Usage: psm_create_pr_worktree <local_repo> <alias> <pr_number> <pr_branch>
 psm_create_pr_worktree() {
@@ -146,10 +172,17 @@ psm_remove_worktree() {
     fi
 
     cd "$local_repo" || return 1
-    git worktree remove "$worktree_path" --force 2>/dev/null || {
-        # Force remove the directory if git worktree remove fails
-        rm -rf "$worktree_path"
-    }
+
+    # Validate path is under PSM worktree root before any deletion
+    if validate_worktree_path "$worktree_path"; then
+        git worktree remove "$worktree_path" --force 2>/dev/null || {
+            # Force remove the directory if git worktree remove fails
+            rm -rf "$worktree_path"
+        }
+    else
+        echo "error|Refusing to delete path outside worktree root: $worktree_path" >&2
+        return 1
+    fi
 
     echo "removed|$worktree_path"
     return 0

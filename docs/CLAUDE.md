@@ -1,3 +1,4 @@
+<!-- OMC:START -->
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
 You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**
@@ -711,8 +712,26 @@ Say "setup omc" or run `/oh-my-claudecode:omc-setup` to configure. After that, e
 - `/oh-my-claudecode:doctor` - Diagnose and fix installation issues
 - `/oh-my-claudecode:hud setup` - Install/repair HUD statusline
 
+### Task Tool Selection
+
+During setup, you can choose your preferred task management tool:
+
+| Tool | Description | Persistence |
+|------|-------------|-------------|
+| Built-in Tasks | Claude Code's native TaskCreate/TodoWrite | Session only |
+| Beads (bd) | Git-backed distributed issue tracker | Permanent |
+| Beads-Rust (br) | Lightweight Rust port of beads | Permanent |
+
+To change your task tool:
+1. Run `/oh-my-claudecode:omc-setup`
+2. Select your preferred tool in Step 3.8.5
+3. Restart Claude Code for context injection to take effect
+
+If using beads/beads-rust, usage instructions are automatically injected at session start.
+
 ---
 
 ## Migration
 
-For migration guides from earlier versions, see the [Migration Guide](https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/MIGRATION.md).
+For migration guides from earlier versions, see [MIGRATION.md](./MIGRATION.md).
+<!-- OMC:END -->

@@ -742,6 +742,18 @@ export {
 } from './setup/index.js';
 
 export {
+  // Beads Context
+  getBeadsInstructions,
+  getBeadsContextConfig,
+  registerBeadsContext,
+  clearBeadsContext,
+  BEADS_INSTRUCTIONS,
+  BEADS_RUST_INSTRUCTIONS,
+  type TaskTool,
+  type BeadsContextConfig
+} from './beads-context/index.js';
+
+export {
   // Subagent Tracker Hook
   processSubagentStart,
   processSubagentStop,

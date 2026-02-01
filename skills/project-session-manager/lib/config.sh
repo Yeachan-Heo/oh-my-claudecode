@@ -48,11 +48,12 @@ psm_get_project() {
         return 1
     fi
 
-    local repo=$(jq -r ".aliases[\"$alias\"].repo // empty" "$PSM_PROJECTS")
-    local local_path=$(jq -r ".aliases[\"$alias\"].local // empty" "$PSM_PROJECTS")
-    local default_base=$(jq -r ".aliases[\"$alias\"].default_base // \"main\"" "$PSM_PROJECTS")
+    local repo=$(jq -r --arg a "$alias" '.aliases[$a].repo // empty' "$PSM_PROJECTS")
+    local local_path=$(jq -r --arg a "$alias" '.aliases[$a].local // empty' "$PSM_PROJECTS")
+    local default_base=$(jq -r --arg a "$alias" '.aliases[$a].default_base // "main"' "$PSM_PROJECTS")
 
-    if [[ -z "$repo" ]]; then
+    local clone_url=$(jq -r --arg a "$alias" '.aliases[$a].clone_url // empty' "$PSM_PROJECTS")
+    if [[ -z "$repo" && -z "$clone_url" ]]; then
         return 1
     fi
 
@@ -60,6 +61,53 @@ psm_get_project() {
     local_path="${local_path/#\~/$HOME}"
 
     echo "${repo}|${local_path}|${default_base}"
+}
+
+# Get provider for a project alias
+# Usage: psm_get_project_provider "mywork"
+# Returns: "github" | "jira" | empty (defaults to github)
+psm_get_project_provider() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        echo "github"
+        return
+    fi
+    local provider
+    provider=$(jq -r --arg a "$alias" '.aliases[$a].provider // "github"' "$PSM_PROJECTS")
+    echo "$provider"
+}
+
+# Get Jira project key for alias
+# Usage: psm_get_project_jira_project "mywork"
+# Returns: "MYPROJ" or empty
+psm_get_project_jira_project() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r --arg a "$alias" '.aliases[$a].jira_project // empty' "$PSM_PROJECTS"
+}
+
+# Get explicit clone_url for alias (for non-GitHub repos)
+# Usage: psm_get_project_clone_url "mywork"
+# Returns: URL or empty
+psm_get_project_clone_url() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r --arg a "$alias" '.aliases[$a].clone_url // empty' "$PSM_PROJECTS"
+}
+
+# Get repo field for alias
+# Usage: psm_get_project_repo "mywork"
+# Returns: "owner/repo" or empty
+psm_get_project_repo() {
+    local alias="$1"
+    if [[ ! -f "$PSM_PROJECTS" ]]; then
+        return
+    fi
+    jq -r --arg a "$alias" '.aliases[$a].repo // empty' "$PSM_PROJECTS"
 }
 
 # Add or update project alias
@@ -70,7 +118,8 @@ psm_set_project() {
     local default_base="${4:-main}"
 
     local tmp=$(mktemp)
-    jq ".aliases[\"$alias\"] = {\"repo\": \"$repo\", \"local\": \"$local_path\", \"default_base\": \"$default_base\"}" \
+    jq --arg a "$alias" --arg r "$repo" --arg l "$local_path" --arg b "$default_base" \
+        '.aliases[$a] = {"repo": $r, "local": $l, "default_base": $b}' \
         "$PSM_PROJECTS" > "$tmp" && mv "$tmp" "$PSM_PROJECTS"
 }
 

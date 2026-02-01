@@ -38,7 +38,35 @@ export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CORE_COMMANDS: string[] = [];
 
 /** Current version */
-export const VERSION = '3.8.6';
+export const VERSION = '3.9.0';
+
+/**
+ * Find a marker that appears at the start of a line (line-anchored).
+ * This prevents matching markers inside code blocks.
+ * @param content - The content to search in
+ * @param marker - The marker string to find
+ * @param fromEnd - If true, finds the LAST occurrence instead of first
+ * @returns The index of the marker, or -1 if not found
+ */
+function findLineAnchoredMarker(content: string, marker: string, fromEnd: boolean = false): number {
+  // Escape special regex characters in marker
+  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`^${escapedMarker}$`, 'gm');
+
+  if (fromEnd) {
+    // Find the last occurrence
+    let lastIndex = -1;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      lastIndex = match.index;
+    }
+    return lastIndex;
+  } else {
+    // Find the first occurrence
+    const match = regex.exec(content);
+    return match ? match.index : -1;
+  }
+}
 
 /** Installation result */
 export interface InstallResult {
@@ -48,6 +76,7 @@ export interface InstallResult {
   installedCommands: string[];
   installedSkills: string[];
   hooksConfigured: boolean;
+  hookConflicts: Array<{ eventType: string; existingCommand: string }>;
   errors: string[];
 }
 
@@ -56,6 +85,29 @@ export interface InstallOptions {
   force?: boolean;
   verbose?: boolean;
   skipClaudeCheck?: boolean;
+  forceHooks?: boolean;
+}
+
+/**
+ * Detect whether a hook command belongs to oh-my-claudecode.
+ *
+ * Uses substring matching rather than word-boundary regex.
+ * Rationale: Real OMC hooks use compound names where "omc" is embedded
+ * (e.g., `omc-pre-tool-use.mjs`, `oh-my-claudecode-hook.mjs`). A word-boundary
+ * regex like /\bomc\b/ would fail to match "oh-my-claudecode" since "omc" appears
+ * as an interior substring. The theoretical false positives (words containing "omc"
+ * like "atomic", "socom") are extremely unlikely in real hook command paths.
+ *
+ * @param command - The hook command string
+ * @returns true if the command contains 'omc' or 'oh-my-claudecode'
+ */
+export function isOmcHook(command: string): boolean {
+  const lowerCommand = command.toLowerCase();
+  // Match on path segments or word boundaries, not substrings
+  // Matches: /omc/, /omc-, omc/, -omc, _omc, omc_
+  const omcPattern = /(?:^|[\/\\_-])omc(?:$|[\/\\_-])/;
+  const fullNamePattern = /oh-my-claudecode/;
+  return omcPattern.test(lowerCommand) || fullNamePattern.test(lowerCommand);
 }
 
 /**
@@ -170,6 +222,57 @@ function loadClaudeMdContent(): string {
 }
 
 /**
+ * Merge OMC content into existing CLAUDE.md using markers
+ * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
+ * @param omcContent - New OMC content to inject
+ * @returns Merged content with markers
+ */
+export function mergeClaudeMd(existingContent: string | null, omcContent: string): string {
+  const START_MARKER = '<!-- OMC:START -->';
+  const END_MARKER = '<!-- OMC:END -->';
+  const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
+
+  // Idempotency guard: strip markers from omcContent if already present
+  // This handles the case where docs/CLAUDE.md ships with markers
+  let cleanOmcContent = omcContent;
+  const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
+  const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
+  if (omcStartIdx !== -1 && omcEndIdx !== -1 && omcStartIdx < omcEndIdx) {
+    // Extract content between markers, trimming any surrounding whitespace
+    cleanOmcContent = omcContent
+      .substring(omcStartIdx + START_MARKER.length, omcEndIdx)
+      .trim();
+  }
+
+  // Case 1: No existing content - wrap omcContent in markers
+  if (!existingContent) {
+    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n`;
+  }
+
+  // Case 2: Existing content has both markers - replace content between markers
+  // Use line-anchored search to avoid matching markers inside code blocks
+  const startIndex = findLineAnchoredMarker(existingContent, START_MARKER);
+  const endIndex = findLineAnchoredMarker(existingContent, END_MARKER, true);
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    // Extract content before START_MARKER and after END_MARKER
+    const beforeMarker = existingContent.substring(0, startIndex);
+    const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
+
+    return `${beforeMarker}${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
+  }
+
+  // Case 3: Corrupted markers (START without END or vice versa)
+  if (startIndex !== -1 || endIndex !== -1) {
+    // Handle corrupted state - backup will be created by caller
+    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+  }
+
+  // Case 4: No markers - wrap omcContent in markers, preserve existing after user customizations header
+  return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
+}
+
+/**
  * Install OMC agents, commands, skills, and hooks
  */
 export function install(options: InstallOptions = {}): InstallResult {
@@ -180,6 +283,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     installedCommands: [],
     installedSkills: [],
     hooksConfigured: false,
+    hookConflicts: [],
     errors: []
   };
 
@@ -294,24 +398,35 @@ export function install(options: InstallOptions = {}): InstallResult {
       // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
       // to avoid duplicate entries in Claude Code's available skills list
 
-      // Install CLAUDE.md (only if it doesn't exist)
+      // Install CLAUDE.md with merge support
       const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
       const homeMdPath = join(homedir(), 'CLAUDE.md');
 
       if (!existsSync(homeMdPath)) {
-        if (!existsSync(claudeMdPath) || options.force) {
-          // Backup existing CLAUDE.md before overwriting (if it exists and --force)
-          if (existsSync(claudeMdPath) && options.force) {
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${today}`);
-            const existingContent = readFileSync(claudeMdPath, 'utf-8');
-            writeFileSync(backupPath, existingContent);
-            log(`Backed up existing CLAUDE.md to ${backupPath}`);
-          }
-          writeFileSync(claudeMdPath, loadClaudeMdContent());
-          log('Created CLAUDE.md');
+        const omcContent = loadClaudeMdContent();
+
+        // Read existing content if it exists
+        let existingContent: string | null = null;
+        if (existsSync(claudeMdPath)) {
+          existingContent = readFileSync(claudeMdPath, 'utf-8');
+        }
+
+        // Always create backup before modification (if file exists)
+        if (existingContent !== null) {
+          const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
+          const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
+          writeFileSync(backupPath, existingContent);
+          log(`Backed up existing CLAUDE.md to ${backupPath}`);
+        }
+
+        // Merge OMC content with existing content
+        const mergedContent = mergeClaudeMd(existingContent, omcContent);
+        writeFileSync(claudeMdPath, mergedContent);
+
+        if (existingContent) {
+          log('Updated CLAUDE.md (merged with existing content)');
         } else {
-          log('CLAUDE.md already exists, skipping');
+          log('Created CLAUDE.md');
         }
       } else {
         log('CLAUDE.md exists in home directory, skipping');
@@ -340,49 +455,15 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
       }
 
-      // Configure settings.json for hooks (merge with existing settings)
-      log('Configuring hooks in settings.json...');
-      try {
-        let existingSettings: Record<string, unknown> = {};
-        if (existsSync(SETTINGS_FILE)) {
-          const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
-          existingSettings = JSON.parse(settingsContent);
-        }
-
-        // Merge hooks configuration (platform-aware)
-        const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
-        const hooksConfig = getHooksSettingsConfig();
-        const newHooks = hooksConfig.hooks;
-
-        // Deep merge: add our hooks, or update if --force is used
-        for (const [eventType, eventHooks] of Object.entries(newHooks)) {
-          if (!existingHooks[eventType]) {
-            existingHooks[eventType] = eventHooks;
-            log(`  Added ${eventType} hook`);
-          } else if (options.force) {
-            existingHooks[eventType] = eventHooks;
-            log(`  Updated ${eventType} hook (--force)`);
-          } else {
-            log(`  ${eventType} hook already configured, skipping`);
-          }
-        }
-
-        existingSettings.hooks = existingHooks;
-
-        // Write back settings
-        writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-        log('  Hooks configured in settings.json');
-        result.hooksConfigured = true;
-      } catch (_e) {
-        log('  Warning: Could not configure hooks in settings.json (non-fatal)');
-        result.hooksConfigured = false;
-      }
+      // Note: hooks configuration is deferred to consolidated settings.json write below
+      result.hooksConfigured = true; // Will be set properly after consolidated write
     } else {
       log('Skipping agent/command/hook files (managed by plugin system)');
     }
 
     // Install HUD statusline (always, even in plugin mode)
     log('Installing HUD statusline...');
+    let hudScriptPath: string | null = null;
     try {
       if (!existsSync(HUD_DIR)) {
         mkdirSync(HUD_DIR, { recursive: true });
@@ -390,7 +471,7 @@ export function install(options: InstallOptions = {}): InstallResult {
 
       // Build the HUD script content (compiled from src/hud/index.ts)
       // Create a wrapper that checks multiple locations for the HUD module
-      const hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
+      hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
       const hudScriptLines = [
         '#!/usr/bin/env node',
         '/**',
@@ -408,19 +489,21 @@ export function install(options: InstallOptions = {}): InstallResult {
         '  let pluginCacheVersion = null;',
         '  let pluginCacheDir = null;',
         '  ',
-        '  // 1. Development paths (preferred for local development)',
-        '  const devPaths = [',
-        '    join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),',
-        '    join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),',
-        '    join(home, "projects/oh-my-claudecode/dist/hud/index.js"),',
-        '  ];',
-        '  ',
-        '  for (const devPath of devPaths) {',
-        '    if (existsSync(devPath)) {',
-        '      try {',
-        '        await import(pathToFileURL(devPath).href);',
-        '        return;',
-        '      } catch { /* continue */ }',
+        '  // 1. Development paths (only when OMC_DEV=1)',
+        '  if (process.env.OMC_DEV === "1") {',
+        '    const devPaths = [',
+        '      join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),',
+        '      join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),',
+        '      join(home, "projects/oh-my-claudecode/dist/hud/index.js"),',
+        '    ];',
+        '    ',
+        '    for (const devPath of devPaths) {',
+        '      if (existsSync(devPath)) {',
+        '        try {',
+        '          await import(pathToFileURL(devPath).href);',
+        '          return;',
+        '        } catch { /* continue */ }',
+        '      }',
         '    }',
         '  }',
         '  ',
@@ -475,39 +558,91 @@ export function install(options: InstallOptions = {}): InstallResult {
         chmodSync(hudScriptPath, 0o755);
       }
       log('  Installed omc-hud.mjs');
+    } catch (_e) {
+      log('  Warning: Could not install HUD statusline script (non-fatal)');
+      hudScriptPath = null;
+    }
 
-      // Configure statusLine in settings.json if not already set
-      try {
-        let existingSettings: Record<string, unknown> = {};
-        if (existsSync(SETTINGS_FILE)) {
-          const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
-          existingSettings = JSON.parse(settingsContent);
+    // Consolidated settings.json write (atomic: read once, modify, write once)
+    log('Configuring settings.json...');
+    try {
+      let existingSettings: Record<string, unknown> = {};
+      if (existsSync(SETTINGS_FILE)) {
+        const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
+        existingSettings = JSON.parse(settingsContent);
+      }
+
+      // 1. Configure hooks (only if not running as plugin)
+      if (!runningAsPlugin) {
+        const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
+        const hooksConfig = getHooksSettingsConfig();
+        const newHooks = hooksConfig.hooks;
+
+        // Deep merge: add our hooks, check for conflicts, or update if --force/--forceHooks is used
+        for (const [eventType, eventHooks] of Object.entries(newHooks)) {
+          if (!existingHooks[eventType]) {
+            existingHooks[eventType] = eventHooks;
+            log(`  Added ${eventType} hook`);
+          } else {
+            // Check if existing hook is owned by another plugin
+            const existingEventHooks = existingHooks[eventType] as Array<{ hooks: Array<{ type: string; command: string }> }>;
+            let hasNonOmcHook = false;
+            let nonOmcCommand = '';
+
+            for (const hookGroup of existingEventHooks) {
+              for (const hook of hookGroup.hooks) {
+                if (hook.type === 'command' && !isOmcHook(hook.command)) {
+                  hasNonOmcHook = true;
+                  nonOmcCommand = hook.command;
+                  break;
+                }
+              }
+              if (hasNonOmcHook) break;
+            }
+
+            if (hasNonOmcHook && !options.forceHooks) {
+              // Conflict detected - don't overwrite
+              log(`  [OMC] Warning: ${eventType} hook owned by another plugin. Skipping. Use --force-hooks to override.`);
+              result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
+            } else if (options.force || options.forceHooks) {
+              existingHooks[eventType] = eventHooks;
+              log(`  Updated ${eventType} hook (${options.forceHooks ? '--force-hooks' : '--force'})`);
+            } else {
+              log(`  ${eventType} hook already configured, skipping`);
+            }
+          }
         }
 
-        // Only add statusLine if not already configured
+        existingSettings.hooks = existingHooks;
+        log('  Hooks configured');
+        result.hooksConfigured = true;
+      }
+
+      // 2. Configure statusLine (always, even in plugin mode)
+      if (hudScriptPath) {
         if (!existingSettings.statusLine) {
           existingSettings.statusLine = {
             type: 'command',
             command: 'node ' + hudScriptPath
           };
-          writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-          log('  Configured statusLine in settings.json');
+          log('  Configured statusLine');
+        } else if (options.force) {
+          existingSettings.statusLine = {
+            type: 'command',
+            command: 'node ' + hudScriptPath
+          };
+          log('  Updated statusLine (--force)');
         } else {
           log('  statusLine already configured, skipping (use --force to override)');
-          if (options.force) {
-            existingSettings.statusLine = {
-              type: 'command',
-              command: 'node ' + hudScriptPath
-            };
-            writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-            log('  Updated statusLine in settings.json (--force)');
-          }
         }
-      } catch {
-        log('  Warning: Could not configure statusLine in settings.json');
       }
+
+      // 3. Single atomic write
+      writeFileSync(SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
+      log('  settings.json updated');
     } catch (_e) {
-      log('  Warning: Could not install HUD statusline (non-fatal)');
+      log('  Warning: Could not configure settings.json (non-fatal)');
+      result.hooksConfigured = false;
     }
 
     // Save version metadata

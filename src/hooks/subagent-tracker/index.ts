@@ -82,6 +82,19 @@ const LOCK_TIMEOUT_MS = 5000; // 5 second lock timeout
 const LOCK_RETRY_MS = 50; // Retry every 50ms
 
 /**
+ * Check if a process is still alive
+ * Signal 0 doesn't kill the process, just checks if it exists
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Synchronous sleep using Atomics.wait
  * Avoids CPU-spinning busy-wait loops
  */
@@ -110,22 +123,27 @@ function acquireLock(directory: string): boolean {
 
   while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
     try {
-      // Check for stale lock (older than timeout)
+      // Check for stale lock (older than timeout or dead process)
       if (existsSync(lockPath)) {
         const lockContent = readFileSync(lockPath, 'utf-8');
-        const lockTime = parseInt(lockContent, 10);
-        if (Date.now() - lockTime > LOCK_TIMEOUT_MS) {
-          // Stale lock, remove it
-          try { unlinkSync(lockPath); } catch {}
+        const [lockPidStr, lockTimeStr] = lockContent.split(':');
+        const lockPid = parseInt(lockPidStr, 10);
+        const lockTime = parseInt(lockTimeStr, 10);
+        const isStale = Date.now() - lockTime > LOCK_TIMEOUT_MS;
+        const isDeadProcess = !isNaN(lockPid) && !isProcessAlive(lockPid);
+
+        if (isStale || isDeadProcess) {
+          // Stale lock or dead process, remove it
+          try { unlinkSync(lockPath); } catch { /* ignore stale lock removal errors */ }
         } else {
-          // Lock is held, wait and retry
+          // Lock is held by a live process, wait and retry
           syncSleep(LOCK_RETRY_MS);
           continue;
         }
       }
 
-      // Try to create lock atomically
-      writeFileSync(lockPath, String(Date.now()), { flag: 'wx' });
+      // Try to create lock atomically with PID:timestamp
+      writeFileSync(lockPath, `${process.pid}:${Date.now()}`, { flag: 'wx' });
       return true;
     } catch (e: any) {
       if (e.code === 'EEXIST') {
@@ -497,7 +515,6 @@ export function clearTrackingState(directory: string): void {
   const statePath = getStateFilePath(directory);
   if (existsSync(statePath)) {
     try {
-      const { unlinkSync } = require('fs');
       unlinkSync(statePath);
     } catch (error) {
       console.error('[SubagentTracker] Error clearing state:', error);

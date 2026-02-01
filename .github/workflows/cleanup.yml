@@ -1,0 +1,78 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run weekly on Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 30);
+
+            let deleted = 0;
+            for (const artifact of artifacts.artifacts) {
+              const createdAt = new Date(artifact.created_at);
+              if (createdAt < cutoffDate) {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+                deleted++;
+                console.log(`Deleted: ${artifact.name} (${artifact.created_at})`);
+              }
+            }
+
+            console.log(`Cleaned up ${deleted} old artifacts`);
+
+  cleanup-caches:
+    name: Cleanup Old Caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: caches } = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 14);
+
+            let deleted = 0;
+            for (const cache of caches.actions_caches || []) {
+              const lastUsed = new Date(cache.last_accessed_at);
+              if (lastUsed < cutoffDate) {
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id
+                });
+                deleted++;
+                console.log(`Deleted cache: ${cache.key}`);
+              }
+            }
+
+            console.log(`Cleaned up ${deleted} old caches`);

@@ -53,6 +53,7 @@ import {
   waitDaemonCommand,
   waitDetectCommand
 } from './commands/wait.js';
+import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,7 +103,7 @@ async function ensureBackfillDone(): Promise<void> {
 // Display enhanced banner using gradient-string (loaded dynamically)
 async function displayAnalyticsBanner() {
   try {
-    // @ts-ignore - gradient-string will be installed during setup
+    // @ts-expect-error - gradient-string will be installed during setup
     const gradient = await import('gradient-string');
     const banner = gradient.default.pastel.multiline([
       '╔═══════════════════════════════════════╗',
@@ -842,6 +843,22 @@ waitCmd
       json: options.json,
       lines: parseInt(options.lines),
     });
+  });
+
+/**
+ * Doctor command - Diagnostic tools
+ */
+const doctorCmd = program
+  .command('doctor')
+  .description('Diagnostic tools for troubleshooting OMC installation');
+
+doctorCmd
+  .command('conflicts')
+  .description('Check for plugin coexistence issues and configuration conflicts')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const exitCode = await doctorConflictsCommand(options);
+    process.exit(exitCode);
   });
 
 /**
