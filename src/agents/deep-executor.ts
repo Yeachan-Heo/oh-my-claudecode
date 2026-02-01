@@ -36,14 +36,14 @@ export const DEEP_EXECUTOR_PROMPT_METADATA: AgentPromptMetadata = {
     'Tasks requiring delegation to sub-agents (use orchestrator)',
   ],
   promptDescription: 'Deep executor for complex goal-oriented tasks. Explores extensively before acting, executes all work itself, and guarantees completion with evidence.',
-  tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace'],
+  tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace', 'Task'],
 };
 
 export const deepExecutorAgent: AgentConfig = {
   name: 'deep-executor',
   description: 'Deep executor for complex goal-oriented tasks. Explores extensively, executes all work itself, guarantees 100% completion with evidence.',
   prompt: loadAgentPrompt('deep-executor'),
-  tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace'],
+  tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'TodoWrite', 'lsp_diagnostics', 'lsp_diagnostics_directory', 'ast_grep_search', 'ast_grep_replace', 'Task'],
   model: 'opus',
   defaultModel: 'opus',
   metadata: DEEP_EXECUTOR_PROMPT_METADATA
