@@ -96,6 +96,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Sess
 }
 
 export async function sendPrompt(sessionId: string, prompt: string, user?: User): Promise<number> {
+  const MAX_PROMPT_LENGTH = 100 * 1024; // 100KB
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    throw new Error(`Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} chars`);
+  }
+
   const session = sessionRepo.findById(sessionId);
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);

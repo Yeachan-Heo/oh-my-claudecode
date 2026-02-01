@@ -71,17 +71,6 @@ export class UserRepository {
       if (data.telegramId && config.adminTelegramIds.includes(data.telegramId)) {
         role = 'admin';
       }
-    } else {
-      // Fallback: first user becomes admin (with warning)
-      const db = getDatabase();
-      const count = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-      if (count.count === 0) {
-        role = 'admin';
-        logger.warn('No adminTelegramIds configured. First user auto-promoted to admin.', {
-          telegramId: data.telegramId,
-          username: data.username,
-        });
-      }
     }
 
     return this.create({ ...data, role });
@@ -102,4 +91,9 @@ export class UserRepository {
     const rows = db.prepare('SELECT * FROM users ORDER BY created_at').all() as UserRow[];
     return rows.map(rowToUser);
   }
+}
+
+export function isAdminConfigured(): boolean {
+  const config = loadConfig();
+  return !!(config.adminTelegramIds && config.adminTelegramIds.length > 0);
 }

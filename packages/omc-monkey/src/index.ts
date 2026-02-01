@@ -10,12 +10,16 @@ import { initDatabase, closeDatabase } from './db/index.js';
 import { loadConfig, getPidPath } from './config.js';
 import { logger } from './utils/logger.js';
 import * as sessionManager from './core/session-manager.js';
+import { initialize as initSessionManager } from './core/session-manager.js';
 
 async function main() {
   const config = loadConfig();
 
   // Initialize database
   initDatabase(config);
+
+  // Initialize session manager and recover existing sessions
+  initSessionManager();
 
   // Write PID file
   const pidPath = getPidPath();
@@ -27,7 +31,7 @@ async function main() {
 
   // Create MCP server
   const server = new Server(
-    { name: 'oh-my-opencode-clawd', version: '0.1.0' },
+    { name: 'omc-monkey', version: '0.1.0' },
     { capabilities: { tools: {} } }
   );
 

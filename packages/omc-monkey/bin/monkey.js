@@ -9,14 +9,14 @@ import { dirname } from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const CLAWD_DIR = join(homedir(), '.clawd');
-const PID_FILE = join(CLAWD_DIR, 'state', 'clawd.pid');
-const LOG_FILE = join(CLAWD_DIR, 'clawd.log');
-// TODO: align LOG_FILE with config.ts getLogPath() -> ~/.clawd/logs/clawd.log
+const MONKEY_DIR = join(homedir(), '.omc-monkey');
+const PID_FILE = join(MONKEY_DIR, 'state', 'monkey.pid');
+const LOG_FILE = join(MONKEY_DIR, 'monkey.log');
+// TODO: align LOG_FILE with config.ts getLogPath() -> ~/.omc-monkey/logs/monkey.log
 
 function ensureDir() {
-  if (!existsSync(CLAWD_DIR)) {
-    mkdirSync(CLAWD_DIR, { recursive: true });
+  if (!existsSync(MONKEY_DIR)) {
+    mkdirSync(MONKEY_DIR, { recursive: true });
   }
 }
 
@@ -35,9 +35,9 @@ function isRunning() {
 
 function start() {
   ensureDir();
-  mkdirSync(join(CLAWD_DIR, 'state'), { recursive: true });
+  mkdirSync(join(MONKEY_DIR, 'state'), { recursive: true });
   if (isRunning()) {
-    console.log('clawd is already running');
+    console.log('monkey is already running');
     process.exit(1);
   }
 
@@ -51,12 +51,12 @@ function start() {
   writeFileSync(PID_FILE, String(child.pid));
   child.unref();
 
-  console.log(`clawd started (PID: ${child.pid})`);
+  console.log(`monkey started (PID: ${child.pid})`);
 }
 
 function stop() {
   if (!isRunning()) {
-    console.log('clawd is not running');
+    console.log('monkey is not running');
     return;
   }
 
@@ -64,18 +64,18 @@ function stop() {
   try {
     process.kill(pid, 'SIGTERM');
     unlinkSync(PID_FILE);
-    console.log('clawd stopped');
+    console.log('monkey stopped');
   } catch (err) {
-    console.error('Failed to stop clawd:', err.message);
+    console.error('Failed to stop monkey:', err.message);
   }
 }
 
 function status() {
   if (isRunning()) {
     const pid = readFileSync(PID_FILE, 'utf8').trim();
-    console.log(`clawd is running (PID: ${pid})`);
+    console.log(`monkey is running (PID: ${pid})`);
   } else {
-    console.log('clawd is not running');
+    console.log('monkey is not running');
   }
 }
 
@@ -92,6 +92,6 @@ switch (command) {
     status();
     break;
   default:
-    console.log('Usage: clawd <start|stop|status>');
+    console.log('Usage: monkey <start|stop|status>');
     process.exit(1);
 }

@@ -1,12 +1,12 @@
 {
-  "name": "oh-my-opencode-clawd",
+  "name": "omc-monkey",
   "version": "0.1.0",
   "description": "Telegram bot for remote Claude Code sessions - MCP server",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "oh-my-opencode-clawd": "dist/index.js",
-    "clawd": "bin/clawd.js"
+    "omc-monkey": "dist/index.js",
+    "monkey": "bin/monkey.js"
   },
   "files": ["dist", "bin"],
   "scripts": {

@@ -5,7 +5,7 @@ import type { User } from './types.js';
 // Tool definitions for MCP
 export const toolDefinitions = [
   {
-    name: 'clawd_session_create',
+    name: 'monkey_session_create',
     description: 'Create a new Claude Code session in a tmux window',
     inputSchema: {
       type: 'object' as const,
@@ -18,12 +18,12 @@ export const toolDefinitions = [
     },
   },
   {
-    name: 'clawd_session_list',
+    name: 'monkey_session_list',
     description: 'List all active Claude Code sessions',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
-    name: 'clawd_session_send',
+    name: 'monkey_session_send',
     description: 'Send a prompt to an active Claude Code session',
     inputSchema: {
       type: 'object' as const,
@@ -35,7 +35,7 @@ export const toolDefinitions = [
     },
   },
   {
-    name: 'clawd_session_output',
+    name: 'monkey_session_output',
     description: 'Get the terminal output from a Claude Code session',
     inputSchema: {
       type: 'object' as const,
@@ -47,7 +47,7 @@ export const toolDefinitions = [
     },
   },
   {
-    name: 'clawd_session_kill',
+    name: 'monkey_session_kill',
     description: 'Terminate a Claude Code session',
     inputSchema: {
       type: 'object' as const,
@@ -58,8 +58,13 @@ export const toolDefinitions = [
     },
   },
   {
-    name: 'clawd_status',
-    description: 'Get the status of the clawd server',
+    name: 'monkey_status',
+    description: 'Get the status of the monkey server',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'monkey_session_recover',
+    description: 'Recover sessions after gateway restart (re-syncs with tmux)',
     inputSchema: { type: 'object' as const, properties: {} },
   },
 ];
@@ -82,7 +87,7 @@ const systemUser: User = {
 // Tool implementations - call session-manager directly (no IPC)
 export function createTools(): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
   return {
-    clawd_session_create: async (args) => {
+    monkey_session_create: async (args) => {
       const { name, workingDirectory, initialPrompt } = args as {
         name: string;
         workingDirectory: string;
@@ -98,7 +103,7 @@ export function createTools(): Record<string, (args: Record<string, unknown>) =>
       return { sessionId: session.id, name: session.name, status: session.status };
     },
 
-    clawd_session_list: async () => {
+    monkey_session_list: async () => {
       const sessions = sessionManager.listActiveSessions();
       return sessions.map(s => ({
         id: s.id,
@@ -109,26 +114,32 @@ export function createTools(): Record<string, (args: Record<string, unknown>) =>
       }));
     },
 
-    clawd_session_send: async (args) => {
+    monkey_session_send: async (args) => {
       const { sessionId, prompt } = args as { sessionId: string; prompt: string };
       await sessionManager.sendPrompt(sessionId, prompt, systemUser);
       return { success: true, sessionId };
     },
 
-    clawd_session_output: async (args) => {
+    monkey_session_output: async (args) => {
       const { sessionId, lines = 100 } = args as { sessionId: string; lines?: number };
       const output = sessionManager.getOutput(sessionId, lines);
       return { sessionId, output };
     },
 
-    clawd_session_kill: async (args) => {
+    monkey_session_kill: async (args) => {
       const { sessionId } = args as { sessionId: string };
       sessionManager.killSession(sessionId, systemUser);
       return { success: true, sessionId };
     },
 
-    clawd_status: async () => {
+    monkey_status: async () => {
       return sessionManager.getStatus();
+    },
+
+    monkey_session_recover: async () => {
+      sessionManager.recoverSessions();
+      const active = sessionManager.listActiveSessions();
+      return { recovered: active.length, sessions: active.map(s => s.name) };
     },
   };
 }

@@ -66,7 +66,7 @@ export interface CommandHandler {
 }
 
 // Config types
-export interface ClawdConfig {
+export interface MonkeyConfig {
   telegram?: {
     token?: string;
     enabled?: boolean;

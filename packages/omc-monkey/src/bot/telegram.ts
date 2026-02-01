@@ -3,6 +3,7 @@ import { loadConfig } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { setTelegramConnected } from '../core/session-manager.js';
 import { registerCommands } from './commands.js';
+import { isAdminConfigured } from '../db/users.js';
 
 let bot: Bot<MyContext> | null = null;
 
@@ -26,6 +27,13 @@ export async function startTelegram(): Promise<Bot<MyContext> | null> {
 
   if (!token) {
     logger.warn('Telegram token not found');
+    return null;
+  }
+
+  // Security: require admin configuration
+  if (!isAdminConfigured()) {
+    logger.error('SECURITY: No adminTelegramIds configured. Bot refusing to start.');
+    logger.error('Configure adminTelegramIds via /oh-my-claudecode:omc-setup or in ~/.claude/.omc-config.json');
     return null;
   }
 

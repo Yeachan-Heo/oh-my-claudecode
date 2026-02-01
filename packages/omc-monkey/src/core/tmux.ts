@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { logger } from '../utils/logger.js';
 
-const SESSION_PREFIX = 'cc-';
+const SESSION_PREFIX = 'monkey-';
 
 export interface TmuxSession {
   name: string;
@@ -13,7 +13,7 @@ export interface TmuxSession {
 function checkTmuxInstalled(): void {
   const result = spawnSync('which', ['tmux'], { encoding: 'utf8', stdio: 'pipe' });
   if (result.status !== 0) {
-    throw new Error('tmux is not installed. Please install tmux to use clawd.');
+    throw new Error('tmux is not installed. Please install tmux to use omc-monkey.');
   }
 }
 

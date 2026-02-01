@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getDbPath } from '../config.js';
-import type { ClawdConfig } from '../types.js';
+import type { MonkeyConfig } from '../types.js';
 
 let db: Database.Database | null = null;
 
@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_created_by ON sessions(created_by);
 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
 `;
 
-export function initDatabase(config: ClawdConfig): Database.Database {
+export function initDatabase(config: MonkeyConfig): Database.Database {
   if (db) return db;
 
   const dbPath = getDbPath(config);

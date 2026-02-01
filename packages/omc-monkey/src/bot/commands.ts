@@ -6,6 +6,26 @@ import { logger } from '../utils/logger.js';
 import { validateWorkingDirectory } from '../utils/validation.js';
 import type { User } from '../types.js';
 
+type RequiredRole = 'public' | 'user' | 'admin';
+
+const COMMAND_ROLES: Record<string, RequiredRole> = {
+  // Commands
+  'start': 'public',
+  'status': 'public',
+  'session': 'admin',
+  'create': 'admin',
+  'kill': 'admin',
+  'prompt': 'user',
+  'output': 'user',
+  // Callback queries (prefixes for pattern matching)
+  'session:list': 'public',
+  'session:create': 'admin',
+  'session:switch': 'user',
+  'session:kill': 'admin',
+  'switch': 'user',  // for switch:* callback pattern
+  // Note: kill:* callbacks use 'session:kill' role which maps to admin
+};
+
 const userRepo = new UserRepository();
 
 interface SessionData {
@@ -25,11 +45,42 @@ async function getOrCreateUser(ctx: MyContext): Promise<User> {
   return userRepo.findOrCreate({ telegramId, username });
 }
 
+async function checkAuthorization(ctx: MyContext, commandOrAction: string): Promise<boolean> {
+  const key = commandOrAction.includes(':') && !COMMAND_ROLES[commandOrAction]
+    ? commandOrAction.split(':')[0]
+    : commandOrAction;
+
+  const requiredRole = COMMAND_ROLES[key] ?? 'admin';
+
+  if (requiredRole === 'public') {
+    return true;
+  }
+
+  try {
+    const user = await getOrCreateUser(ctx);
+
+    if (requiredRole === 'admin' && user.role !== 'admin') {
+      await ctx.reply('⛔ Unauthorized: Admin role required for this action.');
+      return false;
+    }
+
+    if (requiredRole === 'user' && user.role !== 'admin' && user.role !== 'user') {
+      await ctx.reply('⛔ Unauthorized: User role required for this action.');
+      return false;
+    }
+
+    return true;
+  } catch {
+    await ctx.reply('⛔ Authorization failed.');
+    return false;
+  }
+}
+
 export function registerCommands(bot: Bot<MyContext>): void {
   // Start command
   bot.command('start', async (ctx) => {
     await ctx.reply(
-      '🤖 *ClawdCoder* - Claude Code Session Manager\n\n' +
+      '🤖 *OMC Monkey* - Claude Code Session Manager\n\n' +
       'Commands:\n' +
       '/session - Manage sessions\n' +
       '/prompt <text> - Send prompt to active session\n' +
@@ -42,6 +93,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   // Session command with inline keyboard
   bot.command('session', async (ctx) => {
+    if (!(await checkAuthorization(ctx, 'session'))) return;
     const keyboard = new InlineKeyboard()
       .text('📝 Create', 'session:create')
       .text('📋 List', 'session:list')
@@ -54,10 +106,17 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   // Prompt command
   bot.command('prompt', async (ctx) => {
+    if (!(await checkAuthorization(ctx, 'prompt'))) return;
     const text = ctx.match;
 
     if (!text) {
       await ctx.reply('Usage: /prompt <your prompt text>');
+      return;
+    }
+
+    const MAX_PROMPT_LENGTH = 100 * 1024; // 100KB
+    if (text.length > MAX_PROMPT_LENGTH) {
+      await ctx.reply(`Prompt too long (${text.length} chars). Maximum is ${MAX_PROMPT_LENGTH} chars.`);
       return;
     }
 
@@ -93,6 +152,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   // Output command
   bot.command('output', async (ctx) => {
+    if (!(await checkAuthorization(ctx, 'output'))) return;
     try {
       const user = await getOrCreateUser(ctx);
 
@@ -133,7 +193,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
     const telegramIcon = status.telegramConnected ? '🟢' : '🔴';
 
     await ctx.reply(
-      '🤖 *ClawdCoder Status*\n\n' +
+      '🤖 *OMC Monkey Status*\n\n' +
       `⏱ Uptime: ${hours}h ${minutes}m\n` +
       `📊 Sessions: ${status.activeSessions}/${status.maxSessions}\n\n` +
       `${telegramIcon} Telegram`,
@@ -162,6 +222,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   bot.callbackQuery('session:create', async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!(await checkAuthorization(ctx, 'session:create'))) return;
     await ctx.editMessageText(
       'To create a session, use:\n\n' +
       '/create <name> <directory>\n\n' +
@@ -172,6 +233,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   bot.callbackQuery('session:switch', async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!(await checkAuthorization(ctx, 'session:switch'))) return;
 
     try {
       const user = await getOrCreateUser(ctx);
@@ -195,6 +257,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   bot.callbackQuery('session:kill', async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!(await checkAuthorization(ctx, 'session:kill'))) return;
 
     try {
       const user = await getOrCreateUser(ctx);
@@ -219,6 +282,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
   // Switch session handler
   bot.callbackQuery(/^switch:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!(await checkAuthorization(ctx, 'switch'))) return;
 
     try {
       const user = await getOrCreateUser(ctx);
@@ -240,6 +304,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
   // Kill session handler
   bot.callbackQuery(/^kill:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!(await checkAuthorization(ctx, 'session:kill'))) return;
 
     const sessionId = ctx.match[1];
 
@@ -265,6 +330,7 @@ export function registerCommands(bot: Bot<MyContext>): void {
 
   // Create session command
   bot.command('create', async (ctx) => {
+    if (!(await checkAuthorization(ctx, 'create'))) return;
     const args = ctx.match?.split(' ');
 
     if (!args || args.length < 2) {
