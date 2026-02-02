@@ -34,7 +34,8 @@ describe('readHudConfig', () => {
 
     it('reads from settings.json omcHud key first', () => {
       mockExistsSync.mockImplementation((path) => {
-        return path === '/Users/testuser/.claude/settings.json';
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({
         omcHud: {
@@ -53,14 +54,16 @@ describe('readHudConfig', () => {
 
     it('falls back to legacy hud-config.json when settings.json has no omcHud', () => {
       mockExistsSync.mockImplementation((path) => {
-        return path === '/Users/testuser/.claude/settings.json' ||
-               path === '/Users/testuser/.claude/.omc/hud-config.json';
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s) ||
+               /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]\.omc[\\/]hud-config\.json$/.test(s);
       });
       mockReadFileSync.mockImplementation((path) => {
-        if (path === '/Users/testuser/.claude/settings.json') {
+        const s = String(path);
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s)) {
           return JSON.stringify({ someOtherKey: true });
         }
-        if (path === '/Users/testuser/.claude/.omc/hud-config.json') {
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]\.omc[\\/]hud-config\.json$/.test(s)) {
           return JSON.stringify({
             elements: {
               cwd: true,
@@ -78,7 +81,8 @@ describe('readHudConfig', () => {
     it('prefers settings.json over legacy hud-config.json', () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockImplementation((path) => {
-        if (path === '/Users/testuser/.claude/settings.json') {
+        const s = String(path);
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s)) {
           return JSON.stringify({
             omcHud: {
               elements: {
@@ -87,7 +91,7 @@ describe('readHudConfig', () => {
             }
           });
         }
-        if (path === '/Users/testuser/.claude/.omc/hud-config.json') {
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]\.omc[\\/]hud-config\.json$/.test(s)) {
           return JSON.stringify({
             elements: {
               gitRepo: false,
@@ -108,7 +112,8 @@ describe('readHudConfig', () => {
   describe('error handling', () => {
     it('returns defaults when settings.json is invalid JSON', () => {
       mockExistsSync.mockImplementation((path) => {
-        return path === '/Users/testuser/.claude/settings.json';
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
       });
       mockReadFileSync.mockReturnValue('invalid json');
 
@@ -120,10 +125,11 @@ describe('readHudConfig', () => {
     it('falls back to legacy when settings.json read fails', () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockImplementation((path) => {
-        if (path === '/Users/testuser/.claude/settings.json') {
+        const s = String(path);
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s)) {
           throw new Error('Read error');
         }
-        if (path === '/Users/testuser/.claude/.omc/hud-config.json') {
+        if (/[\\/]Users[\\/]testuser[\\/]\.claude[\\/]\.omc[\\/]hud-config\.json$/.test(s)) {
           return JSON.stringify({
             elements: { cwd: true }
           });
@@ -140,7 +146,8 @@ describe('readHudConfig', () => {
   describe('merging with defaults', () => {
     it('merges partial config with defaults', () => {
       mockExistsSync.mockImplementation((path) => {
-        return path === '/Users/testuser/.claude/settings.json';
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({
         omcHud: {
@@ -162,7 +169,8 @@ describe('readHudConfig', () => {
 
     it('merges thresholds with defaults', () => {
       mockExistsSync.mockImplementation((path) => {
-        return path === '/Users/testuser/.claude/settings.json';
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({
         omcHud: {

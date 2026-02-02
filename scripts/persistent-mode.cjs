@@ -9,7 +9,7 @@
  */
 
 const { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } = require('fs');
-const { join } = require('path');
+const { join, dirname } = require('path');
 const { homedir } = require('os');
 
 async function readStdin() {
@@ -32,8 +32,8 @@ function readJsonFile(path) {
 function writeJsonFile(path, data) {
   try {
     // Ensure directory exists
-    const dir = path.substring(0, path.lastIndexOf('/'));
-    if (dir && !existsSync(dir)) {
+    const dir = dirname(path);
+    if (dir && dir !== '.' && !existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
     writeFileSync(path, JSON.stringify(data, null, 2));

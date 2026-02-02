@@ -66,12 +66,20 @@ describe('HUD Windows Compatibility', () => {
 
     it('pathToFileURL should correctly convert Unix paths', () => {
       const unixPath = '/home/user/test.js';
-      expect(pathToFileURL(unixPath).href).toBe('file:///home/user/test.js');
+      expect(pathToFileURL(unixPath).href).toBe(
+        process.platform === 'win32'
+          ? 'file:///C:/home/user/test.js'
+          : 'file:///home/user/test.js'
+      );
     });
 
     it('pathToFileURL should encode spaces in paths', () => {
       const spacePath = '/path/with spaces/file.js';
-      expect(pathToFileURL(spacePath).href).toBe('file:///path/with%20spaces/file.js');
+      expect(pathToFileURL(spacePath).href).toBe(
+        process.platform === 'win32'
+          ? 'file:///C:/path/with%20spaces/file.js'
+          : 'file:///path/with%20spaces/file.js'
+      );
     });
   });
 

@@ -142,16 +142,16 @@ describe('delegation-enforcement-levels', () => {
       // Local config exists with 'off', global has 'strict'
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/tmp/test-project/.omc/config.json')) return true;
-        if (s.includes('/mock/home/.claude/.omc-config.json')) return true;
+        if (/[\\/]tmp[\\/]test-project[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
+        if (/[\\/]mock[\\/]home[\\/]\.claude[\\/]\.omc-config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/tmp/test-project/.omc/config.json')) {
+        if (/[\\/]tmp[\\/]test-project[\\/]\.omc[\\/]config\.json$/.test(s)) {
           return JSON.stringify({ delegationEnforcementLevel: 'off' });
         }
-        if (s.includes('/mock/home/.claude/.omc-config.json')) {
+        if (/[\\/]mock[\\/]home[\\/]\.claude[\\/]\.omc-config\.json$/.test(s)) {
           return JSON.stringify({ delegationEnforcementLevel: 'strict' });
         }
         return '';
@@ -166,12 +166,12 @@ describe('delegation-enforcement-levels', () => {
     it('falls back to global config when no local config', () => {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/mock/home/.claude/.omc-config.json')) return true;
+        if (/[\\/]mock[\\/]home[\\/]\.claude[\\/]\.omc-config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/mock/home/.claude/.omc-config.json')) {
+        if (/[\\/]mock[\\/]home[\\/]\.claude[\\/]\.omc-config\.json$/.test(s)) {
           return JSON.stringify({ delegationEnforcementLevel: 'strict' });
         }
         return '';
@@ -186,7 +186,7 @@ describe('delegation-enforcement-levels', () => {
     it('falls back to warn on invalid enforcement level in config', () => {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/tmp/test-project/.omc/config.json')) return true;
+        if (/[\\/]tmp[\\/]test-project[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {
@@ -202,7 +202,7 @@ describe('delegation-enforcement-levels', () => {
     it('falls back to warn on malformed JSON config', () => {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/tmp/test-project/.omc/config.json')) return true;
+        if (/[\\/]tmp[\\/]test-project[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {
@@ -218,7 +218,7 @@ describe('delegation-enforcement-levels', () => {
     it('supports enforcementLevel key as alternative', () => {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('/tmp/test-project/.omc/config.json')) return true;
+        if (/[\\/]tmp[\\/]test-project[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {
@@ -237,7 +237,7 @@ describe('delegation-enforcement-levels', () => {
     function setEnforcement(level: string) {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('.omc/config.json')) return true;
+        if (/[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {
@@ -493,7 +493,7 @@ describe('delegation-enforcement-levels', () => {
       // before any HUD tracking happens
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('.omc/config.json')) return true;
+        if (/[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {
@@ -513,7 +513,7 @@ describe('delegation-enforcement-levels', () => {
     it('blocks propagated from enforcement', async () => {
       mockExistsSync.mockImplementation((p: unknown) => {
         const s = String(p);
-        if (s.includes('.omc/config.json')) return true;
+        if (/[\\/]\.omc[\\/]config\.json$/.test(s)) return true;
         return false;
       });
       mockReadFileSync.mockImplementation(() => {

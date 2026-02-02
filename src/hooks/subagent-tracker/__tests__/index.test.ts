@@ -638,7 +638,10 @@ describe('subagent-tracker', () => {
       const updated = readTrackingState(testDir);
       const agent = updated.agents[0];
       expect(agent.file_ownership).toHaveLength(2);
-      expect(agent.file_ownership).toContain('src/hooks/bridge.ts');
+      const normalized = (agent.file_ownership ?? []).map((p) =>
+        String(p).replace(/\\/g, '/').replace(/^\/+/, '')
+      );
+      expect(normalized).toContain('src/hooks/bridge.ts');
     });
 
     it('should detect file conflicts between agents', () => {

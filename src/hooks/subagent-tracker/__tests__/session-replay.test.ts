@@ -32,7 +32,7 @@ describe('session-replay', () => {
   describe('getReplayFilePath', () => {
     it('should return correct path for session', () => {
       const path = getReplayFilePath(testDir, 'test-session');
-      expect(path).toContain('.omc/state/agent-replay-test-session.jsonl');
+      expect(path).toContain(join('.omc', 'state', 'agent-replay-test-session.jsonl'));
     });
 
     it('should sanitize session ID', () => {

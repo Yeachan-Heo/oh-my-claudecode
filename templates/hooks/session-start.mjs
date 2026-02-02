@@ -144,8 +144,8 @@ To update, run: claude /install-plugin oh-my-claudecode
     }
 
     // Check for ultrawork state - only restore if session matches (issue #311)
-    const ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
-      || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
+    const ultraworkState = readJsonFile(join(directory, '.omc', 'state', 'ultrawork-state.json'))
+      || readJsonFile(join(homedir(), '.omc', 'state', 'ultrawork-state.json'));
 
     if (ultraworkState?.active && (!ultraworkState.session_id || ultraworkState.session_id === sessionId)) {
       messages.push(`<session-restore>

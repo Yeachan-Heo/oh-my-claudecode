@@ -11,13 +11,13 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module
-const { readStdin } = await import(join(__dirname, 'lib', 'stdin.mjs'));
+const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
 
 function readJsonFile(path) {
   try {
@@ -31,8 +31,8 @@ function readJsonFile(path) {
 function writeJsonFile(path, data) {
   try {
     // Ensure directory exists
-    const dir = path.substring(0, path.lastIndexOf('/'));
-    if (dir && !existsSync(dir)) {
+    const dir = dirname(path);
+    if (dir && dir !== '.' && !existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
     writeFileSync(path, JSON.stringify(data, null, 2));

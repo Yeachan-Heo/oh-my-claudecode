@@ -70,10 +70,11 @@ describe('Persistent Mode Session Isolation (Issue #311)', () => {
     function runPersistentModeScript(input: Record<string, unknown>): Record<string, unknown> {
       try {
         const result = execSync(
-          `echo '${JSON.stringify(input)}' | node "${scriptPath}"`,
+          `node "${scriptPath}"`,
           {
             encoding: 'utf-8',
             timeout: 5000,
+            input: JSON.stringify(input),
             env: { ...process.env, NODE_ENV: 'test' }
           }
         );
