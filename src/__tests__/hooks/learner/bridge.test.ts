@@ -18,6 +18,7 @@ import {
   matchSkillsForInjection,
   getInjectedSkillPaths,
   markSkillsInjected,
+  clearSkillMetadataCache,
 } from "../../../hooks/learner/bridge.js";
 
 describe("Skill Bridge Module", () => {
@@ -25,6 +26,7 @@ describe("Skill Bridge Module", () => {
   let originalCwd: string;
 
   beforeEach(() => {
+    clearSkillMetadataCache();
     originalCwd = process.cwd();
     testProjectRoot = join(tmpdir(), `omc-bridge-test-${Date.now()}`);
     mkdirSync(testProjectRoot, { recursive: true });
