@@ -6,9 +6,8 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 
 // Read all stdin
 async function readStdin() {
@@ -44,7 +43,7 @@ function getAgentTrackingInfo(directory) {
   return { running: 0, total: 0 };
 }
 
-// Get todo status from project and global todos
+// Get todo status from project-local todos only
 function getTodoStatus(directory) {
   let pending = 0;
   let inProgress = 0;
@@ -71,27 +70,9 @@ function getTodoStatus(directory) {
     }
   }
 
-  // Check global Claude Code todos directory
-  const globalTodosDir = join(homedir(), '.claude', 'todos');
-  if (existsSync(globalTodosDir)) {
-    try {
-      const files = readdirSync(globalTodosDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        try {
-          const content = readFileSync(join(globalTodosDir, file), 'utf-8');
-          const todos = JSON.parse(content);
-          if (Array.isArray(todos)) {
-            pending += todos.filter(t => t.status === 'pending').length;
-            inProgress += todos.filter(t => t.status === 'in_progress').length;
-          }
-        } catch {
-          // Ignore individual file errors
-        }
-      }
-    } catch {
-      // Ignore directory read errors
-    }
-  }
+  // NOTE: We intentionally do NOT scan the global ~/.claude/todos/ directory.
+  // That directory accumulates todo files from ALL past sessions across all
+  // projects, causing phantom task counts in fresh sessions (see issue #354).
 
   if (pending + inProgress > 0) {
     return `[${inProgress} active, ${pending} pending] `;
