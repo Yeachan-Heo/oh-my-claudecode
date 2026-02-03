@@ -811,3 +811,38 @@ export {
   type HookOutput as SessionEndHookOutput
 } from './session-end/index.js';
 
+export {
+  // Project Memory Hook
+  registerProjectMemoryContext,
+  clearProjectMemorySession,
+  rescanProjectEnvironment,
+  loadProjectMemory,
+  saveProjectMemory,
+  detectProjectEnvironment,
+  formatContextSummary,
+  formatFullContext,
+  learnFromToolOutput,
+  addCustomNote,
+  processPreCompact as processProjectMemoryPreCompact,
+  mapDirectoryStructure,
+  updateDirectoryAccess,
+  trackAccess,
+  getTopHotPaths,
+  decayHotPaths,
+  detectDirectivesFromMessage,
+  addDirective,
+  formatDirectivesForContext,
+  type ProjectMemory,
+  type TechStack,
+  type BuildInfo,
+  type CodeConventions,
+  type ProjectStructure,
+  type LanguageDetection,
+  type FrameworkDetection,
+  type GitBranchPattern,
+  type CustomNote,
+  type DirectoryInfo,
+  type HotPath,
+  type UserDirective
+} from './project-memory/index.js';
+

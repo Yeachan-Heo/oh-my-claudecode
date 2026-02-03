@@ -26,6 +26,11 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/project-memory-session.mjs\"",
+            "timeout": 5
           }
         ]
       },
@@ -82,6 +87,11 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-verifier.mjs\"",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/project-memory-posttool.mjs\"",
+            "timeout": 3
           }
         ]
       }
@@ -118,6 +128,11 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.mjs\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/project-memory-precompact.mjs\"",
+            "timeout": 5
           }
         ]
       }

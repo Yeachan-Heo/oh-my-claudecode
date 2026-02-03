@@ -21,6 +21,7 @@ export type ContextSourceType =
   | 'session-context'
   | 'learner'
   | 'beads'
+  | 'project-memory'
   | 'custom';
 
 /**
