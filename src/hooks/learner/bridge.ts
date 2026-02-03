@@ -8,15 +8,27 @@
  * Usage: const bridge = require('../dist/hooks/skill-bridge.cjs');
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync } from 'fs';
-import { join, dirname, basename } from 'path';
-import { homedir } from 'os';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+} from "fs";
+import { join, dirname, basename } from "path";
+import { homedir } from "os";
 
 // Re-export constants
-export const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'omc-learned');
-export const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
-export const PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
-export const SKILL_EXTENSION = '.md';
+export const USER_SKILLS_DIR = join(
+  homedir(),
+  ".claude",
+  "skills",
+  "omc-learned",
+);
+export const GLOBAL_SKILLS_DIR = join(homedir(), ".omc", "skills");
+export const PROJECT_SKILLS_SUBDIR = join(".omc", "skills");
+export const SKILL_EXTENSION = ".md";
 
 /** Session TTL: 1 hour */
 const SESSION_TTL_MS = 60 * 60 * 1000;
@@ -25,7 +37,7 @@ const SESSION_TTL_MS = 60 * 60 * 1000;
 const MAX_RECURSION_DEPTH = 10;
 
 /** State file path */
-const STATE_FILE = '.omc/state/skill-sessions.json';
+const STATE_FILE = ".omc/state/skill-sessions.json";
 
 // =============================================================================
 // Types
@@ -34,7 +46,7 @@ const STATE_FILE = '.omc/state/skill-sessions.json';
 export interface SkillFileCandidate {
   path: string;
   realPath: string;
-  scope: 'user' | 'project';
+  scope: "user" | "project";
   /** The root directory this skill was found in */
   sourceDir: string;
 }
@@ -46,7 +58,7 @@ export interface ParseResult {
     description?: string;
     triggers?: string[];
     tags?: string[];
-    matching?: 'exact' | 'fuzzy';
+    matching?: "exact" | "fuzzy";
     model?: string;
     agent?: string;
   };
@@ -60,9 +72,9 @@ export interface MatchedSkill {
   name: string;
   content: string;
   score: number;
-  scope: 'user' | 'project';
+  scope: "user" | "project";
   triggers: string[];
-  matching?: 'exact' | 'fuzzy';
+  matching?: "exact" | "fuzzy";
 }
 
 interface SessionState {
@@ -92,7 +104,7 @@ function readSessionState(projectRoot: string): SessionState {
   const stateFile = getStateFilePath(projectRoot);
   try {
     if (existsSync(stateFile)) {
-      const content = readFileSync(stateFile, 'utf-8');
+      const content = readFileSync(stateFile, "utf-8");
       return JSON.parse(content);
     }
   } catch {
@@ -108,7 +120,7 @@ function writeSessionState(projectRoot: string, state: SessionState): void {
   const stateFile = getStateFilePath(projectRoot);
   try {
     mkdirSync(dirname(stateFile), { recursive: true });
-    writeFileSync(stateFile, JSON.stringify(state, null, 2), 'utf-8');
+    writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
   } catch {
     // Ignore write errors (non-critical)
   }
@@ -117,7 +129,10 @@ function writeSessionState(projectRoot: string, state: SessionState): void {
 /**
  * Get paths of skills already injected in this session.
  */
-export function getInjectedSkillPaths(sessionId: string, projectRoot: string): string[] {
+export function getInjectedSkillPaths(
+  sessionId: string,
+  projectRoot: string,
+): string[] {
   const state = readSessionState(projectRoot);
   const session = state.sessions[sessionId];
 
@@ -134,7 +149,11 @@ export function getInjectedSkillPaths(sessionId: string, projectRoot: string): s
 /**
  * Mark skills as injected for this session.
  */
-export function markSkillsInjected(sessionId: string, paths: string[], projectRoot: string): void {
+export function markSkillsInjected(
+  sessionId: string,
+  paths: string[],
+  projectRoot: string,
+): void {
   const state = readSessionState(projectRoot);
   const now = Date.now();
 
@@ -164,7 +183,11 @@ export function markSkillsInjected(sessionId: string, paths: string[], projectRo
 /**
  * Recursively find all skill files in a directory.
  */
-function findSkillFilesRecursive(dir: string, results: string[], depth: number = 0): void {
+function findSkillFilesRecursive(
+  dir: string,
+  results: string[],
+  depth: number = 0,
+): void {
   if (!existsSync(dir)) return;
   if (depth > MAX_RECURSION_DEPTH) return;
 
@@ -199,11 +222,13 @@ function safeRealpathSync(filePath: string): string {
  * Check if a resolved path is within a boundary directory.
  */
 function isWithinBoundary(realPath: string, boundary: string): boolean {
-  const sep = process.platform === 'win32' ? '\\' : '/';
-  const normalizedReal = realPath.replace(/\\/g, '/').replace(/\/+/g, '/');
-  const normalizedBoundary = boundary.replace(/\\/g, '/').replace(/\/+/g, '/');
-  return normalizedReal === normalizedBoundary ||
-         normalizedReal.startsWith(normalizedBoundary + '/');
+  const sep = process.platform === "win32" ? "\\" : "/";
+  const normalizedReal = realPath.replace(/\\/g, "/").replace(/\/+/g, "/");
+  const normalizedBoundary = boundary.replace(/\\/g, "/").replace(/\/+/g, "/");
+  return (
+    normalizedReal === normalizedBoundary ||
+    normalizedReal.startsWith(normalizedBoundary + "/")
+  );
 }
 
 /**
@@ -213,14 +238,14 @@ function isWithinBoundary(realPath: string, boundary: string): boolean {
  */
 export function findSkillFiles(
   projectRoot: string,
-  options?: { scope?: 'project' | 'user' | 'all' }
+  options?: { scope?: "project" | "user" | "all" },
 ): SkillFileCandidate[] {
   const candidates: SkillFileCandidate[] = [];
   const seenRealPaths = new Set<string>();
-  const scope = options?.scope ?? 'all';
+  const scope = options?.scope ?? "all";
 
   // 1. Search project-level skills (higher priority)
-  if (scope === 'project' || scope === 'all') {
+  if (scope === "project" || scope === "all") {
     const projectSkillsDir = join(projectRoot, PROJECT_SKILLS_SUBDIR);
     const projectFiles: string[] = [];
     findSkillFilesRecursive(projectSkillsDir, projectFiles);
@@ -234,14 +259,14 @@ export function findSkillFiles(
       candidates.push({
         path: filePath,
         realPath,
-        scope: 'project',
+        scope: "project",
         sourceDir: projectSkillsDir,
       });
     }
   }
 
   // 2. Search user-level skills from both directories (lower priority)
-  if (scope === 'user' || scope === 'all') {
+  if (scope === "user" || scope === "all") {
     const userDirs = [GLOBAL_SKILLS_DIR, USER_SKILLS_DIR];
     for (const userDir of userDirs) {
       const userFiles: string[] = [];
@@ -256,7 +281,7 @@ export function findSkillFiles(
         candidates.push({
           path: filePath,
           realPath,
-          scope: 'user',
+          scope: "user",
           sourceDir: userDir,
         });
       }
@@ -313,14 +338,14 @@ export function parseSkillFile(content: string): ParseResult | null {
  * Simple YAML parser for skill frontmatter.
  * Handles: id, name, description, triggers, tags, matching, model, agent
  */
-function parseYamlMetadata(yamlContent: string): ParseResult['metadata'] {
-  const lines = yamlContent.split('\n');
-  const metadata: ParseResult['metadata'] = {};
+function parseYamlMetadata(yamlContent: string): ParseResult["metadata"] {
+  const lines = yamlContent.split("\n");
+  const metadata: ParseResult["metadata"] = {};
 
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const colonIndex = line.indexOf(':');
+    const colonIndex = line.indexOf(":");
 
     if (colonIndex === -1) {
       i++;
@@ -331,31 +356,35 @@ function parseYamlMetadata(yamlContent: string): ParseResult['metadata'] {
     const rawValue = line.slice(colonIndex + 1).trim();
 
     switch (key) {
-      case 'id':
+      case "id":
         metadata.id = parseStringValue(rawValue);
         break;
-      case 'name':
+      case "name":
         metadata.name = parseStringValue(rawValue);
         break;
-      case 'description':
+      case "description":
         metadata.description = parseStringValue(rawValue);
         break;
-      case 'model':
+      case "model":
         metadata.model = parseStringValue(rawValue);
         break;
-      case 'agent':
+      case "agent":
         metadata.agent = parseStringValue(rawValue);
         break;
-      case 'matching':
-        metadata.matching = parseStringValue(rawValue) as 'exact' | 'fuzzy';
+      case "matching":
+        metadata.matching = parseStringValue(rawValue) as "exact" | "fuzzy";
         break;
-      case 'triggers':
-      case 'tags': {
+      case "triggers":
+      case "tags": {
         const { value, consumed } = parseArrayValue(rawValue, lines, i);
-        if (key === 'triggers') {
-          metadata.triggers = Array.isArray(value) ? value : (value ? [value] : []);
+        if (key === "triggers") {
+          metadata.triggers = Array.isArray(value)
+            ? value
+            : value
+              ? [value]
+              : [];
         } else {
-          metadata.tags = Array.isArray(value) ? value : (value ? [value] : []);
+          metadata.tags = Array.isArray(value) ? value : value ? [value] : [];
         }
         i += consumed - 1;
         break;
@@ -369,9 +398,11 @@ function parseYamlMetadata(yamlContent: string): ParseResult['metadata'] {
 }
 
 function parseStringValue(value: string): string {
-  if (!value) return '';
-  if ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))) {
+  if (!value) return "";
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
     return value.slice(1, -1);
   }
   return value;
@@ -380,19 +411,24 @@ function parseStringValue(value: string): string {
 function parseArrayValue(
   rawValue: string,
   lines: string[],
-  currentIndex: number
+  currentIndex: number,
 ): { value: string | string[]; consumed: number } {
   // Inline array: ["a", "b"]
-  if (rawValue.startsWith('[')) {
-    const content = rawValue.slice(1, rawValue.lastIndexOf(']')).trim();
+  if (rawValue.startsWith("[")) {
+    const endIndex = rawValue.lastIndexOf("]");
+    if (endIndex === -1) return { value: [], consumed: 1 };
+    const content = rawValue.slice(1, endIndex).trim();
     if (!content) return { value: [], consumed: 1 };
 
-    const items = content.split(',').map(s => parseStringValue(s.trim())).filter(Boolean);
+    const items = content
+      .split(",")
+      .map((s) => parseStringValue(s.trim()))
+      .filter(Boolean);
     return { value: items, consumed: 1 };
   }
 
   // Multi-line array
-  if (!rawValue || rawValue === '') {
+  if (!rawValue || rawValue === "") {
     const items: string[] = [];
     let consumed = 1;
 
@@ -404,7 +440,7 @@ function parseArrayValue(
         const itemValue = parseStringValue(arrayMatch[1].trim());
         if (itemValue) items.push(itemValue);
         consumed++;
-      } else if (nextLine.trim() === '') {
+      } else if (nextLine.trim() === "") {
         consumed++;
       } else {
         break;
@@ -443,11 +479,7 @@ function levenshteinDistance(str1: string, str2: string): number {
       if (str1[i - 1] === str2[j - 1]) {
         dp[i][j] = dp[i - 1][j - 1];
       } else {
-        dp[i][j] = 1 + Math.min(
-          dp[i - 1][j],
-          dp[i][j - 1],
-          dp[i - 1][j - 1]
-        );
+        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
       }
     }
   }
@@ -460,7 +492,7 @@ function levenshteinDistance(str1: string, str2: string): number {
  * Returns confidence score 0-100.
  */
 function fuzzyMatchTrigger(prompt: string, trigger: string): number {
-  const words = prompt.split(/\s+/).filter(w => w.length > 0);
+  const words = prompt.split(/\s+/).filter((w) => w.length > 0);
 
   // Exact word match
   for (const word of words) {
@@ -493,13 +525,15 @@ export function matchSkillsForInjection(
   prompt: string,
   projectRoot: string,
   sessionId: string,
-  options: { fuzzyThreshold?: number; maxResults?: number } = {}
+  options: { fuzzyThreshold?: number; maxResults?: number } = {},
 ): MatchedSkill[] {
   const { fuzzyThreshold = 60, maxResults = 5 } = options;
   const promptLower = prompt.toLowerCase();
 
   // Get already injected skills
-  const alreadyInjected = new Set(getInjectedSkillPaths(sessionId, projectRoot));
+  const alreadyInjected = new Set(
+    getInjectedSkillPaths(sessionId, projectRoot),
+  );
 
   // Find all skill files
   const candidates = findSkillFiles(projectRoot);
@@ -510,14 +544,14 @@ export function matchSkillsForInjection(
     if (alreadyInjected.has(candidate.path)) continue;
 
     try {
-      const content = readFileSync(candidate.path, 'utf-8');
+      const content = readFileSync(candidate.path, "utf-8");
       const parsed = parseSkillFile(content);
       if (!parsed) continue;
 
       const triggers = parsed.metadata.triggers ?? [];
       if (triggers.length === 0) continue;
 
-      const useFuzzy = parsed.metadata.matching === 'fuzzy';
+      const useFuzzy = parsed.metadata.matching === "fuzzy";
       let totalScore = 0;
 
       // Check triggers
@@ -541,8 +575,8 @@ export function matchSkillsForInjection(
 
       if (totalScore > 0) {
         // Get name from metadata or filename
-        const name = parsed.metadata.name ||
-                     basename(candidate.path, SKILL_EXTENSION);
+        const name =
+          parsed.metadata.name || basename(candidate.path, SKILL_EXTENSION);
 
         matches.push({
           path: candidate.path,

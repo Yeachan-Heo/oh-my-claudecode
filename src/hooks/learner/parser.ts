@@ -4,7 +4,7 @@
  * Parses YAML frontmatter from skill files.
  */
 
-import type { SkillMetadata } from './types.js';
+import type { SkillMetadata } from "./types.js";
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -25,7 +25,7 @@ export function parseSkillFile(rawContent: string): SkillParseResult {
       metadata: {},
       content: rawContent,
       valid: false,
-      errors: ['Missing YAML frontmatter'],
+      errors: ["Missing YAML frontmatter"],
     };
   }
 
@@ -40,20 +40,21 @@ export function parseSkillFile(rawContent: string): SkillParseResult {
     if (!metadata.id && metadata.name) {
       metadata.id = metadata.name
         .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^a-z0-9-]/g, '');
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "");
     }
 
     // Default source to 'manual' if missing
     if (!metadata.source) {
-      metadata.source = 'manual';
+      metadata.source = "manual";
     }
 
     // Validate required fields (only truly required ones)
-    if (!metadata.name) errors.push('Missing required field: name');
-    if (!metadata.description) errors.push('Missing required field: description');
+    if (!metadata.name) errors.push("Missing required field: name");
+    if (!metadata.description)
+      errors.push("Missing required field: description");
     if (!metadata.triggers || metadata.triggers.length === 0) {
-      errors.push('Missing required field: triggers');
+      errors.push("Missing required field: triggers");
     }
 
     return {
@@ -76,13 +77,13 @@ export function parseSkillFile(rawContent: string): SkillParseResult {
  * Parse YAML metadata without external library.
  */
 function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
-  const lines = yamlContent.split('\n');
+  const lines = yamlContent.split("\n");
   const metadata: Partial<SkillMetadata> = {};
 
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const colonIndex = line.indexOf(':');
+    const colonIndex = line.indexOf(":");
 
     if (colonIndex === -1) {
       i++;
@@ -93,34 +94,37 @@ function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
     const rawValue = line.slice(colonIndex + 1).trim();
 
     switch (key) {
-      case 'id':
+      case "id":
         metadata.id = parseStringValue(rawValue);
         break;
-      case 'name':
+      case "name":
         metadata.name = parseStringValue(rawValue);
         break;
-      case 'description':
+      case "description":
         metadata.description = parseStringValue(rawValue);
         break;
-      case 'source':
-        metadata.source = parseStringValue(rawValue) as 'extracted' | 'promoted' | 'manual';
+      case "source":
+        metadata.source = parseStringValue(rawValue) as
+          | "extracted"
+          | "promoted"
+          | "manual";
         break;
-      case 'createdAt':
+      case "createdAt":
         metadata.createdAt = parseStringValue(rawValue);
         break;
-      case 'sessionId':
+      case "sessionId":
         metadata.sessionId = parseStringValue(rawValue);
         break;
-      case 'quality':
+      case "quality":
         metadata.quality = parseInt(rawValue, 10) || undefined;
         break;
-      case 'usageCount':
+      case "usageCount":
         metadata.usageCount = parseInt(rawValue, 10) || 0;
         break;
-      case 'triggers':
-      case 'tags': {
+      case "triggers":
+      case "tags": {
         const { value, consumed } = parseArrayValue(rawValue, lines, i);
-        if (key === 'triggers') {
+        if (key === "triggers") {
           metadata.triggers = Array.isArray(value) ? value : [value];
         } else {
           metadata.tags = Array.isArray(value) ? value : [value];
@@ -137,9 +141,11 @@ function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
 }
 
 function parseStringValue(value: string): string {
-  if (!value) return '';
-  if ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))) {
+  if (!value) return "";
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
     return value.slice(1, -1);
   }
   return value;
@@ -148,19 +154,24 @@ function parseStringValue(value: string): string {
 function parseArrayValue(
   rawValue: string,
   lines: string[],
-  currentIndex: number
+  currentIndex: number,
 ): { value: string | string[]; consumed: number } {
   // Inline array: ["a", "b"]
-  if (rawValue.startsWith('[')) {
-    const content = rawValue.slice(1, rawValue.lastIndexOf(']')).trim();
+  if (rawValue.startsWith("[")) {
+    const endIndex = rawValue.lastIndexOf("]");
+    if (endIndex === -1) return { value: [], consumed: 1 };
+    const content = rawValue.slice(1, endIndex).trim();
     if (!content) return { value: [], consumed: 1 };
 
-    const items = content.split(',').map(s => parseStringValue(s.trim())).filter(Boolean);
+    const items = content
+      .split(",")
+      .map((s) => parseStringValue(s.trim()))
+      .filter(Boolean);
     return { value: items, consumed: 1 };
   }
 
   // Multi-line array
-  if (!rawValue || rawValue === '') {
+  if (!rawValue || rawValue === "") {
     const items: string[] = [];
     let consumed = 1;
 
@@ -172,7 +183,7 @@ function parseArrayValue(
         const itemValue = parseStringValue(arrayMatch[1].trim());
         if (itemValue) items.push(itemValue);
         consumed++;
-      } else if (nextLine.trim() === '') {
+      } else if (nextLine.trim() === "") {
         consumed++;
       } else {
         break;
@@ -193,7 +204,7 @@ function parseArrayValue(
  */
 export function generateSkillFrontmatter(metadata: SkillMetadata): string {
   const lines = [
-    '---',
+    "---",
     `id: "${metadata.id}"`,
     `name: "${metadata.name}"`,
     `description: "${metadata.description}"`,
@@ -213,18 +224,18 @@ export function generateSkillFrontmatter(metadata: SkillMetadata): string {
     lines.push(`usageCount: ${metadata.usageCount}`);
   }
 
-  lines.push('triggers:');
+  lines.push("triggers:");
   for (const trigger of metadata.triggers) {
     lines.push(`  - "${trigger}"`);
   }
 
   if (metadata.tags && metadata.tags.length > 0) {
-    lines.push('tags:');
+    lines.push("tags:");
     for (const tag of metadata.tags) {
       lines.push(`  - "${tag}"`);
     }
   }
 
-  lines.push('---');
-  return lines.join('\n');
+  lines.push("---");
+  return lines.join("\n");
 }

@@ -20,14 +20,14 @@
  */
 function debugLog(message: string, ...args: unknown[]): void {
   const debug = process.env.OMC_DEBUG;
-  if (debug === '1' || debug === 'todo-continuation' || debug === 'true') {
-    console.error('[todo-continuation]', message, ...args);
+  if (debug === "1" || debug === "todo-continuation" || debug === "true") {
+    console.error("[todo-continuation]", message, ...args);
   }
 }
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 
 /**
  * Validates that a session ID is safe to use in file paths.
@@ -38,7 +38,7 @@ import { homedir } from 'os';
  * @returns true if the session ID is safe, false otherwise
  */
 export function isValidSessionId(sessionId: string): boolean {
-  if (!sessionId || typeof sessionId !== 'string') {
+  if (!sessionId || typeof sessionId !== "string") {
     return false;
   }
   // Allow alphanumeric, hyphens, and underscores only
@@ -50,7 +50,7 @@ export function isValidSessionId(sessionId: string): boolean {
 
 export interface Todo {
   content: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  status: "pending" | "in_progress" | "completed" | "cancelled";
   priority?: string;
   id?: string;
 }
@@ -72,23 +72,23 @@ export interface Task {
   subject: string;
   description?: string;
   activeForm?: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  status: "pending" | "in_progress" | "completed" | "deleted";
   blocks?: string[];
   blockedBy?: string[];
 }
 
 /** Internal result for Task checking */
 export interface TaskCheckResult {
-  count: number;          // Incomplete tasks
-  tasks: Task[];          // The incomplete tasks
-  total: number;          // Total tasks found
+  count: number; // Incomplete tasks
+  tasks: Task[]; // The incomplete tasks
+  total: number; // Total tasks found
 }
 
 export interface IncompleteTodosResult {
   count: number;
   todos: Todo[];
   total: number;
-  source: 'task' | 'todo' | 'both' | 'none';
+  source: "task" | "todo" | "both" | "none";
 }
 
 /**
@@ -147,14 +147,25 @@ export function isUserAbort(context?: StopContext): boolean {
 
   // Check stop_reason patterns indicating user abort
   // Exact-match patterns: short generic words that cause false positives with .includes()
-  const exactPatterns = ['aborted', 'abort', 'cancel', 'interrupt'];
+  const exactPatterns = ["aborted", "abort", "cancel", "interrupt"];
   // Substring patterns: compound words safe for .includes() matching
-  const substringPatterns = ['user_cancel', 'user_interrupt', 'ctrl_c', 'manual_stop'];
+  const substringPatterns = [
+    "user_cancel",
+    "user_interrupt",
+    "ctrl_c",
+    "manual_stop",
+  ];
 
   // Support both snake_case and camelCase field names
-  const reason = (context.stop_reason ?? context.stopReason ?? '').toLowerCase();
-  return exactPatterns.some(p => reason === p) ||
-         substringPatterns.some(p => reason.includes(p));
+  const reason = (
+    context.stop_reason ??
+    context.stopReason ??
+    ""
+  ).toLowerCase();
+  return (
+    exactPatterns.some((p) => reason === p) ||
+    substringPatterns.some((p) => reason.includes(p))
+  );
 }
 
 /**
@@ -168,34 +179,51 @@ export function isUserAbort(context?: StopContext): boolean {
 export function isContextLimitStop(context?: StopContext): boolean {
   if (!context) return false;
 
-  const reason = (context.stop_reason ?? context.stopReason ?? '').toLowerCase();
-  const endTurnReason = (context.end_turn_reason ?? context.endTurnReason ?? '').toLowerCase();
+  const reason = (
+    context.stop_reason ??
+    context.stopReason ??
+    ""
+  ).toLowerCase();
+  const endTurnReason = (
+    context.end_turn_reason ??
+    context.endTurnReason ??
+    ""
+  ).toLowerCase();
 
   const contextPatterns = [
-    'context_limit', 'context_window', 'context_exceeded', 'context_full',
-    'max_context', 'token_limit', 'max_tokens', 'conversation_too_long', 'input_too_long'
+    "context_limit",
+    "context_window",
+    "context_exceeded",
+    "context_full",
+    "max_context",
+    "token_limit",
+    "max_tokens",
+    "conversation_too_long",
+    "input_too_long",
   ];
 
-  return contextPatterns.some(p => reason.includes(p) || endTurnReason.includes(p));
+  return contextPatterns.some(
+    (p) => reason.includes(p) || endTurnReason.includes(p),
+  );
 }
 
 /**
  * Get possible todo file locations
  */
 function getTodoFilePaths(sessionId?: string, directory?: string): string[] {
-  const claudeDir = join(homedir(), '.claude');
+  const claudeDir = join(homedir(), ".claude");
   const paths: string[] = [];
 
   // Session-specific todos
   if (sessionId) {
-    paths.push(join(claudeDir, 'sessions', sessionId, 'todos.json'));
-    paths.push(join(claudeDir, 'todos', `${sessionId}.json`));
+    paths.push(join(claudeDir, "sessions", sessionId, "todos.json"));
+    paths.push(join(claudeDir, "todos", `${sessionId}.json`));
   }
 
   // Project-specific todos
   if (directory) {
-    paths.push(join(directory, '.omc', 'todos.json'));
-    paths.push(join(directory, '.claude', 'todos.json'));
+    paths.push(join(directory, ".omc", "todos.json"));
+    paths.push(join(directory, ".claude", "todos.json"));
   }
 
   // NOTE: Global todos directory scan removed to prevent false positives.
@@ -209,33 +237,45 @@ function getTodoFilePaths(sessionId?: string, directory?: string): string[] {
  */
 function parseTodoFile(filePath: string): Todo[] {
   try {
-    const content = readFileSync(filePath, 'utf-8');
-    const data = JSON.parse(content);
+    const content = readFileSync(filePath, "utf-8");
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch {
+      debugLog("Failed to parse JSON in todo file:", filePath);
+      return [];
+    }
 
     // Handle array format
     if (Array.isArray(data)) {
-      return data.filter(item =>
-        item &&
-        typeof item.content === 'string' &&
-        typeof item.status === 'string'
+      return data.filter(
+        (item) =>
+          item &&
+          typeof item.content === "string" &&
+          typeof item.status === "string",
       );
     }
 
     // Handle object format with todos array
-    if (data.todos && Array.isArray(data.todos)) {
-      return data.todos.filter((item: unknown) => {
-        const todo = item as Record<string, unknown>;
-        return (
-          todo &&
-          typeof todo.content === 'string' &&
-          typeof todo.status === 'string'
-        );
-      }) as Todo[];
+    if (
+      (data as Record<string, unknown>).todos &&
+      Array.isArray((data as Record<string, unknown>).todos)
+    ) {
+      return ((data as Record<string, unknown>).todos as unknown[]).filter(
+        (item: unknown) => {
+          const todo = item as Record<string, unknown>;
+          return (
+            todo &&
+            typeof todo.content === "string" &&
+            typeof todo.status === "string"
+          );
+        },
+      ) as Todo[];
     }
 
     return [];
   } catch (err) {
-    debugLog('Failed to parse todo file:', filePath, err);
+    debugLog("Failed to parse todo file:", filePath, err);
     return [];
   }
 }
@@ -244,7 +284,7 @@ function parseTodoFile(filePath: string): Todo[] {
  * Check if a todo is incomplete
  */
 function isIncomplete(todo: Todo): boolean {
-  return todo.status !== 'completed' && todo.status !== 'cancelled';
+  return todo.status !== "completed" && todo.status !== "cancelled";
 }
 
 /**
@@ -257,9 +297,9 @@ function isIncomplete(todo: Todo): boolean {
 export function getTaskDirectory(sessionId: string): string {
   // Security: validate sessionId before constructing path
   if (!isValidSessionId(sessionId)) {
-    return ''; // Return empty string for invalid sessions
+    return ""; // Return empty string for invalid sessions
   }
-  return join(homedir(), '.claude', 'tasks', sessionId);
+  return join(homedir(), ".claude", "tasks", sessionId);
 }
 
 /**
@@ -267,14 +307,16 @@ export function getTaskDirectory(sessionId: string): string {
  * Required fields: id (string), subject (string), status (string).
  */
 export function isValidTask(data: unknown): data is Task {
-  if (data === null || typeof data !== 'object') return false;
+  if (data === null || typeof data !== "object") return false;
   const obj = data as Record<string, unknown>;
   return (
-    typeof obj.id === 'string' && obj.id.length > 0 &&
-    typeof obj.subject === 'string' && obj.subject.length > 0 &&
-    typeof obj.status === 'string' &&
+    typeof obj.id === "string" &&
+    obj.id.length > 0 &&
+    typeof obj.subject === "string" &&
+    obj.subject.length > 0 &&
+    typeof obj.status === "string" &&
     // Accept 'deleted' as valid - matches Task interface status union type
-    ['pending', 'in_progress', 'completed', 'deleted'].includes(obj.status)
+    ["pending", "in_progress", "completed", "deleted"].includes(obj.status)
   );
 }
 
@@ -293,17 +335,23 @@ export function readTaskFiles(sessionId: string): Task[] {
     for (const file of readdirSync(taskDir)) {
       // Skip non-JSON files and .lock file (used by Claude Code for atomic writes)
       // The .lock file prevents concurrent modifications to task files
-      if (!file.endsWith('.json') || file === '.lock') continue;
+      if (!file.endsWith(".json") || file === ".lock") continue;
       try {
-        const content = readFileSync(join(taskDir, file), 'utf-8');
-        const parsed = JSON.parse(content);
+        const content = readFileSync(join(taskDir, file), "utf-8");
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(content);
+        } catch {
+          debugLog("Failed to parse JSON in task file:", file);
+          continue;
+        }
         if (isValidTask(parsed)) tasks.push(parsed);
       } catch (err) {
-        debugLog('Failed to parse task file:', file, err);
+        debugLog("Failed to read task file:", file, err);
       }
     }
   } catch (err) {
-    debugLog('Failed to read task directory:', sessionId, err);
+    debugLog("Failed to read task directory:", sessionId, err);
   }
   return tasks;
 }
@@ -322,7 +370,7 @@ export function readTaskFiles(sessionId: string): Task[] {
  */
 export function isTaskIncomplete(task: Task): boolean {
   // Treat 'completed' and any unknown/deleted status as complete
-  return task.status === 'pending' || task.status === 'in_progress';
+  return task.status === "pending" || task.status === "in_progress";
 }
 
 /**
@@ -345,14 +393,17 @@ export function checkIncompleteTasks(sessionId: string): TaskCheckResult {
   return {
     count: incomplete.length,
     tasks: incomplete,
-    total: tasks.length
+    total: tasks.length,
   };
 }
 
 /**
  * Check for incomplete todos in the legacy system
  */
-export function checkLegacyTodos(sessionId?: string, directory?: string): IncompleteTodosResult {
+export function checkLegacyTodos(
+  sessionId?: string,
+  directory?: string,
+): IncompleteTodosResult {
   const paths = getTodoFilePaths(sessionId, directory);
   const seenContents = new Set<string>();
   const allTodos: Todo[] = [];
@@ -377,7 +428,7 @@ export function checkLegacyTodos(sessionId?: string, directory?: string): Incomp
     count: incompleteTodos.length,
     todos: incompleteTodos,
     total: allTodos.length,
-    source: incompleteTodos.length > 0 ? 'todo' : 'none'
+    source: incompleteTodos.length > 0 ? "todo" : "none",
   };
 }
 
@@ -398,11 +449,11 @@ export function checkLegacyTodos(sessionId?: string, directory?: string): Incomp
 export async function checkIncompleteTodos(
   sessionId?: string,
   directory?: string,
-  stopContext?: StopContext
+  stopContext?: StopContext,
 ): Promise<IncompleteTodosResult> {
   // If user aborted, don't force continuation
   if (isUserAbort(stopContext)) {
-    return { count: 0, todos: [], total: 0, source: 'none' };
+    return { count: 0, todos: [], total: 0, source: "none" };
   }
 
   let taskResult: TaskCheckResult | null = null;
@@ -421,13 +472,13 @@ export async function checkIncompleteTodos(
       count: taskResult.count,
       // taskResult.tasks only contains incomplete tasks (pending/in_progress)
       // so status is safe to cast to Todo['status'] (no 'deleted' will appear)
-      todos: taskResult.tasks.map(t => ({
+      todos: taskResult.tasks.map((t) => ({
         content: t.subject,
-        status: t.status as Todo['status'],
-        id: t.id
+        status: t.status as Todo["status"],
+        id: t.id,
       })),
       total: taskResult.total,
-      source: todoResult.count > 0 ? 'both' : 'task'
+      source: todoResult.count > 0 ? "both" : "task",
     };
   }
 
@@ -437,10 +488,12 @@ export async function checkIncompleteTodos(
 /**
  * Create a Todo Continuation hook instance
  */
-export function createTodoContinuationHook(directory: string): TodoContinuationHook {
+export function createTodoContinuationHook(
+  directory: string,
+): TodoContinuationHook {
   return {
     checkIncomplete: (sessionId?: string) =>
-      checkIncompleteTodos(sessionId, directory)
+      checkIncompleteTodos(sessionId, directory),
   };
 }
 
@@ -460,11 +513,11 @@ export function formatTodoStatus(result: IncompleteTodosResult): string {
  */
 export function getNextPendingTodo(result: IncompleteTodosResult): Todo | null {
   // First try to find one that's in_progress
-  const inProgress = result.todos.find(t => t.status === 'in_progress');
+  const inProgress = result.todos.find((t) => t.status === "in_progress");
   if (inProgress) {
     return inProgress;
   }
 
   // Otherwise return first pending
-  return result.todos.find(t => t.status === 'pending') ?? null;
+  return result.todos.find((t) => t.status === "pending") ?? null;
 }

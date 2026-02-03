@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's rules-injector hook.
  */
 
-import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
+import type { RuleMetadata, RuleFrontmatterResult } from "./types.js";
 
 /**
  * Parse YAML frontmatter from rule file content.
@@ -41,13 +41,13 @@ export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
  * Parse YAML content without external library.
  */
 function parseYamlContent(yamlContent: string): RuleMetadata {
-  const lines = yamlContent.split('\n');
+  const lines = yamlContent.split("\n");
   const metadata: RuleMetadata = {};
 
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const colonIndex = line.indexOf(':');
+    const colonIndex = line.indexOf(":");
 
     if (colonIndex === -1) {
       i++;
@@ -57,11 +57,11 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
     const key = line.slice(0, colonIndex).trim();
     const rawValue = line.slice(colonIndex + 1).trim();
 
-    if (key === 'description') {
+    if (key === "description") {
       metadata.description = parseStringValue(rawValue);
-    } else if (key === 'alwaysApply') {
-      metadata.alwaysApply = rawValue === 'true';
-    } else if (key === 'globs' || key === 'paths' || key === 'applyTo') {
+    } else if (key === "alwaysApply") {
+      metadata.alwaysApply = rawValue === "true";
+    } else if (key === "globs" || key === "paths" || key === "applyTo") {
       const { value, consumed } = parseArrayOrStringValue(rawValue, lines, i);
       // Merge paths into globs (Claude Code compatibility)
       metadata.globs = mergeGlobs(metadata.globs, value);
@@ -79,7 +79,7 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
  * Parse a string value, removing surrounding quotes.
  */
 function parseStringValue(value: string): string {
-  if (!value) return '';
+  if (!value) return "";
 
   // Remove surrounding quotes
   if (
@@ -99,15 +99,15 @@ function parseStringValue(value: string): string {
 function parseArrayOrStringValue(
   rawValue: string,
   lines: string[],
-  currentIndex: number
+  currentIndex: number,
 ): { value: string | string[]; consumed: number } {
   // Case 1: Inline array ["a", "b", "c"]
-  if (rawValue.startsWith('[')) {
+  if (rawValue.startsWith("[")) {
     return { value: parseInlineArray(rawValue), consumed: 1 };
   }
 
   // Case 2: Multi-line array (value is empty, next lines start with "  - ")
-  if (!rawValue || rawValue === '') {
+  if (!rawValue || rawValue === "") {
     const arrayItems: string[] = [];
     let consumed = 1;
 
@@ -122,7 +122,7 @@ function parseArrayOrStringValue(
           arrayItems.push(itemValue);
         }
         consumed++;
-      } else if (nextLine.trim() === '') {
+      } else if (nextLine.trim() === "") {
         // Skip empty lines within array
         consumed++;
       } else {
@@ -138,9 +138,9 @@ function parseArrayOrStringValue(
 
   // Case 3: Comma-separated patterns in single string
   const stringValue = parseStringValue(rawValue);
-  if (stringValue.includes(',')) {
+  if (stringValue.includes(",")) {
     const items = stringValue
-      .split(',')
+      .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     return { value: items, consumed: 1 };
@@ -155,13 +155,15 @@ function parseArrayOrStringValue(
  */
 function parseInlineArray(value: string): string[] {
   // Remove brackets
-  const content = value.slice(1, value.lastIndexOf(']')).trim();
+  const endIndex = value.lastIndexOf("]");
+  if (endIndex === -1) return [];
+  const content = value.slice(1, endIndex).trim();
   if (!content) return [];
 
   const items: string[] = [];
-  let current = '';
+  let current = "";
   let inQuote = false;
-  let quoteChar = '';
+  let quoteChar = "";
 
   for (let i = 0; i < content.length; i++) {
     const char = content[i];
@@ -171,13 +173,13 @@ function parseInlineArray(value: string): string[] {
       quoteChar = char;
     } else if (inQuote && char === quoteChar) {
       inQuote = false;
-      quoteChar = '';
-    } else if (!inQuote && char === ',') {
+      quoteChar = "";
+    } else if (!inQuote && char === ",") {
       const trimmed = current.trim();
       if (trimmed) {
         items.push(parseStringValue(trimmed));
       }
-      current = '';
+      current = "";
     } else {
       current += char;
     }
@@ -197,7 +199,7 @@ function parseInlineArray(value: string): string[] {
  */
 function mergeGlobs(
   existing: string | string[] | undefined,
-  newValue: string | string[]
+  newValue: string | string[],
 ): string | string[] {
   if (!existing) return newValue;
 
