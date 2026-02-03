@@ -273,6 +273,7 @@ export interface HudElementConfig {
   showCache: boolean;         // Show cache hit rate in analytics displays
   showCost: boolean;          // Show cost/dollar amounts in analytics displays
   maxOutputLines: number;     // Max total output lines to prevent input field shrinkage
+  safeMode: boolean;          // Strip ANSI codes and use ASCII-only output to prevent terminal rendering corruption (Issue #346)
 }
 
 export interface HudThresholds {
@@ -322,6 +323,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     showCache: true,
     showCost: true,
     maxOutputLines: 4,
+    safeMode: true,  // Enabled by default to prevent terminal rendering corruption (Issue #346)
   },
   thresholds: {
     contextWarning: 70,
@@ -360,6 +362,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: false,
     showCost: false,
     maxOutputLines: 2,
+    safeMode: true,
   },
   analytics: {
     cwd: false,
@@ -388,6 +391,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: true,
     showCost: true,
     maxOutputLines: 4,
+    safeMode: true,
   },
   focused: {
     cwd: false,
@@ -416,6 +420,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: true,
     showCost: true,
     maxOutputLines: 4,
+    safeMode: true,
   },
   full: {
     cwd: false,
@@ -444,6 +449,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: true,
     showCost: true,
     maxOutputLines: 12,
+    safeMode: true,
   },
   opencode: {
     cwd: false,
@@ -472,6 +478,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: true,
     showCost: true,
     maxOutputLines: 4,
+    safeMode: true,
   },
   dense: {
     cwd: false,
@@ -500,5 +507,6 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showCache: true,
     showCost: true,
     maxOutputLines: 6,
+    safeMode: true,
   },
 };

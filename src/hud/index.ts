@@ -22,6 +22,7 @@ import {
 } from "./omc-state.js";
 import { getUsage } from "./usage-api.js";
 import { render } from "./render.js";
+import { sanitizeOutput } from "./sanitize.js";
 import type {
   HudRenderContext,
   SessionHealth,
@@ -381,11 +382,20 @@ async function main(): Promise<void> {
     }
 
     // Render and output
-    const output = await render(context, config);
+    let output = await render(context, config);
 
-    // Replace spaces with non-breaking spaces for terminal alignment
-    const formattedOutput = output.replace(/ /g, "\u00A0");
-    console.log(formattedOutput);
+    // Apply safe mode sanitization if enabled (Issue #346)
+    // This strips ANSI codes and uses ASCII-only output to prevent
+    // terminal rendering corruption during concurrent updates
+    if (config.elements.safeMode) {
+      output = sanitizeOutput(output);
+      // In safe mode, use regular spaces (don't convert to non-breaking)
+      console.log(output);
+    } else {
+      // Replace spaces with non-breaking spaces for terminal alignment
+      const formattedOutput = output.replace(/ /g, "\u00A0");
+      console.log(formattedOutput);
+    }
   } catch (error) {
     // Distinguish installation errors from runtime errors
     const isInstallError =
