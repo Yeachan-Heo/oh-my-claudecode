@@ -384,7 +384,9 @@ function parseArrayValue(
 ): { value: string | string[]; consumed: number } {
   // Inline array: ["a", "b"]
   if (rawValue.startsWith('[')) {
-    const content = rawValue.slice(1, rawValue.lastIndexOf(']')).trim();
+    const endIdx = rawValue.lastIndexOf(']');
+    if (endIdx === -1) return { value: [], consumed: 1 };
+    const content = rawValue.slice(1, endIdx).trim();
     if (!content) return { value: [], consumed: 1 };
 
     const items = content.split(',').map(s => parseStringValue(s.trim())).filter(Boolean);

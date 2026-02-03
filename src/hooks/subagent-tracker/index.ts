@@ -172,7 +172,9 @@ function acquireLock(directory: string): boolean {
       // Check for stale lock (older than timeout or dead process)
       if (existsSync(lockPath)) {
         const lockContent = readFileSync(lockPath, 'utf-8');
-        const [lockPidStr, lockTimeStr] = lockContent.split(':');
+        const lockParts = lockContent.split(':');
+        if (lockParts.length < 2) { try { unlinkSync(lockPath); } catch {} continue; }
+        const [lockPidStr, lockTimeStr] = lockParts;
         const lockPid = parseInt(lockPidStr, 10);
         const lockTime = parseInt(lockTimeStr, 10);
         const isStale = Date.now() - lockTime > LOCK_TIMEOUT_MS;
