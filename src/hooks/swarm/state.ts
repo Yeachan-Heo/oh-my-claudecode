@@ -6,16 +6,16 @@
  * All state is stored in .omc/state/swarm.db
  */
 
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import type BetterSqlite3 from 'better-sqlite3';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "fs";
+import { join } from "path";
+import type BetterSqlite3 from "better-sqlite3";
 import type {
   SwarmTask,
   SwarmState,
   AgentHeartbeat,
-  SwarmStats
-} from './types.js';
-import { DB_SCHEMA_VERSION } from './types.js';
+  SwarmStats,
+} from "./types.js";
+import { DB_SCHEMA_VERSION } from "./types.js";
 
 /**
  * SwarmSummary interface for the JSON sidecar
@@ -43,14 +43,14 @@ let db: BetterSqlite3.Database | null = null;
  * Get the database file path
  */
 function getDbPath(cwd: string): string {
-  return join(cwd, '.omc', 'state', 'swarm.db');
+  return join(cwd, ".omc", "state", "swarm.db");
 }
 
 /**
  * Ensure the state directory exists
  */
 function ensureStateDir(cwd: string): void {
-  const stateDir = join(cwd, '.omc', 'state');
+  const stateDir = join(cwd, ".omc", "state");
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -62,20 +62,20 @@ function ensureStateDir(cwd: string): void {
  */
 export async function initDb(cwd: string): Promise<boolean> {
   try {
-    // Dynamic import of better-sqlite3
     if (!Database) {
       try {
-        const betterSqlite3 = await import('better-sqlite3');
+        const betterSqlite3 = await import("better-sqlite3");
         Database = betterSqlite3.default;
       } catch (importError) {
-        console.error('Failed to import better-sqlite3. Please install it: npm install better-sqlite3', importError);
+        console.error(
+          "[Swarm] Failed to load better-sqlite3. Swarm mode requires this dependency.",
+        );
+        console.error("[Swarm] Install with: npm install better-sqlite3");
         return false;
       }
     }
 
-    // Verify Database was successfully loaded
     if (!Database) {
-      console.error('Database constructor is null after import');
       return false;
     }
 
@@ -85,7 +85,7 @@ export async function initDb(cwd: string): Promise<boolean> {
     db = new Database(dbPath);
 
     // Enable WAL mode for better concurrency
-    db.pragma('journal_mode = WAL');
+    db.pragma("journal_mode = WAL");
 
     // Create tables
     db.exec(`
@@ -132,13 +132,13 @@ export async function initDb(cwd: string): Promise<boolean> {
 
     // Set schema version
     const setVersion = db.prepare(
-      'INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)'
+      "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?)",
     );
-    setVersion.run('version', String(DB_SCHEMA_VERSION));
+    setVersion.run("version", String(DB_SCHEMA_VERSION));
 
     return true;
   } catch (error) {
-    console.error('Failed to initialize swarm database:', error);
+    console.error("Failed to initialize swarm database:", error);
     return false;
   }
 }
@@ -164,13 +164,13 @@ export function deleteDb(cwd: string): boolean {
       unlinkSync(dbPath);
     }
     // Also remove WAL and SHM files
-    const walPath = dbPath + '-wal';
-    const shmPath = dbPath + '-shm';
+    const walPath = dbPath + "-wal";
+    const shmPath = dbPath + "-shm";
     if (existsSync(walPath)) unlinkSync(walPath);
     if (existsSync(shmPath)) unlinkSync(shmPath);
     return true;
   } catch (error) {
-    console.error('Failed to delete swarm database:', error);
+    console.error("Failed to delete swarm database:", error);
     return false;
   }
 }
@@ -196,7 +196,7 @@ export function initSession(sessionId: string, agentCount: number): boolean {
     stmt.run(sessionId, agentCount, Date.now());
     return true;
   } catch (error) {
-    console.error('Failed to initialize session:', error);
+    console.error("Failed to initialize session:", error);
     return false;
   }
 }
@@ -209,19 +209,21 @@ export function loadState(): SwarmState | null {
 
   try {
     // Get session info
-    const sessionStmt = db.prepare('SELECT * FROM swarm_session WHERE id = 1');
-    const session = sessionStmt.get() as {
-      session_id: string;
-      active: number;
-      agent_count: number;
-      started_at: number;
-      completed_at: number | null;
-    } | undefined;
+    const sessionStmt = db.prepare("SELECT * FROM swarm_session WHERE id = 1");
+    const session = sessionStmt.get() as
+      | {
+          session_id: string;
+          active: number;
+          agent_count: number;
+          started_at: number;
+          completed_at: number | null;
+        }
+      | undefined;
 
     if (!session) return null;
 
     // Get all tasks
-    const tasksStmt = db.prepare('SELECT * FROM tasks ORDER BY id');
+    const tasksStmt = db.prepare("SELECT * FROM tasks ORDER BY id");
     const taskRows = tasksStmt.all() as Array<{
       id: string;
       description: string;
@@ -233,15 +235,15 @@ export function loadState(): SwarmState | null {
       result: string | null;
     }>;
 
-    const tasks: SwarmTask[] = taskRows.map(row => ({
+    const tasks: SwarmTask[] = taskRows.map((row) => ({
       id: row.id,
       description: row.description,
-      status: row.status as SwarmTask['status'],
+      status: row.status as SwarmTask["status"],
       claimedBy: row.claimed_by,
       claimedAt: row.claimed_at,
       completedAt: row.completed_at,
       error: row.error ?? undefined,
-      result: row.result ?? undefined
+      result: row.result ?? undefined,
     }));
 
     return {
@@ -250,10 +252,10 @@ export function loadState(): SwarmState | null {
       agentCount: session.agent_count,
       tasks,
       startedAt: session.started_at,
-      completedAt: session.completed_at
+      completedAt: session.completed_at,
     };
   } catch (error) {
-    console.error('Failed to load swarm state:', error);
+    console.error("Failed to load swarm state:", error);
     return null;
   }
 }
@@ -270,22 +272,24 @@ export function saveState(state: Partial<SwarmState>): boolean {
       const values: (number | null)[] = [];
 
       if (state.active !== undefined) {
-        updates.push('active = ?');
+        updates.push("active = ?");
         values.push(state.active ? 1 : 0);
       }
       if (state.completedAt !== undefined) {
-        updates.push('completed_at = ?');
+        updates.push("completed_at = ?");
         values.push(state.completedAt);
       }
 
       if (updates.length > 0) {
-        const stmt = db.prepare(`UPDATE swarm_session SET ${updates.join(', ')} WHERE id = 1`);
+        const stmt = db.prepare(
+          `UPDATE swarm_session SET ${updates.join(", ")} WHERE id = 1`,
+        );
         stmt.run(...values);
       }
     }
     return true;
   } catch (error) {
-    console.error('Failed to save swarm state:', error);
+    console.error("Failed to save swarm state:", error);
     return false;
   }
 }
@@ -304,7 +308,7 @@ export function addTask(id: string, description: string): boolean {
     stmt.run(id, description);
     return true;
   } catch (error) {
-    console.error('Failed to add task:', error);
+    console.error("Failed to add task:", error);
     return false;
   }
 }
@@ -312,7 +316,9 @@ export function addTask(id: string, description: string): boolean {
 /**
  * Add multiple tasks in a transaction
  */
-export function addTasks(tasks: Array<{ id: string; description: string }>): boolean {
+export function addTasks(
+  tasks: Array<{ id: string; description: string }>,
+): boolean {
   if (!db) return false;
 
   try {
@@ -321,16 +327,18 @@ export function addTasks(tasks: Array<{ id: string; description: string }>): boo
       VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL)
     `);
 
-    const insertMany = db.transaction((taskList: Array<{ id: string; description: string }>) => {
-      for (const task of taskList) {
-        stmt.run(task.id, task.description);
-      }
-    });
+    const insertMany = db.transaction(
+      (taskList: Array<{ id: string; description: string }>) => {
+        for (const task of taskList) {
+          stmt.run(task.id, task.description);
+        }
+      },
+    );
 
     insertMany(tasks);
     return true;
   } catch (error) {
-    console.error('Failed to add tasks:', error);
+    console.error("Failed to add tasks:", error);
     return false;
   }
 }
@@ -342,7 +350,7 @@ export function getTasks(): SwarmTask[] {
   if (!db) return [];
 
   try {
-    const stmt = db.prepare('SELECT * FROM tasks ORDER BY id');
+    const stmt = db.prepare("SELECT * FROM tasks ORDER BY id");
     const rows = stmt.all() as Array<{
       id: string;
       description: string;
@@ -354,18 +362,18 @@ export function getTasks(): SwarmTask[] {
       result: string | null;
     }>;
 
-    return rows.map(row => ({
+    return rows.map((row) => ({
       id: row.id,
       description: row.description,
-      status: row.status as SwarmTask['status'],
+      status: row.status as SwarmTask["status"],
       claimedBy: row.claimed_by,
       claimedAt: row.claimed_at,
       completedAt: row.completed_at,
       error: row.error ?? undefined,
-      result: row.result ?? undefined
+      result: row.result ?? undefined,
     }));
   } catch (error) {
-    console.error('Failed to get tasks:', error);
+    console.error("Failed to get tasks:", error);
     return [];
   }
 }
@@ -373,11 +381,11 @@ export function getTasks(): SwarmTask[] {
 /**
  * Get tasks by status
  */
-export function getTasksByStatus(status: SwarmTask['status']): SwarmTask[] {
+export function getTasksByStatus(status: SwarmTask["status"]): SwarmTask[] {
   if (!db) return [];
 
   try {
-    const stmt = db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY id');
+    const stmt = db.prepare("SELECT * FROM tasks WHERE status = ? ORDER BY id");
     const rows = stmt.all(status) as Array<{
       id: string;
       description: string;
@@ -389,18 +397,18 @@ export function getTasksByStatus(status: SwarmTask['status']): SwarmTask[] {
       result: string | null;
     }>;
 
-    return rows.map(row => ({
+    return rows.map((row) => ({
       id: row.id,
       description: row.description,
-      status: row.status as SwarmTask['status'],
+      status: row.status as SwarmTask["status"],
       claimedBy: row.claimed_by,
       claimedAt: row.claimed_at,
       completedAt: row.completed_at,
       error: row.error ?? undefined,
-      result: row.result ?? undefined
+      result: row.result ?? undefined,
     }));
   } catch (error) {
-    console.error('Failed to get tasks by status:', error);
+    console.error("Failed to get tasks by status:", error);
     return [];
   }
 }
@@ -412,32 +420,34 @@ export function getTask(taskId: string): SwarmTask | null {
   if (!db) return null;
 
   try {
-    const stmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
-    const row = stmt.get(taskId) as {
-      id: string;
-      description: string;
-      status: string;
-      claimed_by: string | null;
-      claimed_at: number | null;
-      completed_at: number | null;
-      error: string | null;
-      result: string | null;
-    } | undefined;
+    const stmt = db.prepare("SELECT * FROM tasks WHERE id = ?");
+    const row = stmt.get(taskId) as
+      | {
+          id: string;
+          description: string;
+          status: string;
+          claimed_by: string | null;
+          claimed_at: number | null;
+          completed_at: number | null;
+          error: string | null;
+          result: string | null;
+        }
+      | undefined;
 
     if (!row) return null;
 
     return {
       id: row.id,
       description: row.description,
-      status: row.status as SwarmTask['status'],
+      status: row.status as SwarmTask["status"],
       claimedBy: row.claimed_by,
       claimedAt: row.claimed_at,
       completedAt: row.completed_at,
       error: row.error ?? undefined,
-      result: row.result ?? undefined
+      result: row.result ?? undefined,
     };
   } catch (error) {
-    console.error('Failed to get task:', error);
+    console.error("Failed to get task:", error);
     return null;
   }
 }
@@ -447,7 +457,7 @@ export function getTask(taskId: string): SwarmTask | null {
  */
 export function updateTask(
   taskId: string,
-  updates: Partial<Omit<SwarmTask, 'id' | 'description'>>
+  updates: Partial<Omit<SwarmTask, "id" | "description">>,
 ): boolean {
   if (!db) return false;
 
@@ -456,38 +466,40 @@ export function updateTask(
     const values: (string | number | null)[] = [];
 
     if (updates.status !== undefined) {
-      setClauses.push('status = ?');
+      setClauses.push("status = ?");
       values.push(updates.status);
     }
     if (updates.claimedBy !== undefined) {
-      setClauses.push('claimed_by = ?');
+      setClauses.push("claimed_by = ?");
       values.push(updates.claimedBy);
     }
     if (updates.claimedAt !== undefined) {
-      setClauses.push('claimed_at = ?');
+      setClauses.push("claimed_at = ?");
       values.push(updates.claimedAt);
     }
     if (updates.completedAt !== undefined) {
-      setClauses.push('completed_at = ?');
+      setClauses.push("completed_at = ?");
       values.push(updates.completedAt);
     }
     if (updates.error !== undefined) {
-      setClauses.push('error = ?');
+      setClauses.push("error = ?");
       values.push(updates.error ?? null);
     }
     if (updates.result !== undefined) {
-      setClauses.push('result = ?');
+      setClauses.push("result = ?");
       values.push(updates.result ?? null);
     }
 
     if (setClauses.length === 0) return true;
 
     values.push(taskId);
-    const stmt = db.prepare(`UPDATE tasks SET ${setClauses.join(', ')} WHERE id = ?`);
+    const stmt = db.prepare(
+      `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`,
+    );
     stmt.run(...values);
     return true;
   } catch (error) {
-    console.error('Failed to update task:', error);
+    console.error("Failed to update task:", error);
     return false;
   }
 }
@@ -509,7 +521,7 @@ export function getStats(): SwarmStats | null {
       pending: 0,
       claimed: 0,
       done: 0,
-      failed: 0
+      failed: 0,
     };
 
     for (const row of counts) {
@@ -522,24 +534,31 @@ export function getStats(): SwarmStats | null {
       WHERE last_heartbeat > ?
     `);
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    const agentCount = (agentStmt.get(fiveMinutesAgo) as { count: number }).count;
+    const agentCount = (agentStmt.get(fiveMinutesAgo) as { count: number })
+      .count;
 
     // Get session start time
-    const sessionStmt = db.prepare('SELECT started_at FROM swarm_session WHERE id = 1');
+    const sessionStmt = db.prepare(
+      "SELECT started_at FROM swarm_session WHERE id = 1",
+    );
     const session = sessionStmt.get() as { started_at: number } | undefined;
     const startedAt = session?.started_at ?? Date.now();
 
     return {
-      totalTasks: statusCounts.pending + statusCounts.claimed + statusCounts.done + statusCounts.failed,
+      totalTasks:
+        statusCounts.pending +
+        statusCounts.claimed +
+        statusCounts.done +
+        statusCounts.failed,
       pendingTasks: statusCounts.pending,
       claimedTasks: statusCounts.claimed,
       doneTasks: statusCounts.done,
       failedTasks: statusCounts.failed,
       activeAgents: agentCount,
-      elapsedTime: Date.now() - startedAt
+      elapsedTime: Date.now() - startedAt,
     };
   } catch (error) {
-    console.error('Failed to get stats:', error);
+    console.error("Failed to get stats:", error);
     return null;
   }
 }
@@ -547,7 +566,10 @@ export function getStats(): SwarmStats | null {
 /**
  * Record an agent heartbeat
  */
-export function recordHeartbeat(agentId: string, currentTaskId: string | null): boolean {
+export function recordHeartbeat(
+  agentId: string,
+  currentTaskId: string | null,
+): boolean {
   if (!db) return false;
 
   try {
@@ -558,7 +580,7 @@ export function recordHeartbeat(agentId: string, currentTaskId: string | null): 
     stmt.run(agentId, Date.now(), currentTaskId);
     return true;
   } catch (error) {
-    console.error('Failed to record heartbeat:', error);
+    console.error("Failed to record heartbeat:", error);
     return false;
   }
 }
@@ -570,20 +592,20 @@ export function getHeartbeats(): AgentHeartbeat[] {
   if (!db) return [];
 
   try {
-    const stmt = db.prepare('SELECT * FROM heartbeats ORDER BY agent_id');
+    const stmt = db.prepare("SELECT * FROM heartbeats ORDER BY agent_id");
     const rows = stmt.all() as Array<{
       agent_id: string;
       last_heartbeat: number;
       current_task_id: string | null;
     }>;
 
-    return rows.map(row => ({
+    return rows.map((row) => ({
       agentId: row.agent_id,
       lastHeartbeat: row.last_heartbeat,
-      currentTaskId: row.current_task_id
+      currentTaskId: row.current_task_id,
     }));
   } catch (error) {
-    console.error('Failed to get heartbeats:', error);
+    console.error("Failed to get heartbeats:", error);
     return [];
   }
 }
@@ -595,11 +617,11 @@ export function removeHeartbeat(agentId: string): boolean {
   if (!db) return false;
 
   try {
-    const stmt = db.prepare('DELETE FROM heartbeats WHERE agent_id = ?');
+    const stmt = db.prepare("DELETE FROM heartbeats WHERE agent_id = ?");
     stmt.run(agentId);
     return true;
   } catch (error) {
-    console.error('Failed to remove heartbeat:', error);
+    console.error("Failed to remove heartbeat:", error);
     return false;
   }
 }
@@ -618,7 +640,7 @@ export function clearAllData(): boolean {
     `);
     return true;
   } catch (error) {
-    console.error('Failed to clear data:', error);
+    console.error("Failed to clear data:", error);
     return false;
   }
 }
@@ -632,7 +654,7 @@ export function runTransaction<T>(fn: () => T): T | null {
   try {
     return db.transaction(fn)();
   } catch (error) {
-    console.error('Transaction failed:', error);
+    console.error("Transaction failed:", error);
     return null;
   }
 }
@@ -666,18 +688,18 @@ export function writeSwarmSummary(cwd: string): boolean {
       tasks_claimed: stats.claimedTasks,
       tasks_done: stats.doneTasks,
       active: state.active,
-      project_path: cwd
+      project_path: cwd,
     };
 
-    const stateDir = join(cwd, '.omc', 'state');
+    const stateDir = join(cwd, ".omc", "state");
     mkdirSync(stateDir, { recursive: true });
 
-    const summaryPath = join(stateDir, 'swarm-summary.json');
-    writeFileSync(summaryPath, JSON.stringify(summary, null, 2), 'utf-8');
+    const summaryPath = join(stateDir, "swarm-summary.json");
+    writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf-8");
 
     return true;
   } catch (error) {
-    console.error('Failed to write swarm summary:', error);
+    console.error("Failed to write swarm summary:", error);
     return false;
   }
 }

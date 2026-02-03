@@ -9,10 +9,10 @@
  * Bash scripts were deprecated in v3.8.6 and removed in v3.9.0.
  */
 
-import { homedir } from 'os';
-import { join, dirname } from 'path';
-import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { homedir } from "os";
+import { join, dirname } from "path";
+import { readFileSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
 
 // =============================================================================
 // TEMPLATE LOADER (loads hook scripts from templates/hooks/)
@@ -26,7 +26,7 @@ function getPackageDir(): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   // From src/installer/ or dist/installer/, go up two levels to package root
-  return join(__dirname, '..', '..');
+  return join(__dirname, "..", "..");
 }
 
 /**
@@ -36,24 +36,24 @@ function getPackageDir(): string {
  * @throws If the template file is not found
  */
 function loadTemplate(filename: string): string {
-  const templatePath = join(getPackageDir(), 'templates', 'hooks', filename);
+  const templatePath = join(getPackageDir(), "templates", "hooks", filename);
   if (!existsSync(templatePath)) {
     // .sh templates have been removed in favor of .mjs - return empty string for missing bash templates
-    return '';
+    return "";
   }
-  return readFileSync(templatePath, 'utf-8');
+  return readFileSync(templatePath, "utf-8");
 }
 
 // =============================================================================
 // CONSTANTS AND UTILITIES
 // =============================================================================
 
-/** Minimum required Node.js version for hooks */
-export const MIN_NODE_VERSION = 18;
+/** Minimum required Node.js version for hooks (must match package.json engines) */
+export const MIN_NODE_VERSION = 20;
 
 /** Check if running on Windows */
 export function isWindows(): boolean {
-  return process.platform === 'win32';
+  return process.platform === "win32";
 }
 
 /**
@@ -66,12 +66,12 @@ export function shouldUseNodeHooks(): boolean {
 
 /** Get the Claude config directory path (cross-platform) */
 export function getClaudeConfigDir(): string {
-  return join(homedir(), '.claude');
+  return join(homedir(), ".claude");
 }
 
 /** Get the hooks directory path */
 export function getHooksDir(): string {
-  return join(getClaudeConfigDir(), 'hooks');
+  return join(getClaudeConfigDir(), "hooks");
 }
 
 /**
@@ -79,7 +79,7 @@ export function getHooksDir(): string {
  * Returns the appropriate syntax for the current platform.
  */
 export function getHomeEnvVar(): string {
-  return isWindows() ? '%USERPROFILE%' : '$HOME';
+  return isWindows() ? "%USERPROFILE%" : "$HOME";
 }
 
 /**
@@ -277,19 +277,23 @@ Continue working until the task is truly done.
 // =============================================================================
 
 /** Node.js keyword detector hook script - loaded from templates/hooks/keyword-detector.mjs */
-export const KEYWORD_DETECTOR_SCRIPT_NODE = loadTemplate('keyword-detector.mjs');
+export const KEYWORD_DETECTOR_SCRIPT_NODE = loadTemplate(
+  "keyword-detector.mjs",
+);
 
 /** Node.js stop continuation hook script - loaded from templates/hooks/stop-continuation.mjs */
-export const STOP_CONTINUATION_SCRIPT_NODE = loadTemplate('stop-continuation.mjs');
+export const STOP_CONTINUATION_SCRIPT_NODE = loadTemplate(
+  "stop-continuation.mjs",
+);
 
 /** Node.js persistent mode hook script - loaded from templates/hooks/persistent-mode.mjs */
-export const PERSISTENT_MODE_SCRIPT_NODE = loadTemplate('persistent-mode.mjs');
+export const PERSISTENT_MODE_SCRIPT_NODE = loadTemplate("persistent-mode.mjs");
 
 /** Node.js session start hook script - loaded from templates/hooks/session-start.mjs */
-export const SESSION_START_SCRIPT_NODE = loadTemplate('session-start.mjs');
+export const SESSION_START_SCRIPT_NODE = loadTemplate("session-start.mjs");
 
 /** Post-tool-use Node.js script - loaded from templates/hooks/post-tool-use.mjs */
-export const POST_TOOL_USE_SCRIPT_NODE = loadTemplate('post-tool-use.mjs');
+export const POST_TOOL_USE_SCRIPT_NODE = loadTemplate("post-tool-use.mjs");
 
 // =============================================================================
 // SETTINGS CONFIGURATION
@@ -310,10 +314,10 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
             // On Unix with node hooks, $HOME is expanded by the shell
             command: isWindows()
               ? 'node "%USERPROFILE%\\.claude\\hooks\\keyword-detector.mjs"'
-              : 'node "$HOME/.claude/hooks/keyword-detector.mjs"'
-          }
-        ]
-      }
+              : 'node "$HOME/.claude/hooks/keyword-detector.mjs"',
+          },
+        ],
+      },
     ],
     SessionStart: [
       {
@@ -322,10 +326,10 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
             type: "command" as const,
             command: isWindows()
               ? 'node "%USERPROFILE%\\.claude\\hooks\\session-start.mjs"'
-              : 'node "$HOME/.claude/hooks/session-start.mjs"'
-          }
-        ]
-      }
+              : 'node "$HOME/.claude/hooks/session-start.mjs"',
+          },
+        ],
+      },
     ],
     PreToolUse: [
       {
@@ -334,10 +338,10 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
             type: "command" as const,
             command: isWindows()
               ? 'node "%USERPROFILE%\\.claude\\hooks\\pre-tool-use.mjs"'
-              : 'node "$HOME/.claude/hooks/pre-tool-use.mjs"'
-          }
-        ]
-      }
+              : 'node "$HOME/.claude/hooks/pre-tool-use.mjs"',
+          },
+        ],
+      },
     ],
     PostToolUse: [
       {
@@ -346,10 +350,10 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
             type: "command" as const,
             command: isWindows()
               ? 'node "%USERPROFILE%\\.claude\\hooks\\post-tool-use.mjs"'
-              : 'node "$HOME/.claude/hooks/post-tool-use.mjs"'
-          }
-        ]
-      }
+              : 'node "$HOME/.claude/hooks/post-tool-use.mjs"',
+          },
+        ],
+      },
     ],
     Stop: [
       {
@@ -358,12 +362,12 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
             type: "command" as const,
             command: isWindows()
               ? 'node "%USERPROFILE%\\.claude\\hooks\\persistent-mode.mjs"'
-              : 'node "$HOME/.claude/hooks/persistent-mode.mjs"'
-          }
-        ]
-      }
-    ]
-  }
+              : 'node "$HOME/.claude/hooks/persistent-mode.mjs"',
+          },
+        ],
+      },
+    ],
+  },
 };
 
 /**
@@ -383,13 +387,13 @@ export function getHooksSettingsConfig(): typeof HOOKS_SETTINGS_CONFIG_NODE {
  */
 export function getHookScripts(): Record<string, string> {
   return {
-    'keyword-detector.mjs': loadTemplate('keyword-detector.mjs'),
-    'stop-continuation.mjs': loadTemplate('stop-continuation.mjs'),
-    'persistent-mode.mjs': loadTemplate('persistent-mode.mjs'),
-    'session-start.mjs': loadTemplate('session-start.mjs'),
-    'pre-tool-use.mjs': loadTemplate('pre-tool-use.mjs'),
-    'post-tool-use.mjs': loadTemplate('post-tool-use.mjs'),
+    "keyword-detector.mjs": loadTemplate("keyword-detector.mjs"),
+    "stop-continuation.mjs": loadTemplate("stop-continuation.mjs"),
+    "persistent-mode.mjs": loadTemplate("persistent-mode.mjs"),
+    "session-start.mjs": loadTemplate("session-start.mjs"),
+    "pre-tool-use.mjs": loadTemplate("pre-tool-use.mjs"),
+    "post-tool-use.mjs": loadTemplate("post-tool-use.mjs"),
     // Shared library modules (in lib/ subdirectory)
-    'lib/stdin.mjs': loadTemplate('lib/stdin.mjs')
+    "lib/stdin.mjs": loadTemplate("lib/stdin.mjs"),
   };
 }
