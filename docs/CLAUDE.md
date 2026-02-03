@@ -373,6 +373,37 @@ See [Verification Tiers](./shared/verification-tiers.md) for complete selection 
 
 Use `<remember>` tags to survive compaction: `<remember>info</remember>` (7 days) or `<remember priority>info</remember>` (permanent). Capture architecture decisions, error resolutions, user preferences. Do NOT capture progress (use todos) or info already in AGENTS.md.
 
+### Notepad System (Session Short-Term Memory)
+
+The notepad at `.omc/notepad.md` provides compaction-resilient memory with three tiers:
+
+| Section | Behavior | Use For |
+|---------|----------|---------|
+| **Priority Context** | ALWAYS loaded on session start (max 500 chars) | Critical facts: "Project uses pnpm", "API key in .env" |
+| **Working Memory** | Timestamped entries, auto-pruned after 7 days | Debugging breadcrumbs, temporary findings |
+| **MANUAL** | Never auto-pruned | Team contacts, deployment info, permanent notes |
+
+**Usage via `/oh-my-claudecode:note` skill:**
+
+```
+/oh-my-claudecode:note <content>              # Add to Working Memory
+/oh-my-claudecode:note --priority <content>   # Add to Priority Context (always loaded)
+/oh-my-claudecode:note --manual <content>     # Add to MANUAL (never pruned)
+/oh-my-claudecode:note --show                 # Display notepad contents
+/oh-my-claudecode:note --prune                # Remove entries older than 7 days
+/oh-my-claudecode:note --clear                # Clear Working Memory only
+```
+
+**Automatic capture via `<remember>` tags** (from Task agent output):
+- `<remember>content</remember>` → Working Memory with timestamp
+- `<remember priority>content</remember>` → Replaces Priority Context
+
+**Key behaviors:**
+- Priority Context is automatically injected on every session start
+- Working Memory entries are timestamped and auto-pruned after 7 days
+- Uses atomic writes to prevent data corruption
+- File is created automatically when first used
+
 ### Continuation Enforcement
 
 You are BOUND to your task list. Do not stop until EVERY task is COMPLETE.

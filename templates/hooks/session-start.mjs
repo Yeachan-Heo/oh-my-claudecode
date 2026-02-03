@@ -109,6 +109,80 @@ function countIncompleteTodos(todosDir) {
   return count;
 }
 
+// ============================================================================
+// Notepad Support
+// ============================================================================
+
+const NOTEPAD_FILENAME = 'notepad.md';
+const PRIORITY_HEADER = '## Priority Context';
+const WORKING_MEMORY_HEADER = '## Working Memory';
+
+/**
+ * Get notepad path in .omc directory
+ */
+function getNotepadPath(directory) {
+  return join(directory, '.omc', NOTEPAD_FILENAME);
+}
+
+/**
+ * Read notepad content
+ */
+function readNotepad(directory) {
+  const notepadPath = getNotepadPath(directory);
+  if (!existsSync(notepadPath)) {
+    return null;
+  }
+  try {
+    return readFileSync(notepadPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a section from notepad content
+ */
+function extractSection(content, header) {
+  // Match from header to next section (## followed by space and non-# char)
+  const regex = new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
+  const match = content.match(regex);
+  if (!match) {
+    return null;
+  }
+  // Remove HTML comments and trim
+  let section = match[1];
+  section = section.replace(/<!--[\s\S]*?-->/g, '').trim();
+  return section || null;
+}
+
+/**
+ * Get Priority Context section (for injection)
+ */
+function getPriorityContext(directory) {
+  const content = readNotepad(directory);
+  if (!content) {
+    return null;
+  }
+  return extractSection(content, PRIORITY_HEADER);
+}
+
+/**
+ * Format notepad context for session injection
+ */
+function formatNotepadContext(directory) {
+  const priorityContext = getPriorityContext(directory);
+  if (!priorityContext) {
+    return null;
+  }
+  return `<notepad-priority>
+
+## Priority Context
+
+${priorityContext}
+
+</notepad-priority>`;
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -174,6 +248,21 @@ Continue working in ultrawork mode until all tasks are complete.
 
 You have ${incompleteCount} incomplete tasks from a previous session.
 Please continue working on these tasks.
+
+</session-restore>
+
+---
+`);
+    }
+
+    // Check for notepad Priority Context (ALWAYS loaded on session start)
+    const notepadContext = formatNotepadContext(directory);
+    if (notepadContext) {
+      messages.push(`<session-restore>
+
+[NOTEPAD PRIORITY CONTEXT LOADED]
+
+${notepadContext}
 
 </session-restore>
 
