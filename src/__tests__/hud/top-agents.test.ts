@@ -92,8 +92,9 @@ describe("TokenTracker.getTopAgents contract", () => {
     );
     const sourceCode = await fs.readFile(trackerPath, "utf-8");
 
-    // Method should be defined with correct signature
-    expect(sourceCode).toContain("async getTopAgents(limit: number = 5)");
+    // Method should be defined with correct signature (may span multiple lines)
+    expect(sourceCode).toContain("async getTopAgents(");
+    expect(sourceCode).toContain("limit: number = 5");
     expect(sourceCode).toContain(
       "Promise<Array<{ agent: string; tokens: number; cost: number }>>",
     );
