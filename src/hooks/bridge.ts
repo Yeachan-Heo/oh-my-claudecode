@@ -760,7 +760,12 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const hookType = hookArg.split('=')[1] as HookType;
+  const hookParts = hookArg.split('=');
+  if (hookParts.length < 2) {
+    console.error('Invalid hook argument format');
+    process.exit(1);
+  }
+  const hookType = hookParts[1] as HookType;
 
   // Read stdin
   const chunks: Buffer[] = [];

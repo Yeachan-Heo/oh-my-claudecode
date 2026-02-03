@@ -154,8 +154,9 @@ function parseArrayOrStringValue(
  * Parse inline JSON-like array: ["a", "b", "c"]
  */
 function parseInlineArray(value: string): string[] {
-  // Remove brackets
-  const content = value.slice(1, value.lastIndexOf(']')).trim();
+  const endIdx = value.lastIndexOf(']');
+  if (endIdx === -1) return [];
+  const content = value.slice(1, endIdx).trim();
   if (!content) return [];
 
   const items: string[] = [];
