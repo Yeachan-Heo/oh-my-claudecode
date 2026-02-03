@@ -94,6 +94,9 @@ import {
 import { handleSessionEnd, type SessionEndInput } from "./session-end/index.js";
 import { initSilentAutoUpdate } from "../features/auto-update.js";
 
+const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
+const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
+
 /**
  * Validates that an input object contains all required fields.
  * Returns true if all required fields are present, false otherwise.
@@ -497,8 +500,8 @@ function processPreToolUse(input: HookInput): HookOutput {
   if (input.toolName === "Bash") {
     const command = (input.toolInput as { command?: string })?.command ?? "";
     if (
-      /\bpkill\b.*\s-f\b/.test(command) ||
-      /\bpkill\b.*--full\b/.test(command)
+      PKILL_F_FLAG_PATTERN.test(command) ||
+      PKILL_FULL_FLAG_PATTERN.test(command)
     ) {
       return {
         continue: true,
