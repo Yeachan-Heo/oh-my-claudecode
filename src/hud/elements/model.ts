@@ -5,6 +5,7 @@
  */
 
 import { dim, cyan } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 /**
  * Format model name for display.
@@ -19,8 +20,8 @@ export function formatModelName(modelId: string | null | undefined): string | nu
   if (id.includes('sonnet')) return 'Sonnet';
   if (id.includes('haiku')) return 'Haiku';
 
-  // Return original if not recognized (truncate if too long)
-  return modelId.length > 20 ? modelId.substring(0, 17) + '...' : modelId;
+  // Return original if not recognized (CJK-aware truncation)
+  return truncateToWidth(modelId, 20);
 }
 
 /**

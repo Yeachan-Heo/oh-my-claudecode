@@ -6,6 +6,7 @@
 
 import type { TodoItem } from "../types.js";
 import { RESET } from "../colors.js";
+import { truncateToWidth } from "../../utils/string-width.js";
 
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
@@ -71,8 +72,8 @@ export function renderTodosWithCurrent(todos: TodoItem[]): string | null {
 
   if (inProgress) {
     const activeText = inProgress.activeForm || inProgress.content || "...";
-    const truncated =
-      activeText.length > 30 ? activeText.slice(0, 27) + "..." : activeText;
+    // Use CJK-aware truncation (30 visual columns)
+    const truncated = truncateToWidth(activeText, 30);
     result += ` ${DIM}(working: ${truncated})${RESET}`;
   }
 

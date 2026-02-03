@@ -9,6 +9,7 @@
 
 import type { ActiveAgent, AgentsFormat } from '../types.js';
 import { cyan, dim, RESET, getModelTierColor, getDurationColor } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 const CYAN = '\x1b[36m';
 
@@ -248,11 +249,12 @@ export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
 
 /**
  * Truncate description to fit in statusline.
+ * CJK-aware: accounts for double-width characters.
  */
-function truncateDescription(desc: string | undefined, maxLen: number = 20): string {
+function truncateDescription(desc: string | undefined, maxWidth: number = 20): string {
   if (!desc) return '...';
-  if (desc.length <= maxLen) return desc;
-  return desc.slice(0, maxLen - 3) + '...';
+  // Use CJK-aware truncation (maxWidth is visual columns, not character count)
+  return truncateToWidth(desc, maxWidth);
 }
 
 /**
@@ -427,7 +429,8 @@ export function renderAgentsMultiLine(
     const durationColor = getDurationColor(durationMs);
 
     const desc = a.description || '...';
-    const truncatedDesc = desc.length > 45 ? desc.slice(0, 42) + '...' : desc;
+    // Use CJK-aware truncation (45 visual columns)
+    const truncatedDesc = truncateToWidth(desc, 45);
 
     detailLines.push(
       `${dim(prefix)} ${color}${code}${RESET} ${dim(shortName)}${durationColor}${duration}${RESET}  ${truncatedDesc}`

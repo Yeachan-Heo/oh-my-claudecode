@@ -6,15 +6,17 @@
 
 import type { UltraworkStateForHud, RalphStateForHud, SkillInvocation } from '../types.js';
 import { RESET, cyan } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 const MAGENTA = '\x1b[35m';
 const BRIGHT_MAGENTA = '\x1b[95m';
 
 /**
- * Truncate string to max length with ellipsis.
+ * Truncate string to max visual width with ellipsis.
+ * CJK-aware: accounts for double-width characters.
  */
-function truncate(str: string, max: number): string {
-  return str.length > max ? str.slice(0, max) + '...' : str;
+function truncate(str: string, maxWidth: number): string {
+  return truncateToWidth(str, maxWidth);
 }
 
 /**
