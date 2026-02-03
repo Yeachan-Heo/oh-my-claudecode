@@ -173,7 +173,7 @@ function acquireLock(directory: string): boolean {
       if (existsSync(lockPath)) {
         const lockContent = readFileSync(lockPath, 'utf-8');
         const lockParts = lockContent.split(':');
-        if (lockParts.length < 2) { try { unlinkSync(lockPath); } catch {} continue; }
+        if (lockParts.length < 2) { try { unlinkSync(lockPath); } catch { /* ignore */ } continue; }
         const [lockPidStr, lockTimeStr] = lockParts;
         const lockPid = parseInt(lockPidStr, 10);
         const lockTime = parseInt(lockTimeStr, 10);
