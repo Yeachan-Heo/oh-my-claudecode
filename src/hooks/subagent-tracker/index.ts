@@ -128,10 +128,16 @@ export const DEADLOCK_CHECK_THRESHOLD = 3;
 // ============================================================================
 
 const STATE_FILE = "subagent-tracking.json";
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 const MAX_COMPLETED_AGENTS = 100;
-const LOCK_TIMEOUT_MS = 5000; // 5 second lock timeout
-const LOCK_RETRY_MS = 50; // Retry every 50ms
+const LOCK_TIMEOUT_MS = 5000;
+const LOCK_RETRY_MS = 50;
+const WRITE_DEBOUNCE_MS = 100;
+
+// Debounce state for batching writes
+let pendingWrite: { directory: string; state: SubagentTrackingState } | null =
+  null;
+let writeTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Check if a process is still alive
@@ -259,9 +265,15 @@ export function getStateFilePath(directory: string): string {
 }
 
 /**
- * Read tracking state from file
+ * Read tracking state from file.
+ * If there's a pending write for this directory, returns it instead of reading disk.
  */
 export function readTrackingState(directory: string): SubagentTrackingState {
+  // Return pending write state if it exists for this directory (avoids stale reads)
+  if (pendingWrite && pendingWrite.directory === directory) {
+    return pendingWrite.state;
+  }
+
   const statePath = getStateFilePath(directory);
 
   if (!existsSync(statePath)) {
@@ -290,9 +302,9 @@ export function readTrackingState(directory: string): SubagentTrackingState {
 }
 
 /**
- * Write tracking state to file
+ * Write tracking state to file immediately (bypasses debounce).
  */
-export function writeTrackingState(
+function writeTrackingStateImmediate(
   directory: string,
   state: SubagentTrackingState,
 ): void {
@@ -303,6 +315,43 @@ export function writeTrackingState(
     writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
   } catch (error) {
     console.error("[SubagentTracker] Error writing state:", error);
+  }
+}
+
+/**
+ * Write tracking state with debouncing to reduce I/O.
+ */
+export function writeTrackingState(
+  directory: string,
+  state: SubagentTrackingState,
+): void {
+  pendingWrite = { directory, state };
+
+  if (writeTimeout) {
+    clearTimeout(writeTimeout);
+  }
+
+  writeTimeout = setTimeout(() => {
+    if (pendingWrite) {
+      writeTrackingStateImmediate(pendingWrite.directory, pendingWrite.state);
+      pendingWrite = null;
+    }
+    writeTimeout = null;
+  }, WRITE_DEBOUNCE_MS);
+}
+
+/**
+ * Flush any pending debounced writes immediately.
+ * Call this in tests before cleanup to ensure state is persisted.
+ */
+export function flushPendingWrites(): void {
+  if (writeTimeout) {
+    clearTimeout(writeTimeout);
+    writeTimeout = null;
+  }
+  if (pendingWrite) {
+    writeTrackingStateImmediate(pendingWrite.directory, pendingWrite.state);
+    pendingWrite = null;
   }
 }
 
