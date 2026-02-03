@@ -54,14 +54,16 @@ const levenshteinCache = new Map<string, number>();
  * Uses canonical key ordering to maximize cache hits.
  */
 function getCachedLevenshtein(str1: string, str2: string): number {
-  // Canonical ordering for cache key
   const key = str1 < str2 ? `${str1}|${str2}` : `${str2}|${str1}`;
   const cached = levenshteinCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    levenshteinCache.delete(key);
+    levenshteinCache.set(key, cached);
+    return cached;
+  }
 
   const result = levenshteinDistance(str1, str2);
 
-  // LRU eviction: remove oldest entry if at capacity
   if (levenshteinCache.size >= LEVENSHTEIN_CACHE_SIZE) {
     const firstKey = levenshteinCache.keys().next().value;
     if (firstKey) levenshteinCache.delete(firstKey);
@@ -339,7 +341,6 @@ function safeRealpathSync(filePath: string): string {
  * Check if a resolved path is within a boundary directory.
  */
 function isWithinBoundary(realPath: string, boundary: string): boolean {
-  const sep = process.platform === "win32" ? "\\" : "/";
   const normalizedReal = realPath.replace(/\\/g, "/").replace(/\/+/g, "/");
   const normalizedBoundary = boundary.replace(/\\/g, "/").replace(/\/+/g, "/");
   return (

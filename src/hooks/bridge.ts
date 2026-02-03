@@ -13,12 +13,7 @@
  * ```
  */
 
-import {
-  detectKeywordsWithType,
-  removeCodeBlocks,
-  getPrimaryKeyword,
-  getAllKeywords,
-} from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywords } from "./keyword-detector/index.js";
 import {
   readRalphState,
   incrementRalphIteration,
@@ -28,7 +23,6 @@ import {
 import { processOrchestratorPreTool } from "./omc-orchestrator/index.js";
 import {
   addBackgroundTask,
-  completeBackgroundTask,
   getRunningTaskCount,
 } from "../hud/background-tasks.js";
 import { loadConfig } from "../config/loader.js";
@@ -40,8 +34,6 @@ import {
 import {
   checkIncompleteTodos,
   StopContext,
-  isContextLimitStop,
-  isUserAbort,
 } from "./todo-continuation/index.js";
 import {
   checkPersistentModes,

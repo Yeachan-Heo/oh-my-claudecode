@@ -79,7 +79,7 @@ function updateSessionIndex(sessionId: string): void {
         const content = fsSync.readFileSync(TOKEN_LOG_FILE, "utf-8");
         const lines = content.split("\n").filter(Boolean);
         index.sessions[sessionId] = {
-          offset: Math.max(0, lines.length - 1),
+          offset: lines.length,
           count: 1,
           lastSeen: new Date().toISOString(),
         };

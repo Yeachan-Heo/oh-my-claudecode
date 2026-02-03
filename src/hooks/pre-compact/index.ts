@@ -226,14 +226,15 @@ export async function saveModeSummary(
 
   const reads = stateFiles.map(async (config) => {
     const path = join(stateDir, config.file);
-    if (!existsSync(path)) return null;
-
     try {
       const content = await fsPromises.readFile(path, "utf-8");
       const state = JSON.parse(content);
       const extracted = config.extract(state);
       return extracted ? { key: config.key, value: extracted } : null;
-    } catch (error) {
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
       console.error(`[PreCompact] Error reading ${config.file}:`, error);
       return null;
     }

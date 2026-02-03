@@ -134,10 +134,11 @@ const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_MS = 50;
 const WRITE_DEBOUNCE_MS = 100;
 
-// Debounce state for batching writes
-let pendingWrite: { directory: string; state: SubagentTrackingState } | null =
-  null;
-let writeTimeout: ReturnType<typeof setTimeout> | null = null;
+// Per-directory debounce state for batching writes (avoids race conditions)
+const pendingWrites = new Map<
+  string,
+  { state: SubagentTrackingState; timeout: ReturnType<typeof setTimeout> }
+>();
 
 /**
  * Check if a process is still alive
@@ -269,9 +270,9 @@ export function getStateFilePath(directory: string): string {
  * If there's a pending write for this directory, returns it instead of reading disk.
  */
 export function readTrackingState(directory: string): SubagentTrackingState {
-  // Return pending write state if it exists for this directory (avoids stale reads)
-  if (pendingWrite && pendingWrite.directory === directory) {
-    return pendingWrite.state;
+  const pending = pendingWrites.get(directory);
+  if (pending) {
+    return pending.state;
   }
 
   const statePath = getStateFilePath(directory);
@@ -325,19 +326,20 @@ export function writeTrackingState(
   directory: string,
   state: SubagentTrackingState,
 ): void {
-  pendingWrite = { directory, state };
-
-  if (writeTimeout) {
-    clearTimeout(writeTimeout);
+  const existing = pendingWrites.get(directory);
+  if (existing) {
+    clearTimeout(existing.timeout);
   }
 
-  writeTimeout = setTimeout(() => {
-    if (pendingWrite) {
-      writeTrackingStateImmediate(pendingWrite.directory, pendingWrite.state);
-      pendingWrite = null;
+  const timeout = setTimeout(() => {
+    const pending = pendingWrites.get(directory);
+    if (pending) {
+      writeTrackingStateImmediate(directory, pending.state);
+      pendingWrites.delete(directory);
     }
-    writeTimeout = null;
   }, WRITE_DEBOUNCE_MS);
+
+  pendingWrites.set(directory, { state, timeout });
 }
 
 /**
@@ -345,14 +347,11 @@ export function writeTrackingState(
  * Call this in tests before cleanup to ensure state is persisted.
  */
 export function flushPendingWrites(): void {
-  if (writeTimeout) {
-    clearTimeout(writeTimeout);
-    writeTimeout = null;
+  for (const [directory, pending] of pendingWrites) {
+    clearTimeout(pending.timeout);
+    writeTrackingStateImmediate(directory, pending.state);
   }
-  if (pendingWrite) {
-    writeTrackingStateImmediate(pendingWrite.directory, pendingWrite.state);
-    pendingWrite = null;
-  }
+  pendingWrites.clear();
 }
 
 // ============================================================================
