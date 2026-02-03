@@ -13,7 +13,12 @@
  * ```
  */
 
-import { removeCodeBlocks, getAllKeywords } from "./keyword-detector/index.js";
+import {
+  detectKeywordsWithType,
+  removeCodeBlocks,
+  getPrimaryKeyword,
+  getAllKeywords,
+} from "./keyword-detector/index.js";
 import {
   readRalphState,
   incrementRalphIteration,
@@ -23,6 +28,7 @@ import {
 import { processOrchestratorPreTool } from "./omc-orchestrator/index.js";
 import {
   addBackgroundTask,
+  completeBackgroundTask,
   getRunningTaskCount,
 } from "../hud/background-tasks.js";
 import { loadConfig } from "../config/loader.js";
@@ -34,6 +40,8 @@ import {
 import {
   checkIncompleteTodos,
   StopContext,
+  isContextLimitStop,
+  isUserAbort,
 } from "./todo-continuation/index.js";
 import {
   checkPersistentModes,
@@ -85,9 +93,6 @@ import {
 } from "./permission-handler/index.js";
 import { handleSessionEnd, type SessionEndInput } from "./session-end/index.js";
 import { initSilentAutoUpdate } from "../features/auto-update.js";
-
-const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
-const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
 
 /**
  * Validates that an input object contains all required fields.
@@ -492,8 +497,8 @@ function processPreToolUse(input: HookInput): HookOutput {
   if (input.toolName === "Bash") {
     const command = (input.toolInput as { command?: string })?.command ?? "";
     if (
-      PKILL_F_FLAG_PATTERN.test(command) ||
-      PKILL_FULL_FLAG_PATTERN.test(command)
+      /\bpkill\b.*\s-f\b/.test(command) ||
+      /\bpkill\b.*--full\b/.test(command)
     ) {
       return {
         continue: true,

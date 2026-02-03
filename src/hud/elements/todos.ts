@@ -70,7 +70,7 @@ export function renderTodosWithCurrent(todos: TodoItem[]): string | null {
   let result = `todos:${color}${completed}/${total}${RESET}`;
 
   if (inProgress) {
-    const activeText = inProgress.activeForm || inProgress.content || "...";
+    const activeText = inProgress.activeForm || inProgress.content || "task";
     const truncated =
       activeText.length > 30 ? activeText.slice(0, 27) + "..." : activeText;
     result += ` ${DIM}(working: ${truncated})${RESET}`;
