@@ -11,19 +11,43 @@
  * with Claude Code's terminal cursor positioning during active rendering.
  *
  * This module provides:
- * - ANSI escape sequence stripping
+ * - Terminal control sequence stripping (preserving color/style codes)
  * - Unicode block character replacement with ASCII equivalents
  * - Line count enforcement (collapse to single line if needed)
  */
 
-// Matches all ANSI escape sequences: CSI (ESC[...), OSC (ESC]...), and simple (ESC + char)
-const ANSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[^[\]]/g;
+// Matches CSI sequences that are NOT SGR (color/style) codes
+// SGR sequences end with 'm' and should be preserved for color output
+// Other CSI sequences (cursor movement, clear screen, etc.) should be stripped:
+// - H: cursor position, J: erase display, K: erase line
+// - A/B/C/D: cursor up/down/forward/back, etc.
+// - ?25l/?25h: cursor visibility (private sequences with ? prefix)
+const CSI_NON_SGR_REGEX = /\x1b\[\??[0-9;]*[A-LN-Za-ln-z]/g;
+
+// Matches OSC sequences (ESC]...BEL) - operating system commands
+const OSC_REGEX = /\x1b\][^\x07]*\x07/g;
+
+// Matches simple escape sequences (ESC + single char, but not [ or ])
+const SIMPLE_ESC_REGEX = /\x1b[^[\]]/g;
 
 /**
- * Strip all ANSI escape sequences from a string.
+ * Strip terminal control ANSI sequences while preserving color/style (SGR) codes.
+ *
+ * SGR (Select Graphic Rendition) sequences end with 'm' and control text appearance:
+ * - Colors: \x1b[32m (green), \x1b[31m (red), etc.
+ * - Styles: \x1b[1m (bold), \x1b[0m (reset), etc.
+ *
+ * Other CSI sequences are stripped as they can interfere with terminal rendering:
+ * - Cursor positioning: \x1b[H, \x1b[10;20H
+ * - Erase commands: \x1b[2J (clear screen), \x1b[K (erase line)
+ * - Cursor movement: \x1b[A (up), \x1b[B (down), etc.
+ * - Cursor visibility: \x1b[?25l (hide), \x1b[?25h (show)
  */
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_REGEX, '');
+  return text
+    .replace(CSI_NON_SGR_REGEX, '') // Strip non-SGR CSI sequences
+    .replace(OSC_REGEX, '') // Strip OSC sequences
+    .replace(SIMPLE_ESC_REGEX, ''); // Strip simple escape sequences
 }
 
 /**
@@ -43,7 +67,7 @@ export function replaceUnicodeBlocks(text: string): string {
  * Sanitize HUD output for safe terminal rendering.
  *
  * When safeMode is enabled:
- * 1. Strips all ANSI escape sequences (prevents cursor position conflicts)
+ * 1. Strips terminal control sequences while preserving color/style SGR codes
  * 2. Replaces Unicode block characters with ASCII (prevents width miscalculation)
  * 3. Collapses multi-line output into a single pipe-separated line
  *    (prevents statusline area resize during active rendering)
@@ -54,7 +78,7 @@ export function replaceUnicodeBlocks(text: string): string {
  * @returns Sanitized output safe for concurrent terminal rendering
  */
 export function sanitizeOutput(output: string): string {
-  // Step 1: Strip ANSI escape sequences
+  // Step 1: Strip terminal control sequences (preserving color/style SGR codes)
   let sanitized = stripAnsi(output);
 
   // Step 2: Replace variable-width Unicode with ASCII

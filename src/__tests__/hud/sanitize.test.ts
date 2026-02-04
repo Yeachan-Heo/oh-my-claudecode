@@ -11,24 +11,60 @@ import { describe, it, expect } from 'vitest';
 import { stripAnsi, replaceUnicodeBlocks, sanitizeOutput } from '../../hud/sanitize.js';
 
 describe('stripAnsi', () => {
-  it('should strip basic color codes', () => {
+  it('should PRESERVE basic color codes (SGR sequences)', () => {
     const input = '\x1b[31mRed text\x1b[0m';
-    expect(stripAnsi(input)).toBe('Red text');
+    expect(stripAnsi(input)).toBe('\x1b[31mRed text\x1b[0m');
   });
 
-  it('should strip bold and dim codes', () => {
+  it('should PRESERVE bold and dim codes', () => {
     const input = '\x1b[1mBold\x1b[0m and \x1b[2mDim\x1b[0m';
-    expect(stripAnsi(input)).toBe('Bold and Dim');
+    expect(stripAnsi(input)).toBe('\x1b[1mBold\x1b[0m and \x1b[2mDim\x1b[0m');
   });
 
-  it('should strip multiple color codes', () => {
+  it('should PRESERVE multiple color codes', () => {
     const input = '\x1b[32mGreen\x1b[0m \x1b[33mYellow\x1b[0m \x1b[34mBlue\x1b[0m';
-    expect(stripAnsi(input)).toBe('Green Yellow Blue');
+    expect(stripAnsi(input)).toBe('\x1b[32mGreen\x1b[0m \x1b[33mYellow\x1b[0m \x1b[34mBlue\x1b[0m');
   });
 
-  it('should strip complex CSI sequences', () => {
+  it('should PRESERVE complex SGR sequences (256 color, RGB)', () => {
     const input = '\x1b[38;5;196mExtended color\x1b[0m';
-    expect(stripAnsi(input)).toBe('Extended color');
+    expect(stripAnsi(input)).toBe('\x1b[38;5;196mExtended color\x1b[0m');
+  });
+
+  it('should STRIP cursor movement sequences', () => {
+    // Cursor up (A), down (B), forward (C), back (D)
+    const input = '\x1b[5Aup\x1b[3Bdown\x1b[2Cforward\x1b[4Dback';
+    expect(stripAnsi(input)).toBe('updownforwardback');
+  });
+
+  it('should STRIP cursor position sequences', () => {
+    // H: cursor position, f: horizontal vertical position
+    const input = '\x1b[10;20Hpositioned\x1b[5;10ftext';
+    expect(stripAnsi(input)).toBe('positionedtext');
+  });
+
+  it('should STRIP erase sequences', () => {
+    // J: erase display, K: erase line
+    const input = '\x1b[2Jcleared\x1b[Kerased';
+    expect(stripAnsi(input)).toBe('clearederased');
+  });
+
+  it('should STRIP cursor visibility sequences', () => {
+    // ?25l: hide cursor, ?25h: show cursor
+    const input = '\x1b[?25lhidden\x1b[?25hvisible';
+    expect(stripAnsi(input)).toBe('hiddenvisible');
+  });
+
+  it('should STRIP OSC sequences (operating system commands)', () => {
+    // OSC for setting terminal title
+    const input = '\x1b]0;Window Title\x07Some text';
+    expect(stripAnsi(input)).toBe('Some text');
+  });
+
+  it('should handle mixed SGR and control sequences', () => {
+    // Color codes should be preserved, cursor movement stripped
+    const input = '\x1b[2J\x1b[H\x1b[32mGreen text\x1b[0m\x1b[10;1H';
+    expect(stripAnsi(input)).toBe('\x1b[32mGreen text\x1b[0m');
   });
 
   it('should handle text without ANSI codes', () => {
@@ -70,9 +106,9 @@ describe('replaceUnicodeBlocks', () => {
 });
 
 describe('sanitizeOutput', () => {
-  it('should strip ANSI and replace blocks in single line', () => {
+  it('should PRESERVE colors and replace blocks in single line', () => {
     const input = '\x1b[32m████░░░░░░\x1b[0m 40%';
-    expect(sanitizeOutput(input)).toBe('####------ 40%');
+    expect(sanitizeOutput(input)).toBe('\x1b[32m####------\x1b[0m 40%');
   });
 
   it('should collapse multi-line output to single line', () => {
@@ -80,9 +116,9 @@ describe('sanitizeOutput', () => {
     expect(sanitizeOutput(input)).toBe('Line 1 | Line 2 | Line 3');
   });
 
-  it('should handle complex HUD output', () => {
+  it('should handle complex HUD output preserving colors', () => {
     const input = '\x1b[1m[OMC]\x1b[0m | \x1b[32m████░░░░░░\x1b[0m 40% | agents:3';
-    expect(sanitizeOutput(input)).toBe('[OMC] | ####------ 40% | agents:3');
+    expect(sanitizeOutput(input)).toBe('\x1b[1m[OMC]\x1b[0m | \x1b[32m####------\x1b[0m 40% | agents:3');
   });
 
   it('should filter empty lines', () => {
@@ -95,20 +131,29 @@ describe('sanitizeOutput', () => {
     expect(sanitizeOutput(input)).toBe('Text with extra spaces');
   });
 
-  it('should handle real HUD multi-line output', () => {
+  it('should handle real HUD multi-line output with colors preserved', () => {
     const input = `\x1b[1m[OMC]\x1b[0m | \x1b[2m5h:\x1b[0m\x1b[32m12%\x1b[0m | Ctx: \x1b[32m████░░░░░░\x1b[0m 40%
 \x1b[2m└─\x1b[0m \x1b[35mO\x1b[0m:architect (2m) analyzing code
 \x1b[2m└─\x1b[0m \x1b[33ms\x1b[0m:executor (1m) writing tests`;
 
     const result = sanitizeOutput(input);
 
-    // Should be single line, no ANSI, ASCII blocks
-    expect(result).not.toContain('\x1b');
+    // Should be single line with ASCII blocks but colors preserved
     expect(result).not.toContain('█');
     expect(result).not.toContain('░');
     expect(result).not.toContain('\n');
     expect(result).toContain('[OMC]');
     expect(result).toContain('architect');
+    // Colors SHOULD be present (SGR sequences ending with 'm')
+    expect(result).toContain('\x1b[32m'); // green
+    expect(result).toContain('\x1b[35m'); // magenta
+    expect(result).toContain('\x1b[0m'); // reset
+  });
+
+  it('should strip cursor control sequences but preserve colors', () => {
+    // Input with cursor positioning mixed with colors
+    const input = '\x1b[H\x1b[2J\x1b[32mColored text\x1b[0m\x1b[10;1H';
+    expect(sanitizeOutput(input)).toBe('\x1b[32mColored text\x1b[0m');
   });
 
   it('should return empty string for whitespace-only input', () => {
