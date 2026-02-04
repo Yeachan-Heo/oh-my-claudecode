@@ -3,7 +3,7 @@
 // Restores persistent mode states when session starts
 // Cross-platform: Windows, macOS, Linux
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -91,22 +91,6 @@ function compareVersions(v1, v2) {
     if (diff !== 0) return diff;
   }
   return 0;
-}
-
-function countIncompleteTodos(todosDir) {
-  let count = 0;
-  if (existsSync(todosDir)) {
-    try {
-      const files = readdirSync(todosDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        const todos = readJsonFile(join(todosDir, file));
-        if (Array.isArray(todos)) {
-          count += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
-        }
-      }
-    } catch {}
-  }
-  return count;
 }
 
 // ============================================================================
@@ -237,9 +221,24 @@ Continue working in ultrawork mode until all tasks are complete.
 `);
     }
 
-    // Check for incomplete todos
-    const todosDir = join(homedir(), '.claude', 'todos');
-    const incompleteCount = countIncompleteTodos(todosDir);
+    // Check for incomplete todos (project-local only, not global ~/.claude/todos/)
+    // NOTE: We intentionally do NOT scan the global ~/.claude/todos/ directory.
+    // That directory accumulates todo files from ALL past sessions across all
+    // projects, causing phantom task counts in fresh sessions (see issue #354).
+    const localTodoPaths = [
+      join(directory, '.omc', 'todos.json'),
+      join(directory, '.claude', 'todos.json')
+    ];
+    let incompleteCount = 0;
+    for (const todoFile of localTodoPaths) {
+      if (existsSync(todoFile)) {
+        try {
+          const data = readJsonFile(todoFile);
+          const todos = data?.todos || (Array.isArray(data) ? data : []);
+          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+        } catch {}
+      }
+    }
 
     if (incompleteCount > 0) {
       messages.push(`<session-restore>

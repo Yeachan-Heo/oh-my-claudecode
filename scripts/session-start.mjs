@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -27,23 +27,6 @@ function readJsonFile(path) {
   } catch {
     return null;
   }
-}
-
-// Count incomplete todos
-function countIncompleteTodos(todosDir) {
-  let count = 0;
-  if (existsSync(todosDir)) {
-    try {
-      const files = readdirSync(todosDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        const todos = readJsonFile(join(todosDir, file));
-        if (Array.isArray(todos)) {
-          count += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
-        }
-      }
-    } catch {}
-  }
-  return count;
 }
 
 // Check if HUD is properly installed (with retry for race conditions)
@@ -159,9 +142,24 @@ Continue working until the task is verified complete.
 `);
     }
 
-    // Check for incomplete todos
-    const todosDir = join(homedir(), '.claude', 'todos');
-    const incompleteCount = countIncompleteTodos(todosDir);
+    // Check for incomplete todos (project-local only, not global ~/.claude/todos/)
+    // NOTE: We intentionally do NOT scan the global ~/.claude/todos/ directory.
+    // That directory accumulates todo files from ALL past sessions across all
+    // projects, causing phantom task counts in fresh sessions (see issue #354).
+    const localTodoPaths = [
+      join(directory, '.omc', 'todos.json'),
+      join(directory, '.claude', 'todos.json')
+    ];
+    let incompleteCount = 0;
+    for (const todoFile of localTodoPaths) {
+      if (existsSync(todoFile)) {
+        try {
+          const data = readJsonFile(todoFile);
+          const todos = data?.todos || (Array.isArray(data) ? data : []);
+          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+        } catch {}
+      }
+    }
 
     if (incompleteCount > 0) {
       messages.push(`<session-restore>
