@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 import { detectGeminiCli } from './cli-detection.js';
 
 // Default model can be overridden via environment variable
-const GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-2.5-pro';
+const GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-3-pro';
 const GEMINI_TIMEOUT = parseInt(process.env.OMC_GEMINI_TIMEOUT || '120000', 10);
 
 /**

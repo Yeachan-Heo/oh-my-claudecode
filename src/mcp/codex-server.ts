@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 import { detectCodexCli } from './cli-detection.js';
 
 // Default model can be overridden via environment variable
-const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-4o';
+const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.2';
 const CODEX_TIMEOUT = parseInt(process.env.OMC_CODEX_TIMEOUT || '60000', 10);
 
 /**
