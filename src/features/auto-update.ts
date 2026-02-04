@@ -10,9 +10,9 @@
  * - Configurable update notifications
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { homedir, tmpdir } from 'os';
+import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { TaskTool } from '../hooks/beads-context/types.js';
 
@@ -320,84 +320,22 @@ export async function performUpdate(options?: {
     const release = await fetchLatestRelease();
     const newVersion = release.tag_name.replace(/^v/, '');
 
-    // Download the install script from the release tag (not main branch)
-    const releaseTag = release.tag_name; // e.g., "v3.9.8"
-    const installScriptUrl = `${GITHUB_RAW_URL}/${releaseTag}/scripts/install.sh`;
-    const response = await fetch(installScriptUrl);
-
-    if (!response.ok) {
-      // Fallback: suggest /plugin install as the canonical method
-      throw new Error(
-        `Failed to download install script from ${releaseTag}: ${response.status}\n` +
-        'Please update using: /plugin install oh-my-claudecode'
-      );
-    }
-
-    const scriptContent = await response.text();
-
-    // Save to a temporary file
-    const tempDir = tmpdir();
-    const tempScript = join(tempDir, `omc-update-${Date.now()}.sh`);
-
-    writeFileSync(tempScript, scriptContent, { mode: 0o755 });
-
-    // Execute the install script (platform-aware)
+    // Use npm for updates on all platforms (install.sh was removed)
     try {
-      const isWindows = process.platform === 'win32';
-
-      if (isWindows) {
-        // Use npm for Windows updates instead of bash script
-        try {
-          execSync('npm install -g oh-my-claude-sisyphus@latest', {
-            encoding: 'utf-8',
-            stdio: options?.verbose ? 'inherit' : 'pipe',
-            timeout: 120000, // 2 minute timeout for npm
-            windowsHide: true
-          });
-
-          // Update version metadata for npm install
-          saveVersionMetadata({
-            version: newVersion,
-            installedAt: new Date().toISOString(),
-            installMethod: 'npm',
-            lastCheckAt: new Date().toISOString()
-          });
-
-          return {
-            success: true,
-            previousVersion,
-            newVersion,
-            message: `Successfully updated from ${previousVersion ?? 'unknown'} to ${newVersion} via npm`
-          };
-        } catch (npmError) {
-          throw new Error(
-            'Auto-update via npm failed. Please run manually:\n' +
-            '  npm install -g oh-my-claude-sisyphus@latest\n' +
-            `Error: ${npmError instanceof Error ? npmError.message : npmError}`
-          );
-        }
-      }
-
-      execSync(`bash "${tempScript}"`, {
+      execSync('npm install -g oh-my-claude-sisyphus@latest', {
         encoding: 'utf-8',
         stdio: options?.verbose ? 'inherit' : 'pipe',
-        timeout: 60000 // 1 minute timeout
+        timeout: 120000, // 2 minute timeout for npm
+        ...(process.platform === 'win32' ? { windowsHide: true } : {})
       });
 
       // Update version metadata
       saveVersionMetadata({
         version: newVersion,
         installedAt: new Date().toISOString(),
-        installMethod: 'script',
+        installMethod: 'npm',
         lastCheckAt: new Date().toISOString()
       });
-
-      // Clean up temp file
-      try {
-        unlinkSync(tempScript);
-      } catch {
-        // Ignore cleanup errors
-      }
 
       return {
         success: true,
@@ -405,14 +343,13 @@ export async function performUpdate(options?: {
         newVersion,
         message: `Successfully updated from ${previousVersion ?? 'unknown'} to ${newVersion}`
       };
-    } catch (error) {
-      // Clean up temp file on error too
-      try {
-        unlinkSync(tempScript);
-      } catch {
-        // Ignore cleanup errors
-      }
-      throw error;
+    } catch (npmError) {
+      throw new Error(
+        'Auto-update via npm failed. Please run manually:\n' +
+        '  npm install -g oh-my-claude-sisyphus@latest\n' +
+        'Or use: /plugin install oh-my-claudecode\n' +
+        `Error: ${npmError instanceof Error ? npmError.message : npmError}`
+      );
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
