@@ -421,6 +421,58 @@ The notepad at `.omc/notepad.md` provides compaction-resilient memory with three
 - Uses atomic writes to prevent data corruption
 - File is created automatically when first used
 
+### Understanding Hooks (System Reminders)
+
+Hooks are OMC extensions that inject context into your conversation via `<system-reminder>` tags. You cannot invoke hooks directly—you only receive their output.
+
+#### Hook Events
+
+| Event | When It Fires | What You See |
+|-------|---------------|--------------|
+| `SessionStart` | Conversation begins | Priority context, mode restoration |
+| `UserPromptSubmit` | After user message | Magic keyword detection, skill prompts |
+| `PreToolUse:{Tool}` | Before tool executes | Guidance, warnings, continuation reminders |
+| `PostToolUse:{Tool}` | After tool completes | Delegation audit, verification prompts |
+| `Stop` | Before session ends | Continuation prompts (in execution modes) |
+| `SubagentStart` | Subagent spawned | `Agent {type} started ({id})` |
+| `SubagentStop` | Subagent finishes | `Agent {type} completed/failed ({id})` |
+
+**Note**: PreToolUse/PostToolUse include the tool name dynamically (e.g., `PreToolUse:Bash`, `PreToolUse:Read`).
+
+#### Message Patterns
+
+| Pattern | Meaning |
+|---------|---------|
+| `{Event} hook success: Success` | Hook ran, nothing to report |
+| `{Event} hook additional context: ...` | Hook provides guidance—read it |
+| `{Event} hook error: ...` | Hook failed (informational, not your fault) |
+
+#### How to Respond
+
+| When You See | Your Response |
+|--------------|---------------|
+| `hook success: Success` | No action needed, proceed normally |
+| `hook additional context: ...` | Read the context, it's relevant to your work |
+| `hook error: ...` | Proceed normally—hook errors are not your fault |
+| `[MAGIC KEYWORD: ...]` | Invoke the indicated skill immediately |
+| `The boulder never stops` | You're in ralph/ultrawork mode—keep working |
+| Stop hook continuation prompt | Check if done; if yes, invoke `/cancel` |
+| `SubagentStart/Stop` messages | Informational—agent tracking |
+
+#### State Management
+
+- Execution modes store state at `.omc/state/{mode}-state.json`
+- Hooks read these state files to determine behavior
+- **All mutable OMC state belongs under `.omc/state/` in the worktree**—not `~/.claude/`
+- `/cancel` removes state files to allow graceful termination
+
+#### Key Points
+
+- Hooks CANNOT read your responses—they only check state files
+- You cannot "explain" completion to a hook—you MUST invoke `/cancel`
+- Multiple hooks may fire per turn (multiple `<system-reminder>` blocks)
+- The SDK injects `<system-reminder>` tags—they're not typed by users
+
 ### Continuation Enforcement
 
 You are BOUND to your task list. Do not stop until EVERY task is COMPLETE.
