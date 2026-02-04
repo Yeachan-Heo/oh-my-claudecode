@@ -220,16 +220,11 @@ function processKeywordDetector(input: HookInput): HookOutput {
         break;
       }
 
-      case "ultrawork": {
-        // Activate persistent ultrawork state with concurrent session detection
-        const result = activateUltrawork(promptText, sessionId, directory);
-        if (result.warning) {
-          messages.push(`⚠️ ${result.warning}\n\n---\n\n${ULTRAWORK_MESSAGE}`);
-        } else {
-          messages.push(ULTRAWORK_MESSAGE);
-        }
+      case "ultrawork":
+        // Activate persistent ultrawork state
+        activateUltrawork(promptText, sessionId, directory);
+        messages.push(ULTRAWORK_MESSAGE);
         break;
-      }
 
       case "ultrathink":
         messages.push(ULTRATHINK_MESSAGE);

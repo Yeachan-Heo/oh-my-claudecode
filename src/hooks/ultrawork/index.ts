@@ -28,17 +28,6 @@ export interface UltraworkState {
   linked_to_ralph?: boolean;
 }
 
-export interface UltraworkActivationResult {
-  /** Whether activation succeeded */
-  success: boolean;
-  /** Warning message if another session was already active */
-  warning?: string;
-  /** The session_id of the previously active session (if any) */
-  previousSessionId?: string;
-  /** When the previous session was started */
-  previousStartedAt?: string;
-}
-
 const _DEFAULT_STATE: UltraworkState = {
   active: false,
   started_at: '',
@@ -102,42 +91,6 @@ export function writeUltraworkState(state: UltraworkState, directory?: string): 
 }
 
 /**
- * Check if another ultrawork session is already active in this project.
- * Returns info about the existing session if found, null otherwise.
- */
-export function checkExistingSession(
-  sessionId?: string,
-  directory?: string
-): { sessionId?: string; startedAt: string; prompt: string } | null {
-  const state = readUltraworkState(directory);
-
-  if (!state || !state.active) {
-    return null;
-  }
-
-  // If the same session is re-activating, that's fine (no warning needed)
-  if (state.session_id && sessionId && state.session_id === sessionId) {
-    return null;
-  }
-
-  // Check staleness - if the existing state is stale (>2 hours), don't warn
-  const lastChecked = state.last_checked_at ? new Date(state.last_checked_at).getTime() : 0;
-  const startedAt = state.started_at ? new Date(state.started_at).getTime() : 0;
-  const mostRecent = Math.max(lastChecked, startedAt);
-  const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
-
-  if (mostRecent > 0 && (Date.now() - mostRecent) > STALE_THRESHOLD_MS) {
-    return null; // Stale state, safe to overwrite
-  }
-
-  return {
-    sessionId: state.session_id,
-    startedAt: state.started_at,
-    prompt: state.original_prompt
-  };
-}
-
-/**
  * Activate ultrawork mode
  */
 export function activateUltrawork(
@@ -145,10 +98,7 @@ export function activateUltrawork(
   sessionId?: string,
   directory?: string,
   linkedToRalph?: boolean
-): UltraworkActivationResult {
-  // Check for existing active session before overwriting
-  const existing = checkExistingSession(sessionId, directory);
-
+): boolean {
   const state: UltraworkState = {
     active: true,
     started_at: new Date().toISOString(),
@@ -160,33 +110,7 @@ export function activateUltrawork(
     linked_to_ralph: linkedToRalph
   };
 
-  const written = writeUltraworkState(state, directory);
-
-  if (!written) {
-    return { success: false };
-  }
-
-  if (existing) {
-    const warning = `WARNING: Another ultrawork session was already active in this project.\n` +
-      `  Previous session: ${existing.sessionId || 'unknown'}\n` +
-      `  Started at: ${existing.startedAt}\n` +
-      `  Task: ${existing.prompt}\n\n` +
-      `The previous session's state has been overwritten by this session.\n` +
-      `Running multiple ultrawork sessions in the same project may cause:\n` +
-      `  - File modification conflicts\n` +
-      `  - Unexpected task execution\n` +
-      `  - State confusion\n\n` +
-      `Consider using /ultrapilot for multi-session parallel work with file ownership partitioning.`;
-
-    return {
-      success: true,
-      warning,
-      previousSessionId: existing.sessionId,
-      previousStartedAt: existing.startedAt
-    };
-  }
-
-  return { success: true };
+  return writeUltraworkState(state, directory);
 }
 
 /**

@@ -7,8 +7,7 @@ import {
   readUltraworkState,
   shouldReinforceUltrawork,
   deactivateUltrawork,
-  incrementReinforcement,
-  checkExistingSession
+  incrementReinforcement
 } from './index.js';
 
 describe('Ultrawork Session Isolation (Issue #269)', () => {
@@ -28,7 +27,7 @@ describe('Ultrawork Session Isolation (Issue #269)', () => {
       const prompt = 'Fix all errors';
 
       const result = activateUltrawork(prompt, sessionId, tempDir);
-      expect(result.success).toBe(true);
+      expect(result).toBe(true);
 
       const state = readUltraworkState(tempDir);
       expect(state).not.toBeNull();
@@ -41,7 +40,7 @@ describe('Ultrawork Session Isolation (Issue #269)', () => {
       const prompt = 'Fix all errors';
 
       const result = activateUltrawork(prompt, undefined, tempDir);
-      expect(result.success).toBe(true);
+      expect(result).toBe(true);
 
       const state = readUltraworkState(tempDir);
       expect(state).not.toBeNull();
@@ -314,132 +313,6 @@ describe('Ultrawork Session Isolation (Issue #269)', () => {
       // Timestamps are ISO strings, compare as dates
       expect(new Date(updatedState?.last_checked_at || 0).getTime())
         .toBeGreaterThanOrEqual(new Date(initialTimestamp || 0).getTime());
-    });
-  });
-
-  describe('Concurrent session detection (Issue #386)', () => {
-    it('should return warning when activating while another session is active', () => {
-      const sessionA = 'session-alpha';
-      const sessionB = 'session-beta';
-
-      // Session A activates first
-      const resultA = activateUltrawork('Task A', sessionA, tempDir);
-      expect(resultA.success).toBe(true);
-      expect(resultA.warning).toBeUndefined();
-
-      // Session B activates while A is still active
-      const resultB = activateUltrawork('Task B', sessionB, tempDir);
-      expect(resultB.success).toBe(true);
-      expect(resultB.warning).toBeDefined();
-      expect(resultB.warning).toContain('Another ultrawork session was already active');
-      expect(resultB.warning).toContain('session-alpha');
-      expect(resultB.warning).toContain('Task A');
-      expect(resultB.previousSessionId).toBe(sessionA);
-    });
-
-    it('should NOT warn when same session re-activates', () => {
-      const sessionId = 'session-same';
-
-      // First activation
-      const result1 = activateUltrawork('Task 1', sessionId, tempDir);
-      expect(result1.success).toBe(true);
-      expect(result1.warning).toBeUndefined();
-
-      // Same session re-activates (e.g., user runs /ultrawork again)
-      const result2 = activateUltrawork('Task 2', sessionId, tempDir);
-      expect(result2.success).toBe(true);
-      expect(result2.warning).toBeUndefined();
-    });
-
-    it('should NOT warn when previous session state is stale (>2 hours)', async () => {
-      const sessionA = 'session-old';
-      const sessionB = 'session-new';
-
-      // Session A activates
-      activateUltrawork('Old task', sessionA, tempDir);
-
-      // Manually make the state stale by backdating timestamps
-      const state = readUltraworkState(tempDir);
-      if (state) {
-        const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-        state.started_at = threeHoursAgo;
-        state.last_checked_at = threeHoursAgo;
-        // Write directly to bypass activation logic
-        const { writeFileSync } = await import('fs');
-        const { join } = await import('path');
-        const stateFile = join(tempDir, '.omc', 'state', 'ultrawork-state.json');
-        writeFileSync(stateFile, JSON.stringify(state, null, 2));
-      }
-
-      // Session B activates - should NOT warn because A is stale
-      const resultB = activateUltrawork('New task', sessionB, tempDir);
-      expect(resultB.success).toBe(true);
-      expect(resultB.warning).toBeUndefined();
-    });
-
-    it('should NOT warn on first activation (clean state)', () => {
-      const result = activateUltrawork('First task', 'session-first', tempDir);
-      expect(result.success).toBe(true);
-      expect(result.warning).toBeUndefined();
-    });
-
-    it('should NOT warn after previous session deactivated', () => {
-      const sessionA = 'session-done';
-      const sessionB = 'session-next';
-
-      // Session A activates and then deactivates
-      activateUltrawork('Task A', sessionA, tempDir);
-      deactivateUltrawork(tempDir);
-
-      // Session B activates - no warning since A is gone
-      const resultB = activateUltrawork('Task B', sessionB, tempDir);
-      expect(resultB.success).toBe(true);
-      expect(resultB.warning).toBeUndefined();
-    });
-
-    it('should suggest /ultrapilot in the warning message', () => {
-      const sessionA = 'session-1';
-      const sessionB = 'session-2';
-
-      activateUltrawork('Task', sessionA, tempDir);
-      const result = activateUltrawork('Task', sessionB, tempDir);
-
-      expect(result.warning).toContain('/ultrapilot');
-      expect(result.warning).toContain('file ownership partitioning');
-    });
-  });
-
-  describe('checkExistingSession', () => {
-    it('should return null when no state exists', () => {
-      const result = checkExistingSession('any-session', tempDir);
-      expect(result).toBeNull();
-    });
-
-    it('should return null when state is not active', () => {
-      activateUltrawork('Task', 'session-1', tempDir);
-      deactivateUltrawork(tempDir);
-
-      const result = checkExistingSession('session-2', tempDir);
-      expect(result).toBeNull();
-    });
-
-    it('should return null for same session', () => {
-      const sessionId = 'same-session';
-      activateUltrawork('Task', sessionId, tempDir);
-
-      const result = checkExistingSession(sessionId, tempDir);
-      expect(result).toBeNull();
-    });
-
-    it('should return existing session info for different session', () => {
-      const sessionA = 'session-existing';
-      activateUltrawork('Existing task', sessionA, tempDir);
-
-      const result = checkExistingSession('session-new', tempDir);
-      expect(result).not.toBeNull();
-      expect(result?.sessionId).toBe(sessionA);
-      expect(result?.prompt).toBe('Existing task');
-      expect(result?.startedAt).toBeDefined();
     });
   });
 });
