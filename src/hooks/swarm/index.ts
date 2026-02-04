@@ -54,11 +54,13 @@ import {
   addTasks,
   getTasks,
   getTasksByStatus,
+  getTasksByWave,
   getTask,
   getStats,
   getHeartbeats,
   clearAllData,
-  writeSwarmSummary
+  writeSwarmSummary,
+  getNextTaskId
 } from './state.js';
 import {
   claimTask as claimTaskInternal,
@@ -72,7 +74,8 @@ import {
   allTasksComplete,
   getActiveAgentCount,
   reclaimFailedTask,
-  setSwarmCwd
+  setSwarmCwd,
+  claimTaskForFiles as claimTaskForFilesInternal
 } from './claiming.js';
 import { canStartMode, createModeMarker, removeModeMarker } from '../mode-registry/index.js';
 
@@ -407,6 +410,79 @@ export function retryTask(agentId: string, taskId: string): ClaimResult {
 }
 
 /**
+ * Claim a task matching the agent's file scope
+ *
+ * @param agentId - Agent claiming the task
+ * @param agentFilePatterns - Glob patterns for files this agent handles
+ * @returns ClaimResult
+ */
+export function claimTaskForFiles(agentId: string, agentFilePatterns: string[]): ClaimResult {
+  return claimTaskForFilesInternal(agentId, agentFilePatterns);
+}
+
+/**
+ * Add additional tasks to a running swarm
+ * Used for dynamic task addition during wave-based execution
+ *
+ * @param tasks - Array of task definitions with optional metadata
+ * @returns Object with count of added tasks and starting ID
+ */
+export function addMoreTasks(
+  tasks: Array<{ description: string; priority?: number; wave?: number; ownedFiles?: string[]; filePatterns?: string[] }>
+): { added: number; startingId: number } {
+  if (!isDbInitialized()) {
+    return { added: 0, startingId: -1 };
+  }
+
+  // Get the highest existing task ID number from database
+  const startingId = getNextTaskId();
+
+  const taskRecords = tasks.map((task, index) => ({
+    id: `task-${startingId + index}`,
+    description: task.description,
+    priority: task.priority,
+    wave: task.wave,
+    ownedFiles: task.ownedFiles,
+    filePatterns: task.filePatterns,
+  }));
+
+  const success = addTasks(taskRecords);
+  if (!success) {
+    return { added: 0, startingId: -1 };
+  }
+
+  // Write updated summary
+  if (currentCwd) {
+    writeSwarmSummary(currentCwd);
+  }
+
+  return { added: tasks.length, startingId };
+}
+
+/**
+ * Get available slots for spawning new agents
+ * Simple calculation from existing stats
+ *
+ * @param maxConcurrent - Maximum concurrent agents (default: 5)
+ * @returns Number of available slots
+ */
+export function getAvailableSlots(maxConcurrent: number = 5): number {
+  const stats = getSwarmStats();
+  if (!stats) return 0;
+  return Math.max(0, maxConcurrent - stats.claimedTasks);
+}
+
+/**
+ * Get tasks for a specific wave
+ *
+ * @param wave - Wave number to filter by
+ * @returns Array of tasks in that wave
+ */
+export function getTasksForWave(wave: number): SwarmTask[] {
+  return getTasksByWave(wave);
+}
+
+/**
  * Check if swarm database is initialized
  *
  * @returns true if database is ready
@@ -526,6 +602,7 @@ export type {
   SwarmTask,
   SwarmState,
   SwarmConfig,
+  AggressiveSwarmConfig,
   SwarmStats,
   ClaimResult,
   AgentHeartbeat

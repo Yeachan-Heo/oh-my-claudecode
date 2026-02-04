@@ -13,25 +13,49 @@ Spawn N coordinated agents working on a shared task list with SQLite-based atomi
 
 {{ARGUMENTS}}
 
-## Usage Pattern
+## Usage Patterns
 
+### Standard Mode (1-5 agents)
 ```
 /oh-my-claudecode:swarm N:agent-type "task description"
 ```
 
+### Aggressive Mode (20-50+ tasks)
+```
+/oh-my-claudecode:swarm aggressive:agent-type "large task description"
+```
+or
+```
+/oh-my-claudecode:swarm 30:executor "fix all TypeScript errors"
+```
+
+When N > 5 or "aggressive" keyword is used, swarm automatically:
+1. Decomposes work into micro-tasks (one function, one file section, one test)
+2. Spawns agents in waves up to the configured concurrent limit
+3. Polls for completions every 5 seconds
+4. Immediately spawns replacement agents as slots free up
+5. Continues until all tasks complete
+
+**Concurrency Note**: The concurrent agent limit is configurable via `permissions.maxBackgroundTasks` (default 5, max 50). Users can raise this in their OMC config to run more agents in parallel.
+
 ### Parameters
 
-- **N** - Number of agents (1-5, enforced by Claude Code limit)
+- **N** - Number of agents (1-5 for standard mode, 6+ for aggressive mode)
 - **agent-type** - Agent to spawn (e.g., executor, build-fixer, architect)
 - **task** - High-level task to decompose and distribute
 
 ### Examples
 
 ```bash
+# Standard Mode
 /oh-my-claudecode:swarm 5:executor "fix all TypeScript errors"
 /oh-my-claudecode:swarm 3:build-fixer "fix build errors in src/"
 /oh-my-claudecode:swarm 4:designer "implement responsive layouts for all components"
 /oh-my-claudecode:swarm 2:architect "analyze and document all API endpoints"
+
+# Aggressive Mode
+/oh-my-claudecode:swarm 30:executor "fix all TypeScript errors"
+/oh-my-claudecode:swarm aggressive:build-fixer "fix build errors across entire codebase"
 ```
 
 ## Architecture
@@ -88,11 +112,131 @@ From `{{ARGUMENTS}}`, extract:
 - Initialize SQLite database with task pool
 - Each task gets: id, description, status (pending), and metadata columns
 
-### 3. Spawn Agents
-- Launch N agents via Task tool
-- Set `run_in_background: true` for all
-- Each agent connects to the SQLite database
-- Agents enter claiming loop automatically
+### 2b. Micro-Task Decomposition (Aggressive Mode)
+
+When N > 5 or "aggressive" keyword is detected, decompose work into fine-grained micro-tasks:
+
+**File-Level Decomposition**
+- One task per file (e.g., "Fix TypeScript errors in src/auth/login.ts")
+- Ideal for: lint fixes, formatting, simple refactors
+- Example: 47 files with errors → 47 tasks
+
+**Function-Level Decomposition**
+- One task per function or exported symbol
+- Ideal for: documentation, test writing, complexity refactors
+- Example: "Document auth module" → 12 tasks (one per exported function)
+
+**Pattern-Based Decomposition**
+- One task per error type or pattern instance
+- Ideal for: specific lint rules, security patterns, deprecation fixes
+- Example: "Remove console.log statements" → 23 tasks (one per file with console.log)
+
+**Example Decomposition: "Fix all TypeScript errors" (32 tasks)**
+
+```typescript
+// Input: "fix all TypeScript errors" with 32 files containing errors
+
+// Output Task Pool:
+[
+  "Fix TypeScript errors in src/auth/login.ts (4 errors)",
+  "Fix TypeScript errors in src/auth/register.ts (2 errors)",
+  "Fix TypeScript errors in src/api/users.ts (7 errors)",
+  "Fix TypeScript errors in src/api/posts.ts (3 errors)",
+  // ... 28 more file-level tasks
+]
+
+// Each task is atomic: one file, clear success criteria (tsc --noEmit shows no errors)
+```
+
+**File Ownership Assignment**
+
+Assign filePatterns to tasks for advisory ownership tracking:
+
+```typescript
+{
+  id: "task-1",
+  description: "Fix TypeScript errors in src/auth/login.ts",
+  filePatterns: ["src/auth/login.ts"],  // Advisory ownership
+  status: "pending"
+}
+```
+
+This allows conflict detection (two agents claiming tasks on same file) but does NOT enforce locks.
+
+### 3. Wave-Based Agent Spawning
+
+**Standard Mode (N ≤ 5)**: Spawn all N agents at once, all run concurrently until task pool is empty.
+
+**Aggressive Mode (N > 5)**: Wave-based spawning to respect concurrent agent limits while maximizing throughput.
+
+#### Wave Loop Algorithm
+
+```typescript
+const maxConcurrent = getMaxBackgroundTasks(); // From config, default 5, max 50
+const totalTasks = taskPool.length;
+let activeAgents = new Set<string>();
+let spawnedCount = 0;
+
+while (!isSwarmComplete()) {
+  // 1. Check available slots
+  const freeSlots = maxConcurrent - activeAgents.size;
+
+  // 2. Spawn agents to fill slots
+  if (freeSlots > 0 && spawnedCount < totalTasks) {
+    const toSpawn = Math.min(freeSlots, totalTasks - spawnedCount);
+
+    for (let i = 0; i < toSpawn; i++) {
+      const agentId = `agent-${spawnedCount + 1}`;
+      spawnAgent(agentId, agentType);
+      activeAgents.add(agentId);
+      spawnedCount++;
+    }
+  }
+
+  // 3. Wait for polling interval
+  await sleep(5000); // Poll every 5 seconds
+
+  // 4. Check for completions and remove finished agents
+  const finishedAgents = await checkCompletedAgents(activeAgents);
+  finishedAgents.forEach(id => activeAgents.delete(id));
+
+  // 5. Loop continues - free slots will trigger more spawns
+}
+```
+
+#### Orchestrator Polling
+
+The orchestrator continuously monitors swarm progress:
+
+```typescript
+async function monitorSwarm() {
+  const pollInterval = 5000; // 5 seconds
+
+  while (!isSwarmComplete()) {
+    // Get current stats
+    const stats = getSwarmStats();
+
+    // Report progress
+    console.log(`Progress: ${stats.doneTasks}/${stats.totalTasks} complete`);
+    console.log(`Active: ${stats.claimedTasks}, Failed: ${stats.failedTasks}`);
+
+    // Check for agent completions via TaskOutput
+    const updates = await pollAgentUpdates();
+
+    // Spawn replacements for completed agents
+    spawnReplacementAgents();
+
+    await sleep(pollInterval);
+  }
+}
+```
+
+#### Key Characteristics
+
+- **Agents claim autonomously**: Orchestrator spawns agents but does NOT pre-assign tasks
+- **Wave-based throughput**: Keeps all available slots filled until work is done
+- **Dynamic scaling**: Respects user-configured `maxBackgroundTasks` limit
+- **No manual coordination**: Agents use SQLite atomic claiming to self-coordinate
 
 **Important:** Use worker preamble when spawning agents to prevent sub-agent recursion:
 
@@ -102,7 +246,67 @@ import { wrapWithPreamble } from '../agents/preamble.js';
 const prompt = wrapWithPreamble(`Your task: ${taskDescription}`);
 ```
 
-### 4. Task Claiming Protocol (SQLite Transactional)
+**Concurrency Configuration**: Users can increase `permissions.maxBackgroundTasks` in their OMC config to run more agents in parallel (max 50).
+
+### 4. File Ownership (Conflict Prevention)
+
+File ownership is **ADVISORY**, not enforced. It helps detect potential conflicts but does not lock files.
+
+#### Assignment Strategy
+
+When creating tasks, assign `filePatterns` for ownership tracking:
+
+```typescript
+{
+  id: "task-12",
+  description: "Fix TypeScript errors in src/api/users.ts",
+  filePatterns: ["src/api/users.ts"],  // Single file ownership
+  status: "pending"
+}
+
+{
+  id: "task-25",
+  description: "Add JSDoc to all auth functions",
+  filePatterns: ["src/auth/*.ts"],     // Pattern-based ownership
+  status: "pending"
+}
+```
+
+#### Conflict Detection
+
+The orchestrator can query for potential conflicts:
+
+```typescript
+function detectFileConflicts(): ConflictReport {
+  const claimedTasks = db.prepare(
+    'SELECT id, claimed_by, filePatterns FROM tasks WHERE status = "claimed"'
+  ).all();
+
+  // Check for overlapping filePatterns
+  const conflicts = findOverlappingPatterns(claimedTasks);
+
+  return conflicts; // Report to user, but don't block
+}
+```
+
+#### Best Practices
+
+**Prefer file-level boundaries:**
+- Good: "Fix errors in src/auth/login.ts" (one file)
+- Avoid: "Refactor auth module" (many files, high conflict risk)
+
+**Use filePatterns for broader scope:**
+- Pattern: `["src/api/*.ts"]` for API-wide changes
+- Pattern: `["**/*.test.ts"]` for test suite work
+
+**Conflict resolution:**
+- If two agents modify the same file, git merge conflict may occur
+- Agents should pull latest changes before committing
+- Failed tasks can be retried automatically
+
+**Note:** File ownership is purely advisory. SQLite ensures task claiming atomicity, but file-level conflicts must be handled by git or agent coordination strategies.
+
+### 5. Task Claiming Protocol (SQLite Transactional)
 Each agent follows this loop:
 
 ```
@@ -126,20 +330,20 @@ LOOP:
 - Lease Timeout: 5 minutes per task
 - If timeout exceeded + no heartbeat, cleanupStaleClaims releases task back to pending
 
-### 5. Heartbeat Protocol
+### 6. Heartbeat Protocol
 - Agents call `heartbeat(agentId)` every 60 seconds (or custom interval)
 - Heartbeat records: agent_id, last_heartbeat timestamp, current_task_id
 - Orchestrator runs cleanupStaleClaims every 60 seconds
 - If heartbeat is stale (>5 minutes old) and task claimed, task auto-releases
 
-### 6. Progress Tracking
+### 7. Progress Tracking
 - Orchestrator monitors via TaskOutput
 - Shows live progress: pending/claimed/done/failed counts
 - Active agent count via getActiveAgents()
 - Reports which agent is working on which task via getAgentTasks()
 - Detects idle agents (all tasks claimed by others)
 
-### 7. Completion
+### 8. Completion
 Exit when ANY of:
 - isSwarmComplete() returns true (all tasks done or failed)
 - All agents idle (no pending tasks, no claimed tasks)
@@ -421,29 +625,37 @@ This:
 
 ## Use Cases
 
-### Fix All Type Errors
+### Quick Fix (Standard Mode)
 ```
-/oh-my-claudecode:swarm 5:executor "fix all TypeScript type errors"
+/oh-my-claudecode:swarm 3:executor "fix linting errors in src/api/"
 ```
-Spawns 5 executors, each claiming and fixing individual files.
+Spawns 3 executors concurrently. Each claims and fixes individual files. Good for small, bounded tasks.
 
-### Implement UI Components
+### Large Codebase Refactor (Aggressive Mode)
 ```
-/oh-my-claudecode:swarm 3:designer "implement Material-UI styling for all components"
+/oh-my-claudecode:swarm 30:executor "fix all TypeScript errors across codebase"
 ```
-Spawns 3 designers, each styling different component files.
+Creates 30 micro-tasks (one per file with errors). Spawns agents in waves of 5 (or configured limit). As agents complete tasks and exit, new agents spawn to maintain throughput until all 30 tasks are done.
 
-### Security Audit
+### Test Suite Expansion
 ```
-/oh-my-claudecode:swarm 4:security-reviewer "review all API endpoints for vulnerabilities"
+/oh-my-claudecode:swarm aggressive:executor "add unit tests for all untested functions"
 ```
-Spawns 4 security reviewers, each auditing different endpoints.
+Uses "aggressive" keyword to trigger micro-task decomposition. Breaks work into function-level tasks. Wave-based spawning keeps pipeline full.
 
 ### Documentation Sprint
 ```
-/oh-my-claudecode:swarm 2:writer "add JSDoc comments to all exported functions"
+/oh-my-claudecode:swarm 25:writer "add JSDoc comments to all exported functions"
 ```
-Spawns 2 writers, each documenting different modules.
+Creates 25 tasks (one per module or file). Spawns writers in waves, continuously replacing finished agents until documentation is complete.
+
+### Security Audit
+```
+/oh-my-claudecode:swarm aggressive:security-reviewer "audit codebase for SQL injection vulnerabilities"
+```
+Pattern-based decomposition: one task per file with database queries. Aggressive mode ensures thorough coverage across large codebases.
+
+**Note on Persistence**: Unlike ralph/ultrawork which use the persistent-mode hook to block Stop events, aggressive swarm's persistence is handled by the orchestrator's wave loop. The orchestrator continuously polls for completion and spawns replacement agents.
 
 ## Benefits of SQLite-Based Implementation
 

@@ -26,6 +26,14 @@ export interface SwarmTask {
   error?: string;
   /** Result/output from completed task */
   result?: string;
+  /** Priority for task ordering (lower = higher priority) */
+  priority?: number;
+  /** Wave number this task belongs to */
+  wave?: number;
+  /** Files this task owns (advisory, for conflict prevention) */
+  ownedFiles?: string[];
+  /** Glob patterns for files this task may modify */
+  filePatterns?: string[];
 }
 
 /**
@@ -79,6 +87,21 @@ export interface SwarmConfig {
 }
 
 /**
+ * Extended configuration for aggressive swarm mode
+ * Enables wave-based spawning with many more tasks than concurrent agents
+ */
+export interface AggressiveSwarmConfig extends SwarmConfig {
+  /** Maximum concurrent agents (respects OMC configurable limit, default 5) */
+  maxConcurrent?: number;
+  /** Total tasks to process (can exceed maxConcurrent) */
+  totalTasks?: number;
+  /** Enable wave-based spawning (default: true when tasks.length > agentCount) */
+  waveMode?: boolean;
+  /** Polling interval for wave management in ms (default: 5000) */
+  wavePollingInterval?: number;
+}
+
+/**
  * Agent heartbeat record
  */
 export interface AgentHeartbeat {
@@ -124,4 +147,4 @@ export const DEFAULT_SWARM_CONFIG: Required<Omit<SwarmConfig, 'tasks' | 'cwd'>> 
 /**
  * Database schema version for migrations
  */
-export const DB_SCHEMA_VERSION = 1;
+export const DB_SCHEMA_VERSION = 2;
