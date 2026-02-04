@@ -238,6 +238,23 @@ User says "cancelomc", "stopomc" → Invoke unified `cancel` skill (automaticall
 - In planning → end interview
 - Unclear → ask user
 
+**Why /cancel matters**: Execution modes (autopilot, ralph, ultrawork, etc.) use hooks that block premature stopping. These hooks check for active state files at `.omc/state/{mode}-state.json`. Running `/cancel` cleanly removes these state files, allowing the session to end gracefully. Without `/cancel`, the stop hook will continue blocking.
+
+**CRITICAL**: Explaining that work is complete does NOT break the loop. Hooks cannot read your explanations - they only check state files. You MUST invoke `/cancel`.
+
+| Situation | Your Action |
+|-----------|-------------|
+| All tasks done, tests pass, verified | Invoke `/oh-my-claudecode:cancel` |
+| Work blocked by external factor | Explain, then invoke `/oh-my-claudecode:cancel` |
+| User says "stop" or "cancel" | Immediately invoke `/oh-my-claudecode:cancel` |
+| Stop hook fires but work incomplete | Continue working (correct behavior) |
+
+**If /cancel doesn't work**: Use `/oh-my-claudecode:cancel --force` to clear all state files.
+
+**Example**: After ultrawork completes all tasks and verification passes:
+- WRONG: "All tasks are complete. The codebase is now fully tested."
+- RIGHT: "All tasks complete and verified." → Then invoke `/oh-my-claudecode:cancel`
+
 ---
 
 ## PART 3: COMPLETE REFERENCE

@@ -215,6 +215,39 @@ writeState('autopilot-state', state);
 | `PreToolUse` | Before tool execution | Permission validation |
 | `PostToolUse` | After tool execution | Error recovery, rules injection |
 
+### Stop Hook Output Contract
+
+The persistent-mode stop hook uses **soft enforcement**:
+
+```typescript
+// Stop hook ALWAYS returns continue: true
+// Enforcement is via message injection, not blocking
+return {
+  continue: true,
+  message: result.message || undefined  // Injected into context
+};
+```
+
+**Why soft enforcement**: Hard blocking (`continue: false`) would prevent context compaction and could deadlock Claude Code.
+
+**Bypass conditions** (checked first, allow stopping):
+1. `context-limit` - Context window exhausted, must allow compaction
+2. `user-abort` - User explicitly requested stop
+
+**Mode priority** (checked after bypass, may inject continuation message):
+1. Ralph (explicit persistence loop)
+2. Autopilot (full orchestration)
+3. Ultrapilot (parallel workers)
+4. Swarm (coordinated agents)
+5. Pipeline (sequential stages)
+6. UltraQA (test cycling)
+7. Ultrawork (parallel execution)
+8. Ecomode (token-efficient)
+
+**Session isolation**: Hooks only enforce for matching `session_id`. Stale states (>2 hours) are ignored.
+
+**Mode completion criteria**: Hook blocks while `state.active === true && state.session_id === currentSession && !isStaleState()`. Running `/cancel` sets `active: false` and removes state files.
+
 ## State Files
 
 | Hook | State File |
