@@ -435,7 +435,9 @@ export {
   shouldReinforceUltrawork,
   getUltraworkPersistenceMessage,
   createUltraworkStateHook,
-  type UltraworkState
+  checkExistingSession,
+  type UltraworkState,
+  type UltraworkActivationResult
 } from './ultrawork/index.js';
 
 export {
