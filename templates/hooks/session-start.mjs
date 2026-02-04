@@ -11,8 +11,25 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Dynamic import for the shared stdin module
-const { readStdin } = await import(join(__dirname, 'lib', 'stdin.mjs'));
+// Import timeout-protected stdin reader (prevents hangs on Linux, see issue #240)
+let readStdin;
+try {
+  const mod = await import(join(__dirname, 'lib', 'stdin.mjs'));
+  readStdin = mod.readStdin;
+} catch {
+  // Fallback: inline timeout-protected readStdin if lib module is missing
+  readStdin = (timeoutMs = 5000) => new Promise((resolve) => {
+    const chunks = [];
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) { settled = true; process.stdin.removeAllListeners(); process.stdin.destroy(); resolve(Buffer.concat(chunks).toString('utf-8')); }
+    }, timeoutMs);
+    process.stdin.on('data', (chunk) => { chunks.push(chunk); });
+    process.stdin.on('end', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } });
+    process.stdin.on('error', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(''); } });
+    if (process.stdin.readableEnded) { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } }
+  });
+}
 
 function readJsonFile(path) {
   try {
