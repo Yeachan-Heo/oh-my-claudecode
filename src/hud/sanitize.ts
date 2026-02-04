@@ -66,13 +66,14 @@ export function replaceUnicodeBlocks(text: string): string {
 /**
  * Sanitize HUD output for safe terminal rendering.
  *
- * When safeMode is enabled:
+ * Processing steps:
  * 1. Strips terminal control sequences while preserving color/style SGR codes
  * 2. Replaces Unicode block characters with ASCII (prevents width miscalculation)
- * 3. Collapses multi-line output into a single pipe-separated line
- *    (prevents statusline area resize during active rendering)
- * 4. Uses regular spaces instead of non-breaking spaces
- *    (prevents width calculation mismatches in some terminals)
+ * 3. Preserves multi-line output (newlines are kept for proper HUD rendering)
+ * 4. Trims excessive whitespace within lines
+ *
+ * Note: Multi-line output is preserved to maintain HUD tree structure display.
+ * The original single-line collapse was too aggressive and broke readability.
  *
  * @param output - Raw HUD output (may contain ANSI codes and newlines)
  * @returns Sanitized output safe for concurrent terminal rendering
@@ -84,17 +85,13 @@ export function sanitizeOutput(output: string): string {
   // Step 2: Replace variable-width Unicode with ASCII
   sanitized = replaceUnicodeBlocks(sanitized);
 
-  // Step 3: Collapse multi-line output to single line
-  // Split on newlines, filter empty lines, join with pipe separator
-  const lines = sanitized.split('\n').filter(line => line.trim().length > 0);
-  if (lines.length > 1) {
-    sanitized = lines.join(' | ');
-  } else {
-    sanitized = lines[0] || '';
-  }
+  // Step 3: Preserve multi-line output, just trim each line
+  // Do NOT collapse to single line - HUD needs proper line breaks for tree display
+  const lines = sanitized.split('\n').map(line => line.trimEnd());
+  sanitized = lines.join('\n');
 
-  // Step 4: Trim excessive whitespace
-  sanitized = sanitized.replace(/\s{2,}/g, ' ').trim();
+  // Step 4: Remove leading/trailing empty lines
+  sanitized = sanitized.replace(/^\n+|\n+$/g, '');
 
   return sanitized;
 }
