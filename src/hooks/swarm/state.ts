@@ -120,7 +120,11 @@ export async function initDb(cwd: string): Promise<boolean> {
         claimed_at INTEGER,
         completed_at INTEGER,
         error TEXT,
-        result TEXT
+        result TEXT,
+        priority INTEGER DEFAULT 0,
+        wave INTEGER DEFAULT 1,
+        owned_files TEXT,
+        file_patterns TEXT
       );
 
       -- Agent heartbeats
@@ -135,6 +139,32 @@ export async function initDb(cwd: string): Promise<boolean> {
       CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by);
       CREATE INDEX IF NOT EXISTS idx_heartbeats_last ON heartbeats(last_heartbeat);
     `);
+
+    // Schema migration (MUST happen before version is overwritten)
+    // Read current version BEFORE it gets replaced
+    const versionStmt = db.prepare("SELECT value FROM schema_info WHERE key = 'version'");
+    const versionRow = versionStmt.get() as { value: string } | undefined;
+    const currentVersion = versionRow ? parseInt(versionRow.value, 10) : 0;
+
+    // Migration v1 -> v2: Add priority, wave, owned_files, file_patterns columns
+    if (currentVersion > 0 && currentVersion < 2) {
+      // Only migrate existing databases (currentVersion > 0)
+      // Fresh databases get columns from CREATE TABLE
+      try {
+        db.exec(`
+          ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0;
+          ALTER TABLE tasks ADD COLUMN wave INTEGER DEFAULT 1;
+          ALTER TABLE tasks ADD COLUMN owned_files TEXT;
+          ALTER TABLE tasks ADD COLUMN file_patterns TEXT;
+        `);
+      } catch (e) {
+        // Columns may already exist if migration was partial - ignore
+        const err = e as Error;
+        if (!err.message?.includes('duplicate column')) {
+          throw e;
+        }
+      }
+    }
 
     // Set schema version
     const setVersion = db.prepare(
@@ -229,7 +259,7 @@ export function loadState(): SwarmState | null {
     if (!session) return null;
 
     // Get all tasks
-    const tasksStmt = db.prepare("SELECT * FROM tasks ORDER BY id");
+    const tasksStmt = db.prepare("SELECT * FROM tasks ORDER BY priority ASC, id ASC");
     const taskRows = tasksStmt.all() as Array<{
       id: string;
       description: string;
@@ -239,6 +269,10 @@ export function loadState(): SwarmState | null {
       completed_at: number | null;
       error: string | null;
       result: string | null;
+      priority: number | null;
+      wave: number | null;
+      owned_files: string | null;
+      file_patterns: string | null;
     }>;
 
     const tasks: SwarmTask[] = taskRows.map((row) => ({
@@ -250,6 +284,10 @@ export function loadState(): SwarmState | null {
       completedAt: row.completed_at,
       error: row.error ?? undefined,
       result: row.result ?? undefined,
+      priority: row.priority ?? 0,
+      wave: row.wave ?? 1,
+      ownedFiles: row.owned_files ? JSON.parse(row.owned_files) : undefined,
+      filePatterns: row.file_patterns ? JSON.parse(row.file_patterns) : undefined,
     }));
 
     return {
@@ -303,15 +341,26 @@ export function saveState(state: Partial<SwarmState>): boolean {
 /**
  * Add a task to the pool
  */
-export function addTask(id: string, description: string): boolean {
+export function addTask(
+  id: string,
+  description: string,
+  options?: { priority?: number; wave?: number; ownedFiles?: string[]; filePatterns?: string[] }
+): boolean {
   if (!db) return false;
 
   try {
     const stmt = db.prepare(`
-      INSERT INTO tasks (id, description, status, claimed_by, claimed_at, completed_at, error, result)
-      VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL)
+      INSERT INTO tasks (id, description, status, claimed_by, claimed_at, completed_at, error, result, priority, wave, owned_files, file_patterns)
+      VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
     `);
-    stmt.run(id, description);
+    stmt.run(
+      id,
+      description,
+      options?.priority ?? 0,
+      options?.wave ?? 1,
+      options?.ownedFiles ? JSON.stringify(options.ownedFiles) : null,
+      options?.filePatterns ? JSON.stringify(options.filePatterns) : null
+    );
     return true;
   } catch (error) {
     console.error("Failed to add task:", error);
@@ -323,20 +372,27 @@ export function addTask(id: string, description: string): boolean {
  * Add multiple tasks in a transaction
  */
 export function addTasks(
-  tasks: Array<{ id: string; description: string }>,
+  tasks: Array<{ id: string; description: string; priority?: number; wave?: number; ownedFiles?: string[]; filePatterns?: string[] }>,
 ): boolean {
   if (!db) return false;
 
   try {
     const stmt = db.prepare(`
-      INSERT INTO tasks (id, description, status, claimed_by, claimed_at, completed_at, error, result)
-      VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL)
+      INSERT INTO tasks (id, description, status, claimed_by, claimed_at, completed_at, error, result, priority, wave, owned_files, file_patterns)
+      VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
     `);
 
     const insertMany = db.transaction(
-      (taskList: Array<{ id: string; description: string }>) => {
+      (taskList: Array<{ id: string; description: string; priority?: number; wave?: number; ownedFiles?: string[]; filePatterns?: string[] }>) => {
         for (const task of taskList) {
-          stmt.run(task.id, task.description);
+          stmt.run(
+            task.id,
+            task.description,
+            task.priority ?? 0,
+            task.wave ?? 1,
+            task.ownedFiles ? JSON.stringify(task.ownedFiles) : null,
+            task.filePatterns ? JSON.stringify(task.filePatterns) : null
+          );
         }
       },
     );
@@ -356,7 +412,7 @@ export function getTasks(): SwarmTask[] {
   if (!db) return [];
 
   try {
-    const stmt = db.prepare("SELECT * FROM tasks ORDER BY id");
+    const stmt = db.prepare("SELECT * FROM tasks ORDER BY priority ASC, id ASC");
     const rows = stmt.all() as Array<{
       id: string;
       description: string;
@@ -366,6 +422,10 @@ export function getTasks(): SwarmTask[] {
       completed_at: number | null;
       error: string | null;
       result: string | null;
+      priority: number | null;
+      wave: number | null;
+      owned_files: string | null;
+      file_patterns: string | null;
     }>;
 
     return rows.map((row) => ({
@@ -377,6 +437,10 @@ export function getTasks(): SwarmTask[] {
       completedAt: row.completed_at,
       error: row.error ?? undefined,
       result: row.result ?? undefined,
+      priority: row.priority ?? 0,
+      wave: row.wave ?? 1,
+      ownedFiles: row.owned_files ? JSON.parse(row.owned_files) : undefined,
+      filePatterns: row.file_patterns ? JSON.parse(row.file_patterns) : undefined,
     }));
   } catch (error) {
     console.error("Failed to get tasks:", error);
@@ -391,7 +455,7 @@ export function getTasksByStatus(status: SwarmTask["status"]): SwarmTask[] {
   if (!db) return [];
 
   try {
-    const stmt = db.prepare("SELECT * FROM tasks WHERE status = ? ORDER BY id");
+    const stmt = db.prepare("SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, id ASC");
     const rows = stmt.all(status) as Array<{
       id: string;
       description: string;
@@ -401,6 +465,10 @@ export function getTasksByStatus(status: SwarmTask["status"]): SwarmTask[] {
       completed_at: number | null;
       error: string | null;
       result: string | null;
+      priority: number | null;
+      wave: number | null;
+      owned_files: string | null;
+      file_patterns: string | null;
     }>;
 
     return rows.map((row) => ({
@@ -412,10 +480,74 @@ export function getTasksByStatus(status: SwarmTask["status"]): SwarmTask[] {
       completedAt: row.completed_at,
       error: row.error ?? undefined,
       result: row.result ?? undefined,
+      priority: row.priority ?? 0,
+      wave: row.wave ?? 1,
+      ownedFiles: row.owned_files ? JSON.parse(row.owned_files) : undefined,
+      filePatterns: row.file_patterns ? JSON.parse(row.file_patterns) : undefined,
     }));
   } catch (error) {
     console.error("Failed to get tasks by status:", error);
     return [];
+  }
+}
+
+/**
+ * Get tasks by wave number
+ */
+export function getTasksByWave(wave: number): SwarmTask[] {
+  if (!db) return [];
+
+  try {
+    const stmt = db.prepare("SELECT * FROM tasks WHERE wave = ? ORDER BY priority ASC, id ASC");
+    const rows = stmt.all(wave) as Array<{
+      id: string;
+      description: string;
+      status: string;
+      claimed_by: string | null;
+      claimed_at: number | null;
+      completed_at: number | null;
+      error: string | null;
+      result: string | null;
+      priority: number | null;
+      wave: number | null;
+      owned_files: string | null;
+      file_patterns: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      description: row.description,
+      status: row.status as SwarmTask["status"],
+      claimedBy: row.claimed_by,
+      claimedAt: row.claimed_at,
+      completedAt: row.completed_at,
+      error: row.error ?? undefined,
+      result: row.result ?? undefined,
+      priority: row.priority ?? 0,
+      wave: row.wave ?? 1,
+      ownedFiles: row.owned_files ? JSON.parse(row.owned_files) : undefined,
+      filePatterns: row.file_patterns ? JSON.parse(row.file_patterns) : undefined,
+    }));
+  } catch (error) {
+    console.error("Failed to get tasks by wave:", error);
+    return [];
+  }
+}
+
+/**
+ * Get the next available task ID number
+ * Uses MAX(id) from database to prevent ID collisions after deletions
+ */
+export function getNextTaskId(): number {
+  if (!db) return 1;
+
+  try {
+    const stmt = db.prepare("SELECT MAX(CAST(SUBSTR(id, 6) AS INTEGER)) as maxId FROM tasks");
+    const result = stmt.get() as { maxId: number | null };
+    return (result?.maxId ?? 0) + 1;
+  } catch (error) {
+    console.error("Failed to get next task ID:", error);
+    return 1;
   }
 }
 
@@ -437,6 +569,10 @@ export function getTask(taskId: string): SwarmTask | null {
           completed_at: number | null;
           error: string | null;
           result: string | null;
+          priority: number | null;
+          wave: number | null;
+          owned_files: string | null;
+          file_patterns: string | null;
         }
       | undefined;
 
@@ -451,6 +587,10 @@ export function getTask(taskId: string): SwarmTask | null {
       completedAt: row.completed_at,
       error: row.error ?? undefined,
       result: row.result ?? undefined,
+      priority: row.priority ?? 0,
+      wave: row.wave ?? 1,
+      ownedFiles: row.owned_files ? JSON.parse(row.owned_files) : undefined,
+      filePatterns: row.file_patterns ? JSON.parse(row.file_patterns) : undefined,
     };
   } catch (error) {
     console.error("Failed to get task:", error);

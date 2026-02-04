@@ -396,7 +396,7 @@ export function generateConfigSchema(): object {
           allowBash: { type: 'boolean', default: true },
           allowEdit: { type: 'boolean', default: true },
           allowWrite: { type: 'boolean', default: true },
-          maxBackgroundTasks: { type: 'integer', default: 5, minimum: 1, maximum: 20 }
+          maxBackgroundTasks: { type: 'integer', default: 5, minimum: 1, maximum: 50 }
         }
       },
       magicKeywords: {
@@ -407,6 +407,16 @@ export function generateConfigSchema(): object {
           search: { type: 'array', items: { type: 'string' } },
           analyze: { type: 'array', items: { type: 'string' } },
           ultrathink: { type: 'array', items: { type: 'string' } }
+        }
+      },
+      swarm: {
+        type: 'object',
+        description: 'Swarm mode settings',
+        properties: {
+          defaultMaxConcurrent: { type: 'integer', default: 5, minimum: 1, maximum: 50 },
+          wavePollingInterval: { type: 'integer', default: 5000, minimum: 1000, maximum: 30000 },
+          aggressiveThreshold: { type: 'integer', default: 5 },
+          enableFileOwnership: { type: 'boolean', default: true }
         }
       }
     }
