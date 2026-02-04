@@ -10,6 +10,8 @@ import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { detectCodexCli } from './cli-detection.js';
 
+// Default model can be overridden via environment variable
+const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-4o';
 const CODEX_TIMEOUT = parseInt(process.env.OMC_CODEX_TIMEOUT || '60000', 10);
 
 /**
@@ -88,11 +90,11 @@ const askCodexTool = tool(
   "Send a prompt to OpenAI Codex CLI for a second-opinion analysis, code generation, or debugging perspective. Returns Codex's text response. Requires Codex CLI to be installed (npm install -g @openai/codex).",
   {
     prompt: { type: "string", description: "The prompt to send to Codex" },
-    model: { type: "string", description: "Codex model to use (default: gpt-4o). Options: gpt-4o, gpt-4o-mini, o3-mini, o4-mini" },
+    model: { type: "string", description: `Codex model to use (default: ${CODEX_DEFAULT_MODEL}). Set OMC_CODEX_DEFAULT_MODEL env var to change default. Options include: gpt-4o, gpt-4o-mini, o3-mini, o4-mini` },
     context_files: { type: "array", items: { type: "string" }, description: "File paths to include as context (contents will be prepended to prompt)" },
   } as any,
   async (args: any) => {
-    const { prompt, model = 'gpt-4o', context_files } = args as {
+    const { prompt, model = CODEX_DEFAULT_MODEL, context_files } = args as {
       prompt: string;
       model?: string;
       context_files?: string[];

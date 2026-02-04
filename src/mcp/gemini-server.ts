@@ -10,6 +10,8 @@ import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { detectGeminiCli } from './cli-detection.js';
 
+// Default model can be overridden via environment variable
+const GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-2.5-pro';
 const GEMINI_TIMEOUT = parseInt(process.env.OMC_GEMINI_TIMEOUT || '120000', 10);
 
 /**
@@ -54,11 +56,11 @@ const askGeminiTool = tool(
   "Send a prompt to Google Gemini CLI for large-context analysis, second-opinion review, or alternative perspective. Gemini excels at analyzing large files with its 1M token context window. Requires Gemini CLI to be installed (npm install -g @google/gemini-cli).",
   {
     prompt: { type: "string", description: "The prompt to send to Gemini" },
-    model: { type: "string", description: "Gemini model to use (default: gemini-2.5-pro). Options: gemini-2.5-pro, gemini-2.5-flash" },
+    model: { type: "string", description: `Gemini model to use (default: ${GEMINI_DEFAULT_MODEL}). Set OMC_GEMINI_DEFAULT_MODEL env var to change default. Options include: gemini-2.5-pro, gemini-2.5-flash` },
     files: { type: "array", items: { type: "string" }, description: "File paths for Gemini to analyze (leverages 1M token context window)" },
   } as any,
   async (args: any) => {
-    const { prompt, model, files } = args as {
+    const { prompt, model = GEMINI_DEFAULT_MODEL, files } = args as {
       prompt: string;
       model?: string;
       files?: string[];
