@@ -3,8 +3,8 @@ import { omcToolsServer, omcToolNames, getOmcToolNames } from '../mcp/omc-tools-
 
 describe('omc-tools-server', () => {
   describe('omcToolNames', () => {
-    it('should export 18 tools total', () => {
-      expect(omcToolNames).toHaveLength(18);
+    it('should export 33 tools total', () => {
+      expect(omcToolNames).toHaveLength(33);
     });
 
     it('should have 12 LSP tools', () => {
@@ -31,30 +31,30 @@ describe('omc-tools-server', () => {
   describe('getOmcToolNames', () => {
     it('should return all tools by default', () => {
       const tools = getOmcToolNames();
-      expect(tools).toHaveLength(18);
+      expect(tools).toHaveLength(33);
     });
 
     it('should filter out LSP tools when includeLsp is false', () => {
       const tools = getOmcToolNames({ includeLsp: false });
       expect(tools.some(t => t.includes('lsp_'))).toBe(false);
-      expect(tools).toHaveLength(6); // 2 AST + 1 python + 3 skills
+      expect(tools).toHaveLength(21); // 2 AST + 1 python + 3 skills + 5 state + 6 notepad + 4 memory
     });
 
     it('should filter out AST tools when includeAst is false', () => {
       const tools = getOmcToolNames({ includeAst: false });
       expect(tools.some(t => t.includes('ast_'))).toBe(false);
-      expect(tools).toHaveLength(16); // 12 LSP + 1 python + 3 skills
+      expect(tools).toHaveLength(31); // 12 LSP + 1 python + 3 skills + 5 state + 6 notepad + 4 memory
     });
 
     it('should filter out python_repl when includePython is false', () => {
       const tools = getOmcToolNames({ includePython: false });
       expect(tools.some(t => t.includes('python_repl'))).toBe(false);
-      expect(tools).toHaveLength(17); // 12 LSP + 2 AST + 3 skills
+      expect(tools).toHaveLength(32); // 12 LSP + 2 AST + 3 skills + 5 state + 6 notepad + 4 memory
     });
 
     it('should filter out skills tools', () => {
       const names = getOmcToolNames({ includeSkills: false });
-      expect(names).toHaveLength(15);
+      expect(names).toHaveLength(30);
       expect(names.every(n => !n.includes('load_omc_skills') && !n.includes('list_omc_skills'))).toBe(true);
     });
 

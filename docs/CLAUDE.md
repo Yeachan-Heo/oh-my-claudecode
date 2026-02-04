@@ -302,12 +302,92 @@ See [Agent Tiers Reference](./shared/agent-tiers.md) for the complete agent-to-t
 
 See [Agent Tiers Reference](./shared/agent-tiers.md) for the full MCP tool assignment matrix.
 
-**Key tools:**
-- LSP tools (hover, definition, references, diagnostics) for code intelligence
-- AST grep (search, replace) for structural code patterns
-- Python REPL for data analysis
+**Tool Categories (33 total):**
+- **LSP tools** (12): Code intelligence (hover, definition, references, diagnostics)
+- **AST tools** (2): Structural code patterns (search, replace)
+- **Python REPL** (1): Data analysis and scripting
+- **Skills tools** (3): Skill loading and discovery
+- **State tools** (5): Mode state management
+- **Notepad tools** (6): Session memory management
+- **Memory tools** (4): Project memory management
 
 **Unassigned tools** (use directly): `lsp_hover`, `lsp_goto_definition`, `lsp_prepare_rename`, `lsp_rename`, `lsp_code_actions`, `lsp_code_action_resolve`, `lsp_servers`
+
+### State Management MCP Tools
+
+Use these tools to inspect and manage execution mode state. All state is stored at `{worktree}/.omc/state/{mode}-state.json`.
+
+| Tool | Description | Usage |
+|------|-------------|-------|
+| `state_read` | Read state for any mode | `state_read mode=ralph` |
+| `state_write` | Write state (use with caution) | `state_write mode=ralph state={...}` |
+| `state_clear` | Clear state for a mode | `state_clear mode=ultrawork` |
+| `state_list_active` | List all active modes | `state_list_active` |
+| `state_get_status` | Detailed status for mode(s) | `state_get_status` or `state_get_status mode=autopilot` |
+
+**Supported modes:** autopilot, ultrapilot, swarm, pipeline, ralph, ultrawork, ultraqa, ecomode, ralplan
+
+**When to use:**
+- Debugging mode state issues
+- Programmatically checking if a mode is active
+- Emergency state cleanup (prefer `/cancel` skill normally)
+- Building automation on top of OMC modes
+
+**Note:** Swarm uses SQLite (`swarm.db`), not JSON. Use `state_read mode=swarm` for info, but state writes are not supported.
+
+### Notepad MCP Tools
+
+Programmatic access to the notepad system at `{worktree}/.omc/notepad.md`. Prefer the `/note` skill for interactive use.
+
+| Tool | Description | Usage |
+|------|-------------|-------|
+| `notepad_read` | Read notepad content | `notepad_read` or `notepad_read section=priority` |
+| `notepad_write_priority` | Set Priority Context (replaces) | `notepad_write_priority content="Project uses pnpm"` |
+| `notepad_write_working` | Add to Working Memory (appends) | `notepad_write_working content="Found bug in auth"` |
+| `notepad_write_manual` | Add to MANUAL section (appends) | `notepad_write_manual content="Team contact: ..."` |
+| `notepad_prune` | Remove old Working Memory entries | `notepad_prune daysOld=7` |
+| `notepad_stats` | Get notepad statistics | `notepad_stats` |
+
+**Sections:** `all` (default), `priority`, `working`, `manual`
+
+**When to use:**
+- Agents saving discoveries that should survive compaction
+- Automated workflows that need persistent context
+- Building tools that interact with OMC memory
+
+### Project Memory MCP Tools
+
+Programmatic access to project memory at `{worktree}/.omc/project-memory.json`.
+
+| Tool | Description | Usage |
+|------|-------------|-------|
+| `project_memory_read` | Read project memory | `project_memory_read` or `project_memory_read section=techStack` |
+| `project_memory_write` | Write/update memory | `project_memory_write memory={...} merge=true` |
+| `project_memory_add_note` | Add categorized note | `project_memory_add_note category="build" content="Use --legacy-peer-deps"` |
+| `project_memory_add_directive` | Add user directive | `project_memory_add_directive directive="Always use TypeScript strict"` |
+
+**Sections:** `all` (default), `techStack`, `build`, `conventions`, `structure`, `notes`, `directives`
+
+**When to use:**
+- Auto-detected project info needs correction
+- Adding project-specific instructions that persist
+- Building onboarding tools for new developers
+
+### Worktree Path Enforcement
+
+**CRITICAL:** All OMC state is stored under the git worktree root, never in `~/.claude/`.
+
+| Path | Purpose |
+|------|---------|
+| `{worktree}/.omc/state/` | Mode state files (`{mode}-state.json`) |
+| `{worktree}/.omc/notepad.md` | Session notepad |
+| `{worktree}/.omc/project-memory.json` | Project memory |
+| `{worktree}/.omc/plans/` | Planning documents |
+| `{worktree}/.omc/research/` | Research outputs |
+| `{worktree}/.omc/logs/` | Audit logs |
+| `{worktree}/.omc/notepads/` | Plan-scoped wisdom |
+
+All MCP tools enforce worktree boundaries and reject path traversal attempts.
 
 ---
 
@@ -414,6 +494,11 @@ The notepad at `.omc/notepad.md` provides compaction-resilient memory with three
 **Automatic capture via `<remember>` tags** (from Task agent output):
 - `<remember>content</remember>` → Working Memory with timestamp
 - `<remember priority>content</remember>` → Replaces Priority Context
+
+**Programmatic access via MCP tools:**
+- `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`, `notepad_prune`, `notepad_stats`
+- Use MCP tools when agents need direct notepad access without the `/note` skill
+- See [State Management MCP Tools](#state-management-mcp-tools) section for full reference
 
 **Key behaviors:**
 - Priority Context is automatically injected on every session start

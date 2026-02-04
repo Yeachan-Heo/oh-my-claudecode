@@ -26,13 +26,7 @@ import {
   countEdits
 } from './lsp/index.js';
 import { runDirectoryDiagnostics, LSP_DIAGNOSTICS_WAIT_MS } from './diagnostics/index.js';
-
-export interface ToolDefinition<T extends z.ZodRawShape> {
-  name: string;
-  description: string;
-  schema: T;
-  handler: (args: z.infer<z.ZodObject<T>>) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
-}
+import { ToolDefinition } from './types.js';
 
 /**
  * Helper to handle LSP errors gracefully
