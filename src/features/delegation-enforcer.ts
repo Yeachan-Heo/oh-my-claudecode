@@ -8,8 +8,8 @@
  * from agent definitions - every Task call must explicitly pass the model parameter.
  */
 
-import { getAgentDefinitions } from '../agents/definitions.js';
-import type { ModelType } from '../shared/types.js';
+import { getMinimalAgentDefinitions } from "../agents-v4/context-manager.js";
+import type { ModelType } from "../shared/types.js";
 
 /**
  * Agent input structure from Claude Agent SDK
@@ -18,7 +18,7 @@ export interface AgentInput {
   description: string;
   prompt: string;
   subagent_type: string;
-  model?: 'sonnet' | 'opus' | 'haiku';
+  model?: "sonnet" | "opus" | "haiku";
   resume?: string;
   run_in_background?: boolean;
 }
@@ -61,21 +61,22 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   }
 
   // Extract agent type (strip oh-my-claudecode: prefix if present)
-  const agentType = agentInput.subagent_type.replace(/^oh-my-claudecode:/, '');
+  const agentType = agentInput.subagent_type.replace(/^oh-my-claudecode:/, "");
 
   // Get agent definition
-  const agentDefs = getAgentDefinitions();
+  const agentDefs = getMinimalAgentDefinitions();
   const agentDef = agentDefs[agentType];
 
   if (!agentDef) {
-    throw new Error(`Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`);
+    throw new Error(
+      `Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`,
+    );
   }
 
   if (!agentDef.model) {
     throw new Error(`No default model defined for agent: ${agentType}`);
   }
 
-  // Convert ModelType to SDK model type
   const sdkModel = convertToSdkModel(agentDef.model);
 
   // Create modified input with model injected
@@ -86,7 +87,7 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
 
   // Create warning message (only shown if OMC_DEBUG=true)
   let warning: string | undefined;
-  if (process.env.OMC_DEBUG === 'true') {
+  if (process.env.OMC_DEBUG === "true") {
     warning = `[OMC] Auto-injecting model: ${sdkModel} for ${agentType}`;
   }
 
@@ -102,9 +103,9 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
 /**
  * Convert ModelType to SDK model format
  */
-function convertToSdkModel(model: ModelType): 'sonnet' | 'opus' | 'haiku' {
-  if (model === 'inherit') {
-    return 'sonnet'; // Default fallback
+function convertToSdkModel(model: ModelType): "sonnet" | "opus" | "haiku" {
+  if (model === "inherit") {
+    return "sonnet"; // Default fallback
   }
   return model;
 }
@@ -112,20 +113,23 @@ function convertToSdkModel(model: ModelType): 'sonnet' | 'opus' | 'haiku' {
 /**
  * Check if tool input is an agent delegation call
  */
-export function isAgentCall(toolName: string, toolInput: unknown): toolInput is AgentInput {
-  if (toolName !== 'Agent' && toolName !== 'Task') {
+export function isAgentCall(
+  toolName: string,
+  toolInput: unknown,
+): toolInput is AgentInput {
+  if (toolName !== "Agent" && toolName !== "Task") {
     return false;
   }
 
-  if (!toolInput || typeof toolInput !== 'object') {
+  if (!toolInput || typeof toolInput !== "object") {
     return false;
   }
 
   const input = toolInput as Record<string, unknown>;
   return (
-    typeof input.subagent_type === 'string' &&
-    typeof input.prompt === 'string' &&
-    typeof input.description === 'string'
+    typeof input.subagent_type === "string" &&
+    typeof input.prompt === "string" &&
+    typeof input.description === "string"
   );
 }
 
@@ -138,7 +142,7 @@ export function isAgentCall(toolName: string, toolInput: unknown): toolInput is 
  */
 export function processPreToolUse(
   toolName: string,
-  toolInput: unknown
+  toolInput: unknown,
 ): { modifiedInput: unknown; warning?: string } {
   // Check if this is an agent delegation call
   if (!isAgentCall(toolName, toolInput)) {
@@ -167,8 +171,8 @@ export function processPreToolUse(
  * @throws Error if agent type not found or has no model
  */
 export function getModelForAgent(agentType: string): ModelType {
-  const normalizedType = agentType.replace(/^oh-my-claudecode:/, '');
-  const agentDefs = getAgentDefinitions();
+  const normalizedType = agentType.replace(/^oh-my-claudecode:/, "");
+  const agentDefs = getMinimalAgentDefinitions();
   const agentDef = agentDefs[normalizedType];
 
   if (!agentDef) {

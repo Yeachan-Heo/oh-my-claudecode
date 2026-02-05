@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-02-04 -->
 
 # src
 
@@ -19,27 +19,28 @@ This directory contains all TypeScript source code organized into modules:
 
 ## Key Files
 
-| File | Description |
-|------|-------------|
-| `index.ts` | Main entry point - exports `createSisyphusSession()` |
-| `shared/types.ts` | Shared TypeScript types used across modules |
+| File              | Description                                          |
+| ----------------- | ---------------------------------------------------- |
+| `index.ts`        | Main entry point - exports `createSisyphusSession()` |
+| `shared/types.ts` | Shared TypeScript types used across modules          |
 
 ## Subdirectories
 
-| Directory | Purpose |
-|-----------|---------|
-| `agents/` | 32 agent definitions with prompts and tools (see `agents/AGENTS.md`) |
-| `tools/` | 15 LSP, AST, and Python REPL tools (see `tools/AGENTS.md`) |
-| `hooks/` | 31 hooks for execution modes (see `hooks/AGENTS.md`) |
-| `features/` | Core features like model routing, state (see `features/AGENTS.md`) |
-| `config/` | Configuration loading (`loader.ts`) |
-| `commands/` | Command expansion utilities |
-| `mcp/` | MCP server configuration |
-| `cli/` | CLI entry points (`index.ts`, `analytics.ts`) |
-| `hud/` | Heads-up display components |
-| `installer/` | Installation system |
-| `analytics/` | Usage analytics collection |
-| `__tests__/` | Test files |
+| Directory    | Purpose                                                              |
+| ------------ | -------------------------------------------------------------------- |
+| `agents/`    | 32 agent definitions with prompts and tools (see `agents/AGENTS.md`) |
+| `tools/`     | 15 LSP, AST, and Python REPL tools (see `tools/AGENTS.md`)           |
+| `agents-v4/` | V4 agent composition, registry, and context management               |
+| `hooks/`     | 31 hooks for execution modes (see `hooks/AGENTS.md`)                 |
+| `features/`  | Core features like model routing, state (see `features/AGENTS.md`)   |
+| `config/`    | Configuration loading (`loader.ts`)                                  |
+| `commands/`  | Command expansion utilities                                          |
+| `mcp/`       | MCP server configuration                                             |
+| `cli/`       | CLI entry points (`index.ts`, `analytics.ts`)                        |
+| `hud/`       | Heads-up display components                                          |
+| `installer/` | Installation system                                                  |
+| `analytics/` | Usage analytics collection                                           |
+| `__tests__/` | Test files                                                           |
 
 ## For AI Agents
 
@@ -51,20 +52,21 @@ This directory contains all TypeScript source code organized into modules:
    - Supporting files as needed
 
 2. **Entry Point Pattern**:
+
    ```typescript
    // Main export in index.ts
-   export { createSisyphusSession } from './session';
-   export { lspTools, astTools, allCustomTools } from './tools';
-   export { getAgentDefinitions, omcSystemPrompt } from './agents/definitions';
+   export { createSisyphusSession } from "./session";
+   export { lspTools, astTools, allCustomTools } from "./tools";
+   export { getAgentDefinitions, omcSystemPrompt } from "./agents/definitions";
    ```
 
 3. **Tool Registration**: Custom tools are registered in `tools/index.ts`:
 
    ```typescript
    export const allCustomTools = [
-     ...lspTools,      // 12 LSP tools
-     ...astTools,      // 2 AST tools
-     pythonReplTool    // 1 REPL tool (15 total)
+     ...lspTools, // 12 LSP tools
+     ...astTools, // 2 AST tools
+     pythonReplTool, // 1 REPL tool (15 total)
    ];
    ```
 
@@ -127,6 +129,7 @@ This directory contains all TypeScript source code organized into modules:
 ## Dependencies
 
 ### Internal
+
 - Uses types from `shared/types.ts`
 - Imports agent prompts from `/agents/*.md`
 - Loads skills from `/skills/*.md`

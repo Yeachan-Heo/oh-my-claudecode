@@ -3,6 +3,8 @@
  *
  * Provides standardized preamble for delegating work to worker agents.
  * This prevents agents from spawning sub-agents and ensures they execute tasks directly.
+ *
+ * Moved from src/agents/preamble.ts during V4 migration.
  */
 
 export const WORKER_PREAMBLE = `CONTEXT: You are a WORKER agent, not an orchestrator.

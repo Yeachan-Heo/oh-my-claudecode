@@ -13,27 +13,46 @@
  * - Magic keywords: Special triggers for enhanced behaviors
  */
 
-import { loadConfig, findContextFiles, loadContextFromFiles } from './config/loader.js';
-import { getAgentDefinitions, omcSystemPrompt } from './agents/definitions.js';
-import { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
-import { omcToolsServer, getOmcToolNames } from './mcp/omc-tools-server.js';
-import { codexMcpServer } from './mcp/codex-server.js';
-import { geminiMcpServer } from './mcp/gemini-server.js';
-import { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
-import { continuationSystemPromptAddition } from './features/continuation-enforcement.js';
+import {
+  loadConfig,
+  findContextFiles,
+  loadContextFromFiles,
+} from "./config/loader.js";
+import { getMinimalAgentDefinitions } from "./agents-v4/context-manager.js";
+import { omcSystemPromptV4 } from "./agents-v4/system-prompt.js";
+import { getDefaultMcpServers, toSdkMcpFormat } from "./mcp/servers.js";
+import { omcToolsServer, getOmcToolNames } from "./mcp/omc-tools-server.js";
+import { codexMcpServer } from "./mcp/codex-server.js";
+import { geminiMcpServer } from "./mcp/gemini-server.js";
+import {
+  createMagicKeywordProcessor,
+  detectMagicKeywords,
+} from "./features/magic-keywords.js";
+import { continuationSystemPromptAddition } from "./features/continuation-enforcement.js";
 import {
   createBackgroundTaskManager,
   shouldRunInBackground as shouldRunInBackgroundFn,
   type BackgroundTaskManager,
-  type TaskExecutionDecision
-} from './features/background-tasks.js';
-import type { PluginConfig, SessionState } from './shared/types.js';
+  type TaskExecutionDecision,
+} from "./features/background-tasks.js";
+import type { PluginConfig, SessionState } from "./shared/types.js";
 
-export { loadConfig, getAgentDefinitions, omcSystemPrompt };
-export { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
-export { lspTools, astTools, allCustomTools } from './tools/index.js';
-export { omcToolsServer, omcToolNames, getOmcToolNames } from './mcp/omc-tools-server.js';
-export { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
+export { loadConfig };
+/** @deprecated Use getMinimalAgentDefinitions from agents-v4 */
+export const getAgentDefinitions = getMinimalAgentDefinitions;
+/** @deprecated Use omcSystemPromptV4 from agents-v4 */
+export const omcSystemPrompt = omcSystemPromptV4;
+export { getDefaultMcpServers, toSdkMcpFormat } from "./mcp/servers.js";
+export { lspTools, astTools, allCustomTools } from "./tools/index.js";
+export {
+  omcToolsServer,
+  omcToolNames,
+  getOmcToolNames,
+} from "./mcp/omc-tools-server.js";
+export {
+  createMagicKeywordProcessor,
+  detectMagicKeywords,
+} from "./features/magic-keywords.js";
 export {
   createBackgroundTaskManager,
   shouldRunInBackground,
@@ -42,8 +61,8 @@ export {
   LONG_RUNNING_PATTERNS,
   BLOCKING_PATTERNS,
   type BackgroundTaskManager,
-  type TaskExecutionDecision
-} from './features/background-tasks.js';
+  type TaskExecutionDecision,
+} from "./features/background-tasks.js";
 export {
   // Auto-update types
   type VersionMetadata,
@@ -64,12 +83,12 @@ export {
   formatUpdateNotification,
   shouldCheckForUpdates,
   backgroundUpdateCheck,
-  compareVersions
-} from './features/auto-update.js';
-export * from './shared/types.js';
+  compareVersions,
+} from "./features/auto-update.js";
+export * from "./shared/types.js";
 
 // Hooks module exports
-export * from './hooks/index.js';
+export * from "./hooks/index.js";
 
 // Features module exports (boulder-state, context-injector)
 export {
@@ -110,27 +129,15 @@ export {
   type MessageContext,
   type OutputPart,
   type InjectionStrategy,
-  type InjectionResult
-} from './features/index.js';
+  type InjectionResult,
+} from "./features/index.js";
 
-// Agent module exports (modular agent system)
+// Agent module exports (V4 compat layer — all @deprecated, will be removed in v5.0.0)
 export {
-  // Types
+  type AgentConfig,
   type ModelType,
   type AgentCost,
   type AgentCategory,
-  type DelegationTrigger,
-  type AgentPromptMetadata,
-  type AgentConfig,
-  type FullAgentConfig,
-  type AgentOverrideConfig,
-  type AgentOverrides,
-  type AgentFactory,
-  type AvailableAgent,
-  isGptModel,
-  isClaudeModel,
-  getDefaultModelForCategory,
-  // Utilities
   createAgentToolRestrictions,
   mergeAgentConfig,
   buildDelegationTable,
@@ -141,7 +148,6 @@ export {
   validateAgentConfig,
   deepMerge,
   loadAgentPrompt,
-  // Individual agents with metadata (rebranded intuitive names)
   architectAgent,
   ARCHITECT_PROMPT_METADATA,
   exploreAgent,
@@ -162,10 +168,9 @@ export {
   ANALYST_PROMPT_METADATA,
   plannerAgent,
   PLANNER_PROMPT_METADATA,
-  // Deprecated (backward compat - will be removed in v4.0.0)
   coordinatorAgent,
-  ORCHESTRATOR_SISYPHUS_PROMPT_METADATA
-} from './agents/index.js';
+  ORCHESTRATOR_SISYPHUS_PROMPT_METADATA,
+} from "./agents-v4/compat.js";
 
 // Command expansion utilities for SDK integration
 export {
@@ -178,8 +183,8 @@ export {
   expandCommands,
   getCommandsDir,
   type CommandInfo,
-  type ExpandedCommand
-} from './commands/index.js';
+  type ExpandedCommand,
+} from "./commands/index.js";
 
 // Installer exports
 export {
@@ -192,8 +197,8 @@ export {
   COMMANDS_DIR,
   VERSION as INSTALLER_VERSION,
   type InstallResult,
-  type InstallOptions
-} from './installer/index.js';
+  type InstallOptions,
+} from "./installer/index.js";
 
 /**
  * Options for creating a Sisyphus session
@@ -221,7 +226,10 @@ export interface SisyphusSession {
   queryOptions: {
     options: {
       systemPrompt: string;
-      agents: Record<string, { description: string; prompt: string; tools?: string[]; model?: string }>;
+      agents: Record<
+        string,
+        { description: string; prompt: string; tools: string[]; model?: string }
+      >;
       mcpServers: Record<string, { command: string; args: string[] }>;
       allowedTools: string[];
       permissionMode: string;
@@ -263,17 +271,22 @@ export interface SisyphusSession {
  * }
  * ```
  */
-export function createSisyphusSession(options?: SisyphusOptions): SisyphusSession {
+export function createSisyphusSession(
+  options?: SisyphusOptions,
+): SisyphusSession {
   // Load configuration
   const loadedConfig = options?.skipConfigLoad ? {} : loadConfig();
   const config: PluginConfig = {
     ...loadedConfig,
-    ...options?.config
+    ...options?.config,
   };
 
   // Find and load context files
-  let contextAddition = '';
-  if (!options?.skipContextInjection && config.features?.autoContextInjection !== false) {
+  let contextAddition = "";
+  if (
+    !options?.skipContextInjection &&
+    config.features?.autoContextInjection !== false
+  ) {
     const contextFiles = findContextFiles(options?.workingDirectory);
     if (contextFiles.length > 0) {
       contextAddition = `\n\n## Project Context\n\n${loadContextFromFiles(contextFiles)}`;
@@ -281,7 +294,7 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   }
 
   // Build system prompt
-  let systemPrompt = omcSystemPrompt;
+  let systemPrompt = omcSystemPromptV4;
 
   // Add continuation enforcement
   if (config.features?.continuationEnforcement !== false) {
@@ -299,30 +312,36 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   }
 
   // Get agent definitions
-  const agents = getAgentDefinitions();
+  const agents = getMinimalAgentDefinitions();
 
   // Build MCP servers configuration
   const externalMcpServers = getDefaultMcpServers({
     exaApiKey: config.mcpServers?.exa?.apiKey,
     enableExa: config.mcpServers?.exa?.enabled,
-    enableContext7: config.mcpServers?.context7?.enabled
+    enableContext7: config.mcpServers?.context7?.enabled,
   });
 
   // Build allowed tools list
   const allowedTools: string[] = [
-    'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'TodoWrite'
+    "Read",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "Task",
+    "TodoWrite",
   ];
 
   if (config.permissions?.allowBash !== false) {
-    allowedTools.push('Bash');
+    allowedTools.push("Bash");
   }
 
   if (config.permissions?.allowEdit !== false) {
-    allowedTools.push('Edit');
+    allowedTools.push("Edit");
   }
 
   if (config.permissions?.allowWrite !== false) {
-    allowedTools.push('Write');
+    allowedTools.push("Write");
   }
 
   // Add MCP tool names
@@ -334,13 +353,13 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   const omcTools = getOmcToolNames({
     includeLsp: config.features?.lspTools !== false,
     includeAst: config.features?.astTools !== false,
-    includePython: true
+    includePython: true,
   });
   allowedTools.push(...omcTools);
 
   // Add Codex and Gemini MCP tool patterns
-  allowedTools.push('mcp__x__*');
-  allowedTools.push('mcp__g__*');
+  allowedTools.push("mcp__x__*");
+  allowedTools.push("mcp__g__*");
 
   // Create magic keyword processor
   const processPrompt = createMagicKeywordProcessor(config.magicKeywords);
@@ -349,7 +368,7 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   const state: SessionState = {
     activeAgents: new Map(),
     backgroundTasks: [],
-    contextFiles: findContextFiles(options?.workingDirectory)
+    contextFiles: findContextFiles(options?.workingDirectory),
   };
 
   // Create background task manager
@@ -362,24 +381,26 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
         agents,
         mcpServers: {
           ...toSdkMcpFormat(externalMcpServers),
-          't': omcToolsServer as any,
-          'x': codexMcpServer as any,
-          'g': geminiMcpServer as any
+          t: omcToolsServer as any,
+          x: codexMcpServer as any,
+          g: geminiMcpServer as any,
         },
         allowedTools,
-        permissionMode: 'acceptEdits'
-      }
+        permissionMode: "acceptEdits",
+      },
     },
     state,
     config,
     processPrompt,
-    detectKeywords: (prompt: string) => detectMagicKeywords(prompt, config.magicKeywords),
+    detectKeywords: (prompt: string) =>
+      detectMagicKeywords(prompt, config.magicKeywords),
     backgroundTasks: backgroundTaskManager,
-    shouldRunInBackground: (command: string) => shouldRunInBackgroundFn(
-      command,
-      backgroundTaskManager.getRunningCount(),
-      backgroundTaskManager.getMaxTasks()
-    )
+    shouldRunInBackground: (command: string) =>
+      shouldRunInBackgroundFn(
+        command,
+        backgroundTaskManager.getRunningCount(),
+        backgroundTaskManager.getMaxTasks(),
+      ),
   };
 }
 
@@ -398,7 +419,7 @@ export function getOmcSystemPrompt(options?: {
   includeContinuation?: boolean;
   customAddition?: string;
 }): string {
-  let prompt = omcSystemPrompt;
+  let prompt = omcSystemPromptV4;
 
   if (options?.includeContinuation !== false) {
     prompt += continuationSystemPromptAddition;

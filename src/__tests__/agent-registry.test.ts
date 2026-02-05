@@ -1,43 +1,75 @@
-import { describe, test, expect } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { getAgentDefinitions } from '../agents/definitions.js';
+import { describe, test, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+import { LEGACY_ALIASES, resolveAlias } from "../agents-v4/registry.js";
+import { AGENT_ROLES } from "../agents-v4/roles.js";
+import {
+  getMinimalAgentDefinitions,
+  getFullAgentPrompt,
+} from "../agents-v4/context-manager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-describe('Agent Registry Validation', () => {
-  test('agent count matches documentation', () => {
-    const agents = getAgentDefinitions();
-    expect(Object.keys(agents).length).toBe(34);
-  });
-
-  test('all agents have .md prompt files', () => {
-    const agents = Object.keys(getAgentDefinitions());
-    const agentsDir = path.join(__dirname, '../../agents');
-    for (const name of agents) {
-      const mdPath = path.join(agentsDir, `${name}.md`);
-      expect(fs.existsSync(mdPath), `Missing .md file for agent: ${name}`).toBe(true);
+describe("V4 Agent Registry Validation", () => {
+  test("all legacy aliases resolve to valid role+tier", () => {
+    for (const [name, alias] of Object.entries(LEGACY_ALIASES)) {
+      expect(alias.role, `Alias ${name} has no role`).toBeTruthy();
+      expect(alias.tier, `Alias ${name} has no tier`).toBeTruthy();
+      expect(
+        AGENT_ROLES[alias.role],
+        `Alias ${name} maps to unknown role: ${alias.role}`,
+      ).toBeDefined();
     }
   });
 
-  test('all registry agents are exported from index.ts', async () => {
-    const registryAgents = Object.keys(getAgentDefinitions());
-    const exports = await import('../agents/index.js') as Record<string, unknown>;
-    for (const name of registryAgents) {
-      const exportName = name.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase()) + 'Agent';
-      expect(exports[exportName], `Missing export for agent: ${name} (expected ${exportName})`).toBeDefined();
+  test("minimal definitions cover all legacy aliases", () => {
+    const defs = getMinimalAgentDefinitions();
+    for (const name of Object.keys(LEGACY_ALIASES)) {
+      expect(
+        defs[name],
+        `Missing minimal definition for: ${name}`,
+      ).toBeDefined();
+      expect(
+        defs[name].prompt.length,
+        `Empty prompt for: ${name}`,
+      ).toBeGreaterThan(0);
+      expect(defs[name].tools.length, `No tools for: ${name}`).toBeGreaterThan(
+        0,
+      );
+      expect(defs[name].model, `No model for: ${name}`).toBeTruthy();
     }
   });
 
-  test('no hardcoded prompts in base agent .ts files', () => {
-    const baseAgents = ['architect', 'executor', 'explore', 'designer', 'researcher',
-                        'writer', 'vision', 'planner', 'critic', 'analyst', 'scientist', 'qa-tester'];
-    const agentsDir = path.join(__dirname, '../agents');
-    for (const name of baseAgents) {
-      const content = fs.readFileSync(path.join(agentsDir, `${name}.ts`), 'utf-8');
-      expect(content, `Hardcoded prompt found in ${name}.ts`).not.toMatch(/const\s+\w+_PROMPT\s*=\s*`/);
+  test("minimal prompts are under budget (short, not full markdown)", () => {
+    const defs = getMinimalAgentDefinitions();
+    const MAX_MINIMAL_PROMPT_LENGTH = 500;
+    for (const [name, def] of Object.entries(defs)) {
+      expect(
+        def.prompt.length,
+        `Minimal prompt for ${name} is ${def.prompt.length} chars — exceeds ${MAX_MINIMAL_PROMPT_LENGTH} budget`,
+      ).toBeLessThan(MAX_MINIMAL_PROMPT_LENGTH);
     }
+  });
+
+  test("full agent prompt loads markdown content", () => {
+    const fullPrompt = getFullAgentPrompt("architect");
+    expect(fullPrompt.length).toBeGreaterThan(100);
+    expect(fullPrompt).not.toContain("Prompt unavailable");
+  });
+
+  test("all roles have markdown files in agents/roles/", () => {
+    const rolesDir = path.join(__dirname, "../../agents/roles");
+    for (const role of Object.keys(AGENT_ROLES)) {
+      const mdPath = path.join(rolesDir, `${role}.md`);
+      expect(fs.existsSync(mdPath), `Missing role markdown: ${role}.md`).toBe(
+        true,
+      );
+    }
+  });
+
+  test("resolveAlias returns null for unknown names", () => {
+    expect(resolveAlias("nonexistent-agent")).toBeNull();
   });
 });

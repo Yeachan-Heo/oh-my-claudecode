@@ -23,7 +23,7 @@ const DEFAULT_BASE_PROTOCOL_SECTION: PromptSection = {
 
 const PROMPT_SECTION_SEPARATOR = "\n\n---\n\n";
 
-const VALID_TIER_COMBINATIONS: Record<AgentRole, ComplexityTier[]> = {
+export const VALID_TIER_COMBINATIONS: Record<AgentRole, ComplexityTier[]> = {
   architect: ["LOW", "MEDIUM", "HIGH"],
   researcher: ["LOW", "MEDIUM"],
   explore: ["LOW", "MEDIUM", "HIGH"],
