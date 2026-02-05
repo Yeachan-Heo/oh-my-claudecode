@@ -59,7 +59,7 @@ autopilot: build a REST API for managing tasks
 ## 功能特性
 
 ### 执行模式
-针对不同场景的多种策略 - 从全自动构建到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+针对不同场景的多种策略 - 从全自动构建到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | 模式 | 速度 | 适用场景 |
 |------|-------|---------|

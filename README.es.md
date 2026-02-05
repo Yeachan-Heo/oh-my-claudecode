@@ -59,7 +59,7 @@ Eso es todo. Todo lo demás es automático.
 ## Características
 
 ### Modos de Ejecución
-Múltiples estrategias para diferentes casos de uso - desde construcciones completamente autónomas hasta refactorización eficiente en tokens. [Aprende más →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+Múltiples estrategias para diferentes casos de uso - desde construcciones completamente autónomas hasta refactorización eficiente en tokens. [Aprende más →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | Modo | Velocidad | Usar Para |
 |------|-------|---------|

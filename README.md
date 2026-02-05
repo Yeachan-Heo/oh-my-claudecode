@@ -59,7 +59,7 @@ That's it. Everything else is automatic.
 ## Features
 
 ### Execution Modes
-Multiple strategies for different use cases - from fully autonomous builds to token-efficient refactoring. [Learn more →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+Multiple strategies for different use cases - from fully autonomous builds to token-efficient refactoring. [Learn more →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | Mode | Speed | Use For |
 |------|-------|---------|

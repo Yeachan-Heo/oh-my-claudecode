@@ -59,7 +59,7 @@ autopilot: build a REST API for managing tasks
 ## 機能
 
 ### 実行モード
-用途に応じた複数の戦略 - 完全自律ビルドからトークン効率の良いリファクタリングまで。[詳しくはこちら →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+用途に応じた複数の戦略 - 完全自律ビルドからトークン効率の良いリファクタリングまで。[詳しくはこちら →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | モード | スピード | 用途 |
 |------|-------|------|

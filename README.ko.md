@@ -59,7 +59,7 @@ autopilot: build a REST API for managing tasks
 ## 기능
 
 ### 실행 모드
-다양한 사용 사례를 위한 여러 전략 - 완전 자율 빌드부터 토큰 효율적인 리팩토링까지. [자세히 보기 →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+다양한 사용 사례를 위한 여러 전략 - 완전 자율 빌드부터 토큰 효율적인 리팩토링까지. [자세히 보기 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | 모드 | 속도 | 용도 |
 |------|-------|---------|
