@@ -18,7 +18,7 @@ const askCodexTool = tool(
   {
     agent_role: { type: "string", description: `Required. Agent perspective for Codex: ${CODEX_VALID_ROLES.join(', ')}. Codex is optimized for analytical/planning tasks.` },
     prompt_file: { type: "string", description: "Path to file containing the prompt" },
-    output_file: { type: "string", description: "Strongly recommended. Path to write response. Response content is NOT returned inline - read from this file or the Response File path in output." },
+    output_file: { type: "string", description: "Required. Path to write response. Response content is NOT returned inline - read from this file." },
     context_files: { type: "array", items: { type: "string" }, description: "File paths to include as context (contents will be prepended to prompt)" },
     model: { type: "string", description: `Codex model to use (default: ${CODEX_DEFAULT_MODEL}). Set OMC_CODEX_DEFAULT_MODEL env var to change default.` },
     background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion." },
@@ -27,7 +27,7 @@ const askCodexTool = tool(
   async (args: any) => {
     const { prompt_file, output_file, agent_role, model, context_files, background, working_directory } = args as {
       prompt_file: string;
-      output_file?: string;
+      output_file: string;
       agent_role: string;
       model?: string;
       context_files?: string[];

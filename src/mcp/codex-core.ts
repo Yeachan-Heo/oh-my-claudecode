@@ -305,7 +305,7 @@ export function validateAndReadFile(filePath: string, baseDir?: string): string 
  */
 export async function handleAskCodex(args: {
   prompt_file: string;
-  output_file?: string;
+  output_file: string;
   agent_role: string;
   model?: string;
   context_files?: string[];
@@ -324,6 +324,14 @@ export async function handleAskCodex(args: {
         type: 'text' as const,
         text: `Invalid agent_role: "${agent_role}". Codex requires one of: ${CODEX_VALID_ROLES.join(', ')}`
       }],
+      isError: true
+    };
+  }
+
+  // Validate output_file is provided
+  if (!args.output_file || !args.output_file.trim()) {
+    return {
+      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
       isError: true
     };
   }
