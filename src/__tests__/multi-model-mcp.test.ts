@@ -17,8 +17,12 @@ describe('Multi-Model MCP Servers', () => {
     });
 
     it('should export correct tool names', () => {
-      expect(codexToolNames).toHaveLength(1);
+      expect(codexToolNames).toHaveLength(5);
       expect(codexToolNames).toContain('ask_codex');
+      expect(codexToolNames).toContain('wait_for_job');
+      expect(codexToolNames).toContain('check_job_status');
+      expect(codexToolNames).toContain('kill_job');
+      expect(codexToolNames).toContain('list_jobs');
     });
 
     it('should have server name "x"', () => {
@@ -33,8 +37,12 @@ describe('Multi-Model MCP Servers', () => {
     });
 
     it('should export correct tool names', () => {
-      expect(geminiToolNames).toHaveLength(1);
+      expect(geminiToolNames).toHaveLength(5);
       expect(geminiToolNames).toContain('ask_gemini');
+      expect(geminiToolNames).toContain('wait_for_job');
+      expect(geminiToolNames).toContain('check_job_status');
+      expect(geminiToolNames).toContain('kill_job');
+      expect(geminiToolNames).toContain('list_jobs');
     });
 
     it('should have server name "g"', () => {

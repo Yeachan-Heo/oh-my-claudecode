@@ -272,7 +272,7 @@ describe('MCP Server Workflows', () => {
       expect(codexMcpServer).toBeDefined();
       expect(codexMcpServer.name).toBe('x');
       expect(codexToolNames).toContain('ask_codex');
-      expect(codexToolNames).toHaveLength(1);
+      expect(codexToolNames).toHaveLength(5);
     });
 
     it('should have correct Gemini tool schema', () => {
@@ -280,7 +280,7 @@ describe('MCP Server Workflows', () => {
       expect(geminiMcpServer).toBeDefined();
       expect(geminiMcpServer.name).toBe('g');
       expect(geminiToolNames).toContain('ask_gemini');
-      expect(geminiToolNames).toHaveLength(1);
+      expect(geminiToolNames).toHaveLength(5);
     });
   });
 

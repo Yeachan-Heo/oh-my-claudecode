@@ -17,6 +17,13 @@ import {
   GEMINI_MODEL_FALLBACKS,
   handleAskGemini,
 } from './gemini-core.js';
+import {
+  handleWaitForJob,
+  handleCheckJobStatus,
+  handleKillJob,
+  handleListJobs,
+  getJobManagementToolSchemas,
+} from './job-management.js';
 
 const askGeminiTool = {
   name: 'ask_gemini',
@@ -40,30 +47,48 @@ const askGeminiTool = {
   },
 };
 
+const jobTools = getJobManagementToolSchemas('gemini');
+
 const server = new Server(
   { name: 'g', version: '1.0.0' },
   { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [askGeminiTool],
+  tools: [askGeminiTool, ...jobTools],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  if (name !== 'ask_gemini') {
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+  if (name === 'ask_gemini') {
+    const { prompt_file, output_file, agent_role, model, files, background, working_directory } = (args ?? {}) as {
+      prompt_file: string;
+      output_file: string;
+      agent_role: string;
+      model?: string;
+      files?: string[];
+      background?: boolean;
+      working_directory?: string;
+    };
+    return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background, working_directory });
   }
-  const { prompt_file, output_file, agent_role, model, files, background, working_directory } = (args ?? {}) as {
-    prompt_file: string;
-    output_file: string;
-    agent_role: string;
-    model?: string;
-    files?: string[];
-    background?: boolean;
-    working_directory?: string;
-  };
-  return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background, working_directory });
+  if (name === 'wait_for_job') {
+    const { job_id, timeout_ms } = (args ?? {}) as { job_id: string; timeout_ms?: number };
+    return handleWaitForJob('gemini', job_id, timeout_ms);
+  }
+  if (name === 'check_job_status') {
+    const { job_id } = (args ?? {}) as { job_id: string };
+    return handleCheckJobStatus('gemini', job_id);
+  }
+  if (name === 'kill_job') {
+    const { job_id, signal } = (args ?? {}) as { job_id: string; signal?: string };
+    return handleKillJob('gemini', job_id, (signal as NodeJS.Signals) || undefined);
+  }
+  if (name === 'list_jobs') {
+    const { status_filter, limit } = (args ?? {}) as { status_filter?: string; limit?: number };
+    return handleListJobs('gemini', (status_filter as 'active' | 'completed' | 'failed' | 'all') || undefined, limit);
+  }
+  return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
 });
 
 async function main() {

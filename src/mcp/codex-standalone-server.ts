@@ -16,6 +16,13 @@ import {
   CODEX_DEFAULT_MODEL,
   handleAskCodex,
 } from './codex-core.js';
+import {
+  handleWaitForJob,
+  handleCheckJobStatus,
+  handleKillJob,
+  handleListJobs,
+  getJobManagementToolSchemas,
+} from './job-management.js';
 
 const askCodexTool = {
   name: 'ask_codex',
@@ -39,30 +46,48 @@ const askCodexTool = {
   },
 };
 
+const jobTools = getJobManagementToolSchemas('codex');
+
 const server = new Server(
   { name: 'x', version: '1.0.0' },
   { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [askCodexTool],
+  tools: [askCodexTool, ...jobTools],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  if (name !== 'ask_codex') {
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+  if (name === 'ask_codex') {
+    const { prompt_file, output_file, agent_role, model, context_files, background, working_directory } = (args ?? {}) as {
+      prompt_file: string;
+      output_file: string;
+      agent_role: string;
+      model?: string;
+      context_files?: string[];
+      background?: boolean;
+      working_directory?: string;
+    };
+    return handleAskCodex({ prompt_file, output_file, agent_role, model, context_files, background, working_directory });
   }
-  const { prompt_file, output_file, agent_role, model, context_files, background, working_directory } = (args ?? {}) as {
-    prompt_file: string;
-    output_file: string;
-    agent_role: string;
-    model?: string;
-    context_files?: string[];
-    background?: boolean;
-    working_directory?: string;
-  };
-  return handleAskCodex({ prompt_file, output_file, agent_role, model, context_files, background, working_directory });
+  if (name === 'wait_for_job') {
+    const { job_id, timeout_ms } = (args ?? {}) as { job_id: string; timeout_ms?: number };
+    return handleWaitForJob('codex', job_id, timeout_ms);
+  }
+  if (name === 'check_job_status') {
+    const { job_id } = (args ?? {}) as { job_id: string };
+    return handleCheckJobStatus('codex', job_id);
+  }
+  if (name === 'kill_job') {
+    const { job_id, signal } = (args ?? {}) as { job_id: string; signal?: string };
+    return handleKillJob('codex', job_id, (signal as NodeJS.Signals) || undefined);
+  }
+  if (name === 'list_jobs') {
+    const { status_filter, limit } = (args ?? {}) as { status_filter?: string; limit?: number };
+    return handleListJobs('codex', (status_filter as 'active' | 'completed' | 'failed' | 'all') || undefined, limit);
+  }
+  return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
 });
 
 async function main() {

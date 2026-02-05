@@ -10,6 +10,7 @@
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { handleAskCodex, CODEX_DEFAULT_MODEL, CODEX_VALID_ROLES } from './codex-core.js';
+import { handleWaitForJob, handleCheckJobStatus, handleKillJob, handleListJobs } from './job-management.js';
 
 // Define the ask_codex tool using the SDK tool() helper
 const askCodexTool = tool(
@@ -38,6 +39,57 @@ const askCodexTool = tool(
   }
 );
 
+const waitForJobTool = tool(
+  "wait_for_job",
+  "Block (poll) until a background job reaches a terminal state (completed, failed, or timeout). Uses exponential backoff. Returns the response preview on success.",
+  {
+    job_id: { type: "string", description: "The job ID returned when the background job was dispatched." },
+    timeout_ms: { type: "number", description: "Maximum time to wait in milliseconds (default: 3600000, max: 3600000)." },
+  } as any,
+  async (args: any) => {
+    const { job_id, timeout_ms } = args as { job_id: string; timeout_ms?: number };
+    return handleWaitForJob('codex', job_id, timeout_ms);
+  }
+);
+
+const checkJobStatusTool = tool(
+  "check_job_status",
+  "Non-blocking status check for a background job. Returns current status, metadata, and error information if available.",
+  {
+    job_id: { type: "string", description: "The job ID returned when the background job was dispatched." },
+  } as any,
+  async (args: any) => {
+    const { job_id } = args as { job_id: string };
+    return handleCheckJobStatus('codex', job_id);
+  }
+);
+
+const killJobTool = tool(
+  "kill_job",
+  "Send a signal to a running background job. Marks the job as failed. Only works on jobs in spawned or running state.",
+  {
+    job_id: { type: "string", description: "The job ID of the running job to kill." },
+    signal: { type: "string", description: "The signal to send (default: SIGTERM)." },
+  } as any,
+  async (args: any) => {
+    const { job_id, signal } = args as { job_id: string; signal?: string };
+    return handleKillJob('codex', job_id, (signal as NodeJS.Signals) || undefined);
+  }
+);
+
+const listJobsTool = tool(
+  "list_jobs",
+  "List background jobs for this provider. Filter by status and limit results. Results sorted newest first.",
+  {
+    status_filter: { type: "string", description: "Filter jobs by status (default: active)." },
+    limit: { type: "number", description: "Maximum number of jobs to return (default: 50)." },
+  } as any,
+  async (args: any) => {
+    const { status_filter, limit } = args as { status_filter?: string; limit?: number };
+    return handleListJobs('codex', (status_filter as 'active' | 'completed' | 'failed' | 'all') || undefined, limit);
+  }
+);
+
 /**
  * In-process MCP server exposing Codex CLI integration
  *
@@ -46,10 +98,10 @@ const askCodexTool = tool(
 export const codexMcpServer = createSdkMcpServer({
   name: "x",
   version: "1.0.0",
-  tools: [askCodexTool]
+  tools: [askCodexTool, waitForJobTool, checkJobStatusTool, killJobTool, listJobsTool]
 });
 
 /**
  * Tool names for allowedTools configuration
  */
-export const codexToolNames = ['ask_codex'];
+export const codexToolNames = ['ask_codex', 'wait_for_job', 'check_job_status', 'kill_job', 'list_jobs'];

@@ -65,3 +65,13 @@ export type {
   JobStatus,
   BackgroundJobMeta
 } from './prompt-persistence.js';
+
+// Job management tools for background execution
+export {
+  handleWaitForJob,
+  handleCheckJobStatus,
+  handleKillJob,
+  handleListJobs,
+  findJobStatusFile,
+  getJobManagementToolSchemas
+} from './job-management.js';
