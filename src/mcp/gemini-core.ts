@@ -512,7 +512,7 @@ export async function handleAskGemini(args: {
         });
       }
 
-      // Handle output_file: check if CLI wrote it, otherwise write stdout to .raw
+      // Handle output_file: if CLI didn't write it, write stdout there directly
       if (args.output_file) {
         const outputPath = resolve(args.output_file);
 
@@ -525,13 +525,11 @@ export async function handleAskGemini(args: {
         } else {
           try {
             if (!existsSync(outputPath)) {
-              const rawPath = `${outputPath}.raw`;
-              // Only create directories within boundary
-              const rawDir = dirname(rawPath);
-              const relRawDir = relative(cwdReal, rawDir);
-              if (!(relRawDir === '' || relRawDir === '..' || relRawDir.startsWith('..' + sep))) {
-                mkdirSync(rawDir, { recursive: true });
-                writeFileSync(rawPath, response, 'utf-8');
+              const outDir = dirname(outputPath);
+              const relOutDir = relative(cwdReal, outDir);
+              if (!(relOutDir === '' || relOutDir === '..' || relOutDir.startsWith('..' + sep))) {
+                mkdirSync(outDir, { recursive: true });
+                writeFileSync(outputPath, response, 'utf-8');
               }
             }
           } catch (err) {

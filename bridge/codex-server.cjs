@@ -14360,12 +14360,11 @@ ${detection.installHint}`
       } else {
         try {
           if (!(0, import_fs4.existsSync)(outputPath)) {
-            const rawPath = `${outputPath}.raw`;
-            const rawDir = (0, import_path4.dirname)(rawPath);
-            const relRawDir = (0, import_path4.relative)(cwdReal, rawDir);
-            if (!(relRawDir === "" || relRawDir === ".." || relRawDir.startsWith(".." + import_path4.sep))) {
-              (0, import_fs4.mkdirSync)(rawDir, { recursive: true });
-              (0, import_fs4.writeFileSync)(rawPath, response, "utf-8");
+            const outDir = (0, import_path4.dirname)(outputPath);
+            const relOutDir = (0, import_path4.relative)(cwdReal, outDir);
+            if (!(relOutDir === "" || relOutDir === ".." || relOutDir.startsWith(".." + import_path4.sep))) {
+              (0, import_fs4.mkdirSync)(outDir, { recursive: true });
+              (0, import_fs4.writeFileSync)(outputPath, response, "utf-8");
             }
           }
         } catch (err) {
