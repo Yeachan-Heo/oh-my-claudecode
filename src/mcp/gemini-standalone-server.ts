@@ -30,12 +30,13 @@ const askGeminiTool = {
         description: `Required. Agent perspective for Gemini: ${GEMINI_VALID_ROLES.join(', ')}. Gemini is optimized for design/implementation tasks with large context.`
       },
       prompt_file: { type: 'string', description: 'Path to file containing the prompt' },
-      output_file: { type: 'string', description: 'Path to write response. If CLI doesn\'t write here, stdout is written directly to output_file' },
+      output_file: { type: 'string', description: 'Required. Path to write response. Response content is NOT returned inline - read from this file.' },
       files: { type: 'array', items: { type: 'string' }, description: 'File paths to include as context (contents will be prepended to prompt)' },
       model: { type: 'string', description: `Gemini model to use (default: ${GEMINI_DEFAULT_MODEL}). Set OMC_GEMINI_DEFAULT_MODEL env var to change default. Auto-fallback chain: ${GEMINI_MODEL_FALLBACKS.join(' → ')}.` },
       background: { type: 'boolean', description: 'Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion.' },
+      working_directory: { type: 'string', description: 'Working directory for path resolution and CLI execution. Defaults to process.cwd().' },
     },
-    required: ['agent_role', 'prompt_file'],
+    required: ['agent_role', 'prompt_file', 'output_file'],
   },
 };
 
@@ -53,15 +54,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name !== 'ask_gemini') {
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   }
-  const { prompt_file, output_file, agent_role, model, files, background } = (args ?? {}) as {
+  const { prompt_file, output_file, agent_role, model, files, background, working_directory } = (args ?? {}) as {
     prompt_file: string;
-    output_file?: string;
+    output_file: string;
     agent_role: string;
     model?: string;
     files?: string[];
     background?: boolean;
+    working_directory?: string;
   };
-  return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background });
+  return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background, working_directory });
 });
 
 async function main() {

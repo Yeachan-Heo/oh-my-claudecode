@@ -31,6 +31,7 @@ describe('prompt_file-only enforcement', () => {
       const result = await handleAskCodex({
         prompt_file: '',
         agent_role: 'architect',
+        output_file: '/tmp/test-output.md',
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('prompt_file is required');
@@ -40,6 +41,7 @@ describe('prompt_file-only enforcement', () => {
       const result = await handleAskCodex({
         prompt_file: 'some-file.md',
         agent_role: 'invalid-role',
+        output_file: '/tmp/test-output.md',
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Invalid agent_role');
@@ -61,6 +63,7 @@ describe('prompt_file-only enforcement', () => {
       const result = await handleAskGemini({
         prompt_file: '',
         agent_role: 'designer',
+        output_file: '/tmp/test-output.md',
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('prompt_file is required');
@@ -70,6 +73,7 @@ describe('prompt_file-only enforcement', () => {
       const result = await handleAskGemini({
         prompt_file: 'some-file.md',
         agent_role: 'invalid-role',
+        output_file: '/tmp/test-output.md',
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Invalid agent_role');

@@ -85,6 +85,7 @@ export interface PersistPromptOptions {
   files?: string[];
   prompt: string;        // The raw user prompt (for slug generation)
   fullPrompt: string;    // The fully assembled prompt (system + files + user)
+  workingDirectory?: string;
 }
 
 /**
@@ -99,6 +100,7 @@ export interface PersistResponseOptions {
   response: string;      // The model's response
   usedFallback?: boolean;
   fallbackModel?: string;
+  workingDirectory?: string;
 }
 
 /**
@@ -146,8 +148,8 @@ export interface BackgroundJobMeta {
 /**
  * Get the prompts directory path under the worktree
  */
-export function getPromptsDir(): string {
-  const root = getWorktreeRoot() || process.cwd();
+export function getPromptsDir(workingDirectory?: string): string {
+  const root = getWorktreeRoot(workingDirectory) || workingDirectory || process.cwd();
   return join(root, '.omc', 'prompts');
 }
 
@@ -206,7 +208,7 @@ function buildResponseFrontmatter(options: PersistResponseOptions): string {
  */
 export function persistPrompt(options: PersistPromptOptions): PersistPromptResult | undefined {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(options.workingDirectory);
     mkdirSync(promptsDir, { recursive: true });
 
     const slug = slugify(options.prompt);
@@ -233,10 +235,11 @@ export function persistPrompt(options: PersistPromptOptions): PersistPromptResul
  * @param provider - The provider (codex or gemini)
  * @param slug - The slug from the prompt
  * @param promptId - The ID from the prompt
+ * @param workingDirectory - Optional working directory
  * @returns The expected file path for the response
  */
-export function getExpectedResponsePath(provider: 'codex' | 'gemini', slug: string, promptId: string): string {
-  const promptsDir = getPromptsDir();
+export function getExpectedResponsePath(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): string {
+  const promptsDir = getPromptsDir(workingDirectory);
   const filename = `${provider}-response-${slug}-${promptId}.md`;
   return join(promptsDir, filename);
 }
@@ -249,7 +252,7 @@ export function getExpectedResponsePath(provider: 'codex' | 'gemini', slug: stri
  */
 export function persistResponse(options: PersistResponseOptions): string | undefined {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(options.workingDirectory);
     mkdirSync(promptsDir, { recursive: true });
 
     const filename = `${options.provider}-response-${options.slug}-${options.promptId}.md`;
@@ -272,20 +275,20 @@ export function persistResponse(options: PersistResponseOptions): string | undef
 /**
  * Get the status file path for a background job
  */
-export function getStatusFilePath(provider: 'codex' | 'gemini', slug: string, promptId: string): string {
-  const promptsDir = getPromptsDir();
+export function getStatusFilePath(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): string {
+  const promptsDir = getPromptsDir(workingDirectory);
   return join(promptsDir, `${provider}-status-${slug}-${promptId}.json`);
 }
 
 /**
  * Write job status atomically (temp file + rename)
  */
-export function writeJobStatus(status: JobStatus): void {
+export function writeJobStatus(status: JobStatus, workingDirectory?: string): void {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(workingDirectory);
     mkdirSync(promptsDir, { recursive: true });
 
-    const statusPath = getStatusFilePath(status.provider, status.slug, status.jobId);
+    const statusPath = getStatusFilePath(status.provider, status.slug, status.jobId, workingDirectory);
     const tempPath = statusPath + '.tmp';
 
     writeFileSync(tempPath, JSON.stringify(status, null, 2), 'utf-8');
@@ -298,8 +301,8 @@ export function writeJobStatus(status: JobStatus): void {
 /**
  * Read job status from disk
  */
-export function readJobStatus(provider: 'codex' | 'gemini', slug: string, promptId: string): JobStatus | undefined {
-  const statusPath = getStatusFilePath(provider, slug, promptId);
+export function readJobStatus(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): JobStatus | undefined {
+  const statusPath = getStatusFilePath(provider, slug, promptId, workingDirectory);
   if (!existsSync(statusPath)) {
     return undefined;
   }
@@ -317,11 +320,12 @@ export function readJobStatus(provider: 'codex' | 'gemini', slug: string, prompt
 export function checkResponseReady(
   provider: 'codex' | 'gemini',
   slug: string,
-  promptId: string
+  promptId: string,
+  workingDirectory?: string
 ): { ready: boolean; responsePath: string; status?: JobStatus } {
-  const responsePath = getExpectedResponsePath(provider, slug, promptId);
+  const responsePath = getExpectedResponsePath(provider, slug, promptId, workingDirectory);
   const ready = existsSync(responsePath);
-  const status = readJobStatus(provider, slug, promptId);
+  const status = readJobStatus(provider, slug, promptId, workingDirectory);
   return { ready, responsePath, status };
 }
 
@@ -331,14 +335,15 @@ export function checkResponseReady(
 export function readCompletedResponse(
   provider: 'codex' | 'gemini',
   slug: string,
-  promptId: string
+  promptId: string,
+  workingDirectory?: string
 ): { response: string; status: JobStatus } | undefined {
-  const responsePath = getExpectedResponsePath(provider, slug, promptId);
+  const responsePath = getExpectedResponsePath(provider, slug, promptId, workingDirectory);
   if (!existsSync(responsePath)) {
     return undefined;
   }
 
-  const status = readJobStatus(provider, slug, promptId);
+  const status = readJobStatus(provider, slug, promptId, workingDirectory);
   if (!status) {
     return undefined;
   }
@@ -358,8 +363,8 @@ export function readCompletedResponse(
 /**
  * List all active (spawned or running) background jobs
  */
-export function listActiveJobs(provider?: 'codex' | 'gemini'): JobStatus[] {
-  const promptsDir = getPromptsDir();
+export function listActiveJobs(provider?: 'codex' | 'gemini', workingDirectory?: string): JobStatus[] {
+  const promptsDir = getPromptsDir(workingDirectory);
   if (!existsSync(promptsDir)) {
     return [];
   }
@@ -396,8 +401,8 @@ export function listActiveJobs(provider?: 'codex' | 'gemini'): JobStatus[] {
 /**
  * Mark stale background jobs (older than maxAgeMs) as timed out
  */
-export function cleanupStaleJobs(maxAgeMs: number): number {
-  const promptsDir = getPromptsDir();
+export function cleanupStaleJobs(maxAgeMs: number, workingDirectory?: string): number {
+  const promptsDir = getPromptsDir(workingDirectory);
   if (!existsSync(promptsDir)) {
     return 0;
   }
@@ -421,7 +426,7 @@ export function cleanupStaleJobs(maxAgeMs: number): number {
             status.status = 'timeout';
             status.completedAt = new Date().toISOString();
             status.error = 'Job exceeded maximum age and was marked stale';
-            writeJobStatus(status);
+            writeJobStatus(status, workingDirectory);
             cleanedCount++;
           }
         }

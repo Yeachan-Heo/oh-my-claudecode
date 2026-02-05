@@ -13716,18 +13716,41 @@ var import_child_process3 = require("child_process");
 var import_fs4 = require("fs");
 var import_path4 = require("path");
 
-// src/mcp/cli-detection.ts
+// src/lib/worktree-paths.ts
 var import_child_process = require("child_process");
+var import_fs = require("fs");
+var import_path = require("path");
+var worktreeCache = null;
+function getWorktreeRoot(cwd) {
+  const effectiveCwd = cwd || process.cwd();
+  if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
+    return worktreeCache.root;
+  }
+  try {
+    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
+      cwd: effectiveCwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    worktreeCache = { cwd: effectiveCwd, root };
+    return root;
+  } catch {
+    return effectiveCwd;
+  }
+}
+
+// src/mcp/cli-detection.ts
+var import_child_process2 = require("child_process");
 var geminiCache = null;
 function detectGeminiCli(useCache = true) {
   if (useCache && geminiCache) return geminiCache;
   const installHint = "Install Gemini CLI: npm install -g @google/gemini-cli (see https://github.com/google-gemini/gemini-cli)";
   try {
     const command = process.platform === "win32" ? "where gemini" : "which gemini";
-    const path = (0, import_child_process.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
+    const path = (0, import_child_process2.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
     let version2;
     try {
-      version2 = (0, import_child_process.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
+      version2 = (0, import_child_process2.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
     } catch {
     }
     const result = { available: true, path, version: version2, installHint };
@@ -13745,29 +13768,29 @@ function detectGeminiCli(useCache = true) {
 }
 
 // src/agents/utils.ts
-var import_fs = require("fs");
-var import_path = require("path");
+var import_fs2 = require("fs");
+var import_path2 = require("path");
 var import_url = require("url");
 var import_meta = {};
 function getPackageDir() {
   const __filename = (0, import_url.fileURLToPath)(import_meta.url);
-  const __dirname = (0, import_path.dirname)(__filename);
-  return (0, import_path.join)(__dirname, "..", "..");
+  const __dirname = (0, import_path2.dirname)(__filename);
+  return (0, import_path2.join)(__dirname, "..", "..");
 }
 function loadAgentPrompt(agentName) {
   if (!/^[a-z0-9-]+$/i.test(agentName)) {
     throw new Error(`Invalid agent name: contains disallowed characters`);
   }
   try {
-    const agentsDir = (0, import_path.join)(getPackageDir(), "agents");
-    const agentPath = (0, import_path.join)(agentsDir, `${agentName}.md`);
-    const resolvedPath = (0, import_path.resolve)(agentPath);
-    const resolvedAgentsDir = (0, import_path.resolve)(agentsDir);
-    const rel = (0, import_path.relative)(resolvedAgentsDir, resolvedPath);
-    if (rel.startsWith("..") || (0, import_path.isAbsolute)(rel)) {
+    const agentsDir = (0, import_path2.join)(getPackageDir(), "agents");
+    const agentPath = (0, import_path2.join)(agentsDir, `${agentName}.md`);
+    const resolvedPath = (0, import_path2.resolve)(agentPath);
+    const resolvedAgentsDir = (0, import_path2.resolve)(agentsDir);
+    const rel = (0, import_path2.relative)(resolvedAgentsDir, resolvedPath);
+    if (rel.startsWith("..") || (0, import_path2.isAbsolute)(rel)) {
       throw new Error(`Invalid agent name: path traversal detected`);
     }
-    const content = (0, import_fs.readFileSync)(agentPath, "utf-8");
+    const content = (0, import_fs2.readFileSync)(agentPath, "utf-8");
     const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
     return match ? match[1].trim() : content.trim();
   } catch (error2) {
@@ -13813,31 +13836,6 @@ ${systemPrompt}
 var import_fs3 = require("fs");
 var import_path3 = require("path");
 var import_crypto = require("crypto");
-
-// src/lib/worktree-paths.ts
-var import_child_process2 = require("child_process");
-var import_fs2 = require("fs");
-var import_path2 = require("path");
-var worktreeCache = null;
-function getWorktreeRoot(cwd) {
-  const effectiveCwd = cwd || process.cwd();
-  if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
-    return worktreeCache.root;
-  }
-  try {
-    const root = (0, import_child_process2.execSync)("git rev-parse --show-toplevel", {
-      cwd: effectiveCwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    worktreeCache = { cwd: effectiveCwd, root };
-    return root;
-  } catch {
-    return effectiveCwd;
-  }
-}
-
-// src/mcp/prompt-persistence.ts
 function yamlString(value) {
   return JSON.stringify(value);
 }
@@ -13869,8 +13867,8 @@ function slugify(text, maxWords = 4) {
 function generatePromptId() {
   return (0, import_crypto.randomBytes)(4).toString("hex");
 }
-function getPromptsDir() {
-  const root = getWorktreeRoot() || process.cwd();
+function getPromptsDir(workingDirectory) {
+  const root = getWorktreeRoot(workingDirectory) || workingDirectory || process.cwd();
   return (0, import_path3.join)(root, ".omc", "prompts");
 }
 function buildPromptFrontmatter(options) {
@@ -13908,7 +13906,7 @@ function buildResponseFrontmatter(options) {
 }
 function persistPrompt(options) {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(options.workingDirectory);
     (0, import_fs3.mkdirSync)(promptsDir, { recursive: true });
     const slug = slugify(options.prompt);
     const id = generatePromptId();
@@ -13925,14 +13923,14 @@ ${options.fullPrompt}`;
     return void 0;
   }
 }
-function getExpectedResponsePath(provider, slug, promptId) {
-  const promptsDir = getPromptsDir();
+function getExpectedResponsePath(provider, slug, promptId, workingDirectory) {
+  const promptsDir = getPromptsDir(workingDirectory);
   const filename = `${provider}-response-${slug}-${promptId}.md`;
   return (0, import_path3.join)(promptsDir, filename);
 }
 function persistResponse(options) {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(options.workingDirectory);
     (0, import_fs3.mkdirSync)(promptsDir, { recursive: true });
     const filename = `${options.provider}-response-${options.slug}-${options.promptId}.md`;
     const filePath = (0, import_path3.join)(promptsDir, filename);
@@ -13947,15 +13945,15 @@ ${options.response}`;
     return void 0;
   }
 }
-function getStatusFilePath(provider, slug, promptId) {
-  const promptsDir = getPromptsDir();
+function getStatusFilePath(provider, slug, promptId, workingDirectory) {
+  const promptsDir = getPromptsDir(workingDirectory);
   return (0, import_path3.join)(promptsDir, `${provider}-status-${slug}-${promptId}.json`);
 }
-function writeJobStatus(status) {
+function writeJobStatus(status, workingDirectory) {
   try {
-    const promptsDir = getPromptsDir();
+    const promptsDir = getPromptsDir(workingDirectory);
     (0, import_fs3.mkdirSync)(promptsDir, { recursive: true });
-    const statusPath = getStatusFilePath(status.provider, status.slug, status.jobId);
+    const statusPath = getStatusFilePath(status.provider, status.slug, status.jobId, workingDirectory);
     const tempPath = statusPath + ".tmp";
     (0, import_fs3.writeFileSync)(tempPath, JSON.stringify(status, null, 2), "utf-8");
     renameOverwritingSync(tempPath, statusPath);
@@ -13976,7 +13974,7 @@ var GEMINI_MODEL_FALLBACKS = [
 var GEMINI_VALID_ROLES = ["designer", "writer", "vision"];
 var MAX_CONTEXT_FILES = 20;
 var MAX_FILE_SIZE = 5 * 1024 * 1024;
-function executeGemini(prompt, model) {
+function executeGemini(prompt, model, cwd) {
   return new Promise((resolve4, reject) => {
     let settled = false;
     const args = ["--yolo"];
@@ -13984,7 +13982,8 @@ function executeGemini(prompt, model) {
       args.push("--model", model);
     }
     const child = (0, import_child_process3.spawn)("gemini", args, {
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      ...cwd ? { cwd } : {}
     });
     const timeoutHandle = setTimeout(() => {
       if (!settled) {
@@ -14032,7 +14031,7 @@ function executeGemini(prompt, model) {
     child.stdin.end();
   });
 }
-function executeGeminiBackground(fullPrompt, model, jobMeta) {
+function executeGeminiBackground(fullPrompt, model, jobMeta, workingDirectory) {
   try {
     const args = ["--yolo"];
     if (model) {
@@ -14040,7 +14039,8 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
     }
     const child = (0, import_child_process3.spawn)("gemini", args, {
       detached: true,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      ...workingDirectory ? { cwd: workingDirectory } : {}
     });
     if (!child.pid) {
       return { error: "Failed to get process ID" };
@@ -14059,7 +14059,7 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
       agentRole: jobMeta.agentRole,
       spawnedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    writeJobStatus(initialStatus);
+    writeJobStatus(initialStatus, workingDirectory);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -14076,7 +14076,7 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
           status: "timeout",
           completedAt: (/* @__PURE__ */ new Date()).toISOString(),
           error: `Gemini timed out after ${GEMINI_TIMEOUT}ms`
-        });
+        }, workingDirectory);
       }
     }, GEMINI_TIMEOUT);
     child.stdout?.on("data", (data) => {
@@ -14094,11 +14094,11 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
         status: "failed",
         completedAt: (/* @__PURE__ */ new Date()).toISOString(),
         error: `Stdin write error: ${err.message}`
-      });
+      }, workingDirectory);
     });
     child.stdin?.write(fullPrompt);
     child.stdin?.end();
-    writeJobStatus({ ...initialStatus, status: "running" });
+    writeJobStatus({ ...initialStatus, status: "running" }, workingDirectory);
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
@@ -14110,20 +14110,21 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
           model,
           promptId: jobMeta.jobId,
           slug: jobMeta.slug,
-          response: stdout.trim()
+          response: stdout.trim(),
+          workingDirectory
         });
         writeJobStatus({
           ...initialStatus,
           status: "completed",
           completedAt: (/* @__PURE__ */ new Date()).toISOString()
-        });
+        }, workingDirectory);
       } else {
         writeJobStatus({
           ...initialStatus,
           status: "failed",
           completedAt: (/* @__PURE__ */ new Date()).toISOString(),
           error: `Gemini exited with code ${code}: ${stderr || "No output"}`
-        });
+        }, workingDirectory);
       }
     });
     child.on("error", (err) => {
@@ -14135,20 +14136,20 @@ function executeGeminiBackground(fullPrompt, model, jobMeta) {
         status: "failed",
         completedAt: (/* @__PURE__ */ new Date()).toISOString(),
         error: `Failed to spawn Gemini CLI: ${err.message}`
-      });
+      }, workingDirectory);
     });
     return { pid };
   } catch (err) {
     return { error: `Failed to start background execution: ${err.message}` };
   }
 }
-function validateAndReadFile(filePath) {
+function validateAndReadFile(filePath, baseDir) {
   if (typeof filePath !== "string") {
     return `--- File: ${filePath} --- (Invalid path type)`;
   }
   try {
-    const resolvedAbs = (0, import_path4.resolve)(filePath);
-    const cwd = process.cwd();
+    const resolvedAbs = (0, import_path4.resolve)(baseDir || process.cwd(), filePath);
+    const cwd = baseDir || process.cwd();
     const cwdReal = (0, import_fs4.realpathSync)(cwd);
     const relAbs = (0, import_path4.relative)(cwdReal, resolvedAbs);
     if (relAbs === "" || relAbs === ".." || relAbs.startsWith(".." + import_path4.sep)) {
@@ -14174,12 +14175,42 @@ ${(0, import_fs4.readFileSync)(resolvedReal, "utf-8")}`;
 }
 async function handleAskGemini(args) {
   const { agent_role, model = GEMINI_DEFAULT_MODEL, files } = args;
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  let trustedRootReal;
+  try {
+    trustedRootReal = (0, import_fs4.realpathSync)(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+  let baseDir = args.working_directory || process.cwd();
+  let baseDirReal;
+  try {
+    baseDirReal = (0, import_fs4.realpathSync)(baseDir);
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: `working_directory '${args.working_directory}' does not exist or is not accessible: ${err.message}` }],
+      isError: true
+    };
+  }
+  const relToRoot = (0, import_path4.relative)(trustedRootReal, baseDirReal);
+  if (relToRoot.startsWith("..") || (0, import_path4.isAbsolute)(relToRoot)) {
+    return {
+      content: [{ type: "text", text: `working_directory '${args.working_directory}' is outside the trusted worktree root '${trustedRoot}'.` }],
+      isError: true
+    };
+  }
   if (!agent_role || !GEMINI_VALID_ROLES.includes(agent_role)) {
     return {
       content: [{
         type: "text",
         text: `Invalid agent_role: "${agent_role}". Gemini requires one of: ${GEMINI_VALID_ROLES.join(", ")}`
       }],
+      isError: true
+    };
+  }
+  if (!args.output_file || !args.output_file.trim()) {
+    return {
+      content: [{ type: "text", text: "output_file is required. Specify a path where the response should be written." }],
       isError: true
     };
   }
@@ -14196,9 +14227,8 @@ async function handleAskGemini(args) {
     };
   }
   let resolvedPrompt;
-  const resolvedPath = (0, import_path4.resolve)(args.prompt_file);
-  const cwd = process.cwd();
-  const cwdReal = (0, import_fs4.realpathSync)(cwd);
+  const resolvedPath = (0, import_path4.resolve)(baseDir, args.prompt_file);
+  const cwdReal = (0, import_fs4.realpathSync)(baseDir);
   const relPath = (0, import_path4.relative)(cwdReal, resolvedPath);
   if (relPath === "" || relPath === ".." || relPath.startsWith(".." + import_path4.sep)) {
     return {
@@ -14238,7 +14268,7 @@ async function handleAskGemini(args) {
   }
   let userPrompt = resolvedPrompt;
   if (args.output_file) {
-    const outputPath = (0, import_path4.resolve)(args.output_file);
+    const outputPath = (0, import_path4.resolve)(baseDir, args.output_file);
     userPrompt = `IMPORTANT: Write your complete response to the file: ${outputPath}
 
 ${resolvedPrompt}`;
@@ -14267,7 +14297,7 @@ ${detection.installHint}`
         isError: true
       };
     }
-    fileContext = files.map((f) => validateAndReadFile(f)).join("\n\n");
+    fileContext = files.map((f) => validateAndReadFile(f, baseDir)).join("\n\n");
   }
   const fullPrompt = buildPromptWithSystemContext(userPrompt, fileContext, resolvedSystemPrompt);
   const promptResult = persistPrompt({
@@ -14276,9 +14306,10 @@ ${detection.installHint}`
     model,
     files,
     prompt: resolvedPrompt,
-    fullPrompt
+    fullPrompt,
+    workingDirectory: baseDir
   });
-  const expectedResponsePath = promptResult ? getExpectedResponsePath("gemini", promptResult.slug, promptResult.id) : void 0;
+  const expectedResponsePath = promptResult ? getExpectedResponsePath("gemini", promptResult.slug, promptResult.id, baseDir) : void 0;
   if (args.background) {
     if (!promptResult) {
       return {
@@ -14286,7 +14317,7 @@ ${detection.installHint}`
         isError: true
       };
     }
-    const statusFilePath = getStatusFilePath("gemini", promptResult.slug, promptResult.id);
+    const statusFilePath = getStatusFilePath("gemini", promptResult.slug, promptResult.id, baseDir);
     const requestedModel2 = model;
     const fallbackIndex2 = GEMINI_MODEL_FALLBACKS.indexOf(requestedModel2);
     const modelsToTry2 = fallbackIndex2 >= 0 ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndex2) : [requestedModel2, ...GEMINI_MODEL_FALLBACKS];
@@ -14298,7 +14329,7 @@ ${detection.installHint}`
       model: modelsToTry2[0],
       promptFile: promptResult.filePath,
       responseFile: expectedResponsePath
-    });
+    }, baseDir);
     if ("error" in result) {
       return {
         content: [{ type: "text", text: `Failed to spawn background job: ${result.error}` }],
@@ -14337,7 +14368,7 @@ ${detection.installHint}`
   const errors = [];
   for (const tryModel of modelsToTry) {
     try {
-      const response = await executeGemini(fullPrompt, tryModel);
+      const response = await executeGemini(fullPrompt, tryModel, baseDir);
       const usedFallback = tryModel !== requestedModel;
       const fallbackNote = usedFallback ? `[Fallback: used ${tryModel} instead of ${requestedModel}]
 
@@ -14351,23 +14382,37 @@ ${detection.installHint}`
           slug: promptResult.slug,
           response,
           usedFallback,
-          fallbackModel: usedFallback ? tryModel : void 0
+          fallbackModel: usedFallback ? tryModel : void 0,
+          workingDirectory: baseDir
         });
       }
       if (args.output_file) {
-        const outputPath = (0, import_path4.resolve)(args.output_file);
-        const cwd2 = process.cwd();
-        const cwdReal2 = (0, import_fs4.realpathSync)(cwd2);
-        const relOutput = (0, import_path4.relative)(cwdReal2, outputPath);
-        if (relOutput === "" || relOutput === ".." || relOutput.startsWith(".." + import_path4.sep)) {
-          console.warn(`[gemini-core] output_file '${args.output_file}' is outside the working directory, skipping write.`);
+        const outputPath = (0, import_path4.resolve)(baseDirReal, args.output_file);
+        const relOutput = (0, import_path4.relative)(trustedRootReal, outputPath);
+        if (relOutput === "" || relOutput.startsWith("..") || (0, import_path4.isAbsolute)(relOutput)) {
+          console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside trusted root, skipping write.`);
         } else {
           try {
-            if (!(0, import_fs4.existsSync)(outputPath)) {
-              const outDir = (0, import_path4.dirname)(outputPath);
-              const relOutDir = (0, import_path4.relative)(cwdReal2, outDir);
-              if (!(relOutDir === "" || relOutDir === ".." || relOutDir.startsWith(".." + import_path4.sep))) {
-                (0, import_fs4.mkdirSync)(outDir, { recursive: true });
+            const outputDir = (0, import_path4.dirname)(outputPath);
+            if (!(0, import_fs4.existsSync)(outputDir)) {
+              const relDir = (0, import_path4.relative)(trustedRootReal, outputDir);
+              if (relDir.startsWith("..") || (0, import_path4.isAbsolute)(relDir)) {
+                console.warn(`[gemini-core] output_file directory is outside trusted root, skipping write.`);
+              } else {
+                (0, import_fs4.mkdirSync)(outputDir, { recursive: true });
+              }
+            }
+            let outputDirReal;
+            try {
+              outputDirReal = (0, import_fs4.realpathSync)(outputDir);
+            } catch {
+              console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
+            }
+            if (outputDirReal) {
+              const relDirReal = (0, import_path4.relative)(trustedRootReal, outputDirReal);
+              if (relDirReal.startsWith("..") || (0, import_path4.isAbsolute)(relDirReal)) {
+                console.warn(`[gemini-core] output_file directory resolves outside trusted root, skipping write.`);
+              } else {
                 (0, import_fs4.writeFileSync)(outputPath, response, "utf-8");
               }
             }
@@ -14379,11 +14424,7 @@ ${detection.installHint}`
       return {
         content: [{
           type: "text",
-          text: `${paramLines}
-
----
-
-${fallbackNote}${response}`
+          text: `${fallbackNote}${paramLines}`
         }]
       };
     } catch (err) {
@@ -14417,12 +14458,13 @@ var askGeminiTool = {
         description: `Required. Agent perspective for Gemini: ${GEMINI_VALID_ROLES.join(", ")}. Gemini is optimized for design/implementation tasks with large context.`
       },
       prompt_file: { type: "string", description: "Path to file containing the prompt" },
-      output_file: { type: "string", description: "Path to write response. If CLI doesn't write here, stdout is written directly to output_file" },
+      output_file: { type: "string", description: "Required. Path to write response. Response content is NOT returned inline - read from this file." },
       files: { type: "array", items: { type: "string" }, description: "File paths to include as context (contents will be prepended to prompt)" },
       model: { type: "string", description: `Gemini model to use (default: ${GEMINI_DEFAULT_MODEL}). Set OMC_GEMINI_DEFAULT_MODEL env var to change default. Auto-fallback chain: ${GEMINI_MODEL_FALLBACKS.join(" \u2192 ")}.` },
-      background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion." }
+      background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion." },
+      working_directory: { type: "string", description: "Working directory for path resolution and CLI execution. Defaults to process.cwd()." }
     },
-    required: ["agent_role", "prompt_file"]
+    required: ["agent_role", "prompt_file", "output_file"]
   }
 };
 var server = new Server(
@@ -14437,8 +14479,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name !== "ask_gemini") {
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   }
-  const { prompt_file, output_file, agent_role, model, files, background } = args ?? {};
-  return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background });
+  const { prompt_file, output_file, agent_role, model, files, background, working_directory } = args ?? {};
+  return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background, working_directory });
 });
 async function main() {
   const transport = new StdioServerTransport();

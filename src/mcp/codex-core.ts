@@ -10,7 +10,8 @@
 
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
-import { dirname, resolve, relative, sep } from 'path';
+import { dirname, resolve, relative, sep, isAbsolute } from 'path';
+import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { detectCodexCli } from './cli-detection.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext } from './prompt-injection.js';
 import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
@@ -64,12 +65,13 @@ export function parseCodexOutput(output: string): string {
 /**
  * Execute Codex CLI command and return the response
  */
-export function executeCodex(prompt: string, model: string): Promise<string> {
+export function executeCodex(prompt: string, model: string, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const args = ['exec', '-m', model, '--json', '--full-auto'];
     const child = spawn('codex', args, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...(cwd ? { cwd } : {})
     });
 
     // Manual timeout handling to ensure proper cleanup
@@ -133,13 +135,15 @@ export function executeCodex(prompt: string, model: string): Promise<string> {
 export function executeCodexBackground(
   fullPrompt: string,
   model: string,
-  jobMeta: BackgroundJobMeta
+  jobMeta: BackgroundJobMeta,
+  workingDirectory?: string
 ): { pid: number } | { error: string } {
   try {
     const args = ['exec', '-m', model, '--json', '--full-auto'];
     const child = spawn('codex', args, {
       detached: true,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...(workingDirectory ? { cwd: workingDirectory } : {})
     });
 
     if (!child.pid) {
@@ -162,7 +166,7 @@ export function executeCodexBackground(
       agentRole: jobMeta.agentRole,
       spawnedAt: new Date().toISOString(),
     };
-    writeJobStatus(initialStatus);
+    writeJobStatus(initialStatus, workingDirectory);
 
     let stdout = '';
     let stderr = '';
@@ -183,7 +187,7 @@ export function executeCodexBackground(
           status: 'timeout',
           completedAt: new Date().toISOString(),
           error: `Codex timed out after ${CODEX_TIMEOUT}ms`,
-        });
+        }, workingDirectory);
       }
     }, CODEX_TIMEOUT);
 
@@ -200,11 +204,11 @@ export function executeCodexBackground(
         status: 'failed',
         completedAt: new Date().toISOString(),
         error: `Stdin write error: ${err.message}`,
-      });
+      }, workingDirectory);
     });
     child.stdin?.write(fullPrompt);
     child.stdin?.end();
-    writeJobStatus({ ...initialStatus, status: 'running' });
+    writeJobStatus({ ...initialStatus, status: 'running' }, workingDirectory);
 
     child.on('close', (code) => {
       if (settled) return;
@@ -220,19 +224,20 @@ export function executeCodexBackground(
           promptId: jobMeta.jobId,
           slug: jobMeta.slug,
           response,
+          workingDirectory,
         });
         writeJobStatus({
           ...initialStatus,
           status: 'completed',
           completedAt: new Date().toISOString(),
-        });
+        }, workingDirectory);
       } else {
         writeJobStatus({
           ...initialStatus,
           status: 'failed',
           completedAt: new Date().toISOString(),
           error: `Codex exited with code ${code}: ${stderr || 'No output'}`,
-        });
+        }, workingDirectory);
       }
     });
 
@@ -245,7 +250,7 @@ export function executeCodexBackground(
         status: 'failed',
         completedAt: new Date().toISOString(),
         error: `Failed to spawn Codex CLI: ${err.message}`,
-      });
+      }, workingDirectory);
     });
 
     return { pid };
@@ -257,16 +262,16 @@ export function executeCodexBackground(
 /**
  * Validate and read a file for context inclusion
  */
-export function validateAndReadFile(filePath: string): string {
+export function validateAndReadFile(filePath: string, baseDir?: string): string {
   if (typeof filePath !== 'string') {
     return `--- File: ${filePath} --- (Invalid path type)`;
   }
   try {
-    const resolvedAbs = resolve(filePath);
+    const workingDir = baseDir || process.cwd();
+    const resolvedAbs = resolve(workingDir, filePath);
 
     // Security: ensure file is within working directory (worktree boundary)
-    const cwd = process.cwd();
-    const cwdReal = realpathSync(cwd);
+    const cwdReal = realpathSync(workingDir);
 
     const relAbs = relative(cwdReal, resolvedAbs);
     if (relAbs === '' || relAbs === '..' || relAbs.startsWith('..' + sep)) {
@@ -301,13 +306,44 @@ export function validateAndReadFile(filePath: string): string {
  */
 export async function handleAskCodex(args: {
   prompt_file: string;
-  output_file?: string;
+  output_file: string;
   agent_role: string;
   model?: string;
   context_files?: string[];
   background?: boolean;
+  working_directory?: string;
 }): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
   const { agent_role, model = CODEX_DEFAULT_MODEL, context_files } = args;
+
+  // Derive trusted root from process.cwd(), NOT from user-controlled input
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  let trustedRootReal: string;
+  try {
+    trustedRootReal = realpathSync(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot; // Fallback if realpath fails
+  }
+
+  // Derive baseDir from working_directory if provided
+  let baseDir = args.working_directory || process.cwd();
+  let baseDirReal: string;
+  try {
+    baseDirReal = realpathSync(baseDir);
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: `working_directory '${args.working_directory}' does not exist or is not accessible: ${(err as Error).message}` }],
+      isError: true
+    };
+  }
+
+  // Validate baseDir is within trusted root
+  const relToRoot = relative(trustedRootReal, baseDirReal);
+  if (relToRoot.startsWith('..') || isAbsolute(relToRoot)) {
+    return {
+      content: [{ type: 'text' as const, text: `working_directory '${args.working_directory}' is outside the trusted worktree root '${trustedRoot}'.` }],
+      isError: true
+    };
+  }
 
   // Validate agent_role
   if (!agent_role || !(CODEX_VALID_ROLES as readonly string[]).includes(agent_role)) {
@@ -316,6 +352,14 @@ export async function handleAskCodex(args: {
         type: 'text' as const,
         text: `Invalid agent_role: "${agent_role}". Codex requires one of: ${CODEX_VALID_ROLES.join(', ')}`
       }],
+      isError: true
+    };
+  }
+
+  // Validate output_file is provided
+  if (!args.output_file || !args.output_file.trim()) {
+    return {
+      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
       isError: true
     };
   }
@@ -338,9 +382,8 @@ export async function handleAskCodex(args: {
 
   // Resolve prompt from prompt_file
   let resolvedPrompt: string;
-  const resolvedPath = resolve(args.prompt_file);
-  const cwd = process.cwd();
-  const cwdReal = realpathSync(cwd);
+  const resolvedPath = resolve(baseDir, args.prompt_file);
+  const cwdReal = realpathSync(baseDir);
   const relPath = relative(cwdReal, resolvedPath);
   if (relPath === '' || relPath === '..' || relPath.startsWith('..' + sep)) {
     return {
@@ -385,7 +428,7 @@ export async function handleAskCodex(args: {
   // If output_file specified, nudge the prompt to write there
   let userPrompt = resolvedPrompt;
   if (args.output_file) {
-    const outputPath = resolve(args.output_file);
+    const outputPath = resolve(baseDir, args.output_file);
     userPrompt = `IMPORTANT: Write your complete response to the file: ${outputPath}\n\n${resolvedPrompt}`;
   }
 
@@ -416,7 +459,7 @@ export async function handleAskCodex(args: {
         isError: true
       };
     }
-    fileContext = context_files.map(f => validateAndReadFile(f)).join('\n\n');
+    fileContext = context_files.map(f => validateAndReadFile(f, baseDir)).join('\n\n');
   }
 
   // Combine: system prompt > file context > user prompt
@@ -430,11 +473,12 @@ export async function handleAskCodex(args: {
     files: context_files,
     prompt: resolvedPrompt,
     fullPrompt,
+    workingDirectory: baseDir,
   });
 
   // Compute expected response path for immediate return
   const expectedResponsePath = promptResult
-    ? getExpectedResponsePath('codex', promptResult.slug, promptResult.id)
+    ? getExpectedResponsePath('codex', promptResult.slug, promptResult.id, baseDir)
     : undefined;
 
   // Background mode: return immediately with job metadata
@@ -446,7 +490,7 @@ export async function handleAskCodex(args: {
       };
     }
 
-    const statusFilePath = getStatusFilePath('codex', promptResult.slug, promptResult.id);
+    const statusFilePath = getStatusFilePath('codex', promptResult.slug, promptResult.id, baseDir);
     const result = executeCodexBackground(fullPrompt, model, {
       provider: 'codex',
       jobId: promptResult.id,
@@ -455,7 +499,7 @@ export async function handleAskCodex(args: {
       model,
       promptFile: promptResult.filePath,
       responseFile: expectedResponsePath!,
-    });
+    }, baseDir);
 
     if ('error' in result) {
       return {
@@ -492,7 +536,7 @@ export async function handleAskCodex(args: {
   ].filter(Boolean).join('\n');
 
   try {
-    const response = await executeCodex(fullPrompt, model);
+    const response = await executeCodex(fullPrompt, model, baseDir);
 
     // Persist response to disk
     if (promptResult) {
@@ -503,26 +547,49 @@ export async function handleAskCodex(args: {
         promptId: promptResult.id,
         slug: promptResult.slug,
         response,
+        workingDirectory: baseDir,
       });
     }
 
     // Handle output_file: if CLI didn't write it, write stdout there directly
     if (args.output_file) {
-      const outputPath = resolve(args.output_file);
+      const outputPath = resolve(baseDirReal, args.output_file);
 
-      // Security: validate output_file is within working directory
-      const cwd = process.cwd();
-      const cwdReal = realpathSync(cwd);
-      const relOutput = relative(cwdReal, outputPath);
-      if (relOutput === '' || relOutput === '..' || relOutput.startsWith('..' + sep)) {
-        console.warn(`[codex-core] output_file '${args.output_file}' is outside the working directory, skipping write.`);
+      // Lexical check: outputPath must be within trusted root
+      const relOutput = relative(trustedRootReal, outputPath);
+      if (relOutput === '' || relOutput.startsWith('..') || isAbsolute(relOutput)) {
+        console.warn(`[codex-core] output_file '${args.output_file}' resolves outside trusted root, skipping write.`);
       } else {
         try {
-          if (!existsSync(outputPath)) {
-            const outDir = dirname(outputPath);
-            const relOutDir = relative(cwdReal, outDir);
-            if (!(relOutDir === '' || relOutDir === '..' || relOutDir.startsWith('..' + sep))) {
-              mkdirSync(outDir, { recursive: true });
+          const outputDir = dirname(outputPath);
+
+          // Ensure parent directory exists within trusted root
+          if (!existsSync(outputDir)) {
+            const relDir = relative(trustedRootReal, outputDir);
+            if (relDir.startsWith('..') || isAbsolute(relDir)) {
+              console.warn(`[codex-core] output_file directory is outside trusted root, skipping write.`);
+            } else {
+              mkdirSync(outputDir, { recursive: true });
+            }
+          }
+
+          // Validate parent directory with realpath (symlink-safe for existing directories)
+          let outputDirReal: string | undefined;
+          try {
+            outputDirReal = realpathSync(outputDir);
+          } catch {
+            // Parent still doesn't exist after mkdir - skip write
+            console.warn(`[codex-core] Failed to resolve output directory, skipping write.`);
+          }
+
+          if (outputDirReal) {
+            const relDirReal = relative(trustedRootReal, outputDirReal);
+            // relDirReal === '' means output dir IS the trusted root - this is ALLOWED
+            // Only block if directory resolves OUTSIDE trusted root
+            if (relDirReal.startsWith('..') || isAbsolute(relDirReal)) {
+              console.warn(`[codex-core] output_file directory resolves outside trusted root, skipping write.`);
+            } else {
+              // ALWAYS write (Issue 3 fix: no existence check)
               writeFileSync(outputPath, response, 'utf-8');
             }
           }
@@ -535,7 +602,7 @@ export async function handleAskCodex(args: {
     return {
       content: [{
         type: 'text' as const,
-        text: `${paramLines}\n\n---\n\n${response}`
+        text: paramLines
       }]
     };
   } catch (err) {
