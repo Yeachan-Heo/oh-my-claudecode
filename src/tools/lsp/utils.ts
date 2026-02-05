@@ -78,8 +78,12 @@ export function formatRange(range: Range): string {
  * Format a location for display
  */
 export function formatLocation(location: Location): string {
-  const path = uriToPath(location.uri);
-  const range = formatRange(location.range);
+  const uri = location.uri || (location as any).targetUri;
+  if (!uri) return 'Unknown location';
+  const path = uriToPath(uri);
+  const locationRange = location.range || (location as any).targetRange || (location as any).targetSelectionRange;
+  if (!locationRange) return path;
+  const range = formatRange(locationRange);
   return `${path}:${range}`;
 }
 

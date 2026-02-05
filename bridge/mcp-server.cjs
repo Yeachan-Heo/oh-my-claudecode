@@ -18388,8 +18388,12 @@ function formatRange(range) {
   return start === end ? start : `${start}-${end}`;
 }
 function formatLocation(location) {
-  const path10 = uriToPath(location.uri);
-  const range = formatRange(location.range);
+  const uri = location.uri || location.targetUri;
+  if (!uri) return "Unknown location";
+  const path10 = uriToPath(uri);
+  const locationRange = location.range || location.targetRange || location.targetSelectionRange;
+  if (!locationRange) return path10;
+  const range = formatRange(locationRange);
   return `${path10}:${range}`;
 }
 function formatHover(hover) {
