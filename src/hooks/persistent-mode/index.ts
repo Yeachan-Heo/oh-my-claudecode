@@ -10,7 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import {
@@ -40,6 +40,14 @@ import {
 } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 
+export interface ToolErrorState {
+  tool_name: string;
+  tool_input_preview?: string;
+  error: string;
+  timestamp: string;
+  retry_count: number;
+}
+
 export interface PersistentModeResult {
   /** Whether to block the stop event */
   shouldBlock: boolean;
@@ -57,6 +65,7 @@ export interface PersistentModeResult {
     phase?: string;
     tasksCompleted?: number;
     tasksTotal?: number;
+    toolError?: ToolErrorState;
   };
 }
 
@@ -65,6 +74,96 @@ const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
+
+/**
+ * Read last tool error from state directory.
+ * Returns null if file doesn't exist or error is stale (>60 seconds old).
+ */
+export function readLastToolError(directory: string): ToolErrorState | null {
+  const stateDir = join(directory, '.omc', 'state');
+  const errorPath = join(stateDir, 'last-tool-error.json');
+
+  try {
+    if (!existsSync(errorPath)) {
+      return null;
+    }
+
+    const content = readFileSync(errorPath, 'utf-8');
+    const toolError = JSON.parse(content) as ToolErrorState;
+
+    if (!toolError || !toolError.timestamp) {
+      return null;
+    }
+
+    // Check staleness - errors older than 60 seconds are ignored
+    const age = Date.now() - new Date(toolError.timestamp).getTime();
+    if (age > 60000) {
+      return null;
+    }
+
+    return toolError;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear tool error state file atomically.
+ */
+export function clearToolErrorState(directory: string): void {
+  const stateDir = join(directory, '.omc', 'state');
+  const errorPath = join(stateDir, 'last-tool-error.json');
+
+  try {
+    if (existsSync(errorPath)) {
+      unlinkSync(errorPath);
+    }
+  } catch {
+    // Ignore errors - file may have been removed already
+  }
+}
+
+/**
+ * Generate retry guidance message for tool errors.
+ * After 5+ retries, suggests alternative approaches.
+ */
+export function getToolErrorRetryGuidance(toolError: ToolErrorState | null): string {
+  if (!toolError) {
+    return '';
+  }
+
+  const retryCount = toolError.retry_count || 1;
+  const toolName = toolError.tool_name || 'unknown';
+  const error = toolError.error || 'Unknown error';
+
+  if (retryCount >= 5) {
+    return `[TOOL ERROR - ALTERNATIVE APPROACH NEEDED]
+The "${toolName}" operation has failed ${retryCount} times.
+
+STOP RETRYING THE SAME APPROACH. Instead:
+1. Try a completely different command or approach
+2. Check if the environment/dependencies are correct
+3. Consider breaking down the task differently
+4. If stuck, ask the user for guidance
+
+`;
+  }
+
+  return `[TOOL ERROR - RETRY REQUIRED]
+The previous "${toolName}" operation failed.
+
+Error: ${error}
+
+REQUIRED ACTIONS:
+1. Analyze why the command failed
+2. Fix the issue (wrong path? permission? syntax? missing dependency?)
+3. RETRY the operation with corrected parameters
+4. Continue with your original task after success
+
+Do NOT skip this step. Do NOT move on without fixing the error.
+
+`;
+}
 
 /**
  * Get or increment todo-continuation attempt counter
@@ -238,6 +337,10 @@ async function checkRalphLoop(
     };
   }
 
+  // Read tool error before generating message
+  const toolError = readLastToolError(workingDir);
+  const errorGuidance = getToolErrorRetryGuidance(toolError);
+
   // Increment and continue
   const newState = incrementRalphIteration(workingDir);
   if (!newState) {
@@ -250,7 +353,7 @@ async function checkRalphLoop(
     ? `2. Check prd.json - are ALL stories marked passes: true?`
     : `2. Check your todo list - are ALL items marked complete?`;
 
-  const continuationPrompt = `<ralph-continuation>
+  let continuationPrompt = `<ralph-continuation>
 
 [RALPH - ITERATION ${newState.iteration}/${newState.max_iterations}]
 
@@ -271,13 +374,24 @@ ${newState.prompt ? `Original task: ${newState.prompt}` : ''}
 
 `;
 
+  // Prepend error guidance if present
+  if (errorGuidance) {
+    continuationPrompt = errorGuidance + continuationPrompt;
+  }
+
+  // Clear error state after message generation
+  if (toolError) {
+    clearToolErrorState(workingDir);
+  }
+
   return {
     shouldBlock: true,
     message: continuationPrompt,
     mode: 'ralph',
     metadata: {
       iteration: newState.iteration,
-      maxIterations: newState.max_iterations
+      maxIterations: newState.max_iterations,
+      toolError: toolError || undefined
     }
   };
 }
@@ -445,7 +559,8 @@ export async function checkPersistentModes(
           maxIterations: autopilotResult.metadata?.maxIterations,
           phase: autopilotResult.phase,
           tasksCompleted: autopilotResult.metadata?.tasksCompleted,
-          tasksTotal: autopilotResult.metadata?.tasksTotal
+          tasksTotal: autopilotResult.metadata?.tasksTotal,
+          toolError: autopilotResult.metadata?.toolError
         }
       };
     }
