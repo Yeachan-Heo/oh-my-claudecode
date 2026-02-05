@@ -6,10 +6,10 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { existsSync, readFileSync } from "fs";
+import { join, dirname } from "path";
+import { homedir } from "os";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,28 +17,59 @@ const __dirname = dirname(__filename);
 // Import timeout-protected stdin reader (prevents hangs on Linux, see issue #240)
 let readStdin;
 try {
-  const mod = await import(join(__dirname, 'lib', 'stdin.mjs'));
+  const mod = await import(join(__dirname, "lib", "stdin.mjs"));
   readStdin = mod.readStdin;
 } catch {
   // Fallback: inline timeout-protected readStdin if lib module is missing
-  readStdin = (timeoutMs = 5000) => new Promise((resolve) => {
-    const chunks = [];
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (!settled) { settled = true; process.stdin.removeAllListeners(); process.stdin.destroy(); resolve(Buffer.concat(chunks).toString('utf-8')); }
-    }, timeoutMs);
-    process.stdin.on('data', (chunk) => { chunks.push(chunk); });
-    process.stdin.on('end', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } });
-    process.stdin.on('error', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(''); } });
-    if (process.stdin.readableEnded) { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } }
-  });
+  readStdin = (timeoutMs = 5000) =>
+    new Promise((resolve) => {
+      const chunks = [];
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          process.stdin.removeAllListeners();
+          process.stdin.destroy();
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      }, timeoutMs);
+
+      process.stdin.on("data", (chunk) => {
+        chunks.push(chunk);
+      });
+
+      process.stdin.on("end", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      });
+
+      process.stdin.on("error", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve("");
+        }
+      });
+
+      if (process.stdin.readableEnded) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      }
+    });
 }
 
 // Read JSON file safely
 function readJsonFile(path) {
   try {
     if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    return JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     return null;
   }
@@ -46,54 +77,58 @@ function readJsonFile(path) {
 
 // Check if HUD is properly installed (with retry for race conditions)
 async function checkHudInstallation(retryCount = 0) {
-  const hudDir = join(homedir(), '.claude', 'hud');
+  const hudDir = join(homedir(), ".claude", "hud");
   // Support both legacy (sisyphus-hud.mjs) and current (omc-hud.mjs) naming
-  const hudScriptOmc = join(hudDir, 'omc-hud.mjs');
-  const hudScriptSisyphus = join(hudDir, 'sisyphus-hud.mjs');
-  const settingsFile = join(homedir(), '.claude', 'settings.json');
+  const hudScriptOmc = join(hudDir, "omc-hud.mjs");
+  const hudScriptSisyphus = join(hudDir, "sisyphus-hud.mjs");
+  const settingsFile = join(homedir(), ".claude", "settings.json");
 
   const MAX_RETRIES = 2;
   const RETRY_DELAY_MS = 100;
 
   // Check if HUD script exists (either naming convention)
-  const hudScriptExists = existsSync(hudScriptOmc) || existsSync(hudScriptSisyphus);
+  const hudScriptExists =
+    existsSync(hudScriptOmc) || existsSync(hudScriptSisyphus);
   if (!hudScriptExists) {
-    return { installed: false, reason: 'HUD script missing' };
+    return { installed: false, reason: "HUD script missing" };
   }
 
   // Check if statusLine is configured (with retry for race conditions)
   try {
     if (existsSync(settingsFile)) {
-      const content = readFileSync(settingsFile, 'utf-8');
+      const content = readFileSync(settingsFile, "utf-8");
       // Handle empty or whitespace-only content (race condition during write)
       if (!content || !content.trim()) {
         if (retryCount < MAX_RETRIES) {
           // Sleep and retry (non-blocking)
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
           return checkHudInstallation(retryCount + 1);
         }
-        return { installed: false, reason: 'settings.json empty (possible race condition)' };
+        return {
+          installed: false,
+          reason: "settings.json empty (possible race condition)",
+        };
       }
       const settings = JSON.parse(content);
       if (!settings.statusLine) {
         // Retry once if statusLine not found (could be mid-write)
         if (retryCount < MAX_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
           return checkHudInstallation(retryCount + 1);
         }
-        return { installed: false, reason: 'statusLine not configured' };
+        return { installed: false, reason: "statusLine not configured" };
       }
     } else {
-      return { installed: false, reason: 'settings.json missing' };
+      return { installed: false, reason: "settings.json missing" };
     }
   } catch (err) {
     // JSON parse error - could be mid-write, retry
     if (retryCount < MAX_RETRIES) {
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
       return checkHudInstallation(retryCount + 1);
     }
-    console.error('HUD check error:', err.message);
-    return { installed: false, reason: 'Could not read settings' };
+    console.error("HUD check error:", err.message);
+    return { installed: false, reason: "Could not read settings" };
   }
 
   return { installed: true };
@@ -104,10 +139,12 @@ async function main() {
   try {
     const input = await readStdin();
     let data = {};
-    try { data = JSON.parse(input); } catch {}
+    try {
+      data = JSON.parse(input);
+    } catch {}
 
     const directory = data.directory || process.cwd();
-    const sessionId = data.sessionId || data.session_id || '';
+    const sessionId = data.sessionId || data.session_id || "";
     const messages = [];
 
     // Check HUD installation (one-time setup guidance)
@@ -119,10 +156,14 @@ async function main() {
     }
 
     // Check for ultrawork state - only restore if session matches (issue #311)
-    const ultraworkState = readJsonFile(join(directory, '.omc', 'state', 'ultrawork-state.json'))
-      || readJsonFile(join(homedir(), '.omc', 'state', 'ultrawork-state.json'));
+    const ultraworkState =
+      readJsonFile(join(directory, ".omc", "state", "ultrawork-state.json")) ||
+      readJsonFile(join(homedir(), ".omc", "state", "ultrawork-state.json"));
 
-    if (ultraworkState?.active && (!ultraworkState.session_id || ultraworkState.session_id === sessionId)) {
+    if (
+      ultraworkState?.active &&
+      (!ultraworkState.session_id || ultraworkState.session_id === sessionId)
+    ) {
       messages.push(`<session-restore>
 
 [ULTRAWORK MODE RESTORED]
@@ -139,14 +180,16 @@ Continue working in ultrawork mode until all tasks are complete.
     }
 
     // Check for ralph loop state
-    const ralphState = readJsonFile(join(directory, '.omc', 'ralph-state.json'));
+    const ralphState = readJsonFile(
+      join(directory, ".omc", "ralph-state.json"),
+    );
     if (ralphState?.active) {
       messages.push(`<session-restore>
 
 [RALPH LOOP RESTORED]
 
 You have an active ralph-loop session.
-Original task: ${ralphState.prompt || 'Task in progress'}
+Original task: ${ralphState.prompt || "Task in progress"}
 Iteration: ${ralphState.iteration || 1}/${ralphState.max_iterations || 10}
 
 Continue working until the task is verified complete.
@@ -162,8 +205,8 @@ Continue working until the task is verified complete.
     // That directory accumulates todo files from ALL past sessions across all
     // projects, causing phantom task counts in fresh sessions (see issue #354).
     const localTodoPaths = [
-      join(directory, '.omc', 'todos.json'),
-      join(directory, '.claude', 'todos.json')
+      join(directory, ".omc", "todos.json"),
+      join(directory, ".claude", "todos.json"),
     ];
     let incompleteCount = 0;
     for (const todoFile of localTodoPaths) {
@@ -171,7 +214,9 @@ Continue working until the task is verified complete.
         try {
           const data = readJsonFile(todoFile);
           const todos = data?.todos || (Array.isArray(data) ? data : []);
-          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+          incompleteCount += todos.filter(
+            (t) => t.status !== "completed" && t.status !== "cancelled",
+          ).length;
         } catch {}
       }
     }
@@ -191,15 +236,19 @@ Please continue working on these tasks.
     }
 
     // Check for notepad Priority Context
-    const notepadPath = join(directory, '.omc', 'notepad.md');
+    const notepadPath = join(directory, ".omc", "notepad.md");
     if (existsSync(notepadPath)) {
       try {
-        const notepadContent = readFileSync(notepadPath, 'utf-8');
-        const priorityMatch = notepadContent.match(/## Priority Context\n([\s\S]*?)(?=## |$)/);
+        const notepadContent = readFileSync(notepadPath, "utf-8");
+        const priorityMatch = notepadContent.match(
+          /## Priority Context\n([\s\S]*?)(?=## |$)/,
+        );
         if (priorityMatch && priorityMatch[1].trim()) {
           const priorityContext = priorityMatch[1].trim();
           // Only inject if there's actual content (not just the placeholder comment)
-          const cleanContent = priorityContext.replace(/<!--[\s\S]*?-->/g, '').trim();
+          const cleanContent = priorityContext
+            .replace(/<!--[\s\S]*?-->/g, "")
+            .trim();
           if (cleanContent) {
             messages.push(`<notepad-context>
 [NOTEPAD - Priority Context]
@@ -213,13 +262,15 @@ ${cleanContent}
     }
 
     if (messages.length > 0) {
-      console.log(JSON.stringify({
-        continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'SessionStart',
-          additionalContext: messages.join('\n')
-        }
-      }));
+      console.log(
+        JSON.stringify({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: messages.join("\n"),
+          },
+        }),
+      );
     } else {
       console.log(JSON.stringify({ continue: true }));
     }

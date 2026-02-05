@@ -3,10 +3,10 @@
 // Restores persistent mode states when session starts
 // Cross-platform: Windows, macOS, Linux
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { homedir } from "os";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,27 +14,58 @@ const __dirname = dirname(__filename);
 // Import timeout-protected stdin reader (prevents hangs on Linux, see issue #240)
 let readStdin;
 try {
-  const mod = await import(join(__dirname, 'lib', 'stdin.mjs'));
+  const mod = await import(join(__dirname, "lib", "stdin.mjs"));
   readStdin = mod.readStdin;
 } catch {
   // Fallback: inline timeout-protected readStdin if lib module is missing
-  readStdin = (timeoutMs = 5000) => new Promise((resolve) => {
-    const chunks = [];
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (!settled) { settled = true; process.stdin.removeAllListeners(); process.stdin.destroy(); resolve(Buffer.concat(chunks).toString('utf-8')); }
-    }, timeoutMs);
-    process.stdin.on('data', (chunk) => { chunks.push(chunk); });
-    process.stdin.on('end', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } });
-    process.stdin.on('error', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(''); } });
-    if (process.stdin.readableEnded) { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } }
-  });
+  readStdin = (timeoutMs = 5000) =>
+    new Promise((resolve) => {
+      const chunks = [];
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          process.stdin.removeAllListeners();
+          process.stdin.destroy();
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      }, timeoutMs);
+
+      process.stdin.on("data", (chunk) => {
+        chunks.push(chunk);
+      });
+
+      process.stdin.on("end", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      });
+
+      process.stdin.on("error", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve("");
+        }
+      });
+
+      if (process.stdin.readableEnded) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(Buffer.concat(chunks).toString("utf-8"));
+        }
+      }
+    });
 }
 
 function readJsonFile(path) {
   try {
     if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    return JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     return null;
   }
@@ -42,11 +73,11 @@ function readJsonFile(path) {
 
 function writeJsonFile(path, data) {
   try {
-    const dir = join(path, '..');
+    const dir = join(path, "..");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8');
+    writeFileSync(path, JSON.stringify(data, null, 2), "utf-8");
     return true;
   } catch {
     return false;
@@ -54,13 +85,13 @@ function writeJsonFile(path, data) {
 }
 
 async function checkForUpdates(currentVersion) {
-  const cacheFile = join(homedir(), '.omc', 'update-check.json');
+  const cacheFile = join(homedir(), ".omc", "update-check.json");
   const now = Date.now();
   const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
   // Check cache first
   const cached = readJsonFile(cacheFile);
-  if (cached && cached.timestamp && (now - cached.timestamp) < CACHE_DURATION) {
+  if (cached && cached.timestamp && now - cached.timestamp < CACHE_DURATION) {
     return cached.updateAvailable ? cached : null;
   }
 
@@ -69,13 +100,16 @@ async function checkForUpdates(currentVersion) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
-      signal: controller.signal
-    });
+    const response = await fetch(
+      "https://registry.npmjs.org/oh-my-claude-sisyphus/latest",
+      {
+        signal: controller.signal,
+      },
+    );
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error('Network response was not ok');
+      throw new Error("Network response was not ok");
     }
 
     const data = await response.json();
@@ -87,7 +121,7 @@ async function checkForUpdates(currentVersion) {
       timestamp: now,
       latestVersion,
       currentVersion,
-      updateAvailable
+      updateAvailable,
     };
 
     writeJsonFile(cacheFile, cacheData);
@@ -100,8 +134,8 @@ async function checkForUpdates(currentVersion) {
 }
 
 function compareVersions(v1, v2) {
-  const parts1 = v1.replace(/^v/, '').split('.').map(Number);
-  const parts2 = v2.replace(/^v/, '').split('.').map(Number);
+  const parts1 = v1.replace(/^v/, "").split(".").map(Number);
+  const parts2 = v2.replace(/^v/, "").split(".").map(Number);
 
   for (let i = 0; i < 3; i++) {
     const diff = (parts1[i] || 0) - (parts2[i] || 0);
@@ -114,15 +148,15 @@ function compareVersions(v1, v2) {
 // Notepad Support
 // ============================================================================
 
-const NOTEPAD_FILENAME = 'notepad.md';
-const PRIORITY_HEADER = '## Priority Context';
-const WORKING_MEMORY_HEADER = '## Working Memory';
+const NOTEPAD_FILENAME = "notepad.md";
+const PRIORITY_HEADER = "## Priority Context";
+const WORKING_MEMORY_HEADER = "## Working Memory";
 
 /**
  * Get notepad path in .omc directory
  */
 function getNotepadPath(directory) {
-  return join(directory, '.omc', NOTEPAD_FILENAME);
+  return join(directory, ".omc", NOTEPAD_FILENAME);
 }
 
 /**
@@ -134,7 +168,7 @@ function readNotepad(directory) {
     return null;
   }
   try {
-    return readFileSync(notepadPath, 'utf-8');
+    return readFileSync(notepadPath, "utf-8");
   } catch {
     return null;
   }
@@ -152,7 +186,7 @@ function extractSection(content, header) {
   }
   // Remove HTML comments and trim
   let section = match[1];
-  section = section.replace(/<!--[\s\S]*?-->/g, '').trim();
+  section = section.replace(/<!--[\s\S]*?-->/g, "").trim();
   return section || null;
 }
 
@@ -188,15 +222,17 @@ async function main() {
   try {
     const input = await readStdin();
     let data = {};
-    try { data = JSON.parse(input); } catch {}
+    try {
+      data = JSON.parse(input);
+    } catch {}
 
     const directory = data.directory || process.cwd();
-    const sessionId = data.sessionId || data.session_id || '';
+    const sessionId = data.sessionId || data.session_id || "";
     const messages = [];
 
     // Check for updates (non-blocking)
-    const packageJsonPath = join(directory, 'package.json');
-    let currentVersion = '3.8.4'; // fallback
+    const packageJsonPath = join(directory, "package.json");
+    let currentVersion = "3.8.4"; // fallback
     const packageJson = readJsonFile(packageJsonPath);
     if (packageJson?.version) {
       currentVersion = packageJson.version;
@@ -219,10 +255,14 @@ To update, run: claude /install-plugin oh-my-claudecode
     }
 
     // Check for ultrawork state - only restore if session matches (issue #311)
-    const ultraworkState = readJsonFile(join(directory, '.omc', 'state', 'ultrawork-state.json'))
-      || readJsonFile(join(homedir(), '.omc', 'state', 'ultrawork-state.json'));
+    const ultraworkState =
+      readJsonFile(join(directory, ".omc", "state", "ultrawork-state.json")) ||
+      readJsonFile(join(homedir(), ".omc", "state", "ultrawork-state.json"));
 
-    if (ultraworkState?.active && (!ultraworkState.session_id || ultraworkState.session_id === sessionId)) {
+    if (
+      ultraworkState?.active &&
+      (!ultraworkState.session_id || ultraworkState.session_id === sessionId)
+    ) {
       messages.push(`<session-restore>
 
 [ULTRAWORK MODE RESTORED]
@@ -243,8 +283,8 @@ Continue working in ultrawork mode until all tasks are complete.
     // That directory accumulates todo files from ALL past sessions across all
     // projects, causing phantom task counts in fresh sessions (see issue #354).
     const localTodoPaths = [
-      join(directory, '.omc', 'todos.json'),
-      join(directory, '.claude', 'todos.json')
+      join(directory, ".omc", "todos.json"),
+      join(directory, ".claude", "todos.json"),
     ];
     let incompleteCount = 0;
     for (const todoFile of localTodoPaths) {
@@ -252,7 +292,9 @@ Continue working in ultrawork mode until all tasks are complete.
         try {
           const data = readJsonFile(todoFile);
           const todos = data?.todos || (Array.isArray(data) ? data : []);
-          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+          incompleteCount += todos.filter(
+            (t) => t.status !== "completed" && t.status !== "cancelled",
+          ).length;
         } catch {}
       }
     }
@@ -287,13 +329,15 @@ ${notepadContext}
     }
 
     if (messages.length > 0) {
-      console.log(JSON.stringify({
-        continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'SessionStart',
-          additionalContext: messages.join('\n')
-        }
-      }));
+      console.log(
+        JSON.stringify({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: messages.join("\n"),
+          },
+        }),
+      );
     } else {
       console.log(JSON.stringify({ continue: true }));
     }

@@ -9,7 +9,6 @@ import { TIER_OVERLAYS } from "../agents-v4/tiers.js";
 import {
   composeAgent,
   composeAllAgents,
-  composePrompt,
   getAgentName,
   VALID_TIER_COMBINATIONS,
 } from "../agents-v4/composer.js";

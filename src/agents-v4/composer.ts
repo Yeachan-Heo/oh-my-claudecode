@@ -91,6 +91,11 @@ export function composePrompt(
   sections?: PromptSection[],
 ): string {
   const roleDefinition = AGENT_ROLES[role];
+  if (!roleDefinition) {
+    throw new Error(
+      `Invalid agent role: "${role}". Valid roles are: ${Object.keys(AGENT_ROLES).join(", ")}`,
+    );
+  }
   const baseSection = resolveBaseProtocolSection(sections);
 
   const tierSection: PromptSection = {
