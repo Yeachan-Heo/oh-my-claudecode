@@ -5,19 +5,26 @@
  * Configures HUD statusline when plugin is installed.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  chmodSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const CLAUDE_DIR = join(homedir(), '.claude');
-const HUD_DIR = join(CLAUDE_DIR, 'hud');
-const SETTINGS_FILE = join(CLAUDE_DIR, 'settings.json');
+const CLAUDE_DIR = join(homedir(), ".claude");
+const HUD_DIR = join(CLAUDE_DIR, "hud");
+const SETTINGS_FILE = join(CLAUDE_DIR, "settings.json");
 
-console.log('[OMC] Running post-install setup...');
+console.log("[OMC] Running post-install setup...");
 
 // 1. Create HUD directory
 if (!existsSync(HUD_DIR)) {
@@ -25,7 +32,7 @@ if (!existsSync(HUD_DIR)) {
 }
 
 // 2. Create HUD wrapper script
-const hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
+const hudScriptPath = join(HUD_DIR, "omc-hud.mjs");
 const hudScript = `#!/usr/bin/env node
 /**
  * OMC HUD - Statusline Script
@@ -38,20 +45,31 @@ import { join } from "node:path";
 
 // Semantic version comparison: returns negative if a < b, positive if a > b, 0 if equal
 function semverCompare(a, b) {
-  // Use parseInt to handle pre-release suffixes (e.g. "0-beta" -> 0)
-  const pa = a.replace(/^v/, "").split(".").map(s => parseInt(s, 10) || 0);
-  const pb = b.replace(/^v/, "").split(".").map(s => parseInt(s, 10) || 0);
+  const aInfo = parseSemver(a);
+  const bInfo = parseSemver(b);
+  const pa = aInfo.parts;
+  const pb = bInfo.parts;
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] || 0;
     const nb = pb[i] || 0;
     if (na !== nb) return na - nb;
   }
   // If numeric parts equal, non-pre-release > pre-release
-  const aHasPre = /-/.test(a);
-  const bHasPre = /-/.test(b);
+  const aHasPre = aInfo.hasPre;
+  const bHasPre = bInfo.hasPre;
   if (aHasPre && !bHasPre) return -1;
   if (!aHasPre && bHasPre) return 1;
   return 0;
+}
+
+function parseSemver(version) {
+  const normalized = version.replace(/^v/i, "");
+  const [base, pre] = normalized.split("-", 2);
+  const parts = base.split(".").map((segment) => {
+    const value = parseInt(segment, 10);
+    return Number.isNaN(value) ? 0 : value;
+  });
+  return { parts, hasPre: Boolean(pre) };
 }
 
 async function main() {
@@ -100,25 +118,27 @@ main();
 writeFileSync(hudScriptPath, hudScript);
 try {
   chmodSync(hudScriptPath, 0o755);
-} catch { /* Windows doesn't need this */ }
-console.log('[OMC] Installed HUD wrapper script');
+} catch {
+  /* Windows doesn't need this */
+}
+console.log("[OMC] Installed HUD wrapper script");
 
 // 3. Configure settings.json
 try {
   let settings = {};
   if (existsSync(SETTINGS_FILE)) {
-    settings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'));
+    settings = JSON.parse(readFileSync(SETTINGS_FILE, "utf-8"));
   }
 
   // Update statusLine to use new HUD path
   settings.statusLine = {
-    type: 'command',
-    command: `node ${hudScriptPath}`
+    type: "command",
+    command: `node ${hudScriptPath}`,
   };
   writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-  console.log('[OMC] Configured HUD statusLine in settings.json');
+  console.log("[OMC] Configured HUD statusLine in settings.json");
 } catch (e) {
-  console.log('[OMC] Warning: Could not configure settings.json:', e.message);
+  console.log("[OMC] Warning: Could not configure settings.json:", e.message);
 }
 
-console.log('[OMC] Setup complete! Restart Claude Code to activate HUD.');
+console.log("[OMC] Setup complete! Restart Claude Code to activate HUD.");

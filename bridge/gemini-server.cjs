@@ -1328,11 +1328,11 @@ var require_errors = __commonJS({
       gen.code((0, codegen_1._)`${names_1.default.errors}++`);
     }
     function returnErrors(it, errs) {
-      const { gen, validateName: validateName2, schemaEnv } = it;
+      const { gen, validateName, schemaEnv } = it;
       if (schemaEnv.$async) {
         gen.throw((0, codegen_1._)`new ${it.ValidationError}(${errs})`);
       } else {
-        gen.assign((0, codegen_1._)`${validateName2}.errors`, errs);
+        gen.assign((0, codegen_1._)`${validateName}.errors`, errs);
         gen.return(false);
       }
     }
@@ -1401,13 +1401,13 @@ var require_boolSchema = __commonJS({
       message: "boolean schema is false"
     };
     function topBoolOrEmptySchema(it) {
-      const { gen, schema, validateName: validateName2 } = it;
+      const { gen, schema, validateName } = it;
       if (schema === false) {
         falseSchemaError(it, false);
       } else if (typeof schema == "object" && schema.$async === true) {
         gen.return(names_1.default.data);
       } else {
-        gen.assign((0, codegen_1._)`${validateName2}.errors`, null);
+        gen.assign((0, codegen_1._)`${validateName}.errors`, null);
         gen.return(true);
       }
     }
@@ -2356,15 +2356,15 @@ var require_validate = __commonJS({
       validateFunction(it, () => (0, boolSchema_1.topBoolOrEmptySchema)(it));
     }
     exports2.validateFunctionCode = validateFunctionCode;
-    function validateFunction({ gen, validateName: validateName2, schema, schemaEnv, opts }, body) {
+    function validateFunction({ gen, validateName, schema, schemaEnv, opts }, body) {
       if (opts.code.es5) {
-        gen.func(validateName2, (0, codegen_1._)`${names_1.default.data}, ${names_1.default.valCxt}`, schemaEnv.$async, () => {
+        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${names_1.default.valCxt}`, schemaEnv.$async, () => {
           gen.code((0, codegen_1._)`"use strict"; ${funcSourceUrl(schema, opts)}`);
           destructureValCxtES5(gen, opts);
           gen.code(body);
         });
       } else {
-        gen.func(validateName2, (0, codegen_1._)`${names_1.default.data}, ${destructureValCxt(opts)}`, schemaEnv.$async, () => gen.code(funcSourceUrl(schema, opts)).code(body));
+        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${destructureValCxt(opts)}`, schemaEnv.$async, () => gen.code(funcSourceUrl(schema, opts)).code(body));
       }
     }
     function destructureValCxt(opts) {
@@ -2403,8 +2403,8 @@ var require_validate = __commonJS({
       return;
     }
     function resetEvaluated(it) {
-      const { gen, validateName: validateName2 } = it;
-      it.evaluated = gen.const("evaluated", (0, codegen_1._)`${validateName2}.evaluated`);
+      const { gen, validateName } = it;
+      it.evaluated = gen.const("evaluated", (0, codegen_1._)`${validateName}.evaluated`);
       gen.if((0, codegen_1._)`${it.evaluated}.dynamicProps`, () => gen.assign((0, codegen_1._)`${it.evaluated}.props`, (0, codegen_1._)`undefined`));
       gen.if((0, codegen_1._)`${it.evaluated}.dynamicItems`, () => gen.assign((0, codegen_1._)`${it.evaluated}.items`, (0, codegen_1._)`undefined`));
     }
@@ -2486,11 +2486,11 @@ var require_validate = __commonJS({
       }
     }
     function returnResults(it) {
-      const { gen, schemaEnv, validateName: validateName2, ValidationError, opts } = it;
+      const { gen, schemaEnv, validateName, ValidationError, opts } = it;
       if (schemaEnv.$async) {
         gen.if((0, codegen_1._)`${names_1.default.errors} === 0`, () => gen.return(names_1.default.data), () => gen.throw((0, codegen_1._)`new ${ValidationError}(${names_1.default.vErrors})`));
       } else {
-        gen.assign((0, codegen_1._)`${validateName2}.errors`, names_1.default.vErrors);
+        gen.assign((0, codegen_1._)`${validateName}.errors`, names_1.default.vErrors);
         if (opts.unevaluated)
           assignEvaluated(it);
         gen.return((0, codegen_1._)`${names_1.default.errors} === 0`);
@@ -2915,8 +2915,8 @@ var require_compile = __commonJS({
           code: (0, codegen_1._)`require("ajv/dist/runtime/validation_error").default`
         });
       }
-      const validateName2 = gen.scopeName("validate");
-      sch.validateName = validateName2;
+      const validateName = gen.scopeName("validate");
+      sch.validateName = validateName;
       const schemaCxt = {
         gen,
         allErrors: this.opts.allErrors,
@@ -2930,7 +2930,7 @@ var require_compile = __commonJS({
         dataTypes: [],
         definedProperties: /* @__PURE__ */ new Set(),
         topSchemaRef: gen.scopeValue("schema", this.opts.code.source === true ? { ref: sch.schema, code: (0, codegen_1.stringify)(sch.schema) } : { ref: sch.schema }),
-        validateName: validateName2,
+        validateName,
         ValidationError: _ValidationError,
         schema: sch.schema,
         schemaEnv: sch,
@@ -2953,14 +2953,14 @@ var require_compile = __commonJS({
           sourceCode = this.opts.code.process(sourceCode, sch);
         const makeValidate = new Function(`${names_1.default.self}`, `${names_1.default.scope}`, sourceCode);
         const validate = makeValidate(this, this.scope.get());
-        this.scope.value(validateName2, { ref: validate });
+        this.scope.value(validateName, { ref: validate });
         validate.errors = null;
         validate.schema = sch.schema;
         validate.schemaEnv = sch;
         if (sch.$async)
           validate.$async = true;
         if (this.opts.code.source === true) {
-          validate.source = { validateName: validateName2, validateCode, scopeValues: gen._values };
+          validate.source = { validateName, validateCode, scopeValues: gen._values };
         }
         if (this.opts.unevaluated) {
           const { props, items } = schemaCxt;
@@ -4487,7 +4487,7 @@ var require_ref = __commonJS({
       schemaType: "string",
       code(cxt) {
         const { gen, schema: $ref, it } = cxt;
-        const { baseId, schemaEnv: env, validateName: validateName2, opts, self } = it;
+        const { baseId, schemaEnv: env, validateName, opts, self } = it;
         const { root } = env;
         if (($ref === "#" || $ref === "#/") && baseId === root.baseId)
           return callRootRef();
@@ -4499,7 +4499,7 @@ var require_ref = __commonJS({
         return inlineRefSchema(schOrEnv);
         function callRootRef() {
           if (env === root)
-            return callRef(cxt, validateName2, env, env.$async);
+            return callRef(cxt, validateName, env, env.$async);
           const rootName = gen.scopeValue("root", { ref: root });
           return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
         }
@@ -14131,23 +14131,37 @@ function stripFrontmatter(content) {
 function formatSectionName(sectionId) {
   return sectionId.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
-function validateName(name, label) {
-  if (!/^[a-z0-9-]+$/i.test(name)) {
-    console.warn(`[${label}] Invalid name: contains disallowed characters`);
-    return null;
+var NAME_ALLOWLIST = /^[a-z0-9][a-z0-9-_]{0,63}$/i;
+var CONTROL_CHAR_PATTERN = new RegExp("[\\u0000-\\u001f\\u007f]");
+function validateNameOrThrow(name, label) {
+  const normalized = name.toLowerCase();
+  if (CONTROL_CHAR_PATTERN.test(name)) {
+    throw new Error(`[${label}] Invalid name: contains control characters`);
+  }
+  if (normalized.includes("..") || normalized.includes("/") || normalized.includes("\\") || normalized.includes("%2f") || normalized.includes("%5c") || normalized.includes("%2e")) {
+    throw new Error(`[${label}] Invalid name: path traversal detected`);
+  }
+  if (!NAME_ALLOWLIST.test(name)) {
+    throw new Error(`[${label}] Invalid name: contains disallowed characters`);
   }
   return name;
 }
 function readMarkdownFile(baseDir, fileName, label) {
   try {
     const filePath = (0, import_path.join)(baseDir, `${fileName}.md`);
-    const resolvedPath = (0, import_path.resolve)(filePath);
     const resolvedBase = (0, import_path.resolve)(baseDir);
+    const resolvedPath = (0, import_path.resolve)(filePath);
     const rel = (0, import_path.relative)(resolvedBase, resolvedPath);
     if (rel.startsWith("..") || (0, import_path.isAbsolute)(rel)) {
       throw new Error("path traversal detected");
     }
-    const content = (0, import_fs.readFileSync)(filePath, "utf-8");
+    const realBase = (0, import_fs.existsSync)(resolvedBase) ? (0, import_fs.realpathSync)(resolvedBase) : resolvedBase;
+    const targetPath = (0, import_fs.existsSync)(resolvedPath) ? (0, import_fs.realpathSync)(resolvedPath) : resolvedPath;
+    const baseBoundary = realBase.endsWith(import_path.sep) ? realBase : `${realBase}${import_path.sep}`;
+    if (!(targetPath === realBase || targetPath.startsWith(baseBoundary))) {
+      throw new Error("path traversal detected");
+    }
+    const content = (0, import_fs.readFileSync)(resolvedPath, "utf-8");
     return stripFrontmatter(content);
   } catch (error2) {
     const message = error2 instanceof Error && error2.message.includes("path traversal") ? "Invalid name: path traversal detected" : "Markdown file not found";
@@ -14160,14 +14174,10 @@ function loadRoleMarkdown(role) {
   if (cached2) {
     return cached2;
   }
-  if (!validateName(role, "loadRoleMarkdown")) {
-    return `Role: ${role}
-
-Prompt unavailable.`;
-  }
+  const validatedRole = validateNameOrThrow(role, "loadRoleMarkdown");
   const rolesDir = (0, import_path.join)(getPackageDir(), "agents", "roles");
-  const content = readMarkdownFile(rolesDir, role, "loadRoleMarkdown");
-  const resolved = content ?? `Role: ${role}
+  const content = readMarkdownFile(rolesDir, validatedRole, "loadRoleMarkdown");
+  const resolved = content ?? `Role: ${validatedRole}
 
 Prompt unavailable.`;
   roleCache.set(role, resolved);
@@ -14178,18 +14188,17 @@ function loadSectionMarkdown(sectionId) {
   if (cached2) {
     return cached2;
   }
-  if (!validateName(sectionId, "loadSectionMarkdown")) {
-    return `Section: ${sectionId}
-
-Prompt unavailable.`;
-  }
-  const sectionsDir = (0, import_path.join)(getPackageDir(), "agents", "sections");
-  const content = readMarkdownFile(
-    sectionsDir,
+  const validatedSection = validateNameOrThrow(
     sectionId,
     "loadSectionMarkdown"
   );
-  const resolved = content ?? `Section: ${sectionId}
+  const sectionsDir = (0, import_path.join)(getPackageDir(), "agents", "sections");
+  const content = readMarkdownFile(
+    sectionsDir,
+    validatedSection,
+    "loadSectionMarkdown"
+  );
+  const resolved = content ?? `Section: ${validatedSection}
 
 Prompt unavailable.`;
   sectionCache.set(sectionId, resolved);

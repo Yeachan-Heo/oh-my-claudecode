@@ -5,14 +5,14 @@
  * Now uses SessionHealth as the source of truth instead of TokenTracker.
  */
 
-import type { SessionHealth } from './types.js';
+import type { SessionHealth } from "./types.js";
 
 export interface AnalyticsDisplay {
   sessionCost: string;
   sessionTokens: string;
   topAgents: string;
   cacheEfficiency: string;
-  costColor: 'green' | 'yellow' | 'red';
+  costColor: "green" | "yellow" | "red";
 }
 
 export interface SessionHealthAnalyticsData {
@@ -33,8 +33,9 @@ export interface SessionHealthAnalyticsData {
 export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
   try {
     // Dynamic imports to avoid circular dependencies and handle missing modules
-    const { getTokenTracker } = await import('../analytics/token-tracker.js');
-    const { calculateCost, formatCost, getCostColor } = await import('../analytics/cost-estimator.js');
+    const { getTokenTracker } = await import("../analytics/token-tracker.js");
+    const { calculateCost, formatCost, getCostColor } =
+      await import("../analytics/cost-estimator.js");
 
     const tracker = getTokenTracker();
     const stats = tracker.getSessionStats();
@@ -48,7 +49,7 @@ export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cacheCreationTokens: usage.cacheCreationTokens,
-          cacheReadTokens: usage.cacheReadTokens
+          cacheReadTokens: usage.cacheReadTokens,
         });
         totalCost += cost.totalCost;
       }
@@ -56,14 +57,16 @@ export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
 
     // Get top agents
     const topAgents = await tracker.getTopAgents(3);
-    const topAgentsStr = topAgents.length > 0
-      ? topAgents.map(a => `${a.agent}:${formatCost(a.cost)}`).join(' ')
-      : 'none';
+    const topAgentsStr =
+      topAgents.length > 0
+        ? topAgents.map((a) => `${a.agent}:${formatCost(a.cost)}`).join(" ")
+        : "none";
 
     // Calculate cache efficiency
     const totalCacheRead = stats.totalCacheRead;
     const totalInput = stats.totalInputTokens;
-    const cacheHitRate = totalInput > 0 ? (totalCacheRead / totalInput) * 100 : 0;
+    const cacheHitRate =
+      totalInput > 0 ? (totalCacheRead / totalInput) * 100 : 0;
     const cacheEfficiency = `${cacheHitRate.toFixed(1)}%`;
 
     // Format totals
@@ -77,16 +80,16 @@ export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
       sessionTokens,
       topAgents: topAgentsStr,
       cacheEfficiency,
-      costColor
+      costColor,
     };
   } catch (error) {
     // Return safe defaults if analytics not yet initialized
     return {
-      sessionCost: '$0.00',
-      sessionTokens: '0',
-      topAgents: 'none',
-      cacheEfficiency: '0%',
-      costColor: 'green'
+      sessionCost: "$0.00",
+      sessionTokens: "0",
+      topAgents: "none",
+      cacheEfficiency: "0%",
+      costColor: "green",
     };
   }
 }
@@ -95,7 +98,7 @@ export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
  * Format token count with K/M suffix for readability.
  */
 function formatTokenCount(tokens: number): string {
-  if (tokens < 1000) return `${tokens / 1000}k`;
+  if (tokens < 1000) return `${tokens}`;
   if (tokens < 1000000) return `${(tokens / 1000).toFixed(1)}k`;
   return `${(tokens / 1000000).toFixed(2)}M`;
 }
@@ -103,22 +106,30 @@ function formatTokenCount(tokens: number): string {
 /**
  * Get color indicator emoji for cost color.
  */
-function getCostColorIndicator(color: 'green' | 'yellow' | 'red'): string {
+function getCostColorIndicator(color: "green" | "yellow" | "red"): string {
   switch (color) {
-    case 'green': return '🟢';
-    case 'yellow': return '🟡';
-    case 'red': return '🔴';
+    case "green":
+      return "🟢";
+    case "yellow":
+      return "🟡";
+    case "red":
+      return "🔴";
   }
 }
 
 /**
  * Get indicator emoji for health status.
  */
-function getHealthIndicator(health: 'healthy' | 'warning' | 'critical'): string {
+function getHealthIndicator(
+  health: "healthy" | "warning" | "critical",
+): string {
   switch (health) {
-    case 'healthy': return '🟢';
-    case 'warning': return '🟡';
-    case 'critical': return '🔴';
+    case "healthy":
+      return "🟢";
+    case "warning":
+      return "🟡";
+    case "critical":
+      return "🔴";
   }
 }
 
@@ -138,7 +149,7 @@ export function renderAnalyticsLine(analytics: AnalyticsDisplay): string {
 export function renderAnalyticsLineWithConfig(
   analytics: AnalyticsDisplay,
   showCost: boolean,
-  showCache: boolean
+  showCache: boolean,
 ): string {
   const parts: string[] = [];
 
@@ -153,7 +164,7 @@ export function renderAnalyticsLineWithConfig(
 
   parts.push(`Top: ${analytics.topAgents}`);
 
-  return parts.join(' | ');
+  return parts.join(" | ");
 }
 
 /**
@@ -161,35 +172,40 @@ export function renderAnalyticsLineWithConfig(
  */
 export async function getSessionInfo(): Promise<string> {
   try {
-    const { getSessionManager } = await import('../analytics/session-manager.js');
+    const { getSessionManager } =
+      await import("../analytics/session-manager.js");
     const manager = getSessionManager();
     const session = await manager.getCurrentSession();
 
     if (!session) {
-      return 'No active session';
+      return "No active session";
     }
 
     const duration = Date.now() - new Date(session.startTime).getTime();
     const durationMinutes = Math.floor(duration / 60000);
-    const tags = session.tags.join(',');
+    const tags = session.tags.join(",");
 
     return `Session: ${session.id.slice(-8)} | ${durationMinutes}m | Tags: ${tags}`;
   } catch (error) {
-    return 'Session info unavailable';
+    return "Session info unavailable";
   }
 }
 
 /**
  * Extract structured analytics data from SessionHealth
  */
-export function getSessionHealthAnalyticsData(sessionHealth: SessionHealth): SessionHealthAnalyticsData {
+export function getSessionHealthAnalyticsData(
+  sessionHealth: SessionHealth,
+): SessionHealthAnalyticsData {
   const costIndicator = getHealthIndicator(sessionHealth.health);
 
-  const costPrefix = sessionHealth.isEstimated ? '~' : '';
+  const costPrefix = sessionHealth.isEstimated ? "~" : "";
   const cost = `${costPrefix}$${(sessionHealth.sessionCost ?? 0).toFixed(4)}`;
   const tokens = formatTokenCount(sessionHealth.totalTokens ?? 0);
   const cache = `${(sessionHealth.cacheHitRate ?? 0).toFixed(1)}%`;
-  const costHour = sessionHealth.costPerHour ? `$${sessionHealth.costPerHour.toFixed(2)}/h` : '';
+  const costHour = sessionHealth.costPerHour
+    ? `$${sessionHealth.costPerHour.toFixed(2)}/h`
+    : "";
 
   return { costIndicator, cost, tokens, cache, costHour };
 }
@@ -198,11 +214,18 @@ export function getSessionHealthAnalyticsData(sessionHealth: SessionHealth): Ses
  * Render analytics from SessionHealth (no longer calls TokenTracker directly)
  * @deprecated Use getSessionHealthAnalyticsData() and compose in render.ts for config-aware rendering
  */
-export function renderSessionHealthAnalytics(sessionHealth: SessionHealth): string {
+export function renderSessionHealthAnalytics(
+  sessionHealth: SessionHealth,
+): string {
   const data = getSessionHealthAnalyticsData(sessionHealth);
-  const parts = [data.costIndicator, data.cost, data.tokens, `Cache: ${data.cache}`];
+  const parts = [
+    data.costIndicator,
+    data.cost,
+    data.tokens,
+    `Cache: ${data.cache}`,
+  ];
   if (data.costHour) parts.push(data.costHour);
-  return parts.join(' | ');
+  return parts.join(" | ");
 }
 
 /**
@@ -217,7 +240,7 @@ export function renderBudgetWarning(sessionHealth: SessionHealth): string {
     return `⚡ Budget notice: Session cost ${cost.toFixed(2)} approaching limit`;
   }
 
-  return '';
+  return "";
 }
 
 /**
@@ -228,7 +251,7 @@ export function renderCacheEfficiency(sessionHealth: SessionHealth): string {
 
   const barLength = 20;
   const filled = Math.round((rate / 100) * barLength);
-  const bar = '█'.repeat(filled) + '░'.repeat(barLength - filled);
+  const bar = "█".repeat(filled) + "░".repeat(barLength - filled);
 
   return `Cache: ${bar} ${rate.toFixed(1)}%`;
 }
