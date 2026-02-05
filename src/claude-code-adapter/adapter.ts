@@ -142,7 +142,7 @@ export class ClaudeCodeAdapter {
         parsedCount += 1;
       } else {
         failedCount += 1;
-        warnings.push(...result.errors);
+        errors.push(...result.errors);
       }
 
       warnings.push(...result.warnings);
@@ -150,6 +150,20 @@ export class ClaudeCodeAdapter {
 
     if (parsedCount === 0 && failedCount > 0) {
       errors.push("Unable to parse any transcript entries.");
+      return {
+        value: events,
+        success: false,
+        warnings,
+        errors,
+      };
+    }
+
+    if (failedCount > parsedCount) {
+      if (parsedCount > 0) {
+        warnings.push(
+          `Partial parse: ${failedCount} of ${failedCount + parsedCount} entries failed (>50% error rate)`,
+        );
+      }
       return {
         value: events,
         success: false,
