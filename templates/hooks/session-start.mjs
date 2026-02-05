@@ -210,7 +210,8 @@ async function main() {
 
 A new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
 
-To update, run: claude /install-plugin oh-my-claudecode
+To update, run: omc update
+(This syncs plugin, npm package, and CLAUDE.md together)
 
 </session-restore>
 

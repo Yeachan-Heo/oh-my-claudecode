@@ -63,9 +63,14 @@ async function main() {
     try {
       const versions = readdirSync(pluginCacheBase);
       if (versions.length > 0) {
-        const latestVersion = versions.sort(semverCompare).reverse()[0];
-        const pluginPath = join(pluginCacheBase, latestVersion, "dist/hud/index.js");
-        if (existsSync(pluginPath)) {
+        // Filter to only versions with built dist/hud/index.js
+        const builtVersions = versions.filter(v => {
+          const hudPath = join(pluginCacheBase, v, "dist/hud/index.js");
+          return existsSync(hudPath);
+        });
+        if (builtVersions.length > 0) {
+          const latestBuilt = builtVersions.sort(semverCompare).reverse()[0];
+          const pluginPath = join(pluginCacheBase, latestBuilt, "dist/hud/index.js");
           await import(pluginPath);
           return;
         }

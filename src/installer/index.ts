@@ -255,7 +255,7 @@ function loadClaudeMdContent(): string {
  * @param omcContent - New OMC content to inject
  * @returns Merged content with markers
  */
-export function mergeClaudeMd(existingContent: string | null, omcContent: string): string {
+export function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string {
   const START_MARKER = '<!-- OMC:START -->';
   const END_MARKER = '<!-- OMC:END -->';
   const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
@@ -272,9 +272,13 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
       .trim();
   }
 
+  // Strip any existing version marker from content and inject current version
+  cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
+  const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
+
   // Case 1: No existing content - wrap omcContent in markers
   if (!existingContent) {
-    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n`;
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
 
   // Case 2: Existing content has both markers - replace content between markers
@@ -287,17 +291,17 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     const beforeMarker = existingContent.substring(0, startIndex);
     const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
 
-    return `${beforeMarker}${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
+    return `${beforeMarker}${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
   }
 
   // Case 3: Corrupted markers (START without END or vice versa)
   if (startIndex !== -1 || endIndex !== -1) {
     // Handle corrupted state - backup will be created by caller
-    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
   }
 
   // Case 4: No markers - wrap omcContent in markers, preserve existing after user customizations header
-  return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
+  return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
 }
 
 /**
@@ -453,7 +457,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
 
         // Merge OMC content with existing content
-        const mergedContent = mergeClaudeMd(existingContent, omcContent);
+        const mergedContent = mergeClaudeMd(existingContent, omcContent, VERSION);
         writeFileSync(claudeMdPath, mergedContent);
 
         if (existingContent) {
