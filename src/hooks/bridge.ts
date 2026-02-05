@@ -40,19 +40,12 @@ import {
   createHookOutput,
 } from "./persistent-mode/index.js";
 import { activateUltrawork, readUltraworkState } from "./ultrawork/index.js";
-import {
-  readAutopilotState,
-  isAutopilotActive,
-  getPhasePrompt,
-  transitionPhase,
-  formatCompactSummary,
-} from "./autopilot/index.js";
+import { readAutopilotState, getPhasePrompt } from "./autopilot/index.js";
 import {
   ULTRAWORK_MESSAGE,
   ULTRATHINK_MESSAGE,
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
-  TODO_CONTINUATION_PROMPT,
   RALPH_MESSAGE,
 } from "../installer/hooks.js";
 
@@ -61,9 +54,6 @@ import {
   processSubagentStart,
   processSubagentStop,
   getAgentDashboard,
-  getAgentObservatory,
-  recordFileOwnership,
-  suggestInterventions,
   type SubagentStartInput,
   type SubagentStopInput,
 } from "./subagent-tracker/index.js";
@@ -71,7 +61,6 @@ import {
 import {
   recordAgentStart,
   recordAgentStop,
-  recordToolEvent,
   recordFileTouch,
 } from "./subagent-tracker/session-replay.js";
 import {
@@ -84,7 +73,12 @@ import {
   type PermissionRequestInput,
 } from "./permission-handler/index.js";
 import { handleSessionEnd, type SessionEndInput } from "./session-end/index.js";
-import { initSilentAutoUpdate } from "../features/auto-update.js";
+import {
+  clearPendingUpdateRestart,
+  getPendingUpdateVersion,
+  hasPendingUpdateRestart,
+  initSilentAutoUpdate,
+} from "../features/auto-update.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
@@ -396,6 +390,23 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
   initSilentAutoUpdate();
 
   const messages: string[] = [];
+
+  if (hasPendingUpdateRestart()) {
+    const pendingVersion = getPendingUpdateVersion();
+    messages.push(`<session-restore>
+
+[UPDATE INSTALLED]
+
+A new version${pendingVersion ? ` (${pendingVersion})` : ""} was installed.
+Please restart your Claude Code session to use the update.
+
+</session-restore>
+
+---
+
+`);
+    clearPendingUpdateRestart();
+  }
 
   // Check for active autopilot state - only restore if it belongs to this session
   const autopilotState = readAutopilotState(directory);
@@ -752,13 +763,16 @@ export async function processHook(
         }
         const stopInput = input as SubagentStopInput;
         const result = processSubagentStop(stopInput);
+        const rawSuccess = (stopInput as unknown as Record<string, unknown>)
+          .success;
+        const succeeded = rawSuccess !== false;
         // Record to session replay (default to true when SDK doesn't provide success)
         recordAgentStop(
           stopInput.cwd,
           stopInput.session_id,
           stopInput.agent_id,
           stopInput.agent_type,
-          stopInput.success !== false,
+          succeeded,
         );
         return result;
       }

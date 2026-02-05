@@ -555,6 +555,8 @@ export interface SilentUpdateConfig {
   checkIntervalHours?: number;
   /** Whether to auto-apply updates without confirmation (default: true) */
   autoApply?: boolean;
+  /** Whether to show user-facing console notifications (default: true) */
+  notifyUser?: boolean;
   /** Log file path for silent update activity (optional) */
   logFile?: string;
   /** Maximum retries on failure (default: 3) */
@@ -642,6 +644,7 @@ export async function silentAutoUpdate(
   const {
     checkIntervalHours = 24,
     autoApply = true,
+    notifyUser = true,
     logFile = join(CLAUDE_CONFIG_DIR, ".omc-update.log"),
     maxRetries = 3,
   } = config;
@@ -708,6 +711,14 @@ export async function silentAutoUpdate(
       return null;
     }
 
+    silentLog(
+      `Applying update: ${checkResult.currentVersion ?? "unknown"} -> ${checkResult.latestVersion}`,
+      logFile,
+    );
+    if (notifyUser) {
+      console.log("[OMC Auto-Update] Applying update in the background...");
+    }
+
     // Perform the update silently
     const result = await performUpdate({
       skipConfirmation: true,
@@ -719,6 +730,11 @@ export async function silentAutoUpdate(
         `Update successful: ${result.previousVersion} -> ${result.newVersion}`,
         logFile,
       );
+      if (notifyUser) {
+        console.log(
+          `[OMC Auto-Update] Update complete. Restart to use ${result.newVersion}.`,
+        );
+      }
       state.consecutiveFailures = 0;
       state.pendingRestart = true;
       state.lastSuccess = new Date().toISOString();
@@ -727,6 +743,9 @@ export async function silentAutoUpdate(
       return result;
     } else {
       silentLog(`Update failed: ${result.message}`, logFile);
+      if (notifyUser) {
+        console.log(`[OMC Auto-Update] Update failed: ${result.message}`);
+      }
       state.consecutiveFailures++;
       saveSilentUpdateState(state);
       return result;
