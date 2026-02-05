@@ -6,9 +6,9 @@ description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ecomode, u
 ## Cross-Platform Compatibility
 
 **IMPORTANT (Windows Git Bash)**: The bash scripts in this skill contain `$(...)` command substitution which fails on Windows. To execute them:
-1. Use the **Write tool** to save the script content to `/tmp/omc-cancel.sh`
-2. Use the **Bash tool** to execute: `bash /tmp/omc-cancel.sh`
-3. Clean up: `rm -f /tmp/omc-cancel.sh`
+1. Use the **Write tool** to save the script content to `./omc-cancel.sh` in your current directory
+2. Use the **Bash tool** to execute: `bash ./omc-cancel.sh`
+3. Clean up: `rm -f ./omc-cancel.sh`
 
 Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
 

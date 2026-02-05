@@ -7,9 +7,9 @@ argument-hint: "[list|add|scan]"
 ## Cross-Platform Compatibility
 
 **IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
-1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-skills-setup.sh`)
-2. Use the **Bash tool** to execute: `bash /tmp/omc-skills-setup.sh`
-3. Clean up: `rm -f /tmp/omc-skills-setup.sh`
+1. Use the **Write tool** to save the script content to a temporary file in the current directory (e.g., `./omc-skills-setup.sh`)
+2. Use the **Bash tool** to execute: `bash ./omc-skills-setup.sh`
+3. Clean up: `rm -f ./omc-skills-setup.sh`
 
 Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
 

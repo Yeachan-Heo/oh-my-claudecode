@@ -34,6 +34,7 @@ import {
 } from '../notepad/index.js';
 import { logAuditEntry } from './audit.js';
 import { getWorktreeRoot } from '../../lib/worktree-paths.js';
+import { toForwardSlash } from '../../utils/paths.js';
 
 // Re-export constants
 export * from './constants.js';
@@ -123,14 +124,6 @@ interface GitFileStat {
 }
 
 /**
- * Normalize path for cross-platform compatibility.
- * Converts Windows backslashes to forward slashes.
- */
-function normalizePathSeparators(filePath: string): string {
-  return filePath.replace(/\\/g, '/');
-}
-
-/**
  * Check if a file path is allowed for direct orchestrator modification.
  * Handles both Unix (/) and Windows (\) path separators.
  */
@@ -138,7 +131,7 @@ export function isAllowedPath(filePath: string, directory?: string): boolean {
   if (!filePath) return true;
 
   // Normalize path separators for cross-platform compatibility (Windows uses \)
-  const normalizedPath = normalizePathSeparators(filePath);
+  const normalizedPath = toForwardSlash(filePath);
 
   // Fast path: check relative patterns first
   if (ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(normalizedPath))) return true;
@@ -149,7 +142,7 @@ export function isAllowedPath(filePath: string, directory?: string): boolean {
   if (isAbsolute) {
     const root = directory ? getWorktreeRoot(directory) : getWorktreeRoot();
     if (root) {
-      const normalizedRoot = normalizePathSeparators(root);
+      const normalizedRoot = toForwardSlash(root);
       if (normalizedPath.startsWith(normalizedRoot + '/')) {
         const relative = normalizedPath.slice(normalizedRoot.length + 1);
         return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(relative));

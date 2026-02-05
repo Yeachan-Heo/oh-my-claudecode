@@ -6,9 +6,9 @@ description: Setup and configure oh-my-claudecode (the ONLY command you need to 
 ## Cross-Platform Compatibility
 
 **IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
-1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-setup-script.sh`)
-2. Use the **Bash tool** to execute: `bash /tmp/omc-setup-script.sh`
-3. Clean up: `rm -f /tmp/omc-setup-script.sh`
+1. Use the **Write tool** to save the script content to a temporary file in the current directory (e.g., `./omc-setup-script.sh`)
+2. Use the **Bash tool** to execute: `bash ./omc-setup-script.sh`
+3. Clean up: `rm -f ./omc-setup-script.sh`
 
 Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
 
