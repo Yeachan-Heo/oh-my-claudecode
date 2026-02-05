@@ -21,6 +21,8 @@ import {
 import type { JobStatus } from './prompt-persistence.js';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { isSpawnedPid as isCodexSpawnedPid } from './codex-core.js';
+import { isSpawnedPid as isGeminiSpawnedPid } from './gemini-core.js';
 
 /** Signals allowed for kill_job. SIGKILL excluded - too dangerous for process groups. */
 const ALLOWED_SIGNALS: ReadonlySet<string> = new Set(['SIGTERM', 'SIGINT']);
@@ -284,6 +286,23 @@ export async function handleKillJob(
   if (!status.pid) {
     return textResult(
       `Job ${jobId} has no PID recorded. Cannot send signal.`,
+      true
+    );
+  }
+
+  // Validate PID is a reasonable positive integer
+  if (!Number.isInteger(status.pid) || status.pid <= 0 || status.pid > 4194304) {
+    return textResult(`Job ${jobId} has invalid PID: ${status.pid}. Refusing to send signal.`, true);
+  }
+
+  // Verify this PID was spawned by us
+  const isOurPid = provider === 'codex'
+    ? isCodexSpawnedPid(status.pid)
+    : isGeminiSpawnedPid(status.pid);
+
+  if (!isOurPid) {
+    return textResult(
+      `Job ${jobId} PID ${status.pid} was not spawned by this process. Refusing to send signal for safety.`,
       true
     );
   }

@@ -11,6 +11,7 @@ import {
   getWorktreeRoot,
   resolveStatePath,
   ensureOmcDir,
+  validateWorkingDirectory,
 } from '../lib/worktree-paths.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import {
@@ -66,10 +67,9 @@ export const stateReadTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const statePath = getStatePath(mode, root);
 
       // Special handling for swarm (SQLite database)
@@ -168,10 +168,9 @@ export const stateWriteTool: ToolDefinition<{
       state,
       workingDirectory
     } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Swarm uses SQLite - cannot be written via this tool
       if (mode === 'swarm') {
@@ -256,10 +255,9 @@ export const stateClearTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Use mode registry's clearModeState for known modes
       if (MODE_CONFIGS[mode as ExecutionMode]) {
@@ -325,10 +323,9 @@ export const stateListActiveTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Get active modes from registry (8 modes)
       const activeModes: string[] = [...getActiveModes(root)];
@@ -391,10 +388,9 @@ export const stateGetStatusTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       if (mode) {
         // Single mode status

@@ -9,7 +9,8 @@ import { z } from 'zod';
 import {
   getWorktreeRoot,
   getWorktreeNotepadPath,
-  ensureOmcDir
+  ensureOmcDir,
+  validateWorkingDirectory,
 } from '../lib/worktree-paths.js';
 import {
   initNotepad,
@@ -46,10 +47,9 @@ export const notepadReadTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { section = 'all', workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       if (section === 'all') {
         const content = formatFullNotepad(root);
@@ -129,10 +129,9 @@ export const notepadWritePriorityTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure .omc directory exists
       ensureOmcDir('', root);
@@ -186,10 +185,9 @@ export const notepadWriteWorkingTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure .omc directory exists
       ensureOmcDir('', root);
@@ -238,10 +236,9 @@ export const notepadWriteManualTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure .omc directory exists
       ensureOmcDir('', root);
@@ -290,10 +287,9 @@ export const notepadPruneTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { daysOld = DEFAULT_CONFIG.workingMemoryDays, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const result = pruneOldEntries(root, daysOld);
 
       return {
@@ -327,10 +323,9 @@ export const notepadStatsTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const stats = getNotepadStats(root);
 
       if (!stats.exists) {

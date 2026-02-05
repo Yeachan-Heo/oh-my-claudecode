@@ -10,13 +10,33 @@
 
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
-import { dirname, resolve, relative, sep, isAbsolute } from 'path';
+import { dirname, resolve, relative, sep, isAbsolute, basename, join } from 'path';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { detectCodexCli } from './cli-detection.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext } from './prompt-injection.js';
 import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
+
+// Module-scoped PID registry - tracks PIDs spawned by this process
+const spawnedPids = new Set<number>();
+
+export function isSpawnedPid(pid: number): boolean {
+  return spawnedPids.has(pid);
+}
+
+export function clearSpawnedPids(): void {
+  spawnedPids.clear();
+}
+
+// Model name validation: alphanumeric start, then alphanumeric/dots/hyphens/underscores, max 64 chars
+const MODEL_NAME_REGEX = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+function validateModelName(model: string): void {
+  if (!MODEL_NAME_REGEX.test(model)) {
+    throw new Error(`Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`);
+  }
+}
 
 // Default model can be overridden via environment variable
 export const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.2';
@@ -67,6 +87,7 @@ export function parseCodexOutput(output: string): string {
  */
 export function executeCodex(prompt: string, model: string, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
+    validateModelName(model);
     let settled = false;
     const args = ['exec', '-m', model, '--json', '--full-auto'];
     const child = spawn('codex', args, {
@@ -139,6 +160,7 @@ export function executeCodexBackground(
   workingDirectory?: string
 ): { pid: number } | { error: string } {
   try {
+    validateModelName(model);
     const args = ['exec', '-m', model, '--json', '--full-auto'];
     const child = spawn('codex', args, {
       detached: true,
@@ -151,6 +173,7 @@ export function executeCodexBackground(
     }
 
     const pid = child.pid;
+    spawnedPids.add(pid);
     child.unref();
 
     // Write initial spawned status
@@ -214,9 +237,10 @@ export function executeCodexBackground(
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
+      spawnedPids.delete(pid);
 
       // Check if user killed this job - if so, don't overwrite the killed status
-      const currentStatus = readJobStatus('codex', jobMeta.slug, jobMeta.jobId);
+      const currentStatus = readJobStatus('codex', jobMeta.slug, jobMeta.jobId, workingDirectory);
       if (currentStatus?.killedByUser) {
         return; // Status already set by kill_job, don't overwrite
       }
@@ -596,7 +620,8 @@ export async function handleAskCodex(args: {
               console.warn(`[codex-core] output_file directory resolves outside trusted root, skipping write.`);
             } else {
               // ALWAYS write (Issue 3 fix: no existence check)
-              writeFileSync(outputPath, response, 'utf-8');
+              const safePath = join(outputDirReal, basename(outputPath));
+              writeFileSync(safePath, response, 'utf-8');
             }
           }
         } catch (err) {

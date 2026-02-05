@@ -8,7 +8,8 @@ import { z } from 'zod';
 import {
   getWorktreeRoot,
   getWorktreeProjectMemoryPath,
-  ensureOmcDir
+  ensureOmcDir,
+  validateWorkingDirectory,
 } from '../lib/worktree-paths.js';
 import {
   loadProjectMemory,
@@ -39,10 +40,9 @@ export const projectMemoryReadTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { section = 'all', workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const memory = await loadProjectMemory(root);
 
       if (!memory) {
@@ -113,10 +113,9 @@ export const projectMemoryWriteTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { memory, merge = false, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure .omc directory exists
       ensureOmcDir('', root);
@@ -176,10 +175,9 @@ export const projectMemoryAddNoteTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { category, content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure memory exists
       let memory = await loadProjectMemory(root);
@@ -231,10 +229,9 @@ export const projectMemoryAddDirectiveTool: ToolDefinition<{
   },
   handler: async (args) => {
     const { directive, context = '', priority = 'normal', workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
 
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
 
       // Ensure memory exists
       let memory = await loadProjectMemory(root);

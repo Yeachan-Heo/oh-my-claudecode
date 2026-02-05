@@ -20996,7 +20996,7 @@ var worktreeCache = null;
 function getWorktreeRoot(cwd) {
   const effectiveCwd = cwd || process.cwd();
   if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
-    return worktreeCache.root;
+    return worktreeCache.root || null;
   }
   try {
     const root = (0, import_child_process8.execSync)("git rev-parse --show-toplevel", {
@@ -21007,14 +21007,14 @@ function getWorktreeRoot(cwd) {
     worktreeCache = { cwd: effectiveCwd, root };
     return root;
   } catch {
-    return effectiveCwd;
+    return null;
   }
 }
 function validatePath(inputPath) {
   if (inputPath.includes("..")) {
     throw new Error(`Invalid path: path traversal not allowed (${inputPath})`);
   }
-  if (inputPath.startsWith("/") || inputPath.startsWith("~")) {
+  if (inputPath.startsWith("~") || (0, import_path7.isAbsolute)(inputPath)) {
     throw new Error(`Invalid path: absolute paths not allowed (${inputPath})`);
   }
 }
@@ -21050,6 +21050,31 @@ function getWorktreeNotepadPath(worktreeRoot) {
 function getWorktreeProjectMemoryPath(worktreeRoot) {
   const root = worktreeRoot || getWorktreeRoot() || process.cwd();
   return (0, import_path7.join)(root, OmcPaths.PROJECT_MEMORY);
+}
+function validateWorkingDirectory(workingDirectory) {
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  if (!workingDirectory) {
+    return trustedRoot;
+  }
+  const resolved = (0, import_path7.resolve)(workingDirectory);
+  const providedRoot = getWorktreeRoot(resolved) || resolved;
+  let trustedRootReal;
+  let providedRootReal;
+  try {
+    trustedRootReal = (0, import_fs6.realpathSync)(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+  try {
+    providedRootReal = (0, import_fs6.realpathSync)(providedRoot);
+  } catch {
+    throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+  }
+  const rel = (0, import_path7.relative)(trustedRootReal, providedRootReal);
+  if (rel.startsWith("..") || (0, import_path7.isAbsolute)(rel)) {
+    throw new Error(`workingDirectory '${workingDirectory}' is outside the trusted worktree root '${trustedRoot}'.`);
+  }
+  return providedRoot;
 }
 
 // src/hooks/mode-registry/index.ts
@@ -21246,9 +21271,8 @@ var stateReadTool = {
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const statePath = getStatePath(mode, root);
       if (mode === "swarm") {
         if (!(0, import_fs8.existsSync)(statePath)) {
@@ -21336,9 +21360,8 @@ var stateWriteTool = {
       state,
       workingDirectory
     } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       if (mode === "swarm") {
         return {
           content: [{
@@ -21405,9 +21428,8 @@ var stateClearTool = {
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       if (MODE_CONFIGS[mode]) {
         const success = clearModeState(mode, root);
         if (success) {
@@ -21462,9 +21484,8 @@ var stateListActiveTool = {
   },
   handler: async (args) => {
     const { workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const activeModes = [...getActiveModes(root)];
       const ralplanPath = getStatePath("ralplan", root);
       if ((0, import_fs8.existsSync)(ralplanPath)) {
@@ -21513,9 +21534,8 @@ var stateGetStatusTool = {
   },
   handler: async (args) => {
     const { mode, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       if (mode) {
         const statePath = getStatePath(mode, root);
         const active = MODE_CONFIGS[mode] ? isModeActive(mode, root) : (0, import_fs8.existsSync)(statePath) && (() => {
@@ -21858,9 +21878,8 @@ var notepadReadTool = {
   },
   handler: async (args) => {
     const { section = "all", workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       if (section === "all") {
         const content = formatFullNotepad(root);
         if (!content) {
@@ -21935,9 +21954,8 @@ var notepadWritePriorityTool = {
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       ensureOmcDir("", root);
       const result = setPriorityContext(root, content);
       if (!result.success) {
@@ -21979,9 +21997,8 @@ var notepadWriteWorkingTool = {
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       ensureOmcDir("", root);
       const success = addWorkingMemoryEntry(root, content);
       if (!success) {
@@ -22017,9 +22034,8 @@ var notepadWriteManualTool = {
   },
   handler: async (args) => {
     const { content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       ensureOmcDir("", root);
       const success = addManualEntry(root, content);
       if (!success) {
@@ -22055,9 +22071,8 @@ var notepadPruneTool = {
   },
   handler: async (args) => {
     const { daysOld = DEFAULT_CONFIG.workingMemoryDays, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const result = pruneOldEntries(root, daysOld);
       return {
         content: [{
@@ -22087,9 +22102,8 @@ var notepadStatsTool = {
   },
   handler: async (args) => {
     const { workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const stats = getNotepadStats(root);
       if (!stats.exists) {
         return {
@@ -22349,9 +22363,8 @@ var projectMemoryReadTool = {
   },
   handler: async (args) => {
     const { section = "all", workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       const memory = await loadProjectMemory(root);
       if (!memory) {
         return {
@@ -22418,9 +22431,8 @@ var projectMemoryWriteTool = {
   },
   handler: async (args) => {
     const { memory, merge: merge2 = false, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       ensureOmcDir("", root);
       let finalMemory;
       if (merge2) {
@@ -22464,9 +22476,8 @@ var projectMemoryAddNoteTool = {
   },
   handler: async (args) => {
     const { category, content, workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       let memory = await loadProjectMemory(root);
       if (!memory) {
         return {
@@ -22507,9 +22518,8 @@ var projectMemoryAddDirectiveTool = {
   },
   handler: async (args) => {
     const { directive, context = "", priority = "normal", workingDirectory } = args;
-    const cwd = workingDirectory || process.cwd();
     try {
-      const root = getWorktreeRoot(cwd) || cwd;
+      const root = validateWorkingDirectory(workingDirectory);
       let memory = await loadProjectMemory(root);
       if (!memory) {
         return {

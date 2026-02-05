@@ -26,6 +26,24 @@ vi.mock('fs', async () => {
   };
 });
 
+// Mock codex-core PID registry
+vi.mock('../mcp/codex-core.js', async () => {
+  const actual = await vi.importActual('../mcp/codex-core.js');
+  return {
+    ...actual,
+    isSpawnedPid: vi.fn(() => true),
+  };
+});
+
+// Mock gemini-core PID registry
+vi.mock('../mcp/gemini-core.js', async () => {
+  const actual = await vi.importActual('../mcp/gemini-core.js');
+  return {
+    ...actual,
+    isSpawnedPid: vi.fn(() => true),
+  };
+});
+
 describe('job-management', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -2992,7 +2992,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3019,7 +3019,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3594,55 +3594,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative4, options, skipNormalization) {
+    function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative4 = parse3(serialize(relative4, options), options);
+        relative5 = parse3(serialize(relative5, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative4.scheme) {
-        target.scheme = relative4.scheme;
-        target.userinfo = relative4.userinfo;
-        target.host = relative4.host;
-        target.port = relative4.port;
-        target.path = removeDotSegments(relative4.path || "");
-        target.query = relative4.query;
+      if (!options.tolerant && relative5.scheme) {
+        target.scheme = relative5.scheme;
+        target.userinfo = relative5.userinfo;
+        target.host = relative5.host;
+        target.port = relative5.port;
+        target.path = removeDotSegments(relative5.path || "");
+        target.query = relative5.query;
       } else {
-        if (relative4.userinfo !== void 0 || relative4.host !== void 0 || relative4.port !== void 0) {
-          target.userinfo = relative4.userinfo;
-          target.host = relative4.host;
-          target.port = relative4.port;
-          target.path = removeDotSegments(relative4.path || "");
-          target.query = relative4.query;
+        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
+          target.userinfo = relative5.userinfo;
+          target.host = relative5.host;
+          target.port = relative5.port;
+          target.path = removeDotSegments(relative5.path || "");
+          target.query = relative5.query;
         } else {
-          if (!relative4.path) {
+          if (!relative5.path) {
             target.path = base.path;
-            if (relative4.query !== void 0) {
-              target.query = relative4.query;
+            if (relative5.query !== void 0) {
+              target.query = relative5.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative4.path[0] === "/") {
-              target.path = removeDotSegments(relative4.path);
+            if (relative5.path[0] === "/") {
+              target.path = removeDotSegments(relative5.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative4.path;
+                target.path = "/" + relative5.path;
               } else if (!base.path) {
-                target.path = relative4.path;
+                target.path = relative5.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative4.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative4.query;
+            target.query = relative5.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3650,7 +3650,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative4.fragment;
+      target.fragment = relative5.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3821,7 +3821,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -12610,7 +12610,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -12627,7 +12627,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -12705,7 +12705,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -12966,12 +12966,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -13700,12 +13700,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
@@ -13724,7 +13724,7 @@ var worktreeCache = null;
 function getWorktreeRoot(cwd) {
   const effectiveCwd = cwd || process.cwd();
   if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
-    return worktreeCache.root;
+    return worktreeCache.root || null;
   }
   try {
     const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
@@ -13735,7 +13735,7 @@ function getWorktreeRoot(cwd) {
     worktreeCache = { cwd: effectiveCwd, root };
     return root;
   } catch {
-    return effectiveCwd;
+    return null;
   }
 }
 
@@ -14023,6 +14023,16 @@ function listActiveJobs(provider, workingDirectory) {
 }
 
 // src/mcp/codex-core.ts
+var spawnedPids = /* @__PURE__ */ new Set();
+function isSpawnedPid(pid) {
+  return spawnedPids.has(pid);
+}
+var MODEL_NAME_REGEX = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+function validateModelName(model) {
+  if (!MODEL_NAME_REGEX.test(model)) {
+    throw new Error(`Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`);
+  }
+}
 var CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || "gpt-5.2";
 var CODEX_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_CODEX_TIMEOUT || "3600000", 10) || 36e5), 36e5);
 var CODEX_VALID_ROLES = ["architect", "planner", "critic", "analyst", "code-reviewer", "security-reviewer", "tdd-guide"];
@@ -14054,7 +14064,8 @@ function parseCodexOutput(output) {
   return messages.join("\n") || output;
 }
 function executeCodex(prompt, model, cwd) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
+    validateModelName(model);
     let settled = false;
     const args = ["exec", "-m", model, "--json", "--full-auto"];
     const child = (0, import_child_process3.spawn)("codex", args, {
@@ -14081,7 +14092,7 @@ function executeCodex(prompt, model, cwd) {
         settled = true;
         clearTimeout(timeoutHandle);
         if (code === 0 || stdout.trim()) {
-          resolve4(parseCodexOutput(stdout));
+          resolve5(parseCodexOutput(stdout));
         } else {
           reject(new Error(`Codex exited with code ${code}: ${stderr || "No output"}`));
         }
@@ -14109,6 +14120,7 @@ function executeCodex(prompt, model, cwd) {
 }
 function executeCodexBackground(fullPrompt, model, jobMeta, workingDirectory) {
   try {
+    validateModelName(model);
     const args = ["exec", "-m", model, "--json", "--full-auto"];
     const child = (0, import_child_process3.spawn)("codex", args, {
       detached: true,
@@ -14119,6 +14131,7 @@ function executeCodexBackground(fullPrompt, model, jobMeta, workingDirectory) {
       return { error: "Failed to get process ID" };
     }
     const pid = child.pid;
+    spawnedPids.add(pid);
     child.unref();
     const initialStatus = {
       provider: "codex",
@@ -14176,7 +14189,8 @@ function executeCodexBackground(fullPrompt, model, jobMeta, workingDirectory) {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
-      const currentStatus = readJobStatus("codex", jobMeta.slug, jobMeta.jobId);
+      spawnedPids.delete(pid);
+      const currentStatus = readJobStatus("codex", jobMeta.slug, jobMeta.jobId, workingDirectory);
       if (currentStatus?.killedByUser) {
         return;
       }
@@ -14475,7 +14489,8 @@ ${detection.installHint}`
             if (relDirReal.startsWith("..") || (0, import_path4.isAbsolute)(relDirReal)) {
               console.warn(`[codex-core] output_file directory resolves outside trusted root, skipping write.`);
             } else {
-              (0, import_fs4.writeFileSync)(outputPath, response, "utf-8");
+              const safePath = (0, import_path4.join)(outputDirReal, (0, import_path4.basename)(outputPath));
+              (0, import_fs4.writeFileSync)(safePath, response, "utf-8");
             }
           }
         } catch (err) {
@@ -14505,8 +14520,22 @@ Codex CLI error: ${err.message}`
 }
 
 // src/mcp/job-management.ts
+var import_fs6 = require("fs");
+var import_path6 = require("path");
+
+// src/mcp/gemini-core.ts
+var import_child_process4 = require("child_process");
 var import_fs5 = require("fs");
 var import_path5 = require("path");
+var spawnedPids2 = /* @__PURE__ */ new Set();
+function isSpawnedPid2(pid) {
+  return spawnedPids2.has(pid);
+}
+var GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview";
+var GEMINI_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5), 36e5);
+var MAX_FILE_SIZE2 = 5 * 1024 * 1024;
+
+// src/mcp/job-management.ts
 var ALLOWED_SIGNALS = /* @__PURE__ */ new Set(["SIGTERM", "SIGINT"]);
 function escapeRegex2(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -14522,9 +14551,9 @@ function findJobStatusFile(provider, jobId) {
     return void 0;
   }
   const promptsDir = getPromptsDir();
-  if (!(0, import_fs5.existsSync)(promptsDir)) return void 0;
+  if (!(0, import_fs6.existsSync)(promptsDir)) return void 0;
   try {
-    const files = (0, import_fs5.readdirSync)(promptsDir);
+    const files = (0, import_fs6.readdirSync)(promptsDir);
     const escapedProvider = escapeRegex2(provider);
     const escapedJobId = escapeRegex2(jobId);
     const pattern = new RegExp(`^${escapedProvider}-status-(.+)-${escapedJobId}\\.json$`);
@@ -14535,7 +14564,7 @@ function findJobStatusFile(provider, jobId) {
         matches.push({
           file: f,
           slug: m[1],
-          statusPath: (0, import_path5.join)(promptsDir, f)
+          statusPath: (0, import_path6.join)(promptsDir, f)
         });
       }
     }
@@ -14546,7 +14575,7 @@ function findJobStatusFile(provider, jobId) {
     let best;
     for (const match of matches) {
       try {
-        const content = (0, import_fs5.readFileSync)(match.statusPath, "utf-8");
+        const content = (0, import_fs6.readFileSync)(match.statusPath, "utf-8");
         const status = JSON.parse(content);
         const isActive = status.status === "spawned" || status.status === "running";
         const spawnedAt = new Date(status.spawnedAt).getTime();
@@ -14604,7 +14633,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
         status.error ? `**Error:** ${status.error}` : null
       ].filter(Boolean).join("\n"), true);
     }
-    await new Promise((resolve4) => setTimeout(resolve4, pollDelay));
+    await new Promise((resolve5) => setTimeout(resolve5, pollDelay));
     pollDelay = Math.min(pollDelay * 1.5, 2e3);
   }
   return textResult(
@@ -14671,6 +14700,16 @@ async function handleKillJob(provider, jobId, signal = "SIGTERM") {
       true
     );
   }
+  if (!Number.isInteger(status.pid) || status.pid <= 0 || status.pid > 4194304) {
+    return textResult(`Job ${jobId} has invalid PID: ${status.pid}. Refusing to send signal.`, true);
+  }
+  const isOurPid = provider === "codex" ? isSpawnedPid(status.pid) : isSpawnedPid2(status.pid);
+  if (!isOurPid) {
+    return textResult(
+      `Job ${jobId} PID ${status.pid} was not spawned by this process. Refusing to send signal for safety.`,
+      true
+    );
+  }
   const updated = {
     ...status,
     killedByUser: true
@@ -14690,7 +14729,7 @@ async function handleKillJob(provider, jobId, signal = "SIGTERM") {
       error: `Killed by user (signal: ${signal})`
     });
     for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise((resolve4) => setTimeout(resolve4, 50));
+      await new Promise((resolve5) => setTimeout(resolve5, 50));
       const recheckStatus = readJobStatus(provider, found.slug, jobId);
       if (!recheckStatus || recheckStatus.status === "failed") {
         break;
@@ -14750,18 +14789,18 @@ async function handleListJobs(provider, statusFilter = "active", limit = 50) {
 ${lines.join("\n\n")}`);
   }
   const promptsDir = getPromptsDir();
-  if (!(0, import_fs5.existsSync)(promptsDir)) {
+  if (!(0, import_fs6.existsSync)(promptsDir)) {
     return textResult(`No ${provider} jobs found.`);
   }
   try {
-    const files = (0, import_fs5.readdirSync)(promptsDir);
+    const files = (0, import_fs6.readdirSync)(promptsDir);
     const statusFiles = files.filter(
       (f) => f.startsWith(`${provider}-status-`) && f.endsWith(".json")
     );
     const jobs = [];
     for (const file of statusFiles) {
       try {
-        const content = (0, import_fs5.readFileSync)((0, import_path5.join)(promptsDir, file), "utf-8");
+        const content = (0, import_fs6.readFileSync)((0, import_path6.join)(promptsDir, file), "utf-8");
         const job = JSON.parse(content);
         if (statusFilter === "completed" && job.status !== "completed") continue;
         if (statusFilter === "failed" && job.status !== "failed" && job.status !== "timeout") continue;

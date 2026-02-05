@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import {
@@ -10,6 +10,17 @@ import {
 } from '../state-tools.js';
 
 const TEST_DIR = '/tmp/state-tools-test';
+
+// Mock validateWorkingDirectory to allow test directory
+vi.mock('../../lib/worktree-paths.js', async () => {
+  const actual = await vi.importActual('../../lib/worktree-paths.js');
+  return {
+    ...actual,
+    validateWorkingDirectory: vi.fn((workingDirectory?: string) => {
+      return workingDirectory || process.cwd();
+    }),
+  };
+});
 
 describe('state-tools', () => {
   beforeEach(() => {
