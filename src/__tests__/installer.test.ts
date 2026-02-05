@@ -324,7 +324,9 @@ describe('Installer Constants', () => {
 
     it('should match package.json version', () => {
       // This is a runtime check - VERSION should match the package.json
-      expect(VERSION).toBe('3.10.3');
+      const packageJsonPath = join(getPackageDir(), 'package.json');
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      expect(VERSION).toBe(packageJson.version);
     });
   });
 
