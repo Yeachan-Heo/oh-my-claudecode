@@ -11,6 +11,7 @@
 5. [Agent Templates](#agent-templates)
 6. [Session Resume](#session-resume)
 7. [Autopilot](#autopilot)
+8. [Prompt Persistence](#prompt-persistence)
 
 ---
 
@@ -591,6 +592,30 @@ All state is persisted to `.omc/state/autopilot-state.json` and includes:
 - Agent spawn count and metrics
 - Phase duration tracking
 - Session binding
+
+---
+
+## Prompt Persistence
+
+Audit trail for Codex/Gemini prompts and responses stored under `.omc/prompts/`.
+Persistence is opt-in via `~/.claude/.omc-config.json`.
+
+### Configuration
+
+```json
+{
+  "promptPersistence": {
+    "enabled": true
+  }
+}
+```
+
+### Behavior
+
+- Disabled by default for privacy.
+- When enabled, `persistPrompt()` and `persistResponse()` write markdown files with YAML frontmatter.
+- Bidi/invisible Unicode characters are stripped before writing.
+- Background MCP mode requires persistence to be enabled.
 
 ---
 
