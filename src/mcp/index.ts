@@ -33,6 +33,12 @@ export {
   geminiToolNames
 } from './gemini-server.js';
 
+// Copilot MCP Server - in-process MCP server for GitHub Copilot CLI integration
+export {
+  copilotMcpServer,
+  copilotToolNames
+} from './copilot-server.js';
+
 // Prompt injection helper for system prompt support
 export {
   resolveSystemPrompt,

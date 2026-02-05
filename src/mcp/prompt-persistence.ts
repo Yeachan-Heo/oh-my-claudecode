@@ -79,7 +79,7 @@ export function generatePromptId(): string {
  * Options for persisting a prompt
  */
 export interface PersistPromptOptions {
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'copilot';
   agentRole: string;
   model: string;
   files?: string[];
@@ -92,7 +92,7 @@ export interface PersistPromptOptions {
  * Options for persisting a response
  */
 export interface PersistResponseOptions {
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'copilot';
   agentRole: string;
   model: string;
   promptId: string;      // The ID from the corresponding prompt file
@@ -116,7 +116,7 @@ export interface PersistPromptResult {
  * Job status for background execution tracking
  */
 export interface JobStatus {
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'copilot';
   jobId: string;
   slug: string;
   status: 'spawned' | 'running' | 'completed' | 'failed' | 'timeout';
@@ -137,7 +137,7 @@ export interface JobStatus {
  * Metadata passed to background execution functions
  */
 export interface BackgroundJobMeta {
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'copilot';
   jobId: string;
   slug: string;
   agentRole: string;
@@ -239,7 +239,7 @@ export function persistPrompt(options: PersistPromptOptions): PersistPromptResul
  * @param workingDirectory - Optional working directory
  * @returns The expected file path for the response
  */
-export function getExpectedResponsePath(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): string {
+export function getExpectedResponsePath(provider: 'codex' | 'gemini' | 'copilot', slug: string, promptId: string, workingDirectory?: string): string {
   const promptsDir = getPromptsDir(workingDirectory);
   const filename = `${provider}-response-${slug}-${promptId}.md`;
   return join(promptsDir, filename);
@@ -276,7 +276,7 @@ export function persistResponse(options: PersistResponseOptions): string | undef
 /**
  * Get the status file path for a background job
  */
-export function getStatusFilePath(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): string {
+export function getStatusFilePath(provider: 'codex' | 'gemini' | 'copilot', slug: string, promptId: string, workingDirectory?: string): string {
   const promptsDir = getPromptsDir(workingDirectory);
   return join(promptsDir, `${provider}-status-${slug}-${promptId}.json`);
 }
@@ -302,7 +302,7 @@ export function writeJobStatus(status: JobStatus, workingDirectory?: string): vo
 /**
  * Read job status from disk
  */
-export function readJobStatus(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): JobStatus | undefined {
+export function readJobStatus(provider: 'codex' | 'gemini' | 'copilot', slug: string, promptId: string, workingDirectory?: string): JobStatus | undefined {
   const statusPath = getStatusFilePath(provider, slug, promptId, workingDirectory);
   if (!existsSync(statusPath)) {
     return undefined;
@@ -319,7 +319,7 @@ export function readJobStatus(provider: 'codex' | 'gemini', slug: string, prompt
  * Check if a background job's response is ready
  */
 export function checkResponseReady(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   slug: string,
   promptId: string,
   workingDirectory?: string
@@ -334,7 +334,7 @@ export function checkResponseReady(
  * Read a completed response, stripping YAML frontmatter
  */
 export function readCompletedResponse(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   slug: string,
   promptId: string,
   workingDirectory?: string
@@ -364,7 +364,7 @@ export function readCompletedResponse(
 /**
  * List all active (spawned or running) background jobs
  */
-export function listActiveJobs(provider?: 'codex' | 'gemini', workingDirectory?: string): JobStatus[] {
+export function listActiveJobs(provider?: 'codex' | 'gemini' | 'copilot', workingDirectory?: string): JobStatus[] {
   const promptsDir = getPromptsDir(workingDirectory);
   if (!existsSync(promptsDir)) {
     return [];

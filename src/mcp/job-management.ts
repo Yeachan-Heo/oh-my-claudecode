@@ -56,7 +56,7 @@ function textResult(text: string, isError = false): { content: Array<{ type: 'te
  * - Many matches: prefers non-terminal (active) status, then newest spawnedAt
  */
 export function findJobStatusFile(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   jobId: string,
 ): { statusPath: string; slug: string } | undefined {
   // Validate jobId format: must be 8-char hex (from generatePromptId)
@@ -135,7 +135,7 @@ export function findJobStatusFile(
  * For non-blocking checks, use handleCheckJobStatus instead.
  */
 export async function handleWaitForJob(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   jobId: string,
   timeoutMs: number = 3600000,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
@@ -207,7 +207,7 @@ export async function handleWaitForJob(
  * check_job_status - non-blocking status check
  */
 export async function handleCheckJobStatus(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   jobId: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
   if (!jobId || typeof jobId !== 'string') {
@@ -249,7 +249,7 @@ export async function handleCheckJobStatus(
  * kill_job - send a signal to a running background job
  */
 export async function handleKillJob(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   jobId: string,
   signal: string = 'SIGTERM',
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
@@ -384,7 +384,7 @@ export async function handleKillJob(
  * Provider is hardcoded per-server (passed as first arg).
  */
 export async function handleListJobs(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'copilot',
   statusFilter: 'active' | 'completed' | 'failed' | 'all' = 'active',
   limit: number = 50,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
@@ -472,7 +472,7 @@ export async function handleListJobs(
 // ---------------------------------------------------------------------------
 
 // TODO: _provider parameter reserved for future per-provider schema customization
-export function getJobManagementToolSchemas(_provider?: 'codex' | 'gemini') {
+export function getJobManagementToolSchemas(_provider?: 'codex' | 'gemini' | 'copilot') {
   return [
     {
       name: 'wait_for_job',

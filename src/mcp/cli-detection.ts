@@ -18,6 +18,7 @@ export interface CliDetectionResult {
 // Session-level cache for detection results
 let codexCache: CliDetectionResult | null = null;
 let geminiCache: CliDetectionResult | null = null;
+let copilotCache: CliDetectionResult | null = null;
 
 /**
  * Detect if Codex CLI is installed and available
@@ -84,9 +85,42 @@ export function detectGeminiCli(useCache = true): CliDetectionResult {
 }
 
 /**
+ * Detect if GitHub Copilot CLI is installed and available
+ */
+export function detectCopilotCli(useCache = true): CliDetectionResult {
+  if (useCache && copilotCache) return copilotCache;
+
+  const installHint = 'Install Copilot CLI: see https://github.com/github/copilot-cli';
+
+  try {
+    const cmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
+    const cliPath = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
+    let version: string | undefined;
+    try {
+      version = execSync('copilot --version', { encoding: 'utf-8', timeout: 5000 }).trim();
+    } catch {
+      // Version check is optional
+    }
+
+    const result: CliDetectionResult = { available: true, path: cliPath, version, installHint };
+    copilotCache = result;
+    return result;
+  } catch {
+    const result: CliDetectionResult = {
+      available: false,
+      error: 'Copilot CLI not found on PATH',
+      installHint
+    };
+    copilotCache = result;
+    return result;
+  }
+}
+
+/**
  * Reset detection cache (useful for testing)
  */
 export function resetDetectionCache(): void {
   codexCache = null;
   geminiCache = null;
+  copilotCache = null;
 }
