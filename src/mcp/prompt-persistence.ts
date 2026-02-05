@@ -130,6 +130,7 @@ export interface JobStatus {
   error?: string;
   usedFallback?: boolean;
   fallbackModel?: string;
+  killedByUser?: boolean;
 }
 
 /**

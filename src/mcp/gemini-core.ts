@@ -19,7 +19,7 @@ import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { detectGeminiCli } from './cli-detection.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext } from './prompt-injection.js';
 import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
-import { writeJobStatus, getStatusFilePath } from './prompt-persistence.js';
+import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
 
 // Default model can be overridden via environment variable
@@ -194,6 +194,12 @@ export function executeGeminiBackground(
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
+
+      // Check if user killed this job - if so, don't overwrite the killed status
+      const currentStatus = readJobStatus('gemini', jobMeta.slug, jobMeta.jobId);
+      if (currentStatus?.killedByUser) {
+        return; // Status already set by kill_job, don't overwrite
+      }
 
       if (code === 0 || stdout.trim()) {
         persistResponse({
