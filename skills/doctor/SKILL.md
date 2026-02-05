@@ -50,10 +50,14 @@ ls -la ~/.claude/hooks/*.sh 2>/dev/null
 ```bash
 # Check if CLAUDE.md exists
 ls -la ~/.claude/CLAUDE.md 2>/dev/null
-
-# Check for OMC marker
-grep -q "oh-my-claudecode Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config"
 ```
+
+```bash
+# Check for OMC marker
+grep -c "oh-my-claudecode Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null
+```
+
+If the grep count is 0 or errors: "Missing OMC config". If 1 or more: "Has OMC config".
 
 **Diagnosis**:
 - If missing: CRITICAL - CLAUDE.md not configured
@@ -68,6 +72,20 @@ ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | wc -l
 
 **Diagnosis**:
 - If > 1 version: WARN - multiple cached versions (cleanup recommended)
+
+### Step 5b: Check Version Pinning (Important for Upgrades)
+
+Check the installed_plugins.json to see pinned version:
+```bash
+cat ~/.claude/installed_plugins.json 2>/dev/null
+```
+
+Or read the file directly and look for `oh-my-claudecode` entry.
+
+**Diagnosis**:
+- Compare pinned version with latest from npm (Step 1)
+- If pinned version != latest: WARN - version is pinned to old version
+- This is why cache clearing doesn't upgrade - the version is pinned!
 
 ### Step 6: Check for Legacy Curl-Installed Content
 
@@ -147,16 +165,41 @@ rm -f ~/.claude/hooks/stop-continuation.sh
 ```
 
 ### Fix: Outdated Plugin
+
+**IMPORTANT**: Simply clearing the cache does NOT work because Claude Code pins the version in `installed_plugins.json`. Use the proper upgrade method:
+
+**Recommended Fix (use Claude Code's plugin system):**
+Tell the user to run:
+```
+/plugin install oh-my-claudecode
+```
+
+This properly updates both the cache AND the version pin.
+
+**Alternative (manual):**
+1. First, tell user to check their installed plugins config:
 ```bash
-rm -rf ~/.claude/plugins/cache/oh-my-claudecode
-echo "Plugin cache cleared. Restart Claude Code to fetch latest version."
+cat ~/.claude/installed_plugins.json 2>/dev/null
+```
+
+2. The version is pinned there. To upgrade, user should use `/plugin install oh-my-claudecode` which will update the pin.
+
+**DO NOT** just clear the cache - it will re-download the old pinned version:
+```bash
+# This alone does NOT work - version is pinned!
+# rm -rf ~/.claude/plugins/cache/omc/oh-my-claudecode
 ```
 
 ### Fix: Stale Cache (multiple versions)
+
+List all versions, then remove all except the latest:
 ```bash
-# Keep only latest version
-cd ~/.claude/plugins/cache/omc/oh-my-claudecode/
-ls | sort -V | head -n -1 | xargs rm -rf
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V
+```
+
+Then remove old versions individually (keep the latest):
+```bash
+rm -rf ~/.claude/plugins/cache/omc/oh-my-claudecode/OLD_VERSION
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
@@ -182,6 +225,27 @@ rm -rf ~/.claude/skills
 ```
 
 **Note**: Only remove if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before removing.
+
+### Fix: Persistent HUD After Disabling Plugin
+
+If user reports that the HUD statusline persists after disabling the plugin, clean up manually:
+
+1. Remove the HUD script:
+```bash
+rm -f ~/.claude/hud/omc-hud.mjs
+```
+
+2. Remove statusLine from settings.json:
+Read `~/.claude/settings.json`, find the `"statusLine"` key, and remove it if it contains `omc-hud`.
+
+Example (use Edit tool to modify settings.json):
+- Find: `"statusLine": { "type": "command", "command": "node /path/to/omc-hud.mjs" }`
+- Remove the entire `statusLine` object
+
+3. Optionally remove omcHud config:
+Find and remove the `"omcHud"` key from settings.json if present.
+
+**Note**: After cleanup, restart Claude Code for changes to take effect.
 
 ---
 

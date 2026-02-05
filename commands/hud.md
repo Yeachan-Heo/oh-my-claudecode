@@ -36,20 +36,23 @@ ls ~/.claude/hud/omc-hud.mjs 2>/dev/null && echo "EXISTS" || echo "MISSING"
 
 **Step 2:** Check if the plugin is built (CRITICAL - common issue!):
 ```bash
-# Find the latest version and check if dist/hud/index.js exists
-PLUGIN_VERSION=$(ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1)
-if [ -n "$PLUGIN_VERSION" ]; then
-  ls ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
-fi
+# Find the latest installed version
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1
+```
+
+Take note of the version printed above (e.g. `4.0.2`), then check if `dist/hud/index.js` exists for that version:
+```bash
+# Replace VERSION with the version from Step 2 above
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
 ```
 
 **⚠️ CRITICAL: If NOT_BUILT, the plugin MUST be compiled before the HUD can work!**
 
 **WHY THIS HAPPENS:** The `dist/` directory contains compiled TypeScript code and is NOT stored on GitHub (it's in .gitignore). When you install the plugin from the marketplace, the build step happens automatically via the `prepare` script during `npm install`. However, if the plugin wasn't properly installed or the build failed, you'll get this error.
 
-**THE FIX:** Run npm install in the plugin directory to build it:
+**THE FIX:** Run npm install in the plugin directory to build it (replace VERSION with the actual version):
 ```bash
-cd ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION && npm install
+cd ~/.claude/plugins/cache/omc/oh-my-claudecode/VERSION && npm install
 ```
 
 This will:

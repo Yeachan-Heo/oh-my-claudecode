@@ -3,6 +3,15 @@ name: learn-about-omc
 description: Analyze your OMC usage patterns and get personalized recommendations
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
+1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-learn.sh`)
+2. Use the **Bash tool** to execute: `bash /tmp/omc-learn.sh`
+3. Clean up: `rm -f /tmp/omc-learn.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # Learn About OMC
 
 Analyzes your oh-my-claudecode usage and provides tailored recommendations to improve your workflow.

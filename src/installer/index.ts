@@ -38,7 +38,7 @@ export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CORE_COMMANDS: string[] = [];
 
 /** Current version */
-export const VERSION = '3.10.3';
+export const VERSION = '4.0.3';
 
 /**
  * Find a marker that appears at the start of a line (line-anchored).
@@ -750,5 +750,183 @@ export function getInstallInfo(): { version: string; installedAt: string; method
     };
   } catch {
     return null;
+  }
+}
+
+/** Uninstall options */
+export interface UninstallOptions {
+  verbose?: boolean;
+  keepConfig?: boolean;  // Keep settings.json modifications (just remove HUD)
+}
+
+/** Uninstall result */
+export interface UninstallResult {
+  success: boolean;
+  message: string;
+  removedFiles: string[];
+  errors: string[];
+}
+
+/**
+ * Uninstall/cleanup OMC components.
+ * This is useful when users want to disable the plugin completely.
+ *
+ * Removes:
+ * - HUD script (~/.claude/hud/omc-hud.mjs)
+ * - statusLine configuration from settings.json
+ * - omcHud configuration from settings.json
+ * - OMC hooks from settings.json (unless keepConfig is true)
+ *
+ * Does NOT remove (by design):
+ * - Plugin cache (managed by Claude Code)
+ * - .omc/ directories (user data)
+ * - CLAUDE.md (may contain user customizations)
+ */
+export function uninstall(options: UninstallOptions = {}): UninstallResult {
+  const result: UninstallResult = {
+    success: false,
+    message: '',
+    removedFiles: [],
+    errors: []
+  };
+
+  const log = (msg: string) => {
+    if (options.verbose) {
+      console.log(msg);
+    }
+  };
+
+  try {
+    // 1. Remove HUD script
+    const hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
+    if (existsSync(hudScriptPath)) {
+      const { unlinkSync } = require('fs');
+      unlinkSync(hudScriptPath);
+      result.removedFiles.push(hudScriptPath);
+      log(`Removed HUD script: ${hudScriptPath}`);
+    }
+
+    // 2. Update settings.json
+    if (existsSync(SETTINGS_FILE)) {
+      const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
+      const settings = JSON.parse(settingsContent) as Record<string, unknown>;
+      let modified = false;
+
+      // Remove statusLine if it's the OMC HUD
+      if (settings.statusLine) {
+        const statusLine = settings.statusLine as { type?: string; command?: string };
+        if (statusLine.command && statusLine.command.includes('omc-hud')) {
+          delete settings.statusLine;
+          modified = true;
+          log('Removed statusLine from settings.json');
+        }
+      }
+
+      // Remove omcHud config
+      if (settings.omcHud) {
+        delete settings.omcHud;
+        modified = true;
+        log('Removed omcHud config from settings.json');
+      }
+
+      // Remove OMC hooks (unless keepConfig is true)
+      if (!options.keepConfig && settings.hooks) {
+        const hooks = settings.hooks as Record<string, unknown>;
+        let hooksModified = false;
+
+        for (const [eventType, eventHooks] of Object.entries(hooks)) {
+          if (Array.isArray(eventHooks)) {
+            const filtered = eventHooks.filter((hookGroup: { hooks?: Array<{ command?: string }> }) => {
+              if (!hookGroup.hooks) return true;
+              // Keep hook groups that don't contain OMC hooks
+              return !hookGroup.hooks.some((hook: { command?: string }) =>
+                hook.command && isOmcHook(hook.command)
+              );
+            });
+
+            if (filtered.length !== eventHooks.length) {
+              if (filtered.length === 0) {
+                delete hooks[eventType];
+              } else {
+                hooks[eventType] = filtered;
+              }
+              hooksModified = true;
+            }
+          }
+        }
+
+        if (hooksModified) {
+          // If all hooks removed, delete hooks key entirely
+          if (Object.keys(hooks).length === 0) {
+            delete settings.hooks;
+          }
+          modified = true;
+          log('Removed OMC hooks from settings.json');
+        }
+      }
+
+      // Write back if modified
+      if (modified) {
+        writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+        log('Updated settings.json');
+      }
+    }
+
+    // 3. Remove version metadata
+    if (existsSync(VERSION_FILE)) {
+      const { unlinkSync } = require('fs');
+      unlinkSync(VERSION_FILE);
+      result.removedFiles.push(VERSION_FILE);
+      log(`Removed version file: ${VERSION_FILE}`);
+    }
+
+    result.success = true;
+    result.message = 'OMC uninstalled successfully. Restart Claude Code for changes to take effect.';
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    result.errors.push(errorMessage);
+    result.message = `Uninstall failed: ${errorMessage}`;
+  }
+
+  return result;
+}
+
+/**
+ * Clean up HUD-specific components only.
+ * Use this when disabling just the HUD statusline.
+ */
+export function cleanupHud(): { success: boolean; message: string } {
+  try {
+    // Remove HUD script
+    const hudScriptPath = join(HUD_DIR, 'omc-hud.mjs');
+    if (existsSync(hudScriptPath)) {
+      const { unlinkSync } = require('fs');
+      unlinkSync(hudScriptPath);
+    }
+
+    // Remove statusLine from settings.json
+    if (existsSync(SETTINGS_FILE)) {
+      const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
+      const settings = JSON.parse(settingsContent) as Record<string, unknown>;
+
+      if (settings.statusLine) {
+        const statusLine = settings.statusLine as { command?: string };
+        if (statusLine.command && statusLine.command.includes('omc-hud')) {
+          delete settings.statusLine;
+          writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: 'HUD cleanup complete. Restart Claude Code for changes to take effect.'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `HUD cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+    };
   }
 }

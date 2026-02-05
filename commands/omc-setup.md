@@ -2,6 +2,15 @@
 description: One-time setup for oh-my-claudecode (the ONLY command you need to learn)
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
+1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-setup-script.sh`)
+2. Use the **Bash tool** to execute: `bash /tmp/omc-setup-script.sh`
+3. Clean up: `rm -f /tmp/omc-setup-script.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # OMC Setup
 
 This is the **only command you need to learn**. After running this, everything else is automatic.
@@ -123,37 +132,19 @@ Check if the plugin is installed and built:
 
 ```bash
 # Find the installed plugin version
-PLUGIN_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode"
-if [ -d "$PLUGIN_DIR" ]; then
-  PLUGIN_VERSION=$(ls "$PLUGIN_DIR" 2>/dev/null | sort -V | tail -1)
-  if [ -n "$PLUGIN_VERSION" ]; then
-    # Check if dist/hud/index.js exists
-    if [ ! -f "$PLUGIN_DIR/$PLUGIN_VERSION/dist/hud/index.js" ]; then
-      echo "Plugin not built - building now..."
-      cd "$PLUGIN_DIR/$PLUGIN_VERSION"
-      # Use bun (preferred) or npm for building
-      if command -v bun &> /dev/null; then
-        bun install
-      elif command -v npm &> /dev/null; then
-        npm install
-      else
-        echo "ERROR: Neither bun nor npm found. Please install Node.js or Bun first."
-        exit 1
-      fi
-      if [ -f "dist/hud/index.js" ]; then
-        echo "Build successful - HUD is ready"
-      else
-        echo "Build failed - HUD may not work correctly"
-      fi
-    else
-      echo "Plugin already built - HUD is ready"
-    fi
-  else
-    echo "Plugin version not found"
-  fi
-else
-  echo "Plugin not installed - install with: claude /install-plugin oh-my-claudecode"
-fi
+ls "$HOME/.claude/plugins/cache/omc/oh-my-claudecode" 2>/dev/null | sort -V | tail -1
+```
+
+Take note of the VERSION printed above, then check if dist/hud/index.js exists:
+
+```bash
+# Replace VERSION with the version from above
+ls "$HOME/.claude/plugins/cache/omc/oh-my-claudecode/VERSION/dist/hud/index.js" 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
+```
+
+```bash
+# If NOT_BUILT, replace VERSION with the actual version and run:
+cd "$HOME/.claude/plugins/cache/omc/oh-my-claudecode/VERSION" && npm install
 ```
 
 **Note:** The `npm install` command triggers the `prepare` script which runs `npm run build`, creating the dist/ directory with all compiled HUD files.
@@ -205,8 +196,10 @@ Skip this step. User can install later with `bun install -g oh-my-claude-sisyphu
 ## Step 4: Verify Plugin Installation
 
 ```bash
-grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+grep -c "oh-my-claudecode" ~/.claude/settings.json 2>/dev/null
 ```
+
+If the count is 0 or errors: Plugin NOT found - run: `claude /install-plugin oh-my-claudecode`. If 1 or more: Plugin verified.
 
 ## Step 4.5: Install AST Tools (Optional)
 

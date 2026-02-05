@@ -14367,7 +14367,9 @@ async function handleAskCodex(args) {
   let userPrompt = resolvedPrompt;
   if (args.output_file) {
     const outputPath = (0, import_path4.resolve)(baseDir, args.output_file);
-    userPrompt = `IMPORTANT: Write your complete response to the file: ${outputPath}
+    userPrompt = `IMPORTANT: After completing the task, write a WORK SUMMARY to: ${outputPath}
+Include: what was done, files modified/created, key decisions made, and any issues encountered.
+The summary is for the orchestrator to understand what changed - actual work products should be created directly.
 
 ${resolvedPrompt}`;
   }

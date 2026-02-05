@@ -123,22 +123,41 @@ interface GitFileStat {
 }
 
 /**
- * Check if a file path is allowed for direct orchestrator modification
+ * Normalize path for cross-platform compatibility.
+ * Converts Windows backslashes to forward slashes.
+ */
+function normalizePathSeparators(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
+/**
+ * Check if a file path is allowed for direct orchestrator modification.
+ * Handles both Unix (/) and Windows (\) path separators.
  */
 export function isAllowedPath(filePath: string, directory?: string): boolean {
   if (!filePath) return true;
+
+  // Normalize path separators for cross-platform compatibility (Windows uses \)
+  const normalizedPath = normalizePathSeparators(filePath);
+
   // Fast path: check relative patterns first
-  if (ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(filePath))) return true;
+  if (ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(normalizedPath))) return true;
+
   // Absolute path: normalize to relative by stripping worktree root
-  if (filePath.startsWith('/')) {
+  // Check both Unix-style (/) and Windows-style (C:\ or D:\) absolute paths
+  const isAbsolute = normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
+  if (isAbsolute) {
     const root = directory ? getWorktreeRoot(directory) : getWorktreeRoot();
-    if (root && filePath.startsWith(root + '/')) {
-      const relative = filePath.slice(root.length + 1);
-      return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(relative));
-    }
-    // If path is exactly the root, also check patterns
-    if (root && filePath === root) {
-      return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(''));
+    if (root) {
+      const normalizedRoot = normalizePathSeparators(root);
+      if (normalizedPath.startsWith(normalizedRoot + '/')) {
+        const relative = normalizedPath.slice(normalizedRoot.length + 1);
+        return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(relative));
+      }
+      // If path is exactly the root, also check patterns
+      if (normalizedPath === normalizedRoot) {
+        return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(''));
+      }
     }
   }
   return false;

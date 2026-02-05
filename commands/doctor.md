@@ -49,10 +49,14 @@ ls -la ~/.claude/hooks/*.sh 2>/dev/null
 ```bash
 # Check if CLAUDE.md exists
 ls -la ~/.claude/CLAUDE.md 2>/dev/null
-
-# Check for OMC marker
-grep -q "oh-my-claudecode Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config"
 ```
+
+```bash
+# Check for OMC marker
+grep -c "oh-my-claudecode Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null
+```
+
+If the grep count is 0 or errors: "Missing OMC config". If 1 or more: "Has OMC config".
 
 **Diagnosis**:
 - If missing: CRITICAL - CLAUDE.md not configured
@@ -152,10 +156,15 @@ echo "Plugin cache cleared. Restart Claude Code to fetch latest version."
 ```
 
 ### Fix: Stale Cache (multiple versions)
+
+List all versions, then remove all except the latest:
 ```bash
-# Keep only latest version
-cd ~/.claude/plugins/cache/omc/oh-my-claudecode/
-ls | sort -V | head -n -1 | xargs rm -rf
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V
+```
+
+Then remove old versions individually (keep the latest):
+```bash
+rm -rf ~/.claude/plugins/cache/omc/oh-my-claudecode/OLD_VERSION
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md

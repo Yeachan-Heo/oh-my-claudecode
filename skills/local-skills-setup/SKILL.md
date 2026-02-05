@@ -4,6 +4,15 @@ description: Set up and manage local skills for automatic matching and invocatio
 argument-hint: "[list|add|scan]"
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
+1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-skills-setup.sh`)
+2. Use the **Bash tool** to execute: `bash /tmp/omc-skills-setup.sh`
+3. Clean up: `rm -f /tmp/omc-skills-setup.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # Local Skills Setup
 
 This skill provides a guided wizard for setting up and managing your local learned skills. Skills are reusable problem-solving patterns that Claude automatically applies when it detects matching triggers.

@@ -4,6 +4,15 @@ description: Manage isolated dev environments with git worktrees and tmux sessio
 aliases: [psm]
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
+1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-psm.sh`)
+2. Use the **Bash tool** to execute: `bash /tmp/omc-psm.sh`
+3. Clean up: `rm -f /tmp/omc-psm.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # Project Session Manager (PSM) Skill
 
 > **Quick Start:** For simple worktree creation without tmux sessions, use `omc teleport`:

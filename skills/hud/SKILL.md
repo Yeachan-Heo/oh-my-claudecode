@@ -19,6 +19,7 @@ Configure the OMC HUD (Heads-Up Display) for the statusline.
 | `/oh-my-claudecode:hud focused` | Switch to focused display (default) |
 | `/oh-my-claudecode:hud full` | Switch to full display |
 | `/oh-my-claudecode:hud status` | Show detailed HUD status |
+| `/oh-my-claudecode:hud disable` | Disable and clean up HUD completely |
 
 ## Auto-Setup
 
@@ -39,20 +40,23 @@ ls ~/.claude/hud/omc-hud.mjs 2>/dev/null && echo "EXISTS" || echo "MISSING"
 
 **Step 2:** Check if the plugin is built (CRITICAL - common issue!):
 ```bash
-# Find the latest version and check if dist/hud/index.js exists
-PLUGIN_VERSION=$(ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1)
-if [ -n "$PLUGIN_VERSION" ]; then
-  ls ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
-fi
+# Find the latest installed version
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1
+```
+
+Take note of the version printed above (e.g. `4.0.2`), then check if `dist/hud/index.js` exists for that version:
+```bash
+# Replace VERSION with the version from Step 2 above
+ls ~/.claude/plugins/cache/omc/oh-my-claudecode/VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
 ```
 
 **⚠️ CRITICAL: If NOT_BUILT, the plugin MUST be compiled before the HUD can work!**
 
 **WHY THIS HAPPENS:** The `dist/` directory contains compiled TypeScript code and is NOT stored on GitHub (it's in .gitignore). When you install the plugin from the marketplace, the build step happens automatically via the `prepare` script during `npm install`. However, if the plugin wasn't properly installed or the build failed, you'll get this error.
 
-**THE FIX:** Run npm install in the plugin directory to build it:
+**THE FIX:** Run npm install in the plugin directory to build it (replace VERSION with the actual version):
 ```bash
-cd ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION && npm install
+cd ~/.claude/plugins/cache/omc/oh-my-claudecode/VERSION && npm install
 ```
 
 This will:
@@ -289,6 +293,38 @@ If the HUD is not showing:
 Manual verification:
 - HUD script: `~/.claude/hud/omc-hud.mjs`
 - Settings: `~/.claude/settings.json` should have `statusLine` configured
+
+---
+
+## Disabling the HUD
+
+If the argument is `disable`, perform a complete HUD cleanup:
+
+**Step 1:** Remove the HUD script:
+```bash
+rm -f ~/.claude/hud/omc-hud.mjs
+```
+
+**Step 2:** Remove `statusLine` from settings.json:
+
+Read `~/.claude/settings.json` and use the Edit tool to remove the `statusLine` key entirely if it contains `omc-hud`.
+
+Example - find and remove:
+```json
+"statusLine": {
+  "type": "command",
+  "command": "node /path/to/.claude/hud/omc-hud.mjs"
+}
+```
+
+**Step 3:** Optionally remove `omcHud` config:
+
+If present in settings.json, also remove the `omcHud` key to clean up all HUD configuration.
+
+**Step 4:** Inform user:
+> HUD disabled. Restart Claude Code for changes to take effect.
+
+**Note:** This does NOT remove the plugin itself - only the HUD statusline. The plugin's agents and skills will still work. To completely uninstall OMC, use `/oh-my-claudecode:doctor` and follow the uninstall instructions.
 
 ---
 

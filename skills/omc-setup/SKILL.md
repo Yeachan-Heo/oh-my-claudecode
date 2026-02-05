@@ -3,6 +3,15 @@ name: omc-setup
 description: Setup and configure oh-my-claudecode (the ONLY command you need to learn)
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: Bash scripts in this template that contain `$(...)` command substitution MUST be executed using a temp file approach to avoid escaping issues:
+1. Use the **Write tool** to save the script content to a temporary file (e.g., `/tmp/omc-setup-script.sh`)
+2. Use the **Bash tool** to execute: `bash /tmp/omc-setup-script.sh`
+3. Clean up: `rm -f /tmp/omc-setup-script.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # OMC Setup
 
 This is the **only command you need to learn**. After running this, everything else is automatic.
@@ -294,8 +303,10 @@ https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.
 ### Verify Plugin Installation
 
 ```bash
-grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+grep -c "oh-my-claudecode" ~/.claude/settings.json 2>/dev/null
 ```
+
+If the count is 0 or errors: Plugin NOT found - run: `claude /install-plugin oh-my-claudecode`. If 1 or more: Plugin verified.
 
 ### Confirm Local Configuration Success
 
@@ -442,8 +453,10 @@ Check `~/.claude/settings.json` for manual hook entries. If the "hooks" key exis
 ### Verify Plugin Installation
 
 ```bash
-grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+grep -c "oh-my-claudecode" ~/.claude/settings.json 2>/dev/null
 ```
+
+If the count is 0 or errors: Plugin NOT found - run: `claude /install-plugin oh-my-claudecode`. If 1 or more: Plugin verified.
 
 ### Confirm Global Configuration Success
 
@@ -696,8 +709,10 @@ echo "Task tool set to: USER_CHOICE"
 ## Step 4: Verify Plugin Installation
 
 ```bash
-grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+grep -c "oh-my-claudecode" ~/.claude/settings.json 2>/dev/null
 ```
+
+If the count is 0 or errors: Plugin NOT found - run: `claude /install-plugin oh-my-claudecode`. If 1 or more: Plugin verified.
 
 ## Step 5: Offer MCP Server Configuration
 

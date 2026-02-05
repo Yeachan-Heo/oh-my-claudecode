@@ -3,6 +3,15 @@ name: cancel
 description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ecomode, ultraqa, swarm, ultrapilot, pipeline)
 ---
 
+## Cross-Platform Compatibility
+
+**IMPORTANT (Windows Git Bash)**: The bash scripts in this skill contain `$(...)` command substitution which fails on Windows. To execute them:
+1. Use the **Write tool** to save the script content to `/tmp/omc-cancel.sh`
+2. Use the **Bash tool** to execute: `bash /tmp/omc-cancel.sh`
+3. Clean up: `rm -f /tmp/omc-cancel.sh`
+
+Do NOT paste scripts containing `$(...)` directly into the Bash tool command parameter.
+
 # Cancel Skill
 
 Intelligent cancellation that detects and cancels the active OMC mode.

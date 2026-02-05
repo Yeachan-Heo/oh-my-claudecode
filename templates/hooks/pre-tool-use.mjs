@@ -35,9 +35,19 @@ const SOURCE_EXTENSIONS = new Set([
   '.sh', '.bash', '.zsh',
 ]);
 
+/**
+ * Normalize path for cross-platform compatibility.
+ * Converts Windows backslashes to forward slashes.
+ */
+function normalizePathSeparators(filePath) {
+  return filePath.replace(/\\/g, '/');
+}
+
 function isAllowedPath(filePath) {
   if (!filePath) return true;
-  return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(filePath));
+  // Normalize path separators for cross-platform compatibility (Windows uses \)
+  const normalizedPath = normalizePathSeparators(filePath);
+  return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(normalizedPath));
 }
 
 function isSourceFile(filePath) {
