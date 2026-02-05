@@ -182,11 +182,15 @@ export function readHudConfig(): HudConfig {
  * Merge partial config with defaults
  */
 function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
+  const preset = config.preset ?? DEFAULT_HUD_CONFIG.preset;
+  const presetElements = PRESET_CONFIGS[preset] ?? {};
+
   return {
-    preset: config.preset ?? DEFAULT_HUD_CONFIG.preset,
+    preset,
     elements: {
-      ...DEFAULT_HUD_CONFIG.elements,
-      ...config.elements,
+      ...DEFAULT_HUD_CONFIG.elements,  // Base defaults
+      ...presetElements,                // Preset overrides
+      ...config.elements,               // User overrides
     },
     thresholds: {
       ...DEFAULT_HUD_CONFIG.thresholds,

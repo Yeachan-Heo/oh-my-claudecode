@@ -269,6 +269,11 @@ export interface HudElementConfig {
   thinking: boolean;          // Show extended thinking indicator
   thinkingFormat: ThinkingFormat;  // Thinking indicator format
   sessionHealth: boolean;     // Show session health/duration
+  showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
+  showHealthIndicator?: boolean;  // Show 🟢/🟡/🔴 health indicator (default: true if sessionHealth is true)
+  showTokens?: boolean;           // Show token count like 79.3k (default: true if sessionHealth is true)
+  showCostPerHour?: boolean;      // Show $X.XX/h cost per hour (default: true if sessionHealth is true)
+  showBudgetWarning?: boolean;    // Show ⚡ Budget notice warning (default: true if sessionHealth is true)
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
   showCache: boolean;         // Show cache hit rate in analytics displays
   showCost: boolean;          // Show cost/dollar amounts in analytics displays
@@ -319,6 +324,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     thinking: true,
     thinkingFormat: 'text',   // Text format for backward compatibility
     sessionHealth: true,
+    // showSessionDuration, showCostPerHour, showBudgetWarning: undefined = default to true
     useBars: false,  // Disabled by default for backwards compatibility
     showCache: true,
     showCost: true,
