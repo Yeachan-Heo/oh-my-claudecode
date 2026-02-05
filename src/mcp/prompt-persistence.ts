@@ -301,8 +301,8 @@ export function writeJobStatus(status: JobStatus, workingDirectory?: string): vo
 /**
  * Read job status from disk
  */
-export function readJobStatus(provider: 'codex' | 'gemini', slug: string, promptId: string): JobStatus | undefined {
-  const statusPath = getStatusFilePath(provider, slug, promptId);
+export function readJobStatus(provider: 'codex' | 'gemini', slug: string, promptId: string, workingDirectory?: string): JobStatus | undefined {
+  const statusPath = getStatusFilePath(provider, slug, promptId, workingDirectory);
   if (!existsSync(statusPath)) {
     return undefined;
   }
@@ -320,11 +320,12 @@ export function readJobStatus(provider: 'codex' | 'gemini', slug: string, prompt
 export function checkResponseReady(
   provider: 'codex' | 'gemini',
   slug: string,
-  promptId: string
+  promptId: string,
+  workingDirectory?: string
 ): { ready: boolean; responsePath: string; status?: JobStatus } {
-  const responsePath = getExpectedResponsePath(provider, slug, promptId);
+  const responsePath = getExpectedResponsePath(provider, slug, promptId, workingDirectory);
   const ready = existsSync(responsePath);
-  const status = readJobStatus(provider, slug, promptId);
+  const status = readJobStatus(provider, slug, promptId, workingDirectory);
   return { ready, responsePath, status };
 }
 
@@ -334,14 +335,15 @@ export function checkResponseReady(
 export function readCompletedResponse(
   provider: 'codex' | 'gemini',
   slug: string,
-  promptId: string
+  promptId: string,
+  workingDirectory?: string
 ): { response: string; status: JobStatus } | undefined {
-  const responsePath = getExpectedResponsePath(provider, slug, promptId);
+  const responsePath = getExpectedResponsePath(provider, slug, promptId, workingDirectory);
   if (!existsSync(responsePath)) {
     return undefined;
   }
 
-  const status = readJobStatus(provider, slug, promptId);
+  const status = readJobStatus(provider, slug, promptId, workingDirectory);
   if (!status) {
     return undefined;
   }
@@ -361,8 +363,8 @@ export function readCompletedResponse(
 /**
  * List all active (spawned or running) background jobs
  */
-export function listActiveJobs(provider?: 'codex' | 'gemini'): JobStatus[] {
-  const promptsDir = getPromptsDir();
+export function listActiveJobs(provider?: 'codex' | 'gemini', workingDirectory?: string): JobStatus[] {
+  const promptsDir = getPromptsDir(workingDirectory);
   if (!existsSync(promptsDir)) {
     return [];
   }
@@ -399,8 +401,8 @@ export function listActiveJobs(provider?: 'codex' | 'gemini'): JobStatus[] {
 /**
  * Mark stale background jobs (older than maxAgeMs) as timed out
  */
-export function cleanupStaleJobs(maxAgeMs: number): number {
-  const promptsDir = getPromptsDir();
+export function cleanupStaleJobs(maxAgeMs: number, workingDirectory?: string): number {
+  const promptsDir = getPromptsDir(workingDirectory);
   if (!existsSync(promptsDir)) {
     return 0;
   }
@@ -424,7 +426,7 @@ export function cleanupStaleJobs(maxAgeMs: number): number {
             status.status = 'timeout';
             status.completedAt = new Date().toISOString();
             status.error = 'Job exceeded maximum age and was marked stale';
-            writeJobStatus(status);
+            writeJobStatus(status, workingDirectory);
             cleanedCount++;
           }
         }

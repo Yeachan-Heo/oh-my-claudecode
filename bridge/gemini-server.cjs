@@ -13716,18 +13716,41 @@ var import_child_process3 = require("child_process");
 var import_fs4 = require("fs");
 var import_path4 = require("path");
 
-// src/mcp/cli-detection.ts
+// src/lib/worktree-paths.ts
 var import_child_process = require("child_process");
+var import_fs = require("fs");
+var import_path = require("path");
+var worktreeCache = null;
+function getWorktreeRoot(cwd) {
+  const effectiveCwd = cwd || process.cwd();
+  if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
+    return worktreeCache.root;
+  }
+  try {
+    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
+      cwd: effectiveCwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    worktreeCache = { cwd: effectiveCwd, root };
+    return root;
+  } catch {
+    return effectiveCwd;
+  }
+}
+
+// src/mcp/cli-detection.ts
+var import_child_process2 = require("child_process");
 var geminiCache = null;
 function detectGeminiCli(useCache = true) {
   if (useCache && geminiCache) return geminiCache;
   const installHint = "Install Gemini CLI: npm install -g @google/gemini-cli (see https://github.com/google-gemini/gemini-cli)";
   try {
     const command = process.platform === "win32" ? "where gemini" : "which gemini";
-    const path = (0, import_child_process.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
+    const path = (0, import_child_process2.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
     let version2;
     try {
-      version2 = (0, import_child_process.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
+      version2 = (0, import_child_process2.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
     } catch {
     }
     const result = { available: true, path, version: version2, installHint };
@@ -13745,29 +13768,29 @@ function detectGeminiCli(useCache = true) {
 }
 
 // src/agents/utils.ts
-var import_fs = require("fs");
-var import_path = require("path");
+var import_fs2 = require("fs");
+var import_path2 = require("path");
 var import_url = require("url");
 var import_meta = {};
 function getPackageDir() {
   const __filename = (0, import_url.fileURLToPath)(import_meta.url);
-  const __dirname = (0, import_path.dirname)(__filename);
-  return (0, import_path.join)(__dirname, "..", "..");
+  const __dirname = (0, import_path2.dirname)(__filename);
+  return (0, import_path2.join)(__dirname, "..", "..");
 }
 function loadAgentPrompt(agentName) {
   if (!/^[a-z0-9-]+$/i.test(agentName)) {
     throw new Error(`Invalid agent name: contains disallowed characters`);
   }
   try {
-    const agentsDir = (0, import_path.join)(getPackageDir(), "agents");
-    const agentPath = (0, import_path.join)(agentsDir, `${agentName}.md`);
-    const resolvedPath = (0, import_path.resolve)(agentPath);
-    const resolvedAgentsDir = (0, import_path.resolve)(agentsDir);
-    const rel = (0, import_path.relative)(resolvedAgentsDir, resolvedPath);
-    if (rel.startsWith("..") || (0, import_path.isAbsolute)(rel)) {
+    const agentsDir = (0, import_path2.join)(getPackageDir(), "agents");
+    const agentPath = (0, import_path2.join)(agentsDir, `${agentName}.md`);
+    const resolvedPath = (0, import_path2.resolve)(agentPath);
+    const resolvedAgentsDir = (0, import_path2.resolve)(agentsDir);
+    const rel = (0, import_path2.relative)(resolvedAgentsDir, resolvedPath);
+    if (rel.startsWith("..") || (0, import_path2.isAbsolute)(rel)) {
       throw new Error(`Invalid agent name: path traversal detected`);
     }
-    const content = (0, import_fs.readFileSync)(agentPath, "utf-8");
+    const content = (0, import_fs2.readFileSync)(agentPath, "utf-8");
     const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
     return match ? match[1].trim() : content.trim();
   } catch (error2) {
@@ -13813,31 +13836,6 @@ ${systemPrompt}
 var import_fs3 = require("fs");
 var import_path3 = require("path");
 var import_crypto = require("crypto");
-
-// src/lib/worktree-paths.ts
-var import_child_process2 = require("child_process");
-var import_fs2 = require("fs");
-var import_path2 = require("path");
-var worktreeCache = null;
-function getWorktreeRoot(cwd) {
-  const effectiveCwd = cwd || process.cwd();
-  if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
-    return worktreeCache.root;
-  }
-  try {
-    const root = (0, import_child_process2.execSync)("git rev-parse --show-toplevel", {
-      cwd: effectiveCwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    worktreeCache = { cwd: effectiveCwd, root };
-    return root;
-  } catch {
-    return effectiveCwd;
-  }
-}
-
-// src/mcp/prompt-persistence.ts
 function yamlString(value) {
   return JSON.stringify(value);
 }
@@ -14177,7 +14175,30 @@ ${(0, import_fs4.readFileSync)(resolvedReal, "utf-8")}`;
 }
 async function handleAskGemini(args) {
   const { agent_role, model = GEMINI_DEFAULT_MODEL, files } = args;
-  const baseDir = args.working_directory || process.cwd();
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  let trustedRootReal;
+  try {
+    trustedRootReal = (0, import_fs4.realpathSync)(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+  let baseDir = args.working_directory || process.cwd();
+  let baseDirReal;
+  try {
+    baseDirReal = (0, import_fs4.realpathSync)(baseDir);
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: `working_directory '${args.working_directory}' does not exist or is not accessible: ${err.message}` }],
+      isError: true
+    };
+  }
+  const relToRoot = (0, import_path4.relative)(trustedRootReal, baseDirReal);
+  if (relToRoot.startsWith("..") || (0, import_path4.isAbsolute)(relToRoot)) {
+    return {
+      content: [{ type: "text", text: `working_directory '${args.working_directory}' is outside the trusted worktree root '${trustedRoot}'.` }],
+      isError: true
+    };
+  }
   if (!agent_role || !GEMINI_VALID_ROLES.includes(agent_role)) {
     return {
       content: [{
@@ -14366,18 +14387,32 @@ ${detection.installHint}`
         });
       }
       if (args.output_file) {
-        const outputPath = (0, import_path4.resolve)(baseDir, args.output_file);
-        const cwdReal2 = (0, import_fs4.realpathSync)(baseDir);
-        const relOutput = (0, import_path4.relative)(cwdReal2, outputPath);
-        if (relOutput === "" || relOutput === ".." || relOutput.startsWith(".." + import_path4.sep)) {
-          console.warn(`[gemini-core] output_file '${args.output_file}' is outside the working directory, skipping write.`);
+        const outputPath = (0, import_path4.resolve)(baseDirReal, args.output_file);
+        const relOutput = (0, import_path4.relative)(trustedRootReal, outputPath);
+        if (relOutput === "" || relOutput.startsWith("..") || (0, import_path4.isAbsolute)(relOutput)) {
+          console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside trusted root, skipping write.`);
         } else {
           try {
-            if (!(0, import_fs4.existsSync)(outputPath)) {
-              const outDir = (0, import_path4.dirname)(outputPath);
-              const relOutDir = (0, import_path4.relative)(cwdReal2, outDir);
-              if (!(relOutDir === "" || relOutDir === ".." || relOutDir.startsWith(".." + import_path4.sep))) {
-                (0, import_fs4.mkdirSync)(outDir, { recursive: true });
+            const outputDir = (0, import_path4.dirname)(outputPath);
+            if (!(0, import_fs4.existsSync)(outputDir)) {
+              const relDir = (0, import_path4.relative)(trustedRootReal, outputDir);
+              if (relDir.startsWith("..") || (0, import_path4.isAbsolute)(relDir)) {
+                console.warn(`[gemini-core] output_file directory is outside trusted root, skipping write.`);
+              } else {
+                (0, import_fs4.mkdirSync)(outputDir, { recursive: true });
+              }
+            }
+            let outputDirReal;
+            try {
+              outputDirReal = (0, import_fs4.realpathSync)(outputDir);
+            } catch {
+              console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
+            }
+            if (outputDirReal) {
+              const relDirReal = (0, import_path4.relative)(trustedRootReal, outputDirReal);
+              if (relDirReal.startsWith("..") || (0, import_path4.isAbsolute)(relDirReal)) {
+                console.warn(`[gemini-core] output_file directory resolves outside trusted root, skipping write.`);
+              } else {
                 (0, import_fs4.writeFileSync)(outputPath, response, "utf-8");
               }
             }
