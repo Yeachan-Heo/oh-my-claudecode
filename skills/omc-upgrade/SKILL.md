@@ -74,18 +74,18 @@ tar -xzf "$TARBALL" -C "$PLUGIN_DIR" --strip-components=1
 echo "Extracted to: $PLUGIN_DIR"
 ```
 
-### Step 4: Install Dependencies and Build
+### Step 4: Install Production Dependencies
+
+The npm package ships with pre-built `dist/` files, so no build step is needed.
+Only install production runtime dependencies (skip devDependencies and prepare script):
 
 ```bash
 cd "$PLUGIN_DIR"
 
-# Install dependencies (including devDependencies for build)
-npm install --production=false
+# Install production dependencies only, skip prepare/build scripts
+npm install --production --ignore-scripts
 
-# Build TypeScript and other assets
-npm run build
-
-echo "Build complete"
+echo "Dependencies installed"
 ```
 
 ### Step 5: Clean Up Old Versions

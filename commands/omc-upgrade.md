@@ -53,18 +53,18 @@ tar -xzf "$TARBALL" -C "$PLUGIN_DIR" --strip-components=1
 echo "Installed to: $PLUGIN_DIR"
 ```
 
-### Step 4: Install Dependencies and Build
+### Step 4: Install Production Dependencies
+
+The npm package ships with pre-built `dist/` files, so no build step is needed.
+Only install production runtime dependencies (skip devDependencies and prepare script):
 
 ```bash
 cd "$PLUGIN_DIR"
 
-# Install dependencies
-npm install --production=false
+# Install production dependencies only, skip prepare/build scripts
+npm install --production --ignore-scripts
 
-# Build the plugin
-npm run build
-
-echo "Build complete"
+echo "Dependencies installed"
 ```
 
 ### Step 5: Clean Up Old Versions
@@ -141,10 +141,9 @@ PLUGIN_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode/$LATEST"
 mkdir -p "$PLUGIN_DIR"
 tar -xzf "$TARBALL" -C "$PLUGIN_DIR" --strip-components=1
 
-# Build
+# Install production deps (dist/ is pre-built in npm package)
 cd "$PLUGIN_DIR"
-npm install --production=false 2>/dev/null
-npm run build 2>/dev/null
+npm install --production --ignore-scripts 2>/dev/null
 
 # Clean old versions
 CACHE_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode"
