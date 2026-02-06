@@ -14386,14 +14386,11 @@ function parseCodexOutput(output) {
   }
   return messages.join("\n") || output;
 }
-function executeCodex(prompt, model, cwd, outputFile) {
+function executeCodex(prompt, model, cwd) {
   return new Promise((resolve5, reject) => {
     validateModelName(model);
     let settled = false;
     const args = ["exec", "-m", model, "--json", "--full-auto"];
-    if (outputFile) {
-      args.push("-o", outputFile);
-    }
     const child = (0, import_child_process3.spawn)("codex", args, {
       stdio: ["pipe", "pipe", "pipe"],
       ...cwd ? { cwd } : {},
@@ -14452,18 +14449,18 @@ function executeCodex(prompt, model, cwd, outputFile) {
     child.stdin.end();
   });
 }
-async function executeCodexWithFallback(prompt, model, cwd, outputFile) {
+async function executeCodexWithFallback(prompt, model, cwd) {
   const modelExplicit = model !== void 0 && model !== null && model !== "";
   const effectiveModel = model || CODEX_DEFAULT_MODEL;
   if (modelExplicit) {
-    const response = await executeCodex(prompt, effectiveModel, cwd, outputFile);
+    const response = await executeCodex(prompt, effectiveModel, cwd);
     return { response, usedFallback: false, actualModel: effectiveModel };
   }
   const modelsToTry = CODEX_MODEL_FALLBACKS.includes(effectiveModel) ? CODEX_MODEL_FALLBACKS.slice(CODEX_MODEL_FALLBACKS.indexOf(effectiveModel)) : [effectiveModel, ...CODEX_MODEL_FALLBACKS];
   let lastError = null;
   for (const tryModel of modelsToTry) {
     try {
-      const response = await executeCodex(prompt, tryModel, cwd, outputFile);
+      const response = await executeCodex(prompt, tryModel, cwd);
       return {
         response,
         usedFallback: tryModel !== effectiveModel,
@@ -14486,9 +14483,6 @@ function executeCodexBackground(fullPrompt, modelInput, jobMeta, workingDirector
     const trySpawnWithModel = (tryModel, remainingModels) => {
       validateModelName(tryModel);
       const args = ["exec", "-m", tryModel, "--json", "--full-auto"];
-      if (jobMeta.responseFile) {
-        args.push("-o", jobMeta.responseFile);
-      }
       const child = (0, import_child_process3.spawn)("codex", args, {
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
@@ -14854,18 +14848,8 @@ ${detection.installHint}`
     promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
     expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null
   ].filter(Boolean).join("\n");
-  let outputFileMtimeBefore = null;
-  let resolvedOutputPath;
-  if (args.output_file) {
-    resolvedOutputPath = (0, import_path5.resolve)(baseDirReal, args.output_file);
-    try {
-      outputFileMtimeBefore = (0, import_fs5.statSync)(resolvedOutputPath).mtimeMs;
-    } catch {
-      outputFileMtimeBefore = null;
-    }
-  }
   try {
-    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model, baseDir, resolvedOutputPath);
+    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model, baseDir);
     if (promptResult) {
       persistResponse({
         provider: "codex",
@@ -14879,49 +14863,39 @@ ${detection.installHint}`
         fallbackModel: usedFallback ? actualModel : void 0
       });
     }
-    if (args.output_file && resolvedOutputPath) {
-      let cliWroteFile = false;
-      try {
-        const currentMtime = (0, import_fs5.statSync)(resolvedOutputPath).mtimeMs;
-        cliWroteFile = outputFileMtimeBefore !== null ? currentMtime > outputFileMtimeBefore : true;
-      } catch {
-        cliWroteFile = false;
-      }
-      if (cliWroteFile) {
+    if (args.output_file) {
+      const outputPath = (0, import_path5.resolve)(baseDirReal, args.output_file);
+      const relOutput = (0, import_path5.relative)(baseDirReal, outputPath);
+      if (relOutput.startsWith("..") || (0, import_path5.isAbsolute)(relOutput)) {
+        console.warn(`[codex-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
       } else {
-        const outputPath = resolvedOutputPath;
-        const relOutput = (0, import_path5.relative)(baseDirReal, outputPath);
-        if (relOutput.startsWith("..") || (0, import_path5.isAbsolute)(relOutput)) {
-          console.warn(`[codex-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
-        } else {
-          try {
-            const outputDir = (0, import_path5.dirname)(outputPath);
-            if (!(0, import_fs5.existsSync)(outputDir)) {
-              const relDir = (0, import_path5.relative)(baseDirReal, outputDir);
-              if (relDir.startsWith("..") || (0, import_path5.isAbsolute)(relDir)) {
-                console.warn(`[codex-core] output_file directory is outside working directory, skipping write.`);
-              } else {
-                (0, import_fs5.mkdirSync)(outputDir, { recursive: true });
-              }
+        try {
+          const outputDir = (0, import_path5.dirname)(outputPath);
+          if (!(0, import_fs5.existsSync)(outputDir)) {
+            const relDir = (0, import_path5.relative)(baseDirReal, outputDir);
+            if (relDir.startsWith("..") || (0, import_path5.isAbsolute)(relDir)) {
+              console.warn(`[codex-core] output_file directory is outside working directory, skipping write.`);
+            } else {
+              (0, import_fs5.mkdirSync)(outputDir, { recursive: true });
             }
-            let outputDirReal;
-            try {
-              outputDirReal = (0, import_fs5.realpathSync)(outputDir);
-            } catch {
-              console.warn(`[codex-core] Failed to resolve output directory, skipping write.`);
-            }
-            if (outputDirReal) {
-              const relDirReal = (0, import_path5.relative)(baseDirReal, outputDirReal);
-              if (relDirReal.startsWith("..") || (0, import_path5.isAbsolute)(relDirReal)) {
-                console.warn(`[codex-core] output_file directory resolves outside working directory, skipping write.`);
-              } else {
-                const safePath = (0, import_path5.join)(outputDirReal, (0, import_path5.basename)(outputPath));
-                (0, import_fs5.writeFileSync)(safePath, response, "utf-8");
-              }
-            }
-          } catch (err) {
-            console.warn(`[codex-core] Failed to write output file: ${err.message}`);
           }
+          let outputDirReal;
+          try {
+            outputDirReal = (0, import_fs5.realpathSync)(outputDir);
+          } catch {
+            console.warn(`[codex-core] Failed to resolve output directory, skipping write.`);
+          }
+          if (outputDirReal) {
+            const relDirReal = (0, import_path5.relative)(baseDirReal, outputDirReal);
+            if (relDirReal.startsWith("..") || (0, import_path5.isAbsolute)(relDirReal)) {
+              console.warn(`[codex-core] output_file directory resolves outside working directory, skipping write.`);
+            } else {
+              const safePath = (0, import_path5.join)(outputDirReal, (0, import_path5.basename)(outputPath));
+              (0, import_fs5.writeFileSync)(safePath, response, "utf-8");
+            }
+          }
+        } catch (err) {
+          console.warn(`[codex-core] Failed to write output file: ${err.message}`);
         }
       }
     }

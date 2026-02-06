@@ -14746,15 +14746,9 @@ ${detection.installHint}`
   const requestedModel = model;
   const fallbackIndex = GEMINI_MODEL_FALLBACKS.indexOf(requestedModel);
   const modelsToTry = fallbackIndex >= 0 ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndex) : [requestedModel, ...GEMINI_MODEL_FALLBACKS];
-  let outputFileMtimeBefore = null;
   let resolvedOutputPath;
   if (args.output_file) {
     resolvedOutputPath = (0, import_path5.resolve)(baseDirReal, args.output_file);
-    try {
-      outputFileMtimeBefore = (0, import_fs5.statSync)(resolvedOutputPath).mtimeMs;
-    } catch {
-      outputFileMtimeBefore = null;
-    }
   }
   const errors = [];
   for (const tryModel of modelsToTry) {
@@ -14778,48 +14772,38 @@ ${detection.installHint}`
         });
       }
       if (args.output_file && resolvedOutputPath) {
-        let cliWroteFile = false;
-        try {
-          const currentMtime = (0, import_fs5.statSync)(resolvedOutputPath).mtimeMs;
-          cliWroteFile = outputFileMtimeBefore !== null ? currentMtime > outputFileMtimeBefore : true;
-        } catch {
-          cliWroteFile = false;
-        }
-        if (cliWroteFile) {
+        const outputPath = resolvedOutputPath;
+        const relOutput = (0, import_path5.relative)(baseDirReal, outputPath);
+        if (relOutput === "" || relOutput.startsWith("..") || (0, import_path5.isAbsolute)(relOutput)) {
+          console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
         } else {
-          const outputPath = resolvedOutputPath;
-          const relOutput = (0, import_path5.relative)(baseDirReal, outputPath);
-          if (relOutput === "" || relOutput.startsWith("..") || (0, import_path5.isAbsolute)(relOutput)) {
-            console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
-          } else {
-            try {
-              const outputDir = (0, import_path5.dirname)(outputPath);
-              if (!(0, import_fs5.existsSync)(outputDir)) {
-                const relDir = (0, import_path5.relative)(baseDirReal, outputDir);
-                if (relDir.startsWith("..") || (0, import_path5.isAbsolute)(relDir)) {
-                  console.warn(`[gemini-core] output_file directory is outside working directory, skipping write.`);
-                } else {
-                  (0, import_fs5.mkdirSync)(outputDir, { recursive: true });
-                }
+          try {
+            const outputDir = (0, import_path5.dirname)(outputPath);
+            if (!(0, import_fs5.existsSync)(outputDir)) {
+              const relDir = (0, import_path5.relative)(baseDirReal, outputDir);
+              if (relDir.startsWith("..") || (0, import_path5.isAbsolute)(relDir)) {
+                console.warn(`[gemini-core] output_file directory is outside working directory, skipping write.`);
+              } else {
+                (0, import_fs5.mkdirSync)(outputDir, { recursive: true });
               }
-              let outputDirReal;
-              try {
-                outputDirReal = (0, import_fs5.realpathSync)(outputDir);
-              } catch {
-                console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
-              }
-              if (outputDirReal) {
-                const relDirReal = (0, import_path5.relative)(baseDirReal, outputDirReal);
-                if (relDirReal.startsWith("..") || (0, import_path5.isAbsolute)(relDirReal)) {
-                  console.warn(`[gemini-core] output_file directory resolves outside working directory, skipping write.`);
-                } else {
-                  const safePath = (0, import_path5.join)(outputDirReal, (0, import_path5.basename)(outputPath));
-                  (0, import_fs5.writeFileSync)(safePath, response, "utf-8");
-                }
-              }
-            } catch (err) {
-              console.warn(`[gemini-core] Failed to write output file: ${err.message}`);
             }
+            let outputDirReal;
+            try {
+              outputDirReal = (0, import_fs5.realpathSync)(outputDir);
+            } catch {
+              console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
+            }
+            if (outputDirReal) {
+              const relDirReal = (0, import_path5.relative)(baseDirReal, outputDirReal);
+              if (relDirReal.startsWith("..") || (0, import_path5.isAbsolute)(relDirReal)) {
+                console.warn(`[gemini-core] output_file directory resolves outside working directory, skipping write.`);
+              } else {
+                const safePath = (0, import_path5.join)(outputDirReal, (0, import_path5.basename)(outputPath));
+                (0, import_fs5.writeFileSync)(safePath, response, "utf-8");
+              }
+            }
+          } catch (err) {
+            console.warn(`[gemini-core] Failed to write output file: ${err.message}`);
           }
         }
       }

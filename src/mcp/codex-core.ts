@@ -132,14 +132,11 @@ export function parseCodexOutput(output: string): string {
 /**
  * Execute Codex CLI command and return the response
  */
-export function executeCodex(prompt: string, model: string, cwd?: string, outputFile?: string): Promise<string> {
+export function executeCodex(prompt: string, model: string, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     validateModelName(model);
     let settled = false;
     const args = ['exec', '-m', model, '--json', '--full-auto'];
-    if (outputFile) {
-      args.push('-o', outputFile);
-    }
     const child = spawn('codex', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
@@ -215,15 +212,14 @@ export function executeCodex(prompt: string, model: string, cwd?: string, output
 export async function executeCodexWithFallback(
   prompt: string,
   model: string | undefined,
-  cwd?: string,
-  outputFile?: string
+  cwd?: string
 ): Promise<{ response: string; usedFallback: boolean; actualModel: string }> {
   const modelExplicit = model !== undefined && model !== null && model !== '';
   const effectiveModel = model || CODEX_DEFAULT_MODEL;
 
   // If model was explicitly provided, no fallback
   if (modelExplicit) {
-    const response = await executeCodex(prompt, effectiveModel, cwd, outputFile);
+    const response = await executeCodex(prompt, effectiveModel, cwd);
     return { response, usedFallback: false, actualModel: effectiveModel };
   }
 
@@ -235,7 +231,7 @@ export async function executeCodexWithFallback(
   let lastError: Error | null = null;
   for (const tryModel of modelsToTry) {
     try {
-      const response = await executeCodex(prompt, tryModel, cwd, outputFile);
+      const response = await executeCodex(prompt, tryModel, cwd);
       return {
         response,
         usedFallback: tryModel !== effectiveModel,
@@ -278,9 +274,6 @@ export function executeCodexBackground(
     const trySpawnWithModel = (tryModel: string, remainingModels: string[]): { pid: number } | { error: string } => {
       validateModelName(tryModel);
       const args = ['exec', '-m', tryModel, '--json', '--full-auto'];
-      if (jobMeta.responseFile) {
-        args.push('-o', jobMeta.responseFile);
-      }
       const child = spawn('codex', args, {
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -730,20 +723,8 @@ ${resolvedPrompt}`;
     expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null,
   ].filter(Boolean).join('\n');
 
-  // Record output_file mtime before execution so we can detect if CLI wrote to it
-  let outputFileMtimeBefore: number | null = null;
-  let resolvedOutputPath: string | undefined;
-  if (args.output_file) {
-    resolvedOutputPath = resolve(baseDirReal, args.output_file);
-    try {
-      outputFileMtimeBefore = statSync(resolvedOutputPath).mtimeMs;
-    } catch {
-      outputFileMtimeBefore = null; // File doesn't exist yet
-    }
-  }
-
   try {
-    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model as string | undefined, baseDir, resolvedOutputPath);
+    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model as string | undefined, baseDir);
 
     // Persist response to disk (audit trail)
     if (promptResult) {
@@ -760,60 +741,46 @@ ${resolvedPrompt}`;
       });
     }
 
-    // Handle output_file: only write if CLI didn't already write to it
-    // Codex with --full-auto can write to the output_file via shell commands.
-    // If it did, we should NOT overwrite with parsed stdout.
-    if (args.output_file && resolvedOutputPath) {
-      let cliWroteFile = false;
-      try {
-        const currentMtime = statSync(resolvedOutputPath).mtimeMs;
-        cliWroteFile = outputFileMtimeBefore !== null
-          ? currentMtime > outputFileMtimeBefore
-          : true; // File was created during execution
-      } catch {
-        cliWroteFile = false; // File still doesn't exist
-      }
-
-      if (cliWroteFile) {
-        // CLI already wrote the output file - don't overwrite
+    // Always write parsed JSONL response to output_file.
+    // We no longer use -o (--output-last-message) because it only captures the
+    // last agent message, which may be a brief acknowledgment. The JSONL-parsed
+    // stdout contains ALL agent messages and is always more comprehensive.
+    if (args.output_file) {
+      const outputPath = resolve(baseDirReal, args.output_file);
+      const relOutput = relative(baseDirReal, outputPath);
+      if (relOutput.startsWith('..') || isAbsolute(relOutput)) {
+        console.warn(`[codex-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
       } else {
-        // CLI didn't write the file, write parsed response ourselves
-        const outputPath = resolvedOutputPath;
-        const relOutput = relative(baseDirReal, outputPath);
-        if (relOutput.startsWith('..') || isAbsolute(relOutput)) {
-          console.warn(`[codex-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
-        } else {
-          try {
-            const outputDir = dirname(outputPath);
+        try {
+          const outputDir = dirname(outputPath);
 
-            if (!existsSync(outputDir)) {
-              const relDir = relative(baseDirReal, outputDir);
-              if (relDir.startsWith('..') || isAbsolute(relDir)) {
-                console.warn(`[codex-core] output_file directory is outside working directory, skipping write.`);
-              } else {
-                mkdirSync(outputDir, { recursive: true });
-              }
+          if (!existsSync(outputDir)) {
+            const relDir = relative(baseDirReal, outputDir);
+            if (relDir.startsWith('..') || isAbsolute(relDir)) {
+              console.warn(`[codex-core] output_file directory is outside working directory, skipping write.`);
+            } else {
+              mkdirSync(outputDir, { recursive: true });
             }
-
-            let outputDirReal: string | undefined;
-            try {
-              outputDirReal = realpathSync(outputDir);
-            } catch {
-              console.warn(`[codex-core] Failed to resolve output directory, skipping write.`);
-            }
-
-            if (outputDirReal) {
-              const relDirReal = relative(baseDirReal, outputDirReal);
-              if (relDirReal.startsWith('..') || isAbsolute(relDirReal)) {
-                console.warn(`[codex-core] output_file directory resolves outside working directory, skipping write.`);
-              } else {
-                const safePath = join(outputDirReal, basename(outputPath));
-                writeFileSync(safePath, response, 'utf-8');
-              }
-            }
-          } catch (err) {
-            console.warn(`[codex-core] Failed to write output file: ${(err as Error).message}`);
           }
+
+          let outputDirReal: string | undefined;
+          try {
+            outputDirReal = realpathSync(outputDir);
+          } catch {
+            console.warn(`[codex-core] Failed to resolve output directory, skipping write.`);
+          }
+
+          if (outputDirReal) {
+            const relDirReal = relative(baseDirReal, outputDirReal);
+            if (relDirReal.startsWith('..') || isAbsolute(relDirReal)) {
+              console.warn(`[codex-core] output_file directory resolves outside working directory, skipping write.`);
+            } else {
+              const safePath = join(outputDirReal, basename(outputPath));
+              writeFileSync(safePath, response, 'utf-8');
+            }
+          }
+        } catch (err) {
+          console.warn(`[codex-core] Failed to write output file: ${(err as Error).message}`);
         }
       }
     }

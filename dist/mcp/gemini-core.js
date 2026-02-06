@@ -520,17 +520,9 @@ ${resolvedPrompt}`;
     const modelsToTry = fallbackIndex >= 0
         ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndex)
         : [requestedModel, ...GEMINI_MODEL_FALLBACKS];
-    // Record output_file mtime before execution so we can detect if CLI wrote to it
-    let outputFileMtimeBefore = null;
     let resolvedOutputPath;
     if (args.output_file) {
         resolvedOutputPath = resolve(baseDirReal, args.output_file);
-        try {
-            outputFileMtimeBefore = statSync(resolvedOutputPath).mtimeMs;
-        }
-        catch {
-            outputFileMtimeBefore = null; // File doesn't exist yet
-        }
     }
     const errors = [];
     for (const tryModel of modelsToTry) {
@@ -552,63 +544,47 @@ ${resolvedPrompt}`;
                     workingDirectory: baseDir,
                 });
             }
-            // Handle output_file: only write if CLI didn't already write to it
-            // Gemini with --yolo can write to the output_file via shell commands.
-            // If it did, we should NOT overwrite with raw stdout.
+            // Always write response to output_file.
+            // We no longer use special CLI output flags because the stdout response
+            // contains the full comprehensive output from Gemini.
             if (args.output_file && resolvedOutputPath) {
-                let cliWroteFile = false;
-                try {
-                    const currentMtime = statSync(resolvedOutputPath).mtimeMs;
-                    cliWroteFile = outputFileMtimeBefore !== null
-                        ? currentMtime > outputFileMtimeBefore
-                        : true; // File was created during execution
-                }
-                catch {
-                    cliWroteFile = false; // File still doesn't exist
-                }
-                if (cliWroteFile) {
-                    // CLI already wrote the output file - don't overwrite
+                const outputPath = resolvedOutputPath;
+                const relOutput = relative(baseDirReal, outputPath);
+                if (relOutput === '' || relOutput.startsWith('..') || isAbsolute(relOutput)) {
+                    console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
                 }
                 else {
-                    // CLI didn't write the file, write response ourselves
-                    const outputPath = resolvedOutputPath;
-                    const relOutput = relative(baseDirReal, outputPath);
-                    if (relOutput === '' || relOutput.startsWith('..') || isAbsolute(relOutput)) {
-                        console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
-                    }
-                    else {
+                    try {
+                        const outputDir = dirname(outputPath);
+                        if (!existsSync(outputDir)) {
+                            const relDir = relative(baseDirReal, outputDir);
+                            if (relDir.startsWith('..') || isAbsolute(relDir)) {
+                                console.warn(`[gemini-core] output_file directory is outside working directory, skipping write.`);
+                            }
+                            else {
+                                mkdirSync(outputDir, { recursive: true });
+                            }
+                        }
+                        let outputDirReal;
                         try {
-                            const outputDir = dirname(outputPath);
-                            if (!existsSync(outputDir)) {
-                                const relDir = relative(baseDirReal, outputDir);
-                                if (relDir.startsWith('..') || isAbsolute(relDir)) {
-                                    console.warn(`[gemini-core] output_file directory is outside working directory, skipping write.`);
-                                }
-                                else {
-                                    mkdirSync(outputDir, { recursive: true });
-                                }
+                            outputDirReal = realpathSync(outputDir);
+                        }
+                        catch {
+                            console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
+                        }
+                        if (outputDirReal) {
+                            const relDirReal = relative(baseDirReal, outputDirReal);
+                            if (relDirReal.startsWith('..') || isAbsolute(relDirReal)) {
+                                console.warn(`[gemini-core] output_file directory resolves outside working directory, skipping write.`);
                             }
-                            let outputDirReal;
-                            try {
-                                outputDirReal = realpathSync(outputDir);
-                            }
-                            catch {
-                                console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
-                            }
-                            if (outputDirReal) {
-                                const relDirReal = relative(baseDirReal, outputDirReal);
-                                if (relDirReal.startsWith('..') || isAbsolute(relDirReal)) {
-                                    console.warn(`[gemini-core] output_file directory resolves outside working directory, skipping write.`);
-                                }
-                                else {
-                                    const safePath = join(outputDirReal, basename(outputPath));
-                                    writeFileSync(safePath, response, 'utf-8');
-                                }
+                            else {
+                                const safePath = join(outputDirReal, basename(outputPath));
+                                writeFileSync(safePath, response, 'utf-8');
                             }
                         }
-                        catch (err) {
-                            console.warn(`[gemini-core] Failed to write output file: ${err.message}`);
-                        }
+                    }
+                    catch (err) {
+                        console.warn(`[gemini-core] Failed to write output file: ${err.message}`);
                     }
                 }
             }
