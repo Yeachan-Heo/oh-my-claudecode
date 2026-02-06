@@ -58,9 +58,23 @@ Three agents collaborate in structured phases to validate and refine work plans:
 │           ▼                                                     │
 │    ┌──────────────────────────────────────────────────────────┐ │
 │    │                  PLAN APPROVED                           │ │
-│    │           Ready for /ralph execution                     │ │
-│    └──────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+│    │         Present plan to user for approval                │ │
+│    └───────────────────────┬──────────────────────────────────┘ │
+└────────────────────────────┼────────────────────────────────────┘
+                             │
+                             ▼
+                      ┌──────────────┐
+                      │  USER GATE   │  ◄── MANDATORY HUMAN-IN-THE-LOOP
+                      │  (Approval)  │
+                      └──────┬───────┘
+                             │
+                ┌────────────┼────────────┐
+                │            │            │
+                ▼            ▼            ▼
+          ┌──────────┐ ┌──────────┐ ┌──────────┐
+          │ PROCEED  │ │  ADJUST  │ │ DISCARD  │
+          │ → ralph  │ │ → replan │ │ → stop   │
+          └──────────┘ └──────────┘ └──────────┘
 ```
 
 ## State Management
@@ -80,7 +94,7 @@ Ralplan maintains persistent state in `.omc/ralplan-state.json` to track progres
 }
 ```
 
-**Phases**: `planner_planning` → `architect_consultation` → `critic_review` → `handling_verdict` → `complete`
+**Phases**: `planner_planning` → `architect_consultation` → `critic_review` → `handling_verdict` → `awaiting_user_approval` → `complete`
 
 ## Plan Mode Interaction (CRITICAL)
 
@@ -176,23 +190,58 @@ Log after Critic completes: `[RALPLAN] Critic verdict: <OKAY|REJECT>`
 
 ### Verdict Handling and Iteration
 
-Based on Critic's verdict, the skill either approves the plan or continues iteration:
+Based on Critic's verdict, the skill either proceeds to user approval or continues iteration:
 
 **If verdict is OKAY:**
-- Mark plan as approved
+- Mark plan as approved by Critic
 - Log approval with iteration count
-- Prepare plan for execution with `/oh-my-claudecode:ralph` or manual orchestration
-- Set state `active: false, current_phase: "complete"`
+- **Transition to `awaiting_user_approval` phase (MANDATORY - see User Approval Gate below)**
+- **DO NOT create branches, spawn executors, or modify any code**
 
 **If verdict is REJECT:**
 - Extract Critic feedback with specific issues
 - Increment iteration counter
 - If `iteration >= max_iterations` (5):
   - Force approval with warning about unresolved concerns
-  - Recommend manual review before execution
+  - **Still proceed to User Approval Gate** (user may choose not to execute)
 - Otherwise:
   - Feed Critic feedback back to Planner
   - Return to Planner Planning phase for refinement
+
+### User Approval Gate (MANDATORY - CANNOT BE SKIPPED)
+
+**This is the HUMAN-IN-THE-LOOP checkpoint. After the Critic approves (or max iterations reached), the orchestrator MUST stop and present the plan to the user for explicit approval before ANY implementation begins.**
+
+**HARD RULES:**
+1. **NEVER** create git branches after Critic approval without user consent
+2. **NEVER** spawn executor agents after Critic approval without user consent
+3. **NEVER** modify source code after Critic approval without user consent
+4. **NEVER** invoke `/oh-my-claudecode:ralph` or any execution mode without user consent
+5. **ALWAYS** use `AskUserQuestion` tool to get explicit user decision
+6. **ALWAYS** wait for user response before taking any action
+
+**Update state:** Set `current_phase: "awaiting_user_approval"`
+
+**Log:** `[RALPLAN] Plan approved by Critic. Awaiting user approval before implementation.`
+
+**Present to user:**
+1. Display a summary of the approved plan (path, scope, key deliverables, iteration count)
+2. Use `AskUserQuestion` tool with the following options:
+
+| Option | Label | Description |
+|--------|-------|-------------|
+| 1 | **Proceed** | Begin implementation with `/oh-my-claudecode:ralph` |
+| 2 | **Adjust** | Return to Planner to modify specific aspects |
+| 3 | **Discard** | Stop ralplan and discard the plan |
+
+**Handle user response:**
+
+| User Decision | Action |
+|---------------|--------|
+| **Proceed** | Set state `active: false, current_phase: "complete"`. Tell user to run `/oh-my-claudecode:ralph` with the plan path, OR invoke it if user explicitly requests |
+| **Adjust** | Return to Planner Planning phase with user's adjustment feedback. Reset iteration if needed |
+| **Discard** | Set state `active: false, current_phase: "cancelled"`. Log cancellation. Do NOT execute anything |
+| **No response / Silence** | WAIT. Do NOT proceed. Do NOT assume consent |
 
 ## Iteration Rules
 
@@ -270,8 +319,21 @@ To stop an active ralplan session:
 6. **Invoke Critic** with plan file path (MANDATORY - CANNOT BE SKIPPED)
 7. **Log:** `[RALPLAN] Critic verdict: <verdict>`
 8. **Handle verdict** - if REJECT, loop back to step 3 with feedback
-9. **Complete** ONLY when Critic approves or max iterations reached with warnings
+9. **Present approved plan to user** using `AskUserQuestion` (MANDATORY - CANNOT BE SKIPPED)
+10. **Log:** `[RALPLAN] Plan approved by Critic. Awaiting user approval before implementation.`
+11. **STOP AND WAIT** for explicit user decision (Proceed / Adjust / Discard)
+12. **Complete** ONLY after user explicitly approves
 
-**HARD RULE:** Steps 5-7 are NON-NEGOTIABLE. No plan approval, user confirmation, or plan mode exit can occur before the Critic has rendered its verdict. This prevents the plan mode confirmation flow from short-circuiting the ralplan review loop.
+**HARD RULE 1:** Steps 5-7 are NON-NEGOTIABLE. No plan approval, user confirmation, or plan mode exit can occur before the Critic has rendered its verdict. This prevents the plan mode confirmation flow from short-circuiting the ralplan review loop.
 
-The iterative loop refines the plan until it meets the rigorous standards of all three agents, ensuring comprehensive, architecturally sound work plans ready for execution.
+**HARD RULE 2:** Steps 9-12 are NON-NEGOTIABLE. After the Critic approves, the orchestrator MUST present the plan to the user and WAIT for explicit consent before ANY implementation (branching, code execution, file modification). This is the human-in-the-loop safety gate that prevents unsolicited autonomous execution.
+
+**FORBIDDEN after Critic OKAY without user consent:**
+- `git checkout -b` (branch creation)
+- `git branch` (branch creation)
+- Spawning executor agents
+- Invoking `/oh-my-claudecode:ralph` or any execution mode
+- Writing to any source code files
+- Any codebase mutation whatsoever
+
+The iterative loop refines the plan until it meets the rigorous standards of all three agents. After consensus, the plan is presented to the user for final approval before any implementation begins.

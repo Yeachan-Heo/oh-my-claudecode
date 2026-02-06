@@ -22,6 +22,9 @@ Invokes the plan skill with --consensus mode, which:
 2. Consults Architect for architectural questions
 3. Reviews with Critic agent
 4. Iterates until Critic approves (max 5 iterations)
+5. **Presents approved plan to user for explicit consent before any implementation**
+
+**CRITICAL:** Ralplan NEVER proceeds to implementation (branching, code execution, or file modification) without explicit user approval. After Critic consensus, the user is always asked to Proceed, Adjust, or Discard.
 
 ## Implementation
 
