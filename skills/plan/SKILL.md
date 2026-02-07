@@ -24,12 +24,55 @@ You guide users through planning by:
 | consensus | --consensus, "ralplan" | Planner → Architect → Critic loop until consensus |
 | review | --review | Critic review of existing plan |
 
-### Review Mode
+### Consensus Mode (`--consensus` / "ralplan")
 
-When `--review` is specified or user says "review this plan":
+Orchestrates three specialized agents — Planner, Architect, and Critic — in an iterative loop until consensus is reached.
+
+**Workflow:**
+1. **Planner** creates initial plan
+2. **Architect** reviews for architectural soundness (via Codex `ask_codex` with `architect` role, or Claude agent fallback)
+3. **Critic** evaluates against quality criteria (via Codex `ask_codex` with `critic` role, or Claude agent fallback)
+4. If Critic rejects: iterate with feedback (max 5 iterations)
+5. On Critic approval: present plan to user for explicit consent
+
+**CRITICAL:** Consensus mode NEVER proceeds to implementation without explicit user approval. After Critic consensus, the orchestrator enters Claude Code's native Plan Mode (`EnterPlanMode` → `ExitPlanMode`) to present the plan. Falls back to `AskUserQuestion` (Proceed/Adjust/Discard) if Plan Mode is unavailable.
+
+**State:** After Critic consensus, state transitions to `awaiting_user_approval`. User choices: **Approve** (execute), **Request changes** (re-plan), or **Reject** (discard).
+
+**Invocation:** `/plan --consensus [task]` or `/ralplan [task]` (alias)
+
+### Review Mode (`--review` / "review this plan")
+
+Critically evaluate an existing plan using Critic. No plan passes without meeting rigorous standards.
+
+**Workflow:**
 1. Read the plan file from `.omc/plans/`
-2. Spawn Critic agent to review
-3. Return verdict (OKAY or REJECT with improvements)
+2. Evaluate via Critic (prefer Codex `ask_codex` with `critic` role; Claude agent fallback)
+3. Return verdict with detailed feedback
+
+**Review Criteria:**
+
+| Criterion | Standard |
+|-----------|----------|
+| Clarity | 80%+ claims cite file/line |
+| Testability | 90%+ criteria are concrete |
+| Verification | All file refs exist |
+| Specificity | No vague terms |
+
+**Verdicts:**
+- **APPROVED** — Plan meets all criteria, ready for execution
+- **REVISE** — Plan has issues needing fixes (with specific feedback)
+- **REJECT** — Fundamental problems require replanning
+
+**What Gets Checked:**
+1. Are requirements clear and unambiguous?
+2. Are acceptance criteria concrete and testable?
+3. Do file references actually exist?
+4. Are implementation steps specific?
+5. Are risks identified with mitigations?
+6. Are verification steps defined?
+
+**Invocation:** `/plan --review` or `/review` (alias)
 
 ### Auto-Detection: Interview vs Direct Planning
 
