@@ -38,7 +38,7 @@ export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CORE_COMMANDS: string[] = [];
 
 /** Current version */
-export const VERSION = '3.10.3';
+export const VERSION = '4.1.0';
 
 /**
  * Find a marker that appears at the start of a line (line-anchored).
