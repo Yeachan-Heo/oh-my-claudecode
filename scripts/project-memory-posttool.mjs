@@ -5,8 +5,19 @@
  * Learns from tool outputs and updates project memory
  */
 
-import { learnFromToolOutput } from '../dist/hooks/project-memory/learner.js';
-import { findProjectRoot } from '../dist/hooks/rules-injector/finder.js';
+// Dynamic imports with graceful fallback
+let learnFromToolOutput = null;
+let findProjectRoot = null;
+try {
+  const learnerModule = await import('../dist/hooks/project-memory/learner.js');
+  const finderModule = await import('../dist/hooks/rules-injector/finder.js');
+  learnFromToolOutput = learnerModule.learnFromToolOutput;
+  findProjectRoot = finderModule.findProjectRoot;
+} catch (err) {
+  if (err?.code !== 'ERR_MODULE_NOT_FOUND') {
+    console.error('[omc] project-memory-posttool: unexpected import error:', err?.message);
+  }
+}
 
 /**
  * Read JSON input from stdin
@@ -26,6 +37,12 @@ async function main() {
   try {
     const input = await readStdin();
     const data = JSON.parse(input);
+
+    // Early exit if imports failed
+    if (!learnFromToolOutput || !findProjectRoot) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
 
     // Extract directory and find project root
     const directory = data.cwd || data.directory || process.cwd();

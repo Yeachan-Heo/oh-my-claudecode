@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, renameSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -60,8 +60,12 @@ function loadStats() {
 // Save session statistics
 function saveStats(stats) {
   try {
-    writeFileSync(STATE_FILE, JSON.stringify(stats, null, 2));
-  } catch {}
+    const tmpFile = STATE_FILE + '.tmp.' + process.pid;
+    writeFileSync(tmpFile, JSON.stringify(stats, null, 2));
+    renameSync(tmpFile, STATE_FILE);
+  } catch {
+    try { unlinkSync(STATE_FILE + '.tmp.' + process.pid); } catch {}
+  }
 }
 
 // Update stats for this session
