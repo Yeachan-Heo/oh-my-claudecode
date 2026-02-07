@@ -229,9 +229,47 @@ Use `mcp__x__ask_codex` with:
 - Drafts are saved to `.omc/drafts/`
 - Final plans are saved to `.omc/plans/`
 
+## Consensus Mode (Ralplan)
+
+When `--consensus` flag is specified (or via `/ralplan` alias):
+
+1. **Initial Plan** - Planner creates draft plan
+2. **Architecture Review** - Architect validates technical approach
+3. **Critic Review** - Critic evaluates plan quality
+4. **Iteration** - Repeat 1-3 until Critic approves (max 5 iterations)
+5. **User Approval Gate** - Enter Plan Mode for user approval
+
+**CRITICAL APPROVAL GATE:** After Critic consensus, the orchestrator MUST:
+- Enter Claude Code native Plan Mode (`EnterPlanMode` → `ExitPlanMode`)
+- Present approved plan for explicit user consent
+- NEVER proceed to implementation without user approval
+- Fallback to `AskUserQuestion` (Proceed/Adjust/Discard) if Plan Mode unavailable
+
+State transitions to `awaiting_user_approval` after Critic consensus.
+
+## Review Mode
+
+When `--review` flag is specified (or via `/review` alias):
+
+1. Read plan file from `.omc/plans/`
+2. Spawn Critic agent to review
+3. Return verdict (APPROVED/REVISE/REJECT) with feedback
+
+**Review Criteria:**
+- 80%+ claims cite file/line references
+- 90%+ acceptance criteria are testable
+- All file references exist
+- No vague terms without metrics
+- All risks have mitigations
+
+**Critic Verdicts:**
+- **APPROVED** - Plan ready for execution
+- **REVISE** - Issues need fixes (specific feedback provided)
+- **REJECT** - Fundamental problems, replanning required
+
 ## Deprecation Notice
 
-**Note:** The separate `/planner` skill has been merged into `/plan`. If you invoke `/planner`, it will automatically redirect to this skill. Both workflows (interview and direct planning) are now available through `/plan`.
+**Note:** The separate `/planner`, `/ralplan`, and `/review` skills have been merged into `/plan`. Both workflows (interview and direct planning) plus consensus and review modes are now available through `/plan`.
 
 ---
 
