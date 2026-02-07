@@ -43,7 +43,7 @@
 - "What if the AI could run multiple specialists in parallel, route tasks to the right model tier, and persist until verification passes?"
 
 **The Reveal**
-- "That's exactly what oh-my-claudecode does. It transforms Claude Code from a single generalist assistant into a coordinated team of 32 specialists."
+- "That's exactly what oh-my-claudecode does. It transforms Claude Code from a single generalist assistant into a coordinated team of 28 specialists."
 - "Today, I'm going to show you how this changes everything about AI-assisted development."
 
 ### Transition
@@ -72,7 +72,7 @@
 
 **The Conductor Metaphor** (Slide 4)
 - "Think about an orchestra conductor. They don't play the violin, the timpani, or the trumpet. They COORDINATE the specialists who do."
-- "That's the shift OMC makes. Claude becomes the conductor, and 32 specialized agents are the orchestra."
+- "That's the shift OMC makes. Claude becomes the conductor, and 28 specialized agents are the orchestra."
 - "When you say 'build a feature,' Claude doesn't do it all personally. It delegates: Explorer finds relevant code, Architect designs the solution, Executor implements, QA Tester verifies."
 
 **Before vs After** (Slide 5)
@@ -90,7 +90,7 @@
 - "You never had to say 'use ultrawork' or 'spawn 3 executors' or 'verify with architect'. It's all automatic."
 
 **The Numbers** (Slide 7)
-- "32 specialized agents across 13 domains - architecture, execution, search, frontend, testing, security, documentation, and more"
+- "28 specialized agents across 13 domains - architecture, execution, search, frontend, testing, security, documentation, and more"
 - "37 skills that combine these agents into workflows - autopilot, planning, persistence, parallelism"
 - "3 model tiers - Haiku for speed and cost, Sonnet for balance, Opus for complex reasoning"
 - "Zero configuration files, zero setup beyond installation"
@@ -292,7 +292,7 @@
 | Ecomode | Medium | Lowest | Efficient | Budget-conscious, batch ops |
 
 ### Transition
-"These modes are powered by OMC's agent system. Let's look at how those 32 specialists are organized."
+"These modes are powered by OMC's agent system. Let's look at how those 28 specialists are organized."
 
 ### Audience Engagement
 - "Quick question: Which mode sounds most useful for YOUR daily work?" (Take 2-3 responses)
@@ -318,18 +318,18 @@
 - "OMC organizes agents into 13 specializations:"
 - "ANALYSIS: architect-low, architect-medium, architect (debugging, root cause)"
 - "EXECUTION: executor-low, executor, executor-high (code implementation)"
-- "SEARCH: explore, explore-medium, explore-high (codebase exploration)"
-- "RESEARCH: researcher-low, researcher (API docs, external research)"
+- "SEARCH: explore, explore-high (codebase exploration)"
+- "RESEARCH: researcher (API docs, external research)"
 - "FRONTEND: designer-low, designer, designer-high (UI/UX, components)"
 - "DOCUMENTATION: writer (technical writing, comments)"
 - "VISUAL: vision (image/diagram analysis)"
 - "PLANNING: planner, analyst, critic (strategic planning)"
-- "TESTING: qa-tester, qa-tester-high (interactive testing)"
+- "TESTING: qa-tester (interactive testing)"
 - "SECURITY: security-reviewer-low, security-reviewer (audits)"
-- "BUILD: build-fixer-low, build-fixer (build error resolution)"
+- "BUILD: build-fixer (build error resolution)"
 - "TDD: tdd-guide-low, tdd-guide (test-first workflows)"
-- "CODE REVIEW: code-reviewer-low, code-reviewer (PR reviews)"
-- "DATA SCIENCE: scientist-low, scientist, scientist-high (analysis, ML)"
+- "CODE REVIEW: code-reviewer (PR reviews)"
+- "DATA SCIENCE: scientist, scientist-high (analysis, ML)"
 
 **The 3-Tier System** (Slide 25)
 - "Each domain has up to three tiers corresponding to Claude model versions:"
@@ -357,7 +357,7 @@
 **Agent Composition** (Slide 27)
 - "Skills combine agents into workflows. For example:"
 - "AUTOPILOT skill = analyst + planner + critic + (executor + qa-tester + build-fixer) loop + architect verification"
-- "DEEPSEARCH skill = explore-medium + architect-medium + writer"
+- "DEEPSEARCH skill = explore + architect-medium + writer"
 - "FRONTEND-UI-UX skill = designer-high + executor + qa-tester"
 - "You invoke skills, skills invoke agents. It's turtles all the way down."
 
@@ -649,7 +649,7 @@ claude-code "autopilot: build me a todo app"
 ### Key Points
 - Shift from interactive assistant to autonomous orchestrator
 - Five execution modes for different scenarios
-- 32 specialized agents with smart model routing
+- 28 specialized agents with smart model routing
 - Zero learning curve, works with natural language
 - Free and open-source (MIT license)
 
@@ -659,7 +659,7 @@ claude-code "autopilot: build me a todo app"
 - "OMC transforms Claude Code from a single assistant into a coordinated team."
 - "You go from micromanaging every step to stating goals and getting results."
 - "The five execution modes cover everything: greenfield (autopilot), parallel (ultrawork/ultrapilot), batch (swarm), sequential (pipeline), budget (ecomode)."
-- "32 agents with 3-tier model routing save you 30-50% on costs while getting work done faster."
+- "28 agents with 3-tier model routing save you 30-50% on costs while getting work done faster."
 
 **Resources** (Slide 42)
 - "GitHub: github.com/Yeachan-Heo/oh-my-claudecode"
@@ -709,7 +709,7 @@ That said, it's open-source. If there's community interest in adapting it to oth
 **Answer:**
 "Great question. Without OMC, Claude Code gives you one very smart generalist assistant. You tell it every step: 'search for this, analyze that, now implement this, now test that.'
 
-With OMC, you get 32 specialized agents orchestrated automatically. You state the goal - 'build authentication' - and OMC:
+With OMC, you get 28 specialized agents orchestrated automatically. You state the goal - 'build authentication' - and OMC:
 - Automatically explores your codebase for patterns
 - Plans the implementation
 - Parallelizes execution across multiple agents

@@ -694,7 +694,7 @@ stopping after partial implementation"
 1. **Add Parallel Exploration Capability**
    ```
    BEFORE executing complex tasks:
-   - Delegate to explore-medium for internal codebase search
+   - Delegate to explore for internal codebase search
    - Delegate to researcher for external documentation
    - Use run_in_background=true for parallelism
    - Synthesize results before planning

@@ -97,7 +97,7 @@ Note: These are real problems I faced building production applications with Clau
         +---------+    +---------+    +---------+
 ```
 
-- 32 specialized agents <!-- .element: class="fragment" -->
+- 28 specialized agents <!-- .element: class="fragment" -->
 - 37 skills <!-- .element: class="fragment" -->
 - Zero configuration required <!-- .element: class="fragment" -->
 
@@ -581,7 +581,7 @@ Note: Ecomode is for budget-conscious development or exploratory work where you 
 |--------|-------------------|-------------------|--------------|
 | Analysis | architect-low | architect-medium | ~~architect~~ |
 | Execution | executor-low | executor | ~~executor-high~~ |
-| Search | explore | explore-medium | ~~explore-high~~ |
+| Search | explore | - | ~~explore-high~~ |
 | Frontend | designer-low | designer | ~~designer-high~~ |
 
 Note: Ecomode tries the cheapest option first and only escalates if that fails.
@@ -619,25 +619,25 @@ Note: The key insight is that 80% of tasks can be done by Haiku - you only need 
 
 ---
 
-## 32 Specialized Agents
+## 28 Specialized Agents
 
 | Domain | Agents |
 |--------|--------|
 | **Analysis** | architect, architect-medium, architect-low |
 | **Execution** | executor, executor-high, executor-low |
-| **Search** | explore, explore-medium, explore-high |
-| **Research** | researcher, researcher-low |
+| **Search** | explore, explore-high |
+| **Research** | researcher |
 | **Frontend** | designer, designer-high, designer-low |
 | **Documentation** | writer |
 | **Visual** | vision |
 | **Planning** | planner, analyst |
 | **Critique** | critic |
-| **Testing** | qa-tester, qa-tester-high |
+| **Testing** | qa-tester |
 | **Security** | security-reviewer, security-reviewer-low |
-| **Build** | build-fixer, build-fixer-low |
+| **Build** | build-fixer |
 | **TDD** | tdd-guide, tdd-guide-low |
-| **Code Review** | code-reviewer, code-reviewer-low |
-| **Data Science** | scientist, scientist-high, scientist-low |
+| **Code Review** | code-reviewer |
+| **Data Science** | scientist, scientist-high |
 
 Note: Each agent has a specialized prompt and toolset optimized for its domain.
 
@@ -1263,7 +1263,6 @@ autopilot: build something amazing
 | executor-high | opus | Complex refactoring |
 | executor-low | haiku | Simple fixes |
 | explore | haiku | Fast file search |
-| explore-medium | sonnet | Pattern matching |
 | explore-high | opus | Architectural search |
 | designer | sonnet | UI components |
 | designer-high | opus | Design systems |
@@ -1276,14 +1275,12 @@ autopilot: build something amazing
 | Agent | Model | Best For |
 |-------|-------|----------|
 | researcher | sonnet | External docs, APIs |
-| researcher-low | haiku | Quick lookups |
 | writer | haiku | Documentation |
 | vision | sonnet | Image analysis |
 | planner | opus | Strategic planning |
 | analyst | opus | Requirements extraction |
 | critic | opus | Plan review |
 | qa-tester | sonnet | CLI testing |
-| qa-tester-high | opus | Comprehensive QA |
 | security-reviewer | opus | Security audits |
 | security-reviewer-low | haiku | Quick security scan |
 
@@ -1294,14 +1291,11 @@ autopilot: build something amazing
 | Agent | Model | Best For |
 |-------|-------|----------|
 | build-fixer | sonnet | Build error resolution |
-| build-fixer-low | haiku | Simple build fixes |
 | tdd-guide | sonnet | TDD workflow |
 | tdd-guide-low | haiku | Quick test suggestions |
 | code-reviewer | opus | Code quality review |
-| code-reviewer-low | haiku | Quick code check |
 | scientist | sonnet | Data analysis |
 | scientist-high | opus | Complex ML/hypothesis |
-| scientist-low | haiku | Quick data inspection |
 
 ---
 
@@ -1351,7 +1345,6 @@ autopilot: build something amazing
 | research | Scientist orchestration | "research", "statistics" |
 | tdd | TDD enforcement | "tdd", "test first" |
 | mcp-setup | Configure MCP | "setup mcp" |
-| learn-about-omc | Usage analysis | `/learn-about-omc` |
 
 ---
 

@@ -96,27 +96,6 @@ export const executorLowAgent: AgentConfig = {
   defaultModel: 'haiku'
 };
 
-/**
- * Researcher-Low Agent - Quick Lookups (Haiku)
- */
-export const researcherLowAgent: AgentConfig = {
-  name: 'researcher-low',
-  description: 'Quick documentation lookups (Haiku). Use for simple documentation queries.',
-  prompt: loadAgentPrompt('researcher-low'),
-  model: 'haiku',
-  defaultModel: 'haiku'
-};
-
-/**
- * Explore-Medium Agent - Thorough Search (Sonnet)
- */
-export const exploreMediumAgent: AgentConfig = {
-  name: 'explore-medium',
-  description: 'Thorough codebase search with reasoning (Sonnet). Use when search requires more reasoning.',
-  prompt: loadAgentPrompt('explore-medium'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
 
 /**
  * Explore-High Agent - Complex Architectural Search (Opus)
@@ -151,27 +130,6 @@ export const designerHighAgent: AgentConfig = {
   defaultModel: 'opus'
 };
 
-/**
- * QA-Tester-High Agent - Comprehensive Production QA (Opus)
- */
-export const qaTesterHighAgent: AgentConfig = {
-  name: 'qa-tester-high',
-  description: 'Comprehensive production-ready QA testing with Opus. Use for thorough verification, edge case detection, security testing, and high-stakes releases.',
-  prompt: loadAgentPrompt('qa-tester-high'),
-  model: 'opus',
-  defaultModel: 'opus'
-};
-
-/**
- * Scientist-Low Agent - Quick Data Inspection (Haiku)
- */
-export const scientistLowAgent: AgentConfig = {
-  name: 'scientist-low',
-  description: 'Quick data inspection and simple statistics (Haiku). Use for fast, simple queries.',
-  prompt: loadAgentPrompt('scientist-low'),
-  model: 'haiku',
-  defaultModel: 'haiku'
-};
 
 /**
  * Scientist-High Agent - Complex Research (Opus)
@@ -221,16 +179,6 @@ export const buildFixerAgent: AgentConfig = {
   defaultModel: 'sonnet'
 };
 
-/**
- * Build-Fixer-Low Agent - Simple Build Fix (Haiku)
- */
-export const buildFixerLowAgent: AgentConfig = {
-  name: 'build-fixer-low',
-  description: 'Simple build error fixer (Haiku). Use for trivial type errors and single-line fixes.',
-  prompt: loadAgentPrompt('build-fixer-low'),
-  model: 'haiku',
-  defaultModel: 'haiku'
-};
 
 /**
  * TDD-Guide Agent - Test-Driven Development (Sonnet)
@@ -265,16 +213,6 @@ export const codeReviewerAgent: AgentConfig = {
   defaultModel: 'opus'
 };
 
-/**
- * Code-Reviewer-Low Agent - Quick Code Check (Haiku)
- */
-export const codeReviewerLowAgent: AgentConfig = {
-  name: 'code-reviewer-low',
-  description: 'Quick code quality checker (Haiku). Use for fast review of small changes.',
-  prompt: loadAgentPrompt('code-reviewer-low'),
-  model: 'haiku',
-  defaultModel: 'haiku'
-};
 
 /**
  * Git-Master Agent - Git Operations Expert (Sonnet)
@@ -345,23 +283,17 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     'architect-low': architectLowAgent,
     'executor-high': executorHighAgent,
     'executor-low': executorLowAgent,
-    'researcher-low': researcherLowAgent,
-    'explore-medium': exploreMediumAgent,
     'explore-high': exploreHighAgent,
     'designer-low': designerLowAgent,
     'designer-high': designerHighAgent,
-    'qa-tester-high': qaTesterHighAgent,
-    'scientist-low': scientistLowAgent,
     'scientist-high': scientistHighAgent,
     // Specialized agents (Security, Build, TDD, Code Review)
     'security-reviewer': securityReviewerAgent,
     'security-reviewer-low': securityReviewerLowAgent,
     'build-fixer': buildFixerAgent,
-    'build-fixer-low': buildFixerLowAgent,
     'tdd-guide': tddGuideAgent,
     'tdd-guide-low': tddGuideLowAgent,
     'code-reviewer': codeReviewerAgent,
-    'code-reviewer-low': codeReviewerLowAgent,
     'git-master': gitMasterAgent
   };
 

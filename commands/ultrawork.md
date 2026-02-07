@@ -44,8 +44,8 @@ The PreToolUse hook will warn you if you attempt direct code changes.
 |--------|-------------|-----------------|-------------|
 | **Analysis** | `architect-low` | `architect-medium` | `architect` |
 | **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | - |
-| **Research** | `researcher-low` | `researcher` | - |
+| **Search** | `explore` | - | - |
+| **Research** | - | `researcher` | - |
 | **Frontend** | `designer-low` | `designer` | `designer-high` |
 | **Docs** | `writer` | - | - |
 | **Visual** | - | `vision` | - |
@@ -77,8 +77,8 @@ Task(subagent_type="executor-high", model="opus", prompt="Refactor auth module u
 // Quick file lookup → LOW tier
 Task(subagent_type="explore", model="haiku", prompt="Find where UserService is defined")
 
-// Thorough search → MEDIUM tier
-Task(subagent_type="explore-medium", model="sonnet", prompt="Find all authentication patterns in the codebase")
+// Thorough search → use explore with sonnet
+Task(subagent_type="explore", model="sonnet", prompt="Find all authentication patterns in the codebase")
 ```
 
 ## Background Execution Rules

@@ -29,11 +29,9 @@ const AGENT_TYPE_CODES: Record<string, string> = {
 
   // Researcher variants - 'R' for Researcher
   researcher: 'r',          // sonnet
-  'researcher-low': 'r',    // haiku
 
   // Explore variants - 'E' for Explore
   explore: 'e',             // haiku
-  'explore-medium': 'e',    // sonnet
 
   // Designer variants - 'D' for Designer
   designer: 'd',            // sonnet
@@ -62,7 +60,6 @@ const AGENT_TYPE_CODES: Record<string, string> = {
 
   // QA-Tester variants - 'Q' for QA
   'qa-tester': 'q',         // sonnet
-  'qa-tester-high': 'Q',    // opus
 };
 
 /**
@@ -232,10 +229,8 @@ export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
     if (name === 'designer-low') name = 'design-l';
     if (name === 'designer-high') name = 'design-h';
     if (name === 'qa-tester') name = 'qa';
-    if (name === 'qa-tester-high') name = 'qa-h';
     if (name === 'architect-medium') name = 'arch-m';
     if (name === 'architect-low') name = 'arch-l';
-    if (name === 'researcher-low') name = 'research-l';
 
     // Add duration if significant
     const durationMs = now - a.startTime.getTime();
@@ -280,11 +275,8 @@ function getShortAgentName(agentType: string): string {
     // Collapse tier variants to base name
     'architect-low': 'arch',
     'architect-medium': 'arch',
-    'explore-medium': 'explore',
-    'researcher-low': 'research',
     // QA variants
     'qa-tester': 'qa',
-    'qa-tester-high': 'qa',
   };
 
   return abbrevs[name] || name;

@@ -36,7 +36,7 @@ Fire independent stages in parallel via Task tool:
 
 ```
 // Stage 1 - Simple data gathering
-Task(subagent_type="oh-my-claudecode:scientist-low", model="haiku", prompt="[RESEARCH_STAGE:1] Investigate...")
+Task(subagent_type="oh-my-claudecode:scientist", model="haiku", prompt="[RESEARCH_STAGE:1] Investigate...")
 
 // Stage 2 - Standard analysis
 Task(subagent_type="oh-my-claudecode:scientist", model="sonnet", prompt="[RESEARCH_STAGE:2] Analyze...")
@@ -49,7 +49,7 @@ Task(subagent_type="oh-my-claudecode:scientist-high", model="opus", prompt="[RES
 
 | Task Complexity | Agent | Model | Use For |
 |-----------------|-------|-------|---------|
-| Data gathering | `scientist-low` | haiku | File enumeration, pattern counting, simple lookups |
+| Data gathering | `scientist` (model=haiku) | haiku | File enumeration, pattern counting, simple lookups |
 | Standard analysis | `scientist` | sonnet | Code analysis, pattern detection, documentation review |
 | Complex reasoning | `scientist-high` | opus | Architecture analysis, cross-cutting concerns, hypothesis validation |
 

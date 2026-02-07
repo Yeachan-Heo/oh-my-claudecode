@@ -45,7 +45,7 @@ Ecomode routes tasks to lower-tier agents:
 | Analysis | architect-low (haiku) | architect (opus) |
 | Execution | executor-low (haiku) | executor-high (opus) |
 | Frontend | designer-low (haiku) | designer-high (opus) |
-| Search | explore (haiku) | explore-medium (sonnet) |
+| Search | explore (haiku) | explore (sonnet) |
 
 ## Setting as Default
 

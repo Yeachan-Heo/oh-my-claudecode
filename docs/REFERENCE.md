@@ -8,7 +8,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [Agents (32 Total)](#agents-32-total)
+- [Agents (28 Total)](#agents-28-total)
 - [Skills (37 Total)](#skills-37-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
@@ -136,7 +136,7 @@ This is a TypeScript monorepo using:
 
 ---
 
-## Agents (32 Total)
+## Agents (28 Total)
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
@@ -146,27 +146,27 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 |--------|-------------|-----------------|-------------|
 | **Analysis** | `architect-low` | `architect-medium` | `architect` |
 | **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | `explore-high` |
-| **Research** | `researcher-low` | `researcher` | - |
+| **Search** | `explore` | - | `explore-high` |
+| **Research** | - | `researcher` | - |
 | **Frontend** | `designer-low` | `designer` | `designer-high` |
 | **Docs** | `writer` | - | - |
 | **Visual** | - | `vision` | - |
 | **Planning** | - | - | `planner` |
 | **Critique** | - | - | `critic` |
 | **Pre-Planning** | - | - | `analyst` |
-| **Testing** | - | `qa-tester` | `qa-tester-high` |
+| **Testing** | - | `qa-tester` | - |
 | **Security** | `security-reviewer-low` | - | `security-reviewer` |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
+| **Build** | - | `build-fixer` | - |
 | **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | `code-reviewer` |
-| **Data Science** | `scientist-low` | `scientist` | `scientist-high` |
+| **Code Review** | - | - | `code-reviewer` |
+| **Data Science** | - | `scientist` | `scientist-high` |
 
 ### Agent Selection Guide
 
 | Task Type | Best Agent | Model |
 |-----------|------------|-------|
 | Quick code lookup | `explore` | haiku |
-| Find files/patterns | `explore` or `explore-medium` | haiku/sonnet |
+| Find files/patterns | `explore` | haiku |
 | Complex architectural search | `explore-high` | opus |
 | Simple code change | `executor-low` | haiku |
 | Feature implementation | `executor` | sonnet |
@@ -185,13 +185,13 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | Security review | `security-reviewer` | opus |
 | Quick security scan | `security-reviewer-low` | haiku |
 | Fix build errors | `build-fixer` | sonnet |
-| Simple build fix | `build-fixer-low` | haiku |
+| Simple build fix | `build-fixer` (model=haiku) | haiku |
 | TDD workflow | `tdd-guide` | sonnet |
 | Quick test suggestions | `tdd-guide-low` | haiku |
 | Code review | `code-reviewer` | opus |
-| Quick code check | `code-reviewer-low` | haiku |
+| Quick code check | `code-reviewer` (model=haiku) | haiku |
 | Data analysis/stats | `scientist` | sonnet |
-| Quick data inspection | `scientist-low` | haiku |
+| Quick data inspection | `scientist` (model=haiku) | haiku |
 | Complex ML/hypothesis | `scientist-high` | opus |
 
 ---
@@ -244,10 +244,8 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | `hud` | Configure HUD statusline | `/oh-my-claudecode:hud` |
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `mcp-setup` | Configure MCP servers | `/oh-my-claudecode:mcp-setup` |
-| `learn-about-omc` | Usage pattern analysis | `/oh-my-claudecode:learn-about-omc` |
 | `writer-memory` | Agentic memory system for writers | `/oh-my-claudecode:writer-memory` |
 | `project-session-manager` | Manage isolated dev environments (git worktrees + tmux) | `/oh-my-claudecode:project-session-manager` |
-| `local-skills-setup` | Set up and manage local skills | `/oh-my-claudecode:local-skills-setup` |
 | `skill` | Manage local skills (list, add, remove, search, edit) | `/oh-my-claudecode:skill` |
 
 ---

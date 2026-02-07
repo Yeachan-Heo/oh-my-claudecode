@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-02-07
+
+### Changed
+
+- **CLAUDE.md Refactoring** - Significantly refactored system prompt from 571 to 358 lines (37% reduction). Condensed MCP Tools, Team Tools, State Tools, Notepad, Memory, and LSP/AST sections. Merged "Commands vs Skills" into Skills section header.
+- **Documentation Cleanup** - Updated 20 files including `AGENTS.md`, `marketplace.json` (agent count 34→28), `ANALYSIS.md`, and seminar materials (`notes.md`, `quickref.md`, `slides.md`) to reflect consolidated agent tiers.
+
+### Removed
+
+- **Redundant Agent Tiers** - Deleted 6 agents: `build-fixer-low`, `code-reviewer-low`, `explore-medium`, `qa-tester-high`, `researcher-low`, `scientist-low`. Capabilities merged into base agents with model routing.
+- **Redundant Skills** - Merged `local-skills-setup` into `skill` (as `/skill setup`) and `learn-about-omc` into `help` (as "Usage Analysis" section).
+- **Source Code Artifacts** - Removed unused definitions from `src/agents/definitions.ts`, exports from `src/agents/index.ts`, MCP safelist entries from `src/mcp/prompt-injection.ts`, HUD mappings from `src/hud/elements/agents.ts`, and CLI help text.
+
+### Fixed
+
+- **Orphan References** - Removed ALL remaining orphan references to deleted agents/skills from source code and documentation.
+- **Test Maintenance** - Removed `explore-medium` test cases from delegation-enforcer and hud-agents tests.
+
 ## [4.0.7] - 2026-02-06
 
 ### Added

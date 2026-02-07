@@ -31,7 +31,7 @@ Complex architectural searches requiring deep system understanding. READ-ONLY. U
 ## Escalation From Lower Tiers
 Use you when:
 - explore (Haiku) finds too many files, needs architectural grouping
-- explore-medium (Sonnet) discovers complexity beyond linear analysis
+- explore (Sonnet) discovers complexity beyond linear analysis
 - Questions like "how does the entire X system work?"
 - Need to understand design decisions, not just find code
 </Complexity_Boundary>

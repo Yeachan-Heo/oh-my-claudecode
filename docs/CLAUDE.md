@@ -2,13 +2,7 @@
 <!-- OMC:VERSION:4.1.0 -->
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
-You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**
-
----
-
-## Quick Start
-
-**Just say what you want to build.** Autopilot activates automatically and handles the rest.
+You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.** Just say what you want to build -- autopilot activates automatically.
 
 ---
 
@@ -65,7 +59,7 @@ Delegate via: `Task(subagent_type="oh-my-claudecode:executor", model="sonnet", p
 
 ---
 
-## All 34 Agents
+## All 28 Agents
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
@@ -138,16 +132,9 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Commands vs Skills
-
-- **Commands** are thin routing stubs that delegate to agents or MCPs with minimal logic (e.g., `analyze`, `git-master`, `frontend-ui-ux`). They detect intent and route — nothing more.
-- **Skills** are substantive workflows with state management, multi-step orchestration, and complex logic (e.g., `autopilot`, `ralph`, `plan`, `ultrawork`).
-
-Commands live alongside skills in the `skills/` directory but contain only a `SKILL.md` that routes to the appropriate agent or MCP tool. Skills contain full implementation logic, often with hooks, state files, and multi-agent coordination.
-
----
-
 ## All Skills
+
+**Commands** (e.g., `analyze`, `git-master`) are thin routing stubs. **Skills** (e.g., `autopilot`, `ralph`) are full workflows with state management.
 
 ### Execution Modes
 
@@ -201,9 +188,7 @@ Commands live alongside skills in the `skills/` directory but contain only a `SK
 | `ask gpt`, `use gpt`, `delegate to gpt` | Codex | `ask_codex` |
 | `ask gemini`, `use gemini`, `delegate to gemini` | Gemini | `ask_gemini` |
 
-These keywords trigger MCP delegation instead of skill invocation. When detected, the LLM writes a prompt file and calls the corresponding MCP tool directly.
-
-**Note:** Bare keywords (`codex`, `gpt`, `gemini`) do NOT trigger - an intent phrase (`ask`, `use`, `delegate to`) is required to avoid false positives.
+These trigger MCP delegation instead of skill invocation. Bare keywords alone do NOT trigger -- an intent phrase (`ask`, `use`, `delegate to`) is required.
 
 ### Utilities
 
@@ -252,253 +237,55 @@ When you detect trigger patterns above, you MUST invoke the corresponding skill 
 
 **MCP-Direct Replacement — Call MCPs directly instead of spawning Claude agents:**
 
-| Task Domain | MCP Tool | Use Instead Of |
-|-------------|----------|----------------|
-| Architecture analysis, debugging | `ask_codex` (architect role) | `architect` / `architect-medium` / `architect-low` agents |
-| Planning, strategy | `ask_codex` (planner role) | `planner` agent |
-| Plan critique | `ask_codex` (critic role) | `critic` agent |
-| Pre-planning analysis | `ask_codex` (analyst role) | `analyst` agent |
-| Code review | `ask_codex` (code-reviewer role) | `code-reviewer` agent |
-| Security review | `ask_codex` (security-reviewer role) | `security-reviewer` / `security-reviewer-low` agents |
-| TDD guidance | `ask_codex` (tdd-guide role) | `tdd-guide` / `tdd-guide-low` agents |
-| UI/UX design, frontend | `ask_gemini` (designer role) | `designer` / `designer-low` / `designer-high` agents |
-| Documentation writing | `ask_gemini` (writer role) | `writer` agent |
-| Visual/image analysis | `ask_gemini` (vision role) | `vision` agent |
+| Task Domain | MCP Tool | Replaces |
+|-------------|----------|----------|
+| Architecture, debugging | `ask_codex` (architect) | `architect` / `architect-medium` / `architect-low` |
+| Planning, strategy, critique | `ask_codex` (planner/critic) | `planner`, `critic` |
+| Pre-planning analysis | `ask_codex` (analyst) | `analyst` |
+| Code review | `ask_codex` (code-reviewer) | `code-reviewer` |
+| Security review | `ask_codex` (security-reviewer) | `security-reviewer` / `security-reviewer-low` |
+| TDD guidance | `ask_codex` (tdd-guide) | `tdd-guide` / `tdd-guide-low` |
+| UI/UX design, frontend | `ask_gemini` (designer) | `designer` / `designer-low` / `designer-high` |
+| Docs, visual analysis | `ask_gemini` (writer/vision) | `writer`, `vision` |
 
-**Agents to keep using (no MCP replacement):**
-- `executor` / `executor-low` / `executor-high` — code execution needs Claude's tool access
-- `explore` / `explore-high` — codebase search needs Claude's file tools
-- `researcher` — uses Context7 MCP, not Codex/Gemini
-- `scientist` (all tiers) — uses Python REPL MCP
-- `build-fixer` — needs Claude's edit tools
-- `qa-tester` — needs Claude's bash/tmux access
-- `git-master` — needs Claude's git tools
-- `deep-executor` — needs Claude's full tool access
+**Agents to keep using (no MCP replacement):** `executor` (all tiers), `explore`/`explore-high`, `researcher`, `scientist`, `build-fixer`, `qa-tester`, `git-master`, `deep-executor` — these need Claude's tool access, Context7, or Python REPL.
 
-**Protocol:**
-1. **MCP-DIRECT:** For tasks in the replacement table, call MCP tools directly — don't spawn Claude agents
-2. **Context packaging:** ALWAYS attach relevant `context_files` — the MCP wrapper cannot read files, but the CLI (in auto mode) has full filesystem access during execution
-3. **Graceful fallback:** If MCP unavailable/fails, THEN spawn the equivalent Claude agent
-4. **Critical evaluation:** MCP output is advisory — verification (tests, typecheck) must come from tool-using agents
-5. **Background pattern:** Use `background: true` for long MCP calls, check with `check_job_status`
+**Protocol:** Call MCP tools directly for tasks in the replacement table (always attach `context_files`). If MCP unavailable, fall back to equivalent Claude agent. MCP output is advisory -- verification (tests, typecheck) must come from tool-using agents.
 
-**When NOT to use MCP-direct (use Claude agents instead):**
-- Need tool-mediated context gathering first (search/trace code before review)
-- Iterative multi-step workflows (review → fix → re-review loops)
-- Need repo-grounded citations with exact file paths/lines
-- Privacy constraints (code shouldn't be sent to external providers)
-- Context assembly too large/complex for manual packaging
-
-**Execution notes:**
-- Codex/Gemini calls can take up to **1 hour** (complex analysis)
-- Direct MCP calls are **blocking** — they hold the turn until complete
-- **For parallel work:** Use the Background Orchestration Pattern below
-- **Timeout:** `wait_for_job` supports up to 3,600,000ms (1 hour) timeout
-
-**Tool Parameters (both ask_gemini and ask_codex):**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_role` | string | Yes | Agent perspective (see routing table above) |
-| `prompt_file` | string | Yes | Path to file containing **task instructions** (what the CLI should do). Write under `{working_directory}/.omc/prompts/` using naming convention `{tool}-{purpose}-{timestamp}.md`. |
-| `output_file` | string | Yes | Path for **work summary** (what was done). The CLI may write here directly via shell, or the wrapper writes stdout if not. Use `-summary.md` suffix. |
-| `files` / `context_files` | array | No | File paths to include as context |
-| `model` | string | No | Model to use (has defaults and fallback chains) |
-| `background` | boolean | No | Run in background (non-blocking) |
-| `working_directory` | string | No | Project directory for the CLI to operate in. Defaults to `process.cwd()`. Can be any valid directory — does NOT need to be within CC's worktree. |
-
-**Notes:**
-- Write task instructions to `prompt_file`, not inline prompts
-- **Two-layer model**: The MCP wrapper reads `context_files` to build the prompt; the CLI (Codex/Gemini in --full-auto/--yolo mode) has full filesystem access during execution
-- The CLI can read additional files and write directly to `output_file` or other files
-
-**Security boundary:** `working_directory` is the trust boundary. `prompt_file` and `output_file` must resolve to paths within `working_directory`. The `working_directory` itself can be any accessible directory — it is NOT restricted to CC's current worktree. This allows cross-project use (e.g., running CC in one repo while delegating Codex/Gemini work to another).
-
-**Semantic Model:**
-- `prompt_file`: Task instructions ("Refactor X", "Review Y", "Fix Z")
-- `output_file`: Work summary/report (what was done, decisions made)
-- `context_files`: Initial context for prompt assembly
-- **Direct edits**: The CLI can read/write any file in the working directory
-
-### Background Orchestration Pattern (Spawn → Check → Await)
-
-When agents need Codex/Gemini and the orchestrator has other work:
-
-**1. SPAWN** — Launch agent in background:
-```
-Task(subagent_type="oh-my-claudecode:architect",
-     model="opus",
-     prompt="Analyze architecture...",
-     run_in_background=true)
-```
-
-**2. CHECK** — Continue independent tasks. Periodically check:
-```
-check_job_status(job_id="...")  // Non-blocking
-```
-
-**3. AWAIT** — When results needed OR no other work:
-```
-wait_for_job(job_id="...", timeout_ms=3600000)  // Up to 1 hour
-```
-
-**Critical Rules:**
-- **Dependency Rule:** If a downstream decision depends on Codex/Gemini output, you MUST switch from CHECK to AWAIT before finalizing that decision
-- **Never await immediately** after spawning unless the delegation is the critical path
-- **Max concurrent:** Cap at 2-3 parallel background delegations to avoid attention loss
-
-**Decision Matrix:**
-
-| Situation | Pattern |
-|-----------|---------|
-| Agent needs Codex/Gemini AND orchestrator has other tasks | Background (SPAWN/CHECK/AWAIT) |
-| Agent needs Codex/Gemini AND this is the only/critical task | Blocking call |
-| Quick validation (<30s expected) | Blocking call |
-| Complex analysis, multi-file review | Background |
-
-**Failure Modes:**
-
-| Failure | Handling |
-|---------|----------|
-| Tool unavailable/not configured | Fall back to local reasoning; log "delegation unavailable" |
-| Long-running delegation | Keep working on independent tasks; only await at dependency points |
-| Stale outputs (code changed since spawn) | Re-spawn OR treat results as advisory only |
-| User cancels/mode ends | Ignore background outputs unless explicitly resumed |
-| Verification gating | NEVER claim "validated by Codex/Gemini" unless you awaited and integrated the result |
-
-### Job Management Tools
-
-| Tool | Description | When to Use |
-|------|-------------|-------------|
-| `check_job_status` | Non-blocking status check | Polling during parallel work |
-| `wait_for_job` | Blocking wait until completion | When results needed to proceed |
-| `list_jobs` | List background jobs (filter by status) | Debugging, monitoring |
-| `kill_job` | Send signal to running job | Cancel stuck/unnecessary jobs |
-
-**Status Values:** `spawned`, `running`, `completed`, `failed`
-
-### Skill-Level MCP Usage
-
-Skills should call MCPs directly instead of spawning Claude agents:
-
-| Skill | MCP Tool | Direct Call |
-|-------|----------|-------------|
-| `plan --consensus` | Codex | Call `ask_codex` with planner/architect/critic roles directly |
-| `frontend-ui-ux` | Gemini | Call `ask_gemini` with designer role directly |
-| `code-review` | Codex | Call `ask_codex` with code-reviewer role directly |
-| `security-review` | Codex | Call `ask_codex` with security-reviewer role directly |
-| `analyze` | Codex | Call `ask_codex` with architect role directly |
-| `plan` | Codex | Call `ask_codex` with planner role directly |
-
-**Enforcement:**
-- Skills call MCP tools directly — skip spawning Claude agents for analysis/review/design
-- If MCP unavailable, fall back to spawning the equivalent Claude agent
-- Use Background Orchestration Pattern for parallel MCP calls
+**Background pattern:** SPAWN with `background: true` → CHECK with `check_job_status` → AWAIT with `wait_for_job` (up to 1 hour).
 
 ### OMC State Tools
 
-All state stored at `{worktree}/.omc/state/{mode}-state.json`. Never in `~/.claude/`.
-
-| Tool | Description |
-|------|-------------|
-| `state_read` | Read state for any mode |
-| `state_write` | Write state (use with caution) |
-| `state_clear` | Clear state for a mode |
-| `state_list_active` | List all active modes |
-| `state_get_status` | Detailed status for mode(s) |
-
-Supported modes: autopilot, ultrapilot, team, pipeline, ralph, ultrawork, ultraqa, ecomode.
+All state stored at `{worktree}/.omc/state/{mode}-state.json`. Never in `~/.claude/`. Tools: `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`. Supported modes: autopilot, ultrapilot, team, pipeline, ralph, ultrawork, ultraqa, ecomode.
 
 ### Team Tools (Claude Code Native)
 
-Native team coordination using Claude Code's built-in TeamCreate/SendMessage/TaskCreate. Use `/oh-my-claudecode:team` to activate.
+Native team coordination using Claude Code's built-in tools. Use `/oh-my-claudecode:team` to activate. Tools: `TeamCreate`, `TeamDelete`, `SendMessage`, `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`.
 
-| Tool | Description |
-|------|-------------|
-| `TeamCreate` | Create named team with shared task list |
-| `TeamDelete` | Remove team + task directories (requires all teammates shut down) |
-| `SendMessage` | DM, broadcast, shutdown_request/response between teammates |
-| `TaskCreate` | Add task to team's shared task list |
-| `TaskList` | List all tasks with status and owner |
-| `TaskUpdate` | Claim (owner + in_progress), complete, or set dependencies |
-| `TaskGet` | Get full task details by ID |
-
-**Storage:** `~/.claude/teams/{name}/config.json` (team config), `~/.claude/tasks/{name}/` (task files)
-
-**Lifecycle:**
-1. `TeamCreate` → creates team, you become team lead
-2. `TaskCreate` × N → populate shared task list
-3. `Task(team_name, name)` × N → spawn teammates
-4. Teammates: `TaskList` → `TaskUpdate(claim)` → work → `TaskUpdate(complete)`
-5. `SendMessage(shutdown_request)` → teammates approve → `TeamDelete`
-
-**Hybrid Execution Modes (MCP Workers in Teams):**
-
-| Mode | Provider | Can Edit Code? | Team-Aware? | Best For |
-|------|----------|---------------|-------------|----------|
-| `claude_worker` | Claude agent | Yes (Claude Code tools) | Yes (TaskList/SendMessage) | Iterative work, build/test loops, team coordination |
-| `mcp_codex` | Codex CLI | Yes (filesystem access) | No (one-shot job) | Code review, security audit, refactoring, architecture |
-| `mcp_gemini` | Gemini CLI | Yes (filesystem + 1M ctx) | No (one-shot job) | UI/frontend, large-scale changes, documentation |
-
-The lead orchestrator manages MCP workers directly: writes `prompt_file`, calls `ask_codex`/`ask_gemini` with `working_directory`, reads `output_file`, marks task complete.
-
-**When to use teams vs individual agents:**
-- **Teams (2+ agents, shared task list):** Large task decomposition, parallel file work, need inter-agent communication
-- **Individual agents:** Single focused task, quick delegation, no coordination needed
+**Lifecycle:** `TeamCreate` → `TaskCreate` x N → `Task(team_name, name)` x N to spawn teammates → teammates claim/complete tasks → `SendMessage(shutdown_request)` → `TeamDelete`.
 
 ### Notepad Tools
 
-Session memory at `{worktree}/.omc/notepad.md`.
-
-| Tool | Description |
-|------|-------------|
-| `notepad_read` | Read notepad (sections: all, priority, working, manual) |
-| `notepad_write_priority` | Set Priority Context — always loaded on session start (max 500 chars) |
-| `notepad_write_working` | Add timestamped entry to Working Memory (auto-pruned 7 days) |
-| `notepad_write_manual` | Add to MANUAL section (never auto-pruned) |
-| `notepad_prune` | Remove old Working Memory entries |
-| `notepad_stats` | Get notepad statistics |
+Session memory at `{worktree}/.omc/notepad.md`. Tools: `notepad_read` (sections: all/priority/working/manual), `notepad_write_priority` (max 500 chars, loaded at session start), `notepad_write_working` (timestamped, auto-pruned 7 days), `notepad_write_manual` (never auto-pruned), `notepad_prune`, `notepad_stats`.
 
 ### Project Memory Tools
 
-Persistent project info at `{worktree}/.omc/project-memory.json`.
+Persistent project info at `{worktree}/.omc/project-memory.json`. Tools: `project_memory_read` (sections: techStack/build/conventions/structure/notes/directives), `project_memory_write` (supports merge), `project_memory_add_note`, `project_memory_add_directive`.
 
-| Tool | Description |
-|------|-------------|
-| `project_memory_read` | Read project memory (sections: techStack, build, conventions, structure, notes, directives) |
-| `project_memory_write` | Write/update memory (supports merge) |
-| `project_memory_add_note` | Add categorized note |
-| `project_memory_add_directive` | Add persistent user directive |
+### Code Intelligence Tools (LSP, AST, REPL)
 
-### LSP Tools
+LSP tools `lsp_hover`, `lsp_goto_definition`, `lsp_prepare_rename`, `lsp_rename`, `lsp_code_actions`, `lsp_code_action_resolve`, `lsp_servers` are orchestrator-direct. Agent-accessible tools:
 
 | Tool | Description | Agent Access |
 |------|-------------|-------------|
-| `lsp_hover` | Type info and docs at position | Orchestrator-direct |
-| `lsp_goto_definition` | Jump to symbol definition | Orchestrator-direct |
 | `lsp_find_references` | Find all usages of a symbol | `explore-high` only |
-| `lsp_document_symbols` | File symbol outline | `explore` family |
-| `lsp_workspace_symbols` | Search symbols by name | `explore` family |
+| `lsp_document_symbols` | File symbol outline | `explore`, `explore-high` |
+| `lsp_workspace_symbols` | Search symbols by name | `explore`, `explore-high` |
 | `lsp_diagnostics` | File errors/warnings | Most agents |
 | `lsp_diagnostics_directory` | Project-wide type checking (tsc --noEmit) | `architect`, `executor`, `build-fixer` |
-| `lsp_prepare_rename` | Check rename feasibility | Orchestrator-direct |
-| `lsp_rename` | Rename symbol across project | Orchestrator-direct |
-| `lsp_code_actions` | Available refactorings/quick fixes | Orchestrator-direct |
-| `lsp_code_action_resolve` | Full edit details for code action | Orchestrator-direct |
-| `lsp_servers` | List available language servers | Orchestrator-direct |
-
-### AST Tools
-
-| Tool | Description | Agent Access |
-|------|-------------|-------------|
 | `ast_grep_search` | Structural code pattern search | `explore`, `architect`, `code-reviewer` |
 | `ast_grep_replace` | Structural code transformation | `executor-high`, `deep-executor` only |
-
-### Python REPL
-
-| Tool | Description | Agent Access |
-|------|-------------|-------------|
-| `python_repl` | Persistent Python REPL for data analysis | `scientist` (all tiers) |
+| `python_repl` | Persistent Python REPL for data analysis | `scientist` |
 
 ---
 

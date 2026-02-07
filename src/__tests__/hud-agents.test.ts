@@ -267,7 +267,6 @@ describe('Agents Element', () => {
       { type: 'architect-low', model: 'haiku', expected: 'a' },
       { type: 'architect-medium', model: 'sonnet', expected: 'a' },
       { type: 'explore', model: 'haiku', expected: 'e' },
-      { type: 'explore-medium', model: 'sonnet', expected: 'e' },
       { type: 'executor', model: 'sonnet', expected: 'x' },
       { type: 'executor-low', model: 'haiku', expected: 'x' },
       { type: 'executor-high', model: 'opus', expected: 'X' },

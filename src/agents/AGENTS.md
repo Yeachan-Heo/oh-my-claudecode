@@ -3,7 +3,7 @@
 
 # agents
 
-32 specialized AI agent definitions with 3-tier model routing for optimal cost and performance.
+28 specialized AI agent definitions with 3-tier model routing for optimal cost and performance.
 
 ## Purpose
 
@@ -11,7 +11,7 @@ This directory defines all agents available in oh-my-claudecode:
 
 - **12 base agents** with default model assignments
 - **4 specialized agents** (security-reviewer, build-fixer, tdd-guide, code-reviewer)
-- **16 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
+- **12 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
 - Prompts loaded dynamically from `/agents/*.md` files
 - Tools assigned based on agent specialization
 
@@ -43,7 +43,7 @@ This directory defines all agents available in oh-my-claudecode:
 The main registry is in `definitions.ts`:
 
 ```typescript
-// Get all 32 agents
+// Get all 28 agents
 const agents = getAgentDefinitions();
 
 // Each agent has:
@@ -68,31 +68,25 @@ const agents = getAgentDefinitions();
 | Simple fixes | `executor-low` | haiku | Read, Glob, Grep, Edit, Write, Bash, TodoWrite |
 | Complex refactoring | `executor-high` | opus | Read, Glob, Grep, Edit, Write, Bash, TodoWrite |
 | Fast file search | `explore` | haiku | Read, Glob, Grep |
-| Thorough search | `explore-medium` | sonnet | Read, Glob, Grep |
 | Architectural discovery | `explore-high` | opus | Read, Glob, Grep |
 | UI components | `designer` | sonnet | Read, Glob, Grep, Edit, Write, Bash |
 | Simple styling | `designer-low` | haiku | Read, Glob, Grep, Edit, Write, Bash |
 | Design systems | `designer-high` | opus | Read, Glob, Grep, Edit, Write, Bash |
 | API documentation | `researcher` | sonnet | Read, Glob, Grep, WebSearch, WebFetch |
-| Quick doc lookup | `researcher-low` | haiku | Read, Glob, Grep, WebSearch, WebFetch |
 | README/docs | `writer` | haiku | Read, Glob, Grep, Edit, Write |
 | Image analysis | `vision` | sonnet | Read, Glob, Grep |
 | Plan review | `critic` | opus | Read, Glob, Grep |
 | Requirements analysis | `analyst` | opus | Read, Glob, Grep, WebSearch |
 | Strategic planning | `planner` | opus | Read, Glob, Grep, WebSearch |
 | CLI testing | `qa-tester` | sonnet | Bash, Read, Grep, Glob, TodoWrite |
-| Production QA | `qa-tester-high` | opus | Bash, Read, Grep, Glob, TodoWrite |
 | Data analysis | `scientist` | sonnet | Read, Glob, Grep, Bash, python_repl |
-| Quick data check | `scientist-low` | haiku | Read, Glob, Grep, Bash, python_repl |
 | ML/hypothesis | `scientist-high` | opus | Read, Glob, Grep, Bash, python_repl |
 | Security audit | `security-reviewer` | opus | Read, Grep, Glob, Bash |
 | Quick security scan | `security-reviewer-low` | haiku | Read, Grep, Glob, Bash |
 | Build errors | `build-fixer` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
-| Simple type errors | `build-fixer-low` | haiku | Read, Grep, Glob, Edit, Write, Bash |
 | TDD workflow | `tdd-guide` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
 | Test suggestions | `tdd-guide-low` | haiku | Read, Grep, Glob, Bash |
 | Code review | `code-reviewer` | opus | Read, Grep, Glob, Bash |
-| Quick code check | `code-reviewer-low` | haiku | Read, Grep, Glob, Bash |
 
 #### Creating a New Agent
 
@@ -237,17 +231,17 @@ None - pure TypeScript definitions.
 |----------|--------|---------|
 | Analysis | architect, architect-medium, architect-low | Debugging, architecture |
 | Execution | executor, executor-low, executor-high | Code implementation |
-| Search | explore, explore-medium, explore-high | Codebase exploration |
-| Research | researcher, researcher-low | External documentation |
+| Search | explore, explore-high | Codebase exploration |
+| Research | researcher | External documentation |
 | Frontend | designer, designer-low, designer-high | UI/UX work |
 | Documentation | writer | Technical writing |
 | Visual | vision | Image/screenshot analysis |
 | Planning | planner, analyst, critic | Strategic planning |
-| Testing | qa-tester, qa-tester-high | Interactive testing |
+| Testing | qa-tester | Interactive testing |
 | Security | security-reviewer, security-reviewer-low | Security audits |
-| Build | build-fixer, build-fixer-low | Compilation errors |
+| Build | build-fixer | Compilation errors |
 | TDD | tdd-guide, tdd-guide-low | Test-driven development |
-| Review | code-reviewer, code-reviewer-low | Code quality |
-| Data | scientist, scientist-low, scientist-high | Data analysis |
+| Review | code-reviewer | Code quality |
+| Data | scientist, scientist-high | Data analysis |
 
 <!-- MANUAL: -->

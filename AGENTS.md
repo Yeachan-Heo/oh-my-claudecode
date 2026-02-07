@@ -12,7 +12,7 @@ Multi-agent orchestration system for Claude Code CLI, providing intelligent dele
 
 oh-my-claudecode enhances Claude Code with:
 
-- **32 specialized agents** across multiple domains with 3-tier model routing (Haiku/Sonnet/Opus)
+- **28 specialized agents** across multiple domains with 3-tier model routing (Haiku/Sonnet/Opus)
 - **37 skills** for workflow automation and specialized behaviors
 - **31 hooks** for event-driven execution modes and enhancements
 - **15 custom tools** including 12 LSP, 2 AST, and Python REPL
@@ -36,7 +36,7 @@ oh-my-claudecode enhances Claude Code with:
 | Directory | Purpose | Related AGENTS.md |
 |-----------|---------|-------------------|
 | `src/` | TypeScript source code - core library | `src/AGENTS.md` |
-| `agents/` | Markdown prompt templates for 32 agents (see `agents/templates/` for guidelines) | - |
+| `agents/` | Markdown prompt templates for 28 agents (see `agents/templates/` for guidelines) | - |
 | `skills/` | 37 skill definitions for workflows | `skills/AGENTS.md` |
 | `commands/` | 31 slash command definitions (mirrors skills) | - |
 | `scripts/` | Build scripts, utilities, and automation | - |
@@ -55,15 +55,15 @@ oh-my-claudecode enhances Claude Code with:
    |-----------|-------------|-------|
    | Code changes | `executor` / `executor-low` / `executor-high` | sonnet/haiku/opus |
    | Analysis | `architect` / `architect-medium` / `architect-low` | opus/sonnet/haiku |
-   | Search | `explore` / `explore-medium` / `explore-high` | haiku/sonnet/opus |
+   | Search | `explore` / `explore-high` | haiku/opus |
    | UI/UX | `designer` / `designer-low` / `designer-high` | sonnet/haiku/opus |
    | Docs | `writer` | haiku |
    | Security | `security-reviewer` / `security-reviewer-low` | opus/haiku |
-   | Build errors | `build-fixer` / `build-fixer-low` | sonnet/haiku |
-   | Testing | `qa-tester` / `qa-tester-high` | sonnet/opus |
-   | Code review | `code-reviewer` / `code-reviewer-low` | opus/haiku |
+   | Build errors | `build-fixer` | sonnet |
+   | Testing | `qa-tester` | sonnet |
+   | Code review | `code-reviewer` | opus |
    | TDD | `tdd-guide` / `tdd-guide-low` | sonnet/haiku |
-   | Data analysis | `scientist` / `scientist-low` / `scientist-high` | sonnet/haiku/opus |
+   | Data analysis | `scientist` / `scientist-high` | sonnet/opus |
 
 2. **LSP/AST Tools**: Use IDE-like tools for code intelligence:
    - `lsp_hover` - Type info and documentation at position
@@ -180,7 +180,7 @@ import { allCustomTools, lspTools, astTools } from './tools';
 │                  oh-my-claudecode (OMC)                     │
 │  ┌─────────────┬─────────────┬─────────────┬─────────────┐  │
 │  │   Skills    │   Agents    │    Tools    │   Hooks     │  │
-│  │ (37 skills) │ (32 agents) │(LSP/AST/REPL)│ (31 hooks)  │  │
+│  │ (37 skills) │ (28 agents) │(LSP/AST/REPL)│ (31 hooks)  │  │
 │  └─────────────┴─────────────┴─────────────┴─────────────┘  │
 │  ┌─────────────────────────────────────────────────────────┐│
 │  │              Features Layer                             ││
@@ -190,7 +190,7 @@ import { allCustomTools, lspTools, astTools } from './tools';
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Agent Summary (32 Total)
+## Agent Summary (28 Total)
 
 ### Base Agents (12)
 
@@ -218,13 +218,13 @@ import { allCustomTools, lspTools, astTools } from './tools';
 | tdd-guide | sonnet | Test-driven development workflow |
 | code-reviewer | opus | Expert code review and quality assessment |
 
-### Tiered Variants (16)
+### Tiered Variants (12)
 
 | Tier | Agents |
 |------|--------|
-| **LOW** (Haiku) | `architect-low`, `executor-low`, `researcher-low`, `designer-low`, `scientist-low`, `security-reviewer-low`, `build-fixer-low`, `tdd-guide-low`, `code-reviewer-low` (9) |
-| **MEDIUM** (Sonnet) | `architect-medium`, `explore-medium` (2) |
-| **HIGH** (Opus) | `executor-high`, `designer-high`, `explore-high`, `qa-tester-high`, `scientist-high` (5) |
+| **LOW** (Haiku) | `architect-low`, `executor-low`, `designer-low`, `security-reviewer-low`, `tdd-guide-low` (5) |
+| **MEDIUM** (Sonnet) | `architect-medium` (1) |
+| **HIGH** (Opus) | `executor-high`, `designer-high`, `explore-high`, `scientist-high`, `deep-executor` (5) |
 
 ## Execution Modes
 

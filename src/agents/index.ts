@@ -43,13 +43,9 @@ export {
   architectLowAgent,
   executorHighAgent,
   executorLowAgent,
-  researcherLowAgent,
-  exploreMediumAgent,
   exploreHighAgent,
   designerLowAgent,
   designerHighAgent,
-  qaTesterHighAgent,
-  scientistLowAgent,
   scientistHighAgent
 } from './definitions.js';
 
@@ -58,11 +54,9 @@ export {
   securityReviewerAgent,
   securityReviewerLowAgent,
   buildFixerAgent,
-  buildFixerLowAgent,
   tddGuideAgent,
   tddGuideLowAgent,
   codeReviewerAgent,
-  codeReviewerLowAgent,
   gitMasterAgent
 } from './definitions.js';
 
