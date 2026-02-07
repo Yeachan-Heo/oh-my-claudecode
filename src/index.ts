@@ -19,6 +19,7 @@ import { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
 import { omcToolsServer, getOmcToolNames } from './mcp/omc-tools-server.js';
 import { codexMcpServer } from './mcp/codex-server.js';
 import { geminiMcpServer } from './mcp/gemini-server.js';
+import { openclawMcpServer } from './mcp/openclaw-server.js';
 import { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
 import { continuationSystemPromptAddition } from './features/continuation-enforcement.js';
 import {
@@ -341,6 +342,7 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
   // Add Codex and Gemini MCP tool patterns
   allowedTools.push('mcp__x__*');
   allowedTools.push('mcp__g__*');
+  allowedTools.push('mcp__oc__*');
 
   // Create magic keyword processor
   const processPrompt = createMagicKeywordProcessor(config.magicKeywords);
@@ -364,7 +366,8 @@ export function createSisyphusSession(options?: SisyphusOptions): SisyphusSessio
           ...toSdkMcpFormat(externalMcpServers),
           't': omcToolsServer as any,
           'x': codexMcpServer as any,
-          'g': geminiMcpServer as any
+          'g': geminiMcpServer as any,
+          'oc': openclawMcpServer as any
         },
         allowedTools,
         permissionMode: 'acceptEdits'
