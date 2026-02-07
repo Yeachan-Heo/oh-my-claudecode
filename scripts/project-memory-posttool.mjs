@@ -15,8 +15,10 @@ try {
   const finderModule = await import('../dist/hooks/rules-injector/finder.js');
   learnFromToolOutput = learnerModule.learnFromToolOutput;
   findProjectRoot = finderModule.findProjectRoot;
-} catch {
-  // dist not built - degrade gracefully
+} catch (err) {
+  if (err?.code !== 'ERR_MODULE_NOT_FOUND') {
+    console.error('[omc] project-memory-posttool: unexpected import error:', err?.message);
+  }
 }
 
 /**

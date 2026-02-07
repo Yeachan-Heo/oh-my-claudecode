@@ -41,13 +41,11 @@ try {
 
 // Load session statistics
 function loadStats() {
-  for (let i = 0; i < 3; i++) {
-    try {
-      if (existsSync(STATE_FILE)) {
-        return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-      }
-    } catch {}
-  }
+  try {
+    if (existsSync(STATE_FILE)) {
+      return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    }
+  } catch {}
   return { sessions: {} };
 }
 
