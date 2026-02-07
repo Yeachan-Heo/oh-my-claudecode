@@ -8,13 +8,13 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (40)', () => {
+    it('should return correct number of skills (35)', () => {
       const skills = createBuiltinSkills();
-      // 39 skills: analyze, autopilot, build-fix, cancel, code-review, deep-executor, deepinit, deepsearch, doctor, ecomode,
+      // 35 skills: analyze, autopilot, build-fix, cancel, code-review, deepinit, deepsearch, doctor, ecomode,
       // frontend-ui-ux, git-master, help, hud, learn-about-omc, learner, local-skills-setup, mcp-setup, note,
-      // omc-setup, orchestrate, pipeline, plan, project-session-manager, ralph, ralph-init, ralplan, release, research, review,
-      // security-review, skill, swarm, tdd, trace, ultrapilot, ultraqa, ultrawork, writer-memory
-      expect(skills).toHaveLength(40);
+      // omc-setup, pipeline, plan, project-session-manager, ralph, ralph-init, release, research,
+      // security-review, skill, tdd, team, trace, ultrapilot, ultraqa, ultrawork, writer-memory
+      expect(skills).toHaveLength(35);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -69,7 +69,6 @@ describe('Builtin Skills', () => {
         'build-fix',
         'cancel',
         'code-review',
-        'deep-executor',
         'deepinit',
         'deepsearch',
         'doctor',
@@ -84,19 +83,15 @@ describe('Builtin Skills', () => {
         'mcp-setup',
         'note',
         'omc-setup',
-        'orchestrate',
         'pipeline',
         'plan',
         'project-session-manager',
         'ralph',
         'ralph-init',
-        'ralplan',
         'release',
         'research',
-        'review',
         'security-review',
         'skill',
-        'swarm',
         'tdd',
         'team',
         'trace',

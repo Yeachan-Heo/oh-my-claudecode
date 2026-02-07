@@ -153,7 +153,6 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | `ultrapilot` | "ultrapilot", "parallel build" | Parallel autopilot with file ownership partitioning (up to 5x faster) |
 | `ecomode` | "eco", "ecomode", "efficient", "budget" | Token-efficient parallel execution using Haiku and Sonnet agents |
 | `team` | "team", "coordinated team" | N coordinated agents using Claude Code native teams (replaces swarm) |
-| `swarm` | "swarm", "coordinated agents" | **[DEPRECATED → use team]** N coordinated agents with SQLite-based claiming |
 | `pipeline` | "pipeline", "chain agents" | Sequential agent chaining with data passing between stages |
 | `ultraqa` | (activated by autopilot) | QA cycling workflow — test, verify, fix, repeat until goal met |
 
@@ -404,7 +403,7 @@ All state stored at `{worktree}/.omc/state/{mode}-state.json`. Never in `~/.clau
 | `state_list_active` | List all active modes |
 | `state_get_status` | Detailed status for mode(s) |
 
-Supported modes: autopilot, ultrapilot, swarm, pipeline, ralph, ultrawork, ultraqa, ecomode, ralplan. Swarm uses SQLite.
+Supported modes: autopilot, ultrapilot, pipeline, ralph, ultrawork, ultraqa, ecomode, ralplan.
 
 ### Team Tools (Claude Code Native)
 
