@@ -86,7 +86,7 @@ export function executeGemini(prompt: string, model?: string, cwd?: string): Pro
   return new Promise((resolve, reject) => {
     if (model) validateModelName(model);
     let settled = false;
-    const args = ['-p', '', '--yolo'];
+    const args = ['-p=.', '--yolo'];
     if (model) {
       args.push('--model', model);
     }
@@ -187,7 +187,7 @@ export function executeGeminiBackground(
     // Helper to try spawning with a specific model
     const trySpawnWithModel = (tryModel: string, remainingModels: string[]): { pid: number } | { error: string } => {
       validateModelName(tryModel);
-      const args = ['-p', '', '--yolo', '--model', tryModel];
+      const args = ['-p=.', '--yolo', '--model', tryModel];
       const child = spawn('gemini', args, {
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],

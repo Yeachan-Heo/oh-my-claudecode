@@ -14356,7 +14356,7 @@ function executeGemini(prompt, model, cwd) {
   return new Promise((resolve5, reject) => {
     if (model) validateModelName(model);
     let settled = false;
-    const args = ["-p", "", "--yolo"];
+    const args = ["-p=.", "--yolo"];
     if (model) {
       args.push("--model", model);
     }
@@ -14430,7 +14430,7 @@ function executeGeminiBackground(fullPrompt, modelInput, jobMeta, workingDirecto
     const modelsToTry = modelExplicit ? [effectiveModel] : GEMINI_MODEL_FALLBACKS.includes(effectiveModel) ? GEMINI_MODEL_FALLBACKS.slice(GEMINI_MODEL_FALLBACKS.indexOf(effectiveModel)) : [effectiveModel, ...GEMINI_MODEL_FALLBACKS];
     const trySpawnWithModel = (tryModel, remainingModels) => {
       validateModelName(tryModel);
-      const args = ["-p", "", "--yolo", "--model", tryModel];
+      const args = ["-p=.", "--yolo", "--model", tryModel];
       const child = (0, import_child_process3.spawn)("gemini", args, {
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
