@@ -117,20 +117,18 @@ Your old commands still work! But now you don't need them.
 
 **After 3.0:** Just work naturally - Claude auto-activates the right behaviors. One-time setup: just say "setup omc"
 
-### Package Rename
+### Project Rebrand
 
-The package has been renamed to better reflect its purpose and improve discoverability.
+The project was rebranded to better reflect its purpose and improve discoverability.
 
-- **Old**: `oh-my-claude-sisyphus`
-- **New**: `oh-my-claudecode`
+- **Project/brand name**: `oh-my-claudecode` (GitHub repo, plugin name, commands)
+- **npm package name**: `oh-my-claude-sisyphus` (unchanged)
 
-#### NPM Commands
+> **Why the difference?** The npm package name `oh-my-claude-sisyphus` was kept for backward compatibility with existing installations. The project, GitHub repository, plugin, and all commands use `oh-my-claudecode`.
+
+#### NPM Install Command (unchanged)
 
 ```bash
-# Old
-npm install -g oh-my-claude-sisyphus
-
-# New
 npm install -g oh-my-claude-sisyphus
 ```
 

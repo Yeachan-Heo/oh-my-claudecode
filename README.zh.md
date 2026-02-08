@@ -36,6 +36,8 @@ autopilot: build a REST API for managing tasks
 
 就这么简单。其余都是自动的。
 
+> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g oh-my-claude-sisyphus`。
+
 ### 更新
 
 ```bash

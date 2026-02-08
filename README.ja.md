@@ -36,6 +36,8 @@ autopilot: build a REST API for managing tasks
 
 以上です。あとは自動で進みます。
 
+> **注意: パッケージ名について** — プロジェクトのブランド名は **oh-my-claudecode**（リポジトリ、プラグイン、コマンド）ですが、npmパッケージは [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) として公開されています。npm/bunでCLIツールをインストールする場合は `npm install -g oh-my-claude-sisyphus` を使用してください。
+
 ### アップデート
 
 ```bash

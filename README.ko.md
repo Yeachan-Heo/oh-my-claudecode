@@ -36,6 +36,8 @@ autopilot: build a REST API for managing tasks
 
 끝입니다. 나머지는 모두 자동입니다.
 
+> **참고: 패키지 이름** — 프로젝트 브랜드명은 **oh-my-claudecode** (저장소, 플러그인, 명령어)이지만, npm 패키지는 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus)로 배포됩니다. npm/bun으로 CLI 도구를 설치할 때는 `npm install -g oh-my-claude-sisyphus`를 사용하세요.
+
 ### 업데이트
 
 ```bash

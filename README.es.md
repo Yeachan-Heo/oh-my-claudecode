@@ -36,6 +36,8 @@ autopilot: build a REST API for managing tasks
 
 Eso es todo. Todo lo demás es automático.
 
+> **Nota: Nombre del paquete** — El proyecto usa la marca **oh-my-claudecode** (repositorio, plugin, comandos), pero el paquete npm se publica como [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). Si instalas las herramientas CLI via npm/bun, usa `npm install -g oh-my-claude-sisyphus`.
+
 ### Actualizar
 
 ```bash
