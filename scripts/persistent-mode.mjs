@@ -318,6 +318,34 @@ async function main() {
     const todoCount = countIncompleteTodos(sessionId, directory);
     const totalIncomplete = taskCount + todoCount;
 
+    // Priority 0: Boulder (active plan execution via /start-work)
+    const boulderPath = join(directory, '.omc', 'boulder.json');
+    const boulderState = readJsonFile(boulderPath);
+    if (boulderState?.active_plan) {
+      const planPath = join(directory, boulderState.active_plan);
+      let remaining = 0;
+      let total = 0;
+      if (existsSync(planPath)) {
+        const content = readFileSync(planPath, 'utf-8');
+        const unchecked = (content.match(/^[-*]\s*\[\s*\]/gm) || []).length;
+        const checked = (content.match(/^[-*]\s*\[[xX]\]/gm) || []).length;
+        total = checked + unchecked;
+        remaining = unchecked;
+      }
+
+      if (remaining > 0) {
+        // Update last_checked_at for staleness tracking
+        boulderState.last_checked_at = new Date().toISOString();
+        writeJsonFile(boulderPath, boulderState);
+
+        console.log(JSON.stringify({
+          decision: "block",
+          reason: `[BOULDER - PLAN EXECUTION] ${total - remaining}/${total} tasks completed, ${remaining} remaining. Continue executing the plan at ${boulderState.active_plan}. Resume from the first unchecked - [ ] task. When ALL tasks are complete, delete .omc/boulder.json and run mcp__t__state_clear(mode: "ralplan").`
+        }));
+        return;
+      }
+    }
+
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
     if (ralph.state?.active && !isStaleState(ralph.state)) {

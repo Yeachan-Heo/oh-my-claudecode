@@ -183,6 +183,33 @@ export {
   type PromptAdaptationStrategy,
 } from './model-routing/index.js';
 
+// Model Config - multi-provider model configuration
+export {
+  // Types
+  type ProviderConfig,
+  type AgentModelConfig,
+  type ModelsConfig,
+  type ResolvedModel,
+  // Constants
+  PROVIDER_MCP_MAPPING,
+  CLAUDE_TIERS,
+  // Loader
+  getModelsConfigPath,
+  resolveApiKey,
+  loadModelsConfigFromFile,
+  validateConfig as validateModelsConfig,
+  loadModelsConfig,
+  getAgentModelConfig,
+  getResolvedProviderConfig,
+  clearModelsConfigCache,
+  // Resolver
+  getMcpToolForProvider,
+  resolveModelForAgent,
+  isProviderAvailable,
+  getFallbackModel,
+  resolveModelWithFallback,
+} from './model-config/index.js';
+
 // Notepad Wisdom - plan-scoped wisdom accumulation
 export {
   // Functions

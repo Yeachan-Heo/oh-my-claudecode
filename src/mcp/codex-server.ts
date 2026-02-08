@@ -24,9 +24,11 @@ const askCodexTool = tool(
     model: { type: "string", description: `Codex model to use (default: ${CODEX_DEFAULT_MODEL}). Set OMC_CODEX_DEFAULT_MODEL env var to change default.` },
     background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion." },
     working_directory: { type: "string", description: "Working directory for path resolution and CLI execution. Defaults to process.cwd()." },
+    api_key: { type: "string", description: "Optional API key override. When provided, passed as OPENAI_API_KEY to the Codex CLI process." },
+    base_url: { type: "string", description: "Optional base URL override. When provided, passed as OPENAI_BASE_URL to the Codex CLI process." },
   } as any,
   async (args: any) => {
-    const { prompt_file, output_file, agent_role, model, context_files, background, working_directory } = args as {
+    const { prompt_file, output_file, agent_role, model, context_files, background, working_directory, api_key, base_url } = args as {
       prompt_file: string;
       output_file: string;
       agent_role: string;
@@ -34,8 +36,10 @@ const askCodexTool = tool(
       context_files?: string[];
       background?: boolean;
       working_directory?: string;
+      api_key?: string;
+      base_url?: string;
     };
-    return handleAskCodex({ prompt_file, output_file, agent_role, model, context_files, background, working_directory });
+    return handleAskCodex({ prompt_file, output_file, agent_role, model, context_files, background, working_directory, api_key, base_url });
   }
 );
 

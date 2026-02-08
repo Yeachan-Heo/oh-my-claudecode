@@ -13,6 +13,7 @@ import { join, dirname } from 'path';
 import * as jsonc from 'jsonc-parser';
 import type { PluginConfig } from '../shared/types.js';
 import { getConfigDir } from '../utils/paths.js';
+import { loadModelsConfigFromFile } from '../features/model-config/loader.js';
 
 /**
  * Default configuration
@@ -246,6 +247,16 @@ export function loadConfig(): PluginConfig {
   // Merge environment variables (highest precedence)
   const envConfig = loadEnvConfig();
   config = deepMerge(config, envConfig);
+
+  // Load .claude/models.json for multi-provider model configuration
+  try {
+    const modelsConfig = loadModelsConfigFromFile();
+    if (modelsConfig) {
+      config.modelsConfig = modelsConfig;
+    }
+  } catch (error) {
+    console.warn(`Warning: Failed to load models.json: ${(error as Error).message}`);
+  }
 
   return config;
 }

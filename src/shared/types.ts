@@ -2,6 +2,8 @@
  * Shared types for Oh-My-Claude-Sisyphus
  */
 
+import type { ModelsConfig } from '../features/model-config/types.js';
+
 export type ModelType = 'sonnet' | 'opus' | 'haiku' | 'inherit';
 
 export interface AgentConfig {
@@ -64,6 +66,9 @@ export interface PluginConfig {
     analyze?: string[];
     ultrathink?: string[];
   };
+
+  // Multi-provider model configuration from .claude/models.json
+  modelsConfig?: ModelsConfig;
 
   // Intelligent model routing configuration
   routing?: {

@@ -322,6 +322,39 @@ Continue working in ultrawork mode until all tasks are complete.
 `);
     }
 
+    // Check for boulder state (active plan execution via /start-work)
+    const boulderState = readJsonFile(join(directory, '.omc', 'boulder.json'));
+    if (boulderState?.active_plan) {
+      const planPath = join(directory, boulderState.active_plan);
+      let progressInfo = '';
+      if (existsSync(planPath)) {
+        const content = readFileSync(planPath, 'utf-8');
+        const unchecked = (content.match(/^[-*]\s*\[\s*\]/gm) || []).length;
+        const checked = (content.match(/^[-*]\s*\[[xX]\]/gm) || []).length;
+        const total = checked + unchecked;
+        if (total > 0) {
+          progressInfo = `\nProgress: ${checked}/${total} tasks completed.`;
+        }
+      }
+
+      messages.push(`<session-restore>
+
+[ACTIVE WORK PLAN]
+
+You have an active plan: ${boulderState.active_plan}
+Plan: ${boulderState.plan_name || 'Unknown'}
+Started: ${boulderState.started_at || 'Unknown'}${progressInfo}
+
+Resume from the first unchecked - [ ] task.
+Read the plan file and continue executing.
+After each task: mark - [x] in plan, save learnings to mcp__t__notepad_write_working.
+
+</session-restore>
+
+---
+`);
+    }
+
     // Check for ralph loop state
     // Session-scoped ONLY when session_id exists — no legacy fallback
     let ralphState = null;

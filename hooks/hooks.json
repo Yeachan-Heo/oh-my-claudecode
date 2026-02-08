@@ -133,6 +133,11 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/project-memory-precompact.mjs\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/boulder-memory-flush.mjs\"",
+            "timeout": 5
           }
         ]
       }
