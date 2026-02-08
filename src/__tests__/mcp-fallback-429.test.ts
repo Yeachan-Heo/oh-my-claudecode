@@ -3,12 +3,14 @@ import {
   isModelError,
   isRateLimitError,
   isRetryableError,
-  CODEX_MODEL_FALLBACKS,
 } from '../mcp/codex-core.js';
 import {
   isGeminiRetryableError,
-  GEMINI_MODEL_FALLBACKS,
 } from '../mcp/gemini-core.js';
+import {
+  CODEX_MODEL_FALLBACKS,
+  GEMINI_MODEL_FALLBACKS,
+} from '../features/model-routing/external-model-policy.js';
 
 describe('MCP Fallback on 429/Rate-Limit Errors', () => {
   describe('Codex: isModelError', () => {

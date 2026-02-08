@@ -21057,6 +21057,15 @@ function getWorktreeProjectMemoryPath(worktreeRoot) {
   return (0, import_path7.join)(root, OmcPaths.PROJECT_MEMORY);
 }
 var SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+var processSessionId = null;
+function getProcessSessionId() {
+  if (!processSessionId) {
+    const pid = process.pid;
+    const startTime = Date.now();
+    processSessionId = `pid-${pid}-${startTime}`;
+  }
+  return processSessionId;
+}
 function validateSessionId(sessionId) {
   if (!sessionId) {
     throw new Error("Session ID cannot be empty");
@@ -21365,7 +21374,7 @@ var stateReadTool = {
     const { mode, workingDirectory, session_id } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const sessionId = session_id;
+      const sessionId = session_id || getProcessSessionId();
       if (mode === "swarm") {
         const statePath2 = getStatePath(mode, root);
         if (!(0, import_fs8.existsSync)(statePath2)) {
@@ -21540,7 +21549,7 @@ var stateWriteTool = {
     } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const sessionId = session_id;
+      const sessionId = session_id || getProcessSessionId();
       if (mode === "swarm") {
         return {
           content: [{
@@ -21620,7 +21629,7 @@ var stateClearTool = {
     const { mode, workingDirectory, session_id } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const sessionId = session_id;
+      const sessionId = session_id || getProcessSessionId();
       if (sessionId) {
         validateSessionId(sessionId);
         if (MODE_CONFIGS[mode]) {
@@ -21740,7 +21749,7 @@ var stateListActiveTool = {
     const { workingDirectory, session_id } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const sessionId = session_id;
+      const sessionId = session_id || getProcessSessionId();
       if (sessionId) {
         validateSessionId(sessionId);
         const activeModes = [...getActiveModes(root, sessionId)];
@@ -21856,7 +21865,7 @@ var stateGetStatusTool = {
     const { mode, workingDirectory, session_id } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const sessionId = session_id;
+      const sessionId = session_id || getProcessSessionId();
       if (mode) {
         const lines2 = [`## Status: ${mode}
 `];

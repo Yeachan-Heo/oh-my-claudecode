@@ -19,6 +19,8 @@ import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext, VALID_AGENT_ROLES } from './prompt-injection.js';
 import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
+import { resolveExternalModel, buildFallbackChain, GEMINI_MODEL_FALLBACKS, } from '../features/model-routing/external-model-policy.js';
+import { loadConfig } from '../config/loader.js';
 // Module-scoped PID registry - tracks PIDs spawned by this process
 const spawnedPids = new Set();
 export function isSpawnedPid(pid) {
@@ -37,13 +39,6 @@ function validateModelName(model) {
 // Default model can be overridden via environment variable
 export const GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-3-pro-preview';
 export const GEMINI_TIMEOUT = Math.min(Math.max(5000, parseInt(process.env.OMC_GEMINI_TIMEOUT || '3600000', 10) || 3600000), 3600000);
-// Model fallback chain: try each in order if previous fails
-export const GEMINI_MODEL_FALLBACKS = [
-    'gemini-3-pro-preview',
-    'gemini-3-flash-preview',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-];
 // Gemini is best for design review and implementation tasks (recommended, not enforced)
 export const GEMINI_RECOMMENDED_ROLES = ['designer', 'writer', 'vision'];
 export const MAX_CONTEXT_FILES = 20;
@@ -385,7 +380,14 @@ export function validateAndReadFile(filePath, baseDir) {
  * @returns MCP-compatible response with content array
  */
 export async function handleAskGemini(args) {
-    const { agent_role, model = GEMINI_DEFAULT_MODEL, files } = args;
+    const { agent_role, files } = args;
+    // Resolve model based on configuration and agent role
+    const config = loadConfig();
+    const resolved = resolveExternalModel(config.externalModels, {
+        agentRole: agent_role,
+        explicitModel: args.model, // user explicitly passed model
+    });
+    const resolvedModel = resolved.model;
     // Derive baseDir from working_directory if provided
     let baseDir = args.working_directory || process.cwd();
     let baseDirReal;
@@ -544,7 +546,7 @@ ${resolvedPrompt}`;
     const promptResult = persistPrompt({
         provider: 'gemini',
         agentRole: agent_role,
-        model,
+        model: resolvedModel,
         files,
         prompt: resolvedPrompt,
         fullPrompt,
@@ -564,17 +566,13 @@ ${resolvedPrompt}`;
         }
         const statusFilePath = getStatusFilePath('gemini', promptResult.slug, promptResult.id, baseDir);
         // Build fallback chain for display (executeGeminiBackground builds its own internally)
-        const requestedModelBg = model;
-        const fallbackIndexBg = GEMINI_MODEL_FALLBACKS.indexOf(requestedModelBg);
-        const modelsToTryBg = fallbackIndexBg >= 0
-            ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndexBg)
-            : [requestedModelBg, ...GEMINI_MODEL_FALLBACKS];
+        const fallbackChainBg = buildFallbackChain('gemini', resolvedModel, config.externalModels);
         const result = executeGeminiBackground(fullPrompt, args.model, {
             provider: 'gemini',
             jobId: promptResult.id,
             slug: promptResult.slug,
             agentRole: agent_role,
-            model: model,
+            model: resolvedModel,
             promptFile: promptResult.filePath,
             responseFile: expectedResponsePath,
         }, baseDir);
@@ -591,8 +589,8 @@ ${resolvedPrompt}`;
                         `**Mode:** Background (non-blocking)`,
                         `**Job ID:** ${promptResult.id}`,
                         `**Agent Role:** ${agent_role}`,
-                        `**Model (attempting):** ${modelsToTryBg[0]}`,
-                        `**Fallback chain:** ${modelsToTryBg.join(' -> ')}`,
+                        `**Model (attempting):** ${fallbackChainBg[0]}`,
+                        `**Fallback chain:** ${fallbackChainBg.join(' -> ')}`,
                         `**PID:** ${result.pid}`,
                         `**Prompt File:** ${promptResult.filePath}`,
                         `**Response File:** ${expectedResponsePath}`,
@@ -610,22 +608,18 @@ ${resolvedPrompt}`;
         promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
         expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null,
     ].filter(Boolean).join('\n');
-    // Build fallback chain: start from the requested model
-    const requestedModel = model;
-    const fallbackIndex = GEMINI_MODEL_FALLBACKS.indexOf(requestedModel);
-    const modelsToTry = fallbackIndex >= 0
-        ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndex)
-        : [requestedModel, ...GEMINI_MODEL_FALLBACKS];
+    // Build fallback chain using the resolver
+    const fallbackChain = buildFallbackChain('gemini', resolvedModel, config.externalModels);
     let resolvedOutputPath;
     if (args.output_file) {
         resolvedOutputPath = resolve(baseDirReal, args.output_file);
     }
     const errors = [];
-    for (const tryModel of modelsToTry) {
+    for (const tryModel of fallbackChain) {
         try {
             const response = await executeGemini(fullPrompt, tryModel, baseDir);
-            const usedFallback = tryModel !== requestedModel;
-            const fallbackNote = usedFallback ? `[Fallback: used ${tryModel} instead of ${requestedModel}]\n\n` : '';
+            const usedFallback = tryModel !== resolvedModel;
+            const fallbackNote = usedFallback ? `[Fallback: used ${tryModel} instead of ${resolvedModel}]\n\n` : '';
             // Persist response to disk (audit trail)
             if (promptResult) {
                 persistResponse({

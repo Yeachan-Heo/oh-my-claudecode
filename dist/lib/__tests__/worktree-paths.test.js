@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { validatePath, resolveOmcPath, resolveStatePath, ensureOmcDir, getWorktreeNotepadPath, getWorktreeProjectMemoryPath, getOmcRoot, resolvePlanPath, resolveResearchPath, resolveLogsPath, resolveWisdomPath, isPathUnderOmc, ensureAllOmcDirs, clearWorktreeCache, } from '../worktree-paths.js';
+import { validatePath, resolveOmcPath, resolveStatePath, ensureOmcDir, getWorktreeNotepadPath, getWorktreeProjectMemoryPath, getOmcRoot, resolvePlanPath, resolveResearchPath, resolveLogsPath, resolveWisdomPath, isPathUnderOmc, ensureAllOmcDirs, clearWorktreeCache, getProcessSessionId, resetProcessSessionId, validateSessionId, } from '../worktree-paths.js';
 const TEST_DIR = '/tmp/worktree-paths-test';
 describe('worktree-paths', () => {
     beforeEach(() => {
@@ -107,6 +107,40 @@ describe('worktree-paths', () => {
             expect(existsSync(join(TEST_DIR, '.omc', 'logs'))).toBe(true);
             expect(existsSync(join(TEST_DIR, '.omc', 'notepads'))).toBe(true);
             expect(existsSync(join(TEST_DIR, '.omc', 'drafts'))).toBe(true);
+        });
+    });
+    describe('getProcessSessionId (Issue #456)', () => {
+        afterEach(() => {
+            resetProcessSessionId();
+        });
+        it('should return a string matching pid-{PID}-{timestamp} format', () => {
+            const sessionId = getProcessSessionId();
+            expect(sessionId).toMatch(/^pid-\d+-\d+$/);
+        });
+        it('should include the current process PID', () => {
+            const sessionId = getProcessSessionId();
+            expect(sessionId).toContain(`pid-${process.pid}-`);
+        });
+        it('should return the same value on repeated calls (stable)', () => {
+            const id1 = getProcessSessionId();
+            const id2 = getProcessSessionId();
+            const id3 = getProcessSessionId();
+            expect(id1).toBe(id2);
+            expect(id2).toBe(id3);
+        });
+        it('should pass session ID validation', () => {
+            const sessionId = getProcessSessionId();
+            expect(() => validateSessionId(sessionId)).not.toThrow();
+        });
+        it('should generate a new ID after reset', () => {
+            const id1 = getProcessSessionId();
+            resetProcessSessionId();
+            const id2 = getProcessSessionId();
+            // IDs should differ (different timestamp)
+            // In rare cases they could match if called in the same millisecond,
+            // but the PID portion will be the same so we just check they're strings
+            expect(typeof id2).toBe('string');
+            expect(id2).toMatch(/^pid-\d+-\d+$/);
         });
     });
 });

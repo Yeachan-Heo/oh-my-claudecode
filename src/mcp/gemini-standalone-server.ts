@@ -14,9 +14,9 @@ import {
 import {
   GEMINI_RECOMMENDED_ROLES,
   GEMINI_DEFAULT_MODEL,
-  GEMINI_MODEL_FALLBACKS,
   handleAskGemini,
 } from './gemini-core.js';
+import { GEMINI_MODEL_FALLBACKS } from '../features/model-routing/external-model-policy.js';
 import {
   handleWaitForJob,
   handleCheckJobStatus,

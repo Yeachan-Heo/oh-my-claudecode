@@ -11,10 +11,10 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import {
   GEMINI_DEFAULT_MODEL,
-  GEMINI_MODEL_FALLBACKS,
   GEMINI_RECOMMENDED_ROLES,
   handleAskGemini
 } from './gemini-core.js';
+import { GEMINI_MODEL_FALLBACKS } from '../features/model-routing/external-model-policy.js';
 import { handleWaitForJob, handleCheckJobStatus, handleKillJob, handleListJobs } from './job-management.js';
 
 // Define the ask_gemini tool using the SDK tool() helper

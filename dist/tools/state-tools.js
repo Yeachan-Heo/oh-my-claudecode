@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
-import { resolveStatePath, ensureOmcDir, validateWorkingDirectory, resolveSessionStatePath, ensureSessionStateDir, listSessionIds, validateSessionId, } from '../lib/worktree-paths.js';
+import { resolveStatePath, ensureOmcDir, validateWorkingDirectory, resolveSessionStatePath, ensureSessionStateDir, listSessionIds, validateSessionId, getProcessSessionId, } from '../lib/worktree-paths.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { isModeActive, getActiveModes, getAllModeStatuses, clearModeState, getStateFilePath, MODE_CONFIGS, getActiveSessionsForMode } from '../hooks/mode-registry/index.js';
 // ExecutionMode from mode-registry (8 modes - NO ralplan)
@@ -46,7 +46,8 @@ export const stateReadTool = {
         const { mode, workingDirectory, session_id } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            const sessionId = session_id;
+            // Auto-inject process session ID when none provided (Issue #456)
+            const sessionId = session_id || getProcessSessionId();
             // Special handling for swarm (SQLite database - no session support)
             if (mode === 'swarm') {
                 const statePath = getStatePath(mode, root);
@@ -180,7 +181,8 @@ export const stateWriteTool = {
         const { mode, active, iteration, max_iterations, current_phase, task_description, plan_path, started_at, completed_at, error, state, workingDirectory, session_id } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            const sessionId = session_id;
+            // Auto-inject process session ID when none provided (Issue #456)
+            const sessionId = session_id || getProcessSessionId();
             // Swarm uses SQLite - cannot be written via this tool
             if (mode === 'swarm') {
                 return {
@@ -277,7 +279,8 @@ export const stateClearTool = {
         const { mode, workingDirectory, session_id } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            const sessionId = session_id;
+            // Auto-inject process session ID when none provided (Issue #456)
+            const sessionId = session_id || getProcessSessionId();
             // If session_id provided, clear only session-specific state
             if (sessionId) {
                 validateSessionId(sessionId);
@@ -411,7 +414,8 @@ export const stateListActiveTool = {
         const { workingDirectory, session_id } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            const sessionId = session_id;
+            // Auto-inject process session ID when none provided (Issue #456)
+            const sessionId = session_id || getProcessSessionId();
             // If session_id provided, show modes active for that specific session
             if (sessionId) {
                 validateSessionId(sessionId);
@@ -539,7 +543,8 @@ export const stateGetStatusTool = {
         const { mode, workingDirectory, session_id } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            const sessionId = session_id;
+            // Auto-inject process session ID when none provided (Issue #456)
+            const sessionId = session_id || getProcessSessionId();
             if (mode) {
                 // Single mode status
                 const lines = [`## Status: ${mode}\n`];

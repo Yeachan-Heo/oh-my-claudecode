@@ -16,7 +16,6 @@ export declare function isSpawnedPid(pid: number): boolean;
 export declare function clearSpawnedPids(): void;
 export declare const GEMINI_DEFAULT_MODEL: string;
 export declare const GEMINI_TIMEOUT: number;
-export declare const GEMINI_MODEL_FALLBACKS: string[];
 export declare const GEMINI_RECOMMENDED_ROLES: readonly ["designer", "writer", "vision"];
 export declare const MAX_CONTEXT_FILES = 20;
 export declare const MAX_FILE_SIZE: number;

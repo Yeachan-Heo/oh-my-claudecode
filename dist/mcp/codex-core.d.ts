@@ -8,11 +8,12 @@
  * This module is SDK-agnostic and contains no dependencies on @anthropic-ai/claude-agent-sdk.
  */
 import type { BackgroundJobMeta } from './prompt-persistence.js';
+import { CODEX_MODEL_FALLBACKS } from '../features/model-routing/external-model-policy.js';
 export declare function isSpawnedPid(pid: number): boolean;
 export declare function clearSpawnedPids(): void;
 export declare const CODEX_DEFAULT_MODEL: string;
 export declare const CODEX_TIMEOUT: number;
-export declare const CODEX_MODEL_FALLBACKS: string[];
+export { CODEX_MODEL_FALLBACKS };
 export declare const CODEX_RECOMMENDED_ROLES: readonly ["architect", "planner", "critic", "analyst", "code-reviewer", "security-reviewer", "tdd-guide"];
 export declare const MAX_CONTEXT_FILES = 20;
 export declare const MAX_FILE_SIZE: number;
@@ -59,7 +60,7 @@ export declare function executeCodex(prompt: string, model: string, cwd?: string
  * Execute Codex CLI with model fallback chain
  * Only falls back on model_not_found errors when model was not explicitly provided
  */
-export declare function executeCodexWithFallback(prompt: string, model: string | undefined, cwd?: string): Promise<{
+export declare function executeCodexWithFallback(prompt: string, model: string | undefined, cwd?: string, fallbackChain?: string[]): Promise<{
     response: string;
     usedFallback: boolean;
     actualModel: string;

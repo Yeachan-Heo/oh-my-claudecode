@@ -114,6 +114,8 @@ export interface PluginConfig {
         /** Keywords that suggest lower tier */
         simplificationKeywords?: string[];
     };
+    externalModels?: ExternalModelsConfig;
+    delegationRouting?: DelegationRoutingConfig;
 }
 export interface SessionState {
     sessionId?: string;
@@ -156,5 +158,104 @@ export interface HookResult {
     continue: boolean;
     message?: string;
     modifiedInput?: unknown;
+}
+/**
+ * External model provider type
+ */
+export type ExternalModelProvider = 'codex' | 'gemini';
+/**
+ * External model configuration for a specific role or task
+ */
+export interface ExternalModelPreference {
+    provider: ExternalModelProvider;
+    model: string;
+}
+/**
+ * External models default configuration
+ */
+export interface ExternalModelsDefaults {
+    provider?: ExternalModelProvider;
+    codexModel?: string;
+    geminiModel?: string;
+}
+/**
+ * External models fallback policy
+ */
+export interface ExternalModelsFallbackPolicy {
+    onModelFailure: 'provider_chain' | 'cross_provider' | 'claude_only';
+    allowCrossProvider?: boolean;
+    crossProviderOrder?: ExternalModelProvider[];
+}
+/**
+ * External models configuration
+ */
+export interface ExternalModelsConfig {
+    defaults?: ExternalModelsDefaults;
+    rolePreferences?: Record<string, ExternalModelPreference>;
+    taskPreferences?: Record<string, ExternalModelPreference>;
+    fallbackPolicy?: ExternalModelsFallbackPolicy;
+}
+/**
+ * Resolved external model result
+ */
+export interface ResolvedModel {
+    provider: ExternalModelProvider;
+    model: string;
+    fallbackPolicy: ExternalModelsFallbackPolicy;
+}
+/**
+ * Options for resolving external model
+ */
+export interface ResolveOptions {
+    agentRole?: string;
+    taskType?: string;
+    explicitProvider?: ExternalModelProvider;
+    explicitModel?: string;
+}
+/**
+ * Provider type for delegation routing
+ */
+export type DelegationProvider = 'claude' | 'codex' | 'gemini';
+/**
+ * Tool type for delegation routing
+ */
+export type DelegationTool = 'Task' | 'ask_codex' | 'ask_gemini';
+/**
+ * Individual route configuration for a role
+ */
+export interface DelegationRoute {
+    provider: DelegationProvider;
+    tool: DelegationTool;
+    model?: string;
+    agentType?: string;
+    fallback?: string[];
+}
+/**
+ * Delegation routing configuration
+ */
+export interface DelegationRoutingConfig {
+    roles?: Record<string, DelegationRoute>;
+    defaultProvider?: DelegationProvider;
+    enabled?: boolean;
+}
+/**
+ * Result of delegation resolution
+ */
+export interface DelegationDecision {
+    provider: DelegationProvider;
+    tool: DelegationTool;
+    agentOrModel: string;
+    reason: string;
+    fallbackChain?: string[];
+}
+/**
+ * Options for resolveDelegation
+ */
+export interface ResolveDelegationOptions {
+    agentRole: string;
+    taskContext?: string;
+    explicitTool?: DelegationTool;
+    explicitModel?: string;
+    config?: DelegationRoutingConfig;
 }
 //# sourceMappingURL=types.d.ts.map

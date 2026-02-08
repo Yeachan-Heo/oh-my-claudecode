@@ -11,7 +11,7 @@ import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import * as jsonc from 'jsonc-parser';
-import type { PluginConfig } from '../shared/types.js';
+import type { PluginConfig, ExternalModelsConfig, DelegationRoutingConfig } from '../shared/types.js';
 import { getConfigDir } from '../utils/paths.js';
 
 /**
@@ -82,6 +82,24 @@ export const DEFAULT_CONFIG: PluginConfig = {
     simplificationKeywords: [
       'find', 'list', 'show', 'where', 'search', 'locate', 'grep'
     ]
+  },
+  // External models configuration (Codex, Gemini)
+  externalModels: {
+    defaults: {
+      codexModel: process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.3-codex',
+      geminiModel: process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-3-pro-preview',
+    },
+    fallbackPolicy: {
+      onModelFailure: 'provider_chain',
+      allowCrossProvider: false,
+      crossProviderOrder: ['codex', 'gemini'],
+    },
+  },
+  // Delegation routing configuration (opt-in feature for external model routing)
+  delegationRouting: {
+    enabled: false,  // Opt-in feature
+    defaultProvider: 'claude',
+    roles: {},
   }
 };
 
@@ -217,6 +235,67 @@ export function loadEnvConfig(): Partial<PluginConfig> {
       ...config.routing,
       escalationEnabled: process.env.OMC_ESCALATION_ENABLED === 'true'
     };
+  }
+
+  // External models configuration from environment
+  const externalModelsDefaults: ExternalModelsConfig['defaults'] = {};
+
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
+    if (provider === 'codex' || provider === 'gemini') {
+      externalModelsDefaults.provider = provider;
+    }
+  }
+
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL) {
+    externalModelsDefaults.codexModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
+  } else if (process.env.OMC_CODEX_DEFAULT_MODEL) {
+    // Legacy fallback
+    externalModelsDefaults.codexModel = process.env.OMC_CODEX_DEFAULT_MODEL;
+  }
+
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL) {
+    externalModelsDefaults.geminiModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
+  } else if (process.env.OMC_GEMINI_DEFAULT_MODEL) {
+    // Legacy fallback
+    externalModelsDefaults.geminiModel = process.env.OMC_GEMINI_DEFAULT_MODEL;
+  }
+
+  const externalModelsFallback: ExternalModelsConfig['fallbackPolicy'] = {
+    onModelFailure: 'provider_chain'
+  };
+
+  if (process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY) {
+    const policy = process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY;
+    if (policy === 'provider_chain' || policy === 'cross_provider' || policy === 'claude_only') {
+      externalModelsFallback.onModelFailure = policy;
+    }
+  }
+
+  // Only add externalModels if any env vars were set
+  if (Object.keys(externalModelsDefaults).length > 0 || externalModelsFallback.onModelFailure !== 'provider_chain') {
+    config.externalModels = {
+      defaults: externalModelsDefaults,
+      fallbackPolicy: externalModelsFallback
+    };
+  }
+
+  // Delegation routing configuration from environment
+  if (process.env.OMC_DELEGATION_ROUTING_ENABLED !== undefined) {
+    config.delegationRouting = {
+      ...config.delegationRouting,
+      enabled: process.env.OMC_DELEGATION_ROUTING_ENABLED === 'true',
+    };
+  }
+
+  if (process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER;
+    if (['claude', 'codex', 'gemini'].includes(provider)) {
+      config.delegationRouting = {
+        ...config.delegationRouting,
+        defaultProvider: provider as 'claude' | 'codex' | 'gemini',
+      };
+    }
   }
 
   return config;
@@ -418,6 +497,112 @@ export function generateConfigSchema(): object {
           wavePollingInterval: { type: 'integer', default: 5000, minimum: 1000, maximum: 30000 },
           aggressiveThreshold: { type: 'integer', default: 5 },
           enableFileOwnership: { type: 'boolean', default: true }
+        }
+      },
+      externalModels: {
+        type: 'object',
+        description: 'External model provider configuration (Codex, Gemini)',
+        properties: {
+          defaults: {
+            type: 'object',
+            description: 'Default model settings for external providers',
+            properties: {
+              provider: {
+                type: 'string',
+                enum: ['codex', 'gemini'],
+                description: 'Default external provider'
+              },
+              codexModel: {
+                type: 'string',
+                default: 'gpt-5.3-codex',
+                description: 'Default Codex model'
+              },
+              geminiModel: {
+                type: 'string',
+                default: 'gemini-3-pro-preview',
+                description: 'Default Gemini model'
+              }
+            }
+          },
+          rolePreferences: {
+            type: 'object',
+            description: 'Provider/model preferences by agent role',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                provider: { type: 'string', enum: ['codex', 'gemini'] },
+                model: { type: 'string' }
+              },
+              required: ['provider', 'model']
+            }
+          },
+          taskPreferences: {
+            type: 'object',
+            description: 'Provider/model preferences by task type',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                provider: { type: 'string', enum: ['codex', 'gemini'] },
+                model: { type: 'string' }
+              },
+              required: ['provider', 'model']
+            }
+          },
+          fallbackPolicy: {
+            type: 'object',
+            description: 'Fallback behavior on model failure',
+            properties: {
+              onModelFailure: {
+                type: 'string',
+                enum: ['provider_chain', 'cross_provider', 'claude_only'],
+                default: 'provider_chain',
+                description: 'Fallback strategy when a model fails'
+              },
+              allowCrossProvider: {
+                type: 'boolean',
+                default: false,
+                description: 'Allow fallback to a different provider'
+              },
+              crossProviderOrder: {
+                type: 'array',
+                items: { type: 'string', enum: ['codex', 'gemini'] },
+                default: ['codex', 'gemini'],
+                description: 'Order of providers for cross-provider fallback'
+              }
+            }
+          }
+        }
+      },
+      delegationRouting: {
+        type: 'object',
+        description: 'Delegation routing configuration for external model providers (opt-in feature)',
+        properties: {
+          enabled: {
+            type: 'boolean',
+            default: false,
+            description: 'Enable delegation routing to external providers (Codex, Gemini)'
+          },
+          defaultProvider: {
+            type: 'string',
+            enum: ['claude', 'codex', 'gemini'],
+            default: 'claude',
+            description: 'Default provider for delegation routing when no specific role mapping exists'
+          },
+          roles: {
+            type: 'object',
+            description: 'Provider mappings by agent role',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                provider: { type: 'string', enum: ['claude', 'codex', 'gemini'] },
+                tool: { type: 'string', enum: ['Task', 'ask_codex', 'ask_gemini'] },
+                model: { type: 'string' },
+                agentType: { type: 'string' },
+                fallback: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['provider', 'tool']
+            }
+          }
         }
       }
     }

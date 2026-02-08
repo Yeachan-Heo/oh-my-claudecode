@@ -7,7 +7,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
-import { GEMINI_RECOMMENDED_ROLES, GEMINI_DEFAULT_MODEL, GEMINI_MODEL_FALLBACKS, handleAskGemini, } from './gemini-core.js';
+import { GEMINI_RECOMMENDED_ROLES, GEMINI_DEFAULT_MODEL, handleAskGemini, } from './gemini-core.js';
+import { GEMINI_MODEL_FALLBACKS } from '../features/model-routing/external-model-policy.js';
 import { handleWaitForJob, handleCheckJobStatus, handleKillJob, handleListJobs, getJobManagementToolSchemas, } from './job-management.js';
 const askGeminiTool = {
     name: 'ask_gemini',

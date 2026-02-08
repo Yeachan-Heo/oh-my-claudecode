@@ -4,7 +4,7 @@
  * Read ralph, ultrawork, and PRD state from existing OMC files.
  * These are read-only functions that don't modify the state files.
  */
-import { existsSync, readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 /**
  * Maximum age for state files to be considered "active".
@@ -25,17 +25,74 @@ function isStateFileStale(filePath) {
     }
 }
 /**
- * Resolve state file path with fallback from .omc/state/ to .omc/
- * Returns null if file doesn't exist in either location.
+ * Resolve state file path with fallback chain:
+ * 1. Session-scoped paths (.omc/state/sessions/{id}/{filename}) - newest first
+ * 2. Standard path (.omc/state/{filename})
+ * 3. Legacy path (.omc/{filename})
+ *
+ * Returns the most recently modified matching path, or null if none found.
+ * This ensures the HUD displays state from any active session (Issue #456).
  */
 function resolveStatePath(directory, filename) {
+    let bestPath = null;
+    let bestMtime = 0;
+    // Check session-scoped paths first (most likely location after Issue #456 fix)
+    const sessionsDir = join(directory, '.omc', 'state', 'sessions');
+    if (existsSync(sessionsDir)) {
+        try {
+            const entries = readdirSync(sessionsDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (!entry.isDirectory())
+                    continue;
+                const sessionFile = join(sessionsDir, entry.name, filename);
+                if (existsSync(sessionFile)) {
+                    try {
+                        const mtime = statSync(sessionFile).mtimeMs;
+                        if (mtime > bestMtime) {
+                            bestMtime = mtime;
+                            bestPath = sessionFile;
+                        }
+                    }
+                    catch {
+                        // Skip on stat error
+                    }
+                }
+            }
+        }
+        catch {
+            // Ignore readdir errors
+        }
+    }
+    // Check standard path
     const newPath = join(directory, '.omc', 'state', filename);
+    if (existsSync(newPath)) {
+        try {
+            const mtime = statSync(newPath).mtimeMs;
+            if (mtime > bestMtime) {
+                bestMtime = mtime;
+                bestPath = newPath;
+            }
+        }
+        catch {
+            if (!bestPath)
+                bestPath = newPath;
+        }
+    }
+    // Check legacy path
     const legacyPath = join(directory, '.omc', filename);
-    if (existsSync(newPath))
-        return newPath;
-    if (existsSync(legacyPath))
-        return legacyPath;
-    return null;
+    if (existsSync(legacyPath)) {
+        try {
+            const mtime = statSync(legacyPath).mtimeMs;
+            if (mtime > bestMtime) {
+                bestPath = legacyPath;
+            }
+        }
+        catch {
+            if (!bestPath)
+                bestPath = legacyPath;
+        }
+    }
+    return bestPath;
 }
 /**
  * Read Ralph Loop state for HUD display.

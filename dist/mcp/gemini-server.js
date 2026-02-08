@@ -8,7 +8,8 @@
  * external-process .mcp.json registration with proper stdio transport.
  */
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
-import { GEMINI_DEFAULT_MODEL, GEMINI_MODEL_FALLBACKS, GEMINI_RECOMMENDED_ROLES, handleAskGemini } from './gemini-core.js';
+import { GEMINI_DEFAULT_MODEL, GEMINI_RECOMMENDED_ROLES, handleAskGemini } from './gemini-core.js';
+import { GEMINI_MODEL_FALLBACKS } from '../features/model-routing/external-model-policy.js';
 import { handleWaitForJob, handleCheckJobStatus, handleKillJob, handleListJobs } from './job-management.js';
 // Define the ask_gemini tool using the SDK tool() helper
 const askGeminiTool = tool("ask_gemini", `Send a prompt to Google Gemini CLI for design/implementation tasks. Gemini excels at frontend design review and implementation with its 1M token context window. Recommended roles: ${GEMINI_RECOMMENDED_ROLES.join(', ')}. Any valid OMC agent role is accepted. Fallback chain: ${GEMINI_MODEL_FALLBACKS.join(' → ')}. Requires Gemini CLI (npm install -g @google/gemini-cli).`, {

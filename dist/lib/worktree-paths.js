@@ -225,6 +225,44 @@ export function clearWorktreeCache() {
 // ============================================================================
 /** Regex for valid session IDs: alphanumeric, hyphens, underscores, max 256 chars */
 const SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+// ============================================================================
+// AUTOMATIC PROCESS SESSION ID (Issue #456)
+// ============================================================================
+/**
+ * Auto-generated session ID for the current process.
+ * Uses PID + process start timestamp to be unique even if PIDs are reused.
+ * Generated once at module load time and stable for the process lifetime.
+ */
+let processSessionId = null;
+/**
+ * Get or generate a unique session ID for the current process.
+ *
+ * Format: `pid-{PID}-{startTimestamp}`
+ * Example: `pid-12345-1707350400000`
+ *
+ * This prevents concurrent Claude Code instances in the same repo from
+ * sharing state files (Issue #456). The ID is stable for the process
+ * lifetime and unique across concurrent processes.
+ *
+ * @returns A unique session ID for the current process
+ */
+export function getProcessSessionId() {
+    if (!processSessionId) {
+        // process.pid is unique among concurrent processes.
+        // Adding a timestamp handles PID reuse after process exit.
+        const pid = process.pid;
+        const startTime = Date.now();
+        processSessionId = `pid-${pid}-${startTime}`;
+    }
+    return processSessionId;
+}
+/**
+ * Reset the process session ID (for testing only).
+ * @internal
+ */
+export function resetProcessSessionId() {
+    processSessionId = null;
+}
 /**
  * Validate a session ID to prevent path traversal attacks.
  *

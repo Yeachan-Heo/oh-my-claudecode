@@ -111,6 +111,24 @@ export declare function ensureAllOmcDirs(worktreeRoot?: string): void;
  */
 export declare function clearWorktreeCache(): void;
 /**
+ * Get or generate a unique session ID for the current process.
+ *
+ * Format: `pid-{PID}-{startTimestamp}`
+ * Example: `pid-12345-1707350400000`
+ *
+ * This prevents concurrent Claude Code instances in the same repo from
+ * sharing state files (Issue #456). The ID is stable for the process
+ * lifetime and unique across concurrent processes.
+ *
+ * @returns A unique session ID for the current process
+ */
+export declare function getProcessSessionId(): string;
+/**
+ * Reset the process session ID (for testing only).
+ * @internal
+ */
+export declare function resetProcessSessionId(): void;
+/**
  * Validate a session ID to prevent path traversal attacks.
  *
  * @param sessionId - The session ID to validate

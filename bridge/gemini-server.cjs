@@ -3587,24 +3587,24 @@ var require_fast_uri = __commonJS({
     function normalize2(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
-        serialize(parse3(uri, options), options);
+        serialize(parse4(uri, options), options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse3(serialize(uri, options), options);
+        parse4(serialize(uri, options), options);
       }
       return uri;
     }
     function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
+      const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
     function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse3(serialize(base, options), options);
-        relative5 = parse3(serialize(relative5, options), options);
+        base = parse4(serialize(base, options), options);
+        relative5 = parse4(serialize(relative5, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative5.scheme) {
@@ -3656,13 +3656,13 @@ var require_fast_uri = __commonJS({
     function equal(uriA, uriB, options) {
       if (typeof uriA === "string") {
         uriA = unescape(uriA);
-        uriA = serialize(normalizeComponentEncoding(parse3(uriA, options), true), { ...options, skipEscape: true });
+        uriA = serialize(normalizeComponentEncoding(parse4(uriA, options), true), { ...options, skipEscape: true });
       } else if (typeof uriA === "object") {
         uriA = serialize(normalizeComponentEncoding(uriA, true), { ...options, skipEscape: true });
       }
       if (typeof uriB === "string") {
         uriB = unescape(uriB);
-        uriB = serialize(normalizeComponentEncoding(parse3(uriB, options), true), { ...options, skipEscape: true });
+        uriB = serialize(normalizeComponentEncoding(parse4(uriB, options), true), { ...options, skipEscape: true });
       } else if (typeof uriB === "object") {
         uriB = serialize(normalizeComponentEncoding(uriB, true), { ...options, skipEscape: true });
       }
@@ -3731,7 +3731,7 @@ var require_fast_uri = __commonJS({
       return uriTokens.join("");
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
-    function parse3(uri, opts) {
+    function parse4(uri, opts) {
       const options = Object.assign({}, opts);
       const parsed = {
         scheme: void 0,
@@ -3825,7 +3825,7 @@ var require_fast_uri = __commonJS({
       resolveComponent,
       equal,
       serialize,
-      parse: parse3
+      parse: parse4
     };
     module2.exports = fastUri;
     module2.exports.default = fastUri;
@@ -6798,6 +6798,154 @@ var require_dist = __commonJS({
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.default = formatsPlugin;
+  }
+});
+
+// node_modules/jsonc-parser/lib/umd/main.js
+var require_main = __commonJS({
+  "node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
+    (function(factory) {
+      if (typeof module2 === "object" && typeof module2.exports === "object") {
+        var v = factory(require, exports2);
+        if (v !== void 0) module2.exports = v;
+      } else if (typeof define === "function" && define.amd) {
+        define(["require", "exports", "./impl/format", "./impl/edit", "./impl/scanner", "./impl/parser"], factory);
+      }
+    })(function(require2, exports3) {
+      "use strict";
+      Object.defineProperty(exports3, "__esModule", { value: true });
+      exports3.applyEdits = exports3.modify = exports3.format = exports3.printParseErrorCode = exports3.ParseErrorCode = exports3.stripComments = exports3.visit = exports3.getNodeValue = exports3.getNodePath = exports3.findNodeAtOffset = exports3.findNodeAtLocation = exports3.parseTree = exports3.parse = exports3.getLocation = exports3.SyntaxKind = exports3.ScanError = exports3.createScanner = void 0;
+      const formatter = require2("./impl/format");
+      const edit = require2("./impl/edit");
+      const scanner = require2("./impl/scanner");
+      const parser = require2("./impl/parser");
+      exports3.createScanner = scanner.createScanner;
+      var ScanError;
+      (function(ScanError2) {
+        ScanError2[ScanError2["None"] = 0] = "None";
+        ScanError2[ScanError2["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
+        ScanError2[ScanError2["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
+        ScanError2[ScanError2["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
+        ScanError2[ScanError2["InvalidUnicode"] = 4] = "InvalidUnicode";
+        ScanError2[ScanError2["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
+        ScanError2[ScanError2["InvalidCharacter"] = 6] = "InvalidCharacter";
+      })(ScanError || (exports3.ScanError = ScanError = {}));
+      var SyntaxKind;
+      (function(SyntaxKind2) {
+        SyntaxKind2[SyntaxKind2["OpenBraceToken"] = 1] = "OpenBraceToken";
+        SyntaxKind2[SyntaxKind2["CloseBraceToken"] = 2] = "CloseBraceToken";
+        SyntaxKind2[SyntaxKind2["OpenBracketToken"] = 3] = "OpenBracketToken";
+        SyntaxKind2[SyntaxKind2["CloseBracketToken"] = 4] = "CloseBracketToken";
+        SyntaxKind2[SyntaxKind2["CommaToken"] = 5] = "CommaToken";
+        SyntaxKind2[SyntaxKind2["ColonToken"] = 6] = "ColonToken";
+        SyntaxKind2[SyntaxKind2["NullKeyword"] = 7] = "NullKeyword";
+        SyntaxKind2[SyntaxKind2["TrueKeyword"] = 8] = "TrueKeyword";
+        SyntaxKind2[SyntaxKind2["FalseKeyword"] = 9] = "FalseKeyword";
+        SyntaxKind2[SyntaxKind2["StringLiteral"] = 10] = "StringLiteral";
+        SyntaxKind2[SyntaxKind2["NumericLiteral"] = 11] = "NumericLiteral";
+        SyntaxKind2[SyntaxKind2["LineCommentTrivia"] = 12] = "LineCommentTrivia";
+        SyntaxKind2[SyntaxKind2["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
+        SyntaxKind2[SyntaxKind2["LineBreakTrivia"] = 14] = "LineBreakTrivia";
+        SyntaxKind2[SyntaxKind2["Trivia"] = 15] = "Trivia";
+        SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
+        SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
+      })(SyntaxKind || (exports3.SyntaxKind = SyntaxKind = {}));
+      exports3.getLocation = parser.getLocation;
+      exports3.parse = parser.parse;
+      exports3.parseTree = parser.parseTree;
+      exports3.findNodeAtLocation = parser.findNodeAtLocation;
+      exports3.findNodeAtOffset = parser.findNodeAtOffset;
+      exports3.getNodePath = parser.getNodePath;
+      exports3.getNodeValue = parser.getNodeValue;
+      exports3.visit = parser.visit;
+      exports3.stripComments = parser.stripComments;
+      var ParseErrorCode;
+      (function(ParseErrorCode2) {
+        ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
+        ParseErrorCode2[ParseErrorCode2["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
+        ParseErrorCode2[ParseErrorCode2["PropertyNameExpected"] = 3] = "PropertyNameExpected";
+        ParseErrorCode2[ParseErrorCode2["ValueExpected"] = 4] = "ValueExpected";
+        ParseErrorCode2[ParseErrorCode2["ColonExpected"] = 5] = "ColonExpected";
+        ParseErrorCode2[ParseErrorCode2["CommaExpected"] = 6] = "CommaExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBraceExpected"] = 7] = "CloseBraceExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBracketExpected"] = 8] = "CloseBracketExpected";
+        ParseErrorCode2[ParseErrorCode2["EndOfFileExpected"] = 9] = "EndOfFileExpected";
+        ParseErrorCode2[ParseErrorCode2["InvalidCommentToken"] = 10] = "InvalidCommentToken";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
+        ParseErrorCode2[ParseErrorCode2["InvalidUnicode"] = 14] = "InvalidUnicode";
+        ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
+        ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
+      })(ParseErrorCode || (exports3.ParseErrorCode = ParseErrorCode = {}));
+      function printParseErrorCode(code) {
+        switch (code) {
+          case 1:
+            return "InvalidSymbol";
+          case 2:
+            return "InvalidNumberFormat";
+          case 3:
+            return "PropertyNameExpected";
+          case 4:
+            return "ValueExpected";
+          case 5:
+            return "ColonExpected";
+          case 6:
+            return "CommaExpected";
+          case 7:
+            return "CloseBraceExpected";
+          case 8:
+            return "CloseBracketExpected";
+          case 9:
+            return "EndOfFileExpected";
+          case 10:
+            return "InvalidCommentToken";
+          case 11:
+            return "UnexpectedEndOfComment";
+          case 12:
+            return "UnexpectedEndOfString";
+          case 13:
+            return "UnexpectedEndOfNumber";
+          case 14:
+            return "InvalidUnicode";
+          case 15:
+            return "InvalidEscapeCharacter";
+          case 16:
+            return "InvalidCharacter";
+        }
+        return "<unknown ParseErrorCode>";
+      }
+      exports3.printParseErrorCode = printParseErrorCode;
+      function format(documentText, range, options) {
+        return formatter.format(documentText, range, options);
+      }
+      exports3.format = format;
+      function modify(text, path, value, options) {
+        return edit.setProperty(text, path, value, options);
+      }
+      exports3.modify = modify;
+      function applyEdits(text, edits) {
+        let sortedEdits = edits.slice(0).sort((a, b) => {
+          const diff = a.offset - b.offset;
+          if (diff === 0) {
+            return a.length - b.length;
+          }
+          return diff;
+        });
+        let lastModifiedOffset = text.length;
+        for (let i = sortedEdits.length - 1; i >= 0; i--) {
+          let e = sortedEdits[i];
+          if (e.offset + e.length <= lastModifiedOffset) {
+            text = edit.applyEdit(text, e);
+          } else {
+            throw new Error("Overlapping edit");
+          }
+          lastModifiedOffset = e.offset;
+        }
+        return text;
+      }
+      exports3.applyEdits = applyEdits;
+    });
   }
 });
 
@@ -13713,8 +13861,8 @@ var StdioServerTransport = class {
 
 // src/mcp/gemini-core.ts
 var import_child_process3 = require("child_process");
-var import_fs5 = require("fs");
-var import_path5 = require("path");
+var import_fs7 = require("fs");
+var import_path7 = require("path");
 
 // src/mcp/cli-detection.ts
 var import_child_process = require("child_process");
@@ -14347,6 +14495,382 @@ function listActiveJobs(provider, workingDirectory) {
   }
 }
 
+// src/features/model-routing/external-model-policy.ts
+var CODEX_MODEL_FALLBACKS = [
+  "gpt-5.3-codex",
+  "gpt-5.3",
+  "gpt-5.2-codex",
+  "gpt-5.2"
+];
+var GEMINI_MODEL_FALLBACKS = [
+  "gemini-3-pro-preview",
+  "gemini-3-flash-preview",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash"
+];
+var HARDCODED_DEFAULTS = {
+  codex: "gpt-5.3-codex",
+  gemini: "gemini-3-pro-preview"
+};
+var DEFAULT_FALLBACK_POLICY = {
+  onModelFailure: "provider_chain",
+  allowCrossProvider: false,
+  crossProviderOrder: ["codex", "gemini"]
+};
+function resolveExternalModel(config2, options) {
+  const { agentRole, taskType, explicitProvider, explicitModel } = options;
+  if (explicitModel) {
+    const provider2 = guessProviderFromModel(explicitModel);
+    return {
+      provider: provider2,
+      model: explicitModel,
+      fallbackPolicy: config2?.fallbackPolicy ?? DEFAULT_FALLBACK_POLICY
+    };
+  }
+  if (explicitProvider && agentRole && config2?.rolePreferences?.[agentRole]) {
+    const rolePref = config2.rolePreferences[agentRole];
+    if (rolePref.provider === explicitProvider) {
+      return {
+        provider: explicitProvider,
+        model: rolePref.model,
+        fallbackPolicy: config2?.fallbackPolicy ?? DEFAULT_FALLBACK_POLICY
+      };
+    }
+  }
+  if (taskType && config2?.taskPreferences?.[taskType]) {
+    const taskPref = config2.taskPreferences[taskType];
+    return {
+      provider: taskPref.provider,
+      model: taskPref.model,
+      fallbackPolicy: config2?.fallbackPolicy ?? DEFAULT_FALLBACK_POLICY
+    };
+  }
+  if (agentRole && config2?.rolePreferences?.[agentRole]) {
+    const rolePref = config2.rolePreferences[agentRole];
+    return {
+      provider: rolePref.provider,
+      model: rolePref.model,
+      fallbackPolicy: config2?.fallbackPolicy ?? DEFAULT_FALLBACK_POLICY
+    };
+  }
+  const provider = explicitProvider ?? config2?.defaults?.provider ?? "codex";
+  const model = getDefaultModelForProvider(provider, config2);
+  return {
+    provider,
+    model,
+    fallbackPolicy: config2?.fallbackPolicy ?? DEFAULT_FALLBACK_POLICY
+  };
+}
+function guessProviderFromModel(model) {
+  const lowerModel = model.toLowerCase();
+  if (lowerModel.includes("gemini")) {
+    return "gemini";
+  }
+  return "codex";
+}
+function getDefaultModelForProvider(provider, config2) {
+  if (provider === "codex" && config2?.defaults?.codexModel) {
+    return config2.defaults.codexModel;
+  }
+  if (provider === "gemini" && config2?.defaults?.geminiModel) {
+    return config2.defaults.geminiModel;
+  }
+  if (provider === "codex") {
+    const envModel = process.env.OMC_CODEX_DEFAULT_MODEL;
+    if (envModel) {
+      return envModel;
+    }
+  }
+  if (provider === "gemini") {
+    const envModel = process.env.OMC_GEMINI_DEFAULT_MODEL;
+    if (envModel) {
+      return envModel;
+    }
+  }
+  return HARDCODED_DEFAULTS[provider];
+}
+function buildFallbackChain(provider, resolvedModel, config2) {
+  const defaultChain = provider === "codex" ? CODEX_MODEL_FALLBACKS : GEMINI_MODEL_FALLBACKS;
+  const chain = [resolvedModel, ...defaultChain];
+  return [...new Set(chain)];
+}
+
+// src/config/loader.ts
+var import_fs6 = require("fs");
+var import_path6 = require("path");
+var jsonc = __toESM(require_main(), 1);
+
+// src/utils/paths.ts
+var import_path5 = require("path");
+var import_fs5 = require("fs");
+var import_os = require("os");
+function getConfigDir() {
+  if (process.platform === "win32") {
+    return process.env.APPDATA || (0, import_path5.join)((0, import_os.homedir)(), "AppData", "Roaming");
+  }
+  return process.env.XDG_CONFIG_HOME || (0, import_path5.join)((0, import_os.homedir)(), ".config");
+}
+
+// src/config/loader.ts
+var DEFAULT_CONFIG = {
+  agents: {
+    omc: { model: "claude-opus-4-6-20260205" },
+    architect: { model: "claude-opus-4-6-20260205", enabled: true },
+    researcher: { model: "claude-sonnet-4-5-20250929" },
+    explore: { model: "claude-haiku-4-5-20251001" },
+    frontendEngineer: { model: "claude-sonnet-4-5-20250929", enabled: true },
+    documentWriter: { model: "claude-haiku-4-5-20251001", enabled: true },
+    multimodalLooker: { model: "claude-sonnet-4-5-20250929", enabled: true },
+    // New agents from oh-my-opencode
+    critic: { model: "claude-opus-4-6-20260205", enabled: true },
+    analyst: { model: "claude-opus-4-6-20260205", enabled: true },
+    orchestratorSisyphus: { model: "claude-sonnet-4-5-20250929", enabled: true },
+    sisyphusJunior: { model: "claude-sonnet-4-5-20250929", enabled: true },
+    planner: { model: "claude-opus-4-6-20260205", enabled: true }
+  },
+  features: {
+    parallelExecution: true,
+    lspTools: true,
+    // Real LSP integration with language servers
+    astTools: true,
+    // Real AST tools using ast-grep
+    continuationEnforcement: true,
+    autoContextInjection: true
+  },
+  mcpServers: {
+    exa: { enabled: true },
+    context7: { enabled: true }
+  },
+  permissions: {
+    allowBash: true,
+    allowEdit: true,
+    allowWrite: true,
+    maxBackgroundTasks: 5
+  },
+  magicKeywords: {
+    ultrawork: ["ultrawork", "ulw", "uw"],
+    search: ["search", "find", "locate"],
+    analyze: ["analyze", "investigate", "examine"],
+    ultrathink: ["ultrathink", "think", "reason", "ponder"]
+  },
+  // Intelligent model routing configuration
+  routing: {
+    enabled: true,
+    defaultTier: "MEDIUM",
+    escalationEnabled: true,
+    maxEscalations: 2,
+    tierModels: {
+      LOW: "claude-haiku-4-5-20251001",
+      MEDIUM: "claude-sonnet-4-5-20250929",
+      HIGH: "claude-opus-4-6-20260205"
+    },
+    agentOverrides: {
+      architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
+      planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
+      critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
+      analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
+      explore: { tier: "LOW", reason: "Exploration is search-focused" },
+      "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+    },
+    escalationKeywords: [
+      "critical",
+      "production",
+      "urgent",
+      "security",
+      "breaking",
+      "architecture",
+      "refactor",
+      "redesign",
+      "root cause"
+    ],
+    simplificationKeywords: [
+      "find",
+      "list",
+      "show",
+      "where",
+      "search",
+      "locate",
+      "grep"
+    ]
+  },
+  // External models configuration (Codex, Gemini)
+  externalModels: {
+    defaults: {
+      codexModel: process.env.OMC_CODEX_DEFAULT_MODEL || "gpt-5.3-codex",
+      geminiModel: process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview"
+    },
+    fallbackPolicy: {
+      onModelFailure: "provider_chain",
+      allowCrossProvider: false,
+      crossProviderOrder: ["codex", "gemini"]
+    }
+  },
+  // Delegation routing configuration (opt-in feature for external model routing)
+  delegationRouting: {
+    enabled: false,
+    // Opt-in feature
+    defaultProvider: "claude",
+    roles: {}
+  }
+};
+function getConfigPaths() {
+  const userConfigDir = getConfigDir();
+  return {
+    user: (0, import_path6.join)(userConfigDir, "claude-sisyphus", "config.jsonc"),
+    project: (0, import_path6.join)(process.cwd(), ".claude", "sisyphus.jsonc")
+  };
+}
+function loadJsoncFile(path) {
+  if (!(0, import_fs6.existsSync)(path)) {
+    return null;
+  }
+  try {
+    const content = (0, import_fs6.readFileSync)(path, "utf-8");
+    const errors = [];
+    const result = jsonc.parse(content, errors, {
+      allowTrailingComma: true,
+      allowEmptyContent: true
+    });
+    if (errors.length > 0) {
+      console.warn(`Warning: Parse errors in ${path}:`, errors);
+    }
+    return result;
+  } catch (error2) {
+    console.error(`Error loading config from ${path}:`, error2);
+    return null;
+  }
+}
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    const sourceValue = source[key];
+    const targetValue = result[key];
+    if (sourceValue !== void 0 && typeof sourceValue === "object" && sourceValue !== null && !Array.isArray(sourceValue) && typeof targetValue === "object" && targetValue !== null && !Array.isArray(targetValue)) {
+      result[key] = deepMerge(
+        targetValue,
+        sourceValue
+      );
+    } else if (sourceValue !== void 0) {
+      result[key] = sourceValue;
+    }
+  }
+  return result;
+}
+function loadEnvConfig() {
+  const config2 = {};
+  if (process.env.EXA_API_KEY) {
+    config2.mcpServers = {
+      ...config2.mcpServers,
+      exa: { enabled: true, apiKey: process.env.EXA_API_KEY }
+    };
+  }
+  if (process.env.OMC_PARALLEL_EXECUTION !== void 0) {
+    config2.features = {
+      ...config2.features,
+      parallelExecution: process.env.OMC_PARALLEL_EXECUTION === "true"
+    };
+  }
+  if (process.env.OMC_LSP_TOOLS !== void 0) {
+    config2.features = {
+      ...config2.features,
+      lspTools: process.env.OMC_LSP_TOOLS === "true"
+    };
+  }
+  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
+    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
+    if (!isNaN(maxTasks)) {
+      config2.permissions = {
+        ...config2.permissions,
+        maxBackgroundTasks: maxTasks
+      };
+    }
+  }
+  if (process.env.OMC_ROUTING_ENABLED !== void 0) {
+    config2.routing = {
+      ...config2.routing,
+      enabled: process.env.OMC_ROUTING_ENABLED === "true"
+    };
+  }
+  if (process.env.OMC_ROUTING_DEFAULT_TIER) {
+    const tier = process.env.OMC_ROUTING_DEFAULT_TIER.toUpperCase();
+    if (tier === "LOW" || tier === "MEDIUM" || tier === "HIGH") {
+      config2.routing = {
+        ...config2.routing,
+        defaultTier: tier
+      };
+    }
+  }
+  if (process.env.OMC_ESCALATION_ENABLED !== void 0) {
+    config2.routing = {
+      ...config2.routing,
+      escalationEnabled: process.env.OMC_ESCALATION_ENABLED === "true"
+    };
+  }
+  const externalModelsDefaults = {};
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
+    if (provider === "codex" || provider === "gemini") {
+      externalModelsDefaults.provider = provider;
+    }
+  }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL) {
+    externalModelsDefaults.codexModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
+  } else if (process.env.OMC_CODEX_DEFAULT_MODEL) {
+    externalModelsDefaults.codexModel = process.env.OMC_CODEX_DEFAULT_MODEL;
+  }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL) {
+    externalModelsDefaults.geminiModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
+  } else if (process.env.OMC_GEMINI_DEFAULT_MODEL) {
+    externalModelsDefaults.geminiModel = process.env.OMC_GEMINI_DEFAULT_MODEL;
+  }
+  const externalModelsFallback = {
+    onModelFailure: "provider_chain"
+  };
+  if (process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY) {
+    const policy = process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY;
+    if (policy === "provider_chain" || policy === "cross_provider" || policy === "claude_only") {
+      externalModelsFallback.onModelFailure = policy;
+    }
+  }
+  if (Object.keys(externalModelsDefaults).length > 0 || externalModelsFallback.onModelFailure !== "provider_chain") {
+    config2.externalModels = {
+      defaults: externalModelsDefaults,
+      fallbackPolicy: externalModelsFallback
+    };
+  }
+  if (process.env.OMC_DELEGATION_ROUTING_ENABLED !== void 0) {
+    config2.delegationRouting = {
+      ...config2.delegationRouting,
+      enabled: process.env.OMC_DELEGATION_ROUTING_ENABLED === "true"
+    };
+  }
+  if (process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER;
+    if (["claude", "codex", "gemini"].includes(provider)) {
+      config2.delegationRouting = {
+        ...config2.delegationRouting,
+        defaultProvider: provider
+      };
+    }
+  }
+  return config2;
+}
+function loadConfig() {
+  const paths = getConfigPaths();
+  let config2 = { ...DEFAULT_CONFIG };
+  const userConfig = loadJsoncFile(paths.user);
+  if (userConfig) {
+    config2 = deepMerge(config2, userConfig);
+  }
+  const projectConfig = loadJsoncFile(paths.project);
+  if (projectConfig) {
+    config2 = deepMerge(config2, projectConfig);
+  }
+  const envConfig = loadEnvConfig();
+  config2 = deepMerge(config2, envConfig);
+  return config2;
+}
+
 // src/mcp/gemini-core.ts
 var spawnedPids = /* @__PURE__ */ new Set();
 function isSpawnedPid(pid) {
@@ -14360,12 +14884,6 @@ function validateModelName(model) {
 }
 var GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview";
 var GEMINI_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5), 36e5);
-var GEMINI_MODEL_FALLBACKS = [
-  "gemini-3-pro-preview",
-  "gemini-3-flash-preview",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash"
-];
 var GEMINI_RECOMMENDED_ROLES = ["designer", "writer", "vision"];
 var MAX_CONTEXT_FILES = 20;
 var MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -14627,19 +15145,19 @@ function validateAndReadFile(filePath, baseDir) {
     return `--- File: ${filePath} --- (Invalid path type)`;
   }
   try {
-    const resolvedAbs = (0, import_path5.resolve)(baseDir || process.cwd(), filePath);
+    const resolvedAbs = (0, import_path7.resolve)(baseDir || process.cwd(), filePath);
     const cwd = baseDir || process.cwd();
-    const cwdReal = (0, import_fs5.realpathSync)(cwd);
-    const relAbs = (0, import_path5.relative)(cwdReal, resolvedAbs);
-    if (relAbs === ".." || relAbs.startsWith(".." + import_path5.sep) || (0, import_path5.isAbsolute)(relAbs)) {
+    const cwdReal = (0, import_fs7.realpathSync)(cwd);
+    const relAbs = (0, import_path7.relative)(cwdReal, resolvedAbs);
+    if (relAbs === ".." || relAbs.startsWith(".." + import_path7.sep) || (0, import_path7.isAbsolute)(relAbs)) {
       return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
     }
-    const resolvedReal = (0, import_fs5.realpathSync)(resolvedAbs);
-    const relReal = (0, import_path5.relative)(cwdReal, resolvedReal);
-    if (relReal === ".." || relReal.startsWith(".." + import_path5.sep) || (0, import_path5.isAbsolute)(relReal)) {
+    const resolvedReal = (0, import_fs7.realpathSync)(resolvedAbs);
+    const relReal = (0, import_path7.relative)(cwdReal, resolvedReal);
+    if (relReal === ".." || relReal.startsWith(".." + import_path7.sep) || (0, import_path7.isAbsolute)(relReal)) {
       return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
     }
-    const stats = (0, import_fs5.statSync)(resolvedReal);
+    const stats = (0, import_fs7.statSync)(resolvedReal);
     if (!stats.isFile()) {
       return `--- File: ${filePath} --- (Not a regular file)`;
     }
@@ -14647,17 +15165,24 @@ function validateAndReadFile(filePath, baseDir) {
       return `--- File: ${filePath} --- (File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB, max 5MB)`;
     }
     return `--- File: ${filePath} ---
-${(0, import_fs5.readFileSync)(resolvedReal, "utf-8")}`;
+${(0, import_fs7.readFileSync)(resolvedReal, "utf-8")}`;
   } catch {
     return `--- File: ${filePath} --- (Error reading file)`;
   }
 }
 async function handleAskGemini(args) {
-  const { agent_role, model = GEMINI_DEFAULT_MODEL, files } = args;
+  const { agent_role, files } = args;
+  const config2 = loadConfig();
+  const resolved = resolveExternalModel(config2.externalModels, {
+    agentRole: agent_role,
+    explicitModel: args.model
+    // user explicitly passed model
+  });
+  const resolvedModel = resolved.model;
   let baseDir = args.working_directory || process.cwd();
   let baseDirReal;
   try {
-    baseDirReal = (0, import_fs5.realpathSync)(baseDir);
+    baseDirReal = (0, import_fs7.realpathSync)(baseDir);
   } catch (err) {
     return {
       content: [{ type: "text", text: `working_directory '${args.working_directory}' does not exist or is not accessible: ${err.message}` }],
@@ -14669,13 +15194,13 @@ async function handleAskGemini(args) {
     if (worktreeRoot) {
       let worktreeReal;
       try {
-        worktreeReal = (0, import_fs5.realpathSync)(worktreeRoot);
+        worktreeReal = (0, import_fs7.realpathSync)(worktreeRoot);
       } catch {
         worktreeReal = "";
       }
       if (worktreeReal) {
-        const relToWorktree = (0, import_path5.relative)(worktreeReal, baseDirReal);
-        if (relToWorktree.startsWith("..") || (0, import_path5.isAbsolute)(relToWorktree)) {
+        const relToWorktree = (0, import_path7.relative)(worktreeReal, baseDirReal);
+        if (relToWorktree.startsWith("..") || (0, import_path7.isAbsolute)(relToWorktree)) {
           return {
             content: [{ type: "text", text: `working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}). Set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass.` }],
             isError: true
@@ -14721,10 +15246,10 @@ async function handleAskGemini(args) {
     };
   }
   let resolvedPrompt;
-  const resolvedPath = (0, import_path5.resolve)(baseDir, args.prompt_file);
-  const cwdReal = (0, import_fs5.realpathSync)(baseDir);
-  const relPath = (0, import_path5.relative)(cwdReal, resolvedPath);
-  if (relPath === ".." || relPath.startsWith(".." + import_path5.sep) || (0, import_path5.isAbsolute)(relPath)) {
+  const resolvedPath = (0, import_path7.resolve)(baseDir, args.prompt_file);
+  const cwdReal = (0, import_fs7.realpathSync)(baseDir);
+  const relPath = (0, import_path7.relative)(cwdReal, resolvedPath);
+  if (relPath === ".." || relPath.startsWith(".." + import_path7.sep) || (0, import_path7.isAbsolute)(relPath)) {
     return {
       content: [{ type: "text", text: `prompt_file '${args.prompt_file}' is outside the working directory.` }],
       isError: true
@@ -14732,22 +15257,22 @@ async function handleAskGemini(args) {
   }
   let resolvedReal;
   try {
-    resolvedReal = (0, import_fs5.realpathSync)(resolvedPath);
+    resolvedReal = (0, import_fs7.realpathSync)(resolvedPath);
   } catch (err) {
     return {
       content: [{ type: "text", text: `Failed to resolve prompt_file '${args.prompt_file}': ${err.message}` }],
       isError: true
     };
   }
-  const relReal = (0, import_path5.relative)(cwdReal, resolvedReal);
-  if (relReal === ".." || relReal.startsWith(".." + import_path5.sep) || (0, import_path5.isAbsolute)(relReal)) {
+  const relReal = (0, import_path7.relative)(cwdReal, resolvedReal);
+  if (relReal === ".." || relReal.startsWith(".." + import_path7.sep) || (0, import_path7.isAbsolute)(relReal)) {
     return {
       content: [{ type: "text", text: `prompt_file '${args.prompt_file}' resolves to a path outside the working directory.` }],
       isError: true
     };
   }
   try {
-    resolvedPrompt = (0, import_fs5.readFileSync)(resolvedReal, "utf-8");
+    resolvedPrompt = (0, import_fs7.readFileSync)(resolvedReal, "utf-8");
   } catch (err) {
     return {
       content: [{ type: "text", text: `Failed to read prompt_file '${args.prompt_file}': ${err.message}` }],
@@ -14793,7 +15318,7 @@ ${detection.installHint}`
   const promptResult = persistPrompt({
     provider: "gemini",
     agentRole: agent_role,
-    model,
+    model: resolvedModel,
     files,
     prompt: resolvedPrompt,
     fullPrompt,
@@ -14808,15 +15333,13 @@ ${detection.installHint}`
       };
     }
     const statusFilePath = getStatusFilePath("gemini", promptResult.slug, promptResult.id, baseDir);
-    const requestedModelBg = model;
-    const fallbackIndexBg = GEMINI_MODEL_FALLBACKS.indexOf(requestedModelBg);
-    const modelsToTryBg = fallbackIndexBg >= 0 ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndexBg) : [requestedModelBg, ...GEMINI_MODEL_FALLBACKS];
+    const fallbackChainBg = buildFallbackChain("gemini", resolvedModel, config2.externalModels);
     const result = executeGeminiBackground(fullPrompt, args.model, {
       provider: "gemini",
       jobId: promptResult.id,
       slug: promptResult.slug,
       agentRole: agent_role,
-      model,
+      model: resolvedModel,
       promptFile: promptResult.filePath,
       responseFile: expectedResponsePath
     }, baseDir);
@@ -14833,8 +15356,8 @@ ${detection.installHint}`
           `**Mode:** Background (non-blocking)`,
           `**Job ID:** ${promptResult.id}`,
           `**Agent Role:** ${agent_role}`,
-          `**Model (attempting):** ${modelsToTryBg[0]}`,
-          `**Fallback chain:** ${modelsToTryBg.join(" -> ")}`,
+          `**Model (attempting):** ${fallbackChainBg[0]}`,
+          `**Fallback chain:** ${fallbackChainBg.join(" -> ")}`,
           `**PID:** ${result.pid}`,
           `**Prompt File:** ${promptResult.filePath}`,
           `**Response File:** ${expectedResponsePath}`,
@@ -14851,19 +15374,17 @@ ${detection.installHint}`
     promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
     expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null
   ].filter(Boolean).join("\n");
-  const requestedModel = model;
-  const fallbackIndex = GEMINI_MODEL_FALLBACKS.indexOf(requestedModel);
-  const modelsToTry = fallbackIndex >= 0 ? GEMINI_MODEL_FALLBACKS.slice(fallbackIndex) : [requestedModel, ...GEMINI_MODEL_FALLBACKS];
+  const fallbackChain = buildFallbackChain("gemini", resolvedModel, config2.externalModels);
   let resolvedOutputPath;
   if (args.output_file) {
-    resolvedOutputPath = (0, import_path5.resolve)(baseDirReal, args.output_file);
+    resolvedOutputPath = (0, import_path7.resolve)(baseDirReal, args.output_file);
   }
   const errors = [];
-  for (const tryModel of modelsToTry) {
+  for (const tryModel of fallbackChain) {
     try {
       const response = await executeGemini(fullPrompt, tryModel, baseDir);
-      const usedFallback = tryModel !== requestedModel;
-      const fallbackNote = usedFallback ? `[Fallback: used ${tryModel} instead of ${requestedModel}]
+      const usedFallback = tryModel !== resolvedModel;
+      const fallbackNote = usedFallback ? `[Fallback: used ${tryModel} instead of ${resolvedModel}]
 
 ` : "";
       if (promptResult) {
@@ -14881,33 +15402,33 @@ ${detection.installHint}`
       }
       if (args.output_file && resolvedOutputPath) {
         const outputPath = resolvedOutputPath;
-        const relOutput = (0, import_path5.relative)(baseDirReal, outputPath);
-        if (relOutput === "" || relOutput.startsWith("..") || (0, import_path5.isAbsolute)(relOutput)) {
+        const relOutput = (0, import_path7.relative)(baseDirReal, outputPath);
+        if (relOutput === "" || relOutput.startsWith("..") || (0, import_path7.isAbsolute)(relOutput)) {
           console.warn(`[gemini-core] output_file '${args.output_file}' resolves outside working directory, skipping write.`);
         } else {
           try {
-            const outputDir = (0, import_path5.dirname)(outputPath);
-            if (!(0, import_fs5.existsSync)(outputDir)) {
-              const relDir = (0, import_path5.relative)(baseDirReal, outputDir);
-              if (relDir.startsWith("..") || (0, import_path5.isAbsolute)(relDir)) {
+            const outputDir = (0, import_path7.dirname)(outputPath);
+            if (!(0, import_fs7.existsSync)(outputDir)) {
+              const relDir = (0, import_path7.relative)(baseDirReal, outputDir);
+              if (relDir.startsWith("..") || (0, import_path7.isAbsolute)(relDir)) {
                 console.warn(`[gemini-core] output_file directory is outside working directory, skipping write.`);
               } else {
-                (0, import_fs5.mkdirSync)(outputDir, { recursive: true });
+                (0, import_fs7.mkdirSync)(outputDir, { recursive: true });
               }
             }
             let outputDirReal;
             try {
-              outputDirReal = (0, import_fs5.realpathSync)(outputDir);
+              outputDirReal = (0, import_fs7.realpathSync)(outputDir);
             } catch {
               console.warn(`[gemini-core] Failed to resolve output directory, skipping write.`);
             }
             if (outputDirReal) {
-              const relDirReal = (0, import_path5.relative)(baseDirReal, outputDirReal);
-              if (relDirReal.startsWith("..") || (0, import_path5.isAbsolute)(relDirReal)) {
+              const relDirReal = (0, import_path7.relative)(baseDirReal, outputDirReal);
+              if (relDirReal.startsWith("..") || (0, import_path7.isAbsolute)(relDirReal)) {
                 console.warn(`[gemini-core] output_file directory resolves outside working directory, skipping write.`);
               } else {
-                const safePath = (0, import_path5.join)(outputDirReal, (0, import_path5.basename)(outputPath));
-                (0, import_fs5.writeFileSync)(safePath, response, "utf-8");
+                const safePath = (0, import_path7.join)(outputDirReal, (0, import_path7.basename)(outputPath));
+                (0, import_fs7.writeFileSync)(safePath, response, "utf-8");
               }
             }
           } catch (err) {
@@ -14954,13 +15475,13 @@ ${errors.join("\n")}`
 }
 
 // src/mcp/job-management.ts
-var import_fs7 = require("fs");
-var import_path7 = require("path");
+var import_fs9 = require("fs");
+var import_path9 = require("path");
 
 // src/mcp/codex-core.ts
 var import_child_process4 = require("child_process");
-var import_fs6 = require("fs");
-var import_path6 = require("path");
+var import_fs8 = require("fs");
+var import_path8 = require("path");
 var spawnedPids2 = /* @__PURE__ */ new Set();
 function isSpawnedPid2(pid) {
   return spawnedPids2.has(pid);
@@ -14985,9 +15506,9 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     return void 0;
   }
   const promptsDir = getPromptsDir(workingDirectory);
-  if (!(0, import_fs7.existsSync)(promptsDir)) return void 0;
+  if (!(0, import_fs9.existsSync)(promptsDir)) return void 0;
   try {
-    const files = (0, import_fs7.readdirSync)(promptsDir);
+    const files = (0, import_fs9.readdirSync)(promptsDir);
     const escapedProvider = escapeRegex2(provider);
     const escapedJobId = escapeRegex2(jobId);
     const pattern = new RegExp(`^${escapedProvider}-status-(.+)-${escapedJobId}\\.json$`);
@@ -14998,7 +15519,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
         matches.push({
           file: f,
           slug: m[1],
-          statusPath: (0, import_path7.join)(promptsDir, f)
+          statusPath: (0, import_path9.join)(promptsDir, f)
         });
       }
     }
@@ -15009,7 +15530,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     let best;
     for (const match of matches) {
       try {
-        const content = (0, import_fs7.readFileSync)(match.statusPath, "utf-8");
+        const content = (0, import_fs9.readFileSync)(match.statusPath, "utf-8");
         const status = JSON.parse(content);
         const isActive = status.status === "spawned" || status.status === "running";
         const spawnedAt = new Date(status.spawnedAt).getTime();
@@ -15387,18 +15908,18 @@ ${lines.join("\n\n")}`);
     }
   }
   const promptsDir = getPromptsDir();
-  if (!(0, import_fs7.existsSync)(promptsDir)) {
+  if (!(0, import_fs9.existsSync)(promptsDir)) {
     return textResult(`No ${provider} jobs found.`);
   }
   try {
-    const files = (0, import_fs7.readdirSync)(promptsDir);
+    const files = (0, import_fs9.readdirSync)(promptsDir);
     const statusFiles = files.filter(
       (f) => f.startsWith(`${provider}-status-`) && f.endsWith(".json")
     );
     const jobs = [];
     for (const file of statusFiles) {
       try {
-        const content = (0, import_fs7.readFileSync)((0, import_path7.join)(promptsDir, file), "utf-8");
+        const content = (0, import_fs9.readFileSync)((0, import_path9.join)(promptsDir, file), "utf-8");
         const job = JSON.parse(content);
         if (statusFilter === "completed" && job.status !== "completed") continue;
         if (statusFilter === "failed" && job.status !== "failed" && job.status !== "timeout") continue;

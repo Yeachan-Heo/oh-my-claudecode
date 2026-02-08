@@ -17,6 +17,12 @@ import { resolveSystemPrompt, buildPromptWithSystemContext, VALID_AGENT_ROLES } 
 import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
+import {
+  resolveExternalModel,
+  buildFallbackChain,
+  CODEX_MODEL_FALLBACKS,
+} from '../features/model-routing/external-model-policy.js';
+import { loadConfig } from '../config/loader.js';
 
 // Module-scoped PID registry - tracks PIDs spawned by this process
 const spawnedPids = new Set<number>();
@@ -42,13 +48,8 @@ function validateModelName(model: string): void {
 export const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.3-codex';
 export const CODEX_TIMEOUT = Math.min(Math.max(5000, parseInt(process.env.OMC_CODEX_TIMEOUT || '3600000', 10) || 3600000), 3600000);
 
-// Model fallback chain: try each in order if previous fails with model_not_found
-export const CODEX_MODEL_FALLBACKS = [
-  'gpt-5.3-codex',
-  'gpt-5.3',
-  'gpt-5.2-codex',
-  'gpt-5.2',
-];
+// Re-export CODEX_MODEL_FALLBACKS for backward compatibility
+export { CODEX_MODEL_FALLBACKS };
 
 // Codex is best for analytical/planning tasks (recommended, not enforced)
 export const CODEX_RECOMMENDED_ROLES = ['architect', 'planner', 'critic', 'analyst', 'code-reviewer', 'security-reviewer', 'tdd-guide'] as const;
@@ -261,7 +262,8 @@ export function executeCodex(prompt: string, model: string, cwd?: string): Promi
 export async function executeCodexWithFallback(
   prompt: string,
   model: string | undefined,
-  cwd?: string
+  cwd?: string,
+  fallbackChain?: string[]
 ): Promise<{ response: string; usedFallback: boolean; actualModel: string }> {
   const modelExplicit = model !== undefined && model !== null && model !== '';
   const effectiveModel = model || CODEX_DEFAULT_MODEL;
@@ -272,10 +274,11 @@ export async function executeCodexWithFallback(
     return { response, usedFallback: false, actualModel: effectiveModel };
   }
 
-  // Try fallback chain
-  const modelsToTry = CODEX_MODEL_FALLBACKS.includes(effectiveModel)
-    ? CODEX_MODEL_FALLBACKS.slice(CODEX_MODEL_FALLBACKS.indexOf(effectiveModel))
-    : [effectiveModel, ...CODEX_MODEL_FALLBACKS];
+  // Use provided fallback chain or build from defaults
+  const chain = fallbackChain || CODEX_MODEL_FALLBACKS;
+  const modelsToTry = chain.includes(effectiveModel)
+    ? chain.slice(chain.indexOf(effectiveModel))
+    : [effectiveModel, ...chain];
 
   let lastError: Error | null = null;
   for (const tryModel of modelsToTry) {
@@ -562,7 +565,20 @@ export async function handleAskCodex(args: {
   background?: boolean;
   working_directory?: string;
 }): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
-  const { agent_role, model = CODEX_DEFAULT_MODEL, context_files } = args;
+  const { agent_role, context_files } = args;
+
+  // Resolve model based on configuration and agent role
+  const config = loadConfig();
+  const resolved = resolveExternalModel(config.externalModels, {
+    agentRole: args.agent_role,
+    explicitModel: args.model,  // user explicitly passed model
+  });
+
+  // Build fallback chain with resolved model as first candidate
+  const fallbackChain = buildFallbackChain('codex', resolved.model, config.externalModels);
+
+  // Use resolved model (with env var fallback for backward compatibility)
+  const model = resolved.model || CODEX_DEFAULT_MODEL;
 
   // Derive baseDir from working_directory if provided
   let baseDir = args.working_directory || process.cwd();
@@ -798,7 +814,7 @@ ${resolvedPrompt}`;
   ].filter(Boolean).join('\n');
 
   try {
-    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model as string | undefined, baseDir);
+    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model as string | undefined, baseDir, fallbackChain);
 
     // Persist response to disk (audit trail)
     if (promptResult) {
