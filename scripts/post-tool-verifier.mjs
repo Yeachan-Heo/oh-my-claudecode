@@ -28,6 +28,11 @@ try {
   // Notepad module not available - remember tags will be silently ignored
 }
 
+// Debug logging helper - gated behind OMC_DEBUG env var
+const debugLog = (...args) => {
+  if (process.env.OMC_DEBUG) console.error('[omc:debug:post-tool-verifier]', ...args);
+};
+
 // State file for session tracking
 const STATE_FILE = join(homedir(), '.claude', '.session-stats.json');
 
@@ -45,18 +50,21 @@ function loadStats() {
     if (existsSync(STATE_FILE)) {
       return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
     }
-  } catch {}
+  } catch (e) {
+    debugLog('Failed to load stats:', e.message);
+  }
   return { sessions: {} };
 }
 
 // Save session statistics
 function saveStats(stats) {
+  const tmpFile = `${STATE_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   try {
-    const tmpFile = STATE_FILE + '.tmp.' + process.pid;
     writeFileSync(tmpFile, JSON.stringify(stats, null, 2));
     renameSync(tmpFile, STATE_FILE);
-  } catch {
-    try { unlinkSync(STATE_FILE + '.tmp.' + process.pid); } catch {}
+  } catch (e) {
+    debugLog('Failed to save stats:', e.message);
+    try { unlinkSync(tmpFile); } catch {}
   }
 }
 

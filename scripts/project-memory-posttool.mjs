@@ -7,6 +7,11 @@
 
 import { readStdin } from './lib/stdin.mjs';
 
+// Debug logging helper - gated behind OMC_DEBUG env var
+const debugLog = (...args) => {
+  if (process.env.OMC_DEBUG) console.error('[omc:debug:project-memory]', ...args);
+};
+
 // Dynamic imports with graceful fallback
 let learnFromToolOutput = null;
 let findProjectRoot = null;
@@ -16,8 +21,12 @@ try {
   learnFromToolOutput = learnerModule.learnFromToolOutput;
   findProjectRoot = finderModule.findProjectRoot;
 } catch (err) {
-  if (err?.code !== 'ERR_MODULE_NOT_FOUND') {
-    console.error('[omc] project-memory-posttool: unexpected import error:', err?.message);
+  if (err?.code === 'ERR_MODULE_NOT_FOUND' && /dist\//.test(err?.message)) {
+    // dist/ not built yet - expected during development, silently skip
+    debugLog('dist/ modules not found, skipping project memory');
+  } else {
+    // Unexpected error (runtime failure, syntax error, etc.) - always log
+    debugLog('Unexpected import error:', err?.code, err?.message);
   }
 }
 
