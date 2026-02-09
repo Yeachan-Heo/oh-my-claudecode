@@ -45,7 +45,7 @@ describe('auto-update reconciliation', () => {
         mockedReadFileSync.mockImplementation((path) => {
             if (String(path).includes('.omc-version.json')) {
                 return JSON.stringify({
-                    version: '4.1.4',
+                    version: '4.1.5',
                     installedAt: '2026-02-09T00:00:00.000Z',
                     installMethod: 'npm',
                 });
@@ -229,7 +229,7 @@ describe('auto-update reconciliation', () => {
         });
         vi.spyOn(hooksModule, 'getHooksSettingsConfig').mockReturnValue(freshHooks);
         const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-        process.env.CLAUDE_PLUGIN_ROOT = join(homedir(), '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.1.4');
+        process.env.CLAUDE_PLUGIN_ROOT = join(homedir(), '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.1.5');
         const result = install({
             force: true,
             skipClaudeCheck: true,
