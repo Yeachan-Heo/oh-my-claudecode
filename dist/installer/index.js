@@ -276,6 +276,7 @@ export function install(options = {}) {
     // Check if running as a plugin
     const runningAsPlugin = isRunningAsPlugin();
     const projectScoped = isProjectScopedPlugin();
+    const allowPluginHookRefresh = runningAsPlugin && options.refreshHooksInPlugin && !projectScoped;
     if (runningAsPlugin) {
         log('Detected Claude Code plugin context - skipping agent/command file installation');
         log('Plugin files are managed by Claude Code plugin system');
@@ -284,6 +285,9 @@ export function install(options = {}) {
         }
         else {
             log('Will still install HUD statusline...');
+            if (allowPluginHookRefresh) {
+                log('Will refresh global hooks/settings for plugin runtime reconciliation');
+            }
         }
         // Don't return early - continue to install HUD (unless project-scoped)
     }
@@ -420,6 +424,26 @@ export function install(options = {}) {
             // Note: hooks configuration is deferred to consolidated settings.json write below
             result.hooksConfigured = true; // Will be set properly after consolidated write
         }
+        else if (allowPluginHookRefresh) {
+            // Refresh hooks in plugin context when explicitly requested (global plugin only)
+            log('Refreshing hook scripts for plugin reconciliation...');
+            if (!existsSync(HOOKS_DIR)) {
+                mkdirSync(HOOKS_DIR, { recursive: true });
+            }
+            const hookScripts = getHookScripts();
+            for (const [filename, content] of Object.entries(hookScripts)) {
+                const filepath = join(HOOKS_DIR, filename);
+                const dir = dirname(filepath);
+                if (!existsSync(dir)) {
+                    mkdirSync(dir, { recursive: true });
+                }
+                writeFileSync(filepath, content);
+                if (!isWindows()) {
+                    chmodSync(filepath, 0o755);
+                }
+            }
+            result.hooksConfigured = true;
+        }
         else {
             log('Skipping agent/command/hook files (managed by plugin system)');
         }
@@ -552,8 +576,8 @@ export function install(options = {}) {
                     const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
                     existingSettings = JSON.parse(settingsContent);
                 }
-                // 1. Configure hooks (only if not running as plugin)
-                if (!runningAsPlugin) {
+                // 1. Configure hooks (only if not running as plugin unless refresh requested)
+                if (!runningAsPlugin || allowPluginHookRefresh) {
                     const existingHooks = (existingSettings.hooks || {});
                     const hooksConfig = getHooksSettingsConfig();
                     const newHooks = hooksConfig.hooks;

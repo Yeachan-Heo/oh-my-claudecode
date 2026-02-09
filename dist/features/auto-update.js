@@ -222,6 +222,7 @@ export function reconcileUpdateRuntime(options) {
             verbose: options?.verbose ?? false,
             skipClaudeCheck: true,
             forceHooks: true,
+            refreshHooksInPlugin: true,
         });
         if (!installResult.success) {
             errors.push(...installResult.errors);
@@ -261,13 +262,6 @@ export async function performUpdate(options) {
                 timeout: 120000, // 2 minute timeout for npm
                 ...(process.platform === 'win32' ? { windowsHide: true } : {})
             });
-            // Update version metadata
-            saveVersionMetadata({
-                version: newVersion,
-                installedAt: new Date().toISOString(),
-                installMethod: 'npm',
-                lastCheckAt: new Date().toISOString()
-            });
             const reconcileResult = reconcileUpdateRuntime({ verbose: options?.verbose });
             if (!reconcileResult.success) {
                 return {
@@ -278,6 +272,13 @@ export async function performUpdate(options) {
                     errors: reconcileResult.errors,
                 };
             }
+            // Update version metadata after reconciliation succeeds
+            saveVersionMetadata({
+                version: newVersion,
+                installedAt: new Date().toISOString(),
+                installMethod: 'npm',
+                lastCheckAt: new Date().toISOString()
+            });
             return {
                 success: true,
                 previousVersion,

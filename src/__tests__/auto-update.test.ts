@@ -20,7 +20,7 @@ vi.mock('fs', async () => {
 });
 
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { install } from '../installer/index.js';
 import {
   reconcileUpdateRuntime,
@@ -30,6 +30,7 @@ import {
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedMkdirSync = vi.mocked(mkdirSync);
+const mockedWriteFileSync = vi.mocked(writeFileSync);
 const mockedInstall = vi.mocked(install);
 
 describe('auto-update reconciliation', () => {
@@ -64,6 +65,7 @@ describe('auto-update reconciliation', () => {
       verbose: false,
       skipClaudeCheck: true,
       forceHooks: true,
+      refreshHooksInPlugin: true,
     });
   });
 
@@ -78,12 +80,14 @@ describe('auto-update reconciliation', () => {
       verbose: false,
       skipClaudeCheck: true,
       forceHooks: true,
+      refreshHooksInPlugin: true,
     });
     expect(mockedInstall).toHaveBeenNthCalledWith(2, {
       force: true,
       verbose: false,
       skipClaudeCheck: true,
       forceHooks: true,
+      refreshHooksInPlugin: true,
     });
   });
 
@@ -112,6 +116,40 @@ describe('auto-update reconciliation', () => {
       verbose: false,
       skipClaudeCheck: true,
       forceHooks: true,
+      refreshHooksInPlugin: true,
     });
+  });
+
+  it('does not persist metadata when reconciliation fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tag_name: 'v4.1.5',
+        name: '4.1.5',
+        published_at: '2026-02-09T00:00:00.000Z',
+        html_url: 'https://example.com/release',
+        body: 'notes',
+        prerelease: false,
+        draft: false,
+      }),
+    }));
+
+    mockedExecSync.mockReturnValue('');
+    mockedInstall.mockReturnValue({
+      success: false,
+      message: 'fail',
+      installedAgents: [],
+      installedCommands: [],
+      installedSkills: [],
+      hooksConfigured: false,
+      hookConflicts: [],
+      errors: ['boom'],
+    });
+
+    const result = await performUpdate({ verbose: false });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toEqual(['boom']);
+    expect(mockedWriteFileSync).not.toHaveBeenCalled();
   });
 });

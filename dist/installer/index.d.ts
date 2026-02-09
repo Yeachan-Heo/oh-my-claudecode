@@ -44,6 +44,7 @@ export interface InstallOptions {
     verbose?: boolean;
     skipClaudeCheck?: boolean;
     forceHooks?: boolean;
+    refreshHooksInPlugin?: boolean;
 }
 /**
  * Detect whether a hook command belongs to oh-my-claudecode.
