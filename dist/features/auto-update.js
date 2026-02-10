@@ -19,6 +19,39 @@ export const REPO_OWNER = 'Yeachan-Heo';
 export const REPO_NAME = 'oh-my-claudecode';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
+function tryExec(command, options = {}) {
+    try {
+        const output = execSync(command, {
+            encoding: 'utf-8',
+            timeout: options.timeout ?? 15000,
+            stdio: options.stdio ?? 'pipe',
+            ...(process.platform === 'win32' ? { windowsHide: true } : {})
+        });
+        return { ok: true, output };
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
+    }
+}
+function syncMarketplaceClone(verbose = false) {
+    // Claude Code marketplace clone used to populate plugin cache
+    const marketplacePath = join(CLAUDE_CONFIG_DIR, 'plugins', 'marketplaces', 'omc');
+    if (!existsSync(marketplacePath)) {
+        return { ok: true, message: 'Marketplace clone not found; skipping' };
+    }
+    // Best effort: fetch + fast-forward main
+    const stdio = verbose ? 'inherit' : 'pipe';
+    const fetch = tryExec(`git -C "${marketplacePath}" fetch --all --prune`, { stdio, timeout: 60000 });
+    if (!fetch.ok)
+        return { ok: false, message: `Failed to fetch marketplace clone: ${fetch.error}` };
+    // Ensure we're on main (ignore errors for older clones)
+    tryExec(`git -C "${marketplacePath}" checkout main`, { stdio, timeout: 15000 });
+    const pull = tryExec(`git -C "${marketplacePath}" pull --ff-only origin main`, { stdio, timeout: 60000 });
+    if (!pull.ok)
+        return { ok: false, message: `Failed to update marketplace clone: ${pull.error}` };
+    return { ok: true, message: 'Marketplace clone updated' };
+}
 /** Installation paths */
 export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
@@ -265,6 +298,13 @@ export async function performUpdate(options) {
                 timeout: 120000, // 2 minute timeout for npm
                 ...(process.platform === 'win32' ? { windowsHide: true } : {})
             });
+            // Sync Claude Code marketplace clone (used to populate plugin cache)
+            // This fixes stale marketplace clones that cause `/plugin install` and cache rebuilds
+            // to repeatedly reinstall old versions. (See #506)
+            const marketplaceSync = syncMarketplaceClone(options?.verbose ?? false);
+            if (!marketplaceSync.ok && options?.verbose) {
+                console.warn(`[omc update] ${marketplaceSync.message}`);
+            }
             const reconcileResult = reconcileUpdateRuntime({ verbose: options?.verbose });
             if (!reconcileResult.success) {
                 return {
