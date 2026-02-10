@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { OmcPaths } from '../../lib/worktree-paths.js';
 import {
   readAutopilotState,
   writeAutopilotState,
@@ -20,6 +21,8 @@ import {
 } from './state.js';
 import { getPhasePrompt } from './prompts.js';
 import type { AutopilotState, AutopilotPhase, AutopilotSignal } from './types.js';
+import { readLastToolError, getToolErrorRetryGuidance, type ToolErrorState } from '../persistent-mode/index.js';
+import { executeTransition, type TransitionStep } from './transition-helper.js';
 
 export interface AutopilotEnforcementResult {
   /** Whether to block the stop event */
@@ -34,6 +37,7 @@ export interface AutopilotEnforcementResult {
     maxIterations?: number;
     tasksCompleted?: number;
     tasksTotal?: number;
+    toolError?: ToolErrorState;
   };
 }
 
@@ -137,20 +141,20 @@ export async function checkAutopilot(
   directory?: string
 ): Promise<AutopilotEnforcementResult | null> {
   const workingDir = directory || process.cwd();
-  const state = readAutopilotState(workingDir);
+  const state = readAutopilotState(workingDir, sessionId);
 
   if (!state || !state.active) {
     return null;
   }
 
-  // Check session binding
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 
   // Check max iterations (safety limit)
   if (state.iteration >= state.max_iterations) {
-    transitionPhase(workingDir, 'failed');
+    transitionPhase(workingDir, 'failed', sessionId);
     return {
       shouldBlock: false,
       message: `[AUTOPILOT STOPPED] Max iterations (${state.max_iterations}) reached. Consider reviewing progress.`,
@@ -189,31 +193,31 @@ export async function checkAutopilot(
           return generateContinuationPrompt(state, workingDir);
         }
       } else if (state.phase === 'qa' && nextPhase === 'validation') {
-        const result = transitionUltraQAToValidation(workingDir);
+        const result = transitionUltraQAToValidation(workingDir, sessionId);
         if (!result.success) {
-          return generateContinuationPrompt(state, workingDir);
+          return generateContinuationPrompt(state, workingDir, sessionId);
         }
       } else if (nextPhase === 'complete') {
-        transitionToComplete(workingDir);
+        transitionToComplete(workingDir, sessionId);
         return {
           shouldBlock: false,
           message: `[AUTOPILOT COMPLETE] All phases finished successfully!`,
           phase: 'complete'
         };
       } else {
-        transitionPhase(workingDir, nextPhase);
+        transitionPhase(workingDir, nextPhase, sessionId);
       }
 
       // Get new state and generate prompt for next phase
-      const newState = readAutopilotState(workingDir);
+      const newState = readAutopilotState(workingDir, sessionId);
       if (newState) {
-        return generateContinuationPrompt(newState, workingDir);
+        return generateContinuationPrompt(newState, workingDir, sessionId);
       }
     }
   }
 
   // No signal detected - continue current phase
-  return generateContinuationPrompt(state, workingDir);
+  return generateContinuationPrompt(state, workingDir, sessionId);
 }
 
 /**
@@ -221,20 +225,25 @@ export async function checkAutopilot(
  */
 function generateContinuationPrompt(
   state: AutopilotState,
-  directory: string
+  directory: string,
+  sessionId?: string
 ): AutopilotEnforcementResult {
+  // Read tool error before generating message
+  const toolError = readLastToolError(directory);
+  const errorGuidance = getToolErrorRetryGuidance(toolError);
+
   // Increment iteration
   state.iteration += 1;
-  writeAutopilotState(directory, state);
+  writeAutopilotState(directory, state, sessionId);
 
   const phasePrompt = getPhasePrompt(state.phase, {
     idea: state.originalIdea,
-    specPath: state.expansion.spec_path || '.omc/autopilot/spec.md',
-    planPath: state.planning.plan_path || '.omc/plans/autopilot-impl.md'
+    specPath: state.expansion.spec_path || `${OmcPaths.AUTOPILOT}/spec.md`,
+    planPath: state.planning.plan_path || `${OmcPaths.PLANS}/autopilot-impl.md`
   });
 
-  const continuationPrompt = `<autopilot-continuation>
-
+  let continuationPrompt = `<autopilot-continuation>
+${errorGuidance ? errorGuidance + '\n' : ''}
 [AUTOPILOT - PHASE: ${state.phase.toUpperCase()} | ITERATION ${state.iteration}/${state.max_iterations}]
 
 Your previous response did not signal phase completion. Continue working on the current phase.
@@ -246,7 +255,7 @@ IMPORTANT: When the phase is complete, output the appropriate signal:
 - Planning: PLANNING_COMPLETE
 - Execution: EXECUTION_COMPLETE
 - QA: QA_COMPLETE
-- Validation: AUTOPILOT_COMPLETE
+- Validation: VALIDATION_COMPLETE
 
 </autopilot-continuation>
 
@@ -262,7 +271,8 @@ IMPORTANT: When the phase is complete, output the appropriate signal:
       iteration: state.iteration,
       maxIterations: state.max_iterations,
       tasksCompleted: state.execution.tasks_completed,
-      tasksTotal: state.execution.tasks_total
+      tasksTotal: state.execution.tasks_total,
+      toolError: toolError || undefined
     }
   };
 }

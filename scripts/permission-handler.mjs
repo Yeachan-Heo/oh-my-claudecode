@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+import { readStdin } from './lib/stdin.mjs';
 
 async function main() {
-  // Read stdin
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
+  // Read stdin (timeout-protected, see issue #240/#459)
+  const input = await readStdin();
 
   try {
     const data = JSON.parse(input);

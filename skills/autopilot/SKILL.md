@@ -3,94 +3,118 @@ name: autopilot
 description: Full autonomous execution from idea to working code
 ---
 
-# Autopilot Skill
+<Purpose>
+Autopilot takes a brief product idea and autonomously handles the full lifecycle: requirements analysis, technical design, planning, parallel implementation, QA cycling, and multi-perspective validation. It produces working, verified code from a 2-3 line description.
+</Purpose>
 
-Full autonomous execution from idea to working code.
+<Use_When>
+- User wants end-to-end autonomous execution from an idea to working code
+- User says "autopilot", "auto pilot", "autonomous", "build me", "create me", "make me", "full auto", "handle it all", or "I want a/an..."
+- Task requires multiple phases: planning, coding, testing, and validation
+- User wants hands-off execution and is willing to let the system run to completion
+</Use_When>
 
-## Overview
+<Do_Not_Use_When>
+- User wants to explore options or brainstorm -- use `plan` skill instead
+- User says "just explain", "draft only", or "what would you suggest" -- respond conversationally
+- User wants a single focused code change -- use `ralph` or delegate to an executor agent
+- User wants to review or critique an existing plan -- use `plan --review`
+- Task is a quick fix or small bug -- use direct executor delegation
+</Do_Not_Use_When>
 
-Autopilot is the ultimate hands-off mode. Give it a brief product idea (2-3 lines) and it handles everything:
+<Why_This_Exists>
+Most non-trivial software tasks require coordinated phases: understanding requirements, designing a solution, implementing in parallel, testing, and validating quality. Autopilot orchestrates all of these phases automatically so the user can describe what they want and receive working code without managing each step.
+</Why_This_Exists>
 
-1. **Understands** your requirements (Analyst)
-2. **Designs** the technical approach (Architect)
-3. **Plans** the implementation (Critic-validated)
-4. **Builds** with parallel agents (Ralph + Ultrawork)
-5. **Tests** until everything passes (UltraQA)
-6. **Validates** quality and security (Multi-architect review)
+<Execution_Policy>
+- Each phase must complete before the next begins
+- Parallel execution is used within phases where possible (Phase 2 and Phase 4)
+- QA cycles repeat up to 5 times; if the same error persists 3 times, stop and report the fundamental issue
+- Validation requires approval from all reviewers; rejected items get fixed and re-validated
+- Cancel with `/oh-my-claudecode:cancel` at any time; progress is preserved for resume
+</Execution_Policy>
 
-## Usage
+<Steps>
+1. **Phase 0 - Expansion**: Turn the user's idea into a detailed spec
+   - Analyst (Opus): Extract requirements
+   - Architect (Opus): Create technical specification
+   - Output: `.omc/autopilot/spec.md`
 
-```
-/oh-my-claudecode:autopilot <your idea>
-/oh-my-claudecode:ap "A CLI tool that tracks daily habits"
-/oh-my-claudecode:autopilot Add dark mode to the app
-```
+2. **Phase 1 - Planning**: Create an implementation plan from the spec
+   - Architect (Opus): Create plan (direct mode, no interview)
+   - Critic (Opus): Validate plan
+   - Output: `.omc/plans/autopilot-impl.md`
 
-## Magic Keywords
+3. **Phase 2 - Execution**: Implement the plan using Ralph + Ultrawork
+   - Executor-low (Haiku): Simple tasks
+   - Executor (Sonnet): Standard tasks
+   - Executor-high (Opus): Complex tasks
+   - Run independent tasks in parallel
 
-These phrases auto-activate autopilot:
-- "autopilot", "auto pilot", "autonomous"
-- "build me", "create me", "make me"
-- "full auto", "handle it all"
-- "I want a/an..."
+4. **Phase 3 - QA**: Cycle until all tests pass (UltraQA mode)
+   - Build, lint, test, fix failures
+   - Repeat up to 5 cycles
+   - Stop early if the same error repeats 3 times (indicates a fundamental issue)
 
-## Phases
+5. **Phase 4 - Validation**: Multi-perspective review in parallel
+   - Architect: Functional completeness
+   - Security-reviewer: Vulnerability check
+   - Code-reviewer: Quality review
+   - All must approve; fix and re-validate on rejection
 
-### Phase 0: Expansion
+6. **Phase 5 - Cleanup**: Delete all state files on successful completion
+   - Remove `.omc/state/autopilot-state.json`, `ralph-state.json`, `ultrawork-state.json`, `ultraqa-state.json`
+   - Run `/oh-my-claudecode:cancel` for clean exit
+</Steps>
 
-**Goal:** Turn vague idea into detailed spec
+<Tool_Usage>
+- Before first MCP tool use, call `ToolSearch("mcp")` to discover deferred MCP tools
+- Use `ask_codex` with `agent_role: "architect"` for Phase 4 architecture validation
+- Use `ask_codex` with `agent_role: "security-reviewer"` for Phase 4 security review
+- Use `ask_codex` with `agent_role: "code-reviewer"` for Phase 4 quality review
+- Agents form their own analysis first, then consult Codex for cross-validation
+- If ToolSearch finds no MCP tools or Codex is unavailable, proceed without it -- never block on external tools
+</Tool_Usage>
 
-**Agents:**
-- Analyst (Opus) - Extract requirements
-- Architect (Opus) - Technical specification
+<Examples>
+<Good>
+User: "autopilot A REST API for a bookstore inventory with CRUD operations using TypeScript"
+Why good: Specific domain (bookstore), clear features (CRUD), technology constraint (TypeScript). Autopilot has enough context to expand into a full spec.
+</Good>
 
-**Output:** `.omc/autopilot/spec.md`
+<Good>
+User: "build me a CLI tool that tracks daily habits with streak counting"
+Why good: Clear product concept with a specific feature. The "build me" trigger activates autopilot.
+</Good>
 
-### Phase 1: Planning
+<Bad>
+User: "fix the bug in the login page"
+Why bad: This is a single focused fix, not a multi-phase project. Use direct executor delegation or ralph instead.
+</Bad>
 
-**Goal:** Create implementation plan from spec
+<Bad>
+User: "what are some good approaches for adding caching?"
+Why bad: This is an exploration/brainstorming request. Respond conversationally or use the plan skill.
+</Bad>
+</Examples>
 
-**Agents:**
-- Architect (Opus) - Create plan (direct mode, no interview)
-- Critic (Opus) - Validate plan
+<Escalation_And_Stop_Conditions>
+- Stop and report when the same QA error persists across 3 cycles (fundamental issue requiring human input)
+- Stop and report when validation keeps failing after 3 re-validation rounds
+- Stop when the user says "stop", "cancel", or "abort"
+- If requirements were too vague and expansion produces an unclear spec, pause and ask the user for clarification before proceeding
+</Escalation_And_Stop_Conditions>
 
-**Output:** `.omc/plans/autopilot-impl.md`
+<Final_Checklist>
+- [ ] All 5 phases completed (Expansion, Planning, Execution, QA, Validation)
+- [ ] All validators approved in Phase 4
+- [ ] Tests pass (verified with fresh test run output)
+- [ ] Build succeeds (verified with fresh build output)
+- [ ] State files cleaned up
+- [ ] User informed of completion with summary of what was built
+</Final_Checklist>
 
-### Phase 2: Execution
-
-**Goal:** Implement the plan
-
-**Mode:** Ralph + Ultrawork (persistence + parallelism)
-
-**Agents:**
-- Executor-low (Haiku) - Simple tasks
-- Executor (Sonnet) - Standard tasks
-- Executor-high (Opus) - Complex tasks
-
-### Phase 3: QA
-
-**Goal:** All tests pass
-
-**Mode:** UltraQA
-
-**Cycle:**
-1. Build
-2. Lint
-3. Test
-4. Fix failures
-5. Repeat (max 5 cycles)
-
-### Phase 4: Validation
-
-**Goal:** Multi-perspective approval
-
-**Agents (parallel):**
-- Architect - Functional completeness
-- Security-reviewer - Vulnerability check
-- Code-reviewer - Quality review
-
-**Rule:** All must APPROVE or issues get fixed and re-validated.
-
+<Advanced>
 ## Configuration
 
 Optional settings in `.claude/settings.json`:
@@ -111,73 +135,22 @@ Optional settings in `.claude/settings.json`:
 }
 ```
 
-## Cancellation
-
-```
-/oh-my-claudecode:cancel
-```
-
-Or say: "stop", "cancel", "abort"
-
-Progress is preserved for resume.
-
 ## Resume
 
-If autopilot was cancelled or failed, just run `/oh-my-claudecode:autopilot` again to resume from where it stopped.
+If autopilot was cancelled or failed, run `/oh-my-claudecode:autopilot` again to resume from where it stopped.
 
-## Examples
+## Best Practices for Input
 
-**New Project:**
-```
-/oh-my-claudecode:autopilot A REST API for a bookstore inventory with CRUD operations
-```
-
-**Feature Addition:**
-```
-/oh-my-claudecode:autopilot Add user authentication with JWT tokens
-```
-
-**Enhancement:**
-```
-/oh-my-claudecode:ap Add dark mode support with system preference detection
-```
-
-## Best Practices
-
-1. **Be specific about the domain** - "bookstore" not "store"
-2. **Mention key features** - "with CRUD", "with authentication"
-3. **Specify constraints** - "using TypeScript", "with PostgreSQL"
-4. **Let it run** - Don't interrupt unless truly needed
-
-## STATE CLEANUP ON COMPLETION
-
-**IMPORTANT: Delete ALL state files on successful completion**
-
-When autopilot reaches the `complete` phase (all validation passed):
-
-```bash
-# Delete autopilot and all sub-mode state files
-rm -f .omc/state/autopilot-state.json
-rm -f .omc/state/ralph-state.json
-rm -f .omc/state/ultrawork-state.json
-rm -f .omc/state/ultraqa-state.json
-```
-
-This ensures clean state for future sessions.
+1. Be specific about the domain -- "bookstore" not "store"
+2. Mention key features -- "with CRUD", "with authentication"
+3. Specify constraints -- "using TypeScript", "with PostgreSQL"
+4. Let it run -- avoid interrupting unless truly needed
 
 ## Troubleshooting
 
-**Stuck in a phase?**
-- Check TODO list for blocked tasks
-- Review `.omc/autopilot-state.json` for state
-- Cancel and resume if needed
+**Stuck in a phase?** Check TODO list for blocked tasks, review `.omc/autopilot-state.json`, or cancel and resume.
 
-**Validation keeps failing?**
-- Review the specific issues
-- Consider if requirements were too vague
-- Cancel and provide more detail
+**QA cycles exhausted?** The same error 3 times indicates a fundamental issue. Review the error pattern; manual intervention may be needed.
 
-**QA cycles exhausted?**
-- Same error 3 times = fundamental issue
-- Review the error pattern
-- May need manual intervention
+**Validation keeps failing?** Review the specific issues. Requirements may have been too vague -- cancel and provide more detail.
+</Advanced>

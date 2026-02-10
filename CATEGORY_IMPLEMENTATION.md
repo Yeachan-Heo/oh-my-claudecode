@@ -198,7 +198,7 @@ import { getCategoryForTask } from './features/delegation-categories';
 import { TIER_MODELS } from './features/model-routing';
 
 const config = getCategoryForTask({ taskPrompt: 'Debug race condition' });
-const model = TIER_MODELS[config.tier];  // claude-opus-4-5-20251101
+const model = TIER_MODELS[config.tier];  // claude-opus-4-6-20260205
 
 delegateToAgent({
   prompt: taskPrompt,

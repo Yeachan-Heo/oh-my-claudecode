@@ -10,6 +10,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSy
 import { dirname, join, basename } from 'path';
 import type { BoulderState, PlanProgress, PlanSummary } from './types.js';
 import { BOULDER_DIR, BOULDER_FILE, PLANNER_PLANS_DIR, PLAN_EXTENSION } from './constants.js';
+import { atomicWriteSync } from '../../lib/atomic-write.js';
 
 /**
  * Get the full path to the boulder state file
@@ -48,7 +49,7 @@ export function writeBoulderState(directory: string, state: BoulderState): boole
       mkdirSync(dir, { recursive: true });
     }
 
-    writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+    atomicWriteSync(filePath, JSON.stringify(state, null, 2));
     return true;
   } catch {
     return false;

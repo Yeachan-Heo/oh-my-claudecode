@@ -14,7 +14,7 @@ describe('OutputEstimator', () => {
     });
 
     it('should estimate Opus output tokens (50% ratio)', () => {
-      const estimate = estimateOutputTokens(1000, 'claude-opus-4-5-20251101');
+      const estimate = estimateOutputTokens(1000, 'claude-opus-4-6-20260205');
       expect(estimate).toBe(500); // 1000 * 0.50
     });
 
@@ -42,7 +42,7 @@ describe('OutputEstimator', () => {
     it('should be case-insensitive for model names', () => {
       expect(estimateOutputTokens(1000, 'CLAUDE-HAIKU-4-5-20251001')).toBe(300);
       expect(estimateOutputTokens(1000, 'Claude-Sonnet-4-5-20250929')).toBe(400);
-      expect(estimateOutputTokens(1000, 'claude-OPUS-4-5-20251101')).toBe(500);
+      expect(estimateOutputTokens(1000, 'claude-OPUS-4-6-20260205')).toBe(500);
     });
 
     it('should handle various model name formats', () => {

@@ -1,35 +1,34 @@
 ---
-description: Review a plan with Critic
+description: Alias for /plan --review
 ---
 
-# Review Skill
+# review
 
-[PLAN REVIEW MODE ACTIVATED]
+**Alias for:** `/plan --review`
 
-## Role
+Review a plan with the Critic agent.
 
-Critically evaluate plans using Critic. No plan passes without meeting rigorous standards.
+## Usage
 
-## Review Criteria
+```bash
+/review [plan file or description]
+```
 
-| Criterion | Standard |
-|-----------|----------|
-| Clarity | 80%+ claims cite file/line |
-| Testability | 90%+ criteria are concrete |
-| Verification | All file refs exist |
-| Specificity | No vague terms |
+This is equivalent to:
 
-## Verdicts
+```bash
+/plan --review [plan file or description]
+```
 
-**APPROVED** - Plan meets all criteria, ready for execution
-**REVISE** - Plan has issues needing fixes (with specific feedback)
-**REJECT** - Fundamental problems require replanning
+## Description
 
-## What Gets Checked
+The review workflow uses the Critic agent to:
+- Evaluate plan completeness
+- Identify gaps and risks
+- Suggest improvements
+- Rate overall quality
 
-1. Are requirements clear and unambiguous?
-2. Are acceptance criteria concrete and testable?
-3. Do file references actually exist?
-4. Are implementation steps specific?
-5. Are risks identified with mitigations?
-6. Are verification steps defined?
+## See Also
+
+- `/plan` - Strategic planning with optional interview workflow
+- `/ralplan` - Iterative planning with consensus

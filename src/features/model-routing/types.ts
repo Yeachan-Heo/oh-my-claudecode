@@ -19,7 +19,7 @@ export type ComplexityTier = 'LOW' | 'MEDIUM' | 'HIGH';
 export const TIER_MODELS: Record<ComplexityTier, string> = {
   LOW: 'claude-haiku-4-5-20251001',
   MEDIUM: 'claude-sonnet-4-5-20250929',
-  HIGH: 'claude-opus-4-5-20251101',
+  HIGH: 'claude-opus-4-6-20260205',
 };
 
 /**

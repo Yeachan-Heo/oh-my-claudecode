@@ -66,6 +66,9 @@ const WAITING_PATTERNS = [
  * Check if tmux is installed and available
  */
 export function isTmuxAvailable(): boolean {
+  if (process.platform === 'win32') {
+    return false; // tmux is not available on native Windows
+  }
   try {
     const result = spawnSync('which', ['tmux'], {
       encoding: 'utf-8',

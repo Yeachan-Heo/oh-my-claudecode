@@ -9,6 +9,7 @@
 
 import type { ActiveAgent, AgentsFormat } from '../types.js';
 import { cyan, dim, RESET, getModelTierColor, getDurationColor } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 const CYAN = '\x1b[36m';
 
@@ -21,47 +22,113 @@ const CYAN = '\x1b[36m';
  * Case indicates model tier: Uppercase = Opus, lowercase = Sonnet/Haiku
  */
 const AGENT_TYPE_CODES: Record<string, string> = {
-  // Architect variants - 'A' for Architect
-  architect: 'A',           // opus
-  'architect-medium': 'a',  // sonnet
-  'architect-low': 'a',     // haiku
+  // ============================================================
+  // BUILD/ANALYSIS LANE
+  // ============================================================
+  // Explore - 'E' for Explore (haiku)
+  explore: 'e',
 
-  // Researcher variants - 'R' for Researcher
-  researcher: 'r',          // sonnet
-  'researcher-low': 'r',    // haiku
-
-  // Explore variants - 'E' for Explore
-  explore: 'e',             // haiku
-  'explore-medium': 'e',    // sonnet
-
-  // Designer variants - 'D' for Designer
-  designer: 'd',            // sonnet
-  'designer-low': 'd',      // haiku
-  'designer-high': 'D',     // opus
-
-  // Writer - 'W' for Writer
-  writer: 'w',              // haiku
-
-  // Vision - 'V' for Vision
-  vision: 'v',              // sonnet
-
-  // Critic - 'C' for Critic
-  critic: 'C',              // opus
-
-  // Analyst - 'T' for meTis (A taken by Architect)
+  // Analyst - 'T' for aTalyst (A taken by Architect)
   analyst: 'T',             // opus
-
-  // Executor variants - 'X' for eXecutor
-  executor: 'x',            // sonnet
-  'executor-low': 'x',      // haiku
-  'executor-high': 'X',     // opus
 
   // Planner - 'P' for Planner
   planner: 'P',             // opus
 
-  // QA-Tester variants - 'Q' for QA
+  // Architect - 'A' for Architect
+  architect: 'A',           // opus
+
+  // Debugger - 'g' for debuGger (d taken by designer)
+  debugger: 'g',            // sonnet
+
+  // Executor - 'X' for eXecutor
+  executor: 'x',            // sonnet
+
+  // Deep Executor - 'X' (same family as executor, opus tier)
+  'deep-executor': 'X',     // opus
+
+  // Verifier - 'V' for Verifier (but vision uses 'v'... use uppercase 'V' for governance role)
+  verifier: 'V',            // sonnet
+
+  // ============================================================
+  // REVIEW LANE
+  // ============================================================
+  // Style Reviewer - 'Y' for stYle
+  'style-reviewer': 'y',    // haiku
+
+  // Quality Reviewer - 'Q' for Quality (but qa-tester uses 'q'... use uppercase 'Q')
+  'quality-reviewer': 'Q',  // sonnet
+
+  // API Reviewer - 'I' for Interface/API
+  'api-reviewer': 'i',      // sonnet
+
+  // Security Reviewer - 'K' for Security (S taken by Scientist)
+  'security-reviewer': 'K',      // sonnet
+
+  // Performance Reviewer - 'O' for perfOrmance
+  'performance-reviewer': 'o',   // sonnet
+
+  // Code Reviewer - 'R' for Review (uppercase, opus tier)
+  'code-reviewer': 'R',     // opus
+
+  // ============================================================
+  // DOMAIN SPECIALISTS
+  // ============================================================
+  // Dependency Expert - 'L' for Library expert
+  'dependency-expert': 'l', // sonnet
+
+  // Test Engineer - 'T' (but analyst uses 'T'... use uppercase 'T')
+  'test-engineer': 't',     // sonnet
+
+  // Quality Strategist - 'Q' for Quality (strategist role)
+  'quality-strategist': 'Q',     // sonnet
+
+  // Build Fixer - 'B' for Build
+  'build-fixer': 'b',       // sonnet
+
+  // Designer - 'd' for Designer
+  designer: 'd',            // sonnet
+
+  // Writer - 'W' for Writer
+  writer: 'w',              // haiku
+
+  // QA Tester - 'Q' for QA
   'qa-tester': 'q',         // sonnet
-  'qa-tester-high': 'Q',    // opus
+
+  // Scientist - 'S' for Scientist
+  scientist: 's',           // sonnet
+
+  // Git Master - 'M' for Master
+  'git-master': 'm',        // sonnet
+
+  // ============================================================
+  // PRODUCT LANE
+  // ============================================================
+  // Product Manager - 'P' for Product (uppercase = important)
+  'product-manager': 'P',   // sonnet
+
+  // UX Researcher - 'u' for Ux
+  'ux-researcher': 'u',     // sonnet
+
+  // Information Architect - 'I' for Information
+  'information-architect': 'I', // sonnet
+
+  // Product Analyst - 'a' for analyst
+  'product-analyst': 'a',   // sonnet
+
+  // ============================================================
+  // COORDINATION
+  // ============================================================
+  // Critic - 'C' for Critic
+  critic: 'C',              // opus
+
+  // Vision - 'V' for Vision (lowercase since sonnet)
+  vision: 'v',              // sonnet
+
+  // ============================================================
+  // BACKWARD COMPATIBILITY (Deprecated)
+  // ============================================================
+  // Researcher - 'R' for Researcher (deprecated, points to dependency-expert)
+  researcher: 'r',          // sonnet
 };
 
 /**
@@ -223,18 +290,29 @@ export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
     const parts = a.type.split(':');
     let name = parts[parts.length - 1] || a.type;
 
-    // Abbreviate common names (aligned with current agent naming)
+    // Abbreviate common names
     if (name === 'executor') name = 'exec';
-    if (name === 'executor-low') name = 'exec-l';
-    if (name === 'executor-high') name = 'exec-h';
+    if (name === 'deep-executor') name = 'deep-x';
     if (name === 'designer') name = 'design';
-    if (name === 'designer-low') name = 'design-l';
-    if (name === 'designer-high') name = 'design-h';
     if (name === 'qa-tester') name = 'qa';
-    if (name === 'qa-tester-high') name = 'qa-h';
-    if (name === 'architect-medium') name = 'arch-m';
-    if (name === 'architect-low') name = 'arch-l';
-    if (name === 'researcher-low') name = 'research-l';
+    if (name === 'scientist') name = 'sci';
+    if (name === 'security-reviewer') name = 'sec';
+    if (name === 'build-fixer') name = 'build';
+    if (name === 'code-reviewer') name = 'review';
+    if (name === 'git-master') name = 'git';
+    if (name === 'style-reviewer') name = 'style';
+    if (name === 'quality-reviewer') name = 'quality';
+    if (name === 'api-reviewer') name = 'api-rev';
+    if (name === 'performance-reviewer') name = 'perf';
+    if (name === 'dependency-expert') name = 'dep-exp';
+    if (name === 'test-engineer') name = 'test-eng';
+    if (name === 'quality-strategist') name = 'qs';
+    if (name === 'debugger') name = 'debug';
+    if (name === 'verifier') name = 'verify';
+    if (name === 'product-manager') name = 'pm';
+    if (name === 'ux-researcher') name = 'uxr';
+    if (name === 'information-architect') name = 'ia';
+    if (name === 'product-analyst') name = 'pa';
 
     // Add duration if significant
     const durationMs = now - a.startTime.getTime();
@@ -248,11 +326,12 @@ export function renderAgentsDetailed(agents: ActiveAgent[]): string | null {
 
 /**
  * Truncate description to fit in statusline.
+ * CJK-aware: accounts for double-width characters.
  */
-function truncateDescription(desc: string | undefined, maxLen: number = 20): string {
+function truncateDescription(desc: string | undefined, maxWidth: number = 20): string {
   if (!desc) return '...';
-  if (desc.length <= maxLen) return desc;
-  return desc.slice(0, maxLen - 3) + '...';
+  // Use CJK-aware truncation (maxWidth is visual columns, not character count)
+  return truncateToWidth(desc, maxWidth);
 }
 
 /**
@@ -262,27 +341,36 @@ function getShortAgentName(agentType: string): string {
   const parts = agentType.split(':');
   let name = parts[parts.length - 1] || agentType;
 
-  // Abbreviate common names (aligned with current agent naming)
+  // Abbreviate common names
   const abbrevs: Record<string, string> = {
-    // Executor variants -> 'exec'
+    // Build/Analysis Lane
     'executor': 'exec',
-    'executor-low': 'exec',
-    'executor-high': 'exec',
-    // Designer variants -> 'design'
+    'deep-executor': 'deep-x',
+    'debugger': 'debug',
+    'verifier': 'verify',
+    // Review Lane
+    'style-reviewer': 'style',
+    'quality-reviewer': 'quality',
+    'api-reviewer': 'api-rev',
+    'security-reviewer': 'sec',
+    'performance-reviewer': 'perf',
+    'code-reviewer': 'review',
+    // Domain Specialists
+    'dependency-expert': 'dep-exp',
+    'test-engineer': 'test-eng',
+    'quality-strategist': 'qs',
+    'build-fixer': 'build',
     'designer': 'design',
-    'designer-low': 'design',
-    'designer-high': 'design',
-    // Keep actual names for clarity
-    'writer': 'writer',
-    'vision': 'vision',
-    // Collapse tier variants to base name
-    'architect-low': 'arch',
-    'architect-medium': 'arch',
-    'explore-medium': 'explore',
-    'researcher-low': 'research',
-    // QA variants
     'qa-tester': 'qa',
-    'qa-tester-high': 'qa',
+    'scientist': 'sci',
+    'git-master': 'git',
+    // Product Lane
+    'product-manager': 'pm',
+    'ux-researcher': 'uxr',
+    'information-architect': 'ia',
+    'product-analyst': 'pa',
+    // Backward compat
+    'researcher': 'dep-exp',
   };
 
   return abbrevs[name] || name;
@@ -427,7 +515,8 @@ export function renderAgentsMultiLine(
     const durationColor = getDurationColor(durationMs);
 
     const desc = a.description || '...';
-    const truncatedDesc = desc.length > 45 ? desc.slice(0, 42) + '...' : desc;
+    // Use CJK-aware truncation (45 visual columns)
+    const truncatedDesc = truncateToWidth(desc, 45);
 
     detailLines.push(
       `${dim(prefix)} ${color}${code}${RESET} ${dim(shortName)}${durationColor}${duration}${RESET}  ${truncatedDesc}`

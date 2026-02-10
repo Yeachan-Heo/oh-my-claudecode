@@ -130,7 +130,7 @@ export const PRICING: Record<string, ModelPricing> = {
     cacheWriteMarkup: 0.25,
     cacheReadDiscount: 0.90
   },
-  'claude-opus-4.5': {
+  'claude-opus-4.6': {
     inputPerMillion: 15.00,
     outputPerMillion: 75.00,
     cacheWriteMarkup: 0.25,

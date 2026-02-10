@@ -50,7 +50,7 @@ describe('tokscale-adapter', () => {
     });
 
     it('returns pricing for opus model', async () => {
-      const pricing = await lookupPricingWithFallback('claude-opus-4.5');
+      const pricing = await lookupPricingWithFallback('claude-opus-4.6');
       // Tokscale returns live pricing from LiteLLM database
       expect(pricing.inputPerMillion).toBeGreaterThan(0);
       expect(pricing.outputPerMillion).toBeGreaterThan(0);

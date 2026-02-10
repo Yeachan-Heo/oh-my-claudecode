@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "3.9.2",
+  "version": "4.1.10",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",
@@ -21,6 +21,10 @@
     "dist",
     "agents",
     "bridge",
+    "bridge/mcp-server.cjs",
+    "bridge/codex-server.cjs",
+    "bridge/gemini-server.cjs",
+    "bridge/team-bridge.cjs",
     "commands",
     "hooks",
     "scripts",
@@ -33,8 +37,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && npm run compose-docs",
+    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-codex-server.mjs && node scripts/build-gemini-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
+    "build:codex": "node scripts/build-codex-server.mjs",
+    "build:gemini": "node scripts/build-gemini-server.mjs",
+    "build:bridge-entry": "node scripts/build-bridge-entry.mjs",
     "compose-docs": "node scripts/compose-docs.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",

@@ -175,6 +175,22 @@ describe('AutopilotCancel', () => {
       expect(state?.active).toBe(false);
       expect(state?.originalIdea).toBe('test idea');
     });
+
+    it('should not clear other session ralph/ultraqa state when sessionId provided', () => {
+      const sessionId = 'session-a';
+      initAutopilot(testDir, 'test idea', sessionId);
+
+      vi.mocked(ralphLoop.readRalphState).mockReturnValueOnce(null as any);
+      vi.mocked(ultraqaLoop.readUltraQAState).mockReturnValueOnce(null as any);
+
+      cancelAutopilot(testDir, sessionId);
+
+      expect(ralphLoop.readRalphState).toHaveBeenCalledWith(testDir, sessionId);
+      expect(ultraqaLoop.readUltraQAState).toHaveBeenCalledWith(testDir, sessionId);
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+      expect(ralphLoop.clearLinkedUltraworkState).not.toHaveBeenCalled();
+      expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
+    });
   });
 
   describe('clearAutopilot', () => {
@@ -259,6 +275,22 @@ describe('AutopilotCancel', () => {
 
       const state = readAutopilotState(testDir);
       expect(state).toBeNull();
+    });
+
+    it('should not clear other session ralph/ultraqa state when sessionId provided', () => {
+      const sessionId = 'session-a';
+      initAutopilot(testDir, 'test idea', sessionId);
+
+      vi.mocked(ralphLoop.readRalphState).mockReturnValueOnce(null as any);
+      vi.mocked(ultraqaLoop.readUltraQAState).mockReturnValueOnce(null as any);
+
+      clearAutopilot(testDir, sessionId);
+
+      expect(ralphLoop.readRalphState).toHaveBeenCalledWith(testDir, sessionId);
+      expect(ultraqaLoop.readUltraQAState).toHaveBeenCalledWith(testDir, sessionId);
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+      expect(ralphLoop.clearLinkedUltraworkState).not.toHaveBeenCalled();
+      expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
     });
   });
 

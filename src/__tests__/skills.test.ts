@@ -8,13 +8,13 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (38)', () => {
+    it('should return correct number of skills (32)', () => {
       const skills = createBuiltinSkills();
-      // 38 skills: analyze, autopilot, build-fix, cancel, code-review, deep-executor, deepinit, deepsearch, doctor, ecomode,
-      // frontend-ui-ux, git-master, help, hud, learn-about-omc, learner, local-skills-setup, mcp-setup, note,
-      // omc-setup, orchestrate, pipeline, plan, project-session-manager, ralph, ralph-init, ralplan, release, research, review,
-      // security-review, skill, swarm, tdd, ultrapilot, ultraqa, ultrawork, writer-memory
-      expect(skills).toHaveLength(38);
+      // 32 skills: analyze, autopilot, build-fix, cancel, code-review, deepinit, deepsearch, doctor, ecomode,
+      // frontend-ui-ux, git-master, help, hud, learner, mcp-setup, note,
+      // omc-setup, pipeline, plan, project-session-manager, ralph, release, research,
+      // security-review, skill, tdd, team, trace, ultrapilot, ultraqa, ultrawork, writer-memory
+      expect(skills).toHaveLength(32);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -69,7 +69,6 @@ describe('Builtin Skills', () => {
         'build-fix',
         'cancel',
         'code-review',
-        'deep-executor',
         'deepinit',
         'deepsearch',
         'doctor',
@@ -78,26 +77,21 @@ describe('Builtin Skills', () => {
         'git-master',
         'help',
         'hud',
-        'learn-about-omc',
         'learner',
-        'local-skills-setup',
         'mcp-setup',
         'note',
         'omc-setup',
-        'orchestrate',
         'pipeline',
         'plan',
         'project-session-manager',
         'ralph',
-        'ralph-init',
-        'ralplan',
         'release',
         'research',
-        'review',
         'security-review',
         'skill',
-        'swarm',
         'tdd',
+        'team',
+        'trace',
         'ultrapilot',
         'ultraqa',
         'ultrawork',
@@ -119,15 +113,15 @@ describe('Builtin Skills', () => {
 
   describe('getBuiltinSkill()', () => {
     it('should retrieve a skill by name', () => {
-      const skill = getBuiltinSkill('orchestrate');
+      const skill = getBuiltinSkill('autopilot');
       expect(skill).toBeDefined();
-      expect(skill?.name).toBe('orchestrate');
+      expect(skill?.name).toBe('autopilot');
     });
 
     it('should be case-insensitive', () => {
-      const skillLower = getBuiltinSkill('orchestrate');
-      const skillUpper = getBuiltinSkill('ORCHESTRATE');
-      const skillMixed = getBuiltinSkill('OrChEsTrAtE');
+      const skillLower = getBuiltinSkill('autopilot');
+      const skillUpper = getBuiltinSkill('AUTOPILOT');
+      const skillMixed = getBuiltinSkill('AuToPiLoT');
 
       expect(skillLower).toBeDefined();
       expect(skillUpper).toBeDefined();
@@ -145,26 +139,22 @@ describe('Builtin Skills', () => {
   describe('listBuiltinSkillNames()', () => {
     it('should return all skill names', () => {
       const names = listBuiltinSkillNames();
-      expect(names).toHaveLength(38);
-      expect(names).toContain('orchestrate');
+      expect(names).toHaveLength(32);
       expect(names).toContain('autopilot');
       expect(names).toContain('cancel');
       expect(names).toContain('ralph');
-      expect(names).toContain('ralph-init');
       expect(names).toContain('frontend-ui-ux');
       expect(names).toContain('git-master');
       expect(names).toContain('ultrawork');
       expect(names).toContain('analyze');
       expect(names).toContain('deepsearch');
       expect(names).toContain('plan');
-      expect(names).toContain('review');
       expect(names).toContain('deepinit');
       expect(names).toContain('release');
       expect(names).toContain('doctor');
       expect(names).toContain('help');
       expect(names).toContain('hud');
       expect(names).toContain('note');
-      expect(names).toContain('learn-about-omc');
       expect(names).toContain('omc-setup');
     });
 

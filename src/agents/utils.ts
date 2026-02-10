@@ -8,7 +8,7 @@
  */
 
 import { readFileSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 
 import type {
@@ -53,7 +53,8 @@ export function loadAgentPrompt(agentName: string): string {
     // Security: Verify resolved path is within the agents directory
     const resolvedPath = resolve(agentPath);
     const resolvedAgentsDir = resolve(agentsDir);
-    if (!resolvedPath.startsWith(resolvedAgentsDir + '/') && resolvedPath !== resolvedAgentsDir) {
+    const rel = relative(resolvedAgentsDir, resolvedPath);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
       throw new Error(`Invalid agent name: path traversal detected`);
     }
 
@@ -233,11 +234,47 @@ export function validateAgentConfig(config: AgentConfig): string[] {
     errors.push('Agent prompt is required');
   }
 
-  if (!config.tools || config.tools.length === 0) {
-    errors.push('Agent must have at least one tool');
-  }
+  // Note: tools is now optional - agents get all tools by default if omitted
 
   return errors;
+}
+
+/**
+ * Parse disallowedTools from agent markdown frontmatter
+ */
+export function parseDisallowedTools(agentName: string): string[] | undefined {
+  // Security: Validate agent name contains only safe characters (alphanumeric and hyphens)
+  if (!/^[a-z0-9-]+$/i.test(agentName)) {
+    return undefined;
+  }
+
+  try {
+    const agentsDir = join(getPackageDir(), 'agents');
+    const agentPath = join(agentsDir, `${agentName}.md`);
+
+    // Security: Verify resolved path is within the agents directory
+    const resolvedPath = resolve(agentPath);
+    const resolvedAgentsDir = resolve(agentsDir);
+    const rel = relative(resolvedAgentsDir, resolvedPath);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      return undefined;
+    }
+
+    const content = readFileSync(agentPath, 'utf-8');
+
+    // Extract frontmatter
+    const match = content.match(/^---[\s\S]*?---/);
+    if (!match) return undefined;
+
+    // Look for disallowedTools line
+    const disallowedMatch = match[0].match(/^disallowedTools:\s*(.+)/m);
+    if (!disallowedMatch) return undefined;
+
+    // Parse comma-separated list
+    return disallowedMatch[1].split(',').map(t => t.trim()).filter(Boolean);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -20,6 +20,10 @@ import { astTools } from '../tools/ast-tools.js';
 // tool.js exports pythonReplTool with wrapped handler returning { content: [...] }
 // index.js exports pythonReplTool with raw handler returning string
 import { pythonReplTool } from '../tools/python-repl/tool.js';
+import { stateTools } from '../tools/state-tools.js';
+import { notepadTools } from '../tools/notepad-tools.js';
+import { memoryTools } from '../tools/memory-tools.js';
+import { traceTools } from '../tools/trace-tools.js';
 import { z } from 'zod';
 
 // Tool interface matching our tool definitions
@@ -35,6 +39,10 @@ const allTools: ToolDef[] = [
   ...(lspTools as unknown as ToolDef[]),
   ...(astTools as unknown as ToolDef[]),
   pythonReplTool as unknown as ToolDef,
+  ...(stateTools as unknown as ToolDef[]),
+  ...(notepadTools as unknown as ToolDef[]),
+  ...(memoryTools as unknown as ToolDef[]),
+  ...(traceTools as unknown as ToolDef[]),
 ];
 
 // Convert Zod schema to JSON Schema for MCP
@@ -110,6 +118,12 @@ function zodTypeToJsonSchema(zodType: z.ZodTypeAny): Record<string, unknown> {
     result.enum = zodType._def?.values;
   } else if (zodType instanceof z.ZodObject) {
     return zodToJsonSchema(zodType.shape);
+  } else if (zodType instanceof z.ZodRecord) {
+    // Handle z.record() - maps to JSON object with additionalProperties
+    result.type = 'object';
+    if (zodType._def?.valueType) {
+      result.additionalProperties = zodTypeToJsonSchema(zodType._def.valueType);
+    }
   } else {
     result.type = 'string';
   }
@@ -154,8 +168,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (tool.handler as (args: any) => Promise<{ content: Array<{ type: 'text'; text: string }> }>)(args ?? {});
+    const result = await tool.handler((args ?? {}) as unknown);
     return {
       content: result.content,
       isError: false,

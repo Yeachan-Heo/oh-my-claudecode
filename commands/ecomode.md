@@ -45,13 +45,27 @@ Ecomode routes tasks to lower-tier agents:
 | Analysis | architect-low (haiku) | architect (opus) |
 | Execution | executor-low (haiku) | executor-high (opus) |
 | Frontend | designer-low (haiku) | designer-high (opus) |
-| Search | explore (haiku) | explore-medium (sonnet) |
+| Search | explore (haiku) | explore (sonnet) |
 
 ## Setting as Default
 
 Run `/oh-my-claudecode:omc-setup` to set ecomode as your default parallel execution mode.
 
 When set as default, saying "fast" or "parallel" will activate ecomode instead of ultrawork.
+
+## Disabling Ecomode
+
+To completely disable ecomode (prevents all ecomode keyword detection and activation), add to `~/.claude/.omc-config.json`:
+
+```json
+{
+  "ecomode": {
+    "enabled": false
+  }
+}
+```
+
+When disabled, ecomode keywords ("eco", "ecomode", "efficient", "save-tokens", "budget") will be ignored and will not trigger ecomode activation.
 
 ## Cancellation
 

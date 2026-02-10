@@ -10,7 +10,7 @@
 
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
-import { relative, resolve } from 'path';
+import { isAbsolute, relative, resolve } from 'path';
 import { findProjectRoot, findRuleFiles } from './finder.js';
 import {
   createContentHash,
@@ -59,10 +59,10 @@ export function createRulesInjectorHook(workingDirectory: string) {
     return sessionCaches.get(sessionId)!;
   }
 
-  function resolveFilePath(path: string): string | null {
-    if (!path) return null;
-    if (path.startsWith('/')) return path;
-    return resolve(workingDirectory, path);
+  function resolveFilePath(filePath: string): string | null {
+    if (!filePath) return null;
+    if (isAbsolute(filePath)) return filePath;
+    return resolve(workingDirectory, filePath);
   }
 
   /**

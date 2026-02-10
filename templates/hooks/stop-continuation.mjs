@@ -2,12 +2,11 @@
 // OMC Stop Continuation Hook (Simplified)
 // Always allows stop - soft enforcement via message injection only.
 
-// Consume stdin (required for hook protocol)
+import { readStdin } from './lib/stdin.mjs';
+
 async function main() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
+  // Consume stdin with timeout protection (required for hook protocol)
+  await readStdin();
   // Always allow stop
   console.log(JSON.stringify({ continue: true }));
 }

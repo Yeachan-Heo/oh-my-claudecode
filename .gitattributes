@@ -17,6 +17,12 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
+# Build output (hide from diffs, treat as generated)
+dist/** linguist-generated=true
+dist/**/*.js linguist-generated=true
+dist/**/*.cjs linguist-generated=true
+dist/**/*.d.ts linguist-generated=true
+
 # Binary files (no conversion)
 *.png binary
 *.jpg binary

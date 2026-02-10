@@ -1,19 +1,128 @@
-import { readState, writeState, StateLocation } from '../features/state-manager/index.js';
-import { TokenUsage, SessionTokenStats, AggregateTokenStats } from './types.js';
-import { getTokscaleAdapter, TokscaleAdapter, TokscaleReport } from './tokscale-adapter.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { homedir } from 'os';
+import {
+  readState,
+  writeState,
+  StateLocation,
+} from "../features/state-manager/index.js";
+import { TokenUsage, SessionTokenStats, AggregateTokenStats } from "./types.js";
+import { normalizeModelName } from "./cost-estimator.js";
+import { getTokscaleAdapter, TokscaleAdapter } from "./tokscale-adapter.js";
+import * as fs from "fs/promises";
+import * as fsSync from "fs";
+import * as path from "path";
+import { homedir } from "os";
 
-const TOKEN_LOG_FILE = path.join(homedir(), '.omc', 'state', 'token-tracking.jsonl');
-const SESSION_STATS_FILE = path.join(homedir(), '.omc', 'state', 'session-token-stats.json');
+const TOKEN_LOG_FILE = path.join(
+  homedir(),
+  ".omc",
+  "state",
+  "token-tracking.jsonl",
+);
+
+// Session index for fast log lookups
+interface SessionIndex {
+  sessions: Record<string, { offset: number; count: number; lastSeen: string }>;
+  lastUpdated: string;
+}
+
+const SESSION_INDEX_FILE = path.join(
+  homedir(),
+  ".omc",
+  "state",
+  "token-tracking-index.json",
+);
+const INDEX_STALE_MS = 5 * 60 * 1000; // 5 minutes
+let sessionIndexCache: SessionIndex | null = null;
+let sessionIndexCacheTime = 0;
+
+function getSessionIndex(): SessionIndex | null {
+  const now = Date.now();
+  if (sessionIndexCache && now - sessionIndexCacheTime < INDEX_STALE_MS) {
+    return sessionIndexCache;
+  }
+  try {
+    if (fsSync.existsSync(SESSION_INDEX_FILE)) {
+      const content = fsSync.readFileSync(SESSION_INDEX_FILE, "utf-8");
+      sessionIndexCache = JSON.parse(content);
+      sessionIndexCacheTime = now;
+      return sessionIndexCache;
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return null;
+}
+
+function saveSessionIndex(index: SessionIndex): void {
+  try {
+    const dir = path.dirname(SESSION_INDEX_FILE);
+    if (!fsSync.existsSync(dir)) {
+      fsSync.mkdirSync(dir, { recursive: true });
+    }
+    fsSync.writeFileSync(SESSION_INDEX_FILE, JSON.stringify(index, null, 2));
+    sessionIndexCache = index;
+    sessionIndexCacheTime = Date.now();
+  } catch {
+    // Ignore write errors
+  }
+}
+
+function updateSessionIndex(sessionId: string): void {
+  const index = getSessionIndex() || { sessions: {}, lastUpdated: "" };
+  const existing = index.sessions[sessionId];
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = new Date().toISOString();
+  } else {
+    // For new session, estimate offset from current log size
+    try {
+      if (fsSync.existsSync(TOKEN_LOG_FILE)) {
+        const content = fsSync.readFileSync(TOKEN_LOG_FILE, "utf-8");
+        const lines = content.split("\n").filter(Boolean);
+        index.sessions[sessionId] = {
+          offset: lines.length,
+          count: 1,
+          lastSeen: new Date().toISOString(),
+        };
+      } else {
+        index.sessions[sessionId] = {
+          offset: 0,
+          count: 1,
+          lastSeen: new Date().toISOString(),
+        };
+      }
+    } catch {
+      index.sessions[sessionId] = {
+        offset: 0,
+        count: 1,
+        lastSeen: new Date().toISOString(),
+      };
+    }
+  }
+  index.lastUpdated = new Date().toISOString();
+  saveSessionIndex(index);
+}
 
 export class TokenTracker {
   private currentSessionId: string;
   private sessionStats: SessionTokenStats;
 
-  constructor(sessionId?: string) {
+  constructor(sessionId?: string, skipRestore?: boolean) {
     this.currentSessionId = sessionId || this.generateSessionId();
+    // Try to restore existing session stats before initializing fresh (Bug #4 fix)
+    if (!skipRestore) {
+      const existing = readState<SessionTokenStats>(
+        "session-token-stats",
+        StateLocation.GLOBAL,
+      );
+      if (
+        existing.exists &&
+        existing.data &&
+        existing.data.sessionId === this.currentSessionId
+      ) {
+        this.sessionStats = existing.data;
+        return;
+      }
+    }
     this.sessionStats = this.initializeSessionStats();
   }
 
@@ -32,15 +141,18 @@ export class TokenTracker {
       byAgent: {},
       byModel: {},
       startTime: new Date().toISOString(),
-      lastUpdate: new Date().toISOString()
+      lastUpdate: new Date().toISOString(),
     };
   }
 
-  async recordTokenUsage(usage: Omit<TokenUsage, 'sessionId' | 'timestamp'>): Promise<void> {
+  async recordTokenUsage(
+    usage: Omit<TokenUsage, "sessionId" | "timestamp">,
+  ): Promise<void> {
     const record: TokenUsage = {
       ...usage,
+      modelName: normalizeModelName(usage.modelName), // Bug #15: normalize model names
       sessionId: this.currentSessionId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     // Append to JSONL log (append-only for performance)
@@ -57,7 +169,8 @@ export class TokenTracker {
     const logDir = path.dirname(TOKEN_LOG_FILE);
 
     await fs.mkdir(logDir, { recursive: true });
-    await fs.appendFile(TOKEN_LOG_FILE, JSON.stringify(record) + '\n', 'utf-8');
+    await fs.appendFile(TOKEN_LOG_FILE, JSON.stringify(record) + "\n", "utf-8");
+    updateSessionIndex(record.sessionId);
   }
 
   private updateSessionStats(record: TokenUsage): void {
@@ -68,7 +181,7 @@ export class TokenTracker {
     this.sessionStats.lastUpdate = record.timestamp;
 
     // Group by agent (use "(main session)" for entries without agentName)
-    const agentKey = record.agentName || '(main session)';
+    const agentKey = record.agentName || "(main session)";
     if (!this.sessionStats.byAgent[agentKey]) {
       this.sessionStats.byAgent[agentKey] = [];
     }
@@ -82,14 +195,19 @@ export class TokenTracker {
   }
 
   private async saveSessionStats(): Promise<void> {
-    writeState('session-token-stats', this.sessionStats, StateLocation.GLOBAL);
+    writeState("session-token-stats", this.sessionStats, StateLocation.GLOBAL);
   }
 
-  async loadSessionStats(sessionId?: string): Promise<SessionTokenStats | null> {
+  async loadSessionStats(
+    sessionId?: string,
+  ): Promise<SessionTokenStats | null> {
     const sid = sessionId || this.currentSessionId;
 
     // Try to load from state
-    const result = readState<SessionTokenStats>('session-token-stats', StateLocation.GLOBAL);
+    const result = readState<SessionTokenStats>(
+      "session-token-stats",
+      StateLocation.GLOBAL,
+    );
 
     if (result.exists && result.data && result.data.sessionId === sid) {
       this.sessionStats = result.data;
@@ -100,17 +218,40 @@ export class TokenTracker {
     return this.rebuildStatsFromLog(sid);
   }
 
-  private async rebuildStatsFromLog(sessionId: string): Promise<SessionTokenStats | null> {
+  private async rebuildStatsFromLog(
+    sessionId: string,
+  ): Promise<SessionTokenStats | null> {
     try {
-      const content = await fs.readFile(TOKEN_LOG_FILE, 'utf-8');
-      const lines = content.trim().split('\n');
+      const index = getSessionIndex();
+      const content = await fs.readFile(TOKEN_LOG_FILE, "utf-8");
+      const allLines = content.trim().split("\n");
+
+      let linesToProcess: string[];
+
+      if (index?.sessions[sessionId]) {
+        const sessionInfo = index.sessions[sessionId];
+        const startOffset = Math.max(0, sessionInfo.offset);
+        const endOffset = Math.min(
+          allLines.length,
+          startOffset + sessionInfo.count + 10,
+        );
+        linesToProcess = allLines.slice(startOffset, endOffset);
+      } else {
+        linesToProcess = allLines;
+      }
+
       const stats = this.initializeSessionStats();
       stats.sessionId = sessionId;
 
-      for (const line of lines) {
-        const record: TokenUsage = JSON.parse(line);
-        if (record.sessionId === sessionId) {
-          this.updateSessionStats(record);
+      for (const line of linesToProcess) {
+        if (!line.trim()) continue;
+        try {
+          const record: TokenUsage = JSON.parse(line);
+          if (record.sessionId === sessionId) {
+            this.updateSessionStats(record);
+          }
+        } catch {
+          continue;
         }
       }
 
@@ -135,7 +276,9 @@ export class TokenTracker {
     return this.getAllStatsLegacy();
   }
 
-  private async getAllStatsViaTokscale(adapter: TokscaleAdapter): Promise<AggregateTokenStats> {
+  private async getAllStatsViaTokscale(
+    adapter: TokscaleAdapter,
+  ): Promise<AggregateTokenStats> {
     try {
       // Get tokscale report using the new unified API
       const report = await adapter.getReport!();
@@ -156,7 +299,7 @@ export class TokenTracker {
         sessionCount: agentData.sessionCount || 1,
         entryCount: report.totalEntries,
         firstEntry: agentData.firstEntry,
-        lastEntry: agentData.lastEntry
+        lastEntry: agentData.lastEntry,
       };
     } catch (error) {
       // If tokscale fails, fall back to legacy implementation
@@ -172,19 +315,22 @@ export class TokenTracker {
     firstEntry: string | null;
     lastEntry: string | null;
   }> {
-    const { calculateCost } = await import('./cost-estimator.js');
+    const { calculateCost } = await import("./cost-estimator.js");
 
     const result = {
       byAgent: {} as Record<string, { tokens: number; cost: number }>,
       sessionCount: 0,
       entryCount: 0,
       firstEntry: null as string | null,
-      lastEntry: null as string | null
+      lastEntry: null as string | null,
     };
 
     try {
-      const content = await fs.readFile(TOKEN_LOG_FILE, 'utf-8');
-      const lines = content.trim().split('\n').filter(line => line.trim());
+      const content = await fs.readFile(TOKEN_LOG_FILE, "utf-8");
+      const lines = content
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim());
 
       if (lines.length === 0) {
         return result;
@@ -213,15 +359,16 @@ export class TokenTracker {
           inputTokens: record.inputTokens,
           outputTokens: record.outputTokens,
           cacheCreationTokens: record.cacheCreationTokens,
-          cacheReadTokens: record.cacheReadTokens
+          cacheReadTokens: record.cacheReadTokens,
         });
 
         // Aggregate by agent (use "(main session)" for entries without agentName)
-        const agentKey = record.agentName || '(main session)';
+        const agentKey = record.agentName || "(main session)";
         if (!result.byAgent[agentKey]) {
           result.byAgent[agentKey] = { tokens: 0, cost: 0 };
         }
-        result.byAgent[agentKey].tokens += record.inputTokens + record.outputTokens;
+        result.byAgent[agentKey].tokens +=
+          record.inputTokens + record.outputTokens;
         result.byAgent[agentKey].cost += cost.totalCost;
       }
 
@@ -234,7 +381,7 @@ export class TokenTracker {
   }
 
   private async getAllStatsLegacy(): Promise<AggregateTokenStats> {
-    const { calculateCost } = await import('./cost-estimator.js');
+    const { calculateCost } = await import("./cost-estimator.js");
 
     const stats: AggregateTokenStats = {
       totalInputTokens: 0,
@@ -247,12 +394,15 @@ export class TokenTracker {
       sessionCount: 0,
       entryCount: 0,
       firstEntry: null,
-      lastEntry: null
+      lastEntry: null,
     };
 
     try {
-      const content = await fs.readFile(TOKEN_LOG_FILE, 'utf-8');
-      const lines = content.trim().split('\n').filter(line => line.trim());
+      const content = await fs.readFile(TOKEN_LOG_FILE, "utf-8");
+      const lines = content
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim());
 
       if (lines.length === 0) {
         return stats;
@@ -287,23 +437,25 @@ export class TokenTracker {
           inputTokens: record.inputTokens,
           outputTokens: record.outputTokens,
           cacheCreationTokens: record.cacheCreationTokens,
-          cacheReadTokens: record.cacheReadTokens
+          cacheReadTokens: record.cacheReadTokens,
         });
         stats.totalCost += cost.totalCost;
 
         // Aggregate by agent (use "(main session)" for entries without agentName)
-        const agentKey = record.agentName || '(main session)';
+        const agentKey = record.agentName || "(main session)";
         if (!stats.byAgent[agentKey]) {
           stats.byAgent[agentKey] = { tokens: 0, cost: 0 };
         }
-        stats.byAgent[agentKey].tokens += record.inputTokens + record.outputTokens;
+        stats.byAgent[agentKey].tokens +=
+          record.inputTokens + record.outputTokens;
         stats.byAgent[agentKey].cost += cost.totalCost;
 
         // Aggregate by model
         if (!stats.byModel[record.modelName]) {
           stats.byModel[record.modelName] = { tokens: 0, cost: 0 };
         }
-        stats.byModel[record.modelName].tokens += record.inputTokens + record.outputTokens;
+        stats.byModel[record.modelName].tokens +=
+          record.inputTokens + record.outputTokens;
         stats.byModel[record.modelName].cost += cost.totalCost;
       }
 
@@ -315,36 +467,47 @@ export class TokenTracker {
     }
   }
 
-  async getTopAgentsAllSessions(limit: number = 5): Promise<Array<{ agent: string; tokens: number; cost: number }>> {
+  async getTopAgentsAllSessions(
+    limit: number = 5,
+  ): Promise<Array<{ agent: string; tokens: number; cost: number }>> {
     const allStats = await this.getAllStats();
 
-    const agentStats = Object.entries(allStats.byAgent).map(([agent, stats]) => ({
-      agent,
-      tokens: stats.tokens,
-      cost: stats.cost
-    }));
+    const agentStats = Object.entries(allStats.byAgent).map(
+      ([agent, stats]) => ({
+        agent,
+        tokens: stats.tokens,
+        cost: stats.cost,
+      }),
+    );
 
     return agentStats.sort((a, b) => b.cost - a.cost).slice(0, limit);
   }
 
-  async getTopAgents(limit: number = 5): Promise<Array<{ agent: string; tokens: number; cost: number }>> {
-    const { calculateCost } = await import('./cost-estimator.js');
+  async getTopAgents(
+    limit: number = 5,
+  ): Promise<Array<{ agent: string; tokens: number; cost: number }>> {
+    const { calculateCost } = await import("./cost-estimator.js");
 
-    const agentStats = Object.entries(this.sessionStats.byAgent).map(([agent, usages]) => {
-      const totalTokens = usages.reduce((sum, u) => sum + u.inputTokens + u.outputTokens, 0);
-      const totalCost = usages.reduce((sum, u) => {
-        const cost = calculateCost({
-          modelName: u.modelName,
-          inputTokens: u.inputTokens,
-          outputTokens: u.outputTokens,
-          cacheCreationTokens: u.cacheCreationTokens,
-          cacheReadTokens: u.cacheReadTokens
-        });
-        return sum + cost.totalCost;
-      }, 0);
+    const agentStats = Object.entries(this.sessionStats.byAgent).map(
+      ([agent, usages]) => {
+        const totalTokens = usages.reduce(
+          (sum, u) => sum + u.inputTokens + u.outputTokens,
+          0,
+        );
+        const totalCost = usages.reduce((sum, u) => {
+          const cost = calculateCost({
+            modelName: u.modelName,
+            inputTokens: u.inputTokens,
+            outputTokens: u.outputTokens,
+            cacheCreationTokens: u.cacheCreationTokens,
+            cacheReadTokens: u.cacheReadTokens,
+          });
+          return sum + cost.totalCost;
+        }, 0);
 
-      return { agent, tokens: totalTokens, cost: totalCost };
-    });
+        return { agent, tokens: totalTokens, cost: totalCost };
+      },
+    );
 
     return agentStats.sort((a, b) => b.cost - a.cost).slice(0, limit);
   }
@@ -354,12 +517,12 @@ export class TokenTracker {
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
     try {
-      const content = await fs.readFile(TOKEN_LOG_FILE, 'utf-8');
-      const lines = content.trim().split('\n');
+      const content = await fs.readFile(TOKEN_LOG_FILE, "utf-8");
+      const lines = content.trim().split("\n");
       let kept = 0;
       let removed = 0;
 
-      const filteredLines = lines.filter(line => {
+      const filteredLines = lines.filter((line) => {
         const record: TokenUsage = JSON.parse(line);
         const recordDate = new Date(record.timestamp);
         if (recordDate >= cutoffDate) {
@@ -370,7 +533,11 @@ export class TokenTracker {
         return false;
       });
 
-      await fs.writeFile(TOKEN_LOG_FILE, filteredLines.join('\n') + '\n', 'utf-8');
+      await fs.writeFile(
+        TOKEN_LOG_FILE,
+        filteredLines.join("\n") + "\n",
+        "utf-8",
+      );
       return removed;
     } catch (error) {
       return 0;
@@ -389,6 +556,6 @@ export function getTokenTracker(sessionId?: string): TokenTracker {
 }
 
 export function resetTokenTracker(sessionId?: string): TokenTracker {
-  globalTracker = new TokenTracker(sessionId);
+  globalTracker = new TokenTracker(sessionId, true);
   return globalTracker;
 }

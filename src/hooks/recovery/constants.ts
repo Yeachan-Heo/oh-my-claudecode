@@ -5,15 +5,8 @@
  */
 
 import { join } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
-
-/**
- * Get the data directory for Claude Code storage
- * Follows XDG Base Directory specification
- */
-function getDataDir(): string {
-  return process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share');
-}
+import { tmpdir } from 'node:os';
+import { getDataDir } from '../../utils/paths.js';
 
 /**
  * Get the Claude Code storage directory

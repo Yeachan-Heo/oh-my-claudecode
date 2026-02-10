@@ -69,6 +69,35 @@ Output: Code review report with:
 )
 ```
 
+## External Model Consultation (Preferred)
+
+The code-reviewer agent SHOULD consult Codex for cross-validation.
+
+### Protocol
+1. **Form your OWN review FIRST** - Complete the review independently
+2. **Consult for validation** - Cross-check findings with Codex
+3. **Critically evaluate** - Never blindly adopt external findings
+4. **Graceful fallback** - Never block if tools unavailable
+
+### When to Consult
+- Security-sensitive code changes
+- Complex architectural patterns
+- Unfamiliar codebases or languages
+- High-stakes production code
+
+### When to Skip
+- Simple refactoring
+- Well-understood patterns
+- Time-critical reviews
+- Small, isolated changes
+
+### Tool Usage
+Before first MCP tool use, call `ToolSearch("mcp")` to discover deferred MCP tools.
+Use `mcp__x__ask_codex` with `agent_role: "code-reviewer"`.
+If ToolSearch finds no MCP tools, fall back to the `code-reviewer` Claude agent.
+
+**Note:** Codex calls can take up to 1 hour. Consider the review timeline before consulting.
+
 ## Output Format
 
 ```

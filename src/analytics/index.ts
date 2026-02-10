@@ -28,5 +28,8 @@ export * from './transcript-token-extractor.js';
 export * from './backfill-dedup.js';
 export * from './backfill-engine.js';
 
+// Session catalog (derives sessions from token-tracking.jsonl)
+export * from './session-catalog.js';
+
 // Tokscale integration (replaces backfill)
 export * from './tokscale-adapter.js';

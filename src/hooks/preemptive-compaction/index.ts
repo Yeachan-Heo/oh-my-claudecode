@@ -33,6 +33,22 @@ import type {
 const DEBUG = process.env.PREEMPTIVE_COMPACTION_DEBUG === '1';
 const DEBUG_FILE = path.join(tmpdir(), 'preemptive-compaction-debug.log');
 
+/**
+ * Rapid-fire debounce window (ms).
+ * When multiple tool outputs arrive within this window (e.g. simultaneous
+ * subagent completions in swarm/ultrawork), only the first triggers
+ * context analysis. Subsequent calls within the window are skipped.
+ * This is much shorter than COMPACTION_COOLDOWN_MS (which debounces warnings)
+ * and specifically targets the concurrent flood scenario (issue #453).
+ */
+const RAPID_FIRE_DEBOUNCE_MS = 500;
+
+/**
+ * Per-session timestamp of last postToolUse analysis.
+ * Used to debounce rapid-fire tool completions.
+ */
+const lastAnalysisTime = new Map<string, number>();
+
 function debugLog(...args: unknown[]): void {
   if (DEBUG) {
     const msg = `[${new Date().toISOString()}] [preemptive-compaction] ${args
@@ -66,6 +82,14 @@ function cleanupSessionStates(): void {
   for (const [sessionId, state] of sessionStates) {
     if (now - state.lastWarningTime > MAX_AGE) {
       sessionStates.delete(sessionId);
+      lastAnalysisTime.delete(sessionId);
+    }
+  }
+
+  // Clean orphaned debounce entries
+  for (const sessionId of lastAnalysisTime.keys()) {
+    if (!sessionStates.has(sessionId)) {
+      lastAnalysisTime.delete(sessionId);
     }
   }
 }
@@ -213,10 +237,29 @@ export function createPreemptiveCompactionHook(
 
       // Only check after tools that produce large outputs
       const toolLower = input.tool_name.toLowerCase();
-      const largeOutputTools = ['read', 'grep', 'glob', 'bash', 'webfetch'];
+      const largeOutputTools = ['read', 'grep', 'glob', 'bash', 'webfetch', 'task'];
       if (!largeOutputTools.includes(toolLower)) {
         return null;
       }
+
+      // Rapid-fire debounce: skip analysis if another was done very recently
+      // for this session. Prevents concurrent flood when multiple subagents
+      // complete simultaneously (issue #453).
+      const now = Date.now();
+      const lastAnalysis = lastAnalysisTime.get(input.session_id) ?? 0;
+      if (now - lastAnalysis < RAPID_FIRE_DEBOUNCE_MS) {
+        debugLog('skipping analysis - rapid-fire debounce active', {
+          sessionId: input.session_id,
+          elapsed: now - lastAnalysis,
+          debounceMs: RAPID_FIRE_DEBOUNCE_MS,
+        });
+        // Still track tokens even when debounced
+        const responseTokens = estimateTokens(input.tool_response);
+        const state = getSessionState(input.session_id);
+        state.estimatedTokens += responseTokens;
+        return null;
+      }
+      lastAnalysisTime.set(input.session_id, now);
 
       // Estimate response size
       const responseTokens = estimateTokens(input.tool_response);
@@ -277,6 +320,9 @@ export function createPreemptiveCompactionHook(
         state.warningCount = 0;
       }
 
+      // Clear rapid-fire debounce state
+      lastAnalysisTime.delete(input.session_id);
+
       return null;
     },
   };
@@ -300,6 +346,14 @@ export function resetSessionTokenEstimate(sessionId: string): void {
     state.warningCount = 0;
     state.lastWarningTime = 0;
   }
+  lastAnalysisTime.delete(sessionId);
+}
+
+/**
+ * Clear the rapid-fire debounce state for a session (for testing).
+ */
+export function clearRapidFireDebounce(sessionId: string): void {
+  lastAnalysisTime.delete(sessionId);
 }
 
 // Re-export types and constants
@@ -307,6 +361,8 @@ export type {
   ContextUsageResult,
   PreemptiveCompactionConfig,
 } from './types.js';
+
+export { RAPID_FIRE_DEBOUNCE_MS };
 
 export {
   DEFAULT_THRESHOLD,

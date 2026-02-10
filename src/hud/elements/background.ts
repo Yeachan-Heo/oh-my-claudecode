@@ -6,6 +6,7 @@
 
 import type { BackgroundTask } from '../types.js';
 import { RESET } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 const CYAN = '\x1b[36m';
 const GREEN = '\x1b[32m';
@@ -69,8 +70,8 @@ export function renderBackgroundDetailed(tasks: BackgroundTask[]): string | null
       const parts = t.agentType.split(':');
       return parts[parts.length - 1];
     }
-    // Otherwise use truncated description
-    return t.description.slice(0, 8);
+    // Otherwise use truncated description (CJK-aware)
+    return truncateToWidth(t.description, 8, '');
   });
 
   const suffix = running.length > 3 ? ',+' + (running.length - 3) : '';

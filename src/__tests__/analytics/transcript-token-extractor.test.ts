@@ -83,7 +83,7 @@ describe('extractTokenUsage', () => {
 
   it('should normalize model names correctly', () => {
     const testCases = [
-      { model: 'claude-opus-4-5-20251101', expected: 'claude-opus-4.5' },
+      { model: 'claude-opus-4-6-20260205', expected: 'claude-opus-4.6' },
       { model: 'claude-sonnet-4-5-20250929', expected: 'claude-sonnet-4.5' },
       { model: 'claude-haiku-4-5-20251001', expected: 'claude-haiku-4' }
     ];

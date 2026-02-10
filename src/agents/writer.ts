@@ -37,7 +37,6 @@ export const writerAgent: AgentConfig = {
   name: 'writer',
   description: `Technical writer who crafts clear, comprehensive documentation. Specializes in README files, API docs, architecture docs, and user guides.`,
   prompt: loadAgentPrompt('writer'),
-  tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
   model: 'haiku',
   defaultModel: 'haiku',
   metadata: DOCUMENT_WRITER_PROMPT_METADATA,

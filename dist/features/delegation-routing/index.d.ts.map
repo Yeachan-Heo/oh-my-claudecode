@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../../src/features/delegation-routing/index.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAGH,OAAO,EAAE,iBAAiB,EAAE,kBAAkB,EAAE,MAAM,eAAe,CAAC;AAGtE,OAAO,EACL,yBAAyB,EACzB,sBAAsB,EACtB,mBAAmB,GACpB,MAAM,YAAY,CAAC;AAGpB,YAAY,EACV,kBAAkB,EAClB,cAAc,EACd,eAAe,EACf,uBAAuB,EACvB,kBAAkB,EAClB,wBAAwB,GACzB,MAAM,uBAAuB,CAAC"}

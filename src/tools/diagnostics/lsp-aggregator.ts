@@ -85,31 +85,28 @@ export async function runLspAggregatedDiagnostics(
 
   for (const file of files) {
     try {
-      const client = await lspClientManager.getClientForFile(file);
-      if (!client) {
-        continue;
-      }
+      await lspClientManager.runWithClientLease(file, async (client) => {
+        // Open document to trigger diagnostics
+        await client.openDocument(file);
 
-      // Open document to trigger diagnostics
-      await client.openDocument(file);
+        // Wait for diagnostics to be published
+        await new Promise(resolve => setTimeout(resolve, LSP_DIAGNOSTICS_WAIT_MS));
 
-      // Wait for diagnostics to be published
-      await new Promise(resolve => setTimeout(resolve, LSP_DIAGNOSTICS_WAIT_MS));
+        // Get diagnostics for this file
+        const diagnostics = client.getDiagnostics(file);
 
-      // Get diagnostics for this file
-      const diagnostics = client.getDiagnostics(file);
+        // Add to aggregated results
+        for (const diagnostic of diagnostics) {
+          allDiagnostics.push({
+            file,
+            diagnostic
+          });
+        }
 
-      // Add to aggregated results
-      for (const diagnostic of diagnostics) {
-        allDiagnostics.push({
-          file,
-          diagnostic
-        });
-      }
-
-      filesChecked++;
+        filesChecked++;
+      });
     } catch (error) {
-      // Skip files that fail
+      // Skip files that fail (including "no server available")
       continue;
     }
   }

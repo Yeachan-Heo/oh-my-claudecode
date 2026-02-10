@@ -892,13 +892,13 @@ Agent Examples per Tier:
 LOW TIER                 MEDIUM TIER              HIGH TIER
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │ executor-low    │     │ executor        │     │ executor-high   │
-│ explore         │     │ explore-medium  │     │ explore-high    │
+│ explore         │     │ executor        │     │ explore-high    │
 │ architect-low   │     │ architect-medium│     │ architect       │
 │ designer-low    │     │ designer        │     │ designer-high   │
-│ researcher-low  │     │ researcher      │     │ planner         │
-│ writer          │     │ vision          │     │ critic          │
-│ build-fixer-low │     │ build-fixer     │     │ analyst         │
-│ tdd-guide-low   │     │ tdd-guide       │     │ code-reviewer   │
+│ writer          │     │ researcher      │     │ planner         │
+│ tdd-guide-low   │     │ vision          │     │ critic          │
+│ sec-reviewer-low│     │ build-fixer     │     │ analyst         │
+│                 │     │ tdd-guide       │     │ code-reviewer   │
 │                 │     │ qa-tester       │     │ security-reviewer│
 │                 │     │ scientist       │     │ scientist-high  │
 └─────────────────┘     └─────────────────┘     └─────────────────┘

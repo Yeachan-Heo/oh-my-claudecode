@@ -10,14 +10,28 @@
  * - Early termination: stops when enough running agents found
  */
 
-import { createReadStream, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
-import { createInterface } from 'readline';
-import { basename } from 'path';
-import type { TranscriptData, ActiveAgent, TodoItem, SkillInvocation, PendingPermission, ThinkingState } from './types.js';
+import {
+  createReadStream,
+  existsSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+} from "fs";
+import { createInterface } from "readline";
+import { basename } from "path";
+import type {
+  TranscriptData,
+  ActiveAgent,
+  TodoItem,
+  SkillInvocation,
+  PendingPermission,
+  ThinkingState,
+} from "./types.js";
 
 // Performance constants
 const MAX_TAIL_BYTES = 512 * 1024; // 500KB - enough for recent activity
-const MAX_AGENT_MAP_SIZE = 50; // Cap agent tracking
+const MAX_AGENT_MAP_SIZE = 100; // Cap agent tracking
 const MIN_RUNNING_AGENTS_THRESHOLD = 10; // Early termination threshold
 
 /**
@@ -25,8 +39,12 @@ const MIN_RUNNING_AGENTS_THRESHOLD = 10; // Early termination threshold
  * Only these tools will trigger the "APPROVE?" indicator.
  */
 const PERMISSION_TOOLS = [
-  'Edit', 'Write', 'Bash',
-  'proxy_Edit', 'proxy_Write', 'proxy_Bash'
+  "Edit",
+  "Write",
+  "Bash",
+  "proxy_Edit",
+  "proxy_Write",
+  "proxy_Bash",
 ] as const;
 
 /**
@@ -45,7 +63,7 @@ const pendingPermissionMap = new Map<string, PendingPermission>();
 /**
  * Content block types that indicate extended thinking mode.
  */
-const THINKING_PART_TYPES = ['thinking', 'reasoning'] as const;
+const THINKING_PART_TYPES = ["thinking", "reasoning"] as const;
 
 /**
  * Time threshold for considering thinking "active".
@@ -64,7 +82,7 @@ export interface ParseTranscriptOptions {
 
 export async function parseTranscript(
   transcriptPath: string | undefined,
-  options?: ParseTranscriptOptions
+  options?: ParseTranscriptOptions,
 ): Promise<TranscriptData> {
   // IMPORTANT: Clear module-level state at the start of each parse
   // to prevent stale data from previous HUD invocations
@@ -96,7 +114,14 @@ export async function parseTranscript(
         if (!line.trim()) continue;
         try {
           const entry = JSON.parse(line);
-          processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap);
+          processEntry(
+            entry,
+            agentMap,
+            latestTodos,
+            result,
+            MAX_AGENT_MAP_SIZE,
+            backgroundAgentMap,
+          );
         } catch {
           // Skip malformed lines
         }
@@ -114,7 +139,14 @@ export async function parseTranscript(
 
         try {
           const entry = JSON.parse(line);
-          processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap);
+          processEntry(
+            entry,
+            agentMap,
+            latestTodos,
+            result,
+            MAX_AGENT_MAP_SIZE,
+            backgroundAgentMap,
+          );
         } catch {
           // Skip malformed lines
         }
@@ -130,12 +162,14 @@ export async function parseTranscript(
   const now = Date.now();
 
   for (const agent of agentMap.values()) {
-    if (agent.status === 'running') {
+    if (agent.status === "running") {
       const runningTime = now - agent.startTime.getTime();
       if (runningTime > STALE_AGENT_THRESHOLD_MS) {
         // Mark as completed (stale)
-        agent.status = 'completed';
-        agent.endTime = new Date(agent.startTime.getTime() + STALE_AGENT_THRESHOLD_MS);
+        agent.status = "completed";
+        agent.endTime = new Date(
+          agent.startTime.getTime() + STALE_AGENT_THRESHOLD_MS,
+        );
       }
     }
   }
@@ -156,9 +190,16 @@ export async function parseTranscript(
   }
 
   // Get running agents first, then recent completed (up to 10 total)
-  const running = Array.from(agentMap.values()).filter(a => a.status === 'running');
-  const completed = Array.from(agentMap.values()).filter(a => a.status === 'completed');
-  result.agents = [...running, ...completed.slice(-(10 - running.length))].slice(0, 10);
+  const running = Array.from(agentMap.values()).filter(
+    (a) => a.status === "running",
+  );
+  const completed = Array.from(agentMap.values()).filter(
+    (a) => a.status === "completed",
+  );
+  result.agents = [
+    ...running,
+    ...completed.slice(-(10 - running.length)),
+  ].slice(0, 10);
   result.todos = latestTodos;
 
   return result;
@@ -168,11 +209,15 @@ export async function parseTranscript(
  * Read the tail portion of a file and split into lines.
  * Handles partial first line (from mid-file start).
  */
-function readTailLines(filePath: string, fileSize: number, maxBytes: number): string[] {
+function readTailLines(
+  filePath: string,
+  fileSize: number,
+  maxBytes: number,
+): string[] {
   const startOffset = Math.max(0, fileSize - maxBytes);
   const bytesToRead = fileSize - startOffset;
 
-  const fd = openSync(filePath, 'r');
+  const fd = openSync(filePath, "r");
   const buffer = Buffer.alloc(bytesToRead);
 
   try {
@@ -181,8 +226,8 @@ function readTailLines(filePath: string, fileSize: number, maxBytes: number): st
     closeSync(fd);
   }
 
-  const content = buffer.toString('utf8');
-  const lines = content.split('\n');
+  const content = buffer.toString("utf8");
+  const lines = content.split("\n");
 
   // If we started mid-file, discard the potentially incomplete first line
   if (startOffset > 0 && lines.length > 0) {
@@ -198,10 +243,13 @@ type BackgroundAgentMap = Map<string, string>;
 /**
  * Extract background agent ID from "Async agent launched" message
  */
-function extractBackgroundAgentId(content: string | Array<{ type?: string; text?: string }>): string | null {
-  const text = typeof content === 'string'
-    ? content
-    : content.find((c) => c.type === 'text')?.text || '';
+function extractBackgroundAgentId(
+  content: string | Array<{ type?: string; text?: string }>,
+): string | null {
+  const text =
+    typeof content === "string"
+      ? content
+      : content.find((c) => c.type === "text")?.text || "";
 
   // Pattern: "agentId: a8de3dd"
   const match = text.match(/agentId:\s*([a-zA-Z0-9]+)/);
@@ -211,10 +259,13 @@ function extractBackgroundAgentId(content: string | Array<{ type?: string; text?
 /**
  * Parse TaskOutput result for completion status
  */
-function parseTaskOutputResult(content: string | Array<{ type?: string; text?: string }>): { taskId: string; status: string } | null {
-  const text = typeof content === 'string'
-    ? content
-    : content.find((c) => c.type === 'text')?.text || '';
+function parseTaskOutputResult(
+  content: string | Array<{ type?: string; text?: string }>,
+): { taskId: string; status: string } | null {
+  const text =
+    typeof content === "string"
+      ? content
+      : content.find((c) => c.type === "text")?.text || "";
 
   // Extract task_id and status from XML-like format
   const taskIdMatch = text.match(/<task_id>([^<]+)<\/task_id>/);
@@ -230,11 +281,11 @@ function parseTaskOutputResult(content: string | Array<{ type?: string; text?: s
  * Extract a human-readable target summary from tool input.
  */
 function extractTargetSummary(input: unknown, toolName: string): string {
-  if (!input || typeof input !== 'object') return '...';
+  if (!input || typeof input !== "object") return "...";
   const inp = input as Record<string, unknown>;
 
   // Edit/Write: show file path
-  if (toolName.includes('Edit') || toolName.includes('Write')) {
+  if (toolName.includes("Edit") || toolName.includes("Write")) {
     const filePath = inp.file_path as string | undefined;
     if (filePath) {
       // Return just the filename or last path segment
@@ -243,7 +294,7 @@ function extractTargetSummary(input: unknown, toolName: string): string {
   }
 
   // Bash: show first 20 chars of command
-  if (toolName.includes('Bash')) {
+  if (toolName.includes("Bash")) {
     const cmd = inp.command as string | undefined;
     if (cmd) {
       const trimmed = cmd.trim().substring(0, 20);
@@ -251,7 +302,7 @@ function extractTargetSummary(input: unknown, toolName: string): string {
     }
   }
 
-  return '...';
+  return "...";
 }
 
 /**
@@ -263,7 +314,7 @@ function processEntry(
   latestTodos: TodoItem[],
   result: TranscriptData,
   maxAgentMapSize: number = 50,
-  backgroundAgentMap?: BackgroundAgentMap
+  backgroundAgentMap?: BackgroundAgentMap,
 ): void {
   const timestamp = entry.timestamp ? new Date(entry.timestamp) : new Date();
 
@@ -277,23 +328,27 @@ function processEntry(
 
   for (const block of content) {
     // Check if this is a thinking block
-    if (THINKING_PART_TYPES.includes(block.type as typeof THINKING_PART_TYPES[number])) {
+    if (
+      THINKING_PART_TYPES.includes(
+        block.type as (typeof THINKING_PART_TYPES)[number],
+      )
+    ) {
       result.thinkingState = {
         active: true,
-        lastSeen: timestamp
+        lastSeen: timestamp,
       };
     }
 
     // Track tool_use for Task (agents) and TodoWrite
-    if (block.type === 'tool_use' && block.id && block.name) {
-      if (block.name === 'Task' || block.name === 'proxy_Task') {
+    if (block.type === "tool_use" && block.id && block.name) {
+      if (block.name === "Task" || block.name === "proxy_Task") {
         const input = block.input as TaskInput | undefined;
         const agentEntry: ActiveAgent = {
           id: block.id,
-          type: input?.subagent_type ?? 'unknown',
+          type: input?.subagent_type ?? "unknown",
           model: input?.model,
           description: input?.description,
-          status: 'running',
+          status: "running",
           startTime: timestamp,
         };
 
@@ -303,7 +358,7 @@ function processEntry(
           let oldestCompleted: string | null = null;
           let oldestTime = Infinity;
           for (const [id, agent] of agentMap) {
-            if (agent.status === 'completed' && agent.startTime) {
+            if (agent.status === "completed" && agent.startTime) {
               const time = agent.startTime.getTime();
               if (time < oldestTime) {
                 oldestTime = time;
@@ -317,7 +372,7 @@ function processEntry(
         }
 
         agentMap.set(block.id, agentEntry);
-      } else if (block.name === 'TodoWrite') {
+      } else if (block.name === "TodoWrite") {
         const input = block.input as TodoWriteInput | undefined;
         if (input?.todos && Array.isArray(input.todos)) {
           // Replace latest todos with new ones
@@ -325,12 +380,12 @@ function processEntry(
           latestTodos.push(
             ...input.todos.map((t) => ({
               content: t.content,
-              status: t.status as TodoItem['status'],
+              status: t.status as TodoItem["status"],
               activeForm: t.activeForm,
-            }))
+            })),
           );
         }
-      } else if (block.name === 'Skill' || block.name === 'proxy_Skill') {
+      } else if (block.name === "Skill" || block.name === "proxy_Skill") {
         // Track last activated skill
         const input = block.input as SkillInput | undefined;
         if (input?.skill) {
@@ -343,17 +398,21 @@ function processEntry(
       }
 
       // Track tool_use for permission-requiring tools
-      if (PERMISSION_TOOLS.includes(block.name as typeof PERMISSION_TOOLS[number])) {
+      if (
+        PERMISSION_TOOLS.includes(
+          block.name as (typeof PERMISSION_TOOLS)[number],
+        )
+      ) {
         pendingPermissionMap.set(block.id, {
-          toolName: block.name.replace('proxy_', ''),
+          toolName: block.name.replace("proxy_", ""),
           targetSummary: extractTargetSummary(block.input, block.name),
-          timestamp: timestamp
+          timestamp: timestamp,
         });
       }
     }
 
     // Track tool_result to mark agents as completed
-    if (block.type === 'tool_result' && block.tool_use_id) {
+    if (block.type === "tool_result" && block.tool_use_id) {
       // Clear from pending permissions when tool_result arrives
       pendingPermissionMap.delete(block.tool_use_id);
 
@@ -363,11 +422,12 @@ function processEntry(
 
         // Check if this is a background agent launch result
         const isBackgroundLaunch =
-          typeof blockContent === 'string'
-            ? blockContent.includes('Async agent launched')
-            : Array.isArray(blockContent) && blockContent.some(
+          typeof blockContent === "string"
+            ? blockContent.includes("Async agent launched")
+            : Array.isArray(blockContent) &&
+              blockContent.some(
                 (c: { type?: string; text?: string }) =>
-                  c.type === 'text' && c.text?.includes('Async agent launched')
+                  c.type === "text" && c.text?.includes("Async agent launched"),
               );
 
         if (isBackgroundLaunch) {
@@ -381,7 +441,7 @@ function processEntry(
           // Keep status as 'running'
         } else {
           // Foreground agent completed
-          agent.status = 'completed';
+          agent.status = "completed";
           agent.endTime = timestamp;
         }
       }
@@ -389,13 +449,13 @@ function processEntry(
       // Check if this is a TaskOutput result showing completion
       if (backgroundAgentMap && block.content) {
         const taskOutput = parseTaskOutputResult(block.content);
-        if (taskOutput && taskOutput.status === 'completed') {
+        if (taskOutput && taskOutput.status === "completed") {
           // Find the original agent by background agent ID
           const toolUseId = backgroundAgentMap.get(taskOutput.taskId);
           if (toolUseId) {
             const bgAgent = agentMap.get(toolUseId);
-            if (bgAgent && bgAgent.status === 'running') {
-              bgAgent.status = 'completed';
+            if (bgAgent && bgAgent.status === "running") {
+              bgAgent.status = "completed";
               bgAgent.endTime = timestamp;
             }
           }
@@ -453,7 +513,7 @@ interface SkillInput {
  * Get count of running agents
  */
 export function getRunningAgentCount(agents: ActiveAgent[]): number {
-  return agents.filter((a) => a.status === 'running').length;
+  return agents.filter((a) => a.status === "running").length;
 }
 
 /**
@@ -465,8 +525,8 @@ export function getTodoStats(todos: TodoItem[]): {
   inProgress: number;
 } {
   return {
-    completed: todos.filter((t) => t.status === 'completed').length,
+    completed: todos.filter((t) => t.status === "completed").length,
     total: todos.length,
-    inProgress: todos.filter((t) => t.status === 'in_progress').length,
+    inProgress: todos.filter((t) => t.status === "in_progress").length,
   };
 }

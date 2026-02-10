@@ -3,15 +3,16 @@
 // Processes <remember> tags from Task agent output
 // Saves to .omc/notepad.md for compaction-resilient memory
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Dynamic import for the shared stdin module
+// Dynamic imports for shared modules
 const { readStdin } = await import(join(__dirname, 'lib', 'stdin.mjs'));
+const { atomicWriteFileSync } = await import(join(__dirname, 'lib', 'atomic-write.mjs'));
 
 // Constants
 const NOTEPAD_TEMPLATE = '# Notepad\n' +
@@ -25,15 +26,15 @@ const NOTEPAD_TEMPLATE = '# Notepad\n' +
 
 // Initialize notepad.md if needed
 function initNotepad(directory) {
-  const sisyphusDir = join(directory, '.omc');
-  const notepadPath = join(sisyphusDir, 'notepad.md');
+  const omcDir = join(directory, '.omc');
+  const notepadPath = join(omcDir, 'notepad.md');
 
-  if (!existsSync(sisyphusDir)) {
-    try { mkdirSync(sisyphusDir, { recursive: true }); } catch {}
+  if (!existsSync(omcDir)) {
+    try { mkdirSync(omcDir, { recursive: true }); } catch {}
   }
 
   if (!existsSync(notepadPath)) {
-    try { writeFileSync(notepadPath, NOTEPAD_TEMPLATE); } catch {}
+    try { atomicWriteFileSync(notepadPath, NOTEPAD_TEMPLATE); } catch {}
   }
 
   return notepadPath;
@@ -51,7 +52,7 @@ function setPriorityContext(notepadPath, content) {
         '<!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->\n' +
         content.trim() + '\n\n';
       notepad = notepad.replace(priorityMatch[0], newPriority);
-      writeFileSync(notepadPath, notepad);
+      atomicWriteFileSync(notepadPath, notepad);
     }
   } catch {}
 }
@@ -68,7 +69,7 @@ function addWorkingMemoryEntry(notepadPath, content) {
     const manualIndex = notepad.indexOf('## MANUAL');
     if (manualIndex !== -1) {
       notepad = notepad.slice(0, manualIndex) + entry + notepad.slice(manualIndex);
-      writeFileSync(notepadPath, notepad);
+      atomicWriteFileSync(notepadPath, notepad);
     }
   } catch {}
 }
@@ -107,17 +108,22 @@ async function main() {
     // tool_response may be string or object — normalize to string for .includes() check
     const rawResponse = data.tool_response || data.toolOutput || '';
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
-    const directory = data.directory || process.cwd();
+    const directory = data.cwd || data.directory || process.cwd();
 
     // Only process Task tool output
-    if (toolName !== 'Task' && toolName !== 'task') {
-      console.log(JSON.stringify({ continue: true }));
+    if (
+      toolName !== 'Task' &&
+      toolName !== 'task' &&
+      toolName !== 'TaskCreate' &&
+      toolName !== 'TaskUpdate'
+    ) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
     // Check for remember tags
     if (!toolOutput.includes('<remember')) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
@@ -125,9 +131,9 @@ async function main() {
     const notepadPath = initNotepad(directory);
     processRememberTags(toolOutput, notepadPath);
 
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

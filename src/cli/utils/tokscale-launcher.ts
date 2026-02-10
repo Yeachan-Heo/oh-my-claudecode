@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 
 export interface TokscaleLaunchOptions {
-  light?: boolean;
   view?: 'overview' | 'models' | 'daily' | 'stats';
   claude?: boolean; // Default true for OMC
 }
@@ -25,21 +24,26 @@ export async function isTokscaleCLIAvailable(): Promise<boolean> {
 
 /**
  * Launch tokscale interactive TUI
+ *
+ * tokscale subcommands:
+ * - tui: default interactive view
+ * - models: model breakdown view (also launches TUI)
+ * - monthly: monthly report view (also launches TUI)
+ *
+ * Note: 'daily' and 'stats' views are not supported by tokscale,
+ * so we fall back to 'tui' for those.
  */
 export async function launchTokscaleTUI(options: TokscaleLaunchOptions = {}): Promise<void> {
-  const args = ['tokscale@latest'];
+  // Map view to tokscale subcommand
+  const subcommand = options.view === 'models' ? 'models'
+    : options.view === 'daily' ? 'monthly'  // tokscale has 'monthly', not 'daily'
+    : 'tui';  // 'overview' and 'stats' use default tui
+
+  const args = ['tokscale@latest', subcommand];
 
   // Always use --claude flag for OMC (Claude-focused) unless explicitly disabled
   if (options.claude !== false) {
     args.push('--claude');
-  }
-
-  if (options.light) {
-    args.push('--light');
-  }
-
-  if (options.view) {
-    args.push(options.view);
   }
 
   const proc = spawn('bunx', args, {

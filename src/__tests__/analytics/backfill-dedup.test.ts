@@ -100,7 +100,7 @@ describe('BackfillDedup', () => {
     it('should handle multiple entry IDs with different patterns', () => {
       const entries = [
         'session-1:2024-01-01T00:00:00Z:claude-sonnet-4.5:100:50',
-        'session-1:2024-01-01T00:01:00Z:claude-opus-4.5:200:100',
+        'session-1:2024-01-01T00:01:00Z:claude-opus-4.6:200:100',
         'session-2:2024-01-01T00:00:00Z:claude-haiku-4:50:25',
         'session-3:2024-01-02T00:00:00Z:claude-sonnet-4.5:150:75'
       ];
@@ -190,7 +190,7 @@ describe('BackfillDedup', () => {
       for (let i = 0; i < 10000; i++) {
         const sessionId = `session-${i % 50}`;
         const timestamp = new Date(Date.now() - (i * 1000)).toISOString();
-        const model = ['claude-sonnet-4.5', 'claude-haiku-4', 'claude-opus-4.5'][i % 3];
+        const model = ['claude-sonnet-4.5', 'claude-haiku-4', 'claude-opus-4.6'][i % 3];
         const tokens = (i % 1000) + 100;
         const entryId = `${sessionId}:${timestamp}:${model}:${tokens}:${tokens / 2}`;
 

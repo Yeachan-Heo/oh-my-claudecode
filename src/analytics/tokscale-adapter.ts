@@ -207,7 +207,7 @@ function normalizeModelName(modelName: string): string {
 
   if (lower.includes('haiku')) return 'claude-haiku-4';
   if (lower.includes('sonnet')) return 'claude-sonnet-4.5';
-  if (lower.includes('opus')) return 'claude-opus-4.5';
+  if (lower.includes('opus')) return 'claude-opus-4.6';
 
   // Check exact matches
   if (PRICING[modelName]) return modelName;

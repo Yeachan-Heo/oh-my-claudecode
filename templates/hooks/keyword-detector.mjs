@@ -9,21 +9,22 @@
  * 1. cancelomc/stopomc: Stop active modes
  * 2. ralph: Persistence mode until task completion
  * 3. autopilot: Full autonomous execution
- * 4. ultrapilot: Parallel autopilot
+ * 4. team: Coordinated team execution
  * 5. ultrawork/ulw: Maximum parallel execution
  * 6. ecomode/eco: Token-efficient execution
- * 7. swarm: N coordinated agents
- * 8. pipeline: Sequential agent chaining
- * 9. ralplan: Iterative planning with consensus
- * 10. plan: Planning interview mode
- * 11. tdd: Test-driven development
- * 12. research: Research orchestration
- * 13. ultrathink/think: Extended reasoning
- * 14. deepsearch: Codebase search (restricted patterns)
- * 15. analyze: Analysis mode (restricted patterns)
+ * 7. pipeline: Sequential agent chaining
+ * 8. ralplan: Iterative planning with consensus
+ * 9. plan: Planning interview mode
+ * 10. tdd: Test-driven development
+ * 11. research: Research orchestration
+ * 12. ultrathink/think: Extended reasoning
+ * 13. deepsearch: Codebase search (restricted patterns)
+ * 14. analyze: Analysis mode (restricted patterns)
+ * 15. codex/gpt: Delegate to Codex MCP (ask_codex)
+ * 16. gemini: Delegate to Gemini MCP (ask_gemini)
  */
 
-import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -80,7 +81,8 @@ function sanitizeForKeywordDetection(text) {
     .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
     // 3. Strip URLs: http://... or https://... up to whitespace
     .replace(/https?:\/\/[^\s)>\]]+/g, '')
-    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz (using lookbehind to avoid consuming leading char)
+    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it)
+    // The TypeScript version (index.ts) uses capture group + $1 replacement for broader compat
     .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '')
     // 5. Strip markdown code blocks (existing)
     .replace(/```[\s\S]*?```/g, '')
@@ -89,11 +91,12 @@ function sanitizeForKeywordDetection(text) {
 }
 
 // Create state file for a mode
-function activateState(directory, prompt, stateName) {
+function activateState(directory, prompt, stateName, sessionId) {
   const state = {
     active: true,
     started_at: new Date().toISOString(),
     original_prompt: prompt,
+    session_id: sessionId || undefined,
     reinforcement_count: 0,
     last_checked_at: new Date().toISOString()
   };
@@ -170,6 +173,66 @@ IMPORTANT: Invoke ALL skills listed above. Start with the first skill IMMEDIATEL
 }
 
 /**
+ * Create MCP delegation message (NOT a skill invocation)
+ */
+function createMcpDelegation(provider, originalPrompt) {
+  const configs = {
+    codex: {
+      tool: 'ask_codex',
+      roles: 'architect, planner, critic, analyst, code-reviewer, security-reviewer, tdd-guide',
+      defaultRole: 'architect',
+    },
+    gemini: {
+      tool: 'ask_gemini',
+      roles: 'designer, writer, vision',
+      defaultRole: 'designer',
+    },
+  };
+  const config = configs[provider];
+  if (!config) return '';
+
+  return `[MAGIC KEYWORD: ${provider.toUpperCase()}]
+
+You MUST delegate this task to the ${provider === 'codex' ? 'Codex' : 'Gemini'} MCP tool.
+
+Steps:
+1. Call ToolSearch("mcp") to discover available MCP tools (required -- they are deferred and not in your tool list by default)
+2. Write a prompt file to \`.omc/prompts/${provider}-{purpose}-{timestamp}.md\` containing clear task instructions derived from the user's request
+3. Determine the appropriate agent_role from: ${config.roles}
+4. Call the \`${config.tool}\` MCP tool with:
+   - agent_role: <detected or default "${config.defaultRole}">
+   - prompt_file: <path you wrote>
+   - output_file: <corresponding -summary.md path>
+   - context_files: <relevant files from user's request>
+
+If ToolSearch returns no MCP tools, the MCP server is not configured. Fall back to the equivalent Claude agent instead.
+
+User request:
+${originalPrompt}
+
+IMPORTANT: Do NOT invoke a skill. Discover MCP tools via ToolSearch first, then delegate IMMEDIATELY.`;
+}
+
+/**
+ * Create combined output for skills + MCP delegations
+ */
+function createCombinedOutput(skillMatches, delegationMatches, originalPrompt) {
+  const parts = [];
+
+  if (skillMatches.length > 0) {
+    parts.push('## Section 1: Skill Invocations\n\n' + createMultiSkillInvocation(skillMatches, originalPrompt));
+  }
+
+  if (delegationMatches.length > 0) {
+    const delegationParts = delegationMatches.map(d => createMcpDelegation(d.name, originalPrompt));
+    parts.push('## Section ' + (skillMatches.length > 0 ? '2' : '1') + ': MCP Delegations\n\n' + delegationParts.join('\n\n---\n\n'));
+  }
+
+  const allNames = [...skillMatches, ...delegationMatches].map(m => m.name.toUpperCase());
+  return `[MAGIC KEYWORDS DETECTED: ${allNames.join(', ')}]\n\n${parts.join('\n\n---\n\n')}\n\nIMPORTANT: Complete ALL sections above in order.`;
+}
+
+/**
  * Resolve conflicts between detected keywords
  */
 function resolveConflicts(matches) {
@@ -187,14 +250,15 @@ function resolveConflicts(matches) {
     resolved = resolved.filter(m => m.name !== 'ultrawork');
   }
 
-  // Ultrapilot beats autopilot
-  if (names.includes('ultrapilot') && names.includes('autopilot')) {
+  // Team beats autopilot (legacy ultrapilot semantics)
+  if (names.includes('team') && names.includes('autopilot')) {
     resolved = resolved.filter(m => m.name !== 'autopilot');
   }
 
   // Sort by priority order
-  const priorityOrder = ['cancel','ralph','autopilot','ultrapilot','ultrawork','ecomode',
-    'swarm','pipeline','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
+  const priorityOrder = ['cancel','ralph','autopilot','team','ultrawork','ecomode',
+    'pipeline','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze',
+    'codex','gemini'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -214,6 +278,52 @@ function createHookOutput(additionalContext) {
   };
 }
 
+/**
+ * Check if the team feature is enabled in Claude Code settings.
+ * Reads ~/.claude/settings.json and checks for CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
+ * @returns {boolean} true if team feature is enabled
+ */
+function isTeamEnabled() {
+  try {
+    const settingsPath = join(homedir(), '.claude', 'settings.json');
+    if (!existsSync(settingsPath)) {
+      return false;
+    }
+    const content = readFileSync(settingsPath, 'utf-8');
+    const settings = JSON.parse(content);
+    const envValue = settings?.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+    if (typeof envValue === 'string') {
+      const normalized = envValue.toLowerCase().trim();
+      return normalized === '1' || normalized === 'true' || normalized === 'yes';
+    }
+    return false;
+  } catch {
+    // Best effort: if we can't read settings, assume disabled
+    return false;
+  }
+}
+
+/**
+ * Create a warning message for when team skill is invoked but feature is not enabled
+ */
+function createTeamWarning() {
+  return `⚠️ **TEAM FEATURE NOT ENABLED**
+
+The team skill requires the experimental agent teams feature to be enabled in Claude Code.
+
+To enable teams, add the following to your ~/.claude/settings.json:
+
+\`\`\`json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+\`\`\`
+
+Then restart Claude Code. The team skill will proceed, but may not function correctly without this setting.`;
+}
+
 // Main
 async function main() {
   try {
@@ -225,7 +335,7 @@ async function main() {
 
     let data = {};
     try { data = JSON.parse(input); } catch {}
-    const directory = data.directory || process.cwd();
+    const directory = data.cwd || data.directory || process.cwd();
 
     const prompt = extractPrompt(input);
     if (!prompt) {
@@ -261,11 +371,16 @@ async function main() {
       matches.push({ name: 'autopilot', args: '' });
     }
 
-    // Ultrapilot keywords
-    if (/\b(ultrapilot|ultra-pilot)\b/i.test(cleanPrompt) ||
-        /\bparallel\s+build\b/i.test(cleanPrompt) ||
-        /\bswarm\s+build\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'ultrapilot', args: '' });
+    // Team keywords (including legacy ultrapilot/swarm phrases)
+    const swarmMatch = cleanPrompt.match(/\bswarm\s+(\d+)\s+agents?\b/i);
+    const hasTeamKeyword = /\b(team)\b/i.test(cleanPrompt) || /\bcoordinated\s+team\b/i.test(cleanPrompt);
+    const hasLegacyTeamKeyword = /\b(ultrapilot|ultra-pilot)\b/i.test(cleanPrompt) ||
+      /\bparallel\s+build\b/i.test(cleanPrompt) ||
+      /\bswarm\s+build\b/i.test(cleanPrompt) ||
+      !!swarmMatch ||
+      /\bcoordinated\s+agents\b/i.test(cleanPrompt);
+    if (hasTeamKeyword || hasLegacyTeamKeyword) {
+      matches.push({ name: 'team', args: swarmMatch ? swarmMatch[1] : '' });
     }
 
     // Ultrawork keywords
@@ -276,13 +391,6 @@ async function main() {
     // Ecomode keywords
     if (/\b(eco|ecomode|eco-mode|efficient|save-tokens|budget)\b/i.test(cleanPrompt)) {
       matches.push({ name: 'ecomode', args: '' });
-    }
-
-    // Swarm - parse N from "swarm N agents"
-    const swarmMatch = cleanPrompt.match(/\bswarm\s+(\d+)\s+agents?\b/i);
-    if (swarmMatch || /\bcoordinated\s+agents\b/i.test(cleanPrompt)) {
-      const agentCount = swarmMatch ? swarmMatch[1] : '3';
-      matches.push({ name: 'swarm', args: agentCount });
     }
 
     // Pipeline keywords
@@ -333,6 +441,16 @@ async function main() {
       matches.push({ name: 'analyze', args: '' });
     }
 
+    // Codex keywords (intent-phrase only)
+    if (/\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'codex', args: '' });
+    }
+
+    // Gemini keywords (intent-phrase only)
+    if (/\b(ask|use|delegate\s+to)\s+gemini\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'gemini', args: '' });
+    }
+
     // No matches - pass through
     if (matches.length === 0) {
       console.log(JSON.stringify({ continue: true }));
@@ -344,15 +462,16 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrapilot', 'ultrawork', 'ecomode', 'swarm', 'pipeline']);
+      clearStateFiles(directory, ['ralph', 'autopilot', 'team', 'ultrawork', 'ecomode', 'pipeline']);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }
 
     // Activate states for modes that need them
-    const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'ultrapilot', 'ultrawork', 'ecomode'].includes(m.name));
+    const sessionId = data.sessionId || data.session_id || data.sessionid || '';
+    const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'team', 'ultrawork', 'ecomode'].includes(m.name));
     for (const mode of stateModes) {
-      activateState(directory, prompt, mode.name);
+      activateState(directory, prompt, mode.name, sessionId);
     }
 
     // Special: Ralph with ultrawork (only if ecomode NOT present)
@@ -360,7 +479,7 @@ async function main() {
     const hasEcomode = resolved.some(m => m.name === 'ecomode');
     const hasUltrawork = resolved.some(m => m.name === 'ultrawork');
     if (hasRalph && !hasEcomode && !hasUltrawork) {
-      activateState(directory, prompt, 'ultrawork');
+      activateState(directory, prompt, 'ultrawork', sessionId);
     }
 
     // Handle ultrathink specially - prepend message instead of skill invocation
@@ -381,8 +500,28 @@ async function main() {
       return;
     }
 
-    // Emit skill invocation(s)
-    console.log(JSON.stringify(createHookOutput(createMultiSkillInvocation(resolved, prompt))));
+    // Split resolved into skills vs MCP delegations
+    const MCP_KEYWORDS = ['codex', 'gemini'];
+    const skillMatches = resolved.filter(m => !MCP_KEYWORDS.includes(m.name));
+    const delegationMatches = resolved.filter(m => MCP_KEYWORDS.includes(m.name));
+
+    // Check if team skill is being invoked and add warning if feature not enabled
+    const hasTeamSkill = skillMatches.some(m => m.name === 'team');
+    const teamWarning = hasTeamSkill && !isTeamEnabled() ? createTeamWarning() + '\n\n---\n\n' : '';
+
+    if (skillMatches.length > 0 && delegationMatches.length > 0) {
+      // Combined: skills + MCP delegations
+      const output = teamWarning + createCombinedOutput(skillMatches, delegationMatches, prompt);
+      console.log(JSON.stringify(createHookOutput(output)));
+    } else if (delegationMatches.length > 0) {
+      // MCP delegation only
+      const delegationParts = delegationMatches.map(d => createMcpDelegation(d.name, prompt));
+      console.log(JSON.stringify(createHookOutput(delegationParts.join('\n\n---\n\n'))));
+    } else {
+      // Skills only (existing behavior)
+      const output = teamWarning + createMultiSkillInvocation(skillMatches, prompt);
+      console.log(JSON.stringify(createHookOutput(output)));
+    }
   } catch (error) {
     // On any error, allow continuation
     console.log(JSON.stringify({ continue: true }));

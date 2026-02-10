@@ -6,18 +6,9 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
-
-// Read all stdin
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf-8');
-}
+import { readStdin } from './lib/stdin.mjs';
 
 // Simple JSON field extraction
 function extractJsonField(input, field, defaultValue = '') {
@@ -31,7 +22,20 @@ function extractJsonField(input, field, defaultValue = '') {
   }
 }
 
-// Get todo status from project and global todos
+// Get agent tracking info from state file
+function getAgentTrackingInfo(directory) {
+  const trackingFile = join(directory, '.omc', 'state', 'subagent-tracking.json');
+  try {
+    if (existsSync(trackingFile)) {
+      const data = JSON.parse(readFileSync(trackingFile, 'utf-8'));
+      const running = (data.agents || []).filter(a => a.status === 'running').length;
+      return { running, total: data.total_spawned || 0 };
+    }
+  } catch {}
+  return { running: 0, total: 0 };
+}
+
+// Get todo status from project-local todos only
 function getTodoStatus(directory) {
   let pending = 0;
   let inProgress = 0;
@@ -58,27 +62,9 @@ function getTodoStatus(directory) {
     }
   }
 
-  // Check global Claude Code todos directory
-  const globalTodosDir = join(homedir(), '.claude', 'todos');
-  if (existsSync(globalTodosDir)) {
-    try {
-      const files = readdirSync(globalTodosDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        try {
-          const content = readFileSync(join(globalTodosDir, file), 'utf-8');
-          const todos = JSON.parse(content);
-          if (Array.isArray(todos)) {
-            pending += todos.filter(t => t.status === 'pending').length;
-            inProgress += todos.filter(t => t.status === 'in_progress').length;
-          }
-        } catch {
-          // Ignore individual file errors
-        }
-      }
-    } catch {
-      // Ignore directory read errors
-    }
-  }
+  // NOTE: We intentionally do NOT scan the global ~/.claude/todos/ directory.
+  // That directory accumulates todo files from ALL past sessions across all
+  // projects, causing phantom task counts in fresh sessions (see issue #354).
 
   if (pending + inProgress > 0) {
     return `[${inProgress} active, ${pending} pending] `;
@@ -87,12 +73,30 @@ function getTodoStatus(directory) {
   return '';
 }
 
+// Generate agent spawn message with metadata
+function generateAgentSpawnMessage(toolInput, directory, todoStatus) {
+  if (!toolInput || typeof toolInput !== 'object') {
+    return `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`;
+  }
+
+  const agentType = toolInput.subagent_type || 'unknown';
+  const model = toolInput.model || 'inherit';
+  const desc = toolInput.description || '';
+  const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
+  const tracking = getAgentTrackingInfo(directory);
+
+  const parts = [`${todoStatus}Spawning agent: ${agentType} (${model})${bg}`];
+  if (desc) parts.push(`Task: ${desc}`);
+  if (tracking.running > 0) parts.push(`Active agents: ${tracking.running}`);
+
+  return parts.join(' | ');
+}
+
 // Generate contextual message based on tool type
 function generateMessage(toolName, todoStatus) {
   const messages = {
     TodoWrite: `${todoStatus}Mark todos in_progress BEFORE starting, completed IMMEDIATELY after finishing.`,
     Bash: `${todoStatus}Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests).`,
-    Task: `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`,
     Edit: `${todoStatus}Verify changes work after editing. Test functionality before marking complete.`,
     Write: `${todoStatus}Verify changes work after editing. Test functionality before marking complete.`,
     Read: `${todoStatus}Read multiple files in parallel when possible for faster analysis.`,
@@ -103,15 +107,44 @@ function generateMessage(toolName, todoStatus) {
   return messages[toolName] || `${todoStatus}The boulder never stops. Continue until all tasks complete.`;
 }
 
+// Record Skill/Task invocations to flow trace (best-effort)
+async function recordToolInvocation(data, directory) {
+  try {
+    const toolName = data.toolName || data.tool_name || '';
+    const sessionId = data.session_id || data.sessionId || '';
+    if (!sessionId || !directory) return;
+
+    if (toolName === 'Skill') {
+      const skillName = data.toolInput?.skill || data.tool_input?.skill || '';
+      if (skillName) {
+        const { recordSkillInvoked } = await import('../dist/hooks/subagent-tracker/flow-tracer.js');
+        recordSkillInvoked(directory, sessionId, skillName);
+      }
+    }
+  } catch { /* best-effort, never block tool execution */ }
+}
+
 async function main() {
   try {
     const input = await readStdin();
 
-    const toolName = extractJsonField(input, 'toolName', 'unknown');
-    const directory = extractJsonField(input, 'directory', process.cwd());
+    const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
+    const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
+
+    // Record Skill invocations to flow trace
+    let data = {};
+    try { data = JSON.parse(input); } catch {}
+    recordToolInvocation(data, directory);
 
     const todoStatus = getTodoStatus(directory);
-    const message = generateMessage(toolName, todoStatus);
+
+    let message;
+    if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
+      const toolInput = data.toolInput || data.tool_input || null;
+      message = generateAgentSpawnMessage(toolInput, directory, todoStatus);
+    } else {
+      message = generateMessage(toolName, todoStatus);
+    }
 
     console.log(JSON.stringify({
       continue: true,

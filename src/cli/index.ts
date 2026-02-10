@@ -28,7 +28,10 @@ import {
   checkForUpdates,
   performUpdate,
   formatUpdateNotification,
-  getInstalledVersion
+  getInstalledVersion,
+  getSisyphusConfig,
+  CONFIG_FILE,
+  type SisyphusConfig,
 } from '../features/auto-update.js';
 import {
   install as installSisyphus,
@@ -54,18 +57,17 @@ import {
   waitDetectCommand
 } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
+import {
+  teleportCommand,
+  teleportListCommand,
+  teleportRemoveCommand
+} from './commands/teleport.js';
+
+import { getRuntimePackageVersion } from '../lib/version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Try to load package.json for version
-let version = '1.0.0';
-try {
-  const pkgPath = join(__dirname, '../../package.json');
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  version = pkg.version;
-} catch {
-  // Use default version
-}
+const version = getRuntimePackageVersion();
 
 const program = new Command();
 
@@ -179,6 +181,11 @@ program
   .description('Show aggregate statistics (or specific session with --session)')
   .option('--json', 'Output as JSON')
   .option('--session <id>', 'Show stats for specific session (defaults to aggregate)')
+  .addHelpText('after', `
+Examples:
+  $ omc stats                    Show aggregate statistics
+  $ omc stats --session abc123   Show stats for a specific session
+  $ omc stats --json             Output as JSON for scripting`)
   .action(async (options) => {
     await ensureBackfillDone();
     await statsCommand(options);
@@ -189,9 +196,15 @@ program
   .command('cost [period]')
   .description('Generate cost report (period: daily, weekly, monthly)')
   .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ omc cost                     Show monthly cost report
+  $ omc cost daily               Show daily cost breakdown
+  $ omc cost weekly --json       Export weekly costs as JSON`)
   .action(async (period = 'monthly', options) => {
     if (!['daily', 'weekly', 'monthly'].includes(period)) {
-      console.error('Invalid period. Use: daily, weekly, or monthly');
+      console.error(chalk.red(`Invalid period "${period}". Valid options: daily, weekly, monthly`));
+      console.error(chalk.gray('Example: omc cost weekly'));
       process.exit(1);
     }
     await ensureBackfillDone();
@@ -203,7 +216,12 @@ program
   .command('sessions')
   .description('View session history')
   .option('--json', 'Output as JSON')
-  .option('--limit <number>', 'Limit number of sessions', '10')
+  .option('-n, --limit <number>', 'Limit number of sessions', '10')
+  .addHelpText('after', `
+Examples:
+  $ omc sessions                 Show last 10 sessions
+  $ omc sessions --limit 50      Show last 50 sessions
+  $ omc sessions --json          Export session history as JSON`)
   .action(async (options) => {
     await ensureBackfillDone();
     await sessionsCommand({ ...options, limit: parseInt(options.limit) });
@@ -214,7 +232,12 @@ program
   .command('agents')
   .description('Show agent usage breakdown')
   .option('--json', 'Output as JSON')
-  .option('--limit <number>', 'Limit number of agents', '10')
+  .option('-n, --limit <number>', 'Limit number of agents', '10')
+  .addHelpText('after', `
+Examples:
+  $ omc agents                   Show top 10 agents by usage
+  $ omc agents --limit 20        Show top 20 agents
+  $ omc agents --json            Export agent data as JSON`)
   .action(async (options) => {
     await ensureBackfillDone();
     await agentsCommand({ ...options, limit: parseInt(options.limit) });
@@ -225,13 +248,20 @@ program
   .command('export <type> <format> <output>')
   .description('Export data (type: cost, sessions, patterns; format: json, csv)')
   .option('--period <period>', 'Period for cost report (daily, weekly, monthly)', 'monthly')
+  .addHelpText('after', `
+Examples:
+  $ omc export cost json costs.json           Export monthly costs to JSON
+  $ omc export sessions csv sessions.csv      Export sessions to CSV
+  $ omc export cost csv data.csv --period weekly   Export weekly costs`)
   .action((type, format, output, options) => {
     if (!['cost', 'sessions', 'patterns'].includes(type)) {
-      console.error('Invalid type. Use: cost, sessions, or patterns');
+      console.error(chalk.red(`Invalid type "${type}". Valid options: cost, sessions, patterns`));
+      console.error(chalk.gray('Example: omc export cost json output.json'));
       process.exit(1);
     }
     if (!['json', 'csv'].includes(format)) {
-      console.error('Invalid format. Use: json or csv');
+      console.error(chalk.red(`Invalid format "${format}". Valid options: json, csv`));
+      console.error(chalk.gray('Example: omc export sessions csv sessions.csv'));
       process.exit(1);
     }
     exportCommand(type as any, format as any, output, options);
@@ -241,7 +271,11 @@ program
 program
   .command('cleanup')
   .description('Clean up old logs and orphaned background tasks')
-  .option('--retention <days>', 'Retention period in days', '30')
+  .option('-r, --retention <days>', 'Retention period in days', '30')
+  .addHelpText('after', `
+Examples:
+  $ omc cleanup                  Clean up logs older than 30 days
+  $ omc cleanup --retention 7    Clean up logs older than 7 days`)
   .action(options => {
     cleanupCommand({ ...options, retention: parseInt(options.retention) });
   });
@@ -255,8 +289,13 @@ program
   .option('--to <date>', 'End date (ISO format: YYYY-MM-DD)')
   .option('--dry-run', 'Preview without writing data')
   .option('--reset', 'Clear deduplication index and re-process all transcripts')
-  .option('--verbose', 'Show detailed progress')
+  .option('-v, --verbose', 'Show detailed progress')
   .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ omc backfill --reset                       Force full re-sync
+  $ omc backfill --project ~/myproject         Backfill specific project
+  $ omc backfill --from 2024-01-01 --verbose   Backfill from date with progress`)
   .action(async (options) => {
     if (!options.reset && !options.project && !options.from && !options.to) {
       console.log(chalk.yellow('Note: Backfill now runs automatically with every omc command.'));
@@ -269,11 +308,14 @@ program
 program
   .command('tui')
   .description('Launch tokscale interactive TUI for token visualization')
-  .option('--light', 'Use light theme')
   .option('--models', 'Show models view')
-  .option('--daily', 'Show daily view')
-  .option('--stats', 'Show stats view')
+  .option('--daily', 'Show daily/monthly view')
   .option('--no-claude', 'Show all providers (not just Claude)')
+  .addHelpText('after', `
+Examples:
+  $ omc tui                      Launch interactive dashboard
+  $ omc tui --light              Use light theme
+  $ omc tui --daily              Start with daily view`)
   .action(async (options) => {
     const available = await isTokscaleCLIAvailable();
 
@@ -285,18 +327,17 @@ program
 
     const view = options.models ? 'models'
                : options.daily ? 'daily'
-               : options.stats ? 'stats'
                : 'overview';
 
     try {
       await launchTokscaleTUI({
-        light: options.light,
         view,
         claude: options.claude
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Failed to launch TUI: ${message}`));
+      console.error(chalk.gray('Try running "omc tui" again, or check if tokscale is properly installed.'));
       process.exit(1);
     }
   });
@@ -309,6 +350,11 @@ program
   .description('Initialize Sisyphus configuration in the current directory')
   .option('-g, --global', 'Initialize global user configuration')
   .option('-f, --force', 'Overwrite existing configuration')
+  .addHelpText('after', `
+Examples:
+  $ omc init                     Initialize in current directory
+  $ omc init --global            Initialize global configuration
+  $ omc init --force             Overwrite existing config`)
   .action(async (options) => {
     console.log(chalk.yellow('⚠️  DEPRECATED: The init command is deprecated.'));
     console.log(chalk.gray('Configuration is now managed automatically. Use /oh-my-claudecode:omc-setup instead.\n'));
@@ -334,7 +380,7 @@ program
 
     // Generate config content
     const configContent = `// Oh-My-ClaudeCode Configuration
-// See: https://github.com/your-repo/oh-my-claudecode for documentation
+// See: https://github.com/Yeachan-Heo/oh-my-claudecode for documentation
 {
   "$schema": "./sisyphus-schema.json",
 
@@ -342,11 +388,11 @@ program
   "agents": {
     "sisyphus": {
       // Main orchestrator - uses the most capable model
-      "model": "claude-opus-4-5-20251101"
+      "model": "claude-opus-4-6-20260205"
     },
     "architect": {
       // Architecture and debugging expert
-      "model": "claude-opus-4-5-20251101",
+      "model": "claude-opus-4-6-20260205",
       "enabled": true
     },
     "researcher": {
@@ -459,6 +505,11 @@ program
   .description('Show current configuration')
   .option('-v, --validate', 'Validate configuration')
   .option('-p, --paths', 'Show configuration file paths')
+  .addHelpText('after', `
+Examples:
+  $ omc config                   Show current configuration
+  $ omc config --validate        Validate configuration files
+  $ omc config --paths           Show config file locations`)
   .action(async (options) => {
     if (options.paths) {
       const paths = getConfigPaths();
@@ -511,11 +562,126 @@ program
   });
 
 /**
+ * Config stop-callback subcommand - Configure stop hook callbacks
+ */
+const configStopCallback = program
+  .command('config-stop-callback <type>')
+  .description('Configure stop hook callbacks (file/telegram/discord)')
+  .option('--enable', 'Enable callback')
+  .option('--disable', 'Disable callback')
+  .option('--path <path>', 'File path (supports {session_id}, {date}, {time})')
+  .option('--format <format>', 'File format: markdown | json')
+  .option('--token <token>', 'Telegram bot token')
+  .option('--chat <id>', 'Telegram chat ID')
+  .option('--webhook <url>', 'Discord webhook URL')
+  .option('--show', 'Show current configuration')
+  .addHelpText('after', `
+Types:
+  file       File system callback (saves session summary to disk)
+  telegram   Telegram bot notification
+  discord    Discord webhook notification
+
+Examples:
+  $ omc config-stop-callback file --enable --path ~/.claude/logs/{date}.md
+  $ omc config-stop-callback telegram --enable --token <token> --chat <id>
+  $ omc config-stop-callback discord --enable --webhook <url>
+  $ omc config-stop-callback file --disable
+  $ omc config-stop-callback file --show`)
+  .action(async (type: string, options) => {
+    const validTypes = ['file', 'telegram', 'discord'];
+    if (!validTypes.includes(type)) {
+      console.error(chalk.red(`Invalid callback type: ${type}`));
+      console.error(chalk.gray(`Valid types: ${validTypes.join(', ')}`));
+      process.exit(1);
+    }
+
+    const config = getSisyphusConfig();
+    config.stopHookCallbacks = config.stopHookCallbacks || {};
+
+    // Show current config
+    if (options.show) {
+      const current = config.stopHookCallbacks[type as keyof typeof config.stopHookCallbacks];
+      if (current) {
+        console.log(chalk.blue(`Current ${type} callback configuration:`));
+        console.log(JSON.stringify(current, null, 2));
+      } else {
+        console.log(chalk.yellow(`No ${type} callback configured.`));
+      }
+      return;
+    }
+
+    // Determine enabled state
+    let enabled: boolean | undefined;
+    if (options.enable) {
+      enabled = true;
+    } else if (options.disable) {
+      enabled = false;
+    }
+
+    // Update config based on type
+    switch (type) {
+      case 'file': {
+        const current = config.stopHookCallbacks.file;
+        config.stopHookCallbacks.file = {
+          enabled: enabled ?? current?.enabled ?? false,
+          path: options.path ?? current?.path ?? '~/.claude/session-logs/{session_id}.md',
+          format: (options.format as 'markdown' | 'json') ?? current?.format ?? 'markdown',
+        };
+        break;
+      }
+
+      case 'telegram': {
+        const current = config.stopHookCallbacks.telegram;
+        if (enabled === true && (!options.token && !current?.botToken)) {
+          console.error(chalk.red('Telegram requires --token <bot_token>'));
+          process.exit(1);
+        }
+        if (enabled === true && (!options.chat && !current?.chatId)) {
+          console.error(chalk.red('Telegram requires --chat <chat_id>'));
+          process.exit(1);
+        }
+        config.stopHookCallbacks.telegram = {
+          enabled: enabled ?? current?.enabled ?? false,
+          botToken: options.token ?? current?.botToken,
+          chatId: options.chat ?? current?.chatId,
+        };
+        break;
+      }
+
+      case 'discord': {
+        const current = config.stopHookCallbacks.discord;
+        if (enabled === true && (!options.webhook && !current?.webhookUrl)) {
+          console.error(chalk.red('Discord requires --webhook <webhook_url>'));
+          process.exit(1);
+        }
+        config.stopHookCallbacks.discord = {
+          enabled: enabled ?? current?.enabled ?? false,
+          webhookUrl: options.webhook ?? current?.webhookUrl,
+        };
+        break;
+      }
+    }
+
+    // Write config
+    try {
+      writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+      console.log(chalk.green(`\u2713 Stop callback '${type}' configured`));
+      console.log(JSON.stringify(config.stopHookCallbacks[type as keyof typeof config.stopHookCallbacks], null, 2));
+    } catch (error) {
+      console.error(chalk.red('Failed to write configuration:'), error);
+      process.exit(1);
+    }
+  });
+
+/**
  * Info command - Show system information
  */
 program
   .command('info')
   .description('Show system and agent information')
+  .addHelpText('after', `
+Examples:
+  $ omc info                     Show agents, features, and MCP servers`)
   .action(async () => {
     const session = createSisyphusSession();
 
@@ -560,6 +726,10 @@ program
 program
   .command('test-prompt <prompt>')
   .description('Test how a prompt would be enhanced')
+  .addHelpText('after', `
+Examples:
+  $ omc test-prompt "ultrawork fix bugs"    See how magic keywords are detected
+  $ omc test-prompt "analyze this code"     Test prompt enhancement`)
   .action(async (prompt: string) => {
     const session = createSisyphusSession();
 
@@ -585,6 +755,13 @@ program
   .option('-c, --check', 'Only check for updates, do not install')
   .option('-f, --force', 'Force reinstall even if up to date')
   .option('-q, --quiet', 'Suppress output except for errors')
+  .option('--standalone', 'Force npm update even in plugin context')
+  .addHelpText('after', `
+Examples:
+  $ omc update                   Check and install updates
+  $ omc update --check           Only check, don't install
+  $ omc update --force           Force reinstall
+  $ omc update --standalone      Force npm update in plugin context`)
   .action(async (options) => {
     if (!options.quiet) {
       console.log(chalk.blue('Oh-My-ClaudeCode Update\n'));
@@ -630,7 +807,7 @@ program
         console.log(chalk.blue('\nStarting update...\n'));
       }
 
-      const result = await performUpdate({ verbose: !options.quiet });
+      const result = await performUpdate({ verbose: !options.quiet, standalone: options.standalone });
 
       if (result.success) {
         if (!options.quiet) {
@@ -647,6 +824,7 @@ program
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Update failed: ${message}`));
+      console.error(chalk.gray('Try again with "omc update --force", or reinstall with "omc install --force".'));
       process.exit(1);
     }
   });
@@ -657,6 +835,9 @@ program
 program
   .command('version')
   .description('Show detailed version information')
+  .addHelpText('after', `
+Examples:
+  $ omc version                  Show version, install method, and commit hash`)
   .action(async () => {
     const installed = getInstalledVersion();
 
@@ -693,6 +874,11 @@ program
   .option('-f, --force', 'Overwrite existing files')
   .option('-q, --quiet', 'Suppress output except for errors')
   .option('--skip-claude-check', 'Skip checking if Claude Code is installed')
+  .addHelpText('after', `
+Examples:
+  $ omc install                  Install to ~/.claude/
+  $ omc install --force          Reinstall, overwriting existing files
+  $ omc install --quiet          Silent install for scripts`)
   .action(async (options) => {
     if (!options.quiet) {
       console.log(chalk.blue('╔═══════════════════════════════════════════════════════════╗'));
@@ -764,8 +950,6 @@ program
         console.log('    architect-low          - Quick questions (Haiku)');
         console.log('    executor-high       - Complex tasks (Opus)');
         console.log('    executor-low        - Trivial tasks (Haiku)');
-        console.log('    researcher-low       - Quick lookups (Haiku)');
-        console.log('    explore-medium      - Thorough search (Sonnet)');
         console.log('    designer-high       - Design systems (Opus)');
         console.log('    designer-low        - Simple styling (Haiku)');
         console.log('');
@@ -784,6 +968,8 @@ program
       if (result.errors.length > 0) {
         result.errors.forEach(err => console.error(chalk.red(`  - ${err}`)));
       }
+      console.error(chalk.gray('\nTry "omc install --force" to overwrite existing files.'));
+      console.error(chalk.gray('For more diagnostics, run "omc doctor conflicts".'));
       process.exit(1);
     }
   });
@@ -803,6 +989,13 @@ const waitCmd = program
   .option('--json', 'Output as JSON')
   .option('--start', 'Start the auto-resume daemon')
   .option('--stop', 'Stop the auto-resume daemon')
+  .addHelpText('after', `
+Examples:
+  $ omc wait                     Show status and suggestions
+  $ omc wait --start             Start auto-resume daemon
+  $ omc wait --stop              Stop auto-resume daemon
+  $ omc wait status              Show detailed rate limit status
+  $ omc wait detect              Scan for blocked tmux sessions`)
   .action(async (options) => {
     await waitCommand(options);
   });
@@ -821,9 +1014,15 @@ waitCmd
   .option('-v, --verbose', 'Enable verbose logging')
   .option('-f, --foreground', 'Run in foreground (blocking)')
   .option('-i, --interval <seconds>', 'Poll interval in seconds', '60')
+  .addHelpText('after', `
+Examples:
+  $ omc wait daemon start            Start background daemon
+  $ omc wait daemon stop             Stop the daemon
+  $ omc wait daemon start -f         Run in foreground`)
   .action(async (action: string, options) => {
     if (action !== 'start' && action !== 'stop') {
-      console.error('Invalid action. Use: start or stop');
+      console.error(chalk.red(`Invalid action "${action}". Valid options: start, stop`));
+      console.error(chalk.gray('Example: omc wait daemon start'));
       process.exit(1);
     }
     await waitDaemonCommand(action as 'start' | 'stop', {
@@ -846,16 +1045,93 @@ waitCmd
   });
 
 /**
+ * Teleport command - Quick worktree creation
+ *
+ * Usage:
+ * - `omc teleport #123` - Create worktree for issue/PR #123
+ * - `omc teleport my-feature` - Create worktree for feature branch
+ * - `omc teleport list` - List existing worktrees
+ * - `omc teleport remove <path>` - Remove a worktree
+ */
+const teleportCmd = program
+  .command('teleport [ref]')
+  .description('Create git worktree for isolated development (e.g., omc teleport #123)')
+  .option('--worktree', 'Create worktree (default behavior, flag kept for compatibility)')
+  .option('-p, --path <path>', 'Custom worktree path (default: ~/Workspace/omc-worktrees/)')
+  .option('-b, --base <branch>', 'Base branch to create from (default: main)')
+  .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ omc teleport #42             Create worktree for issue/PR #42
+  $ omc teleport add-auth        Create worktree for a feature branch
+  $ omc teleport list            List existing worktrees
+  $ omc teleport remove ./path   Remove a worktree`)
+  .action(async (ref: string | undefined, options) => {
+    if (!ref) {
+      // No ref provided, show help
+      console.log(chalk.blue('Teleport - Quick worktree creation\n'));
+      console.log('Usage:');
+      console.log('  omc teleport <ref>           Create worktree for issue/PR/feature');
+      console.log('  omc teleport list            List existing worktrees');
+      console.log('  omc teleport remove <path>   Remove a worktree');
+      console.log('');
+      console.log('Reference formats:');
+      console.log('  #123                         Issue/PR in current repo');
+      console.log('  owner/repo#123               Issue/PR in specific repo');
+      console.log('  my-feature                   Feature branch name');
+      console.log('  https://github.com/...       GitHub URL');
+      console.log('');
+      console.log('Examples:');
+      console.log('  omc teleport #42             Create worktree for issue #42');
+      console.log('  omc teleport add-auth        Create worktree for feature "add-auth"');
+      console.log('');
+      return;
+    }
+
+    await teleportCommand(ref, {
+      worktree: true, // Always create worktree
+      worktreePath: options.path,
+      base: options.base,
+      json: options.json,
+    });
+  });
+
+teleportCmd
+  .command('list')
+  .description('List existing worktrees in ~/Workspace/omc-worktrees/')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    await teleportListCommand(options);
+  });
+
+teleportCmd
+  .command('remove <path>')
+  .alias('rm')
+  .description('Remove a worktree')
+  .option('-f, --force', 'Force removal even with uncommitted changes')
+  .option('--json', 'Output as JSON')
+  .action(async (path: string, options) => {
+    await teleportRemoveCommand(path, options);
+  });
+
+/**
  * Doctor command - Diagnostic tools
  */
 const doctorCmd = program
   .command('doctor')
-  .description('Diagnostic tools for troubleshooting OMC installation');
+  .description('Diagnostic tools for troubleshooting OMC installation')
+  .addHelpText('after', `
+Examples:
+  $ omc doctor conflicts         Check for plugin conflicts`);
 
 doctorCmd
   .command('conflicts')
   .description('Check for plugin coexistence issues and configuration conflicts')
   .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ omc doctor conflicts         Check for configuration issues
+  $ omc doctor conflicts --json  Output results as JSON`)
   .action(async (options) => {
     const exitCode = await doctorConflictsCommand(options);
     process.exit(exitCode);

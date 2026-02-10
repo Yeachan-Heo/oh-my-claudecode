@@ -10,37 +10,60 @@
  * Ported from oh-my-opencode's ralph hook.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  unlinkSync,
+} from "fs";
+import { join } from "path";
 import {
   readPrd,
   getPrdStatus,
   formatNextStoryPrompt,
   formatPrdStatus,
   type PRDStatus,
-  type UserStory
-} from './prd.js';
+  type UserStory,
+} from "./prd.js";
 import {
   getProgressContext,
   appendProgress,
   initProgress,
-  addPattern
-} from './progress.js';
+  addPattern,
+} from "./progress.js";
 import {
   UltraworkState,
   readUltraworkState as readUltraworkStateFromModule,
-  writeUltraworkState as writeUltraworkStateFromModule
-} from '../ultrawork/index.js';
+  writeUltraworkState as writeUltraworkStateFromModule,
+} from "../ultrawork/index.js";
+import { resolveSessionStatePath, ensureSessionStateDir } from "../../lib/worktree-paths.js";
 
 // Forward declaration to avoid circular import - check ultraqa state file directly
-export function isUltraQAActive(directory: string): boolean {
-  const omcDir = join(directory, '.omc');
-  const stateFile = join(omcDir, 'state', 'ultraqa-state.json');
+export function isUltraQAActive(directory: string, sessionId?: string): boolean {
+  // When sessionId is provided, ONLY check session-scoped path — no legacy fallback
+  if (sessionId) {
+    const sessionFile = resolveSessionStatePath('ultraqa', sessionId, directory);
+    if (!existsSync(sessionFile)) {
+      return false;
+    }
+    try {
+      const content = readFileSync(sessionFile, "utf-8");
+      const state = JSON.parse(content);
+      return state && state.active === true;
+    } catch {
+      return false; // NO legacy fallback
+    }
+  }
+
+  // No sessionId: legacy path (backward compat)
+  const omcDir = join(directory, ".omc");
+  const stateFile = join(omcDir, "state", "ultraqa-state.json");
   if (!existsSync(stateFile)) {
     return false;
   }
   try {
-    const content = readFileSync(stateFile, 'utf-8');
+    const content = readFileSync(stateFile, "utf-8");
     const state = JSON.parse(content);
     return state && state.active === true;
   } catch {
@@ -61,6 +84,8 @@ export interface RalphLoopState {
   prompt: string;
   /** Session ID the loop is bound to */
   session_id?: string;
+  /** Project path for isolation */
+  project_path?: string;
   /** Whether PRD mode is active */
   prd_mode?: boolean;
   /** Current story being worked on */
@@ -68,7 +93,6 @@ export interface RalphLoopState {
   /** Whether ultrawork is linked/auto-activated with ralph */
   linked_ultrawork?: boolean;
 }
-
 
 export interface RalphLoopOptions {
   /** Maximum iterations (default: 10) */
@@ -78,7 +102,11 @@ export interface RalphLoopOptions {
 }
 
 export interface RalphLoopHook {
-  startLoop: (sessionId: string, prompt: string, options?: RalphLoopOptions) => boolean;
+  startLoop: (
+    sessionId: string,
+    prompt: string,
+    options?: RalphLoopOptions,
+  ) => boolean;
   cancelLoop: (sessionId: string) => boolean;
   getState: () => RalphLoopState | null;
 }
@@ -88,16 +116,23 @@ const DEFAULT_MAX_ITERATIONS = 10;
 /**
  * Get the state file path for Ralph Loop
  */
-function getStateFilePath(directory: string): string {
-  const omcDir = join(directory, '.omc');
-  return join(omcDir, 'state', 'ralph-state.json');
+function getStateFilePath(directory: string, sessionId?: string): string {
+  if (sessionId) {
+    return resolveSessionStatePath('ralph', sessionId, directory);
+  }
+  const omcDir = join(directory, ".omc");
+  return join(omcDir, "state", "ralph-state.json");
 }
 
 /**
  * Ensure the .omc directory exists
  */
-function ensureStateDir(directory: string): void {
-  const stateDir = join(directory, '.omc', 'state');
+function ensureStateDir(directory: string, sessionId?: string): void {
+  if (sessionId) {
+    ensureSessionStateDir(sessionId, directory);
+    return;
+  }
+  const stateDir = join(directory, ".omc", "state");
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -106,17 +141,37 @@ function ensureStateDir(directory: string): void {
 /**
  * Read Ralph Loop state from disk
  */
-export function readRalphState(directory: string): RalphLoopState | null {
-  const stateFile = getStateFilePath(directory);
+export function readRalphState(directory: string, sessionId?: string): RalphLoopState | null {
+  // When sessionId is provided, ONLY check session-scoped path — no legacy fallback
+  if (sessionId) {
+    const sessionFile = getStateFilePath(directory, sessionId);
+    if (!existsSync(sessionFile)) {
+      return null;
+    }
+    try {
+      const content = readFileSync(sessionFile, "utf-8");
+      const state: RalphLoopState = JSON.parse(content);
+      // Validate session identity
+      if (state.session_id && state.session_id !== sessionId) {
+        return null;
+      }
+      return state;
+    } catch {
+      return null; // NO legacy fallback
+    }
+  }
 
+  // No sessionId: legacy path (backward compat)
+  const stateFile = getStateFilePath(directory);
   if (!existsSync(stateFile)) {
     return null;
   }
 
   try {
-    const content = readFileSync(stateFile, 'utf-8');
+    const content = readFileSync(stateFile, "utf-8");
     return JSON.parse(content);
-  } catch {
+  } catch (error) {
+    console.error("[ralph] Failed to read state file:", error);
     return null;
   }
 }
@@ -124,11 +179,15 @@ export function readRalphState(directory: string): RalphLoopState | null {
 /**
  * Write Ralph Loop state to disk
  */
-export function writeRalphState(directory: string, state: RalphLoopState): boolean {
+export function writeRalphState(
+  directory: string,
+  state: RalphLoopState,
+  sessionId?: string
+): boolean {
   try {
-    ensureStateDir(directory);
-    const stateFile = getStateFilePath(directory);
-    writeFileSync(stateFile, JSON.stringify(state, null, 2));
+    ensureStateDir(directory, sessionId);
+    const stateFile = getStateFilePath(directory, sessionId);
+    writeFileSync(stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
     return true;
   } catch {
     return false;
@@ -138,8 +197,8 @@ export function writeRalphState(directory: string, state: RalphLoopState): boole
 /**
  * Clear Ralph Loop state
  */
-export function clearRalphState(directory: string): boolean {
-  const stateFile = getStateFilePath(directory);
+export function clearRalphState(directory: string, sessionId?: string): boolean {
+  const stateFile = getStateFilePath(directory, sessionId);
 
   if (!existsSync(stateFile)) {
     return true;
@@ -153,20 +212,33 @@ export function clearRalphState(directory: string): boolean {
   }
 }
 
-
 /**
  * Clear ultrawork state (only if linked to ralph)
  */
-export function clearLinkedUltraworkState(directory: string): boolean {
-  const state = readUltraworkStateFromModule(directory);
+export function clearLinkedUltraworkState(directory: string, sessionId?: string): boolean {
+  const state = readUltraworkStateFromModule(directory, sessionId);
 
   // Only clear if it was linked to ralph (auto-activated)
   if (!state || !state.linked_to_ralph) {
     return true;
   }
 
-  const omcDir = join(directory, '.omc');
-  const stateFile = join(omcDir, 'state', 'ultrawork-state.json');
+  // Try session-scoped path first
+  if (sessionId) {
+    const sessionFile = resolveSessionStatePath('ultrawork', sessionId, directory);
+    if (existsSync(sessionFile)) {
+      try {
+        unlinkSync(sessionFile);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  // Fallback to legacy path
+  const omcDir = join(directory, ".omc");
+  const stateFile = join(omcDir, "state", "ultrawork-state.json");
   try {
     unlinkSync(stateFile);
     return true;
@@ -178,8 +250,11 @@ export function clearLinkedUltraworkState(directory: string): boolean {
 /**
  * Increment Ralph Loop iteration
  */
-export function incrementRalphIteration(directory: string): RalphLoopState | null {
-  const state = readRalphState(directory);
+export function incrementRalphIteration(
+  directory: string,
+  sessionId?: string
+): RalphLoopState | null {
+  const state = readRalphState(directory, sessionId);
 
   if (!state || !state.active) {
     return null;
@@ -187,7 +262,7 @@ export function incrementRalphIteration(directory: string): RalphLoopState | nul
 
   state.iteration += 1;
 
-  if (writeRalphState(directory, state)) {
+  if (writeRalphState(directory, state, sessionId)) {
     return state;
   }
 
@@ -201,11 +276,13 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
   const startLoop = (
     sessionId: string,
     prompt: string,
-    options?: RalphLoopOptions
+    options?: RalphLoopOptions,
   ): boolean => {
     // Mutual exclusion check: cannot start Ralph Loop if UltraQA is active
-    if (isUltraQAActive(directory)) {
-      console.error('Cannot start Ralph Loop while UltraQA is active. Cancel UltraQA first with /oh-my-claudecode:cancel.');
+    if (isUltraQAActive(directory, sessionId)) {
+      console.error(
+        "Cannot start Ralph Loop while UltraQA is active. Cancel UltraQA first with /oh-my-claudecode:cancel.",
+      );
       return false;
     }
 
@@ -219,12 +296,14 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
       started_at: now,
       prompt,
       session_id: sessionId,
-      linked_ultrawork: enableUltrawork
+      project_path: directory,
+      linked_ultrawork: enableUltrawork,
     };
 
-    const ralphSuccess = writeRalphState(directory, state);
+    const ralphSuccess = writeRalphState(directory, state, sessionId);
 
     // Auto-activate ultrawork (linked to ralph) by default
+    // Include session_id and project_path for proper isolation
     if (ralphSuccess && enableUltrawork) {
       const ultraworkState: UltraworkState = {
         active: true,
@@ -232,16 +311,18 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
         original_prompt: prompt,
         started_at: now,
         last_checked_at: now,
-        linked_to_ralph: true
+        linked_to_ralph: true,
+        session_id: sessionId,
+        project_path: directory,
       };
-      writeUltraworkStateFromModule(ultraworkState, directory);
+      writeUltraworkStateFromModule(ultraworkState, directory, sessionId);
     }
 
     return ralphSuccess;
   };
 
   const cancelLoop = (sessionId: string): boolean => {
-    const state = readRalphState(directory);
+    const state = readRalphState(directory, sessionId);
 
     if (!state || state.session_id !== sessionId) {
       return false;
@@ -249,20 +330,20 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
 
     // Also clear linked ultrawork state if it was auto-activated
     if (state.linked_ultrawork) {
-      clearLinkedUltraworkState(directory);
+      clearLinkedUltraworkState(directory, sessionId);
     }
 
-    return clearRalphState(directory);
+    return clearRalphState(directory, sessionId);
   };
 
-  const getState = (): RalphLoopState | null => {
-    return readRalphState(directory);
+  const getState = (sessionId?: string): RalphLoopState | null => {
+    return readRalphState(directory, sessionId);
   };
 
   return {
     startLoop,
     cancelLoop,
-    getState
+    getState,
   };
 }
 
@@ -294,7 +375,7 @@ export function getPrdCompletionStatus(directory: string): {
       hasPrd: false,
       allComplete: false,
       status: null,
-      nextStory: null
+      nextStory: null,
     };
   }
 
@@ -304,7 +385,7 @@ export function getPrdCompletionStatus(directory: string): {
     hasPrd: true,
     allComplete: status.allComplete,
     status,
-    nextStory: status.nextStory
+    nextStory: status.nextStory,
   };
 }
 
@@ -329,10 +410,12 @@ export function getRalphContext(directory: string): string {
 
   // Add PRD status summary
   if (prdStatus.status) {
-    parts.push(`<prd-status>\n${formatPrdStatus(prdStatus.status)}\n</prd-status>\n`);
+    parts.push(
+      `<prd-status>\n${formatPrdStatus(prdStatus.status)}\n</prd-status>\n`,
+    );
   }
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 /**
@@ -373,13 +456,13 @@ export function recordStoryProgress(
   storyId: string,
   implementation: string[],
   filesChanged: string[],
-  learnings: string[]
+  learnings: string[],
 ): boolean {
   return appendProgress(directory, {
     storyId,
     implementation,
     filesChanged,
-    learnings
+    learnings,
   });
 }
 
@@ -399,4 +482,4 @@ export function shouldCompleteByPrd(directory: string): boolean {
 }
 
 // Re-export PRD types for convenience
-export type { PRD, PRDStatus, UserStory } from './prd.js';
+export type { PRD, PRDStatus, UserStory } from "./prd.js";

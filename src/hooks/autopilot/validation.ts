@@ -20,6 +20,9 @@ import type {
   ValidationVerdict
 } from './types.js';
 
+/** Number of architects required for validation consensus */
+export const REQUIRED_ARCHITECTS = 3;
+
 export interface ValidationCoordinatorResult {
   success: boolean;
   allApproved: boolean;
@@ -35,9 +38,10 @@ export function recordValidationVerdict(
   directory: string,
   type: ValidationVerdictType,
   verdict: ValidationVerdict,
-  issues?: string[]
+  issues?: string[],
+  sessionId?: string
 ): boolean {
-  const state = readAutopilotState(directory);
+  const state = readAutopilotState(directory, sessionId);
   if (!state || state.phase !== 'validation') {
     return false;
   }
@@ -60,21 +64,21 @@ export function recordValidationVerdict(
     state.validation.architects_spawned++;
   }
 
-  // Check if all verdicts are in (3 architects)
-  if (state.validation.verdicts.length >= 3) {
+  // Check if all verdicts are in
+  if (state.validation.verdicts.length >= REQUIRED_ARCHITECTS) {
     state.validation.all_approved = state.validation.verdicts.every(
       v => v.verdict === 'APPROVED'
     );
   }
 
-  return writeAutopilotState(directory, state);
+  return writeAutopilotState(directory, state, sessionId);
 }
 
 /**
  * Get validation status
  */
-export function getValidationStatus(directory: string): ValidationCoordinatorResult | null {
-  const state = readAutopilotState(directory);
+export function getValidationStatus(directory: string, sessionId?: string): ValidationCoordinatorResult | null {
+  const state = readAutopilotState(directory, sessionId);
   if (!state) {
     return null;
   }
@@ -87,7 +91,7 @@ export function getValidationStatus(directory: string): ValidationCoordinatorRes
   }
 
   return {
-    success: state.validation.verdicts.length >= 3,
+    success: state.validation.verdicts.length >= REQUIRED_ARCHITECTS,
     allApproved: state.validation.all_approved,
     verdicts: state.validation.verdicts,
     round: state.validation.validation_rounds,
@@ -98,8 +102,8 @@ export function getValidationStatus(directory: string): ValidationCoordinatorRes
 /**
  * Start a new validation round
  */
-export function startValidationRound(directory: string): boolean {
-  const state = readAutopilotState(directory);
+export function startValidationRound(directory: string, sessionId?: string): boolean {
+  const state = readAutopilotState(directory, sessionId);
   if (!state || state.phase !== 'validation') {
     return false;
   }
@@ -109,14 +113,14 @@ export function startValidationRound(directory: string): boolean {
   state.validation.all_approved = false;
   state.validation.architects_spawned = 0;
 
-  return writeAutopilotState(directory, state);
+  return writeAutopilotState(directory, state, sessionId);
 }
 
 /**
  * Check if validation should retry
  */
-export function shouldRetryValidation(directory: string, maxRounds: number = 3): boolean {
-  const state = readAutopilotState(directory);
+export function shouldRetryValidation(directory: string, maxRounds: number = 3, sessionId?: string): boolean {
+  const state = readAutopilotState(directory, sessionId);
   if (!state) {
     return false;
   }
@@ -133,8 +137,8 @@ export function shouldRetryValidation(directory: string, maxRounds: number = 3):
 /**
  * Get issues that need fixing before retry
  */
-export function getIssuesToFix(directory: string): string[] {
-  const state = readAutopilotState(directory);
+export function getIssuesToFix(directory: string, sessionId?: string): string[] {
+  const state = readAutopilotState(directory, sessionId);
   if (!state) {
     return [];
   }
@@ -218,7 +222,7 @@ Wait for all three architects to complete, then aggregate verdicts.
 /**
  * Format validation results for display
  */
-export function formatValidationResults(state: AutopilotState): string {
+export function formatValidationResults(state: AutopilotState, sessionId?: string): string {
   const lines: string[] = [
     '## Validation Results',
     `Round: ${state.validation.validation_rounds}`,
@@ -254,8 +258,8 @@ export function formatValidationResults(state: AutopilotState): string {
 /**
  * Generate a summary of the autopilot run
  */
-export function generateSummary(directory: string): AutopilotSummary | null {
-  const state = readAutopilotState(directory);
+export function generateSummary(directory: string, sessionId?: string): AutopilotSummary | null {
+  const state = readAutopilotState(directory, sessionId);
   if (!state) {
     return null;
   }

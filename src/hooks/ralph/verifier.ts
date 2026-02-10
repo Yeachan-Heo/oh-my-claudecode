@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
 
 export interface VerificationState {
   /** Whether verification is pending */
@@ -38,16 +39,21 @@ const DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
 
 /**
  * Get verification state file path
+ * When sessionId is provided, uses session-scoped path.
  */
-function getVerificationStatePath(directory: string): string {
+function getVerificationStatePath(directory: string, sessionId?: string): string {
+  if (sessionId) {
+    return resolveSessionStatePath('ralph-verification', sessionId, directory);
+  }
   return join(directory, '.omc', 'ralph-verification.json');
 }
 
 /**
  * Read verification state
+ * @param sessionId - When provided, reads from session-scoped path only (no legacy fallback)
  */
-export function readVerificationState(directory: string): VerificationState | null {
-  const statePath = getVerificationStatePath(directory);
+export function readVerificationState(directory: string, sessionId?: string): VerificationState | null {
+  const statePath = getVerificationStatePath(directory, sessionId);
   if (!existsSync(statePath)) {
     return null;
   }
@@ -61,15 +67,19 @@ export function readVerificationState(directory: string): VerificationState | nu
 /**
  * Write verification state
  */
-export function writeVerificationState(directory: string, state: VerificationState): boolean {
-  const statePath = getVerificationStatePath(directory);
-  const stateDir = join(directory, '.omc');
+export function writeVerificationState(directory: string, state: VerificationState, sessionId?: string): boolean {
+  const statePath = getVerificationStatePath(directory, sessionId);
 
-  if (!existsSync(stateDir)) {
-    try {
-      mkdirSync(stateDir, { recursive: true });
-    } catch {
-      return false;
+  if (sessionId) {
+    ensureSessionStateDir(sessionId, directory);
+  } else {
+    const stateDir = join(directory, '.omc');
+    if (!existsSync(stateDir)) {
+      try {
+        mkdirSync(stateDir, { recursive: true });
+      } catch {
+        return false;
+      }
     }
   }
 
@@ -83,9 +93,10 @@ export function writeVerificationState(directory: string, state: VerificationSta
 
 /**
  * Clear verification state
+ * @param sessionId - When provided, clears session-scoped state only
  */
-export function clearVerificationState(directory: string): boolean {
-  const statePath = getVerificationStatePath(directory);
+export function clearVerificationState(directory: string, sessionId?: string): boolean {
+  const statePath = getVerificationStatePath(directory, sessionId);
   if (existsSync(statePath)) {
     try {
       unlinkSync(statePath);
@@ -103,7 +114,8 @@ export function clearVerificationState(directory: string): boolean {
 export function startVerification(
   directory: string,
   completionClaim: string,
-  originalTask: string
+  originalTask: string,
+  sessionId?: string
 ): VerificationState {
   const state: VerificationState = {
     pending: true,
@@ -114,7 +126,7 @@ export function startVerification(
     original_task: originalTask
   };
 
-  writeVerificationState(directory, state);
+  writeVerificationState(directory, state, sessionId);
   return state;
 }
 
@@ -124,9 +136,10 @@ export function startVerification(
 export function recordArchitectFeedback(
   directory: string,
   approved: boolean,
-  feedback: string
+  feedback: string,
+  sessionId?: string
 ): VerificationState | null {
-  const state = readVerificationState(directory);
+  const state = readVerificationState(directory, sessionId);
   if (!state) {
     return null;
   }
@@ -137,18 +150,18 @@ export function recordArchitectFeedback(
 
   if (approved) {
     // Clear state on approval
-    clearVerificationState(directory);
+    clearVerificationState(directory, sessionId);
     return { ...state, pending: false };
   }
 
   // Check if max attempts reached
   if (state.verification_attempts >= state.max_verification_attempts) {
-    clearVerificationState(directory);
+    clearVerificationState(directory, sessionId);
     return { ...state, pending: false };
   }
 
   // Continue verification loop
-  writeVerificationState(directory, state);
+  writeVerificationState(directory, state, sessionId);
   return state;
 }
 

@@ -1,6 +1,28 @@
 # Features Reference (v3.1 - v3.4)
 
-## Notepad Wisdom System
+## Session Notepad (Short-Term Memory)
+
+Compaction-resilient memory system at `.omc/notepad.md` with three tiers:
+
+| Section | Behavior | Use For |
+|---------|----------|---------|
+| **Priority Context** | ALWAYS loaded on session start (max 500 chars) | Critical facts: "Project uses pnpm", "API key in .env" |
+| **Working Memory** | Timestamped entries, auto-pruned after 7 days | Debugging breadcrumbs, temporary findings |
+| **MANUAL** | Never auto-pruned | Team contacts, deployment info, permanent notes |
+
+**User skill:** `/oh-my-claudecode:note`
+- `/oh-my-claudecode:note <content>` - Add to Working Memory
+- `/oh-my-claudecode:note --priority <content>` - Add to Priority Context
+- `/oh-my-claudecode:note --manual <content>` - Add to MANUAL section
+- `/oh-my-claudecode:note --show` - Display notepad contents
+
+**Automatic capture:** `<remember>` tags in Task agent output are automatically captured:
+- `<remember>content</remember>` → Working Memory with timestamp
+- `<remember priority>content</remember>` → Replaces Priority Context
+
+**API:** `initNotepad()`, `addWorkingMemoryEntry()`, `setPriorityContext()`, `addManualEntry()`, `getPriorityContext()`, `getWorkingMemory()`, `formatNotepadContext()`, `pruneOldEntries()`
+
+## Notepad Wisdom System (Plan-Scoped)
 
 Plan-scoped wisdom capture for learnings, decisions, issues, and problems.
 

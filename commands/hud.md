@@ -34,30 +34,15 @@ When you run `/hud` or `/hud setup`, the system will automatically:
 ls ~/.claude/hud/omc-hud.mjs 2>/dev/null && echo "EXISTS" || echo "MISSING"
 ```
 
-**Step 2:** Check if the plugin is built (CRITICAL - common issue!):
+**Step 2:** Verify the plugin is installed:
 ```bash
-# Find the latest version and check if dist/hud/index.js exists
 PLUGIN_VERSION=$(ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1)
 if [ -n "$PLUGIN_VERSION" ]; then
-  ls ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
+  ls ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION/dist/hud/index.js 2>/dev/null && echo "READY" || echo "NOT_FOUND - try reinstalling: /plugin install oh-my-claudecode"
+else
+  echo "Plugin not installed - run: /plugin install oh-my-claudecode"
 fi
 ```
-
-**⚠️ CRITICAL: If NOT_BUILT, the plugin MUST be compiled before the HUD can work!**
-
-**WHY THIS HAPPENS:** The `dist/` directory contains compiled TypeScript code and is NOT stored on GitHub (it's in .gitignore). When you install the plugin from the marketplace, the build step happens automatically via the `prepare` script during `npm install`. However, if the plugin wasn't properly installed or the build failed, you'll get this error.
-
-**THE FIX:** Run npm install in the plugin directory to build it:
-```bash
-cd ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION && npm install
-```
-
-This will:
-1. Install all dependencies
-2. Run the `prepare` script which executes `npm run build`
-3. Generate the `dist/hud/index.js` file that the HUD wrapper needs
-
-**DO NOT** try to download `dist/hud/index.js` from GitHub raw URLs - it doesn't exist there!
 
 **Step 3:** If omc-hud.mjs is MISSING or argument is `setup`, create the HUD directory and script:
 
@@ -82,13 +67,19 @@ import { pathToFileURL } from "node:url";
 
 // Semantic version comparison: returns negative if a < b, positive if a > b, 0 if equal
 function semverCompare(a, b) {
-  const pa = a.replace(/^v/, "").split(".").map(Number);
-  const pb = b.replace(/^v/, "").split(".").map(Number);
+  // Use parseInt to handle pre-release suffixes (e.g. "0-beta" -> 0)
+  const pa = a.replace(/^v/, "").split(".").map(s => parseInt(s, 10) || 0);
+  const pb = b.replace(/^v/, "").split(".").map(s => parseInt(s, 10) || 0);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] || 0;
     const nb = pb[i] || 0;
     if (na !== nb) return na - nb;
   }
+  // If numeric parts equal, non-pre-release > pre-release
+  const aHasPre = /-/.test(a);
+  const bHasPre = /-/.test(b);
+  if (aHasPre && !bHasPre) return -1;
+  if (!aHasPre && bHasPre) return 1;
   return 0;
 }
 

@@ -21,11 +21,14 @@
  * 13. ultrathink/think: Extended reasoning
  * 14. deepsearch: Codebase search (restricted patterns)
  * 15. analyze: Analysis mode (restricted patterns)
+ * 16. codex/gpt: Delegate to Codex MCP (ask_codex)
+ * 17. gemini: Delegate to Gemini MCP (ask_gemini)
  */
 
 import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { readStdin } from './lib/stdin.mjs';
 
 const ULTRATHINK_MESSAGE = `<think-mode>
 
@@ -43,15 +46,6 @@ Use your extended thinking capabilities to provide the most thorough and well-re
 
 ---
 `;
-
-// Read all stdin
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf-8');
-}
 
 // Extract prompt from various JSON structures
 function extractPrompt(input) {
@@ -82,7 +76,8 @@ function sanitizeForKeywordDetection(text) {
     .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
     // 3. Strip URLs: http://... or https://... up to whitespace
     .replace(/https?:\/\/[^\s)>\]]+/g, '')
-    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz (using lookbehind to avoid consuming leading char)
+    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it)
+    // The TypeScript version (index.ts) uses capture group + $1 replacement for broader compat
     .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '')
     // 5. Strip markdown code blocks (existing)
     .replace(/```[\s\S]*?```/g, '')
@@ -91,39 +86,48 @@ function sanitizeForKeywordDetection(text) {
 }
 
 // Create state file for a mode
-function activateState(directory, prompt, stateName) {
+function activateState(directory, prompt, stateName, sessionId) {
   const state = {
     active: true,
     started_at: new Date().toISOString(),
     original_prompt: prompt,
+    session_id: sessionId || undefined,
     reinforcement_count: 0,
     last_checked_at: new Date().toISOString()
   };
 
-  // Write to local .omc/state directory
+  // Write to session-scoped path if sessionId available
+  if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
+    const sessionDir = join(directory, '.omc', 'state', 'sessions', sessionId);
+    if (!existsSync(sessionDir)) {
+      try { mkdirSync(sessionDir, { recursive: true }); } catch {}
+    }
+    try { writeFileSync(join(sessionDir, `${stateName}-state.json`), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
+    return; // Session-only write, skip legacy
+  }
+
+  // Fallback: write to legacy local .omc/state directory (no valid sessionId)
   const localDir = join(directory, '.omc', 'state');
   if (!existsSync(localDir)) {
     try { mkdirSync(localDir, { recursive: true }); } catch {}
   }
-  try { writeFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
-
-  // Write to global .omc/state directory
-  const globalDir = join(homedir(), '.omc', 'state');
-  if (!existsSync(globalDir)) {
-    try { mkdirSync(globalDir, { recursive: true }); } catch {}
-  }
-  try { writeFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+  try { writeFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
 }
 
 /**
  * Clear state files for cancel operation
  */
-function clearStateFiles(directory, modeNames) {
+function clearStateFiles(directory, modeNames, sessionId) {
   for (const name of modeNames) {
     const localPath = join(directory, '.omc', 'state', `${name}-state.json`);
     const globalPath = join(homedir(), '.omc', 'state', `${name}-state.json`);
     try { if (existsSync(localPath)) unlinkSync(localPath); } catch {}
     try { if (existsSync(globalPath)) unlinkSync(globalPath); } catch {}
+    // Clear session-scoped file too
+    if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
+      const sessionPath = join(directory, '.omc', 'state', 'sessions', sessionId, `${name}-state.json`);
+      try { if (existsSync(sessionPath)) unlinkSync(sessionPath); } catch {}
+    }
   }
 }
 
@@ -172,6 +176,63 @@ IMPORTANT: Invoke ALL skills listed above. Start with the first skill IMMEDIATEL
 }
 
 /**
+ * Create MCP delegation message (NOT a skill invocation)
+ */
+function createMcpDelegation(provider, originalPrompt) {
+  const configs = {
+    codex: {
+      tool: 'ask_codex',
+      roles: 'architect, planner, critic, analyst, code-reviewer, security-reviewer, tdd-guide',
+      defaultRole: 'architect',
+    },
+    gemini: {
+      tool: 'ask_gemini',
+      roles: 'designer, writer, vision',
+      defaultRole: 'designer',
+    },
+  };
+  const config = configs[provider];
+  if (!config) return '';
+
+  return `[MAGIC KEYWORD: ${provider.toUpperCase()}]
+
+You MUST delegate this task to the ${provider === 'codex' ? 'Codex' : 'Gemini'} MCP tool.
+
+Steps:
+1. Write a prompt file to \`.omc/prompts/${provider}-{purpose}-{timestamp}.md\` containing clear task instructions derived from the user's request
+2. Determine the appropriate agent_role from: ${config.roles}
+3. Call the \`${config.tool}\` MCP tool with:
+   - agent_role: <detected or default "${config.defaultRole}">
+   - prompt_file: <path you wrote>
+   - output_file: <corresponding -summary.md path>
+   - context_files: <relevant files from user's request>
+
+User request:
+${originalPrompt}
+
+IMPORTANT: Do NOT invoke a skill. Delegate to the MCP tool IMMEDIATELY.`;
+}
+
+/**
+ * Create combined output for skills + MCP delegations
+ */
+function createCombinedOutput(skillMatches, delegationMatches, originalPrompt) {
+  const parts = [];
+
+  if (skillMatches.length > 0) {
+    parts.push('## Section 1: Skill Invocations\n\n' + createMultiSkillInvocation(skillMatches, originalPrompt));
+  }
+
+  if (delegationMatches.length > 0) {
+    const delegationParts = delegationMatches.map(d => createMcpDelegation(d.name, originalPrompt));
+    parts.push('## Section ' + (skillMatches.length > 0 ? '2' : '1') + ': MCP Delegations\n\n' + delegationParts.join('\n\n---\n\n'));
+  }
+
+  const allNames = [...skillMatches, ...delegationMatches].map(m => m.name.toUpperCase());
+  return `[MAGIC KEYWORDS DETECTED: ${allNames.join(', ')}]\n\n${parts.join('\n\n---\n\n')}\n\nIMPORTANT: Complete ALL sections above in order.`;
+}
+
+/**
  * Resolve conflicts between detected keywords
  */
 function resolveConflicts(matches) {
@@ -196,7 +257,8 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
   const priorityOrder = ['cancel','ralph','autopilot','ultrapilot','ultrawork','ecomode',
-    'swarm','pipeline','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
+    'swarm','pipeline','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze',
+    'codex','gemini'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -227,7 +289,8 @@ async function main() {
 
     let data = {};
     try { data = JSON.parse(input); } catch {}
-    const directory = data.directory || process.cwd();
+    const directory = data.cwd || data.directory || process.cwd();
+    const sessionId = data.session_id || data.sessionId || '';
 
     const prompt = extractPrompt(input);
     if (!prompt) {
@@ -335,6 +398,16 @@ async function main() {
       matches.push({ name: 'analyze', args: '' });
     }
 
+    // Codex keywords (intent-phrase only)
+    if (/\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'codex', args: '' });
+    }
+
+    // Gemini keywords (intent-phrase only)
+    if (/\b(ask|use|delegate\s+to)\s+gemini\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'gemini', args: '' });
+    }
+
     // No matches - pass through
     if (matches.length === 0) {
       console.log(JSON.stringify({ continue: true }));
@@ -344,9 +417,20 @@ async function main() {
     // Resolve conflicts
     const resolved = resolveConflicts(matches);
 
+    // Import flow tracer once (best-effort)
+    let tracer = null;
+    try { tracer = await import('../dist/hooks/subagent-tracker/flow-tracer.js'); } catch { /* silent */ }
+
+    // Record detected keywords to flow trace
+    if (tracer) {
+      for (const match of resolved) {
+        try { tracer.recordKeywordDetected(directory, sessionId, match.name); } catch { /* silent */ }
+      }
+    }
+
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrapilot', 'ultrawork', 'ecomode', 'swarm', 'pipeline']);
+      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrapilot', 'ultrawork', 'ecomode', 'swarm', 'pipeline'], sessionId);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }
@@ -354,7 +438,14 @@ async function main() {
     // Activate states for modes that need them
     const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'ultrapilot', 'ultrawork', 'ecomode'].includes(m.name));
     for (const mode of stateModes) {
-      activateState(directory, prompt, mode.name);
+      activateState(directory, prompt, mode.name, sessionId);
+    }
+
+    // Record mode changes to flow trace
+    if (tracer) {
+      for (const mode of stateModes) {
+        try { tracer.recordModeChange(directory, sessionId, 'none', mode.name); } catch { /* silent */ }
+      }
     }
 
     // Special: Ralph with ultrawork (only if ecomode NOT present)
@@ -362,7 +453,7 @@ async function main() {
     const hasEcomode = resolved.some(m => m.name === 'ecomode');
     const hasUltrawork = resolved.some(m => m.name === 'ultrawork');
     if (hasRalph && !hasEcomode && !hasUltrawork) {
-      activateState(directory, prompt, 'ultrawork');
+      activateState(directory, prompt, 'ultrawork', sessionId);
     }
 
     // Handle ultrathink specially - prepend message instead of skill invocation
@@ -383,8 +474,22 @@ async function main() {
       return;
     }
 
-    // Emit skill invocation(s)
-    console.log(JSON.stringify(createHookOutput(createMultiSkillInvocation(resolved, prompt))));
+    // Split resolved into skills vs MCP delegations
+    const MCP_KEYWORDS = ['codex', 'gemini'];
+    const skillMatches = resolved.filter(m => !MCP_KEYWORDS.includes(m.name));
+    const delegationMatches = resolved.filter(m => MCP_KEYWORDS.includes(m.name));
+
+    if (skillMatches.length > 0 && delegationMatches.length > 0) {
+      // Combined: skills + MCP delegations
+      console.log(JSON.stringify(createHookOutput(createCombinedOutput(skillMatches, delegationMatches, prompt))));
+    } else if (delegationMatches.length > 0) {
+      // MCP delegation only
+      const delegationParts = delegationMatches.map(d => createMcpDelegation(d.name, prompt));
+      console.log(JSON.stringify(createHookOutput(delegationParts.join('\n\n---\n\n'))));
+    } else {
+      // Skills only (existing behavior)
+      console.log(JSON.stringify(createHookOutput(createMultiSkillInvocation(skillMatches, prompt))));
+    }
   } catch (error) {
     // On any error, allow continuation
     console.log(JSON.stringify({ continue: true }));

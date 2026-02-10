@@ -66,7 +66,8 @@ export type {
 export async function startUltrapilot(
   cwd: string,
   task: string,
-  config?: Partial<UltrapilotConfig>
+  config?: Partial<UltrapilotConfig>,
+  sessionId?: string
 ): Promise<UltrapilotState> {
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
 
@@ -74,7 +75,7 @@ export async function startUltrapilot(
   const subtasks = await decomposeTask(task, mergedConfig);
 
   // Initialize state
-  const state = initUltrapilot(cwd, task, subtasks, undefined, mergedConfig);
+  const state = initUltrapilot(cwd, task, subtasks, sessionId, mergedConfig);
   if (!state) {
     throw new Error('Failed to initialize ultrapilot: another mode is active');
   }

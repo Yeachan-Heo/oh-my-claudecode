@@ -4,6 +4,7 @@
 
 import { join } from 'path';
 import { homedir } from 'os';
+import { OmcPaths } from '../../lib/worktree-paths.js';
 
 /** User-level skills directory (read by skill-injector.mjs hook) */
 export const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'omc-learned');
@@ -12,7 +13,7 @@ export const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'omc-learned
 export const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
 
 /** Project-level skills subdirectory */
-export const PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
+export const PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
 
 /** Maximum recursion depth for skill file discovery */
 export const MAX_RECURSION_DEPTH = 10;

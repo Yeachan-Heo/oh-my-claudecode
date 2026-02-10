@@ -3,27 +3,140 @@ name: ralph
 description: Self-referential loop until task completion with architect verification
 ---
 
-# Ralph Skill
-
 [RALPH + ULTRAWORK - ITERATION {{ITERATION}}/{{MAX}}]
 
 Your previous attempt did not output the completion promise. Continue working on the task.
 
-## PRD MODE (OPTIONAL)
+<Purpose>
+Ralph is a persistence loop that keeps working on a task until it is fully complete and architect-verified. It wraps ultrawork's parallel execution with session persistence, automatic retry on failure, and mandatory verification before completion.
+</Purpose>
 
-If the user provides the `--prd` flag, initialize a PRD (Product Requirements Document) BEFORE starting the ralph loop.
+<Use_When>
+- Task requires guaranteed completion with verification (not just "do your best")
+- User says "ralph", "don't stop", "must complete", "finish this", or "keep going until done"
+- Work may span multiple iterations and needs persistence across retries
+- Task benefits from parallel execution with architect sign-off at the end
+</Use_When>
+
+<Do_Not_Use_When>
+- User wants a full autonomous pipeline from idea to code -- use `autopilot` instead
+- User wants to explore or plan before committing -- use `plan` skill instead
+- User wants a quick one-shot fix -- delegate directly to an executor agent
+- User wants manual control over completion -- use `ultrawork` directly
+</Do_Not_Use_When>
+
+<Why_This_Exists>
+Complex tasks often fail silently: partial implementations get declared "done", tests get skipped, edge cases get forgotten. Ralph prevents this by looping until work is genuinely complete, requiring fresh verification evidence before allowing completion, and using tiered architect review to confirm quality.
+</Why_This_Exists>
+
+<Execution_Policy>
+- Fire independent agent calls simultaneously -- never wait sequentially for independent work
+- Use `run_in_background: true` for long operations (installs, builds, test suites)
+- Always pass the `model` parameter explicitly when delegating to agents
+- Read `docs/shared/agent-tiers.md` before first delegation to select correct agent tiers
+- Deliver the full implementation: no scope reduction, no partial completion, no deleting tests to make them pass
+</Execution_Policy>
+
+<Steps>
+1. **Review progress**: Check TODO list and any prior iteration state
+2. **Continue from where you left off**: Pick up incomplete tasks
+3. **Delegate in parallel**: Route tasks to specialist agents at appropriate tiers
+   - Simple lookups: LOW tier (Haiku) -- "What does this function return?"
+   - Standard work: MEDIUM tier (Sonnet) -- "Add error handling to this module"
+   - Complex analysis: HIGH tier (Opus) -- "Debug this race condition"
+4. **Run long operations in background**: Builds, installs, test suites use `run_in_background: true`
+5. **Verify completion with fresh evidence**:
+   a. Identify what command proves the task is complete
+   b. Run verification (test, build, lint)
+   c. Read the output -- confirm it actually passed
+   d. Check: zero pending/in_progress TODO items
+6. **Architect verification** (tiered):
+   - <5 files, <100 lines with full tests: STANDARD tier minimum (architect-medium / Sonnet)
+   - Standard changes: STANDARD tier (architect-medium / Sonnet)
+   - >20 files or security/architectural changes: THOROUGH tier (architect / Opus)
+   - Ralph floor: always at least STANDARD, even for small changes
+7. **On approval**: Run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
+8. **On rejection**: Fix the issues raised, then re-verify at the same tier
+</Steps>
+
+<Tool_Usage>
+- Before first MCP tool use, call `ToolSearch("mcp")` to discover deferred MCP tools
+- Use `ask_codex` with `agent_role: "architect"` for verification cross-checks when changes are security-sensitive, architectural, or involve complex multi-system integration
+- Skip Codex consultation for simple feature additions, well-tested changes, or time-critical verification
+- If ToolSearch finds no MCP tools or Codex is unavailable, proceed with architect agent verification alone -- never block on external tools
+- Use `state_write` / `state_read` for ralph mode state persistence between iterations
+</Tool_Usage>
+
+<Examples>
+<Good>
+Correct parallel delegation:
+```
+Task(subagent_type="oh-my-claudecode:executor-low", model="haiku", prompt="Add type export for UserConfig")
+Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="Implement the caching layer for API responses")
+Task(subagent_type="oh-my-claudecode:executor-high", model="opus", prompt="Refactor auth module to support OAuth2 flow")
+```
+Why good: Three independent tasks fired simultaneously at appropriate tiers.
+</Good>
+
+<Good>
+Correct verification before completion:
+```
+1. Run: npm test           → Output: "42 passed, 0 failed"
+2. Run: npm run build      → Output: "Build succeeded"
+3. Run: lsp_diagnostics    → Output: 0 errors
+4. Spawn architect-medium  → Verdict: "APPROVED"
+5. Run /oh-my-claudecode:cancel
+```
+Why good: Fresh evidence at each step, architect verification, then clean exit.
+</Good>
+
+<Bad>
+Claiming completion without verification:
+"All the changes look good, the implementation should work correctly. Task complete."
+Why bad: Uses "should" and "look good" -- no fresh test/build output, no architect verification.
+</Bad>
+
+<Bad>
+Sequential execution of independent tasks:
+```
+Task(executor-low, "Add type export") → wait →
+Task(executor, "Implement caching") → wait →
+Task(executor-high, "Refactor auth")
+```
+Why bad: These are independent tasks that should run in parallel, not sequentially.
+</Bad>
+</Examples>
+
+<Escalation_And_Stop_Conditions>
+- Stop and report when a fundamental blocker requires user input (missing credentials, unclear requirements, external service down)
+- Stop when the user says "stop", "cancel", or "abort" -- run `/oh-my-claudecode:cancel`
+- Continue working when the hook system sends "The boulder never stops" -- this means the iteration continues
+- If architect rejects verification, fix the issues and re-verify (do not stop)
+- If the same issue recurs across 3+ iterations, report it as a potential fundamental problem
+</Escalation_And_Stop_Conditions>
+
+<Final_Checklist>
+- [ ] All requirements from the original task are met (no scope reduction)
+- [ ] Zero pending or in_progress TODO items
+- [ ] Fresh test run output shows all tests pass
+- [ ] Fresh build output shows success
+- [ ] lsp_diagnostics shows 0 errors on affected files
+- [ ] Architect verification passed (STANDARD tier minimum)
+- [ ] `/oh-my-claudecode:cancel` run for clean state cleanup
+</Final_Checklist>
+
+<Advanced>
+## PRD Mode (Optional)
+
+When the user provides the `--prd` flag, initialize a Product Requirements Document before starting the ralph loop.
 
 ### Detecting PRD Mode
+Check if `{{PROMPT}}` contains `--prd` or `--PRD`.
 
-Check if `{{PROMPT}}` contains the flag pattern: `--prd` or `--PRD`
-
-### PRD Initialization Workflow
-
-When `--prd` flag detected:
-
-1. **Create PRD File Structure** (`.omc/prd.json` and `.omc/progress.txt`)
-2. **Parse the task** (everything after `--prd` flag)
-3. **Break down into user stories** with this structure:
+### PRD Workflow
+1. Create `.omc/prd.json` and `.omc/progress.txt`
+2. Parse the task (everything after `--prd` flag)
+3. Break down into user stories:
 
 ```json
 {
@@ -43,183 +156,27 @@ When `--prd` flag detected:
 }
 ```
 
-4. **Create progress.txt**:
+4. Create `progress.txt` with timestamp and empty patterns section
+5. Guidelines: right-sized stories (one session each), verifiable criteria, independent stories, priority order (foundational work first)
+6. Proceed to normal ralph loop using user stories as the task list
 
-```
-# Ralph Progress Log
-Started: [ISO timestamp]
-
-## Codebase Patterns
-(No patterns discovered yet)
-
----
-```
-
-5. **Guidelines for PRD creation**:
-   - Right-sized stories: Each completable in one focused session
-   - Verifiable criteria: Include "Typecheck passes", "Tests pass"
-   - Independent stories: Minimize dependencies
-   - Priority order: Foundational work (DB, types) before UI
-
-6. **After PRD created**: Proceed to normal ralph loop execution using the user stories as your task list
-
-### Example Usage
-
+### Example
 User input: `--prd build a todo app with React and TypeScript`
+Workflow: Detect flag, extract task, create `.omc/prd.json`, create `.omc/progress.txt`, begin ralph loop.
 
-Your workflow:
-1. Detect `--prd` flag
-2. Extract task: "build a todo app with React and TypeScript"
-3. Create `.omc/prd.json` with user stories
-4. Create `.omc/progress.txt`
-5. Begin ralph loop using user stories as task breakdown
+## Background Execution Rules
 
-## ULTRAWORK MODE (AUTO-ACTIVATED)
+**Run in background** (`run_in_background: true`):
+- Package installation (npm install, pip install, cargo build)
+- Build processes (make, project build commands)
+- Test suites
+- Docker operations (docker build, docker pull)
 
-Ralph is a **persistence wrapper** that includes Ultrawork as a component for maximum parallel execution. You MUST follow these rules:
-
-### Parallel Execution Rules
-- **PARALLEL**: Fire independent calls simultaneously - NEVER wait sequentially
-- **BACKGROUND FIRST**: Use Task(run_in_background=true) for long operations (10+ concurrent)
-- **DELEGATE**: Route tasks to specialist agents immediately
-
-### Smart Model Routing (SAVE TOKENS)
-
-| Task Complexity | Tier | Examples |
-|-----------------|------|----------|
-| Simple lookups | LOW (haiku) | "What does this function return?", "Find where X is defined" |
-| Standard work | MEDIUM (sonnet) | "Add error handling", "Implement this feature" |
-| Complex analysis | HIGH (opus) | "Debug this race condition", "Refactor auth module" |
-
-### Available Agents by Tier
-
-**FIRST ACTION:** Before delegating any work, read the agent reference file:
-```
-Read file: docs/shared/agent-tiers.md
-```
-This provides the complete agent tier matrix, MCP tool assignments, and selection guidance.
-
-**CRITICAL: Always pass `model` parameter explicitly!**
-```
-Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="...")
-Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
-Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="...")
-```
-
-### Background Execution Rules
-
-**Run in Background** (set `run_in_background: true`):
-- Package installation (npm install, pip install, cargo build, etc.)
-- Build processes (project build command, make, etc.)
-- Test suites (project test command, etc.)
-- Docker operations: docker build, docker pull
-
-**Run Blocking** (foreground):
-- Quick status checks: git status, ls, pwd
-- File reads, edits
+**Run blocking** (foreground):
+- Quick status checks (git status, ls, pwd)
+- File reads and edits
 - Simple commands
-
-## COMPLETION REQUIREMENTS
-
-Before claiming completion, you MUST:
-1. Verify ALL requirements from the original task are met
-2. Ensure no partial implementations
-3. Check that code compiles/runs without errors
-4. Verify tests pass (if applicable)
-5. TODO LIST: Zero pending/in_progress tasks
-
-## VERIFICATION BEFORE COMPLETION (IRON LAW)
-
-**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE**
-
-Before outputting the completion promise:
-
-### Steps (MANDATORY)
-1. **IDENTIFY**: What command proves the task is complete?
-2. **RUN**: Execute verification (test, build, lint)
-3. **READ**: Check output - did it actually pass?
-4. **ONLY THEN**: Proceed to Architect verification
-
-### Red Flags (STOP and verify)
-- Using "should", "probably", "seems to"
-- About to output completion without fresh evidence
-- Expressing satisfaction before verification
-
-### Evidence Chain
-1. Fresh test run output showing pass
-2. Fresh build output showing success
-3. lsp_diagnostics showing 0 errors
-4. THEN Architect verification
-5. THEN completion promise
-
-**Skipping verification = Task NOT complete**
-
-## VERIFICATION PROTOCOL (TIERED)
-
-Ralph uses tiered verification to save tokens while maintaining quality.
-
-### Verification Tier Selection
-
-Before spawning architect for verification, determine the appropriate tier:
-
-| Change Profile | Tier | Agent |
-|----------------|------|-------|
-| <5 files, <100 lines, full tests | LIGHT | architect-low (haiku) |
-| Standard changes | STANDARD | architect-medium (sonnet) |
-| >20 files, security/architectural | THOROUGH | architect (opus) |
-
-### Ralph Minimum Verification Tier
-
-**Floor: STANDARD (architect-medium / sonnet)**
-
-Even for small changes (<5 files), ralph requires at least STANDARD tier verification. The LIGHT tier (haiku) is insufficient for ralph's completion guarantee. When tier selection returns LIGHT, upgrade to STANDARD.
-
-### Verification Flow
-
-1. **Collect change metadata**: Count files, lines, detect security/architectural patterns
-2. **Select tier**: Apply rules from `/docs/shared/verification-tiers.md`
-3. **Spawn appropriate architect**:
-   ```
-   // LIGHT - small, well-tested changes
-   Task(subagent_type="oh-my-claudecode:architect-low", model="haiku", prompt="Quick verification: [describe changes]")
-
-   // STANDARD - most changes
-   Task(subagent_type="oh-my-claudecode:architect-medium", model="sonnet", prompt="Verify implementation: [describe changes]")
-
-   // THOROUGH - large/security/architectural changes
-   Task(subagent_type="oh-my-claudecode:architect", model="opus", prompt="Full verification: [describe changes]")
-   ```
-4. **Wait for verdict**
-5. **If approved**: Run `/oh-my-claudecode:cancel` to cleanly exit
-6. **If rejected**: Fix issues and re-verify (same tier)
-
-For complete tier selection rules, read: `docs/shared/verification-tiers.md`
-
-## ZERO TOLERANCE
-
-- NO Scope Reduction - deliver FULL implementation
-- NO Partial Completion - finish 100%
-- NO Premature Stopping - ALL TODOs must be complete
-- NO TEST DELETION - fix code, not tests
-
-## STATE CLEANUP ON COMPLETION
-
-**IMPORTANT: Use the cancel skill for proper state cleanup**
-
-When work is complete and Architect verification passes, run `/oh-my-claudecode:cancel` to cleanly exit ralph mode. This handles:
-- Deletion of ralph state files (both local and global)
-- Cleanup of linked ultrawork or ecomode state
-- Proper termination of the ralph loop
-
-This ensures clean state for future sessions without leaving stale state files behind.
-
-## INSTRUCTIONS
-
-- Review your progress so far
-- Continue from where you left off
-- Use parallel execution and background tasks
-- When FULLY complete AND Architect verified: Run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
-- Do not stop until the task is truly done
+</Advanced>
 
 Original task:
 {{PROMPT}}

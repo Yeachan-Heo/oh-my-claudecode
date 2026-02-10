@@ -3,7 +3,7 @@
 // Restores persistent mode states when session starts
 // Cross-platform: Windows, macOS, Linux
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -11,8 +11,25 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Dynamic import for the shared stdin module
-const { readStdin } = await import(join(__dirname, 'lib', 'stdin.mjs'));
+// Import timeout-protected stdin reader (prevents hangs on Linux, see issue #240)
+let readStdin;
+try {
+  const mod = await import(join(__dirname, 'lib', 'stdin.mjs'));
+  readStdin = mod.readStdin;
+} catch {
+  // Fallback: inline timeout-protected readStdin if lib module is missing
+  readStdin = (timeoutMs = 5000) => new Promise((resolve) => {
+    const chunks = [];
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) { settled = true; process.stdin.removeAllListeners(); process.stdin.destroy(); resolve(Buffer.concat(chunks).toString('utf-8')); }
+    }, timeoutMs);
+    process.stdin.on('data', (chunk) => { chunks.push(chunk); });
+    process.stdin.on('end', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } });
+    process.stdin.on('error', () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(''); } });
+    if (process.stdin.readableEnded) { if (!settled) { settled = true; clearTimeout(timeout); resolve(Buffer.concat(chunks).toString('utf-8')); } }
+  });
+}
 
 function readJsonFile(path) {
   try {
@@ -93,20 +110,78 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
-function countIncompleteTodos(todosDir) {
-  let count = 0;
-  if (existsSync(todosDir)) {
-    try {
-      const files = readdirSync(todosDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        const todos = readJsonFile(join(todosDir, file));
-        if (Array.isArray(todos)) {
-          count += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
-        }
-      }
-    } catch {}
+// ============================================================================
+// Notepad Support
+// ============================================================================
+
+const NOTEPAD_FILENAME = 'notepad.md';
+const PRIORITY_HEADER = '## Priority Context';
+const WORKING_MEMORY_HEADER = '## Working Memory';
+
+/**
+ * Get notepad path in .omc directory
+ */
+function getNotepadPath(directory) {
+  return join(directory, '.omc', NOTEPAD_FILENAME);
+}
+
+/**
+ * Read notepad content
+ */
+function readNotepad(directory) {
+  const notepadPath = getNotepadPath(directory);
+  if (!existsSync(notepadPath)) {
+    return null;
   }
-  return count;
+  try {
+    return readFileSync(notepadPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a section from notepad content
+ */
+function extractSection(content, header) {
+  // Match from header to next section (## followed by space and non-# char)
+  const regex = new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
+  const match = content.match(regex);
+  if (!match) {
+    return null;
+  }
+  // Remove HTML comments and trim
+  let section = match[1];
+  section = section.replace(/<!--[\s\S]*?-->/g, '').trim();
+  return section || null;
+}
+
+/**
+ * Get Priority Context section (for injection)
+ */
+function getPriorityContext(directory) {
+  const content = readNotepad(directory);
+  if (!content) {
+    return null;
+  }
+  return extractSection(content, PRIORITY_HEADER);
+}
+
+/**
+ * Format notepad context for session injection
+ */
+function formatNotepadContext(directory) {
+  const priorityContext = getPriorityContext(directory);
+  if (!priorityContext) {
+    return null;
+  }
+  return `<notepad-priority>
+
+## Priority Context
+
+${priorityContext}
+
+</notepad-priority>`;
 }
 
 async function main() {
@@ -115,7 +190,8 @@ async function main() {
     let data = {};
     try { data = JSON.parse(input); } catch {}
 
-    const directory = data.directory || process.cwd();
+    const directory = data.cwd || data.directory || process.cwd();
+    const sessionId = data.sessionId || data.session_id || data.sessionid || '';
     const messages = [];
 
     // Check for updates (non-blocking)
@@ -134,7 +210,8 @@ async function main() {
 
 A new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
 
-To update, run: claude /install-plugin oh-my-claudecode
+To update, run: omc update
+(This syncs plugin, npm package, and CLAUDE.md together)
 
 </session-restore>
 
@@ -142,11 +219,11 @@ To update, run: claude /install-plugin oh-my-claudecode
 `);
     }
 
-    // Check for ultrawork state
-    const ultraworkState = readJsonFile(join(directory, '.omc', 'ultrawork-state.json'))
-      || readJsonFile(join(homedir(), '.claude', 'ultrawork-state.json'));
+    // Check for ultrawork state - only restore if session matches (issue #311)
+    const ultraworkState = readJsonFile(join(directory, '.omc', 'state', 'ultrawork-state.json'))
+      || readJsonFile(join(homedir(), '.omc', 'state', 'ultrawork-state.json'));
 
-    if (ultraworkState?.active) {
+    if (ultraworkState?.active && (!ultraworkState.session_id || ultraworkState.session_id === sessionId)) {
       messages.push(`<session-restore>
 
 [ULTRAWORK MODE RESTORED]
@@ -162,9 +239,24 @@ Continue working in ultrawork mode until all tasks are complete.
 `);
     }
 
-    // Check for incomplete todos
-    const todosDir = join(homedir(), '.claude', 'todos');
-    const incompleteCount = countIncompleteTodos(todosDir);
+    // Check for incomplete todos (project-local only, not global ~/.claude/todos/)
+    // NOTE: We intentionally do NOT scan the global ~/.claude/todos/ directory.
+    // That directory accumulates todo files from ALL past sessions across all
+    // projects, causing phantom task counts in fresh sessions (see issue #354).
+    const localTodoPaths = [
+      join(directory, '.omc', 'todos.json'),
+      join(directory, '.claude', 'todos.json')
+    ];
+    let incompleteCount = 0;
+    for (const todoFile of localTodoPaths) {
+      if (existsSync(todoFile)) {
+        try {
+          const data = readJsonFile(todoFile);
+          const todos = data?.todos || (Array.isArray(data) ? data : []);
+          incompleteCount += todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length;
+        } catch {}
+      }
+    }
 
     if (incompleteCount > 0) {
       messages.push(`<session-restore>
@@ -179,6 +271,35 @@ Please continue working on these tasks.
 ---
 `);
     }
+
+    // Check for notepad Priority Context (ALWAYS loaded on session start)
+    const notepadContext = formatNotepadContext(directory);
+    if (notepadContext) {
+      messages.push(`<session-restore>
+
+[NOTEPAD PRIORITY CONTEXT LOADED]
+
+${notepadContext}
+
+</session-restore>
+
+---
+`);
+    }
+
+    // MCP tool discovery reminder (deferred tools need ToolSearch before use)
+    messages.push(`<session-restore>
+
+[MCP TOOL DISCOVERY REQUIRED]
+
+MCP tools (ask_codex, ask_gemini) are deferred and NOT in your tool list yet.
+Before first use, call ToolSearch("mcp") to discover all available MCP tools.
+If ToolSearch returns no results, MCP servers are not configured -- use Claude agent fallbacks instead.
+
+</session-restore>
+
+---
+`);
 
     if (messages.length > 0) {
       console.log(JSON.stringify({

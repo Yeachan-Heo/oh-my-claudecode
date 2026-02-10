@@ -115,50 +115,7 @@ This will:
 2. Configure `statusLine` in `~/.claude/settings.json`
 3. Report status and prompt to restart if needed
 
-## Step 3.5: Verify Plugin Build
-
-The HUD requires the plugin to be built (dist/ directory). The dist/ folder is NOT included in git - it's generated when the plugin is installed via npm.
-
-Check if the plugin is installed and built:
-
-```bash
-# Find the installed plugin version
-PLUGIN_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode"
-if [ -d "$PLUGIN_DIR" ]; then
-  PLUGIN_VERSION=$(ls "$PLUGIN_DIR" 2>/dev/null | sort -V | tail -1)
-  if [ -n "$PLUGIN_VERSION" ]; then
-    # Check if dist/hud/index.js exists
-    if [ ! -f "$PLUGIN_DIR/$PLUGIN_VERSION/dist/hud/index.js" ]; then
-      echo "Plugin not built - building now..."
-      cd "$PLUGIN_DIR/$PLUGIN_VERSION"
-      # Use bun (preferred) or npm for building
-      if command -v bun &> /dev/null; then
-        bun install
-      elif command -v npm &> /dev/null; then
-        npm install
-      else
-        echo "ERROR: Neither bun nor npm found. Please install Node.js or Bun first."
-        exit 1
-      fi
-      if [ -f "dist/hud/index.js" ]; then
-        echo "Build successful - HUD is ready"
-      else
-        echo "Build failed - HUD may not work correctly"
-      fi
-    else
-      echo "Plugin already built - HUD is ready"
-    fi
-  else
-    echo "Plugin version not found"
-  fi
-else
-  echo "Plugin not installed - install with: claude /install-plugin oh-my-claudecode"
-fi
-```
-
-**Note:** The `npm install` command triggers the `prepare` script which runs `npm run build`, creating the dist/ directory with all compiled HUD files.
-
-## Step 3.6: Install CLI Analytics Tools (Optional)
+## Step 3.5: Install CLI Analytics Tools (Optional)
 
 The OMC CLI provides standalone token analytics commands (`omc stats`, `omc agents`, `omc backfill`, `omc tui`).
 
@@ -277,6 +234,103 @@ If yes, invoke the mcp-setup skill:
 
 If no, skip to next step.
 
+## Step 5.5: Configure Agent Teams (Optional)
+
+Agent teams are an experimental Claude Code feature that spawns N coordinated agents on a shared task list with inter-agent messaging. **Disabled by default** — requires enabling in `settings.json`.
+
+Reference: https://code.claude.com/docs/en/agent-teams
+
+Ask user: "Would you like to enable agent teams? (experimental Claude Code feature)"
+
+**Options:**
+1. **Yes, enable teams (Recommended)** - Enable the experimental feature and configure defaults
+2. **No, skip** - Leave teams disabled (can enable later)
+
+### If User Chooses YES:
+
+#### 5.5.1: Enable in settings.json
+
+**CRITICAL**: Must preserve existing user settings. Read `~/.claude/settings.json` first, then merge the teams env var.
+
+```bash
+SETTINGS_FILE="$HOME/.claude/settings.json"
+
+if [ -f "$SETTINGS_FILE" ]; then
+  # Merge env var into existing settings, preserving everything else
+  TEMP_FILE=$(mktemp)
+  jq '.env = (.env // {} | . + {"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"})' "$SETTINGS_FILE" > "$TEMP_FILE" && mv "$TEMP_FILE" "$SETTINGS_FILE"
+  echo "Added CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS to existing settings.json"
+else
+  # Create new settings.json
+  mkdir -p "$(dirname "$SETTINGS_FILE")"
+  cat > "$SETTINGS_FILE" << 'SETTINGS_EOF'
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+SETTINGS_EOF
+  echo "Created settings.json with teams enabled"
+fi
+```
+
+Prefer the Edit tool over jq when possible to preserve formatting.
+
+#### 5.5.2: Configure Teammate Display Mode
+
+Ask: "How should teammates be displayed?"
+
+1. **Auto (Recommended)** - Split panes in tmux, otherwise in-process
+2. **In-process** - All in main terminal, Shift+Up/Down to select
+3. **Split panes (tmux)** - Each teammate in own pane, requires tmux/iTerm2
+
+If not "Auto", add `teammateMode` to settings.json:
+
+```bash
+jq --arg mode "TEAMMATE_MODE" '. + {teammateMode: $mode}' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+```
+
+#### 5.5.3: Configure Team Defaults
+
+Ask three questions:
+
+1. **Default team size?** → 3 agents (Recommended) / 5 agents (maximum) / 2 agents
+2. **Default agent type?** → executor (Recommended) / build-fixer / designer
+3. **Default model?** → sonnet (Recommended) / opus / haiku
+
+Store in `~/.claude/.omc-config.json`:
+
+```bash
+CONFIG_FILE="$HOME/.claude/.omc-config.json"
+mkdir -p "$(dirname "$CONFIG_FILE")"
+
+if [ -f "$CONFIG_FILE" ]; then
+  EXISTING=$(cat "$CONFIG_FILE")
+else
+  EXISTING='{}'
+fi
+
+echo "$EXISTING" | jq \
+  --argjson maxAgents MAX_AGENTS \
+  --arg agentType "AGENT_TYPE" \
+  --arg model "MODEL" \
+  '. + {team: {maxAgents: $maxAgents, defaultAgentType: $agentType, defaultModel: $model, monitorIntervalMs: 30000, shutdownTimeoutMs: 15000}}' > "$CONFIG_FILE"
+```
+
+#### Verify settings.json
+
+```bash
+jq empty "$SETTINGS_FILE" 2>/dev/null && echo "settings.json: valid" || echo "ERROR: invalid JSON!"
+jq -e '.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' "$SETTINGS_FILE" > /dev/null 2>&1 && echo "Agent teams: ENABLED" || echo "WARNING: not enabled"
+```
+
+### If User Chooses NO:
+
+Skip. Teams remain disabled. Enable later by adding to `~/.claude/settings.json`:
+```json
+{ "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
+```
+
 ## Step 6: Detect Upgrade from 2.x
 
 Check if user has existing configuration:
@@ -311,8 +365,15 @@ Just include these words naturally in your request:
 | ralplan | Iterative planning | "ralplan this feature" |
 | ulw | Max parallelism | "ulw refactor the API" |
 | plan | Planning interview | "plan the new endpoints" |
+| team | Coordinated agents | "/team 3:executor fix errors" |
 
 **ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
+
+TEAMS:
+Spawn coordinated agents with shared task lists and real-time messaging:
+- /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+- /oh-my-claudecode:team 5:build-fixer "fix build errors in src/"
+Teams use Claude Code native tools (TeamCreate/SendMessage/TaskCreate).
 
 MCP SERVERS:
 Run /oh-my-claudecode:mcp-setup to add tools like web search, GitHub, etc.
@@ -356,6 +417,12 @@ MAGIC KEYWORDS (power-user shortcuts):
 | ralplan | /ralplan | "ralplan this feature" |
 | ulw | /ultrawork | "ulw refactor API" |
 | plan | /plan | "plan the endpoints" |
+| team | (new!) | "/team 3:executor fix errors" |
+
+TEAMS (NEW!):
+Spawn coordinated agents with shared task lists and real-time messaging:
+- /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+- Uses Claude Code native tools (TeamCreate/SendMessage/TaskCreate)
 
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.

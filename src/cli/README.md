@@ -4,7 +4,7 @@ Command-line interface for Oh-My-ClaudeCode analytics, token tracking, cost repo
 
 ## Installation
 
-After installing oh-my-claudecode:
+Install via npm (note: the npm package name is `oh-my-claude-sisyphus`):
 
 ```bash
 npm install -g oh-my-claude-sisyphus

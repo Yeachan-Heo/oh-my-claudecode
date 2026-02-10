@@ -62,7 +62,7 @@ export async function getAnalyticsDisplay(): Promise<AnalyticsDisplay> {
 
     // Calculate cache efficiency
     const totalCacheRead = stats.totalCacheRead;
-    const totalInput = stats.totalInputTokens;
+    const totalInput = stats.totalInputTokens + stats.totalCacheCreation + stats.totalCacheRead;
     const cacheHitRate = totalInput > 0 ? (totalCacheRead / totalInput) * 100 : 0;
     const cacheEfficiency = `${cacheHitRate.toFixed(1)}%`;
 

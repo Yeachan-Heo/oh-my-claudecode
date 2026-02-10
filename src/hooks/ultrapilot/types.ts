@@ -92,6 +92,8 @@ export interface UltrapilotState {
   failedWorkers: number;
   /** Session binding */
   sessionId?: string;
+  /** Project path for isolation */
+  project_path?: string;
 }
 
 /**

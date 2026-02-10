@@ -46,8 +46,8 @@ Ralph automatically activates Ultrawork for maximum parallel execution. You MUST
 |--------|-------------|-----------------|-------------|
 | **Analysis** | `architect-low` | `architect-medium` | `architect` |
 | **Execution** | `executor-low` | `executor` | `executor-high` |
-| **Search** | `explore` | `explore-medium` | - |
-| **Research** | `researcher-low` | `researcher` | - |
+| **Search** | `explore` | - | - |
+| **Research** | - | `researcher` | - |
 | **Frontend** | `designer-low` | `designer` | `designer-high` |
 | **Docs** | `writer` | - | - |
 | **Visual** | - | `vision` | - |
@@ -56,9 +56,9 @@ Ralph automatically activates Ultrawork for maximum parallel execution. You MUST
 | **Pre-Planning** | - | - | `analyst` |
 | **Testing** | - | `qa-tester` | - |
 | **Security** | `security-reviewer-low` | - | `security-reviewer` |
-| **Build** | `build-fixer-low` | `build-fixer` | - |
+| **Build** | - | `build-fixer` | - |
 | **TDD** | `tdd-guide-low` | `tdd-guide` | - |
-| **Code Review** | `code-reviewer-low` | - | `code-reviewer` |
+| **Code Review** | - | - | `code-reviewer` |
 
 **CRITICAL: Always pass `model` parameter explicitly!**
 ```

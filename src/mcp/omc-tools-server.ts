@@ -10,21 +10,36 @@ import { lspTools } from "../tools/lsp-tools.js";
 import { astTools } from "../tools/ast-tools.js";
 import { pythonReplTool } from "../tools/python-repl/index.js";
 import { skillsTools } from "../tools/skills-tools.js";
+import { stateTools } from "../tools/state-tools.js";
+import { notepadTools } from "../tools/notepad-tools.js";
+import { memoryTools } from "../tools/memory-tools.js";
+import { traceTools } from "../tools/trace-tools.js";
+import { TOOL_CATEGORIES, type ToolCategory } from "../constants/index.js";
 
 // Type for our tool definitions
 interface ToolDef {
   name: string;
   description: string;
+  category?: ToolCategory;
   schema: Record<string, unknown>;
-  handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
+  handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
 }
 
-// Aggregate all custom tools
+// Tag each tool array with its category before aggregation
+function tagCategory<T extends { name: string }>(tools: T[], category: ToolCategory): (T & { category: ToolCategory })[] {
+  return tools.map(t => ({ ...t, category }));
+}
+
+// Aggregate all custom tools with category metadata
 const allTools: ToolDef[] = [
-  ...(lspTools as unknown as ToolDef[]),
-  ...(astTools as unknown as ToolDef[]),
-  pythonReplTool as unknown as ToolDef,
-  ...(skillsTools as unknown as ToolDef[])
+  ...tagCategory(lspTools as unknown as ToolDef[], TOOL_CATEGORIES.LSP),
+  ...tagCategory(astTools as unknown as ToolDef[], TOOL_CATEGORIES.AST),
+  { ...(pythonReplTool as unknown as ToolDef), category: TOOL_CATEGORIES.PYTHON },
+  ...tagCategory(skillsTools as unknown as ToolDef[], TOOL_CATEGORIES.SKILLS),
+  ...tagCategory(stateTools as unknown as ToolDef[], TOOL_CATEGORIES.STATE),
+  ...tagCategory(notepadTools as unknown as ToolDef[], TOOL_CATEGORIES.NOTEPAD),
+  ...tagCategory(memoryTools as unknown as ToolDef[], TOOL_CATEGORIES.MEMORY),
+  ...tagCategory(traceTools as unknown as ToolDef[], TOOL_CATEGORIES.TRACE),
 ];
 
 // Convert to SDK tool format
@@ -54,22 +69,41 @@ export const omcToolsServer = createSdkMcpServer({
  */
 export const omcToolNames = allTools.map(t => `mcp__t__${t.name}`);
 
+// Build a map from MCP tool name to category for efficient lookup
+const toolCategoryMap = new Map<string, ToolCategory>(
+  allTools.map(t => [`mcp__t__${t.name}`, t.category!])
+);
+
 /**
- * Get tool names filtered by category
+ * Get tool names filtered by category.
+ * Uses category metadata instead of string heuristics.
  */
 export function getOmcToolNames(options?: {
   includeLsp?: boolean;
   includeAst?: boolean;
   includePython?: boolean;
   includeSkills?: boolean;
+  includeState?: boolean;
+  includeNotepad?: boolean;
+  includeMemory?: boolean;
+  includeTrace?: boolean;
 }): string[] {
-  const { includeLsp = true, includeAst = true, includePython = true, includeSkills = true } = options || {};
+  const { includeLsp = true, includeAst = true, includePython = true, includeSkills = true, includeState = true, includeNotepad = true, includeMemory = true, includeTrace = true } = options || {};
+
+  const excludedCategories = new Set<ToolCategory>();
+  if (!includeLsp) excludedCategories.add(TOOL_CATEGORIES.LSP);
+  if (!includeAst) excludedCategories.add(TOOL_CATEGORIES.AST);
+  if (!includePython) excludedCategories.add(TOOL_CATEGORIES.PYTHON);
+  if (!includeSkills) excludedCategories.add(TOOL_CATEGORIES.SKILLS);
+  if (!includeState) excludedCategories.add(TOOL_CATEGORIES.STATE);
+  if (!includeNotepad) excludedCategories.add(TOOL_CATEGORIES.NOTEPAD);
+  if (!includeMemory) excludedCategories.add(TOOL_CATEGORIES.MEMORY);
+  if (!includeTrace) excludedCategories.add(TOOL_CATEGORIES.TRACE);
+
+  if (excludedCategories.size === 0) return [...omcToolNames];
 
   return omcToolNames.filter(name => {
-    if (!includeLsp && name.includes('lsp_')) return false;
-    if (!includeAst && name.includes('ast_')) return false;
-    if (!includePython && name.includes('python_repl')) return false;
-    if (!includeSkills && (name.includes('load_omc_skills') || name.includes('list_omc_skills'))) return false;
-    return true;
+    const category = toolCategoryMap.get(name);
+    return !category || !excludedCategories.has(category);
   });
 }

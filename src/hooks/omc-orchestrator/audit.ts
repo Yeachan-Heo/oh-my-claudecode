@@ -5,8 +5,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { OmcPaths } from '../../lib/worktree-paths.js';
 
-const LOG_DIR = '.omc/logs';
+const LOG_DIR = OmcPaths.LOGS;
 const LOG_FILE = 'delegation-audit.jsonl';
 
 export interface AuditEntry {

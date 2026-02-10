@@ -15,10 +15,11 @@ const __dirname = dirname(__filename);
 const { readStdin } = await import(path.join(__dirname, 'lib', 'stdin.mjs'));
 
 // Allowed path patterns (no warning)
+// Paths are normalized to forward slashes before matching
 const ALLOWED_PATH_PATTERNS = [
-  /\.omc\//,
-  /\.claude\//,
-  /\/\.claude\//,
+  /^\.omc\//,          // .omc/** (anchored)
+  /^\.claude\//,       // .claude/** (anchored)
+  /\/\.claude\//,      // any /.claude/ path (intentionally unanchored for absolute paths)
   /CLAUDE\.md$/,
   /AGENTS\.md$/,
 ];
@@ -37,7 +38,10 @@ const SOURCE_EXTENSIONS = new Set([
 
 function isAllowedPath(filePath) {
   if (!filePath) return true;
-  return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(filePath));
+  // Normalize path: convert backslashes, resolve . and .. segments, ensure forward slashes
+  const clean = path.normalize(filePath.replace(/\\/g, '/')).replace(/\\/g, '/');
+  if (clean.startsWith('../') || clean === '..') return false;
+  return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(clean));
 }
 
 function isSourceFile(filePath) {

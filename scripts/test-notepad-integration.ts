@@ -30,7 +30,7 @@ import {
 } from '../dist/hooks/notepad/index.js';
 
 // Import remember tag processing
-import { processOrchestratorPostTool } from '../dist/hooks/sisyphus-orchestrator/index.js';
+import { processOrchestratorPostTool } from '../dist/hooks/omc-orchestrator/index.js';
 
 // ============================================================================
 // Test Infrastructure

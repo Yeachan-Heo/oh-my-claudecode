@@ -70,7 +70,7 @@ describe('TokenExtractor', () => {
     });
 
     it('should estimate output tokens for Opus (50% ratio)', () => {
-      const result = extractTokens(mockStdin, null, 'claude-opus-4-5-20251101');
+      const result = extractTokens(mockStdin, null, 'claude-opus-4-6-20260205');
 
       // 1000 input tokens * 50% = 500
       expect(result.outputTokens).toBe(500);

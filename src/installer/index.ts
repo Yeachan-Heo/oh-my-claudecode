@@ -19,6 +19,7 @@ import {
   isWindows,
   MIN_NODE_VERSION
 } from './hooks.js';
+import { getRuntimePackageVersion } from '../lib/version.js';
 
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
@@ -38,7 +39,7 @@ export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CORE_COMMANDS: string[] = [];
 
 /** Current version */
-export const VERSION = '3.9.2';
+export const VERSION = getRuntimePackageVersion();
 
 /**
  * Find a marker that appears at the start of a line (line-anchored).
@@ -86,6 +87,7 @@ export interface InstallOptions {
   verbose?: boolean;
   skipClaudeCheck?: boolean;
   forceHooks?: boolean;
+  refreshHooksInPlugin?: boolean;
 }
 
 /**
@@ -152,6 +154,34 @@ export function isRunningAsPlugin(): boolean {
   // Check for CLAUDE_PLUGIN_ROOT env var (set by plugin system)
   // This is the most reliable indicator that we're running as a plugin
   return !!process.env.CLAUDE_PLUGIN_ROOT;
+}
+
+/**
+ * Check if we're running as a project-scoped plugin (not global)
+ *
+ * Project-scoped plugins are installed in the project's .claude/plugins/ directory,
+ * while global plugins are installed in ~/.claude/plugins/.
+ *
+ * When project-scoped, we should NOT modify global settings (like ~/.claude/settings.json)
+ * because the user explicitly chose project-level installation.
+ *
+ * @returns true if running as a project-scoped plugin, false otherwise
+ */
+export function isProjectScopedPlugin(): boolean {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) {
+    return false;
+  }
+
+  // Global plugins are installed under ~/.claude/plugins/
+  const globalPluginBase = join(homedir(), '.claude', 'plugins');
+
+  // If the plugin root is NOT under the global plugin directory, it's project-scoped
+  // Normalize paths for comparison (resolve symlinks, trailing slashes, etc.)
+  const normalizedPluginRoot = pluginRoot.replace(/\\/g, '/').replace(/\/$/, '');
+  const normalizedGlobalBase = globalPluginBase.replace(/\\/g, '/').replace(/\/$/, '');
+
+  return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
 
 /**
@@ -227,7 +257,7 @@ function loadClaudeMdContent(): string {
  * @param omcContent - New OMC content to inject
  * @returns Merged content with markers
  */
-export function mergeClaudeMd(existingContent: string | null, omcContent: string): string {
+export function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string {
   const START_MARKER = '<!-- OMC:START -->';
   const END_MARKER = '<!-- OMC:END -->';
   const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
@@ -244,9 +274,13 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
       .trim();
   }
 
+  // Strip any existing version marker from content and inject current version
+  cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
+  const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
+
   // Case 1: No existing content - wrap omcContent in markers
   if (!existingContent) {
-    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n`;
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
 
   // Case 2: Existing content has both markers - replace content between markers
@@ -259,17 +293,17 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     const beforeMarker = existingContent.substring(0, startIndex);
     const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
 
-    return `${beforeMarker}${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
+    return `${beforeMarker}${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
   }
 
   // Case 3: Corrupted markers (START without END or vice versa)
   if (startIndex !== -1 || endIndex !== -1) {
     // Handle corrupted state - backup will be created by caller
-    return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
   }
 
   // Case 4: No markers - wrap omcContent in markers, preserve existing after user customizations header
-  return `${START_MARKER}\n${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
+  return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
 }
 
 /**
@@ -306,11 +340,20 @@ export function install(options: InstallOptions = {}): InstallResult {
 
   // Check if running as a plugin
   const runningAsPlugin = isRunningAsPlugin();
+  const projectScoped = isProjectScopedPlugin();
+  const allowPluginHookRefresh = runningAsPlugin && options.refreshHooksInPlugin && !projectScoped;
   if (runningAsPlugin) {
     log('Detected Claude Code plugin context - skipping agent/command file installation');
     log('Plugin files are managed by Claude Code plugin system');
-    log('Will still install HUD statusline...');
-    // Don't return early - continue to install HUD
+    if (projectScoped) {
+      log('Detected project-scoped plugin - skipping global HUD/settings modifications');
+    } else {
+      log('Will still install HUD statusline...');
+      if (allowPluginHookRefresh) {
+        log('Will refresh global hooks/settings for plugin runtime reconciliation');
+      }
+    }
+    // Don't return early - continue to install HUD (unless project-scoped)
   }
 
   // Check Claude installation (optional)
@@ -325,8 +368,8 @@ export function install(options: InstallOptions = {}): InstallResult {
   }
 
   try {
-    // Ensure base config directory exists
-    if (!existsSync(CLAUDE_CONFIG_DIR)) {
+    // Ensure base config directory exists (skip for project-scoped plugins)
+    if (!projectScoped && !existsSync(CLAUDE_CONFIG_DIR)) {
       mkdirSync(CLAUDE_CONFIG_DIR, { recursive: true });
     }
 
@@ -420,7 +463,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
 
         // Merge OMC content with existing content
-        const mergedContent = mergeClaudeMd(existingContent, omcContent);
+        const mergedContent = mergeClaudeMd(existingContent, omcContent, VERSION);
         writeFileSync(claudeMdPath, mergedContent);
 
         if (existingContent) {
@@ -457,14 +500,38 @@ export function install(options: InstallOptions = {}): InstallResult {
 
       // Note: hooks configuration is deferred to consolidated settings.json write below
       result.hooksConfigured = true; // Will be set properly after consolidated write
+    } else if (allowPluginHookRefresh) {
+      // Refresh hooks in plugin context when explicitly requested (global plugin only)
+      log('Refreshing hook scripts for plugin reconciliation...');
+      if (!existsSync(HOOKS_DIR)) {
+        mkdirSync(HOOKS_DIR, { recursive: true });
+      }
+      const hookScripts = getHookScripts();
+      for (const [filename, content] of Object.entries(hookScripts)) {
+        const filepath = join(HOOKS_DIR, filename);
+        const dir = dirname(filepath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(filepath, content);
+        if (!isWindows()) {
+          chmodSync(filepath, 0o755);
+        }
+      }
+      result.hooksConfigured = true;
     } else {
       log('Skipping agent/command/hook files (managed by plugin system)');
     }
 
-    // Install HUD statusline (always, even in plugin mode)
-    log('Installing HUD statusline...');
+    // Install HUD statusline (skip for project-scoped plugins to avoid affecting global settings)
+    // Project-scoped plugins should not modify ~/.claude/settings.json
     let hudScriptPath: string | null = null;
-    try {
+    if (projectScoped) {
+      log('Skipping HUD statusline (project-scoped plugin should not modify global settings)');
+    } else {
+      log('Installing HUD statusline...');
+    }
+    if (!projectScoped) try {
       if (!existsSync(HUD_DIR)) {
         mkdirSync(HUD_DIR, { recursive: true });
       }
@@ -513,11 +580,18 @@ export function install(options: InstallOptions = {}): InstallResult {
         '    try {',
         '      const versions = readdirSync(pluginCacheBase);',
         '      if (versions.length > 0) {',
-        '        const latestVersion = versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()[0];',
-        '        pluginCacheVersion = latestVersion;',
-        '        pluginCacheDir = join(pluginCacheBase, latestVersion);',
-        '        const pluginPath = join(pluginCacheDir, "dist/hud/index.js");',
-        '        if (existsSync(pluginPath)) {',
+        '        // Filter to only versions with built dist/hud/index.js',
+        '        // This prevents picking an unbuilt new version after plugin update',
+        '        const builtVersions = versions.filter(version => {',
+        '          const pluginPath = join(pluginCacheBase, version, "dist/hud/index.js");',
+        '          return existsSync(pluginPath);',
+        '        });',
+        '        ',
+        '        if (builtVersions.length > 0) {',
+        '          const latestVersion = builtVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()[0];',
+        '          pluginCacheVersion = latestVersion;',
+        '          pluginCacheDir = join(pluginCacheBase, latestVersion);',
+        '          const pluginPath = join(pluginCacheDir, "dist/hud/index.js");',
         '          await import(pathToFileURL(pluginPath).href);',
         '          return;',
         '        }',
@@ -564,16 +638,21 @@ export function install(options: InstallOptions = {}): InstallResult {
     }
 
     // Consolidated settings.json write (atomic: read once, modify, write once)
-    log('Configuring settings.json...');
-    try {
+    // Skip for project-scoped plugins to avoid affecting global settings
+    if (projectScoped) {
+      log('Skipping settings.json configuration (project-scoped plugin)');
+    } else {
+      log('Configuring settings.json...');
+    }
+    if (!projectScoped) try {
       let existingSettings: Record<string, unknown> = {};
       if (existsSync(SETTINGS_FILE)) {
         const settingsContent = readFileSync(SETTINGS_FILE, 'utf-8');
         existingSettings = JSON.parse(settingsContent);
       }
 
-      // 1. Configure hooks (only if not running as plugin)
-      if (!runningAsPlugin) {
+      // 1. Configure hooks (only if not running as plugin unless refresh requested)
+      if (!runningAsPlugin || allowPluginHookRefresh) {
         const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
         const hooksConfig = getHooksSettingsConfig();
         const newHooks = hooksConfig.hooks;
@@ -600,7 +679,9 @@ export function install(options: InstallOptions = {}): InstallResult {
               if (hasNonOmcHook) break;
             }
 
-            if (hasNonOmcHook && !options.forceHooks) {
+            const canOverrideNonOmc = options.forceHooks && !allowPluginHookRefresh;
+
+            if (hasNonOmcHook && !canOverrideNonOmc) {
               // Conflict detected - don't overwrite
               log(`  [OMC] Warning: ${eventType} hook owned by another plugin. Skipping. Use --force-hooks to override.`);
               result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
@@ -645,15 +726,19 @@ export function install(options: InstallOptions = {}): InstallResult {
       result.hooksConfigured = false;
     }
 
-    // Save version metadata
-    const versionMetadata = {
-      version: VERSION,
-      installedAt: new Date().toISOString(),
-      installMethod: 'npm' as const,
-      lastCheckAt: new Date().toISOString()
-    };
-    writeFileSync(VERSION_FILE, JSON.stringify(versionMetadata, null, 2));
-    log('Saved version metadata');
+    // Save version metadata (skip for project-scoped plugins)
+    if (!projectScoped) {
+      const versionMetadata = {
+        version: VERSION,
+        installedAt: new Date().toISOString(),
+        installMethod: 'npm' as const,
+        lastCheckAt: new Date().toISOString()
+      };
+      writeFileSync(VERSION_FILE, JSON.stringify(versionMetadata, null, 2));
+      log('Saved version metadata');
+    } else {
+      log('Skipping version metadata (project-scoped plugin)');
+    }
 
     result.success = true;
     const hookCount = Object.keys(getHookScripts()).length;

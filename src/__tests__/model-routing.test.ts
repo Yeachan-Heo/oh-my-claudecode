@@ -656,7 +656,7 @@ describe('Router', () => {
 
       expect(decision.tier).toBe('HIGH');
       expect(decision.modelType).toBe('opus');
-      expect(decision.model).toBe('claude-opus-4-5-20251101');
+      expect(decision.model).toBe('claude-opus-4-6-20260205');
     });
 
     it('should respect explicit model override', () => {

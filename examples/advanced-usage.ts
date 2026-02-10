@@ -114,7 +114,7 @@ Always:
 `,
     config: {
       agents: {
-        sisyphus: { model: 'claude-opus-4-5-20251101' }
+        sisyphus: { model: 'claude-opus-4-6-20260205' }
       },
       features: {
         parallelExecution: true,

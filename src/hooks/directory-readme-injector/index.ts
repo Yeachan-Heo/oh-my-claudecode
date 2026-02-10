@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   loadInjectedPaths,
   saveInjectedPaths,
@@ -74,10 +74,10 @@ export function createDirectoryReadmeInjectorHook(workingDirectory: string) {
     return sessionCaches.get(sessionID)!;
   }
 
-  function resolveFilePath(path: string): string | null {
-    if (!path) return null;
-    if (path.startsWith('/')) return path;
-    return resolve(workingDirectory, path);
+  function resolveFilePath(filePath: string): string | null {
+    if (!filePath) return null;
+    if (isAbsolute(filePath)) return filePath;
+    return resolve(workingDirectory, filePath);
   }
 
   /**

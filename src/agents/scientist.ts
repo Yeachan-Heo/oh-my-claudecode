@@ -50,7 +50,6 @@ export const scientistAgent: AgentConfig = {
   name: 'scientist',
   description: 'Data analysis and research execution specialist. Executes Python code for EDA, statistical analysis, and generating data-driven findings. Works with CSV, JSON, Parquet files using pandas, numpy, scipy.',
   prompt: loadAgentPrompt('scientist'),
-  tools: ['Read', 'Glob', 'Grep', 'Bash', 'python_repl'],
   model: 'sonnet',
   defaultModel: 'sonnet',
   metadata: SCIENTIST_PROMPT_METADATA

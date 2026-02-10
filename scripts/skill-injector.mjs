@@ -13,6 +13,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
+import { readStdin } from './lib/stdin.mjs';
 import { createRequire } from 'module';
 
 // Try to load the compiled bridge bundle
@@ -182,15 +183,6 @@ function findMatchingSkillsFallback(prompt, directory, sessionId) {
 // Main Logic (uses bridge if available, fallback otherwise)
 // =============================================================================
 
-// Read all stdin
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf-8');
-}
-
 // Find matching skills - delegates to bridge or fallback
 function findMatchingSkills(prompt, directory, sessionId) {
   if (bridge) {
@@ -258,7 +250,7 @@ async function main() {
     try { data = JSON.parse(input); } catch { /* ignore parse errors */ }
 
     const prompt = data.prompt || '';
-    const sessionId = data.sessionId || 'unknown';
+    const sessionId = data.session_id || data.sessionId || 'unknown';
     const directory = data.cwd || process.cwd();
 
     // Skip if no prompt
@@ -268,6 +260,16 @@ async function main() {
     }
 
     const matchingSkills = findMatchingSkills(prompt, directory, sessionId);
+
+    // Record skill activations to flow trace (best-effort)
+    if (matchingSkills.length > 0) {
+      try {
+        const { recordSkillActivated } = await import('../dist/hooks/subagent-tracker/flow-tracer.js');
+        for (const skill of matchingSkills) {
+          recordSkillActivated(directory, sessionId, skill.name, skill.scope || 'learned');
+        }
+      } catch { /* silent - trace is best-effort */ }
+    }
 
     if (matchingSkills.length > 0) {
       console.log(JSON.stringify({

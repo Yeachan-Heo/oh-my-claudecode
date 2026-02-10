@@ -20,6 +20,8 @@ import { renderThinking } from './elements/thinking.js';
 import { renderSession } from './elements/session.js';
 import { renderAutopilot } from './elements/autopilot.js';
 import { renderCwd } from './elements/cwd.js';
+import { renderGitRepo, renderGitBranch } from './elements/git.js';
+import { renderModel } from './elements/model.js';
 import {
   getAnalyticsDisplay,
   renderAnalyticsLineWithConfig,
@@ -58,21 +60,36 @@ function renderSessionHealthAnalyticsWithConfig(
   const data = getSessionHealthAnalyticsData(sessionHealth);
   const parts: string[] = [];
 
+  // Health indicator (🟢/🟡/🔴) - controlled by showHealthIndicator
+  const showIndicator = enabledElements.showHealthIndicator ?? true;
+
   // Cost indicator and cost amount (respects showCost)
   if (enabledElements.showCost) {
-    parts.push(data.costIndicator, data.cost);
+    if (showIndicator) {
+      parts.push(data.costIndicator, data.cost);
+    } else {
+      parts.push(data.cost);
+    }
+  } else if (showIndicator) {
+    // Show indicator even without cost
+    parts.push(data.costIndicator);
   }
 
-  // Tokens always shown (not a cost/cache thing)
-  parts.push(data.tokens);
+  // Tokens - controlled by showTokens
+  const showTokens = enabledElements.showTokens ?? true;
+  if (showTokens) {
+    parts.push(data.tokens);
+  }
 
   // Cache (respects showCache)
   if (enabledElements.showCache) {
     parts.push(`Cache: ${data.cache}`);
   }
 
-  // Cost per hour (respects showCost)
-  if (enabledElements.showCost && data.costHour) {
+  // Cost per hour
+  // If showCostPerHour is explicitly set, use it; otherwise default to true (backward compat)
+  const showCostHour = enabledElements.showCostPerHour ?? true;
+  if (showCostHour && enabledElements.showCost && data.costHour) {
     parts.push(data.costHour);
   }
 
@@ -106,8 +123,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
         if (cacheEfficiency) lines.push(cacheEfficiency);
       }
 
-      // Budget warning (respects showCost)
-      if (enabledElements.showCost) {
+      // Budget warning
+      // If showBudgetWarning is explicitly set, use it; otherwise default to true (backward compat)
+      const showBudgetAnalytics = enabledElements.showBudgetWarning ?? true;
+      if (showBudgetAnalytics && enabledElements.showCost) {
         const budgetWarning = renderBudgetWarning(context.sessionHealth);
         if (budgetWarning) lines.push(budgetWarning);
       }
@@ -128,10 +147,31 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     return limitOutputLines(lines, config.elements.maxOutputLines).join('\n');
   }
 
-  // Working directory (first element)
+  // Git info line (separate line above HUD)
+  const gitElements: string[] = [];
+
+  // Working directory
   if (enabledElements.cwd) {
     const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || 'relative');
-    if (cwdElement) elements.push(cwdElement);
+    if (cwdElement) gitElements.push(cwdElement);
+  }
+
+  // Git repository name
+  if (enabledElements.gitRepo) {
+    const gitRepoElement = renderGitRepo(context.cwd);
+    if (gitRepoElement) gitElements.push(gitRepoElement);
+  }
+
+  // Git branch
+  if (enabledElements.gitBranch) {
+    const gitBranchElement = renderGitBranch(context.cwd);
+    if (gitBranchElement) gitElements.push(gitBranchElement);
+  }
+
+  // Model name
+  if (enabledElements.model && context.modelName) {
+    const modelElement = renderModel(context.modelName);
+    if (modelElement) gitElements.push(modelElement);
   }
 
   // [OMC] label
@@ -161,15 +201,22 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Session health indicator
   if (enabledElements.sessionHealth && context.sessionHealth) {
-    const session = renderSession(context.sessionHealth);
-    if (session) elements.push(session);
+    // Session duration display (session:19m)
+    // If showSessionDuration is explicitly set, use it; otherwise default to true (backward compat)
+    const showDuration = enabledElements.showSessionDuration ?? true;
+    if (showDuration) {
+      const session = renderSession(context.sessionHealth);
+      if (session) elements.push(session);
+    }
 
     // Add analytics inline if available (respects showCache/showCost)
     const analytics = renderSessionHealthAnalyticsWithConfig(context.sessionHealth, enabledElements);
     if (analytics) elements.push(analytics);
 
-    // Add budget warning to detail lines if needed (respects showCost)
-    if (enabledElements.showCost) {
+    // Add budget warning to detail lines
+    // If showBudgetWarning is explicitly set, use it; otherwise default to true (backward compat)
+    const showBudget = enabledElements.showBudgetWarning ?? true;
+    if (showBudget && enabledElements.showCost) {
       const warning = renderBudgetWarning(context.sessionHealth);
       if (warning) detailLines.push(warning);
     }
@@ -241,9 +288,18 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   }
 
   // Compose output
-  const headerLine = elements.join(dim(' | '));
+  const outputLines: string[] = [];
 
-  // Todos on second line (if available)
+  // Git info line (separate line above HUD header)
+  if (gitElements.length > 0) {
+    outputLines.push(gitElements.join(dim(' | ')));
+  }
+
+  // HUD header line
+  const headerLine = elements.join(dim(' | '));
+  outputLines.push(headerLine);
+
+  // Todos on next line (if available)
   if (enabledElements.todos) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
@@ -265,5 +321,5 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     }
   }
 
-  return limitOutputLines([headerLine, ...detailLines], config.elements.maxOutputLines).join('\n');
+  return limitOutputLines([...outputLines, ...detailLines], config.elements.maxOutputLines).join('\n');
 }

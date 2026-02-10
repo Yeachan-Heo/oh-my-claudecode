@@ -141,21 +141,17 @@ console.log(result.modifiedInput.model); // 'sonnet'
 | `executor-high` | opus | Complex refactoring |
 | `executor-low` | haiku | Simple changes |
 | `explore` | haiku | Fast code search |
-| `explore-medium` | sonnet | Thorough search |
 | `designer` | sonnet | UI implementation |
 | `designer-high` | opus | Complex UI architecture |
 | `designer-low` | haiku | Simple styling |
 | `researcher` | sonnet | Documentation lookup |
-| `researcher-low` | haiku | Quick docs |
 | `writer` | haiku | Documentation writing |
 | `vision` | sonnet | Image analysis |
 | `planner` | opus | Strategic planning |
 | `critic` | opus | Plan review |
 | `analyst` | opus | Pre-planning analysis |
 | `qa-tester` | sonnet | CLI testing |
-| `qa-tester-high` | opus | Comprehensive QA |
 | `scientist` | sonnet | Data analysis |
-| `scientist-low` | haiku | Quick inspection |
 | `scientist-high` | opus | Complex research |
 
 ## Debug Mode

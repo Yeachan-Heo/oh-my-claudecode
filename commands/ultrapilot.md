@@ -7,7 +7,10 @@ aliases: [up, ultraauto, parallelauto]
 
 [ULTRAPILOT ACTIVATED - PARALLEL AUTONOMOUS EXECUTION MODE]
 
-You are now in ULTRAPILOT mode. This is a parallel autopilot that spawns multiple workers with file ownership partitioning for maximum speed.
+You are now in ULTRAPILOT mode. Ultrapilot is a high-parallelism compatibility facade that maps orchestration onto Team mode's staged runtime while preserving the ultrapilot user intent.
+
+Canonical staged runtime:
+`team-plan -> team-prd -> team-exec -> team-verify -> team-fix (loop)`
 
 ## User's Task
 
@@ -22,6 +25,32 @@ Transform this task into working code through parallel execution:
 3. **Parallel Execution** - Spawn up to 5 workers with exclusive file ownership
 4. **Integration** - Handle shared files sequentially
 5. **Validation** - Full system integrity check
+
+## Team-Backed Staged Semantics
+
+Ultrapilot preserves high-parallel execution intent, but stage orchestration aligns with Team runtime:
+
+`team-plan -> team-prd -> team-exec -> team-verify -> team-fix (loop)`
+
+### Stage Entry/Exit Criteria
+
+- **team-plan**: enter when ultrapilot request is parsed; exit when decomposition + ownership plan are ready.
+- **team-prd**: enter when acceptance criteria/scope are underspecified; exit when execution criteria are explicit.
+- **team-exec**: enter once task graph + workers are active; exit when current execution pass reaches terminal task states.
+- **team-verify**: enter after execution pass; exit on pass or transition to `team-fix` on failure.
+- **team-fix**: enter when verification finds defects/incomplete criteria; exit back to `team-exec` for another pass.
+
+### Verify/Fix Loop Policy and Stop Conditions
+
+Continue `team-exec -> team-verify -> team-fix` until verification passes with no required follow-up tasks, or work reaches an explicit terminal blocked/failed outcome with evidence.
+
+`team-fix` is bounded by max attempts; exceeding that bound transitions to terminal `failed`.
+
+### Resume and Cancel Semantics
+
+- **Resume:** continue from the last non-terminal Team stage using staged state + live task status.
+- **Cancel:** `/oh-my-claudecode:cancel` requests worker shutdown, waits best-effort for acknowledgements, marks phase `cancelled` with `active=false`, records cancellation metadata, clears/preserves team state per policy, and halts stage progression.
+- Terminal states are `complete`, `failed`, and `cancelled`.
 
 ## Phase 0: Task Analysis
 

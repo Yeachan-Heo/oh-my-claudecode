@@ -6,15 +6,26 @@
 
 import type { UltraworkStateForHud, RalphStateForHud, SkillInvocation } from '../types.js';
 import { RESET, cyan } from '../colors.js';
+import { truncateToWidth } from '../../utils/string-width.js';
 
 const MAGENTA = '\x1b[35m';
 const BRIGHT_MAGENTA = '\x1b[95m';
 
 /**
- * Truncate string to max length with ellipsis.
+ * Truncate string to max visual width with ellipsis.
+ * CJK-aware: accounts for double-width characters.
  */
-function truncate(str: string, max: number): string {
-  return str.length > max ? str.slice(0, max) + '...' : str;
+function truncate(str: string, maxWidth: number): string {
+  return truncateToWidth(str, maxWidth);
+}
+
+/**
+ * Extract the display name from a skill name.
+ * For namespaced skills (e.g., "oh-my-claudecode:plan"), returns only the last segment ("plan").
+ * For non-namespaced skills, returns the name unchanged.
+ */
+function getSkillDisplayName(skillName: string): string {
+  return skillName.split(':').pop() || skillName;
 }
 
 /**
@@ -57,7 +68,8 @@ export function renderSkills(
   // Last skill (if different from active mode)
   if (lastSkill && !isActiveMode(lastSkill.name, ultrawork, ralph)) {
     const argsDisplay = lastSkill.args ? `(${truncate(lastSkill.args, 15)})` : '';
-    parts.push(cyan(`skill:${lastSkill.name}${argsDisplay}`));
+    const displayName = getSkillDisplayName(lastSkill.name);
+    parts.push(cyan(`skill:${displayName}${argsDisplay}`));
   }
 
   return parts.length > 0 ? parts.join(' ') : null;
@@ -72,7 +84,8 @@ export function renderLastSkill(
   if (!lastSkill) return null;
 
   const argsDisplay = lastSkill.args ? `(${truncate(lastSkill.args, 15)})` : '';
-  return cyan(`skill:${lastSkill.name}${argsDisplay}`);
+  const displayName = getSkillDisplayName(lastSkill.name);
+  return cyan(`skill:${displayName}${argsDisplay}`);
 }
 
 /**

@@ -89,10 +89,8 @@ program
 program
   .command('tui')
   .description('Launch tokscale interactive TUI for token visualization')
-  .option('--light', 'Use light theme')
   .option('--models', 'Show models view')
-  .option('--daily', 'Show daily view')
-  .option('--stats', 'Show stats view')
+  .option('--daily', 'Show daily/monthly view')
   .option('--no-claude', 'Show all providers (not just Claude)')
   .action(async (options) => {
     const available = await isTokscaleCLIAvailable();
@@ -105,12 +103,10 @@ program
 
     const view = options.models ? 'models'
                : options.daily ? 'daily'
-               : options.stats ? 'stats'
                : 'overview';
 
     try {
       await launchTokscaleTUI({
-        light: options.light,
         view,
         claude: options.claude
       });

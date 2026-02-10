@@ -39,8 +39,8 @@ Ecomode is a modifier that combines with execution modes:
 
 | Decision | Rule |
 |----------|------|
-| DEFAULT | Use LOW tier (Haiku) for all tasks |
-| UPGRADE | Use MEDIUM (Sonnet) only when task complexity warrants |
+| DEFAULT | Start with LOW tier (Haiku) for most tasks |
+| UPGRADE | Escalate to MEDIUM (Sonnet) when LOW tier fails or task requires multi-file reasoning |
 | AVOID | HIGH tier (Opus) - only for planning/critique if essential |
 
 ## Agent Selection in Ecomode
@@ -88,6 +88,19 @@ Long-running commands (install, build, test) run in background. Maximum 5 concur
 3. **Prefer executor-low** for simple changes - only upgrade if it fails
 4. **Use writer (haiku)** for all documentation tasks
 5. **Avoid opus agents** unless the task genuinely requires deep reasoning
+
+## Disabling Ecomode
+
+Ecomode can be completely disabled via config. When disabled, all ecomode keywords are ignored.
+
+Set in `~/.claude/.omc-config.json`:
+```json
+{
+  "ecomode": {
+    "enabled": false
+  }
+}
+```
 
 ## State Management
 

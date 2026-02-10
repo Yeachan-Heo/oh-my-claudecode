@@ -227,7 +227,7 @@ Output escalation recommendation:
 | Variant | Model | Tools | Focus |
 |---------|-------|-------|-------|
 | explore | Haiku | Read, Glob, Grep | Quick searches |
-| explore-medium | Sonnet | Same | Thorough analysis |
+| explore (model=sonnet) | Sonnet | Same | Thorough analysis |
 
 **Shared Constraints**:
 - READ-ONLY
@@ -244,7 +244,7 @@ Output escalation recommendation:
 - Parallel tool calls (3+)
 - Escalate if: architecture understanding needed, cross-module analysis
 
-## explore-medium
+## explore (model=sonnet)
 - Thorough analysis
 - Cross-reference findings
 - Explain relationships

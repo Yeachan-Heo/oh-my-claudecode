@@ -1,3 +1,5 @@
+English | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md)
+
 # oh-my-claudecode
 
 [![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
@@ -34,6 +36,48 @@ autopilot: build a REST API for managing tasks
 
 That's it. Everything else is automatic.
 
+## Team Mode (Recommended)
+
+Starting in **v4.1.7**, **Team** is the canonical orchestration surface in OMC. Legacy entrypoints like **swarm** and **ultrapilot** are still supported, but they now **route to Team under the hood**.
+
+```bash
+/oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+```
+
+Team runs as a staged pipeline:
+
+`team-plan → team-prd → team-exec → team-verify → team-fix (loop)`
+
+Enable Claude Code native teams in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+> If teams are disabled, OMC will warn you and fall back to non-team execution where possible.
+
+> **Note: Package naming** — The project is branded as **oh-my-claudecode** (repo, plugin, commands), but the npm package is published as [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). If you install the CLI tools via npm/bun, use `npm install -g oh-my-claude-sisyphus`.
+
+### Updating
+
+```bash
+# 1. Update the plugin
+/plugin install oh-my-claudecode
+
+# 2. Re-run setup to refresh configuration
+/oh-my-claudecode:omc-setup
+```
+
+If you experience issues after updating, clear the old plugin cache:
+
+```bash
+/oh-my-claudecode:doctor
+```
+
 <h1 align="center">Your Claude Just Have been Steroided.</h1>
 
 <p align="center">
@@ -45,6 +89,7 @@ That's it. Everything else is automatic.
 ## Why oh-my-claudecode?
 
 - **Zero configuration required** - Works out of the box with intelligent defaults
+- **Team-first orchestration** - Team is the canonical multi-agent surface (swarm/ultrapilot are compatibility facades)
 - **Natural language interface** - No commands to memorize, just describe what you want
 - **Automatic parallelization** - Complex tasks distributed across specialized agents
 - **Persistent execution** - Won't give up until the job is verified complete
@@ -56,18 +101,18 @@ That's it. Everything else is automatic.
 
 ## Features
 
-### Execution Modes
-Multiple strategies for different use cases - from fully autonomous builds to token-efficient refactoring. [Learn more →](https://yeachan-heo.github.io/oh-my-claudecode-website/execution-modes)
+### Orchestration Modes
+Multiple strategies for different use cases — from Team-backed orchestration to token-efficient refactoring. [Learn more →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
-| Mode | Speed | Use For |
-|------|-------|---------|
-| **Autopilot** | Fast | Full autonomous workflows |
-| **Ultrawork** | Parallel | Maximum parallelism for any task |
-| **Ralph** | Persistent | Tasks that must complete fully |
-| **Ultrapilot** | 3-5x faster | Multi-component systems |
-| **Ecomode** | Fast + 30-50% cheaper | Budget-conscious projects |
-| **Swarm** | Coordinated | Parallel independent tasks |
-| **Pipeline** | Sequential | Multi-stage processing |
+| Mode | What it is | Use For |
+|------|------------|---------|
+| **Team (recommended)** | Canonical staged pipeline (`team-plan → team-prd → team-exec → team-verify → team-fix`) | Coordinated agents working on a shared task list |
+| **Autopilot** | Autonomous execution (single lead agent) | End-to-end feature work with minimal ceremony |
+| **Ultrawork** | Maximum parallelism (non-team) | Burst parallel fixes/refactors where Team isn't needed |
+| **Ralph** | Persistent mode with verify/fix loops | Tasks that must complete fully (no silent partials) |
+| **Ecomode** | Token-efficient routing | Budget-conscious iteration |
+| **Pipeline** | Sequential, staged processing | Multi-step transformations with strict ordering |
+| **Swarm / Ultrapilot (legacy)** | Compatibility facades that route to **Team** | Existing workflows and older docs |
 
 ### Intelligent Orchestration
 
@@ -92,16 +137,19 @@ Optional shortcuts for power users. Natural language works fine without them.
 
 | Keyword | Effect | Example |
 |---------|--------|---------|
+| `team` | Canonical Team orchestration | `/oh-my-claudecode:team 3:executor "fix all TypeScript errors"` |
 | `autopilot` | Full autonomous execution | `autopilot: build a todo app` |
 | `ralph` | Persistence mode | `ralph: refactor auth` |
 | `ulw` | Maximum parallelism | `ulw fix all errors` |
 | `eco` | Token-efficient execution | `eco: migrate database` |
 | `plan` | Planning interview | `plan the API` |
 | `ralplan` | Iterative planning consensus | `ralplan this feature` |
+| `swarm` | Legacy keyword (routes to Team) | `swarm 5 agents: fix lint errors` |
+| `ultrapilot` | Legacy keyword (routes to Team) | `ultrapilot: build a fullstack app` |
 
-**ralph includes ultrawork:** When you activate ralph mode, it automatically includes ultrawork's parallel execution. No need to combine keywords.
-
----
+**Notes:**
+- **ralph includes ultrawork**: when you activate ralph mode, it automatically includes ultrawork's parallel execution.
+- `swarm N agents` syntax is still recognized for agent count extraction, but the runtime is Team-backed in v4.1.7+.
 
 ## Utilities
 
@@ -122,6 +170,7 @@ omc wait --stop   # Disable daemon
 ## Documentation
 
 - **[Full Reference](docs/REFERENCE.md)** - Complete feature documentation
+- **[Performance Monitoring](docs/PERFORMANCE-MONITORING.md)** - Agent tracking, debugging, and optimization
 - **[Website](https://yeachan-heo.github.io/oh-my-claudecode-website)** - Interactive guides and examples
 - **[Migration Guide](docs/MIGRATION.md)** - Upgrade from v2.x
 - **[Architecture](docs/ARCHITECTURE.md)** - How it works under the hood
@@ -132,6 +181,17 @@ omc wait --stop   # Disable daemon
 
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro subscription OR Anthropic API key
+
+### Optional: Multi-AI Orchestration
+
+OMC can optionally orchestrate external AI providers for cross-validation and design consistency. These are **not required** — OMC works fully without them.
+
+| Provider | Install | What it enables |
+|----------|---------|-----------------|
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | Design review, UI consistency (1M token context) |
+| [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | Architecture validation, code review cross-check |
+
+**Cost:** 3 Pro plans (Claude + Gemini + ChatGPT) cover everything for ~$60/month.
 
 ---
 

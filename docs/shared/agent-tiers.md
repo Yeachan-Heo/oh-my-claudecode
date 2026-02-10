@@ -9,20 +9,20 @@ This is the single source of truth for all agent tier information. All skill fil
 | **Analysis** | architect-low | architect-medium | architect |
 | **Execution** | executor-low | executor | executor-high |
 | **Deep Work** | - | - | deep-executor |
-| **Search** | explore | explore-medium | explore-high |
-| **Research** | researcher-low | researcher | - |
+| **Search** | explore | - | explore-high |
+| **Research** | - | researcher | - |
 | **Frontend** | designer-low | designer | designer-high |
 | **Docs** | writer | - | - |
 | **Visual** | - | vision | - |
 | **Planning** | - | - | planner |
 | **Critique** | - | - | critic |
 | **Pre-Planning** | - | - | analyst |
-| **Testing** | - | qa-tester | qa-tester-high |
+| **Testing** | - | qa-tester | - |
 | **Security** | security-reviewer-low | - | security-reviewer |
-| **Build** | build-fixer-low | build-fixer | - |
+| **Build** | - | build-fixer | - |
 | **TDD** | tdd-guide-low | tdd-guide | - |
-| **Code Review** | code-reviewer-low | - | code-reviewer |
-| **Data Science** | scientist-low | scientist | scientist-high |
+| **Code Review** | - | - | code-reviewer |
+| **Data Science** | - | scientist | scientist-high |
 
 ## Model Routing Guide
 
@@ -37,7 +37,7 @@ This is the single source of truth for all agent tier information. All skill fil
 | Task Type | Best Agent | Tier |
 |-----------|------------|------|
 | Quick code lookup | explore | LOW |
-| Find files/patterns | explore, explore-medium | LOW/MEDIUM |
+| Find files/patterns | explore | LOW |
 | Complex architectural search | explore-high | HIGH |
 | Simple code change | executor-low | LOW |
 | Feature implementation | executor | MEDIUM |
@@ -56,13 +56,13 @@ This is the single source of truth for all agent tier information. All skill fil
 | Security review | security-reviewer | HIGH |
 | Quick security scan | security-reviewer-low | LOW |
 | Fix build errors | build-fixer | MEDIUM |
-| Simple build fix | build-fixer-low | LOW |
+| Simple build fix | build-fixer (model=haiku) | LOW |
 | TDD workflow | tdd-guide | MEDIUM |
 | Quick test suggestions | tdd-guide-low | LOW |
 | Code review | code-reviewer | HIGH |
-| Quick code check | code-reviewer-low | LOW |
+| Quick code check | code-reviewer (model=haiku) | LOW |
 | Data analysis/stats | scientist | MEDIUM |
-| Quick data inspection | scientist-low | LOW |
+| Quick data inspection | scientist (model=haiku) | LOW |
 | Complex ML/hypothesis | scientist-high | HIGH |
 | Find symbol references | explore-high | HIGH |
 | Get file/workspace symbol outline | explore | LOW |
@@ -116,7 +116,6 @@ For token savings, prefer lower tiers when the task allows:
 | Agent | LSP Diagnostics | LSP Dir Diagnostics | LSP Symbols | LSP References | AST Search | AST Replace | Python REPL |
 |-------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | `explore` | - | - | doc + workspace | - | yes | - | - |
-| `explore-medium` | - | - | doc + workspace | - | yes | - | - |
 | `explore-high` | - | - | doc + workspace | yes | yes | - | - |
 | `architect-low` | yes | - | - | - | - | - | - |
 | `architect-medium` | yes | yes | - | - | yes | - | - |
@@ -126,14 +125,10 @@ For token savings, prefer lower tiers when the task allows:
 | `executor-high` | yes | yes | - | - | yes | yes | - |
 | `deep-executor` | yes | yes | - | - | yes | yes | - |
 | `build-fixer` | yes | yes | - | - | - | - | - |
-| `build-fixer-low` | yes | yes | - | - | - | - | - |
 | `tdd-guide` | yes | - | - | - | - | - | - |
 | `tdd-guide-low` | yes | - | - | - | - | - | - |
 | `code-reviewer` | yes | - | - | - | yes | - | - |
-| `code-reviewer-low` | yes | - | - | - | - | - | - |
 | `qa-tester` | yes | - | - | - | - | - | - |
-| `qa-tester-high` | yes | - | - | - | - | - | - |
-| `scientist-low` | - | - | - | - | - | - | yes |
 | `scientist` | - | - | - | - | - | - | yes |
 | `scientist-high` | - | - | - | - | - | - | yes |
 
@@ -155,11 +150,11 @@ For complex rename or refactoring tasks requiring implementation, delegate to `e
 
 ### Tool Selection Guidance
 
-- **Need file symbol outline or workspace search?** Use `lsp_document_symbols`/`lsp_workspace_symbols` via `explore`, `explore-medium`, or `explore-high`
+- **Need file symbol outline or workspace search?** Use `lsp_document_symbols`/`lsp_workspace_symbols` via `explore` or `explore-high`
 - **Need to find all usages of a symbol?** Use `lsp_find_references` via `explore-high` (only agent with it)
 - **Need structural code patterns?** (e.g., "find all functions matching X shape") Use `ast_grep_search` via `explore` family, `architect`/`architect-medium`, or `code-reviewer`
 - **Need to transform code structurally?** Use `ast_grep_replace` via `executor-high` (only agent with it)
-- **Need project-wide type checking?** Use `lsp_diagnostics_directory` via `architect`/`architect-medium`, `executor`/`executor-high`, or `build-fixer` family
+- **Need project-wide type checking?** Use `lsp_diagnostics_directory` via `architect`/`architect-medium`, `executor`/`executor-high`, or `build-fixer`
 - **Need single-file error checking?** Use `lsp_diagnostics` via many agents (see matrix)
-- **Need data analysis / computation?** Use `python_repl` via `scientist` agents (all tiers)
+- **Need data analysis / computation?** Use `python_repl` via `scientist` or `scientist-high`
 - **Need quick type info or definition lookup?** Use `lsp_hover`/`lsp_goto_definition` directly (orchestrator-direct tools)

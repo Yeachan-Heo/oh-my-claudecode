@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { triggerStopCallbacks } from './callbacks.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -234,9 +235,11 @@ const MODE_STATE_FILES = [
  * in subsequent sessions. When a session ends normally, all active modes
  * should be considered terminated.
  *
+ * @param directory - The project directory
+ * @param sessionId - Optional session ID to match. Only cleans states belonging to this session.
  * @returns Object with counts of files removed and modes cleaned
  */
-export function cleanupModeStates(directory: string): { filesRemoved: number; modesCleaned: string[] } {
+export function cleanupModeStates(directory: string, sessionId?: string): { filesRemoved: number; modesCleaned: string[] } {
   let filesRemoved = 0;
   const modesCleaned: string[] = [];
   const stateDir = path.join(directory, '.omc', 'state');
@@ -256,12 +259,19 @@ export function cleanupModeStates(directory: string): { filesRemoved: number; mo
           const content = fs.readFileSync(localPath, 'utf-8');
           const state = JSON.parse(content);
 
-          // Only clean if marked as active (prevents removing historical/completed states)
+          // Only clean if marked as active AND belongs to this session
+          // (prevents removing other concurrent sessions' states)
           if (state.active === true) {
-            fs.unlinkSync(localPath);
-            filesRemoved++;
-            if (!modesCleaned.includes(mode)) {
-              modesCleaned.push(mode);
+            // If sessionId is provided, only clean matching states
+            // If state has no session_id, it's legacy - clean it
+            // If state.session_id matches our sessionId, clean it
+            const stateSessionId = state.session_id as string | undefined;
+            if (!sessionId || !stateSessionId || stateSessionId === sessionId) {
+              fs.unlinkSync(localPath);
+              filesRemoved++;
+              if (!modesCleaned.includes(mode)) {
+                modesCleaned.push(mode);
+              }
             }
           }
         } else {
@@ -305,7 +315,7 @@ export function exportSessionSummary(directory: string, metrics: SessionMetrics)
 /**
  * Process session end
  */
-export function processSessionEnd(input: SessionEndInput): HookOutput {
+export async function processSessionEnd(input: SessionEndInput): Promise<HookOutput> {
   // Record and export session metrics to disk
   const metrics = recordSessionMetrics(input.cwd, input);
   exportSessionSummary(input.cwd, metrics);
@@ -315,7 +325,14 @@ export function processSessionEnd(input: SessionEndInput): HookOutput {
 
   // Clean up mode state files to prevent stale state issues
   // This ensures the stop hook won't malfunction in subsequent sessions
-  cleanupModeStates(input.cwd);
+  // Pass session_id to only clean up this session's states
+  cleanupModeStates(input.cwd, input.session_id);
+
+  // Trigger stop hook callbacks (#395)
+  await triggerStopCallbacks(metrics, {
+    session_id: input.session_id,
+    cwd: input.cwd,
+  });
 
   // Return simple response - metrics are persisted to .omc/sessions/
   return { continue: true };

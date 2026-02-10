@@ -24,21 +24,21 @@
 ## Combine Modes
 `ralph ulw: migrate database` = persistence + parallelism
 
-## Agent Tiers (32 Total)
+## Agent Tiers (28 Total)
 
 | Domain | Haiku (fast) | Sonnet (balanced) | Opus (complex) |
 |--------|-------------|-------------------|-----------------|
 | Analysis | architect-low | architect-medium | architect |
 | Execution | executor-low | executor | executor-high |
-| Search | explore | explore-medium | explore-high |
+| Search | explore | - | explore-high |
 | Frontend | designer-low | designer | designer-high |
-| Testing | - | qa-tester | qa-tester-high |
+| Testing | - | qa-tester | - |
 | Security | security-rev-low | - | security-reviewer |
-| Data Sci | scientist-low | scientist | scientist-high |
-| Research | researcher-low | researcher | - |
-| Build | build-fixer-low | build-fixer | - |
+| Data Sci | - | scientist | scientist-high |
+| Research | - | researcher | - |
+| Build | - | build-fixer | - |
 | TDD | tdd-guide-low | tdd-guide | - |
-| Code Review | code-reviewer-low | - | code-reviewer |
+| Code Review | - | - | code-reviewer |
 | Docs | writer | - | - |
 | Visual | - | vision | - |
 | Planning | - | - | planner |

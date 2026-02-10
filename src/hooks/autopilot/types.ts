@@ -160,6 +160,8 @@ export interface AutopilotState {
 
   /** Session binding */
   session_id?: string;
+  /** Project path for isolation */
+  project_path?: string;
 }
 
 /**

@@ -93,7 +93,7 @@ function updateTopAgents(
  * Calculate cache hit rate percentage
  */
 function calculateCacheHitRate(totals: AnalyticsSummary['totals']): number {
-  const total = totals.inputTokens + totals.cacheCreationTokens;
+  const total = totals.inputTokens + totals.cacheCreationTokens + totals.cacheReadTokens;
   if (total === 0) return 0;
   return (totals.cacheReadTokens / total) * 100;
 }

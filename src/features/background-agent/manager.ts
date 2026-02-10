@@ -201,7 +201,8 @@ export class BackgroundManager {
   }
 
   /**
-   * Detect sessions with no recent activity and invoke callback
+   * Detect sessions with no recent activity and handle them
+   * Marks stale tasks as errored even without a callback configured (Bug #9 fix)
    */
   private detectAndHandleStaleSessions(): void {
     const now = Date.now();
@@ -219,6 +220,21 @@ export class BackgroundManager {
         // Invoke callback if configured (allows caller to auto-interrupt)
         if (this.config.onStaleSession) {
           this.config.onStaleSession(task);
+        } else {
+          // Default behavior: mark as error after 2x threshold with no activity
+          if (timeSinceActivity > threshold * 2) {
+            task.status = 'error';
+            task.error = `Task stale: no activity for ${Math.round(timeSinceActivity / 60000)} minutes`;
+            task.completedAt = new Date();
+
+            if (task.concurrencyKey) {
+              this.concurrencyManager.release(task.concurrencyKey);
+            }
+
+            this.clearNotificationsForTask(task.id);
+            this.unpersistTask(task.id);
+            this.tasks.delete(task.id);
+          }
         }
       }
     }

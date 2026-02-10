@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { atomicWriteJson } from '../../lib/atomic-write.js';
 
 export interface InvocationConfig {
   enabled: boolean;
@@ -202,20 +203,17 @@ export function getInvocationStats(state: AutoInvokeState): {
  */
 export function saveInvocationHistory(state: AutoInvokeState): void {
   const historyDir = path.join(os.homedir(), '.omc', 'analytics', 'invocations');
+  const historyFile = path.join(historyDir, `${state.sessionId}.json`);
 
-  try {
-    fs.mkdirSync(historyDir, { recursive: true });
-
-    const historyFile = path.join(historyDir, `${state.sessionId}.json`);
-    fs.writeFileSync(historyFile, JSON.stringify({
-      sessionId: state.sessionId,
-      config: state.config,
-      invocations: state.invocations,
-      stats: getInvocationStats(state),
-    }, null, 2));
-  } catch (error) {
+  // Use atomic write to prevent corruption from concurrent sessions (Bug #11 fix)
+  atomicWriteJson(historyFile, {
+    sessionId: state.sessionId,
+    config: state.config,
+    invocations: state.invocations,
+    stats: getInvocationStats(state),
+  }).catch(error => {
     console.error('[auto-invoke] Failed to save invocation history:', error);
-  }
+  });
 }
 
 /**

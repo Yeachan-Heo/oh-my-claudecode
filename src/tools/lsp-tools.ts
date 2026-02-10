@@ -26,44 +26,33 @@ import {
   countEdits
 } from './lsp/index.js';
 import { runDirectoryDiagnostics, LSP_DIAGNOSTICS_WAIT_MS } from './diagnostics/index.js';
-
-export interface ToolDefinition<T extends z.ZodRawShape> {
-  name: string;
-  description: string;
-  schema: T;
-  handler: (args: z.infer<z.ZodObject<T>>) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
-}
+import { ToolDefinition } from './types.js';
 
 /**
- * Helper to handle LSP errors gracefully
+ * Helper to handle LSP errors gracefully.
+ * Uses runWithClientLease to protect the client from idle eviction
+ * while the operation is in flight.
  */
 async function withLspClient<T>(
   filePath: string,
   operation: string,
-  fn: (client: Awaited<ReturnType<typeof lspClientManager.getClientForFile>>) => Promise<T>
+  fn: (client: NonNullable<Awaited<ReturnType<typeof lspClientManager.getClientForFile>>>) => Promise<T>
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   try {
-    const client = await lspClientManager.getClientForFile(filePath);
-
-    if (!client) {
-      const serverConfig = getServerForFile(filePath);
-      if (!serverConfig) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `No language server available for file type: ${filePath}\n\nUse lsp_servers tool to see available language servers.`
-          }]
-        };
-      }
+    // Pre-check: is there a server for this file type?
+    const serverConfig = getServerForFile(filePath);
+    if (!serverConfig) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Language server '${serverConfig.name}' not installed.\n\nInstall with: ${serverConfig.installHint}`
+          text: `No language server available for file type: ${filePath}\n\nUse lsp_servers tool to see available language servers.`
         }]
       };
     }
 
-    const result = await fn(client);
+    const result = await lspClientManager.runWithClientLease(filePath, async (client) => {
+      return fn(client);
+    });
     return {
       content: [{
         type: 'text' as const,
@@ -71,10 +60,20 @@ async function withLspClient<T>(
       }]
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Surface install hints for missing servers
+    if (message.includes('not found')) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `${message}`
+        }]
+      };
+    }
     return {
       content: [{
         type: 'text' as const,
-        text: `Error in ${operation}: ${error instanceof Error ? error.message : String(error)}`
+        text: `Error in ${operation}: ${message}`
       }]
     };
   }

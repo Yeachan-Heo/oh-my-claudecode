@@ -10,7 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import {
@@ -40,6 +40,14 @@ import {
 } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 
+export interface ToolErrorState {
+  tool_name: string;
+  tool_input_preview?: string;
+  error: string;
+  timestamp: string;
+  retry_count: number;
+}
+
 export interface PersistentModeResult {
   /** Whether to block the stop event */
   shouldBlock: boolean;
@@ -57,6 +65,7 @@ export interface PersistentModeResult {
     phase?: string;
     tasksCompleted?: number;
     tasksTotal?: number;
+    toolError?: ToolErrorState;
   };
 }
 
@@ -65,6 +74,100 @@ const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
+
+/**
+ * Read last tool error from state directory.
+ * Returns null if file doesn't exist or error is stale (>60 seconds old).
+ */
+export function readLastToolError(directory: string): ToolErrorState | null {
+  const stateDir = join(directory, '.omc', 'state');
+  const errorPath = join(stateDir, 'last-tool-error.json');
+
+  try {
+    if (!existsSync(errorPath)) {
+      return null;
+    }
+
+    const content = readFileSync(errorPath, 'utf-8');
+    const toolError = JSON.parse(content) as ToolErrorState;
+
+    if (!toolError || !toolError.timestamp) {
+      return null;
+    }
+
+    // Check staleness - errors older than 60 seconds are ignored
+    const parsedTime = new Date(toolError.timestamp).getTime();
+    if (!Number.isFinite(parsedTime)) {
+      return null;
+    }
+    const age = Date.now() - parsedTime;
+    if (age > 60000) {
+      return null;
+    }
+
+    return toolError;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear tool error state file atomically.
+ */
+export function clearToolErrorState(directory: string): void {
+  const stateDir = join(directory, '.omc', 'state');
+  const errorPath = join(stateDir, 'last-tool-error.json');
+
+  try {
+    if (existsSync(errorPath)) {
+      unlinkSync(errorPath);
+    }
+  } catch {
+    // Ignore errors - file may have been removed already
+  }
+}
+
+/**
+ * Generate retry guidance message for tool errors.
+ * After 5+ retries, suggests alternative approaches.
+ */
+export function getToolErrorRetryGuidance(toolError: ToolErrorState | null): string {
+  if (!toolError) {
+    return '';
+  }
+
+  const retryCount = toolError.retry_count || 1;
+  const toolName = toolError.tool_name || 'unknown';
+  const error = toolError.error || 'Unknown error';
+
+  if (retryCount >= 5) {
+    return `[TOOL ERROR - ALTERNATIVE APPROACH NEEDED]
+The "${toolName}" operation has failed ${retryCount} times.
+
+STOP RETRYING THE SAME APPROACH. Instead:
+1. Try a completely different command or approach
+2. Check if the environment/dependencies are correct
+3. Consider breaking down the task differently
+4. If stuck, ask the user for guidance
+
+`;
+  }
+
+  return `[TOOL ERROR - RETRY REQUIRED]
+The previous "${toolName}" operation failed.
+
+Error: ${error}
+
+REQUIRED ACTIONS:
+1. Analyze why the command failed
+2. Fix the issue (wrong path? permission? syntax? missing dependency?)
+3. RETRY the operation with corrected parameters
+4. Continue with your original task after success
+
+Do NOT skip this step. Do NOT move on without fixing the error.
+
+`;
+}
 
 /**
  * Get or increment todo-continuation attempt counter
@@ -145,14 +248,14 @@ async function checkRalphLoop(
   directory?: string
 ): Promise<PersistentModeResult | null> {
   const workingDir = directory || process.cwd();
-  const state = readRalphState(workingDir);
+  const state = readRalphState(workingDir, sessionId);
 
   if (!state || !state.active) {
     return null;
   }
 
-  // Check if this is the right session
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 
@@ -160,9 +263,9 @@ async function checkRalphLoop(
   const prdStatus = getPrdCompletionStatus(workingDir);
   if (prdStatus.hasPrd && prdStatus.allComplete) {
     // All PRD stories complete - allow completion
-    clearRalphState(workingDir);
-    clearVerificationState(workingDir);
-    deactivateUltrawork(workingDir);
+    clearRalphState(workingDir, sessionId);
+    clearVerificationState(workingDir, sessionId);
+    deactivateUltrawork(workingDir, sessionId);
     return {
       shouldBlock: false,
       message: `[RALPH LOOP COMPLETE - PRD] All ${prdStatus.status?.total || 0} stories are complete! Great work!`,
@@ -171,7 +274,7 @@ async function checkRalphLoop(
   }
 
   // Check for existing verification state (architect verification in progress)
-  const verificationState = readVerificationState(workingDir);
+  const verificationState = readVerificationState(workingDir, sessionId);
 
   if (verificationState?.pending) {
     // Verification is in progress - check for architect's response
@@ -180,9 +283,9 @@ async function checkRalphLoop(
       if (checkArchitectApprovalInTranscript(sessionId)) {
         // Architect approved - truly complete
         // Also deactivate ultrawork if it was active alongside ralph
-        clearVerificationState(workingDir);
-        clearRalphState(workingDir);
-        deactivateUltrawork(workingDir);
+        clearVerificationState(workingDir, sessionId);
+        clearRalphState(workingDir, sessionId);
+        deactivateUltrawork(workingDir, sessionId);
         return {
           shouldBlock: false,
           message: `[RALPH LOOP VERIFIED COMPLETE] Architect verified task completion after ${state.iteration} iteration(s). Excellent work!`,
@@ -194,8 +297,8 @@ async function checkRalphLoop(
       const rejection = checkArchitectRejectionInTranscript(sessionId);
       if (rejection.rejected) {
         // Architect rejected - continue with feedback
-        recordArchitectFeedback(workingDir, false, rejection.feedback);
-        const updatedVerification = readVerificationState(workingDir);
+        recordArchitectFeedback(workingDir, false, rejection.feedback, sessionId);
+        const updatedVerification = readVerificationState(workingDir, sessionId);
 
         if (updatedVerification) {
           const continuationPrompt = getArchitectRejectionContinuationPrompt(updatedVerification);
@@ -228,9 +331,9 @@ async function checkRalphLoop(
   // Check max iterations
   if (state.iteration >= state.max_iterations) {
     // Also deactivate ultrawork if it was active alongside ralph
-    clearRalphState(workingDir);
-    clearVerificationState(workingDir);
-    deactivateUltrawork(workingDir);
+    clearRalphState(workingDir, sessionId);
+    clearVerificationState(workingDir, sessionId);
+    deactivateUltrawork(workingDir, sessionId);
     return {
       shouldBlock: false,
       message: `[RALPH LOOP STOPPED] Max iterations (${state.max_iterations}) reached without completion. Consider reviewing the task requirements.`,
@@ -238,8 +341,12 @@ async function checkRalphLoop(
     };
   }
 
+  // Read tool error before generating message
+  const toolError = readLastToolError(workingDir);
+  const errorGuidance = getToolErrorRetryGuidance(toolError);
+
   // Increment and continue
-  const newState = incrementRalphIteration(workingDir);
+  const newState = incrementRalphIteration(workingDir, sessionId);
   if (!newState) {
     return null;
   }
@@ -250,8 +357,8 @@ async function checkRalphLoop(
     ? `2. Check prd.json - are ALL stories marked passes: true?`
     : `2. Check your todo list - are ALL items marked complete?`;
 
-  const continuationPrompt = `<ralph-continuation>
-
+  let continuationPrompt = `<ralph-continuation>
+${errorGuidance ? errorGuidance + '\n' : ''}
 [RALPH - ITERATION ${newState.iteration}/${newState.max_iterations}]
 
 The task is NOT complete yet. Continue working.
@@ -277,7 +384,8 @@ ${newState.prompt ? `Original task: ${newState.prompt}` : ''}
     mode: 'ralph',
     metadata: {
       iteration: newState.iteration,
-      maxIterations: newState.max_iterations
+      maxIterations: newState.max_iterations,
+      toolError: toolError || undefined
     }
   };
 }
@@ -290,20 +398,20 @@ async function checkUltrawork(
   directory?: string,
   hasIncompleteTodos?: boolean
 ): Promise<PersistentModeResult | null> {
-  const state = readUltraworkState(directory);
+  const state = readUltraworkState(directory, sessionId);
 
   if (!state || !state.active) {
     return null;
   }
 
-  // If bound to a session, only reinforce for that session
-  if (state.session_id && sessionId && state.session_id !== sessionId) {
+  // Strict session isolation: only process state for matching session
+  if (state.session_id !== sessionId) {
     return null;
   }
 
   // Reinforce ultrawork mode - ALWAYS continue while active.
   // This prevents false stops from bash errors, transient failures, etc.
-  const newState = incrementReinforcement(directory);
+  const newState = incrementReinforcement(directory, sessionId);
   if (!newState) {
     return null;
   }
@@ -433,7 +541,7 @@ export async function checkPersistentModes(
   }
 
   // Priority 1.5: Autopilot (full orchestration mode - higher than ultrawork, lower than ralph)
-  if (isAutopilotActive(workingDir)) {
+  if (isAutopilotActive(workingDir, sessionId)) {
     const autopilotResult = await checkAutopilot(sessionId, workingDir);
     if (autopilotResult?.shouldBlock) {
       return {
@@ -445,7 +553,8 @@ export async function checkPersistentModes(
           maxIterations: autopilotResult.metadata?.maxIterations,
           phase: autopilotResult.phase,
           tasksCompleted: autopilotResult.metadata?.tasksCompleted,
-          tasksTotal: autopilotResult.metadata?.tasksTotal
+          tasksTotal: autopilotResult.metadata?.tasksTotal,
+          toolError: autopilotResult.metadata?.toolError
         }
       };
     }

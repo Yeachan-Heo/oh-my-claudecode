@@ -312,6 +312,8 @@ export {
   analyzeContextUsage,
   getSessionTokenEstimate,
   resetSessionTokenEstimate,
+  clearRapidFireDebounce,
+  RAPID_FIRE_DEBOUNCE_MS,
   DEFAULT_THRESHOLD as PREEMPTIVE_DEFAULT_THRESHOLD,
   CRITICAL_THRESHOLD,
   COMPACTION_COOLDOWN_MS,
@@ -691,41 +693,6 @@ export {
 } from './mode-registry/index.js';
 
 export {
-  // Swarm Coordination
-  startSwarm,
-  stopSwarm,
-  getSwarmStatus,
-  getSwarmStats,
-  claimTask,
-  releaseTask,
-  completeTask,
-  failTask,
-  heartbeat,
-  cleanupStaleClaims,
-  hasPendingWork,
-  isSwarmComplete,
-  getActiveAgents,
-  getAllTasks,
-  getTasksWithStatus,
-  getTaskById,
-  getAgentTasks,
-  getAllHeartbeats,
-  retryTask,
-  isSwarmReady,
-  connectToSwarm,
-  disconnectFromSwarm,
-  isSwarmActive,
-  cancelSwarm,
-  DEFAULT_SWARM_CONFIG,
-  type SwarmTask,
-  type SwarmState,
-  type SwarmConfig,
-  type SwarmStats,
-  type ClaimResult,
-  type AgentHeartbeat
-} from './swarm/index.js';
-
-export {
   // Setup Hook
   ensureDirectoryStructure,
   validateConfigFiles,
@@ -784,6 +751,8 @@ export {
   saveModeSummary,
   createCompactCheckpoint,
   formatCompactSummary as formatPreCompactSummary,
+  isCompactionInProgress,
+  getCompactionQueueDepth,
   type PreCompactInput,
   type CompactCheckpoint,
   type HookOutput as PreCompactHookOutput
@@ -810,4 +779,49 @@ export {
   type SessionMetrics,
   type HookOutput as SessionEndHookOutput
 } from './session-end/index.js';
+
+export {
+  // Project Memory Hook
+  registerProjectMemoryContext,
+  clearProjectMemorySession,
+  rescanProjectEnvironment,
+  loadProjectMemory,
+  saveProjectMemory,
+  detectProjectEnvironment,
+  formatContextSummary,
+  formatFullContext,
+  learnFromToolOutput,
+  addCustomNote,
+  processPreCompact as processProjectMemoryPreCompact,
+  mapDirectoryStructure,
+  updateDirectoryAccess,
+  trackAccess,
+  getTopHotPaths,
+  decayHotPaths,
+  detectDirectivesFromMessage,
+  addDirective,
+  formatDirectivesForContext,
+  type ProjectMemory,
+  type TechStack,
+  type BuildInfo,
+  type CodeConventions,
+  type ProjectStructure,
+  type LanguageDetection,
+  type FrameworkDetection,
+  type GitBranchPattern,
+  type CustomNote,
+  type DirectoryInfo,
+  type HotPath,
+  type UserDirective
+} from './project-memory/index.js';
+
+export {
+  // Flow Tracer (Agent Flow Trace Recording)
+  recordHookFire,
+  recordHookResult,
+  recordKeywordDetected,
+  recordSkillActivated,
+  recordSkillInvoked,
+  recordModeChange,
+} from './subagent-tracker/flow-tracer.js';
 

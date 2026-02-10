@@ -25,7 +25,7 @@ function normalizeModelName(model: string): string {
   const lower = model.toLowerCase();
 
   if (lower.includes('opus')) {
-    return 'claude-opus-4.5';
+    return 'claude-opus-4.6';
   } else if (lower.includes('sonnet')) {
     return 'claude-sonnet-4.5';
   } else if (lower.includes('haiku')) {

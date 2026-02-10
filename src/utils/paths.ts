@@ -7,6 +7,7 @@
  */
 
 import { join } from 'path';
+import { existsSync, unlinkSync, rmSync } from 'fs';
 import { homedir } from 'os';
 
 /**
@@ -57,4 +58,35 @@ export function getConfigDir(): string {
     return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
   }
   return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+
+/**
+ * Safely delete a file, ignoring ENOENT errors.
+ * Prevents crashes when cleaning up files that may not exist (Bug #13 fix).
+ */
+export function safeUnlinkSync(filePath: string): boolean {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safely remove a directory recursively, ignoring errors.
+ */
+export function safeRmSync(dirPath: string): boolean {
+  try {
+    if (existsSync(dirPath)) {
+      rmSync(dirPath, { recursive: true, force: true });
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }

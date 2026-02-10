@@ -222,8 +222,8 @@ pip install -r requirements.txt
 
 ### Custom Model
 ```bash
-./run_vanilla.sh --model claude-opus-4.5-20251101
-./run_omc.sh --model claude-opus-4.5-20251101
+./run_vanilla.sh --model claude-opus-4-6-20260205
+./run_omc.sh --model claude-opus-4-6-20260205
 ```
 
 ### Longer Timeout

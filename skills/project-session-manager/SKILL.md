@@ -6,6 +6,14 @@ aliases: [psm]
 
 # Project Session Manager (PSM) Skill
 
+> **Quick Start:** For simple worktree creation without tmux sessions, use `omc teleport`:
+> ```bash
+> omc teleport #123          # Create worktree for issue/PR
+> omc teleport my-feature    # Create worktree for feature
+> omc teleport list          # List worktrees
+> ```
+> See [Teleport Command](#teleport-command) below for details.
+
 Automate isolated development environments using git worktrees and tmux sessions with Claude Code. Enables parallel work across multiple tasks, projects, and repositories.
 
 ## Commands
@@ -447,6 +455,65 @@ Parse `{{ARGUMENTS}}` to determine:
 | PR not found | Verify URL/number, check permissions |
 | No tmux | Warn and skip session creation |
 | No gh CLI | Error with install instructions |
+
+## Teleport Command
+
+The `omc teleport` command provides a lightweight alternative to full PSM sessions. It creates git worktrees without tmux session management — ideal for quick, isolated development.
+
+### Usage
+
+```bash
+# Create worktree for an issue or PR
+omc teleport #123
+omc teleport owner/repo#123
+omc teleport https://github.com/owner/repo/issues/42
+
+# Create worktree for a feature
+omc teleport my-feature
+
+# List existing worktrees
+omc teleport list
+
+# Remove a worktree
+omc teleport remove issue/my-repo-123
+omc teleport remove --force feat/my-repo-my-feature
+```
+
+### Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--worktree` | Create worktree (default, kept for compatibility) | `true` |
+| `--path <path>` | Custom worktree root directory | `~/Workspace/omc-worktrees/` |
+| `--base <branch>` | Base branch to create from | `main` |
+| `--json` | Output as JSON | `false` |
+
+### Worktree Layout
+
+```
+~/Workspace/omc-worktrees/
+├── issue/
+│   └── my-repo-123/        # Issue worktrees
+├── pr/
+│   └── my-repo-456/        # PR review worktrees
+└── feat/
+    └── my-repo-my-feature/ # Feature worktrees
+```
+
+### PSM vs Teleport
+
+| Feature | PSM | Teleport |
+|---------|-----|----------|
+| Git worktree | Yes | Yes |
+| Tmux session | Yes | No |
+| Claude Code launch | Yes | No |
+| Session registry | Yes | No |
+| Auto-cleanup | Yes | No |
+| Project aliases | Yes | No (uses current repo) |
+
+Use **PSM** for full managed sessions. Use **teleport** for quick worktree creation.
+
+---
 
 ## Requirements
 

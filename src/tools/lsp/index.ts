@@ -2,7 +2,7 @@
  * LSP Module Exports
  */
 
-export { LspClient, lspClientManager } from './client.js';
+export { LspClient, lspClientManager, disconnectAll } from './client.js';
 export type {
   Position,
   Range,

@@ -36,6 +36,8 @@ await esbuild.build({
   format: 'cjs',
   outfile,
   banner: { js: banner },
+  // Prefer ESM entry points so UMD packages (e.g. jsonc-parser) get properly bundled
+  mainFields: ['module', 'main'],
   // Externalize Node.js built-ins and native modules
   external: [
     'fs', 'path', 'os', 'util', 'stream', 'events',

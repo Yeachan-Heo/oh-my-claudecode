@@ -109,7 +109,9 @@ export function buildToolSelectionSection(agents: AgentConfig[]): string {
     lines.push(`### ${capitalizeFirst(category)} Agents`);
     for (const agent of categoryAgents) {
       lines.push(`**${agent.name}** (${agent.model || 'sonnet'}):`);
-      lines.push(`- Tools: ${agent.tools.join(', ')}`);
+      if (agent.tools?.length) {
+        lines.push(`- Tools: ${agent.tools.join(', ')}`);
+      }
 
       if (agent.metadata?.useWhen && agent.metadata.useWhen.length > 0) {
         lines.push(`- Use when: ${agent.metadata.useWhen.join('; ')}`);
