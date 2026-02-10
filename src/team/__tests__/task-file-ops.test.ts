@@ -250,6 +250,9 @@ describe('acquireTaskLock / releaseTaskLock', () => {
     mkdirSync(TASKS_DIR, { recursive: true });
     const lockPath = join(TASKS_DIR, 'lock-test-7.lock');
     writeFileSync(lockPath, 'not valid json', { mode: 0o600 });
+    // Set mtime to 2 seconds ago to ensure age check passes
+    const past = new Date(Date.now() - 2000);
+    utimesSync(lockPath, past, past);
     // With staleLockMs=1, malformed file should be treated as stale
     const handle = acquireTaskLock(TEST_TEAM, 'lock-test-7', { staleLockMs: 1 });
     expect(handle).not.toBeNull();
