@@ -602,7 +602,7 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     // Presence-based precedence: if `prompt_file` key exists (even invalid value), file mode wins.
     // Separate intent detection (field presence) from content validation (non-empty).
     const inlinePrompt = typeof args.prompt === 'string' ? args.prompt : undefined;
-    const hasPromptFileField = Object.hasOwn(args, 'prompt_file');
+    const hasPromptFileField = Object.hasOwn(args, 'prompt_file') && args.prompt_file !== undefined;
     const promptFileInput = typeof args.prompt_file === 'string' ? args.prompt_file : undefined;
     const hasInlineIntent = inlinePrompt !== undefined && !hasPromptFileField;
     const isInlineMode = hasInlineIntent && inlinePrompt.trim().length > 0;
@@ -611,6 +611,14 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
         return {
             content: [{ type: 'text', text: 'Inline prompt is empty. Provide a non-empty prompt string.' }],
             isError: true
+        };
+    }
+    // Reject oversized inline prompts before any persistence
+    const MAX_INLINE_PROMPT_BYTES = 256 * 1024; // 256 KB
+    if (isInlineMode && Buffer.byteLength(inlinePrompt, 'utf-8') > MAX_INLINE_PROMPT_BYTES) {
+        return {
+            content: [{ type: 'text', text: `Inline prompt exceeds maximum size (${MAX_INLINE_PROMPT_BYTES} bytes). Use prompt_file for large prompts.` }],
+            isError: true,
         };
     }
     // Inline mode is foreground only - check BEFORE any file persistence to avoid leaks
@@ -855,6 +863,7 @@ ${resolvedPrompt}`;
         ];
         // In inline mode, return metadata + raw response as separate content blocks
         if (isInlineMode) {
+            responseLines.push(`**Request ID:** ${inlineRequestId}`);
             return {
                 content: [
                     { type: 'text', text: responseLines.join('\n') },

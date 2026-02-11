@@ -283,3 +283,41 @@ describe('inline success response shape contract', () => {
     });
   });
 });
+
+describe('Inline prompt edge cases', () => {
+  it('inline + background rejection returns before any persistence', async () => {
+    // Background check occurs BEFORE persistence (mkdirSync/writeFileSync),
+    // so rejected background requests never touch the filesystem by design.
+    const result = await handleAskCodex({
+      agent_role: 'architect',
+      prompt: 'test prompt',
+      background: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('foreground only');
+    // Structural guarantee: isInlineMode && args.background check precedes all fs operations
+  });
+
+  it('prompt_file: undefined with valid prompt treats as inline mode', async () => {
+    // prompt_file key exists but value is undefined - should NOT suppress inline mode
+    const result = await handleAskCodex({
+      agent_role: 'architect',
+      prompt: 'test inline prompt',
+      prompt_file: undefined,
+    });
+    // Should NOT get the "Either prompt or prompt_file" error
+    const text = result.content[0].text;
+    expectNoMissingPromptError(text);
+  });
+
+  it('rejects oversized inline prompts', async () => {
+    const hugePrompt = 'x'.repeat(256 * 1024 + 1);
+    const result = await handleAskCodex({
+      agent_role: 'architect',
+      prompt: hugePrompt,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('exceeds maximum size');
+  });
+});

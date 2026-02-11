@@ -17208,13 +17208,20 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     };
   }
   const inlinePrompt = typeof args.prompt === "string" ? args.prompt : void 0;
-  const hasPromptFileField = Object.hasOwn(args, "prompt_file");
+  const hasPromptFileField = Object.hasOwn(args, "prompt_file") && args.prompt_file !== void 0;
   const promptFileInput = typeof args.prompt_file === "string" ? args.prompt_file : void 0;
   const hasInlineIntent = inlinePrompt !== void 0 && !hasPromptFileField;
   const isInlineMode = hasInlineIntent && inlinePrompt.trim().length > 0;
   if (hasInlineIntent && !inlinePrompt?.trim()) {
     return {
       content: [{ type: "text", text: "Inline prompt is empty. Provide a non-empty prompt string." }],
+      isError: true
+    };
+  }
+  const MAX_INLINE_PROMPT_BYTES = 256 * 1024;
+  if (isInlineMode && Buffer.byteLength(inlinePrompt, "utf-8") > MAX_INLINE_PROMPT_BYTES) {
+    return {
+      content: [{ type: "text", text: `Inline prompt exceeds maximum size (${MAX_INLINE_PROMPT_BYTES} bytes). Use prompt_file for large prompts.` }],
       isError: true
     };
   }
@@ -17438,6 +17445,7 @@ path_policy: ${pathPolicy}`
       `**Path Policy:** OMC_ALLOW_EXTERNAL_WORKDIR=${process.env.OMC_ALLOW_EXTERNAL_WORKDIR || "0 (enforced)"}`
     ];
     if (isInlineMode) {
+      responseLines.push(`**Request ID:** ${inlineRequestId}`);
       return {
         content: [
           { type: "text", text: responseLines.join("\n") },
