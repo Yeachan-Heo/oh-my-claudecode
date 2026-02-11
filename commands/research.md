@@ -55,7 +55,7 @@ Task(subagent_type="oh-my-claudecode:scientist-high", model="opus", prompt="[RES
 
 ### Concurrency Limit
 
-**Maximum 5 concurrent scientist agents** to prevent resource exhaustion.
+**Maximum 20 concurrent scientist agents** to prevent resource exhaustion.
 
 ## AUTO Mode
 

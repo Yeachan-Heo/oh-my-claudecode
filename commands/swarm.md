@@ -17,7 +17,7 @@ Staged runtime: `team-plan -> team-prd -> team-exec -> team-verify -> team-fix (
 
 ## Usage Patterns
 
-### Standard Mode (1-5 agents)
+### Standard Mode (1-20 agents)
 ```
 /oh-my-claudecode:swarm N:agent-type "task description"
 ```
@@ -31,7 +31,7 @@ or
 /oh-my-claudecode:swarm 30:executor "fix all TypeScript errors"
 ```
 
-When N > 5 or "aggressive" keyword is used, swarm automatically:
+When N > 20 or "aggressive" keyword is used, swarm automatically:
 1. Decomposes work into micro-tasks (one function, one file section, one test)
 2. Spawns agents in waves up to the configured concurrent limit
 3. Polls for completions every 5 seconds
@@ -42,7 +42,7 @@ When N > 5 or "aggressive" keyword is used, swarm automatically:
 
 ### Parameters
 
-- **N** - Number of agents (1-5 for standard mode, 6+ for aggressive mode)
+- **N** - Number of agents (1-20 for standard mode, 21+ for aggressive mode)
 - **agent-type** - Agent to spawn (e.g., executor, build-fixer, architect)
 - **task** - High-level task to decompose and distribute
 
@@ -134,7 +134,7 @@ User: "/swarm 5:executor fix all TypeScript errors"
 ### 1. Parse Input
 
 From `{{ARGUMENTS}}`, extract:
-- N (agent count, validate <= 5)
+- N (agent count, validate <= 20)
 - agent-type (executor, build-fixer, etc.)
 - task description
 
@@ -557,7 +557,7 @@ Get task counts and timing info.
 
 ```typescript
 interface SwarmConfig {
-  agentCount: number;           // Number of agents (1-5)
+  agentCount: number;           // Number of agents (1-20)
   tasks: string[];              // Task descriptions
   agentType?: string;           // Agent type (default: 'executor')
   leaseTimeout?: number;        // Milliseconds (default: 5 min)

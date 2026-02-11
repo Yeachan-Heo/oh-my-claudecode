@@ -273,7 +273,7 @@ Broad Request Detection:
 Parallelization:
 - Run 2+ independent tasks in parallel when each takes >30s.
 - Run dependent tasks sequentially.
-- Use `run_in_background: true` for installs, builds, and tests (up to 5 concurrent).
+- Use `run_in_background: true` for installs, builds, and tests (up to 20 concurrent).
 - Prefer Team mode as the primary parallel execution surface. Use ad hoc parallelism (`run_in_background`) only when Team overhead is disproportionate to the task.
 
 Continuation:

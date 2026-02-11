@@ -68,7 +68,7 @@ Background agents can be resumed with full context via `resume-session` tool.
 
 ## Ultrapilot (v3.4)
 
-Parallel autopilot with up to 5 concurrent workers for 3-5x faster execution.
+Parallel autopilot with up to 20 concurrent workers for 3-5x faster execution.
 
 **Trigger:** "ultrapilot", "parallel build", "swarm build"
 

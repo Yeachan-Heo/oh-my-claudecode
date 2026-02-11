@@ -79,7 +79,7 @@ Ecomode maintains all delegation rules from core protocol with cost-optimized ro
 | Documentation | writer | haiku |
 
 ### Background Execution
-Long-running commands (install, build, test) run in background. Maximum 5 concurrent.
+Long-running commands (install, build, test) run in background. Maximum 20 concurrent.
 
 ## Token Savings Tips
 

@@ -15,7 +15,7 @@ Spawn N coordinated agents working on a shared task list using Claude Code's nat
 
 ### Parameters
 
-- **N** - Number of teammate agents (1-5, enforced by Claude Code limit)
+- **N** - Number of teammate agents (1-20)
 - **agent-type** - OMC agent to spawn (e.g., executor, executor-low, build-fixer, designer)
 - **task** - High-level task to decompose and distribute among teammates
 
@@ -119,7 +119,7 @@ Continue `team-exec -> team-verify -> team-fix` until:
 
 ### Phase 1: Parse Input
 
-- Extract **N** (agent count), validate 1-5
+- Extract **N** (agent count), validate 1-20
 - Extract **agent-type**, validate it maps to a known OMC subagent
 - Extract **task** description
 
@@ -622,7 +622,7 @@ Optional settings via `.omc-config.json`:
 ```json
 {
   "team": {
-    "maxAgents": 5,
+    "maxAgents": 20,
     "defaultAgentType": "executor",
     "monitorIntervalMs": 30000,
     "shutdownTimeoutMs": 15000
@@ -630,7 +630,7 @@ Optional settings via `.omc-config.json`:
 }
 ```
 
-- **maxAgents** - Maximum teammates (hard cap: 5)
+- **maxAgents** - Maximum teammates (default: 20)
 - **defaultAgentType** - Agent type when not specified (default: `executor`)
 - **monitorIntervalMs** - How often to poll `TaskList` (default: 30s)
 - **shutdownTimeoutMs** - How long to wait for shutdown responses (default: 15s)

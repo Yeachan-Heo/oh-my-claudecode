@@ -216,9 +216,9 @@ Validate consistency across all findings:
 
 ### Concurrency Limit
 
-**Maximum 5 concurrent scientist agents** to prevent resource exhaustion.
+**Maximum 20 concurrent scientist agents** to prevent resource exhaustion.
 
-If more than 5 stages, batch them:
+If more than 20 stages, batch them:
 ```
 Batch 1: Stages 1-5 (parallel)
 [wait for completion]

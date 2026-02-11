@@ -13,7 +13,7 @@ autopilot (autonomous end-to-end)
 
 ultrapilot (parallel autopilot)
 ├── includes: file ownership partitioning
-├── includes: worker coordination (up to 5 workers)
+├── includes: worker coordination (up to 20 workers)
 └── falls back to: autopilot (if not parallelizable)
 
 swarm (N-agent coordination)
@@ -70,7 +70,7 @@ Have many similar independent tasks (e.g., "fix 47 errors")?
 | Mode | Best For | Parallelism | Persistence | Verification | File Ownership |
 |------|----------|-------------|-------------|--------------|----------------|
 | autopilot | "Build me X" | Via ralph | Yes | Yes | N/A |
-| ultrapilot | Multi-component | 5 workers | Yes | Yes | Partitioned |
+| ultrapilot | Multi-component | 20 workers | Yes | Yes | Partitioned |
 | swarm | Homogeneous tasks | N workers | Per-task | Per-task | Per-task |
 | ralph | "Don't stop" | Via ultrawork | Yes | Mandatory | N/A |
 | ultrawork | Parallel only | Yes | No | No | N/A |

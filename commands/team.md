@@ -15,14 +15,14 @@ Spawn N coordinated agents working on a shared task list using Claude Code's nat
 
 ## Usage Patterns
 
-### Standard Mode (1-5 agents)
+### Standard Mode (1-20 agents)
 ```
 /oh-my-claudecode:team N:agent-type "task description"
 ```
 
 ### Parameters
 
-- **N** - Number of agents (1-5, Claude Code background task limit)
+- **N** - Number of agents (1-20)
 - **agent-type** - Agent to spawn (e.g., executor, build-fixer, architect)
 - **task** - High-level task to decompose and distribute
 
@@ -202,7 +202,7 @@ Cancellation is a terminal state (`cancelled`) and stops further stage transitio
 ### 1. Parse Input
 
 From `{{ARGUMENTS}}`, extract:
-- N (agent count, validate <= 5)
+- N (agent count, validate <= 20)
 - agent-type (executor, build-fixer, etc.)
 - task description
 

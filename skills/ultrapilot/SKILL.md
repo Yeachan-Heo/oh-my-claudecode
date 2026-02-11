@@ -14,7 +14,7 @@ Ultrapilot is the parallel evolution of autopilot. It decomposes your task into 
 **Key Capabilities:**
 1. **Decomposes** task into parallel-safe components
 2. **Partitions** files with exclusive ownership (no conflicts)
-3. **Spawns** up to 5 parallel workers (Claude Code limit)
+3. **Spawns** up to 20 parallel workers
 4. **Coordinates** progress via TaskOutput
 5. **Integrates** changes with sequential handling of shared files
 6. **Validates** full system integrity

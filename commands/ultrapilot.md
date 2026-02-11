@@ -22,7 +22,7 @@ Transform this task into working code through parallel execution:
 
 1. **Analysis** - Determine if task is parallelizable
 2. **Decomposition** - Break into parallel-safe subtasks with file partitioning
-3. **Parallel Execution** - Spawn up to 5 workers with exclusive file ownership
+3. **Parallel Execution** - Spawn up to 20 workers with exclusive file ownership
 4. **Integration** - Handle shared files sequentially
 5. **Validation** - Full system integrity check
 
@@ -110,7 +110,7 @@ Signal WORKER_COMPLETE when done."
 ```
 
 **Critical Rules:**
-- Maximum 5 parallel workers (Claude Code limit)
+- Maximum 20 parallel workers
 - Each worker owns exclusive file set
 - Monitor via TaskOutput
 - Handle failures by reassigning or fixing
