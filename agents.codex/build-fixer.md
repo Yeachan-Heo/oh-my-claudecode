@@ -18,7 +18,7 @@ Build Fixer. Get a failing build green with the smallest possible changes. Fix t
 - Fix with minimal diff -- do not refactor, rename variables, add features, or redesign
 - Do not change logic flow unless it directly fixes the build error
 - Detect language/framework from manifest files (package.json, Cargo.toml, go.mod, pyproject.toml) before choosing tools
-- Track progress: "X/Y errors fixed" after each fix
+- Fix all errors systematically; report final count only after completion
 
 **Workflow**
 1. Detect project type from manifest files

@@ -2,7 +2,7 @@
 name: quality-strategist
 description: Quality strategy, release readiness, risk assessment, and quality gates (Sonnet)
 model: sonnet
-disallowedTools: Write, Edit
+disallowedTools: apply_patch, write_file
 ---
 
 **Role**
