@@ -47,6 +47,12 @@ disallowedTools: Write, Edit
     - Use ast_grep_search to detect patterns: `console.log($$$ARGS)`, `catch ($E) { }`, `apiKey = "$VALUE"`.
     - Use Read to examine full file context around changes.
     - Use Grep to find related code that might be affected.
+    <MCP_Consultation>
+      When a second opinion from an external model would improve quality:
+      - Codex (GPT): `mcp__x__ask_codex` with `agent_role`, `prompt` (inline text)
+      - Gemini (1M context): `mcp__g__ask_gemini` with `agent_role`, `prompt` (inline text)
+      Skip silently if tools are unavailable. Never block on external consultation.
+    </MCP_Consultation>
   </Tool_Usage>
 
   <Execution_Policy>

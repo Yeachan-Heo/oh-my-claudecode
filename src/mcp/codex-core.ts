@@ -16,7 +16,7 @@ import { detectCodexCli } from './cli-detection.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { isExternalPromptAllowed } from './mcp-config.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext, wrapUntrustedFileContent, isValidAgentRoleName, VALID_AGENT_ROLES } from './prompt-injection.js';
-import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
+import { persistPrompt, persistResponse, getExpectedResponsePath, getPromptsDir, slugify, generatePromptId } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
 import {
@@ -563,8 +563,9 @@ export function validateAndReadFile(filePath: string, baseDir?: string): string 
  * the SDK server and the standalone stdio server.
  */
 export async function handleAskCodex(args: {
-  prompt_file: string;
-  output_file: string;
+  prompt?: string;
+  prompt_file?: string;
+  output_file?: string;
   agent_role: string;
   model?: string;
   context_files?: string[];
@@ -665,40 +666,55 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     };
   }
 
-  // Validate output_file is provided
-  if (!args.output_file || !args.output_file.trim()) {
-    return {
-      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
-      isError: true
-    };
+  // Determine inline mode: prompt provided without prompt_file
+  const isInlineMode = !!args.prompt && !args.prompt_file;
+
+  // Handle inline prompt: auto-persist to file for audit trail
+  if (args.prompt && !args.prompt_file) {
+    const promptsDir = getPromptsDir(baseDir);
+    mkdirSync(promptsDir, { recursive: true });
+    const slug = slugify(args.prompt);
+    const id = generatePromptId();
+    const inlinePromptFile = join(promptsDir, `codex-inline-${slug}-${id}.md`);
+    writeFileSync(inlinePromptFile, args.prompt, 'utf-8');
+    args = { ...args, prompt_file: inlinePromptFile };
   }
 
-  // Check if deprecated 'prompt' parameter is being used
-  if ('prompt' in (args as Record<string, unknown>)) {
-    return {
-      content: [{ type: 'text' as const, text: "The 'prompt' parameter has been removed. Write the prompt to a file (recommended: .omc/prompts/) and pass 'prompt_file' instead." }],
-      isError: true
-    };
-  }
-
-  // Validate prompt_file is provided and not empty
+  // Validate that at least one prompt source is provided
   if (!args.prompt_file || !args.prompt_file.trim()) {
     return {
-      content: [{ type: 'text' as const, text: 'prompt_file is required.' }],
+      content: [{ type: 'text' as const, text: "Either 'prompt' (inline) or 'prompt_file' (file path) is required." }],
       isError: true
     };
   }
 
-  // Resolve prompt from prompt_file
+  // Auto-generate output_file when using inline mode
+  if (!args.output_file || !args.output_file.trim()) {
+    if (isInlineMode) {
+      const promptsDir = getPromptsDir(baseDir);
+      mkdirSync(promptsDir, { recursive: true });
+      const slug = slugify(args.prompt!);
+      const id = generatePromptId();
+      args = { ...args, output_file: join(promptsDir, `codex-inline-response-${slug}-${id}.md`) };
+    } else {
+      return {
+        content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
+        isError: true
+      };
+    }
+  }
+
+  // Resolve prompt from prompt_file (validated non-empty above)
   let resolvedPrompt: string;
-  const resolvedPath = resolve(baseDir, args.prompt_file);
+  const promptFile = args.prompt_file!;
+  const resolvedPath = resolve(baseDir, promptFile);
   const cwdReal = realpathSync(baseDir);
   const relPath = relative(cwdReal, resolvedPath);
   if (!isExternalPromptAllowed() && (relPath === '..' || relPath.startsWith('..' + sep) || isAbsolute(relPath))) {
     const errorToken = 'E_PATH_OUTSIDE_WORKDIR_PROMPT';
     return {
-      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${args.prompt_file}' resolves outside working_directory '${baseDirReal}'.
-Requested: ${args.prompt_file}
+      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
@@ -713,7 +729,7 @@ Suggested: place the prompt file within the working directory or set working_dir
   } catch (err) {
     const errorToken = 'E_PATH_RESOLUTION_FAILED';
     return {
-      content: [{ type: 'text' as const, text: `${errorToken}: Failed to resolve prompt_file '${args.prompt_file}'.
+      content: [{ type: 'text' as const, text: `${errorToken}: Failed to resolve prompt_file '${promptFile}'.
 Error: ${(err as Error).message}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
@@ -725,8 +741,8 @@ Suggested: ensure the prompt file exists and is accessible` }],
   if (!isExternalPromptAllowed() && (relReal === '..' || relReal.startsWith('..' + sep) || isAbsolute(relReal))) {
     const errorToken = 'E_PATH_OUTSIDE_WORKDIR_PROMPT';
     return {
-      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${args.prompt_file}' resolves to a path outside working_directory '${baseDirReal}'.
-Requested: ${args.prompt_file}
+      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
 Resolved path: ${resolvedReal}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
@@ -740,14 +756,14 @@ Suggested: place the prompt file within the working directory or set working_dir
     resolvedPrompt = readFileSync(resolvedReal, 'utf-8');
   } catch (err) {
     return {
-      content: [{ type: 'text' as const, text: `Failed to read prompt_file '${args.prompt_file}': ${(err as Error).message}` }],
+      content: [{ type: 'text' as const, text: `Failed to read prompt_file '${promptFile}': ${(err as Error).message}` }],
       isError: true
     };
   }
   // Check for empty prompt
   if (!resolvedPrompt.trim()) {
     return {
-      content: [{ type: 'text' as const, text: `prompt_file '${args.prompt_file}' is empty.` }],
+      content: [{ type: 'text' as const, text: `prompt_file '${promptFile}' is empty.` }],
       isError: true
     };
   }
@@ -886,6 +902,16 @@ ${resolvedPrompt}`;
           isError: true
         };
       }
+    }
+
+    // Inline mode: return the actual response content in the MCP result
+    if (isInlineMode) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `${paramLines}\n\n---\n\n${response}`
+        }]
+      };
     }
 
     return {

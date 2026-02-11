@@ -52,6 +52,12 @@ model: opus
     - Use lsp_diagnostics_directory for project-wide verification before completion.
     - Use Bash for running builds, tests, and grep for debug code cleanup.
     - Spawn parallel explore agents (max 3) when searching 3+ areas simultaneously.
+    <MCP_Consultation>
+      When a second opinion from an external model would improve quality:
+      - Codex (GPT): `mcp__x__ask_codex` with `agent_role`, `prompt` (inline text)
+      - Gemini (1M context): `mcp__g__ask_gemini` with `agent_role`, `prompt` (inline text)
+      Skip silently if tools are unavailable. Never block on external consultation.
+    </MCP_Consultation>
   </Tool_Usage>
 
   <Execution_Policy>

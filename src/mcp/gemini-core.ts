@@ -20,7 +20,7 @@ import { detectGeminiCli } from './cli-detection.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { isExternalPromptAllowed } from './mcp-config.js';
 import { resolveSystemPrompt, buildPromptWithSystemContext, wrapUntrustedFileContent, isValidAgentRoleName, VALID_AGENT_ROLES } from './prompt-injection.js';
-import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
+import { persistPrompt, persistResponse, getExpectedResponsePath, getPromptsDir, generatePromptId, slugify } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
 import {
@@ -424,8 +424,9 @@ export function validateAndReadFile(filePath: string, baseDir?: string): string 
  * @returns MCP-compatible response with content array
  */
 export async function handleAskGemini(args: {
-  prompt_file: string;
-  output_file: string;
+  prompt?: string;
+  prompt_file?: string;
+  output_file?: string;
   agent_role: string;
   model?: string;
   files?: string[];
@@ -516,26 +517,51 @@ export async function handleAskGemini(args: {
     };
   }
 
-  // Validate output_file is provided
+  // Inline prompt support: when `prompt` is provided as a string, auto-persist
+  // it to a file for audit trail and continue with normal prompt_file flow.
+  // `prompt_file` takes precedence if both are provided.
+  const isInlineMode = !!args.prompt && !args.prompt_file;
+
+  if (isInlineMode) {
+    // Auto-persist inline prompt to file
+    try {
+      const promptsDir = getPromptsDir(baseDir);
+      mkdirSync(promptsDir, { recursive: true });
+      const slug = slugify(args.prompt!);
+      const id = generatePromptId();
+      const filename = `gemini-inline-${slug}-${id}.md`;
+      const inlinePromptPath = join(promptsDir, filename);
+      writeFileSync(inlinePromptPath, args.prompt!, 'utf-8');
+      args = { ...args, prompt_file: inlinePromptPath };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to persist inline prompt: ${(err as Error).message}` }],
+        isError: true
+      };
+    }
+
+    // Auto-generate output_file when not provided in inline mode
+    if (!args.output_file || !args.output_file.trim()) {
+      const promptsDir = getPromptsDir(baseDir);
+      const outSlug = slugify(args.prompt!);
+      const outId = generatePromptId();
+      const outFilename = `gemini-inline-response-${outSlug}-${outId}.md`;
+      args = { ...args, output_file: join(promptsDir, outFilename) };
+    }
+  }
+
+  // Validate output_file is provided (required in non-inline mode)
   if (!args.output_file || !args.output_file.trim()) {
     return {
-      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
+      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written, or use the inline `prompt` parameter for auto-generated paths.' }],
       isError: true
     };
   }
 
-  // Check if old 'prompt' parameter is used (hard error)
-  if ('prompt' in (args as Record<string, unknown>)) {
-    return {
-      content: [{ type: 'text' as const, text: "The 'prompt' parameter has been removed. Write the prompt to a file (recommended: .omc/prompts/) and pass 'prompt_file' instead." }],
-      isError: true
-    };
-  }
-
-  // Validate prompt_file is provided
+  // Validate prompt_file is provided (required unless inline prompt was used)
   if (!args.prompt_file || !args.prompt_file.trim()) {
     return {
-      content: [{ type: 'text' as const, text: 'prompt_file is required.' }],
+      content: [{ type: 'text' as const, text: 'Either prompt (inline string) or prompt_file (path) is required.' }],
       isError: true
     };
   }
@@ -637,6 +663,14 @@ ${resolvedPrompt}`;
   const expectedResponsePath = promptResult
     ? getExpectedResponsePath('gemini', promptResult.slug, promptResult.id, baseDir)
     : undefined;
+
+  // Inline mode is foreground only
+  if (isInlineMode && args.background) {
+    return {
+      content: [{ type: 'text' as const, text: 'Inline prompt mode is foreground only. Use prompt_file for background execution.' }],
+      isError: true
+    };
+  }
 
   // Background mode: return immediately with job metadata
   if (args.background) {
@@ -747,6 +781,11 @@ ${resolvedPrompt}`;
         `**Resolved Working Directory:** ${baseDirReal}`,
         `**Path Policy:** OMC_ALLOW_EXTERNAL_WORKDIR=${process.env.OMC_ALLOW_EXTERNAL_WORKDIR || '0 (enforced)'}`,
       ];
+
+      // In inline mode, include the actual response content in the MCP result
+      if (isInlineMode) {
+        responseLines.push('', '---', '', response);
+      }
 
       return {
         content: [{

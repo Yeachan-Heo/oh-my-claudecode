@@ -23,24 +23,26 @@ const askGeminiTool = tool(
   `Send a prompt to Google Gemini CLI for design/implementation tasks. Gemini excels at frontend design review and implementation with its 1M token context window. Recommended roles: ${GEMINI_RECOMMENDED_ROLES.join(', ')}. Any valid OMC agent role is accepted. Fallback chain: ${GEMINI_MODEL_FALLBACKS.join(' → ')}. Requires Gemini CLI (npm install -g @google/gemini-cli).`,
   {
     agent_role: { type: "string", description: `Required. Agent perspective for Gemini. Recommended: ${GEMINI_RECOMMENDED_ROLES.join(', ')}. Any valid OMC agent role is accepted.` },
-    prompt_file: { type: "string", description: "Path to file containing the prompt" },
-    output_file: { type: "string", description: "Required. Path to write response. Response content is NOT returned inline - read from this file." },
+    prompt: { type: "string", description: "Inline prompt string. Alternative to prompt_file -- the prompt is auto-persisted to a file for audit trail. When used, output_file is optional (auto-generated if omitted) and the response is returned inline in the MCP result." },
+    prompt_file: { type: "string", description: "Path to file containing the prompt. Takes precedence over inline prompt if both provided." },
+    output_file: { type: "string", description: "Required. Path to write response. Response content is NOT returned inline - read from this file. Optional when using inline prompt (auto-generated if omitted)." },
     files: { type: "array", items: { type: "string" }, description: "File paths to include as context (contents will be prepended to prompt)" },
     model: { type: "string", description: `Gemini model to use (default: ${GEMINI_DEFAULT_MODEL}). Set OMC_GEMINI_DEFAULT_MODEL env var to change default. Auto-fallback chain: ${GEMINI_MODEL_FALLBACKS.join(' → ')}.` },
-    background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion." },
+    background: { type: "boolean", description: "Run in background (non-blocking). Returns immediately with job metadata and file paths. Check response file for completion. Not available with inline prompt." },
     working_directory: { type: "string", description: "Working directory for path resolution and CLI execution. Defaults to process.cwd()." },
   } as any,
   async (args: any) => {
-    const { prompt_file, output_file, agent_role, model, files, background, working_directory } = args as {
-      prompt_file: string;
-      output_file: string;
+    const { prompt, prompt_file, output_file, agent_role, model, files, background, working_directory } = args as {
+      prompt?: string;
+      prompt_file?: string;
+      output_file?: string;
       agent_role: string;
       model?: string;
       files?: string[];
       background?: boolean;
       working_directory?: string;
     };
-    return handleAskGemini({ prompt_file, output_file, agent_role, model, files, background, working_directory });
+    return handleAskGemini({ prompt, prompt_file, output_file, agent_role, model, files, background, working_directory });
   }
 );
 

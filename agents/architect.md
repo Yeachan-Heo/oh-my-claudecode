@@ -48,6 +48,12 @@ disallowedTools: Write, Edit
     - Use lsp_diagnostics_directory to verify project-wide health.
     - Use ast_grep_search to find structural patterns (e.g., "all async functions without try/catch").
     - Use Bash with git blame/log for change history analysis.
+    <MCP_Consultation>
+      When a second opinion from an external model would improve quality:
+      - Codex (GPT): `mcp__x__ask_codex` with `agent_role`, `prompt` (inline text)
+      - Gemini (1M context): `mcp__g__ask_gemini` with `agent_role`, `prompt` (inline text)
+      Skip silently if tools are unavailable. Never block on external consultation.
+    </MCP_Consultation>
   </Tool_Usage>
 
   <Execution_Policy>

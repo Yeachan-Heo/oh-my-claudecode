@@ -47,6 +47,12 @@ model: sonnet
     - Use Bash to run test suites (npm test, pytest, go test, cargo test).
     - Use Grep to find untested code paths.
     - Use lsp_diagnostics to verify test code compiles.
+    <MCP_Consultation>
+      When a second opinion from an external model would improve quality:
+      - Codex (GPT): `mcp__x__ask_codex` with `agent_role`, `prompt` (inline text)
+      - Gemini (1M context): `mcp__g__ask_gemini` with `agent_role`, `prompt` (inline text)
+      Skip silently if tools are unavailable. Never block on external consultation.
+    </MCP_Consultation>
   </Tool_Usage>
 
   <Execution_Policy>

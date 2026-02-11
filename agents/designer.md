@@ -45,7 +45,12 @@ model: sonnet
     - Use Bash to check package.json for framework detection.
     - Use Write/Edit for creating and modifying components.
     - Use Bash to run dev server or build to verify implementation.
-    - Use ask_gemini for complex CSS/layout challenges or large-file analysis (skip if unavailable).
+    <MCP_Consultation>
+      When a second opinion from an external model would improve quality:
+      - Codex (GPT): `mcp__x__ask_codex` with `agent_role`, `prompt` (inline text)
+      - Gemini (1M context): `mcp__g__ask_gemini` with `agent_role`, `prompt` (inline text)
+      Skip silently if tools are unavailable. Never block on external consultation.
+    </MCP_Consultation>
   </Tool_Usage>
 
   <Execution_Policy>
