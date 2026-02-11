@@ -25,6 +25,26 @@ for (const file of agentFiles) {
 }
 console.log(`Embedding ${agentRoles.length} agent roles + prompts into ${outfile}`);
 
+// Scan agents.codex/*.md at build time to embed Codex-specific prompts
+const codexPrompts = {};
+try {
+  const codexFiles = (await readdir('agents.codex'))
+    .filter(f => f.endsWith('.md') && f !== 'CONVERSION-GUIDE.md').sort();
+  for (const file of codexFiles) {
+    const content = await readFile(join('agents.codex', file), 'utf-8');
+    const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
+    codexPrompts[basename(file, '.md')] = match ? match[1].trim() : content.trim();
+  }
+  console.log(`Embedding ${Object.keys(codexPrompts).length} Codex agent prompts`);
+} catch { /* agents.codex/ not present - OK */ }
+
+// Warn about agents missing Codex-specific prompts
+for (const role of agentRoles) {
+  if (!codexPrompts[role]) {
+    console.warn(`WARNING: Agent '${role}' has no Codex-specific prompt in agents.codex/`);
+  }
+}
+
 // Ensure output directory exists
 await mkdir('bridge', { recursive: true });
 
@@ -55,6 +75,7 @@ await esbuild.build({
   define: {
     '__AGENT_ROLES__': JSON.stringify(agentRoles),
     '__AGENT_PROMPTS__': JSON.stringify(agentPrompts),
+    '__AGENT_PROMPTS_CODEX__': JSON.stringify(codexPrompts),
   },
   // Prefer ESM entry points so UMD packages (e.g. jsonc-parser) get properly bundled
   mainFields: ['module', 'main'],

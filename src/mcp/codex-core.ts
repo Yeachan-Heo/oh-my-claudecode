@@ -770,7 +770,7 @@ ${resolvedPrompt}`;
   }
 
   // Resolve system prompt from agent role
-  const resolvedSystemPrompt = resolveSystemPrompt(undefined, agent_role);
+  const resolvedSystemPrompt = resolveSystemPrompt(undefined, agent_role, 'codex');
 
   // Build file context
   let fileContext: string | undefined;
