@@ -598,12 +598,13 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
             isError: true
         };
     }
-    // Determine inline intent: caller provided `prompt` field without a valid `prompt_file`.
+    // Determine inline intent: caller provided `prompt` field without `prompt_file` field.
+    // Presence-based precedence: if `prompt_file` key exists (even invalid value), file mode wins.
     // Separate intent detection (field presence) from content validation (non-empty).
-    // Type-guard both fields for defensive robustness against non-string values.
     const inlinePrompt = typeof args.prompt === 'string' ? args.prompt : undefined;
+    const hasPromptFileField = 'prompt_file' in args;
     const promptFileInput = typeof args.prompt_file === 'string' ? args.prompt_file : undefined;
-    const hasInlineIntent = inlinePrompt !== undefined && promptFileInput === undefined;
+    const hasInlineIntent = inlinePrompt !== undefined && !hasPromptFileField;
     const isInlineMode = hasInlineIntent && !!inlinePrompt.trim();
     // Reject empty/whitespace inline prompt with explicit error BEFORE any side effects
     if (hasInlineIntent && !inlinePrompt.trim()) {
@@ -619,22 +620,30 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
             isError: true
         };
     }
+    let inlineRequestId;
     // Handle inline prompt: auto-persist to file for audit trail
     if (isInlineMode) {
+        inlineRequestId = generatePromptId();
         try {
             const promptsDir = getPromptsDir(baseDir);
             mkdirSync(promptsDir, { recursive: true });
             const slug = slugify(args.prompt);
-            const id = generatePromptId();
-            const inlinePromptFile = join(promptsDir, `codex-inline-${slug}-${id}.md`);
+            const inlinePromptFile = join(promptsDir, `codex-inline-${slug}-${inlineRequestId}.md`);
             writeFileSync(inlinePromptFile, args.prompt, 'utf-8');
             args = { ...args, prompt_file: inlinePromptFile };
         }
-        catch (err) {
+        catch {
             return {
-                content: [{ type: 'text', text: `Failed to persist inline prompt: ${err.message}` }],
+                content: [{ type: 'text', text: 'Failed to persist inline prompt. Check working directory permissions and disk space.' }],
                 isError: true
             };
+        }
+        // Auto-generate output_file when using inline mode
+        if (!args.output_file || !args.output_file.trim()) {
+            const promptsDir = getPromptsDir(baseDir);
+            mkdirSync(promptsDir, { recursive: true });
+            const slug = slugify(args.prompt);
+            args = { ...args, output_file: join(promptsDir, `codex-inline-response-${slug}-${inlineRequestId}.md`) };
         }
     }
     // Validate that at least one prompt source is provided
@@ -644,21 +653,12 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
             isError: true
         };
     }
-    // Auto-generate output_file when using inline mode
+    // output_file is required in file mode
     if (!args.output_file || !args.output_file.trim()) {
-        if (isInlineMode) {
-            const promptsDir = getPromptsDir(baseDir);
-            mkdirSync(promptsDir, { recursive: true });
-            const slug = slugify(args.prompt);
-            const id = generatePromptId();
-            args = { ...args, output_file: join(promptsDir, `codex-inline-response-${slug}-${id}.md`) };
-        }
-        else {
-            return {
-                content: [{ type: 'text', text: 'output_file is required. Specify a path where the response should be written.' }],
-                isError: true
-            };
-        }
+        return {
+            content: [{ type: 'text', text: 'output_file is required. Specify a path where the response should be written.' }],
+            isError: true
+        };
     }
     // Resolve prompt from prompt_file (validated non-empty above)
     let resolvedPrompt;
@@ -857,7 +857,7 @@ ${resolvedPrompt}`;
             return {
                 content: [
                     { type: 'text', text: responseLines.join('\n') },
-                    { type: 'text', text: response },
+                    { type: 'text', text: wrapUntrustedFileContent(response, { source: 'inline-cli-response', tool: 'ask_codex' }) },
                 ]
             };
         }

@@ -14913,11 +14913,18 @@ function resolveSystemPrompt(systemPrompt, agentRole, provider) {
   }
   return void 0;
 }
-function wrapUntrustedFileContent(filepath, content) {
-  return `
---- UNTRUSTED FILE CONTENT (${filepath}) ---
-${content}
+function wrapUntrustedFileContent(filepathOrContent, contentOrMetadata) {
+  if (typeof contentOrMetadata === "string") {
+    return `
+--- UNTRUSTED FILE CONTENT (${filepathOrContent}) ---
+${contentOrMetadata}
 --- END UNTRUSTED FILE CONTENT ---
+`;
+  }
+  return `
+--- UNTRUSTED CLI RESPONSE (${contentOrMetadata.tool}:${contentOrMetadata.source}) ---
+${filepathOrContent}
+--- END UNTRUSTED CLI RESPONSE ---
 `;
 }
 function buildPromptWithSystemContext(userPrompt, fileContext, systemPrompt) {
@@ -17201,8 +17208,9 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     };
   }
   const inlinePrompt = typeof args.prompt === "string" ? args.prompt : void 0;
+  const hasPromptFileField = "prompt_file" in args;
   const promptFileInput = typeof args.prompt_file === "string" ? args.prompt_file : void 0;
-  const hasInlineIntent = inlinePrompt !== void 0 && promptFileInput === void 0;
+  const hasInlineIntent = inlinePrompt !== void 0 && !hasPromptFileField;
   const isInlineMode = hasInlineIntent && !!inlinePrompt.trim();
   if (hasInlineIntent && !inlinePrompt.trim()) {
     return {
@@ -17216,20 +17224,27 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
       isError: true
     };
   }
+  let inlineRequestId;
   if (isInlineMode) {
+    inlineRequestId = generatePromptId();
     try {
       const promptsDir = getPromptsDir(baseDir);
       (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
       const slug = slugify(args.prompt);
-      const id = generatePromptId();
-      const inlinePromptFile = (0, import_path9.join)(promptsDir, `codex-inline-${slug}-${id}.md`);
+      const inlinePromptFile = (0, import_path9.join)(promptsDir, `codex-inline-${slug}-${inlineRequestId}.md`);
       (0, import_fs9.writeFileSync)(inlinePromptFile, args.prompt, "utf-8");
       args = { ...args, prompt_file: inlinePromptFile };
-    } catch (err) {
+    } catch {
       return {
-        content: [{ type: "text", text: `Failed to persist inline prompt: ${err.message}` }],
+        content: [{ type: "text", text: "Failed to persist inline prompt. Check working directory permissions and disk space." }],
         isError: true
       };
+    }
+    if (!args.output_file || !args.output_file.trim()) {
+      const promptsDir = getPromptsDir(baseDir);
+      (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
+      const slug = slugify(args.prompt);
+      args = { ...args, output_file: (0, import_path9.join)(promptsDir, `codex-inline-response-${slug}-${inlineRequestId}.md`) };
     }
   }
   if (!args.prompt_file || !args.prompt_file.trim()) {
@@ -17239,18 +17254,10 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     };
   }
   if (!args.output_file || !args.output_file.trim()) {
-    if (isInlineMode) {
-      const promptsDir = getPromptsDir(baseDir);
-      (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
-      const slug = slugify(args.prompt);
-      const id = generatePromptId();
-      args = { ...args, output_file: (0, import_path9.join)(promptsDir, `codex-inline-response-${slug}-${id}.md`) };
-    } else {
-      return {
-        content: [{ type: "text", text: "output_file is required. Specify a path where the response should be written." }],
-        isError: true
-      };
-    }
+    return {
+      content: [{ type: "text", text: "output_file is required. Specify a path where the response should be written." }],
+      isError: true
+    };
   }
   let resolvedPrompt;
   const promptFile = args.prompt_file;
@@ -17435,7 +17442,7 @@ path_policy: ${pathPolicy}`
       return {
         content: [
           { type: "text", text: responseLines.join("\n") },
-          { type: "text", text: response }
+          { type: "text", text: wrapUntrustedFileContent(response, { source: "inline-cli-response", tool: "ask_codex" }) }
         ]
       };
     }

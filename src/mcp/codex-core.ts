@@ -719,16 +719,20 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     }
   }
 
-  // Validate that at least one prompt source is provided
-  if (!args.prompt_file || !args.prompt_file.trim()) {
+  // Validate that at least one prompt source is provided.
+  // Use type-guarded promptFileInput to avoid .trim() TypeError on non-string values.
+  const effectivePromptFile = isInlineMode ? args.prompt_file : promptFileInput;
+  if (!effectivePromptFile || !effectivePromptFile.trim()) {
     return {
       content: [{ type: 'text' as const, text: "Either 'prompt' (inline) or 'prompt_file' (file path) is required." }],
       isError: true
     };
   }
 
-  // output_file is required in file mode
-  if (!args.output_file || !args.output_file.trim()) {
+  // output_file is required in file mode.
+  // Use typeof guard to avoid .trim() TypeError on non-string values.
+  const effectiveOutputFile = typeof args.output_file === 'string' ? args.output_file : undefined;
+  if (!effectiveOutputFile || !effectiveOutputFile.trim()) {
     return {
       content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
       isError: true

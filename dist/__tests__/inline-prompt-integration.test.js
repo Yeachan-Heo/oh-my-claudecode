@@ -6,6 +6,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleAskCodex } from '../mcp/codex-core.js';
 import { handleAskGemini } from '../mcp/gemini-core.js';
+const STANDARD_MISSING_PROMPT_ERROR = "Either 'prompt' (inline) or 'prompt_file' (file path) is required";
+const LEGACY_MISSING_PROMPT_ERROR = 'Either prompt (inline string) or prompt_file (path) is required.';
+function expectMissingPromptError(text) {
+    expect(text.includes(STANDARD_MISSING_PROMPT_ERROR) || text.includes(LEGACY_MISSING_PROMPT_ERROR)).toBe(true);
+}
+function expectNoMissingPromptError(text) {
+    expect(text).not.toContain(STANDARD_MISSING_PROMPT_ERROR);
+    expect(text).not.toContain(LEGACY_MISSING_PROMPT_ERROR);
+}
 // Mock CLI detection to avoid hanging on actual CLI checks
 vi.mock('../mcp/cli-detection.js', () => ({
     detectCodexCli: vi.fn(() => ({ available: true, path: '/usr/bin/codex', version: '1.0.0', installHint: '' })),
@@ -40,7 +49,7 @@ describe('Inline prompt integration - Codex', () => {
         expect(result.isError).toBe(true);
         // File mode with whitespace prompt_file should fail at prompt_file validation
         const text = result.content[0].text;
-        expect(text).toContain('Either');
+        expectMissingPromptError(text);
     });
     it('should not enter inline mode when prompt_file is empty string', async () => {
         const result = await handleAskCodex({
@@ -51,7 +60,7 @@ describe('Inline prompt integration - Codex', () => {
         });
         expect(result.isError).toBe(true);
         const text = result.content[0].text;
-        expect(text).toContain('Either');
+        expectMissingPromptError(text);
     });
     it('should handle path traversal in inline prompt safely', async () => {
         const result = await handleAskCodex({
@@ -67,7 +76,7 @@ describe('Inline prompt integration - Codex', () => {
             agent_role: 'architect',
         });
         expect(result.isError).toBe(true);
-        expect(result.content[0].text).toContain('Either');
+        expectMissingPromptError(result.content[0].text);
     });
     it('should still require output_file in prompt_file mode', async () => {
         const result = await handleAskCodex({
@@ -86,7 +95,7 @@ describe('Inline prompt integration - Gemini', () => {
         });
         // Will error because Gemini CLI is not actually running, but should NOT error about prompt parameter
         const text = result.content[0].text;
-        expect(text).not.toContain('Either prompt (inline string) or prompt_file (path) is required.');
+        expectNoMissingPromptError(text);
         expect(text).not.toContain('output_file is required');
     });
     it('should not enter inline mode when prompt_file is whitespace', async () => {
@@ -98,7 +107,7 @@ describe('Inline prompt integration - Gemini', () => {
         });
         expect(result.isError).toBe(true);
         const text = result.content[0].text;
-        expect(text).toContain('Either');
+        expectMissingPromptError(text);
     });
     it('should not enter inline mode when prompt_file is empty string', async () => {
         const result = await handleAskGemini({
@@ -109,14 +118,14 @@ describe('Inline prompt integration - Gemini', () => {
         });
         expect(result.isError).toBe(true);
         const text = result.content[0].text;
-        expect(text).toContain('Either');
+        expectMissingPromptError(text);
     });
     it('should error when neither prompt nor prompt_file provided', async () => {
         const result = await handleAskGemini({
             agent_role: 'designer',
         });
         expect(result.isError).toBe(true);
-        expect(result.content[0].text).toContain('Either prompt (inline string) or prompt_file (path) is required.');
+        expectMissingPromptError(result.content[0].text);
     });
     it('should block inline prompt with background mode', async () => {
         const result = await handleAskGemini({
@@ -126,6 +135,42 @@ describe('Inline prompt integration - Gemini', () => {
         });
         expect(result.isError).toBe(true);
         expect(result.content[0].text).toContain('foreground only');
+    });
+});
+describe('Response shape contract', () => {
+    it('Codex: error responses should always be single content block', async () => {
+        const result = await handleAskCodex({
+            prompt: '',
+            agent_role: 'architect',
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content).toHaveLength(1);
+    });
+    it('Gemini: error responses should always be single content block', async () => {
+        const result = await handleAskGemini({
+            prompt: '',
+            agent_role: 'designer',
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content).toHaveLength(1);
+    });
+    it('Codex: validation error for missing prompt should be single block', async () => {
+        const result = await handleAskCodex({
+            agent_role: 'architect',
+            output_file: '/tmp/test-output.md',
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content).toHaveLength(1);
+        expect(result.content[0].type).toBe('text');
+    });
+    it('Gemini: validation error for missing prompt should be single block', async () => {
+        const result = await handleAskGemini({
+            agent_role: 'designer',
+            output_file: '/tmp/test-output.md',
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content).toHaveLength(1);
+        expect(result.content[0].type).toBe('text');
     });
 });
 describe('Inline prompt validation - empty and background', () => {

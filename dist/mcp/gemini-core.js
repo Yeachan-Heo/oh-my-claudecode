@@ -466,12 +466,12 @@ export async function handleAskGemini(args) {
     }
     // Inline prompt support: when `prompt` is provided as a string, auto-persist
     // it to a file for audit trail and continue with normal prompt_file flow.
-    // `prompt_file` takes precedence if both are provided.
+    // Presence-based precedence: if `prompt_file` key exists (even invalid value), file mode wins.
     // Separate intent detection (field presence) from content validation (non-empty).
-    // Type-guard both fields for defensive robustness against non-string values.
     const inlinePrompt = typeof args.prompt === 'string' ? args.prompt : undefined;
+    const hasPromptFileField = 'prompt_file' in args;
     const promptFileInput = typeof args.prompt_file === 'string' ? args.prompt_file : undefined;
-    const hasInlineIntent = inlinePrompt !== undefined && promptFileInput === undefined;
+    const hasInlineIntent = inlinePrompt !== undefined && !hasPromptFileField;
     const isInlineMode = hasInlineIntent && !!inlinePrompt.trim();
     // Reject empty/whitespace inline prompt with explicit error BEFORE any side effects
     if (hasInlineIntent && !inlinePrompt.trim()) {
@@ -487,41 +487,42 @@ export async function handleAskGemini(args) {
             isError: true
         };
     }
+    let inlineRequestId;
     if (isInlineMode) {
+        inlineRequestId = generatePromptId();
         // Auto-persist inline prompt to file
         try {
             const promptsDir = getPromptsDir(baseDir);
             mkdirSync(promptsDir, { recursive: true });
             const slug = slugify(args.prompt);
-            const id = generatePromptId();
-            const filename = `gemini-inline-${slug}-${id}.md`;
+            const filename = `gemini-inline-${slug}-${inlineRequestId}.md`;
             const inlinePromptPath = join(promptsDir, filename);
             writeFileSync(inlinePromptPath, args.prompt, 'utf-8');
             args = { ...args, prompt_file: inlinePromptPath };
         }
-        catch (err) {
+        catch {
             return {
-                content: [{ type: 'text', text: `Failed to persist inline prompt: ${err.message}` }],
+                content: [{ type: 'text', text: 'Failed to persist inline prompt. Check working directory permissions and disk space.' }],
                 isError: true
             };
         }
         // Auto-generate output_file when not provided in inline mode
         if (!args.output_file || !args.output_file.trim()) {
             const promptsDir = getPromptsDir(baseDir);
+            mkdirSync(promptsDir, { recursive: true });
             const outSlug = slugify(args.prompt);
-            const outId = generatePromptId();
-            const outFilename = `gemini-inline-response-${outSlug}-${outId}.md`;
+            const outFilename = `gemini-inline-response-${outSlug}-${inlineRequestId}.md`;
             args = { ...args, output_file: join(promptsDir, outFilename) };
         }
     }
     // Validate prompt_file is provided (required unless inline prompt was used)
     if (!args.prompt_file || !args.prompt_file.trim()) {
         return {
-            content: [{ type: 'text', text: 'Either prompt (inline string) or prompt_file (path) is required.' }],
+            content: [{ type: 'text', text: "Either 'prompt' (inline) or 'prompt_file' (file path) is required." }],
             isError: true
         };
     }
-    // Validate output_file is provided (required in non-inline mode)
+    // Validate output_file is provided after prompt source validation
     if (!args.output_file || !args.output_file.trim()) {
         return {
             content: [{ type: 'text', text: 'output_file is required. Specify a path where the response should be written, or use the inline `prompt` parameter for auto-generated paths.' }],
@@ -720,7 +721,7 @@ ${resolvedPrompt}`;
                 return {
                     content: [
                         { type: 'text', text: responseLines.join('\n') },
-                        { type: 'text', text: response },
+                        { type: 'text', text: wrapUntrustedFileContent(response, { source: 'inline-cli-response', tool: 'ask_gemini' }) },
                     ]
                 };
             }

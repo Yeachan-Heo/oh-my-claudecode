@@ -32,6 +32,10 @@ export declare function resolveSystemPrompt(systemPrompt?: string, agentRole?: s
  * Each file's content is clearly marked as data to analyze, not instructions.
  */
 export declare function wrapUntrustedFileContent(filepath: string, content: string): string;
+export declare function wrapUntrustedFileContent(content: string, metadata: {
+    source: string;
+    tool: string;
+}): string;
 /**
  * Build the full prompt with system prompt prepended.
  *

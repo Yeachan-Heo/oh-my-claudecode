@@ -11,30 +11,9 @@ function expectMissingPromptError(text: string): void {
   ).toBe(true);
 }
 
-function expectMissingPromptBehavior(text: string): void {
-  expect([
-    STANDARD_MISSING_PROMPT_ERROR,
-    LEGACY_MISSING_PROMPT_ERROR,
-    'args.prompt_file.trim is not a function',
-  ]).toContain(text);
-}
-
 function expectNoMissingPromptError(text: string): void {
   expect(text).not.toContain(STANDARD_MISSING_PROMPT_ERROR);
   expect(text).not.toContain(LEGACY_MISSING_PROMPT_ERROR);
-}
-
-async function getErrorText(call: () => Promise<{ isError?: boolean; content: Array<{ text: string }> }>): Promise<string> {
-  try {
-    const result = await call();
-    expect(result.isError).toBe(true);
-    return result.content[0].text;
-  } catch (error) {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    throw error;
-  }
 }
 
 // Mock CLI detection to return available
@@ -136,16 +115,15 @@ describe('prompt_file-only enforcement', () => {
 
 describe('non-string input handling', () => {
   it('should treat non-string prompt_file as file mode (number)', async () => {
-    const text = await getErrorText(() =>
-      handleAskCodex({
-        prompt: 'valid inline prompt',
-        prompt_file: 123 as any,
-        agent_role: 'architect',
-        output_file: '/tmp/test-output.md',
-      }),
-    );
+    const result = await handleAskCodex({
+      prompt: 'valid inline prompt',
+      prompt_file: 123 as any,
+      agent_role: 'architect',
+      output_file: '/tmp/test-output.md',
+    });
     // prompt_file is present (even non-string), so file mode, not inline
-    expectMissingPromptBehavior(text);
+    expect(result.isError).toBe(true);
+    expectMissingPromptError(result.content[0].text);
   });
 
   it('should treat non-string prompt_file as file mode (null)', async () => {
@@ -170,15 +148,14 @@ describe('non-string input handling', () => {
   });
 
   it('Gemini: should treat non-string prompt_file as file mode', async () => {
-    const text = await getErrorText(() =>
-      handleAskGemini({
-        prompt: 'valid inline prompt',
-        prompt_file: 123 as any,
-        agent_role: 'designer',
-        output_file: '/tmp/test-output.md',
-      }),
-    );
-    expectMissingPromptBehavior(text);
+    const result = await handleAskGemini({
+      prompt: 'valid inline prompt',
+      prompt_file: 123 as any,
+      agent_role: 'designer',
+      output_file: '/tmp/test-output.md',
+    });
+    expect(result.isError).toBe(true);
+    expectMissingPromptError(result.content[0].text);
   });
 });
 
