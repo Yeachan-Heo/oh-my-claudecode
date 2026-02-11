@@ -4,6 +4,7 @@ node_modules/
 .omc/
 .sisyphus/
 .idea/
+.claude/
 
 # Windows reserved names (prevent accidental creation)
 nul

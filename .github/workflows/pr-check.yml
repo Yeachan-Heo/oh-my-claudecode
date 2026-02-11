@@ -36,22 +36,28 @@ jobs:
             else if (additions + deletions > 500) sizeLabel = 'size/L';
             else if (additions + deletions > 100) sizeLabel = 'size/M';
 
-            // Add size label
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              labels: [sizeLabel]
-            });
+            const isFork = context.payload.pull_request.head.repo.full_name !== context.payload.repository.full_name;
 
-            // Comment if PR is too large
-            if (additions + deletions > 1000) {
-              await github.rest.issues.createComment({
+            if (!isFork) {
+              // Add size label
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `⚠️ **Large PR Alert**\n\nThis PR has ${additions} additions and ${deletions} deletions across ${changedFiles} files.\n\nConsider breaking it into smaller PRs for easier review.`
+                labels: [sizeLabel]
               });
+
+              // Comment if PR is too large
+              if (additions + deletions > 1000) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `⚠️ **Large PR Alert**\n\nThis PR has ${additions} additions and ${deletions} deletions across ${changedFiles} files.\n\nConsider breaking it into smaller PRs for easier review.`
+                });
+              }
+            } else {
+              core.notice(`Fork PR - skipping label/comment (no write permission). Size: ${sizeLabel}`);
             }
 
             console.log(`PR Stats: +${additions} -${deletions} (${changedFiles} files) → ${sizeLabel}`);

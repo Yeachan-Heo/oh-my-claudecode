@@ -118,13 +118,13 @@ Suggested: use '${join(config.outputRedirectDir, basename(outputFile))}' or set 
         const relWritten = relative(baseDirReal, writtenReal);
         if (relWritten.startsWith('..') || isAbsolute(relWritten)) {
           // Written file escaped boundary via symlink - remove and error
-          try { unlinkSync(safeOutputPath); } catch {}
+          try { unlinkSync(safeOutputPath); } catch { /* cleanup best-effort */ }
           const errorToken = E_PATH_OUTSIDE_WORKDIR_OUTPUT;
           const errorMessage = `${errorToken}: output file '${outputFile}' resolved to '${writtenReal}' outside working_directory '${baseDirReal}' via symlink.\nSuggested: remove the symlink and retry`;
           console.warn(`${logPrefix} ${errorMessage}`);
           return { success: false, errorToken, errorMessage };
         }
-      } catch {}
+      } catch { /* symlink check best-effort */ }
       return { success: true, actualPath: safeOutputPath };
     } catch (err) {
       const errorToken = 'E_WRITE_FAILED';
@@ -183,13 +183,13 @@ Suggested: place the output file within the working directory or set working_dir
         const relWritten = relative(baseDirReal, writtenReal);
         if (relWritten.startsWith('..') || isAbsolute(relWritten)) {
           // Written file escaped boundary via symlink - remove and error
-          try { unlinkSync(safePath); } catch {}
+          try { unlinkSync(safePath); } catch { /* cleanup best-effort */ }
           const errorToken = E_PATH_OUTSIDE_WORKDIR_OUTPUT;
           const errorMessage = `${errorToken}: output file '${outputFile}' resolved to '${writtenReal}' outside working_directory '${baseDirReal}' via symlink.\nSuggested: remove the symlink and retry`;
           console.warn(`${logPrefix} ${errorMessage}`);
           return { success: false, errorToken, errorMessage };
         }
-      } catch {}
+      } catch { /* symlink check best-effort */ }
       return { success: true, actualPath: safePath };
     }
 
