@@ -19,10 +19,14 @@ describe('detectBashFailure', () => {
     it('detects command not found', () => {
       expect(detectBashFailure('bash: foobar: command not found')).toBe(true);
       expect(detectBashFailure('zsh: foobar: command not found')).toBe(true);
+      expect(detectBashFailure('sh: foobar: command not found')).toBe(true);
+      expect(detectBashFailure('  bash: foobar: command not found')).toBe(true);
     });
 
     it('detects permission denied', () => {
       expect(detectBashFailure('/usr/bin/foo: Permission denied')).toBe(true);
+      expect(detectBashFailure('permission denied while accessing file')).toBe(true);
+      expect(detectBashFailure('operation not permitted')).toBe(true);
     });
 
     it('detects no such file or directory', () => {
@@ -31,11 +35,18 @@ describe('detectBashFailure', () => {
 
     it('detects fatal errors', () => {
       expect(detectBashFailure('fatal: not a git repository')).toBe(true);
+      expect(detectBashFailure('  fatal: repository not found')).toBe(true);
+    });
+
+    it('detects panic errors', () => {
+      expect(detectBashFailure('panic: runtime error')).toBe(true);
+      expect(detectBashFailure('  panic: index out of range')).toBe(true);
     });
 
     it('detects line-anchored error: prefix', () => {
       expect(detectBashFailure('error: something went wrong')).toBe(true);
       expect(detectBashFailure('Error: ENOENT')).toBe(true);
+      expect(detectBashFailure('Error: ENOENT no such file or directory, open /tmp/missing')).toBe(true);
     });
   });
 
@@ -133,6 +144,12 @@ describe('detectWriteFailure', () => {
 
     it('detects line-anchored Error:', () => {
       expect(detectWriteFailure('Error: File not found')).toBe(true);
+      expect(detectWriteFailure('\n  Error: failed to write file')).toBe(true);
+    });
+
+    it('detects errno token patterns', () => {
+      expect(detectWriteFailure('write failed with ENOENT')).toBe(true);
+      expect(detectWriteFailure('open failed: EACCES')).toBe(true);
     });
 
     it('detects old_string not found (Edit tool)', () => {
@@ -197,14 +214,18 @@ describe('detectBackgroundOperation', () => {
   describe('true positives', () => {
     it('detects task_id in output', () => {
       expect(detectBackgroundOperation('{"task_id": "abc-123"}')).toBe(true);
+      expect(detectBackgroundOperation('\n  task_id: abc-123')).toBe(true);
     });
 
-    it('detects Background task launched', () => {
+    it('detects background launch/resume/start markers', () => {
       expect(detectBackgroundOperation('Background task launched successfully')).toBe(true);
+      expect(detectBackgroundOperation('\n background resumed by worker')).toBe(true);
+      expect(detectBackgroundOperation('\n   background task started for job')).toBe(true);
     });
 
-    it('detects run_in_background', () => {
+    it('detects run_in_background and spawned markers', () => {
       expect(detectBackgroundOperation('run_in_background: true')).toBe(true);
+      expect(detectBackgroundOperation('\nspawned worker process')).toBe(true);
     });
   });
 

@@ -139,11 +139,13 @@ function detectBashFailure(output) {
   //    whitespace) so they won't match words embedded in normal command output.
   const lineAnchoredPatterns = [
     /^bash: .+: command not found$/m,
-    /^.*: command not found$/m,
     /^.*: Permission denied$/m,
     /^.*: No such file or directory$/m,
     /^fatal: /m,
     /^error: /mi,
+    /(?:^|\n)\s*(fatal|panic):\s+/i,
+    /(?:^|\n)\s*(?:bash|zsh|sh): .*command not found/i,
+    /(?:^|\n)\s*(?:permission denied|operation not permitted)\b/i,
   ];
 
   return lineAnchoredPatterns.some(pattern => pattern.test(output));
@@ -154,11 +156,9 @@ function detectBashFailure(output) {
 // common words like "started", "running", or "async".
 function detectBackgroundOperation(output) {
   const bgPatterns = [
-    /task_id/i,
-    /Background task launched/i,
-    /Background task resumed/i,
-    /run_in_background/i,
-    /"spawned"/i,
+    /(?:^|\n)\s*background(?:\s+task)?\s+(launched|resumed|started)\b/i,
+    /(?:^|\n)\s*(task_id|run_in_background|spawned)\b/i,
+    /(?:^|\n)\s*\{?\s*["']?(task_id|run_in_background|spawned)["']?\s*[:=]/i,
   ];
 
   return bgPatterns.some(pattern => pattern.test(output));
@@ -209,11 +209,8 @@ function detectWriteFailure(output) {
   const patterns = [
     // Claude Code Edit/Write specific error responses
     /^Error: /m,
-    /ENOENT:/,
-    /EACCES:/,
-    /EPERM:/,
-    /EISDIR:/,
-    /EROFS:/,
+    /(?:^|\n)\s*Error:\s+/m,
+    /\b(ENOENT|EACCES|EPERM|EISDIR|EROFS)\b/,
     /Permission denied$/m,
     /read-only file system/i,
     // Edit tool: old_string not found

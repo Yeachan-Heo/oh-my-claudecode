@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's keyword-detector hook.
  */
-import { isEcomodeEnabled, isTeamEnabled } from '../../features/auto-update.js';
+import { isEcomodeEnabled } from '../../features/auto-update.js';
 /**
  * Autopilot keywords
  */
@@ -35,9 +35,11 @@ const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
     ralph: /\b(ralph|don't stop|must complete|until done)\b/i,
     autopilot: /\b(autopilot|auto pilot|auto-pilot|autonomous|full auto|fullsend)\b/i,
-    team: /(?<!\b(?:my|the|our|a|his|her|their|its)\s)\bteam\b|\bcoordinated\s+team\b|\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b|\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b/i,
+    ultrapilot: /\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b/i,
     ultrawork: /\b(ultrawork|ulw|uw)\b/i,
     ecomode: /\b(eco|ecomode|eco-mode|efficient|save-tokens|budget)\b/i,
+    swarm: /\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b|\bteam\s+mode\b/i,
+    team: /(?<!\b(?:my|the|our|a|his|her|their|its)\s)\bteam\b|\bcoordinated\s+team\b/i,
     pipeline: /\b(pipeline)\b|\bchain\s+agents\b/i,
     ralplan: /\b(ralplan)\b/i,
     plan: /\bplan\s+(this|the)\b/i,
@@ -51,11 +53,10 @@ const KEYWORD_PATTERNS = {
 };
 /**
  * Priority order for keyword detection
- * Higher priority keywords take precedence
  */
 const KEYWORD_PRIORITY = [
-    'cancel', 'ralph', 'autopilot', 'team', 'ultrawork', 'ecomode',
-    'pipeline', 'ralplan', 'plan', 'tdd', 'research',
+    'cancel', 'ralph', 'autopilot', 'ultrapilot', 'team', 'ultrawork', 'ecomode',
+    'swarm', 'pipeline', 'ralplan', 'plan', 'tdd', 'research',
     'ultrathink', 'deepsearch', 'analyze', 'codex', 'gemini'
 ];
 /**
@@ -71,25 +72,17 @@ export function removeCodeBlocks(text) {
     return result;
 }
 /**
- * Sanitize text for keyword detection by removing XML tags, URLs, file paths,
- * and code blocks to prevent false positives
+ * Sanitize text before keyword detection to reduce false positives
  */
 export function sanitizeForKeywordDetection(text) {
-    return text
-        // Strip XML-style tag blocks
-        .replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, '')
-        // Strip self-closing XML tags
-        .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
-        // Strip URLs
-        .replace(/https?:\/\/[^\s)>\]]+/g, '')
-        // Strip file paths — uses capture group + $1 replacement instead of lookbehind
-        // for broader engine compatibility (the .mjs runtime uses lookbehind instead)
-        .replace(/(^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '$1')
-        // Strip markdown code blocks
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/~~~[\s\S]*?~~~/g, '')
-        // Strip inline code
-        .replace(/`[^`]+`/g, '');
+    let result = removeCodeBlocks(text);
+    // Remove XML-like tags and tag blocks
+    result = result.replace(/<[^>]+>/g, ' ');
+    // Remove URLs
+    result = result.replace(/https?:\/\/\S+/gi, ' ');
+    // Remove path-like tokens
+    result = result.replace(/(?:^|\s)(?:\.?\.?\/)?(?:[\w.-]+\/)+[\w.-]+/g, ' ');
+    return result;
 }
 /**
  * Extract prompt text from message parts
@@ -105,32 +98,37 @@ export function extractPromptText(parts) {
  */
 export function detectKeywordsWithType(text, _agentName) {
     const detected = [];
-    const cleanedText = sanitizeForKeywordDetection(text);
-    // Check for autopilot keywords
-    const hasAutopilot = AUTOPILOT_KEYWORDS.some(kw => cleanedText.toLowerCase().includes(kw.toLowerCase()));
-    // Check for autopilot phrase patterns
-    const hasAutopilotPhrase = AUTOPILOT_PHRASE_PATTERNS.some(pattern => pattern.test(cleanedText));
-    if (hasAutopilot || hasAutopilotPhrase) {
-        const keyword = hasAutopilot ? 'autopilot' : 'build-phrase';
-        const position = cleanedText.toLowerCase().indexOf(keyword.toLowerCase());
-        detected.push({
-            type: 'autopilot',
-            keyword,
-            position: position >= 0 ? position : 0
-        });
+    const cleanedText = removeCodeBlocks(text);
+    // Check autopilot phrases first (more specific than keywords)
+    for (const pattern of AUTOPILOT_PHRASE_PATTERNS) {
+        const match = cleanedText.match(pattern);
+        if (match && match.index !== undefined) {
+            detected.push({
+                type: 'autopilot',
+                keyword: match[0],
+                position: match.index
+            });
+            break; // Only need one autopilot match
+        }
+    }
+    // Check autopilot keywords
+    for (const keyword of AUTOPILOT_KEYWORDS) {
+        const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+        const match = cleanedText.match(regex);
+        if (match && match.index !== undefined) {
+            // Avoid duplicates from phrase detection
+            const position = cleanedText.toLowerCase().indexOf(keyword.toLowerCase());
+            detected.push({
+                type: 'autopilot',
+                keyword,
+                position: position >= 0 ? position : 0
+            });
+        }
     }
     // Check each keyword type
     for (const type of KEYWORD_PRIORITY) {
-        // Skip autopilot in loop - already detected above via explicit keyword/phrase checks
-        if (type === 'autopilot') {
-            continue;
-        }
         // Skip ecomode detection if disabled in config
         if (type === 'ecomode' && !isEcomodeEnabled()) {
-            continue;
-        }
-        // Skip team detection if disabled in config
-        if (type === 'team' && !isTeamEnabled()) {
             continue;
         }
         const pattern = KEYWORD_PATTERNS[type];
@@ -149,13 +147,15 @@ export function detectKeywordsWithType(text, _agentName) {
  * Check if text contains any magic keyword
  */
 export function hasKeyword(text) {
-    return detectKeywordsWithType(text).length > 0;
+    const cleanText = removeCodeBlocks(text);
+    return detectKeywordsWithType(cleanText).length > 0;
 }
 /**
  * Get all detected keywords with conflict resolution applied
  */
 export function getAllKeywords(text) {
-    const detected = detectKeywordsWithType(text);
+    const cleanText = removeCodeBlocks(text);
+    const detected = detectKeywordsWithType(cleanText);
     if (detected.length === 0)
         return [];
     let types = [...new Set(detected.map(d => d.type))];
@@ -166,13 +166,15 @@ export function getAllKeywords(text) {
     if (types.includes('ecomode') && types.includes('ultrawork') && isEcomodeEnabled()) {
         types = types.filter(t => t !== 'ultrawork');
     }
-    // Mutual exclusion: team beats autopilot (legacy ultrapilot semantics)
-    if (types.includes('team') && types.includes('autopilot')) {
+    // Mutual exclusion: ultrapilot beats autopilot
+    if (types.includes('ultrapilot') && types.includes('autopilot')) {
         types = types.filter(t => t !== 'autopilot');
     }
-    // Composition: team + ralph coexist (team-ralph linked mode)
-    // Both keywords are preserved so the skill can detect the composition.
-    // Ralph is primary (higher priority) but team is kept as secondary.
+    // Team is an alias for swarm - map team to swarm for processing
+    // But keep team as distinct for UI purposes
+    if (types.includes('team') && !types.includes('swarm')) {
+        types.push('swarm');
+    }
     // Sort by priority order
     return KEYWORD_PRIORITY.filter(k => types.includes(k));
 }
@@ -187,7 +189,8 @@ export function getPrimaryKeyword(text) {
     // Get the highest priority keyword type
     const primaryType = allKeywords[0];
     // Find the original detected keyword for this type
-    const detected = detectKeywordsWithType(text);
+    const cleanText = removeCodeBlocks(text);
+    const detected = detectKeywordsWithType(cleanText);
     const match = detected.find(d => d.type === primaryType);
     return match || null;
 }

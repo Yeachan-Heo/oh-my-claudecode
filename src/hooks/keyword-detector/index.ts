@@ -107,6 +107,24 @@ export function removeCodeBlocks(text: string): string {
 }
 
 /**
+ * Sanitize text before keyword detection to reduce false positives
+ */
+export function sanitizeForKeywordDetection(text: string): string {
+  let result = removeCodeBlocks(text);
+
+  // Remove XML-like tags and tag blocks
+  result = result.replace(/<[^>]+>/g, ' ');
+
+  // Remove URLs
+  result = result.replace(/https?:\/\/\S+/gi, ' ');
+
+  // Remove path-like tokens
+  result = result.replace(/(?:^|\s)(?:\.?\.?\/)?(?:[\w.-]+\/)+[\w.-]+/g, ' ');
+
+  return result;
+}
+
+/**
  * Extract prompt text from message parts
  */
 export function extractPromptText(
