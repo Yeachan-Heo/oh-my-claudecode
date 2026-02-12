@@ -358,6 +358,30 @@ function isContextLimitStop(data) {
 /**
  * Detect if stop was triggered by user abort (Ctrl+C, cancel button, etc.)
  */
+/**
+ * Send session-idle notification (fire-and-forget, non-blocking).
+ * Called when no persistent mode is blocking and session is truly idle.
+ */
+async function sendIdleNotification(sessionId, directory) {
+  if (!sessionId) return;
+
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    if (!pluginRoot) return;
+
+    const notifPath = join(pluginRoot, "dist", "notifications", "index.js");
+    if (!existsSync(notifPath)) return;
+
+    const { notify } = await import(pathToFileURL(notifPath).href);
+    await notify("session-idle", {
+      sessionId,
+      projectPath: directory,
+    });
+  } catch {
+    // Notification module not available, skip silently
+  }
+}
+
 function isUserAbort(data) {
   if (data.user_requested || data.userRequested) return true;
 
@@ -781,7 +805,10 @@ async function main() {
       return;
     }
 
-    // No blocking needed
+    // No blocking needed — Claude is truly idle.
+    // Fire session-idle notification (non-blocking) so user gets notified.
+    // Fix: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/584
+    sendIdleNotification(sessionId, directory).catch(() => {});
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
     // On any error, allow stop rather than blocking forever

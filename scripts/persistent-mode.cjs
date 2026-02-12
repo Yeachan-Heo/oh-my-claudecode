@@ -87,6 +87,32 @@ async function sendStopNotification(modeName, stateData, sessionId, directory) {
 }
 
 /**
+ * Send session-idle notification (fire-and-forget, non-blocking).
+ * Called when no persistent mode is blocking and session is truly idle.
+ * Fix: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/584
+ */
+async function sendIdleNotification(sessionId, directory) {
+  if (!sessionId) return;
+
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    if (!pluginRoot) return;
+
+    const { pathToFileURL } = require('url');
+    const notifPath = join(pluginRoot, 'dist', 'notifications', 'index.js');
+    if (!existsSync(notifPath)) return;
+
+    const { notify } = await import(pathToFileURL(notifPath).href);
+    await notify('session-idle', {
+      sessionId,
+      projectPath: directory,
+    });
+  } catch {
+    // Notification module not available, skip silently
+  }
+}
+
+/**
  * Staleness threshold for mode states (2 hours in milliseconds).
  * States older than this are treated as inactive to prevent stale state
  * from causing the stop hook to malfunction in new sessions.
@@ -609,7 +635,10 @@ async function main() {
       return;
     }
 
-    // No blocking needed
+    // No blocking needed — Claude is truly idle.
+    // Fire session-idle notification (non-blocking) so user gets notified.
+    // Fix: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/584
+    sendIdleNotification(sessionId, directory).catch(() => {});
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
