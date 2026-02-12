@@ -26,6 +26,8 @@ The consensus workflow:
 2. **Architect** reviews for architectural soundness
 3. **Critic** evaluates against quality criteria
 4. If Critic rejects: iterate with feedback (max 5 iterations)
-5. On Critic approval: present to user for final consent
+5. On Critic approval: **MUST** use `AskUserQuestion` to present the plan with approval options
+6. User chooses: Approve, Request changes, or Reject
+7. On approval: **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution -- never implement directly
 
 Follow the Plan skill's full documentation for consensus mode details.
