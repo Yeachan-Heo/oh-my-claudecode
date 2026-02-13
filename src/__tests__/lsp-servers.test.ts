@@ -4,8 +4,8 @@ import { LSP_SERVERS, getServerForFile, getServerForLanguage } from '../tools/ls
 describe('LSP Server Configurations', () => {
   const serverKeys = Object.keys(LSP_SERVERS);
 
-  it('should have 16 configured servers', () => {
-    expect(serverKeys).toHaveLength(16);
+  it('should have 17 configured servers', () => {
+    expect(serverKeys).toHaveLength(17);
   });
 
   it.each(serverKeys)('server "%s" should have valid config', (key) => {
@@ -55,6 +55,7 @@ describe('getServerForFile', () => {
     ['page.heex', 'ElixirLS'],
     ['template.eex', 'ElixirLS'],
     ['Program.cs', 'OmniSharp'],
+    ['main.dart', 'Dart Analysis Server'],
     ['view.erb', 'Ruby Language Server (Solargraph)'],
   ];
 
@@ -104,6 +105,8 @@ describe('getServerForLanguage', () => {
     ['erb', 'Ruby Language Server (Solargraph)'],
     ['c#', 'OmniSharp'],
     ['cs', 'OmniSharp'],
+    ['dart', 'Dart Analysis Server'],
+    ['flutter', 'Dart Analysis Server'],
   ];
 
   it.each(cases)('should resolve language "%s" to "%s"', (lang, expectedName) => {
