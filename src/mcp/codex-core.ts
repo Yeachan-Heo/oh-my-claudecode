@@ -114,28 +114,40 @@ export function isModelError(output: string): { isError: boolean; message: strin
 /**
  * Check if an error message or output indicates a rate-limit (429) error
  * that should trigger a fallback to the next model in the chain.
+ *
+ * Only checks structured JSONL error events and stderr — never raw stdout
+ * content, which may contain user-facing text that mentions "rate limit"
+ * without being an actual API error (false positive).
  */
 export function isRateLimitError(output: string, stderr: string = ''): { isError: boolean; message: string } {
-  const combined = `${output}\n${stderr}`;
-  // Check for 429 status codes and rate limit messages in both stdout and stderr
-  if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(combined)) {
-    // Extract a meaningful message
-    const lines = combined.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line);
+  const RATE_LIMIT_RE = /429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i;
+
+  // 1. Check structured JSONL error events in stdout (safe — only error/turn.failed types)
+  const lines = output.trim().split('\n').filter(l => l.trim());
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === 'error' || event.type === 'turn.failed') {
         const msg = typeof event.message === 'string' ? event.message :
                     typeof event.error?.message === 'string' ? event.error.message : '';
-        if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(msg)) {
+        if (RATE_LIMIT_RE.test(msg)) {
           return { isError: true, message: msg };
         }
-      } catch { /* check raw line */ }
-      if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(line)) {
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+
+  // 2. Check stderr (always error output, never response content)
+  if (RATE_LIMIT_RE.test(stderr)) {
+    const stderrLines = stderr.split('\n').filter(l => l.trim());
+    for (const line of stderrLines) {
+      if (RATE_LIMIT_RE.test(line)) {
         return { isError: true, message: line.trim() };
       }
     }
-    return { isError: true, message: 'Rate limit error detected' };
+    return { isError: true, message: 'Rate limit error detected in stderr' };
   }
+
   return { isError: false, message: '' };
 }
 

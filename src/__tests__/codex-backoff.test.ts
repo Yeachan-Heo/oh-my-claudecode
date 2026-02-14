@@ -5,6 +5,7 @@ import {
   RATE_LIMIT_INITIAL_DELAY,
   RATE_LIMIT_MAX_DELAY,
   isRetryableError,
+  isRateLimitError,
 } from '../mcp/codex-core.js';
 
 describe('Codex Background Retry / Backoff', () => {
@@ -164,6 +165,56 @@ describe('Codex Background Retry / Backoff', () => {
       }
       expect(Number.isFinite(totalDelay)).toBe(true);
       expect(totalDelay).toBeLessThanOrEqual(RATE_LIMIT_RETRY_COUNT * RATE_LIMIT_MAX_DELAY);
+    });
+  });
+
+  describe('false positive prevention (response content containing rate limit keywords)', () => {
+    it('should NOT flag response text mentioning "rate limit" as an error', () => {
+      const responseWithRateLimit = [
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'HTTP 429 rate limit errors are common in distributed systems.' } }),
+      ].join('\n');
+      const result = isRateLimitError(responseWithRateLimit, '');
+      expect(result.isError).toBe(false);
+    });
+
+    it('should NOT flag response text mentioning "429" and "quota exceeded" as an error', () => {
+      const responseWithKeywords = [
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '429 too many requests. quota exceeded. resource exhausted.' } }),
+      ].join('\n');
+      const result = isRateLimitError(responseWithKeywords, '');
+      expect(result.isError).toBe(false);
+    });
+
+    it('should NOT flag message event containing rate limit discussion as an error', () => {
+      const messageEvent = JSON.stringify({ type: 'message', content: 'To handle rate limit errors, implement exponential backoff with 429 status detection.' });
+      const result = isRateLimitError(messageEvent, '');
+      expect(result.isError).toBe(false);
+    });
+
+    it('SHOULD detect real rate limit from structured error event', () => {
+      const errorEvent = JSON.stringify({ type: 'error', message: 'Rate limit exceeded. Please retry after 30 seconds.' });
+      const result = isRateLimitError(errorEvent, '');
+      expect(result.isError).toBe(true);
+    });
+
+    it('SHOULD detect real rate limit from turn.failed event', () => {
+      const failedEvent = JSON.stringify({ type: 'turn.failed', message: '429 Too Many Requests' });
+      const result = isRateLimitError(failedEvent, '');
+      expect(result.isError).toBe(true);
+    });
+
+    it('SHOULD detect rate limit from stderr', () => {
+      const result = isRateLimitError('', 'Error: 429 Too Many Requests');
+      expect(result.isError).toBe(true);
+    });
+
+    it('should NOT flag via isRetryableError when response content has rate limit keywords', () => {
+      const responseWithRateLimit = [
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'HTTP 429 rate limit error: too many requests. quota exceeded. resource exhausted.' } }),
+      ].join('\n');
+      const result = isRetryableError(responseWithRateLimit, '');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
     });
   });
 });
