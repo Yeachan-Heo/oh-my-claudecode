@@ -38,6 +38,9 @@ const RATE_LIMIT_PATTERNS = [
   /please wait/i,
   /try again later/i,
   /limit reached/i,
+  /hit your limit/i,
+  /hit .+ limit/i,
+  /resets? .+ at/i,
   /5[- ]?hour/i,
   /weekly/i,
 ];
@@ -54,12 +57,14 @@ const CLAUDE_CODE_PATTERNS = [
 
 /** Patterns that indicate the pane is waiting for user input */
 const WAITING_PATTERNS = [
-  /\[\d+\]/,           // Menu selection prompt like [1], [2], [3]
-  /continue\?/i,        // Continue prompt
+  /\[\d+\]/,              // Menu selection prompt like [1], [2], [3]
+  /^\s*❯?\s*\d+\.\s/m,     // Menu selection prompt like "❯ 1. ..." or "  2. ..."
+  /continue\?/i,           // Continue prompt
   /press enter/i,
   /waiting for/i,
   /select an option/i,
   /choice:/i,
+  /enter to confirm/i,
 ];
 
 /**
