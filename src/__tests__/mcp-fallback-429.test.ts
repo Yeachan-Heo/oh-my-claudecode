@@ -121,10 +121,11 @@ describe('MCP Fallback on 429/Rate-Limit Errors', () => {
       expect(result.type).toBe('rate_limit');
     });
 
-    it('should detect rate limit in stdout', () => {
+    it('should NOT detect rate limit from stdout (response content)', () => {
+      // Gemini CLI outputs plain text to stdout — searching it causes false positives
       const result = isGeminiRetryableError('rate limit exceeded for model gemini-3-pro-preview', '');
-      expect(result.isError).toBe(true);
-      expect(result.type).toBe('rate_limit');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
     });
 
     it('should detect quota_exceeded', () => {
@@ -169,10 +170,60 @@ describe('MCP Fallback on 429/Rate-Limit Errors', () => {
       expect(result.type).toBe('none');
     });
 
-    it('should prioritize model errors over rate limit errors', () => {
-      const result = isGeminiRetryableError('model_not_found', '429 Too Many Requests');
+    it('should prioritize model errors over rate limit errors in stderr', () => {
+      // Both patterns in stderr: model error check runs first
+      const result = isGeminiRetryableError('', 'model_not_found\n429 Too Many Requests');
       expect(result.isError).toBe(true);
       expect(result.type).toBe('model');
+    });
+
+    it('should ignore model_not_found in stdout (response content)', () => {
+      // stdout is response text, only stderr is checked
+      const result = isGeminiRetryableError('model_not_found', '');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
+    });
+  });
+
+  describe('Gemini: false positive prevention (response content with error keywords)', () => {
+    it('should NOT flag response discussing rate limits', () => {
+      const response = 'To handle HTTP 429 rate limit errors, implement exponential backoff with quota exceeded detection.';
+      const result = isGeminiRetryableError(response, '');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
+    });
+
+    it('should NOT flag response containing "429" and "too many requests"', () => {
+      const response = 'The server returned 429 Too Many Requests. This means resource exhausted.';
+      const result = isGeminiRetryableError(response, '');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
+    });
+
+    it('should NOT flag response about model availability', () => {
+      const response = 'The model is not available in all regions. Check model_not_found errors.';
+      const result = isGeminiRetryableError(response, '');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
+    });
+
+    it('SHOULD detect real rate limit from stderr', () => {
+      const result = isGeminiRetryableError('', 'Error 429: Too Many Requests');
+      expect(result.isError).toBe(true);
+      expect(result.type).toBe('rate_limit');
+    });
+
+    it('SHOULD detect real model error from stderr', () => {
+      const result = isGeminiRetryableError('', 'ModelNotFoundError: Requested entity was not found.');
+      expect(result.isError).toBe(true);
+      expect(result.type).toBe('model');
+    });
+
+    it('should NOT flag when response has rate limit keywords but stderr has unrelated error', () => {
+      const response = '429 rate limit errors are common in distributed systems.';
+      const result = isGeminiRetryableError(response, 'ENOENT: file not found');
+      expect(result.isError).toBe(false);
+      expect(result.type).toBe('none');
     });
   });
 

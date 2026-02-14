@@ -61,19 +61,26 @@ export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
 export const MAX_STDOUT_BYTES = 10 * 1024 * 1024; // 10MB stdout cap
 
 /**
- * Check if Gemini output/stderr indicates a rate-limit (429) or quota error
+ * Check if Gemini stderr indicates a rate-limit (429) or quota error
  * that should trigger a fallback to the next model in the chain.
+ *
+ * IMPORTANT: Only checks stderr. Gemini CLI outputs plain text to stdout,
+ * so stdout contains response content that may legitimately mention
+ * "429", "rate limit", etc. Searching stdout causes false positives.
  */
 export function isGeminiRetryableError(stdout: string, stderr: string = ''): { isError: boolean; message: string; type: 'rate_limit' | 'model' | 'none' } {
-  const combined = `${stdout}\n${stderr}`;
-  // Check for model not found / not supported
-  if (/model.?not.?found|model is not supported|model.+does not exist|not.+available/i.test(combined)) {
-    const match = combined.match(/.*(?:model.?not.?found|model is not supported|model.+does not exist|not.+available).*/i);
+  // Only check stderr — stdout is response content (plain text) and must never
+  // be searched for error patterns, as it causes false positives when the
+  // response discusses rate limiting, HTTP 429, quotas, etc.
+
+  // Check stderr for model not found / not supported
+  if (/model.?not.?found|model is not supported|model.+does not exist|not.+available/i.test(stderr)) {
+    const match = stderr.match(/.*(?:model.?not.?found|model is not supported|model.+does not exist|not.+available).*/i);
     return { isError: true, message: match?.[0]?.trim() || 'Model not available', type: 'model' };
   }
-  // Check for 429/rate limit errors
-  if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(combined)) {
-    const match = combined.match(/.*(?:429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted).*/i);
+  // Check stderr for 429/rate limit errors
+  if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(stderr)) {
+    const match = stderr.match(/.*(?:429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted).*/i);
     return { isError: true, message: match?.[0]?.trim() || 'Rate limit error detected', type: 'rate_limit' };
   }
   return { isError: false, message: '', type: 'none' };
@@ -123,16 +130,21 @@ export function executeGemini(prompt: string, model?: string, cwd?: string): Pro
         clearTimeout(timeoutHandle);
         const stdout = collector.toString();
         if (code === 0 || stdout.trim()) {
-          // Check for retryable errors even on "successful" exit
-          const retryable = isGeminiRetryableError(stdout, stderr);
-          if (retryable.isError) {
-            reject(new Error(`Gemini ${retryable.type === 'rate_limit' ? 'rate limit' : 'model'} error: ${retryable.message}`));
-          } else {
-            resolve(stdout.trim());
+          // Only check for retryable errors when exit code is non-zero.
+          // When code === 0, Gemini CLI mirrors response text to stderr,
+          // which causes false positives if searched for error patterns
+          // (e.g. a response discussing "429 rate limit" errors).
+          if (code !== 0) {
+            const retryable = isGeminiRetryableError('', stderr);
+            if (retryable.isError) {
+              reject(new Error(`Gemini ${retryable.type === 'rate_limit' ? 'rate limit' : 'model'} error: ${retryable.message}`));
+              return;
+            }
           }
+          resolve(stdout.trim());
         } else {
-          // Check stderr for rate limit errors before generic failure
-          const retryableExit = isGeminiRetryableError(stderr, stdout);
+          // No stdout, non-zero exit: check stderr for retryable errors
+          const retryableExit = isGeminiRetryableError('', stderr);
           if (retryableExit.isError) {
             reject(new Error(`Gemini ${retryableExit.type === 'rate_limit' ? 'rate limit' : 'model'} error: ${retryableExit.message}`));
           } else {
@@ -275,30 +287,34 @@ export function executeGeminiBackground(
         }
 
         if (code === 0 || stdout.trim()) {
-          // Check for retryable errors (model errors + rate limit/429)
-          const retryableErr = isGeminiRetryableError(stdout, stderr);
-          if (retryableErr.isError && remainingModels.length > 0) {
-            const nextModel = remainingModels[0];
-            const newRemainingModels = remainingModels.slice(1);
-            const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
-            if ('error' in retryResult) {
+          // Only check for retryable errors when exit code is non-zero.
+          // When code === 0, Gemini CLI mirrors response text to stderr,
+          // which causes false positives if searched for error patterns.
+          if (code !== 0) {
+            const retryableErr = isGeminiRetryableError('', stderr);
+            if (retryableErr.isError && remainingModels.length > 0) {
+              const nextModel = remainingModels[0];
+              const newRemainingModels = remainingModels.slice(1);
+              const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
+              if ('error' in retryResult) {
+                writeJobStatus({
+                  ...initialStatus,
+                  status: 'failed',
+                  completedAt: new Date().toISOString(),
+                  error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                }, workingDirectory);
+              }
+              return;
+            }
+            if (retryableErr.isError) {
               writeJobStatus({
                 ...initialStatus,
                 status: 'failed',
                 completedAt: new Date().toISOString(),
-                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`,
               }, workingDirectory);
+              return;
             }
-            return;
-          }
-          if (retryableErr.isError) {
-            writeJobStatus({
-              ...initialStatus,
-              status: 'failed',
-              completedAt: new Date().toISOString(),
-              error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`,
-            }, workingDirectory);
-            return;
           }
 
           const response = stdout.trim();
@@ -323,8 +339,8 @@ export function executeGeminiBackground(
             fallbackModel: usedFallback ? tryModel : undefined,
           }, workingDirectory);
         } else {
-          // Check if the failure is a retryable error before giving up
-          const retryableExit = isGeminiRetryableError(stderr, stdout);
+          // No stdout, non-zero exit: check stderr for retryable errors
+          const retryableExit = isGeminiRetryableError('', stderr);
           if (retryableExit.isError && remainingModels.length > 0) {
             const nextModel = remainingModels[0];
             const newRemainingModels = remainingModels.slice(1);
