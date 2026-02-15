@@ -37,7 +37,7 @@ import {
   readUltraworkState as readUltraworkStateFromModule,
   writeUltraworkState as writeUltraworkStateFromModule,
 } from "../ultrawork/index.js";
-import { resolveSessionStatePath, ensureSessionStateDir } from "../../lib/worktree-paths.js";
+import { resolveModePath, ensureModeStateDir, resolveSessionStatePath } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
 import type { TeamPipelinePhase } from "../team-pipeline/types.js";
 
@@ -119,25 +119,14 @@ const DEFAULT_MAX_ITERATIONS = 10;
  * Get the state file path for Ralph Loop
  */
 function getStateFilePath(directory: string, sessionId?: string): string {
-  if (sessionId) {
-    return resolveSessionStatePath('ralph', sessionId, directory);
-  }
-  const omcDir = join(directory, ".omc");
-  return join(omcDir, "state", "ralph-state.json");
+  return resolveModePath('ralph', directory, sessionId);
 }
 
 /**
  * Ensure the .omc directory exists
  */
 function ensureStateDir(directory: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory);
-    return;
-  }
-  const stateDir = join(directory, ".omc", "state");
-  if (!existsSync(stateDir)) {
-    mkdirSync(stateDir, { recursive: true });
-  }
+  ensureModeStateDir(directory, sessionId);
 }
 
 /**

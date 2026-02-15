@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const MULTIMODAL_LOOKER_PROMPT_METADATA = {
     category: 'specialist',
     cost: 'CHEAP',
@@ -29,12 +29,10 @@ export const MULTIMODAL_LOOKER_PROMPT_METADATA = {
         'Simple file reading tasks',
     ],
 };
-export const visionAgent = {
+export const visionAgent = defineAgent({
     name: 'vision',
     description: `Analyze media files (PDFs, images, diagrams) that require interpretation beyond raw text. Extracts specific information or summaries from documents, describes visual content.`,
-    prompt: loadAgentPrompt('vision'),
     model: 'sonnet',
-    defaultModel: 'sonnet',
     metadata: MULTIMODAL_LOOKER_PROMPT_METADATA,
-};
+});
 //# sourceMappingURL=vision.js.map

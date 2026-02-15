@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's document specialist agent.
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const DOCUMENT_SPECIALIST_PROMPT_METADATA: AgentPromptMetadata;
-export declare const documentSpecialistAgent: AgentConfig;
+export declare const documentSpecialistAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=document-specialist.d.ts.map

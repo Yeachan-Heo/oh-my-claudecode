@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's agent utils.
  */
-import type { AgentConfig, AgentPromptMetadata, AvailableAgent, AgentOverrideConfig } from './types.js';
+import type { AgentConfig, AgentPromptMetadata, AvailableAgent, AgentOverrideConfig, ModelType } from './types.js';
 import type { ExternalModelProvider } from '../shared/types.js';
 /**
  * Load an agent prompt from /agents/{agentName}.md
@@ -19,6 +19,18 @@ import type { ExternalModelProvider } from '../shared/types.js';
  * Security: Validates agent name to prevent path traversal attacks
  */
 export declare function loadAgentPrompt(agentName: string, provider?: ExternalModelProvider): string;
+/**
+ * Define an agent with sensible defaults.
+ * Reduces boilerplate by auto-loading prompts and setting defaultModel.
+ */
+export declare function defineAgent(def: {
+    name: string;
+    description: string;
+    model?: ModelType;
+    metadata?: AgentPromptMetadata;
+    tools?: string[];
+    disallowedTools?: string[];
+}): AgentConfig;
 /**
  * Create tool restrictions configuration
  * Returns an object that can be spread into agent config to restrict tools

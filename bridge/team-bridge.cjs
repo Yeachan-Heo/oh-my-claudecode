@@ -11,9 +11,11 @@ try {
 } catch (_e) { /* npm not available - native modules will gracefully degrade */ }
 
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -27,6 +29,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // src/team/bridge-entry.ts
@@ -47,12 +57,69 @@ var import_path7 = require("path");
 // src/team/fs-utils.ts
 var import_fs = require("fs");
 var import_path = require("path");
+
+// src/lib/atomic-write.ts
+var fs = __toESM(require("fs/promises"), 1);
+var fsSync = __toESM(require("fs"), 1);
+var path = __toESM(require("path"), 1);
+var crypto = __toESM(require("crypto"), 1);
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
+function atomicWriteFileSync(filePath, content, options) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
+  const fileMode = options?.mode ?? 384;
+  let fd = null;
+  let success = false;
+  try {
+    ensureDirSync(dir);
+    fd = fsSync.openSync(tempPath, "wx", fileMode);
+    fsSync.writeSync(fd, content, 0, "utf-8");
+    fsSync.fsyncSync(fd);
+    fsSync.closeSync(fd);
+    fd = null;
+    fsSync.renameSync(tempPath, filePath);
+    success = true;
+    try {
+      const dirFd = fsSync.openSync(dir, "r");
+      try {
+        fsSync.fsyncSync(dirFd);
+      } finally {
+        fsSync.closeSync(dirFd);
+      }
+    } catch {
+    }
+  } finally {
+    if (fd !== null) {
+      try {
+        fsSync.closeSync(fd);
+      } catch {
+      }
+    }
+    if (!success) {
+      try {
+        fsSync.unlinkSync(tempPath);
+      } catch {
+      }
+    }
+  }
+}
+
+// src/team/fs-utils.ts
 function atomicWriteJson(filePath, data, mode = 384) {
-  const dir = (0, import_path.dirname)(filePath);
-  if (!(0, import_fs.existsSync)(dir)) (0, import_fs.mkdirSync)(dir, { recursive: true, mode: 448 });
-  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  (0, import_fs.writeFileSync)(tmpPath, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
-  (0, import_fs.renameSync)(tmpPath, filePath);
+  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + "\n", { mode });
 }
 function writeFileWithMode(filePath, data, mode = 384) {
   (0, import_fs.writeFileSync)(filePath, data, { encoding: "utf-8", mode });
@@ -594,12 +661,12 @@ function logAuditEvent(workingDirectory, event) {
 
 // src/team/permissions.ts
 var import_node_path3 = require("node:path");
-function matchGlob(pattern, path) {
+function matchGlob(pattern, path2) {
   let pi = 0;
   let si = 0;
   let starPi = -1;
   let starSi = -1;
-  while (si < path.length) {
+  while (si < path2.length) {
     if (pi < pattern.length - 1 && pattern[pi] === "*" && pattern[pi + 1] === "*") {
       pi += 2;
       if (pi < pattern.length && pattern[pi] === "/") pi++;
@@ -613,12 +680,12 @@ function matchGlob(pattern, path) {
       starSi = si;
       continue;
     }
-    if (pi < pattern.length && pattern[pi] === "?" && path[si] !== "/") {
+    if (pi < pattern.length && pattern[pi] === "?" && path2[si] !== "/") {
       pi++;
       si++;
       continue;
     }
-    if (pi < pattern.length && pattern[pi] === path[si]) {
+    if (pi < pattern.length && pattern[pi] === path2[si]) {
       pi++;
       si++;
       continue;
@@ -628,7 +695,7 @@ function matchGlob(pattern, path) {
       starSi++;
       si = starSi;
       const wasSingleStar = starPi >= 2 && pattern[starPi - 2] === "*" && pattern[starPi - 1] === "*" ? false : starPi >= 1 && pattern[starPi - 1] === "*" ? true : false;
-      if (wasSingleStar && si > 0 && path[si - 1] === "/") {
+      if (wasSingleStar && si > 0 && path2[si - 1] === "/") {
         return false;
       }
       continue;
@@ -754,9 +821,9 @@ function captureFileSnapshot(cwd) {
 }
 function diffSnapshots(before, after) {
   const changed = [];
-  for (const path of after) {
-    if (!before.has(path)) {
-      changed.push(path);
+  for (const path2 of after) {
+    if (!before.has(path2)) {
+      changed.push(path2);
     }
   }
   return changed;

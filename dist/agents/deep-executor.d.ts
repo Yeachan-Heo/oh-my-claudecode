@@ -9,7 +9,7 @@
  * - Self-execution: Does all work itself (no delegation)
  * - 100% completion guarantee with verification evidence
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const DEEP_EXECUTOR_PROMPT_METADATA: AgentPromptMetadata;
-export declare const deepExecutorAgent: AgentConfig;
+export declare const deepExecutorAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=deep-executor.d.ts.map

@@ -6,8 +6,8 @@
  * Ported from oh-my-opencode's agent definitions.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const MULTIMODAL_LOOKER_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -33,11 +33,9 @@ export const MULTIMODAL_LOOKER_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const visionAgent: AgentConfig = {
+export const visionAgent = defineAgent({
   name: 'vision',
   description: `Analyze media files (PDFs, images, diagrams) that require interpretation beyond raw text. Extracts specific information or summaries from documents, describes visual content.`,
-  prompt: loadAgentPrompt('vision'),
   model: 'sonnet',
-  defaultModel: 'sonnet',
   metadata: MULTIMODAL_LOOKER_PROMPT_METADATA,
-};
+});

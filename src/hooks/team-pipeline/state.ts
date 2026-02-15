@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
-import { ensureSessionStateDir, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { ensureModeStateDir, resolveModePath } from '../../lib/worktree-paths.js';
 import type {
   TeamPipelineState,
   TeamPipelinePhase,
@@ -14,10 +14,7 @@ function nowIso(): string {
 }
 
 function getTeamStatePath(directory: string, sessionId?: string): string {
-  if (!sessionId) {
-    return `${directory}/.omc/state/team-state.json`;
-  }
-  return resolveSessionStatePath('team', sessionId, directory);
+  return resolveModePath('team', directory, sessionId);
 }
 
 export function initTeamPipelineState(
@@ -91,7 +88,7 @@ export function writeTeamPipelineState(directory: string, state: TeamPipelineSta
   }
 
   try {
-    ensureSessionStateDir(sessionId, directory);
+    ensureModeStateDir(directory, sessionId);
     const statePath = getTeamStatePath(directory, sessionId);
     const next: TeamPipelineState = {
       ...state,

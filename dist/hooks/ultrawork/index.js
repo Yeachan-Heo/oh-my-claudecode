@@ -5,9 +5,8 @@
  * When ultrawork is activated and todos remain incomplete,
  * this module ensures the mode persists until all work is done.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { resolveModePath, ensureModeStateDir } from '../../lib/worktree-paths.js';
 const _DEFAULT_STATE = {
     active: false,
     started_at: '',
@@ -19,26 +18,13 @@ const _DEFAULT_STATE = {
  * Get the state file path for Ultrawork
  */
 function getStateFilePath(directory, sessionId) {
-    const baseDir = directory || process.cwd();
-    if (sessionId) {
-        return resolveSessionStatePath('ultrawork', sessionId, baseDir);
-    }
-    const omcDir = join(baseDir, '.omc');
-    return join(omcDir, 'state', 'ultrawork-state.json');
+    return resolveModePath('ultrawork', directory || process.cwd(), sessionId);
 }
 /**
  * Ensure the .omc/state directory exists
  */
 function ensureStateDir(directory, sessionId) {
-    if (sessionId) {
-        ensureSessionStateDir(sessionId, directory || process.cwd());
-        return;
-    }
-    const baseDir = directory || process.cwd();
-    const omcDir = join(baseDir, '.omc', 'state');
-    if (!existsSync(omcDir)) {
-        mkdirSync(omcDir, { recursive: true });
-    }
+    ensureModeStateDir(directory || process.cwd(), sessionId);
 }
 /**
  * Read Ultrawork state from disk (local only)

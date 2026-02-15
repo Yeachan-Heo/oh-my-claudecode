@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's explore agent.
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const EXPLORE_PROMPT_METADATA: AgentPromptMetadata;
-export declare const exploreAgent: AgentConfig;
+export declare const exploreAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=explore.d.ts.map

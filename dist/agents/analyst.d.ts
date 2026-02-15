@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const ANALYST_PROMPT_METADATA: AgentPromptMetadata;
-export declare const analystAgent: AgentConfig;
+export declare const analystAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=analyst.d.ts.map

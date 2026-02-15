@@ -6,8 +6,8 @@
  * Ported from oh-my-opencode's agent definitions.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const DOCUMENT_WRITER_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -33,11 +33,9 @@ export const DOCUMENT_WRITER_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const writerAgent: AgentConfig = {
+export const writerAgent = defineAgent({
   name: 'writer',
   description: `Technical writer who crafts clear, comprehensive documentation. Specializes in README files, API docs, architecture docs, and user guides.`,
-  prompt: loadAgentPrompt('writer'),
   model: 'haiku',
-  defaultModel: 'haiku',
   metadata: DOCUMENT_WRITER_PROMPT_METADATA,
-};
+});

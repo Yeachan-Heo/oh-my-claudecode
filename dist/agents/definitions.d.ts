@@ -26,84 +26,31 @@ export { documentSpecialistAgent } from './document-specialist.js';
 /** @deprecated Use document-specialist agent instead */
 export { documentSpecialistAgent as researcherAgent } from './document-specialist.js';
 export { loadAgentPrompt };
-/**
- * Debugger Agent - Root-Cause Analysis & Debugging (Sonnet)
- */
-export declare const debuggerAgent: AgentConfig;
-/**
- * Verifier Agent - Completion Evidence & Test Validation (Sonnet)
- */
-export declare const verifierAgent: AgentConfig;
-/**
- * Style-Reviewer Agent - Code Style & Conventions (Haiku)
- */
-export declare const styleReviewerAgent: AgentConfig;
-/**
- * Quality-Reviewer Agent - Logic Defects & Maintainability (Sonnet)
- */
-export declare const qualityReviewerAgent: AgentConfig;
-/**
- * API-Reviewer Agent - API Contracts & Versioning (Sonnet)
- */
-export declare const apiReviewerAgent: AgentConfig;
-/**
- * Performance-Reviewer Agent - Performance & Complexity (Sonnet)
- */
-export declare const performanceReviewerAgent: AgentConfig;
-/**
- * Dependency-Expert Agent - External SDK/API/Package Evaluation (Sonnet)
- * Replaces: researcher agent
- */
-export declare const dependencyExpertAgent: AgentConfig;
-/**
- * Test-Engineer Agent - Test Strategy & Coverage (Sonnet)
- * Replaces: tdd-guide agent
- */
-export declare const testEngineerAgent: AgentConfig;
-/**
- * Quality-Strategist Agent - Quality Strategy & Release Readiness (Sonnet)
- */
-export declare const qualityStrategistAgent: AgentConfig;
-/**
- * Product Manager Agent - Problem Framing & Value Hypothesis (Sonnet)
- */
-export declare const productManagerAgent: AgentConfig;
-/**
- * UX Researcher Agent - Heuristic Audits & Usability (Sonnet)
- */
-export declare const uxResearcherAgent: AgentConfig;
-/**
- * Information Architect Agent - Taxonomy & Navigation (Sonnet)
- */
-export declare const informationArchitectAgent: AgentConfig;
-/**
- * Product Analyst Agent - Metrics & Experiment Design (Sonnet)
- */
-export declare const productAnalystAgent: AgentConfig;
-/**
- * Security-Reviewer Agent - Security Vulnerability Detection (Sonnet)
- */
-export declare const securityReviewerAgent: AgentConfig;
-/**
- * Build-Fixer Agent - Build Error Resolution (Sonnet)
- */
-export declare const buildFixerAgent: AgentConfig;
-/**
- * Code-Reviewer Agent - Expert Code Review (Opus)
- */
-export declare const codeReviewerAgent: AgentConfig;
-/**
- * Git-Master Agent - Git Operations Expert (Sonnet)
- */
-export declare const gitMasterAgent: AgentConfig;
+export declare const debuggerAgent: import("./types.js").AgentConfig;
+export declare const verifierAgent: import("./types.js").AgentConfig;
+export declare const styleReviewerAgent: import("./types.js").AgentConfig;
+export declare const qualityReviewerAgent: import("./types.js").AgentConfig;
+export declare const apiReviewerAgent: import("./types.js").AgentConfig;
+export declare const performanceReviewerAgent: import("./types.js").AgentConfig;
+export declare const dependencyExpertAgent: import("./types.js").AgentConfig;
+export declare const testEngineerAgent: import("./types.js").AgentConfig;
+export declare const qualityStrategistAgent: import("./types.js").AgentConfig;
+export declare const productManagerAgent: import("./types.js").AgentConfig;
+export declare const uxResearcherAgent: import("./types.js").AgentConfig;
+export declare const informationArchitectAgent: import("./types.js").AgentConfig;
+export declare const productAnalystAgent: import("./types.js").AgentConfig;
+export declare const securityReviewerAgent: import("./types.js").AgentConfig;
+export declare const buildFixerAgent: import("./types.js").AgentConfig;
+export declare const codeReviewerAgent: import("./types.js").AgentConfig;
+export declare const gitMasterAgent: import("./types.js").AgentConfig;
 /**
  * @deprecated Use dependency-expert agent instead
  */
-export declare const researcherAgentAlias: AgentConfig;
+export declare const researcherAgentAlias: import("./types.js").AgentConfig;
 /**
  * @deprecated Use test-engineer agent instead
  */
-export declare const tddGuideAgentAlias: AgentConfig;
+export declare const tddGuideAgentAlias: import("./types.js").AgentConfig;
 /**
  * Agent Role Disambiguation
  *

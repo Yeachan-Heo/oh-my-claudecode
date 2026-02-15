@@ -6,8 +6,8 @@
  * Ported from oh-my-opencode's agent definitions.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const ANALYST_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'planner',
@@ -33,11 +33,9 @@ export const ANALYST_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const analystAgent: AgentConfig = {
+export const analystAgent = defineAgent({
   name: 'analyst',
   description: `Pre-planning consultant that analyzes requests before implementation to identify hidden requirements, edge cases, and potential risks. Use before creating a work plan.`,
-  prompt: loadAgentPrompt('analyst'),
   model: 'opus',
-  defaultModel: 'opus',
   metadata: ANALYST_PROMPT_METADATA,
-};
+});

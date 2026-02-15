@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's architect agent.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const ARCHITECT_PROMPT_METADATA = {
     category: 'advisor',
     cost: 'EXPENSIVE',
@@ -32,13 +32,10 @@ export const ARCHITECT_PROMPT_METADATA = {
         'Things you can infer from existing code patterns',
     ],
 };
-// Prompt loaded dynamically from agents/architect.md (authoritative source)
-export const architectAgent = {
+export const architectAgent = defineAgent({
     name: 'architect',
     description: 'Read-only consultation agent. High-IQ reasoning specialist for debugging hard problems and high-difficulty architecture design.',
-    prompt: loadAgentPrompt('architect'),
     model: 'opus',
-    defaultModel: 'opus',
-    metadata: ARCHITECT_PROMPT_METADATA
-};
+    metadata: ARCHITECT_PROMPT_METADATA,
+});
 //# sourceMappingURL=architect.js.map

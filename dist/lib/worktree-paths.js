@@ -221,6 +221,42 @@ export function clearWorktreeCache() {
     worktreeCache = null;
 }
 // ============================================================================
+// MODE STATE PATH HELPERS
+// ============================================================================
+/**
+ * Resolve the state file path for a given mode.
+ * Handles both session-scoped and legacy paths.
+ *
+ * @param modeName - Mode name (e.g., "autopilot", "ralph", "ultrawork")
+ * @param directory - Worktree root directory
+ * @param sessionId - Optional session ID for session-scoped paths
+ * @returns Absolute path to the state file
+ */
+export function resolveModePath(modeName, directory, sessionId) {
+    if (sessionId) {
+        return resolveSessionStatePath(modeName, sessionId, directory);
+    }
+    const normalizedName = modeName.endsWith('-state') ? modeName : `${modeName}-state`;
+    return join(directory, OmcPaths.STATE, `${normalizedName}.json`);
+}
+/**
+ * Ensure the state directory exists for a given mode.
+ * Handles both session-scoped and legacy directories.
+ *
+ * @param directory - Worktree root directory
+ * @param sessionId - Optional session ID for session-scoped paths
+ */
+export function ensureModeStateDir(directory, sessionId) {
+    if (sessionId) {
+        ensureSessionStateDir(sessionId, directory);
+        return;
+    }
+    const stateDir = join(directory, OmcPaths.STATE);
+    if (!existsSync(stateDir)) {
+        mkdirSync(stateDir, { recursive: true });
+    }
+}
+// ============================================================================
 // SESSION-SCOPED STATE PATHS
 // ============================================================================
 /** Regex for valid session IDs: alphanumeric, hyphens, underscores, max 256 chars */

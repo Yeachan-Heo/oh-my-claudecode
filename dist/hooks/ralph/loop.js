@@ -9,12 +9,12 @@
  *
  * Ported from oh-my-opencode's ralph hook.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, } from "fs";
 import { join } from "path";
 import { readPrd, getPrdStatus, formatNextStoryPrompt, formatPrdStatus, } from "./prd.js";
 import { getProgressContext, appendProgress, initProgress, addPattern, } from "./progress.js";
 import { readUltraworkState as readUltraworkStateFromModule, writeUltraworkState as writeUltraworkStateFromModule, } from "../ultrawork/index.js";
-import { resolveSessionStatePath, ensureSessionStateDir } from "../../lib/worktree-paths.js";
+import { resolveModePath, ensureModeStateDir, resolveSessionStatePath } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
 // Forward declaration to avoid circular import - check ultraqa state file directly
 export function isUltraQAActive(directory, sessionId) {
@@ -53,24 +53,13 @@ const DEFAULT_MAX_ITERATIONS = 10;
  * Get the state file path for Ralph Loop
  */
 function getStateFilePath(directory, sessionId) {
-    if (sessionId) {
-        return resolveSessionStatePath('ralph', sessionId, directory);
-    }
-    const omcDir = join(directory, ".omc");
-    return join(omcDir, "state", "ralph-state.json");
+    return resolveModePath('ralph', directory, sessionId);
 }
 /**
  * Ensure the .omc directory exists
  */
 function ensureStateDir(directory, sessionId) {
-    if (sessionId) {
-        ensureSessionStateDir(sessionId, directory);
-        return;
-    }
-    const stateDir = join(directory, ".omc", "state");
-    if (!existsSync(stateDir)) {
-        mkdirSync(stateDir, { recursive: true });
-    }
+    ensureModeStateDir(directory, sessionId);
 }
 /**
  * Read Ralph Loop state from disk

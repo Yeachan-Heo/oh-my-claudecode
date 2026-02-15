@@ -7,8 +7,8 @@
  * Ported from oh-my-opencode's architect agent.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const ARCHITECT_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'advisor',
@@ -36,13 +36,9 @@ export const ARCHITECT_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-// Prompt loaded dynamically from agents/architect.md (authoritative source)
-
-export const architectAgent: AgentConfig = {
+export const architectAgent = defineAgent({
   name: 'architect',
   description: 'Read-only consultation agent. High-IQ reasoning specialist for debugging hard problems and high-difficulty architecture design.',
-  prompt: loadAgentPrompt('architect'),
   model: 'opus',
-  defaultModel: 'opus',
-  metadata: ARCHITECT_PROMPT_METADATA
-};
+  metadata: ARCHITECT_PROMPT_METADATA,
+});

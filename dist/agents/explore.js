@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's explore agent.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const EXPLORE_PROMPT_METADATA = {
     category: 'exploration',
     cost: 'CHEAP',
@@ -30,12 +30,10 @@ export const EXPLORE_PROMPT_METADATA = {
         'When you already know the file location',
     ],
 };
-export const exploreAgent = {
+export const exploreAgent = defineAgent({
     name: 'explore',
     description: 'Fast codebase exploration and pattern search. Use for finding files, understanding structure, locating implementations. Searches INTERNAL codebase.',
-    prompt: loadAgentPrompt('explore'),
     model: 'haiku',
-    defaultModel: 'haiku',
-    metadata: EXPLORE_PROMPT_METADATA
-};
+    metadata: EXPLORE_PROMPT_METADATA,
+});
 //# sourceMappingURL=explore.js.map

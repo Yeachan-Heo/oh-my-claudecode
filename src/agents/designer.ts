@@ -6,8 +6,8 @@
  * Ported from oh-my-opencode's agent definitions.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const FRONTEND_ENGINEER_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -37,11 +37,9 @@ export const FRONTEND_ENGINEER_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const designerAgent: AgentConfig = {
+export const designerAgent = defineAgent({
   name: 'designer',
   description: `Designer-turned-developer who crafts stunning UI/UX even without design mockups. Use for VISUAL changes only (styling, layout, animation). Pure logic changes in frontend files should be handled directly.`,
-  prompt: loadAgentPrompt('designer'),
   model: 'sonnet',
-  defaultModel: 'sonnet',
   metadata: FRONTEND_ENGINEER_PROMPT_METADATA,
-};
+});

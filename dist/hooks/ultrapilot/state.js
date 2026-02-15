@@ -4,22 +4,17 @@
  * Persistent state for ultrapilot workflow - tracks parallel workers,
  * file ownership, and progress.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { DEFAULT_CONFIG } from './types.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
-const STATE_FILE = 'ultrapilot-state.json';
+import { resolveModePath, ensureModeStateDir } from '../../lib/worktree-paths.js';
 const OWNERSHIP_FILE = 'ultrapilot-ownership.json';
 /**
  * Get the state file path
  */
 function getStateFilePath(directory, sessionId) {
-    if (sessionId) {
-        return resolveSessionStatePath('ultrapilot', sessionId, directory);
-    }
-    const omcDir = join(directory, '.omc', 'state');
-    return join(omcDir, STATE_FILE);
+    return resolveModePath('ultrapilot', directory, sessionId);
 }
 /**
  * Get the ownership file path
@@ -37,14 +32,7 @@ function getOwnershipFilePath(directory, sessionId) {
  * Ensure the state directory exists
  */
 function ensureStateDir(directory, sessionId) {
-    if (sessionId) {
-        ensureSessionStateDir(sessionId, directory);
-        return;
-    }
-    const stateDir = join(directory, '.omc', 'state');
-    if (!existsSync(stateDir)) {
-        mkdirSync(stateDir, { recursive: true });
-    }
+    ensureModeStateDir(directory, sessionId);
 }
 /**
  * Read ultrapilot state from disk

@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { dirname, join, basename } from 'path';
 import { BOULDER_DIR, BOULDER_FILE, PLANNER_PLANS_DIR, PLAN_EXTENSION } from './constants.js';
-import { atomicWriteSync } from '../../lib/atomic-write.js';
+import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 /**
  * Get the full path to the boulder state file
  */
@@ -41,7 +41,7 @@ export function writeBoulderState(directory, state) {
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
         }
-        atomicWriteSync(filePath, JSON.stringify(state, null, 2));
+        atomicWriteFileSync(filePath, JSON.stringify(state, null, 2));
         return true;
     }
     catch {

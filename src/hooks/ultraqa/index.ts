@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { readRalphState } from '../ralph/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveModePath, ensureModeStateDir } from '../../lib/worktree-paths.js';
 
 export type UltraQAGoalType = 'tests' | 'build' | 'lint' | 'typecheck' | 'custom';
 
@@ -58,25 +58,14 @@ const SAME_FAILURE_THRESHOLD = 3;
  * Get the state file path for UltraQA
  */
 function getStateFilePath(directory: string, sessionId?: string): string {
-  if (sessionId) {
-    return resolveSessionStatePath('ultraqa', sessionId, directory);
-  }
-  const omcDir = join(directory, '.omc');
-  return join(omcDir, 'state', 'ultraqa-state.json');
+  return resolveModePath('ultraqa', directory, sessionId);
 }
 
 /**
  * Ensure the .omc/state directory exists
  */
 function ensureStateDir(directory: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory);
-    return;
-  }
-  const stateDir = join(directory, '.omc', 'state');
-  if (!existsSync(stateDir)) {
-    mkdirSync(stateDir, { recursive: true });
-  }
+  ensureModeStateDir(directory, sessionId);
 }
 
 /**
