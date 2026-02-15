@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const FRONTEND_ENGINEER_PROMPT_METADATA = {
     category: 'specialist',
     cost: 'CHEAP',
@@ -33,12 +33,10 @@ export const FRONTEND_ENGINEER_PROMPT_METADATA = {
         'Non-visual refactoring',
     ],
 };
-export const designerAgent = {
+export const designerAgent = defineAgent({
     name: 'designer',
     description: `Designer-turned-developer who crafts stunning UI/UX even without design mockups. Use for VISUAL changes only (styling, layout, animation). Pure logic changes in frontend files should be handled directly.`,
-    prompt: loadAgentPrompt('designer'),
     model: 'sonnet',
-    defaultModel: 'sonnet',
     metadata: FRONTEND_ENGINEER_PROMPT_METADATA,
-};
+});
 //# sourceMappingURL=designer.js.map

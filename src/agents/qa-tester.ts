@@ -3,16 +3,10 @@
  *
  * Specialized agent for QA testing of CLI applications and services
  * using tmux for session management and interactive testing.
- *
- * Enables:
- * - Spinning up services in isolated tmux sessions
- * - Sending commands and capturing output
- * - Verifying CLI behavior and responses
- * - Clean teardown of test environments
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const QA_TESTER_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -38,11 +32,9 @@ export const QA_TESTER_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const qaTesterAgent: AgentConfig = {
+export const qaTesterAgent = defineAgent({
   name: 'qa-tester',
   description: 'Interactive CLI testing specialist using tmux. Tests CLI applications, background services, and interactive tools. Manages test sessions, sends commands, verifies output, and ensures cleanup.',
-  prompt: loadAgentPrompt('qa-tester'),
   model: 'sonnet',
-  defaultModel: 'sonnet',
-  metadata: QA_TESTER_PROMPT_METADATA
-};
+  metadata: QA_TESTER_PROMPT_METADATA,
+});

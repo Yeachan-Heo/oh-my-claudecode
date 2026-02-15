@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const DOCUMENT_WRITER_PROMPT_METADATA: AgentPromptMetadata;
-export declare const writerAgent: AgentConfig;
+export declare const writerAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=writer.d.ts.map

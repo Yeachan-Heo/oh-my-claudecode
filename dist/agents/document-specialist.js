@@ -6,7 +6,7 @@
  *
  * Ported from oh-my-opencode's document specialist agent.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const DOCUMENT_SPECIALIST_PROMPT_METADATA = {
     category: 'exploration',
     cost: 'CHEAP',
@@ -29,12 +29,10 @@ export const DOCUMENT_SPECIALIST_PROMPT_METADATA = {
         'When you already have the information',
     ],
 };
-export const documentSpecialistAgent = {
+export const documentSpecialistAgent = defineAgent({
     name: 'document-specialist',
     description: 'Document Specialist for documentation research and external reference finding. Use for official docs, GitHub examples, OSS implementations, API references. Searches EXTERNAL resources, not internal codebase.',
-    prompt: loadAgentPrompt('document-specialist'),
     model: 'sonnet',
-    defaultModel: 'sonnet',
-    metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
-};
+    metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA,
+});
 //# sourceMappingURL=document-specialist.js.map

@@ -9,7 +9,7 @@
  * - Self-execution: Does all work itself (no delegation)
  * - 100% completion guarantee with verification evidence
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const DEEP_EXECUTOR_PROMPT_METADATA = {
     category: 'specialist',
     cost: 'EXPENSIVE',
@@ -34,12 +34,10 @@ export const DEEP_EXECUTOR_PROMPT_METADATA = {
     ],
     promptDescription: 'Deep executor for complex goal-oriented tasks. Explores extensively before acting, executes all work itself, and guarantees completion with evidence.',
 };
-export const deepExecutorAgent = {
+export const deepExecutorAgent = defineAgent({
     name: 'deep-executor',
     description: 'Deep executor for complex goal-oriented tasks. Explores extensively, executes all work itself, guarantees 100% completion with evidence.',
-    prompt: loadAgentPrompt('deep-executor'),
     model: 'opus',
-    defaultModel: 'opus',
-    metadata: DEEP_EXECUTOR_PROMPT_METADATA
-};
+    metadata: DEEP_EXECUTOR_PROMPT_METADATA,
+});
 //# sourceMappingURL=deep-executor.js.map

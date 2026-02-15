@@ -10,8 +10,8 @@
  * - 100% completion guarantee with verification evidence
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const DEEP_EXECUTOR_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -38,11 +38,9 @@ export const DEEP_EXECUTOR_PROMPT_METADATA: AgentPromptMetadata = {
   promptDescription: 'Deep executor for complex goal-oriented tasks. Explores extensively before acting, executes all work itself, and guarantees completion with evidence.',
 };
 
-export const deepExecutorAgent: AgentConfig = {
+export const deepExecutorAgent = defineAgent({
   name: 'deep-executor',
   description: 'Deep executor for complex goal-oriented tasks. Explores extensively, executes all work itself, guarantees 100% completion with evidence.',
-  prompt: loadAgentPrompt('deep-executor'),
   model: 'opus',
-  defaultModel: 'opus',
-  metadata: DEEP_EXECUTOR_PROMPT_METADATA
-};
+  metadata: DEEP_EXECUTOR_PROMPT_METADATA,
+});

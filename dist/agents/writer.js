@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const DOCUMENT_WRITER_PROMPT_METADATA = {
     category: 'specialist',
     cost: 'FREE',
@@ -29,12 +29,10 @@ export const DOCUMENT_WRITER_PROMPT_METADATA = {
         'Non-documentation tasks',
     ],
 };
-export const writerAgent = {
+export const writerAgent = defineAgent({
     name: 'writer',
     description: `Technical writer who crafts clear, comprehensive documentation. Specializes in README files, API docs, architecture docs, and user guides.`,
-    prompt: loadAgentPrompt('writer'),
     model: 'haiku',
-    defaultModel: 'haiku',
     metadata: DOCUMENT_WRITER_PROMPT_METADATA,
-};
+});
 //# sourceMappingURL=writer.js.map

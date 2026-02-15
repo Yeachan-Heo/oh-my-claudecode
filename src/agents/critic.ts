@@ -6,8 +6,8 @@
  * Ported from oh-my-opencode's agent definitions.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const CRITIC_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'reviewer',
@@ -32,11 +32,9 @@ export const CRITIC_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const criticAgent: AgentConfig = {
+export const criticAgent = defineAgent({
   name: 'critic',
   description: `Expert reviewer for evaluating work plans against rigorous clarity, verifiability, and completeness standards. Use after planner creates a work plan to validate it before execution.`,
-  prompt: loadAgentPrompt('critic'),
   model: 'opus',
-  defaultModel: 'opus',
   metadata: CRITIC_PROMPT_METADATA,
-};
+});

@@ -7,8 +7,8 @@
  * Ported from oh-my-opencode's document specialist agent.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const DOCUMENT_SPECIALIST_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'exploration',
@@ -33,12 +33,9 @@ export const DOCUMENT_SPECIALIST_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-
-export const documentSpecialistAgent: AgentConfig = {
+export const documentSpecialistAgent = defineAgent({
   name: 'document-specialist',
   description: 'Document Specialist for documentation research and external reference finding. Use for official docs, GitHub examples, OSS implementations, API references. Searches EXTERNAL resources, not internal codebase.',
-  prompt: loadAgentPrompt('document-specialist'),
   model: 'sonnet',
-  defaultModel: 'sonnet',
-  metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
-};
+  metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA,
+});

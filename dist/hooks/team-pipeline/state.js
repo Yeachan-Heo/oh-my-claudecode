@@ -1,15 +1,12 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
-import { ensureSessionStateDir, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { ensureModeStateDir, resolveModePath } from '../../lib/worktree-paths.js';
 import { TEAM_PIPELINE_SCHEMA_VERSION } from './types.js';
 function nowIso() {
     return new Date().toISOString();
 }
 function getTeamStatePath(directory, sessionId) {
-    if (!sessionId) {
-        return `${directory}/.omc/state/team-state.json`;
-    }
-    return resolveSessionStatePath('team', sessionId, directory);
+    return resolveModePath('team', directory, sessionId);
 }
 export function initTeamPipelineState(directory, sessionId, options) {
     const ts = nowIso();
@@ -76,7 +73,7 @@ export function writeTeamPipelineState(directory, state, sessionId) {
         return false;
     }
     try {
-        ensureSessionStateDir(sessionId, directory);
+        ensureModeStateDir(directory, sessionId);
         const statePath = getTeamStatePath(directory, sessionId);
         const next = {
             ...state,

@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const PLANNER_PROMPT_METADATA: AgentPromptMetadata;
-export declare const plannerAgent: AgentConfig;
+export declare const plannerAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=planner.d.ts.map

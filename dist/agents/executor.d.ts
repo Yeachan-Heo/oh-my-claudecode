@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's executor agent.
  * Prompt loaded from: agents/executor.md
  */
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
+import type { AgentPromptMetadata } from './types.js';
 export declare const SISYPHUS_JUNIOR_PROMPT_METADATA: AgentPromptMetadata;
-export declare const executorAgent: AgentConfig;
+export declare const executorAgent: import("./types.js").AgentConfig;
 //# sourceMappingURL=executor.d.ts.map

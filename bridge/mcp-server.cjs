@@ -19828,15 +19828,16 @@ async function atomicWriteJson(filePath, data) {
     }
   }
 }
-function atomicWriteFileSync(filePath, content) {
+function atomicWriteFileSync(filePath, content, options) {
   const dir = path2.dirname(filePath);
   const base = path2.basename(filePath);
   const tempPath = path2.join(dir, `.${base}.tmp.${crypto2.randomUUID()}`);
+  const fileMode = options?.mode ?? 384;
   let fd = null;
   let success = false;
   try {
     ensureDirSync(dir);
-    fd = fsSync.openSync(tempPath, "wx", 384);
+    fd = fsSync.openSync(tempPath, "wx", fileMode);
     fsSync.writeSync(fd, content, 0, "utf-8");
     fsSync.fsyncSync(fd);
     fsSync.closeSync(fd);

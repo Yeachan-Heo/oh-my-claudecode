@@ -19,30 +19,21 @@ export declare function ensureDirSync(dir: string): void;
  */
 export declare function atomicWriteJson(filePath: string, data: unknown): Promise<void>;
 /**
- * Write text content atomically to a file (synchronous version).
- * Uses temp file + atomic rename pattern to ensure durability.
- *
- * @param filePath Target file path
- * @param content Text content to write
- * @throws Error if write operation fails
- */
-export declare function atomicWriteSync(filePath: string, content: string): void;
-/**
- * Read and parse JSON file with error handling.
- * Returns null if file doesn't exist or on parse errors.
- *
- * @param filePath Path to JSON file
- * @returns Parsed JSON data or null on error
- */
-/**
  * Write string data atomically to a file (synchronous version).
  * Uses temp file + atomic rename pattern with fsync for durability.
  *
  * @param filePath Target file path
  * @param content String content to write
+ * @param options Optional settings (mode defaults to 0o600)
  * @throws Error if write operation fails
  */
-export declare function atomicWriteFileSync(filePath: string, content: string): void;
+export declare function atomicWriteFileSync(filePath: string, content: string, options?: {
+    mode?: number;
+}): void;
+/**
+ * @deprecated Use atomicWriteFileSync instead. This is a compatibility alias.
+ */
+export declare const atomicWriteSync: typeof atomicWriteFileSync;
 /**
  * Write JSON data atomically to a file (synchronous version).
  * Uses temp file + atomic rename pattern with fsync for durability.

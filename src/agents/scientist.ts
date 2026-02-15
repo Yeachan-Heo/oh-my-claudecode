@@ -3,16 +3,10 @@
  *
  * Specialized agent for executing data analysis workflows using Python.
  * Performs EDA, statistical analysis, and generates actionable findings.
- *
- * Enables:
- * - Exploratory data analysis on CSV, JSON, Parquet files
- * - Statistical computations and hypothesis testing
- * - Data transformations and feature engineering
- * - Generating structured findings with evidence
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const SCIENTIST_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'specialist',
@@ -46,11 +40,9 @@ export const SCIENTIST_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const scientistAgent: AgentConfig = {
+export const scientistAgent = defineAgent({
   name: 'scientist',
   description: 'Data analysis and research execution specialist. Executes Python code for EDA, statistical analysis, and generating data-driven findings. Works with CSV, JSON, Parquet files using pandas, numpy, scipy.',
-  prompt: loadAgentPrompt('scientist'),
   model: 'sonnet',
-  defaultModel: 'sonnet',
-  metadata: SCIENTIST_PROMPT_METADATA
-};
+  metadata: SCIENTIST_PROMPT_METADATA,
+});

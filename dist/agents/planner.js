@@ -5,7 +5,7 @@
  *
  * Ported from oh-my-opencode's agent definitions.
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const PLANNER_PROMPT_METADATA = {
     category: 'planner',
     cost: 'EXPENSIVE',
@@ -28,12 +28,10 @@ export const PLANNER_PROMPT_METADATA = {
         'When a plan already exists',
     ],
 };
-export const plannerAgent = {
+export const plannerAgent = defineAgent({
     name: 'planner',
     description: `Strategic planning consultant. Interviews users to understand requirements, then creates comprehensive work plans. NEVER implements - only plans.`,
-    prompt: loadAgentPrompt('planner'),
     model: 'opus',
-    defaultModel: 'opus',
     metadata: PLANNER_PROMPT_METADATA,
-};
+});
 //# sourceMappingURL=planner.js.map

@@ -111,6 +111,24 @@ export declare function ensureAllOmcDirs(worktreeRoot?: string): void;
  */
 export declare function clearWorktreeCache(): void;
 /**
+ * Resolve the state file path for a given mode.
+ * Handles both session-scoped and legacy paths.
+ *
+ * @param modeName - Mode name (e.g., "autopilot", "ralph", "ultrawork")
+ * @param directory - Worktree root directory
+ * @param sessionId - Optional session ID for session-scoped paths
+ * @returns Absolute path to the state file
+ */
+export declare function resolveModePath(modeName: string, directory: string, sessionId?: string): string;
+/**
+ * Ensure the state directory exists for a given mode.
+ * Handles both session-scoped and legacy directories.
+ *
+ * @param directory - Worktree root directory
+ * @param sessionId - Optional session ID for session-scoped paths
+ */
+export declare function ensureModeStateDir(directory: string, sessionId?: string): void;
+/**
  * Get or generate a unique session ID for the current process.
  *
  * Format: `pid-{PID}-{startTimestamp}`

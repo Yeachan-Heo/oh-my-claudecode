@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's executor agent.
  * Prompt loaded from: agents/executor.md
  */
-import { loadAgentPrompt } from './utils.js';
+import { defineAgent } from './utils.js';
 export const SISYPHUS_JUNIOR_PROMPT_METADATA = {
     category: 'specialist',
     cost: 'CHEAP',
@@ -29,12 +29,10 @@ export const SISYPHUS_JUNIOR_PROMPT_METADATA = {
         'Complex decisions (consult architect)',
     ],
 };
-export const executorAgent = {
+export const executorAgent = defineAgent({
     name: 'executor',
     description: 'Focused task executor. Execute tasks directly. NEVER delegate or spawn other agents. Same discipline as Sisyphus, no delegation.',
-    prompt: loadAgentPrompt('executor'),
     model: 'sonnet',
-    defaultModel: 'sonnet',
-    metadata: SISYPHUS_JUNIOR_PROMPT_METADATA
-};
+    metadata: SISYPHUS_JUNIOR_PROMPT_METADATA,
+});
 //# sourceMappingURL=executor.js.map

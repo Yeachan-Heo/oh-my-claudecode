@@ -22,9 +22,8 @@ import {
   readUltraQAState
 } from '../ultraqa/index.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveModePath, ensureModeStateDir } from '../../lib/worktree-paths.js';
 
-const STATE_FILE = 'autopilot-state.json';
 const SPEC_DIR = 'autopilot';
 
 // ============================================================================
@@ -32,35 +31,10 @@ const SPEC_DIR = 'autopilot';
 // ============================================================================
 
 /**
- * Get the state file path
- */
-function getStateFilePath(directory: string, sessionId?: string): string {
-  if (sessionId) {
-    return resolveSessionStatePath('autopilot', sessionId, directory);
-  }
-  const omcDir = join(directory, '.omc');
-  return join(omcDir, 'state', STATE_FILE);
-}
-
-/**
- * Ensure the .omc/state directory exists
- */
-function ensureStateDir(directory: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory);
-    return;
-  }
-  const stateDir = join(directory, '.omc', 'state');
-  if (!existsSync(stateDir)) {
-    mkdirSync(stateDir, { recursive: true });
-  }
-}
-
-/**
  * Ensure the autopilot directory exists
  */
 export function ensureAutopilotDir(directory: string): string {
-  ensureStateDir(directory);
+  ensureModeStateDir(directory);
   const autopilotDir = join(directory, '.omc', SPEC_DIR);
   if (!existsSync(autopilotDir)) {
     mkdirSync(autopilotDir, { recursive: true });
@@ -74,7 +48,7 @@ export function ensureAutopilotDir(directory: string): string {
 export function readAutopilotState(directory: string, sessionId?: string): AutopilotState | null {
   if (sessionId) {
     // Session-scoped ONLY — no legacy fallback
-    const sessionFile = getStateFilePath(directory, sessionId);
+    const sessionFile = resolveModePath('autopilot', directory, sessionId);
     if (!existsSync(sessionFile)) return null;
     try {
       const content = readFileSync(sessionFile, 'utf-8');
@@ -88,7 +62,7 @@ export function readAutopilotState(directory: string, sessionId?: string): Autop
   }
 
   // No sessionId: legacy path (backward compat)
-  const stateFile = getStateFilePath(directory);
+  const stateFile = resolveModePath('autopilot', directory);
   if (!existsSync(stateFile)) {
     return null;
   }
@@ -106,8 +80,8 @@ export function readAutopilotState(directory: string, sessionId?: string): Autop
  */
 export function writeAutopilotState(directory: string, state: AutopilotState, sessionId?: string): boolean {
   try {
-    ensureStateDir(directory, sessionId);
-    const stateFile = getStateFilePath(directory, sessionId);
+    ensureModeStateDir(directory, sessionId);
+    const stateFile = resolveModePath('autopilot', directory, sessionId);
     writeFileSync(stateFile, JSON.stringify(state, null, 2));
     return true;
   } catch {
@@ -119,7 +93,7 @@ export function writeAutopilotState(directory: string, state: AutopilotState, se
  * Clear autopilot state
  */
 export function clearAutopilotState(directory: string, sessionId?: string): boolean {
-  const stateFile = getStateFilePath(directory, sessionId);
+  const stateFile = resolveModePath('autopilot', directory, sessionId);
 
   if (!existsSync(stateFile)) {
     return true;
@@ -138,7 +112,7 @@ export function clearAutopilotState(directory: string, sessionId?: string): bool
  * Returns null if no state file exists.
  */
 export function getAutopilotStateAge(directory: string, sessionId?: string): number | null {
-  const stateFile = getStateFilePath(directory, sessionId);
+  const stateFile = resolveModePath('autopilot', directory, sessionId);
   if (!existsSync(stateFile)) return null;
   try {
     const stats = statSync(stateFile);

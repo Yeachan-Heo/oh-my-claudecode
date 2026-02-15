@@ -122,6 +122,23 @@ export function loadAgentPrompt(agentName, provider) {
     }
 }
 /**
+ * Define an agent with sensible defaults.
+ * Reduces boilerplate by auto-loading prompts and setting defaultModel.
+ */
+export function defineAgent(def) {
+    const model = def.model ?? 'sonnet';
+    return {
+        name: def.name,
+        description: def.description,
+        prompt: loadAgentPrompt(def.name),
+        model,
+        defaultModel: model,
+        metadata: def.metadata,
+        tools: def.tools,
+        disallowedTools: def.disallowedTools,
+    };
+}
+/**
  * Create tool restrictions configuration
  * Returns an object that can be spread into agent config to restrict tools
  */

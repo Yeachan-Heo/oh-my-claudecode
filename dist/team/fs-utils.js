@@ -6,16 +6,12 @@
  * All directory creates default to 0o700 (owner-only access).
  * Atomic writes use PID+timestamp temp files to prevent collisions.
  */
-import { writeFileSync, existsSync, mkdirSync, renameSync, openSync, writeSync, closeSync, realpathSync, constants } from 'fs';
+import { writeFileSync, existsSync, mkdirSync, openSync, writeSync, closeSync, realpathSync, constants } from 'fs';
 import { dirname, resolve, relative, basename } from 'path';
+import { atomicWriteFileSync } from '../lib/atomic-write.js';
 /** Atomic write: write JSON to temp file with permissions, then rename (prevents corruption on crash) */
 export function atomicWriteJson(filePath, data, mode = 0o600) {
-    const dir = dirname(filePath);
-    if (!existsSync(dir))
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf-8', mode });
-    renameSync(tmpPath, filePath);
+    atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode });
 }
 /** Write file with explicit permission mode */
 export function writeFileWithMode(filePath, data, mode = 0o600) {

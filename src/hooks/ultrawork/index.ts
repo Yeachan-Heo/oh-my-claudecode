@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveModePath, ensureModeStateDir } from '../../lib/worktree-paths.js';
 
 export interface UltraworkState {
   /** Whether ultrawork mode is currently active */
@@ -41,28 +41,14 @@ const _DEFAULT_STATE: UltraworkState = {
  * Get the state file path for Ultrawork
  */
 function getStateFilePath(directory?: string, sessionId?: string): string {
-  const baseDir = directory || process.cwd();
-  if (sessionId) {
-    return resolveSessionStatePath('ultrawork', sessionId, baseDir);
-  }
-  const omcDir = join(baseDir, '.omc');
-  return join(omcDir, 'state', 'ultrawork-state.json');
+  return resolveModePath('ultrawork', directory || process.cwd(), sessionId);
 }
-
 
 /**
  * Ensure the .omc/state directory exists
  */
 function ensureStateDir(directory?: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory || process.cwd());
-    return;
-  }
-  const baseDir = directory || process.cwd();
-  const omcDir = join(baseDir, '.omc', 'state');
-  if (!existsSync(omcDir)) {
-    mkdirSync(omcDir, { recursive: true });
-  }
+  ensureModeStateDir(directory || process.cwd(), sessionId);
 }
 
 

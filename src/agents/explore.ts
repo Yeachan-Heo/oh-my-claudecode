@@ -7,8 +7,8 @@
  * Ported from oh-my-opencode's explore agent.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentPromptMetadata } from './types.js';
+import { defineAgent } from './utils.js';
 
 export const EXPLORE_PROMPT_METADATA: AgentPromptMetadata = {
   category: 'exploration',
@@ -34,11 +34,9 @@ export const EXPLORE_PROMPT_METADATA: AgentPromptMetadata = {
   ],
 };
 
-export const exploreAgent: AgentConfig = {
+export const exploreAgent = defineAgent({
   name: 'explore',
   description: 'Fast codebase exploration and pattern search. Use for finding files, understanding structure, locating implementations. Searches INTERNAL codebase.',
-  prompt: loadAgentPrompt('explore'),
   model: 'haiku',
-  defaultModel: 'haiku',
-  metadata: EXPLORE_PROMPT_METADATA
-};
+  metadata: EXPLORE_PROMPT_METADATA,
+});
