@@ -159,6 +159,8 @@ export interface NotificationPayload {
   question?: string;
   /** Incomplete task count */
   incompleteTasks?: number;
+  /** tmux pane ID for reply injection target */
+  tmuxPaneId?: string;
 }
 
 /** Result of a notification send attempt */
@@ -166,6 +168,7 @@ export interface NotificationResult {
   platform: NotificationPlatform;
   success: boolean;
   error?: string;
+  messageId?: string; // NEW: platform message ID for reply correlation
 }
 
 /** Result of dispatching notifications for an event */
@@ -174,4 +177,19 @@ export interface DispatchResult {
   results: NotificationResult[];
   /** Whether at least one notification was sent successfully */
   anySuccess: boolean;
+}
+
+/** Reply injection configuration */
+export interface ReplyConfig {
+  enabled: boolean;
+  /** Polling interval in milliseconds (default: 3000) */
+  pollIntervalMs: number;
+  /** Maximum message length (default: 500) */
+  maxMessageLength: number;
+  /** Rate limit: max messages per minute (default: 10) */
+  rateLimitPerMinute: number;
+  /** Include visual prefix like [reply:discord] (default: true) */
+  includePrefix: boolean;
+  /** Authorized Discord user IDs (REQUIRED for Discord, empty = Discord disabled) */
+  authorizedDiscordUserIds: string[];
 }

@@ -508,6 +508,18 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
           }).catch(() => {})
         ).catch(() => {});
       }
+
+      // Clean up reply listener session
+      import("../notifications/session-registry.js")
+        .then(async ({ removeSession, loadAllMappings }) => {
+          removeSession(sessionId);
+          const remaining = loadAllMappings();
+          if (remaining.length === 0) {
+            const { stopReplyListener } = await import("../notifications/reply-listener.js");
+            stopReplyListener();
+          }
+        })
+        .catch(() => {});
     }
     return output;
   }
@@ -562,6 +574,25 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
         projectPath: directory,
       }).catch(() => {})
     ).catch(() => {});
+  }
+
+  // Start reply listener daemon if configured (non-blocking, swallows errors)
+  if (sessionId) {
+    Promise.all([
+      import("../notifications/reply-listener.js"),
+      import("../notifications/config.js"),
+    ]).then(([{ startReplyListener }, { getReplyConfig, getNotificationConfig }]) => {
+      const replyConfig = getReplyConfig();
+      if (!replyConfig) return;
+      const notifConfig = getNotificationConfig();
+      startReplyListener({
+        ...replyConfig,
+        telegramBotToken: notifConfig?.telegram?.botToken,
+        telegramChatId: notifConfig?.telegram?.chatId,
+        discordBotToken: notifConfig?.["discord-bot"]?.botToken,
+        discordChannelId: notifConfig?.["discord-bot"]?.channelId,
+      });
+    }).catch(() => {});
   }
 
   const messages: string[] = [];

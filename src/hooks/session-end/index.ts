@@ -461,6 +461,23 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
     // Notification failures should never block session end
   }
 
+  // Clean up reply session registry and stop daemon if no active sessions remain
+  try {
+    const { removeSession, loadAllMappings } = await import('../../notifications/session-registry.js');
+    const { stopReplyListener } = await import('../../notifications/reply-listener.js');
+
+    // Remove this session's message mappings
+    removeSession(input.session_id);
+
+    // Stop daemon if registry is now empty (no other active sessions)
+    const remainingMappings = loadAllMappings();
+    if (remainingMappings.length === 0) {
+      await stopReplyListener();
+    }
+  } catch {
+    // Reply listener cleanup failures should never block session end
+  }
+
   // Return simple response - metrics are persisted to .omc/sessions/
   return { continue: true };
 }
