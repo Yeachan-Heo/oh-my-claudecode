@@ -1,65 +1,35 @@
 /**
- * Gemini Core Business Logic - Shared between SDK and Standalone MCP servers
+ * Gemini MCP Core - Gemini CLI integration
  *
- * This module contains all the business logic for Gemini CLI integration:
- * - Constants and configuration
- * - CLI execution with timeout handling
- * - File validation and reading
- * - Complete tool handler logic with role validation, fallback chain, etc.
+ * Thin wrapper around provider-core.ts that supplies Gemini-specific
+ * configuration (CLI args, raw stdout output, error detection).
+ * All shared logic lives in provider-core.ts.
  *
  * This module is SDK-agnostic and can be imported by both:
  * - gemini-server.ts (in-process SDK MCP server)
  * - gemini-standalone-server.ts (stdio-based external process server)
  */
-import type { BackgroundJobMeta } from './prompt-persistence.js';
-export declare function isSpawnedPid(pid: number): boolean;
-export declare function clearSpawnedPids(): void;
+import { type RetryableErrorResult, MAX_FILE_SIZE, MAX_STDOUT_BYTES, validateAndReadFile } from './provider-core.js';
+export { MAX_FILE_SIZE, MAX_STDOUT_BYTES, validateAndReadFile };
 export declare const GEMINI_DEFAULT_MODEL: string;
 export declare const GEMINI_TIMEOUT: number;
 export declare const GEMINI_RECOMMENDED_ROLES: readonly ["designer", "writer", "vision"];
-export declare const MAX_FILE_SIZE: number;
-export declare const MAX_STDOUT_BYTES: number;
+export declare function isSpawnedPid(pid: number): boolean;
+export declare function clearSpawnedPids(): void;
 /**
- * Check if Gemini output/stderr indicates a rate-limit (429) or quota error
- * that should trigger a fallback to the next model in the chain.
+ * Check if Gemini output/stderr indicates a retryable error
+ * (model not found, rate-limit/429, or quota exhaustion).
  */
-export declare function isGeminiRetryableError(stdout: string, stderr?: string): {
-    isError: boolean;
-    message: string;
-    type: 'rate_limit' | 'model' | 'none';
-};
-/**
- * Execute Gemini CLI command and return the response
- */
+export declare function isGeminiRetryableError(stdout: string, stderr?: string): RetryableErrorResult;
+/** Execute Gemini CLI command and return the response */
 export declare function executeGemini(prompt: string, model?: string, cwd?: string): Promise<string>;
-/**
- * Execute Gemini CLI in background with fallback chain support
- * Retries with next model on model errors and 429/rate-limit errors
- */
-export declare function executeGeminiBackground(fullPrompt: string, modelInput: string | undefined, jobMeta: BackgroundJobMeta, workingDirectory?: string): {
+/** Execute Gemini CLI in background with fallback chain */
+export declare function executeGeminiBackground(fullPrompt: string, modelInput: string | undefined, jobMeta: import('./prompt-persistence.js').BackgroundJobMeta, workingDirectory?: string): {
     pid: number;
 } | {
     error: string;
 };
-/**
- * Validate and read a file for context inclusion
- */
-export declare function validateAndReadFile(filePath: string, baseDir?: string): string;
-/**
- * Handle ask_gemini tool request - contains ALL business logic
- *
- * This function is called by both the SDK server and standalone server.
- * It performs:
- * - Agent role validation
- * - CLI detection
- * - System prompt resolution
- * - File context building
- * - Full prompt assembly
- * - Fallback chain execution
- * - Error handling
- *
- * @returns MCP-compatible response with content array
- */
+/** Handle ask_gemini tool invocation */
 export declare function handleAskGemini(args: {
     prompt?: string;
     prompt_file?: string;

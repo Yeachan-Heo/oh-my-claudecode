@@ -3231,7 +3231,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve6.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3258,7 +3258,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve6(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3842,55 +3842,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve7(baseURI, relativeURI, options) {
+    function resolve6(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse5(baseURI, schemelessOptions), parse5(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative6, options, skipNormalization) {
+    function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse5(serialize(base, options), options);
-        relative6 = parse5(serialize(relative6, options), options);
+        relative5 = parse5(serialize(relative5, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative6.scheme) {
-        target.scheme = relative6.scheme;
-        target.userinfo = relative6.userinfo;
-        target.host = relative6.host;
-        target.port = relative6.port;
-        target.path = removeDotSegments(relative6.path || "");
-        target.query = relative6.query;
+      if (!options.tolerant && relative5.scheme) {
+        target.scheme = relative5.scheme;
+        target.userinfo = relative5.userinfo;
+        target.host = relative5.host;
+        target.port = relative5.port;
+        target.path = removeDotSegments(relative5.path || "");
+        target.query = relative5.query;
       } else {
-        if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
-          target.userinfo = relative6.userinfo;
-          target.host = relative6.host;
-          target.port = relative6.port;
-          target.path = removeDotSegments(relative6.path || "");
-          target.query = relative6.query;
+        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
+          target.userinfo = relative5.userinfo;
+          target.host = relative5.host;
+          target.port = relative5.port;
+          target.path = removeDotSegments(relative5.path || "");
+          target.query = relative5.query;
         } else {
-          if (!relative6.path) {
+          if (!relative5.path) {
             target.path = base.path;
-            if (relative6.query !== void 0) {
-              target.query = relative6.query;
+            if (relative5.query !== void 0) {
+              target.query = relative5.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative6.path[0] === "/") {
-              target.path = removeDotSegments(relative6.path);
+            if (relative5.path[0] === "/") {
+              target.path = removeDotSegments(relative5.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative6.path;
+                target.path = "/" + relative5.path;
               } else if (!base.path) {
-                target.path = relative6.path;
+                target.path = relative5.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative6.query;
+            target.query = relative5.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3898,7 +3898,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative6.fragment;
+      target.fragment = relative5.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4069,7 +4069,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve7,
+      resolve: resolve6,
       resolveComponent,
       equal,
       serialize,
@@ -13311,7 +13311,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -13328,7 +13328,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve6, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -13406,7 +13406,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve7(parseResult.data);
+            resolve6(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -13667,12 +13667,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve6, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve7, interval);
+      const timeoutId = setTimeout(resolve6, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -14416,12 +14416,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve7) => {
+    return new Promise((resolve6) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve7();
+        resolve6();
       } else {
-        this._stdout.once("drain", resolve7);
+        this._stdout.once("drain", resolve6);
       }
     });
   }
@@ -14431,7 +14431,12 @@ var StdioServerTransport = class {
 init_define_AGENT_PROMPTS_CODEX();
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process3 = require("child_process");
+
+// src/mcp/provider-core.ts
+init_define_AGENT_PROMPTS_CODEX();
+init_define_AGENT_PROMPTS();
+init_define_AGENT_ROLES();
+var import_child_process2 = require("child_process");
 var import_fs9 = require("fs");
 var import_path9 = require("path");
 
@@ -14632,42 +14637,11 @@ Suggested: remove the symlink and retry`;
   }
 }
 
-// src/mcp/cli-detection.ts
-init_define_AGENT_PROMPTS_CODEX();
-init_define_AGENT_PROMPTS();
-init_define_AGENT_ROLES();
-var import_child_process = require("child_process");
-var codexCache = null;
-function detectCodexCli(useCache = true) {
-  if (useCache && codexCache) return codexCache;
-  const installHint = "Install Codex CLI: npm install -g @openai/codex";
-  try {
-    const command = process.platform === "win32" ? "where codex" : "which codex";
-    const path = (0, import_child_process.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
-    let version2;
-    try {
-      version2 = (0, import_child_process.execSync)("codex --version", { encoding: "utf-8", timeout: 5e3 }).trim();
-    } catch {
-    }
-    const result = { available: true, path, version: version2, installHint };
-    codexCache = result;
-    return result;
-  } catch {
-    const result = {
-      available: false,
-      error: "Codex CLI not found on PATH",
-      installHint
-    };
-    codexCache = result;
-    return result;
-  }
-}
-
 // src/lib/worktree-paths.ts
 init_define_AGENT_PROMPTS_CODEX();
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process2 = require("child_process");
+var import_child_process = require("child_process");
 var import_fs2 = require("fs");
 var import_path2 = require("path");
 var worktreeCache = null;
@@ -14677,7 +14651,7 @@ function getWorktreeRoot(cwd) {
     return worktreeCache.root || null;
   }
   try {
-    const root = (0, import_child_process2.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"]
@@ -16667,34 +16641,688 @@ function loadConfig() {
   return config2;
 }
 
-// src/mcp/codex-core.ts
-var spawnedPids = /* @__PURE__ */ new Set();
-function isSpawnedPid(pid) {
-  return spawnedPids.has(pid);
-}
+// src/mcp/provider-core.ts
 var MODEL_NAME_REGEX = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
-function validateModelName(model) {
-  if (!MODEL_NAME_REGEX.test(model)) {
-    throw new Error(`Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`);
-  }
-}
-var CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || "gpt-5.3-codex";
-var CODEX_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_CODEX_TIMEOUT || "3600000", 10) || 36e5), 36e5);
-var RATE_LIMIT_RETRY_COUNT = Math.min(10, Math.max(1, parseInt(process.env.OMC_CODEX_RATE_LIMIT_RETRY_COUNT || "3", 10) || 3));
-var RATE_LIMIT_INITIAL_DELAY = Math.max(1e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_INITIAL_DELAY || "5000", 10) || 5e3);
-var RATE_LIMIT_MAX_DELAY = Math.max(5e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_MAX_DELAY || "60000", 10) || 6e4);
-var CODEX_RECOMMENDED_ROLES = ["architect", "planner", "critic", "analyst", "code-reviewer", "security-reviewer", "tdd-guide"];
-var VALID_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 var MAX_FILE_SIZE = 5 * 1024 * 1024;
 var MAX_STDOUT_BYTES = 10 * 1024 * 1024;
-function computeBackoffDelay(attempt, initialDelay = RATE_LIMIT_INITIAL_DELAY, maxDelay = RATE_LIMIT_MAX_DELAY) {
+var PLATFORM_SHELL_OPTS = process.platform === "win32" ? { shell: true } : {};
+var RATE_LIMIT_PATTERN = /429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i;
+function validateModelName(model) {
+  if (!MODEL_NAME_REGEX.test(model)) {
+    throw new Error(
+      `Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`
+    );
+  }
+}
+function computeBackoffDelay(attempt, initialDelay, maxDelay) {
   const exponential = initialDelay * Math.pow(2, attempt);
   const capped = Math.min(exponential, maxDelay);
   const jitter = capped * (0.5 + Math.random() * 0.5);
   return Math.round(jitter);
 }
 function sleep(ms) {
-  return new Promise((resolve7) => setTimeout(resolve7, ms));
+  return new Promise((r) => setTimeout(r, ms));
+}
+function createPidRegistry() {
+  const pids = /* @__PURE__ */ new Set();
+  return {
+    add: (pid) => {
+      pids.add(pid);
+    },
+    delete: (pid) => {
+      pids.delete(pid);
+    },
+    has: (pid) => pids.has(pid),
+    clear: () => {
+      pids.clear();
+    }
+  };
+}
+function validateAndReadFile(filePath, baseDir) {
+  if (typeof filePath !== "string") {
+    return `--- File: ${filePath} --- (Invalid path type)`;
+  }
+  try {
+    const workingDir = baseDir || process.cwd();
+    const resolvedAbs = (0, import_path9.resolve)(workingDir, filePath);
+    const cwdReal = (0, import_fs9.realpathSync)(workingDir);
+    const relAbs = (0, import_path9.relative)(cwdReal, resolvedAbs);
+    if (relAbs === ".." || relAbs.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relAbs)) {
+      return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
+    }
+    const resolvedReal = (0, import_fs9.realpathSync)(resolvedAbs);
+    const relReal = (0, import_path9.relative)(cwdReal, resolvedReal);
+    if (relReal === ".." || relReal.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relReal)) {
+      return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
+    }
+    const stats = (0, import_fs9.statSync)(resolvedReal);
+    if (!stats.isFile()) {
+      return `--- File: ${filePath} --- (Not a regular file)`;
+    }
+    if (stats.size > MAX_FILE_SIZE) {
+      return `--- File: ${filePath} --- (File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB, max 5MB)`;
+    }
+    return wrapUntrustedFileContent(filePath, (0, import_fs9.readFileSync)(resolvedReal, "utf-8"));
+  } catch {
+    return `--- File: ${filePath} --- (Error reading file)`;
+  }
+}
+function executeCli(config2, prompt, model, cwd, extra) {
+  return new Promise((resolve6, reject) => {
+    validateModelName(model);
+    let settled = false;
+    const args = config2.buildCliArgs(model, extra);
+    const child = (0, import_child_process2.spawn)(config2.cliCommand, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      ...cwd ? { cwd } : {},
+      ...PLATFORM_SHELL_OPTS
+    });
+    const timeoutHandle = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill("SIGTERM");
+        reject(new Error(`${config2.name} timed out after ${config2.timeout}ms`));
+      }
+    }, config2.timeout);
+    const collector = createStdoutCollector(MAX_STDOUT_BYTES);
+    let stderr = "";
+    child.stdout.on("data", (data) => {
+      collector.append(data.toString());
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    child.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        const stdout = collector.toString();
+        if (code === 0 || stdout.trim()) {
+          const retryable = config2.isRetryableError(stdout, stderr);
+          if (retryable.isError) {
+            reject(new Error(`${config2.name} ${retryable.type === "rate_limit" ? "rate limit" : "model"} error: ${retryable.message}`));
+          } else {
+            resolve6(config2.parseOutput(stdout));
+          }
+        } else {
+          const retryableExit = config2.isRetryableError(stderr, stdout);
+          if (retryableExit.isError) {
+            reject(new Error(`${config2.name} ${retryableExit.type === "rate_limit" ? "rate limit" : "model"} error: ${retryableExit.message}`));
+          } else {
+            reject(new Error(`${config2.name} exited with code ${code}: ${stderr || "No output"}`));
+          }
+        }
+      }
+    });
+    child.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        child.kill("SIGTERM");
+        reject(new Error(`Failed to spawn ${config2.name} CLI: ${err.message}`));
+      }
+    });
+    child.stdin.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        child.kill("SIGTERM");
+        reject(new Error(`Stdin write error: ${err.message}`));
+      }
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+async function executeCliWithFallback(config2, prompt, model, cwd, fallbackChain, extra, overrides) {
+  const exec = overrides?.executor ?? executeCli;
+  const sleepFn = overrides?.sleepFn ?? sleep;
+  const modelExplicit = model !== void 0 && model !== null && model !== "";
+  const effectiveModel = model || config2.defaultModel;
+  const rlConfig = config2.rateLimitConfig;
+  if (modelExplicit && rlConfig) {
+    let lastError2 = null;
+    for (let attempt = 0; attempt <= rlConfig.retryCount; attempt++) {
+      try {
+        const response = await exec(config2, prompt, effectiveModel, cwd, extra);
+        return { response, usedFallback: false, actualModel: effectiveModel };
+      } catch (err) {
+        lastError2 = err;
+        if (!RATE_LIMIT_PATTERN.test(lastError2.message)) throw lastError2;
+        if (attempt < rlConfig.retryCount) {
+          await sleepFn(computeBackoffDelay(attempt, rlConfig.initialDelay, rlConfig.maxDelay));
+        }
+      }
+    }
+    throw lastError2 || new Error(`${config2.name} rate limit: all retries exhausted`);
+  }
+  const chain = fallbackChain || config2.modelFallbacks;
+  const modelsToTry = chain.includes(effectiveModel) ? chain.slice(chain.indexOf(effectiveModel)) : [effectiveModel, ...chain];
+  let lastError = null;
+  let rateLimitAttempt = 0;
+  for (const tryModel of modelsToTry) {
+    try {
+      const response = await exec(config2, prompt, tryModel, cwd, extra);
+      return { response, usedFallback: tryModel !== effectiveModel, actualModel: tryModel };
+    } catch (err) {
+      lastError = err;
+      if (!/model error|model_not_found|model is not supported|429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
+        throw lastError;
+      }
+      if (rlConfig && RATE_LIMIT_PATTERN.test(lastError.message)) {
+        await sleepFn(computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay));
+        rateLimitAttempt++;
+      }
+    }
+  }
+  throw lastError || new Error(`All ${config2.name} models in fallback chain failed`);
+}
+function executeCliBackground(config2, pidRegistry, fullPrompt, modelInput, jobMeta, workingDirectory, extra) {
+  try {
+    const modelExplicit = modelInput !== void 0 && modelInput !== null && modelInput !== "";
+    const effectiveModel = modelInput || config2.defaultModel;
+    const rlConfig = config2.rateLimitConfig;
+    const modelsToTry = modelExplicit ? [effectiveModel] : config2.modelFallbacks.includes(effectiveModel) ? config2.modelFallbacks.slice(config2.modelFallbacks.indexOf(effectiveModel)) : [effectiveModel, ...config2.modelFallbacks];
+    const trySpawnWithModel = (tryModel, remainingModels, rateLimitAttempt = 0) => {
+      validateModelName(tryModel);
+      const args = config2.buildCliArgs(tryModel, extra);
+      const child = (0, import_child_process2.spawn)(config2.cliCommand, args, {
+        detached: process.platform !== "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+        ...workingDirectory ? { cwd: workingDirectory } : {},
+        ...PLATFORM_SHELL_OPTS
+      });
+      if (!child.pid) return { error: "Failed to get process ID" };
+      const pid = child.pid;
+      pidRegistry.add(pid);
+      child.unref();
+      const initialStatus = {
+        provider: config2.name,
+        jobId: jobMeta.jobId,
+        slug: jobMeta.slug,
+        status: "spawned",
+        pid,
+        promptFile: jobMeta.promptFile,
+        responseFile: jobMeta.responseFile,
+        model: tryModel,
+        agentRole: jobMeta.agentRole,
+        spawnedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      writeJobStatus(initialStatus, workingDirectory);
+      const collector = createStdoutCollector(MAX_STDOUT_BYTES);
+      let stderr = "";
+      let settled = false;
+      const timeoutHandle = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          pidRegistry.delete(pid);
+          try {
+            if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
+            else child.kill("SIGTERM");
+          } catch {
+          }
+          writeJobStatus({
+            ...initialStatus,
+            status: "timeout",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            error: `${config2.name} timed out after ${config2.timeout}ms`
+          }, workingDirectory);
+        }
+      }, config2.timeout);
+      child.stdout?.on("data", (data) => {
+        collector.append(data.toString());
+      });
+      child.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.stdin?.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `Stdin write error: ${err.message}`
+        }, workingDirectory);
+      });
+      child.stdin?.write(fullPrompt);
+      child.stdin?.end();
+      writeJobStatus({ ...initialStatus, status: "running" }, workingDirectory);
+      const handleRetryable = (retryableErr) => {
+        const isRateLimit = retryableErr.type === "rate_limit";
+        if (isRateLimit && modelExplicit && rlConfig && rateLimitAttempt < rlConfig.retryCount) {
+          const delay = computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay);
+          setTimeout(() => {
+            const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
+            if ("error" in retryResult) {
+              writeJobStatus({
+                ...initialStatus,
+                status: "failed",
+                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+                error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`
+              }, workingDirectory);
+            }
+          }, delay);
+          return;
+        }
+        if (remainingModels.length > 0) {
+          const nextModel = remainingModels[0];
+          const newRemaining = remainingModels.slice(1);
+          const nextRlAttempt = isRateLimit ? rateLimitAttempt + 1 : rateLimitAttempt;
+          const doRetry = () => {
+            const retryResult = trySpawnWithModel(nextModel, newRemaining, nextRlAttempt);
+            if ("error" in retryResult) {
+              writeJobStatus({
+                ...initialStatus,
+                status: "failed",
+                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
+              }, workingDirectory);
+            }
+          };
+          if (isRateLimit && rlConfig) {
+            setTimeout(doRetry, computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay));
+          } else {
+            doRetry();
+          }
+          return;
+        }
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`
+        }, workingDirectory);
+      };
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        pidRegistry.delete(pid);
+        const stdout = collector.toString();
+        const currentStatus = readJobStatus(config2.name, jobMeta.slug, jobMeta.jobId, workingDirectory);
+        if (currentStatus?.killedByUser) return;
+        const hasOutput = code === 0 || !!stdout.trim();
+        const retryable = hasOutput ? config2.isRetryableError(stdout, stderr) : config2.isRetryableError(stderr, stdout);
+        if (retryable.isError) {
+          handleRetryable(retryable);
+          return;
+        }
+        if (hasOutput) {
+          const response = config2.parseOutput(stdout);
+          const usedFallback = tryModel !== effectiveModel;
+          persistResponse({
+            provider: config2.name,
+            agentRole: jobMeta.agentRole,
+            model: tryModel,
+            promptId: jobMeta.jobId,
+            slug: jobMeta.slug,
+            response,
+            workingDirectory,
+            usedFallback,
+            fallbackModel: usedFallback ? tryModel : void 0
+          });
+          writeJobStatus({
+            ...initialStatus,
+            model: tryModel,
+            status: "completed",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            usedFallback: usedFallback || void 0,
+            fallbackModel: usedFallback ? tryModel : void 0
+          }, workingDirectory);
+        } else {
+          writeJobStatus({
+            ...initialStatus,
+            status: "failed",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            error: `${config2.name} exited with code ${code}: ${stderr || "No output"}`
+          }, workingDirectory);
+        }
+      });
+      child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `Failed to spawn ${config2.name} CLI: ${err.message}`
+        }, workingDirectory);
+      });
+      return { pid };
+    };
+    return trySpawnWithModel(modelsToTry[0], modelsToTry.slice(1));
+  } catch (err) {
+    return { error: `Failed to start background execution: ${err.message}` };
+  }
+}
+async function handleAskProvider(config2, pidRegistry, args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return singleErrorBlock("Invalid request: args must be an object.");
+  }
+  const { agent_role, contextFiles, extra } = args;
+  const appConfig = loadConfig();
+  const resolved = resolveExternalModel(appConfig.externalModels, {
+    agentRole: agent_role,
+    explicitProvider: config2.name,
+    explicitModel: args.model
+  });
+  const fallbackChain = buildFallbackChain(config2.name, resolved.model, appConfig.externalModels);
+  const model = resolved.model || config2.defaultModel;
+  let baseDir = args.working_directory || process.cwd();
+  let baseDirReal;
+  const pathPolicy = process.env.OMC_ALLOW_EXTERNAL_WORKDIR === "1" ? "permissive" : "strict";
+  try {
+    baseDirReal = (0, import_fs9.realpathSync)(baseDir);
+    baseDir = baseDirReal;
+  } catch (err) {
+    return singleErrorBlock(
+      `E_WORKDIR_INVALID: working_directory '${args.working_directory}' does not exist or is not accessible.
+Error: ${err.message}
+Resolved working directory: ${baseDir}
+Path policy: ${pathPolicy}
+Suggested: ensure the working directory exists and is accessible`
+    );
+  }
+  if (pathPolicy === "strict") {
+    const worktreeRoot = getWorktreeRoot(baseDirReal);
+    if (worktreeRoot) {
+      let worktreeReal;
+      try {
+        worktreeReal = (0, import_fs9.realpathSync)(worktreeRoot);
+      } catch {
+        worktreeReal = "";
+      }
+      if (worktreeReal) {
+        const relToWorktree = (0, import_path9.relative)(worktreeReal, baseDirReal);
+        if (relToWorktree.startsWith("..") || (0, import_path9.isAbsolute)(relToWorktree)) {
+          return singleErrorBlock(
+            `E_WORKDIR_INVALID: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
+Requested: ${args.working_directory}
+Resolved working directory: ${baseDirReal}
+Worktree root: ${worktreeRoot}
+Path policy: ${pathPolicy}
+Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass`
+          );
+        }
+      }
+    }
+  }
+  if (typeof agent_role !== "string" || !agent_role.trim()) {
+    return singleErrorBlock("agent_role is required and must be a non-empty string.");
+  }
+  if (!isValidAgentRoleName(agent_role)) {
+    return singleErrorBlock(
+      `Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for ${config2.name}: ${config2.recommendedRoles.join(", ")}`
+    );
+  }
+  if (!VALID_AGENT_ROLES.includes(agent_role)) {
+    return singleErrorBlock(
+      `Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(", ")}. Recommended for ${config2.name}: ${config2.recommendedRoles.join(", ")}`
+    );
+  }
+  const inlinePrompt = typeof args.prompt === "string" ? args.prompt : void 0;
+  const hasPromptFileField = Object.prototype.hasOwnProperty.call(args, "prompt_file") && args.prompt_file !== void 0;
+  const promptFileInput = hasPromptFileField && typeof args.prompt_file === "string" ? args.prompt_file.trim() || void 0 : void 0;
+  let resolvedPromptFile = promptFileInput;
+  let resolvedOutputFile = typeof args.output_file === "string" ? args.output_file : void 0;
+  const hasInlineIntent = inlinePrompt !== void 0 && !hasPromptFileField;
+  const isInlineMode = hasInlineIntent && inlinePrompt.trim().length > 0;
+  if (hasInlineIntent && !inlinePrompt?.trim()) {
+    return singleErrorBlock("Inline prompt is empty. Provide a non-empty prompt string.");
+  }
+  const MAX_INLINE_PROMPT_BYTES = 256 * 1024;
+  if (isInlineMode && Buffer.byteLength(inlinePrompt, "utf-8") > MAX_INLINE_PROMPT_BYTES) {
+    return singleErrorBlock(`Inline prompt exceeds maximum size (${MAX_INLINE_PROMPT_BYTES} bytes). Use prompt_file for large prompts.`);
+  }
+  if (isInlineMode && args.background) {
+    return singleErrorBlock("Inline prompt mode is foreground only. Use prompt_file for background execution.");
+  }
+  if (hasPromptFileField && !promptFileInput) {
+    return singleErrorBlock("prompt_file must be a non-empty string when provided. Received non-string or empty value.");
+  }
+  let inlineRequestId;
+  if (isInlineMode) {
+    inlineRequestId = generatePromptId();
+    try {
+      const promptsDir = getPromptsDir(baseDir);
+      (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
+      const slug = slugify(inlinePrompt);
+      const inlinePromptFile = (0, import_path9.join)(promptsDir, `${config2.name}-inline-${slug}-${inlineRequestId}.md`);
+      (0, import_fs9.writeFileSync)(inlinePromptFile, inlinePrompt, { encoding: "utf-8", mode: 384 });
+      resolvedPromptFile = inlinePromptFile;
+      if (!resolvedOutputFile || !resolvedOutputFile.trim()) {
+        resolvedOutputFile = (0, import_path9.join)(promptsDir, `${config2.name}-inline-response-${slug}-${inlineRequestId}.md`);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "unknown error";
+      return singleErrorBlock(`Failed to persist inline prompt (${reason}). Check working directory permissions and disk space.`);
+    }
+  }
+  const effectivePromptFile = resolvedPromptFile;
+  if (!effectivePromptFile || !effectivePromptFile.trim()) {
+    return singleErrorBlock("Either 'prompt' (inline) or 'prompt_file' (file path) is required.");
+  }
+  const effectiveOutputFile = resolvedOutputFile;
+  if (!effectiveOutputFile || !effectiveOutputFile.trim()) {
+    return singleErrorBlock("output_file is required. Specify a path where the response should be written.");
+  }
+  let resolvedPrompt;
+  const promptFile = effectivePromptFile;
+  const resolvedPath = (0, import_path9.resolve)(baseDir, promptFile);
+  const cwdReal = (0, import_fs9.realpathSync)(baseDir);
+  const relPath = (0, import_path9.relative)(cwdReal, resolvedPath);
+  if (!isExternalPromptAllowed() && (relPath === ".." || relPath.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relPath))) {
+    return singleErrorBlock(
+      `E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
+Working directory: ${baseDirReal}
+Resolved working directory: ${baseDirReal}
+Path policy: ${pathPolicy}
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`
+    );
+  }
+  let resolvedReal;
+  try {
+    resolvedReal = (0, import_fs9.realpathSync)(resolvedPath);
+  } catch (err) {
+    return singleErrorBlock(
+      `E_PATH_RESOLUTION_FAILED: Failed to resolve prompt_file '${promptFile}'.
+Error: ${err.message}
+Resolved working directory: ${baseDirReal}
+Path policy: ${pathPolicy}
+Suggested: ensure the prompt file exists and is accessible`
+    );
+  }
+  const relReal = (0, import_path9.relative)(cwdReal, resolvedReal);
+  if (!isExternalPromptAllowed() && (relReal === ".." || relReal.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relReal))) {
+    return singleErrorBlock(
+      `E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
+Resolved path: ${resolvedReal}
+Working directory: ${baseDirReal}
+Resolved working directory: ${baseDirReal}
+Path policy: ${pathPolicy}
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`
+    );
+  }
+  try {
+    resolvedPrompt = (0, import_fs9.readFileSync)(resolvedReal, "utf-8");
+  } catch (err) {
+    return singleErrorBlock(`Failed to read prompt_file '${promptFile}': ${err.message}`);
+  }
+  if (!resolvedPrompt.trim()) {
+    return singleErrorBlock(`prompt_file '${promptFile}' is empty.`);
+  }
+  const userPrompt = `[HEADLESS SESSION] You are running non-interactively in a headless pipeline. Produce your FULL, comprehensive analysis directly in your response. Do NOT ask for clarification or confirmation - work thoroughly with all provided context. Do NOT write brief acknowledgments - your response IS the deliverable.
+
+${resolvedPrompt}`;
+  const detection = config2.detectCli();
+  if (!detection.available) {
+    return singleErrorBlock(`${config2.name} CLI is not available: ${detection.error}
+
+${detection.installHint}`);
+  }
+  const resolvedSystemPrompt = resolveSystemPrompt(void 0, agent_role, config2.name);
+  let fileContext;
+  if (contextFiles && contextFiles.length > 0) {
+    fileContext = contextFiles.map((f) => validateAndReadFile(f, baseDir)).join("\n\n");
+  }
+  const fullPrompt = buildPromptWithSystemContext(userPrompt, fileContext, resolvedSystemPrompt);
+  const promptResult = persistPrompt({
+    provider: config2.name,
+    agentRole: agent_role,
+    model,
+    files: contextFiles,
+    prompt: resolvedPrompt,
+    fullPrompt,
+    workingDirectory: baseDir
+  });
+  const expectedResponsePath = promptResult ? getExpectedResponsePath(config2.name, promptResult.slug, promptResult.id, baseDir) : void 0;
+  if (args.background) {
+    if (!promptResult) {
+      return singleErrorBlock("Failed to persist prompt for background execution");
+    }
+    const statusFilePath = getStatusFilePath(config2.name, promptResult.slug, promptResult.id, baseDir);
+    const result = executeCliBackground(config2, pidRegistry, fullPrompt, args.model, {
+      provider: config2.name,
+      jobId: promptResult.id,
+      slug: promptResult.slug,
+      agentRole: agent_role,
+      model,
+      promptFile: promptResult.filePath,
+      responseFile: expectedResponsePath
+    }, baseDir, extra);
+    if ("error" in result) {
+      return singleErrorBlock(`Failed to spawn background job: ${result.error}`);
+    }
+    const bgLines = [
+      `**Mode:** Background (non-blocking)`,
+      `**Job ID:** ${promptResult.id}`,
+      `**Agent Role:** ${agent_role}`,
+      `**Model:** ${model}`,
+      fallbackChain.length > 1 ? `**Fallback chain:** ${fallbackChain.join(" -> ")}` : null,
+      `**PID:** ${result.pid}`,
+      `**Prompt File:** ${promptResult.filePath}`,
+      `**Response File:** ${expectedResponsePath}`,
+      `**Status File:** ${statusFilePath}`,
+      ``,
+      `Job dispatched. Check response file or status file for completion.`
+    ].filter(Boolean);
+    return { content: [{ type: "text", text: bgLines.join("\n") }] };
+  }
+  const paramLines = [
+    `**Agent Role:** ${agent_role}`,
+    ...args.extraParamLines || [],
+    contextFiles?.length ? `**Files:** ${contextFiles.join(", ")}` : null,
+    promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
+    expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null,
+    `**Resolved Working Directory:** ${baseDirReal}`,
+    `**Path Policy:** ${pathPolicy}`
+  ].filter(Boolean).join("\n");
+  try {
+    const { response, usedFallback, actualModel } = await executeCliWithFallback(
+      config2,
+      fullPrompt,
+      args.model,
+      baseDir,
+      fallbackChain,
+      extra
+    );
+    if (promptResult) {
+      persistResponse({
+        provider: config2.name,
+        agentRole: agent_role,
+        model: actualModel,
+        promptId: promptResult.id,
+        slug: promptResult.slug,
+        response,
+        workingDirectory: baseDir,
+        usedFallback,
+        fallbackModel: usedFallback ? actualModel : void 0
+      });
+    }
+    if (effectiveOutputFile) {
+      const writeResult = safeWriteOutputFile(effectiveOutputFile, response, baseDirReal, `[${config2.name}-core]`);
+      if (!writeResult.success) {
+        return singleErrorBlock(`${paramLines}
+
+---
+
+${writeResult.errorMessage}
+
+resolved_working_directory: ${baseDirReal}
+path_policy: ${pathPolicy}`);
+      }
+    }
+    const responseLines = [paramLines];
+    if (usedFallback) responseLines.push(`Fallback: used model ${actualModel}`);
+    if (isInlineMode) {
+      responseLines.push(`**Request ID:** ${inlineRequestId}`);
+      const metadataText = responseLines.join("\n");
+      const wrappedResponse = wrapUntrustedCliResponse(response, {
+        source: "inline-cli-response",
+        tool: `ask_${config2.name}`
+      });
+      return inlineSuccessBlocks(metadataText, wrappedResponse);
+    }
+    return { content: [{ type: "text", text: responseLines.join("\n") }] };
+  } catch (err) {
+    return singleErrorBlock(`${paramLines}
+
+---
+
+${config2.name} CLI error: ${err.message}`);
+  }
+}
+
+// src/mcp/cli-detection.ts
+init_define_AGENT_PROMPTS_CODEX();
+init_define_AGENT_PROMPTS();
+init_define_AGENT_ROLES();
+var import_child_process3 = require("child_process");
+var codexCache = null;
+function detectCodexCli(useCache = true) {
+  if (useCache && codexCache) return codexCache;
+  const installHint = "Install Codex CLI: npm install -g @openai/codex";
+  try {
+    const command = process.platform === "win32" ? "where codex" : "which codex";
+    const path = (0, import_child_process3.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
+    let version2;
+    try {
+      version2 = (0, import_child_process3.execSync)("codex --version", { encoding: "utf-8", timeout: 5e3 }).trim();
+    } catch {
+    }
+    const result = { available: true, path, version: version2, installHint };
+    codexCache = result;
+    return result;
+  } catch {
+    const result = {
+      available: false,
+      error: "Codex CLI not found on PATH",
+      installHint
+    };
+    codexCache = result;
+    return result;
+  }
+}
+
+// src/mcp/codex-core.ts
+var CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || "gpt-5.3-codex";
+var CODEX_TIMEOUT = Math.min(
+  Math.max(5e3, parseInt(process.env.OMC_CODEX_TIMEOUT || "3600000", 10) || 36e5),
+  36e5
+);
+var RATE_LIMIT_RETRY_COUNT = Math.min(10, Math.max(1, parseInt(process.env.OMC_CODEX_RATE_LIMIT_RETRY_COUNT || "3", 10) || 3));
+var RATE_LIMIT_INITIAL_DELAY = Math.max(1e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_INITIAL_DELAY || "5000", 10) || 5e3);
+var RATE_LIMIT_MAX_DELAY = Math.max(5e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_MAX_DELAY || "60000", 10) || 6e4);
+var CODEX_RECOMMENDED_ROLES = ["architect", "planner", "critic", "analyst", "code-reviewer", "security-reviewer", "tdd-guide"];
+var VALID_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
+var codexPidRegistry = createPidRegistry();
+function isSpawnedPid(pid) {
+  return codexPidRegistry.has(pid);
 }
 function isModelError(output) {
   const lines = output.trim().split("\n").filter((l) => l.trim());
@@ -16715,18 +17343,18 @@ function isModelError(output) {
 function isRateLimitError(output, stderr = "") {
   const combined = `${output}
 ${stderr}`;
-  if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(combined)) {
+  if (RATE_LIMIT_PATTERN.test(combined)) {
     const lines = combined.split("\n").filter((l) => l.trim());
     for (const line of lines) {
       try {
         const event = JSON.parse(line);
         const msg = typeof event.message === "string" ? event.message : typeof event.error?.message === "string" ? event.error.message : "";
-        if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(msg)) {
+        if (RATE_LIMIT_PATTERN.test(msg)) {
           return { isError: true, message: msg };
         }
       } catch {
       }
-      if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(line)) {
+      if (RATE_LIMIT_PATTERN.test(line)) {
         return { isError: true, message: line.trim() };
       }
     }
@@ -16776,694 +17404,67 @@ function parseCodexOutput(output) {
   }
   return messages.join("\n") || output;
 }
-function executeCodex(prompt, model, cwd, reasoningEffort) {
-  return new Promise((resolve7, reject) => {
-    validateModelName(model);
-    let settled = false;
+var CODEX_CONFIG = {
+  name: "codex",
+  cliCommand: "codex",
+  defaultModel: CODEX_DEFAULT_MODEL,
+  timeout: CODEX_TIMEOUT,
+  modelFallbacks: CODEX_MODEL_FALLBACKS,
+  recommendedRoles: CODEX_RECOMMENDED_ROLES,
+  fileContextParam: "context_files",
+  buildCliArgs(model, extra) {
     const args = ["exec", "-m", model, "--json", "--full-auto"];
-    if (reasoningEffort && VALID_REASONING_EFFORTS.includes(reasoningEffort)) {
-      args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
+    const re = extra?.reasoningEffort;
+    if (typeof re === "string" && VALID_REASONING_EFFORTS.includes(re)) {
+      args.push("-c", `model_reasoning_effort="${re}"`);
     }
-    const child = (0, import_child_process3.spawn)("codex", args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      ...cwd ? { cwd } : {},
-      // shell: true needed on Windows for .cmd/.bat executables.
-      // Safe: args are array-based and model names are regex-validated.
-      ...process.platform === "win32" ? { shell: true } : {}
-    });
-    const timeoutHandle = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Codex timed out after ${CODEX_TIMEOUT}ms`));
-      }
-    }, CODEX_TIMEOUT);
-    const collector = createStdoutCollector(MAX_STDOUT_BYTES);
-    let stderr = "";
-    child.stdout.on("data", (data) => {
-      collector.append(data.toString());
-    });
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-    child.on("close", (code) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        const stdout = collector.toString();
-        if (code === 0 || stdout.trim()) {
-          const retryable = isRetryableError(stdout, stderr);
-          if (retryable.isError) {
-            reject(new Error(`Codex ${retryable.type === "rate_limit" ? "rate limit" : "model"} error: ${retryable.message}`));
-          } else {
-            resolve7(parseCodexOutput(stdout));
-          }
-        } else {
-          const retryableExit = isRateLimitError(stderr, stdout);
-          if (retryableExit.isError) {
-            reject(new Error(`Codex rate limit error: ${retryableExit.message}`));
-          } else {
-            reject(new Error(`Codex exited with code ${code}: ${stderr || "No output"}`));
-          }
-        }
-      }
-    });
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill("SIGTERM");
-        reject(new Error(`Failed to spawn Codex CLI: ${err.message}`));
-      }
-    });
-    child.stdin.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill("SIGTERM");
-        reject(new Error(`Stdin write error: ${err.message}`));
-      }
-    });
-    child.stdin.write(prompt);
-    child.stdin.end();
-  });
-}
-async function executeCodexWithFallback(prompt, model, cwd, fallbackChain, overrides, reasoningEffort) {
-  const exec = overrides?.executor ?? executeCodex;
-  const sleepFn = overrides?.sleepFn ?? sleep;
-  const modelExplicit = model !== void 0 && model !== null && model !== "";
-  const effectiveModel = model || CODEX_DEFAULT_MODEL;
-  if (modelExplicit) {
-    let lastError2 = null;
-    for (let attempt = 0; attempt <= RATE_LIMIT_RETRY_COUNT; attempt++) {
-      try {
-        const response = await exec(prompt, effectiveModel, cwd, reasoningEffort);
-        return { response, usedFallback: false, actualModel: effectiveModel };
-      } catch (err) {
-        lastError2 = err;
-        if (!/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError2.message)) {
-          throw lastError2;
-        }
-        if (attempt < RATE_LIMIT_RETRY_COUNT) {
-          const delay = computeBackoffDelay(attempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-          await sleepFn(delay);
-        }
-      }
-    }
-    throw lastError2 || new Error("Codex rate limit: all retries exhausted");
+    return args;
+  },
+  parseOutput: parseCodexOutput,
+  detectCli: () => detectCodexCli(),
+  isRetryableError,
+  rateLimitConfig: {
+    retryCount: RATE_LIMIT_RETRY_COUNT,
+    initialDelay: RATE_LIMIT_INITIAL_DELAY,
+    maxDelay: RATE_LIMIT_MAX_DELAY
   }
-  const chain = fallbackChain || CODEX_MODEL_FALLBACKS;
-  const modelsToTry = chain.includes(effectiveModel) ? chain.slice(chain.indexOf(effectiveModel)) : [effectiveModel, ...chain];
-  let lastError = null;
-  let rateLimitAttempt = 0;
-  for (const tryModel of modelsToTry) {
-    try {
-      const response = await exec(prompt, tryModel, cwd, reasoningEffort);
-      return {
-        response,
-        usedFallback: tryModel !== effectiveModel,
-        actualModel: tryModel
-      };
-    } catch (err) {
-      lastError = err;
-      if (!/model error|model_not_found|model is not supported|429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
-        throw lastError;
-      }
-      if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
-        const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-        await sleepFn(delay);
-        rateLimitAttempt++;
-      }
-    }
-  }
-  throw lastError || new Error("All Codex models in fallback chain failed");
-}
-function executeCodexBackground(fullPrompt, modelInput, jobMeta, workingDirectory, reasoningEffort) {
-  try {
-    const modelExplicit = modelInput !== void 0 && modelInput !== null && modelInput !== "";
-    const effectiveModel = modelInput || CODEX_DEFAULT_MODEL;
-    const modelsToTry = modelExplicit ? [effectiveModel] : CODEX_MODEL_FALLBACKS.includes(effectiveModel) ? CODEX_MODEL_FALLBACKS.slice(CODEX_MODEL_FALLBACKS.indexOf(effectiveModel)) : [effectiveModel, ...CODEX_MODEL_FALLBACKS];
-    const trySpawnWithModel = (tryModel, remainingModels, rateLimitAttempt = 0) => {
-      validateModelName(tryModel);
-      const args = ["exec", "-m", tryModel, "--json", "--full-auto"];
-      if (reasoningEffort && VALID_REASONING_EFFORTS.includes(reasoningEffort)) {
-        args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
-      }
-      const child = (0, import_child_process3.spawn)("codex", args, {
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe"],
-        ...workingDirectory ? { cwd: workingDirectory } : {},
-        // shell: true needed on Windows for .cmd/.bat executables.
-        // Safe: args are array-based and model names are regex-validated.
-        ...process.platform === "win32" ? { shell: true } : {}
-      });
-      if (!child.pid) {
-        return { error: "Failed to get process ID" };
-      }
-      const pid = child.pid;
-      spawnedPids.add(pid);
-      child.unref();
-      const initialStatus = {
-        provider: "codex",
-        jobId: jobMeta.jobId,
-        slug: jobMeta.slug,
-        status: "spawned",
-        pid,
-        promptFile: jobMeta.promptFile,
-        responseFile: jobMeta.responseFile,
-        model: tryModel,
-        agentRole: jobMeta.agentRole,
-        spawnedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      writeJobStatus(initialStatus, workingDirectory);
-      const collector = createStdoutCollector(MAX_STDOUT_BYTES);
-      let stderr = "";
-      let settled = false;
-      const timeoutHandle = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          spawnedPids.delete(pid);
-          try {
-            if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
-            else child.kill("SIGTERM");
-          } catch {
-          }
-          writeJobStatus({
-            ...initialStatus,
-            status: "timeout",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            error: `Codex timed out after ${CODEX_TIMEOUT}ms`
-          }, workingDirectory);
-        }
-      }, CODEX_TIMEOUT);
-      child.stdout?.on("data", (data) => {
-        collector.append(data.toString());
-      });
-      child.stderr?.on("data", (data) => {
-        stderr += data.toString();
-      });
-      child.stdin?.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        writeJobStatus({
-          ...initialStatus,
-          status: "failed",
-          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          error: `Stdin write error: ${err.message}`
-        }, workingDirectory);
-      });
-      child.stdin?.write(fullPrompt);
-      child.stdin?.end();
-      writeJobStatus({ ...initialStatus, status: "running" }, workingDirectory);
-      child.on("close", (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        spawnedPids.delete(pid);
-        const stdout = collector.toString();
-        const currentStatus = readJobStatus("codex", jobMeta.slug, jobMeta.jobId, workingDirectory);
-        if (currentStatus?.killedByUser) {
-          return;
-        }
-        if (code === 0 || stdout.trim()) {
-          const retryableErr = isRetryableError(stdout, stderr);
-          if (retryableErr.isError) {
-            const isRateLimit = retryableErr.type === "rate_limit";
-            if (isRateLimit && modelExplicit && rateLimitAttempt < RATE_LIMIT_RETRY_COUNT) {
-              const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-              setTimeout(() => {
-                const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
-                if ("error" in retryResult) {
-                  writeJobStatus({
-                    ...initialStatus,
-                    status: "failed",
-                    completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                    error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`
-                  }, workingDirectory);
-                }
-              }, delay);
-              return;
-            }
-            if (remainingModels.length > 0) {
-              const nextModel = remainingModels[0];
-              const newRemainingModels = remainingModels.slice(1);
-              if (isRateLimit) {
-                const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-                setTimeout(() => {
-                  const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt + 1);
-                  if ("error" in retryResult) {
-                    writeJobStatus({
-                      ...initialStatus,
-                      status: "failed",
-                      completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                      error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-                    }, workingDirectory);
-                  }
-                }, delay);
-              } else {
-                const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt);
-                if ("error" in retryResult) {
-                  writeJobStatus({
-                    ...initialStatus,
-                    status: "failed",
-                    completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                    error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-                  }, workingDirectory);
-                }
-              }
-              return;
-            }
-            writeJobStatus({
-              ...initialStatus,
-              status: "failed",
-              completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-              error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`
-            }, workingDirectory);
-            return;
-          }
-          const response = parseCodexOutput(stdout);
-          const usedFallback = tryModel !== effectiveModel;
-          persistResponse({
-            provider: "codex",
-            agentRole: jobMeta.agentRole,
-            model: tryModel,
-            promptId: jobMeta.jobId,
-            slug: jobMeta.slug,
-            response,
-            workingDirectory,
-            usedFallback,
-            fallbackModel: usedFallback ? tryModel : void 0
-          });
-          writeJobStatus({
-            ...initialStatus,
-            model: tryModel,
-            status: "completed",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            usedFallback: usedFallback || void 0,
-            fallbackModel: usedFallback ? tryModel : void 0
-          }, workingDirectory);
-        } else {
-          const retryableExit = isRetryableError(stderr, stdout);
-          if (retryableExit.isError) {
-            const isRateLimit = retryableExit.type === "rate_limit";
-            if (isRateLimit && modelExplicit && rateLimitAttempt < RATE_LIMIT_RETRY_COUNT) {
-              const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-              setTimeout(() => {
-                const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
-                if ("error" in retryResult) {
-                  writeJobStatus({
-                    ...initialStatus,
-                    status: "failed",
-                    completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                    error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`
-                  }, workingDirectory);
-                }
-              }, delay);
-              return;
-            }
-            if (remainingModels.length > 0) {
-              const nextModel = remainingModels[0];
-              const newRemainingModels = remainingModels.slice(1);
-              if (isRateLimit) {
-                const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
-                setTimeout(() => {
-                  const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt + 1);
-                  if ("error" in retryResult) {
-                    writeJobStatus({
-                      ...initialStatus,
-                      status: "failed",
-                      completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                      error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-                    }, workingDirectory);
-                  }
-                }, delay);
-              } else {
-                const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt);
-                if ("error" in retryResult) {
-                  writeJobStatus({
-                    ...initialStatus,
-                    status: "failed",
-                    completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                    error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-                  }, workingDirectory);
-                }
-              }
-              return;
-            }
-          }
-          writeJobStatus({
-            ...initialStatus,
-            status: "failed",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            error: `Codex exited with code ${code}: ${stderr || "No output"}`
-          }, workingDirectory);
-        }
-      });
-      child.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        writeJobStatus({
-          ...initialStatus,
-          status: "failed",
-          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          error: `Failed to spawn Codex CLI: ${err.message}`
-        }, workingDirectory);
-      });
-      return { pid };
-    };
-    return trySpawnWithModel(modelsToTry[0], modelsToTry.slice(1));
-  } catch (err) {
-    return { error: `Failed to start background execution: ${err.message}` };
-  }
-}
-function validateAndReadFile(filePath, baseDir) {
-  if (typeof filePath !== "string") {
-    return `--- File: ${filePath} --- (Invalid path type)`;
-  }
-  try {
-    const workingDir = baseDir || process.cwd();
-    const resolvedAbs = (0, import_path9.resolve)(workingDir, filePath);
-    const cwdReal = (0, import_fs9.realpathSync)(workingDir);
-    const relAbs = (0, import_path9.relative)(cwdReal, resolvedAbs);
-    if (relAbs === ".." || relAbs.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relAbs)) {
-      return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
-    }
-    const resolvedReal = (0, import_fs9.realpathSync)(resolvedAbs);
-    const relReal = (0, import_path9.relative)(cwdReal, resolvedReal);
-    if (relReal === ".." || relReal.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relReal)) {
-      return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
-    }
-    const stats = (0, import_fs9.statSync)(resolvedReal);
-    if (!stats.isFile()) {
-      return `--- File: ${filePath} --- (Not a regular file)`;
-    }
-    if (stats.size > MAX_FILE_SIZE) {
-      return `--- File: ${filePath} --- (File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB, max 5MB)`;
-    }
-    return wrapUntrustedFileContent(filePath, (0, import_fs9.readFileSync)(resolvedReal, "utf-8"));
-  } catch {
-    return `--- File: ${filePath} --- (Error reading file)`;
-  }
-}
+};
 async function handleAskCodex(args) {
-  if (!args || typeof args !== "object" || Array.isArray(args)) {
-    return singleErrorBlock("Invalid request: args must be an object.");
-  }
-  const { agent_role, context_files } = args;
   const resolvedEffort = typeof args.reasoning_effort === "string" && VALID_REASONING_EFFORTS.includes(args.reasoning_effort) ? args.reasoning_effort : void 0;
-  const config2 = loadConfig();
-  const resolved = resolveExternalModel(config2.externalModels, {
-    agentRole: args.agent_role,
-    explicitProvider: "codex",
-    explicitModel: args.model
-    // user explicitly passed model
+  return handleAskProvider(CODEX_CONFIG, codexPidRegistry, {
+    prompt: args.prompt,
+    prompt_file: args.prompt_file,
+    output_file: args.output_file,
+    agent_role: args.agent_role,
+    model: args.model,
+    contextFiles: args.context_files,
+    background: args.background,
+    working_directory: args.working_directory,
+    extra: resolvedEffort ? { reasoningEffort: resolvedEffort } : void 0,
+    extraParamLines: resolvedEffort ? [`**Reasoning Effort:** ${resolvedEffort}`] : void 0
   });
-  const fallbackChain = buildFallbackChain("codex", resolved.model, config2.externalModels);
-  const model = resolved.model || CODEX_DEFAULT_MODEL;
-  let baseDir = args.working_directory || process.cwd();
-  let baseDirReal;
-  const pathPolicy = process.env.OMC_ALLOW_EXTERNAL_WORKDIR === "1" ? "permissive" : "strict";
-  try {
-    baseDirReal = (0, import_fs9.realpathSync)(baseDir);
-    baseDir = baseDirReal;
-  } catch (err) {
-    const errorToken = "E_WORKDIR_INVALID";
-    return singleErrorBlock(`${errorToken}: working_directory '${args.working_directory}' does not exist or is not accessible.
-Error: ${err.message}
-Resolved working directory: ${baseDir}
-Path policy: ${pathPolicy}
-Suggested: ensure the working directory exists and is accessible`);
-  }
-  if (pathPolicy === "strict") {
-    const worktreeRoot = getWorktreeRoot(baseDirReal);
-    if (worktreeRoot) {
-      let worktreeReal;
-      try {
-        worktreeReal = (0, import_fs9.realpathSync)(worktreeRoot);
-      } catch {
-        worktreeReal = "";
-      }
-      if (worktreeReal) {
-        const relToWorktree = (0, import_path9.relative)(worktreeReal, baseDirReal);
-        if (relToWorktree.startsWith("..") || (0, import_path9.isAbsolute)(relToWorktree)) {
-          const errorToken = "E_WORKDIR_INVALID";
-          return singleErrorBlock(`${errorToken}: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
-Requested: ${args.working_directory}
-Resolved working directory: ${baseDirReal}
-Worktree root: ${worktreeRoot}
-Path policy: ${pathPolicy}
-Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass`);
-        }
-      }
-    }
-  }
-  if (typeof agent_role !== "string" || !agent_role.trim()) {
-    return singleErrorBlock("agent_role is required and must be a non-empty string.");
-  }
-  if (!isValidAgentRoleName(agent_role)) {
-    return singleErrorBlock(`Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(", ")}`);
-  }
-  if (!VALID_AGENT_ROLES.includes(agent_role)) {
-    return singleErrorBlock(`Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(", ")}. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(", ")}`);
-  }
-  const inlinePrompt = typeof args.prompt === "string" ? args.prompt : void 0;
-  const hasPromptFileField = Object.prototype.hasOwnProperty.call(args, "prompt_file") && args.prompt_file !== void 0;
-  const promptFileInput = hasPromptFileField && typeof args.prompt_file === "string" ? args.prompt_file.trim() || void 0 : void 0;
-  let resolvedPromptFile = promptFileInput;
-  let resolvedOutputFile = typeof args.output_file === "string" ? args.output_file : void 0;
-  const hasInlineIntent = inlinePrompt !== void 0 && !hasPromptFileField;
-  const isInlineMode = hasInlineIntent && inlinePrompt.trim().length > 0;
-  if (hasInlineIntent && !inlinePrompt?.trim()) {
-    return singleErrorBlock("Inline prompt is empty. Provide a non-empty prompt string.");
-  }
-  const MAX_INLINE_PROMPT_BYTES = 256 * 1024;
-  if (isInlineMode && Buffer.byteLength(inlinePrompt, "utf-8") > MAX_INLINE_PROMPT_BYTES) {
-    return singleErrorBlock(`Inline prompt exceeds maximum size (${MAX_INLINE_PROMPT_BYTES} bytes). Use prompt_file for large prompts.`);
-  }
-  if (isInlineMode && args.background) {
-    return singleErrorBlock("Inline prompt mode is foreground only. Use prompt_file for background execution.");
-  }
-  if (hasPromptFileField && !promptFileInput) {
-    return singleErrorBlock("prompt_file must be a non-empty string when provided. Received non-string or empty value.");
-  }
-  let inlineRequestId;
-  if (isInlineMode) {
-    inlineRequestId = generatePromptId();
-    try {
-      const promptsDir = getPromptsDir(baseDir);
-      (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
-      const slug = slugify(inlinePrompt);
-      const inlinePromptFile = (0, import_path9.join)(promptsDir, `codex-inline-${slug}-${inlineRequestId}.md`);
-      (0, import_fs9.writeFileSync)(inlinePromptFile, inlinePrompt, { encoding: "utf-8", mode: 384 });
-      const resolvedPromptFileLocal = inlinePromptFile;
-      const resolvedOutputFileLocal = !resolvedOutputFile || !resolvedOutputFile.trim() ? (0, import_path9.join)(promptsDir, `codex-inline-response-${slug}-${inlineRequestId}.md`) : resolvedOutputFile;
-      resolvedPromptFile = resolvedPromptFileLocal;
-      resolvedOutputFile = resolvedOutputFileLocal;
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "unknown error";
-      return singleErrorBlock(`Failed to persist inline prompt (${reason}). Check working directory permissions and disk space.`);
-    }
-  }
-  const effectivePromptFile = resolvedPromptFile;
-  if (!effectivePromptFile || !effectivePromptFile.trim()) {
-    return singleErrorBlock("Either 'prompt' (inline) or 'prompt_file' (file path) is required.");
-  }
-  const effectiveOutputFile = resolvedOutputFile;
-  if (!effectiveOutputFile || !effectiveOutputFile.trim()) {
-    return singleErrorBlock("output_file is required. Specify a path where the response should be written.");
-  }
-  let resolvedPrompt;
-  const promptFile = effectivePromptFile;
-  const resolvedPath = (0, import_path9.resolve)(baseDir, promptFile);
-  const cwdReal = (0, import_fs9.realpathSync)(baseDir);
-  const relPath = (0, import_path9.relative)(cwdReal, resolvedPath);
-  if (!isExternalPromptAllowed() && (relPath === ".." || relPath.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relPath))) {
-    const errorToken = "E_PATH_OUTSIDE_WORKDIR_PROMPT";
-    return singleErrorBlock(`${errorToken}: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
-Requested: ${promptFile}
-Working directory: ${baseDirReal}
-Resolved working directory: ${baseDirReal}
-Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
-  }
-  let resolvedReal;
-  try {
-    resolvedReal = (0, import_fs9.realpathSync)(resolvedPath);
-  } catch (err) {
-    const errorToken = "E_PATH_RESOLUTION_FAILED";
-    return singleErrorBlock(`${errorToken}: Failed to resolve prompt_file '${promptFile}'.
-Error: ${err.message}
-Resolved working directory: ${baseDirReal}
-Path policy: ${pathPolicy}
-Suggested: ensure the prompt file exists and is accessible`);
-  }
-  const relReal = (0, import_path9.relative)(cwdReal, resolvedReal);
-  if (!isExternalPromptAllowed() && (relReal === ".." || relReal.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relReal))) {
-    const errorToken = "E_PATH_OUTSIDE_WORKDIR_PROMPT";
-    return singleErrorBlock(`${errorToken}: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
-Requested: ${promptFile}
-Resolved path: ${resolvedReal}
-Working directory: ${baseDirReal}
-Resolved working directory: ${baseDirReal}
-Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
-  }
-  try {
-    resolvedPrompt = (0, import_fs9.readFileSync)(resolvedReal, "utf-8");
-  } catch (err) {
-    return singleErrorBlock(`Failed to read prompt_file '${promptFile}': ${err.message}`);
-  }
-  if (!resolvedPrompt.trim()) {
-    return singleErrorBlock(`prompt_file '${promptFile}' is empty.`);
-  }
-  const userPrompt = `[HEADLESS SESSION] You are running non-interactively in a headless pipeline. Produce your FULL, comprehensive analysis directly in your response. Do NOT ask for clarification or confirmation - work thoroughly with all provided context. Do NOT write brief acknowledgments - your response IS the deliverable.
-
-${resolvedPrompt}`;
-  const detection = detectCodexCli();
-  if (!detection.available) {
-    return singleErrorBlock(`Codex CLI is not available: ${detection.error}
-
-${detection.installHint}`);
-  }
-  const resolvedSystemPrompt = resolveSystemPrompt(void 0, agent_role, "codex");
-  let fileContext;
-  if (context_files && context_files.length > 0) {
-    fileContext = context_files.map((f) => validateAndReadFile(f, baseDir)).join("\n\n");
-  }
-  const fullPrompt = buildPromptWithSystemContext(userPrompt, fileContext, resolvedSystemPrompt);
-  const promptResult = persistPrompt({
-    provider: "codex",
-    agentRole: agent_role,
-    model,
-    files: context_files,
-    prompt: resolvedPrompt,
-    fullPrompt,
-    workingDirectory: baseDir
-  });
-  const expectedResponsePath = promptResult ? getExpectedResponsePath("codex", promptResult.slug, promptResult.id, baseDir) : void 0;
-  if (args.background) {
-    if (!promptResult) {
-      return singleErrorBlock("Failed to persist prompt for background execution");
-    }
-    const statusFilePath = getStatusFilePath("codex", promptResult.slug, promptResult.id, baseDir);
-    const result = executeCodexBackground(fullPrompt, args.model, {
-      provider: "codex",
-      jobId: promptResult.id,
-      slug: promptResult.slug,
-      agentRole: agent_role,
-      model,
-      // This is the effective model for metadata
-      promptFile: promptResult.filePath,
-      responseFile: expectedResponsePath
-    }, baseDir, resolvedEffort);
-    if ("error" in result) {
-      return singleErrorBlock(`Failed to spawn background job: ${result.error}`);
-    }
-    return {
-      content: [{
-        type: "text",
-        text: [
-          `**Mode:** Background (non-blocking)`,
-          `**Job ID:** ${promptResult.id}`,
-          `**Agent Role:** ${agent_role}`,
-          `**Model:** ${model}`,
-          `**PID:** ${result.pid}`,
-          `**Prompt File:** ${promptResult.filePath}`,
-          `**Response File:** ${expectedResponsePath}`,
-          `**Status File:** ${statusFilePath}`,
-          ``,
-          `Job dispatched. Check response file existence or read status file for completion.`
-        ].join("\n")
-      }]
-    };
-  }
-  const paramLines = [
-    `**Agent Role:** ${agent_role}`,
-    resolvedEffort ? `**Reasoning Effort:** ${resolvedEffort}` : null,
-    context_files?.length ? `**Files:** ${context_files.join(", ")}` : null,
-    promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
-    expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null,
-    `**Resolved Working Directory:** ${baseDirReal}`,
-    `**Path Policy:** ${pathPolicy}`
-  ].filter(Boolean).join("\n");
-  try {
-    const { response, usedFallback, actualModel } = await executeCodexWithFallback(fullPrompt, args.model, baseDir, fallbackChain, void 0, resolvedEffort);
-    if (promptResult) {
-      persistResponse({
-        provider: "codex",
-        agentRole: agent_role,
-        model: actualModel,
-        promptId: promptResult.id,
-        slug: promptResult.slug,
-        response,
-        workingDirectory: baseDir,
-        usedFallback,
-        fallbackModel: usedFallback ? actualModel : void 0
-      });
-    }
-    if (effectiveOutputFile) {
-      const writeResult = safeWriteOutputFile(effectiveOutputFile, response, baseDirReal, "[codex-core]");
-      if (!writeResult.success) {
-        return singleErrorBlock(`${paramLines}
-
----
-
-${writeResult.errorMessage}
-
-resolved_working_directory: ${baseDirReal}
-path_policy: ${pathPolicy}`);
-      }
-    }
-    const responseLines = [paramLines];
-    const fallbackLine = usedFallback ? `Fallback: used model ${actualModel}` : void 0;
-    if (fallbackLine) {
-      responseLines.push(fallbackLine);
-    }
-    if (isInlineMode) {
-      responseLines.push(`**Request ID:** ${inlineRequestId}`);
-      const metadataText = responseLines.join("\n");
-      const wrappedResponse = wrapUntrustedCliResponse(response, { source: "inline-cli-response", tool: "ask_codex" });
-      return inlineSuccessBlocks(metadataText, wrappedResponse);
-    }
-    return {
-      content: [{
-        type: "text",
-        text: responseLines.join("\n")
-      }]
-    };
-  } catch (err) {
-    return singleErrorBlock(`${paramLines}
-
----
-
-Codex CLI error: ${err.message}`);
-  }
 }
 
 // src/mcp/job-management.ts
 init_define_AGENT_PROMPTS_CODEX();
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_fs11 = require("fs");
-var import_path11 = require("path");
+var import_fs10 = require("fs");
+var import_path10 = require("path");
 
 // src/mcp/gemini-core.ts
 init_define_AGENT_PROMPTS_CODEX();
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process4 = require("child_process");
-var import_fs10 = require("fs");
-var import_path10 = require("path");
-var spawnedPids2 = /* @__PURE__ */ new Set();
-function isSpawnedPid2(pid) {
-  return spawnedPids2.has(pid);
-}
 var GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview";
-var GEMINI_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5), 36e5);
-var MAX_FILE_SIZE2 = 5 * 1024 * 1024;
-var MAX_STDOUT_BYTES2 = 10 * 1024 * 1024;
+var GEMINI_TIMEOUT = Math.min(
+  Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5),
+  36e5
+);
+var geminiPidRegistry = createPidRegistry();
+function isSpawnedPid2(pid) {
+  return geminiPidRegistry.has(pid);
+}
 
 // src/mcp/job-management.ts
 var ALLOWED_SIGNALS = /* @__PURE__ */ new Set(["SIGTERM", "SIGINT"]);
@@ -17481,9 +17482,9 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     return void 0;
   }
   const promptsDir = getPromptsDir(workingDirectory);
-  if (!(0, import_fs11.existsSync)(promptsDir)) return void 0;
+  if (!(0, import_fs10.existsSync)(promptsDir)) return void 0;
   try {
-    const files = (0, import_fs11.readdirSync)(promptsDir);
+    const files = (0, import_fs10.readdirSync)(promptsDir);
     const escapedProvider = escapeRegex2(provider);
     const escapedJobId = escapeRegex2(jobId);
     const pattern = new RegExp(`^${escapedProvider}-status-(.+)-${escapedJobId}\\.json$`);
@@ -17494,7 +17495,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
         matches.push({
           file: f,
           slug: m[1],
-          statusPath: (0, import_path11.join)(promptsDir, f)
+          statusPath: (0, import_path10.join)(promptsDir, f)
         });
       }
     }
@@ -17505,7 +17506,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     let best;
     for (const match of matches) {
       try {
-        const content = (0, import_fs11.readFileSync)(match.statusPath, "utf-8");
+        const content = (0, import_fs10.readFileSync)(match.statusPath, "utf-8");
         const status = JSON.parse(content);
         const isActive = status.status === "spawned" || status.status === "running";
         const spawnedAt = new Date(status.spawnedAt).getTime();
@@ -17559,7 +17560,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
             status2.error ? `**Error:** ${status2.error}` : null
           ].filter(Boolean).join("\n"), true);
         }
-        await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+        await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
         pollDelay = Math.min(pollDelay * 1.5, 2e3);
         continue;
       }
@@ -17571,7 +17572,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
       if (notFoundCount >= 10) {
         return textResult(`No job found with ID: ${jobId}`, true);
       }
-      await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+      await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
       pollDelay = Math.min(pollDelay * 1.5, 2e3);
       continue;
     }
@@ -17603,7 +17604,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
         status.error ? `**Error:** ${status.error}` : null
       ].filter(Boolean).join("\n"), true);
     }
-    await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+    await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
     pollDelay = Math.min(pollDelay * 1.5, 2e3);
   }
   return textResult(
@@ -17762,7 +17763,7 @@ async function handleKillJob(provider, jobId, signal = "SIGTERM") {
       error: `Killed by user (signal: ${signal})`
     });
     for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise((resolve7) => setTimeout(resolve7, 50));
+      await new Promise((resolve6) => setTimeout(resolve6, 50));
       const recheckStatus = readJobStatus(provider, found.slug, jobId);
       if (!recheckStatus || recheckStatus.status === "failed") {
         break;
@@ -17883,18 +17884,18 @@ ${lines.join("\n\n")}`);
     }
   }
   const promptsDir = getPromptsDir();
-  if (!(0, import_fs11.existsSync)(promptsDir)) {
+  if (!(0, import_fs10.existsSync)(promptsDir)) {
     return textResult(`No ${provider} jobs found.`);
   }
   try {
-    const files = (0, import_fs11.readdirSync)(promptsDir);
+    const files = (0, import_fs10.readdirSync)(promptsDir);
     const statusFiles = files.filter(
       (f) => f.startsWith(`${provider}-status-`) && f.endsWith(".json")
     );
     const jobs = [];
     for (const file of statusFiles) {
       try {
-        const content = (0, import_fs11.readFileSync)((0, import_path11.join)(promptsDir, file), "utf-8");
+        const content = (0, import_fs10.readFileSync)((0, import_path10.join)(promptsDir, file), "utf-8");
         const job = JSON.parse(content);
         if (statusFilter === "completed" && job.status !== "completed") continue;
         if (statusFilter === "failed" && job.status !== "failed" && job.status !== "timeout") continue;

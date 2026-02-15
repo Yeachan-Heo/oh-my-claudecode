@@ -3202,7 +3202,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve6.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3229,7 +3229,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve6(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3810,55 +3810,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve7(baseURI, relativeURI, options) {
+    function resolve6(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse5(baseURI, schemelessOptions), parse5(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative6, options, skipNormalization) {
+    function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse5(serialize(base, options), options);
-        relative6 = parse5(serialize(relative6, options), options);
+        relative5 = parse5(serialize(relative5, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative6.scheme) {
-        target.scheme = relative6.scheme;
-        target.userinfo = relative6.userinfo;
-        target.host = relative6.host;
-        target.port = relative6.port;
-        target.path = removeDotSegments(relative6.path || "");
-        target.query = relative6.query;
+      if (!options.tolerant && relative5.scheme) {
+        target.scheme = relative5.scheme;
+        target.userinfo = relative5.userinfo;
+        target.host = relative5.host;
+        target.port = relative5.port;
+        target.path = removeDotSegments(relative5.path || "");
+        target.query = relative5.query;
       } else {
-        if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
-          target.userinfo = relative6.userinfo;
-          target.host = relative6.host;
-          target.port = relative6.port;
-          target.path = removeDotSegments(relative6.path || "");
-          target.query = relative6.query;
+        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
+          target.userinfo = relative5.userinfo;
+          target.host = relative5.host;
+          target.port = relative5.port;
+          target.path = removeDotSegments(relative5.path || "");
+          target.query = relative5.query;
         } else {
-          if (!relative6.path) {
+          if (!relative5.path) {
             target.path = base.path;
-            if (relative6.query !== void 0) {
-              target.query = relative6.query;
+            if (relative5.query !== void 0) {
+              target.query = relative5.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative6.path[0] === "/") {
-              target.path = removeDotSegments(relative6.path);
+            if (relative5.path[0] === "/") {
+              target.path = removeDotSegments(relative5.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative6.path;
+                target.path = "/" + relative5.path;
               } else if (!base.path) {
-                target.path = relative6.path;
+                target.path = relative5.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative6.query;
+            target.query = relative5.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3866,7 +3866,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative6.fragment;
+      target.fragment = relative5.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4037,7 +4037,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve7,
+      resolve: resolve6,
       resolveComponent,
       equal,
       serialize,
@@ -13168,7 +13168,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -13185,7 +13185,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve6, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -13263,7 +13263,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve7(parseResult.data);
+            resolve6(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -13524,12 +13524,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve6, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve7, interval);
+      const timeoutId = setTimeout(resolve6, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -14268,12 +14268,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve7) => {
+    return new Promise((resolve6) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve7();
+        resolve6();
       } else {
-        this._stdout.once("drain", resolve7);
+        this._stdout.once("drain", resolve6);
       }
     });
   }
@@ -14282,7 +14282,11 @@ var StdioServerTransport = class {
 // src/mcp/gemini-core.ts
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process3 = require("child_process");
+
+// src/mcp/provider-core.ts
+init_define_AGENT_PROMPTS();
+init_define_AGENT_ROLES();
+var import_child_process2 = require("child_process");
 var import_fs9 = require("fs");
 var import_path9 = require("path");
 
@@ -14481,40 +14485,10 @@ Suggested: remove the symlink and retry`;
   }
 }
 
-// src/mcp/cli-detection.ts
-init_define_AGENT_PROMPTS();
-init_define_AGENT_ROLES();
-var import_child_process = require("child_process");
-var geminiCache = null;
-function detectGeminiCli(useCache = true) {
-  if (useCache && geminiCache) return geminiCache;
-  const installHint = "Install Gemini CLI: npm install -g @google/gemini-cli (see https://github.com/google-gemini/gemini-cli)";
-  try {
-    const command = process.platform === "win32" ? "where gemini" : "which gemini";
-    const path = (0, import_child_process.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
-    let version2;
-    try {
-      version2 = (0, import_child_process.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
-    } catch {
-    }
-    const result = { available: true, path, version: version2, installHint };
-    geminiCache = result;
-    return result;
-  } catch {
-    const result = {
-      available: false,
-      error: "Gemini CLI not found on PATH",
-      installHint
-    };
-    geminiCache = result;
-    return result;
-  }
-}
-
 // src/lib/worktree-paths.ts
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process2 = require("child_process");
+var import_child_process = require("child_process");
 var import_fs2 = require("fs");
 var import_path2 = require("path");
 var worktreeCache = null;
@@ -14524,7 +14498,7 @@ function getWorktreeRoot(cwd) {
     return worktreeCache.root || null;
   }
   try {
-    const root = (0, import_child_process2.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"]
@@ -16500,286 +16474,51 @@ function loadConfig() {
   return config2;
 }
 
-// src/mcp/gemini-core.ts
-var spawnedPids = /* @__PURE__ */ new Set();
-function isSpawnedPid(pid) {
-  return spawnedPids.has(pid);
-}
+// src/mcp/provider-core.ts
 var MODEL_NAME_REGEX = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
-function validateModelName(model) {
-  if (!MODEL_NAME_REGEX.test(model)) {
-    throw new Error(`Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`);
-  }
-}
-var GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview";
-var GEMINI_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5), 36e5);
-var GEMINI_RECOMMENDED_ROLES = ["designer", "writer", "vision"];
 var MAX_FILE_SIZE = 5 * 1024 * 1024;
 var MAX_STDOUT_BYTES = 10 * 1024 * 1024;
-function isGeminiRetryableError(stdout, stderr = "") {
-  const combined = `${stdout}
-${stderr}`;
-  if (/model.?not.?found|model is not supported|model.+does not exist|not.+available/i.test(combined)) {
-    const match = combined.match(/.*(?:model.?not.?found|model is not supported|model.+does not exist|not.+available).*/i);
-    return { isError: true, message: match?.[0]?.trim() || "Model not available", type: "model" };
+var PLATFORM_SHELL_OPTS = process.platform === "win32" ? { shell: true } : {};
+var RATE_LIMIT_PATTERN = /429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i;
+function validateModelName(model) {
+  if (!MODEL_NAME_REGEX.test(model)) {
+    throw new Error(
+      `Invalid model name: "${model}". Model names must match pattern: alphanumeric start, followed by alphanumeric, dots, hyphens, or underscores (max 64 chars).`
+    );
   }
-  if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(combined)) {
-    const match = combined.match(/.*(?:429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted).*/i);
-    return { isError: true, message: match?.[0]?.trim() || "Rate limit error detected", type: "rate_limit" };
-  }
-  return { isError: false, message: "", type: "none" };
 }
-function executeGemini(prompt, model, cwd) {
-  return new Promise((resolve7, reject) => {
-    if (model) validateModelName(model);
-    let settled = false;
-    const args = ["-p=.", "--yolo"];
-    if (model) {
-      args.push("--model", model);
+function computeBackoffDelay(attempt, initialDelay, maxDelay) {
+  const exponential = initialDelay * Math.pow(2, attempt);
+  const capped = Math.min(exponential, maxDelay);
+  const jitter = capped * (0.5 + Math.random() * 0.5);
+  return Math.round(jitter);
+}
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+function createPidRegistry() {
+  const pids = /* @__PURE__ */ new Set();
+  return {
+    add: (pid) => {
+      pids.add(pid);
+    },
+    delete: (pid) => {
+      pids.delete(pid);
+    },
+    has: (pid) => pids.has(pid),
+    clear: () => {
+      pids.clear();
     }
-    const child = (0, import_child_process3.spawn)("gemini", args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      ...cwd ? { cwd } : {},
-      // shell: true needed on Windows for .cmd/.bat executables.
-      // Safe: args are array-based and model names are regex-validated.
-      ...process.platform === "win32" ? { shell: true } : {}
-    });
-    const timeoutHandle = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Gemini timed out after ${GEMINI_TIMEOUT}ms`));
-      }
-    }, GEMINI_TIMEOUT);
-    const collector = createStdoutCollector(MAX_STDOUT_BYTES);
-    let stderr = "";
-    child.stdout.on("data", (data) => {
-      collector.append(data.toString());
-    });
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-    child.on("close", (code) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        const stdout = collector.toString();
-        if (code === 0 || stdout.trim()) {
-          const retryable = isGeminiRetryableError(stdout, stderr);
-          if (retryable.isError) {
-            reject(new Error(`Gemini ${retryable.type === "rate_limit" ? "rate limit" : "model"} error: ${retryable.message}`));
-          } else {
-            resolve7(stdout.trim());
-          }
-        } else {
-          const retryableExit = isGeminiRetryableError(stderr, stdout);
-          if (retryableExit.isError) {
-            reject(new Error(`Gemini ${retryableExit.type === "rate_limit" ? "rate limit" : "model"} error: ${retryableExit.message}`));
-          } else {
-            reject(new Error(`Gemini exited with code ${code}: ${stderr || "No output"}`));
-          }
-        }
-      }
-    });
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill("SIGTERM");
-        reject(new Error(`Failed to spawn Gemini CLI: ${err.message}`));
-      }
-    });
-    child.stdin.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill("SIGTERM");
-        reject(new Error(`Stdin write error: ${err.message}`));
-      }
-    });
-    child.stdin.write(prompt);
-    child.stdin.end();
-  });
-}
-function executeGeminiBackground(fullPrompt, modelInput, jobMeta, workingDirectory) {
-  try {
-    const modelExplicit = modelInput !== void 0 && modelInput !== null && modelInput !== "";
-    const effectiveModel = modelInput || GEMINI_DEFAULT_MODEL;
-    const modelsToTry = modelExplicit ? [effectiveModel] : GEMINI_MODEL_FALLBACKS.includes(effectiveModel) ? GEMINI_MODEL_FALLBACKS.slice(GEMINI_MODEL_FALLBACKS.indexOf(effectiveModel)) : [effectiveModel, ...GEMINI_MODEL_FALLBACKS];
-    const trySpawnWithModel = (tryModel, remainingModels) => {
-      validateModelName(tryModel);
-      const args = ["-p=.", "--yolo", "--model", tryModel];
-      const child = (0, import_child_process3.spawn)("gemini", args, {
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe"],
-        ...workingDirectory ? { cwd: workingDirectory } : {},
-        ...process.platform === "win32" ? { shell: true } : {}
-      });
-      if (!child.pid) {
-        return { error: "Failed to get process ID" };
-      }
-      const pid = child.pid;
-      spawnedPids.add(pid);
-      child.unref();
-      const initialStatus = {
-        provider: "gemini",
-        jobId: jobMeta.jobId,
-        slug: jobMeta.slug,
-        status: "spawned",
-        pid,
-        promptFile: jobMeta.promptFile,
-        responseFile: jobMeta.responseFile,
-        model: tryModel,
-        agentRole: jobMeta.agentRole,
-        spawnedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      writeJobStatus(initialStatus, workingDirectory);
-      const collector = createStdoutCollector(MAX_STDOUT_BYTES);
-      let stderr = "";
-      let settled = false;
-      const timeoutHandle = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          spawnedPids.delete(pid);
-          try {
-            if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
-            else child.kill("SIGTERM");
-          } catch {
-          }
-          writeJobStatus({
-            ...initialStatus,
-            status: "timeout",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            error: `Gemini timed out after ${GEMINI_TIMEOUT}ms`
-          }, workingDirectory);
-        }
-      }, GEMINI_TIMEOUT);
-      child.stdout?.on("data", (data) => {
-        collector.append(data.toString());
-      });
-      child.stderr?.on("data", (data) => {
-        stderr += data.toString();
-      });
-      child.stdin?.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        writeJobStatus({
-          ...initialStatus,
-          status: "failed",
-          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          error: `Stdin write error: ${err.message}`
-        }, workingDirectory);
-      });
-      child.stdin?.write(fullPrompt);
-      child.stdin?.end();
-      writeJobStatus({ ...initialStatus, status: "running" }, workingDirectory);
-      child.on("close", (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        spawnedPids.delete(pid);
-        const stdout = collector.toString();
-        const currentStatus = readJobStatus("gemini", jobMeta.slug, jobMeta.jobId, workingDirectory);
-        if (currentStatus?.killedByUser) {
-          return;
-        }
-        if (code === 0 || stdout.trim()) {
-          const retryableErr = isGeminiRetryableError(stdout, stderr);
-          if (retryableErr.isError && remainingModels.length > 0) {
-            const nextModel = remainingModels[0];
-            const newRemainingModels = remainingModels.slice(1);
-            const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
-            if ("error" in retryResult) {
-              writeJobStatus({
-                ...initialStatus,
-                status: "failed",
-                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-              }, workingDirectory);
-            }
-            return;
-          }
-          if (retryableErr.isError) {
-            writeJobStatus({
-              ...initialStatus,
-              status: "failed",
-              completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-              error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`
-            }, workingDirectory);
-            return;
-          }
-          const response = stdout.trim();
-          const usedFallback = tryModel !== effectiveModel;
-          persistResponse({
-            provider: "gemini",
-            agentRole: jobMeta.agentRole,
-            model: tryModel,
-            promptId: jobMeta.jobId,
-            slug: jobMeta.slug,
-            response,
-            workingDirectory,
-            usedFallback,
-            fallbackModel: usedFallback ? tryModel : void 0
-          });
-          writeJobStatus({
-            ...initialStatus,
-            model: tryModel,
-            status: "completed",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            usedFallback: usedFallback || void 0,
-            fallbackModel: usedFallback ? tryModel : void 0
-          }, workingDirectory);
-        } else {
-          const retryableExit = isGeminiRetryableError(stderr, stdout);
-          if (retryableExit.isError && remainingModels.length > 0) {
-            const nextModel = remainingModels[0];
-            const newRemainingModels = remainingModels.slice(1);
-            const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
-            if ("error" in retryResult) {
-              writeJobStatus({
-                ...initialStatus,
-                status: "failed",
-                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
-              }, workingDirectory);
-            }
-            return;
-          }
-          writeJobStatus({
-            ...initialStatus,
-            status: "failed",
-            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            error: `Gemini exited with code ${code}: ${stderr || "No output"}`
-          }, workingDirectory);
-        }
-      });
-      child.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutHandle);
-        writeJobStatus({
-          ...initialStatus,
-          status: "failed",
-          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          error: `Failed to spawn Gemini CLI: ${err.message}`
-        }, workingDirectory);
-      });
-      return { pid };
-    };
-    return trySpawnWithModel(modelsToTry[0], modelsToTry.slice(1));
-  } catch (err) {
-    return { error: `Failed to start background execution: ${err.message}` };
-  }
+  };
 }
 function validateAndReadFile(filePath, baseDir) {
   if (typeof filePath !== "string") {
     return `--- File: ${filePath} --- (Invalid path type)`;
   }
   try {
-    const resolvedAbs = (0, import_path9.resolve)(baseDir || process.cwd(), filePath);
-    const cwd = baseDir || process.cwd();
-    const cwdReal = (0, import_fs9.realpathSync)(cwd);
+    const workingDir = baseDir || process.cwd();
+    const resolvedAbs = (0, import_path9.resolve)(workingDir, filePath);
+    const cwdReal = (0, import_fs9.realpathSync)(workingDir);
     const relAbs = (0, import_path9.relative)(cwdReal, resolvedAbs);
     if (relAbs === ".." || relAbs.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relAbs)) {
       return `[BLOCKED] File '${filePath}' is outside the working directory. Only files within the project are allowed.`;
@@ -16801,19 +16540,310 @@ function validateAndReadFile(filePath, baseDir) {
     return `--- File: ${filePath} --- (Error reading file)`;
   }
 }
-async function handleAskGemini(args) {
+function executeCli(config2, prompt, model, cwd, extra) {
+  return new Promise((resolve6, reject) => {
+    validateModelName(model);
+    let settled = false;
+    const args = config2.buildCliArgs(model, extra);
+    const child = (0, import_child_process2.spawn)(config2.cliCommand, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      ...cwd ? { cwd } : {},
+      ...PLATFORM_SHELL_OPTS
+    });
+    const timeoutHandle = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill("SIGTERM");
+        reject(new Error(`${config2.name} timed out after ${config2.timeout}ms`));
+      }
+    }, config2.timeout);
+    const collector = createStdoutCollector(MAX_STDOUT_BYTES);
+    let stderr = "";
+    child.stdout.on("data", (data) => {
+      collector.append(data.toString());
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    child.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        const stdout = collector.toString();
+        if (code === 0 || stdout.trim()) {
+          const retryable = config2.isRetryableError(stdout, stderr);
+          if (retryable.isError) {
+            reject(new Error(`${config2.name} ${retryable.type === "rate_limit" ? "rate limit" : "model"} error: ${retryable.message}`));
+          } else {
+            resolve6(config2.parseOutput(stdout));
+          }
+        } else {
+          const retryableExit = config2.isRetryableError(stderr, stdout);
+          if (retryableExit.isError) {
+            reject(new Error(`${config2.name} ${retryableExit.type === "rate_limit" ? "rate limit" : "model"} error: ${retryableExit.message}`));
+          } else {
+            reject(new Error(`${config2.name} exited with code ${code}: ${stderr || "No output"}`));
+          }
+        }
+      }
+    });
+    child.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        child.kill("SIGTERM");
+        reject(new Error(`Failed to spawn ${config2.name} CLI: ${err.message}`));
+      }
+    });
+    child.stdin.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutHandle);
+        child.kill("SIGTERM");
+        reject(new Error(`Stdin write error: ${err.message}`));
+      }
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+async function executeCliWithFallback(config2, prompt, model, cwd, fallbackChain, extra, overrides) {
+  const exec = overrides?.executor ?? executeCli;
+  const sleepFn = overrides?.sleepFn ?? sleep;
+  const modelExplicit = model !== void 0 && model !== null && model !== "";
+  const effectiveModel = model || config2.defaultModel;
+  const rlConfig = config2.rateLimitConfig;
+  if (modelExplicit && rlConfig) {
+    let lastError2 = null;
+    for (let attempt = 0; attempt <= rlConfig.retryCount; attempt++) {
+      try {
+        const response = await exec(config2, prompt, effectiveModel, cwd, extra);
+        return { response, usedFallback: false, actualModel: effectiveModel };
+      } catch (err) {
+        lastError2 = err;
+        if (!RATE_LIMIT_PATTERN.test(lastError2.message)) throw lastError2;
+        if (attempt < rlConfig.retryCount) {
+          await sleepFn(computeBackoffDelay(attempt, rlConfig.initialDelay, rlConfig.maxDelay));
+        }
+      }
+    }
+    throw lastError2 || new Error(`${config2.name} rate limit: all retries exhausted`);
+  }
+  const chain = fallbackChain || config2.modelFallbacks;
+  const modelsToTry = chain.includes(effectiveModel) ? chain.slice(chain.indexOf(effectiveModel)) : [effectiveModel, ...chain];
+  let lastError = null;
+  let rateLimitAttempt = 0;
+  for (const tryModel of modelsToTry) {
+    try {
+      const response = await exec(config2, prompt, tryModel, cwd, extra);
+      return { response, usedFallback: tryModel !== effectiveModel, actualModel: tryModel };
+    } catch (err) {
+      lastError = err;
+      if (!/model error|model_not_found|model is not supported|429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
+        throw lastError;
+      }
+      if (rlConfig && RATE_LIMIT_PATTERN.test(lastError.message)) {
+        await sleepFn(computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay));
+        rateLimitAttempt++;
+      }
+    }
+  }
+  throw lastError || new Error(`All ${config2.name} models in fallback chain failed`);
+}
+function executeCliBackground(config2, pidRegistry, fullPrompt, modelInput, jobMeta, workingDirectory, extra) {
+  try {
+    const modelExplicit = modelInput !== void 0 && modelInput !== null && modelInput !== "";
+    const effectiveModel = modelInput || config2.defaultModel;
+    const rlConfig = config2.rateLimitConfig;
+    const modelsToTry = modelExplicit ? [effectiveModel] : config2.modelFallbacks.includes(effectiveModel) ? config2.modelFallbacks.slice(config2.modelFallbacks.indexOf(effectiveModel)) : [effectiveModel, ...config2.modelFallbacks];
+    const trySpawnWithModel = (tryModel, remainingModels, rateLimitAttempt = 0) => {
+      validateModelName(tryModel);
+      const args = config2.buildCliArgs(tryModel, extra);
+      const child = (0, import_child_process2.spawn)(config2.cliCommand, args, {
+        detached: process.platform !== "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+        ...workingDirectory ? { cwd: workingDirectory } : {},
+        ...PLATFORM_SHELL_OPTS
+      });
+      if (!child.pid) return { error: "Failed to get process ID" };
+      const pid = child.pid;
+      pidRegistry.add(pid);
+      child.unref();
+      const initialStatus = {
+        provider: config2.name,
+        jobId: jobMeta.jobId,
+        slug: jobMeta.slug,
+        status: "spawned",
+        pid,
+        promptFile: jobMeta.promptFile,
+        responseFile: jobMeta.responseFile,
+        model: tryModel,
+        agentRole: jobMeta.agentRole,
+        spawnedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      writeJobStatus(initialStatus, workingDirectory);
+      const collector = createStdoutCollector(MAX_STDOUT_BYTES);
+      let stderr = "";
+      let settled = false;
+      const timeoutHandle = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          pidRegistry.delete(pid);
+          try {
+            if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
+            else child.kill("SIGTERM");
+          } catch {
+          }
+          writeJobStatus({
+            ...initialStatus,
+            status: "timeout",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            error: `${config2.name} timed out after ${config2.timeout}ms`
+          }, workingDirectory);
+        }
+      }, config2.timeout);
+      child.stdout?.on("data", (data) => {
+        collector.append(data.toString());
+      });
+      child.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.stdin?.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `Stdin write error: ${err.message}`
+        }, workingDirectory);
+      });
+      child.stdin?.write(fullPrompt);
+      child.stdin?.end();
+      writeJobStatus({ ...initialStatus, status: "running" }, workingDirectory);
+      const handleRetryable = (retryableErr) => {
+        const isRateLimit = retryableErr.type === "rate_limit";
+        if (isRateLimit && modelExplicit && rlConfig && rateLimitAttempt < rlConfig.retryCount) {
+          const delay = computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay);
+          setTimeout(() => {
+            const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
+            if ("error" in retryResult) {
+              writeJobStatus({
+                ...initialStatus,
+                status: "failed",
+                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+                error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`
+              }, workingDirectory);
+            }
+          }, delay);
+          return;
+        }
+        if (remainingModels.length > 0) {
+          const nextModel = remainingModels[0];
+          const newRemaining = remainingModels.slice(1);
+          const nextRlAttempt = isRateLimit ? rateLimitAttempt + 1 : rateLimitAttempt;
+          const doRetry = () => {
+            const retryResult = trySpawnWithModel(nextModel, newRemaining, nextRlAttempt);
+            if ("error" in retryResult) {
+              writeJobStatus({
+                ...initialStatus,
+                status: "failed",
+                completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`
+              }, workingDirectory);
+            }
+          };
+          if (isRateLimit && rlConfig) {
+            setTimeout(doRetry, computeBackoffDelay(rateLimitAttempt, rlConfig.initialDelay, rlConfig.maxDelay));
+          } else {
+            doRetry();
+          }
+          return;
+        }
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `All models in fallback chain failed. Last error (${retryableErr.type}): ${retryableErr.message}`
+        }, workingDirectory);
+      };
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        pidRegistry.delete(pid);
+        const stdout = collector.toString();
+        const currentStatus = readJobStatus(config2.name, jobMeta.slug, jobMeta.jobId, workingDirectory);
+        if (currentStatus?.killedByUser) return;
+        const hasOutput = code === 0 || !!stdout.trim();
+        const retryable = hasOutput ? config2.isRetryableError(stdout, stderr) : config2.isRetryableError(stderr, stdout);
+        if (retryable.isError) {
+          handleRetryable(retryable);
+          return;
+        }
+        if (hasOutput) {
+          const response = config2.parseOutput(stdout);
+          const usedFallback = tryModel !== effectiveModel;
+          persistResponse({
+            provider: config2.name,
+            agentRole: jobMeta.agentRole,
+            model: tryModel,
+            promptId: jobMeta.jobId,
+            slug: jobMeta.slug,
+            response,
+            workingDirectory,
+            usedFallback,
+            fallbackModel: usedFallback ? tryModel : void 0
+          });
+          writeJobStatus({
+            ...initialStatus,
+            model: tryModel,
+            status: "completed",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            usedFallback: usedFallback || void 0,
+            fallbackModel: usedFallback ? tryModel : void 0
+          }, workingDirectory);
+        } else {
+          writeJobStatus({
+            ...initialStatus,
+            status: "failed",
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            error: `${config2.name} exited with code ${code}: ${stderr || "No output"}`
+          }, workingDirectory);
+        }
+      });
+      child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        writeJobStatus({
+          ...initialStatus,
+          status: "failed",
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          error: `Failed to spawn ${config2.name} CLI: ${err.message}`
+        }, workingDirectory);
+      });
+      return { pid };
+    };
+    return trySpawnWithModel(modelsToTry[0], modelsToTry.slice(1));
+  } catch (err) {
+    return { error: `Failed to start background execution: ${err.message}` };
+  }
+}
+async function handleAskProvider(config2, pidRegistry, args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return singleErrorBlock("Invalid request: args must be an object.");
   }
-  const { agent_role, files } = args;
-  const config2 = loadConfig();
-  const resolved = resolveExternalModel(config2.externalModels, {
+  const { agent_role, contextFiles, extra } = args;
+  const appConfig = loadConfig();
+  const resolved = resolveExternalModel(appConfig.externalModels, {
     agentRole: agent_role,
-    explicitProvider: "gemini",
+    explicitProvider: config2.name,
     explicitModel: args.model
-    // user explicitly passed model
   });
-  const resolvedModel = resolved.model || GEMINI_DEFAULT_MODEL;
+  const fallbackChain = buildFallbackChain(config2.name, resolved.model, appConfig.externalModels);
+  const model = resolved.model || config2.defaultModel;
   let baseDir = args.working_directory || process.cwd();
   let baseDirReal;
   const pathPolicy = process.env.OMC_ALLOW_EXTERNAL_WORKDIR === "1" ? "permissive" : "strict";
@@ -16821,13 +16851,15 @@ async function handleAskGemini(args) {
     baseDirReal = (0, import_fs9.realpathSync)(baseDir);
     baseDir = baseDirReal;
   } catch (err) {
-    return singleErrorBlock(`E_WORKDIR_INVALID: working_directory '${args.working_directory}' does not exist or is not accessible.
+    return singleErrorBlock(
+      `E_WORKDIR_INVALID: working_directory '${args.working_directory}' does not exist or is not accessible.
 Error: ${err.message}
 Resolved working directory: ${baseDir}
 Path policy: ${pathPolicy}
-Suggested: ensure the working directory exists and is accessible`);
+Suggested: ensure the working directory exists and is accessible`
+    );
   }
-  if (process.env.OMC_ALLOW_EXTERNAL_WORKDIR !== "1") {
+  if (pathPolicy === "strict") {
     const worktreeRoot = getWorktreeRoot(baseDirReal);
     if (worktreeRoot) {
       let worktreeReal;
@@ -16839,12 +16871,14 @@ Suggested: ensure the working directory exists and is accessible`);
       if (worktreeReal) {
         const relToWorktree = (0, import_path9.relative)(worktreeReal, baseDirReal);
         if (relToWorktree.startsWith("..") || (0, import_path9.isAbsolute)(relToWorktree)) {
-          return singleErrorBlock(`E_WORKDIR_INVALID: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
+          return singleErrorBlock(
+            `E_WORKDIR_INVALID: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
 Requested: ${args.working_directory}
 Resolved working directory: ${baseDirReal}
 Worktree root: ${worktreeRoot}
 Path policy: ${pathPolicy}
-Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass`);
+Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass`
+          );
         }
       }
     }
@@ -16853,10 +16887,14 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
     return singleErrorBlock("agent_role is required and must be a non-empty string.");
   }
   if (!isValidAgentRoleName(agent_role)) {
-    return singleErrorBlock(`Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for Gemini: ${GEMINI_RECOMMENDED_ROLES.join(", ")}`);
+    return singleErrorBlock(
+      `Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for ${config2.name}: ${config2.recommendedRoles.join(", ")}`
+    );
   }
   if (!VALID_AGENT_ROLES.includes(agent_role)) {
-    return singleErrorBlock(`Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(", ")}. Recommended for Gemini: ${GEMINI_RECOMMENDED_ROLES.join(", ")}`);
+    return singleErrorBlock(
+      `Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(", ")}. Recommended for ${config2.name}: ${config2.recommendedRoles.join(", ")}`
+    );
   }
   const inlinePrompt = typeof args.prompt === "string" ? args.prompt : void 0;
   const hasPromptFileField = Object.prototype.hasOwnProperty.call(args, "prompt_file") && args.prompt_file !== void 0;
@@ -16885,12 +16923,12 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
       const promptsDir = getPromptsDir(baseDir);
       (0, import_fs9.mkdirSync)(promptsDir, { recursive: true });
       const slug = slugify(inlinePrompt);
-      const inlinePromptPath = (0, import_path9.join)(promptsDir, `gemini-inline-${slug}-${inlineRequestId}.md`);
-      (0, import_fs9.writeFileSync)(inlinePromptPath, inlinePrompt, { encoding: "utf-8", mode: 384 });
-      const resolvedPromptFileLocal = inlinePromptPath;
-      const resolvedOutputFileLocal = !resolvedOutputFile || !resolvedOutputFile.trim() ? (0, import_path9.join)(promptsDir, `gemini-inline-response-${slug}-${inlineRequestId}.md`) : resolvedOutputFile;
-      resolvedPromptFile = resolvedPromptFileLocal;
-      resolvedOutputFile = resolvedOutputFileLocal;
+      const inlinePromptFile = (0, import_path9.join)(promptsDir, `${config2.name}-inline-${slug}-${inlineRequestId}.md`);
+      (0, import_fs9.writeFileSync)(inlinePromptFile, inlinePrompt, { encoding: "utf-8", mode: 384 });
+      resolvedPromptFile = inlinePromptFile;
+      if (!resolvedOutputFile || !resolvedOutputFile.trim()) {
+        resolvedOutputFile = (0, import_path9.join)(promptsDir, `${config2.name}-inline-response-${slug}-${inlineRequestId}.md`);
+      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown error";
       return singleErrorBlock(`Failed to persist inline prompt (${reason}). Check working directory permissions and disk space.`);
@@ -16910,28 +16948,38 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
   const cwdReal = (0, import_fs9.realpathSync)(baseDir);
   const relPath = (0, import_path9.relative)(cwdReal, resolvedPath);
   if (!isExternalPromptAllowed() && (relPath === ".." || relPath.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relPath))) {
-    return singleErrorBlock(`E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
+    return singleErrorBlock(
+      `E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
 Requested: ${promptFile}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`
+    );
   }
   let resolvedReal;
   try {
     resolvedReal = (0, import_fs9.realpathSync)(resolvedPath);
   } catch (err) {
-    return singleErrorBlock(`Failed to resolve prompt_file '${promptFile}': ${err.message}`);
+    return singleErrorBlock(
+      `E_PATH_RESOLUTION_FAILED: Failed to resolve prompt_file '${promptFile}'.
+Error: ${err.message}
+Resolved working directory: ${baseDirReal}
+Path policy: ${pathPolicy}
+Suggested: ensure the prompt file exists and is accessible`
+    );
   }
   const relReal = (0, import_path9.relative)(cwdReal, resolvedReal);
   if (!isExternalPromptAllowed() && (relReal === ".." || relReal.startsWith(".." + import_path9.sep) || (0, import_path9.isAbsolute)(relReal))) {
-    return singleErrorBlock(`E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
+    return singleErrorBlock(
+      `E_PATH_OUTSIDE_WORKDIR_PROMPT: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
 Requested: ${promptFile}
 Resolved path: ${resolvedReal}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`
+    );
   }
   try {
     resolvedPrompt = (0, import_fs9.readFileSync)(resolvedReal, "utf-8");
@@ -16944,101 +16992,95 @@ Suggested: place the prompt file within the working directory or set working_dir
   const userPrompt = `[HEADLESS SESSION] You are running non-interactively in a headless pipeline. Produce your FULL, comprehensive analysis directly in your response. Do NOT ask for clarification or confirmation - work thoroughly with all provided context. Do NOT write brief acknowledgments - your response IS the deliverable.
 
 ${resolvedPrompt}`;
-  const detection = detectGeminiCli();
+  const detection = config2.detectCli();
   if (!detection.available) {
-    return singleErrorBlock(`Gemini CLI is not available: ${detection.error}
+    return singleErrorBlock(`${config2.name} CLI is not available: ${detection.error}
 
 ${detection.installHint}`);
   }
-  const resolvedSystemPrompt = resolveSystemPrompt(void 0, agent_role, "gemini");
+  const resolvedSystemPrompt = resolveSystemPrompt(void 0, agent_role, config2.name);
   let fileContext;
-  if (files && files.length > 0) {
-    fileContext = files.map((f) => validateAndReadFile(f, baseDir)).join("\n\n");
+  if (contextFiles && contextFiles.length > 0) {
+    fileContext = contextFiles.map((f) => validateAndReadFile(f, baseDir)).join("\n\n");
   }
   const fullPrompt = buildPromptWithSystemContext(userPrompt, fileContext, resolvedSystemPrompt);
   const promptResult = persistPrompt({
-    provider: "gemini",
+    provider: config2.name,
     agentRole: agent_role,
-    model: resolvedModel,
-    files,
+    model,
+    files: contextFiles,
     prompt: resolvedPrompt,
     fullPrompt,
     workingDirectory: baseDir
   });
-  const expectedResponsePath = promptResult ? getExpectedResponsePath("gemini", promptResult.slug, promptResult.id, baseDir) : void 0;
+  const expectedResponsePath = promptResult ? getExpectedResponsePath(config2.name, promptResult.slug, promptResult.id, baseDir) : void 0;
   if (args.background) {
     if (!promptResult) {
       return singleErrorBlock("Failed to persist prompt for background execution");
     }
-    const statusFilePath = getStatusFilePath("gemini", promptResult.slug, promptResult.id, baseDir);
-    const fallbackChainBg = buildFallbackChain("gemini", resolvedModel, config2.externalModels);
-    const result = executeGeminiBackground(fullPrompt, args.model, {
-      provider: "gemini",
+    const statusFilePath = getStatusFilePath(config2.name, promptResult.slug, promptResult.id, baseDir);
+    const result = executeCliBackground(config2, pidRegistry, fullPrompt, args.model, {
+      provider: config2.name,
       jobId: promptResult.id,
       slug: promptResult.slug,
       agentRole: agent_role,
-      model: resolvedModel,
+      model,
       promptFile: promptResult.filePath,
       responseFile: expectedResponsePath
-    }, baseDir);
+    }, baseDir, extra);
     if ("error" in result) {
       return singleErrorBlock(`Failed to spawn background job: ${result.error}`);
     }
-    return {
-      content: [{
-        type: "text",
-        text: [
-          `**Mode:** Background (non-blocking)`,
-          `**Job ID:** ${promptResult.id}`,
-          `**Agent Role:** ${agent_role}`,
-          `**Model (attempting):** ${fallbackChainBg[0]}`,
-          `**Fallback chain:** ${fallbackChainBg.join(" -> ")}`,
-          `**PID:** ${result.pid}`,
-          `**Prompt File:** ${promptResult.filePath}`,
-          `**Response File:** ${expectedResponsePath}`,
-          `**Status File:** ${statusFilePath}`,
-          ``,
-          `Job dispatched. Will automatically try fallback models on 429/rate-limit or model errors.`
-        ].join("\n")
-      }]
-    };
+    const bgLines = [
+      `**Mode:** Background (non-blocking)`,
+      `**Job ID:** ${promptResult.id}`,
+      `**Agent Role:** ${agent_role}`,
+      `**Model:** ${model}`,
+      fallbackChain.length > 1 ? `**Fallback chain:** ${fallbackChain.join(" -> ")}` : null,
+      `**PID:** ${result.pid}`,
+      `**Prompt File:** ${promptResult.filePath}`,
+      `**Response File:** ${expectedResponsePath}`,
+      `**Status File:** ${statusFilePath}`,
+      ``,
+      `Job dispatched. Check response file or status file for completion.`
+    ].filter(Boolean);
+    return { content: [{ type: "text", text: bgLines.join("\n") }] };
   }
   const paramLines = [
     `**Agent Role:** ${agent_role}`,
-    files?.length ? `**Files:** ${files.join(", ")}` : null,
+    ...args.extraParamLines || [],
+    contextFiles?.length ? `**Files:** ${contextFiles.join(", ")}` : null,
     promptResult ? `**Prompt File:** ${promptResult.filePath}` : null,
     expectedResponsePath ? `**Response File:** ${expectedResponsePath}` : null,
     `**Resolved Working Directory:** ${baseDirReal}`,
     `**Path Policy:** ${pathPolicy}`
   ].filter(Boolean).join("\n");
-  const fallbackChain = buildFallbackChain("gemini", resolvedModel, config2.externalModels);
-  let resolvedOutputPath;
-  if (effectiveOutputFile) {
-    resolvedOutputPath = (0, import_path9.resolve)(baseDirReal, effectiveOutputFile);
-  }
-  const errors = [];
-  for (const tryModel of fallbackChain) {
-    try {
-      const response = await executeGemini(fullPrompt, tryModel, baseDir);
-      const usedFallback = tryModel !== resolvedModel;
-      const fallbackLine = usedFallback ? `Fallback: used model ${tryModel}` : void 0;
-      if (promptResult) {
-        persistResponse({
-          provider: "gemini",
-          agentRole: agent_role,
-          model: tryModel,
-          promptId: promptResult.id,
-          slug: promptResult.slug,
-          response,
-          usedFallback,
-          fallbackModel: usedFallback ? tryModel : void 0,
-          workingDirectory: baseDir
-        });
-      }
-      if (effectiveOutputFile && resolvedOutputPath) {
-        const writeResult = safeWriteOutputFile(effectiveOutputFile, response, baseDirReal, "[gemini-core]");
-        if (!writeResult.success) {
-          return singleErrorBlock(`${paramLines}
+  try {
+    const { response, usedFallback, actualModel } = await executeCliWithFallback(
+      config2,
+      fullPrompt,
+      args.model,
+      baseDir,
+      fallbackChain,
+      extra
+    );
+    if (promptResult) {
+      persistResponse({
+        provider: config2.name,
+        agentRole: agent_role,
+        model: actualModel,
+        promptId: promptResult.id,
+        slug: promptResult.slug,
+        response,
+        workingDirectory: baseDir,
+        usedFallback,
+        fallbackModel: usedFallback ? actualModel : void 0
+      });
+    }
+    if (effectiveOutputFile) {
+      const writeResult = safeWriteOutputFile(effectiveOutputFile, response, baseDirReal, `[${config2.name}-core]`);
+      if (!writeResult.success) {
+        return singleErrorBlock(`${paramLines}
 
 ---
 
@@ -17046,67 +17088,135 @@ ${writeResult.errorMessage}
 
 resolved_working_directory: ${baseDirReal}
 path_policy: ${pathPolicy}`);
-        }
-      }
-      const responseLines = [paramLines];
-      if (fallbackLine) {
-        responseLines.push(fallbackLine);
-      }
-      if (isInlineMode) {
-        responseLines.push(`**Request ID:** ${inlineRequestId}`);
-        const metadataText = responseLines.join("\n");
-        const wrappedResponse = wrapUntrustedCliResponse(response, { source: "inline-cli-response", tool: "ask_gemini" });
-        return inlineSuccessBlocks(metadataText, wrappedResponse);
-      }
-      return {
-        content: [{
-          type: "text",
-          text: responseLines.join("\n")
-        }]
-      };
-    } catch (err) {
-      const errMsg = err.message;
-      errors.push(`${tryModel}: ${errMsg}`);
-      if (!/model error|model.?not.?found|model is not supported|429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(errMsg)) {
-        return singleErrorBlock(`${paramLines}
-
----
-
-Gemini CLI error: ${errMsg}`);
       }
     }
-  }
-  return singleErrorBlock(`${paramLines}
+    const responseLines = [paramLines];
+    if (usedFallback) responseLines.push(`Fallback: used model ${actualModel}`);
+    if (isInlineMode) {
+      responseLines.push(`**Request ID:** ${inlineRequestId}`);
+      const metadataText = responseLines.join("\n");
+      const wrappedResponse = wrapUntrustedCliResponse(response, {
+        source: "inline-cli-response",
+        tool: `ask_${config2.name}`
+      });
+      return inlineSuccessBlocks(metadataText, wrappedResponse);
+    }
+    return { content: [{ type: "text", text: responseLines.join("\n") }] };
+  } catch (err) {
+    return singleErrorBlock(`${paramLines}
 
 ---
 
-Gemini CLI error: all models in fallback chain failed.
-${errors.join("\n")}`);
+${config2.name} CLI error: ${err.message}`);
+  }
+}
+
+// src/mcp/cli-detection.ts
+init_define_AGENT_PROMPTS();
+init_define_AGENT_ROLES();
+var import_child_process3 = require("child_process");
+var geminiCache = null;
+function detectGeminiCli(useCache = true) {
+  if (useCache && geminiCache) return geminiCache;
+  const installHint = "Install Gemini CLI: npm install -g @google/gemini-cli (see https://github.com/google-gemini/gemini-cli)";
+  try {
+    const command = process.platform === "win32" ? "where gemini" : "which gemini";
+    const path = (0, import_child_process3.execSync)(command, { encoding: "utf-8", timeout: 5e3 }).trim();
+    let version2;
+    try {
+      version2 = (0, import_child_process3.execSync)("gemini --version", { encoding: "utf-8", timeout: 5e3 }).trim();
+    } catch {
+    }
+    const result = { available: true, path, version: version2, installHint };
+    geminiCache = result;
+    return result;
+  } catch {
+    const result = {
+      available: false,
+      error: "Gemini CLI not found on PATH",
+      installHint
+    };
+    geminiCache = result;
+    return result;
+  }
+}
+
+// src/mcp/gemini-core.ts
+var GEMINI_DEFAULT_MODEL = process.env.OMC_GEMINI_DEFAULT_MODEL || "gemini-3-pro-preview";
+var GEMINI_TIMEOUT = Math.min(
+  Math.max(5e3, parseInt(process.env.OMC_GEMINI_TIMEOUT || "3600000", 10) || 36e5),
+  36e5
+);
+var GEMINI_RECOMMENDED_ROLES = ["designer", "writer", "vision"];
+var geminiPidRegistry = createPidRegistry();
+function isSpawnedPid(pid) {
+  return geminiPidRegistry.has(pid);
+}
+function isGeminiRetryableError(stdout, stderr = "") {
+  const combined = `${stdout}
+${stderr}`;
+  if (/model.?not.?found|model is not supported|model.+does not exist|not.+available/i.test(combined)) {
+    const match = combined.match(/.*(?:model.?not.?found|model is not supported|model.+does not exist|not.+available).*/i);
+    return { isError: true, message: match?.[0]?.trim() || "Model not available", type: "model" };
+  }
+  if (RATE_LIMIT_PATTERN.test(combined)) {
+    const match = combined.match(/.*(?:429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted).*/i);
+    return { isError: true, message: match?.[0]?.trim() || "Rate limit error detected", type: "rate_limit" };
+  }
+  return { isError: false, message: "", type: "none" };
+}
+var GEMINI_CONFIG = {
+  name: "gemini",
+  cliCommand: "gemini",
+  defaultModel: GEMINI_DEFAULT_MODEL,
+  timeout: GEMINI_TIMEOUT,
+  modelFallbacks: GEMINI_MODEL_FALLBACKS,
+  recommendedRoles: GEMINI_RECOMMENDED_ROLES,
+  fileContextParam: "files",
+  buildCliArgs(model) {
+    return ["-p=.", "--yolo", "--model", model];
+  },
+  parseOutput(stdout) {
+    return stdout.trim();
+  },
+  detectCli: () => detectGeminiCli(),
+  isRetryableError: isGeminiRetryableError
+  // No rateLimitConfig: Gemini retries are immediate (no backoff)
+};
+async function handleAskGemini(args) {
+  return handleAskProvider(GEMINI_CONFIG, geminiPidRegistry, {
+    prompt: args.prompt,
+    prompt_file: args.prompt_file,
+    output_file: args.output_file,
+    agent_role: args.agent_role,
+    model: args.model,
+    contextFiles: args.files,
+    background: args.background,
+    working_directory: args.working_directory
+  });
 }
 
 // src/mcp/job-management.ts
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_fs11 = require("fs");
-var import_path11 = require("path");
+var import_fs10 = require("fs");
+var import_path10 = require("path");
 
 // src/mcp/codex-core.ts
 init_define_AGENT_PROMPTS();
 init_define_AGENT_ROLES();
-var import_child_process4 = require("child_process");
-var import_fs10 = require("fs");
-var import_path10 = require("path");
-var spawnedPids2 = /* @__PURE__ */ new Set();
-function isSpawnedPid2(pid) {
-  return spawnedPids2.has(pid);
-}
 var CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || "gpt-5.3-codex";
-var CODEX_TIMEOUT = Math.min(Math.max(5e3, parseInt(process.env.OMC_CODEX_TIMEOUT || "3600000", 10) || 36e5), 36e5);
+var CODEX_TIMEOUT = Math.min(
+  Math.max(5e3, parseInt(process.env.OMC_CODEX_TIMEOUT || "3600000", 10) || 36e5),
+  36e5
+);
 var RATE_LIMIT_RETRY_COUNT = Math.min(10, Math.max(1, parseInt(process.env.OMC_CODEX_RATE_LIMIT_RETRY_COUNT || "3", 10) || 3));
 var RATE_LIMIT_INITIAL_DELAY = Math.max(1e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_INITIAL_DELAY || "5000", 10) || 5e3);
 var RATE_LIMIT_MAX_DELAY = Math.max(5e3, parseInt(process.env.OMC_CODEX_RATE_LIMIT_MAX_DELAY || "60000", 10) || 6e4);
-var MAX_FILE_SIZE2 = 5 * 1024 * 1024;
-var MAX_STDOUT_BYTES2 = 10 * 1024 * 1024;
+var codexPidRegistry = createPidRegistry();
+function isSpawnedPid2(pid) {
+  return codexPidRegistry.has(pid);
+}
 
 // src/mcp/job-management.ts
 var ALLOWED_SIGNALS = /* @__PURE__ */ new Set(["SIGTERM", "SIGINT"]);
@@ -17124,9 +17234,9 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     return void 0;
   }
   const promptsDir = getPromptsDir(workingDirectory);
-  if (!(0, import_fs11.existsSync)(promptsDir)) return void 0;
+  if (!(0, import_fs10.existsSync)(promptsDir)) return void 0;
   try {
-    const files = (0, import_fs11.readdirSync)(promptsDir);
+    const files = (0, import_fs10.readdirSync)(promptsDir);
     const escapedProvider = escapeRegex2(provider);
     const escapedJobId = escapeRegex2(jobId);
     const pattern = new RegExp(`^${escapedProvider}-status-(.+)-${escapedJobId}\\.json$`);
@@ -17137,7 +17247,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
         matches.push({
           file: f,
           slug: m[1],
-          statusPath: (0, import_path11.join)(promptsDir, f)
+          statusPath: (0, import_path10.join)(promptsDir, f)
         });
       }
     }
@@ -17148,7 +17258,7 @@ function findJobStatusFile(provider, jobId, workingDirectory) {
     let best;
     for (const match of matches) {
       try {
-        const content = (0, import_fs11.readFileSync)(match.statusPath, "utf-8");
+        const content = (0, import_fs10.readFileSync)(match.statusPath, "utf-8");
         const status = JSON.parse(content);
         const isActive = status.status === "spawned" || status.status === "running";
         const spawnedAt = new Date(status.spawnedAt).getTime();
@@ -17202,7 +17312,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
             status2.error ? `**Error:** ${status2.error}` : null
           ].filter(Boolean).join("\n"), true);
         }
-        await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+        await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
         pollDelay = Math.min(pollDelay * 1.5, 2e3);
         continue;
       }
@@ -17214,7 +17324,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
       if (notFoundCount >= 10) {
         return textResult(`No job found with ID: ${jobId}`, true);
       }
-      await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+      await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
       pollDelay = Math.min(pollDelay * 1.5, 2e3);
       continue;
     }
@@ -17246,7 +17356,7 @@ async function handleWaitForJob(provider, jobId, timeoutMs = 36e5) {
         status.error ? `**Error:** ${status.error}` : null
       ].filter(Boolean).join("\n"), true);
     }
-    await new Promise((resolve7) => setTimeout(resolve7, pollDelay));
+    await new Promise((resolve6) => setTimeout(resolve6, pollDelay));
     pollDelay = Math.min(pollDelay * 1.5, 2e3);
   }
   return textResult(
@@ -17405,7 +17515,7 @@ async function handleKillJob(provider, jobId, signal = "SIGTERM") {
       error: `Killed by user (signal: ${signal})`
     });
     for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise((resolve7) => setTimeout(resolve7, 50));
+      await new Promise((resolve6) => setTimeout(resolve6, 50));
       const recheckStatus = readJobStatus(provider, found.slug, jobId);
       if (!recheckStatus || recheckStatus.status === "failed") {
         break;
@@ -17526,18 +17636,18 @@ ${lines.join("\n\n")}`);
     }
   }
   const promptsDir = getPromptsDir();
-  if (!(0, import_fs11.existsSync)(promptsDir)) {
+  if (!(0, import_fs10.existsSync)(promptsDir)) {
     return textResult(`No ${provider} jobs found.`);
   }
   try {
-    const files = (0, import_fs11.readdirSync)(promptsDir);
+    const files = (0, import_fs10.readdirSync)(promptsDir);
     const statusFiles = files.filter(
       (f) => f.startsWith(`${provider}-status-`) && f.endsWith(".json")
     );
     const jobs = [];
     for (const file of statusFiles) {
       try {
-        const content = (0, import_fs11.readFileSync)((0, import_path11.join)(promptsDir, file), "utf-8");
+        const content = (0, import_fs10.readFileSync)((0, import_path10.join)(promptsDir, file), "utf-8");
         const job = JSON.parse(content);
         if (statusFilter === "completed" && job.status !== "completed") continue;
         if (statusFilter === "failed" && job.status !== "failed" && job.status !== "timeout") continue;
