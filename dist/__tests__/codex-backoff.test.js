@@ -40,7 +40,7 @@ describe('Codex Background Retry / Backoff', () => {
             expect(delay).toBe(45000);
         });
         it('should use defaults from module constants', () => {
-            const delay = computeBackoffDelay(0);
+            const delay = computeBackoffDelay(0, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
             const expected = Math.round(RATE_LIMIT_INITIAL_DELAY * 0.75);
             expect(delay).toBe(expected);
         });
