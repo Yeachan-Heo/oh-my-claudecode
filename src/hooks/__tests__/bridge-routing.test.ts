@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import * as autoUpdate from '../../features/auto-update.js';
 import {
   processHook,
   resetSkipHooksCache,
@@ -31,10 +32,12 @@ describe('processHook - Routing Matrix', () => {
     process.env = { ...originalEnv };
     delete process.env.DISABLE_OMC;
     delete process.env.OMC_SKIP_HOOKS;
+    vi.spyOn(autoUpdate, 'isLowTierAgentsEnabled').mockReturnValue(true);
     resetSkipHooksCache();
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     process.env = originalEnv;
     resetSkipHooksCache();
   });
@@ -123,6 +126,28 @@ describe('processHook - Routing Matrix', () => {
 
       const result = await processHook('pre-tool-use', input);
       expect(result.continue).toBe(true);
+    });
+
+    it('should rewrite low-tier Task agent to base tier when low-tier agents are disabled', async () => {
+      vi.spyOn(autoUpdate, 'isLowTierAgentsEnabled').mockReturnValue(false);
+      const input: HookInput = {
+        sessionId: 'test-session',
+        toolName: 'Task',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:executor-low',
+          model: 'haiku',
+          description: 'test',
+          prompt: 'test',
+        },
+        directory: '/tmp/test-routing',
+      };
+
+      const result = await processHook('pre-tool-use', input);
+      expect(result.continue).toBe(true);
+      expect(result.modifiedInput).toBeDefined();
+      const modifiedInput = result.modifiedInput as { subagent_type?: string; model?: string };
+      expect(modifiedInput.subagent_type).toBe('oh-my-claudecode:executor');
+      expect(modifiedInput.model).toBe('sonnet');
     });
 
     it('should handle post-tool-use with tool output', async () => {

@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import { triggerStopCallbacks } from './callbacks.js';
 import { notify } from '../../notifications/index.js';
+import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -266,6 +268,68 @@ const MODE_STATE_FILES = [
   { file: 'swarm-summary.json', mode: 'swarm' },
 ];
 
+const PYTHON_REPL_TOOL_NAMES = new Set(['python_repl', 'mcp__t__python_repl']);
+
+/**
+ * Extract python_repl research session IDs from transcript JSONL.
+ * These sessions are terminated on SessionEnd to prevent bridge leaks.
+ */
+export async function extractPythonReplSessionIdsFromTranscript(transcriptPath: string): Promise<string[]> {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    return [];
+  }
+
+  const sessionIds = new Set<string>();
+  const stream = fs.createReadStream(transcriptPath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({
+    input: stream,
+    crlfDelay: Infinity,
+  });
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const entry = parsed as { message?: { content?: unknown[] } };
+      const contentBlocks = entry.message?.content;
+      if (!Array.isArray(contentBlocks)) {
+        continue;
+      }
+
+      for (const block of contentBlocks) {
+        const toolUse = block as {
+          type?: string;
+          name?: string;
+          input?: { researchSessionID?: unknown };
+        };
+
+        if (toolUse.type !== 'tool_use' || !toolUse.name || !PYTHON_REPL_TOOL_NAMES.has(toolUse.name)) {
+          continue;
+        }
+
+        const sessionId = toolUse.input?.researchSessionID;
+        if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+          sessionIds.add(sessionId.trim());
+        }
+      }
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+
+  return [...sessionIds];
+}
+
 /**
  * Clean up mode state files on session end.
  *
@@ -366,6 +430,17 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   // Pass session_id to only clean up this session's states
   cleanupModeStates(input.cwd, input.session_id);
 
+  // Clean up Python REPL bridge sessions used in this transcript (#641).
+  // Best-effort only: session end should not fail because cleanup fails.
+  try {
+    const pythonSessionIds = await extractPythonReplSessionIdsFromTranscript(input.transcript_path);
+    if (pythonSessionIds.length > 0) {
+      await cleanupBridgeSessions(pythonSessionIds);
+    }
+  } catch {
+    // Ignore cleanup errors
+  }
+
   // Trigger stop hook callbacks (#395)
   await triggerStopCallbacks(metrics, {
     session_id: input.session_id,
@@ -386,6 +461,23 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
     });
   } catch {
     // Notification failures should never block session end
+  }
+
+  // Clean up reply session registry and stop daemon if no active sessions remain
+  try {
+    const { removeSession, loadAllMappings } = await import('../../notifications/session-registry.js');
+    const { stopReplyListener } = await import('../../notifications/reply-listener.js');
+
+    // Remove this session's message mappings
+    removeSession(input.session_id);
+
+    // Stop daemon if registry is now empty (no other active sessions)
+    const remainingMappings = loadAllMappings();
+    if (remainingMappings.length === 0) {
+      await stopReplyListener();
+    }
+  } catch {
+    // Reply listener cleanup failures should never block session end
   }
 
   // Return simple response - metrics are persisted to .omc/sessions/

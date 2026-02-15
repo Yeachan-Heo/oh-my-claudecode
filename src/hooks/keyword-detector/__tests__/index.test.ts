@@ -14,11 +14,15 @@ import {
 // Mock isEcomodeEnabled
 vi.mock('../../../features/auto-update.js', () => ({
   isEcomodeEnabled: vi.fn(() => true),
+  isLowTierAgentsEnabled: vi.fn(() => true),
   isTeamEnabled: vi.fn(() => true),
 }));
 
 import { isEcomodeEnabled } from '../../../features/auto-update.js';
 const mockedIsEcomodeEnabled = vi.mocked(isEcomodeEnabled);
+
+import { isLowTierAgentsEnabled } from '../../../features/auto-update.js';
+const mockedIsLowTierAgentsEnabled = vi.mocked(isLowTierAgentsEnabled);
 
 import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
@@ -445,22 +449,25 @@ World`);
     });
 
     describe('ecomode keyword', () => {
-      it('should NOT detect bare eco keyword', () => {
+      it('should detect bare eco keyword', () => {
         const result = detectKeywordsWithType('eco fix all errors');
         const ecoMatch = result.find((r) => r.type === 'ecomode');
-        expect(ecoMatch).toBeUndefined();
+        expect(ecoMatch).toBeDefined();
+        expect(ecoMatch?.keyword).toBe('eco');
       });
 
-      it('should NOT detect budget keyword', () => {
+      it('should detect budget keyword', () => {
         const result = detectKeywordsWithType('budget fix all errors');
         const ecoMatch = result.find((r) => r.type === 'ecomode');
-        expect(ecoMatch).toBeUndefined();
+        expect(ecoMatch).toBeDefined();
+        expect(ecoMatch?.keyword).toBe('budget');
       });
 
-      it('should NOT detect efficient keyword', () => {
+      it('should detect efficient keyword', () => {
         const result = detectKeywordsWithType('efficient fix all errors');
         const ecoMatch = result.find((r) => r.type === 'ecomode');
-        expect(ecoMatch).toBeUndefined();
+        expect(ecoMatch).toBeDefined();
+        expect(ecoMatch?.keyword).toBe('efficient');
       });
 
       it('should detect ecomode keyword', () => {
@@ -517,6 +524,28 @@ World`);
         });
 
         it('should not suppress ultrawork when ecomode disabled and both keywords present', () => {
+          const result = getAllKeywords('ulw ecomode fix errors');
+          expect(result).toContain('ultrawork');
+          expect(result).not.toContain('ecomode');
+        });
+      });
+
+      describe('when low-tier agents are disabled via config', () => {
+        beforeEach(() => {
+          mockedIsLowTierAgentsEnabled.mockReturnValue(false);
+        });
+
+        afterEach(() => {
+          mockedIsLowTierAgentsEnabled.mockReturnValue(true);
+        });
+
+        it('should NOT detect ecomode keyword when low-tier agents are disabled', () => {
+          const result = detectKeywordsWithType('ecomode fix build');
+          const ecoMatch = result.find((r) => r.type === 'ecomode');
+          expect(ecoMatch).toBeUndefined();
+        });
+
+        it('should keep ultrawork when both ultrawork and ecomode are present', () => {
           const result = getAllKeywords('ulw ecomode fix errors');
           expect(result).toContain('ultrawork');
           expect(result).not.toContain('ecomode');

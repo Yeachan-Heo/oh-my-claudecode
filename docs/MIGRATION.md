@@ -715,6 +715,24 @@ Set your preferred execution mode in `~/.claude/.omc-config.json`:
 
 When you use generic keywords like "fast" or "parallel" without explicit mode keywords, this setting determines which mode activates.
 
+#### Disable Ecomode / Low Tier Agents
+
+If you want to fully disable ecomode keywords and LOW-tier (`haiku` / `*-low`) delegation:
+
+```json
+{
+  "ecomode": { "enabled": false },
+  "agentTiers": { "lowEnabled": false }
+}
+```
+
+Equivalent CLI commands:
+
+```bash
+omc config-ecomode --disable
+omc config-agent-tiers --disable-low
+```
+
 ### Breaking Changes
 
 None. All v3.3.x features and commands continue to work in v3.4.0.

@@ -74,6 +74,7 @@ export function getOMCConfig() {
             taskToolConfig: config.taskToolConfig,
             defaultExecutionMode: config.defaultExecutionMode,
             ecomode: config.ecomode,
+            agentTiers: config.agentTiers,
             setupCompleted: config.setupCompleted,
             setupVersion: config.setupVersion,
             stopHookCallbacks: config.stopHookCallbacks,
@@ -108,6 +109,15 @@ export function isEcomodeEnabled() {
     const config = getOMCConfig();
     // Default to true if not configured
     return config.ecomode?.enabled !== false;
+}
+/**
+ * Check if low-tier agents are enabled
+ * Returns true by default if not explicitly disabled
+ */
+export function isLowTierAgentsEnabled() {
+    const config = getOMCConfig();
+    // Default to true if not configured
+    return config.agentTiers?.lowEnabled !== false;
 }
 /**
  * Check if team feature is enabled

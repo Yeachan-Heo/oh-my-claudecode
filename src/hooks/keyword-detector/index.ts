@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 
-import { isEcomodeEnabled, isTeamEnabled } from '../../features/auto-update.js';
+import { isEcomodeEnabled, isLowTierAgentsEnabled, isTeamEnabled } from '../../features/auto-update.js';
 
 export type KeywordType =
   | 'cancel'      // Priority 1
@@ -66,7 +66,8 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   autopilot: /\b(autopilot|auto pilot|auto-pilot|autonomous|full auto|fullsend)\b/i,
   ultrapilot: /\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b/i,
   ultrawork: /\b(ultrawork|ulw|uw)\b/i,
-  ecomode: /\b(ecomode|eco-mode|eco\s+mode|save-tokens)\b/i,
+  // Keep `eco` first so "eco mode" matches "eco" (tests + docs expect keyword="eco").
+  ecomode: /\b(eco|ecomode|eco-mode|eco\s+mode|efficient|budget|save-tokens)\b/i,
   swarm: /\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b|\bteam\s+mode\b/i,
   team: /(?<!\b(?:my|the|our|a|his|her|their|its)\s)\bteam\b|\bcoordinated\s+team\b/i,
   pipeline: /\b(pipeline)\b|\bchain\s+agents\b/i,
@@ -143,6 +144,7 @@ export function detectKeywordsWithType(
 ): DetectedKeyword[] {
   const detected: DetectedKeyword[] = [];
   const cleanedText = sanitizeForKeywordDetection(text);
+  const ecomodeActive = isEcomodeEnabled() && isLowTierAgentsEnabled();
 
   // Check autopilot phrases first (more specific than keywords)
   for (const pattern of AUTOPILOT_PHRASE_PATTERNS) {
@@ -180,7 +182,7 @@ export function detectKeywordsWithType(
     }
 
     // Skip ecomode detection if disabled in config
-    if (type === 'ecomode' && !isEcomodeEnabled()) {
+    if (type === 'ecomode' && !ecomodeActive) {
       continue;
     }
 
@@ -224,12 +226,13 @@ export function getAllKeywords(text: string): KeywordType[] {
   if (detected.length === 0) return [];
 
   let types = [...new Set(detected.map(d => d.type))];
+  const ecomodeActive = isEcomodeEnabled() && isLowTierAgentsEnabled();
 
   // Exclusive: cancel suppresses everything
   if (types.includes('cancel')) return ['cancel'];
 
   // Mutual exclusion: ecomode beats ultrawork (only if ecomode is enabled)
-  if (types.includes('ecomode') && types.includes('ultrawork') && isEcomodeEnabled()) {
+  if (types.includes('ecomode') && types.includes('ultrawork') && ecomodeActive) {
     types = types.filter(t => t !== 'ultrawork');
   }
 

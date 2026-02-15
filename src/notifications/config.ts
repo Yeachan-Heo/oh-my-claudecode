@@ -385,3 +385,87 @@ export function getEnabledPlatforms(
 
   return platforms;
 }
+
+/**
+ * Parse Discord user IDs from environment variable or config array.
+ * Returns empty array if neither is valid.
+ */
+function parseDiscordUserIds(
+  envValue: string | undefined,
+  configValue: unknown,
+): string[] {
+  // Try env var first (comma-separated list)
+  if (envValue) {
+    const ids = envValue
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => /^\d{17,20}$/.test(id));
+    if (ids.length > 0) return ids;
+  }
+
+  // Try config array
+  if (Array.isArray(configValue)) {
+    const ids = configValue
+      .filter((id) => typeof id === "string" && /^\d{17,20}$/.test(id));
+    if (ids.length > 0) return ids;
+  }
+
+  return [];
+}
+
+/**
+ * Get reply injection configuration.
+ *
+ * Returns null when:
+ * - Reply listening is disabled
+ * - No reply-capable bot platform (discord-bot or telegram) is configured
+ * - Notifications are globally disabled
+ *
+ * Reads from .omc-config.json notifications.reply section.
+ * Environment variables override config file values:
+ * - OMC_REPLY_ENABLED: enable reply listening (default: false)
+ * - OMC_REPLY_POLL_INTERVAL_MS: polling interval in ms (default: 3000)
+ * - OMC_REPLY_RATE_LIMIT: max messages per minute (default: 10)
+ * - OMC_REPLY_DISCORD_USER_IDS: comma-separated authorized Discord user IDs
+ * - OMC_REPLY_INCLUDE_PREFIX: include visual prefix (default: true)
+ *
+ * SECURITY: Logs warning when Discord bot is enabled but authorizedDiscordUserIds is empty.
+ */
+export function getReplyConfig(): import("./types.js").ReplyConfig | null {
+  const notifConfig = getNotificationConfig();
+  if (!notifConfig?.enabled) return null;
+
+  // Check if any reply-capable platform (discord-bot or telegram) is enabled
+  const hasDiscordBot = !!notifConfig["discord-bot"]?.enabled;
+  const hasTelegram = !!notifConfig.telegram?.enabled;
+  if (!hasDiscordBot && !hasTelegram) return null;
+
+  // Read reply-specific config
+  const raw = readRawConfig();
+  const replyRaw = (raw?.notifications as any)?.reply;
+
+  const enabled = process.env.OMC_REPLY_ENABLED === "true" || replyRaw?.enabled === true;
+  if (!enabled) return null;
+
+  const authorizedDiscordUserIds = parseDiscordUserIds(
+    process.env.OMC_REPLY_DISCORD_USER_IDS,
+    replyRaw?.authorizedDiscordUserIds,
+  );
+
+  // SECURITY: If Discord bot is enabled but no authorized user IDs, log warning
+  if (hasDiscordBot && authorizedDiscordUserIds.length === 0) {
+    console.warn(
+      "[notifications] Discord reply listening disabled: authorizedDiscordUserIds is empty. " +
+      "Set OMC_REPLY_DISCORD_USER_IDS or add to .omc-config.json notifications.reply.authorizedDiscordUserIds"
+    );
+  }
+
+  return {
+    enabled: true,
+    pollIntervalMs: parseInt(process.env.OMC_REPLY_POLL_INTERVAL_MS || "") || replyRaw?.pollIntervalMs || 3000,
+    maxMessageLength: replyRaw?.maxMessageLength || 500,
+    rateLimitPerMinute: parseInt(process.env.OMC_REPLY_RATE_LIMIT || "") || replyRaw?.rateLimitPerMinute || 10,
+    includePrefix: process.env.OMC_REPLY_INCLUDE_PREFIX !== "false" && (replyRaw?.includePrefix !== false),
+    authorizedDiscordUserIds,
+  };
+}

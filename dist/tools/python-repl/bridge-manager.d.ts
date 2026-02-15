@@ -13,6 +13,22 @@ export interface EscalationResult {
     terminatedBy?: 'SIGINT' | 'SIGTERM' | 'SIGKILL';
     terminationTimeMs?: number;
 }
+export interface BridgeSessionCleanupResult {
+    requestedSessions: number;
+    foundSessions: number;
+    terminatedSessions: number;
+    errors: string[];
+}
+export interface StaleBridgeCleanupResult {
+    scannedSessions: number;
+    staleSessions: number;
+    activeSessions: number;
+    filesRemoved: number;
+    metaRemoved: number;
+    socketRemoved: number;
+    lockRemoved: number;
+    errors: string[];
+}
 /**
  * Verify that a bridge process is still running and is the same process
  * that was originally spawned (guards against PID reuse).
@@ -62,4 +78,14 @@ export declare function ensureBridge(sessionId: string, projectDir?: string): Pr
 export declare function killBridgeWithEscalation(sessionId: string, options?: {
     gracePeriodMs?: number;
 }): Promise<EscalationResult>;
+/**
+ * Clean up bridge processes for explicit session IDs.
+ * Used by session-end to terminate bridges created during the ending session.
+ */
+export declare function cleanupBridgeSessions(sessionIds: Iterable<string>): Promise<BridgeSessionCleanupResult>;
+/**
+ * Clean up stale bridge artifacts across all runtime sessions.
+ * "Stale" means metadata is invalid OR process is no longer alive.
+ */
+export declare function cleanupStaleBridges(): Promise<StaleBridgeCleanupResult>;
 //# sourceMappingURL=bridge-manager.d.ts.map

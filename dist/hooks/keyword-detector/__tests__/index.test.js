@@ -3,10 +3,13 @@ import { removeCodeBlocks, sanitizeForKeywordDetection, extractPromptText, detec
 // Mock isEcomodeEnabled
 vi.mock('../../../features/auto-update.js', () => ({
     isEcomodeEnabled: vi.fn(() => true),
+    isLowTierAgentsEnabled: vi.fn(() => true),
     isTeamEnabled: vi.fn(() => true),
 }));
 import { isEcomodeEnabled } from '../../../features/auto-update.js';
 const mockedIsEcomodeEnabled = vi.mocked(isEcomodeEnabled);
+import { isLowTierAgentsEnabled } from '../../../features/auto-update.js';
+const mockedIsLowTierAgentsEnabled = vi.mocked(isLowTierAgentsEnabled);
 import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
 describe('keyword-detector', () => {
@@ -364,23 +367,41 @@ World`);
             });
         });
         describe('ecomode keyword', () => {
-            it('should detect eco keyword', () => {
+            it('should detect bare eco keyword', () => {
                 const result = detectKeywordsWithType('eco fix all errors');
                 const ecoMatch = result.find((r) => r.type === 'ecomode');
                 expect(ecoMatch).toBeDefined();
+                expect(ecoMatch?.keyword).toBe('eco');
+            });
+            it('should detect budget keyword', () => {
+                const result = detectKeywordsWithType('budget fix all errors');
+                const ecoMatch = result.find((r) => r.type === 'ecomode');
+                expect(ecoMatch).toBeDefined();
+                expect(ecoMatch?.keyword).toBe('budget');
+            });
+            it('should detect efficient keyword', () => {
+                const result = detectKeywordsWithType('efficient fix all errors');
+                const ecoMatch = result.find((r) => r.type === 'ecomode');
+                expect(ecoMatch).toBeDefined();
+                expect(ecoMatch?.keyword).toBe('efficient');
             });
             it('should detect ecomode keyword', () => {
                 const result = detectKeywordsWithType('ecomode fix build');
                 const ecoMatch = result.find((r) => r.type === 'ecomode');
                 expect(ecoMatch).toBeDefined();
             });
-            it('should detect save-tokens keyword', () => {
-                const result = detectKeywordsWithType('save-tokens and fix errors');
+            it('should detect eco-mode keyword', () => {
+                const result = detectKeywordsWithType('eco-mode fix build');
                 const ecoMatch = result.find((r) => r.type === 'ecomode');
                 expect(ecoMatch).toBeDefined();
             });
-            it('should detect budget keyword', () => {
-                const result = detectKeywordsWithType('budget fix all errors');
+            it('should detect eco mode keyword', () => {
+                const result = detectKeywordsWithType('eco mode fix build');
+                const ecoMatch = result.find((r) => r.type === 'ecomode');
+                expect(ecoMatch).toBeDefined();
+            });
+            it('should detect save-tokens keyword', () => {
+                const result = detectKeywordsWithType('save-tokens and fix errors');
                 const ecoMatch = result.find((r) => r.type === 'ecomode');
                 expect(ecoMatch).toBeDefined();
             });
@@ -391,25 +412,43 @@ World`);
                 afterEach(() => {
                     mockedIsEcomodeEnabled.mockReturnValue(true);
                 });
-                it('should NOT detect eco keyword when disabled', () => {
-                    const result = detectKeywordsWithType('eco fix all errors');
-                    const ecoMatch = result.find((r) => r.type === 'ecomode');
-                    expect(ecoMatch).toBeUndefined();
-                });
                 it('should NOT detect ecomode keyword when disabled', () => {
                     const result = detectKeywordsWithType('ecomode fix build');
                     const ecoMatch = result.find((r) => r.type === 'ecomode');
                     expect(ecoMatch).toBeUndefined();
                 });
+                it('should NOT detect eco-mode keyword when disabled', () => {
+                    const result = detectKeywordsWithType('eco-mode fix build');
+                    const ecoMatch = result.find((r) => r.type === 'ecomode');
+                    expect(ecoMatch).toBeUndefined();
+                });
                 it('should still detect ultrawork when ecomode is disabled', () => {
-                    const result = detectKeywordsWithType('ulw eco fix errors');
+                    const result = detectKeywordsWithType('ulw ecomode fix errors');
                     const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
                     expect(ultraworkMatch).toBeDefined();
                     const ecoMatch = result.find((r) => r.type === 'ecomode');
                     expect(ecoMatch).toBeUndefined();
                 });
                 it('should not suppress ultrawork when ecomode disabled and both keywords present', () => {
-                    const result = getAllKeywords('ulw eco fix errors');
+                    const result = getAllKeywords('ulw ecomode fix errors');
+                    expect(result).toContain('ultrawork');
+                    expect(result).not.toContain('ecomode');
+                });
+            });
+            describe('when low-tier agents are disabled via config', () => {
+                beforeEach(() => {
+                    mockedIsLowTierAgentsEnabled.mockReturnValue(false);
+                });
+                afterEach(() => {
+                    mockedIsLowTierAgentsEnabled.mockReturnValue(true);
+                });
+                it('should NOT detect ecomode keyword when low-tier agents are disabled', () => {
+                    const result = detectKeywordsWithType('ecomode fix build');
+                    const ecoMatch = result.find((r) => r.type === 'ecomode');
+                    expect(ecoMatch).toBeUndefined();
+                });
+                it('should keep ultrawork when both ultrawork and ecomode are present', () => {
+                    const result = getAllKeywords('ulw ecomode fix errors');
                     expect(result).toContain('ultrawork');
                     expect(result).not.toContain('ecomode');
                 });
@@ -620,12 +659,12 @@ World`);
         describe('multiple keyword conflict resolution', () => {
             it('should return ecomode over ultrawork when both present', () => {
                 // ecomode wins over ultrawork per conflict resolution rules
-                const result = getPrimaryKeyword('ulw eco fix errors');
+                const result = getPrimaryKeyword('ulw ecomode fix errors');
                 expect(result?.type).toBe('ecomode');
             });
             it('should return ecomode over ultrawork (ecomode has higher priority)', () => {
                 // UPDATED: ecomode wins per conflict resolution
-                const result = getPrimaryKeyword('eco ultrawork fix errors');
+                const result = getPrimaryKeyword('ecomode ultrawork fix errors');
                 expect(result?.type).toBe('ecomode');
             });
             it('should return cancel over everything', () => {
@@ -633,11 +672,11 @@ World`);
                 expect(result?.type).toBe('cancel');
             });
             it('should return ralph over ultrawork and ecomode', () => {
-                const result = getPrimaryKeyword('ralph ulw eco fix errors');
+                const result = getPrimaryKeyword('ralph ulw ecomode fix errors');
                 expect(result?.type).toBe('ralph');
             });
             it('should detect all keywords even when multiple present', () => {
-                const result = detectKeywordsWithType('ulw eco fix errors');
+                const result = detectKeywordsWithType('ulw ecomode fix errors');
                 const types = result.map(r => r.type);
                 expect(types).toContain('ultrawork');
                 expect(types).toContain('ecomode');
@@ -680,7 +719,7 @@ World`);
             expect(getAllKeywords('cancelomc ralph ultrawork')).toEqual(['cancel']);
         });
         it('should return ecomode over ultrawork when both present', () => {
-            expect(getAllKeywords('ulw eco fix errors')).toEqual(['ecomode']);
+            expect(getAllKeywords('ulw ecomode fix errors')).toEqual(['ecomode']);
         });
         it('should return team and ultrapilot when legacy ultrapilot trigger is present', () => {
             const result = getAllKeywords('autopilot ultrapilot build');
@@ -700,7 +739,7 @@ World`);
             expect(result).toContain('ultrawork');
         });
         it('should return ralph with ecomode but not ultrawork', () => {
-            const result = getAllKeywords('ralph eco ulw fix');
+            const result = getAllKeywords('ralph ecomode ulw fix');
             expect(result).toContain('ralph');
             expect(result).toContain('ecomode');
             expect(result).not.toContain('ultrawork');
@@ -794,7 +833,7 @@ World`);
         });
         // Mixed keyword precedence tests
         it('should handle team + ecomode + ralph combination', () => {
-            const result = getAllKeywords('team ralph eco build the app');
+            const result = getAllKeywords('team ralph ecomode build the app');
             expect(result).toContain('ralph');
             expect(result).toContain('team');
             expect(result).toContain('ecomode');

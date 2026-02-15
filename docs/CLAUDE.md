@@ -210,6 +210,20 @@ Notifications: `configure-discord` ("configure discord", "setup discord", "disco
 Utilities: `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager` (psm), `skill`, `writer-memory`, `ralph-init`, `learn-about-omc`
 
 Conflict resolution: explicit mode keywords (`ulw`, `ultrawork`, `ecomode`, `eco-mode`, `eco mode`, `save-tokens`) override defaults. When both are present, ecomode wins. Generic "fast"/"parallel" reads `~/.claude/.omc-config.json` -> `defaultExecutionMode`. Ralph includes ultrawork (persistence wrapper). Ecomode is a model-routing modifier only. Autopilot can transition to ralph or ultraqa. Autopilot and ultrapilot are mutually exclusive.
+
+Disable ecomode and/or low-tier agents (Haiku / `*-low`) in `~/.claude/.omc-config.json`:
+```json
+{
+  "ecomode": { "enabled": false },
+  "agentTiers": { "lowEnabled": false }
+}
+```
+
+CLI helpers:
+```bash
+omc config-ecomode --disable
+omc config-agent-tiers --disable-low
+```
 </skills>
 
 ---

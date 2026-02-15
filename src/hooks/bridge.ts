@@ -27,6 +27,7 @@ import {
   getRunningTaskCount,
 } from "../hud/background-tasks.js";
 import { loadConfig } from "../config/loader.js";
+import { isLowTierAgentsEnabled } from "../features/auto-update.js";
 import {
   ULTRAWORK_MESSAGE,
   ULTRATHINK_MESSAGE,
@@ -54,6 +55,13 @@ import type { StopContext } from "./todo-continuation/index.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
+const LOW_TIER_AGENT_REWRITES: Record<string, string> = {
+  'architect-low': 'architect',
+  'executor-low': 'executor',
+  'designer-low': 'designer',
+  'security-reviewer-low': 'security-reviewer',
+  'tdd-guide-low': 'tdd-guide',
+};
 
 const TEAM_TERMINAL_VALUES = new Set([
   "completed",
@@ -509,6 +517,18 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
           }).catch(() => {})
         ).catch(() => {});
       }
+
+      // Clean up reply listener session
+      import("../notifications/session-registry.js")
+        .then(async ({ removeSession, loadAllMappings }) => {
+          removeSession(sessionId);
+          const remaining = loadAllMappings();
+          if (remaining.length === 0) {
+            const { stopReplyListener } = await import("../notifications/reply-listener.js");
+            stopReplyListener();
+          }
+        })
+        .catch(() => {});
     }
     return output;
   }
@@ -563,6 +583,25 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
         projectPath: directory,
       }).catch(() => {})
     ).catch(() => {});
+  }
+
+  // Start reply listener daemon if configured (non-blocking, swallows errors)
+  if (sessionId) {
+    Promise.all([
+      import("../notifications/reply-listener.js"),
+      import("../notifications/config.js"),
+    ]).then(([{ startReplyListener }, { getReplyConfig, getNotificationConfig }]) => {
+      const replyConfig = getReplyConfig();
+      if (!replyConfig) return;
+      const notifConfig = getNotificationConfig();
+      startReplyListener({
+        ...replyConfig,
+        telegramBotToken: notifConfig?.telegram?.botToken,
+        telegramChatId: notifConfig?.telegram?.chatId,
+        discordBotToken: notifConfig?.["discord-bot"]?.botToken,
+        discordChannelId: notifConfig?.["discord-bot"]?.channelId,
+      });
+    }).catch(() => {});
   }
 
   const messages: string[] = [];
@@ -754,6 +793,9 @@ function processPreToolUse(input: HookInput): HookOutput {
     };
   }
 
+  const lowTierRewrite = rewriteLowTierAgentInput(input.toolName, input.toolInput);
+  const effectiveToolInput = lowTierRewrite.modifiedInput ?? input.toolInput;
+
   // Notify when AskUserQuestion is about to execute (issue #597)
   // Fire-and-forget: notify users that input is needed BEFORE the tool blocks
   if (input.toolName === "AskUserQuestion" && input.sessionId) {
@@ -784,7 +826,7 @@ function processPreToolUse(input: HookInput): HookOutput {
   // Background process guard - prevent forkbomb (issue #302)
   // Block new background tasks if limit is exceeded
   if (input.toolName === "Task" || input.toolName === "Bash") {
-    const toolInput = input.toolInput as
+    const toolInput = effectiveToolInput as
       | {
           description?: string;
           subagent_type?: string;
@@ -812,7 +854,7 @@ function processPreToolUse(input: HookInput): HookOutput {
 
   // Track Task tool invocations for HUD background tasks display
   if (input.toolName === "Task") {
-    const toolInput = input.toolInput as
+    const toolInput = effectiveToolInput as
       | {
           description?: string;
           subagent_type?: string;
@@ -850,18 +892,83 @@ function processPreToolUse(input: HookInput): HookOutput {
   if (input.toolName === "Task") {
     const dashboard = getAgentDashboard(directory);
     if (dashboard) {
-      const baseMessage = enforcementResult.message || "";
+      const messageParts = [enforcementResult.message, lowTierRewrite.message].filter(
+        (part): part is string => typeof part === "string" && part.length > 0,
+      );
+      const baseMessage = messageParts.join("\n\n");
       const combined = baseMessage
         ? `${baseMessage}\n\n${dashboard}`
         : dashboard;
-      return { continue: true, message: combined };
+      return {
+        continue: true,
+        message: combined,
+        ...(lowTierRewrite.modifiedInput !== undefined
+          ? { modifiedInput: lowTierRewrite.modifiedInput }
+          : {}),
+      };
     }
   }
 
-  // Return enforcement message if present (warning), otherwise continue silently
-  return enforcementResult.message
-    ? { continue: true, message: enforcementResult.message }
-    : { continue: true };
+  const messageParts = [enforcementResult.message, lowTierRewrite.message].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  return {
+    continue: true,
+    ...(messageParts.length > 0 ? { message: messageParts.join("\n\n") } : {}),
+    ...(lowTierRewrite.modifiedInput !== undefined
+      ? { modifiedInput: lowTierRewrite.modifiedInput }
+      : {}),
+  };
+}
+
+function rewriteLowTierAgentInput(
+  toolName?: string,
+  toolInput?: unknown,
+): { modifiedInput?: unknown; message?: string } {
+  if (!toolName || (toolName !== "Task" && toolName !== "Agent")) {
+    return {};
+  }
+
+  if (isLowTierAgentsEnabled()) {
+    return {};
+  }
+
+  if (!toolInput || typeof toolInput !== "object") {
+    return {};
+  }
+
+  const input = toolInput as Record<string, unknown>;
+  const rawSubagent = input.subagent_type;
+  if (typeof rawSubagent !== "string" || rawSubagent.length === 0) {
+    return {};
+  }
+
+  const hasPrefix = rawSubagent.startsWith("oh-my-claudecode:");
+  const normalized = rawSubagent.replace(/^oh-my-claudecode:/, "");
+  const rewrittenBase = LOW_TIER_AGENT_REWRITES[normalized];
+  if (!rewrittenBase) {
+    return {};
+  }
+
+  const rewrittenSubagent = hasPrefix ? `oh-my-claudecode:${rewrittenBase}` : rewrittenBase;
+  const modifiedInput: Record<string, unknown> = {
+    ...input,
+    subagent_type: rewrittenSubagent,
+  };
+
+  let modelUpgradeNote = "";
+  if (input.model === "haiku") {
+    modifiedInput.model = "sonnet";
+    modelUpgradeNote = " and model=haiku -> sonnet";
+  }
+
+  return {
+    modifiedInput,
+    message:
+      process.env.OMC_DEBUG === "true"
+        ? `Low-tier agents disabled via config: rewrote ${rawSubagent} -> ${rewrittenSubagent}${modelUpgradeNote}.`
+        : undefined,
+  };
 }
 
 /**

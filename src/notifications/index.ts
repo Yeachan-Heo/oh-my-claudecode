@@ -43,6 +43,7 @@ export {
 } from "./formatter.js";
 export {
   getCurrentTmuxSession,
+  getCurrentTmuxPaneId,
   getTeamTmuxSessions,
   formatTmuxInfo,
 } from "./tmux.js";
@@ -83,6 +84,9 @@ export async function notify(
       return null;
     }
 
+    // Get tmux pane ID
+    const { getCurrentTmuxPaneId } = await import("./tmux.js");
+
     // Build the full payload
     const payload: NotificationPayload = {
       event,
@@ -90,6 +94,7 @@ export async function notify(
       message: "", // Will be formatted below
       timestamp: data.timestamp || new Date().toISOString(),
       tmuxSession: data.tmuxSession ?? getCurrentTmuxSession() ?? undefined,
+      tmuxPaneId: data.tmuxPaneId ?? getCurrentTmuxPaneId() ?? undefined,
       projectPath: data.projectPath,
       projectName:
         data.projectName ||
@@ -111,7 +116,36 @@ export async function notify(
     payload.message = data.message || formatNotification(payload);
 
     // Dispatch to all enabled platforms
-    return await dispatchNotifications(config, event, payload);
+    const result = await dispatchNotifications(config, event, payload);
+
+    // NEW: Register message IDs for reply correlation
+    if (result.anySuccess && payload.tmuxPaneId) {
+      try {
+        const { registerMessage } = await import("./session-registry.js");
+        for (const r of result.results) {
+          if (
+            r.success &&
+            r.messageId &&
+            (r.platform === "discord-bot" || r.platform === "telegram")
+          ) {
+            registerMessage({
+              platform: r.platform,
+              messageId: r.messageId,
+              sessionId: payload.sessionId,
+              tmuxPaneId: payload.tmuxPaneId,
+              tmuxSessionName: payload.tmuxSession || "",
+              event: payload.event,
+              createdAt: new Date().toISOString(),
+              projectPath: payload.projectPath,
+            });
+          }
+        }
+      } catch {
+        // Non-fatal: reply correlation is best-effort
+      }
+    }
+
+    return result;
   } catch (error) {
     // Never let notification failures propagate to hooks
     console.error(

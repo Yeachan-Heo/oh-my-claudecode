@@ -1,1 +1,1 @@
-{"version":3,"file":"cleanup.d.ts","sourceRoot":"","sources":["../../../src/cli/commands/cleanup.ts"],"names":[],"mappings":"AAIA,wBAAsB,cAAc,CAAC,OAAO,EAAE;IAAE,SAAS,CAAC,EAAE,MAAM,CAAA;CAAE,GAAG,OAAO,CAAC,IAAI,CAAC,CAgBnF"}
+{"version":3,"file":"cleanup.d.ts","sourceRoot":"","sources":["../../../src/cli/commands/cleanup.ts"],"names":[],"mappings":"AAKA,wBAAsB,cAAc,CAAC,OAAO,EAAE;IAAE,SAAS,CAAC,EAAE,MAAM,CAAA;CAAE,GAAG,OAAO,CAAC,IAAI,CAAC,CAuBnF"}

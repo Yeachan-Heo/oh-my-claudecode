@@ -30,6 +30,8 @@ import { existsSync, readFileSync } from 'fs';
 import {
   getOMCConfig,
   isAutoUpgradePromptEnabled,
+  isEcomodeEnabled,
+  isLowTierAgentsEnabled,
   isSilentAutoUpdateEnabled,
 } from '../features/auto-update.js';
 
@@ -98,5 +100,27 @@ describe('auto-upgrade prompt config', () => {
     mockedReadFileSync.mockReturnValue('not valid json');
 
     expect(isAutoUpgradePromptEnabled()).toBe(true);
+  });
+
+  it('defaults ecomode and low-tier agents to enabled when unset', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      silentAutoUpdate: false,
+    }));
+
+    expect(isEcomodeEnabled()).toBe(true);
+    expect(isLowTierAgentsEnabled()).toBe(true);
+  });
+
+  it('returns false when ecomode.enabled=false and agentTiers.lowEnabled=false', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      silentAutoUpdate: false,
+      ecomode: { enabled: false },
+      agentTiers: { lowEnabled: false },
+    }));
+
+    expect(isEcomodeEnabled()).toBe(false);
+    expect(isLowTierAgentsEnabled()).toBe(false);
   });
 });

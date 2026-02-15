@@ -14,7 +14,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getSessionDir, getBridgeSocketPath, getBridgeMetaPath } from './paths.js';
+import { getRuntimeDir, getSessionDir, getBridgeSocketPath, getBridgeMetaPath, getSessionLockPath } from './paths.js';
 import { atomicWriteJson, safeReadJson, ensureDirSync } from '../../lib/atomic-write.js';
 import { getProcessStartTime, isProcessAlive } from '../../platform/index.js';
 const execFileAsync = promisify(execFile);
@@ -430,6 +430,152 @@ export async function killBridgeWithEscalation(sessionId, options) {
         terminationTimeMs: Date.now() - startTime,
     };
 }
+/**
+ * Clean up bridge processes for explicit session IDs.
+ * Used by session-end to terminate bridges created during the ending session.
+ */
+export async function cleanupBridgeSessions(sessionIds) {
+    const uniqueSessionIds = [...new Set(Array.from(sessionIds).filter(Boolean))];
+    const result = {
+        requestedSessions: uniqueSessionIds.length,
+        foundSessions: 0,
+        terminatedSessions: 0,
+        errors: [],
+    };
+    for (const sessionId of uniqueSessionIds) {
+        try {
+            const metaPath = getBridgeMetaPath(sessionId);
+            const socketPath = getBridgeSocketPath(sessionId);
+            const lockPath = getSessionLockPath(sessionId);
+            const hasArtifacts = fs.existsSync(metaPath) || fs.existsSync(socketPath) || fs.existsSync(lockPath);
+            if (!hasArtifacts) {
+                continue;
+            }
+            result.foundSessions++;
+            const meta = await safeReadJson(metaPath);
+            if (meta && isValidBridgeMeta(meta)) {
+                const escalation = await killBridgeWithEscalation(sessionId);
+                if (escalation.terminatedBy) {
+                    result.terminatedSessions++;
+                }
+            }
+            else {
+                await removeFileIfExists(metaPath);
+                await removeFileIfExists(socketPath);
+            }
+            // Lock files can linger after abnormal exits; always best-effort cleanup.
+            await removeFileIfExists(lockPath);
+        }
+        catch (error) {
+            result.errors.push(`session=${sessionId}: ${error.message}`);
+        }
+    }
+    return result;
+}
+/**
+ * Clean up stale bridge artifacts across all runtime sessions.
+ * "Stale" means metadata is invalid OR process is no longer alive.
+ */
+export async function cleanupStaleBridges() {
+    const result = {
+        scannedSessions: 0,
+        staleSessions: 0,
+        activeSessions: 0,
+        filesRemoved: 0,
+        metaRemoved: 0,
+        socketRemoved: 0,
+        lockRemoved: 0,
+        errors: [],
+    };
+    const runtimeDir = getRuntimeDir();
+    if (!fs.existsSync(runtimeDir)) {
+        return result;
+    }
+    let entries;
+    try {
+        entries = await fsPromises.readdir(runtimeDir, { withFileTypes: true });
+    }
+    catch (error) {
+        result.errors.push(`runtimeDir=${runtimeDir}: ${error.message}`);
+        return result;
+    }
+    for (const entry of entries) {
+        if (!entry.isDirectory()) {
+            continue;
+        }
+        const sessionDir = path.join(runtimeDir, entry.name);
+        const metaPath = path.join(sessionDir, 'bridge_meta.json');
+        const socketPath = path.join(sessionDir, 'bridge.sock');
+        const lockPath = path.join(sessionDir, 'session.lock');
+        const hasArtifacts = fs.existsSync(metaPath) || fs.existsSync(socketPath) || fs.existsSync(lockPath);
+        if (!hasArtifacts) {
+            continue;
+        }
+        result.scannedSessions++;
+        try {
+            // No metadata means we cannot verify ownership/process identity; treat as stale artifacts.
+            if (!fs.existsSync(metaPath)) {
+                result.staleSessions++;
+                const socketRemoved = await removeFileIfExists(socketPath);
+                const lockRemoved = await removeFileIfExists(lockPath);
+                if (socketRemoved) {
+                    result.socketRemoved++;
+                    result.filesRemoved++;
+                }
+                if (lockRemoved) {
+                    result.lockRemoved++;
+                    result.filesRemoved++;
+                }
+                continue;
+            }
+            const meta = await safeReadJson(metaPath);
+            if (!meta || !isValidBridgeMeta(meta)) {
+                result.staleSessions++;
+                const metaRemoved = await removeFileIfExists(metaPath);
+                const socketRemoved = await removeFileIfExists(socketPath);
+                const lockRemoved = await removeFileIfExists(lockPath);
+                if (metaRemoved) {
+                    result.metaRemoved++;
+                    result.filesRemoved++;
+                }
+                if (socketRemoved) {
+                    result.socketRemoved++;
+                    result.filesRemoved++;
+                }
+                if (lockRemoved) {
+                    result.lockRemoved++;
+                    result.filesRemoved++;
+                }
+                continue;
+            }
+            const alive = await verifyProcessIdentity(meta);
+            if (alive) {
+                result.activeSessions++;
+                continue;
+            }
+            result.staleSessions++;
+            const metaRemoved = await removeFileIfExists(metaPath);
+            const socketRemoved = await removeFileIfExists(socketPath);
+            const lockRemoved = await removeFileIfExists(lockPath);
+            if (metaRemoved) {
+                result.metaRemoved++;
+                result.filesRemoved++;
+            }
+            if (socketRemoved) {
+                result.socketRemoved++;
+                result.filesRemoved++;
+            }
+            if (lockRemoved) {
+                result.lockRemoved++;
+                result.filesRemoved++;
+            }
+        }
+        catch (error) {
+            result.errors.push(`sessionDir=${sessionDir}: ${error.message}`);
+        }
+    }
+    return result;
+}
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
@@ -443,6 +589,21 @@ async function deleteBridgeMeta(sessionId) {
     }
     catch {
         // Ignore errors (file might not exist)
+    }
+}
+/**
+ * Remove a file if it exists. Returns true when a file was removed.
+ */
+async function removeFileIfExists(filePath) {
+    try {
+        await fsPromises.unlink(filePath);
+        return true;
+    }
+    catch (error) {
+        if (error?.code === 'ENOENT') {
+            return false;
+        }
+        throw error;
     }
 }
 /**

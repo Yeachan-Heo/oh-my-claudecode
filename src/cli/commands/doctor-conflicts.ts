@@ -151,6 +151,7 @@ export function checkConfigIssues(): ConflictReport['configIssues'] {
       'defaultExecutionMode',
       'bashHistory',
       'ecomode',
+      'agentTiers',
       'setupCompleted',
       'setupVersion',
       'stopHookCallbacks',

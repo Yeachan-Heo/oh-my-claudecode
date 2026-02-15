@@ -13,12 +13,12 @@ import type {
 } from './types.js';
 import {
   DEFAULT_ROUTING_CONFIG,
-  TIER_MODELS,
   TIER_TO_MODEL_TYPE,
 } from './types.js';
 import { extractAllSignals } from './signals.js';
 import { calculateComplexityScore, calculateConfidence, scoreToTier } from './scorer.js';
 import { evaluateRules, DEFAULT_ROUTING_RULES } from './rules.js';
+import { isLowTierAgentsEnabled } from '../auto-update.js';
 
 /**
  * Route a task to the appropriate model tier
@@ -29,21 +29,32 @@ export function routeTask(
 ): RoutingDecision {
   const mergedConfig = { ...DEFAULT_ROUTING_CONFIG, ...config };
 
+  const minTier = mergedConfig.minTier ?? (isLowTierAgentsEnabled() ? undefined : 'MEDIUM');
+
   // If routing is disabled, use default tier
   if (!mergedConfig.enabled) {
-    return createDecision(mergedConfig.defaultTier, ['Routing disabled, using default tier'], false);
+    const { tier, reason } = applyMinTier(mergedConfig.defaultTier, minTier);
+    const reasons = ['Routing disabled, using default tier'];
+    if (reason) reasons.push(reason);
+    return createDecision(tier, mergedConfig.tierModels, reasons, false);
   }
 
   // If explicit model is specified, respect it
   if (context.explicitModel) {
-    const tier = modelTypeToTier(context.explicitModel);
-    return createDecision(tier, ['Explicit model specified by user'], false);
+    const explicitTier = modelTypeToTier(context.explicitModel);
+    const { tier, reason } = applyMinTier(explicitTier, minTier);
+    const reasons = ['Explicit model specified by user'];
+    if (reason) reasons.push(reason);
+    return createDecision(tier, mergedConfig.tierModels, reasons, false, explicitTier);
   }
 
   // Check for agent-specific overrides
   if (context.agentType && mergedConfig.agentOverrides?.[context.agentType]) {
     const override = mergedConfig.agentOverrides[context.agentType];
-    return createDecision(override.tier, [override.reason], false);
+    const { tier, reason } = applyMinTier(override.tier, minTier);
+    const reasons = [override.reason];
+    if (reason) reasons.push(reason);
+    return createDecision(tier, mergedConfig.tierModels, reasons, false, override.tier);
   }
 
   // Extract signals from the task
@@ -54,7 +65,10 @@ export function routeTask(
 
   if (ruleResult.tier === 'EXPLICIT') {
     // Explicit model was handled above, this shouldn't happen
-    return createDecision('MEDIUM', ['Unexpected EXPLICIT tier'], false);
+    const { tier, reason } = applyMinTier('MEDIUM', minTier);
+    const reasons = ['Unexpected EXPLICIT tier'];
+    if (reason) reasons.push(reason);
+    return createDecision(tier, mergedConfig.tierModels, reasons, false);
   }
 
   // Calculate score for confidence and logging
@@ -62,16 +76,19 @@ export function routeTask(
   const scoreTier = scoreToTier(score);
   const confidence = calculateConfidence(score, ruleResult.tier);
 
+  const { tier: clampedTier, reason: clampReason } = applyMinTier(ruleResult.tier, minTier);
+
   const reasons = [
     ruleResult.reason,
     `Rule: ${ruleResult.ruleName}`,
     `Score: ${score} (${scoreTier} tier by score)`,
+    ...(clampReason ? [clampReason] : []),
   ];
 
   return {
-    model: mergedConfig.tierModels[ruleResult.tier],
-    modelType: TIER_TO_MODEL_TYPE[ruleResult.tier],
-    tier: ruleResult.tier,
+    model: mergedConfig.tierModels[clampedTier],
+    modelType: TIER_TO_MODEL_TYPE[clampedTier],
+    tier: clampedTier,
     confidence,
     reasons,
     escalated: false,
@@ -83,12 +100,13 @@ export function routeTask(
  */
 function createDecision(
   tier: ComplexityTier,
+  tierModels: Record<ComplexityTier, string>,
   reasons: string[],
   escalated: boolean,
   originalTier?: ComplexityTier
 ): RoutingDecision {
   return {
-    model: TIER_MODELS[tier],
+    model: tierModels[tier],
     modelType: TIER_TO_MODEL_TYPE[tier],
     tier,
     confidence: escalated ? 0.9 : 0.7, // Higher confidence after escalation
@@ -96,6 +114,21 @@ function createDecision(
     escalated,
     originalTier,
   };
+}
+
+const TIER_ORDER: Record<ComplexityTier, number> = {
+  LOW: 0,
+  MEDIUM: 1,
+  HIGH: 2,
+};
+
+function applyMinTier(
+  tier: ComplexityTier,
+  minTier?: ComplexityTier,
+): { tier: ComplexityTier; reason?: string } {
+  if (!minTier) return { tier };
+  if (TIER_ORDER[tier] >= TIER_ORDER[minTier]) return { tier };
+  return { tier: minTier, reason: `Min tier enforced: ${minTier} (was ${tier})` };
 }
 
 /**

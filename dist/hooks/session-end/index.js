@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import { triggerStopCallbacks } from './callbacks.js';
 import { notify } from '../../notifications/index.js';
+import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
 /**
  * Read agent tracking to get spawn/completion counts
  */
@@ -214,6 +216,56 @@ const MODE_STATE_FILES = [
     { file: 'swarm-active.marker', mode: 'swarm' },
     { file: 'swarm-summary.json', mode: 'swarm' },
 ];
+const PYTHON_REPL_TOOL_NAMES = new Set(['python_repl', 'mcp__t__python_repl']);
+/**
+ * Extract python_repl research session IDs from transcript JSONL.
+ * These sessions are terminated on SessionEnd to prevent bridge leaks.
+ */
+export async function extractPythonReplSessionIdsFromTranscript(transcriptPath) {
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+        return [];
+    }
+    const sessionIds = new Set();
+    const stream = fs.createReadStream(transcriptPath, { encoding: 'utf-8' });
+    const rl = readline.createInterface({
+        input: stream,
+        crlfDelay: Infinity,
+    });
+    try {
+        for await (const line of rl) {
+            if (!line.trim()) {
+                continue;
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(line);
+            }
+            catch {
+                continue;
+            }
+            const entry = parsed;
+            const contentBlocks = entry.message?.content;
+            if (!Array.isArray(contentBlocks)) {
+                continue;
+            }
+            for (const block of contentBlocks) {
+                const toolUse = block;
+                if (toolUse.type !== 'tool_use' || !toolUse.name || !PYTHON_REPL_TOOL_NAMES.has(toolUse.name)) {
+                    continue;
+                }
+                const sessionId = toolUse.input?.researchSessionID;
+                if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+                    sessionIds.add(sessionId.trim());
+                }
+            }
+        }
+    }
+    finally {
+        rl.close();
+        stream.destroy();
+    }
+    return [...sessionIds];
+}
 /**
  * Clean up mode state files on session end.
  *
@@ -304,6 +356,17 @@ export async function processSessionEnd(input) {
     // This ensures the stop hook won't malfunction in subsequent sessions
     // Pass session_id to only clean up this session's states
     cleanupModeStates(input.cwd, input.session_id);
+    // Clean up Python REPL bridge sessions used in this transcript (#641).
+    // Best-effort only: session end should not fail because cleanup fails.
+    try {
+        const pythonSessionIds = await extractPythonReplSessionIdsFromTranscript(input.transcript_path);
+        if (pythonSessionIds.length > 0) {
+            await cleanupBridgeSessions(pythonSessionIds);
+        }
+    }
+    catch {
+        // Ignore cleanup errors
+    }
     // Trigger stop hook callbacks (#395)
     await triggerStopCallbacks(metrics, {
         session_id: input.session_id,

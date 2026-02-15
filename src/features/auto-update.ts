@@ -132,6 +132,11 @@ export interface OMCConfig {
     /** Whether ecomode is enabled (default: true). Set to false to disable ecomode completely. */
     enabled?: boolean;
   };
+  /** Agent tier controls */
+  agentTiers?: {
+    /** Whether LOW-tier (haiku) delegation is enabled (default: true). */
+    lowEnabled?: boolean;
+  };
   /** Whether initial setup has been completed (ISO timestamp) */
   setupCompleted?: string;
   /** Version of setup wizard that was completed */
@@ -167,6 +172,7 @@ export function getOMCConfig(): OMCConfig {
       taskToolConfig: config.taskToolConfig,
       defaultExecutionMode: config.defaultExecutionMode,
       ecomode: config.ecomode,
+      agentTiers: config.agentTiers,
       setupCompleted: config.setupCompleted,
       setupVersion: config.setupVersion,
       stopHookCallbacks: config.stopHookCallbacks,
@@ -203,6 +209,16 @@ export function isEcomodeEnabled(): boolean {
   const config = getOMCConfig();
   // Default to true if not configured
   return config.ecomode?.enabled !== false;
+}
+
+/**
+ * Check if low-tier agents are enabled
+ * Returns true by default if not explicitly disabled
+ */
+export function isLowTierAgentsEnabled(): boolean {
+  const config = getOMCConfig();
+  // Default to true if not configured
+  return config.agentTiers?.lowEnabled !== false;
 }
 
 /**

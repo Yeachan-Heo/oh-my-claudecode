@@ -44,6 +44,11 @@ export declare function recordSessionMetrics(directory: string, input: SessionEn
  */
 export declare function cleanupTransientState(directory: string): number;
 /**
+ * Extract python_repl research session IDs from transcript JSONL.
+ * These sessions are terminated on SessionEnd to prevent bridge leaks.
+ */
+export declare function extractPythonReplSessionIdsFromTranscript(transcriptPath: string): Promise<string[]>;
+/**
  * Clean up mode state files on session end.
  *
  * This prevents stale state from causing the stop hook to malfunction

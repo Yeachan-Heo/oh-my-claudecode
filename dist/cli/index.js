@@ -440,7 +440,13 @@ program
 Examples:
   $ omc config                   Show current configuration
   $ omc config --validate        Validate configuration files
-  $ omc config --paths           Show config file locations`)
+  $ omc config --paths           Show config file locations
+
+Disable ecomode + low-tier agents:
+  {
+    "ecomode": { "enabled": false },
+    "agentTiers": { "lowEnabled": false }
+  }`)
     .action(async (options) => {
     if (options.paths) {
         const paths = getConfigPaths();
@@ -618,6 +624,88 @@ Examples:
         writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
         console.log(chalk.green(`\u2713 Stop callback '${type}' configured`));
         console.log(JSON.stringify(config.stopHookCallbacks[type], null, 2));
+    }
+    catch (error) {
+        console.error(chalk.red('Failed to write configuration:'), error);
+        process.exit(1);
+    }
+});
+/**
+ * Config ecomode subcommand - Enable/disable ecomode keyword detection
+ */
+program
+    .command('config-ecomode')
+    .description('Configure ecomode keyword detection (stored in ~/.claude/.omc-config.json)')
+    .option('--enable', 'Enable ecomode (default if unset)')
+    .option('--disable', 'Disable ecomode completely (keywords are ignored)')
+    .option('--show', 'Show current configuration')
+    .addHelpText('after', `
+Examples:
+  $ omc config-ecomode --show
+  $ omc config-ecomode --disable
+  $ omc config-ecomode --enable`)
+    .action(async (options) => {
+    const config = getOMCConfig();
+    config.ecomode = config.ecomode || {};
+    if (options.show) {
+        console.log(JSON.stringify({ ecomode: config.ecomode }, null, 2));
+        return;
+    }
+    if (options.enable) {
+        config.ecomode.enabled = true;
+    }
+    else if (options.disable) {
+        config.ecomode.enabled = false;
+    }
+    else {
+        console.error(chalk.red('Must specify one of: --show, --enable, --disable'));
+        process.exit(1);
+    }
+    try {
+        mkdirSync(dirname(CONFIG_FILE), { recursive: true });
+        writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+        console.log(chalk.green(`\u2713 ecomode configured (enabled=${config.ecomode.enabled !== false})`));
+    }
+    catch (error) {
+        console.error(chalk.red('Failed to write configuration:'), error);
+        process.exit(1);
+    }
+});
+/**
+ * Config agent tiers subcommand - Enable/disable low-tier agents (haiku / *-low)
+ */
+program
+    .command('config-agent-tiers')
+    .description('Configure agent tier usage (stored in ~/.claude/.omc-config.json)')
+    .option('--enable-low', 'Enable low-tier agents (default if unset)')
+    .option('--disable-low', 'Disable low-tier agents (rewrites *-low to base agents)')
+    .option('--show', 'Show current configuration')
+    .addHelpText('after', `
+Examples:
+  $ omc config-agent-tiers --show
+  $ omc config-agent-tiers --disable-low
+  $ omc config-agent-tiers --enable-low`)
+    .action(async (options) => {
+    const config = getOMCConfig();
+    config.agentTiers = config.agentTiers || {};
+    if (options.show) {
+        console.log(JSON.stringify({ agentTiers: config.agentTiers }, null, 2));
+        return;
+    }
+    if (options.enableLow) {
+        config.agentTiers.lowEnabled = true;
+    }
+    else if (options.disableLow) {
+        config.agentTiers.lowEnabled = false;
+    }
+    else {
+        console.error(chalk.red('Must specify one of: --show, --enable-low, --disable-low'));
+        process.exit(1);
+    }
+    try {
+        mkdirSync(dirname(CONFIG_FILE), { recursive: true });
+        writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+        console.log(chalk.green(`\u2713 agent tiers configured (lowEnabled=${config.agentTiers.lowEnabled !== false})`));
     }
     catch (error) {
         console.error(chalk.red('Failed to write configuration:'), error);

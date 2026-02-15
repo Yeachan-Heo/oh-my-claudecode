@@ -124,6 +124,7 @@ export function checkConfigIssues() {
             'defaultExecutionMode',
             'bashHistory',
             'ecomode',
+            'agentTiers',
             'setupCompleted',
             'setupVersion',
             'stopHookCallbacks',

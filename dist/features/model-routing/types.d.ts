@@ -151,6 +151,8 @@ export interface RoutingConfig {
     enabled: boolean;
     /** Default tier when no rules match */
     defaultTier: ComplexityTier;
+    /** Minimum tier to allow (e.g. disable LOW tier by setting minTier to MEDIUM) */
+    minTier?: ComplexityTier;
     /** Whether automatic escalation is enabled */
     escalationEnabled: boolean;
     /** Maximum escalation attempts */
