@@ -507,6 +507,27 @@ async function pollDiscord(
         } catch (e) {
           log(`WARN: Failed to add confirmation reaction: ${e}`);
         }
+
+        // Send injection notification to channel (non-critical)
+        try {
+          await fetch(
+            `https://discord.com/api/v10/channels/${config.discordChannelId}/messages`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bot ${config.discordBotToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                content: `Injected into Claude Code session.`,
+                allowed_mentions: { parse: [] },
+              }),
+              signal: AbortSignal.timeout(5000),
+            }
+          );
+        } catch (e) {
+          log(`WARN: Failed to send injection channel notification: ${e}`);
+        }
       } else {
         state.errors++;
       }

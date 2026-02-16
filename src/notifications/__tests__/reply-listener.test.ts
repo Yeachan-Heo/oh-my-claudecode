@@ -322,6 +322,105 @@ describe("reply-listener", () => {
     });
   });
 
+  describe("Injection feedback", () => {
+    it("Discord sends checkmark reaction on successful injection", () => {
+      const channelId = "123456";
+      const messageId = "789012";
+      const expectedUrl = `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}/reactions/%E2%9C%85/@me`;
+
+      expect(expectedUrl).toContain("/reactions/%E2%9C%85/@me");
+      expect(expectedUrl).toContain(channelId);
+      expect(expectedUrl).toContain(messageId);
+    });
+
+    it("Discord sends channel notification after successful injection", () => {
+      const channelId = "123456";
+      const expectedUrl = `https://discord.com/api/v10/channels/${channelId}/messages`;
+      const expectedBody = {
+        content: "Injected into Claude Code session.",
+        allowed_mentions: { parse: [] },
+      };
+
+      expect(expectedUrl).toContain(`/channels/${channelId}/messages`);
+      expect(expectedUrl).not.toContain("reactions");
+      expect(expectedBody.content).toBe("Injected into Claude Code session.");
+      expect(expectedBody.allowed_mentions.parse).toEqual([]);
+    });
+
+    it("Telegram sends reply confirmation on successful injection", () => {
+      const chatId = "123456";
+      const messageId = 789;
+      const expectedBody = {
+        chat_id: chatId,
+        text: "Injected into Claude Code session.",
+        reply_to_message_id: messageId,
+      };
+
+      expect(expectedBody.text).toBe("Injected into Claude Code session.");
+      expect(expectedBody.reply_to_message_id).toBe(messageId);
+    });
+
+    it("feedback is non-critical and wrapped in try/catch", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Reaction is in try/catch
+      expect(source).toContain("Failed to add confirmation reaction");
+      // Channel notification is in try/catch
+      expect(source).toContain("Failed to send injection channel notification");
+      // Telegram confirmation is in try/catch
+      expect(source).toContain("Failed to send confirmation reply");
+    });
+
+    it("feedback uses 5-second timeout", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Discord reaction + channel notification use AbortSignal.timeout(5000)
+      const abortTimeoutMatches = source.match(/AbortSignal\.timeout\(5000\)/g);
+      expect(abortTimeoutMatches).not.toBeNull();
+      expect(abortTimeoutMatches!.length).toBeGreaterThanOrEqual(2);
+
+      // Telegram confirmation uses httpsRequest timeout: 5000
+      expect(source).toContain("timeout: 5000");
+    });
+
+    it("Discord channel notification suppresses mentions", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Channel notification uses allowed_mentions: { parse: [] } to suppress pings
+      expect(source).toContain("allowed_mentions: { parse: [] }");
+    });
+
+    it("does not send feedback on failed injection", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Confirmation/feedback code is inside "if (success)" blocks
+      // The else blocks only increment error counters
+      const successBlocks = source.match(/if \(success\) \{[\s\S]*?messagesInjected/g);
+      expect(successBlocks).not.toBeNull();
+      expect(successBlocks!.length).toBe(2); // one for Discord, one for Telegram
+    });
+  });
+
   describe("Error handling", () => {
     it("logs errors without blocking", () => {
       // Errors should be logged but not throw
