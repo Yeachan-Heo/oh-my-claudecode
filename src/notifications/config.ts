@@ -387,6 +387,87 @@ export function getEnabledPlatforms(
 }
 
 /**
+ * Events checked when resolving reply-capable platform config.
+ * Order matters for deterministic fallback when only event-level config exists.
+ */
+const REPLY_PLATFORM_EVENTS: NotificationEvent[] = [
+  "session-start",
+  "ask-user-question",
+  "session-stop",
+  "session-idle",
+  "session-end",
+];
+
+/**
+ * Resolve the effective enabled platform config for reply-listener bootstrap.
+ *
+ * Priority:
+ * 1) Top-level platform config when enabled
+ * 2) First enabled event-level platform config (deterministic event order)
+ */
+function getEnabledReplyPlatformConfig<T extends { enabled: boolean }>(
+  config: NotificationConfig,
+  platform: "discord-bot" | "telegram",
+): T | undefined {
+  const topLevel = config[platform] as T | undefined;
+  if (topLevel?.enabled) {
+    return topLevel;
+  }
+
+  for (const event of REPLY_PLATFORM_EVENTS) {
+    const eventConfig = config.events?.[event];
+    const eventPlatform =
+      eventConfig?.[platform as keyof EventNotificationConfig];
+
+    if (
+      eventPlatform &&
+      typeof eventPlatform === "object" &&
+      "enabled" in eventPlatform &&
+      (eventPlatform as { enabled: boolean }).enabled
+    ) {
+      return eventPlatform as T;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolve bot credentials used by the reply listener daemon.
+ * Supports both top-level and event-level platform configs.
+ */
+export function getReplyListenerPlatformConfig(
+  config: NotificationConfig | null,
+): {
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  discordBotToken?: string;
+  discordChannelId?: string;
+} {
+  if (!config) return {};
+
+  const telegramConfig =
+    getEnabledReplyPlatformConfig<TelegramNotificationConfig>(
+      config,
+      "telegram",
+    );
+  const discordBotConfig =
+    getEnabledReplyPlatformConfig<DiscordBotNotificationConfig>(
+      config,
+      "discord-bot",
+    );
+
+  return {
+    telegramBotToken: telegramConfig?.botToken || config.telegram?.botToken,
+    telegramChatId: telegramConfig?.chatId || config.telegram?.chatId,
+    discordBotToken:
+      discordBotConfig?.botToken || config["discord-bot"]?.botToken,
+    discordChannelId:
+      discordBotConfig?.channelId || config["discord-bot"]?.channelId,
+  };
+}
+
+/**
  * Parse Discord user IDs from environment variable or config array.
  * Returns empty array if neither is valid.
  */
@@ -435,9 +516,16 @@ export function getReplyConfig(): import("./types.js").ReplyConfig | null {
   const notifConfig = getNotificationConfig();
   if (!notifConfig?.enabled) return null;
 
-  // Check if any reply-capable platform (discord-bot or telegram) is enabled
-  const hasDiscordBot = !!notifConfig["discord-bot"]?.enabled;
-  const hasTelegram = !!notifConfig.telegram?.enabled;
+  // Check if any reply-capable platform (discord-bot or telegram) is enabled.
+  // Supports event-level platform config (not just top-level defaults).
+  const hasDiscordBot = !!getEnabledReplyPlatformConfig<DiscordBotNotificationConfig>(
+    notifConfig,
+    "discord-bot",
+  );
+  const hasTelegram = !!getEnabledReplyPlatformConfig<TelegramNotificationConfig>(
+    notifConfig,
+    "telegram",
+  );
   if (!hasDiscordBot && !hasTelegram) return null;
 
   // Read reply-specific config

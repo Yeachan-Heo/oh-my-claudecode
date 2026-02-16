@@ -1,106 +1,190 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getReplyConfig } from "../config.js";
 
-describe("getReplyConfig", () => {
-  const originalEnv = process.env;
+type RawConfig = Record<string, unknown> | null;
 
+const VALID_DISCORD_USER_ID = "123456789012345678";
+const ORIGINAL_ENV = process.env;
+
+function mockConfigFile(rawConfig: RawConfig): void {
+  vi.doMock("fs", () => ({
+    existsSync: vi.fn(() => rawConfig !== null),
+    readFileSync: vi.fn(() => JSON.stringify(rawConfig ?? {})),
+  }));
+}
+
+describe("reply config", () => {
   beforeEach(() => {
-    // Reset process.env
-    process.env = { ...originalEnv };
     vi.resetModules();
+    vi.restoreAllMocks();
+    process.env = { ...ORIGINAL_ENV };
+    delete process.env.OMC_REPLY_ENABLED;
+    delete process.env.OMC_REPLY_POLL_INTERVAL_MS;
+    delete process.env.OMC_REPLY_RATE_LIMIT;
+    delete process.env.OMC_REPLY_DISCORD_USER_IDS;
+    delete process.env.OMC_REPLY_INCLUDE_PREFIX;
+    delete process.env.OMC_DISCORD_NOTIFIER_BOT_TOKEN;
+    delete process.env.OMC_DISCORD_NOTIFIER_CHANNEL;
+    delete process.env.OMC_DISCORD_WEBHOOK_URL;
+    delete process.env.OMC_DISCORD_MENTION;
+    delete process.env.OMC_TELEGRAM_BOT_TOKEN;
+    delete process.env.OMC_TELEGRAM_NOTIFIER_BOT_TOKEN;
+    delete process.env.OMC_TELEGRAM_CHAT_ID;
+    delete process.env.OMC_TELEGRAM_NOTIFIER_CHAT_ID;
+    delete process.env.OMC_TELEGRAM_NOTIFIER_UID;
+    delete process.env.OMC_SLACK_WEBHOOK_URL;
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    process.env = ORIGINAL_ENV;
+    vi.resetModules();
     vi.restoreAllMocks();
   });
 
-  it("returns null when notifications are globally disabled", async () => {
-    // Mock getNotificationConfig to return disabled
-    vi.doMock("../config.js", () => ({
-      getNotificationConfig: () => ({ enabled: false }),
-      getReplyConfig: vi.fn(() => null),
-    }));
-
-    const { getReplyConfig } = await import("../config.js");
-    const config = getReplyConfig();
-    expect(config).toBeNull();
-  });
-
-  it("returns null when no bot platform is configured", async () => {
-    // Mock getNotificationConfig with no bot platforms
-    vi.doMock("../config.js", () => ({
-      getNotificationConfig: () => ({
+  it("enables reply config when reply-capable platform exists only at event level", async () => {
+    mockConfigFile({
+      notifications: {
         enabled: true,
-        discord: { enabled: true, webhookUrl: "https://example.com" },
-      }),
-      getReplyConfig: vi.fn(() => null),
-    }));
+        events: {
+          "ask-user-question": {
+            telegram: {
+              enabled: true,
+              botToken: "tg-token-event",
+              chatId: "tg-chat-event",
+            },
+          },
+        },
+        reply: {
+          enabled: true,
+          rateLimitPerMinute: 12,
+        },
+      },
+    });
+
+    const {
+      getReplyConfig,
+      getNotificationConfig,
+      getReplyListenerPlatformConfig,
+    } = await import("../config.js");
+
+    const replyConfig = getReplyConfig();
+    expect(replyConfig).not.toBeNull();
+    expect(replyConfig?.rateLimitPerMinute).toBe(12);
+
+    const notifConfig = getNotificationConfig();
+    const runtime = getReplyListenerPlatformConfig(notifConfig);
+    expect(runtime.telegramBotToken).toBe("tg-token-event");
+    expect(runtime.telegramChatId).toBe("tg-chat-event");
+  });
+
+  it("returns null when reply is enabled but no reply-capable platform is configured", async () => {
+    mockConfigFile({
+      notifications: {
+        enabled: true,
+        discord: {
+          enabled: true,
+          webhookUrl: "https://discord.com/api/webhooks/abc/123",
+        },
+        reply: {
+          enabled: true,
+        },
+      },
+    });
 
     const { getReplyConfig } = await import("../config.js");
-    const config = getReplyConfig();
-    expect(config).toBeNull();
+    expect(getReplyConfig()).toBeNull();
   });
 
-  it("returns null when reply is explicitly disabled", async () => {
-    process.env.OMC_REPLY_ENABLED = "false";
+  it("warns when discord-bot is enabled but authorizedDiscordUserIds is empty", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const config = getReplyConfig();
-    // Config will be null because OMC_REPLY_ENABLED is not "true"
-    expect(config).toBeNull();
+    mockConfigFile({
+      notifications: {
+        enabled: true,
+        "discord-bot": {
+          enabled: true,
+          botToken: "discord-token",
+          channelId: "discord-channel",
+        },
+        reply: {
+          enabled: true,
+        },
+      },
+    });
+
+    const { getReplyConfig } = await import("../config.js");
+    const replyConfig = getReplyConfig();
+
+    expect(replyConfig).not.toBeNull();
+    expect(replyConfig?.authorizedDiscordUserIds).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledOnce();
   });
 
-  it("returns config with defaults when enabled", async () => {
-    // This test requires actual notification config, so it's more of an integration test
-    // For unit testing, we'd need to mock the entire config system
-    // Skipping for now as the function implementation is already verified in the source
-    expect(true).toBe(true);
-  });
-
-  it("env vars override config file values", () => {
+  it("applies environment overrides for reply settings and discord user IDs", async () => {
     process.env.OMC_REPLY_POLL_INTERVAL_MS = "5000";
     process.env.OMC_REPLY_RATE_LIMIT = "20";
     process.env.OMC_REPLY_INCLUDE_PREFIX = "false";
+    process.env.OMC_REPLY_DISCORD_USER_IDS = `${VALID_DISCORD_USER_ID},invalid-id`;
 
-    // This would require mocking the entire config system
-    // The implementation in config.ts already shows env vars take precedence
-    expect(true).toBe(true);
+    mockConfigFile({
+      notifications: {
+        enabled: true,
+        "discord-bot": {
+          enabled: true,
+          botToken: "discord-token",
+          channelId: "discord-channel",
+        },
+        reply: {
+          enabled: true,
+          pollIntervalMs: 1000,
+          rateLimitPerMinute: 5,
+          includePrefix: true,
+          authorizedDiscordUserIds: ["999999999999999999"],
+        },
+      },
+    });
+
+    const { getReplyConfig } = await import("../config.js");
+    const replyConfig = getReplyConfig();
+
+    expect(replyConfig).not.toBeNull();
+    expect(replyConfig?.pollIntervalMs).toBe(5000);
+    expect(replyConfig?.rateLimitPerMinute).toBe(20);
+    expect(replyConfig?.includePrefix).toBe(false);
+    expect(replyConfig?.authorizedDiscordUserIds).toEqual([
+      VALID_DISCORD_USER_ID,
+    ]);
   });
 
-  it("logs warning when Discord bot enabled but authorizedDiscordUserIds is empty", () => {
-    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("resolves discord credentials from event-level config and falls back to top-level tokens", async () => {
+    mockConfigFile({
+      notifications: {
+        enabled: true,
+        "discord-bot": {
+          enabled: false,
+          botToken: "top-level-token",
+          channelId: "top-level-channel",
+        },
+        events: {
+          "session-end": {
+            "discord-bot": {
+              enabled: true,
+            },
+          },
+        },
+        reply: {
+          enabled: true,
+          authorizedDiscordUserIds: [VALID_DISCORD_USER_ID],
+        },
+      },
+    });
 
-    // This would require full config setup with Discord bot enabled
-    // The warning logic is verified in the source code (config.ts lines 456-460)
+    const { getNotificationConfig, getReplyListenerPlatformConfig } = await import(
+      "../config.js"
+    );
+    const notifConfig = getNotificationConfig();
+    const runtime = getReplyListenerPlatformConfig(notifConfig);
 
-    consoleWarnSpy.mockRestore();
-    expect(true).toBe(true);
-  });
-
-  it("parses Discord user IDs from environment variable", () => {
-    process.env.OMC_REPLY_DISCORD_USER_IDS = "123456789,987654321";
-
-    // The parseDiscordUserIds function in config.ts handles this
-    // It splits by comma and validates the format
-    expect(true).toBe(true);
-  });
-
-  it("validates Discord user ID format", () => {
-    // Discord user IDs must be 17-20 digits
-    // Invalid IDs are filtered out by parseDiscordUserIds
-    const validId = "123456789012345678";
-    const invalidId = "abc";
-
-    expect(validId).toMatch(/^\d{17,20}$/);
-    expect(invalidId).not.toMatch(/^\d{17,20}$/);
-  });
-
-  it("returns default values when config file has no reply section", () => {
-    // Default values from config.ts:
-    // pollIntervalMs: 3000
-    // maxMessageLength: 500
-    // rateLimitPerMinute: 10
-    // includePrefix: true
-    expect(true).toBe(true);
+    expect(runtime.discordBotToken).toBe("top-level-token");
+    expect(runtime.discordChannelId).toBe("top-level-channel");
   });
 });

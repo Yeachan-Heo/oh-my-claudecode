@@ -1,17 +1,14 @@
 import { describe, it, expect } from "vitest";
+import { sanitizeReplyInput } from "../reply-listener.js";
 
 describe("reply-listener", () => {
   describe("sanitizeReplyInput", () => {
-    // Note: sanitizeReplyInput is not exported from reply-listener.ts
-    // Testing the sanitization logic that's documented in the implementation
-
     it("strips control characters", () => {
       // Control characters \x00-\x08, \x0b, \x0c, \x0e-\x1f, \x7f are stripped
       const input = "hello\x00\x01\x02world\x7f";
       const expected = "helloworld";
 
-      // The actual function removes these chars
-      const sanitized = input.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
@@ -19,7 +16,7 @@ describe("reply-listener", () => {
       const input = "line1\nline2\r\nline3";
       const expected = "line1 line2 line3";
 
-      const sanitized = input.replace(/\r?\n/g, ' ');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
@@ -27,7 +24,7 @@ describe("reply-listener", () => {
       const input = "echo `whoami`";
       const expected = "echo \\`whoami\\`";
 
-      const sanitized = input.replace(/`/g, '\\`');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
@@ -35,7 +32,7 @@ describe("reply-listener", () => {
       const input = "echo $(whoami)";
       const expected = "echo \\$(whoami)";
 
-      const sanitized = input.replace(/\$\(/g, '\\$(');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
@@ -43,7 +40,7 @@ describe("reply-listener", () => {
       const input = "echo ${USER}";
       const expected = "echo \\${USER}";
 
-      const sanitized = input.replace(/\$\{/g, '\\${');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
@@ -51,22 +48,14 @@ describe("reply-listener", () => {
       const input = "path\\to\\file";
       const expected = "path\\\\to\\\\file";
 
-      const sanitized = input.replace(/\\/g, '\\\\');
+      const sanitized = sanitizeReplyInput(input);
       expect(sanitized).toBe(expected);
     });
 
     it("applies all sanitizations in correct order", () => {
       const input = "hello\nworld `cmd` $(sub) ${var} \x00test\\path";
 
-      // Apply sanitizations in the order from reply-listener.ts
-      let result = input
-        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')  // Control chars
-        .replace(/\r?\n/g, ' ')                            // Newlines
-        .replace(/\\/g, '\\\\')                            // Backslashes
-        .replace(/`/g, '\\`')                              // Backticks
-        .replace(/\$\(/g, '\\$(')                          // $()
-        .replace(/\$\{/g, '\\${')                          // ${}
-        .trim();
+      const result = sanitizeReplyInput(input);
 
       expect(result).toContain('hello world');
       expect(result).toContain('\\`cmd\\`');

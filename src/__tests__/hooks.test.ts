@@ -1,18 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import { execSync } from 'child_process';
-
-// Mock isTeamEnabled so team/ultrapilot/swarm keywords are detected in CI
-vi.mock('../features/auto-update.js', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    isTeamEnabled: () => true,
-  };
-});
-
 import {
   extractPromptText,
   removeCodeBlocks,
@@ -685,6 +675,61 @@ describe('Team staged workflow integration', () => {
 
     expect(result.continue).toBe(true);
     expect(result.message || '').not.toContain('[TEAM MODE CONTINUATION]');
+  });
+});
+
+describe('Persistent-mode reply cleanup behavior', () => {
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  let testDir: string;
+  let tempHome: string;
+  const sessionId = 'reply-cleanup-session';
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `omc-reply-cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempHome = join(tmpdir(), `omc-reply-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(tempHome, { recursive: true });
+    execSync('git init', { cwd: testDir });
+
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    process.env.USERPROFILE = originalUserProfile;
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it('does not remove reply-session registry on idle Stop/persistent-mode', async () => {
+    const registryPath = join(homedir(), '.omc', 'state', 'reply-session-registry.jsonl');
+    mkdirSync(join(homedir(), '.omc', 'state'), { recursive: true });
+    writeFileSync(
+      registryPath,
+      `${JSON.stringify({
+        platform: 'telegram',
+        messageId: '123',
+        sessionId,
+        tmuxPaneId: '%1',
+        tmuxSessionName: 'main',
+        event: 'session-start',
+        createdAt: new Date().toISOString(),
+      })}\n`,
+    );
+
+    const before = readFileSync(registryPath, 'utf-8');
+    const result = await processHook('persistent-mode', {
+      sessionId,
+      directory: testDir,
+    });
+    const after = readFileSync(registryPath, 'utf-8');
+
+    expect(result.continue).toBe(true);
+    expect(existsSync(registryPath)).toBe(true);
+    expect(after).toBe(before);
+    expect(after).toContain(sessionId);
   });
 });
 

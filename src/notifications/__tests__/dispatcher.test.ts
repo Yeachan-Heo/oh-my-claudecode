@@ -505,7 +505,10 @@ describe("sendTelegram", () => {
 
         // Override on() to detect handler registration
         const originalOn = res.on.bind(res);
-        (res as any).on = (event: string, handler: Function) => {
+        (res as any).on = (
+          event: string,
+          handler: (...args: unknown[]) => unknown,
+        ) => {
           if (event === "data") dataHandlerRegistered = true;
           if (event === "end") endHandlerRegistered = true;
           return originalOn(event, handler);

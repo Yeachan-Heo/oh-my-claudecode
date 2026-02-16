@@ -1,7 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, unlinkSync, statSync, readFileSync } from "fs";
+import {
+  existsSync,
+  unlinkSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  utimesSync,
+  openSync,
+  closeSync,
+} from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { spawn } from "child_process";
 import {
   registerMessage,
   lookupByMessageId,
@@ -13,6 +23,40 @@ import {
 } from "../session-registry.js";
 
 const REGISTRY_PATH = join(homedir(), ".omc", "state", "reply-session-registry.jsonl");
+const LOCK_PATH = join(homedir(), ".omc", "state", "reply-session-registry.lock");
+const SESSION_REGISTRY_MODULE_PATH = join(process.cwd(), "src", "notifications", "session-registry.ts");
+
+function registerMessageInChildProcess(mapping: SessionMapping): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const script = `
+import { registerMessage } from ${JSON.stringify(SESSION_REGISTRY_MODULE_PATH)};
+const mapping = JSON.parse(process.env.TEST_MAPPING_JSON ?? "{}");
+registerMessage(mapping);
+`;
+
+    const child = spawn(process.execPath, ["--import", "tsx", "-e", script], {
+      env: {
+        ...process.env,
+        TEST_MAPPING_JSON: JSON.stringify(mapping),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    child.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("exit", code => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(stderr || `child exited with code ${code ?? "unknown"}`));
+      }
+    });
+  });
+}
 
 describe("session-registry", () => {
   beforeEach(() => {
@@ -20,12 +64,18 @@ describe("session-registry", () => {
     if (existsSync(REGISTRY_PATH)) {
       unlinkSync(REGISTRY_PATH);
     }
+    if (existsSync(LOCK_PATH)) {
+      unlinkSync(LOCK_PATH);
+    }
   });
 
   afterEach(() => {
     // Clean up registry after each test
     if (existsSync(REGISTRY_PATH)) {
       unlinkSync(REGISTRY_PATH);
+    }
+    if (existsSync(LOCK_PATH)) {
+      unlinkSync(LOCK_PATH);
     }
   });
 
@@ -87,6 +137,168 @@ describe("session-registry", () => {
       if (process.platform !== "win32") {
         expect(mode).toBe(0o600);
       }
+    });
+
+    it("releases lock file after append", () => {
+      const mapping: SessionMapping = {
+        platform: "discord-bot",
+        messageId: "123",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "session-start",
+        createdAt: new Date().toISOString(),
+      };
+
+      registerMessage(mapping);
+      expect(existsSync(LOCK_PATH)).toBe(false);
+    });
+
+    it("recovers from stale lock file", () => {
+      // Create stale lock file (>10s old)
+      writeFileSync(LOCK_PATH, "stale-lock");
+      const staleTime = new Date(Date.now() - 30_000);
+      utimesSync(LOCK_PATH, staleTime, staleTime);
+
+      const mapping: SessionMapping = {
+        platform: "telegram",
+        messageId: "456",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "session-start",
+        createdAt: new Date().toISOString(),
+      };
+
+      registerMessage(mapping);
+
+      const loaded = loadAllMappings();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].messageId).toBe("456");
+      expect(existsSync(LOCK_PATH)).toBe(false);
+    });
+
+    it("does not drop writes under contention (eventually appends)", async () => {
+      // Hold lock to force registerMessage to block waiting.
+      const lockFd = openSync(LOCK_PATH, "wx", 0o600);
+      const mapping: SessionMapping = {
+        platform: "discord-bot",
+        messageId: "contended",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "session-start",
+        createdAt: new Date().toISOString(),
+      };
+
+      const registerPromise = registerMessageInChildProcess(mapping);
+
+      // Give child process time to start and attempt lock acquisition.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      expect(existsSync(REGISTRY_PATH)).toBe(false);
+
+      // Release lock, then registerMessage should proceed.
+      closeSync(lockFd);
+      unlinkSync(LOCK_PATH);
+
+      await registerPromise;
+
+      const loaded = loadAllMappings();
+      expect(loaded.some(m => m.messageId === "contended")).toBe(true);
+    });
+
+    it("retries across lock-timeout windows and eventually appends", async () => {
+      // Hold lock for > LOCK_TIMEOUT_MS (2s) to force timeout + retry behavior.
+      const lockFd = openSync(LOCK_PATH, "wx", 0o600);
+      const mapping: SessionMapping = {
+        platform: "telegram",
+        messageId: "timeout-retry",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "ask-user-question",
+        createdAt: new Date().toISOString(),
+      };
+
+      const registerPromise = registerMessageInChildProcess(mapping);
+
+      await new Promise(resolve => setTimeout(resolve, 2300));
+      expect(existsSync(REGISTRY_PATH)).toBe(false);
+      expect(existsSync(LOCK_PATH)).toBe(true);
+
+      closeSync(lockFd);
+      unlinkSync(LOCK_PATH);
+
+      await registerPromise;
+
+      const loaded = loadAllMappings();
+      expect(loaded.some(m => m.messageId === "timeout-retry")).toBe(true);
+    });
+
+    it("does not reap stale lock when owner pid is still alive", async () => {
+      // Stale mtime alone should not trigger lock removal if owner pid is alive.
+      writeFileSync(
+        LOCK_PATH,
+        JSON.stringify({
+          pid: process.pid,
+          acquiredAt: Date.now() - 60_000,
+          token: "live-owner-token",
+        }),
+      );
+      const staleTime = new Date(Date.now() - 30_000);
+      utimesSync(LOCK_PATH, staleTime, staleTime);
+
+      const mapping: SessionMapping = {
+        platform: "discord-bot",
+        messageId: "alive-owner",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "session-start",
+        createdAt: new Date().toISOString(),
+      };
+
+      const registerPromise = registerMessageInChildProcess(mapping);
+
+      await new Promise(resolve => setTimeout(resolve, 150));
+      expect(existsSync(LOCK_PATH)).toBe(true);
+      expect(existsSync(REGISTRY_PATH)).toBe(false);
+
+      // Simulate owner releasing lock; waiting writer should proceed.
+      unlinkSync(LOCK_PATH);
+      await registerPromise;
+
+      const loaded = loadAllMappings();
+      expect(loaded.some(m => m.messageId === "alive-owner")).toBe(true);
+    });
+
+    it("reaps stale lock when owner pid is not alive", () => {
+      writeFileSync(
+        LOCK_PATH,
+        JSON.stringify({
+          pid: 0,
+          acquiredAt: Date.now() - 60_000,
+          token: "dead-owner-token",
+        }),
+      );
+      const staleTime = new Date(Date.now() - 30_000);
+      utimesSync(LOCK_PATH, staleTime, staleTime);
+
+      const mapping: SessionMapping = {
+        platform: "telegram",
+        messageId: "dead-owner",
+        sessionId: "session-1",
+        tmuxPaneId: "%0",
+        tmuxSessionName: "main",
+        event: "session-start",
+        createdAt: new Date().toISOString(),
+      };
+
+      registerMessage(mapping);
+
+      const loaded = loadAllMappings();
+      expect(loaded.some(m => m.messageId === "dead-owner")).toBe(true);
+      expect(existsSync(LOCK_PATH)).toBe(false);
     });
   });
 

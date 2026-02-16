@@ -509,17 +509,9 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
         ).catch(() => {});
       }
 
-      // Clean up reply listener session
-      import("../notifications/session-registry.js")
-        .then(async ({ removeSession, loadAllMappings }) => {
-          removeSession(sessionId);
-          const remaining = loadAllMappings();
-          if (remaining.length === 0) {
-            const { stopReplyListener } = await import("../notifications/reply-listener.js");
-            stopReplyListener();
-          }
-        })
-        .catch(() => {});
+      // IMPORTANT: Do NOT clean up reply-listener/session-registry on Stop hooks.
+      // Stop can fire for normal "idle" turns while the session is still active.
+      // Reply cleanup is handled in the true SessionEnd hook only.
     }
     return output;
   }
@@ -581,16 +573,18 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
     Promise.all([
       import("../notifications/reply-listener.js"),
       import("../notifications/config.js"),
-    ]).then(([{ startReplyListener }, { getReplyConfig, getNotificationConfig }]) => {
+    ]).then(
+      ([
+        { startReplyListener },
+        { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig },
+      ]) => {
       const replyConfig = getReplyConfig();
       if (!replyConfig) return;
       const notifConfig = getNotificationConfig();
+      const platformConfig = getReplyListenerPlatformConfig(notifConfig);
       startReplyListener({
         ...replyConfig,
-        telegramBotToken: notifConfig?.telegram?.botToken,
-        telegramChatId: notifConfig?.telegram?.chatId,
-        discordBotToken: notifConfig?.["discord-bot"]?.botToken,
-        discordChannelId: notifConfig?.["discord-bot"]?.channelId,
+        ...platformConfig,
       });
     }).catch(() => {});
   }
