@@ -462,20 +462,26 @@ function getEffectivePlatformConfig<T>(
   config: NotificationConfig,
   event: NotificationEvent,
 ): T | undefined {
+  const topLevel = config[platform as keyof NotificationConfig] as T | undefined;
   const eventConfig = config.events?.[event];
   const eventPlatform = eventConfig?.[platform as keyof typeof eventConfig];
 
-  // Event-level override
+  // Event-level override merged with top-level defaults.
+  // This ensures fields like `mention` are inherited from top-level
+  // when the event-level config omits them.
   if (
     eventPlatform &&
     typeof eventPlatform === "object" &&
     "enabled" in eventPlatform
   ) {
+    if (topLevel && typeof topLevel === "object") {
+      return { ...topLevel, ...eventPlatform } as T;
+    }
     return eventPlatform as T;
   }
 
   // Top-level default
-  return config[platform as keyof NotificationConfig] as T | undefined;
+  return topLevel;
 }
 
 /**

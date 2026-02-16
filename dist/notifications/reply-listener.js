@@ -34,6 +34,7 @@ const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
 /**
  * Allowlist of environment variables safe to pass to daemon child process.
  * This prevents leaking sensitive variables like ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.
+ * OMC_* notification env vars are forwarded so the daemon can call getNotificationConfig().
  */
 const DAEMON_ENV_ALLOWLIST = [
     'PATH', 'HOME', 'USERPROFILE',
@@ -63,6 +64,12 @@ function createMinimalDaemonEnv() {
     const env = {};
     for (const key of DAEMON_ENV_ALLOWLIST) {
         if (process.env[key] !== undefined) {
+            env[key] = process.env[key];
+        }
+    }
+    // Forward OMC_* env vars so the daemon can call getNotificationConfig()
+    for (const key of Object.keys(process.env)) {
+        if (key.startsWith('OMC_')) {
             env[key] = process.env[key];
         }
     }
@@ -147,27 +154,22 @@ function writeDaemonState(state) {
     writeSecureFile(STATE_FILE_PATH, JSON.stringify(state, null, 2));
 }
 /**
- * Read daemon config from state file
+ * Build daemon config from notification config.
+ * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
-function readDaemonConfig() {
+async function buildDaemonConfig() {
     try {
-        const configPath = join(DEFAULT_STATE_DIR, 'reply-listener-config.json');
-        if (!existsSync(configPath)) {
+        const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
+        const replyConfig = getReplyConfig();
+        if (!replyConfig)
             return null;
-        }
-        const content = readFileSync(configPath, 'utf-8');
-        return JSON.parse(content);
+        const notifConfig = getNotificationConfig();
+        const platformConfig = getReplyListenerPlatformConfig(notifConfig);
+        return { ...replyConfig, ...platformConfig };
     }
     catch {
         return null;
     }
-}
-/**
- * Write daemon config to disk with secure permissions (contains bot tokens)
- */
-function writeDaemonConfig(config) {
-    const configPath = join(DEFAULT_STATE_DIR, 'reply-listener-config.json');
-    writeSecureFile(configPath, JSON.stringify(config, null, 2));
 }
 /**
  * Read PID file
@@ -561,9 +563,9 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
  */
 async function pollLoop() {
     log('Reply listener daemon starting poll loop');
-    const config = readDaemonConfig();
+    const config = await buildDaemonConfig();
     if (!config) {
-        log('ERROR: No daemon config found, exiting');
+        log('ERROR: No notification config found for reply listener, exiting');
         process.exit(1);
     }
     const state = readDaemonState() || {
@@ -636,12 +638,12 @@ async function pollLoop() {
 /**
  * Start the reply listener daemon.
  *
- * Writes bot tokens to the state file (0600 permissions), then forks
- * the daemon process with minimal env (no tokens in env).
+ * Forks a daemon process that derives its config from getNotificationConfig().
+ * OMC_* env vars are forwarded so the daemon can read both file and env config.
  *
  * Idempotent: if daemon is already running, returns success.
  *
- * @param config - Daemon config including bot tokens and reply settings
+ * @param config - Daemon config (used only for validation, daemon reads config independently)
  */
 export function startReplyListener(config) {
     // Check if already running (idempotent)
@@ -660,8 +662,6 @@ export function startReplyListener(config) {
             message: 'tmux not available - reply injection requires tmux',
         };
     }
-    // Write daemon config to secure file (contains bot tokens, 0600 permissions)
-    writeDaemonConfig(config);
     ensureStateDir();
     // Fork a new process for the daemon
     const modulePath = __filename.replace(/\.ts$/, '.js');

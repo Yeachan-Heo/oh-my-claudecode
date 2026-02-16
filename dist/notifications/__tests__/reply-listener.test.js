@@ -220,11 +220,28 @@ describe("reply-listener", () => {
         });
     });
     describe("Configuration", () => {
-        it("reads bot tokens from state file, not env vars", () => {
-            // Bot tokens should be in daemon config file with 0600 permissions
-            // NOT in process.env
-            expect(process.env.TELEGRAM_BOT_TOKEN).toBeUndefined();
-            expect(process.env.DISCORD_BOT_TOKEN).toBeUndefined();
+        it("daemon derives config from getNotificationConfig, not separate file", () => {
+            // No reply-listener-config.json should be needed
+            // The daemon calls buildDaemonConfig() which uses getNotificationConfig()
+            const fs = require("fs");
+            const path = require("path");
+            const source = fs.readFileSync(path.join(__dirname, "..", "reply-listener.ts"), "utf-8");
+            // Should use buildDaemonConfig, not readDaemonConfig
+            expect(source).toContain("buildDaemonConfig");
+            expect(source).not.toContain("readDaemonConfig");
+            expect(source).not.toContain("writeDaemonConfig");
+            // Should import from config.js
+            expect(source).toContain("getNotificationConfig");
+            expect(source).toContain("getReplyConfig");
+            expect(source).toContain("getReplyListenerPlatformConfig");
+        });
+        it("forwards OMC_* env vars to daemon process", () => {
+            const fs = require("fs");
+            const path = require("path");
+            const source = fs.readFileSync(path.join(__dirname, "..", "reply-listener.ts"), "utf-8");
+            // Should forward OMC_* env vars for getNotificationConfig()
+            expect(source).toContain("OMC_");
+            expect(source).toContain("startsWith('OMC_')");
         });
         it("uses minimal env allowlist for daemon", () => {
             const allowlist = [

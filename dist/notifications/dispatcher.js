@@ -375,16 +375,22 @@ export async function sendWebhook(config, payload) {
  * Event-level config overrides top-level defaults.
  */
 function getEffectivePlatformConfig(platform, config, event) {
+    const topLevel = config[platform];
     const eventConfig = config.events?.[event];
     const eventPlatform = eventConfig?.[platform];
-    // Event-level override
+    // Event-level override merged with top-level defaults.
+    // This ensures fields like `mention` are inherited from top-level
+    // when the event-level config omits them.
     if (eventPlatform &&
         typeof eventPlatform === "object" &&
         "enabled" in eventPlatform) {
+        if (topLevel && typeof topLevel === "object") {
+            return { ...topLevel, ...eventPlatform };
+        }
         return eventPlatform;
     }
     // Top-level default
-    return config[platform];
+    return topLevel;
 }
 /**
  * Dispatch notifications to all enabled platforms for an event.

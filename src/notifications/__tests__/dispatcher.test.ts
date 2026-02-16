@@ -847,6 +847,192 @@ describe("dispatchNotifications", () => {
   });
 });
 
+describe("sendDiscordBot mention in content", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "1234567890" }),
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prepends mention to message content", async () => {
+    const config: DiscordBotNotificationConfig = {
+      enabled: true,
+      botToken: "test-bot-token",
+      channelId: "999888777",
+      mention: "<@12345678901234567>",
+    };
+    await sendDiscordBot(config, basePayload);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toContain("<@12345678901234567>");
+    expect(body.content).toMatch(/^<@12345678901234567>\n/);
+  });
+
+  it("prepends role mention to message content", async () => {
+    const config: DiscordBotNotificationConfig = {
+      enabled: true,
+      botToken: "test-bot-token",
+      channelId: "999888777",
+      mention: "<@&98765432109876543>",
+    };
+    await sendDiscordBot(config, basePayload);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toContain("<@&98765432109876543>");
+    expect(body.allowed_mentions.roles).toEqual(["98765432109876543"]);
+  });
+
+  it("sends content without mention prefix when mention is undefined", async () => {
+    const config: DiscordBotNotificationConfig = {
+      enabled: true,
+      botToken: "test-bot-token",
+      channelId: "999888777",
+    };
+    await sendDiscordBot(config, basePayload);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toBe(basePayload.message);
+  });
+
+  it("truncates long message to fit mention within 2000 chars", async () => {
+    const mention = "<@12345678901234567>";
+    const longMessage = "X".repeat(2500);
+    const config: DiscordBotNotificationConfig = {
+      enabled: true,
+      botToken: "test-bot-token",
+      channelId: "999888777",
+      mention,
+    };
+    await sendDiscordBot(config, { ...basePayload, message: longMessage });
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect(body.content).toMatch(/^<@12345678901234567>\n/);
+  });
+});
+
+describe("getEffectivePlatformConfig event-level merge", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "1234567890" }),
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("inherits mention from top-level when event-level override omits it", async () => {
+    const config: NotificationConfig = {
+      enabled: true,
+      "discord-bot": {
+        enabled: true,
+        botToken: "test-token",
+        channelId: "123456",
+        mention: "<@12345678901234567>",
+      },
+      events: {
+        "session-idle": {
+          enabled: true,
+          "discord-bot": {
+            enabled: true,
+            botToken: "test-token",
+            channelId: "123456",
+          },
+        },
+      },
+    };
+    const result = await dispatchNotifications(
+      config,
+      "session-idle",
+      basePayload,
+    );
+    expect(result.anySuccess).toBe(true);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toContain("<@12345678901234567>");
+  });
+
+  it("allows event-level to override mention", async () => {
+    const config: NotificationConfig = {
+      enabled: true,
+      "discord-bot": {
+        enabled: true,
+        botToken: "test-token",
+        channelId: "123456",
+        mention: "<@11111111111111111>",
+      },
+      events: {
+        "session-end": {
+          enabled: true,
+          "discord-bot": {
+            enabled: true,
+            botToken: "test-token",
+            channelId: "123456",
+            mention: "<@22222222222222222>",
+          },
+        },
+      },
+    };
+    const result = await dispatchNotifications(
+      config,
+      "session-end",
+      basePayload,
+    );
+    expect(result.anySuccess).toBe(true);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toContain("<@22222222222222222>");
+    expect(body.content).not.toContain("<@11111111111111111>");
+  });
+
+  it("inherits botToken and channelId from top-level for event override", async () => {
+    const config: NotificationConfig = {
+      enabled: true,
+      "discord-bot": {
+        enabled: false,
+        botToken: "inherited-token",
+        channelId: "inherited-channel",
+        mention: "<@12345678901234567>",
+      },
+      events: {
+        "session-end": {
+          enabled: true,
+          "discord-bot": {
+            enabled: true,
+          },
+        },
+      },
+    };
+    const result = await dispatchNotifications(
+      config,
+      "session-end",
+      basePayload,
+    );
+    expect(result.anySuccess).toBe(true);
+    const call = vi.mocked(fetch).mock.calls[0];
+    expect(call[0]).toBe(
+      "https://discord.com/api/v10/channels/inherited-channel/messages",
+    );
+    const body = JSON.parse(call[1]!.body as string);
+    expect(body.content).toContain("<@12345678901234567>");
+  });
+});
+
 describe("dispatcher mention separation", () => {
   it("dispatcher does not read process.env for mention resolution", async () => {
     // Read the dispatcher source to verify no process.env usage for mentions

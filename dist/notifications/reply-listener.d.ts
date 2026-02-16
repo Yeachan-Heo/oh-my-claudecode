@@ -64,12 +64,12 @@ declare function pollLoop(): Promise<void>;
 /**
  * Start the reply listener daemon.
  *
- * Writes bot tokens to the state file (0600 permissions), then forks
- * the daemon process with minimal env (no tokens in env).
+ * Forks a daemon process that derives its config from getNotificationConfig().
+ * OMC_* env vars are forwarded so the daemon can read both file and env config.
  *
  * Idempotent: if daemon is already running, returns success.
  *
- * @param config - Daemon config including bot tokens and reply settings
+ * @param config - Daemon config (used only for validation, daemon reads config independently)
  */
 export declare function startReplyListener(config: ReplyListenerDaemonConfig): DaemonResponse;
 /**
