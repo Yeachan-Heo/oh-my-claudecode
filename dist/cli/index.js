@@ -19,7 +19,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { loadConfig, getConfigPaths, generateConfigSchema } from '../config/loader.js';
 import { createSisyphusSession } from '../index.js';
-import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
+import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, CONFIG_FILE, } from '../features/auto-update.js';
 import { install as installSisyphus, isInstalled, getInstallInfo } from '../installer/index.js';
 import { statsCommand } from './commands/stats.js';
 import { costCommand } from './commands/cost.js';
@@ -33,8 +33,6 @@ import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } 
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 import { teleportCommand, teleportListCommand, teleportRemoveCommand } from './commands/teleport.js';
 import { getRuntimePackageVersion } from '../lib/version.js';
-import { launchCommand } from './launch.js';
-import { interopCommand } from './interop.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const version = getRuntimePackageVersion();
 const program = new Command();
@@ -88,20 +86,8 @@ async function displayAnalyticsBanner() {
         console.log('');
     }
 }
-// Default action when running 'omc' with no args
-// Check env var to decide between dashboard and launch
+// Default action when running 'omc' with no args - show everything
 async function defaultAction() {
-    const defaultActionMode = process.env.OMC_DEFAULT_ACTION || 'launch';
-    if (defaultActionMode === 'dashboard') {
-        await displayAnalyticsDashboard();
-    }
-    else {
-        // Launch Claude Code by default
-        await launchCommand([]);
-    }
-}
-// Analytics dashboard - moved from defaultAction
-async function displayAnalyticsDashboard() {
     await displayAnalyticsBanner();
     // Check if we need to backfill for agent data
     const shouldAutoBackfill = await checkIfBackfillNeeded();
@@ -137,50 +123,6 @@ program
     .description('Multi-agent orchestration system for Claude Agent SDK with analytics')
     .version(version)
     .action(defaultAction);
-/**
- * Launch command - Native tmux shell launch for Claude Code
- */
-program
-    .command('launch [args...]')
-    .description('Launch Claude Code with native tmux shell integration')
-    .allowUnknownOption()
-    .addHelpText('after', `
-Examples:
-  $ omc launch                   Launch Claude Code
-  $ omc launch --madmax          Launch with permissions bypass
-  $ omc launch --yolo            Launch with permissions bypass (alias)
-
-Environment:
-  Set OMC_DEFAULT_ACTION=dashboard to show analytics dashboard when running 'omc' with no args`)
-    .action(async (args) => {
-    await launchCommand(args);
-});
-/**
- * Dashboard command - Show analytics dashboard
- */
-program
-    .command('dashboard')
-    .description('Show analytics dashboard (aggregate stats, costs, agents)')
-    .addHelpText('after', `
-Note: This was the default 'omc' behavior. Now 'omc' launches Claude Code by default.
-Set OMC_DEFAULT_ACTION=dashboard to restore the old behavior.`)
-    .action(async () => {
-    await displayAnalyticsDashboard();
-});
-/**
- * Interop command - Split-pane tmux session with OMC and OMX
- */
-program
-    .command('interop')
-    .description('Launch split-pane tmux session with Claude Code (OMC) and Codex (OMX)')
-    .addHelpText('after', `
-Requirements:
-  - Must be running inside a tmux session
-  - Claude CLI must be installed
-  - Codex CLI recommended (graceful fallback if missing)`)
-    .action(() => {
-    interopCommand();
-});
 /**
  * Analytics Commands
  */
@@ -550,15 +492,13 @@ const configStopCallback = program
     .option('--disable', 'Disable callback')
     .option('--path <path>', 'File path (supports {session_id}, {date}, {time})')
     .option('--format <format>', 'File format: markdown | json')
-    .option('--token <token>', 'Bot token (telegram or discord-bot)')
+    .option('--token <token>', 'Telegram bot token')
     .option('--chat <id>', 'Telegram chat ID')
     .option('--webhook <url>', 'Discord webhook URL')
-    .option('--channel-id <id>', 'Discord bot channel ID (used with --profile)')
     .option('--tag-list <csv>', 'Replace tag list (comma-separated, telegram/discord only)')
     .option('--add-tag <tag>', 'Append one tag (telegram/discord only)')
     .option('--remove-tag <tag>', 'Remove one tag (telegram/discord only)')
     .option('--clear-tags', 'Clear all tags (telegram/discord only)')
-    .option('--profile <name>', 'Named notification profile to configure')
     .option('--show', 'Show current configuration')
     .addHelpText('after', `
 Types:
@@ -566,156 +506,13 @@ Types:
   telegram   Telegram bot notification
   discord    Discord webhook notification
 
-Profile types (use with --profile):
-  discord-bot  Discord Bot API (token + channel ID)
-  slack        Slack incoming webhook
-  webhook      Generic webhook (POST with JSON body)
-
 Examples:
   $ omc config-stop-callback file --enable --path ~/.claude/logs/{date}.md
   $ omc config-stop-callback telegram --enable --token <token> --chat <id>
   $ omc config-stop-callback discord --enable --webhook <url>
   $ omc config-stop-callback file --disable
-  $ omc config-stop-callback file --show
-
-  # Named profiles (stored in notificationProfiles):
-  $ omc config-stop-callback discord --profile work --enable --webhook <url>
-  $ omc config-stop-callback telegram --profile work --enable --token <tk> --chat <id>
-  $ omc config-stop-callback discord-bot --profile ops --enable --token <tk> --channel-id <id>
-
-  # Select profile at launch:
-  $ OMC_NOTIFY_PROFILE=work claude`)
+  $ omc config-stop-callback file --show`)
     .action(async (type, options) => {
-    // When --profile is used, route to profile-based config
-    if (options.profile) {
-        const profileValidTypes = ['file', 'telegram', 'discord', 'discord-bot', 'slack', 'webhook'];
-        if (!profileValidTypes.includes(type)) {
-            console.error(chalk.red(`Invalid type for profile: ${type}`));
-            console.error(chalk.gray(`Valid types: ${profileValidTypes.join(', ')}`));
-            process.exit(1);
-        }
-        const config = getOMCConfig();
-        config.notificationProfiles = config.notificationProfiles || {};
-        const profileName = options.profile;
-        const profile = config.notificationProfiles[profileName] || { enabled: true };
-        // Show current profile config
-        if (options.show) {
-            if (config.notificationProfiles[profileName]) {
-                console.log(chalk.blue(`Profile "${profileName}" — ${type} configuration:`));
-                const platformConfig = profile[type];
-                if (platformConfig) {
-                    console.log(JSON.stringify(platformConfig, null, 2));
-                }
-                else {
-                    console.log(chalk.yellow(`No ${type} platform configured in profile "${profileName}".`));
-                }
-            }
-            else {
-                console.log(chalk.yellow(`Profile "${profileName}" not found.`));
-            }
-            return;
-        }
-        let enabled;
-        if (options.enable)
-            enabled = true;
-        else if (options.disable)
-            enabled = false;
-        switch (type) {
-            case 'discord': {
-                const current = profile.discord;
-                if (enabled === true && (!options.webhook && !current?.webhookUrl)) {
-                    console.error(chalk.red('Discord requires --webhook <webhook_url>'));
-                    process.exit(1);
-                }
-                profile.discord = {
-                    ...current,
-                    enabled: enabled ?? current?.enabled ?? false,
-                    webhookUrl: options.webhook ?? current?.webhookUrl,
-                };
-                break;
-            }
-            case 'discord-bot': {
-                const current = profile['discord-bot'];
-                if (enabled === true && (!options.token && !current?.botToken)) {
-                    console.error(chalk.red('Discord bot requires --token <bot_token>'));
-                    process.exit(1);
-                }
-                if (enabled === true && (!options.channelId && !current?.channelId)) {
-                    console.error(chalk.red('Discord bot requires --channel-id <channel_id>'));
-                    process.exit(1);
-                }
-                profile['discord-bot'] = {
-                    ...current,
-                    enabled: enabled ?? current?.enabled ?? false,
-                    botToken: options.token ?? current?.botToken,
-                    channelId: options.channelId ?? current?.channelId,
-                };
-                break;
-            }
-            case 'telegram': {
-                const current = profile.telegram;
-                if (enabled === true && (!options.token && !current?.botToken)) {
-                    console.error(chalk.red('Telegram requires --token <bot_token>'));
-                    process.exit(1);
-                }
-                if (enabled === true && (!options.chat && !current?.chatId)) {
-                    console.error(chalk.red('Telegram requires --chat <chat_id>'));
-                    process.exit(1);
-                }
-                profile.telegram = {
-                    ...current,
-                    enabled: enabled ?? current?.enabled ?? false,
-                    botToken: options.token ?? current?.botToken,
-                    chatId: options.chat ?? current?.chatId,
-                };
-                break;
-            }
-            case 'slack': {
-                const current = profile.slack;
-                if (enabled === true && (!options.webhook && !current?.webhookUrl)) {
-                    console.error(chalk.red('Slack requires --webhook <webhook_url>'));
-                    process.exit(1);
-                }
-                profile.slack = {
-                    ...current,
-                    enabled: enabled ?? current?.enabled ?? false,
-                    webhookUrl: options.webhook ?? current?.webhookUrl,
-                };
-                break;
-            }
-            case 'webhook': {
-                const current = profile.webhook;
-                if (enabled === true && (!options.webhook && !current?.url)) {
-                    console.error(chalk.red('Webhook requires --webhook <url>'));
-                    process.exit(1);
-                }
-                profile.webhook = {
-                    ...current,
-                    enabled: enabled ?? current?.enabled ?? false,
-                    url: options.webhook ?? current?.url,
-                };
-                break;
-            }
-            case 'file': {
-                console.error(chalk.yellow('File callbacks are not supported in notification profiles.'));
-                console.error(chalk.gray('Use without --profile for file callbacks.'));
-                process.exit(1);
-                break;
-            }
-        }
-        config.notificationProfiles[profileName] = profile;
-        try {
-            writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
-            console.log(chalk.green(`\u2713 Profile "${profileName}" — ${type} configured`));
-            console.log(JSON.stringify(profile[type], null, 2));
-        }
-        catch (error) {
-            console.error(chalk.red('Failed to write configuration:'), error);
-            process.exit(1);
-        }
-        return;
-    }
-    // Legacy (non-profile) path
     const validTypes = ['file', 'telegram', 'discord'];
     if (!validTypes.includes(type)) {
         console.error(chalk.red(`Invalid callback type: ${type}`));
@@ -827,92 +624,6 @@ Examples:
     catch (error) {
         console.error(chalk.red('Failed to write configuration:'), error);
         process.exit(1);
-    }
-});
-/**
- * Config notify-profile subcommand - List, show, and delete notification profiles
- */
-program
-    .command('config-notify-profile [name]')
-    .description('Manage notification profiles')
-    .option('--list', 'List all profiles')
-    .option('--show', 'Show profile configuration')
-    .option('--delete', 'Delete a profile')
-    .addHelpText('after', `
-Examples:
-  $ omc config-notify-profile --list
-  $ omc config-notify-profile work --show
-  $ omc config-notify-profile work --delete
-
-  # Create/update profiles via config-stop-callback --profile:
-  $ omc config-stop-callback discord --profile work --enable --webhook <url>
-
-  # Select profile at launch:
-  $ OMC_NOTIFY_PROFILE=work claude`)
-    .action(async (name, options) => {
-    const config = getOMCConfig();
-    const profiles = config.notificationProfiles || {};
-    if (options.list || !name) {
-        const names = Object.keys(profiles);
-        if (names.length === 0) {
-            console.log(chalk.yellow('No notification profiles configured.'));
-            console.log(chalk.gray('Create one with: omc config-stop-callback <type> --profile <name> --enable ...'));
-        }
-        else {
-            console.log(chalk.blue('Notification profiles:'));
-            for (const pName of names) {
-                const p = profiles[pName];
-                const platforms = ['discord', 'discord-bot', 'telegram', 'slack', 'webhook']
-                    .filter((plat) => p[plat]?.enabled)
-                    .join(', ');
-                const status = p.enabled !== false ? chalk.green('enabled') : chalk.red('disabled');
-                console.log(`  ${chalk.bold(pName)} [${status}] — ${platforms || 'no platforms'}`);
-            }
-        }
-        const activeProfile = process.env.OMC_NOTIFY_PROFILE;
-        if (activeProfile) {
-            console.log(chalk.gray(`\nActive profile (OMC_NOTIFY_PROFILE): ${activeProfile}`));
-        }
-        return;
-    }
-    if (options.show) {
-        if (profiles[name]) {
-            console.log(chalk.blue(`Profile "${name}":`));
-            console.log(JSON.stringify(profiles[name], null, 2));
-        }
-        else {
-            console.log(chalk.yellow(`Profile "${name}" not found.`));
-        }
-        return;
-    }
-    if (options.delete) {
-        if (!profiles[name]) {
-            console.log(chalk.yellow(`Profile "${name}" not found.`));
-            return;
-        }
-        delete profiles[name];
-        config.notificationProfiles = profiles;
-        if (Object.keys(profiles).length === 0) {
-            delete config.notificationProfiles;
-        }
-        try {
-            writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
-            console.log(chalk.green(`\u2713 Profile "${name}" deleted`));
-        }
-        catch (error) {
-            console.error(chalk.red('Failed to write configuration:'), error);
-            process.exit(1);
-        }
-        return;
-    }
-    // Default: show the named profile
-    if (profiles[name]) {
-        console.log(chalk.blue(`Profile "${name}":`));
-        console.log(JSON.stringify(profiles[name], null, 2));
-    }
-    else {
-        console.log(chalk.yellow(`Profile "${name}" not found.`));
-        console.log(chalk.gray('Create it with: omc config-stop-callback <type> --profile ' + name + ' --enable ...'));
     }
 });
 /**
@@ -1049,34 +760,6 @@ Examples:
         const message = error instanceof Error ? error.message : String(error);
         console.error(chalk.red(`Update failed: ${message}`));
         console.error(chalk.gray('Try again with "omc update --force", or reinstall with "omc install --force".'));
-        process.exit(1);
-    }
-});
-/**
- * Update reconcile command - Internal command for post-update reconciliation
- * Called automatically after npm install to ensure hooks/settings are updated with NEW code
- */
-program
-    .command('update-reconcile')
-    .description('Internal: Reconcile runtime state after update (called by update command)')
-    .option('-v, --verbose', 'Show detailed output')
-    .action(async (options) => {
-    try {
-        const reconcileResult = reconcileUpdateRuntime({ verbose: options.verbose });
-        if (!reconcileResult.success) {
-            console.error(chalk.red('Reconciliation failed:'));
-            if (reconcileResult.errors) {
-                reconcileResult.errors.forEach(err => console.error(chalk.red(`  - ${err}`)));
-            }
-            process.exit(1);
-        }
-        if (options.verbose) {
-            console.log(chalk.green(reconcileResult.message));
-        }
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(chalk.red(`Reconciliation error: ${message}`));
         process.exit(1);
     }
 });

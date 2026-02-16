@@ -11,13 +11,14 @@ import * as crypto from "crypto";
  * Ensures parent directories exist before creating the target directory.
  *
  * @param dir Directory path to create
+ * @param mode Optional permission mode for the directory (e.g. 0o700)
  */
-export function ensureDirSync(dir) {
+export function ensureDirSync(dir, mode) {
     if (fsSync.existsSync(dir)) {
         return;
     }
     try {
-        fsSync.mkdirSync(dir, { recursive: true });
+        fsSync.mkdirSync(dir, { recursive: true, ...(mode !== undefined && { mode }) });
     }
     catch (err) {
         // If directory was created by another process between exists check and mkdir,
@@ -87,7 +88,7 @@ export async function atomicWriteJson(filePath, data) {
  *
  * @param filePath Target file path
  * @param content String content to write
- * @param options Optional settings (mode defaults to 0o600)
+ * @param options Optional settings (mode defaults to 0o600, dirMode for parent directory permissions)
  * @throws Error if write operation fails
  */
 export function atomicWriteFileSync(filePath, content, options) {
@@ -99,7 +100,7 @@ export function atomicWriteFileSync(filePath, content, options) {
     let success = false;
     try {
         // Ensure parent directory exists
-        ensureDirSync(dir);
+        ensureDirSync(dir, options?.dirMode);
         // Open temp file with exclusive creation (O_CREAT | O_EXCL | O_WRONLY)
         fd = fsSync.openSync(tempPath, "wx", fileMode);
         // Write content

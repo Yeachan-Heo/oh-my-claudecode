@@ -1,12 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { removeCodeBlocks, sanitizeForKeywordDetection, extractPromptText, detectKeywordsWithType, hasKeyword, getPrimaryKeyword, getAllKeywords, } from '../index.js';
-// Mock isEcomodeEnabled
+// Mock isTeamEnabled
 vi.mock('../../../features/auto-update.js', () => ({
-    isEcomodeEnabled: vi.fn(() => true),
     isTeamEnabled: vi.fn(() => true),
 }));
-import { isEcomodeEnabled } from '../../../features/auto-update.js';
-const mockedIsEcomodeEnabled = vi.mocked(isEcomodeEnabled);
 import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
 describe('keyword-detector', () => {
@@ -172,20 +169,20 @@ World`);
                 expect(ralphMatch).toBeDefined();
                 expect(ralphMatch?.keyword).toBe('ralph');
             });
-            it('should detect "don\'t stop" keyword', () => {
+            it('should NOT detect "don\'t stop" phrase', () => {
                 const result = detectKeywordsWithType("Don't stop until done");
                 const ralphMatch = result.find((r) => r.type === 'ralph');
-                expect(ralphMatch).toBeDefined();
+                expect(ralphMatch).toBeUndefined();
             });
-            it('should detect "must complete" keyword', () => {
+            it('should NOT detect "must complete" phrase', () => {
                 const result = detectKeywordsWithType('You must complete this task');
                 const ralphMatch = result.find((r) => r.type === 'ralph');
-                expect(ralphMatch).toBeDefined();
+                expect(ralphMatch).toBeUndefined();
             });
-            it('should detect "until done" keyword', () => {
+            it('should NOT detect "until done" phrase', () => {
                 const result = detectKeywordsWithType('Keep going until done');
                 const ralphMatch = result.find((r) => r.type === 'ralph');
-                expect(ralphMatch).toBeDefined();
+                expect(ralphMatch).toBeUndefined();
             });
         });
         describe('autopilot keyword', () => {
@@ -204,11 +201,6 @@ World`);
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
                 expect(autopilotMatch).toBeDefined();
             });
-            it('should detect "autonomous" keyword', () => {
-                const result = detectKeywordsWithType('Run in autonomous mode');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
             it('should detect "full auto" keyword', () => {
                 const result = detectKeywordsWithType('Go full auto on this');
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
@@ -219,40 +211,15 @@ World`);
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
                 expect(autopilotMatch).toBeDefined();
             });
-            it('should detect autopilot phrase "build me"', () => {
+            it('should NOT detect "build me" phrase', () => {
                 const result = detectKeywordsWithType('build me a web app');
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
+                expect(autopilotMatch).toBeUndefined();
             });
-            it('should detect autopilot phrase "create me"', () => {
-                const result = detectKeywordsWithType('create me a new feature');
+            it('should NOT detect "autonomous" keyword', () => {
+                const result = detectKeywordsWithType('Run in autonomous mode');
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
-            it('should detect autopilot phrase "make me"', () => {
-                const result = detectKeywordsWithType('make me a dashboard');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
-            it('should detect autopilot phrase "i want a"', () => {
-                const result = detectKeywordsWithType('i want a new login page');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
-            it('should detect autopilot phrase "handle it all"', () => {
-                const result = detectKeywordsWithType('Just handle it all');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
-            it('should detect autopilot phrase "end to end"', () => {
-                const result = detectKeywordsWithType('Build this end to end');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
-            });
-            it('should detect autopilot phrase "e2e this"', () => {
-                const result = detectKeywordsWithType('e2e this feature');
-                const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeDefined();
+                expect(autopilotMatch).toBeUndefined();
             });
         });
         describe('ultrawork keyword', () => {
@@ -266,6 +233,50 @@ World`);
                 const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
                 expect(ultraworkMatch).toBeDefined();
             });
+            it('should NOT detect uw abbreviation', () => {
+                const result = detectKeywordsWithType('uw this code');
+                const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
+                expect(ultraworkMatch).toBeUndefined();
+            });
+        });
+        describe('pipeline keyword', () => {
+            it('should detect agent pipeline phrase', () => {
+                const result = detectKeywordsWithType('agent pipeline build the API');
+                const pipelineMatch = result.find((r) => r.type === 'pipeline');
+                expect(pipelineMatch).toBeDefined();
+            });
+            it('should detect chain agents phrase', () => {
+                const result = detectKeywordsWithType('chain agents to build');
+                const pipelineMatch = result.find((r) => r.type === 'pipeline');
+                expect(pipelineMatch).toBeDefined();
+            });
+            it('should NOT detect bare pipeline keyword', () => {
+                const result = detectKeywordsWithType('pipeline fix this');
+                const pipelineMatch = result.find((r) => r.type === 'pipeline');
+                expect(pipelineMatch).toBeUndefined();
+            });
+            it('should NOT detect CI/CD pipeline', () => {
+                const result = detectKeywordsWithType('the CI pipeline is broken');
+                const pipelineMatch = result.find((r) => r.type === 'pipeline');
+                expect(pipelineMatch).toBeUndefined();
+            });
+        });
+        describe('tdd keyword', () => {
+            it('should detect tdd keyword', () => {
+                const result = detectKeywordsWithType('tdd this feature');
+                const tddMatch = result.find((r) => r.type === 'tdd');
+                expect(tddMatch).toBeDefined();
+            });
+            it('should detect test first phrase', () => {
+                const result = detectKeywordsWithType('test first approach');
+                const tddMatch = result.find((r) => r.type === 'tdd');
+                expect(tddMatch).toBeDefined();
+            });
+            it('should NOT detect red green phrase', () => {
+                const result = detectKeywordsWithType('red green refactor cycle');
+                const tddMatch = result.find((r) => r.type === 'tdd');
+                expect(tddMatch).toBeUndefined();
+            });
         });
         describe('ultrathink keyword', () => {
             it('should detect ultrathink keyword', () => {
@@ -273,10 +284,15 @@ World`);
                 const ultrathinkMatch = result.find((r) => r.type === 'ultrathink');
                 expect(ultrathinkMatch).toBeDefined();
             });
-            it('should detect think keyword', () => {
+            it('should NOT detect "think hard" phrase', () => {
                 const result = detectKeywordsWithType('think hard about this problem');
                 const ultrathinkMatch = result.find((r) => r.type === 'ultrathink');
-                expect(ultrathinkMatch).toBeDefined();
+                expect(ultrathinkMatch).toBeUndefined();
+            });
+            it('should NOT detect "think deeply" phrase', () => {
+                const result = detectKeywordsWithType('think deeply about this problem');
+                const ultrathinkMatch = result.find((r) => r.type === 'ultrathink');
+                expect(ultrathinkMatch).toBeUndefined();
             });
         });
         describe('deepsearch keyword', () => {
@@ -295,25 +311,35 @@ World`);
                 const searchMatch = result.find((r) => r.type === 'deepsearch');
                 expect(searchMatch).toBeDefined();
             });
+            it('should detect find in the codebase', () => {
+                const result = detectKeywordsWithType('find in the codebase');
+                const searchMatch = result.find((r) => r.type === 'deepsearch');
+                expect(searchMatch).toBeDefined();
+            });
             it('should NOT detect generic find', () => {
                 const result = detectKeywordsWithType('find the bug');
                 const searchMatch = result.find((r) => r.type === 'deepsearch');
                 expect(searchMatch).toBeUndefined();
             });
-            it('should detect search code pattern', () => {
+            it('should NOT detect search code pattern', () => {
                 const result = detectKeywordsWithType('search code for errors');
                 const searchMatch = result.find((r) => r.type === 'deepsearch');
-                expect(searchMatch).toBeDefined();
+                expect(searchMatch).toBeUndefined();
             });
-            it('should detect find in all files', () => {
+            it('should NOT detect find in all files', () => {
                 const result = detectKeywordsWithType('find in all files');
                 const searchMatch = result.find((r) => r.type === 'deepsearch');
-                expect(searchMatch).toBeDefined();
+                expect(searchMatch).toBeUndefined();
             });
-            it('should detect search project', () => {
+            it('should NOT detect search project', () => {
                 const result = detectKeywordsWithType('search the project');
                 const searchMatch = result.find((r) => r.type === 'deepsearch');
-                expect(searchMatch).toBeDefined();
+                expect(searchMatch).toBeUndefined();
+            });
+            it('should NOT detect search files', () => {
+                const result = detectKeywordsWithType('search files for errors');
+                const searchMatch = result.find((r) => r.type === 'deepsearch');
+                expect(searchMatch).toBeUndefined();
             });
         });
         describe('analyze keyword', () => {
@@ -322,112 +348,50 @@ World`);
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
                 expect(analyzeMatch).toBeDefined();
             });
-            it('should detect investigate with context', () => {
+            it('should detect deep-analyze with hyphen', () => {
+                const result = detectKeywordsWithType('deep-analyze this code');
+                const analyzeMatch = result.find((r) => r.type === 'analyze');
+                expect(analyzeMatch).toBeDefined();
+            });
+            it('should detect deepanalyze without space', () => {
+                const result = detectKeywordsWithType('deepanalyze this code');
+                const analyzeMatch = result.find((r) => r.type === 'analyze');
+                expect(analyzeMatch).toBeDefined();
+            });
+            it('should NOT detect investigate with context', () => {
                 const result = detectKeywordsWithType('investigate the issue');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
-            it('should detect investigate this', () => {
+            it('should NOT detect investigate this', () => {
                 const result = detectKeywordsWithType('investigate this bug');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
-            it('should detect investigate why', () => {
+            it('should NOT detect investigate why', () => {
                 const result = detectKeywordsWithType('investigate why this fails');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
-            it('should detect debug the', () => {
+            it('should NOT detect debug the', () => {
                 const result = detectKeywordsWithType('debug the function');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
-            it('should detect debug this', () => {
+            it('should NOT detect debug this', () => {
                 const result = detectKeywordsWithType('debug this issue');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
-            it('should detect debug why', () => {
+            it('should NOT detect debug why', () => {
                 const result = detectKeywordsWithType('debug why this breaks');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeDefined();
+                expect(analyzeMatch).toBeUndefined();
             });
             it('should NOT detect generic analyze', () => {
                 const result = detectKeywordsWithType('analyze without context');
                 const analyzeMatch = result.find((r) => r.type === 'analyze');
                 expect(analyzeMatch).toBeUndefined();
-            });
-            it('should NOT detect generic how/why phrases', () => {
-                const result = detectKeywordsWithType('how to do this');
-                const analyzeMatch = result.find((r) => r.type === 'analyze');
-                expect(analyzeMatch).toBeUndefined();
-            });
-        });
-        describe('ecomode keyword', () => {
-            it('should NOT detect bare eco keyword', () => {
-                const result = detectKeywordsWithType('eco fix all errors');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeUndefined();
-            });
-            it('should NOT detect budget keyword', () => {
-                const result = detectKeywordsWithType('budget fix all errors');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeUndefined();
-            });
-            it('should NOT detect efficient keyword', () => {
-                const result = detectKeywordsWithType('efficient fix all errors');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeUndefined();
-            });
-            it('should detect ecomode keyword', () => {
-                const result = detectKeywordsWithType('ecomode fix build');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeDefined();
-            });
-            it('should detect eco-mode keyword', () => {
-                const result = detectKeywordsWithType('eco-mode fix build');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeDefined();
-            });
-            it('should detect eco mode keyword', () => {
-                const result = detectKeywordsWithType('eco mode fix build');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeDefined();
-            });
-            it('should detect save-tokens keyword', () => {
-                const result = detectKeywordsWithType('save-tokens and fix errors');
-                const ecoMatch = result.find((r) => r.type === 'ecomode');
-                expect(ecoMatch).toBeDefined();
-            });
-            describe('when ecomode is disabled via config', () => {
-                beforeEach(() => {
-                    mockedIsEcomodeEnabled.mockReturnValue(false);
-                });
-                afterEach(() => {
-                    mockedIsEcomodeEnabled.mockReturnValue(true);
-                });
-                it('should NOT detect ecomode keyword when disabled', () => {
-                    const result = detectKeywordsWithType('ecomode fix build');
-                    const ecoMatch = result.find((r) => r.type === 'ecomode');
-                    expect(ecoMatch).toBeUndefined();
-                });
-                it('should NOT detect eco-mode keyword when disabled', () => {
-                    const result = detectKeywordsWithType('eco-mode fix build');
-                    const ecoMatch = result.find((r) => r.type === 'ecomode');
-                    expect(ecoMatch).toBeUndefined();
-                });
-                it('should still detect ultrawork when ecomode is disabled', () => {
-                    const result = detectKeywordsWithType('ulw ecomode fix errors');
-                    const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
-                    expect(ultraworkMatch).toBeDefined();
-                    const ecoMatch = result.find((r) => r.type === 'ecomode');
-                    expect(ecoMatch).toBeUndefined();
-                });
-                it('should not suppress ultrawork when ecomode disabled and both keywords present', () => {
-                    const result = getAllKeywords('ulw ecomode fix errors');
-                    expect(result).toContain('ultrawork');
-                    expect(result).not.toContain('ecomode');
-                });
             });
         });
         describe('case insensitivity', () => {
@@ -577,7 +541,7 @@ World`);
                 expect(autopilotMatch?.position).toBeGreaterThanOrEqual(0);
             });
             it('should detect multiple different keyword types', () => {
-                const text = 'autopilot and investigate the bug';
+                const text = 'autopilot and deep analyze the bug';
                 const result = detectKeywordsWithType(text);
                 const types = result.map((r) => r.type);
                 expect(types).toContain('autopilot');
@@ -620,7 +584,7 @@ World`);
                 expect(result?.type).toBe('ultrawork');
             });
             it('should return ultrathink over deepsearch', () => {
-                const result = getPrimaryKeyword('think hard and search the codebase');
+                const result = getPrimaryKeyword('ultrathink and search the codebase');
                 expect(result?.type).toBe('ultrathink');
             });
             it('should return deepsearch over analyze', () => {
@@ -628,34 +592,24 @@ World`);
                 expect(result?.type).toBe('deepsearch');
             });
             it('should return analyze when it is the only keyword', () => {
-                const result = getPrimaryKeyword('investigate the issue');
+                const result = getPrimaryKeyword('deep analyze the issue');
                 expect(result?.type).toBe('analyze');
             });
         });
         describe('multiple keyword conflict resolution', () => {
-            it('should return ecomode over ultrawork when both present', () => {
-                // ecomode wins over ultrawork per conflict resolution rules
-                const result = getPrimaryKeyword('ulw ecomode fix errors');
-                expect(result?.type).toBe('ecomode');
-            });
-            it('should return ecomode over ultrawork (ecomode has higher priority)', () => {
-                // UPDATED: ecomode wins per conflict resolution
-                const result = getPrimaryKeyword('ecomode ultrawork fix errors');
-                expect(result?.type).toBe('ecomode');
-            });
             it('should return cancel over everything', () => {
-                const result = getPrimaryKeyword('cancelomc ralph ultrawork eco');
+                const result = getPrimaryKeyword('cancelomc ralph ultrawork');
                 expect(result?.type).toBe('cancel');
             });
-            it('should return ralph over ultrawork and ecomode', () => {
-                const result = getPrimaryKeyword('ralph ulw ecomode fix errors');
+            it('should return ralph over ultrawork', () => {
+                const result = getPrimaryKeyword('ralph ulw fix errors');
                 expect(result?.type).toBe('ralph');
             });
             it('should detect all keywords even when multiple present', () => {
-                const result = detectKeywordsWithType('ulw ecomode fix errors');
+                const result = detectKeywordsWithType('ulw ralph fix errors');
                 const types = result.map(r => r.type);
                 expect(types).toContain('ultrawork');
-                expect(types).toContain('ecomode');
+                expect(types).toContain('ralph');
             });
         });
         it('should return null when no keyword found', () => {
@@ -694,9 +648,6 @@ World`);
         it('should return cancel exclusively when present', () => {
             expect(getAllKeywords('cancelomc ralph ultrawork')).toEqual(['cancel']);
         });
-        it('should return ecomode over ultrawork when both present', () => {
-            expect(getAllKeywords('ulw ecomode fix errors')).toEqual(['ecomode']);
-        });
         it('should return team and ultrapilot when legacy ultrapilot trigger is present', () => {
             const result = getAllKeywords('autopilot ultrapilot build');
             expect(result).toContain('ultrapilot');
@@ -713,12 +664,6 @@ World`);
             const result = getAllKeywords('ralph ultrawork fix');
             expect(result).toContain('ralph');
             expect(result).toContain('ultrawork');
-        });
-        it('should return ralph with ecomode but not ultrawork', () => {
-            const result = getAllKeywords('ralph ecomode ulw fix');
-            expect(result).toContain('ralph');
-            expect(result).toContain('ecomode');
-            expect(result).not.toContain('ultrawork');
         });
         it('should return ralph with codex', () => {
             const result = getAllKeywords('ralph ask gpt to review');
@@ -808,11 +753,10 @@ World`);
             expect(result).toContain('swarm');
         });
         // Mixed keyword precedence tests
-        it('should handle team + ecomode + ralph combination', () => {
-            const result = getAllKeywords('team ralph ecomode build the app');
+        it('should handle team + ralph combination', () => {
+            const result = getAllKeywords('team ralph build the app');
             expect(result).toContain('ralph');
             expect(result).toContain('team');
-            expect(result).toContain('ecomode');
         });
         it('should not detect cancel alongside team', () => {
             const result = getAllKeywords('cancelomc team');

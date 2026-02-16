@@ -63,12 +63,12 @@ var fs = __toESM(require("fs/promises"), 1);
 var fsSync = __toESM(require("fs"), 1);
 var path = __toESM(require("path"), 1);
 var crypto = __toESM(require("crypto"), 1);
-function ensureDirSync(dir) {
+function ensureDirSync(dir, mode) {
   if (fsSync.existsSync(dir)) {
     return;
   }
   try {
-    fsSync.mkdirSync(dir, { recursive: true });
+    fsSync.mkdirSync(dir, { recursive: true, ...mode !== void 0 && { mode } });
   } catch (err) {
     if (err.code === "EEXIST") {
       return;
@@ -84,7 +84,7 @@ function atomicWriteFileSync(filePath, content, options) {
   let fd = null;
   let success = false;
   try {
-    ensureDirSync(dir);
+    ensureDirSync(dir, options?.dirMode);
     fd = fsSync.openSync(tempPath, "wx", fileMode);
     fsSync.writeSync(fd, content, 0, "utf-8");
     fsSync.fsyncSync(fd);
@@ -119,7 +119,7 @@ function atomicWriteFileSync(filePath, content, options) {
 
 // src/team/fs-utils.ts
 function atomicWriteJson(filePath, data, mode = 384) {
-  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + "\n", { mode });
+  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + "\n", { mode, dirMode: 448 });
 }
 function writeFileWithMode(filePath, data, mode = 384) {
   (0, import_fs.writeFileSync)(filePath, data, { encoding: "utf-8", mode });

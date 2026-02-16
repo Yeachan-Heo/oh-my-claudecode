@@ -11,7 +11,7 @@ import { dirname, resolve, relative, basename } from 'path';
 import { atomicWriteFileSync } from '../lib/atomic-write.js';
 /** Atomic write: write JSON to temp file with permissions, then rename (prevents corruption on crash) */
 export function atomicWriteJson(filePath, data, mode = 0o600) {
-    atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode });
+    atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode, dirMode: 0o700 });
 }
 /** Write file with explicit permission mode */
 export function writeFileWithMode(filePath, data, mode = 0o600) {

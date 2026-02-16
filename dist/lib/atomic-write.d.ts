@@ -7,8 +7,9 @@
  * Ensures parent directories exist before creating the target directory.
  *
  * @param dir Directory path to create
+ * @param mode Optional permission mode for the directory (e.g. 0o700)
  */
-export declare function ensureDirSync(dir: string): void;
+export declare function ensureDirSync(dir: string, mode?: number): void;
 /**
  * Write JSON data atomically to a file.
  * Uses temp file + atomic rename pattern to ensure durability.
@@ -24,11 +25,12 @@ export declare function atomicWriteJson(filePath: string, data: unknown): Promis
  *
  * @param filePath Target file path
  * @param content String content to write
- * @param options Optional settings (mode defaults to 0o600)
+ * @param options Optional settings (mode defaults to 0o600, dirMode for parent directory permissions)
  * @throws Error if write operation fails
  */
 export declare function atomicWriteFileSync(filePath: string, content: string, options?: {
     mode?: number;
+    dirMode?: number;
 }): void;
 /**
  * @deprecated Use atomicWriteFileSync instead. This is a compatibility alias.

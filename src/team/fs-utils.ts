@@ -14,7 +14,7 @@ import { atomicWriteFileSync } from '../lib/atomic-write.js';
 
 /** Atomic write: write JSON to temp file with permissions, then rename (prevents corruption on crash) */
 export function atomicWriteJson(filePath: string, data: unknown, mode: number = 0o600): void {
-  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode });
+  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode, dirMode: 0o700 });
 }
 
 /** Write file with explicit permission mode */

@@ -19782,12 +19782,12 @@ var fs2 = __toESM(require("fs/promises"), 1);
 var fsSync = __toESM(require("fs"), 1);
 var path2 = __toESM(require("path"), 1);
 var crypto2 = __toESM(require("crypto"), 1);
-function ensureDirSync(dir) {
+function ensureDirSync(dir, mode) {
   if (fsSync.existsSync(dir)) {
     return;
   }
   try {
-    fsSync.mkdirSync(dir, { recursive: true });
+    fsSync.mkdirSync(dir, { recursive: true, ...mode !== void 0 && { mode } });
   } catch (err) {
     if (err.code === "EEXIST") {
       return;
@@ -19836,7 +19836,7 @@ function atomicWriteFileSync(filePath, content, options) {
   let fd = null;
   let success = false;
   try {
-    ensureDirSync(dir);
+    ensureDirSync(dir, options?.dirMode);
     fd = fsSync.openSync(tempPath, "wx", fileMode);
     fsSync.writeSync(fd, content, 0, "utf-8");
     fsSync.fsyncSync(fd);
@@ -21322,12 +21322,6 @@ var MODE_CONFIGS = {
     name: "UltraQA",
     stateFile: "ultraqa-state.json",
     activeProperty: "active"
-  },
-  ecomode: {
-    name: "Ecomode",
-    stateFile: "ecomode-state.json",
-    activeProperty: "active",
-    hasGlobalState: false
   }
 };
 function getStateDir(cwd) {
@@ -21495,8 +21489,7 @@ var EXECUTION_MODES = [
   "team",
   "ralph",
   "ultrawork",
-  "ultraqa",
-  "ecomode"
+  "ultraqa"
 ];
 var STATE_TOOL_MODES = [...EXECUTION_MODES, "ralplan"];
 function getStatePath(mode, root) {
