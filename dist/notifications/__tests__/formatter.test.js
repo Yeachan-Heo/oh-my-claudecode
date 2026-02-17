@@ -32,6 +32,17 @@ describe("formatSessionIdle", () => {
         });
         expect(result).toContain("**Modes:** ultrawork, ralph");
     });
+    it("should include contextSummary when provided", () => {
+        const result = formatSessionIdle({
+            ...basePayload,
+            contextSummary: "Refactored auth module and added tests",
+        });
+        expect(result).toContain("**Summary:** Refactored auth module and added tests");
+    });
+    it("should not include summary section when contextSummary is absent", () => {
+        const result = formatSessionIdle(basePayload);
+        expect(result).not.toContain("**Summary:**");
+    });
     it("should include tmux session in footer when available", () => {
         const result = formatSessionIdle({
             ...basePayload,
