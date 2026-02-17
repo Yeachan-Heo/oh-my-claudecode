@@ -124,6 +124,9 @@ export function formatSessionIdle(payload) {
     if (payload.modesUsed && payload.modesUsed.length > 0) {
         lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
     }
+    if (payload.contextSummary) {
+        lines.push("", `**Summary:** ${payload.contextSummary}`);
+    }
     lines.push("");
     lines.push(buildFooter(payload, true));
     return lines.join("\n");

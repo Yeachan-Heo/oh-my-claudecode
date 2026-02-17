@@ -622,6 +622,9 @@ async function main() {
               notify('session-idle', {
                 sessionId,
                 projectPath: directory,
+                contextSummary: typeof data.tool_response === 'string' && data.tool_response.length > 0
+                  ? data.tool_response.slice(0, 500)
+                  : undefined,
               }).catch(() => {})
             )
             .catch(() => {});
