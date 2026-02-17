@@ -69,6 +69,9 @@ export {
   getRegistrationStrategy,
   readProbeResult,
   writeProbeResult,
+  isProtocolTeam,
+  writeStateVersion,
+  readStateVersion,
 } from './team-registration.js';
 
 export {
@@ -84,6 +87,8 @@ export {
   readNewOutboxMessages,
   readAllTeamOutboxMessages,
   resetOutboxCursor,
+  readProtocolOutboxMessages,
+  readAllProtocolTeamOutboxMessages,
 } from './outbox-reader.js';
 
 export type { OutboxCursor } from './outbox-reader.js';
@@ -92,6 +97,20 @@ export { getTeamStatus } from './team-status.js';
 export type { WorkerStatus, TeamStatus } from './team-status.js';
 
 export { runBridge, sanitizePromptContent } from './mcp-team-bridge.js';
+
+export {
+  CodexSpawner,
+  GeminiSpawner,
+  ClaudeCodeSpawner,
+  getSpawner,
+} from './spawner.js';
+
+export type {
+  WorkerSpawner,
+  SpawnRunConfig,
+  SpawnResult,
+  SpawnHandle,
+} from './spawner.js';
 
 export { validateConfigPath } from './bridge-entry.js';
 

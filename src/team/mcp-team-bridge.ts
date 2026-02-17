@@ -3,22 +3,55 @@
 /**
  * MCP Team Bridge Daemon
  *
- * Core bridge process that runs in a tmux session alongside a Codex/Gemini CLI.
+ * Core bridge process that runs in a tmux session alongside a Codex/Gemini/Claude CLI.
  * Polls task files, builds prompts, spawns CLI processes, reports results.
  */
 
-import { spawn, ChildProcess } from 'child_process';
-import { existsSync, readFileSync, openSync, readSync, closeSync } from 'fs';
+import { ChildProcess } from 'child_process';
+import { existsSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
 import type { BridgeConfig, TaskFile, OutboxMessage, HeartbeatData, InboxMessage } from './types.js';
-import { findNextTask, updateTask, readTask, writeTaskFailure, readTaskFailure, isTaskRetryExhausted } from './task-file-ops.js';
+import { getSpawner } from './spawner.js';
 import {
-  readNewInboxMessages, appendOutbox, rotateOutboxIfNeeded, rotateInboxIfNeeded,
-  checkShutdownSignal, deleteShutdownSignal, checkDrainSignal, deleteDrainSignal
-} from './inbox-outbox.js';
+  listTasks as protoListTasks,
+  updateTask as protoUpdateTask,
+  readTask as protoReadTask,
+} from 'cli-agent-mail';
+import type { ProtocolTask } from 'cli-agent-mail';
+import {
+  claimTask as protoClaimTask,
+  transitionTask as protoTransitionTask,
+  releaseTaskClaim as protoReleaseTaskClaim,
+  computeTaskReadiness,
+} from 'cli-agent-mail';
+import {
+  sendMessage as protoSendMessage,
+  listMessages as protoListMessages,
+  markDelivered as protoMarkDelivered,
+  pruneDeliveredMessages as protoPruneDelivered,
+} from 'cli-agent-mail';
+import {
+  writeHeartbeat as protoWriteHeartbeat,
+  readHeartbeat as protoReadHeartbeat,
+} from 'cli-agent-mail';
+import {
+  readShutdownRequest as protoReadShutdown,
+  readDrainSignal as protoReadDrain,
+  clearSignals as protoClearSignals,
+  ackShutdown as protoAckShutdown,
+} from 'cli-agent-mail';
+import {
+  appendEvent as protoAppendEvent,
+} from 'cli-agent-mail';
+import {
+  toProtocolTask, fromProtocolTask,
+  toProtocolMessage, fromProtocolMessage,
+  toProtocolHeartbeat,
+  resolveStateRoot,
+} from './protocol-adapter.js';
+import { writeTaskFailure, readTaskFailure, isTaskRetryExhausted } from './task-file-ops.js';
 import { unregisterMcpWorker } from './team-registration.js';
-import { writeHeartbeat, deleteHeartbeat } from './heartbeat.js';
 import { killSession } from './tmux-session.js';
 import { logAuditEvent } from './audit-log.js';
 import type { AuditEvent } from './audit-log.js';
@@ -115,13 +148,7 @@ function buildEffectivePermissions(config: BridgeConfig): WorkerPermissions {
   });
 }
 
-/** Maximum stdout/stderr buffer size (10MB) */
-const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
-
-/** Max inbox file size before rotation (matches inbox-outbox.ts) */
-const INBOX_ROTATION_THRESHOLD = 10 * 1024 * 1024; // 10MB
-
-/** Build heartbeat data */
+/** Build heartbeat data (OMC format, converted to protocol for writes) */
 function buildHeartbeat(
   config: BridgeConfig,
   status: HeartbeatData['status'],
@@ -138,6 +165,82 @@ function buildHeartbeat(
     consecutiveErrors,
     status,
   };
+}
+
+/** Write heartbeat via protocol library */
+function writeHeartbeatProto(config: BridgeConfig, hbData: HeartbeatData): void {
+  const stateRoot = resolveStateRoot(config.workingDirectory);
+  const protoHb = toProtocolHeartbeat(hbData);
+  protoWriteHeartbeat(stateRoot, config.teamName, config.workerName, protoHb);
+}
+
+/** Send outbox message via protocol mailbox (worker -> lead) */
+function sendOutboxMessage(config: BridgeConfig, message: OutboxMessage): void {
+  const stateRoot = resolveStateRoot(config.workingDirectory);
+  const protoMsg = toProtocolMessage(message, config.workerName);
+  protoSendMessage(stateRoot, config.teamName, {
+    from: protoMsg.from,
+    to: 'lead',
+    type: protoMsg.type,
+    body: protoMsg.body,
+  });
+}
+
+/** Read new inbox messages via protocol mailbox, marking delivered */
+function readInboxMessages(config: BridgeConfig): InboxMessage[] {
+  const stateRoot = resolveStateRoot(config.workingDirectory);
+  const protoMessages = protoListMessages(stateRoot, config.teamName, config.workerName);
+  // Filter to undelivered messages
+  const undelivered = protoMessages.filter(m => !m.delivered_at);
+  // Mark them delivered
+  for (const m of undelivered) {
+    try {
+      protoMarkDelivered(stateRoot, config.teamName, config.workerName, m.message_id);
+    } catch { /* best effort */ }
+  }
+  // Convert to OMC InboxMessage format
+  return undelivered.map(fromProtocolMessage);
+}
+
+/** Find next executable task for this worker via protocol APIs */
+async function findNextTaskProto(config: BridgeConfig): Promise<{ task: TaskFile; claimToken: string } | null> {
+  const stateRoot = resolveStateRoot(config.workingDirectory);
+  const allTasks = protoListTasks(stateRoot, config.teamName);
+
+  // Sort by ID ascending (numeric then lexicographic)
+  allTasks.sort((a, b) => {
+    const numA = parseInt(a.id, 10);
+    const numB = parseInt(b.id, 10);
+    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+    return a.id.localeCompare(b.id);
+  });
+
+  for (const protoTask of allTasks) {
+    if (protoTask.status !== 'pending') continue;
+    if (protoTask.owner !== config.workerName) continue;
+
+    // Check readiness (dependencies resolved)
+    const readiness = computeTaskReadiness(stateRoot, config.teamName, protoTask);
+    if (!readiness.ready) continue;
+
+    // Attempt to claim
+    const result = protoClaimTask(stateRoot, config.teamName, protoTask.id, config.workerName);
+    if (!result.ok) continue;
+
+    return { task: fromProtocolTask(result.task), claimToken: result.claimToken };
+  }
+
+  return null;
+}
+
+/** Update task status via protocol */
+function updateTaskProto(config: BridgeConfig, taskId: string, updates: { status?: string; metadata?: Record<string, unknown>; owner?: string }): void {
+  const stateRoot = resolveStateRoot(config.workingDirectory);
+  const protoUpdates: Record<string, unknown> = {};
+  if (updates.status !== undefined) protoUpdates.status = updates.status;
+  if (updates.metadata !== undefined) protoUpdates.metadata = updates.metadata;
+  if (updates.owner !== undefined) protoUpdates.owner = updates.owner;
+  protoUpdateTask(stateRoot, config.teamName, taskId, protoUpdates);
 }
 
 /** Maximum total prompt size */
@@ -283,134 +386,30 @@ function readOutputSummary(outputFile: string): string {
   }
 }
 
-/** Maximum accumulated size for parseCodexOutput (1MB) */
-const MAX_CODEX_OUTPUT_SIZE = 1024 * 1024;
-
-/** Parse Codex JSONL output to extract text responses */
-function parseCodexOutput(output: string): string {
-  const lines = output.trim().split('\n').filter(l => l.trim());
-  const messages: string[] = [];
-  let totalSize = 0;
-
-  for (const line of lines) {
-    if (totalSize >= MAX_CODEX_OUTPUT_SIZE) {
-      messages.push('[output truncated]');
-      break;
-    }
-    try {
-      const event = JSON.parse(line);
-      if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
-        messages.push(event.item.text);
-        totalSize += event.item.text.length;
-      }
-      if (event.type === 'message' && event.content) {
-        if (typeof event.content === 'string') {
-          messages.push(event.content);
-          totalSize += event.content.length;
-        } else if (Array.isArray(event.content)) {
-          for (const part of event.content) {
-            if (part.type === 'text' && part.text) {
-              messages.push(part.text);
-              totalSize += part.text.length;
-            }
-          }
-        }
-      }
-      if (event.type === 'output_text' && event.text) {
-        messages.push(event.text);
-        totalSize += event.text.length;
-      }
-    } catch { /* skip non-JSON lines */ }
-  }
-
-  return messages.join('\n') || output;
-}
-
 /**
- * Spawn a CLI process and return both the child handle and a result promise.
- * This allows the bridge to kill the child on shutdown while still awaiting the result.
+ * Spawn a CLI process via the unified spawner interface.
+ * Returns both the child handle (for kill on shutdown) and a result promise.
+ * Delegates all CLI-specific logic (command construction, output parsing)
+ * to the WorkerSpawner implementations in spawner.ts.
  */
 function spawnCliProcess(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'claude',
   prompt: string,
   model: string | undefined,
   cwd: string,
   timeoutMs: number
 ): { child: ChildProcess; result: Promise<string> } {
-  let args: string[];
-  let cmd: string;
-
-  if (provider === 'codex') {
-    cmd = 'codex';
-    args = ['exec', '-m', model || 'gpt-5.3-codex', '--json', '--full-auto'];
-  } else {
-    cmd = 'gemini';
-    args = ['--yolo'];
-    if (model) args.push('--model', model);
-  }
-
-  const child = spawn(cmd, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    cwd,
-    ...(process.platform === 'win32' ? { shell: true } : {})
+  const spawner = getSpawner(provider);
+  const handle = spawner.spawn(prompt, {
+    model: model || spawner.defaultModel(),
+    workingDirectory: cwd,
+    timeoutMs,
   });
 
-  const result = new Promise<string>((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
+  // Adapt SpawnHandle.result (Promise<SpawnResult>) to Promise<string> for backward compat
+  const result = handle.result.then(r => r.output);
 
-    const timeoutHandle = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill('SIGTERM');
-        reject(new Error(`CLI timed out after ${timeoutMs}ms`));
-      }
-    }, timeoutMs);
-
-    child.stdout?.on('data', (data: Buffer) => {
-      if (stdout.length < MAX_BUFFER_SIZE) stdout += data.toString();
-    });
-    child.stderr?.on('data', (data: Buffer) => {
-      if (stderr.length < MAX_BUFFER_SIZE) stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        if (code === 0) {
-          const response = provider === 'codex' ? parseCodexOutput(stdout) : stdout.trim();
-          resolve(response);
-        } else {
-          const detail = stderr || stdout.trim() || 'No output';
-          reject(new Error(`CLI exited with code ${code}: ${detail}`));
-        }
-      }
-    });
-
-    child.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        reject(new Error(`Failed to spawn ${cmd}: ${err.message}`));
-      }
-    });
-
-    // Write prompt via stdin
-    child.stdin?.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill('SIGTERM');
-        reject(new Error(`Stdin write error: ${err.message}`));
-      }
-    });
-    child.stdin?.write(prompt);
-    child.stdin?.end();
-  });
-
-  return { child, result };
+  return { child: handle.child, result };
 }
 
 /** Handle graceful shutdown */
@@ -437,8 +436,16 @@ async function handleShutdown(
     }
   }
 
-  // 2. Write shutdown ack to outbox
-  appendOutbox(teamName, workerName, {
+  // 2. Write shutdown ack via protocol
+  const stateRoot = resolveStateRoot(workingDirectory);
+  protoAckShutdown(stateRoot, teamName, workerName, {
+    status: 'accept',
+    reason: signal.reason,
+    updated_at: new Date().toISOString(),
+  });
+
+  // Also send shutdown_ack as outbox message for lead consumption
+  sendOutboxMessage(config, {
     type: 'shutdown_ack',
     requestId: signal.requestId,
     timestamp: new Date().toISOString()
@@ -449,11 +456,11 @@ async function handleShutdown(
     unregisterMcpWorker(teamName, workerName, workingDirectory);
   } catch { /* ignore */ }
 
-  // 4. Clean up signal file
-  deleteShutdownSignal(teamName, workerName);
+  // 4. Clean up signal files
+  protoClearSignals(stateRoot, teamName, workerName);
 
-  // 5. Clean up heartbeat
-  deleteHeartbeat(workingDirectory, teamName, workerName);
+  // 5. Clean up heartbeat (write shutdown status)
+  writeHeartbeatProto(config, buildHeartbeat(config, 'shutdown', null, 0));
 
   // 6. Outbox/inbox preserved for lead to read final ack
 
@@ -479,7 +486,7 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
 
   // Write initial heartbeat (protected so startup I/O failure doesn't prevent loop entry)
   try {
-    writeHeartbeat(workingDirectory, buildHeartbeat(config, 'polling', null, 0));
+    writeHeartbeatProto(config, buildHeartbeat(config, 'polling', null, 0));
   } catch (err) {
     audit(config, 'bridge_start', undefined, { warning: 'startup_write_failed', error: String(err) });
   }
@@ -490,40 +497,44 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
   while (true) {
     try {
       // --- 1. Check shutdown signal ---
-      const shutdown = checkShutdownSignal(teamName, workerName);
-      if (shutdown) {
-        audit(config, 'shutdown_received', undefined, { requestId: shutdown.requestId, reason: shutdown.reason });
-        await handleShutdown(config, shutdown, activeChild);
+      const stateRoot = resolveStateRoot(workingDirectory);
+      const shutdownReq = protoReadShutdown(stateRoot, teamName, workerName);
+      if (shutdownReq) {
+        const shutdownSignal = { requestId: `shutdown-${Date.now()}`, reason: shutdownReq.requested_by };
+        audit(config, 'shutdown_received', undefined, { requestId: shutdownSignal.requestId, reason: shutdownSignal.reason });
+        await handleShutdown(config, shutdownSignal, activeChild);
         break;
       }
 
       // --- 1b. Check drain signal ---
-      const drain = checkDrainSignal(teamName, workerName);
-      if (drain) {
+      const drainReq = protoReadDrain(stateRoot, teamName, workerName);
+      if (drainReq) {
         // Drain = finish current work, don't pick up new tasks
         // Since we're at the top of the loop (no task executing), shut down now
-        log(`[bridge] Drain signal received: ${drain.reason}`);
-        audit(config, 'shutdown_received', undefined, { requestId: drain.requestId, reason: drain.reason, type: 'drain' });
+        const drainId = `drain-${Date.now()}`;
+        const drainReason = drainReq.requested_by;
+        log(`[bridge] Drain signal received: ${drainReason}`);
+        audit(config, 'shutdown_received', undefined, { requestId: drainId, reason: drainReason, type: 'drain' });
 
         // Write drain ack to outbox
-        appendOutbox(teamName, workerName, {
+        sendOutboxMessage(config, {
           type: 'shutdown_ack',
-          requestId: drain.requestId,
+          requestId: drainId,
           timestamp: new Date().toISOString()
         });
 
-        // Clean up drain signal
-        deleteDrainSignal(teamName, workerName);
+        // Clean up drain signal via protocol
+        protoClearSignals(stateRoot, teamName, workerName);
 
         // Use the same handleShutdown for cleanup
-        await handleShutdown(config, { requestId: drain.requestId, reason: `drain: ${drain.reason}` }, null);
+        await handleShutdown(config, { requestId: drainId, reason: `drain: ${drainReason}` }, null);
         break;
       }
 
       // --- 2. Check self-quarantine ---
       if (consecutiveErrors >= config.maxConsecutiveErrors) {
         if (!quarantineNotified) {
-          appendOutbox(teamName, workerName, {
+          sendOutboxMessage(config, {
             type: 'error',
             message: `Self-quarantined after ${consecutiveErrors} consecutive errors. Awaiting lead intervention or shutdown.`,
             timestamp: new Date().toISOString()
@@ -531,25 +542,32 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
           audit(config, 'worker_quarantined', undefined, { consecutiveErrors });
           quarantineNotified = true;
         }
-        writeHeartbeat(workingDirectory, buildHeartbeat(config, 'quarantined', null, consecutiveErrors));
+        writeHeartbeatProto(config, buildHeartbeat(config, 'quarantined', null, consecutiveErrors));
         // Stay alive but stop processing — just check shutdown signals
         await sleep(config.pollIntervalMs * 3);
         continue;
       }
 
       // --- 3. Write heartbeat ---
-      writeHeartbeat(workingDirectory, buildHeartbeat(config, 'polling', null, consecutiveErrors));
+      writeHeartbeatProto(config, buildHeartbeat(config, 'polling', null, consecutiveErrors));
 
       // Emit ready after first successful heartbeat write in poll loop
       if (!readyEmitted) {
         try {
           // Write ready heartbeat so status-based monitoring detects the transition
-          writeHeartbeat(workingDirectory, buildHeartbeat(config, 'ready', null, 0));
+          writeHeartbeatProto(config, buildHeartbeat(config, 'ready', null, 0));
 
-          appendOutbox(teamName, workerName, {
+          sendOutboxMessage(config, {
             type: 'ready',
             message: `Worker ${workerName} is ready (${provider})`,
             timestamp: new Date().toISOString(),
+          });
+
+          // Emit worker_ready event via protocol event log
+          protoAppendEvent(stateRoot, teamName, {
+            team: teamName,
+            type: 'worker_ready',
+            worker: workerName,
           });
 
           // Emit worker_ready audit event for activity-log / hook consumers
@@ -562,26 +580,36 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
       }
 
       // --- 4. Read inbox ---
-      const messages = readNewInboxMessages(teamName, workerName);
+      const messages = readInboxMessages(config);
 
       // --- 5. Find next task ---
-      const task = await findNextTask(teamName, workerName);
+      const claimResult = await findNextTaskProto(config);
 
-      if (task) {
+      if (claimResult) {
+        const { task, claimToken } = claimResult;
         idleNotified = false;
 
-        // --- 6. Mark in_progress ---
-        updateTask(teamName, task.id, { status: 'in_progress' });
+        // --- 6. Task already marked in_progress by claimTask ---
         audit(config, 'task_claimed', task.id);
         audit(config, 'task_started', task.id);
-        writeHeartbeat(workingDirectory, buildHeartbeat(config, 'executing', task.id, consecutiveErrors));
+        writeHeartbeatProto(config, buildHeartbeat(config, 'executing', task.id, consecutiveErrors));
+
+        // Emit task_claimed event via protocol
+        protoAppendEvent(stateRoot, teamName, {
+          team: teamName,
+          type: 'task_claimed',
+          worker: workerName,
+          task_id: task.id,
+        });
 
         // Re-check shutdown before spawning CLI (prevents race #11)
-        const shutdownBeforeSpawn = checkShutdownSignal(teamName, workerName);
+        const shutdownBeforeSpawn = protoReadShutdown(stateRoot, teamName, workerName);
         if (shutdownBeforeSpawn) {
-          audit(config, 'shutdown_received', task.id, { requestId: shutdownBeforeSpawn.requestId, reason: shutdownBeforeSpawn.reason });
-          updateTask(teamName, task.id, { status: 'pending' }); // Revert
-          await handleShutdown(config, shutdownBeforeSpawn, null);
+          const shutdownSig = { requestId: `shutdown-${Date.now()}`, reason: shutdownBeforeSpawn.requested_by };
+          audit(config, 'shutdown_received', task.id, { requestId: shutdownSig.requestId, reason: shutdownSig.reason });
+          // Release the claim to revert task to pending
+          protoReleaseTaskClaim(stateRoot, teamName, task.id, claimToken);
+          await handleShutdown(config, shutdownSig, null);
           return;
         }
 
@@ -638,17 +666,11 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
                 mode: 'enforce',
               });
 
-              updateTask(teamName, task.id, {
-                status: 'completed',
-                metadata: {
-                  ...(task.metadata || {}),
-                  error: `Permission violations detected (enforce mode)`,
-                  permissionViolations: violations,
-                  permanentlyFailed: true,
-                },
-              });
+              // Transition task to failed via protocol
+              protoTransitionTask(stateRoot, teamName, task.id, claimToken, 'failed',
+                `Permission violations detected (enforce mode)`);
 
-              appendOutbox(teamName, workerName, {
+              sendOutboxMessage(config, {
                 type: 'error',
                 taskId: task.id,
                 error: `Permission violation (enforce mode):\n${violationSummary}`,
@@ -667,13 +689,21 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
 
               log(`[bridge] Permission audit warning for task ${task.id}:\n${violationSummary}`);
 
-              // Continue with normal completion
-              updateTask(teamName, task.id, { status: 'completed' });
+              // Continue with normal completion via protocol
+              protoTransitionTask(stateRoot, teamName, task.id, claimToken, 'completed');
               audit(config, 'task_completed', task.id);
               consecutiveErrors = 0;
 
+              // Emit task_completed event
+              protoAppendEvent(stateRoot, teamName, {
+                team: teamName,
+                type: 'task_completed',
+                worker: workerName,
+                task_id: task.id,
+              });
+
               const summary = readOutputSummary(outputFile);
-              appendOutbox(teamName, workerName, {
+              sendOutboxMessage(config, {
                 type: 'task_complete',
                 taskId: task.id,
                 summary: `${summary}\n[AUDIT WARNING: ${violations.length} permission violation(s) detected]`,
@@ -684,13 +714,21 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
             }
           } else {
             // --- 9. Mark complete (no violations) ---
-            updateTask(teamName, task.id, { status: 'completed' });
+            protoTransitionTask(stateRoot, teamName, task.id, claimToken, 'completed');
             audit(config, 'task_completed', task.id);
             consecutiveErrors = 0;
 
+            // Emit task_completed event
+            protoAppendEvent(stateRoot, teamName, {
+              team: teamName,
+              type: 'task_completed',
+              worker: workerName,
+              task_id: task.id,
+            });
+
             // --- 10. Report to lead ---
             const summary = readOutputSummary(outputFile);
-            appendOutbox(teamName, workerName, {
+            sendOutboxMessage(config, {
               type: 'task_complete',
               taskId: task.id,
               summary,
@@ -713,27 +751,28 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
             audit(config, 'cli_error', task.id, { error: errorMsg });
           }
 
-          writeTaskFailure(teamName, task.id, errorMsg);
+          writeTaskFailure(config.teamName, task.id, errorMsg);
 
-          const failure = readTaskFailure(teamName, task.id);
+          const failure = readTaskFailure(config.teamName, task.id);
           const attempt = failure?.retryCount || 1;
 
           // Check if retries exhausted
-          if (isTaskRetryExhausted(teamName, task.id, config.maxRetries)) {
-            // Permanently fail: mark completed with error metadata
-            updateTask(teamName, task.id, {
-              status: 'completed',
-              metadata: {
-                ...(task.metadata || {}),
-                error: errorMsg,
-                permanentlyFailed: true,
-                failedAttempts: attempt,
-              },
+          if (isTaskRetryExhausted(config.teamName, task.id, config.maxRetries)) {
+            // Permanently fail via protocol transition
+            protoTransitionTask(stateRoot, teamName, task.id, claimToken, 'failed', errorMsg);
+
+            // Emit task_failed event
+            protoAppendEvent(stateRoot, teamName, {
+              team: teamName,
+              type: 'task_failed',
+              worker: workerName,
+              task_id: task.id,
+              reason: errorMsg,
             });
 
             audit(config, 'task_permanently_failed', task.id, { error: errorMsg, attempts: attempt });
 
-            appendOutbox(teamName, workerName, {
+            sendOutboxMessage(config, {
               type: 'error',
               taskId: task.id,
               error: `Task permanently failed after ${attempt} attempts: ${errorMsg}`,
@@ -742,12 +781,12 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
 
             log(`[bridge] Task ${task.id} permanently failed after ${attempt} attempts`);
           } else {
-            // Retry: set back to pending
-            updateTask(teamName, task.id, { status: 'pending' });
+            // Retry: release the claim to set back to pending
+            protoReleaseTaskClaim(stateRoot, teamName, task.id, claimToken);
 
             audit(config, 'task_failed', task.id, { error: errorMsg, attempt });
 
-            appendOutbox(teamName, workerName, {
+            sendOutboxMessage(config, {
               type: 'task_failed',
               taskId: task.id,
               error: `${errorMsg} (attempt ${attempt})`,
@@ -760,19 +799,28 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
       } else {
         // --- No tasks available ---
         if (!idleNotified) {
-          appendOutbox(teamName, workerName, {
+          sendOutboxMessage(config, {
             type: 'idle',
             message: 'All assigned tasks complete. Standing by.',
             timestamp: new Date().toISOString()
           });
+
+          // Emit worker_idle event via protocol
+          protoAppendEvent(stateRoot, teamName, {
+            team: teamName,
+            type: 'worker_idle',
+            worker: workerName,
+          });
+
           audit(config, 'worker_idle');
           idleNotified = true;
         }
       }
 
-      // --- 11. Rotate outbox if needed ---
-      rotateOutboxIfNeeded(teamName, workerName, config.outboxMaxLines);
-      rotateInboxIfNeeded(teamName, workerName, INBOX_ROTATION_THRESHOLD);
+      // --- 11. Prune delivered messages from protocol mailbox ---
+      try {
+        protoPruneDelivered(stateRoot, teamName, workerName);
+      } catch { /* pruning failure is non-fatal */ }
 
       // --- 12. Poll interval ---
       await sleep(config.pollIntervalMs);

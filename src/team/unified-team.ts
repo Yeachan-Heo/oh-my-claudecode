@@ -11,8 +11,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getClaudeConfigDir } from '../utils/paths.js';
 import type { WorkerBackend, WorkerCapability } from './types.js';
-import { listMcpWorkers } from './team-registration.js';
+import { listMcpWorkers, isProtocolTeam } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
+import {
+  readHeartbeat as protoReadHeartbeat,
+  isWorkerAlive as protoIsWorkerAlive,
+} from 'cli-agent-mail';
+import { resolveStateRoot, fromProtocolHeartbeat } from './protocol-adapter.js';
 import { getDefaultCapabilities } from './capabilities.js';
 
 export interface UnifiedTeamMember {
@@ -63,9 +68,25 @@ export function getTeamMembers(
   // 2. Read MCP workers from shadow registry + heartbeat
   try {
     const mcpWorkers = listMcpWorkers(teamName, workingDirectory);
+    const useProtocol = isProtocolTeam(workingDirectory, teamName);
+    const stateRoot = useProtocol ? resolveStateRoot(workingDirectory) : '';
+
     for (const worker of mcpWorkers) {
-      const heartbeat = readHeartbeat(workingDirectory, teamName, worker.name);
-      const alive = isWorkerAlive(workingDirectory, teamName, worker.name, 60000);
+      let heartbeat: import('./types.js').HeartbeatData | null = null;
+      let alive = false;
+
+      if (useProtocol) {
+        // Read from protocol heartbeat
+        const protoHb = protoReadHeartbeat(stateRoot, teamName, worker.name);
+        if (protoHb) {
+          heartbeat = fromProtocolHeartbeat(protoHb, worker.name, teamName);
+        }
+        alive = protoIsWorkerAlive(stateRoot, teamName, worker.name, 60000);
+      } else {
+        // Legacy: read from OMC heartbeat files
+        heartbeat = readHeartbeat(workingDirectory, teamName, worker.name);
+        alive = isWorkerAlive(workingDirectory, teamName, worker.name, 60000);
+      }
 
       // Determine status from heartbeat
       let status: UnifiedTeamMember['status'] = 'unknown';

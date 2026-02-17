@@ -49,7 +49,7 @@ describe('bridge-entry security', () => {
   it('has signal handlers for graceful cleanup', () => {
     expect(source).toContain('SIGINT');
     expect(source).toContain('SIGTERM');
-    expect(source).toContain('deleteHeartbeat');
+    expect(source).toContain('protoWriteHeartbeat');
     expect(source).toContain('unregisterMcpWorker');
   });
 

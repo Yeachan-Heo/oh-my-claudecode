@@ -3,9 +3,12 @@
 /**
  * Heartbeat Management for MCP Team Bridge Workers
  *
- * Each worker writes a heartbeat file every poll cycle.
- * The lead checks freshness to detect dead workers.
+ * @legacy This file provides heartbeat I/O for legacy (non-protocol) teams.
+ * Protocol teams use cli-agent-mail writeHeartbeat/readHeartbeat directly.
+ * Consumers should check isProtocolTeam() and prefer protocol APIs for new teams.
+ *
  * Files stored at: .omc/state/team-bridge/{team}/{worker}.heartbeat.json
+ * Phase 5: Marked as legacy — retained for backward compatibility.
  */
 
 import { readFileSync, existsSync, readdirSync, unlinkSync, rmdirSync } from 'fs';

@@ -10,7 +10,10 @@ import { resolve } from 'path';
 import { homedir } from 'os';
 import type { BridgeConfig } from './types.js';
 import { runBridge } from './mcp-team-bridge.js';
-import { deleteHeartbeat } from './heartbeat.js';
+import {
+  writeHeartbeat as protoWriteHeartbeat,
+} from 'cli-agent-mail';
+import { toProtocolHeartbeat, resolveStateRoot } from './protocol-adapter.js';
 import { unregisterMcpWorker } from './team-registration.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../utils/paths.js';
@@ -186,7 +189,18 @@ function main(): void {
     process.on(sig, () => {
       console.error(`[bridge] Received ${sig}, shutting down...`);
       try {
-        deleteHeartbeat(config.workingDirectory, config.teamName, config.workerName);
+        // Write shutdown heartbeat via protocol
+        const stateRoot = resolveStateRoot(config.workingDirectory);
+        const shutdownHb = toProtocolHeartbeat({
+          workerName: config.workerName,
+          teamName: config.teamName,
+          provider: config.provider,
+          pid: process.pid,
+          lastPollAt: new Date().toISOString(),
+          consecutiveErrors: 0,
+          status: 'shutdown',
+        });
+        protoWriteHeartbeat(stateRoot, config.teamName, config.workerName, shutdownHb);
         unregisterMcpWorker(config.teamName, config.workerName, config.workingDirectory);
       } catch { /* best-effort cleanup */ }
       process.exit(0);

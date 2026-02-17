@@ -3,8 +3,12 @@
 /**
  * Team Registration for MCP Workers
  *
- * Dual-path registration: config.json (if tolerated) or shadow registry (fallback).
- * Auto-detects strategy via cached probe result.
+ * Tri-path registration:
+ *   1. Protocol manifest (if state_version marker is present — new teams)
+ *   2. config.json (if tolerated — legacy Claude Code teams)
+ *   3. Shadow registry (fallback)
+ *
+ * Phase 3c: Added state_version marker and protocol manifest registration.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -12,7 +16,14 @@ import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/paths.js';
 import type { McpWorkerMember, ConfigProbeResult } from './types.js';
 import { sanitizeName } from './tmux-session.js';
-import { atomicWriteJson, validateResolvedPath } from './fs-utils.js';
+import { atomicWriteJson, validateResolvedPath, ensureDirWithMode } from './fs-utils.js';
+import { resolveStateRoot } from './protocol-adapter.js';
+import { toProtocolWorkerInfo } from './protocol-adapter.js';
+import {
+  readManifest as protocolReadManifest,
+  addWorkerToManifest as protocolAddWorker,
+} from 'cli-agent-mail';
+import { teamDir as protocolTeamDir } from 'cli-agent-mail';
 
 // --- Config paths ---
 
@@ -30,6 +41,58 @@ function shadowRegistryPath(workingDirectory: string): string {
 
 function probeResultPath(workingDirectory: string): string {
   return join(workingDirectory, '.omc', 'state', 'config-probe-result.json');
+}
+
+// --- State version marker ---
+
+/** State version marker content */
+interface StateVersionMarker {
+  protocol: string;
+  version: number;
+}
+
+/** Path to the state_version marker for a team */
+function stateVersionPath(workingDirectory: string, teamName: string): string {
+  const stateRoot = resolveStateRoot(workingDirectory);
+  return join(protocolTeamDir(stateRoot, teamName), 'state_version');
+}
+
+/**
+ * Check if a team uses the cli-agent-mail protocol layout.
+ * Returns true if the state_version marker file exists in the team directory.
+ */
+export function isProtocolTeam(workingDirectory: string, teamName: string): boolean {
+  return existsSync(stateVersionPath(workingDirectory, teamName));
+}
+
+/**
+ * Write the state_version marker for a team, indicating it uses protocol paths.
+ * Called during registration to mark new teams as protocol-based.
+ */
+export function writeStateVersion(workingDirectory: string, teamName: string): void {
+  const markerPath = stateVersionPath(workingDirectory, teamName);
+  const stateRoot = resolveStateRoot(workingDirectory);
+  const teamDirPath = protocolTeamDir(stateRoot, teamName);
+  ensureDirWithMode(teamDirPath);
+  const marker: StateVersionMarker = {
+    protocol: 'cli-agent-mail',
+    version: 1,
+  };
+  atomicWriteJson(markerPath, marker);
+}
+
+/**
+ * Read the state_version marker. Returns null if not present.
+ */
+export function readStateVersion(workingDirectory: string, teamName: string): StateVersionMarker | null {
+  const markerPath = stateVersionPath(workingDirectory, teamName);
+  if (!existsSync(markerPath)) return null;
+  try {
+    const raw = readFileSync(markerPath, 'utf-8');
+    return JSON.parse(raw) as StateVersionMarker;
+  } catch {
+    return null;
+  }
 }
 
 // --- Probe result cache ---
@@ -102,6 +165,10 @@ export function registerMcpWorker(
 
   // Always write to shadow registry (as backup or primary)
   registerInShadow(workingDirectory, teamName, member);
+
+  // If this team has a protocol manifest, also register in the manifest.
+  // Write state_version marker if a manifest exists but marker doesn't yet.
+  registerInProtocolManifest(workingDirectory, teamName, member);
 }
 
 function registerInConfig(teamName: string, member: McpWorkerMember): void {
@@ -147,6 +214,38 @@ function registerInShadow(workingDirectory: string, teamName: string, member: Mc
   registry.teamName = teamName;
 
   atomicWriteJson(filePath, registry);
+}
+
+/**
+ * Register a worker in the protocol manifest if the team has one.
+ * Writes the state_version marker if a manifest exists but no marker yet.
+ */
+function registerInProtocolManifest(
+  workingDirectory: string,
+  teamName: string,
+  member: McpWorkerMember,
+): void {
+  const stateRoot = resolveStateRoot(workingDirectory);
+  const manifest = protocolReadManifest(stateRoot, teamName);
+  if (!manifest) return; // No protocol manifest — legacy team only
+
+  // Ensure state_version marker exists
+  if (!isProtocolTeam(workingDirectory, teamName)) {
+    writeStateVersion(workingDirectory, teamName);
+  }
+
+  // Check if worker is already in the manifest
+  const existing = manifest.workers.find(w => w.name === member.name);
+  if (existing) return; // Already registered
+
+  // Add worker to manifest
+  const workerInfo = toProtocolWorkerInfo(member);
+  workerInfo.index = manifest.workers.length;
+  try {
+    protocolAddWorker(stateRoot, teamName, workerInfo);
+  } catch {
+    // Non-fatal — shadow registry is the backup
+  }
 }
 
 /**

@@ -7,8 +7,13 @@
  */
 
 import type { HeartbeatData } from './types.js';
-import { listMcpWorkers } from './team-registration.js';
+import { listMcpWorkers, isProtocolTeam } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
+import {
+  readHeartbeat as protoReadHeartbeat,
+  isWorkerAlive as protoIsWorkerAlive,
+} from 'cli-agent-mail';
+import { resolveStateRoot, fromProtocolHeartbeat } from './protocol-adapter.js';
 import { isSessionAlive } from './tmux-session.js';
 import { readAuditLog } from './audit-log.js';
 
@@ -36,10 +41,23 @@ export function getWorkerHealthReports(
 ): WorkerHealthReport[] {
   const workers = listMcpWorkers(teamName, workingDirectory);
   const reports: WorkerHealthReport[] = [];
+  const useProtocol = isProtocolTeam(workingDirectory, teamName);
+  const stateRoot = useProtocol ? resolveStateRoot(workingDirectory) : '';
 
   for (const worker of workers) {
-    const heartbeat = readHeartbeat(workingDirectory, teamName, worker.name);
-    const alive = isWorkerAlive(workingDirectory, teamName, worker.name, heartbeatMaxAgeMs);
+    let heartbeat: HeartbeatData | null = null;
+    let alive = false;
+
+    if (useProtocol) {
+      const protoHb = protoReadHeartbeat(stateRoot, teamName, worker.name);
+      if (protoHb) {
+        heartbeat = fromProtocolHeartbeat(protoHb, worker.name, teamName);
+      }
+      alive = protoIsWorkerAlive(stateRoot, teamName, worker.name, heartbeatMaxAgeMs);
+    } else {
+      heartbeat = readHeartbeat(workingDirectory, teamName, worker.name);
+      alive = isWorkerAlive(workingDirectory, teamName, worker.name, heartbeatMaxAgeMs);
+    }
 
     let tmuxAlive = false;
     try {
@@ -112,8 +130,20 @@ export function checkWorkerHealth(
   workingDirectory: string,
   heartbeatMaxAgeMs: number = 30000
 ): string | null {
-  const heartbeat = readHeartbeat(workingDirectory, teamName, workerName);
-  const alive = isWorkerAlive(workingDirectory, teamName, workerName, heartbeatMaxAgeMs);
+  let heartbeat: HeartbeatData | null = null;
+  let alive = false;
+
+  if (isProtocolTeam(workingDirectory, teamName)) {
+    const sr = resolveStateRoot(workingDirectory);
+    const protoHb = protoReadHeartbeat(sr, teamName, workerName);
+    if (protoHb) {
+      heartbeat = fromProtocolHeartbeat(protoHb, workerName, teamName);
+    }
+    alive = protoIsWorkerAlive(sr, teamName, workerName, heartbeatMaxAgeMs);
+  } else {
+    heartbeat = readHeartbeat(workingDirectory, teamName, workerName);
+    alive = isWorkerAlive(workingDirectory, teamName, workerName, heartbeatMaxAgeMs);
+  }
 
   let tmuxAlive = false;
   try {

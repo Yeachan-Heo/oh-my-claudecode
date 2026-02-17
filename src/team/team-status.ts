@@ -10,11 +10,18 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/paths.js';
-import { listMcpWorkers } from './team-registration.js';
+import { listMcpWorkers, isProtocolTeam } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
 import { listTaskIds, readTask } from './task-file-ops.js';
 import { sanitizeName } from './tmux-session.js';
 import type { HeartbeatData, TaskFile, OutboxMessage, McpWorkerMember } from './types.js';
+import {
+  readHeartbeat as protoReadHeartbeat,
+  isWorkerAlive as protoIsWorkerAlive,
+  listTasks as protoListTasks,
+  listMessages as protoListMessages,
+} from 'cli-agent-mail';
+import { resolveStateRoot, fromProtocolHeartbeat, fromProtocolTask } from './protocol-adapter.js';
 
 /**
  * Read the last N messages from a worker's outbox file without advancing any cursor.
@@ -42,6 +49,32 @@ function peekRecentOutboxMessages(
       } catch { /* skip malformed lines */ }
     }
     return messages;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read recent messages from a worker via protocol mailbox (side-effect-free peek).
+ */
+function peekProtocolOutboxMessages(
+  stateRoot: string,
+  teamName: string,
+  workerName: string,
+  maxMessages: number = 10
+): OutboxMessage[] {
+  try {
+    const allMessages = protoListMessages(stateRoot, teamName, 'lead');
+    const workerMessages = allMessages
+      .filter(m => m.from === workerName)
+      .slice(-maxMessages);
+    return workerMessages.map(m => {
+      try {
+        return JSON.parse(m.body) as OutboxMessage;
+      } catch {
+        return { type: 'error' as const, message: m.body, timestamp: m.created_at };
+      }
+    });
   } catch {
     return [];
   }
@@ -82,20 +115,40 @@ export function getTeamStatus(
 ): TeamStatus {
   // Get all workers
   const mcpWorkers = listMcpWorkers(teamName, workingDirectory);
+  const useProtocol = isProtocolTeam(workingDirectory, teamName);
+  const stateRoot = useProtocol ? resolveStateRoot(workingDirectory) : '';
 
   // Get all tasks for the team
-  const taskIds = listTaskIds(teamName);
-  const tasks: TaskFile[] = [];
-  for (const id of taskIds) {
-    const task = readTask(teamName, id);
-    if (task) tasks.push(task);
+  let tasks: TaskFile[] = [];
+  if (useProtocol) {
+    const protoTasks = protoListTasks(stateRoot, teamName);
+    tasks = protoTasks.map(fromProtocolTask);
+  } else {
+    const taskIds = listTaskIds(teamName);
+    for (const id of taskIds) {
+      const task = readTask(teamName, id);
+      if (task) tasks.push(task);
+    }
   }
 
   // Build per-worker status
   const workers: WorkerStatus[] = mcpWorkers.map(w => {
-    const heartbeat = readHeartbeat(workingDirectory, teamName, w.name);
-    const alive = isWorkerAlive(workingDirectory, teamName, w.name, heartbeatMaxAgeMs);
-    const recentMessages = peekRecentOutboxMessages(teamName, w.name);
+    let heartbeat: HeartbeatData | null = null;
+    let alive = false;
+    let recentMessages: OutboxMessage[] = [];
+
+    if (useProtocol) {
+      const protoHb = protoReadHeartbeat(stateRoot, teamName, w.name);
+      if (protoHb) {
+        heartbeat = fromProtocolHeartbeat(protoHb, w.name, teamName);
+      }
+      alive = protoIsWorkerAlive(stateRoot, teamName, w.name, heartbeatMaxAgeMs);
+      recentMessages = peekProtocolOutboxMessages(stateRoot, teamName, w.name);
+    } else {
+      heartbeat = readHeartbeat(workingDirectory, teamName, w.name);
+      alive = isWorkerAlive(workingDirectory, teamName, w.name, heartbeatMaxAgeMs);
+      recentMessages = peekRecentOutboxMessages(teamName, w.name);
+    }
 
     // Compute per-worker task stats
     const workerTasks = tasks.filter(t => t.owner === w.name);

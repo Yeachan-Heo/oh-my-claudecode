@@ -3,18 +3,53 @@
 /**
  * Task File Operations for MCP Team Bridge
  *
- * Read/write/scan task JSON files with atomic writes (temp + rename).
- * Tasks live at ~/.claude/tasks/{teamName}/{id}.json
+ * Dual-path: delegates to cli-agent-mail protocol when the team has a
+ * protocol layout (state_version marker), otherwise falls back to legacy
+ * direct file I/O. Failure sidecars are always OMC-specific file I/O.
+ *
+ * Phase 3b-2: Migrated protocol path.
+ * Phase 5: Added legacy fallback for backward compatibility.
  */
 
 import { readFileSync, readdirSync, existsSync, openSync, closeSync, unlinkSync, writeSync, statSync, constants as fsConstants } from 'fs';
 import { join } from 'path';
-import { getClaudeConfigDir } from '../utils/paths.js';
+import {
+  readTask as protocolReadTask,
+  listTasks as protocolListTasks,
+  updateTask as protocolUpdateTask,
+} from 'cli-agent-mail';
+import {
+  claimTask as protocolClaimTask,
+  computeTaskReadiness,
+} from 'cli-agent-mail';
 import type { TaskFile, TaskFileUpdate, TaskFailureSidecar } from './types.js';
-import { sanitizeName } from './tmux-session.js';
+import { fromProtocolTask, resolveStateRoot } from './protocol-adapter.js';
 import { atomicWriteJson, validateResolvedPath, ensureDirWithMode } from './fs-utils.js';
+import { getClaudeConfigDir } from '../utils/paths.js';
+import { sanitizeName } from './tmux-session.js';
 
-// ─── Lock-based atomic claiming ────────────────────────────────────────────
+// ─── State root + protocol detection ────────────────────────────────────────
+
+function getStateRoot(): string {
+  const cwd = process.env['OMC_WORKING_DIR'] || process.cwd();
+  return resolveStateRoot(cwd);
+}
+
+/**
+ * Check if a team has the protocol layout.
+ * Looks for the team directory under {stateRoot}/team/{teamName}/.
+ */
+function hasProtocolLayout(teamName: string): boolean {
+  try {
+    const stateRoot = getStateRoot();
+    const manifestFile = join(stateRoot, 'team', teamName, 'manifest.json');
+    return existsSync(manifestFile);
+  } catch {
+    return false;
+  }
+}
+
+// ─── Legacy lock interface (deprecated, kept for API compatibility) ─────────
 
 /** Handle returned by acquireTaskLock; pass to releaseTaskLock. */
 export interface LockHandle {
@@ -27,7 +62,6 @@ const DEFAULT_STALE_LOCK_MS = 30_000;
 
 /**
  * Check if a process with the given PID is alive.
- * Returns false for PIDs <= 0 or if kill(pid, 0) throws ESRCH.
  */
 function isPidAlive(pid: number): boolean {
   if (pid <= 0 || !Number.isFinite(pid)) return false;
@@ -35,22 +69,13 @@ function isPidAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (e: unknown) {
-    // EPERM means the process exists but we don't have permission — still alive
     if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'EPERM') return true;
     return false;
   }
 }
 
 /**
- * Try to acquire an exclusive lock file for a task.
- *
- * Uses O_CREAT|O_EXCL|O_WRONLY which atomically creates the file only if
- * it doesn't already exist — the kernel guarantees no two openers succeed.
- *
- * If the lock file already exists, checks for staleness (age > staleLockMs
- * AND owner PID is dead) and reaps if stale, retrying once.
- *
- * Returns a LockHandle on success, or null if the lock is held by another live worker.
+ * Try to acquire an exclusive lock file for a task (legacy path only).
  */
 export function acquireTaskLock(
   teamName: string,
@@ -58,14 +83,13 @@ export function acquireTaskLock(
   opts?: { staleLockMs?: number; workerName?: string },
 ): LockHandle | null {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
-  const dir = tasksDir(teamName);
+  const dir = legacyTasksDir(teamName);
   ensureDirWithMode(dir);
   const lockPath = join(dir, `${sanitizeTaskId(taskId)}.lock`);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
-      // Write payload so stale-detection can read PID + timestamp
       const payload = JSON.stringify({
         pid: process.pid,
         workerName: opts?.workerName ?? '',
@@ -75,14 +99,13 @@ export function acquireTaskLock(
       return { fd, path: lockPath };
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'EEXIST') {
-        // Lock file exists — check if stale
         if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
           try { unlinkSync(lockPath); } catch { /* another worker reaped it */ }
-          continue; // retry once
+          continue;
         }
-        return null; // held by a live worker
+        return null;
       }
-      throw err; // unexpected error — bubble up
+      throw err;
     }
   }
   return null;
@@ -90,7 +113,6 @@ export function acquireTaskLock(
 
 /**
  * Release a previously acquired task lock.
- * Closes the file descriptor and removes the lock file.
  */
 export function releaseTaskLock(handle: LockHandle): void {
   try { closeSync(handle.fd); } catch { /* already closed */ }
@@ -99,7 +121,6 @@ export function releaseTaskLock(handle: LockHandle): void {
 
 /**
  * Execute a function while holding an exclusive task lock.
- * Returns the function's result, or null if the lock could not be acquired.
  */
 export async function withTaskLock<T>(
   teamName: string,
@@ -107,6 +128,10 @@ export async function withTaskLock<T>(
   fn: () => T | Promise<T>,
   opts?: { staleLockMs?: number; workerName?: string },
 ): Promise<T | null> {
+  if (hasProtocolLayout(teamName)) {
+    // Protocol handles locking internally
+    return await fn();
+  }
   const handle = acquireTaskLock(teamName, taskId, opts);
   if (!handle) return null;
   try {
@@ -116,34 +141,24 @@ export async function withTaskLock<T>(
   }
 }
 
-/**
- * Check if an existing lock file is stale.
- * A lock is stale if it's older than staleLockMs AND the owning PID is dead.
- */
 function isLockStale(lockPath: string, staleLockMs: number): boolean {
   try {
     const stat = statSync(lockPath);
     const ageMs = Date.now() - stat.mtimeMs;
     if (ageMs < staleLockMs) return false;
-
-    // Try to read PID from the lock payload
     try {
       const raw = readFileSync(lockPath, 'utf-8');
       const payload = JSON.parse(raw) as { pid?: number };
       if (payload.pid && isPidAlive(payload.pid)) return false;
-    } catch {
-      // Malformed or unreadable — treat as stale if old enough
-    }
+    } catch { /* malformed — treat as stale if old enough */ }
     return true;
   } catch {
-    // Lock file disappeared between check and stat — not stale, just gone
     return false;
   }
 }
 
-// ─── End lock helpers ──────────────────────────────────────────────────────
+// ─── Legacy path helpers ────────────────────────────────────────────────────
 
-/** Validate task ID to prevent path traversal */
 function sanitizeTaskId(taskId: string): string {
   if (!/^[A-Za-z0-9._-]+$/.test(taskId)) {
     throw new Error(`Invalid task ID: "${taskId}" contains unsafe characters`);
@@ -151,24 +166,20 @@ function sanitizeTaskId(taskId: string): string {
   return taskId;
 }
 
-/** Paths helper */
-function tasksDir(teamName: string): string {
+function legacyTasksDir(teamName: string): string {
   const result = join(getClaudeConfigDir(), 'tasks', sanitizeName(teamName));
   validateResolvedPath(result, join(getClaudeConfigDir(), 'tasks'));
   return result;
 }
 
-function taskPath(teamName: string, taskId: string): string {
-  return join(tasksDir(teamName), `${sanitizeTaskId(taskId)}.json`);
+function legacyTaskPath(teamName: string, taskId: string): string {
+  return join(legacyTasksDir(teamName), `${sanitizeTaskId(taskId)}.json`);
 }
 
-function failureSidecarPath(teamName: string, taskId: string): string {
-  return join(tasksDir(teamName), `${sanitizeTaskId(taskId)}.failure.json`);
-}
+// ─── Legacy file I/O functions ──────────────────────────────────────────────
 
-/** Read a single task file. Returns null if not found or malformed. */
-export function readTask(teamName: string, taskId: string): TaskFile | null {
-  const filePath = taskPath(teamName, taskId);
+function legacyReadTask(teamName: string, taskId: string): TaskFile | null {
+  const filePath = legacyTaskPath(teamName, taskId);
   if (!existsSync(filePath)) return null;
   try {
     const raw = readFileSync(filePath, 'utf-8');
@@ -178,14 +189,61 @@ export function readTask(teamName: string, taskId: string): TaskFile | null {
   }
 }
 
+function legacyUpdateTask(teamName: string, taskId: string, updates: TaskFileUpdate): void {
+  const filePath = legacyTaskPath(teamName, taskId);
+  let task: Record<string, unknown>;
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    task = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Task file not found or malformed: ${taskId}`);
+  }
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== undefined) {
+      task[key] = value;
+    }
+  }
+  atomicWriteJson(filePath, task);
+}
+
+function legacyListTaskIds(teamName: string): string[] {
+  const dir = legacyTasksDir(teamName);
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir)
+      .filter(f => f.endsWith('.json') && !f.includes('.tmp.') && !f.includes('.failure.'))
+      .map(f => f.replace('.json', ''))
+      .sort((a, b) => {
+        const numA = parseInt(a, 10);
+        const numB = parseInt(b, 10);
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+        return a.localeCompare(b);
+      });
+  } catch {
+    return [];
+  }
+}
+
+// ─── Dual-path task operations ──────────────────────────────────────────────
+
+/** Read a single task file. Returns null if not found or malformed. */
+export function readTask(teamName: string, taskId: string): TaskFile | null {
+  if (hasProtocolLayout(teamName)) {
+    try {
+      const stateRoot = getStateRoot();
+      const protocolTask = protocolReadTask(stateRoot, teamName, taskId);
+      if (!protocolTask) return null;
+      return fromProtocolTask(protocolTask);
+    } catch {
+      return null;
+    }
+  }
+  return legacyReadTask(teamName, taskId);
+}
+
 /**
- * Atomic update: reads full task JSON, patches specified fields, writes back.
- * Preserves unknown fields to avoid data loss.
- *
- * When useLock is true (default), wraps the read-modify-write in an O_EXCL
- * lock to prevent lost updates from concurrent writers. Falls back to
- * unlocked write if the lock cannot be acquired within a single attempt
- * (backward-compatible degradation with a console warning).
+ * Update a task: reads, patches, writes back.
+ * Uses protocol when available, legacy file I/O otherwise.
  */
 export function updateTask(
   teamName: string,
@@ -193,43 +251,46 @@ export function updateTask(
   updates: TaskFileUpdate,
   opts?: { useLock?: boolean },
 ): void {
-  const useLock = opts?.useLock ?? true;
+  if (hasProtocolLayout(teamName)) {
+    const stateRoot = getStateRoot();
+    const protocolUpdates: Record<string, unknown> = {};
+    if (updates.status !== undefined) protocolUpdates['status'] = updates.status;
+    if (updates.owner !== undefined) protocolUpdates['owner'] = updates.owner;
 
-  const doUpdate = () => {
-    const filePath = taskPath(teamName, taskId);
-    let task: Record<string, unknown>;
-    try {
-      const raw = readFileSync(filePath, 'utf-8');
-      task = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
+    const currentTask = protocolReadTask(stateRoot, teamName, taskId);
+    if (!currentTask) {
       throw new Error(`Task file not found or malformed: ${taskId}`);
     }
-    for (const [key, value] of Object.entries(updates)) {
-      if (value !== undefined) {
-        task[key] = value;
-      }
-    }
-    atomicWriteJson(filePath, task);
-  };
 
+    const mergedMeta: Record<string, unknown> = { ...(currentTask.metadata ?? {}) };
+    if (updates.metadata !== undefined) Object.assign(mergedMeta, updates.metadata);
+    if (updates.claimedBy !== undefined) mergedMeta['claimedBy'] = updates.claimedBy;
+    if (updates.claimedAt !== undefined) mergedMeta['claimedAt'] = updates.claimedAt;
+    if (updates.claimPid !== undefined) mergedMeta['claimPid'] = updates.claimPid;
+    protocolUpdates['metadata'] = mergedMeta;
+
+    protocolUpdateTask(stateRoot, teamName, taskId, protocolUpdates);
+    return;
+  }
+
+  // Legacy path with optional locking
+  const useLock = opts?.useLock ?? true;
   if (!useLock) {
-    doUpdate();
+    legacyUpdateTask(teamName, taskId, updates);
     return;
   }
 
   const handle = acquireTaskLock(teamName, taskId);
   if (!handle) {
-    // Fallback: another worker holds the lock — proceed without lock + warn
-    // This maintains backward compatibility while logging the degradation
     if (typeof process !== 'undefined' && process.stderr) {
       process.stderr.write(`[task-file-ops] WARN: could not acquire lock for task ${taskId}, updating without lock\n`);
     }
-    doUpdate();
+    legacyUpdateTask(teamName, taskId, updates);
     return;
   }
 
   try {
-    doUpdate();
+    legacyUpdateTask(teamName, taskId, updates);
   } finally {
     releaseTaskLock(handle);
   }
@@ -237,47 +298,58 @@ export function updateTask(
 
 /**
  * Find next executable task for this worker.
- * Returns first task where:
- *   - owner === workerName
- *   - status === 'pending'
- *   - all blockedBy tasks have status 'completed'
- * Sorted by ID ascending.
- *
- * Uses O_EXCL lock files for atomic claiming — no sleep/jitter needed.
- * The kernel guarantees only one worker can create the lock file.
+ * Protocol path uses claimTask; legacy path uses O_EXCL locks.
  */
 export async function findNextTask(teamName: string, workerName: string): Promise<TaskFile | null> {
-  const dir = tasksDir(teamName);
+  if (hasProtocolLayout(teamName)) {
+    const stateRoot = getStateRoot();
+    const allTasks = protocolListTasks(stateRoot, teamName);
+    allTasks.sort((a, b) => {
+      const numA = parseInt(a.id, 10);
+      const numB = parseInt(b.id, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.id.localeCompare(b.id);
+    });
+
+    for (const task of allTasks) {
+      if (task.status !== 'pending') continue;
+      if (task.owner !== workerName) continue;
+      const readiness = computeTaskReadiness(stateRoot, teamName, task);
+      if (!readiness.ready) continue;
+      const result = protocolClaimTask(stateRoot, teamName, task.id, workerName);
+      if (!result.ok) continue;
+      return fromProtocolTask(result.task);
+    }
+    return null;
+  }
+
+  // Legacy path
+  const dir = legacyTasksDir(teamName);
   if (!existsSync(dir)) return null;
 
-  const taskIds = listTaskIds(teamName);
-
+  const taskIds = legacyListTaskIds(teamName);
   for (const id of taskIds) {
-    // Quick pre-check without lock (avoid lock overhead for obvious skips)
-    const task = readTask(teamName, id);
+    const task = legacyReadTask(teamName, id);
     if (!task) continue;
     if (task.status !== 'pending') continue;
     if (task.owner !== workerName) continue;
     if (!areBlockersResolved(teamName, task.blockedBy)) continue;
 
-    // Attempt atomic lock
     const handle = acquireTaskLock(teamName, id, { workerName });
-    if (!handle) continue; // another worker holds the lock — skip
+    if (!handle) continue;
 
     try {
-      // Re-read under lock to verify state hasn't changed
-      const freshTask = readTask(teamName, id);
+      const freshTask = legacyReadTask(teamName, id);
       if (
         !freshTask ||
         freshTask.status !== 'pending' ||
         freshTask.owner !== workerName ||
         !areBlockersResolved(teamName, freshTask.blockedBy)
       ) {
-        continue; // state changed between pre-check and lock acquisition
+        continue;
       }
 
-      // Claim the task atomically
-      const filePath = join(tasksDir(teamName), `${sanitizeTaskId(id)}.json`);
+      const filePath = legacyTaskPath(teamName, id);
       let taskData: Record<string, unknown>;
       try {
         const raw = readFileSync(filePath, 'utf-8');
@@ -304,11 +376,50 @@ export async function findNextTask(teamName: string, workerName: string): Promis
 /** Check if all blocker task IDs have status 'completed' */
 export function areBlockersResolved(teamName: string, blockedBy: string[]): boolean {
   if (!blockedBy || blockedBy.length === 0) return true;
+  if (hasProtocolLayout(teamName)) {
+    const stateRoot = getStateRoot();
+    for (const blockerId of blockedBy) {
+      const blocker = protocolReadTask(stateRoot, teamName, blockerId);
+      if (!blocker || blocker.status !== 'completed') return false;
+    }
+    return true;
+  }
   for (const blockerId of blockedBy) {
-    const blocker = readTask(teamName, blockerId);
+    const blocker = legacyReadTask(teamName, blockerId);
     if (!blocker || blocker.status !== 'completed') return false;
   }
   return true;
+}
+
+/** List all task IDs in a team, sorted ascending */
+export function listTaskIds(teamName: string): string[] {
+  if (hasProtocolLayout(teamName)) {
+    try {
+      const stateRoot = getStateRoot();
+      const tasks = protocolListTasks(stateRoot, teamName);
+      return tasks
+        .map(t => t.id)
+        .sort((a, b) => {
+          const numA = parseInt(a, 10);
+          const numB = parseInt(b, 10);
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          return a.localeCompare(b);
+        });
+    } catch {
+      return [];
+    }
+  }
+  return legacyListTaskIds(teamName);
+}
+
+// ─── Failure sidecars (OMC-specific, not in protocol) ───────────────────────
+
+function failureSidecarDir(teamName: string): string {
+  return join(getClaudeConfigDir(), 'tasks', sanitizeName(teamName));
+}
+
+function failureSidecarPath(teamName: string, taskId: string): string {
+  return join(failureSidecarDir(teamName), `${sanitizeTaskId(taskId)}.failure.json`);
 }
 
 /**
@@ -351,23 +462,4 @@ export function isTaskRetryExhausted(
   const failure = readTaskFailure(teamName, taskId);
   if (!failure) return false;
   return failure.retryCount >= maxRetries;
-}
-
-/** List all task IDs in a team directory, sorted ascending */
-export function listTaskIds(teamName: string): string[] {
-  const dir = tasksDir(teamName);
-  if (!existsSync(dir)) return [];
-  try {
-    return readdirSync(dir)
-      .filter(f => f.endsWith('.json') && !f.includes('.tmp.') && !f.includes('.failure.'))
-      .map(f => f.replace('.json', ''))
-      .sort((a, b) => {
-        const numA = parseInt(a, 10);
-        const numB = parseInt(b, 10);
-        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-        return a.localeCompare(b);
-      });
-  } catch {
-    return [];
-  }
 }

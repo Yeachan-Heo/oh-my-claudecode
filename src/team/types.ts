@@ -20,7 +20,7 @@ export type {
 export interface BridgeConfig {
   teamName: string;
   workerName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'claude';
   model?: string;
   workingDirectory: string;
   pollIntervalMs: number;       // default: 3000
@@ -108,7 +108,7 @@ export interface McpWorkerMember {
 export interface HeartbeatData {
   workerName: string;
   teamName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'claude';
   pid: number;
   lastPollAt: string;       // ISO timestamp of last poll cycle
   currentTaskId?: string;   // task being executed, if any
