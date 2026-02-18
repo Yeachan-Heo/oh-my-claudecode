@@ -446,7 +446,7 @@ async function main() {
     if (/\b(research)\b/i.test(cleanPrompt) ||
         /\banalyze\s+data\b/i.test(cleanPrompt) ||
         /\bstatistics\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'research', args: '' });
+      matches.push({ name: 'sciomc', args: '' });
     }
 
     // Ultrathink keywords
