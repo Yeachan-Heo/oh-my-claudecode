@@ -529,9 +529,9 @@ let v='';
 const b=p.join(d,'plugins','cache','omc','oh-my-claudecode');
 try{const vs=f.readdirSync(b).filter(x=>/^\d/.test(x)).sort((a,c)=>a.localeCompare(c,void 0,{numeric:true}));if(vs.length)v=vs[vs.length-1]}catch{}
 // Try .omc-version.json second
-if(v==='')try{const j=JSON.parse(f.readFileSync('.omc-version.json','utf-8'));v=j.version||''}catch{}
+if(!v)try{const j=JSON.parse(f.readFileSync('.omc-version.json','utf-8'));v=j.version||''}catch{}
 // Try CLAUDE.md header third
-if(v==='')for(const c of['.claude/CLAUDE.md',p.join(d,'CLAUDE.md')]){try{const m=f.readFileSync(c,'utf-8').match(/^# oh-my-claudecode.*?(v?\d+\.\d+\.\d+)/m);if(m){v=m[1].replace(/^v/,'');break}}catch{}}
+if(!v)for(const c of['.claude/CLAUDE.md',p.join(d,'CLAUDE.md')]){try{const m=f.readFileSync(c,'utf-8').match(/^# oh-my-claudecode.*?(v?\d+\.\d+\.\d+)/m);if(m){v=m[1].replace(/^v/,'');break}}catch{}}
 console.log('Installed:',v||'(not found)');
 "
 
@@ -563,7 +563,6 @@ Use the AskUserQuestion tool to prompt the user:
 
 **Options:**
 1. **ultrawork (maximum capability)** - Uses all agent tiers including Opus for complex tasks. Best for challenging work where quality matters most. (Recommended)
-2. ** (token efficient)** - Prefers Haiku/Sonnet agents, avoids Opus. Best for pro-plan users who want cost efficiency.
 
 Store the preference in `~/.claude/.omc-config.json`:
 
@@ -584,6 +583,7 @@ echo "Default execution mode set to: USER_CHOICE"
 ```
 
 **Note**: This preference ONLY affects generic keywords ("fast", "parallel"). Explicit keywords ("ulw") always override this preference.
+
 
 ## Step 3.8: Install CLI Analytics Tools (Optional)
 
@@ -914,7 +914,6 @@ Just include these words naturally in your request:
 | ralph | Persistence mode | "ralph: fix the auth bug" |
 | ralplan | Iterative planning | "ralplan this feature" |
 | ulw | Max parallelism | "ulw refactor the API" |
-| eco | Token-efficient mode | "eco refactor the API" |
 | plan | Planning interview | "plan the new endpoints" |
 | team | Coordinated agents | "/team 3:executor fix errors" |
 
@@ -962,7 +961,6 @@ MAGIC KEYWORDS (power-user shortcuts):
 | ralph | /ralph | "ralph: fix the bug" |
 | ralplan | /ralplan | "ralplan this feature" |
 | ulw | /ultrawork | "ulw refactor API" |
-| eco | (new!) | "eco fix all errors" |
 | plan | /plan | "plan the endpoints" |
 | team | (new!) | "/team 3:executor fix errors" |
 

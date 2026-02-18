@@ -47,11 +47,11 @@ Active modes are still cancelled in dependency order:
 2. Ralph (cleans its linked ultrawork or )
 3. Ultrawork (standalone)
 4. UltraQA (standalone)
-6. Swarm (standalone)
-7. Ultrapilot (standalone)
-8. Pipeline (standalone)
-9. Team (Claude Code native)
-10. Plan Consensus (standalone)
+5. Swarm (standalone)
+6. Ultrapilot (standalone)
+7. Pipeline (standalone)
+8. Team (Claude Code native)
+9. Plan Consensus (standalone)
 
 ## Force Clear All
 
