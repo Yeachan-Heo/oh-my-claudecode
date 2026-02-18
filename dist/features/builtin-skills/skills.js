@@ -49,8 +49,13 @@ function loadSkillFromFile(skillPath, skillName) {
     try {
         const content = readFileSync(skillPath, 'utf-8');
         const { data, body } = parseFrontmatter(content);
+        const resolvedName = data.name || skillName;
+        // Prefix skills whose short name would shadow a CC native command
+        const safeName = CC_NATIVE_COMMANDS.has(resolvedName.toLowerCase())
+            ? `omc-${resolvedName}`
+            : resolvedName;
         return {
-            name: data.name || skillName,
+            name: safeName,
             description: data.description || '',
             template: body.trim(),
             // Optional fields from frontmatter
@@ -63,6 +68,22 @@ function loadSkillFromFile(skillPath, skillName) {
         return null;
     }
 }
+/**
+ * Claude Code native commands that must not be shadowed by OMC skill short names.
+ * Skills with these names will still load but their name will be prefixed with 'omc-'
+ * to avoid overriding built-in /review, /plan, /security-review etc.
+ */
+const CC_NATIVE_COMMANDS = new Set([
+    'review',
+    'plan',
+    'security-review',
+    'init',
+    'doctor',
+    'help',
+    'config',
+    'clear',
+    'memory',
+]);
 /**
  * Load all skills from the skills/ directory
  */

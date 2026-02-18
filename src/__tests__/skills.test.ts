@@ -86,16 +86,16 @@ describe('Builtin Skills', () => {
         'note',
         'omc-setup',
         'pipeline',
-        'plan',
+        'omc-plan',
         'project-session-manager',
         'psm',
         'ralph',
         'ralph-init',
         'ralplan',
         'release',
-        'review',
+        'omc-review',
         'sciomc',
-        'security-review',
+        'omc-security-review',
         'skill',
         'swarm',
         'tdd',
@@ -157,7 +157,7 @@ describe('Builtin Skills', () => {
       expect(names).toContain('ultrawork');
       expect(names).toContain('analyze');
       expect(names).toContain('deepsearch');
-      expect(names).toContain('plan');
+      expect(names).toContain('omc-plan');
       expect(names).toContain('deepinit');
       expect(names).toContain('release');
       expect(names).toContain('omc-doctor');
