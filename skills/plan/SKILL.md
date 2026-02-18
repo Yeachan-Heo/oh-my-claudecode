@@ -66,16 +66,21 @@ Jumping into code without understanding requirements leads to rework, scope cree
 2. **User feedback**: **MUST** use `AskUserQuestion` to present the draft plan with these options:
    - **Proceed to review** — send to Architect and Critic for evaluation
    - **Request changes** — return to step 1 with user feedback incorporated
-   - **Skip review** — go directly to final approval (step 6)
+   - **Skip review** — go directly to final approval (step 7)
 3. **Architect** reviews for architectural soundness (prefer `ask_codex` with `architect` role)
 4. **Critic** evaluates against quality criteria (prefer `ask_codex` with `critic` role)
 5. If Critic rejects: iterate with feedback (max 5 iterations)
-6. On Critic approval: **MUST** use `AskUserQuestion` to present the plan with these options:
+6. **Apply improvements**: When reviewers approve with improvement suggestions, merge all accepted improvements into the plan file before proceeding. Specifically:
+   a. Collect all improvement suggestions from Architect and Critic responses
+   b. Deduplicate and categorize the suggestions
+   c. Update the plan file in `.omc/plans/` with the accepted improvements (add missing details, refine steps, strengthen acceptance criteria, etc.)
+   d. Note which improvements were applied in a brief changelog section at the end of the plan
+7. On Critic approval (with improvements applied): **MUST** use `AskUserQuestion` to present the plan with these options:
    - **Approve and execute** — proceed to implementation via ralph+ultrawork
    - **Request changes** — return to step 1 with user feedback
    - **Reject** — discard the plan entirely
-7. User chooses via the structured `AskUserQuestion` UI (never ask for approval in plain text)
-8. On user approval: **MUST** invoke `Skill("oh-my-claudecode:ralph")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. Do NOT edit source code files in the planning agent. The ralph skill handles execution via ultrawork parallel agents.
+8. User chooses via the structured `AskUserQuestion` UI (never ask for approval in plain text)
+9. On user approval: **MUST** invoke `Skill("oh-my-claudecode:ralph")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. Do NOT edit source code files in the planning agent. The ralph skill handles execution via ultrawork parallel agents.
 
 ### Review Mode (`--review`)
 
@@ -104,8 +109,8 @@ Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
 - Use `ask_codex` with `agent_role: "analyst"` for requirements analysis
 - Use `ask_codex` with `agent_role: "critic"` for plan review in consensus and review modes
 - If ToolSearch finds no MCP tools or Codex is unavailable, fall back to equivalent Claude agents -- never block on external tools
-- In consensus mode, **MUST** use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 6) -- never ask for approval in plain text
-- In consensus mode, on user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution (step 8) -- never implement directly in the planning agent
+- In consensus mode, **MUST** use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 7) -- never ask for approval in plain text
+- In consensus mode, on user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution (step 9) -- never implement directly in the planning agent
 </Tool_Usage>
 
 <Examples>
