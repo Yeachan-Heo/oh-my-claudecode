@@ -8,6 +8,8 @@ English | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](READM
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 
+> **For Codex users:** Check out [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) — the same orchestration experience for OpenAI Codex CLI.
+
 **Multi-agent orchestration for Claude Code. Zero learning curve.**
 
 *Don't learn Claude Code. Just use OMC.*
