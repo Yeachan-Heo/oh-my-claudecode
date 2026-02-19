@@ -23,6 +23,9 @@ vi.mock("../config.js", () => ({
   getNotificationConfig: (profileName?: string) => mockGetNotificationConfig(profileName),
   isEventEnabled: (config: unknown, event: unknown) => mockIsEventEnabled(config, event),
   getEnabledPlatforms: () => ["discord-bot"],
+  getVerbosity: () => "session",
+  isEventAllowedByVerbosity: () => true,
+  shouldIncludeTmuxTail: () => false,
   parseMentionAllowedMentions: () => ({
     users: undefined,
     roles: undefined,

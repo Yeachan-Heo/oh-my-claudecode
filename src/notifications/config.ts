@@ -16,6 +16,7 @@ import type {
   DiscordNotificationConfig,
   DiscordBotNotificationConfig,
   TelegramNotificationConfig,
+  VerbosityLevel,
 } from "./types.js";
 
 const CONFIG_FILE = join(getClaudeConfigDir(), ".omc-config.json");
@@ -307,6 +308,74 @@ function applyEnvMerge(config: NotificationConfig): NotificationConfig {
   }
 
   return merged;
+}
+
+/** Valid verbosity level values */
+const VALID_VERBOSITY_LEVELS: ReadonlySet<string> = new Set([
+  "verbose",
+  "agent",
+  "session",
+  "minimal",
+]);
+
+/** Session events allowed at minimal/session verbosity */
+const SESSION_EVENTS: ReadonlySet<NotificationEvent> = new Set([
+  "session-start",
+  "session-stop",
+  "session-end",
+  "session-idle",
+]);
+
+/**
+ * Get the effective verbosity level.
+ *
+ * Priority: OMC_NOTIFY_VERBOSITY env var > config.verbosity > "session" default.
+ * Invalid env var values are ignored (fall back to config or default).
+ */
+export function getVerbosity(config: NotificationConfig): VerbosityLevel {
+  const envValue = process.env.OMC_NOTIFY_VERBOSITY;
+  if (envValue && VALID_VERBOSITY_LEVELS.has(envValue)) {
+    return envValue as VerbosityLevel;
+  }
+  if (config.verbosity && VALID_VERBOSITY_LEVELS.has(config.verbosity)) {
+    return config.verbosity;
+  }
+  return "session";
+}
+
+/**
+ * Check if an event is allowed by the given verbosity level.
+ *
+ * Level matrix:
+ * - minimal: session-start, session-stop, session-end, session-idle
+ * - session: same as minimal (tmux tail handled separately)
+ * - agent:   session events + agent-call
+ * - verbose: all events
+ */
+export function isEventAllowedByVerbosity(
+  verbosity: VerbosityLevel,
+  event: NotificationEvent,
+): boolean {
+  switch (verbosity) {
+    case "verbose":
+      return true;
+    case "agent":
+      return SESSION_EVENTS.has(event) || event === "agent-call";
+    case "session":
+    case "minimal":
+      return SESSION_EVENTS.has(event);
+    default:
+      return SESSION_EVENTS.has(event);
+  }
+}
+
+/**
+ * Check if tmux tail content should be included at the given verbosity level.
+ *
+ * Returns true for session, agent, verbose. Returns false for minimal.
+ */
+export function shouldIncludeTmuxTail(verbosity: VerbosityLevel): boolean {
+  return verbosity !== "minimal";
 }
 
 /**

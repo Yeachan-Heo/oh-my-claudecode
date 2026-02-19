@@ -788,6 +788,28 @@ function processPreToolUse(input: HookInput): HookOutput {
     _notify.askUserQuestion(input.sessionId, directory, input.toolInput);
   }
 
+  // Notify when a new agent is spawned via Task tool (issue #761)
+  // Fire-and-forget: verbosity filtering is handled inside notify()
+  if (input.toolName === "Task" && input.sessionId) {
+    const taskInput = input.toolInput as {
+      subagent_type?: string;
+      description?: string;
+    } | undefined;
+    const agentType = taskInput?.subagent_type;
+    const agentName = agentType?.includes(":")
+      ? agentType.split(":").pop()
+      : agentType;
+    import("../notifications/index.js").then(({ notify }) =>
+      notify("agent-call", {
+        sessionId: input.sessionId!,
+        projectPath: directory,
+        agentName,
+        agentType,
+        profileName: process.env.OMC_NOTIFY_PROFILE,
+      }).catch(() => {})
+    ).catch(() => {});
+  }
+
   // Warn about pkill -f self-termination risk (issue #210)
   // Matches: pkill -f, pkill -9 -f, pkill --full, etc.
   if (input.toolName === "Bash") {

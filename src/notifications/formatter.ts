@@ -134,6 +134,8 @@ export function formatSessionEnd(payload: NotificationPayload): string {
     lines.push("", `**Summary:** ${payload.contextSummary}`);
   }
 
+  appendTmuxTail(lines, payload);
+
   lines.push("");
   lines.push(buildFooter(payload, true));
 
@@ -156,6 +158,42 @@ export function formatSessionIdle(payload: NotificationPayload): string {
 
   if (payload.modesUsed && payload.modesUsed.length > 0) {
     lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
+  }
+
+  appendTmuxTail(lines, payload);
+
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+
+  return lines.join("\n");
+}
+
+/**
+ * Append tmux tail content to a message if present in the payload.
+ */
+function appendTmuxTail(lines: string[], payload: NotificationPayload): void {
+  if (payload.tmuxTail) {
+    lines.push("");
+    lines.push("**Recent output:**");
+    lines.push("```");
+    lines.push(payload.tmuxTail.trimEnd());
+    lines.push("```");
+  }
+}
+
+/**
+ * Format agent-call notification message.
+ * Sent when a new agent (Task) is spawned.
+ */
+export function formatAgentCall(payload: NotificationPayload): string {
+  const lines = [`# Agent Spawned`, ""];
+
+  if (payload.agentName) {
+    lines.push(`**Agent:** \`${payload.agentName}\``);
+  }
+
+  if (payload.agentType) {
+    lines.push(`**Type:** \`${payload.agentType}\``);
   }
 
   lines.push("");
@@ -199,6 +237,8 @@ export function formatNotification(payload: NotificationPayload): string {
       return formatSessionIdle(payload);
     case "ask-user-question":
       return formatAskUserQuestion(payload);
+    case "agent-call":
+      return formatAgentCall(payload);
     default:
       return payload.message || `Event: ${payload.event}`;
   }
