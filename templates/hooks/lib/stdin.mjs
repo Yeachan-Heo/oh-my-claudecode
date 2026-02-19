@@ -12,10 +12,10 @@
  * close stdin, this hangs forever. This function uses event-based reading
  * with a timeout as a safety net.
  *
- * @param {number} timeoutMs - Maximum time to wait for stdin (default: 5000ms)
+ * @param {number} timeoutMs - Maximum time to wait for stdin (default: 2000ms)
  * @returns {Promise<string>} - The stdin content, or empty string on error/timeout
  */
-export async function readStdin(timeoutMs = 5000) {
+export async function readStdin(timeoutMs = 2000) {
   return new Promise((resolve) => {
     const chunks = [];
     let settled = false;
