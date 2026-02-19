@@ -41,12 +41,14 @@ Eso es todo. Todo lo demás es automático.
 ### Actualizar
 
 ```bash
-# 1. Actualizar el plugin
-/plugin install oh-my-claudecode
+# 1. Actualizar el clon del marketplace
+/plugin marketplace update omc
 
 # 2. Volver a ejecutar el setup para actualizar la configuracion
 /omc:omc-setup
 ```
+
+> **Nota:** Si la actualizacion automatica del marketplace no esta activada, debes ejecutar manualmente `/plugin marketplace update omc` para sincronizar la ultima version antes de ejecutar el setup.
 
 Si experimentas problemas despues de actualizar, limpia la cache antigua del plugin:
 

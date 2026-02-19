@@ -65,12 +65,14 @@ Enable Claude Code native teams in `~/.claude/settings.json`:
 ### Updating
 
 ```bash
-# 1. Update the plugin
-/plugin install oh-my-claudecode
+# 1. Update the marketplace clone
+/plugin marketplace update omc
 
 # 2. Re-run setup to refresh configuration
 /omc:omc-setup
 ```
+
+> **Note:** If marketplace auto-update is not enabled, you must manually run `/plugin marketplace update omc` to sync the latest version before running setup.
 
 If you experience issues after updating, clear the old plugin cache:
 

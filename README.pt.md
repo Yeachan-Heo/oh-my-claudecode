@@ -65,12 +65,14 @@ Ative os times nativos do Claude Code em `~/.claude/settings.json`:
 ### Atualizando
 
 ```bash
-# 1. Atualize o plugin
-/plugin install oh-my-claudecode
+# 1. Atualize o clone do marketplace
+/plugin marketplace update omc
 
 # 2. Execute o setup novamente para atualizar a configuração
 /omc:omc-setup
 ```
+
+> **Observação:** Se a atualização automática do marketplace não estiver habilitada, você precisa executar manualmente `/plugin marketplace update omc` para sincronizar a versão mais recente antes de executar o setup.
 
 Se você tiver problemas depois de atualizar, limpe o cache antigo do plugin:
 
