@@ -9,6 +9,26 @@
 
 import { execSync, execFileSync } from 'child_process';
 
+/**
+ * Resolve the tmux session name that the current process is running inside.
+ *
+ * Returns the session name string when inside tmux, or null when not in tmux
+ * or when the query fails.  This is used as a safety guard to prevent the
+ * team-leader from accidentally killing its own session (issue #723).
+ */
+function getCurrentTmuxSessionName(): string | null {
+  if (!process.env.TMUX) return null;
+  try {
+    const name = execFileSync(
+      'tmux', ['display-message', '-p', '#S'],
+      { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
 const TMUX_SESSION_PREFIX = 'omc-team';
 
 /** Validate tmux is available. Throws with install instructions if not. */
@@ -48,10 +68,15 @@ export function sessionName(teamName: string, workerName: string): string {
 export function createSession(teamName: string, workerName: string, workingDirectory?: string): string {
   const name = sessionName(teamName, workerName);
 
-  // Kill existing session if present (stale from previous run)
-  try {
-    execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
-  } catch { /* ignore — session may not exist */ }
+  // Kill existing session if present (stale from previous run).
+  // Guard: never kill the session the current process (team leader) is running
+  // inside — doing so would terminate the leader mid-execution (#723).
+  const leaderSession = getCurrentTmuxSessionName();
+  if (leaderSession !== name) {
+    try {
+      execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
+    } catch { /* ignore — session may not exist */ }
+  }
 
   // Create detached session with reasonable terminal size
   const args = ['new-session', '-d', '-s', name, '-x', '200', '-y', '50'];
@@ -66,6 +91,12 @@ export function createSession(teamName: string, workerName: string, workingDirec
 /** Kill a session by team/worker name. No-op if not found. */
 export function killSession(teamName: string, workerName: string): void {
   const name = sessionName(teamName, workerName);
+
+  // Guard: never kill the session the current process (team leader) is running
+  // inside — doing so would terminate the leader mid-execution (#723).
+  const leaderSession = getCurrentTmuxSessionName();
+  if (leaderSession === name) return;
+
   try {
     execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
   } catch { /* ignore — session may not exist */ }
