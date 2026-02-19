@@ -67,8 +67,8 @@ Jumping into code without understanding requirements leads to rework, scope cree
    - **Proceed to review** — send to Architect and Critic for evaluation
    - **Request changes** — return to step 1 with user feedback incorporated
    - **Skip review** — go directly to final approval (step 7)
-3. **Architect** reviews for architectural soundness (prefer `ask_codex` with `architect` role)
-4. **Critic** evaluates against quality criteria (prefer `ask_codex` with `critic` role)
+3. **Architect** reviews for architectural soundness (prefer `ask_codex` with `architect` role). **Wait for this step to complete before proceeding to step 4.** Do NOT run steps 3 and 4 in parallel — parallel `ask_codex` calls can trigger a sibling cascade failure if one receives a 429 rate-limit error. If `ask_codex` fails with a rate-limit or 429 error, wait 5–10 seconds and retry once; if it fails again, fall back to spawning a `Task` with `subagent_type="oh-my-claudecode:architect"`.
+4. **Critic** evaluates against quality criteria (prefer `ask_codex` with `critic` role). Run only after step 3 is complete. Apply the same retry/fallback rule: on rate-limit error, retry once after a short delay; on second failure, fall back to `Task` with `subagent_type="oh-my-claudecode:critic"`.
 5. **Re-review loop** (max 5 iterations): If Critic rejects, execute this closed loop:
    a. Collect all rejection feedback from Architect + Critic
    b. Pass feedback to Planner to produce a revised plan
@@ -118,6 +118,8 @@ Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
 - Use `ask_codex` with `agent_role: "analyst"` for requirements analysis
 - Use `ask_codex` with `agent_role: "critic"` for plan review in consensus and review modes
 - If ToolSearch finds no MCP tools or Codex is unavailable, fall back to equivalent Claude agents -- never block on external tools
+- **CRITICAL — Consensus mode `ask_codex` calls MUST be sequential, never parallel.** Claude Code cancels sibling tool calls when one fails ("Sibling tool call errored"), so running Architect and Critic `ask_codex` calls in the same tool-call batch will cause a cascade failure if either hits a 429 rate-limit. Always await the Architect call result before issuing the Critic call.
+- On `ask_codex` rate-limit (429) error: wait 5–10 s and retry once. If the second attempt also fails, fall back to the equivalent Claude agent (`Task` with `subagent_type="oh-my-claudecode:architect"` or `"oh-my-claudecode:critic"`).
 - In consensus mode, **MUST** use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 7) -- never ask for approval in plain text
 - In consensus mode, on user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution (step 9) -- never implement directly in the planning agent
 - When user selects "Clear context and implement" in step 7: invoke `Skill("compact")` first to compress the accumulated planning context, then immediately invoke `Skill("oh-my-claudecode:ralph")` with the plan path -- the compact step is critical to free up context before the implementation loop begins
