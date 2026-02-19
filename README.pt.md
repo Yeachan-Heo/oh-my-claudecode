@@ -26,7 +26,7 @@
 
 **Passo 2: Configure**
 ```bash
-/omc:omc-setup
+/omc-setup
 ```
 
 **Passo 3: Crie algo**
@@ -41,7 +41,7 @@ autopilot: build a REST API for managing tasks
 A partir da **v4.1.7**, o **Team** é a superfície canônica de orquestração no OMC. Entrypoints legados como **swarm** e **ultrapilot** continuam com suporte, mas agora **roteiam para Team por baixo dos panos**.
 
 ```bash
-/omc:team 3:executor "fix all TypeScript errors"
+/team 3:executor "fix all TypeScript errors"
 ```
 
 O Team roda como um pipeline em estágios:
@@ -69,7 +69,7 @@ Ative os times nativos do Claude Code em `~/.claude/settings.json`:
 /plugin marketplace update omc
 
 # 2. Execute o setup novamente para atualizar a configuração
-/omc:omc-setup
+/omc-setup
 ```
 
 > **Observação:** Se a atualização automática do marketplace não estiver habilitada, você precisa executar manualmente `/plugin marketplace update omc` para sincronizar a versão mais recente antes de executar o setup.
@@ -77,7 +77,7 @@ Ative os times nativos do Claude Code em `~/.claude/settings.json`:
 Se você tiver problemas depois de atualizar, limpe o cache antigo do plugin:
 
 ```bash
-/omc:omc-doctor
+/omc-doctor
 ```
 
 <h1 align="center">Seu Claude acabou de tomar esteroides.</h1>
@@ -138,7 +138,7 @@ Atalhos opcionais para usuários avançados. Linguagem natural funciona bem sem 
 
 | Palavra-chave | Efeito | Exemplo |
 |---------------|--------|---------|
-| `team` | Orquestração canônica com Team | `/omc:team 3:executor "fix all TypeScript errors"` |
+| `team` | Orquestração canônica com Team | `/team 3:executor "fix all TypeScript errors"` |
 | `autopilot` | Execução autônoma completa | `autopilot: build a todo app` |
 | `ralph` | Modo persistente | `ralph: refactor auth` |
 | `ulw` | Paralelismo máximo | `ulw fix all errors` |

@@ -26,7 +26,7 @@
 
 **第二步：配置**
 ```bash
-/omc:omc-setup
+/omc-setup
 ```
 
 **第三步：开始构建**
@@ -45,7 +45,7 @@ autopilot: build a REST API for managing tasks
 /plugin marketplace update omc
 
 # 2. 重新运行设置以刷新配置
-/omc:omc-setup
+/omc-setup
 ```
 
 > **注意：** 如果 marketplace 自动更新未启用，您需要在运行设置之前手动执行 `/plugin marketplace update omc` 来同步最新版本。
@@ -53,7 +53,7 @@ autopilot: build a REST API for managing tasks
 如果更新后遇到问题，清除旧的插件缓存：
 
 ```bash
-/omc:omc-doctor
+/omc-doctor
 ```
 
 <h1 align="center">你的 Claude 已被注入超能力。</h1>

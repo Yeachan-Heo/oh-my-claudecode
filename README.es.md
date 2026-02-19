@@ -26,7 +26,7 @@
 
 **Paso 2: Configurar**
 ```bash
-/omc:omc-setup
+/omc-setup
 ```
 
 **Paso 3: Construye algo**
@@ -45,7 +45,7 @@ Eso es todo. Todo lo demás es automático.
 /plugin marketplace update omc
 
 # 2. Volver a ejecutar el setup para actualizar la configuracion
-/omc:omc-setup
+/omc-setup
 ```
 
 > **Nota:** Si la actualizacion automatica del marketplace no esta activada, debes ejecutar manualmente `/plugin marketplace update omc` para sincronizar la ultima version antes de ejecutar el setup.
@@ -53,7 +53,7 @@ Eso es todo. Todo lo demás es automático.
 Si experimentas problemas despues de actualizar, limpia la cache antigua del plugin:
 
 ```bash
-/omc:omc-doctor
+/omc-doctor
 ```
 
 <h1 align="center">Tu Claude acaba de recibir esteroides.</h1>

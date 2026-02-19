@@ -26,7 +26,7 @@
 
 **ステップ 2: セットアップ**
 ```bash
-/omc:omc-setup
+/omc-setup
 ```
 
 **ステップ 3: 何か作ってみる**
@@ -45,7 +45,7 @@ autopilot: build a REST API for managing tasks
 /plugin marketplace update omc
 
 # 2. セットアップを再実行して設定を更新
-/omc:omc-setup
+/omc-setup
 ```
 
 > **注意:** マーケットプレイスの自動更新が有効になっていない場合は、セットアップ実行前に `/plugin marketplace update omc` を手動で実行して最新バージョンを同期する必要があります。
@@ -53,7 +53,7 @@ autopilot: build a REST API for managing tasks
 更新後に問題が発生した場合は、古いプラグインキャッシュをクリアしてください：
 
 ```bash
-/omc:omc-doctor
+/omc-doctor
 ```
 
 <h1 align="center">あなたの Claude がステロイド級にパワーアップ。</h1>

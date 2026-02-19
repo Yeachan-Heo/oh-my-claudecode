@@ -26,7 +26,7 @@
 
 **Bước 2: Thiết lập**
 ```bash
-/omc:omc-setup
+/omc-setup
 ```
 
 **Bước 3: Xây một thứ gì đó**
@@ -41,7 +41,7 @@ Vậy là xong. Mọi thứ còn lại đều tự động.
 Bắt đầu từ **v4.1.7**, **Team** là bề mặt điều phối chuẩn trong OMC. Các điểm vào cũ như **swarm** và **ultrapilot** vẫn được hỗ trợ, nhưng giờ đây chúng **được chuyển sang Team ở tầng bên dưới**.
 
 ```bash
-/omc:team 3:executor "fix all TypeScript errors"
+/team 3:executor "fix all TypeScript errors"
 ```
 
 Team chạy theo pipeline theo từng giai đoạn:
@@ -69,7 +69,7 @@ Bật Claude Code native teams trong `~/.claude/settings.json`:
 /plugin marketplace update omc
 
 # 2. Chạy lại setup để làm mới cấu hình
-/omc:omc-setup
+/omc-setup
 ```
 
 > **Lưu ý:** Nếu tự động cập nhật marketplace chưa được bật, bạn cần chạy `/plugin marketplace update omc` thủ công để đồng bộ phiên bản mới nhất trước khi chạy setup.
@@ -77,7 +77,7 @@ Bật Claude Code native teams trong `~/.claude/settings.json`:
 Nếu gặp sự cố sau khi cập nhật, hãy xóa cache plugin cũ:
 
 ```bash
-/omc:omc-doctor
+/omc-doctor
 ```
 
 <h1 align="center">Your Claude Just Have been Steroided.</h1>
@@ -138,7 +138,7 @@ Các phím tắt tùy chọn cho người dùng nâng cao. Không dùng chúng t
 
 | Keyword | Hiệu ứng | Ví dụ |
 |---------|--------|---------|
-| `team` | Điều phối Team chuẩn | `/omc:team 3:executor "fix all TypeScript errors"` |
+| `team` | Điều phối Team chuẩn | `/team 3:executor "fix all TypeScript errors"` |
 | `autopilot` | Thực thi tự động toàn phần | `autopilot: build a todo app` |
 | `ralph` | Chế độ bền bỉ | `ralph: refactor auth` |
 | `ulw` | Song song tối đa | `ulw fix all errors` |
