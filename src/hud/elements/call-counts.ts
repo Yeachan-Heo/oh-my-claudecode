@@ -4,8 +4,16 @@
  * Renders real-time counts of tool calls, agent invocations, and skill usages
  * on the right side of the HUD status line. (Issue #710)
  *
- * Format: 🔧42 🤖7 ⚡3
+ * Format: 🔧42 🤖7 ⚡3  (Unix)
+ * Format: T:42 A:7 S:3   (Windows - ASCII fallback to avoid rendering issues)
  */
+
+// Windows terminals (cmd.exe, PowerShell, Windows Terminal) may not render
+// multi-byte emoji correctly, causing HUD layout corruption.
+const isWin = process.platform === 'win32';
+const TOOL_ICON = isWin ? 'T:' : '\u{1F527}';
+const AGENT_ICON = isWin ? 'A:' : '\u{1F916}';
+const SKILL_ICON = isWin ? 'S:' : '\u26A1';
 
 /**
  * Render call counts badge.
@@ -25,13 +33,13 @@ export function renderCallCounts(
   const parts: string[] = [];
 
   if (toolCalls > 0) {
-    parts.push(`\u{1F527}${toolCalls}`); // 🔧
+    parts.push(`${TOOL_ICON}${toolCalls}`);
   }
   if (agentInvocations > 0) {
-    parts.push(`\u{1F916}${agentInvocations}`); // 🤖
+    parts.push(`${AGENT_ICON}${agentInvocations}`);
   }
   if (skillUsages > 0) {
-    parts.push(`\u26A1${skillUsages}`); // ⚡
+    parts.push(`${SKILL_ICON}${skillUsages}`);
   }
 
   return parts.length > 0 ? parts.join(' ') : null;

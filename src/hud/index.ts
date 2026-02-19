@@ -472,7 +472,11 @@ async function main(): Promise<void> {
     // Apply safe mode sanitization if enabled (Issue #346)
     // This strips ANSI codes and uses ASCII-only output to prevent
     // terminal rendering corruption during concurrent updates
-    if (config.elements.safeMode) {
+    // On Windows, always use safe mode to prevent terminal rendering issues
+    // with non-breaking spaces and ANSI escape sequences
+    const useSafeMode = config.elements.safeMode || process.platform === 'win32';
+
+    if (useSafeMode) {
       output = sanitizeOutput(output);
       // In safe mode, use regular spaces (don't convert to non-breaking)
       console.log(output);
