@@ -13,7 +13,8 @@
  * 5. ultrawork/ulw: Maximum parallel execution
  * 6. ecomode/eco: Token-efficient execution
  * 7. pipeline: Sequential agent chaining
- * 8. ralplan: Iterative planning with consensus
+ * 8. ccg: Claude-Codex-Gemini tri-model orchestration
+ * 9. ralplan: Iterative planning with consensus
  * 9. plan: Planning interview mode
  * 10. tdd: Test-driven development
  * 11. research: Research orchestration
@@ -297,7 +298,7 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
   const priorityOrder = ['cancel','ralph','autopilot','team','ultrawork','ecomode',
-    'pipeline','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze',
+    'pipeline','ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze',
     'codex','gemini'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
@@ -409,6 +410,11 @@ async function main() {
     // Pipeline keywords
     if (/\b(pipeline)\b/i.test(cleanPrompt) || /\bchain\s+agents\b/i.test(cleanPrompt)) {
       matches.push({ name: 'pipeline', args: '' });
+    }
+
+    // CCG keywords (Claude-Codex-Gemini tri-model orchestration)
+    if (/\b(ccg|claude-codex-gemini)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'ccg', args: '' });
     }
 
     // Ralplan keyword

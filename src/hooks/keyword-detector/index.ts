@@ -19,6 +19,7 @@ export type KeywordType =
   | 'ecomode'     // Priority 6
   | 'swarm'       // Priority 7
   | 'pipeline'    // Priority 8
+  | 'ccg'         // Priority 8.5 (Claude-Codex-Gemini orchestration)
   | 'ralplan'     // Priority 9
   | 'plan'        // Priority 10
   | 'tdd'         // Priority 11
@@ -78,6 +79,7 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   ultrathink: /\b(ultrathink|think hard|think deeply)\b/i,
   deepsearch: /\b(deepsearch)\b|\bsearch\s+(the\s+)?(codebase|code|files?|project)\b|\bfind\s+(in\s+)?(codebase|code|all\s+files?)\b/i,
   analyze: /\b(deep\s*analyze)\b|\binvestigate\s+(the|this|why)\b|\bdebug\s+(the|this|why)\b/i,
+  ccg: /\b(ccg|claude-codex-gemini)\b/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
 };
@@ -87,7 +89,7 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
  */
 const KEYWORD_PRIORITY: KeywordType[] = [
   'cancel', 'ralph', 'autopilot', 'ultrapilot', 'team', 'ultrawork', 'ecomode',
-  'swarm', 'pipeline', 'ralplan', 'plan', 'tdd', 'research',
+  'swarm', 'pipeline', 'ccg', 'ralplan', 'plan', 'tdd', 'research',
   'ultrathink', 'deepsearch', 'analyze', 'codex', 'gemini'
 ];
 
@@ -104,6 +106,28 @@ export function removeCodeBlocks(text: string): string {
   result = result.replace(/`[^`]+`/g, '');
 
   return result;
+}
+
+/**
+ * Sanitize text for keyword detection by removing common false-positive sources:
+ * XML/HTML tags, URLs, file paths, code blocks, and inline code.
+ *
+ * This is a superset of removeCodeBlocks — use this for keyword detection logic.
+ */
+export function sanitizeForKeywordDetection(text: string): string {
+  return text
+    // Strip XML/HTML tag blocks: <tag>...</tag>
+    .replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, '')
+    // Strip self-closing XML tags: <tag />, <tag attr="val" />
+    .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
+    // Strip URLs: http(s)://... up to whitespace
+    .replace(/https?:\/\/[^\s)>\]]+/g, '')
+    // Strip file paths: /foo/bar or foo/bar/baz
+    .replace(/(^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '$1')
+    // Strip fenced code blocks
+    .replace(/```[\s\S]*?```/g, '')
+    // Strip inline code
+    .replace(/`[^`]+`/g, '');
 }
 
 /**
