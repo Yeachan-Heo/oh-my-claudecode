@@ -11,7 +11,7 @@ describe('Agent Registry Validation', () => {
   test('agent count matches documentation', () => {
     const agentsDir = path.join(__dirname, '../../agents');
     const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
-    expect(promptFiles.length).toBe(30);
+    expect(promptFiles.length).toBe(31);
   });
 
   test('all agents have .md prompt files', () => {

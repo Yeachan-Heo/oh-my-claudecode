@@ -73,12 +73,13 @@ export {
   productAnalystAgent
 } from './definitions.js';
 
-// Specialized agents (Security, Build, Code Review, Git)
+// Specialized agents (Security, Build, Code Review, Git, Code Simplifier)
 export {
   securityReviewerAgent,
   buildFixerAgent,
   codeReviewerAgent,
-  gitMasterAgent
+  gitMasterAgent,
+  codeSimplifierAgent
 } from './definitions.js';
 
 // Core exports (getAgentDefinitions and omcSystemPrompt)

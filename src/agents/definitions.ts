@@ -259,6 +259,17 @@ export const gitMasterAgent: AgentConfig = {
   defaultModel: 'sonnet'
 };
 
+/**
+ * Code-Simplifier Agent - Code Simplification & Refactoring (Opus)
+ */
+export const codeSimplifierAgent: AgentConfig = {
+  name: 'code-simplifier',
+  description: 'Simplifies and refines code for clarity, consistency, and maintainability (Opus).',
+  prompt: loadAgentPrompt('code-simplifier'),
+  model: 'opus',
+  defaultModel: 'opus'
+};
+
 // ============================================================
 // DEPRECATED ALIASES (Backward Compatibility)
 // ============================================================
@@ -338,6 +349,7 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     'qa-tester': qaTesterAgent,
     scientist: scientistAgent,
     'git-master': gitMasterAgent,
+    'code-simplifier': codeSimplifierAgent,
 
     // ============================================================
     // PRODUCT LANE
