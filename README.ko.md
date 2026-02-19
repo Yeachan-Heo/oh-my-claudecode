@@ -188,7 +188,7 @@ export OMC_TELEGRAM_CHAT_ID="your_chat_id"
 export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
 export OMC_SLACK_MENTION="<@U1234567890>"  # optional
 
-# Optional webhooks
+# 선택적 웹훅
 export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
 ```
 

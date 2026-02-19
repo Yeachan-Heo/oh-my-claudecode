@@ -190,6 +190,40 @@ Hành vi tag:
 
 ---
 
+## Thông báo (Notifications)
+
+Bạn có thể nhận thông báo theo thời gian thực cho các sự kiện vòng đời phiên.
+
+Sự kiện được hỗ trợ:
+- `session-start`
+- `session-stop` (khi chế độ persistent vào trạng thái chờ/block)
+- `session-end`
+- `ask-user-question`
+
+### Cấu hình
+Thêm các biến môi trường sau vào shell profile (ví dụ `~/.zshrc`, `~/.bashrc`):
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Slack
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_MENTION="<@U1234567890>"  # tùy chọn
+
+# Webhook tùy chọn
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+```
+
+> Lưu ý: các biến phải được tải trong cùng shell nơi bạn chạy `claude`.
+
+---
+
 ## Tài liệu
 
 - **[Tham chiếu đầy đủ](docs/REFERENCE.md)** - Tài liệu đầy đủ về tính năng

@@ -192,6 +192,40 @@ Tag behavior:
 
 ---
 
+## Notifications
+
+Receive real-time notifications for session lifecycle events.
+
+Supported events:
+- `session-start`
+- `session-stop` (when a persistent mode enters a waiting/blocked state)
+- `session-end`
+- `ask-user-question`
+
+### Configuration
+Add these environment variables to your shell profile (e.g. `~/.zshrc`, `~/.bashrc`):
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Slack
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_MENTION="<@U1234567890>"  # optional
+
+# Optional webhooks
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+```
+
+> Note: variables must be loaded in the same shell where you run `claude`.
+
+---
+
 ## Documentation
 
 - **[Full Reference](docs/REFERENCE.md)** - Complete feature documentation

@@ -190,6 +190,40 @@ Comportamento das tags:
 
 ---
 
+## Notificações
+
+Receba notificações em tempo real para eventos do ciclo de vida da sessão.
+
+Eventos suportados:
+- `session-start`
+- `session-stop` (quando um modo persistente entra em estado de espera/bloqueio)
+- `session-end`
+- `ask-user-question`
+
+### Configuração
+Adicione estas variáveis de ambiente ao seu perfil de shell (ex: `~/.zshrc`, `~/.bashrc`):
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Slack
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_MENTION="<@U1234567890>"  # opcional
+
+# Webhooks opcionais
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+```
+
+> Nota: as variáveis devem estar carregadas no mesmo shell onde você executa `claude`.
+
+---
+
 ## Documentação
 
 - **[Referência Completa](docs/REFERENCE.md)** - Documentação completa de recursos
