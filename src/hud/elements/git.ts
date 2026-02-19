@@ -23,7 +23,7 @@ export function getGitRepoName(cwd?: string): string | null {
       encoding: 'utf-8',
       timeout: 1000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? true : undefined,
+      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
     }).trim();
 
     if (!url) return null;
@@ -50,7 +50,7 @@ export function getGitBranch(cwd?: string): string | null {
       encoding: 'utf-8',
       timeout: 1000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? true : undefined,
+      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
     }).trim();
 
     return branch || null;
