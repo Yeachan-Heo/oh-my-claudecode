@@ -477,6 +477,39 @@ World`);
                 expect(codexMatch).toBeUndefined();
             });
         });
+        describe('ccg keyword', () => {
+            it('should detect "ccg" keyword', () => {
+                const result = detectKeywordsWithType('ccg this feature');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeDefined();
+                expect(ccgMatch?.keyword).toMatch(/ccg/i);
+            });
+            it('should detect "claude-codex-gemini" keyword', () => {
+                const result = detectKeywordsWithType('use claude-codex-gemini to build this');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeDefined();
+            });
+            it('should detect CCG in uppercase', () => {
+                const result = detectKeywordsWithType('CCG add user profile page');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeDefined();
+            });
+            it('should NOT detect ccg inside code block', () => {
+                const result = detectKeywordsWithType('```\nccg mode\n```');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeUndefined();
+            });
+            it('should NOT detect ccg inside inline code', () => {
+                const result = detectKeywordsWithType('use `ccg` command');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeUndefined();
+            });
+            it('should detect ccg with other text around it', () => {
+                const result = detectKeywordsWithType('please ccg this full-stack feature');
+                const ccgMatch = result.find((r) => r.type === 'ccg');
+                expect(ccgMatch).toBeDefined();
+            });
+        });
         describe('gemini keyword', () => {
             it('should detect "ask gemini"', () => {
                 const result = detectKeywordsWithType('ask gemini to design');
@@ -674,6 +707,31 @@ World`);
             const result = getAllKeywords('ask codex and ask gemini');
             expect(result).toContain('codex');
             expect(result).toContain('gemini');
+        });
+        it('should return ccg when ccg keyword present', () => {
+            const result = getAllKeywords('ccg add a user profile feature');
+            expect(result).toContain('ccg');
+        });
+        it('should return ccg with higher priority than codex/gemini', () => {
+            const result = getAllKeywords('ccg ask codex to review');
+            const ccgIdx = result.indexOf('ccg');
+            const codexIdx = result.indexOf('codex');
+            expect(ccgIdx).toBeGreaterThanOrEqual(0);
+            expect(codexIdx).toBeGreaterThanOrEqual(0);
+            expect(ccgIdx).toBeLessThan(codexIdx);
+        });
+        it('should return ralph before ccg in priority order', () => {
+            const result = getAllKeywords('ralph ccg build the app');
+            const ralphIdx = result.indexOf('ralph');
+            const ccgIdx = result.indexOf('ccg');
+            expect(ralphIdx).toBeGreaterThanOrEqual(0);
+            expect(ccgIdx).toBeGreaterThanOrEqual(0);
+            expect(ralphIdx).toBeLessThan(ccgIdx);
+        });
+        it('should not return ccg when cancel is present', () => {
+            const result = getAllKeywords('cancelomc ccg build');
+            expect(result).toEqual(['cancel']);
+            expect(result).not.toContain('ccg');
         });
         it('should return ralph over codex in priority', () => {
             const primary = getPrimaryKeyword('ralph ask codex');

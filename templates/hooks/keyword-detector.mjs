@@ -11,7 +11,7 @@
  * 3. autopilot: Full autonomous execution
  * 4. team: Coordinated team execution
  * 5. ultrawork/ulw: Maximum parallel execution
- * 6. pipeline: Sequential agent chaining
+* 6. pipeline: Sequential agent chaining
  * 7. ralplan: Iterative planning with consensus
  * 8. plan: Planning interview mode
  * 9. tdd: Test-driven development
@@ -20,6 +20,7 @@
  * 12. analyze: Analysis mode (restricted patterns)
  * 13. codex/gpt: Delegate to Codex MCP (ask_codex)
  * 14. gemini: Delegate to Gemini MCP (ask_gemini)
+ * 8. ccg: Claude-Codex-Gemini tri-model orchestration
  */
 
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
@@ -289,8 +290,9 @@ function resolveConflicts(matches) {
   // Both keywords are preserved so the skill can detect the composition.
 
   // Sort by priority order
-  const priorityOrder = ['cancel','ralph','autopilot','team','ultrawork',
+const priorityOrder = ['cancel','ralph','autopilot','team','ultrawork',
     'pipeline','ralplan','plan','tdd','ultrathink','deepsearch','analyze',
+    'pipeline','ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze',
     'codex','gemini'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
@@ -389,6 +391,11 @@ async function main() {
     // Pipeline keywords
     if (/\bagent\s+pipeline\b/i.test(cleanPrompt) || /\bchain\s+agents\b/i.test(cleanPrompt)) {
       matches.push({ name: 'pipeline', args: '' });
+    }
+
+    // CCG keywords (Claude-Codex-Gemini tri-model orchestration)
+    if (/\b(ccg|claude-codex-gemini)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'ccg', args: '' });
     }
 
     // Ralplan keyword
