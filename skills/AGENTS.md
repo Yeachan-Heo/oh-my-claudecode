@@ -1,9 +1,9 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-02-19 -->
 
 # skills
 
-37 skill definitions for workflow automation and specialized behaviors.
+40 skill directories for workflow automation and specialized behaviors (42 runtime skill names including compatibility aliases).
 
 ## Purpose
 
@@ -22,9 +22,8 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `ultrawork/SKILL.md` | ultrawork | Maximum parallel agent execution |
 | `ralph/SKILL.md` | ralph | Persistence until verified complete |
 | `ultrapilot/SKILL.md` | ultrapilot | Parallel autopilot with file ownership |
-| `swarm/SKILL.md` | swarm | N coordinated agents with task claiming |
+| `team/SKILL.md` | team (+ `swarm` alias) | N coordinated agents with task claiming |
 | `pipeline/SKILL.md` | pipeline | Sequential agent chaining |
-| `/SKILL.md` |  | Token-efficient parallel execution |
 | `ultraqa/SKILL.md` | ultraqa | QA cycling until goal met |
 
 ### Planning Skills
@@ -75,7 +74,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 |-----------|-------|---------|
 | `frontend-ui-ux/SKILL.md` | frontend-ui-ux | Designer-developer aesthetic |
 | `git-master/SKILL.md` | git-master | Git expertise, atomic commits |
-| `project-session-manager/SKILL.md` | psm | Isolated dev environments |
+| `project-session-manager/SKILL.md` | project-session-manager (+ `psm` alias) | Isolated dev environments |
 | `writer-memory/SKILL.md` | writer-memory | Agentic memory for writers |
 | `release/SKILL.md` | release | Automated release workflow |
 

@@ -231,9 +231,9 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | `autopilot` | Full autonomous execution from idea to working code | `/oh-my-claudecode:autopilot` |
 | `ultrawork` | Maximum performance with parallel agents | `/oh-my-claudecode:ultrawork` |
 | `ultrapilot` | Parallel autopilot with 3-5x speedup | `/oh-my-claudecode:ultrapilot` |
-| `swarm` | N coordinated agents with task claiming | `/oh-my-claudecode:swarm` |
+| `team` | N coordinated agents on shared task list using native teams (alias: `swarm`) | `/oh-my-claudecode:team` |
+| `swarm` | Compatibility facade over team orchestration | `/oh-my-claudecode:swarm` |
 | `pipeline` | Sequential agent chaining | `/oh-my-claudecode:pipeline` |
-| `` | Token-efficient parallel execution | `/oh-my-claudecode:` |
 | `ralph` | Self-referential development until completion | `/oh-my-claudecode:ralph` |
 | `ralph-init` | Initialize PRD for structured task tracking | `/oh-my-claudecode:ralph-init` |
 | `ultraqa` | Autonomous QA cycling workflow | `/oh-my-claudecode:ultraqa` |
@@ -270,7 +270,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `mcp-setup` | Configure MCP servers | `/oh-my-claudecode:mcp-setup` |
 | `writer-memory` | Agentic memory system for writers | `/oh-my-claudecode:writer-memory` |
-| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux) | `/oh-my-claudecode:project-session-manager` |
+| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux) (alias: `psm`) | `/oh-my-claudecode:project-session-manager` |
 | `skill` | Manage local skills (list, add, remove, search, edit) | `/oh-my-claudecode:skill` |
 
 ---
@@ -285,9 +285,9 @@ All skills are available as slash commands with the prefix `/oh-my-claudecode:`.
 | `/oh-my-claudecode:autopilot <task>` | Full autonomous execution |
 | `/oh-my-claudecode:ultrawork <task>` | Maximum performance mode with parallel agents |
 | `/oh-my-claudecode:ultrapilot <task>` | Parallel autopilot (3-5x faster) |
+| `/oh-my-claudecode:team <N>:<agent> <task>` | Coordinated native team workflow |
 | `/oh-my-claudecode:swarm <N>:<agent> <task>` | Coordinated agent swarm |
 | `/oh-my-claudecode:pipeline <stages>` | Sequential agent chaining |
-| `/oh-my-claudecode: <task>` | Token-efficient parallel execution |
 | `/oh-my-claudecode:ralph-init <task>` | Initialize PRD for structured task tracking |
 | `/oh-my-claudecode:ralph <task>` | Self-referential loop until task completion |
 | `/oh-my-claudecode:ultraqa <goal>` | Autonomous QA cycling workflow |
@@ -308,6 +308,7 @@ All skills are available as slash commands with the prefix `/oh-my-claudecode:`.
 | `/oh-my-claudecode:hud` | Configure HUD statusline |
 | `/oh-my-claudecode:release` | Automated release workflow |
 | `/oh-my-claudecode:mcp-setup` | Configure MCP servers |
+| `/oh-my-claudecode:psm <arguments>` | Alias for project session manager |
 
 ---
 
@@ -323,9 +324,10 @@ Oh-my-claudecode includes 31 lifecycle hooks that enhance Claude Code's behavior
 | `ultrawork` | Maximum parallel agent execution |
 | `ralph` | Persistence until verified complete |
 | `ultrapilot` | Parallel autopilot with file ownership |
+| `team-pipeline` | Native team staged pipeline orchestration |
 | `ultraqa` | QA cycling until goal met |
 | `swarm` | Coordinated multi-agent with SQLite task claiming |
-| `mode-registry` | Tracks active execution mode (incl. ) |
+| `mode-registry` | Tracks active execution mode state (including team/ralph/ultrawork/ralplan) |
 | `persistent-mode` | Maintains mode state across sessions |
 
 ### Core Hooks
