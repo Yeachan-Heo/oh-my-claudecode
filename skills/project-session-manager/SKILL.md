@@ -6,6 +6,8 @@ aliases: [psm]
 
 # Project Session Manager (PSM) Skill
 
+`psm` is the compatibility alias for this canonical skill entrypoint.
+
 > **Quick Start:** For simple worktree creation without tmux sessions, use `omc teleport`:
 > ```bash
 > omc teleport #123          # Create worktree for issue/PR
@@ -15,6 +17,8 @@ aliases: [psm]
 > See [Teleport Command](#teleport-command) below for details.
 
 Automate isolated development environments using git worktrees and tmux sessions with Claude Code. Enables parallel work across multiple tasks, projects, and repositories.
+
+Canonical slash command: `/oh-my-claudecode:project-session-manager` (alias: `/oh-my-claudecode:psm`).
 
 ## Commands
 

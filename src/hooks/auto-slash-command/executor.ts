@@ -57,6 +57,43 @@ function parseFrontmatter(content: string): { data: Record<string, string>; body
   return { data, body };
 }
 
+function stripOptionalQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function getFrontmatterString(
+  data: Record<string, string>,
+  key: string,
+): string | undefined {
+  const value = data[key];
+  if (!value) return undefined;
+  const normalized = stripOptionalQuotes(value);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function getFrontmatterAliases(data: Record<string, string>): string[] {
+  const rawAliases = getFrontmatterString(data, 'aliases');
+  if (!rawAliases) return [];
+
+  if (rawAliases.startsWith('[') && rawAliases.endsWith(']')) {
+    const inner = rawAliases.slice(1, -1).trim();
+    if (!inner) return [];
+    return inner
+      .split(',')
+      .map(alias => stripOptionalQuotes(alias))
+      .filter(alias => alias.length > 0);
+  }
+
+  return [rawAliases];
+}
+
 /**
  * Discover commands from a directory
  */
@@ -136,21 +173,37 @@ export function discoverAllCommands(): CommandInfo[] {
             const content = readFileSync(skillPath, 'utf-8');
             const { data, body } = parseFrontmatter(content);
 
-            const metadata: CommandMetadata = {
-              name: data.name || dir.name,
-              description: data.description || '',
-              argumentHint: data['argument-hint'],
-              model: data.model,
-              agent: data.agent,
-            };
+            const canonicalName = getFrontmatterString(data, 'name') || dir.name;
+            const aliases = Array.from(new Set(
+              getFrontmatterAliases(data).filter(
+                alias => alias.toLowerCase() !== canonicalName.toLowerCase()
+              )
+            ));
+            const commandNames = [canonicalName, ...aliases];
+            const description = getFrontmatterString(data, 'description') || '';
+            const argumentHint = getFrontmatterString(data, 'argument-hint');
+            const model = getFrontmatterString(data, 'model');
+            const agent = getFrontmatterString(data, 'agent');
 
-            skillCommands.push({
-              name: data.name || dir.name,
-              path: skillPath,
-              metadata,
-              content: body,
-              scope: 'skill',
-            });
+            for (const commandName of commandNames) {
+              const metadata: CommandMetadata = {
+                name: commandName,
+                description,
+                argumentHint,
+                model,
+                agent,
+                aliases: commandName === canonicalName ? aliases : undefined,
+                aliasOf: commandName === canonicalName ? undefined : canonicalName,
+              };
+
+              skillCommands.push({
+                name: commandName,
+                path: skillPath,
+                metadata,
+                content: body,
+                scope: 'skill',
+              });
+            }
           } catch {
             continue;
           }
@@ -162,7 +215,15 @@ export function discoverAllCommands(): CommandInfo[] {
   }
 
   // Priority: project > user > skills
-  return [...projectCommands, ...userCommands, ...skillCommands];
+  const prioritized = [...projectCommands, ...userCommands, ...skillCommands];
+  const seen = new Set<string>();
+
+  return prioritized.filter((command) => {
+    const key = command.name.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**

@@ -23,6 +23,10 @@ export interface SkillMcpConfig {
 export interface BuiltinSkill {
   /** Unique skill name */
   name: string;
+  /** Aliases available for canonical skill entries */
+  aliases?: string[];
+  /** Canonical skill name when this entry is an alias */
+  aliasOf?: string;
   /** Short description of the skill */
   description: string;
   /** Full template content for the skill */
