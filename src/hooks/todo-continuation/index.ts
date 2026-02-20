@@ -199,6 +199,8 @@ export function isRateLimitStop(context?: StopContext): boolean {
     'too_many_requests', '429',
     'quota_exceeded', 'quota_limit', 'quota_exhausted',
     'request_limit', 'api_limit',
+    // Anthropic API returns 'overloaded_error' (529) for server overload;
+    // 'capacity' covers provider-level capacity-exceeded responses
     'overloaded', 'capacity',
   ];
 

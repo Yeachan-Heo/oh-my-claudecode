@@ -47,8 +47,14 @@ describe('isRateLimitStop (fix #777 - ralph infinite retry loop)', () => {
     expect(isRateLimitStop({ stop_reason: 'quota_exhausted' })).toBe(true);
   });
 
-  it('should return true for "overloaded" stop reason', () => {
+  it('should return true for "overloaded" stop reason (Anthropic 529 overloaded_error)', () => {
     expect(isRateLimitStop({ stop_reason: 'overloaded' })).toBe(true);
+    expect(isRateLimitStop({ stop_reason: 'overloaded_error' })).toBe(true);
+  });
+
+  it('should return true for "capacity" stop reason (provider capacity-exceeded)', () => {
+    expect(isRateLimitStop({ stop_reason: 'capacity' })).toBe(true);
+    expect(isRateLimitStop({ stop_reason: 'capacity_exceeded' })).toBe(true);
   });
 
   // Compound patterns with prefixes/suffixes
