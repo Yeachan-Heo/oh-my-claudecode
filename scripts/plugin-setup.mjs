@@ -119,7 +119,7 @@ try {
   // Update statusLine to use new HUD path
   settings.statusLine = {
     type: 'command',
-    command: `node ${hudScriptPath}`
+    command: `node ${hudScriptPath.replace(/\\/g, "/")}`
   };
   writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
   console.log('[OMC] Configured HUD statusLine in settings.json');
