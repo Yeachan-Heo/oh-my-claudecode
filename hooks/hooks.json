@@ -106,6 +106,18 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-use-failure.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "matcher": "*",
@@ -164,6 +176,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/persistent-mode.cjs\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/code-simplifier.mjs\"",
             "timeout": 5
           }
         ]
