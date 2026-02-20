@@ -471,7 +471,16 @@ Do NOT mark the task as completed. Leave it in_progress so the lead can reassign
 }
 ```
 
-### Shutdown Protocol
+### Shutdown Protocol (BLOCKING)
+
+**CRITICAL: Steps must execute in exact order. Never call TeamDelete before shutdown is confirmed.**
+
+**Step 1: Verify completion**
+```
+Call TaskList — verify all real tasks (non-internal) are completed or failed.
+```
+
+**Step 2: Request shutdown from each teammate**
 
 **Lead sends:**
 ```json
@@ -481,6 +490,11 @@ Do NOT mark the task as completed. Leave it in_progress so the lead can reassign
   "content": "All work complete, shutting down team"
 }
 ```
+
+**Step 3: Wait for responses (BLOCKING)**
+- Wait up to 30s per teammate for `shutdown_response`
+- Track which teammates confirmed vs timed out
+- If a teammate doesn't respond within 30s: log warning, mark as unresponsive
 
 **Teammate receives and responds:**
 ```json
@@ -495,6 +509,24 @@ After approval:
 - Teammate process terminates
 - Teammate auto-removed from `config.json` members array
 - Internal task for that teammate completes
+
+**Step 4: TeamDelete — only after ALL teammates confirmed or timed out**
+```json
+{ "team_name": "fix-ts-errors" }
+```
+
+**Step 5: Orphan scan**
+
+Check for agent processes that survived TeamDelete:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" --team-name fix-ts-errors
+```
+
+This scans for processes matching the team name whose config no longer exists, and terminates them (SIGTERM → 5s wait → SIGKILL). Supports `--dry-run` for inspection.
+
+**Shutdown sequence is BLOCKING:** Do not proceed to TeamDelete until all teammates have either:
+- Confirmed shutdown (`shutdown_response` with `approve: true`), OR
+- Timed out (30s with no response)
 
 **IMPORTANT:** The `request_id` is provided in the shutdown request message that the teammate receives. The teammate must extract it and pass it back. Do NOT fabricate request IDs.
 

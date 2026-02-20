@@ -169,8 +169,23 @@ After graceful pass:
   3. Check for linked ralph: state_read(mode="ralph") — if linked_team is true:
      a. Clear ralph state: state_clear(mode="ralph")
      b. Clear linked ultrawork if present: state_clear(mode="ultrawork")
-  4. Emit structured cancel report
+  4. Run orphan scan (see below)
+  5. Emit structured cancel report
 ```
+
+**Orphan Detection (Post-Cleanup):**
+
+After TeamDelete, verify no agent processes remain:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" --team-name "{team_name}"
+```
+
+The orphan scanner:
+1. Checks `ps aux` (Unix) or `tasklist` (Windows) for processes with `--team-name` matching the deleted team
+2. For each orphan whose team config no longer exists: sends SIGTERM, waits 5s, sends SIGKILL if still alive
+3. Reports cleanup results as JSON
+
+Use `--dry-run` to inspect without killing. The scanner is safe to run multiple times.
 
 **Structured Cancel Report:**
 ```
