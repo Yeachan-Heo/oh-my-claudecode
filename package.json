@@ -15,7 +15,8 @@
     "oh-my-claudecode": "dist/cli/index.js",
     "omc": "dist/cli/index.js",
     "omc-analytics": "dist/cli/analytics.js",
-    "omc-cli": "dist/cli/index.js"
+    "omc-cli": "dist/cli/index.js",
+    "claud": "dist/cli/claud.js"
   },
   "files": [
     "dist",

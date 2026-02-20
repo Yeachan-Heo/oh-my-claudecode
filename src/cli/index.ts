@@ -197,12 +197,20 @@ program
   .allowUnknownOption()
   .addHelpText('after', `
 Examples:
-  $ omc launch                   Launch Claude Code
-  $ omc launch --madmax          Launch with permissions bypass
-  $ omc launch --yolo            Launch with permissions bypass (alias)
+  $ omc launch                         Launch Claude Code
+  $ omc launch --madmax                Launch with permissions bypass
+  $ omc launch --yolo                  Launch with permissions bypass (alias)
+  $ omc launch --notify false          Launch with all CCNotifier events suppressed
+  $ claud --notify false               Same via the dedicated shell launcher
+
+Options:
+  --notify <bool>   Enable/disable CCNotifier events. false sets OMC_NOTIFY=0
+                    and suppresses all stop/session-start/session-idle notifications.
+                    Default: true
 
 Environment:
-  Set OMC_DEFAULT_ACTION=dashboard to show analytics dashboard when running 'omc' with no args`)
+  OMC_NOTIFY=0              Suppress all notifications (set by --notify false)
+  OMC_DEFAULT_ACTION=dashboard  Show analytics dashboard when running 'omc' with no args`)
   .action(async (args: string[]) => {
     await launchCommand(args);
   });

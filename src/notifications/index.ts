@@ -89,6 +89,11 @@ export async function notify(
   event: NotificationEvent,
   data: Partial<NotificationPayload> & { sessionId: string; profileName?: string },
 ): Promise<DispatchResult | null> {
+  // OMC_NOTIFY=0 suppresses all CCNotifier events (set by `claud --notify false`)
+  if (process.env.OMC_NOTIFY === '0') {
+    return null;
+  }
+
   try {
     const config = getNotificationConfig(data.profileName);
     if (!config || !isEventEnabled(config, event)) {
