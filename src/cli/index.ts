@@ -127,16 +127,17 @@ async function displayAnalyticsBanner() {
   }
 }
 
-// Default action when running 'omc' with no args
-// Check env var to decide between dashboard and launch
+// Default action when running 'omc' with no subcommand
+// Forwards all args to launchCommand so 'omc --notify false --madmax' etc. work directly
 async function defaultAction() {
   const defaultActionMode = process.env.OMC_DEFAULT_ACTION || 'launch';
 
   if (defaultActionMode === 'dashboard') {
     await displayAnalyticsDashboard();
   } else {
-    // Launch Claude Code by default
-    await launchCommand([]);
+    // Pass all CLI args through to launch (strip node + script path)
+    const args = process.argv.slice(2);
+    await launchCommand(args);
   }
 }
 
@@ -186,6 +187,7 @@ program
   .name('omc')
   .description('Multi-agent orchestration system for Claude Agent SDK with analytics')
   .version(version)
+  .allowUnknownOption()
   .action(defaultAction);
 
 /**
@@ -197,11 +199,12 @@ program
   .allowUnknownOption()
   .addHelpText('after', `
 Examples:
-  $ omc launch                         Launch Claude Code
-  $ omc launch --madmax                Launch with permissions bypass
-  $ omc launch --yolo                  Launch with permissions bypass (alias)
-  $ omc launch --notify false          Launch with all CCNotifier events suppressed
-  $ claud --notify false               Same via the dedicated shell launcher
+  $ omc                                Launch Claude Code
+  $ omc --madmax                       Launch with permissions bypass
+  $ omc --yolo                         Launch with permissions bypass (alias)
+  $ omc --notify false                 Launch without CCNotifier events
+  $ omc launch                         Explicit launch subcommand (same as bare omc)
+  $ omc launch --madmax                Explicit launch with flags
 
 Options:
   --notify <bool>   Enable/disable CCNotifier events. false sets OMC_NOTIFY=0
