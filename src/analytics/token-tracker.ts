@@ -243,6 +243,9 @@ export class TokenTracker {
       const stats = this.initializeSessionStats();
       stats.sessionId = sessionId;
 
+      const savedStats = this.sessionStats;
+      this.sessionStats = stats;
+
       for (const line of linesToProcess) {
         if (!line.trim()) continue;
         try {
@@ -254,6 +257,8 @@ export class TokenTracker {
           continue;
         }
       }
+
+      this.sessionStats = savedStats;
 
       return stats.totalInputTokens > 0 ? stats : null;
     } catch (error) {
