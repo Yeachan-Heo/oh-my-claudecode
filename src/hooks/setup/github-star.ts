@@ -29,11 +29,21 @@ export interface GitHubStarOptions {
 // ============================================================================
 
 const DEFAULT_REPO = 'Yeachan-Heo/oh-my-claudecode';
-const EXEC_OPTIONS: ExecSyncOptions = { stdio: 'ignore' };
+const EXEC_OPTIONS: ExecSyncOptions = {
+  stdio: 'ignore',
+  timeout: 3000, // 3 second timeout to prevent hanging
+};
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Validate repository format (owner/repo)
+ */
+function validateRepo(repo: string): boolean {
+  return /^[a-zA-Z0-9-]+\/[a-zA-Z0-9-_\.]+$/.test(repo);
+}
 
 /**
  * Check if gh CLI is available
@@ -54,11 +64,21 @@ export function isRepoStarred(
   repo: string,
   execFn: ExecFunction = execSync
 ): boolean {
+  if (!validateRepo(repo)) {
+    if (process.env.DEBUG) {
+      console.error('[GitHub Star] Invalid repository format:', repo);
+    }
+    return false;
+  }
+
   try {
     execFn(`gh api user/starred/${repo}`, EXEC_OPTIONS);
     return true;
   } catch (error) {
     // 404 means not starred, other errors should be treated as not starred
+    if (process.env.DEBUG && error instanceof Error) {
+      console.error('[GitHub Star] Check star status failed:', error.message);
+    }
     return false;
   }
 }
@@ -70,10 +90,20 @@ export function starRepository(
   repo: string,
   execFn: ExecFunction = execSync
 ): boolean {
+  if (!validateRepo(repo)) {
+    if (process.env.DEBUG) {
+      console.error('[GitHub Star] Invalid repository format:', repo);
+    }
+    return false;
+  }
+
   try {
     execFn(`gh api --method PUT user/starred/${repo}`, EXEC_OPTIONS);
     return true;
   } catch (error) {
+    if (process.env.DEBUG && error instanceof Error) {
+      console.error('[GitHub Star] Star repository failed:', error.message);
+    }
     return false;
   }
 }
