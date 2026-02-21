@@ -178,7 +178,13 @@ describe('GitHub Star Module', () => {
     const isCI = !!process.env.CI;
 
     // This test makes real gh API calls
-    it.skipIf(isCI)('should work with real gh CLI', () => {
+    it('should work with real gh CLI', () => {
+      // Skip in CI where GitHub auth is not available
+      if (isCI) {
+        console.log('⚠️  Skipping real API test - running in CI environment');
+        return;
+      }
+
       // Skip if gh CLI is not available
       if (!isGhCliAvailable()) {
         console.log('⚠️  Skipping real API test - gh CLI not available');
@@ -196,7 +202,14 @@ describe('GitHub Star Module', () => {
       }
     });
 
-    it.skipIf(isCI)('should verify star status after starring', () => {
+    it('should verify star status after starring', () => {
+      // Skip in CI where GitHub auth is not available
+      if (isCI) {
+        console.log('⚠️  Skipping real API test - running in CI environment');
+        return;
+      }
+
+      // Skip if gh CLI is not available
       if (!isGhCliAvailable()) {
         console.log('⚠️  Skipping real API test - gh CLI not available');
         return;
