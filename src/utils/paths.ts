@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { existsSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, unlinkSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { getConfigDir as getClaudeBaseConfigDir } from './config-dir.js';
 
@@ -101,4 +101,103 @@ export function safeRmSync(dirPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Result of a plugin cache purge operation.
+ */
+export interface PurgeCacheResult {
+  /** Number of stale version directories removed */
+  removed: number;
+  /** Paths that were removed */
+  removedPaths: string[];
+  /** Errors encountered (non-fatal) */
+  errors: string[];
+}
+
+/**
+ * Purge stale plugin cache versions that are no longer referenced by
+ * installed_plugins.json.
+ *
+ * Claude Code caches each plugin version under:
+ *   <configDir>/plugins/cache/<marketplace>/<plugin>/<version>/
+ *
+ * On plugin update the old version directory is left behind. This function
+ * reads the active install paths from installed_plugins.json and removes
+ * every version directory that is NOT active.
+ */
+export function purgeStalePluginCacheVersions(): PurgeCacheResult {
+  const result: PurgeCacheResult = { removed: 0, removedPaths: [], errors: [] };
+
+  const configDir = getClaudeConfigDir();
+  const pluginsDir = join(configDir, 'plugins');
+  const installedFile = join(pluginsDir, 'installed_plugins.json');
+  const cacheDir = join(pluginsDir, 'cache');
+
+  if (!existsSync(installedFile) || !existsSync(cacheDir)) {
+    return result;
+  }
+
+  // Collect active install paths (normalised to forward-slash for comparison)
+  let activePaths: Set<string>;
+  try {
+    const raw = JSON.parse(readFileSync(installedFile, 'utf-8'));
+    const plugins: Record<string, Array<{ installPath?: string }>> = raw.plugins ?? raw;
+    activePaths = new Set<string>();
+    for (const entries of Object.values(plugins)) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (entry.installPath) {
+          activePaths.add(toForwardSlash(entry.installPath));
+        }
+      }
+    }
+  } catch (err) {
+    result.errors.push(`Failed to parse installed_plugins.json: ${err instanceof Error ? err.message : err}`);
+    return result;
+  }
+
+  // Walk cache/<marketplace>/<plugin>/<version> and remove inactive versions
+  let marketplaces: string[];
+  try {
+    marketplaces = readdirSync(cacheDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+  } catch {
+    return result;
+  }
+
+  for (const marketplace of marketplaces) {
+    const marketDir = join(cacheDir, marketplace);
+    let pluginNames: string[];
+    try {
+      pluginNames = readdirSync(marketDir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => d.name);
+    } catch { continue; }
+
+    for (const pluginName of pluginNames) {
+      const pluginDir = join(marketDir, pluginName);
+      let versions: string[];
+      try {
+        versions = readdirSync(pluginDir, { withFileTypes: true })
+          .filter(d => d.isDirectory())
+          .map(d => d.name);
+      } catch { continue; }
+
+      for (const version of versions) {
+        const versionDir = join(pluginDir, version);
+        const normalised = toForwardSlash(versionDir);
+
+        if (!activePaths.has(normalised)) {
+          if (safeRmSync(versionDir)) {
+            result.removed++;
+            result.removedPaths.push(versionDir);
+          }
+        }
+      }
+    }
+  }
+
+  return result;
 }

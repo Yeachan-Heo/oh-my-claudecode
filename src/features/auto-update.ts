@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import { TaskTool } from '../hooks/beads-context/types.js';
 import { install as installSisyphus, HOOKS_DIR, isProjectScopedPlugin, isRunningAsPlugin } from '../installer/index.js';
 import { getConfigDir } from '../utils/config-dir.js';
+import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 import type { NotificationConfig } from '../notifications/types.js';
 
 /** GitHub repository information */
@@ -465,6 +466,21 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean }): UpdateR
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     errors.push(`Failed to refresh installer artifacts: ${message}`);
+  }
+
+  // Purge stale plugin cache versions (non-fatal)
+  try {
+    const purgeResult = purgeStalePluginCacheVersions();
+    if (purgeResult.removed > 0 && options?.verbose) {
+      console.log(`[omc] Purged ${purgeResult.removed} stale plugin cache version(s)`);
+    }
+    if (purgeResult.errors.length > 0 && options?.verbose) {
+      for (const err of purgeResult.errors) {
+        console.warn(`[omc] Cache purge warning: ${err}`);
+      }
+    }
+  } catch {
+    // Cache purge is best-effort; never block reconciliation
   }
 
   if (errors.length > 0) {

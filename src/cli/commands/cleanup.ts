@@ -2,6 +2,7 @@ import { getQueryEngine } from '../../analytics/query-engine.js';
 import { cleanupStaleBackgroundTasks } from '../../hud/background-cleanup.js';
 import { colors } from '../utils/formatting.js';
 import { cleanupStaleBridges } from '../../tools/python-repl/bridge-manager.js';
+import { purgeStalePluginCacheVersions } from '../../utils/paths.js';
 
 export async function cleanupCommand(options: { retention?: number }): Promise<void> {
   console.log(colors.bold('\n🧹 Running Cleanup...\n'));
@@ -18,6 +19,9 @@ export async function cleanupCommand(options: { retention?: number }): Promise<v
   // Clean stale python bridge artifacts (bridge_meta.json/bridge.sock/session.lock)
   const pythonCleanup = await cleanupStaleBridges();
 
+  // Purge stale plugin cache versions not referenced by installed_plugins.json
+  const cachePurge = purgeStalePluginCacheVersions();
+
   console.log(`Removed ${removedTokens} old token logs (older than ${retentionDays} days)`);
   console.log(`Removed ${removedMetrics} old metric events`);
   console.log(`Removed ${removedTasks} stale background tasks`);
@@ -25,5 +29,11 @@ export async function cleanupCommand(options: { retention?: number }): Promise<v
     `Removed ${pythonCleanup.filesRemoved} stale python_repl bridge file(s) ` +
       `(${pythonCleanup.staleSessions} stale session(s), ${pythonCleanup.activeSessions} active session(s) skipped)`
   );
+  console.log(`Removed ${cachePurge.removed} stale plugin cache version(s)`);
+  if (cachePurge.errors.length > 0) {
+    for (const err of cachePurge.errors) {
+      console.log(colors.yellow(`  Warning: ${err}`));
+    }
+  }
   console.log(colors.green('\n✓ Cleanup complete\n'));
 }
