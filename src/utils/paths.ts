@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { existsSync, readFileSync, readdirSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { getConfigDir as getClaudeBaseConfigDir } from './config-dir.js';
 
@@ -126,6 +126,16 @@ export interface PurgeCacheResult {
  * reads the active install paths from installed_plugins.json and removes
  * every version directory that is NOT active.
  */
+/**
+ * Strip trailing slashes from a normalised forward-slash path.
+ */
+function stripTrailing(p: string): string {
+  return toForwardSlash(p).replace(/\/+$/, '');
+}
+
+/** Default grace period: skip directories modified within the last hour. */
+const STALE_THRESHOLD_MS = 60 * 60 * 1000;
+
 export function purgeStalePluginCacheVersions(): PurgeCacheResult {
   const result: PurgeCacheResult = { removed: 0, removedPaths: [], errors: [] };
 
@@ -138,17 +148,22 @@ export function purgeStalePluginCacheVersions(): PurgeCacheResult {
     return result;
   }
 
-  // Collect active install paths (normalised to forward-slash for comparison)
+  // Collect active install paths (normalised, trailing-slash stripped)
   let activePaths: Set<string>;
   try {
     const raw = JSON.parse(readFileSync(installedFile, 'utf-8'));
-    const plugins: Record<string, Array<{ installPath?: string }>> = raw.plugins ?? raw;
+    const plugins = raw.plugins ?? raw;
+    if (typeof plugins !== 'object' || plugins === null || Array.isArray(plugins)) {
+      result.errors.push('installed_plugins.json has unexpected top-level structure');
+      return result;
+    }
     activePaths = new Set<string>();
-    for (const entries of Object.values(plugins)) {
+    for (const entries of Object.values(plugins as Record<string, unknown>)) {
       if (!Array.isArray(entries)) continue;
       for (const entry of entries) {
-        if (entry.installPath) {
-          activePaths.add(toForwardSlash(entry.installPath));
+        const ip = (entry as { installPath?: string }).installPath;
+        if (ip) {
+          activePaths.add(stripTrailing(ip));
         }
       }
     }
@@ -166,6 +181,8 @@ export function purgeStalePluginCacheVersions(): PurgeCacheResult {
   } catch {
     return result;
   }
+
+  const now = Date.now();
 
   for (const marketplace of marketplaces) {
     const marketDir = join(cacheDir, marketplace);
@@ -187,13 +204,24 @@ export function purgeStalePluginCacheVersions(): PurgeCacheResult {
 
       for (const version of versions) {
         const versionDir = join(pluginDir, version);
-        const normalised = toForwardSlash(versionDir);
+        const normalised = stripTrailing(versionDir);
 
-        if (!activePaths.has(normalised)) {
-          if (safeRmSync(versionDir)) {
-            result.removed++;
-            result.removedPaths.push(versionDir);
-          }
+        // Check if this version or any of its subdirectories are referenced
+        const isActive = activePaths.has(normalised) ||
+          [...activePaths].some(ap => ap.startsWith(normalised + '/'));
+
+        if (isActive) continue;
+
+        // Grace period: skip recently modified directories to avoid
+        // race conditions during concurrent plugin updates
+        try {
+          const stats = statSync(versionDir);
+          if (now - stats.mtimeMs < STALE_THRESHOLD_MS) continue;
+        } catch { continue; }
+
+        if (safeRmSync(versionDir)) {
+          result.removed++;
+          result.removedPaths.push(versionDir);
         }
       }
     }

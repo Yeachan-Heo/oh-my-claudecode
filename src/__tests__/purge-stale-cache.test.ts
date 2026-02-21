@@ -8,6 +8,7 @@ vi.mock('fs', async () => {
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
     readdirSync: vi.fn(),
+    statSync: vi.fn(),
     rmSync: vi.fn(),
     unlinkSync: vi.fn(),
   };
@@ -17,21 +18,34 @@ vi.mock('../utils/config-dir.js', () => ({
   getConfigDir: vi.fn(() => '/mock/.claude'),
 }));
 
-import { existsSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'fs';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedReadFileSync = vi.mocked(readFileSync);
 const mockedReaddirSync = vi.mocked(readdirSync);
+const mockedStatSync = vi.mocked(statSync);
 const mockedRmSync = vi.mocked(rmSync);
 
 function dirent(name: string): { name: string; isDirectory: () => boolean } {
   return { name, isDirectory: () => true };
 }
 
+/** Return a stat result with mtime N ms ago */
+function staleStats(ageMs: number = 2 * 60 * 60 * 1000) {
+  return { mtimeMs: Date.now() - ageMs } as ReturnType<typeof statSync>;
+}
+
+/** Return a stat result modified very recently */
+function freshStats() {
+  return { mtimeMs: Date.now() - 1000 } as ReturnType<typeof statSync>;
+}
+
 describe('purgeStalePluginCacheVersions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: statSync returns stale timestamps
+    mockedStatSync.mockReturnValue(staleStats());
   });
 
   it('returns early when installed_plugins.json does not exist', () => {
@@ -49,7 +63,6 @@ describe('purgeStalePluginCacheVersions', () => {
 
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
-      // installed_plugins.json, cache dir, and stale version all exist
       if (ps.includes('installed_plugins.json')) return true;
       if (ps === cacheDir) return true;
       if (ps === staleVersion) return true;
@@ -67,9 +80,6 @@ describe('purgeStalePluginCacheVersions', () => {
       },
     }));
 
-    // cache/ -> [my-marketplace]
-    // my-marketplace/ -> [my-plugin]
-    // my-plugin/ -> [1.0.0, 2.0.0]
     mockedReaddirSync.mockImplementation((p, _opts?) => {
       const ps = String(p);
       if (ps === cacheDir) return [dirent('my-marketplace')] as any;
@@ -97,7 +107,6 @@ describe('purgeStalePluginCacheVersions', () => {
       const ps = String(p);
       if (ps.includes('installed_plugins.json')) return true;
       if (ps === cacheDir) return true;
-      // stale versions exist
       if (ps === stale1 || ps === stale2) return true;
       return false;
     });
@@ -165,5 +174,105 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(result.removed).toBe(0);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain('Failed to parse installed_plugins.json');
+  });
+
+  // --- C2 fix: trailing slash in installPath ---
+  it('matches installPath with trailing slash correctly', () => {
+    const cacheDir = '/mock/.claude/plugins/cache';
+    const versionDir = join(cacheDir, 'omc/plugin/1.0.0');
+
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: {
+        'plugin@omc': [{
+          // installPath has trailing slash
+          installPath: versionDir + '/',
+        }],
+      },
+    }));
+
+    mockedReaddirSync.mockImplementation((p, _opts?) => {
+      const ps = String(p);
+      if (ps === cacheDir) return [dirent('omc')] as any;
+      if (ps.endsWith('omc')) return [dirent('plugin')] as any;
+      if (ps.endsWith('plugin')) return [dirent('1.0.0')] as any;
+      return [] as any;
+    });
+
+    const result = purgeStalePluginCacheVersions();
+    // Should NOT remove the active version despite trailing slash
+    expect(result.removed).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalled();
+  });
+
+  // --- C2 fix: installPath points to subdirectory ---
+  it('preserves version when installPath points to a subdirectory', () => {
+    const cacheDir = '/mock/.claude/plugins/cache';
+    const versionDir = join(cacheDir, 'omc/plugin/2.0.0');
+
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: {
+        'plugin@omc': [{
+          // installPath points into a subdirectory
+          installPath: versionDir + '/dist',
+        }],
+      },
+    }));
+
+    mockedReaddirSync.mockImplementation((p, _opts?) => {
+      const ps = String(p);
+      if (ps === cacheDir) return [dirent('omc')] as any;
+      if (ps.endsWith('omc')) return [dirent('plugin')] as any;
+      if (ps.endsWith('plugin')) return [dirent('2.0.0')] as any;
+      return [] as any;
+    });
+
+    const result = purgeStalePluginCacheVersions();
+    // Should NOT remove — active installPath is within this version dir
+    expect(result.removed).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalled();
+  });
+
+  // --- C3 fix: recently modified directories are skipped ---
+  it('skips recently modified directories (race condition guard)', () => {
+    const cacheDir = '/mock/.claude/plugins/cache';
+
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: { 'plugin@omc': [{ installPath: '/other/path' }] },
+    }));
+
+    mockedReaddirSync.mockImplementation((p, _opts?) => {
+      const ps = String(p);
+      if (ps === cacheDir) return [dirent('omc')] as any;
+      if (ps.endsWith('omc')) return [dirent('plugin')] as any;
+      if (ps.endsWith('plugin')) return [dirent('1.0.0')] as any;
+      return [] as any;
+    });
+
+    // Directory was just modified (fresh) — should be skipped
+    mockedStatSync.mockReturnValue(freshStats());
+
+    const result = purgeStalePluginCacheVersions();
+    expect(result.removed).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalled();
+  });
+
+  // --- S5 fix: unexpected top-level structure ---
+  it('reports error for unexpected plugins structure (array)', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: [1, 2, 3],
+    }));
+
+    const result = purgeStalePluginCacheVersions();
+    expect(result.removed).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('unexpected top-level structure');
   });
 });
