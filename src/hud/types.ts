@@ -181,6 +181,75 @@ export interface RateLimits {
   monthlyResetsAt?: Date | null;
 }
 
+// ============================================================================
+// Custom Rate Limit Provider
+// ============================================================================
+
+/**
+ * Custom rate limit provider configuration.
+ * Set omcHud.rateLimitsProvider.type = 'custom' to enable.
+ */
+export interface RateLimitsProviderConfig {
+  type: 'custom';
+  /** Shell command string or argv array to execute */
+  command: string | string[];
+  /** Execution timeout in milliseconds (default: 800) */
+  timeoutMs?: number;
+  /** Optional bucket IDs to display; shows all buckets when omitted */
+  periods?: string[];
+  /** Percent usage threshold above which resetsAt is shown (default: 85) */
+  resetsAtDisplayThresholdPercent?: number;
+}
+
+/** Usage expressed as a 0-100 percent value */
+export interface BucketUsagePercent {
+  type: 'percent';
+  value: number;
+}
+
+/** Usage expressed as consumed credits vs. limit */
+export interface BucketUsageCredit {
+  type: 'credit';
+  used: number;
+  limit: number;
+}
+
+/** Usage expressed as a pre-formatted string (resetsAt always hidden) */
+export interface BucketUsageString {
+  type: 'string';
+  value: string;
+}
+
+export type CustomBucketUsage = BucketUsagePercent | BucketUsageCredit | BucketUsageString;
+
+/** A single rate limit bucket returned by the custom provider command */
+export interface CustomBucket {
+  id: string;
+  label: string;
+  usage: CustomBucketUsage;
+  /** ISO 8601 reset time; only shown when usage crosses resetsAtDisplayThresholdPercent */
+  resetsAt?: string;
+}
+
+/** The JSON object a custom provider command must print to stdout */
+export interface CustomProviderOutput {
+  version: 1;
+  generatedAt: string;
+  buckets: CustomBucket[];
+}
+
+/**
+ * Result of executing (or loading from cache) the custom rate limit provider.
+ * Passed directly to the HUD render context.
+ */
+export interface CustomProviderResult {
+  buckets: CustomBucket[];
+  /** True when using the last-known-good cached value after a command failure */
+  stale: boolean;
+  /** Error message when command failed and no cache is available */
+  error?: string;
+}
+
 export interface HudRenderContext {
   /** Context window percentage (0-100) */
   contextPercent: number;
@@ -215,8 +284,11 @@ export interface HudRenderContext {
   /** Last activated skill from transcript */
   lastSkill: SkillInvocation | null;
 
-  /** Rate limits (5h and weekly) */
+  /** Rate limits (5h and weekly) from built-in Anthropic/z.ai providers */
   rateLimits: RateLimits | null;
+
+  /** Custom rate limit buckets from rateLimitsProvider command (null when not configured) */
+  customBuckets: CustomProviderResult | null;
 
   /** Pending permission state (heuristic-based) */
   pendingPermission: PendingPermission | null;
@@ -351,6 +423,8 @@ export interface HudConfig {
   thresholds: HudThresholds;
   staleTaskThresholdMinutes: number; // Default 30
   contextLimitWarning: ContextLimitWarningConfig;
+  /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
+  rateLimitsProvider?: RateLimitsProviderConfig;
 }
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {

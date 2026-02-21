@@ -104,4 +104,13 @@ disallowedTools: Write, Edit
     - Is the verdict clear (APPROVE/REQUEST CHANGES/COMMENT)?
     - Did I check for security issues (hardcoded secrets, injection, XSS)?
   </Final_Checklist>
+
+  <API_Contract_Review>
+When reviewing APIs, additionally check:
+- Breaking changes: removed fields, changed types, renamed endpoints, altered semantics
+- Versioning strategy: is there a version bump for incompatible changes?
+- Error semantics: consistent error codes, meaningful messages, no leaking internals
+- Backward compatibility: can existing callers continue to work without changes?
+- Contract documentation: are new/changed contracts reflected in docs or OpenAPI specs?
+</API_Contract_Review>
 </Agent_Prompt>

@@ -75,7 +75,7 @@ Claude reads both output files and:
 - Test strategy, TDD, unit/integration tests
 - Build errors and TypeScript issues
 
-**Roles**: `architect`, `code-reviewer`, `security-reviewer`, `executor`, `planner`, `critic`, `tdd-guide`
+**Roles**: `architect`, `code-reviewer`, `security-reviewer`, `executor`, `planner`, `critic`, `test-engineer`
 
 ### Use Gemini (`ask_gemini`) for:
 - React/Vue/Svelte component implementation

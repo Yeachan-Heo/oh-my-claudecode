@@ -26,4 +26,11 @@ export declare function listAvailableCommands(): Array<{
     description: string;
     scope: CommandScope;
 }>;
+export declare function listAvailableCommandsWithOptions(options?: {
+    includeAliases?: boolean;
+}): Array<{
+    name: string;
+    description: string;
+    scope: CommandScope;
+}>;
 //# sourceMappingURL=executor.d.ts.map

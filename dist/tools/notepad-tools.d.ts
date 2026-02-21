@@ -33,8 +33,17 @@ export declare const notepadStatsTool: ToolDefinition<{
 /**
  * All notepad tools for registration
  */
-export declare const notepadTools: ToolDefinition<{
+export declare const notepadTools: (ToolDefinition<{
+    section: z.ZodOptional<z.ZodEnum<typeof SECTION_NAMES>>;
     workingDirectory: z.ZodOptional<z.ZodString>;
-}>[];
+}> | ToolDefinition<{
+    content: z.ZodString;
+    workingDirectory: z.ZodOptional<z.ZodString>;
+}> | ToolDefinition<{
+    daysOld: z.ZodOptional<z.ZodNumber>;
+    workingDirectory: z.ZodOptional<z.ZodString>;
+}> | ToolDefinition<{
+    workingDirectory: z.ZodOptional<z.ZodString>;
+}>)[];
 export {};
 //# sourceMappingURL=notepad-tools.d.ts.map

@@ -9,33 +9,31 @@
  */
 import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
 // Re-export base agents from individual files (rebranded names)
+export { deepExecutorAgent } from './deep-executor.js';
 export { architectAgent } from './architect.js';
 export { designerAgent } from './designer.js';
 export { writerAgent } from './writer.js';
-export { visionAgent } from './vision.js';
 export { criticAgent } from './critic.js';
 export { analystAgent } from './analyst.js';
 export { executorAgent } from './executor.js';
 export { plannerAgent } from './planner.js';
-export { deepExecutorAgent } from './deep-executor.js';
 export { qaTesterAgent } from './qa-tester.js';
 export { scientistAgent } from './scientist.js';
 export { exploreAgent } from './explore.js';
 // Backward compatibility: Deprecated aliases
-/** @deprecated Use dependency-expert agent instead */
+/** @deprecated Use document-specialist agent instead */
 export { documentSpecialistAgent } from './document-specialist.js';
 /** @deprecated Use document-specialist agent instead */
 export { documentSpecialistAgent as researcherAgent } from './document-specialist.js';
 // Import base agents for use in getAgentDefinitions
+import { deepExecutorAgent } from './deep-executor.js';
 import { architectAgent } from './architect.js';
 import { designerAgent } from './designer.js';
 import { writerAgent } from './writer.js';
-import { visionAgent } from './vision.js';
 import { criticAgent } from './critic.js';
 import { analystAgent } from './analyst.js';
 import { executorAgent } from './executor.js';
 import { plannerAgent } from './planner.js';
-import { deepExecutorAgent } from './deep-executor.js';
 import { qaTesterAgent } from './qa-tester.js';
 import { scientistAgent } from './scientist.js';
 import { exploreAgent } from './explore.js';
@@ -69,16 +67,6 @@ export const verifierAgent = {
 // REFORMED AGENTS (REVIEW LANE)
 // ============================================================
 /**
- * Style-Reviewer Agent - Code Style & Conventions (Haiku)
- */
-export const styleReviewerAgent = {
-    name: 'style-reviewer',
-    description: 'Formatting, naming, idioms, lint/style conventions (Haiku).',
-    prompt: loadAgentPrompt('style-reviewer'),
-    model: 'haiku',
-    defaultModel: 'haiku'
-};
-/**
  * Quality-Reviewer Agent - Logic Defects & Maintainability (Sonnet)
  */
 export const qualityReviewerAgent = {
@@ -88,40 +76,9 @@ export const qualityReviewerAgent = {
     model: 'sonnet',
     defaultModel: 'sonnet'
 };
-/**
- * API-Reviewer Agent - API Contracts & Versioning (Sonnet)
- */
-export const apiReviewerAgent = {
-    name: 'api-reviewer',
-    description: 'API contracts, versioning, backward compatibility (Sonnet).',
-    prompt: loadAgentPrompt('api-reviewer'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-/**
- * Performance-Reviewer Agent - Performance & Complexity (Sonnet)
- */
-export const performanceReviewerAgent = {
-    name: 'performance-reviewer',
-    description: 'Hotspots, complexity, memory/latency optimization (Sonnet).',
-    prompt: loadAgentPrompt('performance-reviewer'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
 // ============================================================
 // REFORMED AGENTS (DOMAIN SPECIALISTS)
 // ============================================================
-/**
- * Dependency-Expert Agent - External SDK/API/Package Evaluation (Sonnet)
- * Replaces: researcher agent
- */
-export const dependencyExpertAgent = {
-    name: 'dependency-expert',
-    description: 'External SDK/API/package evaluation (Sonnet).',
-    prompt: loadAgentPrompt('dependency-expert'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
 /**
  * Test-Engineer Agent - Test Strategy & Coverage (Sonnet)
  * Replaces: tdd-guide agent
@@ -130,59 +87,6 @@ export const testEngineerAgent = {
     name: 'test-engineer',
     description: 'Test strategy, coverage, flaky test hardening (Sonnet).',
     prompt: loadAgentPrompt('test-engineer'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-/**
- * Quality-Strategist Agent - Quality Strategy & Release Readiness (Sonnet)
- */
-export const qualityStrategistAgent = {
-    name: 'quality-strategist',
-    description: 'Quality strategy, release readiness, risk assessment, and quality gates (Sonnet).',
-    prompt: loadAgentPrompt('quality-strategist'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-// ============================================================
-// REFORMED AGENTS (PRODUCT LANE)
-// ============================================================
-/**
- * Product Manager Agent - Problem Framing & Value Hypothesis (Sonnet)
- */
-export const productManagerAgent = {
-    name: 'product-manager',
-    description: 'Problem framing, personas/JTBD, value hypothesis, PRDs, KPI trees (Sonnet).',
-    prompt: loadAgentPrompt('product-manager'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-/**
- * UX Researcher Agent - Heuristic Audits & Usability (Sonnet)
- */
-export const uxResearcherAgent = {
-    name: 'ux-researcher',
-    description: 'Heuristic audits, usability risks, accessibility, research plans (Sonnet).',
-    prompt: loadAgentPrompt('ux-researcher'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-/**
- * Information Architect Agent - Taxonomy & Navigation (Sonnet)
- */
-export const informationArchitectAgent = {
-    name: 'information-architect',
-    description: 'Taxonomy, navigation, findability, naming consistency (Sonnet).',
-    prompt: loadAgentPrompt('information-architect'),
-    model: 'sonnet',
-    defaultModel: 'sonnet'
-};
-/**
- * Product Analyst Agent - Metrics & Experiment Design (Sonnet)
- */
-export const productAnalystAgent = {
-    name: 'product-analyst',
-    description: 'Product metrics, funnel analysis, experiment design, KPI definitions (Sonnet).',
-    prompt: loadAgentPrompt('product-analyst'),
     model: 'sonnet',
     defaultModel: 'sonnet'
 };
@@ -243,10 +147,6 @@ export const codeSimplifierAgent = {
 // DEPRECATED ALIASES (Backward Compatibility)
 // ============================================================
 /**
- * @deprecated Use dependency-expert agent instead
- */
-export const researcherAgentAlias = dependencyExpertAgent;
-/**
  * @deprecated Use test-engineer agent instead
  */
 export const tddGuideAgentAlias = testEngineerAgent;
@@ -281,23 +181,18 @@ export function getAgentDefinitions(overrides) {
         architect: architectAgent,
         debugger: debuggerAgent,
         executor: executorAgent,
-        'deep-executor': deepExecutorAgent,
         verifier: verifierAgent,
         // ============================================================
         // REVIEW LANE
         // ============================================================
-        'style-reviewer': styleReviewerAgent,
         'quality-reviewer': qualityReviewerAgent,
-        'api-reviewer': apiReviewerAgent,
         'security-reviewer': securityReviewerAgent,
-        'performance-reviewer': performanceReviewerAgent,
         'code-reviewer': codeReviewerAgent,
         // ============================================================
         // DOMAIN SPECIALISTS
         // ============================================================
-        'dependency-expert': dependencyExpertAgent,
+        'deep-executor': deepExecutorAgent,
         'test-engineer': testEngineerAgent,
-        'quality-strategist': qualityStrategistAgent,
         'build-fixer': buildFixerAgent,
         designer: designerAgent,
         writer: writerAgent,
@@ -306,23 +201,13 @@ export function getAgentDefinitions(overrides) {
         'git-master': gitMasterAgent,
         'code-simplifier': codeSimplifierAgent,
         // ============================================================
-        // PRODUCT LANE
-        // ============================================================
-        'product-manager': productManagerAgent,
-        'ux-researcher': uxResearcherAgent,
-        'information-architect': informationArchitectAgent,
-        'product-analyst': productAnalystAgent,
-        // ============================================================
         // COORDINATION
         // ============================================================
         critic: criticAgent,
-        vision: visionAgent,
         // ============================================================
         // BACKWARD COMPATIBILITY (Deprecated)
         // ============================================================
-        'document-specialist': documentSpecialistAgent,
-        researcher: documentSpecialistAgent,
-        'tdd-guide': testEngineerAgent
+        'document-specialist': documentSpecialistAgent
     };
     const result = {};
     for (const [name, config] of Object.entries(agents)) {
@@ -354,7 +239,7 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (28 Agents)
+## Available Subagents (21 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) — fast pattern matching
@@ -362,38 +247,33 @@ You coordinate specialized subagents to accomplish complex software engineering 
 - **planner**: Task sequencing (opus) — execution plans and risk flags
 - **architect**: System design (opus) — boundaries, interfaces, tradeoffs
 - **debugger**: Root-cause analysis (sonnet) — regression isolation, diagnosis
-- **executor**: Code implementation (sonnet) — features and refactoring
-- **deep-executor**: Complex execution (opus) — autonomous goal-oriented work
+- **executor**: Code implementation (sonnet) — features and refactoring (use model=opus for complex tasks)
 - **verifier**: Completion validation (sonnet) — evidence, claims, test adequacy
 
 ### Review Lane
-- **style-reviewer**: Code style (haiku) — formatting, naming, idioms
-- **quality-reviewer**: Logic defects (sonnet) — maintainability, anti-patterns
-- **api-reviewer**: API contracts (sonnet) — versioning, backward compatibility
+- **quality-reviewer**: Logic defects (sonnet) — maintainability, anti-patterns, performance hotspots, quality strategy, release readiness (use model=haiku for lightweight style-only checks)
 - **security-reviewer**: Security audits (sonnet) — vulns, trust boundaries, authn/authz
-- **performance-reviewer**: Performance (sonnet) — hotspots, complexity, optimization
-- **code-reviewer**: Comprehensive review (opus) — orchestrates all review aspects
+- **code-reviewer**: Comprehensive review (opus) — API contracts, versioning, backward compatibility, orchestrates all review aspects
 
 ### Domain Specialists
-- **dependency-expert**: SDK/API evaluation (sonnet) — external package research
 - **test-engineer**: Test strategy (sonnet) — coverage, flaky test hardening
-- **quality-strategist**: Quality strategy (sonnet) — release readiness, risk assessment, quality gates
 - **build-fixer**: Build errors (sonnet) — toolchain/type failures
 - **designer**: UI/UX architecture (sonnet) — interaction design
 - **writer**: Documentation (haiku) — docs, migration notes
 - **qa-tester**: CLI testing (sonnet) — interactive runtime validation via tmux
 - **scientist**: Data analysis (sonnet) — statistics and research
 - **git-master**: Git operations (sonnet) — commits, rebasing, history
-
-### Product Lane
-- **product-manager**: Problem framing (sonnet) — personas, JTBD, PRDs, KPI trees
-- **ux-researcher**: UX research (sonnet) — heuristic audits, usability, accessibility
-- **information-architect**: Info architecture (sonnet) — taxonomy, navigation, findability
-- **product-analyst**: Product analytics (sonnet) — metrics, funnels, experiment design
+- **document-specialist**: External docs & reference lookup (sonnet) — SDK/API/package research
 
 ### Coordination
 - **critic**: Plan review (opus) — critical challenge and evaluation
-- **vision**: Visual analysis (sonnet) — images, screenshots, diagrams
+
+### Deprecated Aliases
+- **api-reviewer** → code-reviewer
+- **performance-reviewer** → quality-reviewer
+- **dependency-expert** → document-specialist
+- **researcher** → document-specialist
+- **tdd-guide** → test-engineer
 
 ## Orchestration Principles
 1. **Delegate Aggressively**: Fire off subagents for specialized tasks - don't do everything yourself

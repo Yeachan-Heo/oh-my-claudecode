@@ -100,6 +100,10 @@ function loadSkillFromFile(skillPath, skillName) {
                 name,
                 aliases: name === safePrimaryName ? safeAliases : undefined,
                 aliasOf: name === safePrimaryName ? undefined : safePrimaryName,
+                deprecatedAlias: name === safePrimaryName ? undefined : true,
+                deprecationMessage: name === safePrimaryName
+                    ? undefined
+                    : `Skill alias "${name}" is deprecated. Use "${safePrimaryName}" instead.`,
                 description: data.description || '',
                 template: body.trim(),
                 // Optional fields from frontmatter
@@ -187,8 +191,13 @@ export function getBuiltinSkill(name) {
 /**
  * List all builtin skill names
  */
-export function listBuiltinSkillNames() {
-    return createBuiltinSkills().map(s => s.name);
+export function listBuiltinSkillNames(options) {
+    const { includeAliases = false } = options ?? {};
+    const skills = createBuiltinSkills();
+    if (includeAliases) {
+        return skills.map((s) => s.name);
+    }
+    return skills.filter((s) => !s.aliasOf).map((s) => s.name);
 }
 /**
  * Clear the skills cache (useful for testing)

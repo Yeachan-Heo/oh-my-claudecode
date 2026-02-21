@@ -10,6 +10,7 @@ import { parseTranscript } from "./transcript.js";
 import { readHudState, readHudConfig, getRunningTasks, writeHudState, initializeHUDState, } from "./state.js";
 import { readRalphStateForHud, readUltraworkStateForHud, readPrdStateForHud, readAutopilotStateForHud, } from "./omc-state.js";
 import { getUsage } from "./usage-api.js";
+import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { sanitizeOutput } from "./sanitize.js";
 import { extractTokens, createSnapshot, } from "../analytics/token-extractor.js";
@@ -283,6 +284,10 @@ async function main() {
         }
         // Fetch rate limits from OAuth API (if available)
         const rateLimits = config.elements.rateLimits !== false ? await getUsage() : null;
+        // Fetch custom rate limit buckets (if configured)
+        const customBuckets = config.rateLimitsProvider?.type === 'custom'
+            ? await executeCustomProvider(config.rateLimitsProvider)
+            : null;
         // Read OMC version and update check cache
         let omcVersion = null;
         let updateAvailable = null;
@@ -320,6 +325,7 @@ async function main() {
             cwd,
             lastSkill: transcriptData.lastActivatedSkill || null,
             rateLimits,
+            customBuckets,
             pendingPermission: transcriptData.pendingPermission || null,
             thinkingState: transcriptData.thinkingState || null,
             sessionHealth: await calculateSessionHealth(sessionStart, getContextPercent(stdin), stdin, config.thresholds),

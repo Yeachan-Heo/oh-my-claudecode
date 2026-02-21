@@ -1,5 +1,5 @@
 <!-- OMC:START -->
-<!-- OMC:VERSION:4.3.0 -->
+<!-- OMC:VERSION:4.3.1 -->
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
 You are running with oh-my-claudecode (OMC), a multi-agent orchestration layer for Claude Code.
@@ -27,7 +27,7 @@ Work directly only for trivial operations where delegation adds disproportionate
 
 For substantive code changes, route implementation to `executor` (or `deep-executor` for complex autonomous execution). This keeps editing workflows consistent and easier to verify.
 
-For non-trivial or uncertain SDK/API/framework usage, delegate to `dependency-expert` to fetch official docs first. Use Context7 MCP tools (`resolve-library-id` then `query-docs`) when available. This prevents guessing field names or API contracts. For well-known, stable APIs you can proceed directly.
+For non-trivial or uncertain SDK/API/framework usage, delegate to `document-specialist` to fetch official docs first. Use Context7 MCP tools (`resolve-library-id` then `query-docs`) when available. This prevents guessing field names or API contracts. For well-known, stable APIs you can proceed directly.
 </delegation_rules>
 
 <model_routing>
@@ -65,38 +65,25 @@ Build/Analysis Lane:
 - `verifier` (sonnet): completion evidence, claim validation, test adequacy
 
 Review Lane:
-- `style-reviewer` (haiku): formatting, naming, idioms, lint conventions
-- `quality-reviewer` (sonnet): logic defects, maintainability, anti-patterns
-- `api-reviewer` (sonnet): API contracts, versioning, backward compatibility
+- `quality-reviewer` (sonnet): logic defects, maintainability, anti-patterns, formatting, naming, idioms, lint conventions, performance hotspots, complexity, memory/latency optimization, quality strategy, release readiness
 - `security-reviewer` (sonnet): vulnerabilities, trust boundaries, authn/authz
-- `performance-reviewer` (sonnet): hotspots, complexity, memory/latency optimization
-- `code-reviewer` (opus): comprehensive review across concerns
+- `code-reviewer` (opus): comprehensive review across concerns, API contracts, versioning, backward compatibility
 
 Domain Specialists:
-- `dependency-expert` (sonnet): external SDK/API/package evaluation
 - `test-engineer` (sonnet): test strategy, coverage, flaky-test hardening
-- `quality-strategist` (sonnet): quality strategy, release readiness, risk assessment
 - `build-fixer` (sonnet): build/toolchain/type failures
 - `designer` (sonnet): UX/UI architecture, interaction design
 - `writer` (haiku): docs, migration notes, user guidance
 - `qa-tester` (sonnet): interactive CLI/service runtime validation
 - `scientist` (sonnet): data/statistical analysis
 - `document-specialist` (sonnet): external documentation & reference lookup
-- `git-master` (sonnet): commit strategy, history hygiene
-
-Product Lane:
-- `product-manager` (sonnet): problem framing, personas/JTBD, PRDs
-- `ux-researcher` (sonnet): heuristic audits, usability, accessibility
-- `information-architect` (sonnet): taxonomy, navigation, findability
-- `product-analyst` (sonnet): product metrics, funnel analysis, experiments
 
 Coordination:
 - `critic` (opus): plan/design critical challenge
-- `vision` (sonnet): image/screenshot/diagram analysis
 
-Deprecated aliases (backward compatibility): `researcher` -> `document-specialist`, `tdd-guide` -> `test-engineer`.
+Deprecated aliases (backward compatibility only): `researcher` -> `document-specialist`, `tdd-guide` -> `test-engineer`, `api-reviewer` -> `code-reviewer`, `performance-reviewer` -> `quality-reviewer`, `dependency-expert` -> `document-specialist`, `quality-strategist` -> `quality-reviewer`, `vision` -> `document-specialist`.
 
-Some roles are alias prompts mapped to core agent types; the canonical set is in `src/agents/definitions.ts`.
+Compatibility aliases may still be normalized during routing, but canonical runtime registry keys are defined in `src/agents/definitions.ts`.
 </agent_catalog>
 
 ---
@@ -117,16 +104,16 @@ Available MCP providers:
 Any OMC agent role can be passed as `agent_role` to either provider. The role loads a matching system prompt if one exists; otherwise the task runs without role-specific framing.
 
 Provider strengths (use these to choose the right provider):
-- **Codex excels at**: architecture review, planning validation, critical analysis, code review, security review, test strategy. Recommended roles: architect, planner, critic, analyst, code-reviewer, security-reviewer, tdd-guide.
-- **Gemini excels at**: UI/UX design review, documentation, visual analysis, large-context tasks (1M tokens). Recommended roles: designer, writer, vision.
+- **Codex excels at**: architecture review, planning validation, critical analysis, code review, security review, test strategy. Recommended roles: architect, planner, critic, analyst, code-reviewer, security-reviewer, test-engineer.
+- **Gemini excels at**: UI/UX design review, documentation, visual analysis, large-context tasks (1M tokens). Recommended roles: designer, writer.
 
 Always attach `context_files`/`files` when calling MCP tools. MCP output is advisory -- verification (tests, typecheck) should come from tool-using agents.
 
 Background pattern: spawn with `background: true`, check with `check_job_status`, await with `wait_for_job` (up to 1 hour).
 
-Agents that have no MCP replacement (they need Claude's tool access): `executor`, `deep-executor`, `explore`, `debugger`, `verifier`, `dependency-expert`, `scientist`, `build-fixer`, `qa-tester`, `git-master`, all review-lane agents, all product-lane agents.
+Agents that have no MCP replacement (they need Claude's tool access): `executor`, `deep-executor`, `explore`, `debugger`, `verifier`, `scientist`, `build-fixer`, `qa-tester`, all review-lane agents.
 
-Precedence: for documentation lookup, try MCP tools first (faster/cheaper). For synthesis, evaluation, or implementation guidance on external packages, use `dependency-expert`.
+Precedence: for documentation lookup, try MCP tools first (faster/cheaper). For synthesis, evaluation, or implementation guidance on external packages, use `document-specialist`.
 
 MCP output is wrapped as untrusted content; response files have output safety constraints applied.
 </mcp_routing>
@@ -135,8 +122,8 @@ MCP output is wrapped as untrusted content; response files have output safety co
 
 <tools>
 External AI (MCP providers):
-- Codex: `mcp__x__ask_codex` with `agent_role` (any role; best for: architect, planner, critic, analyst, code-reviewer, security-reviewer, tdd-guide)
-- Gemini: `mcp__g__ask_gemini` with `agent_role` (any role; best for: designer, writer, vision)
+- Codex: `mcp__x__ask_codex` with `agent_role` (any role; best for: architect, planner, critic, analyst, code-reviewer, security-reviewer, test-engineer)
+- Gemini: `mcp__g__ask_gemini` with `agent_role` (any role; best for: designer, writer)
 - Job management: `check_job_status`, `wait_for_job`, `kill_job`, `list_jobs` (per provider)
 
 OMC State:
@@ -176,7 +163,7 @@ Workflow Skills:
 - `autopilot` ("autopilot", "build me", "I want a"): full autonomous execution from idea to working code
 - `ralph` ("ralph", "don't stop", "must complete"): self-referential loop with verifier verification; includes ultrawork
 - `ultrawork` ("ulw", "ultrawork"): maximum parallelism with parallel agent orchestration
-- `swarm` ("swarm"): compatibility facade over Team; preserves `/swarm` syntax, routes to Team staged pipeline
+- `swarm` ("swarm"): **deprecated compatibility alias** over Team; use `/team` (still routes to Team staged pipeline for now)
 - `ultrapilot` ("ultrapilot", "parallel build"): compatibility facade over Team; maps onto Team's staged runtime
 - `team` ("team", "coordinated team", "team ralph"): N coordinated agents using Claude Code native teams with stage-aware agent routing; supports `team ralph` for persistent team execution
 - `pipeline` ("pipeline", "chain agents"): sequential agent chaining with data passing
@@ -189,13 +176,10 @@ Workflow Skills:
 
 Agent Shortcuts (thin wrappers; call the agent directly with `model` for more control):
 - `analyze` -> `debugger`: "analyze", "debug", "investigate"
-- `deepsearch` -> `explore`: "search", "find in codebase"
 - `tdd` -> `test-engineer`: "tdd", "test first", "red green"
 - `build-fix` -> `build-fixer`: "fix build", "type errors"
 - `code-review` -> `code-reviewer`: "review code"
 - `security-review` -> `security-reviewer`: "security review"
-- `frontend-ui-ux` -> `designer`: UI/component/styling work (auto)
-- `git-master` -> `git-master`: git/commit work (auto)
 - `review` -> `plan --review`: "review plan", "critique plan"
 
 MCP Delegation (auto-detected when an intent phrase is present):
@@ -204,9 +188,9 @@ MCP Delegation (auto-detected when an intent phrase is present):
 - `ask gemini`, `use gemini`, `delegate to gemini` -> `ask_gemini`
 - Bare keywords without an intent phrase do not trigger delegation.
 
-Notifications: `configure-discord` ("configure discord", "setup discord", "discord webhook"), `configure-telegram` ("configure telegram", "setup telegram", "telegram bot")
+Notifications: `configure-notifications` ("configure discord", "setup discord", "discord webhook", "configure telegram", "setup telegram", "telegram bot", "configure slack", "setup slack")
 
-Utilities: `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager` (psm), `skill`, `writer-memory`, `ralph-init`, `learn-about-omc`
+Utilities: `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager` (`psm` is deprecated alias), `skill`, `writer-memory`, `ralph-init`, `learn-about-omc`
 
 Conflict resolution: explicit mode keywords (`ulw`, `ultrawork`) override defaults. Generic "fast"/"parallel" reads `~/.claude/.omc-config.json` -> `defaultExecutionMode`. Ralph includes ultrawork (persistence wrapper). Autopilot can transition to ralph or ultraqa. Autopilot and ultrapilot are mutually exclusive.
 </skills>
@@ -223,16 +207,7 @@ Bug Investigation:
   `explore` + `debugger` + `executor` + `test-engineer` + `verifier`
 
 Code Review:
-  `style-reviewer` + `quality-reviewer` + `api-reviewer` + `security-reviewer`
-
-Product Discovery:
-  `product-manager` + `ux-researcher` + `product-analyst` + `designer`
-
-Feature Specification:
-  `product-manager` -> `analyst` -> `information-architect` -> `planner` -> `executor`
-
-UX Audit:
-  `ux-researcher` + `information-architect` + `designer` + `product-analyst`
+  `quality-reviewer` + `security-reviewer` + `code-reviewer`
 </team_compositions>
 
 <team_pipeline>
@@ -242,9 +217,9 @@ Team is the default multi-agent orchestrator. It uses a canonical staged pipelin
 
 Stage Agent Routing (each stage uses specialized agents, not just executors):
 - `team-plan`: `explore` (haiku) + `planner` (opus), optionally `analyst`/`architect`
-- `team-prd`: `analyst` (opus), optionally `product-manager`/`critic`
+- `team-prd`: `analyst` (opus), optionally `critic`
 - `team-exec`: `executor` (sonnet) + task-appropriate specialists (`designer`, `build-fixer`, `writer`, `test-engineer`, `deep-executor`)
-- `team-verify`: `verifier` (sonnet) + `security-reviewer`/`code-reviewer`/`quality-reviewer`/`performance-reviewer` as needed
+- `team-verify`: `verifier` (sonnet) + `security-reviewer`/`code-reviewer`/`quality-reviewer` as needed
 - `team-fix`: `executor`/`build-fixer`/`debugger` depending on defect type
 
 Stage transitions:

@@ -12,7 +12,7 @@
  *
  * Tools will be available as mcp__g__ask_gemini
  */
-export declare const geminiMcpServer: any;
+export declare const geminiMcpServer: import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance;
 /**
  * Tool names for allowedTools configuration
  */

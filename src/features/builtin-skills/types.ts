@@ -27,6 +27,10 @@ export interface BuiltinSkill {
   aliases?: string[];
   /** Canonical skill name when this entry is an alias */
   aliasOf?: string;
+  /** Whether this entry is a deprecated compatibility alias */
+  deprecatedAlias?: boolean;
+  /** Human-readable deprecation guidance */
+  deprecationMessage?: string;
   /** Short description of the skill */
   description: string;
   /** Full template content for the skill */

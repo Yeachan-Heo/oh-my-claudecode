@@ -231,6 +231,8 @@ export function quickTierForAgent(agentType: string): ComplexityTier | null {
     'writer': 'LOW',
     'document-specialist': 'MEDIUM',
     researcher: 'MEDIUM',
+    'test-engineer': 'MEDIUM',
+    'tdd-guide': 'MEDIUM',
     'executor': 'MEDIUM',
     'designer': 'MEDIUM',
     'vision': 'MEDIUM',

@@ -44,7 +44,7 @@ export { isGptModel, isClaudeModel, getDefaultModelForCategory,
 // Utilities
 createAgentToolRestrictions, mergeAgentConfig, buildDelegationTable, buildUseAvoidSection, createEnvContext, getAvailableAgents, buildKeyTriggersSection, validateAgentConfig, deepMerge, loadAgentPrompt, 
 // Individual agents with metadata (rebranded intuitive names)
-architectAgent, ARCHITECT_PROMPT_METADATA, exploreAgent, EXPLORE_PROMPT_METADATA, researcherAgent, DOCUMENT_SPECIALIST_PROMPT_METADATA, executorAgent, SISYPHUS_JUNIOR_PROMPT_METADATA, designerAgent, FRONTEND_ENGINEER_PROMPT_METADATA, writerAgent, DOCUMENT_WRITER_PROMPT_METADATA, visionAgent, MULTIMODAL_LOOKER_PROMPT_METADATA, criticAgent, CRITIC_PROMPT_METADATA, analystAgent, ANALYST_PROMPT_METADATA, plannerAgent, PLANNER_PROMPT_METADATA, 
+architectAgent, ARCHITECT_PROMPT_METADATA, exploreAgent, EXPLORE_PROMPT_METADATA, researcherAgent, DOCUMENT_SPECIALIST_PROMPT_METADATA, executorAgent, SISYPHUS_JUNIOR_PROMPT_METADATA, designerAgent, FRONTEND_ENGINEER_PROMPT_METADATA, writerAgent, DOCUMENT_WRITER_PROMPT_METADATA, criticAgent, CRITIC_PROMPT_METADATA, analystAgent, ANALYST_PROMPT_METADATA, plannerAgent, PLANNER_PROMPT_METADATA, 
 // Deprecated (backward compat - will be removed in v4.0.0)
 coordinatorAgent, ORCHESTRATOR_SISYPHUS_PROMPT_METADATA } from './agents/index.js';
 // Command expansion utilities for SDK integration

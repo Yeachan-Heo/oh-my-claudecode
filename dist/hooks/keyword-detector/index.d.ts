@@ -6,6 +6,7 @@
  *
  * Ported from oh-my-opencode's keyword-detector hook.
  */
+import { type TaskSizeResult } from '../task-size-detector/index.js';
 export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'ultrapilot' | 'team' | 'ultrawork' | 'swarm' | 'pipeline' | 'ralplan' | 'plan' | 'tdd' | 'ultrathink' | 'deepsearch' | 'analyze' | 'codex' | 'gemini' | 'ccg';
 export interface DetectedKeyword {
     type: KeywordType;
@@ -42,6 +43,35 @@ export declare function hasKeyword(text: string): boolean;
  * Get all detected keywords with conflict resolution applied
  */
 export declare function getAllKeywords(text: string): KeywordType[];
+/**
+ * Options for task-size-aware keyword filtering
+ */
+export interface TaskSizeFilterOptions {
+    /** Enable task-size detection. Default: true */
+    enabled?: boolean;
+    /** Word count threshold for small tasks. Default: 50 */
+    smallWordLimit?: number;
+    /** Word count threshold for large tasks. Default: 200 */
+    largeWordLimit?: number;
+    /** Suppress heavy modes for small tasks. Default: true */
+    suppressHeavyModesForSmallTasks?: boolean;
+}
+/**
+ * Result of task-size-aware keyword detection
+ */
+export interface TaskSizeAwareKeywordsResult {
+    keywords: KeywordType[];
+    taskSizeResult: TaskSizeResult | null;
+    suppressedKeywords: KeywordType[];
+}
+/**
+ * Get all keywords with task-size-based filtering applied.
+ * For small tasks, heavy orchestration modes (ralph/autopilot/team/ultrawork etc.)
+ * are suppressed to avoid over-orchestration.
+ *
+ * This is the recommended function to use in the bridge hook for keyword detection.
+ */
+export declare function getAllKeywordsWithSizeCheck(text: string, options?: TaskSizeFilterOptions): TaskSizeAwareKeywordsResult;
 /**
  * Get the highest priority keyword detected with conflict resolution
  */

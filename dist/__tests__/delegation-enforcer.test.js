@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { enforceModel, isAgentCall, processPreToolUse, getModelForAgent } from '../features/delegation-enforcer.js';
+import { resolveDelegation } from '../features/delegation-routing/resolver.js';
 describe('delegation-enforcer', () => {
     let originalDebugEnv;
     beforeEach(() => {
@@ -94,11 +95,7 @@ describe('delegation-enforcer', () => {
                 { agent: 'designer', expectedModel: 'sonnet' },
                 { agent: 'debugger', expectedModel: 'sonnet' },
                 { agent: 'verifier', expectedModel: 'sonnet' },
-                { agent: 'style-reviewer', expectedModel: 'haiku' },
                 { agent: 'quality-reviewer', expectedModel: 'sonnet' },
-                { agent: 'api-reviewer', expectedModel: 'sonnet' },
-                { agent: 'performance-reviewer', expectedModel: 'sonnet' },
-                { agent: 'dependency-expert', expectedModel: 'sonnet' },
                 { agent: 'test-engineer', expectedModel: 'sonnet' }
             ];
             for (const testCase of testCases) {
@@ -203,6 +200,38 @@ describe('delegation-enforcer', () => {
         });
         it('throws error for unknown agent', () => {
             expect(() => getModelForAgent('unknown')).toThrow('Unknown agent type');
+        });
+    });
+    describe('deprecated alias routing', () => {
+        it('routes api-reviewer to code-reviewer', () => {
+            const result = resolveDelegation({ agentRole: 'api-reviewer' });
+            expect(result.provider).toBe('claude');
+            expect(result.tool).toBe('Task');
+            expect(result.agentOrModel).toBe('code-reviewer');
+        });
+        it('routes performance-reviewer to quality-reviewer', () => {
+            const result = resolveDelegation({ agentRole: 'performance-reviewer' });
+            expect(result.provider).toBe('claude');
+            expect(result.tool).toBe('Task');
+            expect(result.agentOrModel).toBe('quality-reviewer');
+        });
+        it('routes dependency-expert to document-specialist', () => {
+            const result = resolveDelegation({ agentRole: 'dependency-expert' });
+            expect(result.provider).toBe('claude');
+            expect(result.tool).toBe('Task');
+            expect(result.agentOrModel).toBe('document-specialist');
+        });
+        it('routes quality-strategist to quality-reviewer', () => {
+            const result = resolveDelegation({ agentRole: 'quality-strategist' });
+            expect(result.provider).toBe('claude');
+            expect(result.tool).toBe('Task');
+            expect(result.agentOrModel).toBe('quality-reviewer');
+        });
+        it('routes vision to document-specialist', () => {
+            const result = resolveDelegation({ agentRole: 'vision' });
+            expect(result.provider).toBe('claude');
+            expect(result.tool).toBe('Task');
+            expect(result.agentOrModel).toBe('document-specialist');
         });
     });
 });

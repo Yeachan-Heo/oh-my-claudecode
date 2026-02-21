@@ -17,6 +17,7 @@ function createMinimalContext(overrides: Partial<HudRenderContext> = {}): HudRen
     cwd: '/tmp/test',
     lastSkill: null,
     rateLimits: null,
+    customBuckets: null,
     pendingPermission: null,
     thinkingState: null,
     sessionHealth: null,

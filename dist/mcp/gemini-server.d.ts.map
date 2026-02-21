@@ -1,1 +1,1 @@
-{"version":3,"file":"gemini-server.d.ts","sourceRoot":"","sources":["../../src/mcp/gemini-server.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AA2FH;;;;GAIG;AACH,eAAO,MAAM,eAAe,KAI1B,CAAC;AAEH;;GAEG;AACH,eAAO,MAAM,eAAe,UAA8E,CAAC"}
+{"version":3,"file":"gemini-server.d.ts","sourceRoot":"","sources":["../../src/mcp/gemini-server.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AA2FH;;;;GAIG;AACH,eAAO,MAAM,eAAe,yEAI1B,CAAC;AAEH;;GAEG;AACH,eAAO,MAAM,eAAe,UAA8E,CAAC"}

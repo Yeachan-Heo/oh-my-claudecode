@@ -381,6 +381,10 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
 };
 /**
  * Get the hooks settings config (Node.js only).
+ *
+ * @deprecated Hooks are now delivered via the plugin's hooks/hooks.json.
+ * settings.json hook entries are no longer written by the installer.
+ * Kept for test compatibility only.
  */
 export function getHooksSettingsConfig() {
     return HOOKS_SETTINGS_CONFIG_NODE;
@@ -391,6 +395,10 @@ export function getHooksSettingsConfig() {
 /**
  * Get Node.js hook scripts (Cross-platform)
  * Returns a record of filename -> content for all Node.js hooks
+ *
+ * @deprecated Hook scripts are no longer installed to ~/.claude/hooks/.
+ * All hooks are delivered via the plugin's hooks/hooks.json + scripts/.
+ * Kept for test compatibility only.
  */
 export function getHookScripts() {
     return {

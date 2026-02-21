@@ -143,14 +143,19 @@ export function discoverAllCommands() {
                         const model = getFrontmatterString(data, 'model');
                         const agent = getFrontmatterString(data, 'agent');
                         for (const commandName of commandNames) {
+                            const isAlias = commandName !== canonicalName;
                             const metadata = {
                                 name: commandName,
                                 description,
                                 argumentHint,
                                 model,
                                 agent,
-                                aliases: commandName === canonicalName ? aliases : undefined,
-                                aliasOf: commandName === canonicalName ? undefined : canonicalName,
+                                aliases: isAlias ? undefined : aliases,
+                                aliasOf: isAlias ? canonicalName : undefined,
+                                deprecatedAlias: isAlias || undefined,
+                                deprecationMessage: isAlias
+                                    ? `Alias "/${commandName}" is deprecated. Use "/${canonicalName}" instead.`
+                                    : undefined,
                             };
                             skillCommands.push({
                                 name: commandName,
@@ -214,6 +219,9 @@ function formatCommandTemplate(cmd, args) {
         sections.push(`**Agent**: ${cmd.metadata.agent}\n`);
     }
     sections.push(`**Scope**: ${cmd.scope}\n`);
+    if (cmd.metadata.aliasOf) {
+        sections.push(`⚠️ **Deprecated Alias**: \`/${cmd.name}\` is deprecated and will be removed in a future release. Use \`/${cmd.metadata.aliasOf}\` instead.\n`);
+    }
     sections.push('---\n');
     // Resolve arguments in content, then execute any live-data commands
     const resolvedContent = resolveArguments(cmd.content || '', args);
@@ -255,8 +263,15 @@ export function executeSlashCommand(parsed) {
  * List all available commands
  */
 export function listAvailableCommands() {
+    return listAvailableCommandsWithOptions();
+}
+export function listAvailableCommandsWithOptions(options) {
+    const { includeAliases = false } = options ?? {};
     const commands = discoverAllCommands();
-    return commands.map((cmd) => ({
+    const visibleCommands = includeAliases
+        ? commands
+        : commands.filter((cmd) => !cmd.metadata.aliasOf);
+    return visibleCommands.map((cmd) => ({
         name: cmd.name,
         description: cmd.metadata.description,
         scope: cmd.scope,

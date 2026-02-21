@@ -178,43 +178,5 @@ describe('Issue #595: Consensus mode execution handoff', () => {
       expect(criticIdx).toBeGreaterThan(architectIdx);
     });
 
-    it('should include user feedback step in ralplan alias workflow', () => {
-      const skill = getBuiltinSkill('ralplan');
-      expect(skill).toBeDefined();
-
-      expect(skill!.template).toContain('**User feedback**');
-
-      // Verify ordering in ralplan too
-      const plannerIdx = skill!.template.indexOf('**Planner** creates initial plan');
-      const feedbackIdx = skill!.template.indexOf('**User feedback**');
-      const architectIdx = skill!.template.indexOf('**Architect** reviews');
-
-      expect(plannerIdx).toBeGreaterThan(-1);
-      expect(feedbackIdx).toBeGreaterThan(-1);
-      expect(architectIdx).toBeGreaterThan(-1);
-
-      expect(feedbackIdx).toBeGreaterThan(plannerIdx);
-      expect(architectIdx).toBeGreaterThan(feedbackIdx);
-    });
-  });
-
-  describe('ralplan skill - consensus alias', () => {
-    it('should reference AskUserQuestion in the approval step', () => {
-      const skill = getBuiltinSkill('ralplan');
-      expect(skill).toBeDefined();
-      expect(skill!.template).toContain('AskUserQuestion');
-    });
-
-    it('should reference ralph skill invocation on approval', () => {
-      const skill = getBuiltinSkill('ralplan');
-      expect(skill).toBeDefined();
-      expect(skill!.template).toContain('Skill("oh-my-claudecode:ralph")');
-    });
-
-    it('should still identify as an alias for /plan --consensus', () => {
-      const skill = getBuiltinSkill('ralplan');
-      expect(skill).toBeDefined();
-      expect(skill!.template).toContain('/oh-my-claudecode:plan --consensus');
-    });
   });
 });

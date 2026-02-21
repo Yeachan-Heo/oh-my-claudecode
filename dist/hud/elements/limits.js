@@ -1,7 +1,8 @@
 /**
  * OMC HUD - Rate Limits Element
  *
- * Renders 5-hour and weekly rate limit usage display.
+ * Renders 5-hour and weekly rate limit usage display (built-in providers),
+ * and custom rate limit buckets from the rateLimitsProvider command.
  */
 import { RESET } from '../colors.js';
 const GREEN = '\x1b[32m';
@@ -146,6 +147,69 @@ export function renderRateLimitsWithBar(limits, barWidth = 8) {
             : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}`;
         parts.push(monthlyPart);
     }
+    return parts.join(' ');
+}
+// ============================================================================
+// Custom provider bucket rendering
+// ============================================================================
+/**
+ * Compute a 0-100 usage percentage for threshold checks.
+ * Returns null for string usage (no numeric basis).
+ */
+function bucketUsagePercent(usage) {
+    if (usage.type === 'percent')
+        return usage.value;
+    if (usage.type === 'credit' && usage.limit > 0)
+        return (usage.used / usage.limit) * 100;
+    return null;
+}
+/**
+ * Render a bucket usage value as a display string.
+ *   percent  → "32%"
+ *   credit   → "250/300"
+ *   string   → value as-is
+ */
+function renderBucketUsageValue(usage) {
+    if (usage.type === 'percent')
+        return `${Math.round(usage.value)}%`;
+    if (usage.type === 'credit')
+        return `${usage.used}/${usage.limit}`;
+    return usage.value;
+}
+/**
+ * Render custom rate limit buckets from the rateLimitsProvider command.
+ *
+ * Format (normal):  label:32%  label2:250/300  label3:as-is
+ * Format (stale):   label:32%*  (asterisk marks stale/cached data)
+ * Format (error):   [cmd:err]
+ *
+ * resetsAt is shown only when usage exceeds thresholdPercent (default 85).
+ */
+export function renderCustomBuckets(result, thresholdPercent = 85) {
+    // Command failed and no cached data
+    if (result.error && result.buckets.length === 0) {
+        return `${YELLOW}[cmd:err]${RESET}`;
+    }
+    if (result.buckets.length === 0)
+        return null;
+    const staleMarker = result.stale ? `${DIM}*${RESET}` : '';
+    const parts = result.buckets.map((bucket) => {
+        const pct = bucketUsagePercent(bucket.usage);
+        const color = pct != null ? getColor(pct) : '';
+        const colorReset = pct != null ? RESET : '';
+        const usageStr = renderBucketUsageValue(bucket.usage);
+        // Show resetsAt only above threshold (string usage never shows it)
+        let resetPart = '';
+        if (bucket.resetsAt && pct != null && pct >= thresholdPercent) {
+            const d = new Date(bucket.resetsAt);
+            if (!isNaN(d.getTime())) {
+                const str = formatResetTime(d);
+                if (str)
+                    resetPart = `${DIM}(${str})${RESET}`;
+            }
+        }
+        return `${DIM}${bucket.label}:${RESET}${color}${usageStr}${colorReset}${staleMarker}${resetPart}`;
+    });
     return parts.join(' ');
 }
 //# sourceMappingURL=limits.js.map

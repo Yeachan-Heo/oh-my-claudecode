@@ -14,17 +14,16 @@ describe('prompt-injection', () => {
     test('is immutable (readonly array)', () => {
       // TypeScript enforces this at compile time, but we can verify the array exists
       expect(Array.isArray(VALID_AGENT_ROLES)).toBe(true);
-      expect(VALID_AGENT_ROLES.length).toBeGreaterThanOrEqual(28);
+      expect(VALID_AGENT_ROLES.length).toBeGreaterThanOrEqual(21);
     });
 
     test('includes all agents with .md files', () => {
       // Verify known agents that have .md files are included
       expect(VALID_AGENT_ROLES).toContain('debugger');
       expect(VALID_AGENT_ROLES).toContain('verifier');
-      expect(VALID_AGENT_ROLES).toContain('product-manager');
-      expect(VALID_AGENT_ROLES).toContain('dependency-expert');
       expect(VALID_AGENT_ROLES).toContain('quality-reviewer');
-      expect(VALID_AGENT_ROLES).toContain('api-reviewer');
+      expect(VALID_AGENT_ROLES).toContain('code-reviewer');
+      expect(VALID_AGENT_ROLES).toContain('document-specialist');
     });
   });
 
@@ -32,7 +31,7 @@ describe('prompt-injection', () => {
     test('returns array of role names from agents/*.md files', () => {
       const roles = getValidAgentRoles();
       expect(Array.isArray(roles)).toBe(true);
-      expect(roles.length).toBeGreaterThanOrEqual(28);
+      expect(roles.length).toBeGreaterThanOrEqual(21);
       // Should be sorted
       expect(roles).toEqual([...roles].sort());
     });

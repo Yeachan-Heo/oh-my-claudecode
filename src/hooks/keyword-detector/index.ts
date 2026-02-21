@@ -8,6 +8,12 @@
  */
 
 import { isTeamEnabled } from '../../features/auto-update.js';
+import {
+  classifyTaskSize,
+  isHeavyMode,
+  type TaskSizeResult,
+  type TaskSizeThresholds,
+} from '../task-size-detector/index.js';
 
 export type KeywordType =
   | 'cancel'      // Priority 1
@@ -180,6 +186,77 @@ export function getAllKeywords(text: string): KeywordType[] {
 
   // Sort by priority order
   return KEYWORD_PRIORITY.filter(k => types.includes(k));
+}
+
+/**
+ * Options for task-size-aware keyword filtering
+ */
+export interface TaskSizeFilterOptions {
+  /** Enable task-size detection. Default: true */
+  enabled?: boolean;
+  /** Word count threshold for small tasks. Default: 50 */
+  smallWordLimit?: number;
+  /** Word count threshold for large tasks. Default: 200 */
+  largeWordLimit?: number;
+  /** Suppress heavy modes for small tasks. Default: true */
+  suppressHeavyModesForSmallTasks?: boolean;
+}
+
+/**
+ * Result of task-size-aware keyword detection
+ */
+export interface TaskSizeAwareKeywordsResult {
+  keywords: KeywordType[];
+  taskSizeResult: TaskSizeResult | null;
+  suppressedKeywords: KeywordType[];
+}
+
+/**
+ * Get all keywords with task-size-based filtering applied.
+ * For small tasks, heavy orchestration modes (ralph/autopilot/team/ultrawork etc.)
+ * are suppressed to avoid over-orchestration.
+ *
+ * This is the recommended function to use in the bridge hook for keyword detection.
+ */
+export function getAllKeywordsWithSizeCheck(
+  text: string,
+  options: TaskSizeFilterOptions = {},
+): TaskSizeAwareKeywordsResult {
+  const {
+    enabled = true,
+    smallWordLimit = 50,
+    largeWordLimit = 200,
+    suppressHeavyModesForSmallTasks = true,
+  } = options;
+
+  const keywords = getAllKeywords(text);
+
+  if (!enabled || !suppressHeavyModesForSmallTasks || keywords.length === 0) {
+    return { keywords, taskSizeResult: null, suppressedKeywords: [] };
+  }
+
+  const thresholds: TaskSizeThresholds = { smallWordLimit, largeWordLimit };
+  const taskSizeResult = classifyTaskSize(text, thresholds);
+
+  // Only suppress heavy modes for small tasks
+  if (taskSizeResult.size !== 'small') {
+    return { keywords, taskSizeResult, suppressedKeywords: [] };
+  }
+
+  const suppressedKeywords: KeywordType[] = [];
+  const filteredKeywords = keywords.filter(keyword => {
+    if (isHeavyMode(keyword)) {
+      suppressedKeywords.push(keyword);
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    keywords: filteredKeywords,
+    taskSizeResult,
+    suppressedKeywords,
+  };
 }
 
 /**

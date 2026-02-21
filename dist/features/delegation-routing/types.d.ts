@@ -15,6 +15,14 @@ export declare const DEFAULT_DELEGATION_CONFIG: DelegationRoutingConfig;
  */
 export declare const ROLE_CATEGORY_DEFAULTS: Record<string, string>;
 /**
+ * Deprecated role aliases mapped to canonical role names.
+ */
+export declare const DEPRECATED_ROLE_ALIASES: Readonly<Record<string, string>>;
+/**
+ * Normalize legacy role aliases to canonical role names.
+ */
+export declare function normalizeDelegationRole(role: string): string;
+/**
  * Check if delegation routing is enabled
  */
 export declare function isDelegationEnabled(config: DelegationRoutingConfig | undefined): boolean;

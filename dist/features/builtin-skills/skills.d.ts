@@ -20,10 +20,13 @@ export declare function createBuiltinSkills(): BuiltinSkill[];
  * Get a skill by name
  */
 export declare function getBuiltinSkill(name: string): BuiltinSkill | undefined;
+export interface ListBuiltinSkillNamesOptions {
+    includeAliases?: boolean;
+}
 /**
  * List all builtin skill names
  */
-export declare function listBuiltinSkillNames(): string[];
+export declare function listBuiltinSkillNames(options?: ListBuiltinSkillNamesOptions): string[];
 /**
  * Clear the skills cache (useful for testing)
  */

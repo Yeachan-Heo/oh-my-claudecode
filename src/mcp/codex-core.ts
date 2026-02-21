@@ -59,7 +59,7 @@ export const RATE_LIMIT_MAX_DELAY = Math.max(5000, parseInt(process.env.OMC_CODE
 export { CODEX_MODEL_FALLBACKS };
 
 // Codex is best for analytical/planning tasks (recommended, not enforced)
-export const CODEX_RECOMMENDED_ROLES = ['architect', 'planner', 'critic', 'analyst', 'code-reviewer', 'security-reviewer', 'tdd-guide'] as const;
+export const CODEX_RECOMMENDED_ROLES = ['architect', 'planner', 'critic', 'analyst', 'code-reviewer', 'security-reviewer', 'test-engineer'] as const;
 
 // Valid reasoning effort levels for Codex CLI (via -c model_reasoning_effort=<value>)
 // Default (when omitted): inherits from ~/.codex/config.toml (Codex CLI default is "medium")

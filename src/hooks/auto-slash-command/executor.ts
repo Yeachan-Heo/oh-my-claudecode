@@ -186,14 +186,19 @@ export function discoverAllCommands(): CommandInfo[] {
             const agent = getFrontmatterString(data, 'agent');
 
             for (const commandName of commandNames) {
+              const isAlias = commandName !== canonicalName;
               const metadata: CommandMetadata = {
                 name: commandName,
                 description,
                 argumentHint,
                 model,
                 agent,
-                aliases: commandName === canonicalName ? aliases : undefined,
-                aliasOf: commandName === canonicalName ? undefined : canonicalName,
+                aliases: isAlias ? undefined : aliases,
+                aliasOf: isAlias ? canonicalName : undefined,
+                deprecatedAlias: isAlias || undefined,
+                deprecationMessage: isAlias
+                  ? `Alias "/${commandName}" is deprecated. Use "/${canonicalName}" instead.`
+                  : undefined,
               };
 
               skillCommands.push({
@@ -270,6 +275,13 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
   }
 
   sections.push(`**Scope**: ${cmd.scope}\n`);
+
+  if (cmd.metadata.aliasOf) {
+    sections.push(
+      `⚠️ **Deprecated Alias**: \`/${cmd.name}\` is deprecated and will be removed in a future release. Use \`/${cmd.metadata.aliasOf}\` instead.\n`
+    );
+  }
+
   sections.push('---\n');
 
   // Resolve arguments in content, then execute any live-data commands
@@ -323,8 +335,23 @@ export function listAvailableCommands(): Array<{
   description: string;
   scope: CommandScope;
 }> {
+  return listAvailableCommandsWithOptions();
+}
+
+export function listAvailableCommandsWithOptions(options?: {
+  includeAliases?: boolean;
+}): Array<{
+  name: string;
+  description: string;
+  scope: CommandScope;
+}> {
+  const { includeAliases = false } = options ?? {};
   const commands = discoverAllCommands();
-  return commands.map((cmd) => ({
+  const visibleCommands = includeAliases
+    ? commands
+    : commands.filter((cmd) => !cmd.metadata.aliasOf);
+
+  return visibleCommands.map((cmd) => ({
     name: cmd.name,
     description: cmd.metadata.description,
     scope: cmd.scope,

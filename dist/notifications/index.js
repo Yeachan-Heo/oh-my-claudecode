@@ -29,7 +29,7 @@ import { basename } from "path";
  * @returns DispatchResult or null if notifications are not configured/enabled
  */
 export async function notify(event, data) {
-    // OMC_NOTIFY=0 suppresses all CCNotifier events (set by `claud --notify false`)
+    // OMC_NOTIFY=0 suppresses all CCNotifier events (set by `omc --notify false`)
     if (process.env.OMC_NOTIFY === '0') {
         return null;
     }

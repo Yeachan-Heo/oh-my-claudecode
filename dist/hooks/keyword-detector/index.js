@@ -7,6 +7,7 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 import { isTeamEnabled } from '../../features/auto-update.js';
+import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
 /**
  * Keyword patterns for each mode
  */
@@ -130,6 +131,39 @@ export function getAllKeywords(text) {
     }
     // Sort by priority order
     return KEYWORD_PRIORITY.filter(k => types.includes(k));
+}
+/**
+ * Get all keywords with task-size-based filtering applied.
+ * For small tasks, heavy orchestration modes (ralph/autopilot/team/ultrawork etc.)
+ * are suppressed to avoid over-orchestration.
+ *
+ * This is the recommended function to use in the bridge hook for keyword detection.
+ */
+export function getAllKeywordsWithSizeCheck(text, options = {}) {
+    const { enabled = true, smallWordLimit = 50, largeWordLimit = 200, suppressHeavyModesForSmallTasks = true, } = options;
+    const keywords = getAllKeywords(text);
+    if (!enabled || !suppressHeavyModesForSmallTasks || keywords.length === 0) {
+        return { keywords, taskSizeResult: null, suppressedKeywords: [] };
+    }
+    const thresholds = { smallWordLimit, largeWordLimit };
+    const taskSizeResult = classifyTaskSize(text, thresholds);
+    // Only suppress heavy modes for small tasks
+    if (taskSizeResult.size !== 'small') {
+        return { keywords, taskSizeResult, suppressedKeywords: [] };
+    }
+    const suppressedKeywords = [];
+    const filteredKeywords = keywords.filter(keyword => {
+        if (isHeavyMode(keyword)) {
+            suppressedKeywords.push(keyword);
+            return false;
+        }
+        return true;
+    });
+    return {
+        keywords: filteredKeywords,
+        taskSizeResult,
+        suppressedKeywords,
+    };
 }
 /**
  * Get the highest priority keyword detected with conflict resolution

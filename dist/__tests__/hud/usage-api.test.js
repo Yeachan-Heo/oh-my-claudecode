@@ -17,9 +17,6 @@ vi.mock('fs', async (importOriginal) => {
         mkdirSync: vi.fn(),
     };
 });
-vi.mock('child_process', () => ({
-    execSync: vi.fn().mockReturnValue(''),
-}));
 vi.mock('https', () => ({
     default: {
         request: vi.fn(),

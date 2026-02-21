@@ -12,7 +12,11 @@ import type {
   DelegationProvider,
   DelegationTool,
 } from '../../shared/types.js';
-import { isDelegationEnabled, ROLE_CATEGORY_DEFAULTS } from './types.js';
+import {
+  isDelegationEnabled,
+  ROLE_CATEGORY_DEFAULTS,
+  normalizeDelegationRole,
+} from './types.js';
 
 /**
  * Resolve delegation decision based on configuration and context
@@ -25,19 +29,23 @@ import { isDelegationEnabled, ROLE_CATEGORY_DEFAULTS } from './types.js';
  */
 export function resolveDelegation(options: ResolveDelegationOptions): DelegationDecision {
   const { agentRole, explicitTool, explicitModel, config } = options;
+  const canonicalAgentRole = normalizeDelegationRole(agentRole);
 
   // Priority 1: Explicit tool invocation
   if (explicitTool) {
-    return resolveExplicitTool(explicitTool, explicitModel, agentRole);
+    return resolveExplicitTool(explicitTool, explicitModel, canonicalAgentRole);
   }
 
   // Priority 2: Configured routing (if enabled)
-  if (isDelegationEnabled(config) && config?.roles?.[agentRole]) {
-    return resolveFromConfig(agentRole, config.roles[agentRole], config);
+  const configuredRoute = config?.roles?.[agentRole]
+    ?? (canonicalAgentRole !== agentRole ? config?.roles?.[canonicalAgentRole] : undefined);
+
+  if (config && isDelegationEnabled(config) && configuredRoute) {
+    return resolveFromConfig(canonicalAgentRole, configuredRoute);
   }
 
   // Priority 3 & 4: Default heuristic
-  return resolveDefault(agentRole, config);
+  return resolveDefault(canonicalAgentRole, config);
 }
 
 /**
@@ -83,9 +91,8 @@ function resolveExplicitTool(
 function resolveFromConfig(
   agentRole: string,
   route: DelegationRoute,
-  config: DelegationRoutingConfig
 ): DelegationDecision {
-  let provider = route.provider;
+  const provider = route.provider;
   let tool = route.tool;
 
   // Validate provider matches tool

@@ -19,7 +19,7 @@ export async function checkRateLimitStatus() {
             // No OAuth credentials or API unavailable
             return null;
         }
-        const fiveHourLimited = usage.fiveHourPercent >= RATE_LIMIT_THRESHOLD;
+        const fiveHourLimited = (usage.fiveHourPercent ?? 0) >= RATE_LIMIT_THRESHOLD;
         const weeklyLimited = (usage.weeklyPercent ?? 0) >= RATE_LIMIT_THRESHOLD;
         const monthlyLimited = (usage.monthlyPercent ?? 0) >= RATE_LIMIT_THRESHOLD;
         const isLimited = fiveHourLimited || weeklyLimited || monthlyLimited;

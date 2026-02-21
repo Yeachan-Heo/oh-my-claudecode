@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-01-28 | Updated: 2026-01-31 -->
+<!-- Generated: 2026-01-28 | Updated: 2026-02-19 -->
 
 # agents
 
@@ -10,7 +10,7 @@
 This directory defines all agents available in oh-my-claudecode:
 
 - **12 base agents** with default model assignments
-- **4 specialized agents** (security-reviewer, build-fixer, tdd-guide, code-reviewer)
+- **4 specialized agents** (security-reviewer, build-fixer, test-engineer, code-reviewer)
 - **12 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
 - Prompts loaded dynamically from `/agents/*.md` files
 - Tools assigned based on agent specialization
@@ -84,8 +84,8 @@ const agents = getAgentDefinitions();
 | Security audit | `security-reviewer` | opus | Read, Grep, Glob, Bash |
 | Quick security scan | `security-reviewer-low` | haiku | Read, Grep, Glob, Bash |
 | Build errors | `build-fixer` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
-| TDD workflow | `tdd-guide` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
-| Test suggestions | `tdd-guide-low` | haiku | Read, Grep, Glob, Bash |
+| TDD workflow | `test-engineer` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
+| Test suggestions | `test-engineer` (model=haiku) | haiku | Read, Grep, Glob, Bash |
 | Code review | `code-reviewer` | opus | Read, Grep, Glob, Bash |
 
 #### Creating a New Agent
@@ -240,7 +240,7 @@ None - pure TypeScript definitions.
 | Testing | qa-tester | Interactive testing |
 | Security | security-reviewer, security-reviewer-low | Security audits |
 | Build | build-fixer | Compilation errors |
-| TDD | tdd-guide, tdd-guide-low | Test-driven development |
+| TDD | test-engineer | Test-driven development |
 | Review | code-reviewer | Code quality |
 | Data | scientist, scientist-high | Data analysis |
 

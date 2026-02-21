@@ -226,7 +226,8 @@ describe('resolveDelegation', () => {
     it.each([
         ['explore', 'explore'],
         ['document-specialist', 'document-specialist'],
-        ['researcher', 'researcher'],
+        ['researcher', 'document-specialist'],
+        ['tdd-guide', 'test-engineer'],
         ['architect', 'architect'],
         ['planner', 'planner'],
         ['critic', 'critic'],
@@ -238,7 +239,7 @@ describe('resolveDelegation', () => {
         ['quality-reviewer', 'quality-reviewer'],
         ['designer', 'designer'],
         ['writer', 'writer'],
-        ['vision', 'vision'],
+        ['vision', 'document-specialist'],
         ['qa-tester', 'qa-tester'],
         ['debugger', 'debugger'],
         ['scientist', 'scientist'],

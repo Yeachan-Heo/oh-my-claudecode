@@ -10,3 +10,4 @@ node_modules/
 nul
 NUL
 .omx/
+.env

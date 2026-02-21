@@ -96,9 +96,9 @@ Each pipeline stage uses **specialized agents** -- not just executors. The lead 
 | Stage | Required Agents | Optional Agents | Selection Criteria |
 |-------|----------------|-----------------|-------------------|
 | **team-plan** | `explore` (haiku), `planner` (opus) | `analyst` (opus), `architect` (opus) | Use `analyst` for unclear requirements. Use `architect` for systems with complex boundaries. |
-| **team-prd** | `analyst` (opus) | `product-manager` (sonnet), `critic` (opus) | Use `product-manager` for user-facing features. Use `critic` to challenge scope. |
+| **team-prd** | `analyst` (opus) | `critic` (opus) | Use `critic` to challenge scope. |
 | **team-exec** | `executor` (sonnet) | `deep-executor` (opus), `build-fixer` (sonnet), `designer` (sonnet), `writer` (haiku), `test-engineer` (sonnet) | Match agent to subtask type. Use `deep-executor` for complex autonomous work, `designer` for UI, `build-fixer` for compilation issues, `writer` for docs, `test-engineer` for test creation. |
-| **team-verify** | `verifier` (sonnet) | `test-engineer` (sonnet), `security-reviewer` (sonnet), `code-reviewer` (opus), `quality-reviewer` (sonnet), `performance-reviewer` (sonnet) | Always run `verifier`. Add `security-reviewer` for auth/crypto changes. Add `code-reviewer` for >20 files or architectural changes. Add `performance-reviewer` for latency-sensitive code. |
+| **team-verify** | `verifier` (sonnet) | `test-engineer` (sonnet), `security-reviewer` (sonnet), `code-reviewer` (opus), `quality-reviewer` (sonnet) | Always run `verifier`. Add `security-reviewer` for auth/crypto changes. Add `code-reviewer` for >20 files or architectural changes. Add `quality-reviewer` (model=haiku) for style/formatting checks. |
 | **team-fix** | `executor` (sonnet) | `build-fixer` (sonnet), `debugger` (sonnet), `deep-executor` (opus) | Use `build-fixer` for type/build errors. Use `debugger` for regression isolation. Use `deep-executor` for complex multi-file fixes. |
 
 **Routing rules:**
@@ -116,7 +116,7 @@ Each pipeline stage uses **specialized agents** -- not just executors. The lead 
   - Exit: decomposition is complete and a runnable task graph is prepared.
 - **team-prd**
   - Entry: scope is ambiguous or acceptance criteria are missing.
-  - Agents: `analyst` extracts requirements, optionally `product-manager`/`critic`.
+  - Agents: `analyst` extracts requirements, optionally `critic`.
   - Exit: acceptance criteria and boundaries are explicit.
 - **team-exec**
   - Entry: `TeamCreate`, `TaskCreate`, assignment, and worker spawn are complete.

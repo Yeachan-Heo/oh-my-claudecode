@@ -12,7 +12,7 @@ import { renderSkills, renderLastSkill } from './elements/skills.js';
 import { renderContext, renderContextWithBar } from './elements/context.js';
 import { renderBackground } from './elements/background.js';
 import { renderPrd } from './elements/prd.js';
-import { renderRateLimits, renderRateLimitsWithBar } from './elements/limits.js';
+import { renderRateLimits, renderRateLimitsWithBar, renderCustomBuckets } from './elements/limits.js';
 import { renderPermission } from './elements/permission.js';
 import { renderThinking } from './elements/thinking.js';
 import { renderSession } from './elements/session.js';
@@ -168,6 +168,13 @@ export async function render(context, config) {
             : renderRateLimits(context.rateLimits);
         if (limits)
             elements.push(limits);
+    }
+    // Custom rate limit buckets
+    if (context.customBuckets) {
+        const thresholdPercent = config.rateLimitsProvider?.resetsAtDisplayThresholdPercent;
+        const custom = renderCustomBuckets(context.customBuckets, thresholdPercent);
+        if (custom)
+            elements.push(custom);
     }
     // Permission status indicator (heuristic-based)
     if (enabledElements.permissionStatus && context.pendingPermission) {

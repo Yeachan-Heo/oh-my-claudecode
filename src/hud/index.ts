@@ -22,6 +22,7 @@ import {
   readAutopilotStateForHud,
 } from "./omc-state.js";
 import { getUsage } from "./usage-api.js";
+import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { sanitizeOutput } from "./sanitize.js";
 import type {
@@ -379,6 +380,12 @@ async function main(): Promise<void> {
     const rateLimits =
       config.elements.rateLimits !== false ? await getUsage() : null;
 
+    // Fetch custom rate limit buckets (if configured)
+    const customBuckets =
+      config.rateLimitsProvider?.type === 'custom'
+        ? await executeCustomProvider(config.rateLimitsProvider)
+        : null;
+
     // Read OMC version and update check cache
     let omcVersion: string | null = null;
     let updateAvailable: string | null = null;
@@ -414,6 +421,7 @@ async function main(): Promise<void> {
       cwd,
       lastSkill: transcriptData.lastActivatedSkill || null,
       rateLimits,
+      customBuckets,
       pendingPermission: transcriptData.pendingPermission || null,
       thinkingState: transcriptData.thinkingState || null,
       sessionHealth: await calculateSessionHealth(

@@ -63,7 +63,7 @@ PSM body`
   });
 
   it('discovers alias commands from skill frontmatter', async () => {
-    const { discoverAllCommands, findCommand } = await loadExecutor();
+    const { discoverAllCommands, findCommand, listAvailableCommands } = await loadExecutor();
 
     const commands = discoverAllCommands();
     const names = commands.map((command) => command.name);
@@ -78,8 +78,18 @@ PSM body`
 
     expect(swarm?.scope).toBe('skill');
     expect(swarm?.metadata.aliasOf).toBe('team');
+    expect(swarm?.metadata.deprecatedAlias).toBe(true);
+    expect(swarm?.metadata.deprecationMessage).toContain('/team');
     expect(psm?.scope).toBe('skill');
     expect(psm?.metadata.aliasOf).toBe('project-session-manager');
+    expect(psm?.metadata.deprecatedAlias).toBe(true);
+    expect(psm?.metadata.deprecationMessage).toContain('/project-session-manager');
+
+    const listedNames = listAvailableCommands().map((command) => command.name);
+    expect(listedNames).toContain('team');
+    expect(listedNames).toContain('project-session-manager');
+    expect(listedNames).not.toContain('swarm');
+    expect(listedNames).not.toContain('psm');
   });
 
   it('keeps source-priority semantics with deduped names', async () => {
@@ -99,5 +109,20 @@ Project swarm body`
     expect(swarmCommands).toHaveLength(1);
     expect(swarmCommands[0].scope).toBe('project');
     expect(findCommand('swarm')?.scope).toBe('project');
+  });
+
+  it('injects deprecation warning when alias command is executed', async () => {
+    const { executeSlashCommand } = await loadExecutor();
+
+    const result = executeSlashCommand({
+      command: 'swarm',
+      args: 'fix lint',
+      raw: '/swarm fix lint',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.replacementText).toContain('Deprecated Alias');
+    expect(result.replacementText).toContain('/swarm');
+    expect(result.replacementText).toContain('/team');
   });
 });

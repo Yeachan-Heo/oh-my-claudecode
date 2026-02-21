@@ -96,7 +96,14 @@ export const DEFAULT_CONFIG = {
         enabled: false, // Opt-in feature
         defaultProvider: 'claude',
         roles: {},
-    }
+    },
+    // Task size detection (issue #790): prevent over-orchestration for small tasks
+    taskSizeDetection: {
+        enabled: true,
+        smallWordLimit: 50,
+        largeWordLimit: 200,
+        suppressHeavyModesForSmallTasks: true,
+    },
 };
 /**
  * Configuration file locations

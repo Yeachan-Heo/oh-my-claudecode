@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywords } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import { addBackgroundTask, getRunningTaskCount, } from "../hud/background-tasks.js";
@@ -161,14 +161,36 @@ async function processKeywordDetector(input) {
     }
     // Remove code blocks to prevent false positives
     const cleanedText = removeCodeBlocks(promptText);
-    // Get all keywords (supports multiple keywords in one prompt)
-    const keywords = getAllKeywords(cleanedText);
-    if (keywords.length === 0) {
-        return { continue: true };
-    }
     const sessionId = input.sessionId;
     const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
+    // Load config for task-size detection settings
+    const config = loadConfig();
+    const taskSizeConfig = config.taskSizeDetection ?? {};
+    // Get all keywords with optional task-size filtering (issue #790)
+    const sizeCheckResult = getAllKeywordsWithSizeCheck(cleanedText, {
+        enabled: taskSizeConfig.enabled !== false,
+        smallWordLimit: taskSizeConfig.smallWordLimit ?? 50,
+        largeWordLimit: taskSizeConfig.largeWordLimit ?? 200,
+        suppressHeavyModesForSmallTasks: taskSizeConfig.suppressHeavyModesForSmallTasks !== false,
+    });
+    const keywords = sizeCheckResult.keywords;
+    // Notify user when heavy modes were suppressed for a small task
+    if (sizeCheckResult.suppressedKeywords.length > 0 && sizeCheckResult.taskSizeResult) {
+        const suppressed = sizeCheckResult.suppressedKeywords.join(', ');
+        const reason = sizeCheckResult.taskSizeResult.reason;
+        messages.push(`[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ${suppressed}.\n` +
+            `Reason: ${reason}\n` +
+            `Running directly without heavy agent stacking. ` +
+            `Prefix with \`quick:\`, \`simple:\`, or \`tiny:\` to always use lightweight mode. ` +
+            `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`);
+    }
+    if (keywords.length === 0) {
+        if (messages.length > 0) {
+            return { continue: true, message: messages.join('\n\n---\n\n') };
+        }
+        return { continue: true };
+    }
     // Process each keyword and collect messages
     for (const keywordType of keywords) {
         switch (keywordType) {

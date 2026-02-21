@@ -991,6 +991,18 @@ gh auth status &>/dev/null
 
 ### If gh is available and authenticated:
 
+**Before prompting, check if the repository is already starred:**
+
+```bash
+gh api user/starred/Yeachan-Heo/oh-my-claudecode &>/dev/null
+```
+
+**If already starred (exit code 0):**
+- Skip the prompt entirely
+- Continue to next step silently
+
+**If NOT starred (exit code non-zero):**
+
 Use the AskUserQuestion tool to prompt the user:
 
 **Question:** "If you're enjoying oh-my-claudecode, would you like to support the project by starring it on GitHub?"

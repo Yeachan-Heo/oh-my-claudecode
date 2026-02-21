@@ -57,6 +57,8 @@ export interface CommandMetadata {
     agent?: string;
     aliases?: string[];
     aliasOf?: string;
+    deprecatedAlias?: boolean;
+    deprecationMessage?: string;
 }
 /**
  * Discovered command information

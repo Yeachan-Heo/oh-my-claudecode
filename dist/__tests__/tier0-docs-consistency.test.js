@@ -37,11 +37,11 @@ describe('Tier-0 contract docs consistency', () => {
     it('keeps ralplan documented as the /plan --consensus alias', () => {
         expect(claudeDoc).toContain('`ralplan` ("ralplan", "consensus plan"): alias for `/plan --consensus`');
     });
-    it('keeps compatibility aliases documented for team and project session manager', () => {
-        expect(referenceDoc).toContain('`swarm` | Compatibility facade over team orchestration');
+    it('keeps deprecated compatibility aliases documented for team and project session manager', () => {
+        expect(referenceDoc).toContain('`swarm` | **Deprecated** compatibility facade over team orchestration');
         expect(referenceDoc).toContain('/oh-my-claudecode:swarm');
         expect(referenceDoc).toContain('project-session-manager');
-        expect(referenceDoc).toContain('alias: `psm`');
+        expect(referenceDoc).toContain('`psm` | **Deprecated** compatibility alias for `project-session-manager`');
     });
 });
 //# sourceMappingURL=tier0-docs-consistency.test.js.map

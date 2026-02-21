@@ -1,9 +1,10 @@
 /**
  * OMC HUD - Rate Limits Element
  *
- * Renders 5-hour and weekly rate limit usage display.
+ * Renders 5-hour and weekly rate limit usage display (built-in providers),
+ * and custom rate limit buckets from the rateLimitsProvider command.
  */
-import type { RateLimits } from '../types.js';
+import type { RateLimits, CustomProviderResult } from '../types.js';
 /**
  * Render rate limits display.
  *
@@ -22,4 +23,14 @@ export declare function renderRateLimitsCompact(limits: RateLimits | null): stri
  * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
  */
 export declare function renderRateLimitsWithBar(limits: RateLimits | null, barWidth?: number): string | null;
+/**
+ * Render custom rate limit buckets from the rateLimitsProvider command.
+ *
+ * Format (normal):  label:32%  label2:250/300  label3:as-is
+ * Format (stale):   label:32%*  (asterisk marks stale/cached data)
+ * Format (error):   [cmd:err]
+ *
+ * resetsAt is shown only when usage exceeds thresholdPercent (default 85).
+ */
+export declare function renderCustomBuckets(result: CustomProviderResult, thresholdPercent?: number): string | null;
 //# sourceMappingURL=limits.d.ts.map

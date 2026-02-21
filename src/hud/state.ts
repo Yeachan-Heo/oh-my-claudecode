@@ -201,6 +201,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
       ...DEFAULT_HUD_CONFIG.contextLimitWarning,
       ...config.contextLimitWarning,
     },
+    ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
   };
 }
 

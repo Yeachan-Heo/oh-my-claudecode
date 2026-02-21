@@ -12,7 +12,7 @@ vi.mock('../features/auto-update.js', () => ({
 
 import { getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
 
-const TIER0_SKILLS = ['ralplan', 'team', 'ralph', 'ultrawork', 'autopilot'] as const;
+const TIER0_SKILLS = ['team', 'ralph', 'ultrawork', 'autopilot'] as const;
 
 describe('Tier-0 contract: skill aliases and canonical entrypoints', () => {
   beforeEach(() => {
@@ -47,7 +47,6 @@ describe('Tier-0 contract: keyword routing fidelity', () => {
       { prompt: 'autopilot build a dashboard', expected: 'autopilot' },
       { prompt: 'ultrawork fix these lint errors', expected: 'ultrawork' },
       { prompt: 'ralph finish this refactor', expected: 'ralph' },
-      { prompt: 'ralplan this migration', expected: 'ralplan' },
       { prompt: 'team 3:executor ship this feature', expected: 'team' },
     ];
 
