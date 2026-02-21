@@ -174,8 +174,11 @@ describe('GitHub Star Module', () => {
   });
 
   describe('Integration Test (Real API)', () => {
+    // Skip these tests in CI where GitHub auth is not available
+    const isCI = !!process.env.CI;
+
     // This test makes real gh API calls
-    it('should work with real gh CLI', () => {
+    it.skipIf(isCI)('should work with real gh CLI', () => {
       // Skip if gh CLI is not available
       if (!isGhCliAvailable()) {
         console.log('⚠️  Skipping real API test - gh CLI not available');
@@ -183,24 +186,17 @@ describe('GitHub Star Module', () => {
       }
 
       const result = autoStarRepository({ repo: TEST_REPO });
+      expect(result.starred).toBe(true);
+      expect(['already_starred', 'newly_starred']).toContain(result.action);
 
-      // In CI environments, the token might be read-only or lack star permissions
-      // Accept both success and permission-related failures
-      if (result.starred) {
-        expect(['already_starred', 'newly_starred']).toContain(result.action);
-        if (result.action === 'newly_starred') {
-          console.log('✅ Successfully starred the repository!');
-        } else if (result.action === 'already_starred') {
-          console.log('✅ Repository was already starred');
-        }
-      } else {
-        // In CI, token might not have write permissions
-        expect(['failed', 'skipped']).toContain(result.action);
-        console.log('⚠️  Star operation not available (likely read-only token in CI)');
+      if (result.action === 'newly_starred') {
+        console.log('✅ Successfully starred the repository!');
+      } else if (result.action === 'already_starred') {
+        console.log('✅ Repository was already starred');
       }
     });
 
-    it('should verify star status after starring', () => {
+    it.skipIf(isCI)('should verify star status after starring', () => {
       if (!isGhCliAvailable()) {
         console.log('⚠️  Skipping real API test - gh CLI not available');
         return;
@@ -210,21 +206,15 @@ describe('GitHub Star Module', () => {
       const isStarred = isRepoStarred(TEST_REPO);
       console.log(`Repository star status: ${isStarred ? 'starred' : 'not starred'}`);
 
-      // If not starred, try to star it
+      // If not starred, star it
       if (!isStarred) {
         const starResult = starRepository(TEST_REPO);
+        expect(starResult).toBe(true);
 
-        // In CI, token might not have write permissions
-        if (starResult) {
-          // Verify it's now starred
-          const verifyStarred = isRepoStarred(TEST_REPO);
-          expect(verifyStarred).toBe(true);
-          console.log('✅ Star verified after starring');
-        } else {
-          // Star operation failed (likely read-only token in CI)
-          console.log('⚠️  Star operation failed (likely read-only token in CI)');
-          expect(starResult).toBe(false);
-        }
+        // Verify it's now starred
+        const verifyStarred = isRepoStarred(TEST_REPO);
+        expect(verifyStarred).toBe(true);
+        console.log('✅ Star verified after starring');
       } else {
         console.log('✅ Repository already starred');
       }
