@@ -145,8 +145,10 @@ Read `~/.claude/settings.json`, then update/add the `statusLine` field.
 
 First, determine the correct path:
 ```bash
-node -e "const p=require('path').join(require('os').homedir(),'.claude','hud','omc-hud.mjs');console.log(JSON.stringify(p))"
+node -e "const p=require('path').join(require('os').homedir(),'.claude','hud','omc-hud.mjs').split(require('path').sep).join('/');console.log(JSON.stringify(p))"
 ```
+
+**IMPORTANT:** The command path MUST use forward slashes on all platforms. Claude Code executes statusLine commands via bash, which interprets backslashes as escape characters and breaks the path.
 
 Then set the `statusLine` field using the resolved path. On Unix it will look like:
 ```json
@@ -158,12 +160,12 @@ Then set the `statusLine` field using the resolved path. On Unix it will look li
 }
 ```
 
-On Windows it will look like:
+On Windows the path uses forward slashes (not backslashes):
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "node C:\\Users\\username\\.claude\\hud\\omc-hud.mjs"
+    "command": "node C:/Users/username/.claude/hud/omc-hud.mjs"
   }
 }
 ```
