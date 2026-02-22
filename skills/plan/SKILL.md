@@ -31,7 +31,7 @@ Jumping into code without understanding requirements leads to rework, scope cree
 - Ask one question at a time during interviews -- never batch multiple questions
 - Gather codebase facts via `explore` agent before asking the user about them
 - Plans must meet quality standards: 80%+ claims cite file/line, 90%+ criteria are testable
-- Consensus mode requires explicit user approval before proceeding to implementation
+- Consensus mode runs fully automated by default; add `--interactive` to enable user prompts at draft review and final approval steps
 </Execution_Policy>
 
 <Steps>
@@ -42,7 +42,7 @@ Jumping into code without understanding requirements leads to rework, scope cree
 |------|---------|----------|
 | Interview | Default for broad requests | Interactive requirements gathering |
 | Direct | `--direct`, or detailed request | Skip interview, generate plan directly |
-| Consensus | `--consensus`, "ralplan" | Planner -> Architect -> Critic loop until agreement |
+| Consensus | `--consensus`, "ralplan" | Planner -> Architect -> Critic loop until agreement; add `--interactive` for user prompts at draft and approval steps |
 | Review | `--review`, "review this plan" | Critic evaluation of existing plan |
 
 ### Interview Mode (broad/vague requests)
@@ -63,10 +63,11 @@ Jumping into code without understanding requirements leads to rework, scope cree
 ### Consensus Mode (`--consensus` / "ralplan")
 
 1. **Planner** creates initial plan
-2. **User feedback**: **MUST** use `AskUserQuestion` to present the draft plan with these options:
+2. **User feedback** *(--interactive only)*: If running with `--interactive`, **MUST** use `AskUserQuestion` to present the draft plan with these options:
    - **Proceed to review** — send to Architect and Critic for evaluation
    - **Request changes** — return to step 1 with user feedback incorporated
    - **Skip review** — go directly to final approval (step 7)
+   If NOT running with `--interactive`, automatically proceed to review (step 3).
 3. **Architect** reviews for architectural soundness (prefer `ask_codex` with `architect` role). **Wait for this step to complete before proceeding to step 4.** Do NOT run steps 3 and 4 in parallel — parallel `ask_codex` calls can trigger a sibling cascade failure if one receives a 429 rate-limit error. If `ask_codex` fails with a rate-limit or 429 error, wait 5–10 seconds and retry once; if it fails again, fall back to spawning a `Task` with `subagent_type="oh-my-claudecode:architect"`.
 4. **Critic** evaluates against quality criteria (prefer `ask_codex` with `critic` role). Run only after step 3 is complete. Apply the same retry/fallback rule: on rate-limit error, retry once after a short delay; on second failure, fall back to `Task` with `subagent_type="oh-my-claudecode:critic"`.
 5. **Re-review loop** (max 5 iterations): If Critic rejects, execute this closed loop:
@@ -81,14 +82,17 @@ Jumping into code without understanding requirements leads to rework, scope cree
    b. Deduplicate and categorize the suggestions
    c. Update the plan file in `.omc/plans/` with the accepted improvements (add missing details, refine steps, strengthen acceptance criteria, etc.)
    d. Note which improvements were applied in a brief changelog section at the end of the plan
-7. On Critic approval (with improvements applied): **MUST** use `AskUserQuestion` to present the plan with these options:
+7. On Critic approval (with improvements applied): *(--interactive only)* If running with `--interactive`, use `AskUserQuestion` to present the plan with these options:
    - **Approve and execute** — proceed to implementation via ralph+ultrawork
+   - **Approve and implement via team** — proceed to implementation via coordinated parallel team agents
    - **Clear context and implement** — compact the context window first (recommended when context is large after planning), then start fresh implementation via ralph with the saved plan file
    - **Request changes** — return to step 1 with user feedback
    - **Reject** — discard the plan entirely
-8. User chooses via the structured `AskUserQuestion` UI (never ask for approval in plain text)
-9. On user approval:
+   If NOT running with `--interactive`, output the final approved plan and stop. Do NOT auto-execute.
+8. *(--interactive only)* User chooses via the structured `AskUserQuestion` UI (never ask for approval in plain text)
+9. On user approval (--interactive only):
    - **Approve and execute**: **MUST** invoke `Skill("oh-my-claudecode:ralph")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. Do NOT edit source code files in the planning agent. The ralph skill handles execution via ultrawork parallel agents.
+   - **Approve and implement via team**: **MUST** invoke `Skill("oh-my-claudecode:team")` with the approved plan path from `.omc/plans/` as context. Do NOT implement directly. The team skill coordinates parallel agents across the staged pipeline for faster execution on large tasks.
    - **Clear context and implement**: First invoke `Skill("compact")` to compress the context window (reduces token usage accumulated during planning), then invoke `Skill("oh-my-claudecode:ralph")` with the approved plan path from `.omc/plans/`. This path is recommended when the context window is 50%+ full after the planning session.
 
 ### Review Mode (`--review`)
@@ -120,9 +124,9 @@ Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
 - If ToolSearch finds no MCP tools or Codex is unavailable, fall back to equivalent Claude agents -- never block on external tools
 - **CRITICAL — Consensus mode `ask_codex` calls MUST be sequential, never parallel.** Claude Code cancels sibling tool calls when one fails ("Sibling tool call errored"), so running Architect and Critic `ask_codex` calls in the same tool-call batch will cause a cascade failure if either hits a 429 rate-limit. Always await the Architect call result before issuing the Critic call.
 - On `ask_codex` rate-limit (429) error: wait 5–10 s and retry once. If the second attempt also fails, fall back to the equivalent Claude agent (`Task` with `subagent_type="oh-my-claudecode:architect"` or `"oh-my-claudecode:critic"`).
-- In consensus mode, **MUST** use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 7) -- never ask for approval in plain text
-- In consensus mode, on user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution (step 9) -- never implement directly in the planning agent
-- When user selects "Clear context and implement" in step 7: invoke `Skill("compact")` first to compress the accumulated planning context, then immediately invoke `Skill("oh-my-claudecode:ralph")` with the plan path -- the compact step is critical to free up context before the implementation loop begins
+- In consensus mode with `--interactive`: use `AskUserQuestion` for the user feedback step (step 2) and the final approval step (step 7) -- never ask for approval in plain text. Without `--interactive`, skip both prompts and output the final plan.
+- In consensus mode with `--interactive`, on user approval **MUST** invoke `Skill("oh-my-claudecode:ralph")` for execution (step 9) -- never implement directly in the planning agent
+- When user selects "Clear context and implement" in step 7 (--interactive only): invoke `Skill("compact")` first to compress the accumulated planning context, then immediately invoke `Skill("oh-my-claudecode:ralph")` with the plan path -- the compact step is critical to free up context before the implementation loop begins
 </Tool_Usage>
 
 <Examples>
@@ -178,7 +182,7 @@ Why bad: Decision fatigue. Present one option with trade-offs, get reaction, the
 <Escalation_And_Stop_Conditions>
 - Stop interviewing when requirements are clear enough to plan -- do not over-interview
 - In consensus mode, stop after 5 Planner/Architect/Critic iterations and present the best version
-- Consensus mode requires explicit user approval before any implementation begins
+- Consensus mode without `--interactive` outputs the final plan and stops; with `--interactive`, requires explicit user approval before any implementation begins
 - If the user says "just do it" or "skip planning", **MUST** invoke `Skill("oh-my-claudecode:ralph")` to transition to execution mode. Do NOT implement directly in the planning agent.
 - Escalate to the user when there are irreconcilable trade-offs that require a business decision
 </Escalation_And_Stop_Conditions>
@@ -189,7 +193,7 @@ Why bad: Decision fatigue. Present one option with trade-offs, get reaction, the
 - [ ] All risks have mitigations identified
 - [ ] No vague terms without metrics ("fast" -> "p99 < 200ms")
 - [ ] Plan saved to `.omc/plans/`
-- [ ] In consensus mode: user explicitly approved before any execution
+- [ ] In consensus mode with `--interactive`: user explicitly approved before any execution; without `--interactive`: plan output only, no auto-execution
 </Final_Checklist>
 
 <Advanced>
