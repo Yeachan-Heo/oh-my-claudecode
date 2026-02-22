@@ -7,7 +7,7 @@
  * Polls task files, builds prompts, spawns CLI processes, reports results.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import { existsSync, readFileSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
@@ -56,8 +56,7 @@ function sleep(ms: number): Promise<void> {
  * Uses `git status --porcelain` + `git ls-files --others --exclude-standard`.
  * Returns a Set of relative file paths that currently exist or are modified.
  */
-function captureFileSnapshot(cwd: string): Set<string> {
-  const { execSync } = require('child_process') as typeof import('child_process');
+export function captureFileSnapshot(cwd: string): Set<string> {
   const files = new Set<string>();
   try {
     // Get all tracked files that are modified, added, or staged
