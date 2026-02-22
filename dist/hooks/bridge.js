@@ -391,6 +391,7 @@ async function processSessionStart(input) {
     const { readAutopilotState } = await import("./autopilot/index.js");
     const { readUltraworkState } = await import("./ultrawork/index.js");
     const { checkIncompleteTodos } = await import("./todo-continuation/index.js");
+    const { buildAgentsOverlay } = await import("./agents-overlay.js");
     // Trigger silent auto-update check (non-blocking, checks config internally)
     initSilentAutoUpdate();
     // Send session-start notification (non-blocking, swallows errors)
@@ -419,6 +420,16 @@ async function processSessionStart(input) {
         }).catch(() => { });
     }
     const messages = [];
+    // Inject startup codebase map (issue #804) — first context item so agents orient quickly
+    try {
+        const overlayResult = buildAgentsOverlay(directory);
+        if (overlayResult.message) {
+            messages.push(overlayResult.message);
+        }
+    }
+    catch {
+        // Non-blocking: codebase map failure must never break session start
+    }
     // Check for active autopilot state - only restore if it belongs to this session
     const autopilotState = readAutopilotState(directory);
     if (autopilotState?.active && autopilotState.session_id === sessionId) {

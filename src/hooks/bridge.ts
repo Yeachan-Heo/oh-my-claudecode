@@ -583,6 +583,7 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
   const { readAutopilotState } = await import("./autopilot/index.js");
   const { readUltraworkState } = await import("./ultrawork/index.js");
   const { checkIncompleteTodos } = await import("./todo-continuation/index.js");
+  const { buildAgentsOverlay } = await import("./agents-overlay.js");
 
   // Trigger silent auto-update check (non-blocking, checks config internally)
   initSilentAutoUpdate();
@@ -620,6 +621,16 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
   }
 
   const messages: string[] = [];
+
+  // Inject startup codebase map (issue #804) — first context item so agents orient quickly
+  try {
+    const overlayResult = buildAgentsOverlay(directory);
+    if (overlayResult.message) {
+      messages.push(overlayResult.message);
+    }
+  } catch {
+    // Non-blocking: codebase map failure must never break session start
+  }
 
   // Check for active autopilot state - only restore if it belongs to this session
   const autopilotState = readAutopilotState(directory);

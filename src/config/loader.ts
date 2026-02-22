@@ -101,6 +101,12 @@ export const DEFAULT_CONFIG: PluginConfig = {
     defaultProvider: 'claude',
     roles: {},
   },
+  // Startup codebase map injection (issue #804)
+  startupCodebaseMap: {
+    enabled: true,
+    maxFiles: 200,
+    maxDepth: 4,
+  },
   // Task size detection (issue #790): prevent over-orchestration for small tasks
   taskSizeDetection: {
     enabled: true,

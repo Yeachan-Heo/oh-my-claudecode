@@ -829,6 +829,23 @@ export {
 } from './subagent-tracker/flow-tracer.js';
 
 export {
+  // Codebase Map Generator (issue #804)
+  generateCodebaseMap,
+  buildTree,
+  renderTree,
+  shouldSkipEntry,
+  extractPackageMetadata,
+  type CodebaseMapOptions,
+  type CodebaseMapResult,
+} from './codebase-map.js';
+
+export {
+  // Agents Overlay - startup context injection (issue #804)
+  buildAgentsOverlay,
+  type AgentsOverlayResult,
+} from './agents-overlay.js';
+
+export {
   // Code Simplifier Stop Hook
   processCodeSimplifier,
   isCodeSimplifierEnabled,

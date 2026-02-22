@@ -138,6 +138,12 @@ export {
 // Flow Tracer (Agent Flow Trace Recording)
 recordHookFire, recordHookResult, recordKeywordDetected, recordSkillActivated, recordSkillInvoked, recordModeChange, } from './subagent-tracker/flow-tracer.js';
 export { 
+// Codebase Map Generator (issue #804)
+generateCodebaseMap, buildTree, renderTree, shouldSkipEntry, extractPackageMetadata, } from './codebase-map.js';
+export { 
+// Agents Overlay - startup context injection (issue #804)
+buildAgentsOverlay, } from './agents-overlay.js';
+export { 
 // Code Simplifier Stop Hook
 processCodeSimplifier, isCodeSimplifierEnabled, getModifiedFiles, readOmcConfig, isAlreadyTriggered, writeTriggerMarker, clearTriggerMarker, buildSimplifierMessage, TRIGGER_MARKER_FILENAME, } from './code-simplifier/index.js';
 //# sourceMappingURL=index.js.map

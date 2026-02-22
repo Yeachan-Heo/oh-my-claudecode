@@ -119,6 +119,14 @@ export interface PluginConfig {
     };
     externalModels?: ExternalModelsConfig;
     delegationRouting?: DelegationRoutingConfig;
+    startupCodebaseMap?: {
+        /** Enable codebase map injection on session start. Default: true */
+        enabled?: boolean;
+        /** Maximum files to include in the map. Default: 200 */
+        maxFiles?: number;
+        /** Maximum directory depth to scan. Default: 4 */
+        maxDepth?: number;
+    };
     taskSizeDetection?: {
         /** Enable task-size detection to prevent over-orchestration for small tasks. Default: true */
         enabled?: boolean;
