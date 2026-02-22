@@ -775,7 +775,7 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
         // Guard: if inProgress > 0, other workers are still running — don't shutdown yet.
         try {
           const teamStatus = getTeamStatus(teamName, workingDirectory);
-          if (teamStatus.taskSummary.pending === 0 && teamStatus.taskSummary.inProgress === 0) {
+          if (teamStatus.taskSummary.total > 0 && teamStatus.taskSummary.pending === 0 && teamStatus.taskSummary.inProgress === 0) {
             log(`[bridge] All team tasks complete. Auto-terminating worker.`);
             appendOutbox(teamName, workerName, {
               type: 'all_tasks_complete',

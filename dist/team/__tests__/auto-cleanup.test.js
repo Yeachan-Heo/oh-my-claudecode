@@ -73,7 +73,7 @@ function makeTask(id, owner, status, permanentlyFailed) {
 // ============================================================
 function shouldAutoCleanup(teamName, workDir) {
     const status = getTeamStatus(teamName, workDir);
-    return status.taskSummary.pending === 0 && status.taskSummary.inProgress === 0;
+    return status.taskSummary.total > 0 && status.taskSummary.pending === 0 && status.taskSummary.inProgress === 0;
 }
 // ============================================================
 // Tests
@@ -148,9 +148,15 @@ describe('auto-cleanup when all tasks complete', () => {
         expect(status.taskSummary.inProgress).toBe(1);
         expect(status.taskSummary.total).toBe(3);
     });
-    it('should trigger when task list is empty (no tasks at all)', () => {
-        // Edge case: team with no tasks — pending=0 and inProgress=0, so cleanup fires
+    it('should NOT trigger when task list is empty (startup race condition)', () => {
+        // worker starts before tasks are assigned, total===0, must not self-terminate
         writeWorkerRegistry([makeWorker('w1')]);
+        expect(shouldAutoCleanup(TEST_TEAM, WORK_DIR)).toBe(false);
+    });
+    it('should trigger when total > 0 and all tasks are completed', () => {
+        // Confirm the guard does not block legitimate cleanup when tasks exist and are all done
+        writeWorkerRegistry([makeWorker('w1')]);
+        writeTask(makeTask('1', 'w1', 'completed'));
         expect(shouldAutoCleanup(TEST_TEAM, WORK_DIR)).toBe(true);
     });
 });
