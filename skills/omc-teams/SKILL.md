@@ -103,11 +103,13 @@ mcp__team__omc_run_team_wait({
 })
 ```
 
-> **Timeout guidance:** Use `60000` (60 s) as the default. If the job times out, do NOT
-> retry with a longer timeout — instead check whether workers are still alive with
-> `mcp__team__omc_run_team_status`, then call `omc_run_team_cleanup` to kill stale panes,
-> and report the partial results to the user. Teams can silently stall due to stuck workers
-> or tmux session issues; a short wait timeout surfaces these problems faster.
+> **Timeout guidance:** Use `60000` (60 s) as the default. If the job times out,
+> **workers are left running** — the timeout does NOT kill them. You have two options:
+> - Call `omc_run_team_wait` again with the same `job_id` to keep waiting (workers continue)
+> - Call `omc_run_team_cleanup` to explicitly stop all worker panes when you want to cancel
+>
+> Teams can silently stall due to stuck workers or tmux session issues. Use
+> `mcp__team__omc_run_team_status` to inspect live progress before deciding to cancel.
 
 Returns when done:
 ```json

@@ -214,44 +214,11 @@ async function handleWait(args: unknown): Promise<{ content: Array<{ type: 'text
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
   }
 
-  // Timeout: SIGTERM → wait → SIGKILL escalation, then kill remaining worker panes
-  const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
-
-  // Set status immediately so the close handler won't override it
-  if (timedOutJob && timedOutJob.status === 'running') {
-    timedOutJob.status = 'timeout';
-  }
-
-  const panes = timedOutJob ? await loadPaneIds(job_id) : null;
-
-  if (timedOutJob?.pid != null) {
-    try { process.kill(timedOutJob.pid, 'SIGTERM'); } catch { /* already gone */ }
-
-    // Wait up to 10s for runtime-cli to exit cleanly (SIGTERM handler calls shutdownTeam)
-    const killDeadline = Date.now() + 10_000;
-    while (Date.now() < killDeadline) {
-      try { process.kill(timedOutJob.pid, 0); } catch { break; } // ESRCH = process gone
-      await new Promise<void>(r => setTimeout(r, 500));
-    }
-
-    // Escalate to SIGKILL if still alive
-    try { process.kill(timedOutJob.pid, 'SIGKILL'); } catch { /* gone */ }
-  }
-
-  // Backstop: kill any remaining worker panes (grace already elapsed above)
-  if (panes && timedOutJob) {
-    await killWorkerPanes({
-      paneIds: panes.paneIds,
-      leaderPaneId: panes.leaderPaneId,
-      teamName: timedOutJob.teamName ?? '',
-      cwd: timedOutJob.cwd ?? '',
-      graceMs: 0,
-    });
-  }
-
-  if (timedOutJob) persistJob(job_id, timedOutJob);
-
-  return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s` }) }] };
+  // Timeout: leave workers running — caller must use omc_run_team_cleanup to stop them explicitly.
+  // Do NOT kill the process or panes here; the user may call omc_run_team_wait again to keep
+  // waiting, or omc_run_team_status to check progress.
+  const elapsed = ((Date.now() - (omcTeamJobs.get(job_id)?.startedAt ?? Date.now())) / 1000).toFixed(1);
+  return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s — workers are still running; call omc_run_team_wait again to keep waiting or omc_run_team_cleanup to stop them`, jobId: job_id, status: 'running', elapsedSeconds: elapsed }) }] };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +265,7 @@ const TOOLS = [
   },
   {
     name: 'omc_run_team_wait',
-    description: 'Block (poll internally) until a background omc_run_team job reaches a terminal state (completed, failed, timeout). Returns the result when done. One call instead of N polling calls. Uses exponential backoff (500ms → 2000ms). No deadlock: the child process is independent and never calls back into this server.',
+    description: 'Block (poll internally) until a background omc_run_team job reaches a terminal state (completed, failed, timeout). Returns the result when done. One call instead of N polling calls. Uses exponential backoff (500ms → 2000ms). On timeout, workers are left running — call omc_run_team_wait again to keep waiting, or omc_run_team_cleanup to stop them explicitly.',
     inputSchema: {
       type: 'object' as const,
       properties: {
