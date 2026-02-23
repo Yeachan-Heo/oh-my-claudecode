@@ -536,7 +536,7 @@ console.log('Installed:',v||'(not found)');
 "
 
 # Check npm for latest version
-LATEST_VERSION=$(npm view oh-my-claudecode version 2>/dev/null)
+LATEST_VERSION=$(npm view oh-my-claude-sisyphus version 2>/dev/null)
 
 if [ -n "$INSTALLED_VERSION" ] && [ -n "$LATEST_VERSION" ]; then
   # Simple version comparison (assumes semantic versioning)
