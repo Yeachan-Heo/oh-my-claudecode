@@ -6,7 +6,7 @@
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
 
-import { readStdin, getContextPercent, getModelName } from "./stdin.js";
+import { readStdin, writeStdinCache, readStdinCache, getContextPercent, getModelName } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
 import {
   readHudState,
@@ -314,17 +314,29 @@ async function calculateSessionHealth(
 
 /**
  * Main HUD entry point
+ * @param watchMode - true when called from the --watch polling loop (stdin is TTY)
  */
-async function main(): Promise<void> {
+async function main(watchMode = false): Promise<void> {
   try {
     // Initialize HUD state (cleanup stale/orphaned tasks)
     await initializeHUDState();
 
     // Read stdin from Claude Code
-    const stdin = await readStdin();
+    let stdin = await readStdin();
 
-    if (!stdin) {
-      // No stdin - suggest setup
+    if (stdin) {
+      // Persist for --watch mode so it can read data when stdin is a TTY
+      writeStdinCache(stdin);
+    } else if (watchMode) {
+      // In watch mode stdin is always a TTY; fall back to last cached value
+      stdin = readStdinCache();
+      if (!stdin) {
+        // Cache not yet populated (first poll before statusline fires)
+        console.log("[OMC] Starting...");
+        return;
+      }
+    } else {
+      // Non-watch invocation with no stdin - suggest setup
       console.log("[OMC] run /omc-setup to install properly");
       return;
     }
