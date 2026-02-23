@@ -17757,8 +17757,9 @@ var StdioServerTransport = class {
 var import_child_process = require("child_process");
 var import_path = require("path");
 var import_fs = require("fs");
+var import_os = require("os");
 var omcTeamJobs = /* @__PURE__ */ new Map();
-var OMC_JOBS_DIR = "/tmp/omc-team-jobs";
+var OMC_JOBS_DIR = (0, import_path.join)((0, import_os.homedir)(), ".omc", "team-jobs");
 function persistJob(jobId, job) {
   try {
     if (!(0, import_fs.existsSync)(OMC_JOBS_DIR)) (0, import_fs.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
@@ -17805,7 +17806,7 @@ async function handleStart(args) {
   const errChunks = [];
   child.stdout.on("data", (c) => outChunks.push(c));
   child.stderr.on("data", (c) => errChunks.push(c));
-  child.on("close", (_code) => {
+  child.on("close", (code) => {
     const stdout = Buffer.concat(outChunks).toString("utf-8").trim();
     const stderr = Buffer.concat(errChunks).toString("utf-8").trim();
     if (stdout) {
@@ -17818,6 +17819,9 @@ async function handleStart(args) {
       }
       job.result = stdout;
     } else {
+      job.status = "failed";
+    }
+    if (code !== 0 && code !== null) {
       job.status = "failed";
     }
     if (stderr) job.stderr = stderr;
@@ -17859,6 +17863,19 @@ async function handleWait(args) {
     if (!job) {
       return { content: [{ type: "text", text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
     }
+    if (job.status === "running" && job.pid != null) {
+      try {
+        process.kill(job.pid, 0);
+      } catch (e) {
+        if (e.code === "ESRCH") {
+          job.status = "failed";
+          if (!job.result) job.result = JSON.stringify({ error: "Process no longer alive (MCP restart?)" });
+          persistJob(job_id, job);
+          const elapsed = ((Date.now() - job.startedAt) / 1e3).toFixed(1);
+          return { content: [{ type: "text", text: JSON.stringify({ jobId: job_id, status: "failed", elapsedSeconds: elapsed, error: "Process no longer alive (MCP restart?)" }) }] };
+        }
+      }
+    }
     if (job.status !== "running") {
       const elapsed = ((Date.now() - job.startedAt) / 1e3).toFixed(1);
       const out = { jobId: job_id, status: job.status, elapsedSeconds: elapsed };
@@ -17874,6 +17891,13 @@ async function handleWait(args) {
     }
     await new Promise((r) => setTimeout(r, pollDelay));
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2e3);
+  }
+  const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+  if (timedOutJob?.pid != null) {
+    try {
+      process.kill(timedOutJob.pid, "SIGKILL");
+    } catch {
+    }
   }
   return { content: [{ type: "text", text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1e3).toFixed(0)}s` }) }] };
 }

@@ -18,7 +18,7 @@ await esbuild.build({
   format: 'cjs',
   outfile,
   external: [
-    'fs', 'path', 'os', 'util', 'stream', 'events',
+    'fs', 'fs/promises', 'path', 'os', 'util', 'stream', 'events',
     'buffer', 'crypto', 'http', 'https', 'url',
     'child_process', 'assert', 'module', 'net', 'tls',
     'dns', 'readline', 'tty', 'worker_threads',
