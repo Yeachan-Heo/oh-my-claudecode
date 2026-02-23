@@ -22,7 +22,9 @@ Initialize a PRD (Product Requirements Document) for structured ralph-loop execu
    - Acceptance criteria (testable)
    - Technical constraints
    - Implementation phases
-3. **Link to Ralph** so that `/oh-my-claudecode:ralph` can use the PRD as its completion criteria
+3. **Output the PRD path** and instruct the user to run ralph separately
+
+**IMPORTANT: This is a planning-only skill. After creating the PRD, you MUST stop and wait for user input. Do NOT automatically start execution, invoke ralph, or begin implementing the PRD. Simply tell the user the PRD path and how to start ralph with it.**
 
 ## Output
 

@@ -507,6 +507,24 @@ describe('Keyword Detector', () => {
       expect(primary!.type).toBe('ralph');
     });
 
+    it('should not detect ralph in ralph-init compound name', () => {
+      const detected = detectKeywordsWithType('ralph-init "create a PRD"');
+      const ralphMatch = detected.find(d => d.type === 'ralph');
+      expect(ralphMatch).toBeUndefined();
+    });
+
+    it('should not detect ralph in /oh-my-claudecode:ralph-init', () => {
+      const primary = getPrimaryKeyword('/oh-my-claudecode:ralph-init "my project"');
+      expect(primary?.type).not.toBe('ralph');
+    });
+
+    it('should still detect ralph when standalone', () => {
+      const detected = detectKeywordsWithType('use ralph for this task');
+      const ralphMatch = detected.find(d => d.type === 'ralph');
+      expect(ralphMatch).toBeDefined();
+      expect(ralphMatch!.keyword).toBe('ralph');
+    });
+
     it('should prioritize ultrapilot for legacy ultrapilot trigger', () => {
       const primary = getPrimaryKeyword('ultrapilot this task');
       expect(primary).not.toBeNull();
