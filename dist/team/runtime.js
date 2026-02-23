@@ -1,9 +1,10 @@
-import { mkdir, writeFile, readFile, rm } from 'fs/promises';
+import { mkdir, writeFile, readFile, rm, appendFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { buildWorkerCommand, validateCliAvailable, getWorkerEnv as getModelWorkerEnv } from './model-contract.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForWorkerReady, isWorkerAlive, killTeamSession, injectToLeaderPane, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, } from './worker-bootstrap.js';
+import { queueInboxInstruction } from './tmux-comm.js';
 function workerName(index) {
     return `worker-${index + 1}`;
 }
@@ -22,6 +23,24 @@ async function readJsonSafe(filePath) {
     catch {
         return null;
     }
+}
+/**
+ * Build the initial task instruction written to a worker's inbox.
+ * Includes task ID, subject, full description, and done-signal path.
+ */
+function buildInitialTaskInstruction(teamName, workerName, task, taskId) {
+    const donePath = `.omc/state/team/${teamName}/workers/${workerName}/done.json`;
+    return [
+        `## Initial Task Assignment`,
+        `Task ID: ${taskId}`,
+        `Worker: ${workerName}`,
+        `Subject: ${task.subject}`,
+        ``,
+        task.description,
+        ``,
+        `When complete, write done signal to ${donePath}:`,
+        `{"taskId":"${taskId}","status":"completed","summary":"<brief summary>","completedAt":"<ISO timestamp>"}`,
+    ].join('\n');
 }
 /**
  * Start a new team: create tmux session, spawn workers, wait for ready.
@@ -85,10 +104,11 @@ export async function startTeam(config) {
             const ready = await waitForWorkerReady(teamName, wName, cwd, 30_000);
             if (!ready)
                 console.warn(`[runtime] Claude worker ${wName} not ready within 30s`);
-            // Send the worker's assigned task as the initial prompt so it starts working
-            const taskDesc = tasks[i]?.description ?? tasks[0]?.description ?? '';
-            if (taskDesc) {
-                await sendToWorker(session.sessionName, paneId, taskDesc);
+            // Deliver full task via inbox file to avoid 200-char tmux limit
+            const task = tasks[i] ?? tasks[0];
+            if (task) {
+                const taskId = String(i + 1);
+                await queueInboxInstruction(teamName, wName, buildInitialTaskInstruction(teamName, wName, task, taskId), paneId, cwd);
             }
         }
         else {
@@ -100,10 +120,17 @@ export async function startTeam(config) {
                 await sendToWorker(session.sessionName, paneId, '1');
                 await new Promise(r => setTimeout(r, 800));
             }
-            // Send the worker's assigned task as the initial prompt
-            const taskDesc = tasks[i]?.description ?? tasks[0]?.description ?? '';
-            if (taskDesc) {
-                await sendToWorker(session.sessionName, paneId, taskDesc);
+            // Deliver full task via inbox file to avoid 200-char tmux limit.
+            // Non-Claude CLIs (codex/gemini) don't understand 'check-inbox' protocol,
+            // so we write to the inbox file and send a natural-language read trigger.
+            const task = tasks[i] ?? tasks[0];
+            if (task) {
+                const taskId = String(i + 1);
+                const instruction = buildInitialTaskInstruction(teamName, wName, task, taskId);
+                const inboxPath = join(cwd, `.omc/state/team/${teamName}/workers/${wName}/inbox.md`);
+                await appendFile(inboxPath, `\n\n---\n${instruction}\n_queued: ${new Date().toISOString()}_\n`, 'utf-8');
+                const relPath = `.omc/state/team/${teamName}/workers/${wName}/inbox.md`;
+                await sendToWorker(session.sessionName, paneId, `Read and execute your task from: ${relPath}`);
             }
         }
     }));
