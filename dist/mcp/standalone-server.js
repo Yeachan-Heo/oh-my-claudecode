@@ -22,6 +22,8 @@ import { memoryTools } from '../tools/memory-tools.js';
 import { traceTools } from '../tools/trace-tools.js';
 import { z } from 'zod';
 // Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
+// Team runtime tools (omc_run_team_start, omc_run_team_status) live in the
+// separate "team" MCP server (bridge/team-mcp.cjs) registered in .mcp.json.
 const allTools = [
     ...lspTools,
     ...astTools,

@@ -7,7 +7,7 @@
  * - OMC_MCP_ALLOW_EXTERNAL_PROMPT=0|1 (default: 0)
  *
  * This module provides policy resolution and path redirection logic
- * accessible from both codex-core.ts and gemini-core.ts.
+ * accessible across MCP server modules.
  */
 
 

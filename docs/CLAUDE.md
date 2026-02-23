@@ -92,8 +92,9 @@ Compatibility aliases may still be normalized during routing, but canonical runt
 ---
 
 <tools>
-External AI:
-- For Codex, Gemini, or additional Claude workers, use `/team` to spawn CLI workers in tmux panes.
+External AI (tmux CLI workers):
+- For **Claude agents**: use `/team N:executor "task"` — spawns Claude Code agent teammates via `TeamCreate`/`Task`
+- For **Codex or Gemini CLI workers**: use `/omc-teams N:codex "task"` or `/omc-teams N:gemini "task"` — spawns CLI processes in tmux panes via `bridge/runtime-cli.cjs`
 
 OMC State:
 - `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
@@ -134,7 +135,8 @@ Workflow Skills:
 - `ultrawork` ("ulw", "ultrawork"): maximum parallelism with parallel agent orchestration
 - `swarm` ("swarm"): **deprecated compatibility alias** over Team; use `/team` (still routes to Team staged pipeline for now)
 - `ultrapilot` ("ultrapilot", "parallel build"): compatibility facade over Team; maps onto Team's staged runtime
-- `team` ("team", "coordinated team", "team ralph"): N coordinated agents using Claude Code native teams with stage-aware agent routing; supports `team ralph` for persistent team execution
+- `team` ("team", "coordinated team", "team ralph"): N coordinated Claude agents using Claude Code native teams with stage-aware agent routing; supports `team ralph` for persistent team execution
+- `omc-teams` ("omc-teams"): Spawn `claude`, `codex`, or `gemini` CLI workers in tmux panes via `bridge/runtime-cli.cjs`; use when you need CLI process workers rather than Claude Code native agents
 - `pipeline` ("pipeline", "chain agents"): sequential agent chaining with data passing
 - `ultraqa` (activated by autopilot): QA cycling -- test, verify, fix, repeat
 - `plan` ("plan this", "plan the"): strategic planning; supports `--consensus` and `--review` modes

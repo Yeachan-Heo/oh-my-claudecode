@@ -5,13 +5,12 @@ import type { CliAgentType } from './model-contract.js';
 import { buildWorkerCommand, validateCliAvailable, getWorkerEnv as getModelWorkerEnv } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  waitForWorkerReady, isWorkerAlive, killTeamSession, injectToLeaderPane,
+  isWorkerAlive, killTeamSession, injectToLeaderPane,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
   generateWorkerOverlay, composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay,
 } from './worker-bootstrap.js';
-import { queueInboxInstruction } from './tmux-comm.js';
 
 export interface TeamConfig {
   teamName: string;
@@ -180,14 +179,17 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
       const paneId = session.workerPaneIds[i];
 
       if (agentType === 'claude') {
-        // Claude workers write .ready sentinel after reading their AGENTS.md overlay
-        const ready = await waitForWorkerReady(teamName, wName, cwd, 30_000);
-        if (!ready) console.warn(`[runtime] Claude worker ${wName} not ready within 30s`);
-        // Deliver full task via inbox file to avoid 200-char tmux limit
+        // Wait for CLI startup (same as codex/gemini — no sentinel protocol)
+        await new Promise(r => setTimeout(r, 4000));
+
         const task = tasks[i] ?? tasks[0];
         if (task) {
           const taskId = String(i + 1);
-          await queueInboxInstruction(teamName, wName, buildInitialTaskInstruction(teamName, wName, task, taskId), paneId, cwd);
+          const instruction = buildInitialTaskInstruction(teamName, wName, task, taskId);
+          const inboxPath = join(cwd, `.omc/state/team/${teamName}/workers/${wName}/inbox.md`);
+          await appendFile(inboxPath, `\n\n---\n${instruction}\n_queued: ${new Date().toISOString()}_\n`, 'utf-8');
+          const relPath = `.omc/state/team/${teamName}/workers/${wName}/inbox.md`;
+          await sendToWorker(session.sessionName, paneId, `Read and execute your task from: ${relPath}`);
         }
       } else {
         // Non-Claude workers (codex/gemini): wait for CLI startup, then send initial task via tmux

@@ -365,7 +365,7 @@ export async function sendToWorker(
 /**
  * Inject a status message into the leader Claude pane.
  * The message is typed into the leader's input, triggering a new conversation turn.
- * Prefixes with [watchdog] marker to distinguish from user input.
+ * Prefixes with [OMC_TMUX_INJECT] marker to distinguish from user input.
  * Returns false on error (does not throw).
  */
 export async function injectToLeaderPane(
@@ -373,7 +373,7 @@ export async function injectToLeaderPane(
   leaderPaneId: string,
   message: string
 ): Promise<boolean> {
-  const prefixed = `[watchdog] ${message}`.slice(0, 200);
+  const prefixed = `[OMC_TMUX_INJECT] ${message}`.slice(0, 200);
   return sendToWorker(sessionName, leaderPaneId, prefixed);
 }
 

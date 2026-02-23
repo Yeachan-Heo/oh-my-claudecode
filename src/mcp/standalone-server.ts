@@ -35,6 +35,8 @@ interface ToolDef {
 }
 
 // Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
+// Team runtime tools (omc_run_team_start, omc_run_team_status) live in the
+// separate "team" MCP server (bridge/team-mcp.cjs) registered in .mcp.json.
 const allTools: ToolDef[] = [
   ...(lspTools as unknown as ToolDef[]),
   ...(astTools as unknown as ToolDef[]),
