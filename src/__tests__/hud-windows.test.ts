@@ -155,12 +155,14 @@ describe('HUD Windows Compatibility', () => {
       expect(content).toContain('pathToFileURL(pluginPath).href');
     });
 
-    it('plugin-setup.mjs should use path.join for plugin cache base', () => {
+    it('plugin-setup.mjs should respect CLAUDE_CONFIG_DIR for plugin cache base', () => {
       const setupPath = join(packageRoot, 'scripts', 'plugin-setup.mjs');
       const content = readFileSync(setupPath, 'utf-8');
 
-      // The generated HUD wrapper should use join() for path construction
-      expect(content).toContain('join(home, ".claude/plugins/cache/omc/oh-my-claudecode")');
+      // Should use CLAUDE_CONFIG_DIR env var for cross-platform compat (#897)
+      expect(content).toContain('process.env.CLAUDE_CONFIG_DIR');
+      // Should use join() with configDir for path construction
+      expect(content).toContain('join(configDir,');
     });
 
     it('omc-doctor skill should use cross-platform Node.js commands', () => {

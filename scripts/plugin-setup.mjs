@@ -59,7 +59,9 @@ async function main() {
   const home = homedir();
 
   // 1. Try plugin cache first (marketplace: omc, plugin: oh-my-claudecode)
-  const pluginCacheBase = join(home, ".claude/plugins/cache/omc/oh-my-claudecode");
+  // Respect CLAUDE_CONFIG_DIR so installs under a custom config dir are found
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  const pluginCacheBase = join(configDir, "plugins", "cache", "omc", "oh-my-claudecode");
   if (existsSync(pluginCacheBase)) {
     try {
       const versions = readdirSync(pluginCacheBase);
@@ -90,7 +92,7 @@ async function main() {
   for (const devPath of devPaths) {
     if (existsSync(devPath)) {
       try {
-        await import(devPath);
+        await import(pathToFileURL(devPath).href);
         return;
       } catch { /* continue */ }
     }
