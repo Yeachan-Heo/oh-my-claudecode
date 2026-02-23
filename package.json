@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claudecode",
-  "version": "4.4.0",
+  "version": "4.4.1",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",

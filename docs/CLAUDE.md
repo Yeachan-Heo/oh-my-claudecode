@@ -1,5 +1,5 @@
 <!-- OMC:START -->
-<!-- OMC:VERSION:4.4.0 -->
+<!-- OMC:VERSION:4.4.1 -->
 > **v5.0 Breaking Change:** Codex and Gemini MCP servers (`x`, `g`) have been removed.
 > Use `/team` to coordinate Claude, Codex, and Gemini CLI workers in tmux panes instead.
 

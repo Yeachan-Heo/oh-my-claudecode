@@ -1,3 +1,15 @@
+# oh-my-claudecode v4.4.1: HUD hotfix
+
+## Patch Notes
+
+**Fix: HUD disappears after updating to v4.4.0** (#hotfix)
+
+In v4.4.0, `dist/hud/index.js` was changed to export `main` for programmatic use and guard its auto-run with `process.argv[1] === fileURLToPath(import.meta.url)`. This check correctly identifies direct execution (`node dist/hud/index.js`) but **fails when the module is loaded via dynamic `import()` from the `omc-hud.mjs` wrapper** — in that case `process.argv[1]` is the wrapper path, not `index.js`, so `main()` was never called and the HUD silently produced no output.
+
+**Fix:** Remove the direct-execution guard and call `main()` unconditionally. The `export { main }` is preserved for programmatic/watch-loop use.
+
+---
+
 # oh-my-claudecode v4.4.0: tmux CLI Workers, On-Demand Workers, Surgical Pane Cleanup & Security Hardening
 
 This is a major release that rewrites how Codex and Gemini are integrated into OMC. The old MCP server architecture (`x`, `g` providers) has been replaced entirely by a tmux-based CLI worker runtime that spawns real CLI processes in visible panes. Workers are now spun up on demand and torn down immediately when done. Team session cleanup has been hardened to never destroy the user's shell. Several security issues in the MCP surface have been fixed.
