@@ -19,4 +19,14 @@ export declare function getContextPercent(stdin: StatuslineStdin): number;
  * Get model display name from stdin.
  */
 export declare function getModelName(stdin: StatuslineStdin): string;
+/**
+ * Cache stdin data to disk so the --watch mode (tmux pane) can read it.
+ * Called by the normal Claude Code statusline path after receiving stdin.
+ */
+export declare function writeStdinCache(data: StatuslineStdin, cwd: string): void;
+/**
+ * Read cached stdin data from disk.
+ * Used by --watch mode (tmux pane) where stdin is a TTY and not piped from Claude Code.
+ */
+export declare function readStdinCache(cwd: string): StatuslineStdin | null;
 //# sourceMappingURL=stdin.d.ts.map

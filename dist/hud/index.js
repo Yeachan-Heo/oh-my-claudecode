@@ -5,7 +5,7 @@
  * Statusline command that visualizes oh-my-claudecode state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
-import { readStdin, getContextPercent, getModelName } from "./stdin.js";
+import { readStdin, getContextPercent, getModelName, writeStdinCache, readStdinCache } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
 import { readHudState, readHudConfig, getRunningTasks, writeHudState, initializeHUDState, } from "./state.js";
 import { readRalphStateForHud, readUltraworkStateForHud, readPrdStateForHud, readAutopilotStateForHud, } from "./omc-state.js";
@@ -234,14 +234,26 @@ async function main() {
     try {
         // Initialize HUD state (cleanup stale/orphaned tasks)
         await initializeHUDState();
-        // Read stdin from Claude Code
-        const stdin = await readStdin();
+        // Read stdin from Claude Code (piped JSON), or fall back to cached stdin for TTY/--watch mode
+        let stdin = await readStdin();
+        if (!stdin && process.stdin.isTTY) {
+            // TTY mode (e.g. tmux --watch pane): stdin is not piped from Claude Code.
+            // Read cached stdin written by the last Claude Code statusline invocation.
+            stdin = readStdinCache(process.cwd());
+        }
         if (!stdin) {
-            // No stdin - suggest setup
-            console.log("[OMC] run /omc-setup to install properly");
+            // No stdin and no cache - either setup issue or Claude Code hasn't run the statusline yet
+            if (process.stdin.isTTY) {
+                console.log("[OMC]");
+            }
+            else {
+                console.log("[OMC] run /omc-setup to install properly");
+            }
             return;
         }
         const cwd = stdin.cwd || process.cwd();
+        // Cache stdin for --watch mode (tmux pane) to read
+        writeStdinCache(stdin, cwd);
         // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
         const config = readHudConfig();
         // Parse transcript for agents and todos

@@ -6,6 +6,8 @@
  */
 
 import type { StatuslineStdin } from './types.js';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 /**
  * Read and parse stdin JSON from Claude Code.
@@ -75,4 +77,40 @@ export function getContextPercent(stdin: StatuslineStdin): number {
  */
 export function getModelName(stdin: StatuslineStdin): string {
   return stdin.model?.id ?? stdin.model?.display_name ?? 'Unknown';
+}
+
+/**
+ * Cache stdin data to disk so the --watch mode (tmux pane) can read it.
+ * Called by the normal Claude Code statusline path after receiving stdin.
+ */
+export function writeStdinCache(data: StatuslineStdin, cwd: string): void {
+  try {
+    const stateDir = join(cwd, '.omc', 'state');
+    if (!existsSync(stateDir)) {
+      mkdirSync(stateDir, { recursive: true });
+    }
+    writeFileSync(
+      join(stateDir, 'hud-stdin-cache.json'),
+      JSON.stringify(data),
+    );
+  } catch {
+    // Silent failure - don't break HUD rendering
+  }
+}
+
+/**
+ * Read cached stdin data from disk.
+ * Used by --watch mode (tmux pane) where stdin is a TTY and not piped from Claude Code.
+ */
+export function readStdinCache(cwd: string): StatuslineStdin | null {
+  try {
+    const cachePath = join(cwd, '.omc', 'state', 'hud-stdin-cache.json');
+    if (!existsSync(cachePath)) {
+      return null;
+    }
+    const raw = readFileSync(cachePath, 'utf-8');
+    return JSON.parse(raw) as StatuslineStdin;
+  } catch {
+    return null;
+  }
 }
