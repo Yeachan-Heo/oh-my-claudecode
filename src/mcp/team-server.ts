@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { homedir } from 'os';
 
 // ---------------------------------------------------------------------------
 // Job state: in-memory Map (primary) + /tmp backup (survives MCP restart)
@@ -37,7 +38,7 @@ interface OmcTeamJob {
 }
 
 const omcTeamJobs = new Map<string, OmcTeamJob>();
-const OMC_JOBS_DIR = '/tmp/omc-team-jobs';
+const OMC_JOBS_DIR = join(homedir(), '.omc', 'team-jobs');
 
 function persistJob(jobId: string, job: OmcTeamJob): void {
   try {
@@ -102,7 +103,7 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
   child.stdout.on('data', (c: Buffer) => outChunks.push(c));
   child.stderr.on('data', (c: Buffer) => errChunks.push(c));
 
-  child.on('close', (_code) => {
+  child.on('close', (code) => {
     const stdout = Buffer.concat(outChunks).toString('utf-8').trim();
     const stderr = Buffer.concat(errChunks).toString('utf-8').trim();
     if (stdout) {
@@ -113,6 +114,9 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
       } catch { job.status = 'failed'; }
       job.result = stdout;
     } else {
+      job.status = 'failed';
+    }
+    if (code !== 0 && code !== null) {
       job.status = 'failed';
     }
     if (stderr) job.stderr = stderr;
@@ -154,6 +158,21 @@ async function handleWait(args: unknown): Promise<{ content: Array<{ type: 'text
     if (!job) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
     }
+    // FIX 2: Detect orphan PIDs (e.g. after MCP restart) — if job is 'running' but
+    // the process is dead, mark it failed immediately rather than polling forever.
+    if (job.status === 'running' && job.pid != null) {
+      try {
+        process.kill(job.pid, 0);
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code === 'ESRCH') {
+          job.status = 'failed';
+          if (!job.result) job.result = JSON.stringify({ error: 'Process no longer alive (MCP restart?)' });
+          persistJob(job_id, job);
+          const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+          return { content: [{ type: 'text', text: JSON.stringify({ jobId: job_id, status: 'failed', elapsedSeconds: elapsed, error: 'Process no longer alive (MCP restart?)' }) }] };
+        }
+      }
+    }
     if (job.status !== 'running') {
       const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
       const out: Record<string, unknown> = { jobId: job_id, status: job.status, elapsedSeconds: elapsed };
@@ -166,6 +185,12 @@ async function handleWait(args: unknown): Promise<{ content: Array<{ type: 'text
     // back into this MCP server.
     await new Promise<void>(r => setTimeout(r, pollDelay));
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
+  }
+
+  // FIX 1: Hard-kill backstop — ensure the child process doesn't run forever after timeout.
+  const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+  if (timedOutJob?.pid != null) {
+    try { process.kill(timedOutJob.pid, 'SIGKILL'); } catch { /* already dead */ }
   }
 
   return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s` }) }] };

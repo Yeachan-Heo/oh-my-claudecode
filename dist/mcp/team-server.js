@@ -19,8 +19,9 @@ import { z } from 'zod';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { homedir } from 'os';
 const omcTeamJobs = new Map();
-const OMC_JOBS_DIR = '/tmp/omc-team-jobs';
+const OMC_JOBS_DIR = join(homedir(), '.omc', 'team-jobs');
 function persistJob(jobId, job) {
     try {
         if (!existsSync(OMC_JOBS_DIR))
@@ -75,7 +76,7 @@ async function handleStart(args) {
     const errChunks = [];
     child.stdout.on('data', (c) => outChunks.push(c));
     child.stderr.on('data', (c) => errChunks.push(c));
-    child.on('close', (_code) => {
+    child.on('close', (code) => {
         const stdout = Buffer.concat(outChunks).toString('utf-8').trim();
         const stderr = Buffer.concat(errChunks).toString('utf-8').trim();
         if (stdout) {
@@ -90,6 +91,9 @@ async function handleStart(args) {
             job.result = stdout;
         }
         else {
+            job.status = 'failed';
+        }
+        if (code !== 0 && code !== null) {
             job.status = 'failed';
         }
         if (stderr)
@@ -113,8 +117,14 @@ async function handleStatus(args) {
     }
     const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
     const out = { jobId: job_id, status: job.status, elapsedSeconds: elapsed };
-    if (job.result)
-        out.result = JSON.parse(job.result);
+    if (job.result) {
+        try {
+            out.result = JSON.parse(job.result);
+        }
+        catch {
+            out.result = job.result;
+        }
+    }
     if (job.stderr)
         out.stderr = job.stderr;
     return { content: [{ type: 'text', text: JSON.stringify(out) }] };
@@ -129,11 +139,34 @@ async function handleWait(args) {
         if (!job) {
             return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
         }
+        // FIX 2: Detect orphan PIDs (e.g. after MCP restart) — if job is 'running' but
+        // the process is dead, mark it failed immediately rather than polling forever.
+        if (job.status === 'running' && job.pid != null) {
+            try {
+                process.kill(job.pid, 0);
+            }
+            catch (e) {
+                if (e.code === 'ESRCH') {
+                    job.status = 'failed';
+                    if (!job.result)
+                        job.result = JSON.stringify({ error: 'Process no longer alive (MCP restart?)' });
+                    persistJob(job_id, job);
+                    const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+                    return { content: [{ type: 'text', text: JSON.stringify({ jobId: job_id, status: 'failed', elapsedSeconds: elapsed, error: 'Process no longer alive (MCP restart?)' }) }] };
+                }
+            }
+        }
         if (job.status !== 'running') {
             const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
             const out = { jobId: job_id, status: job.status, elapsedSeconds: elapsed };
-            if (job.result)
-                out.result = JSON.parse(job.result);
+            if (job.result) {
+                try {
+                    out.result = JSON.parse(job.result);
+                }
+                catch {
+                    out.result = job.result;
+                }
+            }
             if (job.stderr)
                 out.stderr = job.stderr;
             return { content: [{ type: 'text', text: JSON.stringify(out) }] };
@@ -143,6 +176,14 @@ async function handleWait(args) {
         // back into this MCP server.
         await new Promise(r => setTimeout(r, pollDelay));
         pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
+    }
+    // FIX 1: Hard-kill backstop — ensure the child process doesn't run forever after timeout.
+    const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+    if (timedOutJob?.pid != null) {
+        try {
+            process.kill(timedOutJob.pid, 'SIGKILL');
+        }
+        catch { /* already dead */ }
     }
     return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s` }) }] };
 }
