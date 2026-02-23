@@ -40,6 +40,24 @@ export declare function validateConfigFiles(directory: string): string[];
  */
 export declare function setEnvironmentVariables(): string[];
 /**
+ * On Windows, replace sh+find-node.sh hook invocations with direct node calls.
+ *
+ * The sh->find-node.sh->node chain introduced in v4.3.4 (issue #892) is only
+ * needed on Unix where nvm/fnm may not expose `node` on PATH in non-interactive
+ * shells.  On Windows (MSYS2 / Git Bash) the same chain triggers Claude Code UI
+ * bug #17088, which mislabels every successful hook as an error.
+ *
+ * This function reads the plugin's hooks.json and rewrites every command of the
+ * form:
+ *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ * to:
+ *   node "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ *
+ * The file is only written when at least one command was actually changed, so
+ * the function is safe to call on every init (idempotent after first patch).
+ */
+export declare function patchHooksJsonForWindows(pluginRoot: string): void;
+/**
  * Process setup init trigger
  */
 export declare function processSetupInit(input: SetupInput): Promise<HookOutput>;

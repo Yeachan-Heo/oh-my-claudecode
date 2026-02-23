@@ -6,7 +6,7 @@
  * - init: Create directory structure, validate configs, set environment
  * - maintenance: Prune old state files, cleanup orphaned state, vacuum SQLite
  */
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { registerBeadsContext } from '../beads-context/index.js';
 // ============================================================================
@@ -84,6 +84,54 @@ export function setEnvironmentVariables() {
     return envVars;
 }
 /**
+ * On Windows, replace sh+find-node.sh hook invocations with direct node calls.
+ *
+ * The sh->find-node.sh->node chain introduced in v4.3.4 (issue #892) is only
+ * needed on Unix where nvm/fnm may not expose `node` on PATH in non-interactive
+ * shells.  On Windows (MSYS2 / Git Bash) the same chain triggers Claude Code UI
+ * bug #17088, which mislabels every successful hook as an error.
+ *
+ * This function reads the plugin's hooks.json and rewrites every command of the
+ * form:
+ *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ * to:
+ *   node "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ *
+ * The file is only written when at least one command was actually changed, so
+ * the function is safe to call on every init (idempotent after first patch).
+ */
+export function patchHooksJsonForWindows(pluginRoot) {
+    const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
+    if (!existsSync(hooksJsonPath))
+        return;
+    try {
+        const content = readFileSync(hooksJsonPath, 'utf-8');
+        const data = JSON.parse(content);
+        // Matches: sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [optional args]
+        const pattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "(\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[^"]+)"(.*)$/;
+        let patched = false;
+        for (const groups of Object.values(data.hooks ?? {})) {
+            for (const group of groups) {
+                for (const hook of group.hooks ?? []) {
+                    if (typeof hook.command === 'string') {
+                        const m = hook.command.match(pattern);
+                        if (m) {
+                            hook.command = `node "${m[1]}"${m[2]}`;
+                            patched = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (patched) {
+            writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
+        }
+    }
+    catch {
+        // Non-fatal: hooks.json patching is best-effort
+    }
+}
+/**
  * Process setup init trigger
  */
 export async function processSetupInit(input) {
@@ -93,6 +141,16 @@ export async function processSetupInit(input) {
         errors: [],
         env_vars_set: [],
     };
+    // On Windows, patch hooks.json to use direct node invocation (no sh wrapper).
+    // The sh->find-node.sh->node chain triggers Claude Code UI bug #17088 on
+    // MSYS2/Git Bash, mislabeling every successful hook as an error (issue #899).
+    // find-node.sh is only needed on Unix for nvm/fnm PATH discovery.
+    if (process.platform === 'win32') {
+        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+        if (pluginRoot) {
+            patchHooksJsonForWindows(pluginRoot);
+        }
+    }
     try {
         // Create directory structure
         result.directories_created = ensureDirectoryStructure(input.cwd);
