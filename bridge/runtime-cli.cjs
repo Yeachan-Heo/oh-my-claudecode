@@ -24,11 +24,12 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/team/runtime-cli.ts
 var import_fs4 = require("fs");
-var import_path5 = require("path");
+var import_promises4 = require("fs/promises");
+var import_path6 = require("path");
 
 // src/team/runtime.ts
-var import_promises2 = require("fs/promises");
-var import_path4 = require("path");
+var import_promises3 = require("fs/promises");
+var import_path5 = require("path");
 var import_fs3 = require("fs");
 
 // src/team/model-contract.ts
@@ -129,6 +130,8 @@ function getWorkerEnv(teamName, workerName2, agentType) {
 
 // src/team/tmux-session.ts
 var import_child_process2 = require("child_process");
+var import_path = require("path");
+var import_promises = __toESM(require("fs/promises"), 1);
 async function createTeamSession(teamName, workerCount, cwd) {
   const { execFile } = await import("child_process");
   const { promisify } = await import("util");
@@ -330,34 +333,35 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId) {
   const { execFile } = await import("child_process");
   const { promisify } = await import("util");
   const execFileAsync = promisify(execFile);
-  if (sessionName.includes(":") && workerPaneIds && workerPaneIds.length > 0) {
-    for (const paneId of workerPaneIds) {
-      if (leaderPaneId && paneId === leaderPaneId) continue;
+  if (sessionName.includes(":")) {
+    if (!workerPaneIds?.length) return;
+    for (const id of workerPaneIds) {
+      if (id === leaderPaneId) continue;
       try {
-        await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
+        await execFileAsync("tmux", ["kill-pane", "-t", id]);
       } catch {
       }
     }
-  } else {
-    try {
-      await execFileAsync("tmux", ["kill-session", "-t", sessionName]);
-    } catch {
-    }
+    return;
+  }
+  try {
+    await execFileAsync("tmux", ["kill-session", "-t", sessionName]);
+  } catch {
   }
 }
 
 // src/team/worker-bootstrap.ts
-var import_promises = require("fs/promises");
-var import_path3 = require("path");
+var import_promises2 = require("fs/promises");
+var import_path4 = require("path");
 
 // src/agents/prompt-helpers.ts
 var import_fs2 = require("fs");
-var import_path2 = require("path");
+var import_path3 = require("path");
 var import_url2 = require("url");
 
 // src/agents/utils.ts
 var import_fs = require("fs");
-var import_path = require("path");
+var import_path2 = require("path");
 var import_url = require("url");
 
 // src/agents/prompt-helpers.ts
@@ -366,13 +370,13 @@ function getPackageDir() {
   try {
     if (import_meta?.url) {
       const __filename = (0, import_url2.fileURLToPath)(import_meta.url);
-      const __dirname2 = (0, import_path2.dirname)(__filename);
-      return (0, import_path2.join)(__dirname2, "..", "..");
+      const __dirname2 = (0, import_path3.dirname)(__filename);
+      return (0, import_path3.join)(__dirname2, "..", "..");
     }
   } catch {
   }
   if (typeof __dirname !== "undefined") {
-    return (0, import_path2.join)(__dirname, "..");
+    return (0, import_path3.join)(__dirname, "..");
   }
   return process.cwd();
 }
@@ -387,9 +391,9 @@ function getValidAgentRoles() {
   } catch {
   }
   try {
-    const agentsDir = (0, import_path2.join)(getPackageDir(), "agents");
+    const agentsDir = (0, import_path3.join)(getPackageDir(), "agents");
     const files = (0, import_fs2.readdirSync)(agentsDir);
-    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => (0, import_path2.basename)(f, ".md")).sort();
+    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => (0, import_path3.basename)(f, ".md")).sort();
   } catch (err) {
     console.error("[prompt-injection] CRITICAL: Could not scan agents/ directory for role discovery:", err);
     _cachedRoles = [];
@@ -479,24 +483,24 @@ ${bootstrapInstructions}
 ` : ""}`;
 }
 async function composeInitialInbox(teamName, workerName2, content, cwd) {
-  const inboxPath = (0, import_path3.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/inbox.md`);
-  await (0, import_promises.mkdir)((0, import_path3.dirname)(inboxPath), { recursive: true });
-  await (0, import_promises.writeFile)(inboxPath, content, "utf-8");
+  const inboxPath = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/inbox.md`);
+  await (0, import_promises2.mkdir)((0, import_path4.dirname)(inboxPath), { recursive: true });
+  await (0, import_promises2.writeFile)(inboxPath, content, "utf-8");
 }
 async function ensureWorkerStateDir(teamName, workerName2, cwd) {
-  const workerDir = (0, import_path3.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}`);
-  await (0, import_promises.mkdir)(workerDir, { recursive: true });
-  const mailboxDir = (0, import_path3.join)(cwd, `.omc/state/team/${teamName}/mailbox`);
-  await (0, import_promises.mkdir)(mailboxDir, { recursive: true });
-  const tasksDir = (0, import_path3.join)(cwd, `.omc/state/team/${teamName}/tasks`);
-  await (0, import_promises.mkdir)(tasksDir, { recursive: true });
+  const workerDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}`);
+  await (0, import_promises2.mkdir)(workerDir, { recursive: true });
+  const mailboxDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/mailbox`);
+  await (0, import_promises2.mkdir)(mailboxDir, { recursive: true });
+  const tasksDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/tasks`);
+  await (0, import_promises2.mkdir)(tasksDir, { recursive: true });
 }
 async function writeWorkerOverlay(params) {
   const { teamName, workerName: workerName2, cwd } = params;
   const overlay = generateWorkerOverlay(params);
-  const overlayPath = (0, import_path3.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`);
-  await (0, import_promises.mkdir)((0, import_path3.dirname)(overlayPath), { recursive: true });
-  await (0, import_promises.writeFile)(overlayPath, overlay, "utf-8");
+  const overlayPath = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`);
+  await (0, import_promises2.mkdir)((0, import_path4.dirname)(overlayPath), { recursive: true });
+  await (0, import_promises2.writeFile)(overlayPath, overlay, "utf-8");
   return overlayPath;
 }
 
@@ -505,15 +509,15 @@ function workerName(index) {
   return `worker-${index + 1}`;
 }
 function stateRoot(cwd, teamName) {
-  return (0, import_path4.join)(cwd, `.omc/state/team/${teamName}`);
+  return (0, import_path5.join)(cwd, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-  await (0, import_promises2.mkdir)((0, import_path4.join)(filePath, ".."), { recursive: true });
-  await (0, import_promises2.writeFile)(filePath, JSON.stringify(data, null, 2), "utf-8");
+  await (0, import_promises3.mkdir)((0, import_path5.join)(filePath, ".."), { recursive: true });
+  await (0, import_promises3.writeFile)(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 async function readJsonSafe(filePath) {
   try {
-    const content = await (0, import_promises2.readFile)(filePath, "utf-8");
+    const content = await (0, import_promises3.readFile)(filePath, "utf-8");
     return JSON.parse(content);
   } catch {
     return null;
@@ -539,12 +543,12 @@ async function startTeam(config) {
     validateCliAvailable(agentType);
   }
   const root = stateRoot(cwd, teamName);
-  await (0, import_promises2.mkdir)((0, import_path4.join)(root, "tasks"), { recursive: true });
-  await (0, import_promises2.mkdir)((0, import_path4.join)(root, "mailbox"), { recursive: true });
-  await writeJson((0, import_path4.join)(root, "config.json"), config);
+  await (0, import_promises3.mkdir)((0, import_path5.join)(root, "tasks"), { recursive: true });
+  await (0, import_promises3.mkdir)((0, import_path5.join)(root, "mailbox"), { recursive: true });
+  await writeJson((0, import_path5.join)(root, "config.json"), config);
   for (let i = 0; i < tasks.length; i++) {
     const taskId = String(i + 1);
-    await writeJson((0, import_path4.join)(root, "tasks", `${taskId}.json`), {
+    await writeJson((0, import_path5.join)(root, "tasks", `${taskId}.json`), {
       id: taskId,
       subject: tasks[i].subject,
       description: tasks[i].description,
@@ -601,8 +605,8 @@ Write your ready sentinel first, then claim tasks from .omc/state/team/${teamNam
       if (task) {
         const taskId = String(i + 1);
         const instruction = buildInitialTaskInstruction(teamName, wName, task, taskId);
-        const inboxPath = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${wName}/inbox.md`);
-        await (0, import_promises2.appendFile)(inboxPath, `
+        const inboxPath = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/workers/${wName}/inbox.md`);
+        await (0, import_promises3.appendFile)(inboxPath, `
 
 ---
 ${instruction}
@@ -627,7 +631,7 @@ _queued: ${(/* @__PURE__ */ new Date()).toISOString()}_
         if (!ok) {
           console.warn(`[watchdog] Failed to inject completion message for ${event.workerName}`);
         }
-        const taskPath = (0, import_path4.join)(root, "tasks", `${event.taskId}.json`);
+        const taskPath = (0, import_path5.join)(root, "tasks", `${event.taskId}.json`);
         const task = await readJsonSafe(taskPath);
         if (task && task.status !== "completed") {
           task.status = event.status === "completed" ? "completed" : "failed";
@@ -654,9 +658,9 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
   const taskCounts = { pending: 0, inProgress: 0, completed: 0, failed: 0 };
   try {
     const { readdir } = await import("fs/promises");
-    const taskFiles = await readdir((0, import_path4.join)(root, "tasks"));
+    const taskFiles = await readdir((0, import_path5.join)(root, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
-      const task = await readJsonSafe((0, import_path4.join)(root, "tasks", f));
+      const task = await readJsonSafe((0, import_path5.join)(root, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
       else if (task?.status === "in_progress") taskCounts.inProgress++;
       else if (task?.status === "completed") taskCounts.completed++;
@@ -670,7 +674,7 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
     const wName = `worker-${i + 1}`;
     const paneId = workerPaneIds[i];
     const alive = await isWorkerAlive(paneId);
-    const heartbeatPath = (0, import_path4.join)(root, "workers", wName, "heartbeat.json");
+    const heartbeatPath = (0, import_path5.join)(root, "workers", wName, "heartbeat.json");
     const heartbeat = await readJsonSafe(heartbeatPath);
     let stalled = false;
     if (heartbeat?.updatedAt) {
@@ -704,7 +708,7 @@ function watchdogCliWorkers(teamName, workerNames, cwd, intervalMs, onComplete) 
     for (let i = 0; i < workerNames.length; i++) {
       const wName = workerNames[i];
       if (processed.has(wName)) continue;
-      const donePath = (0, import_path4.join)(stateRoot(cwd, teamName), "workers", wName, "done.json");
+      const donePath = (0, import_path5.join)(stateRoot(cwd, teamName), "workers", wName, "done.json");
       const signal = await readJsonSafe(donePath);
       if (!signal) continue;
       processed.add(wName);
@@ -732,17 +736,17 @@ function watchdogCliWorkers(teamName, workerNames, cwd, intervalMs, onComplete) 
 }
 async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerPaneIds, leaderPaneId) {
   const root = stateRoot(cwd, teamName);
-  await writeJson((0, import_path4.join)(root, "shutdown.json"), {
+  await writeJson((0, import_path5.join)(root, "shutdown.json"), {
     requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
     teamName
   });
   const deadline = Date.now() + timeoutMs;
-  const configData = await readJsonSafe((0, import_path4.join)(root, "config.json"));
+  const configData = await readJsonSafe((0, import_path5.join)(root, "config.json"));
   const workerCount = configData?.workerCount ?? 0;
   const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
   while (Date.now() < deadline && expectedAcks.length > 0) {
     for (const wName of [...expectedAcks]) {
-      const ackPath = (0, import_path4.join)(root, "workers", wName, "shutdown-ack.json");
+      const ackPath = (0, import_path5.join)(root, "workers", wName, "shutdown-ack.json");
       if ((0, import_fs3.existsSync)(ackPath)) {
         expectedAcks.splice(expectedAcks.indexOf(wName), 1);
       }
@@ -753,19 +757,19 @@ async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerP
   }
   await killTeamSession(sessionName, workerPaneIds, leaderPaneId);
   try {
-    await (0, import_promises2.rm)(root, { recursive: true, force: true });
+    await (0, import_promises3.rm)(root, { recursive: true, force: true });
   } catch {
   }
 }
 
 // src/team/runtime-cli.ts
 function collectTaskResults(stateRoot2) {
-  const tasksDir = (0, import_path5.join)(stateRoot2, "tasks");
+  const tasksDir = (0, import_path6.join)(stateRoot2, "tasks");
   try {
     const files = (0, import_fs4.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
-        const raw = (0, import_fs4.readFileSync)((0, import_path5.join)(tasksDir, f), "utf-8");
+        const raw = (0, import_fs4.readFileSync)((0, import_path6.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
         return {
           taskId: task.id ?? f.replace(".json", ""),
@@ -814,7 +818,7 @@ async function main() {
     pollIntervalMs = 5e3
   } = input;
   const workerCount = input.workerCount ?? agentTypes.length;
-  const stateRoot2 = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}`);
+  const stateRoot2 = (0, import_path6.join)(cwd, `.omc/state/team/${teamName}`);
   const timeoutMs = timeoutSeconds * 1e3;
   const config = {
     teamName,
@@ -826,6 +830,9 @@ async function main() {
   let runtime = null;
   let finalStatus = "timeout";
   let pollActive = true;
+  function exitCodeFor(status) {
+    return status === "completed" ? 0 : status === "timeout" ? 2 : 1;
+  }
   async function doShutdown(status) {
     pollActive = false;
     finalStatus = status;
@@ -857,7 +864,7 @@ async function main() {
       workerCount
     };
     process.stdout.write(JSON.stringify(output) + "\n");
-    process.exit(0);
+    process.exit(exitCodeFor(status));
   }
   process.on("SIGINT", () => {
     process.stderr.write("[runtime-cli] Received SIGINT, shutting down...\n");
@@ -873,6 +880,21 @@ async function main() {
     process.stderr.write(`[runtime-cli] startTeam failed: ${err}
 `);
     process.exit(1);
+  }
+  const jobId = process.env.OMC_JOB_ID;
+  const omcJobsDir = process.env.OMC_JOBS_DIR;
+  if (jobId && omcJobsDir) {
+    try {
+      const panesPath = (0, import_path6.join)(omcJobsDir, `${jobId}-panes.json`);
+      await (0, import_promises4.writeFile)(
+        panesPath + ".tmp",
+        JSON.stringify({ paneIds: runtime.workerPaneIds, leaderPaneId: runtime.leaderPaneId })
+      );
+      await (0, import_promises4.rename)(panesPath + ".tmp", panesPath);
+    } catch (err) {
+      process.stderr.write(`[runtime-cli] Failed to persist pane IDs: ${err}
+`);
+    }
   }
   const deadline = Date.now() + timeoutMs;
   while (pollActive && Date.now() < deadline) {

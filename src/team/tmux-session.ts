@@ -8,6 +8,10 @@
  */
 
 import { execSync, execFileSync } from 'child_process';
+import { join } from 'path';
+import fs from 'fs/promises';
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 const TMUX_SESSION_PREFIX = 'omc-team';
 
@@ -411,6 +415,41 @@ export async function isWorkerAlive(paneId: string): Promise<boolean> {
 }
 
 /**
+ * Graceful-then-force kill of worker panes.
+ * Writes a shutdown sentinel, waits up to graceMs, then force-kills remaining panes.
+ * Never kills the leader pane.
+ */
+export async function killWorkerPanes(opts: {
+  paneIds: string[];
+  leaderPaneId?: string;
+  teamName: string;
+  cwd: string;
+  graceMs?: number;
+}): Promise<void> {
+  const { paneIds, leaderPaneId, teamName, cwd, graceMs = 10_000 } = opts;
+
+  if (!paneIds.length) return;   // guard: nothing to kill
+
+  // 1. Write graceful shutdown sentinel
+  const shutdownPath = join(cwd, '.omc', 'state', 'team', teamName, 'shutdown.json');
+  try {
+    await fs.writeFile(shutdownPath, JSON.stringify({ requestedAt: Date.now() }));
+    await sleep(graceMs);
+  } catch { /* sentinel write failure is non-fatal */ }
+
+  // 2. Force-kill each worker pane, guarding leader
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+
+  for (const paneId of paneIds) {
+    if (paneId === leaderPaneId) continue;   // GUARD — never kill leader
+    try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); }
+    catch { /* pane already gone — OK */ }
+  }
+}
+
+/**
  * Kill the team tmux session or just the worker panes (split-pane mode).
  *
  * When sessionName contains ':' (split-pane mode, "session:window" form),
@@ -428,22 +467,21 @@ export async function killTeamSession(
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
-  if (sessionName.includes(':') && workerPaneIds && workerPaneIds.length > 0) {
-    // Split-pane mode: kill only worker panes, never the leader
-    for (const paneId of workerPaneIds) {
-      if (leaderPaneId && paneId === leaderPaneId) continue;
-      try {
-        await execFileAsync('tmux', ['kill-pane', '-t', paneId]);
-      } catch {
-        // Pane may already be dead
-      }
+  if (sessionName.includes(':')) {
+    // Split-pane mode: kill ONLY worker panes, never kill-session
+    if (!workerPaneIds?.length) return;   // no-op guard
+    for (const id of workerPaneIds) {
+      if (id === leaderPaneId) continue;
+      try { await execFileAsync('tmux', ['kill-pane', '-t', id]); }
+      catch { /* already gone */ }
     }
-  } else {
-    try {
-      await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
-    } catch {
-      // Session may already be dead
-    }
+    return;
+  }
+  // Session mode: this session is fully owned by the team
+  try {
+    await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
+  } catch {
+    // Session may already be dead
   }
 }
 

@@ -7,6 +7,7 @@
  */
 
 import { readdirSync, readFileSync } from 'fs';
+import { writeFile, rename } from 'fs/promises';
 import { join } from 'path';
 import { startTeam, monitorTeam, shutdownTeam } from './runtime.js';
 import type { TeamConfig, TeamRuntime } from './runtime.js';
@@ -111,6 +112,10 @@ async function main(): Promise<void> {
   let finalStatus: 'completed' | 'failed' | 'timeout' = 'timeout';
   let pollActive = true;
 
+  function exitCodeFor(status: 'completed' | 'failed' | 'timeout'): number {
+    return status === 'completed' ? 0 : status === 'timeout' ? 2 : 1;
+  }
+
   async function doShutdown(status: 'completed' | 'failed' | 'timeout'): Promise<void> {
     pollActive = false;
     finalStatus = status;
@@ -152,7 +157,7 @@ async function main(): Promise<void> {
     process.stdout.write(JSON.stringify(output) + '\n');
 
     // 5. Exit
-    process.exit(0);
+    process.exit(exitCodeFor(status));
   }
 
   // Register signal handlers before poll loop
@@ -171,6 +176,22 @@ async function main(): Promise<void> {
   } catch (err) {
     process.stderr.write(`[runtime-cli] startTeam failed: ${err}\n`);
     process.exit(1);
+  }
+
+  // Persist pane IDs to disk so MCP server can clean up after timeout (Step 1)
+  const jobId = process.env.OMC_JOB_ID;
+  const omcJobsDir = process.env.OMC_JOBS_DIR;
+  if (jobId && omcJobsDir) {
+    try {
+      const panesPath = join(omcJobsDir, `${jobId}-panes.json`);
+      await writeFile(
+        panesPath + '.tmp',
+        JSON.stringify({ paneIds: runtime.workerPaneIds, leaderPaneId: runtime.leaderPaneId }),
+      );
+      await rename(panesPath + '.tmp', panesPath);
+    } catch (err) {
+      process.stderr.write(`[runtime-cli] Failed to persist pane IDs: ${err}\n`);
+    }
   }
 
   // Poll loop

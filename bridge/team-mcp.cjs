@@ -6777,12 +6777,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs, exportName) {
+    function addFormats(ajv, list, fs2, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs[f]);
+        ajv.addFormat(f, fs2[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -17754,24 +17754,66 @@ var StdioServerTransport = class {
 };
 
 // src/mcp/team-server.ts
+var import_child_process2 = require("child_process");
+var import_path2 = require("path");
+var import_fs = require("fs");
+var import_promises2 = require("fs/promises");
+var import_os = require("os");
+
+// src/team/tmux-session.ts
 var import_child_process = require("child_process");
 var import_path = require("path");
-var import_fs = require("fs");
-var import_os = require("os");
+var import_promises = __toESM(require("fs/promises"), 1);
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function killWorkerPanes(opts) {
+  const { paneIds, leaderPaneId, teamName, cwd, graceMs = 1e4 } = opts;
+  if (!paneIds.length) return;
+  const shutdownPath = (0, import_path.join)(cwd, ".omc", "state", "team", teamName, "shutdown.json");
+  try {
+    await import_promises.default.writeFile(shutdownPath, JSON.stringify({ requestedAt: Date.now() }));
+    await sleep(graceMs);
+  } catch {
+  }
+  const { execFile } = await import("child_process");
+  const { promisify } = await import("util");
+  const execFileAsync = promisify(execFile);
+  for (const paneId of paneIds) {
+    if (paneId === leaderPaneId) continue;
+    try {
+      await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
+    } catch {
+    }
+  }
+}
+
+// src/mcp/team-server.ts
 var omcTeamJobs = /* @__PURE__ */ new Map();
-var OMC_JOBS_DIR = (0, import_path.join)((0, import_os.homedir)(), ".omc", "team-jobs");
+var OMC_JOBS_DIR = (0, import_path2.join)((0, import_os.homedir)(), ".omc", "team-jobs");
 function persistJob(jobId, job) {
   try {
     if (!(0, import_fs.existsSync)(OMC_JOBS_DIR)) (0, import_fs.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
-    (0, import_fs.writeFileSync)((0, import_path.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
+    (0, import_fs.writeFileSync)((0, import_path2.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
   } catch {
   }
 }
 function loadJobFromDisk(jobId) {
   try {
-    return JSON.parse((0, import_fs.readFileSync)((0, import_path.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
+    return JSON.parse((0, import_fs.readFileSync)((0, import_path2.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
   } catch {
     return void 0;
+  }
+}
+async function loadPaneIds(jobId) {
+  const p = (0, import_path2.join)(OMC_JOBS_DIR, `${jobId}-panes.json`);
+  try {
+    return JSON.parse(await (0, import_promises2.readFile)(p, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function validateJobId(job_id) {
+  if (!/^omc-[a-z0-9]{1,12}$/.test(job_id)) {
+    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
   }
 }
 var startSchema = external_exports.object({
@@ -17794,10 +17836,13 @@ var waitSchema = external_exports.object({
 async function handleStart(args) {
   const input = startSchema.parse(args);
   const jobId = `omc-${Date.now().toString(36)}`;
-  const runtimeCliPath = (0, import_path.join)(__dirname, "runtime-cli.cjs");
-  const job = { status: "running", startedAt: Date.now() };
+  const runtimeCliPath = (0, import_path2.join)(__dirname, "runtime-cli.cjs");
+  const job = { status: "running", startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
-  const child = (0, import_child_process.spawn)("node", [runtimeCliPath], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = (0, import_child_process2.spawn)("node", [runtimeCliPath], {
+    env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
   job.pid = child.pid;
   persistJob(jobId, job);
   child.stdin.write(JSON.stringify(input));
@@ -17813,16 +17858,18 @@ async function handleStart(args) {
       try {
         const parsed = JSON.parse(stdout);
         const s = parsed.status;
-        job.status = s === "completed" || s === "failed" || s === "timeout" ? s : "failed";
+        if (job.status === "running") {
+          job.status = s === "completed" || s === "failed" || s === "timeout" ? s : "failed";
+        }
       } catch {
-        job.status = "failed";
+        if (job.status === "running") job.status = "failed";
       }
       job.result = stdout;
-    } else {
-      job.status = "failed";
     }
-    if (code !== 0 && code !== null) {
-      job.status = "failed";
+    if (job.status === "running") {
+      if (code === 0) job.status = "completed";
+      else if (code === 2) job.status = "timeout";
+      else job.status = "failed";
     }
     if (stderr) job.stderr = stderr;
     persistJob(jobId, job);
@@ -17893,12 +17940,39 @@ async function handleWait(args) {
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2e3);
   }
   const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+  if (timedOutJob && timedOutJob.status === "running") {
+    timedOutJob.status = "timeout";
+  }
+  const panes = timedOutJob ? await loadPaneIds(job_id) : null;
   if (timedOutJob?.pid != null) {
+    try {
+      process.kill(timedOutJob.pid, "SIGTERM");
+    } catch {
+    }
+    const killDeadline = Date.now() + 1e4;
+    while (Date.now() < killDeadline) {
+      try {
+        process.kill(timedOutJob.pid, 0);
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
     try {
       process.kill(timedOutJob.pid, "SIGKILL");
     } catch {
     }
   }
+  if (panes && timedOutJob) {
+    await killWorkerPanes({
+      paneIds: panes.paneIds,
+      leaderPaneId: panes.leaderPaneId,
+      teamName: timedOutJob.teamName ?? "",
+      cwd: timedOutJob.cwd ?? "",
+      graceMs: 0
+    });
+  }
+  if (timedOutJob) persistJob(job_id, timedOutJob);
   return { content: [{ type: "text", text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1e3).toFixed(0)}s` }) }] };
 }
 var TOOLS = [
@@ -17950,6 +18024,18 @@ var TOOLS = [
       },
       required: ["job_id"]
     }
+  },
+  {
+    name: "omc_run_team_cleanup",
+    description: "Explicitly clean up worker panes for a completed or timed-out team job. Kills all worker panes recorded for the job without touching the leader pane or the user session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "Job ID returned by omc_run_team_start" },
+        grace_ms: { type: "number", description: "Grace period in ms before force-killing panes (default: 10000)" }
+      },
+      required: ["job_id"]
+    }
   }
 ];
 var server = new Server(
@@ -17963,6 +18049,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "omc_run_team_start") return await handleStart(args ?? {});
     if (name === "omc_run_team_status") return await handleStatus(args ?? {});
     if (name === "omc_run_team_wait") return await handleWait(args ?? {});
+    if (name === "omc_run_team_cleanup") {
+      const { job_id, grace_ms } = args ?? {};
+      validateJobId(job_id);
+      const job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+      if (!job) return { content: [{ type: "text", text: `Job ${job_id} not found` }] };
+      const panes = await loadPaneIds(job_id);
+      if (!panes?.paneIds?.length) {
+        return { content: [{ type: "text", text: "No pane IDs recorded for this job \u2014 nothing to clean up." }] };
+      }
+      await killWorkerPanes({
+        paneIds: panes.paneIds,
+        leaderPaneId: panes.leaderPaneId,
+        teamName: job.teamName ?? "",
+        cwd: job.cwd ?? "",
+        graceMs: grace_ms ?? 1e4
+      });
+      job.cleanedUpAt = (/* @__PURE__ */ new Date()).toISOString();
+      persistJob(job_id, job);
+      return { content: [{ type: "text", text: `Cleaned up ${panes.paneIds.length} worker pane(s).` }] };
+    }
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   } catch (error2) {
     return { content: [{ type: "text", text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };

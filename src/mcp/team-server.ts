@@ -23,7 +23,9 @@ import { z } from 'zod';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { homedir } from 'os';
+import { killWorkerPanes } from '../team/tmux-session.js';
 
 // ---------------------------------------------------------------------------
 // Job state: in-memory Map (primary) + /tmp backup (survives MCP restart)
@@ -35,6 +37,11 @@ interface OmcTeamJob {
   stderr?: string;
   startedAt: number;
   pid?: number;
+  paneIds?: string[];
+  leaderPaneId?: string;
+  teamName?: string;
+  cwd?: string;
+  cleanedUpAt?: string;
 }
 
 const omcTeamJobs = new Map<string, OmcTeamJob>();
@@ -52,6 +59,18 @@ function loadJobFromDisk(jobId: string): OmcTeamJob | undefined {
     return JSON.parse(readFileSync(join(OMC_JOBS_DIR, `${jobId}.json`), 'utf-8')) as OmcTeamJob;
   } catch {
     return undefined;
+  }
+}
+
+async function loadPaneIds(jobId: string): Promise<{ paneIds: string[]; leaderPaneId: string } | null> {
+  const p = join(OMC_JOBS_DIR, `${jobId}-panes.json`);
+  try { return JSON.parse(await readFile(p, 'utf-8')); }
+  catch { return null; }
+}
+
+function validateJobId(job_id: string): void {
+  if (!/^omc-[a-z0-9]{1,12}$/.test(job_id)) {
+    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
   }
 }
 
@@ -88,10 +107,13 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
   const jobId = `omc-${Date.now().toString(36)}`;
   const runtimeCliPath = join(__dirname, 'runtime-cli.cjs');
 
-  const job: OmcTeamJob = { status: 'running', startedAt: Date.now() };
+  const job: OmcTeamJob = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
 
-  const child = spawn('node', [runtimeCliPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn('node', [runtimeCliPath], {
+    env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   job.pid = child.pid;
   persistJob(jobId, job);
 
@@ -110,14 +132,19 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
       try {
         const parsed = JSON.parse(stdout) as { status?: string };
         const s = parsed.status;
-        job.status = (s === 'completed' || s === 'failed' || s === 'timeout') ? s : 'failed';
-      } catch { job.status = 'failed'; }
+        if (job.status === 'running') {
+          job.status = (s === 'completed' || s === 'failed' || s === 'timeout') ? s : 'failed';
+        }
+      } catch {
+        if (job.status === 'running') job.status = 'failed';
+      }
       job.result = stdout;
-    } else {
-      job.status = 'failed';
     }
-    if (code !== 0 && code !== null) {
-      job.status = 'failed';
+    // Only fall back to exit-code when stdout parsing did not set a status
+    if (job.status === 'running') {
+      if (code === 0) job.status = 'completed';
+      else if (code === 2) job.status = 'timeout';
+      else job.status = 'failed';
     }
     if (stderr) job.stderr = stderr;
     persistJob(jobId, job);
@@ -187,11 +214,42 @@ async function handleWait(args: unknown): Promise<{ content: Array<{ type: 'text
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
   }
 
-  // FIX 1: Hard-kill backstop — ensure the child process doesn't run forever after timeout.
+  // Timeout: SIGTERM → wait → SIGKILL escalation, then kill remaining worker panes
   const timedOutJob = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
-  if (timedOutJob?.pid != null) {
-    try { process.kill(timedOutJob.pid, 'SIGKILL'); } catch { /* already dead */ }
+
+  // Set status immediately so the close handler won't override it
+  if (timedOutJob && timedOutJob.status === 'running') {
+    timedOutJob.status = 'timeout';
   }
+
+  const panes = timedOutJob ? await loadPaneIds(job_id) : null;
+
+  if (timedOutJob?.pid != null) {
+    try { process.kill(timedOutJob.pid, 'SIGTERM'); } catch { /* already gone */ }
+
+    // Wait up to 10s for runtime-cli to exit cleanly (SIGTERM handler calls shutdownTeam)
+    const killDeadline = Date.now() + 10_000;
+    while (Date.now() < killDeadline) {
+      try { process.kill(timedOutJob.pid, 0); } catch { break; } // ESRCH = process gone
+      await new Promise<void>(r => setTimeout(r, 500));
+    }
+
+    // Escalate to SIGKILL if still alive
+    try { process.kill(timedOutJob.pid, 'SIGKILL'); } catch { /* gone */ }
+  }
+
+  // Backstop: kill any remaining worker panes (grace already elapsed above)
+  if (panes && timedOutJob) {
+    await killWorkerPanes({
+      paneIds: panes.paneIds,
+      leaderPaneId: panes.leaderPaneId,
+      teamName: timedOutJob.teamName ?? '',
+      cwd: timedOutJob.cwd ?? '',
+      graceMs: 0,
+    });
+  }
+
+  if (timedOutJob) persistJob(job_id, timedOutJob);
 
   return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s` }) }] };
 }
@@ -250,6 +308,18 @@ const TOOLS = [
       required: ['job_id'],
     },
   },
+  {
+    name: 'omc_run_team_cleanup',
+    description: 'Explicitly clean up worker panes for a completed or timed-out team job. Kills all worker panes recorded for the job without touching the leader pane or the user session.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        job_id: { type: 'string', description: 'Job ID returned by omc_run_team_start' },
+        grace_ms: { type: 'number', description: 'Grace period in ms before force-killing panes (default: 10000)' },
+      },
+      required: ['job_id'],
+    },
+  },
 ];
 
 const server = new Server(
@@ -265,6 +335,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'omc_run_team_start') return await handleStart(args ?? {});
     if (name === 'omc_run_team_status') return await handleStatus(args ?? {});
     if (name === 'omc_run_team_wait') return await handleWait(args ?? {});
+    if (name === 'omc_run_team_cleanup') {
+      const { job_id, grace_ms } = (args ?? {}) as { job_id: string; grace_ms?: number };
+      validateJobId(job_id);
+      const job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+      if (!job) return { content: [{ type: 'text', text: `Job ${job_id} not found` }] };
+      const panes = await loadPaneIds(job_id);
+      if (!panes?.paneIds?.length) {
+        return { content: [{ type: 'text', text: 'No pane IDs recorded for this job — nothing to clean up.' }] };
+      }
+      await killWorkerPanes({
+        paneIds: panes.paneIds,
+        leaderPaneId: panes.leaderPaneId,
+        teamName: job.teamName ?? '',
+        cwd: job.cwd ?? '',
+        graceMs: grace_ms ?? 10_000,
+      });
+      job.cleanedUpAt = new Date().toISOString();
+      persistJob(job_id, job);
+      return { content: [{ type: 'text', text: `Cleaned up ${panes.paneIds.length} worker pane(s).` }] };
+    }
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   } catch (error) {
     return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
