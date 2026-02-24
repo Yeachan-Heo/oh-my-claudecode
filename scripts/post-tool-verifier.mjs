@@ -247,14 +247,19 @@ function processRememberTags(output, directory) {
 }
 
 // Detect write failure
+// Patterns are tightened to tool-level failure phrases to avoid false positives
+// when edited file content contains error-handling code (issue #1005)
 export function detectWriteFailure(output) {
   const cleaned = stripClaudeTempCwdErrors(output);
   const errorPatterns = [
-    /error/i,
-    /failed/i,
-    /permission denied/i,
-    /read-only/i,
-    /not found/i,
+    /\berror:/i,              // "error:" with word boundary — avoids "setError", "console.error"
+    /\bfailed to\b/i,        // "failed to write" — avoids "failedOidc", UI strings
+    /\bwrite failed\b/i,     // explicit write failure
+    /\boperation failed\b/i, // explicit operation failure
+    /permission denied/i,    // keep as-is (specific enough)
+    /read-only/i,            // keep as-is
+    /\bno such file\b/i,     // more specific than "not found"
+    /\bdirectory not found\b/i,
   ];
 
   return errorPatterns.some(pattern => pattern.test(cleaned));
