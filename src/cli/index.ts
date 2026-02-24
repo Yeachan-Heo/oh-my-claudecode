@@ -1459,14 +1459,16 @@ waitCmd
  */
 const teleportCmd = program
   .command('teleport [ref]')
-  .description('Create git worktree for isolated development (e.g., omc teleport #123)')
+  .description('Create git worktree for isolated development (e.g., omc teleport \'#123\')')
   .option('--worktree', 'Create worktree (default behavior, flag kept for compatibility)')
   .option('-p, --path <path>', 'Custom worktree path (default: ~/Workspace/omc-worktrees/)')
   .option('-b, --base <branch>', 'Base branch to create from (default: main)')
   .option('--json', 'Output as JSON')
   .addHelpText('after', `
+Note: Quote the # sign in your shell, e.g., omc teleport '#42'
+
 Examples:
-  $ omc teleport #42             Create worktree for issue/PR #42
+  $ omc teleport '#42'           Create worktree for issue/PR #42
   $ omc teleport add-auth        Create worktree for a feature branch
   $ omc teleport list            List existing worktrees
   $ omc teleport remove ./path   Remove a worktree`)
@@ -1480,13 +1482,13 @@ Examples:
       console.log('  omc teleport remove <path>   Remove a worktree');
       console.log('');
       console.log('Reference formats:');
-      console.log('  #123                         Issue/PR in current repo');
-      console.log('  owner/repo#123               Issue/PR in specific repo');
+      console.log('  \'#123\'                       Issue/PR in current repo (quote the #)');
+      console.log('  owner/repo#123               Issue/PR in specific repo (no quoting needed)');
       console.log('  my-feature                   Feature branch name');
       console.log('  https://github.com/...       GitHub URL');
       console.log('');
       console.log('Examples:');
-      console.log('  omc teleport #42             Create worktree for issue #42');
+      console.log('  omc teleport \'#42\'           Create worktree for issue #42');
       console.log('  omc teleport add-auth        Create worktree for feature "add-auth"');
       console.log('');
       return;

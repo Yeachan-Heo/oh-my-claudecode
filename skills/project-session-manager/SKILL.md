@@ -10,7 +10,7 @@ aliases: [psm]
 
 > **Quick Start:** For simple worktree creation without tmux sessions, use `omc teleport`:
 > ```bash
-> omc teleport #123          # Create worktree for issue/PR
+> omc teleport '#123'        # Create worktree for issue/PR
 > omc teleport my-feature    # Create worktree for feature
 > omc teleport list          # List worktrees
 > ```
@@ -467,9 +467,9 @@ The `omc teleport` command provides a lightweight alternative to full PSM sessio
 ### Usage
 
 ```bash
-# Create worktree for an issue or PR
-omc teleport #123
-omc teleport owner/repo#123
+# Create worktree for an issue or PR (quote # when it starts the ref)
+omc teleport '#123'
+omc teleport owner/repo#123    # no quoting needed — # is not at word start
 omc teleport https://github.com/owner/repo/issues/42
 
 # Create worktree for a feature
