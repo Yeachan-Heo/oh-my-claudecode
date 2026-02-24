@@ -1,6 +1,6 @@
 /**
  * Native tmux shell launch for omc
- * Launches Claude Code with tmux session management and HUD integration
+ * Launches Claude Code with tmux session management
  */
 /**
  * Extract the OMC-specific --notify flag from launch args.
@@ -29,8 +29,8 @@ export declare function preLaunch(_cwd: string, _sessionId: string): Promise<voi
 /**
  * runClaude: Launch Claude CLI (blocks until exit)
  * Handles 3 scenarios:
- * 1. inside-tmux: Launch claude in current pane, HUD in bottom split
- * 2. outside-tmux: Create new tmux session with claude + HUD pane
+ * 1. inside-tmux: Launch claude in current pane
+ * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
  */
 export declare function runClaude(cwd: string, args: string[], sessionId: string): void;

@@ -1,9 +1,9 @@
 /**
  * Native tmux shell launch for omc
- * Launches Claude Code with tmux session management and HUD integration
+ * Launches Claude Code with tmux session management
  */
 import { execFileSync } from 'child_process';
-import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, listHudWatchPaneIdsInCurrentWindow, createHudWatchPane, killTmuxPane, isClaudeAvailable, } from './tmux-utils.js';
+import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, isClaudeAvailable, } from './tmux-utils.js';
 // Flag mapping
 const MADMAX_FLAG = '--madmax';
 const YOLO_FLAG = '--yolo';
@@ -78,23 +78,18 @@ export async function preLaunch(_cwd, _sessionId) {
 /**
  * runClaude: Launch Claude CLI (blocks until exit)
  * Handles 3 scenarios:
- * 1. inside-tmux: Launch claude in current pane, HUD in bottom split
- * 2. outside-tmux: Create new tmux session with claude + HUD pane
+ * 1. inside-tmux: Launch claude in current pane
+ * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
  */
 export function runClaude(cwd, args, sessionId) {
-    const omcBin = process.argv[1];
     const policy = resolveLaunchPolicy(process.env);
-    // Check if omc has a HUD command
-    // For now, use a simple placeholder or skip HUD if not available
-    const hasHudCommand = true;
-    const hudCmd = hasHudCommand ? buildTmuxShellCommand('node', [omcBin, 'hud', '--watch']) : '';
     switch (policy) {
         case 'inside-tmux':
-            runClaudeInsideTmux(cwd, args, hudCmd);
+            runClaudeInsideTmux(cwd, args);
             break;
         case 'outside-tmux':
-            runClaudeOutsideTmux(cwd, args, sessionId, hudCmd);
+            runClaudeOutsideTmux(cwd, args, sessionId);
             break;
         case 'direct':
             runClaudeDirect(cwd, args);
@@ -103,25 +98,9 @@ export function runClaude(cwd, args, sessionId) {
 }
 /**
  * Run Claude inside existing tmux session
- * Splits pane for HUD, launches Claude in current pane
+ * Launches Claude in current pane
  */
-function runClaudeInsideTmux(cwd, args, hudCmd) {
-    const currentPaneId = process.env.TMUX_PANE;
-    // Clean up stale HUD panes
-    const staleHudPaneIds = listHudWatchPaneIdsInCurrentWindow(currentPaneId);
-    for (const paneId of staleHudPaneIds) {
-        killTmuxPane(paneId);
-    }
-    // Create HUD pane if command is available
-    let hudPaneId = null;
-    if (hudCmd) {
-        try {
-            hudPaneId = createHudWatchPane(cwd, hudCmd);
-        }
-        catch {
-            // HUD split failed, continue without it
-        }
-    }
+function runClaudeInsideTmux(cwd, args) {
     // Launch Claude in current pane
     try {
         execFileSync('claude', args, { cwd, stdio: 'inherit' });
@@ -135,23 +114,12 @@ function runClaudeInsideTmux(cwd, args, hudCmd) {
         // Propagate Claude's exit code so omc does not swallow failures
         process.exit(typeof err.status === 'number' ? err.status : 1);
     }
-    finally {
-        // Cleanup HUD pane on exit
-        if (hudPaneId) {
-            killTmuxPane(hudPaneId);
-        }
-        // Clean up any remaining HUD panes
-        const remainingHudPaneIds = listHudWatchPaneIdsInCurrentWindow(currentPaneId);
-        for (const paneId of remainingHudPaneIds) {
-            killTmuxPane(paneId);
-        }
-    }
 }
 /**
  * Run Claude outside tmux - create new session
- * Creates tmux session with Claude + HUD pane
+ * Creates tmux session with Claude
  */
-function runClaudeOutsideTmux(cwd, args, _sessionId, hudCmd) {
+function runClaudeOutsideTmux(cwd, args, _sessionId) {
     const claudeCmd = buildTmuxShellCommand('claude', args);
     const sessionName = buildTmuxSessionName(cwd);
     const tmuxArgs = [
@@ -159,10 +127,6 @@ function runClaudeOutsideTmux(cwd, args, _sessionId, hudCmd) {
         claudeCmd,
         ';', 'set-option', '-g', 'mouse', 'on',
     ];
-    // Add HUD pane if available
-    if (hudCmd) {
-        tmuxArgs.push(';', 'split-window', '-v', '-l', '4', '-d', '-c', cwd, hudCmd, ';', 'select-pane', '-t', '0');
-    }
     // Attach to session
     tmuxArgs.push(';', 'attach-session', '-t', sessionName);
     try {

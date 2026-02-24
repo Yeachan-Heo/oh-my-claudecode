@@ -3,8 +3,7 @@
  *
  * Covers:
  * - Exit code propagation (runClaude direct / inside-tmux)
- * - hasHudCommand fix (issue #863): HUD must no longer be permanently
- *   disabled by a hardcoded `false`.
+ * - No OMC HUD pane spawning in tmux launch paths
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -23,9 +22,6 @@ vi.mock('../tmux-utils.js', () => ({
   buildTmuxSessionName: vi.fn(() => 'test-session'),
   buildTmuxShellCommand: vi.fn((cmd: string, args: string[]) => `${cmd} ${args.join(' ')}`),
   quoteShellArg: vi.fn((s: string) => s),
-  listHudWatchPaneIdsInCurrentWindow: vi.fn(() => []),
-  createHudWatchPane: vi.fn(() => '%1'),
-  killTmuxPane: vi.fn(),
   isClaudeAvailable: vi.fn(() => true),
 }));
 
@@ -33,8 +29,6 @@ import { runClaude, extractNotifyFlag, normalizeClaudeLaunchArgs } from '../laun
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
-  createHudWatchPane,
-  listHudWatchPaneIdsInCurrentWindow,
 } from '../tmux-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -212,66 +206,37 @@ describe('runClaude — exit code propagation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runClaude — HUD integration (issue #863 regression guard)
+// runClaude — OMC HUD pane spawning disabled
 // ---------------------------------------------------------------------------
-describe('runClaude HUD integration', () => {
-  const savedTmuxPane = process.env.TMUX_PANE;
-
+describe('runClaude OMC HUD behavior', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    process.env.TMUX_PANE = '%0';
+    vi.resetAllMocks();
     (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
   });
 
-  afterEach(() => {
-    if (savedTmuxPane === undefined) {
-      delete process.env.TMUX_PANE;
-    } else {
-      process.env.TMUX_PANE = savedTmuxPane;
-    }
-  });
-
-  it('builds a non-empty hudCmd when inside tmux (hasHudCommand=true)', () => {
+  it('does not build an omc hud --watch command inside tmux', () => {
     (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('inside-tmux');
 
     runClaude('/tmp/cwd', [], 'test-session');
 
-    // buildTmuxShellCommand must have been called with 'node' and hud args
     const calls = vi.mocked(buildTmuxShellCommand).mock.calls;
-    const hudCall = calls.find(
+    const omcHudCall = calls.find(
       ([cmd, args]) => cmd === 'node' && Array.isArray(args) && args.includes('hud'),
     );
-    expect(hudCall).toBeDefined();
-    expect(hudCall![1]).toContain('--watch');
+    expect(omcHudCall).toBeUndefined();
   });
 
-  it('creates a HUD pane when inside tmux', () => {
-    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('inside-tmux');
+  it('does not add split-window HUD pane args when launching outside tmux', () => {
+    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('outside-tmux');
 
     runClaude('/tmp/cwd', [], 'test-session');
 
-    expect(createHudWatchPane).toHaveBeenCalledOnce();
-    // The second argument is the hudCmd string – must be non-empty
-    const hudCmd = vi.mocked(createHudWatchPane).mock.calls[0][1];
-    expect(typeof hudCmd).toBe('string');
-    expect(hudCmd.length).toBeGreaterThan(0);
-  });
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    expect(tmuxCall).toBeDefined();
 
-  it('does NOT create a HUD pane when running direct (no tmux)', () => {
-    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('direct');
-
-    runClaude('/tmp/cwd', [], 'test-session');
-
-    expect(createHudWatchPane).not.toHaveBeenCalled();
-  });
-
-  it('cleans up stale HUD panes before launching', () => {
-    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('inside-tmux');
-    vi.mocked(listHudWatchPaneIdsInCurrentWindow).mockReturnValue(['%5', '%6']);
-
-    runClaude('/tmp/cwd', [], 'test-session');
-
-    expect(listHudWatchPaneIdsInCurrentWindow).toHaveBeenCalled();
+    const tmuxArgs = tmuxCall![1] as string[];
+    expect(tmuxArgs).not.toContain('split-window');
   });
 });
 
