@@ -91,6 +91,8 @@ var CONTRACTS = {
     agentType: "gemini",
     binary: "gemini",
     installInstructions: "Install Gemini CLI: npm install -g @google/gemini-cli",
+    supportsPromptMode: true,
+    promptModeFlag: "-p",
     buildLaunchArgs(model, extraFlags = []) {
       const args = ["--yolo"];
       if (model) args.push("--model", model);
@@ -141,6 +143,17 @@ function getWorkerEnv(teamName, workerName2, agentType) {
     OMC_TEAM_NAME: teamName,
     OMC_WORKER_AGENT_TYPE: agentType
   };
+}
+function isPromptModeAgent(agentType) {
+  const contract = getContract(agentType);
+  return !!(contract.supportsPromptMode && contract.promptModeFlag);
+}
+function getPromptModeArgs(agentType, instruction) {
+  const contract = getContract(agentType);
+  if (contract.supportsPromptMode && contract.promptModeFlag) {
+    return [contract.promptModeFlag, instruction];
+  }
+  return [];
 }
 
 // src/team/tmux-session.ts
@@ -223,15 +236,39 @@ async function createTeamSession(teamName, workerCount, cwd) {
   if (!process.env.TMUX) {
     throw new Error("Team mode requires running inside tmux. Start one: tmux new-session");
   }
-  const contextResult = await execFileAsync("tmux", [
-    "display-message",
-    "-p",
-    "#S:#I #{pane_id}"
-  ]);
-  const contextLine = contextResult.stdout.trim();
-  const spaceIdx = contextLine.indexOf(" ");
-  const sessionAndWindow = contextLine.slice(0, spaceIdx);
-  const leaderPaneId = contextLine.slice(spaceIdx + 1);
+  const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
+  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
+  let sessionAndWindow = "";
+  let leaderPaneId = envPaneId;
+  if (envPaneId) {
+    try {
+      const targetedContextResult = await execFileAsync("tmux", [
+        "display-message",
+        "-p",
+        "-t",
+        envPaneId,
+        "#S:#I"
+      ]);
+      sessionAndWindow = targetedContextResult.stdout.trim();
+    } catch {
+      sessionAndWindow = "";
+      leaderPaneId = "";
+    }
+  }
+  if (!sessionAndWindow || !leaderPaneId) {
+    const contextResult = await execFileAsync("tmux", [
+      "display-message",
+      "-p",
+      "#S:#I #{pane_id}"
+    ]);
+    const contextLine = contextResult.stdout.trim();
+    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+    if (!contextMatch) {
+      throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+    }
+    sessionAndWindow = contextMatch[1];
+    leaderPaneId = contextMatch[2];
+  }
   const teamTarget = sessionAndWindow;
   const resolvedSessionName = teamTarget.split(":")[0];
   const workerPaneIds = [];
@@ -978,12 +1015,20 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
   if (!paneId) return "";
   const workerIndex = parseWorkerIndex(workerNameValue);
   const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length] ?? runtime.config.agentTypes[0] ?? "claude";
+  const usePromptMode = isPromptModeAgent(agentType);
+  const instruction = buildInitialTaskInstruction(runtime.teamName, workerNameValue, task, taskId);
+  await composeInitialInbox(runtime.teamName, workerNameValue, instruction, runtime.cwd);
+  const relInboxPath = `.omc/state/team/${runtime.teamName}/workers/${workerNameValue}/inbox.md`;
   const envVars = getWorkerEnv(runtime.teamName, workerNameValue, agentType);
   const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
     teamName: runtime.teamName,
     workerName: workerNameValue,
     cwd: runtime.cwd
   });
+  if (usePromptMode) {
+    const promptArgs = getPromptModeArgs(agentType, `Read and execute your task from: ${relInboxPath}`);
+    launchArgs.push(...promptArgs);
+  }
   const paneConfig = {
     teamName: runtime.teamName,
     workerName: workerNameValue,
@@ -1003,28 +1048,27 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     await writePanesTrackingFileIfPresent(runtime);
   } catch {
   }
-  await new Promise((r) => setTimeout(r, 4e3));
-  if (agentType === "gemini") {
-    const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, "1");
-    if (!confirmed) {
+  if (!usePromptMode) {
+    await new Promise((r) => setTimeout(r, 4e3));
+    if (agentType === "gemini") {
+      const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, "1");
+      if (!confirmed) {
+        await killWorkerPane(runtime, workerNameValue, paneId);
+        await resetTaskToPending(root, taskId);
+        throw new Error(`worker_notify_failed:${workerNameValue}:trust-confirm`);
+      }
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    const notified = await notifyPaneWithRetry(
+      runtime.sessionName,
+      paneId,
+      `Read and execute your task from: ${relInboxPath}`
+    );
+    if (!notified) {
       await killWorkerPane(runtime, workerNameValue, paneId);
       await resetTaskToPending(root, taskId);
-      throw new Error(`worker_notify_failed:${workerNameValue}:trust-confirm`);
+      throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
     }
-    await new Promise((r) => setTimeout(r, 800));
-  }
-  const instruction = buildInitialTaskInstruction(runtime.teamName, workerNameValue, task, taskId);
-  await composeInitialInbox(runtime.teamName, workerNameValue, instruction, runtime.cwd);
-  const relInboxPath = `.omc/state/team/${runtime.teamName}/workers/${workerNameValue}/inbox.md`;
-  const notified = await notifyPaneWithRetry(
-    runtime.sessionName,
-    paneId,
-    `Read and execute your task from: ${relInboxPath}`
-  );
-  if (!notified) {
-    await killWorkerPane(runtime, workerNameValue, paneId);
-    await resetTaskToPending(root, taskId);
-    throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
   }
   return paneId;
 }

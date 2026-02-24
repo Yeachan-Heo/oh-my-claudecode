@@ -5,6 +5,10 @@ export interface CliAgentContract {
     installInstructions: string;
     buildLaunchArgs(model?: string, extraFlags?: string[]): string[];
     parseOutput(rawOutput: string): string;
+    /** Whether this agent supports a prompt/headless mode that bypasses TUI input */
+    supportsPromptMode?: boolean;
+    /** CLI flag for prompt mode (e.g., '-p' for gemini) */
+    promptModeFlag?: string;
 }
 export interface WorkerLaunchConfig {
     teamName: string;
@@ -21,4 +25,13 @@ export declare function buildWorkerArgv(agentType: CliAgentType, config: WorkerL
 export declare function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunchConfig): string;
 export declare function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType): Record<string, string>;
 export declare function parseCliOutput(agentType: CliAgentType, rawOutput: string): string;
+/**
+ * Check if an agent type supports prompt/headless mode (bypasses TUI).
+ */
+export declare function isPromptModeAgent(agentType: CliAgentType): boolean;
+/**
+ * Get the extra CLI args needed to pass an instruction in prompt mode.
+ * Returns empty array if the agent does not support prompt mode.
+ */
+export declare function getPromptModeArgs(agentType: CliAgentType, instruction: string): string[];
 //# sourceMappingURL=model-contract.d.ts.map

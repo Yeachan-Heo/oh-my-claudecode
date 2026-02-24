@@ -49,6 +49,8 @@ const CONTRACTS = {
         agentType: 'gemini',
         binary: 'gemini',
         installInstructions: 'Install Gemini CLI: npm install -g @google/gemini-cli',
+        supportsPromptMode: true,
+        promptModeFlag: '-p',
         buildLaunchArgs(model, extraFlags = []) {
             const args = ['--yolo'];
             if (model)
@@ -107,5 +109,23 @@ export function getWorkerEnv(teamName, workerName, agentType) {
 }
 export function parseCliOutput(agentType, rawOutput) {
     return getContract(agentType).parseOutput(rawOutput);
+}
+/**
+ * Check if an agent type supports prompt/headless mode (bypasses TUI).
+ */
+export function isPromptModeAgent(agentType) {
+    const contract = getContract(agentType);
+    return !!(contract.supportsPromptMode && contract.promptModeFlag);
+}
+/**
+ * Get the extra CLI args needed to pass an instruction in prompt mode.
+ * Returns empty array if the agent does not support prompt mode.
+ */
+export function getPromptModeArgs(agentType, instruction) {
+    const contract = getContract(agentType);
+    if (contract.supportsPromptMode && contract.promptModeFlag) {
+        return [contract.promptModeFlag, instruction];
+    }
+    return [];
 }
 //# sourceMappingURL=model-contract.js.map
