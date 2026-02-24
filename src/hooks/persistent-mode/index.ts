@@ -22,7 +22,7 @@ import {
   getUltraworkPersistenceMessage,
   type UltraworkState
 } from '../ultrawork/index.js';
-import { resolveToWorktreeRoot } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import {
   readRalphState,
   writeRalphState,
@@ -38,7 +38,7 @@ import {
   detectArchitectRejection,
   clearVerificationState
 } from '../ralph/index.js';
-import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop } from '../todo-continuation/index.js';
+import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
   isAutopilotActive
@@ -78,9 +78,51 @@ export interface PersistentModeResult {
 
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
+const CANCEL_SIGNAL_TTL_MS = 30_000;
 
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
+
+/**
+ * Check whether this session is in an explicit cancel window.
+ * Used to prevent stop-hook re-enforcement races during /cancel.
+ */
+function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
+  if (!sessionId) return false;
+
+  let cancelSignalPath: string;
+  try {
+    cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
+  } catch {
+    return false;
+  }
+
+  if (!existsSync(cancelSignalPath)) {
+    return false;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(cancelSignalPath, 'utf-8')) as {
+      requested_at?: string;
+      expires_at?: string;
+    };
+
+    const now = Date.now();
+    const expiresAt = raw.expires_at ? new Date(raw.expires_at).getTime() : NaN;
+    const requestedAt = raw.requested_at ? new Date(raw.requested_at).getTime() : NaN;
+    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
+
+    if (!Number.isFinite(effectiveExpiry) || effectiveExpiry <= now) {
+      unlinkSync(cancelSignalPath);
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Read last tool error from state directory.
@@ -322,6 +364,15 @@ async function checkRalphLoop(
     return null;
   }
 
+  // Explicit cancellation window: never re-arm Ralph internals while cancel is in progress.
+  if (isSessionCancelInProgress(workingDir, sessionId)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
   // Self-heal linked ultrawork: if ralph is active and marked linked but ultrawork
   // state is missing, recreate it so stop reinforcement cannot silently disappear.
   if (state.linked_ultrawork) {
@@ -451,6 +502,14 @@ async function checkRalphLoop(
   }
 
   // Check max iterations
+  if (isSessionCancelInProgress(workingDir, sessionId)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
   if (state.iteration >= state.max_iterations) {
     // Do not silently stop Ralph with unfinished work.
     // Extend the limit and continue enforcement so user-visible cancellation
@@ -516,7 +575,8 @@ async function checkUltrawork(
   directory?: string,
   _hasIncompleteTodos?: boolean
 ): Promise<PersistentModeResult | null> {
-  const state = readUltraworkState(directory, sessionId);
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readUltraworkState(workingDir, sessionId);
 
   if (!state || !state.active) {
     return null;
@@ -527,9 +587,17 @@ async function checkUltrawork(
     return null;
   }
 
+  if (isSessionCancelInProgress(workingDir, sessionId)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
   // Reinforce ultrawork mode - ALWAYS continue while active.
   // This prevents false stops from bash errors, transient failures, etc.
-  const newState = incrementReinforcement(directory, sessionId);
+  const newState = incrementReinforcement(workingDir, sessionId);
   if (!newState) {
     return null;
   }
@@ -631,6 +699,27 @@ export async function checkPersistentModes(
   // Blocking these causes a deadlock where Claude Code cannot compact.
   // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
   if (isContextLimitStop(stopContext)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
+  // Explicit /cancel paths must always bypass continuation re-enforcement.
+  // This prevents cancel races where stop-hook persistence can re-arm Ralph/Ultrawork
+  // (self-heal, max-iteration extension, reinforcement) during shutdown.
+  if (isExplicitCancelCommand(stopContext)) {
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none'
+    };
+  }
+
+  // Session-scoped cancel signal from state_clear during /cancel flow.
+  // Ensures stop-hook does not re-arm Ralph/Ultrawork while cancellation is in progress.
+  if (isSessionCancelInProgress(workingDir, sessionId)) {
     return {
       shouldBlock: false,
       message: '',

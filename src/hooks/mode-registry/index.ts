@@ -352,9 +352,11 @@ export function getAllModeStatuses(cwd: string, sessionId?: string): ModeStatus[
 export function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: string): boolean {
   const config = MODE_CONFIGS[mode];
   let success = true;
+  const markerFile = getMarkerFilePath(cwd, mode);
+  const isSessionScopedClear = Boolean(sessionId && !config.isSqlite);
 
   // Delete session-scoped state file if sessionId provided
-  if (sessionId && !config.isSqlite) {
+  if (isSessionScopedClear && sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     if (existsSync(sessionStateFile)) {
       try {
@@ -364,34 +366,65 @@ export function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: str
       }
     }
 
-    // Session-scoped clear should not touch legacy/marker files
-    return success;
+    // Clear session-scoped marker artifacts (e.g., ralph-verification-state.json).
+    // Keep legacy/shared marker files untouched for isolation.
+    if (config.markerFile) {
+      const markerStateName = config.markerFile.replace(/\.json$/i, '');
+      const sessionMarkerFile = resolveSessionStatePath(markerStateName, sessionId, cwd);
+      if (existsSync(sessionMarkerFile)) {
+        try {
+          unlinkSync(sessionMarkerFile);
+        } catch {
+          success = false;
+        }
+      }
+    }
+
+    // Also try cleaning legacy marker for this mode (best-effort).
+    // Keep isolation by deleting only unowned markers or markers owned by this session.
+    if (markerFile && existsSync(markerFile)) {
+      try {
+        const markerRaw = JSON.parse(readFileSync(markerFile, 'utf-8')) as { session_id?: string; sessionId?: string };
+        const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
+        if (!markerSessionId || markerSessionId === sessionId) {
+          unlinkSync(markerFile);
+        }
+      } catch {
+        // If marker is not JSON (or unreadable), best-effort delete for cleanup.
+        try {
+          unlinkSync(markerFile);
+        } catch {
+          success = false;
+        }
+      }
+    }
   }
 
-  // Delete local state file (legacy path)
+  // Delete local state file (legacy path) for non-session clears
   const stateFile = getStateFilePath(cwd, mode);
-  if (existsSync(stateFile)) {
-    try {
-      unlinkSync(stateFile);
-    } catch {
-      success = false;
+  if (!isSessionScopedClear) {
+    if (existsSync(stateFile)) {
+      try {
+        unlinkSync(stateFile);
+      } catch {
+        success = false;
+      }
     }
-  }
 
-  // For SQLite, also delete WAL and SHM files
-  if (config.isSqlite) {
-    const walFile = stateFile + '-wal';
-    const shmFile = stateFile + '-shm';
-    if (existsSync(walFile)) {
-      try { unlinkSync(walFile); } catch { success = false; }
-    }
-    if (existsSync(shmFile)) {
-      try { unlinkSync(shmFile); } catch { success = false; }
+    // For SQLite, also delete WAL and SHM files
+    if (config.isSqlite) {
+      const walFile = stateFile + '-wal';
+      const shmFile = stateFile + '-shm';
+      if (existsSync(walFile)) {
+        try { unlinkSync(walFile); } catch { success = false; }
+      }
+      if (existsSync(shmFile)) {
+        try { unlinkSync(shmFile); } catch { success = false; }
+      }
     }
   }
 
   // Delete marker file if applicable
-  const markerFile = getMarkerFilePath(cwd, mode);
   if (markerFile && existsSync(markerFile)) {
     try {
       unlinkSync(markerFile);

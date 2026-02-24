@@ -178,6 +178,32 @@ describe('Session-Scoped State Isolation', () => {
       const pathB = join(tempDir, '.omc', 'state', 'sessions', 'session-B', 'ultrawork-state.json');
       expect(existsSync(pathB)).toBe(true);
     });
+
+    it('should clear session-scoped marker artifacts (ralph verification) for the target session only', () => {
+      const sessionA = 'session-A';
+      const sessionB = 'session-B';
+      createSessionState(sessionA, 'ralph', { active: true, session_id: sessionA });
+      createSessionState(sessionB, 'ralph', { active: true, session_id: sessionB });
+
+      const sessionADir = join(tempDir, '.omc', 'state', 'sessions', sessionA);
+      const sessionBDir = join(tempDir, '.omc', 'state', 'sessions', sessionB);
+      const markerA = join(sessionADir, 'ralph-verification-state.json');
+      const markerB = join(sessionBDir, 'ralph-verification-state.json');
+      const legacyMarker = join(tempDir, '.omc', 'state', 'ralph-verification.json');
+      writeFileSync(markerA, JSON.stringify({ pending: true }, null, 2));
+      writeFileSync(markerB, JSON.stringify({ pending: true }, null, 2));
+      mkdirSync(join(tempDir, '.omc', 'state'), { recursive: true });
+      writeFileSync(legacyMarker, JSON.stringify({ pending: true }, null, 2));
+      expect(existsSync(legacyMarker)).toBe(true);
+
+      clearModeState('ralph', tempDir, sessionA);
+
+      expect(existsSync(join(sessionADir, 'ralph-state.json'))).toBe(false);
+      expect(existsSync(markerA)).toBe(false);
+      expect(existsSync(join(sessionBDir, 'ralph-state.json'))).toBe(true);
+      expect(existsSync(markerB)).toBe(true);
+      expect(existsSync(legacyMarker)).toBe(false);
+    });
   });
 
   describe('Stale session cleanup', () => {
