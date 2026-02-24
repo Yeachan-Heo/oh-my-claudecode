@@ -121,7 +121,7 @@ function getConfigDir() {
 function getClaudeConfigDir() {
   return getConfigDir();
 }
-var STALE_THRESHOLD_MS = 60 * 60 * 1e3;
+var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/team/tmux-session.ts
 var import_child_process = require("child_process");

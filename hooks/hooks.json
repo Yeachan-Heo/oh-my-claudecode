@@ -67,7 +67,7 @@
         ]
       },
       {
-        "matcher": "TeamCreate|ExitPlanMode",
+        "matcher": "ExitPlanMode",
         "hooks": [
           {
             "type": "command",

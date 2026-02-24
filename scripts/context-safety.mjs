@@ -19,7 +19,11 @@ import { statSync, openSync, readSync, closeSync } from 'node:fs';
 import { readStdin } from './lib/stdin.mjs';
 
 const THRESHOLD = parseInt(process.env.OMC_CONTEXT_SAFETY_THRESHOLD || '55', 10);
-const BLOCKED_TOOLS = new Set(['TeamCreate', 'ExitPlanMode']);
+// TeamCreate was removed from BLOCKED_TOOLS in issue #1006.
+// Blocking TeamCreate at high context caused silent fallback to regular subagents,
+// defeating the team orchestration pipeline. TeamCreate is lightweight infrastructure
+// setup, not expensive model inference, so context pressure is not a concern.
+const BLOCKED_TOOLS = new Set(['ExitPlanMode']);
 
 /**
  * Estimate context usage percentage from the transcript file.

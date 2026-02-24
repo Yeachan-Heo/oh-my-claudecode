@@ -268,7 +268,9 @@ function createHookOutput(additionalContext) {
  */
 function isTeamEnabled() {
   try {
-    const settingsPath = join(homedir(), '.claude', 'settings.json');
+    // Check settings.json first (authoritative, user-controlled)
+    const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+    const settingsPath = join(cfgDir, 'settings.json');
     if (existsSync(settingsPath)) {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
       if (settings.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === '1' ||
@@ -276,6 +278,7 @@ function isTeamEnabled() {
         return true;
       }
     }
+    // Fallback: check env var (for dev/CI environments)
     if (process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === '1' ||
         process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === 'true') {
       return true;

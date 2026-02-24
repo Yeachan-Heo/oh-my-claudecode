@@ -136,8 +136,37 @@ function hasActiveMode(directory, sessionId) {
   );
 }
 
+/**
+ * Check if team mode is active for the given directory/session.
+ * Reads team-state.json from session-scoped or legacy paths.
+ * Returns the team state object if active, null otherwise.
+ */
+function getActiveTeamState(directory, sessionId) {
+  const paths = [];
+
+  // Session-scoped path (preferred)
+  if (sessionId && SESSION_ID_PATTERN.test(sessionId)) {
+    paths.push(join(directory, '.omc', 'state', 'sessions', sessionId, 'team-state.json'));
+  }
+
+  // Legacy path
+  paths.push(join(directory, '.omc', 'state', 'team-state.json'));
+
+  for (const statePath of paths) {
+    const state = readJsonFile(statePath);
+    if (state && state.active === true) {
+      // Respect session isolation: skip state tagged to a different session
+      if (sessionId && state.session_id && state.session_id !== sessionId) {
+        continue;
+      }
+      return state;
+    }
+  }
+  return null;
+}
+
 // Generate agent spawn message with metadata
-function generateAgentSpawnMessage(toolInput, directory, todoStatus) {
+function generateAgentSpawnMessage(toolInput, directory, todoStatus, sessionId) {
   if (!toolInput || typeof toolInput !== 'object') {
     return `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`;
   }
@@ -147,6 +176,20 @@ function generateAgentSpawnMessage(toolInput, directory, todoStatus) {
   const desc = toolInput.description || '';
   const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
   const tracking = getAgentTrackingInfo(directory);
+
+  // Team-routing enforcement (issue #1006):
+  // When team state is active and Task is called WITHOUT team_name,
+  // inject a redirect message to use team agents instead of subagents.
+  const teamState = getActiveTeamState(directory, sessionId);
+  if (teamState && !toolInput.team_name) {
+    const teamName = teamState.team_name || teamState.teamName || 'team';
+    return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning a regular subagent ` +
+      `without team_name. You MUST use TeamCreate first (if not already created), then spawn teammates with ` +
+      `Task(team_name="${teamName}", name="worker-N", subagent_type="${agentType}"). ` +
+      `Do NOT use Task without team_name during an active team session. ` +
+      `If TeamCreate is not available in your tools, tell the user to verify ` +
+      `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 is set in ~/.claude/settings.json and restart Claude Code.`;
+  }
 
   const parts = [`${todoStatus}Spawning agent: ${agentType} (${model})${bg}`];
   if (desc) parts.push(`Task: ${desc}`);
@@ -246,7 +289,7 @@ async function main() {
     let message;
     if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
       const toolInput = data.toolInput || data.tool_input || null;
-      message = generateAgentSpawnMessage(toolInput, directory, todoStatus);
+      message = generateAgentSpawnMessage(toolInput, directory, todoStatus, sessionId);
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
