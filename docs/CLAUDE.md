@@ -1,7 +1,7 @@
 <!-- OMC:START -->
 <!-- OMC:VERSION:4.4.4 -->
 > **v5.0 Breaking Change:** Codex and Gemini MCP servers (`x`, `g`) have been removed.
-> Use `/team` to coordinate Claude, Codex, and Gemini CLI workers in tmux panes instead.
+> Use `/omc-teams` to spawn Codex and Gemini CLI workers in tmux panes, or `/team` for Claude Code native agents.
 
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
@@ -137,8 +137,8 @@ Workflow Skills:
 - `swarm` ("swarm"): **deprecated compatibility alias** over Team; use `/team` (still routes to Team staged pipeline for now)
 - `ultrapilot` ("ultrapilot", "parallel build"): compatibility facade over Team; maps onto Team's staged runtime
 - `team` ("team", "coordinated team", "team ralph"): N coordinated Claude agents using Claude Code native teams with stage-aware agent routing; supports `team ralph` for persistent team execution
-- `omc-teams` ("omc-teams"): Spawn `claude`, `codex`, or `gemini` CLI workers in tmux panes via `bridge/runtime-cli.cjs`; use when you need CLI process workers rather than Claude Code native agents
-- `ccg` ("ccg", "tri-model", "claude codex gemini"): Fan out backend/analytical tasks to Codex + frontend/UI tasks to Gemini in parallel tmux panes, then Claude synthesizes; requires codex and gemini CLIs
+- `omc-teams` ("omc-teams", "codex", "gemini"): Spawn `claude`, `codex`, or `gemini` CLI workers in tmux panes via `bridge/runtime-cli.cjs`; use when you need CLI process workers rather than Claude Code native agents. Note: bare "codex" or "gemini" alone routes here; when all three ("claude codex gemini") appear together, `ccg` takes priority
+- `ccg` ("ccg", "tri-model", "claude codex gemini"): Fan out backend/analytical tasks to Codex + frontend/UI tasks to Gemini in parallel tmux panes, then Claude synthesizes; requires codex and gemini CLIs. Priority: matches when all three model names appear together, overriding bare "codex"/"gemini" routing to omc-teams
 - `pipeline` ("pipeline", "chain agents"): sequential agent chaining with data passing
 - `ultraqa` (activated by autopilot): QA cycling -- test, verify, fix, repeat
 - `plan` ("plan this", "plan the"): strategic planning; supports `--consensus` and `--review` modes
@@ -159,7 +159,7 @@ Notifications: `configure-notifications` ("configure discord", "setup discord", 
 
 Utilities: `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager` (`psm` is deprecated alias), `skill`, `writer-memory`, `ralph-init`, `learn-about-omc`
 
-Conflict resolution: explicit mode keywords (`ulw`, `ultrawork`) override defaults. Generic "fast"/"parallel" reads `~/.claude/.omc-config.json` -> `defaultExecutionMode`. Ralph includes ultrawork (persistence wrapper). Autopilot can transition to ralph or ultraqa. Autopilot and ultrapilot are mutually exclusive.
+Conflict resolution: explicit mode keywords (`ulw`, `ultrawork`) override defaults. Generic "fast"/"parallel" reads `~/.claude/.omc-config.json` -> `defaultExecutionMode`. Ralph includes ultrawork (persistence wrapper). Autopilot can transition to ralph or ultraqa. Autopilot and ultrapilot are mutually exclusive. Keyword disambiguation: bare "codex" or "gemini" routes to `omc-teams`; the full phrase "claude codex gemini" routes to `ccg` (longest-match priority).
 </skills>
 
 ---
