@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectBashFailure, detectWriteFailure } from '../../scripts/post-tool-verifier.mjs';
+import { detectBashFailure, detectWriteFailure, isNonZeroExitWithOutput } from '../../scripts/post-tool-verifier.mjs';
 
 describe('detectBashFailure', () => {
   describe('Claude Code temp CWD false positives (issue #696)', () => {
@@ -73,6 +73,83 @@ describe('detectBashFailure', () => {
 
     it('should return false for empty output', () => {
       expect(detectBashFailure('')).toBe(false);
+    });
+  });
+});
+
+describe('isNonZeroExitWithOutput (issue #960)', () => {
+  describe('should return true for non-zero exit with valid stdout', () => {
+    it('gh pr checks with pending checks (exit code 8)', () => {
+      const output = [
+        'Error: Exit code 8',
+        'Lint & Type Check  pass  47s  https://example.com/1',
+        'Test               pending 0  https://example.com/2',
+      ].join('\n');
+      expect(isNonZeroExitWithOutput(output)).toBe(true);
+    });
+
+    it('generic non-zero exit with clean output', () => {
+      const output = 'Error: Exit code 2\nSome valid output here';
+      expect(isNonZeroExitWithOutput(output)).toBe(true);
+    });
+
+    it('exit code with multi-line valid output', () => {
+      const output = [
+        'Error: Exit code 1',
+        'line 1: something',
+        'line 2: something else',
+        'line 3: all good',
+      ].join('\n');
+      expect(isNonZeroExitWithOutput(output)).toBe(true);
+    });
+  });
+
+  describe('should return false for real failures', () => {
+    it('exit code with error content in stdout', () => {
+      const output = [
+        'Error: Exit code 1',
+        'FAIL src/test.js',
+        'Test failed: expected 1 to equal 2',
+      ].join('\n');
+      expect(isNonZeroExitWithOutput(output)).toBe(false);
+    });
+
+    it('exit code with fatal error in stdout', () => {
+      const output = 'Error: Exit code 128\nfatal: not a git repository';
+      expect(isNonZeroExitWithOutput(output)).toBe(false);
+    });
+
+    it('exit code with permission denied in stdout', () => {
+      const output = 'Error: Exit code 1\npermission denied: /etc/shadow';
+      expect(isNonZeroExitWithOutput(output)).toBe(false);
+    });
+
+    it('exit code with "cannot" in stdout', () => {
+      const output = 'Error: Exit code 1\ncannot find module "foo"';
+      expect(isNonZeroExitWithOutput(output)).toBe(false);
+    });
+  });
+
+  describe('should return false for non-matching cases', () => {
+    it('exit code only, no stdout content', () => {
+      expect(isNonZeroExitWithOutput('Error: Exit code 1')).toBe(false);
+    });
+
+    it('exit code with only whitespace after', () => {
+      expect(isNonZeroExitWithOutput('Error: Exit code 1\n   \n  ')).toBe(false);
+    });
+
+    it('no exit code prefix at all', () => {
+      expect(isNonZeroExitWithOutput('some normal output')).toBe(false);
+    });
+
+    it('empty string', () => {
+      expect(isNonZeroExitWithOutput('')).toBe(false);
+    });
+
+    it('null/undefined', () => {
+      expect(isNonZeroExitWithOutput(null)).toBe(false);
+      expect(isNonZeroExitWithOutput(undefined)).toBe(false);
     });
   });
 });
