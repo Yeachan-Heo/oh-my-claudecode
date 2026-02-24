@@ -76,9 +76,6 @@ describe('showCallCounts config option', () => {
     it('dense preset enables showCallCounts', () => {
         expect(PRESET_CONFIGS.dense.showCallCounts).toBe(true);
     });
-    it('analytics preset enables showCallCounts', () => {
-        expect(PRESET_CONFIGS.analytics.showCallCounts).toBe(true);
-    });
     it('opencode preset enables showCallCounts', () => {
         expect(PRESET_CONFIGS.opencode.showCallCounts).toBe(true);
     });

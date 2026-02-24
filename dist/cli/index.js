@@ -13,22 +13,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import * as fs from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
 import { loadConfig, getConfigPaths, generateConfigSchema } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
 import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
 import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
-import { statsCommand } from './commands/stats.js';
-import { costCommand } from './commands/cost.js';
-import { sessionsCommand } from './commands/sessions.js';
-import { agentsCommand } from './commands/agents.js';
-import { exportCommand } from './commands/export.js';
-import { cleanupCommand } from './commands/cleanup.js';
-import { backfillCommand } from './commands/backfill.js';
-import { launchTokscaleTUI, isTokscaleCLIAvailable, getInstallInstructions } from './utils/tokscale-launcher.js';
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 import { teleportCommand, teleportListCommand, teleportRemoveCommand } from './commands/teleport.js';
@@ -41,104 +31,16 @@ const version = getRuntimePackageVersion();
 const program = new Command();
 // Win32 platform warning - OMC requires tmux which is not available on native Windows
 warnIfWin32();
-// Helper functions for auto-backfill
-async function checkIfBackfillNeeded() {
-    const tokenLogPath = join(homedir(), '.omc', 'state', 'token-tracking.jsonl');
-    try {
-        await fs.access(tokenLogPath);
-        const stats = await fs.stat(tokenLogPath);
-        // Backfill if file is older than 1 hour or very small
-        const ageMs = Date.now() - stats.mtimeMs;
-        return stats.size < 100 || ageMs > 3600000;
-    }
-    catch {
-        return true; // File doesn't exist
-    }
-}
-async function runQuickBackfill(silent = false) {
-    const { BackfillEngine } = await import('../analytics/backfill-engine.js');
-    const engine = new BackfillEngine();
-    const result = await engine.run({ verbose: false });
-    if (result.entriesAdded > 0 && !silent) {
-        console.log(chalk.green(`Backfilled ${result.entriesAdded} entries in ${result.timeElapsed}ms`));
-    }
-}
-// Auto-backfill before analytics commands
-async function ensureBackfillDone() {
-    const shouldBackfill = await checkIfBackfillNeeded();
-    if (shouldBackfill) {
-        await runQuickBackfill(true); // Silent backfill for subcommands
-    }
-}
-// Display enhanced banner using gradient-string (loaded dynamically)
-async function displayAnalyticsBanner() {
-    try {
-        // @ts-expect-error - gradient-string will be installed during setup
-        const gradient = await import('gradient-string');
-        const banner = gradient.default.pastel.multiline([
-            '╔═══════════════════════════════════════╗',
-            '║   Oh-My-ClaudeCode - Analytics Dashboard   ║',
-            '╚═══════════════════════════════════════╝'
-        ].join('\n'));
-        console.log(banner);
-        console.log('');
-    }
-    catch (_error) {
-        // Fallback if gradient-string not installed
-        console.log('╔═══════════════════════════════════════╗');
-        console.log('║   Oh-My-ClaudeCode - Analytics Dashboard   ║');
-        console.log('╚═══════════════════════════════════════╝');
-        console.log('');
-    }
-}
 // Default action when running 'omc' with no subcommand
 // Forwards all args to launchCommand so 'omc --notify false --madmax' etc. work directly
 async function defaultAction() {
-    const defaultActionMode = process.env.OMC_DEFAULT_ACTION || 'launch';
-    if (defaultActionMode === 'dashboard') {
-        await displayAnalyticsDashboard();
-    }
-    else {
-        // Pass all CLI args through to launch (strip node + script path)
-        const args = process.argv.slice(2);
-        await launchCommand(args);
-    }
-}
-// Analytics dashboard - moved from defaultAction
-async function displayAnalyticsDashboard() {
-    await displayAnalyticsBanner();
-    // Check if we need to backfill for agent data
-    const shouldAutoBackfill = await checkIfBackfillNeeded();
-    if (shouldAutoBackfill) {
-        console.log(chalk.yellow('First run detected - backfilling agent data...'));
-        await runQuickBackfill();
-    }
-    // Show aggregate session stats
-    console.log(chalk.bold('📊 Aggregate Session Statistics'));
-    console.log(chalk.gray('─'.repeat(50)));
-    await statsCommand({ json: false });
-    console.log('\n');
-    // Show cost breakdown
-    console.log(chalk.bold('💰 Cost Analysis (Monthly)'));
-    console.log(chalk.gray('─'.repeat(50)));
-    await costCommand('monthly', { json: false });
-    console.log('\n');
-    // Show top agents
-    console.log(chalk.bold('🤖 Top Agents'));
-    console.log(chalk.gray('─'.repeat(50)));
-    await agentsCommand({ json: false, limit: 10 });
-    console.log('\n');
-    console.log(chalk.dim('Run with --help to see all available commands'));
-    // Show tokscale hint if available
-    const tuiAvailable = await isTokscaleCLIAvailable();
-    if (tuiAvailable) {
-        console.log('');
-        console.log(chalk.dim('Tip: Run `omc tui` for an interactive token visualization dashboard'));
-    }
+    // Pass all CLI args through to launch (strip node + script path)
+    const args = process.argv.slice(2);
+    await launchCommand(args);
 }
 program
     .name('omc')
-    .description('Multi-agent orchestration system for Claude Agent SDK with analytics')
+    .description('Multi-agent orchestration system for Claude Agent SDK')
     .version(version)
     .allowUnknownOption()
     .action(defaultAction);
@@ -165,21 +67,9 @@ Options:
 
 Environment:
   OMC_NOTIFY=0              Suppress all notifications (set by --notify false)
-  OMC_DEFAULT_ACTION=dashboard  Show analytics dashboard when running 'omc' with no args`)
+`)
     .action(async (args) => {
     await launchCommand(args);
-});
-/**
- * Dashboard command - Show analytics dashboard
- */
-program
-    .command('dashboard')
-    .description('Show analytics dashboard (aggregate stats, costs, agents)')
-    .addHelpText('after', `
-Note: This was the default 'omc' behavior. Now 'omc' launches Claude Code by default.
-Set OMC_DEFAULT_ACTION=dashboard to restore the old behavior.`)
-    .action(async () => {
-    await displayAnalyticsDashboard();
 });
 /**
  * Interop command - Split-pane tmux session with OMC and OMX
@@ -194,166 +84,6 @@ Requirements:
   - Codex CLI recommended (graceful fallback if missing)`)
     .action(() => {
     interopCommand();
-});
-/**
- * Analytics Commands
- */
-// Stats command
-program
-    .command('stats')
-    .description('Show aggregate statistics (or specific session with --session)')
-    .option('--json', 'Output as JSON')
-    .option('--session <id>', 'Show stats for specific session (defaults to aggregate)')
-    .addHelpText('after', `
-Examples:
-  $ omc stats                    Show aggregate statistics
-  $ omc stats --session abc123   Show stats for a specific session
-  $ omc stats --json             Output as JSON for scripting`)
-    .action(async (options) => {
-    await ensureBackfillDone();
-    await statsCommand(options);
-});
-// Cost command
-program
-    .command('cost [period]')
-    .description('Generate cost report (period: daily, weekly, monthly)')
-    .option('--json', 'Output as JSON')
-    .addHelpText('after', `
-Examples:
-  $ omc cost                     Show monthly cost report
-  $ omc cost daily               Show daily cost breakdown
-  $ omc cost weekly --json       Export weekly costs as JSON`)
-    .action(async (period = 'monthly', options) => {
-    if (!['daily', 'weekly', 'monthly'].includes(period)) {
-        console.error(chalk.red(`Invalid period "${period}". Valid options: daily, weekly, monthly`));
-        console.error(chalk.gray('Example: omc cost weekly'));
-        process.exit(1);
-    }
-    await ensureBackfillDone();
-    await costCommand(period, options);
-});
-// Sessions command
-program
-    .command('sessions')
-    .description('View session history')
-    .option('--json', 'Output as JSON')
-    .option('-n, --limit <number>', 'Limit number of sessions', '10')
-    .addHelpText('after', `
-Examples:
-  $ omc sessions                 Show last 10 sessions
-  $ omc sessions --limit 50      Show last 50 sessions
-  $ omc sessions --json          Export session history as JSON`)
-    .action(async (options) => {
-    await ensureBackfillDone();
-    await sessionsCommand({ ...options, limit: parseInt(options.limit) });
-});
-// Agents command
-program
-    .command('agents')
-    .description('Show agent usage breakdown')
-    .option('--json', 'Output as JSON')
-    .option('-n, --limit <number>', 'Limit number of agents', '10')
-    .addHelpText('after', `
-Examples:
-  $ omc agents                   Show top 10 agents by usage
-  $ omc agents --limit 20        Show top 20 agents
-  $ omc agents --json            Export agent data as JSON`)
-    .action(async (options) => {
-    await ensureBackfillDone();
-    await agentsCommand({ ...options, limit: parseInt(options.limit) });
-});
-// Export command
-program
-    .command('export <type> <format> <output>')
-    .description('Export data (type: cost, sessions, patterns; format: json, csv)')
-    .option('--period <period>', 'Period for cost report (daily, weekly, monthly)', 'monthly')
-    .addHelpText('after', `
-Examples:
-  $ omc export cost json costs.json           Export monthly costs to JSON
-  $ omc export sessions csv sessions.csv      Export sessions to CSV
-  $ omc export cost csv data.csv --period weekly   Export weekly costs`)
-    .action((type, format, output, options) => {
-    if (!['cost', 'sessions', 'patterns'].includes(type)) {
-        console.error(chalk.red(`Invalid type "${type}". Valid options: cost, sessions, patterns`));
-        console.error(chalk.gray('Example: omc export cost json output.json'));
-        process.exit(1);
-    }
-    if (!['json', 'csv'].includes(format)) {
-        console.error(chalk.red(`Invalid format "${format}". Valid options: json, csv`));
-        console.error(chalk.gray('Example: omc export sessions csv sessions.csv'));
-        process.exit(1);
-    }
-    exportCommand(type, format, output, options);
-});
-// Cleanup command
-program
-    .command('cleanup')
-    .description('Clean up old logs and orphaned background tasks')
-    .option('-r, --retention <days>', 'Retention period in days', '30')
-    .addHelpText('after', `
-Examples:
-  $ omc cleanup                  Clean up logs older than 30 days
-  $ omc cleanup --retention 7    Clean up logs older than 7 days`)
-    .action(options => {
-    cleanupCommand({ ...options, retention: parseInt(options.retention) });
-});
-// Backfill command (deprecated - auto-backfill runs on every command)
-program
-    .command('backfill')
-    .description('[DEPRECATED] Backfill now runs automatically. Use for manual re-sync only.')
-    .option('--project <path>', 'Filter to specific project path')
-    .option('--from <date>', 'Start date (ISO format: YYYY-MM-DD)')
-    .option('--to <date>', 'End date (ISO format: YYYY-MM-DD)')
-    .option('--dry-run', 'Preview without writing data')
-    .option('--reset', 'Clear deduplication index and re-process all transcripts')
-    .option('-v, --verbose', 'Show detailed progress')
-    .option('--json', 'Output as JSON')
-    .addHelpText('after', `
-Examples:
-  $ omc backfill --reset                       Force full re-sync
-  $ omc backfill --project ~/myproject         Backfill specific project
-  $ omc backfill --from 2024-01-01 --verbose   Backfill from date with progress`)
-    .action(async (options) => {
-    if (!options.reset && !options.project && !options.from && !options.to) {
-        console.log(chalk.yellow('Note: Backfill now runs automatically with every omc command.'));
-        console.log(chalk.gray('Use --reset to force full re-sync, or --project/--from/--to for filtered backfill.\n'));
-    }
-    await backfillCommand(options);
-});
-// TUI command
-program
-    .command('tui')
-    .description('Launch tokscale interactive TUI for token visualization')
-    .option('--models', 'Show models view')
-    .option('--daily', 'Show daily/monthly view')
-    .option('--no-claude', 'Show all providers (not just Claude)')
-    .addHelpText('after', `
-Examples:
-  $ omc tui                      Launch interactive dashboard
-  $ omc tui --light              Use light theme
-  $ omc tui --daily              Start with daily view`)
-    .action(async (options) => {
-    const available = await isTokscaleCLIAvailable();
-    if (!available) {
-        console.log(chalk.yellow('tokscale is not installed.'));
-        console.log(getInstallInstructions());
-        process.exit(1);
-    }
-    const view = options.models ? 'models'
-        : options.daily ? 'daily'
-            : 'overview';
-    try {
-        await launchTokscaleTUI({
-            view,
-            claude: options.claude
-        });
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(chalk.red(`Failed to launch TUI: ${message}`));
-        console.error(chalk.gray('Try running "omc tui" again, or check if tokscale is properly installed.'));
-        process.exit(1);
-    }
 });
 /**
  * Init command - Initialize configuration

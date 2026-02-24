@@ -4,7 +4,6 @@
  * Shared utilities for injecting system prompts into Codex/Gemini MCP tools.
  * Enables agents to pass their personality/guidelines when consulting external models.
  */
-import type { ExternalModelProvider } from '../shared/types.js';
 /**
  * Check if a role name is valid (contains only allowed characters).
  * This is a security check, not an allowlist check.
@@ -26,7 +25,7 @@ export type AgentRole = string;
  *
  * Returns undefined if neither is provided or resolution fails.
  */
-export declare function resolveSystemPrompt(systemPrompt?: string, agentRole?: string, provider?: ExternalModelProvider): string | undefined;
+export declare function resolveSystemPrompt(systemPrompt?: string, agentRole?: string): string | undefined;
 /**
  * Wrap file content with untrusted delimiters to prevent prompt injection.
  * Each file's content is clearly marked as data to analyze, not instructions.

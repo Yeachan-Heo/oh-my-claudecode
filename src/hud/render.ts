@@ -25,15 +25,6 @@ import { renderGitRepo, renderGitBranch } from './elements/git.js';
 import { renderModel } from './elements/model.js';
 import { renderCallCounts } from './elements/call-counts.js';
 import { renderContextLimitWarning } from './elements/context-warning.js';
-import {
-  getAnalyticsDisplay,
-  renderAnalyticsLineWithConfig,
-  getSessionInfo,
-  getSessionHealthAnalyticsData,
-  renderBudgetWarning,
-  renderCacheEfficiency
-} from './analytics-display.js';
-import type { SessionHealth, HudElementConfig } from './types.js';
 
 /**
  * Limit output lines to prevent input field shrinkage (Issue #222).
@@ -53,102 +44,12 @@ export function limitOutputLines(lines: string[], maxLines?: number): string[] {
 }
 
 /**
- * Render session health analytics respecting config toggles.
- * Composes output from getSessionHealthAnalyticsData() based on showCache/showCost flags.
- */
-function renderSessionHealthAnalyticsWithConfig(
-  sessionHealth: SessionHealth,
-  enabledElements: HudElementConfig
-): string {
-  const data = getSessionHealthAnalyticsData(sessionHealth);
-  const parts: string[] = [];
-
-  // Health indicator (🟢/🟡/🔴) - controlled by showHealthIndicator
-  const showIndicator = enabledElements.showHealthIndicator ?? true;
-
-  // Cost indicator and cost amount (respects showCost)
-  if (enabledElements.showCost) {
-    if (showIndicator) {
-      parts.push(data.costIndicator, data.cost);
-    } else {
-      parts.push(data.cost);
-    }
-  } else if (showIndicator) {
-    // Show indicator even without cost
-    parts.push(data.costIndicator);
-  }
-
-  // Tokens - controlled by showTokens
-  const showTokens = enabledElements.showTokens ?? true;
-  if (showTokens) {
-    parts.push(data.tokens);
-  }
-
-  // Cache (respects showCache)
-  if (enabledElements.showCache) {
-    parts.push(`Cache: ${data.cache}`);
-  }
-
-  // Cost per hour
-  // If showCostPerHour is explicitly set, use it; otherwise default to true (backward compat)
-  const showCostHour = enabledElements.showCostPerHour ?? true;
-  if (showCostHour && enabledElements.showCost && data.costHour) {
-    parts.push(data.costHour);
-  }
-
-  return parts.join(' | ');
-}
-
-/**
  * Render the complete statusline (single or multi-line)
  */
 export async function render(context: HudRenderContext, config: HudConfig): Promise<string> {
   const elements: string[] = [];
   const detailLines: string[] = [];
   const { elements: enabledElements } = config;
-
-  // Check if analytics preset is active
-  if (config.preset === 'analytics') {
-    const analytics = await getAnalyticsDisplay();
-    const sessionInfo = await getSessionInfo();
-
-    // Render analytics-focused layout
-    const lines = [sessionInfo, renderAnalyticsLineWithConfig(analytics, enabledElements.showCost, enabledElements.showCache)];
-
-    // Add SessionHealth analytics if available
-    if (context.sessionHealth) {
-      const healthAnalytics = renderSessionHealthAnalyticsWithConfig(context.sessionHealth, enabledElements);
-      if (healthAnalytics) lines.push(healthAnalytics);
-
-      // Cache efficiency (respects showCache)
-      if (enabledElements.showCache) {
-        const cacheEfficiency = renderCacheEfficiency(context.sessionHealth);
-        if (cacheEfficiency) lines.push(cacheEfficiency);
-      }
-
-      // Budget warning
-      // If showBudgetWarning is explicitly set, use it; otherwise default to true (backward compat)
-      const showBudgetAnalytics = enabledElements.showBudgetWarning ?? true;
-      if (showBudgetAnalytics && enabledElements.showCost) {
-        const budgetWarning = renderBudgetWarning(context.sessionHealth, config.thresholds);
-        if (budgetWarning) lines.push(budgetWarning);
-      }
-    }
-
-    // Add agents if available
-    if (context.activeAgents.length > 0) {
-      const agents = renderAgentsByFormat(context.activeAgents, enabledElements.agentsFormat || 'codes');
-      if (agents) lines.push(agents);
-    }
-
-    // Add todos if available
-    if (enabledElements.todos) {
-      const todos = renderTodosWithCurrent(context.todos);
-      if (todos) lines.push(todos);
-    }
-
-    return limitOutputLines(lines, config.elements.maxOutputLines).join('\n');
-  }
 
   // Git info line (separate line above HUD)
   const gitElements: string[] = [];
@@ -228,18 +129,6 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     if (showDuration) {
       const session = renderSession(context.sessionHealth);
       if (session) elements.push(session);
-    }
-
-    // Add analytics inline if available (respects showCache/showCost)
-    const analytics = renderSessionHealthAnalyticsWithConfig(context.sessionHealth, enabledElements);
-    if (analytics) elements.push(analytics);
-
-    // Add budget warning to detail lines
-    // If showBudgetWarning is explicitly set, use it; otherwise default to true (backward compat)
-    const showBudget = enabledElements.showBudgetWarning ?? true;
-    if (showBudget && enabledElements.showCost) {
-      const warning = renderBudgetWarning(context.sessionHealth, config.thresholds);
-      if (warning) detailLines.push(warning);
     }
   }
 
@@ -344,22 +233,6 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   if (enabledElements.todos) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
-  }
-
-  // Optionally add analytics line for full/dense presets
-  if (config.preset === 'full' || config.preset === 'dense') {
-    try {
-      const analytics = await getAnalyticsDisplay();
-      detailLines.push(renderAnalyticsLineWithConfig(analytics, enabledElements.showCost, enabledElements.showCache));
-
-      // Also add cache efficiency if SessionHealth available (respects showCache)
-      if (enabledElements.showCache && context.sessionHealth?.cacheHitRate !== undefined) {
-        const cacheEfficiency = renderCacheEfficiency(context.sessionHealth);
-        if (cacheEfficiency) detailLines.push(cacheEfficiency);
-      }
-    } catch {
-      // Analytics not available, skip
-    }
   }
 
   return limitOutputLines([...outputLines, ...detailLines], config.elements.maxOutputLines).join('\n');

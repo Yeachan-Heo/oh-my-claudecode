@@ -25,8 +25,9 @@ const mockedRmSync = vi.mocked(rmSync);
 function dirent(name) {
     return { name, isDirectory: () => true };
 }
-/** Return a stat result with mtime N ms ago */
-function staleStats(ageMs = 2 * 60 * 60 * 1000) {
+/** Return a stat result with mtime N ms ago.
+ * Default must exceed STALE_THRESHOLD_MS (24 h) in src/utils/paths.ts. */
+function staleStats(ageMs = 25 * 60 * 60 * 1000) {
     return { mtimeMs: Date.now() - ageMs };
 }
 /** Return a stat result modified very recently */

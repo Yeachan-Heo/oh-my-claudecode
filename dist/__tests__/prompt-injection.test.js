@@ -178,32 +178,6 @@ describe('prompt-injection', () => {
             expect(result).not.toContain('\n\n\n\n'); // No extra blank sections
         });
     });
-    describe('provider-aware resolution', () => {
-        let consoleWarnSpy;
-        beforeEach(() => {
-            consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
-        });
-        afterEach(() => {
-            consoleWarnSpy.mockRestore();
-        });
-        test('resolveSystemPrompt with codex provider returns prompt without XML tags', () => {
-            const result = resolveSystemPrompt(undefined, 'architect', 'codex');
-            expect(result).toBeDefined();
-            expect(result).not.toContain('<Agent_Prompt>');
-            expect(result).not.toContain('<Role>');
-        });
-        test('resolveSystemPrompt without provider returns Claude-style prompt', () => {
-            const result = resolveSystemPrompt(undefined, 'architect');
-            expect(result).toBeDefined();
-            expect(result).toContain('<Agent_Prompt>');
-        });
-        test('resolveSystemPrompt with gemini provider falls back to Claude prompt', () => {
-            const result = resolveSystemPrompt(undefined, 'architect', 'gemini');
-            expect(result).toBeDefined();
-            // No agents.gemini/ directory exists, so should fall back to Claude prompt
-            expect(result).toContain('<Agent_Prompt>');
-        });
-    });
     describe('integration: resolveSystemPrompt + buildPromptWithSystemContext', () => {
         test('full flow with agent_role', () => {
             const systemPrompt = resolveSystemPrompt(undefined, 'architect');

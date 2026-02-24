@@ -131,7 +131,6 @@ describe('limitOutputLines', () => {
       expect(PRESET_CONFIGS.full.maxOutputLines).toBe(12);
       expect(PRESET_CONFIGS.dense.maxOutputLines).toBe(6);
       expect(PRESET_CONFIGS.opencode.maxOutputLines).toBe(4);
-      expect(PRESET_CONFIGS.analytics.maxOutputLines).toBe(4);
     });
   });
 

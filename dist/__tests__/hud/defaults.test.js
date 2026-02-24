@@ -19,7 +19,7 @@ describe('HUD Default Configuration', () => {
         });
     });
     describe('PRESET_CONFIGS', () => {
-        const presets = ['minimal', 'analytics', 'focused', 'full', 'opencode', 'dense'];
+        const presets = ['minimal', 'focused', 'full', 'opencode', 'dense'];
         it('should use text thinkingFormat in all presets', () => {
             presets.forEach(preset => {
                 expect(PRESET_CONFIGS[preset].thinkingFormat).toBe('text');
@@ -29,9 +29,8 @@ describe('HUD Default Configuration', () => {
             expect(PRESET_CONFIGS.full.gitRepo).toBe(true);
             expect(PRESET_CONFIGS.dense.gitRepo).toBe(true);
         });
-        it('should have gitRepo disabled in minimal, analytics, focused, and opencode presets', () => {
+        it('should have gitRepo disabled in minimal, focused, and opencode presets', () => {
             expect(PRESET_CONFIGS.minimal.gitRepo).toBe(false);
-            expect(PRESET_CONFIGS.analytics.gitRepo).toBe(false);
             expect(PRESET_CONFIGS.focused.gitRepo).toBe(false);
             expect(PRESET_CONFIGS.opencode.gitRepo).toBe(false);
         });
@@ -41,9 +40,8 @@ describe('HUD Default Configuration', () => {
             expect(PRESET_CONFIGS.opencode.gitBranch).toBe(true);
             expect(PRESET_CONFIGS.dense.gitBranch).toBe(true);
         });
-        it('should have gitBranch disabled in minimal and analytics presets', () => {
+        it('should have gitBranch disabled in minimal preset', () => {
             expect(PRESET_CONFIGS.minimal.gitBranch).toBe(false);
-            expect(PRESET_CONFIGS.analytics.gitBranch).toBe(false);
         });
         it('should have model disabled in all presets', () => {
             presets.forEach(preset => {

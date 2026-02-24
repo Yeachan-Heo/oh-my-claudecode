@@ -18,8 +18,6 @@ import type {
   AgentOverrideConfig,
   ModelType
 } from './types.js';
-import type { ExternalModelProvider } from '../shared/types.js';
-
 // ============================================================
 // DYNAMIC PROMPT LOADING
 // ============================================================
@@ -30,13 +28,6 @@ import type { ExternalModelProvider } from '../shared/types.js';
  * In dev/test (unbundled), this remains undefined and we fall back to runtime file reads.
  */
 declare const __AGENT_PROMPTS__: Record<string, string> | undefined;
-
-/**
- * Build-time injected Codex-specific agent prompts map.
- * esbuild replaces this with a { role: "prompt content" } object during Codex bridge builds.
- * In dev/test (unbundled), this remains undefined and we fall back to runtime file reads.
- */
-declare const __AGENT_PROMPTS_CODEX__: Record<string, string> | undefined;
 
 /**
  * Get the package root directory (where agents/ folder lives).
@@ -75,46 +66,13 @@ function stripFrontmatter(content: string): string {
  * Uses build-time embedded prompts when available (CJS bundles),
  * falls back to runtime file reads (dev/test environments).
  *
- * When a provider is specified, tries provider-specific prompts first
- * (e.g. agents.codex/{agentName}.md), then falls back to the default prompt.
- *
  * Security: Validates agent name to prevent path traversal attacks
  */
-export function loadAgentPrompt(agentName: string, provider?: ExternalModelProvider): string {
+export function loadAgentPrompt(agentName: string): string {
   // Security: Validate agent name contains only safe characters (alphanumeric and hyphens)
   // This prevents path traversal attacks like "../../etc/passwd"
   if (!/^[a-z0-9-]+$/i.test(agentName)) {
     throw new Error(`Invalid agent name: contains disallowed characters`);
-  }
-
-  // Try provider-specific prompt first
-  if (provider) {
-    // Build-time path (CJS bundle)
-    try {
-      if (provider === 'codex' && typeof __AGENT_PROMPTS_CODEX__ !== 'undefined' && __AGENT_PROMPTS_CODEX__ !== null) {
-        const prompt = __AGENT_PROMPTS_CODEX__[agentName];
-        if (prompt) return prompt;
-      }
-    } catch {
-      // __AGENT_PROMPTS_CODEX__ not defined — fall through to runtime file read
-    }
-
-    // Runtime path (dev/test environments)
-    try {
-      const providerDir = join(getPackageDir(), `agents.${provider}`);
-      const providerPath = join(providerDir, `${agentName}.md`);
-
-      // Security: Verify resolved path is within the provider directory
-      const resolvedPath = resolve(providerPath);
-      const resolvedProviderDir = resolve(providerDir);
-      const rel = relative(resolvedProviderDir, resolvedPath);
-      if (!rel.startsWith('..') && !isAbsolute(rel)) {
-        const content = readFileSync(providerPath, 'utf-8');
-        return stripFrontmatter(content);
-      }
-    } catch {
-      // provider-specific not found, fall through to default
-    }
   }
 
   // Prefer build-time embedded prompts (always available in CJS bundles)

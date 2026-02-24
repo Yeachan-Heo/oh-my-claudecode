@@ -9,7 +9,6 @@ import { readdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { loadAgentPrompt } from './utils.js';
-import type { ExternalModelProvider } from '../shared/types.js';
 
 /**
  * Build-time injected agent roles list.
@@ -119,7 +118,6 @@ export type AgentRole = string;
 export function resolveSystemPrompt(
   systemPrompt?: string,
   agentRole?: string,
-  provider?: ExternalModelProvider
 ): string | undefined {
   // Explicit system_prompt takes precedence
   if (systemPrompt && systemPrompt.trim()) {
@@ -130,7 +128,7 @@ export function resolveSystemPrompt(
   if (agentRole && agentRole.trim()) {
     const role = agentRole.trim();
     // loadAgentPrompt already validates the name and handles errors gracefully
-    const prompt = loadAgentPrompt(role, provider);
+    const prompt = loadAgentPrompt(role);
     // loadAgentPrompt returns "Agent: {name}\n\nPrompt unavailable." on failure
     if (prompt.includes('Prompt unavailable')) {
       console.warn(`[prompt-injection] Agent role "${role}" prompt not found, skipping injection`);

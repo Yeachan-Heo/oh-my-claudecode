@@ -96,7 +96,7 @@ export const VALID_AGENT_ROLES = getValidAgentRoles();
  *
  * Returns undefined if neither is provided or resolution fails.
  */
-export function resolveSystemPrompt(systemPrompt, agentRole, provider) {
+export function resolveSystemPrompt(systemPrompt, agentRole) {
     // Explicit system_prompt takes precedence
     if (systemPrompt && systemPrompt.trim()) {
         return systemPrompt.trim();
@@ -105,7 +105,7 @@ export function resolveSystemPrompt(systemPrompt, agentRole, provider) {
     if (agentRole && agentRole.trim()) {
         const role = agentRole.trim();
         // loadAgentPrompt already validates the name and handles errors gracefully
-        const prompt = loadAgentPrompt(role, provider);
+        const prompt = loadAgentPrompt(role);
         // loadAgentPrompt returns "Agent: {name}\n\nPrompt unavailable." on failure
         if (prompt.includes('Prompt unavailable')) {
             console.warn(`[prompt-injection] Agent role "${role}" prompt not found, skipping injection`);

@@ -24,6 +24,7 @@ function createMinimalContext(overrides = {}) {
         toolCallCount: 0,
         agentCallCount: 0,
         skillCallCount: 0,
+        promptTime: null,
         ...overrides,
     };
 }

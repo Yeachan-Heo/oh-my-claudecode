@@ -78,15 +78,6 @@ export interface SessionHealth {
     durationMinutes: number;
     messageCount: number;
     health: 'healthy' | 'warning' | 'critical';
-    sessionCost?: number;
-    totalTokens?: number;
-    cacheHitRate?: number;
-    topAgents?: Array<{
-        agent: string;
-        cost: number;
-    }>;
-    costPerHour?: number;
-    isEstimated?: boolean;
 }
 export interface TranscriptData {
     agents: ActiveAgent[];
@@ -240,7 +231,7 @@ export interface HudRenderContext {
     /** Last prompt submission time (from HUD state) */
     promptTime: Date | null;
 }
-export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense' | 'analytics';
+export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense';
 /**
  * Agent display format options:
  * - count: agents:2
@@ -302,11 +293,7 @@ export interface HudElementConfig {
     showSessionDuration?: boolean;
     showHealthIndicator?: boolean;
     showTokens?: boolean;
-    showCostPerHour?: boolean;
-    showBudgetWarning?: boolean;
     useBars: boolean;
-    showCache: boolean;
-    showCost: boolean;
     showCallCounts?: boolean;
     maxOutputLines: number;
     safeMode: boolean;
@@ -320,10 +307,6 @@ export interface HudThresholds {
     contextCritical: number;
     /** Ralph iteration that triggers warning color (default: 7) */
     ralphWarning: number;
-    /** Session cost ($) that triggers budget warning (default: 2.0) */
-    budgetWarning: number;
-    /** Session cost ($) that triggers budget critical alert (default: 5.0) */
-    budgetCritical: number;
 }
 export interface ContextLimitWarningConfig {
     /** Context percentage threshold that triggers the warning banner (default: 80) */

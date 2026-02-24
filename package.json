@@ -14,7 +14,6 @@
   "bin": {
     "oh-my-claudecode": "dist/cli/index.js",
     "omc": "dist/cli/index.js",
-    "omc-analytics": "dist/cli/analytics.js",
     "omc-cli": "dist/cli/index.js"
   },
   "files": [
@@ -63,7 +62,6 @@
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@ast-grep/napi": "^0.31.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "@tokscale/core": "^1.0.25",
     "@types/better-sqlite3": "^7.6.13",
     "ajv": "^8.17.1",
     "better-sqlite3": "^12.6.2",

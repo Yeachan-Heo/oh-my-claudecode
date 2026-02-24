@@ -101,6 +101,12 @@ export function runClaude(cwd, args, sessionId) {
  * Launches Claude in current pane
  */
 function runClaudeInsideTmux(cwd, args) {
+    // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
+    try {
+        execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
+        execFileSync('tmux', ['set-option', 'terminal-overrides', '*:smcup@:rmcup@'], { stdio: 'ignore' });
+    }
+    catch { /* non-fatal — user's tmux may not support these options */ }
     // Launch Claude in current pane
     try {
         execFileSync('claude', args, { cwd, stdio: 'inherit' });
@@ -120,12 +126,18 @@ function runClaudeInsideTmux(cwd, args) {
  * Creates tmux session with Claude
  */
 function runClaudeOutsideTmux(cwd, args, _sessionId) {
-    const claudeCmd = buildTmuxShellCommand('claude', args);
+    const rawClaudeCmd = buildTmuxShellCommand('claude', args);
+    // Drain any pending terminal Device Attributes (DA1) response from stdin.
+    // When tmux attach-session sends a DA1 query, the terminal replies with
+    // \e[?6c which lands in the pty buffer before Claude reads input.
+    // A short sleep lets the response arrive, then tcflush discards it.
+    const claudeCmd = `sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
     const sessionName = buildTmuxSessionName(cwd);
     const tmuxArgs = [
         'new-session', '-d', '-s', sessionName, '-c', cwd,
         claudeCmd,
-        ';', 'set-option', '-g', 'mouse', 'on',
+        ';', 'set-option', '-t', sessionName, 'mouse', 'on',
+        ';', 'set-option', '-t', sessionName, 'terminal-overrides', '*:smcup@:rmcup@',
     ];
     // Attach to session
     tmuxArgs.push(';', 'attach-session', '-t', sessionName);
