@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdirSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 
 type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
@@ -184,6 +184,14 @@ describe('validateJobId regex (/^omc-[a-z0-9]{1,12}$/)', () => {
 
   it('rejects empty suffix', () => {
     expect(JOB_ID_RE.test('omc-')).toBe(false);
+  });
+});
+
+describe('team start validation wiring', () => {
+  it('validates teamName at omc_run_team_start API boundary', () => {
+    const source = readFileSync(join(__dirname, '..', 'team-server.ts'), 'utf-8');
+    expect(source).toContain("import { validateTeamName } from '../team/team-name.js'");
+    expect(source).toContain('validateTeamName(input.teamName);');
   });
 });
 

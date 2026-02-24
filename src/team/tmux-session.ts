@@ -10,6 +10,7 @@
 import { execSync, execFileSync } from 'child_process';
 import { join, basename } from 'path';
 import fs from 'fs/promises';
+import { validateTeamName } from './team-name.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -25,7 +26,10 @@ export interface WorkerPaneConfig {
   teamName: string;
   workerName: string;
   envVars: Record<string, string>;
-  launchCmd: string;
+  launchBinary?: string;
+  launchArgs?: string[];
+  /** @deprecated Prefer launchBinary + launchArgs for safe argv handling */
+  launchCmd?: string;
   cwd: string;
 }
 
@@ -44,17 +48,65 @@ function shellNameFromPath(shellPath: string): string {
   const shellName = basename(shellPath.replace(/\\/g, '/'));
   return shellName.replace(/\.(exe|cmd|bat)$/i, '');
 }
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function assertSafeEnvKey(key: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error(`Invalid environment key: "${key}"`);
+  }
+}
+
+function getLaunchWords(config: WorkerPaneConfig): string[] {
+  if (config.launchBinary) {
+    return [config.launchBinary, ...(config.launchArgs ?? [])];
+  }
+  if (config.launchCmd) {
+    return [config.launchCmd];
+  }
+  throw new Error('Missing worker launch command. Provide launchBinary or launchCmd.');
+}
 
 export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
   const shell = getDefaultShell();
+  const launchWords = getLaunchWords(config);
 
   if (process.platform === 'win32') {
     const envPrefix = Object.entries(config.envVars)
-      .map(([k, v]) => `set "${k}=${escapeForCmdSet(v)}"`)
+      .map(([k, v]) => {
+        assertSafeEnvKey(k);
+        return `set "${k}=${escapeForCmdSet(v)}"`;
+      })
       .join(' && ');
-    const launch = config.launchCmd;
+    const launch = config.launchBinary
+      ? launchWords.map((part) => `"${escapeForCmdSet(part)}"`).join(' ')
+      : launchWords[0];
     const cmdBody = envPrefix ? `${envPrefix} && ${launch}` : launch;
     return `${shell} /d /s /c "${cmdBody}"`;
+  }
+
+  if (config.launchBinary) {
+    const envAssignments = Object.entries(config.envVars).map(([key, value]) => {
+      assertSafeEnvKey(key);
+      return `${key}=${shellEscape(value)}`;
+    });
+
+    const shellName = shellNameFromPath(shell) || 'bash';
+    const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
+    const script = rcFile
+      ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; exec "$@"`
+      : 'exec "$@"';
+
+    return [
+      'env',
+      ...envAssignments,
+      shell,
+      '-lc',
+      script,
+      '--',
+      ...launchWords,
+    ].map(shellEscape).join(' ');
   }
 
   const envString = Object.entries(config.envVars)
@@ -66,7 +118,7 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
   // Quote rcFile to prevent shell injection if HOME contains metacharacters
   const sourceCmd = rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : '';
 
-  return `env ${envString} ${shell} -c "${sourceCmd}exec ${config.launchCmd}"`;
+  return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
 
 /** Validate tmux is available. Throws with install instructions if not. */
@@ -288,6 +340,7 @@ export async function spawnWorkerInPane(
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
+  validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
 
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string

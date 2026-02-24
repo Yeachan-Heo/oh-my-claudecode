@@ -35,4 +35,8 @@ describe('runtime types', () => {
 
     rmSync(cwd, { recursive: true, force: true });
   });
+
+  it('monitorTeam rejects invalid team names before path usage', async () => {
+    await expect(monitorTeam('Bad-Team', '/tmp', [])).rejects.toThrow('Invalid team name');
+  });
 });

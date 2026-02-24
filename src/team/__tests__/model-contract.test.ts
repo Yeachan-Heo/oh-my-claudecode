@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getContract, buildLaunchArgs, buildWorkerCommand, getWorkerEnv, parseCliOutput } from '../model-contract.js';
+import { getContract, buildLaunchArgs, buildWorkerArgv, buildWorkerCommand, getWorkerEnv, parseCliOutput } from '../model-contract.js';
 
 describe('model-contract', () => {
   describe('getContract', () => {
@@ -50,6 +50,16 @@ describe('model-contract', () => {
       expect(env.OMC_TEAM_WORKER).toBe('my-team/worker-1');
       expect(env.OMC_TEAM_NAME).toBe('my-team');
       expect(env.OMC_WORKER_AGENT_TYPE).toBe('codex');
+    });
+
+    it('rejects invalid team names', () => {
+      expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
+    });
+  });
+
+  describe('buildWorkerArgv', () => {
+    it('builds binary + args', () => {
+      expect(buildWorkerArgv('codex', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' })).toEqual(['codex', '--full-auto']);
     });
   });
 

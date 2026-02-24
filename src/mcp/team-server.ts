@@ -26,6 +26,7 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { killWorkerPanes } from '../team/tmux-session.js';
+import { validateTeamName } from '../team/team-name.js';
 
 // ---------------------------------------------------------------------------
 // Job state: in-memory Map (primary) + /tmp backup (survives MCP restart)
@@ -104,6 +105,7 @@ const waitSchema = z.object({
 
 async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   const input = startSchema.parse(args);
+  validateTeamName(input.teamName);
   const jobId = `omc-${Date.now().toString(36)}`;
   const runtimeCliPath = join(__dirname, 'runtime-cli.cjs');
 

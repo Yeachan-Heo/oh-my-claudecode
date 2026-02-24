@@ -2,7 +2,8 @@ import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { CliAgentType } from './model-contract.js';
-import { buildWorkerCommand, validateCliAvailable, getWorkerEnv as getModelWorkerEnv } from './model-contract.js';
+import { buildWorkerArgv, validateCliAvailable, getWorkerEnv as getModelWorkerEnv } from './model-contract.js';
+import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
   isWorkerAlive, killTeamSession,
@@ -93,6 +94,7 @@ function workerName(index: number): string {
 }
 
 function stateRoot(cwd: string, teamName: string): string {
+  validateTeamName(teamName);
   return join(cwd, `.omc/state/team/${teamName}`);
 }
 
@@ -261,6 +263,7 @@ function buildInitialTaskInstruction(
  */
 export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
   const { teamName, agentTypes, tasks, cwd } = config;
+  validateTeamName(teamName);
 
   // Validate CLIs are available
   for (const agentType of [...new Set(agentTypes)]) {
@@ -332,6 +335,7 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
  * Monitor team: poll worker health, detect stalls, return snapshot.
  */
 export async function monitorTeam(teamName: string, cwd: string, workerPaneIds: string[]): Promise<TeamSnapshot> {
+  validateTeamName(teamName);
   const monitorStartedAt = Date.now();
   const root = stateRoot(cwd, teamName);
 
@@ -503,7 +507,7 @@ export async function spawnWorkerForTask(
     ?? runtime.config.agentTypes[0]
     ?? 'claude';
   const envVars = getModelWorkerEnv(runtime.teamName, workerNameValue, agentType);
-  const launchCmd = buildWorkerCommand(agentType, {
+  const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
     teamName: runtime.teamName,
     workerName: workerNameValue,
     cwd: runtime.cwd,
@@ -512,7 +516,8 @@ export async function spawnWorkerForTask(
     teamName: runtime.teamName,
     workerName: workerNameValue,
     envVars,
-    launchCmd,
+    launchBinary,
+    launchArgs,
     cwd: runtime.cwd,
   };
 
