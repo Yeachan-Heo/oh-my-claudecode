@@ -296,27 +296,40 @@ const GATE_BYPASS_PREFIXES = ['force:', '!'];
 
 /**
  * Positive signals that the prompt IS well-specified enough for direct execution.
- * If any of these are present, the prompt passes the gate.
+ * If ANY of these are present, the prompt auto-passes the gate (fast path).
  */
 const WELL_SPECIFIED_SIGNALS: RegExp[] = [
   // References specific files by extension
   /\b[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx|vue|svelte|rb|c|cpp|h|css|scss|html|json|yaml|yml|toml)\b/,
   // References specific paths with directory separators
   /(?:src|lib|test|spec|app|pages|components|hooks|utils|services|api|dist|build|scripts)\/\w+/,
-  // References specific functions/classes/methods
+  // References specific functions/classes/methods by keyword
   /\b(?:function|class|method|interface|type|const|let|var|def|fn|struct|enum)\s+\w{2,}/i,
+  // CamelCase identifiers (likely symbol names: processKeyword, getUserById)
+  /\b[a-z]+(?:[A-Z][a-z]+)+\b/,
+  // PascalCase identifiers (likely class/type names: KeywordDetector, UserModel)
+  /\b[A-Z][a-z]+(?:[A-Z][a-z0-9]*)+\b/,
+  // snake_case identifiers with 2+ segments (likely symbol names: user_model, get_user)
+  /\b[a-z]+(?:_[a-z]+)+\b/,
+  // Bare issue/PR number (#123, #42)
+  /(?:^|\s)#\d+\b/,
   // Has numbered steps or bullet list (structured request)
   /(?:^|\n)\s*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
   // Has acceptance criteria or test spec keywords
   /\b(?:acceptance\s+criteria|test\s+(?:spec|plan|case)|should\s+(?:return|throw|render|display|create|delete|update))\b/i,
   // Has specific error or issue reference
   /\b(?:error:|bug\s*#?\d+|issue\s*#\d+|stack\s*trace|exception|TypeError|ReferenceError|SyntaxError)\b/i,
-  // Has a code block with substantial content
+  // Has a code block with substantial content.
+  // NOTE: In the bridge.ts integration, cleanedText has code blocks pre-stripped by
+  // removeCodeBlocks(), so this regex will not match there. It remains useful for
+  // direct callers of isUnderspecifiedForExecution() that pass raw prompt text.
   /```[\s\S]{20,}?```/,
   // PR or commit reference
   /\b(?:PR\s*#\d+|commit\s+[0-9a-f]{7}|pull\s+request)\b/i,
   // "in <specific-path>" pattern
   /\bin\s+[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx)\b/,
+  // Test runner commands (explicit test target)
+  /\b(?:npm\s+test|npx\s+(?:vitest|jest)|pytest|cargo\s+test|go\s+test|make\s+test)\b/i,
 ];
 
 /**

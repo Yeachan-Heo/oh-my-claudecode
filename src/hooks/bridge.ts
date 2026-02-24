@@ -323,30 +323,41 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     suppressHeavyModesForSmallTasks: taskSizeConfig.suppressHeavyModesForSmallTasks !== false,
   });
 
-  // Apply ralplan-first gate (issue #997): redirect underspecified execution requests to ralplan
-  const gateResult = applyRalplanGate(sizeCheckResult.keywords, cleanedText);
+  // Apply ralplan-first gate BEFORE task-size suppression (issue #997).
+  // Reconstruct the full keyword set so the gate sees execution keywords
+  // that task-size suppression may have already removed for small tasks.
+  const fullKeywords = [...sizeCheckResult.keywords, ...sizeCheckResult.suppressedKeywords];
+  const gateResult = applyRalplanGate(fullKeywords, cleanedText);
+
+  let keywords: typeof fullKeywords;
   if (gateResult.gateApplied) {
+    // Gate fired: redirect to ralplan (task-size suppression is moot — we're planning, not executing)
+    keywords = gateResult.keywords;
     const gated = gateResult.gatedKeywords.join(', ');
     messages.push(
-      `[RALPLAN GATE] Execution mode(s) redirected: ${gated} → ralplan.\n` +
-      `Reason: Request lacks specific files, functions, or concrete deliverables.\n` +
-      `The ralplan workflow will establish PRD scope and test spec before execution begins.\n` +
-      `To bypass: prefix your prompt with \`force:\` or \`!\`.`
+      `[RALPLAN GATE] Redirecting ${gated} → ralplan for scoping.\n` +
+      `Tip: add a concrete anchor to run directly next time:\n` +
+      `  \u2022 "ralph fix the bug in src/auth.ts"  (file path)\n` +
+      `  \u2022 "ralph implement #42"               (issue number)\n` +
+      `  \u2022 "ralph fix processKeyword"           (symbol name)\n` +
+      `Or prefix with \`force:\` / \`!\` to bypass.`
     );
-  }
-  const keywords = gateResult.keywords;
+  } else {
+    // Gate did not fire: use task-size-suppressed result as normal
+    keywords = sizeCheckResult.keywords;
 
-  // Notify user when heavy modes were suppressed for a small task
-  if (sizeCheckResult.suppressedKeywords.length > 0 && sizeCheckResult.taskSizeResult) {
-    const suppressed = sizeCheckResult.suppressedKeywords.join(', ');
-    const reason = sizeCheckResult.taskSizeResult.reason;
-    messages.push(
-      `[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ${suppressed}.\n` +
-      `Reason: ${reason}\n` +
-      `Running directly without heavy agent stacking. ` +
-      `Prefix with \`quick:\`, \`simple:\`, or \`tiny:\` to always use lightweight mode. ` +
-      `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`
-    );
+    // Notify user when heavy modes were suppressed for a small task
+    if (sizeCheckResult.suppressedKeywords.length > 0 && sizeCheckResult.taskSizeResult) {
+      const suppressed = sizeCheckResult.suppressedKeywords.join(', ');
+      const reason = sizeCheckResult.taskSizeResult.reason;
+      messages.push(
+        `[TASK-SIZE: SMALL] Heavy orchestration mode(s) suppressed: ${suppressed}.\n` +
+        `Reason: ${reason}\n` +
+        `Running directly without heavy agent stacking. ` +
+        `Prefix with \`quick:\`, \`simple:\`, or \`tiny:\` to always use lightweight mode. ` +
+        `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`
+      );
+    }
   }
 
   if (keywords.length === 0) {
