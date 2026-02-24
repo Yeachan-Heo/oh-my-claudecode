@@ -253,14 +253,39 @@ export async function createTeamSession(
     throw new Error('Team mode requires running inside tmux. Start one: tmux new-session');
   }
 
-  // Get "session:window" target and leader pane ID in one call
-  const contextResult = await execFileAsync('tmux', [
-    'display-message', '-p', '#S:#I #{pane_id}'
-  ]);
-  const contextLine = contextResult.stdout.trim();
-  const spaceIdx = contextLine.indexOf(' ');
-  const sessionAndWindow = contextLine.slice(0, spaceIdx);
-  const leaderPaneId = contextLine.slice(spaceIdx + 1);
+  // Prefer the invoking pane from environment to avoid focus races when users
+  // switch tmux windows during startup (issue #966).
+  const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
+  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
+  let sessionAndWindow = '';
+  let leaderPaneId = envPaneId;
+
+  if (envPaneId) {
+    try {
+      const targetedContextResult = await execFileAsync('tmux', [
+        'display-message', '-p', '-t', envPaneId, '#S:#I'
+      ]);
+      sessionAndWindow = targetedContextResult.stdout.trim();
+    } catch {
+      sessionAndWindow = '';
+      leaderPaneId = '';
+    }
+  }
+
+  if (!sessionAndWindow || !leaderPaneId) {
+    // Fallback when TMUX_PANE is unavailable/invalid.
+    const contextResult = await execFileAsync('tmux', [
+      'display-message', '-p', '#S:#I #{pane_id}'
+    ]);
+    const contextLine = contextResult.stdout.trim();
+    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+    if (!contextMatch) {
+      throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+    }
+    sessionAndWindow = contextMatch[1];
+    leaderPaneId = contextMatch[2];
+  }
+
   const teamTarget = sessionAndWindow; // "session:window" form
   // Extract bare session name (before ':') for options that don't accept window targets
   const resolvedSessionName = teamTarget.split(':')[0];
