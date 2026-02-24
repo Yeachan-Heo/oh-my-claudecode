@@ -730,7 +730,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         // Use absolute node path so nvm/fnm users don't get "node not found"
         // errors when Claude Code invokes the statusLine in a non-interactive shell.
         const nodeBin = resolveNodeBinary();
-        const statusLineCommand = nodeBin + ' ' + hudScriptPath.replace(/\\/g, '/');
+        const statusLineCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
         if (!existingSettings.statusLine) {
           existingSettings.statusLine = {
             type: 'command',
