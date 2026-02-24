@@ -9,7 +9,6 @@ import type {
   DelegationRoute,
   DelegationDecision,
   ResolveDelegationOptions,
-  DelegationProvider,
   DelegationTool,
 } from '../../shared/types.js';
 import {

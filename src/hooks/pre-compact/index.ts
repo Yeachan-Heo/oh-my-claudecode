@@ -19,7 +19,7 @@ import {
 } from "fs";
 import { promises as fsPromises } from "fs";
 import { join } from "path";
-import { initJobDb, getActiveJobs, getRecentJobs, getJobStats, closeJobDb } from '../../lib/job-state-db.js';
+import { initJobDb, getActiveJobs, getRecentJobs, getJobStats } from '../../lib/job-state-db.js';
 
 // ============================================================================
 // Types

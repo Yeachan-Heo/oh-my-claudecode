@@ -1,5 +1,4 @@
-import { execSync, spawnSync } from 'child_process';
-import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
 
