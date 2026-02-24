@@ -1452,7 +1452,7 @@ waitCmd
  * Teleport command - Quick worktree creation
  *
  * Usage:
- * - `omc teleport #123` - Create worktree for issue/PR #123
+ * - `omc teleport '#123'` - Create worktree for issue/PR #123
  * - `omc teleport my-feature` - Create worktree for feature branch
  * - `omc teleport list` - List existing worktrees
  * - `omc teleport remove <path>` - Remove a worktree
