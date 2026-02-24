@@ -424,12 +424,34 @@ export function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: str
     }
   }
 
-  // Delete marker file if applicable
+  // Delete marker file if applicable, but respect ownership when session-scoped.
   if (markerFile && existsSync(markerFile)) {
-    try {
-      unlinkSync(markerFile);
-    } catch {
-      success = false;
+    if (isSessionScopedClear) {
+      // Only delete if the marker is unowned or owned by this session.
+      try {
+        const markerRaw = JSON.parse(readFileSync(markerFile, 'utf-8')) as { session_id?: string; sessionId?: string };
+        const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
+        if (!markerSessionId || markerSessionId === sessionId) {
+          try {
+            unlinkSync(markerFile);
+          } catch {
+            success = false;
+          }
+        }
+      } catch {
+        // Marker is not valid JSON or unreadable — best-effort delete for cleanup.
+        try {
+          unlinkSync(markerFile);
+        } catch {
+          success = false;
+        }
+      }
+    } else {
+      try {
+        unlinkSync(markerFile);
+      } catch {
+        success = false;
+      }
     }
   }
 

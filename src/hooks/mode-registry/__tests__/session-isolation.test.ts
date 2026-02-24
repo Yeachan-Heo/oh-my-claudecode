@@ -204,6 +204,29 @@ describe('Session-Scoped State Isolation', () => {
       expect(existsSync(markerB)).toBe(true);
       expect(existsSync(legacyMarker)).toBe(false);
     });
+
+    it('should NOT delete legacy marker file owned by a different session', () => {
+      // Regression test for issue #927:
+      // clearModeState with sessionId used to unconditionally delete the legacy
+      // marker file, bypassing the ownership check.
+      const sessionA = 'session-A';
+      const sessionB = 'session-B';
+
+      createSessionState(sessionA, 'ralph', { active: true, session_id: sessionA });
+
+      // Legacy marker is owned by session B (a different session)
+      const legacyMarkerDir = join(tempDir, '.omc', 'state');
+      mkdirSync(legacyMarkerDir, { recursive: true });
+      const legacyMarker = join(legacyMarkerDir, 'ralph-verification.json');
+      writeFileSync(legacyMarker, JSON.stringify({ pending: true, session_id: sessionB }));
+
+      // Clear session A's state — must NOT touch session B's marker
+      clearModeState('ralph', tempDir, sessionA);
+
+      expect(existsSync(legacyMarker)).toBe(true);
+      const remaining = JSON.parse(readFileSync(legacyMarker, 'utf-8'));
+      expect(remaining.session_id).toBe(sessionB);
+    });
   });
 
   describe('Stale session cleanup', () => {
