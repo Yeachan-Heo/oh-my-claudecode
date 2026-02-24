@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -434,26 +434,42 @@ ${cleanContent}
               const versionPath = join(cacheBase, version);
               const stat = lstatSync(versionPath);
 
-              if (stat.isSymbolicLink()) {
-                // Already a symlink — update only if pointing to wrong target
-                const target = readlinkSync(versionPath);
-                if (target === latest) continue;
-                unlinkSync(versionPath);
-              } else if (stat.isDirectory()) {
-                rmSync(versionPath, { recursive: true, force: true });
-              }
+              const isWin = process.platform === 'win32';
+              const symlinkTarget = isWin ? join(cacheBase, latest) : latest;
 
-              // Create symlink: e.g. 4.4.1 -> 4.4.3
-              // On Windows, use 'junction' type which works without Developer Mode
-              // or admin privileges. On Unix, use default (relative symlink).
-              try {
-                const isWin = process.platform === 'win32';
-                const symlinkTarget = isWin ? join(cacheBase, latest) : latest;
-                symlinkSync(symlinkTarget, versionPath, isWin ? 'junction' : undefined);
-              } catch (symlinkErr) {
-                // EEXIST: another session raced us and created the symlink — safe to ignore.
-                if (symlinkErr?.code !== 'EEXIST') {
-                  // Symlink genuinely failed. Leave the path as-is rather than losing it.
+              if (stat.isSymbolicLink()) {
+                // Already a symlink — update only if pointing to wrong target.
+                // Use atomic temp-symlink + rename to avoid a window where
+                // the path doesn't exist (fixes race in issue #1007).
+                const target = readlinkSync(versionPath);
+                if (target === latest || target === join(cacheBase, latest)) continue;
+                try {
+                  const tmpLink = versionPath + '.tmp.' + process.pid;
+                  symlinkSync(symlinkTarget, tmpLink, isWin ? 'junction' : undefined);
+                  try {
+                    renameSync(tmpLink, versionPath);
+                  } catch {
+                    // rename failed (e.g. cross-device) — fall back to unlink+symlink
+                    try { unlinkSync(tmpLink); } catch {}
+                    unlinkSync(versionPath);
+                    symlinkSync(symlinkTarget, versionPath, isWin ? 'junction' : undefined);
+                  }
+                } catch (swapErr) {
+                  if (swapErr?.code !== 'EEXIST') {
+                    // Leave as-is rather than losing it
+                  }
+                }
+              } else if (stat.isDirectory()) {
+                // Directory → symlink: cannot be atomic, but run.cjs now
+                // handles missing targets gracefully (issue #1007).
+                rmSync(versionPath, { recursive: true, force: true });
+                try {
+                  symlinkSync(symlinkTarget, versionPath, isWin ? 'junction' : undefined);
+                } catch (symlinkErr) {
+                  // EEXIST: another session raced us — safe to ignore.
+                  if (symlinkErr?.code !== 'EEXIST') {
+                    // Symlink genuinely failed. Leave the path as-is.
+                  }
                 }
               }
             } catch {
