@@ -123,7 +123,7 @@ try {
   const nodeBin = process.execPath || 'node';
   settings.statusLine = {
     type: 'command',
-    command: `${nodeBin} ${hudScriptPath.replace(/\\/g, "/")}`
+    command: `"${nodeBin}" "${hudScriptPath.replace(/\\/g, "/")}"`
   };
   writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
   console.log('[OMC] Configured HUD statusLine in settings.json');
@@ -182,7 +182,7 @@ try {
           // New run.cjs format — replace bare `node` with absolute path (all platforms)
           const m1 = hook.command.match(runCjsPattern);
           if (m1) {
-            hook.command = `${nodeBin} ${m1[1]}`;
+            hook.command = `"${nodeBin}" ${m1[1]}`;
             patched = true;
             continue;
           }
@@ -191,7 +191,7 @@ try {
           if (process.platform === 'win32') {
             const m2 = hook.command.match(findNodePattern);
             if (m2) {
-              hook.command = `${nodeBin} "\${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" "${m2[1]}"${m2[2]}`;
+              hook.command = `"${nodeBin}" "\${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" "${m2[1]}"${m2[2]}`;
               patched = true;
             }
           }
