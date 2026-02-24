@@ -7,6 +7,8 @@ import {
   hasKeyword,
   getPrimaryKeyword,
   getAllKeywords,
+  isUnderspecifiedForExecution,
+  applyRalplanGate,
   type KeywordType,
   type DetectedKeyword,
 } from '../index.js';
@@ -1042,6 +1044,158 @@ World`);
         expect(result).toContain('autopilot');
         expect(result).not.toContain('team');
       });
+    });
+  });
+
+  describe('isUnderspecifiedForExecution (issue #997)', () => {
+    it('should flag vague prompt with just mode keyword', () => {
+      expect(isUnderspecifiedForExecution('ralph fix this')).toBe(true);
+    });
+
+    it('should flag prompt with no file or function references', () => {
+      expect(isUnderspecifiedForExecution('ralph improve the performance')).toBe(true);
+    });
+
+    it('should flag short vague prompt', () => {
+      expect(isUnderspecifiedForExecution('autopilot build the app')).toBe(true);
+    });
+
+    it('should flag empty prompt', () => {
+      expect(isUnderspecifiedForExecution('')).toBe(true);
+    });
+
+    it('should pass prompt with specific file reference', () => {
+      expect(isUnderspecifiedForExecution('ralph fix the bug in src/hooks/bridge.ts')).toBe(false);
+    });
+
+    it('should pass prompt with function reference', () => {
+      expect(isUnderspecifiedForExecution('ralph fix function processKeywordDetector')).toBe(false);
+    });
+
+    it('should pass prompt with issue reference', () => {
+      expect(isUnderspecifiedForExecution('ralph implement issue #42')).toBe(false);
+    });
+
+    it('should pass prompt with numbered steps', () => {
+      expect(isUnderspecifiedForExecution('ralph do:\n1. Add validation\n2. Add tests\n3. Update docs')).toBe(false);
+    });
+
+    it('should pass prompt with code block', () => {
+      const prompt = 'ralph add this function:\n```typescript\nfunction hello() { return "world"; }\n```';
+      expect(isUnderspecifiedForExecution(prompt)).toBe(false);
+    });
+
+    it('should pass prompt with force: escape hatch', () => {
+      expect(isUnderspecifiedForExecution('force: ralph fix this')).toBe(false);
+    });
+
+    it('should pass prompt with ! escape hatch', () => {
+      expect(isUnderspecifiedForExecution('! ralph improve it')).toBe(false);
+    });
+
+    it('should pass prompt with path reference', () => {
+      expect(isUnderspecifiedForExecution('ralph add logging to src/api/server.ts')).toBe(false);
+    });
+
+    it('should pass prompt with PR reference', () => {
+      expect(isUnderspecifiedForExecution('ralph fix PR #123')).toBe(false);
+    });
+
+    it('should pass prompt with directory path', () => {
+      expect(isUnderspecifiedForExecution('ralph refactor the hooks in src/hooks')).toBe(false);
+    });
+
+    it('should pass long detailed prompt without file refs', () => {
+      expect(isUnderspecifiedForExecution(
+        'ralph add a new API endpoint for user registration that accepts email and password, validates the input, hashes the password with bcrypt, stores in the users table, and returns a JWT token'
+      )).toBe(false);
+    });
+
+    it('should pass prompt with acceptance criteria', () => {
+      expect(isUnderspecifiedForExecution('ralph add login - acceptance criteria: user can log in with email')).toBe(false);
+    });
+
+    it('should pass prompt with error reference', () => {
+      expect(isUnderspecifiedForExecution('ralph fix TypeError in the auth module')).toBe(false);
+    });
+
+    it('should pass prompt with bullet list', () => {
+      expect(isUnderspecifiedForExecution('ralph implement:\n- Add user model\n- Add API routes')).toBe(false);
+    });
+  });
+
+  describe('applyRalplanGate (issue #997)', () => {
+    it('should redirect underspecified ralph to ralplan', () => {
+      const result = applyRalplanGate(['ralph'], 'ralph fix this');
+      expect(result.gateApplied).toBe(true);
+      expect(result.keywords).toContain('ralplan');
+      expect(result.keywords).not.toContain('ralph');
+      expect(result.gatedKeywords).toEqual(['ralph']);
+    });
+
+    it('should redirect underspecified autopilot to ralplan', () => {
+      const result = applyRalplanGate(['autopilot'], 'autopilot build the app');
+      expect(result.gateApplied).toBe(true);
+      expect(result.keywords).toContain('ralplan');
+      expect(result.keywords).not.toContain('autopilot');
+    });
+
+    it('should redirect underspecified team to ralplan', () => {
+      const result = applyRalplanGate(['team'], 'team improve performance');
+      expect(result.gateApplied).toBe(true);
+      expect(result.keywords).toContain('ralplan');
+      expect(result.keywords).not.toContain('team');
+    });
+
+    it('should not gate well-specified ralph prompt', () => {
+      const result = applyRalplanGate(['ralph'], 'ralph fix the bug in src/hooks/bridge.ts');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('ralph');
+    });
+
+    it('should not gate when cancel is present', () => {
+      const result = applyRalplanGate(['cancel'], 'cancelomc ralph fix this');
+      expect(result.gateApplied).toBe(false);
+    });
+
+    it('should not gate when ralplan is already present', () => {
+      const result = applyRalplanGate(['ralplan'], 'ralplan fix this');
+      expect(result.gateApplied).toBe(false);
+    });
+
+    it('should not gate non-execution keywords', () => {
+      const result = applyRalplanGate(['tdd', 'ultrathink'], 'tdd improve it');
+      expect(result.gateApplied).toBe(false);
+    });
+
+    it('should preserve non-execution keywords when gating', () => {
+      const result = applyRalplanGate(['ralph', 'tdd'], 'ralph tdd fix this');
+      expect(result.gateApplied).toBe(true);
+      expect(result.keywords).toContain('tdd');
+      expect(result.keywords).toContain('ralplan');
+      expect(result.keywords).not.toContain('ralph');
+    });
+
+    it('should return empty gatedKeywords when no gate applied', () => {
+      const result = applyRalplanGate([], 'regular text');
+      expect(result.gateApplied).toBe(false);
+      expect(result.gatedKeywords).toEqual([]);
+    });
+
+    it('should gate multiple execution keywords at once', () => {
+      const result = applyRalplanGate(['ralph', 'ultrawork'], 'ralph ultrawork fix it');
+      expect(result.gateApplied).toBe(true);
+      expect(result.keywords).toContain('ralplan');
+      expect(result.keywords).not.toContain('ralph');
+      expect(result.keywords).not.toContain('ultrawork');
+      expect(result.gatedKeywords).toContain('ralph');
+      expect(result.gatedKeywords).toContain('ultrawork');
+    });
+
+    it('should not gate with force: escape hatch', () => {
+      const result = applyRalplanGate(['ralph'], 'force: ralph fix this');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('ralph');
     });
   });
 });

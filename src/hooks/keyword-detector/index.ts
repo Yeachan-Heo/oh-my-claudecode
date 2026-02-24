@@ -276,3 +276,119 @@ export function getPrimaryKeyword(text: string): DetectedKeyword | null {
 
   return match || null;
 }
+
+/**
+ * Execution mode keywords subject to the ralplan-first gate (issue #997).
+ * These modes spin up heavy orchestration and should not run on vague requests.
+ */
+export const EXECUTION_GATE_KEYWORDS = new Set<KeywordType>([
+  'ralph',
+  'autopilot',
+  'team',
+  'ultrawork',
+  'ultrapilot',
+]);
+
+/**
+ * Escape hatch prefixes that bypass the ralplan gate.
+ */
+const GATE_BYPASS_PREFIXES = ['force:', '!'];
+
+/**
+ * Positive signals that the prompt IS well-specified enough for direct execution.
+ * If any of these are present, the prompt passes the gate.
+ */
+const WELL_SPECIFIED_SIGNALS: RegExp[] = [
+  // References specific files by extension
+  /\b[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx|vue|svelte|rb|c|cpp|h|css|scss|html|json|yaml|yml|toml)\b/,
+  // References specific paths with directory separators
+  /(?:src|lib|test|spec|app|pages|components|hooks|utils|services|api|dist|build|scripts)\/\w+/,
+  // References specific functions/classes/methods
+  /\b(?:function|class|method|interface|type|const|let|var|def|fn|struct|enum)\s+\w{2,}/i,
+  // Has numbered steps or bullet list (structured request)
+  /(?:^|\n)\s*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
+  // Has acceptance criteria or test spec keywords
+  /\b(?:acceptance\s+criteria|test\s+(?:spec|plan|case)|should\s+(?:return|throw|render|display|create|delete|update))\b/i,
+  // Has specific error or issue reference
+  /\b(?:error:|bug\s*#?\d+|issue\s*#\d+|stack\s*trace|exception|TypeError|ReferenceError|SyntaxError)\b/i,
+  // Has a code block with substantial content
+  /```[\s\S]{20,}?```/,
+  // PR or commit reference
+  /\b(?:PR\s*#\d+|commit\s+[0-9a-f]{7}|pull\s+request)\b/i,
+  // "in <specific-path>" pattern
+  /\bin\s+[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx)\b/,
+];
+
+/**
+ * Check if a prompt is underspecified for direct execution.
+ * Returns true if the prompt lacks enough specificity for heavy execution modes.
+ *
+ * Conservative: only gates clearly vague prompts. Borderline cases pass through.
+ */
+export function isUnderspecifiedForExecution(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+
+  // Escape hatch: force: or ! prefix bypasses the gate
+  for (const prefix of GATE_BYPASS_PREFIXES) {
+    if (trimmed.startsWith(prefix)) return false;
+  }
+
+  // If any well-specified signal is present, pass through
+  if (WELL_SPECIFIED_SIGNALS.some(p => p.test(trimmed))) return false;
+
+  // Strip mode keywords for effective word counting
+  const stripped = trimmed
+    .replace(/\b(?:ralph|autopilot|team|ultrawork|ultrapilot|ulw|swarm)\b/gi, '')
+    .trim();
+  const effectiveWords = stripped.split(/\s+/).filter(w => w.length > 0).length;
+
+  // Short prompts without well-specified signals are underspecified
+  if (effectiveWords <= 15) return true;
+
+  return false;
+}
+
+/**
+ * Apply the ralplan-first gate (issue #997): if execution keywords are present
+ * but the prompt is underspecified, redirect to ralplan.
+ *
+ * Returns the modified keyword list and gate metadata.
+ */
+export function applyRalplanGate(
+  keywords: KeywordType[],
+  text: string,
+): { keywords: KeywordType[]; gateApplied: boolean; gatedKeywords: KeywordType[] } {
+  if (keywords.length === 0) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+
+  // Don't gate if cancel is present (cancel always wins)
+  if (keywords.includes('cancel')) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+
+  // Don't gate if ralplan is already in the list
+  if (keywords.includes('ralplan')) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+
+  // Check if any execution keywords are present
+  const executionKeywords = keywords.filter(k => EXECUTION_GATE_KEYWORDS.has(k));
+  if (executionKeywords.length === 0) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+
+  // Check if prompt is underspecified
+  if (!isUnderspecifiedForExecution(text)) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+
+  // Gate: replace execution keywords with ralplan
+  const filtered = keywords.filter(k => !EXECUTION_GATE_KEYWORDS.has(k));
+  if (!filtered.includes('ralplan')) {
+    filtered.push('ralplan');
+  }
+
+  return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
+}

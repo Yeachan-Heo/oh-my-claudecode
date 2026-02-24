@@ -19,7 +19,7 @@ import { join } from "path";
 import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywordsWithSizeCheck } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import {
@@ -323,7 +323,18 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     suppressHeavyModesForSmallTasks: taskSizeConfig.suppressHeavyModesForSmallTasks !== false,
   });
 
-  const keywords = sizeCheckResult.keywords;
+  // Apply ralplan-first gate (issue #997): redirect underspecified execution requests to ralplan
+  const gateResult = applyRalplanGate(sizeCheckResult.keywords, cleanedText);
+  if (gateResult.gateApplied) {
+    const gated = gateResult.gatedKeywords.join(', ');
+    messages.push(
+      `[RALPLAN GATE] Execution mode(s) redirected: ${gated} → ralplan.\n` +
+      `Reason: Request lacks specific files, functions, or concrete deliverables.\n` +
+      `The ralplan workflow will establish PRD scope and test spec before execution begins.\n` +
+      `To bypass: prefix your prompt with \`force:\` or \`!\`.`
+    );
+  }
+  const keywords = gateResult.keywords;
 
   // Notify user when heavy modes were suppressed for a small task
   if (sizeCheckResult.suppressedKeywords.length > 0 && sizeCheckResult.taskSizeResult) {
