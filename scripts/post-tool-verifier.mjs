@@ -134,6 +134,47 @@ function stripClaudeTempCwdErrors(output) {
   return output.replace(CLAUDE_TEMP_CWD_PATTERN, '');
 }
 
+// Pattern matching Claude Code's "Error: Exit code N" prefix line
+const CLAUDE_EXIT_CODE_PREFIX = /^Error: Exit code \d+\s*$/gm;
+
+/**
+ * Detect non-zero exit code with valid stdout (issue #960).
+ * Returns true when output has Claude Code's "Error: Exit code N" prefix
+ * AND substantial content that doesn't itself indicate real errors.
+ * Example: `gh pr checks` exits 8 (pending) but outputs valid CI status.
+ */
+export function isNonZeroExitWithOutput(output) {
+  if (!output) return false;
+  const cleaned = stripClaudeTempCwdErrors(output);
+
+  // Must contain Claude Code's exit code prefix
+  if (!CLAUDE_EXIT_CODE_PREFIX.test(cleaned)) return false;
+  // Reset regex state (global flag)
+  CLAUDE_EXIT_CODE_PREFIX.lastIndex = 0;
+
+  // Strip exit code prefix line(s) and check remaining content
+  const remaining = cleaned.replace(CLAUDE_EXIT_CODE_PREFIX, '').trim();
+  CLAUDE_EXIT_CODE_PREFIX.lastIndex = 0;
+
+  // Must have at least one non-empty line of real output
+  const contentLines = remaining.split('\n').filter(l => l.trim().length > 0);
+  if (contentLines.length === 0) return false;
+
+  // If remaining content has its own error indicators, it's a real failure
+  const contentErrorPatterns = [
+    /error:/i,
+    /failed/i,
+    /cannot/i,
+    /permission denied/i,
+    /command not found/i,
+    /no such file/i,
+    /fatal:/i,
+    /abort/i,
+  ];
+
+  return !contentErrorPatterns.some(p => p.test(remaining));
+}
+
 // Detect failures in Bash output
 export function detectBashFailure(output) {
   const cleaned = stripClaudeTempCwdErrors(output);
@@ -251,7 +292,12 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory) 
 
   switch (toolName) {
     case 'Bash':
-      if (detectBashFailure(toolOutput)) {
+      if (isNonZeroExitWithOutput(toolOutput)) {
+        // Non-zero exit with valid output — warning, not error (issue #960)
+        const exitMatch = toolOutput.match(/Exit code (\d+)/);
+        const code = exitMatch ? exitMatch[1] : 'non-zero';
+        message = `Command exited with code ${code} but produced valid output. This may be expected behavior.`;
+      } else if (detectBashFailure(toolOutput)) {
         message = 'Command failed. Please investigate the error and fix before continuing.';
       } else if (detectBackgroundOperation(toolOutput)) {
         message = 'Background operation detected. Remember to verify results before proceeding.';
