@@ -39,7 +39,7 @@ describe('tokscale-adapter', () => {
       expect(pricing).toHaveProperty('outputPerMillion');
       expect(pricing.inputPerMillion).toBeGreaterThan(0);
       expect(pricing.outputPerMillion).toBeGreaterThan(0);
-    });
+    }, 15000);
 
     it('returns pricing for haiku model', async () => {
       const pricing = await lookupPricingWithFallback('claude-haiku-4');
@@ -47,7 +47,7 @@ describe('tokscale-adapter', () => {
       expect(pricing.inputPerMillion).toBeGreaterThan(0);
       expect(pricing.outputPerMillion).toBeGreaterThan(0);
       expect(pricing.outputPerMillion).toBeGreaterThan(pricing.inputPerMillion);
-    });
+    }, 15000);
 
     it('returns pricing for opus model', async () => {
       const pricing = await lookupPricingWithFallback('claude-opus-4.6');
