@@ -282,9 +282,21 @@ If the HUD is not showing:
 2. Restart Claude Code after setup completes
 3. If still not working, run `/oh-my-claudecode:omc-doctor` for full diagnostics
 
+**Legacy string format migration:** Older OMC versions wrote `statusLine` as a plain string (e.g., `"~/.claude/hud/omc-hud.mjs"`). Modern Claude Code (v2.1+) requires an object format. Running the installer or `/oh-my-claudecode:hud setup` will auto-migrate legacy strings to the correct object format:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /home/username/.claude/hud/omc-hud.mjs"
+  }
+}
+```
+
+**Node 24+ compatibility:** The HUD wrapper script imports `homedir` from `node:os` (not `node:path`). If you encounter `SyntaxError: The requested module 'path' does not provide an export named 'homedir'`, re-run the installer to regenerate `omc-hud.mjs`.
+
 Manual verification:
 - HUD script: `~/.claude/hud/omc-hud.mjs`
-- Settings: `~/.claude/settings.json` should have `statusLine` configured
+- Settings: `~/.claude/settings.json` should have `statusLine` configured as an object with `type` and `command` fields
 
 ---
 
