@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
@@ -93,8 +93,48 @@ function generateAgentSpawnMessage(toolInput, directory, todoStatus) {
   return parts.join(' | ');
 }
 
+// Check if any OMC mode is currently active
+function hasActiveMode(directory) {
+  const modes = ['ultrawork', 'ralph', 'autopilot', 'ultraqa', 'ultrapilot', 'pipeline', 'team'];
+  const stateDir = join(directory, '.omc', 'state');
+
+  // Check session-scoped state
+  const sessionDir = join(stateDir, 'sessions');
+  try {
+    if (existsSync(sessionDir)) {
+      for (const sid of readdirSync(sessionDir)) {
+        for (const mode of modes) {
+          const f = join(sessionDir, sid, `${mode}-state.json`);
+          if (existsSync(f)) {
+            try {
+              const d = JSON.parse(readFileSync(f, 'utf-8'));
+              if (d.active !== false) return true;
+            } catch { /* ignore malformed state */ }
+          }
+        }
+      }
+    }
+  } catch { /* sessionDir not readable */ }
+
+  // Check legacy state files
+  for (const mode of modes) {
+    const f = join(stateDir, `${mode}-state.json`);
+    if (existsSync(f)) {
+      try {
+        const d = JSON.parse(readFileSync(f, 'utf-8'));
+        if (d.active !== false) return true;
+      } catch { /* ignore malformed state */ }
+    }
+  }
+
+  // Check swarm marker
+  if (existsSync(join(stateDir, 'swarm-active.marker'))) return true;
+
+  return false;
+}
+
 // Generate contextual message based on tool type
-function generateMessage(toolName, todoStatus) {
+function generateMessage(toolName, todoStatus, directory) {
   const messages = {
     TodoWrite: `${todoStatus}Mark todos in_progress BEFORE starting, completed IMMEDIATELY after finishing.`,
     Bash: `${todoStatus}Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests).`,
@@ -105,7 +145,14 @@ function generateMessage(toolName, todoStatus) {
     Glob: `${todoStatus}Combine searches in parallel when investigating multiple patterns.`,
   };
 
-  return messages[toolName] || `${todoStatus}The boulder never stops. Continue until all tasks complete.`;
+  if (messages[toolName]) return messages[toolName];
+
+  // Only inject boulder message when an OMC mode is actually active
+  if (hasActiveMode(directory)) {
+    return `${todoStatus}The boulder never stops. Continue until all tasks complete.`;
+  }
+
+  return '';
 }
 
 // Record Skill/Task invocations to flow trace (best-effort)
@@ -176,16 +223,20 @@ async function main() {
       const toolInput = data.toolInput || data.tool_input || null;
       message = generateAgentSpawnMessage(toolInput, directory, todoStatus);
     } else {
-      message = generateMessage(toolName, todoStatus);
+      message = generateMessage(toolName, todoStatus, directory);
     }
 
-    console.log(JSON.stringify({
-      continue: true,
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        additionalContext: message
-      }
-    }, null, 2));
+    if (message) {
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          additionalContext: message
+        }
+      }, null, 2));
+    } else {
+      console.log(JSON.stringify({ continue: true }));
+    }
   } catch (error) {
     // On error, always continue
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
