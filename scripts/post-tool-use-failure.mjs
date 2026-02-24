@@ -149,10 +149,28 @@ async function main() {
     // Write error state
     writeErrorState(stateDir, toolName, inputPreview, error, retryCount);
 
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    // Inject continuation guidance so the model analyzes the error instead of stopping.
+    // Without this, PostToolUseFailure returns silently and the model may end its turn.
+    // The PostToolUse hook (post-tool-verifier.mjs) provides similar guidance for
+    // successful Bash calls with error patterns, but PostToolUseFailure is a separate
+    // event that needs its own guidance injection.
+    let guidance;
+    if (retryCount >= 5) {
+      guidance = `Tool "${toolName}" has failed ${retryCount} times. Stop retrying the same approach — try a different command, check dependencies, or ask the user for guidance.`;
+    } else {
+      guidance = `Tool "${toolName}" failed. Analyze the error, fix the issue, and continue working.`;
+    }
+
+    console.log(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUseFailure',
+        additionalContext: guidance,
+      },
+    }));
   } catch (error) {
     // Never block on hook errors
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    console.log(JSON.stringify({ continue: true }));
   }
 }
 
