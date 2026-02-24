@@ -372,7 +372,7 @@ function spawnCliProcess(
 
   if (provider === 'codex') {
     cmd = 'codex';
-    args = ['exec', '-m', model || 'gpt-5.3-codex', '--json', '--full-auto', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'];
+    args = ['exec', '-m', model || 'gpt-5.3-codex', '--json', '--full-auto', '--skip-git-repo-check'];
   } else {
     cmd = 'gemini';
     args = ['--yolo'];

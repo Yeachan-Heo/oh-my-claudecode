@@ -66,7 +66,7 @@ var CONTRACTS = {
     binary: "codex",
     installInstructions: "Install Codex CLI: npm install -g @openai/codex",
     buildLaunchArgs(model, extraFlags = []) {
-      const args = ["--full-auto", "--dangerously-bypass-approvals-and-sandbox"];
+      const args = ["--full-auto"];
       if (model) args.push("--model", model);
       return [...args, ...extraFlags];
     },

@@ -26,10 +26,10 @@ describe('model-contract', () => {
             const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
             expect(args).toContain('--dangerously-skip-permissions');
         });
-        it('codex includes --full-auto and bypass approvals/sandbox', () => {
+        it('codex includes --full-auto only (no conflicting bypass flag)', () => {
             const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp' });
             expect(args).toContain('--full-auto');
-            expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
+            expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
         });
         it('gemini includes --yolo', () => {
             const args = buildLaunchArgs('gemini', { teamName: 't', workerName: 'w', cwd: '/tmp' });
@@ -57,7 +57,6 @@ describe('model-contract', () => {
             expect(buildWorkerArgv('codex', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' })).toEqual([
                 'codex',
                 '--full-auto',
-                '--dangerously-bypass-approvals-and-sandbox',
             ]);
         });
     });

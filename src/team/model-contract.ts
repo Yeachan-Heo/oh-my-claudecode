@@ -38,7 +38,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     binary: 'codex',
     installInstructions: 'Install Codex CLI: npm install -g @openai/codex',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
-      const args = ['--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
+      const args = ['--full-auto'];
       if (model) args.push('--model', model);
       return [...args, ...extraFlags];
     },
