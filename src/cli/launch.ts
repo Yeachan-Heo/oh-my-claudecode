@@ -96,8 +96,8 @@ export function extractOpenClawFlag(args: string[]): { openclawEnabled: boolean;
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
  */
-export function extractTelegramFlag(args: string[]): { telegramEnabled: boolean; remainingArgs: string[] } {
-  let telegramEnabled = false;
+export function extractTelegramFlag(args: string[]): { telegramEnabled: boolean | undefined; remainingArgs: string[] } {
+  let telegramEnabled: boolean | undefined = undefined;
   const remainingArgs: string[] = [];
   for (const arg of args) {
     if (arg === TELEGRAM_FLAG) { telegramEnabled = true; continue; }
@@ -123,8 +123,8 @@ export function extractTelegramFlag(args: string[]): { telegramEnabled: boolean;
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
  */
-export function extractDiscordFlag(args: string[]): { discordEnabled: boolean; remainingArgs: string[] } {
-  let discordEnabled = false;
+export function extractDiscordFlag(args: string[]): { discordEnabled: boolean | undefined; remainingArgs: string[] } {
+  let discordEnabled: boolean | undefined = undefined;
   const remainingArgs: string[] = [];
   for (const arg of args) {
     if (arg === DISCORD_FLAG) { discordEnabled = true; continue; }
@@ -150,8 +150,8 @@ export function extractDiscordFlag(args: string[]): { discordEnabled: boolean; r
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
  */
-export function extractSlackFlag(args: string[]): { slackEnabled: boolean; remainingArgs: string[] } {
-  let slackEnabled = false;
+export function extractSlackFlag(args: string[]): { slackEnabled: boolean | undefined; remainingArgs: string[] } {
+  let slackEnabled: boolean | undefined = undefined;
   const remainingArgs: string[] = [];
   for (const arg of args) {
     if (arg === SLACK_FLAG) { slackEnabled = true; continue; }
@@ -177,8 +177,8 @@ export function extractSlackFlag(args: string[]): { slackEnabled: boolean; remai
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
  */
-export function extractWebhookFlag(args: string[]): { webhookEnabled: boolean; remainingArgs: string[] } {
-  let webhookEnabled = false;
+export function extractWebhookFlag(args: string[]): { webhookEnabled: boolean | undefined; remainingArgs: string[] } {
+  let webhookEnabled: boolean | undefined = undefined;
   const remainingArgs: string[] = [];
   for (const arg of args) {
     if (arg === WEBHOOK_FLAG) { webhookEnabled = true; continue; }
