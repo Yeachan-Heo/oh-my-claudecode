@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { _openclaw } from "../bridge.js";
+import { _openclaw, processHook, resetSkipHooksCache, type HookInput } from "../bridge.js";
 
 describe("_openclaw.wake", () => {
   afterEach(() => {
@@ -76,5 +76,82 @@ describe("_openclaw.wake", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     vi.doUnmock("../../openclaw/index.js");
+  });
+});
+
+describe("bridge-level regression tests", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.DISABLE_OMC;
+    delete process.env.OMC_SKIP_HOOKS;
+    delete process.env.OMC_OPENCLAW;
+    delete process.env.OMC_NOTIFY;
+    resetSkipHooksCache();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    resetSkipHooksCache();
+  });
+
+  it("keyword-detector injects translation message for non-Latin prompts", async () => {
+    const input: HookInput = {
+      sessionId: "test-session",
+      prompt: "이 코드를 수정해줘",
+      directory: "/tmp/test",
+    };
+
+    const result = await processHook("keyword-detector", input);
+
+    // The result should contain the PROMPT_TRANSLATION_MESSAGE
+    expect(result.message).toBeDefined();
+    expect(result.message).toContain("[PROMPT TRANSLATION]");
+    expect(result.message).toContain("Non-English input detected");
+  });
+
+  it("keyword-detector does NOT inject translation message for Latin prompts", async () => {
+    const input: HookInput = {
+      sessionId: "test-session",
+      prompt: "fix the bug in auth.ts",
+      directory: "/tmp/test",
+    };
+
+    const result = await processHook("keyword-detector", input);
+
+    // Should not contain translation message for English text
+    const msg = result.message || "";
+    expect(msg).not.toContain("[PROMPT TRANSLATION]");
+  });
+
+  it("pre-tool-use calls _openclaw.wake for AskUserQuestion", async () => {
+    process.env.OMC_OPENCLAW = "1";
+    process.env.OMC_NOTIFY = "0"; // suppress real notifications
+
+    const wakeSpy = vi.spyOn(_openclaw, "wake");
+
+    const input: HookInput = {
+      sessionId: "test-session",
+      toolName: "AskUserQuestion",
+      toolInput: {
+        questions: [{ question: "What should I do next?" }],
+      },
+      directory: "/tmp/test",
+    };
+
+    await processHook("pre-tool-use", input);
+
+    // Verify _openclaw.wake was called with ask-user-question event
+    const askCall = wakeSpy.mock.calls.find(
+      (call) => call[0] === "ask-user-question",
+    );
+    expect(askCall).toBeDefined();
+    expect(askCall![1]).toMatchObject({
+      sessionId: "test-session",
+      question: "What should I do next?",
+    });
+
+    wakeSpy.mockRestore();
   });
 });
