@@ -59,18 +59,30 @@ export function routeTask(
   // Calculate score for confidence and logging
   const score = calculateComplexityScore(signals);
   const scoreTier = scoreToTier(score);
-  const confidence = calculateConfidence(score, ruleResult.tier);
+  let confidence = calculateConfidence(score, ruleResult.tier);
 
   let finalTier = ruleResult.tier;
+  const tierOrder: ComplexityTier[] = ['LOW', 'MEDIUM', 'HIGH'];
+  const ruleIdx = tierOrder.indexOf(ruleResult.tier);
+  const scoreIdx = tierOrder.indexOf(scoreTier);
+
+  // When scorer and rules diverge by more than 1 level, reduce confidence
+  // and prefer the higher tier to avoid under-provisioning
+  const divergence = Math.abs(ruleIdx - scoreIdx);
+  if (divergence > 1) {
+    confidence = Math.min(confidence, 0.5);
+    finalTier = tierOrder[Math.max(ruleIdx, scoreIdx)];
+  }
+
   const reasons = [
     ruleResult.reason,
     `Rule: ${ruleResult.ruleName}`,
     `Score: ${score} (${scoreTier} tier by score)`,
+    ...(divergence > 1 ? [`Scorer/rules divergence (${divergence} levels): confidence reduced, preferred higher tier`] : []),
   ];
 
   // Enforce minTier if configured
   if (mergedConfig.minTier) {
-    const tierOrder: ComplexityTier[] = ['LOW', 'MEDIUM', 'HIGH'];
     const currentIdx = tierOrder.indexOf(finalTier);
     const minIdx = tierOrder.indexOf(mergedConfig.minTier);
     if (currentIdx < minIdx) {

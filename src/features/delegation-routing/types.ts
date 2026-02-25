@@ -56,6 +56,8 @@ export const ROLE_CATEGORY_DEFAULTS: Record<string, string> = {
   debugger: 'debugger',
   scientist: 'scientist',
   'build-fixer': 'build-fixer',
+  'git-master': 'executor',
+  'code-simplifier': 'executor',
 };
 
 /**

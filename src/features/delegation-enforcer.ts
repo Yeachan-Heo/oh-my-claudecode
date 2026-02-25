@@ -9,6 +9,7 @@
  */
 
 import { getAgentDefinitions } from '../agents/definitions.js';
+import { normalizeDelegationRole } from './delegation-routing/types.js';
 import type { ModelType } from '../shared/types.js';
 
 /**
@@ -61,7 +62,9 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   }
 
   // Extract agent type (strip oh-my-claudecode: prefix if present)
-  const agentType = agentInput.subagent_type.replace(/^oh-my-claudecode:/, '');
+  const rawAgentType = agentInput.subagent_type.replace(/^oh-my-claudecode:/, '');
+  // Normalize deprecated role aliases before registry lookup
+  const agentType = normalizeDelegationRole(rawAgentType);
 
   // Get agent definition
   const agentDefs = getAgentDefinitions();
