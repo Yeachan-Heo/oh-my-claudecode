@@ -285,12 +285,20 @@ function detectTaskType(task: string): TaskType {
     return 'refactoring';
   }
 
-  if (
-    task.includes('fix') ||
-    task.includes('bug') ||
-    task.includes('error') ||
-    task.includes('issue')
-  ) {
+  // Require 2+ distinct signals to classify as bug-fix, to avoid false positives
+  // (e.g. "resolve the performance issue" should not be classified as bug-fix)
+  const bugFixSignals = [
+    /\bfix\b/,
+    /\bbug\b/,
+    /\berror\b/,
+    /\bissue\b/,
+    /\bbroken\b/,
+    /\bcrash\b/,
+    /\bfailure\b/,
+    /\bregression\b/,
+  ];
+  const bugFixMatches = bugFixSignals.filter((re) => re.test(task)).length;
+  if (bugFixMatches >= 2) {
     return 'bug-fix';
   }
 
