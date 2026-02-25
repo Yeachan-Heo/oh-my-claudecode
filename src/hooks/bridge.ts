@@ -19,7 +19,7 @@ import { join } from "path";
 import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import {
@@ -34,6 +34,7 @@ import {
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
   RALPH_MESSAGE,
+  PROMPT_TRANSLATION_MESSAGE,
 } from "../installer/hooks.js";
 // Agent dashboard is used in pre/post-tool-use hot path
 import {
@@ -358,6 +359,11 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
         `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`
       );
     }
+  }
+
+  const sanitizedText = sanitizeForKeywordDetection(cleanedText);
+  if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
+    messages.push(PROMPT_TRANSLATION_MESSAGE);
   }
 
   if (keywords.length === 0) {

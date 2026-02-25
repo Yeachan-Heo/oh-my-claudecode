@@ -10,6 +10,7 @@ import {
   getAllKeywordsWithSizeCheck,
   isUnderspecifiedForExecution,
   applyRalplanGate,
+  NON_LATIN_SCRIPT_PATTERN,
   type KeywordType,
   type DetectedKeyword,
 } from '../index.js';
@@ -1386,6 +1387,94 @@ World`);
       expect(gateResult.keywords).toContain('ralplan');
       expect(gateResult.keywords).toContain('tdd');
       expect(gateResult.keywords).not.toContain('ralph');
+    });
+  });
+
+  describe('non-ASCII prompt translation detection', () => {
+    describe('NON_LATIN_SCRIPT_PATTERN - should trigger', () => {
+      it('detects Japanese hiragana', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('UIコンポーネントを修正して')).toBe(true);
+      });
+
+      it('detects Japanese katakana', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('バグを修正してください')).toBe(true);
+      });
+
+      it('detects Chinese characters', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('修复这个错误')).toBe(true);
+      });
+
+      it('detects Korean Hangul', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('버그를 수정해주세요')).toBe(true);
+      });
+
+      it('detects Cyrillic (Russian)', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('исправь эту ошибку')).toBe(true);
+      });
+
+      it('detects Arabic', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('أصلح هذا الخطأ')).toBe(true);
+      });
+
+      it('detects Devanagari (Hindi)', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('इस बग को ठीक करें')).toBe(true);
+      });
+
+      it('detects mixed non-ASCII with English', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('ralph バグを修正して')).toBe(true);
+      });
+    });
+
+    describe('NON_LATIN_SCRIPT_PATTERN - should NOT trigger', () => {
+      it('does not trigger on pure ASCII', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('Fix the UI components')).toBe(false);
+      });
+
+      it('does not trigger on emoji only', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('👍 fix this bug')).toBe(false);
+      });
+
+      it('does not trigger on accented Latin (café)', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('café résumé naïve')).toBe(false);
+      });
+
+      it('does not trigger on accented Latin (Spanish)', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('arregla el error por favor')).toBe(false);
+      });
+
+      it('does not trigger on empty string', () => {
+        expect(NON_LATIN_SCRIPT_PATTERN.test('')).toBe(false);
+      });
+    });
+
+    describe('sanitizeForKeywordDetection strips non-ASCII from structural noise', () => {
+      it('strips non-ASCII from code blocks before detection', () => {
+        const text = 'Fix this: ```const x = "日本語";```';
+        const sanitized = sanitizeForKeywordDetection(text);
+        // After sanitization, code block content is removed
+        expect(NON_LATIN_SCRIPT_PATTERN.test(sanitized)).toBe(false);
+      });
+
+      it('strips non-ASCII from URLs before detection', () => {
+        const text = 'See https://example.com/path for details';
+        const sanitized = sanitizeForKeywordDetection(text);
+        // After sanitization, URL is removed - plain text remains
+        expect(sanitized).not.toContain('https://');
+      });
+
+      it('preserves non-ASCII in plain human-language text', () => {
+        const text = 'UIコンポーネントを修正して';
+        const sanitized = sanitizeForKeywordDetection(text);
+        // Plain Japanese text is preserved after sanitization
+        expect(NON_LATIN_SCRIPT_PATTERN.test(sanitized)).toBe(true);
+      });
+
+      it('preserves non-ASCII when mixed with English keywords', () => {
+        const text = 'ralph バグを修正して';
+        const sanitized = sanitizeForKeywordDetection(text);
+        // Japanese text preserved, English keyword also preserved
+        expect(NON_LATIN_SCRIPT_PATTERN.test(sanitized)).toBe(true);
+      });
     });
   });
 });

@@ -285,6 +285,15 @@ Ralph mode auto-activates Ultrawork for maximum parallel execution. Follow these
 Continue working until the task is truly done.
 `;
 
+/**
+ * Prompt translation message - injected when non-English input detected
+ * Reminds users to write prompts in English for consistent agent routing
+ */
+export const PROMPT_TRANSLATION_MESSAGE = `[PROMPT TRANSLATION] Non-English input detected.
+When delegating via Task(), write prompt arguments in English for consistent agent routing.
+Respond to the user in their original language.
+`;
+
 // =============================================================================
 // NODE.JS HOOK SCRIPTS (Cross-platform: Windows, macOS, Linux)
 // =============================================================================

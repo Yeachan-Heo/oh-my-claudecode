@@ -86,6 +86,16 @@ export function removeCodeBlocks(text: string): string {
   return result;
 }
 
+
+/**
+ * Regex matching non-Latin script characters for prompt translation detection.
+ * Uses Unicode script ranges (not raw non-ASCII) to avoid false positives on emoji and accented Latin.
+ * Covers: CJK (Japanese/Chinese), Korean, Cyrillic, Arabic, Devanagari, Thai, Myanmar.
+ */
+export const NON_LATIN_SCRIPT_PATTERN =
+  // eslint-disable-next-line no-misleading-character-class -- Intentional: detecting script presence, not matching grapheme clusters
+  /[\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]/u;
+
 /**
 * Sanitize text for keyword detection by removing structural noise.
  * Strips XML tags, URLs, file paths, and code blocks.
