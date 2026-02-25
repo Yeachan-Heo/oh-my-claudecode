@@ -69,7 +69,7 @@ var CONTRACTS = {
     // Codex accepts prompt as a positional argument (no flag needed):
     //   codex [OPTIONS] [PROMPT]
     buildLaunchArgs(model, extraFlags = []) {
-      const args = ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"];
+      const args = ["--dangerously-bypass-approvals-and-sandbox"];
       if (model) args.push("--model", model);
       return [...args, ...extraFlags];
     },

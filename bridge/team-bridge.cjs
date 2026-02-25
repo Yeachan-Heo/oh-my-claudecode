@@ -126,11 +126,8 @@ var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 // src/team/tmux-session.ts
 var import_child_process = require("child_process");
 var import_path3 = require("path");
-var import_util = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
 var TMUX_SESSION_PREFIX = "omc-team";
-var promisifiedExec = (0, import_util.promisify)(import_child_process.exec);
-var promisifiedExecFile = (0, import_util.promisify)(import_child_process.execFile);
 function sanitizeName(name) {
   const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
   if (sanitized.length === 0) {
@@ -1654,7 +1651,6 @@ ${violationSummary}`);
 }
 
 // src/lib/worktree-paths.ts
-var import_crypto = require("crypto");
 var import_child_process3 = require("child_process");
 var import_fs9 = require("fs");
 var import_path11 = require("path");
