@@ -8,7 +8,8 @@ import {
   killSession,
   shouldAttemptAdaptiveRetry,
   getDefaultShell,
-  buildWorkerStartCommand
+  buildWorkerStartCommand,
+  isUnixLikeOnWindows,
 } from '../tmux-session.js';
 
 afterEach(() => {
@@ -69,6 +70,22 @@ describe('getDefaultShell', () => {
     vi.stubEnv('SHELL', '/bin/zsh');
     expect(getDefaultShell()).toBe('/bin/zsh');
   });
+
+  it('uses SHELL instead of COMSPEC on win32 when MSYSTEM is set (MSYS2)', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('MSYSTEM', 'MINGW64');
+    vi.stubEnv('SHELL', '/usr/bin/bash');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    expect(getDefaultShell()).toBe('/usr/bin/bash');
+  });
+
+  it('uses SHELL instead of COMSPEC on win32 when MINGW_PREFIX is set', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('MINGW_PREFIX', '/mingw64');
+    vi.stubEnv('SHELL', '/usr/bin/bash');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    expect(getDefaultShell()).toBe('/usr/bin/bash');
+  });
 });
 
 describe('buildWorkerStartCommand', () => {
@@ -106,6 +123,25 @@ describe('buildWorkerStartCommand', () => {
     expect(cmd).not.toContain('env ');
     expect(cmd).not.toContain('[ -f ');
     expect(cmd).not.toContain('source ');
+  });
+
+  it('builds a POSIX command on win32 when MSYSTEM is set (MSYS2)', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('MSYSTEM', 'MINGW64');
+    vi.stubEnv('SHELL', '/usr/bin/bash');
+    vi.stubEnv('HOME', '/home/tester');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { A: '1' },
+      launchCmd: 'node app.js',
+      cwd: '/c/repo'
+    });
+
+    expect(cmd).toContain("env A='1' /usr/bin/bash -c");
+    expect(cmd).not.toContain('cmd.exe');
+    expect(cmd).not.toContain('/d /s /c');
   });
 
   it('uses basename-style shell name extraction for windows-style shell path', () => {

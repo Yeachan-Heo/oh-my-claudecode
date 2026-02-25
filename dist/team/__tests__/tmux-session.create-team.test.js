@@ -22,6 +22,13 @@ vi.mock('child_process', async (importOriginal) => {
         }
         return { stdout: '', stderr: '' };
     };
+    /** Parse a shell command like: tmux "arg1" "arg2" into ['arg1', 'arg2'] */
+    const parseTmuxShellCmd = (cmd) => {
+        const match = cmd.match(/^tmux\s+(.+)$/);
+        if (!match)
+            return null;
+        return match[1].match(/"([^"]*)"/g)?.map(s => s.slice(1, -1)) ?? [];
+    };
     const execFileMock = vi.fn((_cmd, args, cb) => {
         const { stdout, stderr } = runMockExec(args);
         cb(null, stdout, stderr);
@@ -30,8 +37,20 @@ vi.mock('child_process', async (importOriginal) => {
     const promisifyCustom = Symbol.for('nodejs.util.promisify.custom');
     execFileMock[promisifyCustom] =
         async (_cmd, args) => runMockExec(args);
+    const execMock = vi.fn((cmd, cb) => {
+        const args = parseTmuxShellCmd(cmd);
+        const { stdout, stderr } = args ? runMockExec(args) : { stdout: '', stderr: '' };
+        cb(null, stdout, stderr);
+        return {};
+    });
+    execMock[promisifyCustom] =
+        async (cmd) => {
+            const args = parseTmuxShellCmd(cmd);
+            return args ? runMockExec(args) : { stdout: '', stderr: '' };
+        };
     return {
         ...actual,
+        exec: execMock,
         execFile: execFileMock,
     };
 });

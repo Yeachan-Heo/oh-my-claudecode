@@ -72,7 +72,7 @@ export function getContract(agentType) {
 export function isCliAvailable(agentType) {
     const contract = getContract(agentType);
     try {
-        const result = spawnSync(contract.binary, ['--version'], { timeout: 5000 });
+        const result = spawnSync(contract.binary, ['--version'], { timeout: 5000, shell: true });
         return result.status === 0;
     }
     catch {

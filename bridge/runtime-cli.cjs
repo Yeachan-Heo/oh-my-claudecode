@@ -113,7 +113,7 @@ function getContract(agentType) {
 function isCliAvailable(agentType) {
   const contract = getContract(agentType);
   try {
-    const result = (0, import_child_process.spawnSync)(contract.binary, ["--version"], { timeout: 5e3 });
+    const result = (0, import_child_process.spawnSync)(contract.binary, ["--version"], { timeout: 5e3, shell: true });
     return result.status === 0;
   } catch {
     return false;
@@ -159,9 +159,22 @@ function getPromptModeArgs(agentType, instruction) {
 // src/team/tmux-session.ts
 var import_child_process2 = require("child_process");
 var import_path = require("path");
+var import_util = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
+var promisifiedExec = (0, import_util.promisify)(import_child_process2.exec);
+var promisifiedExecFile = (0, import_util.promisify)(import_child_process2.execFile);
+function isUnixLikeOnWindows() {
+  return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
+}
+async function tmuxAsync(args) {
+  if (args.some((a) => a.includes("#{"))) {
+    const escaped = args.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(" ");
+    return promisifiedExec(`tmux ${escaped}`);
+  }
+  return promisifiedExecFile("tmux", args);
+}
 function getDefaultShell() {
-  if (process.platform === "win32") {
+  if (process.platform === "win32" && !isUnixLikeOnWindows()) {
     return process.env.COMSPEC || "cmd.exe";
   }
   return process.env.SHELL || "/bin/bash";
@@ -193,7 +206,7 @@ function getLaunchWords(config) {
 function buildWorkerStartCommand(config) {
   const shell = getDefaultShell();
   const launchWords = getLaunchWords(config);
-  if (process.platform === "win32") {
+  if (process.platform === "win32" && !isUnixLikeOnWindows()) {
     const envPrefix = Object.entries(config.envVars).map(([k, v]) => {
       assertSafeEnvKey(k);
       return `set "${k}=${escapeForCmdSet(v)}"`;
@@ -230,9 +243,9 @@ function buildWorkerStartCommand(config) {
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
 async function createTeamSession(teamName, workerCount, cwd) {
-  const { execFile } = await import("child_process");
-  const { promisify } = await import("util");
-  const execFileAsync = promisify(execFile);
+  const { execFile: execFile2 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile2);
   if (!process.env.TMUX) {
     throw new Error("Team mode requires running inside tmux. Start one: tmux new-session");
   }
@@ -256,7 +269,7 @@ async function createTeamSession(teamName, workerCount, cwd) {
     }
   }
   if (!sessionAndWindow || !leaderPaneId) {
-    const contextResult = await execFileAsync("tmux", [
+    const contextResult = await tmuxAsync([
       "display-message",
       "-p",
       "#S:#I #{pane_id}"
@@ -287,7 +300,7 @@ async function createTeamSession(teamName, workerCount, cwd) {
   for (let i = 0; i < workerCount; i++) {
     const splitTarget = i === 0 ? leaderPaneId : workerPaneIds[i - 1];
     const splitType = i === 0 ? "-h" : "-v";
-    const splitResult = await execFileAsync("tmux", [
+    const splitResult = await tmuxAsync([
       "split-window",
       splitType,
       "-t",
@@ -309,7 +322,7 @@ async function createTeamSession(teamName, workerCount, cwd) {
   } catch {
   }
   try {
-    const widthResult = await execFileAsync("tmux", [
+    const widthResult = await tmuxAsync([
       "display-message",
       "-p",
       "-t",
@@ -336,9 +349,9 @@ async function createTeamSession(teamName, workerCount, cwd) {
   return { sessionName: teamTarget, leaderPaneId, workerPaneIds };
 }
 async function spawnWorkerInPane(sessionName, paneId, config) {
-  const { execFile } = await import("child_process");
-  const { promisify } = await import("util");
-  const execFileAsync = promisify(execFile);
+  const { execFile: execFile2 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile2);
   validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
   await execFileAsync("tmux", [
@@ -391,7 +404,7 @@ function paneTailContainsLiteralLine(captured, text) {
 }
 async function paneInCopyMode(paneId, execFileAsync) {
   try {
-    const result = await execFileAsync("tmux", ["display-message", "-t", paneId, "-p", "#{pane_in_mode}"]);
+    const result = await tmuxAsync(["display-message", "-t", paneId, "-p", "#{pane_in_mode}"]);
     return result.stdout.trim() === "1";
   } catch {
     return false;
@@ -414,9 +427,9 @@ async function sendToWorker(_sessionName, paneId, message) {
     message = message.slice(0, 200);
   }
   try {
-    const { execFile } = await import("child_process");
-    const { promisify } = await import("util");
-    const execFileAsync = promisify(execFile);
+    const { execFile: execFile2 } = await import("child_process");
+    const { promisify: promisify2 } = await import("util");
+    const execFileAsync = promisify2(execFile2);
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const sendKey = async (key) => {
       await execFileAsync("tmux", ["send-keys", "-t", paneId, key]);
@@ -495,10 +508,10 @@ async function sendToWorker(_sessionName, paneId, message) {
 }
 async function isWorkerAlive(paneId) {
   try {
-    const { execFile } = await import("child_process");
-    const { promisify } = await import("util");
-    const execFileAsync = promisify(execFile);
-    const result = await execFileAsync("tmux", [
+    const { execFile: execFile2 } = await import("child_process");
+    const { promisify: promisify2 } = await import("util");
+    const execFileAsync = promisify2(execFile2);
+    const result = await tmuxAsync([
       "display-message",
       "-t",
       paneId,
@@ -511,9 +524,9 @@ async function isWorkerAlive(paneId) {
   }
 }
 async function killTeamSession(sessionName, workerPaneIds, leaderPaneId) {
-  const { execFile } = await import("child_process");
-  const { promisify } = await import("util");
-  const execFileAsync = promisify(execFile);
+  const { execFile: execFile2 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile2);
   if (sessionName.includes(":")) {
     if (!workerPaneIds?.length) return;
     for (const id of workerPaneIds) {
@@ -994,9 +1007,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
   if (!task) return "";
   const marked = await markTaskInProgress(root, taskId, workerNameValue);
   if (!marked) return "";
-  const { execFile } = await import("child_process");
-  const { promisify } = await import("util");
-  const execFileAsync = promisify(execFile);
+  const { execFile: execFile2 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile2);
   const splitTarget = runtime.workerPaneIds.length === 0 ? runtime.leaderPaneId : runtime.workerPaneIds[runtime.workerPaneIds.length - 1];
   const splitType = runtime.workerPaneIds.length === 0 ? "-h" : "-v";
   const splitResult = await execFileAsync("tmux", [
@@ -1074,9 +1087,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
 }
 async function killWorkerPane(runtime, workerNameValue, paneId) {
   try {
-    const { execFile } = await import("child_process");
-    const { promisify } = await import("util");
-    const execFileAsync = promisify(execFile);
+    const { execFile: execFile2 } = await import("child_process");
+    const { promisify: promisify2 } = await import("util");
+    const execFileAsync = promisify2(execFile2);
     await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
   } catch {
   }

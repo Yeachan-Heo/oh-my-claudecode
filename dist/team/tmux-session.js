@@ -5,14 +5,37 @@
  * Create, kill, list, and manage tmux sessions for MCP worker bridge daemons.
  * Sessions are named "omc-team-{teamName}-{workerName}".
  */
-import { execSync, execFileSync } from 'child_process';
+import { exec, execFile, execSync, execFileSync } from 'child_process';
 import { join, basename } from 'path';
+import { promisify } from 'util';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const TMUX_SESSION_PREFIX = 'omc-team';
+const promisifiedExec = promisify(exec);
+const promisifiedExecFile = promisify(execFile);
+/**
+ * True when running on Windows under MSYS2/Git Bash.
+ * Tmux panes run bash in this environment, not cmd.exe.
+ */
+export function isUnixLikeOnWindows() {
+    return process.platform === 'win32' &&
+        !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
+}
+/**
+ * Execute a tmux command asynchronously. Routes through shell when arguments
+ * contain tmux format strings (e.g. #{pane_id}) to prevent MSYS2 execFile
+ * from stripping curly braces.
+ */
+async function tmuxAsync(args) {
+    if (args.some(a => a.includes('#{'))) {
+        const escaped = args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+        return promisifiedExec(`tmux ${escaped}`);
+    }
+    return promisifiedExecFile('tmux', args);
+}
 export function getDefaultShell() {
-    if (process.platform === 'win32') {
+    if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
         return process.env.COMSPEC || 'cmd.exe';
     }
     return process.env.SHELL || '/bin/bash';
@@ -44,7 +67,7 @@ function getLaunchWords(config) {
 export function buildWorkerStartCommand(config) {
     const shell = getDefaultShell();
     const launchWords = getLaunchWords(config);
-    if (process.platform === 'win32') {
+    if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
         const envPrefix = Object.entries(config.envVars)
             .map(([k, v]) => {
             assertSafeEnvKey(k);
@@ -160,7 +183,12 @@ export function isSessionAlive(teamName, workerName) {
 export function listActiveSessions(teamName) {
     const prefix = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-`;
     try {
-        const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+        // Use shell execution to prevent MSYS2 from stripping #{} in format strings
+        const fmtArgs = ['list-sessions', '-F', '#{session_name}'];
+        const shellCmd = 'tmux ' + fmtArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+        const output = execSync(shellCmd, {
+            encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
+        });
         return output.trim().split('\n')
             .filter(s => s.startsWith(prefix))
             .map(s => s.slice(prefix.length));
@@ -217,7 +245,7 @@ export async function createTeamSession(teamName, workerCount, cwd) {
     }
     if (!sessionAndWindow || !leaderPaneId) {
         // Fallback when TMUX_PANE is unavailable/invalid.
-        const contextResult = await execFileAsync('tmux', [
+        const contextResult = await tmuxAsync([
             'display-message', '-p', '#S:#I #{pane_id}'
         ]);
         const contextLine = contextResult.stdout.trim();
@@ -250,7 +278,7 @@ export async function createTeamSession(teamName, workerCount, cwd) {
         const splitTarget = i === 0 ? leaderPaneId : workerPaneIds[i - 1];
         const splitType = i === 0 ? '-h' : '-v';
         // -d: don't switch focus to new pane; -P -F: print new pane ID directly
-        const splitResult = await execFileAsync('tmux', [
+        const splitResult = await tmuxAsync([
             'split-window', splitType, '-t', splitTarget,
             '-d', '-P', '-F', '#{pane_id}',
             '-c', cwd,
@@ -269,7 +297,7 @@ export async function createTeamSession(teamName, workerCount, cwd) {
     }
     // Set leader pane to half the window width
     try {
-        const widthResult = await execFileAsync('tmux', [
+        const widthResult = await tmuxAsync([
             'display-message', '-p', '-t', teamTarget, '#{window_width}'
         ]);
         const width = parseInt(widthResult.stdout.trim(), 10);
@@ -356,7 +384,7 @@ function paneTailContainsLiteralLine(captured, text) {
 }
 async function paneInCopyMode(paneId, execFileAsync) {
     try {
-        const result = await execFileAsync('tmux', ['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
+        const result = await tmuxAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
         return result.stdout.trim() === '1';
     }
     catch {
@@ -525,7 +553,7 @@ export async function isWorkerAlive(paneId) {
         const { execFile } = await import('child_process');
         const { promisify } = await import('util');
         const execFileAsync = promisify(execFile);
-        const result = await execFileAsync('tmux', [
+        const result = await tmuxAsync([
             'display-message', '-t', paneId, '-p', '#{pane_dead}'
         ]);
         return result.stdout.trim() === '0';
