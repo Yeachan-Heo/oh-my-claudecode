@@ -186,7 +186,7 @@ async function recoverToolResultMissing(
   // This is a placeholder showing the recovery intent.
   // A full implementation would require access to the SDK client.
 
-  return true; // Indicate recovery was attempted
+  return false; // Cannot actually inject tool results without SDK client access
 }
 
 /**
