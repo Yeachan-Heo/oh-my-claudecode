@@ -270,7 +270,6 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
   // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
   try {
     execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
-    execFileSync('tmux', ['set-option', 'terminal-overrides', '*:smcup@:rmcup@'], { stdio: 'ignore' });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
   // Launch Claude in current pane
@@ -304,7 +303,6 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
     'new-session', '-d', '-s', sessionName, '-c', cwd,
     claudeCmd,
     ';', 'set-option', '-t', sessionName, 'mouse', 'on',
-    ';', 'set-option', '-t', sessionName, 'terminal-overrides', '*:smcup@:rmcup@',
   ];
 
   // Attach to session

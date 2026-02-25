@@ -276,15 +276,15 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     expect(tmuxArgs).not.toContain('-g');
   });
 
-  it('sets terminal-overrides to disable alternate screen so scroll works in TUI', () => {
+  it('does not set terminal-overrides in tmux args', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
     const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
     const tmuxArgs = tmuxCall![1] as string[];
 
-    expect(tmuxArgs).toContain('terminal-overrides');
-    expect(tmuxArgs).toContain('*:smcup@:rmcup@');
+    expect(tmuxArgs).not.toContain('terminal-overrides');
+    expect(tmuxArgs).not.toContain('*:smcup@:rmcup@');
   });
 
   it('places mouse mode setup before attach-session', () => {
@@ -319,20 +319,18 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
     processExitSpy.mockRestore();
   });
 
-  it('enables mouse mode and terminal-overrides before launching claude', () => {
+  it('enables mouse mode before launching claude', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
 
-    // First two calls should be tmux set-option for mouse config
-    expect(calls.length).toBeGreaterThanOrEqual(3);
+    // First call should be tmux set-option for mouse config
+    expect(calls.length).toBeGreaterThanOrEqual(2);
     expect(calls[0][0]).toBe('tmux');
     expect(calls[0][1]).toEqual(['set-option', 'mouse', 'on']);
-    expect(calls[1][0]).toBe('tmux');
-    expect(calls[1][1]).toEqual(['set-option', 'terminal-overrides', '*:smcup@:rmcup@']);
 
-    // Third call should be claude
-    expect(calls[2][0]).toBe('claude');
+    // Second call should be claude
+    expect(calls[1][0]).toBe('claude');
   });
 
   it('still launches claude even if tmux mouse config fails', () => {
