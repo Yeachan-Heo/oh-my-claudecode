@@ -3,6 +3,7 @@ import { extractLexicalSignals, extractStructuralSignals, extractContextSignals,
 import { calculateComplexityScore, scoreToTier, calculateComplexityTier, getScoreBreakdown, calculateConfidence, } from '../features/model-routing/scorer.js';
 import { evaluateRules, getMatchingRules, createRule, mergeRules, DEFAULT_ROUTING_RULES, } from '../features/model-routing/rules.js';
 import { routeTask, escalateModel, canEscalate, getModelForTask, quickTierForAgent, analyzeTaskComplexity, } from '../features/model-routing/router.js';
+import { getDefaultModelHigh, getDefaultModelLow, } from '../config/models.js';
 // ============ Signal Extraction Tests ============
 describe('Signal Extraction', () => {
     describe('extractLexicalSignals', () => {
@@ -522,7 +523,7 @@ describe('Router', () => {
             const decision = routeTask(context);
             expect(decision.tier).toBe('LOW');
             expect(decision.modelType).toBe('haiku');
-            expect(decision.model).toBe('claude-haiku-4-5-20251001');
+            expect(decision.model).toBe(getDefaultModelLow());
         });
         it('should route complex task to HIGH tier', () => {
             const context = {
@@ -531,7 +532,7 @@ describe('Router', () => {
             const decision = routeTask(context);
             expect(decision.tier).toBe('HIGH');
             expect(decision.modelType).toBe('opus');
-            expect(decision.model).toBe('claude-opus-4-6-20260205');
+            expect(decision.model).toBe(getDefaultModelHigh());
         });
         it('should respect explicit model override', () => {
             const context = {

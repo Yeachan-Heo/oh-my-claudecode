@@ -7,6 +7,7 @@
  */
 
 import type { ModelType } from '../../shared/types.js';
+import { getDefaultTierModels } from '../../config/models.js';
 
 /**
  * Complexity tier for task routing
@@ -14,13 +15,13 @@ import type { ModelType } from '../../shared/types.js';
 export type ComplexityTier = 'LOW' | 'MEDIUM' | 'HIGH';
 
 /**
- * Model tier mapping to actual Claude models
+ * Model tier mapping to actual Claude models.
+ *
+ * Reads from environment variables (OMC_MODEL_HIGH, OMC_MODEL_MEDIUM,
+ * OMC_MODEL_LOW) with built-in fallbacks. User/project config overrides
+ * are applied later by the config loader.
  */
-export const TIER_MODELS: Record<ComplexityTier, string> = {
-  LOW: 'claude-haiku-4-5-20251001',
-  MEDIUM: 'claude-sonnet-4-6-20260217',
-  HIGH: 'claude-opus-4-6-20260205',
-};
+export const TIER_MODELS: Record<ComplexityTier, string> = getDefaultTierModels();
 
 /**
  * Model tier to simple model type mapping

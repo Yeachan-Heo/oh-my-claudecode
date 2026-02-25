@@ -8,7 +8,11 @@
  */
 import type { PluginConfig } from '../shared/types.js';
 /**
- * Default configuration
+ * Default configuration.
+ *
+ * Model IDs are resolved from environment variables (OMC_MODEL_HIGH,
+ * OMC_MODEL_MEDIUM, OMC_MODEL_LOW) with built-in fallbacks.
+ * User/project config files can further override via deepMerge.
  */
 export declare const DEFAULT_CONFIG: PluginConfig;
 /**

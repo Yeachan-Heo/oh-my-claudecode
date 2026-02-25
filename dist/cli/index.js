@@ -16,6 +16,7 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadConfig, getConfigPaths, generateConfigSchema } from '../config/loader.js';
+import { getDefaultModelHigh, getDefaultModelMedium, getDefaultModelLow, } from '../config/models.js';
 import { createOmcSession } from '../index.js';
 import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
 import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
@@ -116,9 +117,18 @@ Examples:
         mkdirSync(targetDir, { recursive: true });
         console.log(chalk.green(`Created directory: ${targetDir}`));
     }
+    // Resolve current default model IDs (respects OMC_MODEL_* env vars)
+    const modelHigh = getDefaultModelHigh();
+    const modelMedium = getDefaultModelMedium();
+    const modelLow = getDefaultModelLow();
     // Generate config content
     const configContent = `// Oh-My-ClaudeCode Configuration
 // See: https://github.com/Yeachan-Heo/oh-my-claudecode for documentation
+//
+// Model IDs can be overridden via environment variables:
+//   OMC_MODEL_HIGH   (opus-class)
+//   OMC_MODEL_MEDIUM (sonnet-class)
+//   OMC_MODEL_LOW    (haiku-class)
 {
   "$schema": "./omc-schema.json",
 
@@ -126,31 +136,31 @@ Examples:
   "agents": {
     "omc": {
       // Main orchestrator - uses the most capable model
-      "model": "claude-opus-4-6-20260205"
+      "model": "${modelHigh}"
     },
     "architect": {
       // Architecture and debugging expert
-      "model": "claude-opus-4-6-20260205",
+      "model": "${modelHigh}",
       "enabled": true
     },
     "researcher": {
       // Documentation and codebase analysis
-      "model": "claude-sonnet-4-6-20260217"
+      "model": "${modelMedium}"
     },
     "explore": {
       // Fast pattern matching - uses fastest model
-      "model": "claude-3-5-haiku-20241022"
+      "model": "${modelLow}"
     },
     "frontendEngineer": {
-      "model": "claude-sonnet-4-6-20260217",
+      "model": "${modelMedium}",
       "enabled": true
     },
     "documentWriter": {
-      "model": "claude-3-5-haiku-20241022",
+      "model": "${modelLow}",
       "enabled": true
     },
     "multimodalLooker": {
-      "model": "claude-sonnet-4-6-20260217",
+      "model": "${modelMedium}",
       "enabled": true
     }
   },

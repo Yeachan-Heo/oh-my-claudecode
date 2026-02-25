@@ -10,24 +10,29 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import * as jsonc from 'jsonc-parser';
 import { getConfigDir } from '../utils/paths.js';
+import { getDefaultModelHigh, getDefaultModelMedium, getDefaultModelLow, } from './models.js';
 /**
- * Default configuration
+ * Default configuration.
+ *
+ * Model IDs are resolved from environment variables (OMC_MODEL_HIGH,
+ * OMC_MODEL_MEDIUM, OMC_MODEL_LOW) with built-in fallbacks.
+ * User/project config files can further override via deepMerge.
  */
 export const DEFAULT_CONFIG = {
     agents: {
-        omc: { model: 'claude-opus-4-6-20260205' },
-        architect: { model: 'claude-opus-4-6-20260205', enabled: true },
-        researcher: { model: 'claude-sonnet-4-6-20260217' },
-        explore: { model: 'claude-haiku-4-5-20251001' },
-        frontendEngineer: { model: 'claude-sonnet-4-6-20260217', enabled: true },
-        documentWriter: { model: 'claude-haiku-4-5-20251001', enabled: true },
-        multimodalLooker: { model: 'claude-sonnet-4-6-20260217', enabled: true },
+        omc: { model: getDefaultModelHigh() },
+        architect: { model: getDefaultModelHigh(), enabled: true },
+        researcher: { model: getDefaultModelMedium() },
+        explore: { model: getDefaultModelLow() },
+        frontendEngineer: { model: getDefaultModelMedium(), enabled: true },
+        documentWriter: { model: getDefaultModelLow(), enabled: true },
+        multimodalLooker: { model: getDefaultModelMedium(), enabled: true },
         // New agents from oh-my-opencode
-        critic: { model: 'claude-opus-4-6-20260205', enabled: true },
-        analyst: { model: 'claude-opus-4-6-20260205', enabled: true },
-        coordinator: { model: 'claude-sonnet-4-6-20260217', enabled: true },
-        executor: { model: 'claude-sonnet-4-6-20260217', enabled: true },
-        planner: { model: 'claude-opus-4-6-20260205', enabled: true }
+        critic: { model: getDefaultModelHigh(), enabled: true },
+        analyst: { model: getDefaultModelHigh(), enabled: true },
+        coordinator: { model: getDefaultModelMedium(), enabled: true },
+        executor: { model: getDefaultModelMedium(), enabled: true },
+        planner: { model: getDefaultModelHigh(), enabled: true }
     },
     features: {
         parallelExecution: true,
@@ -59,9 +64,9 @@ export const DEFAULT_CONFIG = {
         escalationEnabled: true,
         maxEscalations: 2,
         tierModels: {
-            LOW: 'claude-haiku-4-5-20251001',
-            MEDIUM: 'claude-sonnet-4-6-20260217',
-            HIGH: 'claude-opus-4-6-20260205'
+            LOW: getDefaultModelLow(),
+            MEDIUM: getDefaultModelMedium(),
+            HIGH: getDefaultModelHigh()
         },
         agentOverrides: {
             architect: { tier: 'HIGH', reason: 'Advisory agent requires deep reasoning' },

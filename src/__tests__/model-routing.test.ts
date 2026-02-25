@@ -31,6 +31,11 @@ import type {
   RoutingContext,
   ComplexitySignals,
 } from '../features/model-routing/types.js';
+import {
+  getDefaultModelHigh,
+  getDefaultModelMedium,
+  getDefaultModelLow,
+} from '../config/models.js';
 
 // ============ Signal Extraction Tests ============
 
@@ -646,7 +651,7 @@ describe('Router', () => {
 
       expect(decision.tier).toBe('LOW');
       expect(decision.modelType).toBe('haiku');
-      expect(decision.model).toBe('claude-haiku-4-5-20251001');
+      expect(decision.model).toBe(getDefaultModelLow());
     });
 
     it('should route complex task to HIGH tier', () => {
@@ -657,7 +662,7 @@ describe('Router', () => {
 
       expect(decision.tier).toBe('HIGH');
       expect(decision.modelType).toBe('opus');
-      expect(decision.model).toBe('claude-opus-4-6-20260205');
+      expect(decision.model).toBe(getDefaultModelHigh());
     });
 
     it('should respect explicit model override', () => {

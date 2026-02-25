@@ -5,14 +5,15 @@
  * sub-agent tasks to appropriate models (Opus/Sonnet/Haiku) based on
  * task complexity.
  */
+import { getDefaultTierModels } from '../../config/models.js';
 /**
- * Model tier mapping to actual Claude models
+ * Model tier mapping to actual Claude models.
+ *
+ * Reads from environment variables (OMC_MODEL_HIGH, OMC_MODEL_MEDIUM,
+ * OMC_MODEL_LOW) with built-in fallbacks. User/project config overrides
+ * are applied later by the config loader.
  */
-export const TIER_MODELS = {
-    LOW: 'claude-haiku-4-5-20251001',
-    MEDIUM: 'claude-sonnet-4-6-20260217',
-    HIGH: 'claude-opus-4-6-20260205',
-};
+export const TIER_MODELS = getDefaultTierModels();
 /**
  * Model tier to simple model type mapping
  */

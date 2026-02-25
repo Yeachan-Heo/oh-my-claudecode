@@ -11,7 +11,11 @@ import type { ModelType } from '../../shared/types.js';
  */
 export type ComplexityTier = 'LOW' | 'MEDIUM' | 'HIGH';
 /**
- * Model tier mapping to actual Claude models
+ * Model tier mapping to actual Claude models.
+ *
+ * Reads from environment variables (OMC_MODEL_HIGH, OMC_MODEL_MEDIUM,
+ * OMC_MODEL_LOW) with built-in fallbacks. User/project config overrides
+ * are applied later by the config loader.
  */
 export declare const TIER_MODELS: Record<ComplexityTier, string>;
 /**
