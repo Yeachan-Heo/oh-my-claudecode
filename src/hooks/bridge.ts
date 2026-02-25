@@ -19,7 +19,7 @@ import { join } from "path";
 import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import {
@@ -34,7 +34,6 @@ import {
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
   RALPH_MESSAGE,
-  PROMPT_TRANSLATION_MESSAGE,
 } from "../installer/hooks.js";
 // Agent dashboard is used in pre/post-tool-use hot path
 import {
@@ -361,9 +360,13 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     }
   }
 
-  const sanitizedText = sanitizeForKeywordDetection(cleanedText);
-  if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
-    messages.push(PROMPT_TRANSLATION_MESSAGE);
+  // Wake OpenClaw gateway for keyword-detector (non-blocking, fires for all prompts)
+  if (input.sessionId) {
+    _openclaw.wake("keyword-detector", {
+      sessionId: input.sessionId,
+      projectPath: directory,
+      prompt: cleanedText,
+    });
   }
 
   if (keywords.length === 0) {
@@ -625,6 +628,8 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
               profileName: process.env.OMC_NOTIFY_PROFILE,
             }).catch(() => {})
           ).catch(() => {});
+          // Wake OpenClaw gateway for stop event (non-blocking)
+          _openclaw.wake("stop", { sessionId, projectPath: directory });
         }
       }
 
@@ -692,6 +697,8 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
         profileName: process.env.OMC_NOTIFY_PROFILE,
       }).catch(() => {})
     ).catch(() => {});
+    // Wake OpenClaw gateway for session-start (non-blocking)
+    _openclaw.wake("session-start", { sessionId, projectPath: directory });
   }
 
   // Start reply listener daemon if configured (non-blocking, swallows errors)
@@ -892,6 +899,23 @@ export const _notify = {
 };
 
 /**
+ * @internal Object wrapper for OpenClaw gateway dispatch.
+ * Mirrors the _notify pattern for testability (tests spy on _openclaw.wake
+ * instead of mocking dynamic imports).
+ *
+ * Fire-and-forget: the lazy import + double .catch() ensures OpenClaw
+ * never blocks hooks or surfaces errors.
+ */
+export const _openclaw = {
+  wake: (event: import("../openclaw/types.js").OpenClawHookEvent, context: import("../openclaw/types.js").OpenClawContext) => {
+    if (process.env.OMC_OPENCLAW !== "1") return;
+    import("../openclaw/index.js").then(({ wakeOpenClaw }) =>
+      wakeOpenClaw(event, context).catch(() => {})
+    ).catch(() => {});
+  },
+};
+
+/**
  * Process pre-tool-use hook
  * Checks delegation enforcement and tracks background tasks
  */
@@ -1043,6 +1067,15 @@ function processPreToolUse(input: HookInput): HookOutput {
     }
   }
 
+  // Wake OpenClaw gateway for pre-tool-use (non-blocking, fires only for allowed tools)
+  if (input.sessionId) {
+    _openclaw.wake("pre-tool-use", {
+      sessionId: input.sessionId,
+      projectPath: directory,
+      toolName: input.toolName,
+    });
+  }
+
   return {
     continue: true,
     ...(enforcementResult.message ? { message: enforcementResult.message } : {}),
@@ -1118,6 +1151,15 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
     if (dashboard) {
       messages.push(dashboard);
     }
+  }
+
+  // Wake OpenClaw gateway for post-tool-use (non-blocking, fires for all tools)
+  if (input.sessionId) {
+    _openclaw.wake("post-tool-use", {
+      sessionId: input.sessionId,
+      projectPath: directory,
+      toolName: input.toolName,
+    });
   }
 
   if (messages.length > 0) {
