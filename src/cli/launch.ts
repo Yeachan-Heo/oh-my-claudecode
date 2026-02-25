@@ -119,10 +119,17 @@ export function runClaude(cwd: string, args: string[], sessionId: string): void 
  * Launches Claude in current pane
  */
 function runClaudeInsideTmux(cwd: string, args: string[]): void {
-  // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
+  // Enable mouse support in the current tmux session (non-fatal if it fails)
   try {
     execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
-    execFileSync('tmux', ['set-option', 'terminal-overrides', '*:smcup@:rmcup@'], { stdio: 'ignore' });
+    // Unbind disruptive mouse actions from root table
+    execFileSync('tmux', ['unbind-key', '-T', 'root', 'MouseDrag1Pane'], { stdio: 'ignore' });
+    execFileSync('tmux', ['unbind-key', '-T', 'root', 'DoubleClick1Pane'], { stdio: 'ignore' });
+    execFileSync('tmux', ['unbind-key', '-T', 'root', 'TripleClick1Pane'], { stdio: 'ignore' });
+    // Bind pane selection and stop-selection for copy modes
+    execFileSync('tmux', ['bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t='], { stdio: 'ignore' });
+    execFileSync('tmux', ['bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection'], { stdio: 'ignore' });
+    execFileSync('tmux', ['bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection'], { stdio: 'ignore' });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
   // Launch Claude in current pane
@@ -156,7 +163,14 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
     'new-session', '-d', '-s', sessionName, '-c', cwd,
     claudeCmd,
     ';', 'set-option', '-t', sessionName, 'mouse', 'on',
-    ';', 'set-option', '-t', sessionName, 'terminal-overrides', '*:smcup@:rmcup@',
+    // Unbind disruptive mouse actions from root table
+    ';', 'unbind-key', '-T', 'root', 'MouseDrag1Pane',
+    ';', 'unbind-key', '-T', 'root', 'DoubleClick1Pane',
+    ';', 'unbind-key', '-T', 'root', 'TripleClick1Pane',
+    // Bind pane selection and stop-selection for copy modes
+    ';', 'bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t=',
+    ';', 'bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection',
+    ';', 'bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection',
   ];
 
   // Attach to session

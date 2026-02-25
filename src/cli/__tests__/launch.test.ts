@@ -276,15 +276,33 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     expect(tmuxArgs).not.toContain('-g');
   });
 
-  it('sets terminal-overrides to disable alternate screen so scroll works in TUI', () => {
+  it('does not set terminal-overrides smcup@/rmcup@ (issue #1018)', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
     const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
     const tmuxArgs = tmuxCall![1] as string[];
 
-    expect(tmuxArgs).toContain('terminal-overrides');
-    expect(tmuxArgs).toContain('*:smcup@:rmcup@');
+    expect(tmuxArgs).not.toContain('terminal-overrides');
+    expect(tmuxArgs).not.toContain('*:smcup@:rmcup@');
+  });
+
+  it('unbinds disruptive mouse actions and binds pane selection (issue #1018)', () => {
+    runClaude('/tmp', [], 'sid');
+
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    const tmuxArgs = tmuxCall![1] as string[];
+
+    expect(tmuxArgs).toContain('unbind-key');
+    expect(tmuxArgs).toContain('MouseDrag1Pane');
+    expect(tmuxArgs).toContain('DoubleClick1Pane');
+    expect(tmuxArgs).toContain('TripleClick1Pane');
+    expect(tmuxArgs).toContain('bind-key');
+    expect(tmuxArgs).toContain('MouseDown1Pane');
+    expect(tmuxArgs).toContain('select-pane');
+    expect(tmuxArgs).toContain('MouseDragEnd1Pane');
+    expect(tmuxArgs).toContain('stop-selection');
   });
 
   it('places mouse mode setup before attach-session', () => {
@@ -319,20 +337,32 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
     processExitSpy.mockRestore();
   });
 
-  it('enables mouse mode and terminal-overrides before launching claude', () => {
+  it('enables mouse mode and mouse bindings before launching claude (issue #1018)', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
 
-    // First two calls should be tmux set-option for mouse config
-    expect(calls.length).toBeGreaterThanOrEqual(3);
+    // Mouse config calls + claude launch
+    expect(calls.length).toBeGreaterThanOrEqual(8);
     expect(calls[0][0]).toBe('tmux');
     expect(calls[0][1]).toEqual(['set-option', 'mouse', 'on']);
-    expect(calls[1][0]).toBe('tmux');
-    expect(calls[1][1]).toEqual(['set-option', 'terminal-overrides', '*:smcup@:rmcup@']);
+    // Unbind disruptive mouse actions
+    expect(calls[1][1]).toEqual(['unbind-key', '-T', 'root', 'MouseDrag1Pane']);
+    expect(calls[2][1]).toEqual(['unbind-key', '-T', 'root', 'DoubleClick1Pane']);
+    expect(calls[3][1]).toEqual(['unbind-key', '-T', 'root', 'TripleClick1Pane']);
+    // Bind pane selection and stop-selection
+    expect(calls[4][1]).toEqual(['bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t=']);
+    expect(calls[5][1]).toEqual(['bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection']);
+    expect(calls[6][1]).toEqual(['bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection']);
 
-    // Third call should be claude
-    expect(calls[2][0]).toBe('claude');
+    // No terminal-overrides (issue #1018)
+    const termOverrideCalls = calls.filter(([, args]) =>
+      Array.isArray(args) && args.includes('terminal-overrides'));
+    expect(termOverrideCalls).toHaveLength(0);
+
+    // Last call should be claude
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall[0]).toBe('claude');
   });
 
   it('still launches claude even if tmux mouse config fails', () => {
