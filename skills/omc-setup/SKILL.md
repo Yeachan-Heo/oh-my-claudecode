@@ -226,8 +226,8 @@ fi
 
 # Strip existing markers from downloaded content (idempotency)
 if grep -q '<!-- OMC:START -->' "$TEMP_OMC"; then
-  # Extract content between markers
-  sed -n '/<!-- OMC:START -->/,/<!-- OMC:END -->/{//!p}' "$TEMP_OMC" > "${TEMP_OMC}.clean"
+  # Extract content between markers (awk is portable across GNU/BSD)
+  awk '/<!-- OMC:END -->/{p=0} p; /<!-- OMC:START -->/{p=1}' "$TEMP_OMC" > "${TEMP_OMC}.clean"
   mv "${TEMP_OMC}.clean" "$TEMP_OMC"
 fi
 
@@ -244,8 +244,9 @@ else
   # Merge: preserve user content outside OMC markers
   if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
     # Has markers: replace OMC section, keep user content
-    BEFORE_OMC=$(sed -n '1,/<!-- OMC:START -->/{ /<!-- OMC:START -->/!p }' "$TARGET_PATH")
-    AFTER_OMC=$(sed -n '/<!-- OMC:END -->/,${  /<!-- OMC:END -->/!p }' "$TARGET_PATH")
+    # Use awk instead of sed for cross-platform compatibility (GNU/BSD)
+    BEFORE_OMC=$(awk '/<!-- OMC:START -->/{exit} {print}' "$TARGET_PATH")
+    AFTER_OMC=$(awk 'p; /<!-- OMC:END -->/{p=1}' "$TARGET_PATH")
     {
       [ -n "$BEFORE_OMC" ] && printf '%s\n' "$BEFORE_OMC"
       echo '<!-- OMC:START -->'
@@ -365,8 +366,8 @@ fi
 
 # Strip existing markers from downloaded content (idempotency)
 if grep -q '<!-- OMC:START -->' "$TEMP_OMC"; then
-  # Extract content between markers
-  sed -n '/<!-- OMC:START -->/,/<!-- OMC:END -->/{//!p}' "$TEMP_OMC" > "${TEMP_OMC}.clean"
+  # Extract content between markers (awk is portable across GNU/BSD)
+  awk '/<!-- OMC:END -->/{p=0} p; /<!-- OMC:START -->/{p=1}' "$TEMP_OMC" > "${TEMP_OMC}.clean"
   mv "${TEMP_OMC}.clean" "$TEMP_OMC"
 fi
 
@@ -383,8 +384,9 @@ else
   # Merge: preserve user content outside OMC markers
   if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
     # Has markers: replace OMC section, keep user content
-    BEFORE_OMC=$(sed -n '1,/<!-- OMC:START -->/{ /<!-- OMC:START -->/!p }' "$TARGET_PATH")
-    AFTER_OMC=$(sed -n '/<!-- OMC:END -->/,${  /<!-- OMC:END -->/!p }' "$TARGET_PATH")
+    # Use awk instead of sed for cross-platform compatibility (GNU/BSD)
+    BEFORE_OMC=$(awk '/<!-- OMC:START -->/{exit} {print}' "$TARGET_PATH")
+    AFTER_OMC=$(awk 'p; /<!-- OMC:END -->/{p=1}' "$TARGET_PATH")
     {
       [ -n "$BEFORE_OMC" ] && printf '%s\n' "$BEFORE_OMC"
       echo '<!-- OMC:START -->'
