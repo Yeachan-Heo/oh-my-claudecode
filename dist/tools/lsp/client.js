@@ -20,7 +20,7 @@ export class LspClient {
     process = null;
     requestId = 0;
     pendingRequests = new Map();
-    buffer = '';
+    buffer = Buffer.alloc(0);
     openDocuments = new Set();
     diagnostics = new Map();
     workspaceRoot;
@@ -50,7 +50,7 @@ export class LspClient {
                 shell: process.platform === 'win32'
             });
             this.process.stdout?.on('data', (data) => {
-                this.handleData(data.toString());
+                this.handleData(data);
             });
             this.process.stderr?.on('data', (data) => {
                 // Log stderr for debugging but don't fail
@@ -99,17 +99,17 @@ export class LspClient {
      * Handle incoming data from the server
      */
     handleData(data) {
-        this.buffer += data;
+        this.buffer = Buffer.concat([this.buffer, data]);
         while (true) {
             // Look for Content-Length header
             const headerEnd = this.buffer.indexOf('\r\n\r\n');
             if (headerEnd === -1)
                 break;
-            const header = this.buffer.slice(0, headerEnd);
+            const header = this.buffer.subarray(0, headerEnd).toString();
             const contentLengthMatch = header.match(/Content-Length: (\d+)/i);
             if (!contentLengthMatch) {
                 // Invalid header, try to recover
-                this.buffer = this.buffer.slice(headerEnd + 4);
+                this.buffer = this.buffer.subarray(headerEnd + 4);
                 continue;
             }
             const contentLength = parseInt(contentLengthMatch[1], 10);
@@ -118,8 +118,8 @@ export class LspClient {
             if (this.buffer.length < messageEnd) {
                 break; // Not enough data yet
             }
-            const messageJson = this.buffer.slice(messageStart, messageEnd);
-            this.buffer = this.buffer.slice(messageEnd);
+            const messageJson = this.buffer.subarray(messageStart, messageEnd).toString();
+            this.buffer = this.buffer.subarray(messageEnd);
             try {
                 const message = JSON.parse(messageJson);
                 this.handleMessage(message);

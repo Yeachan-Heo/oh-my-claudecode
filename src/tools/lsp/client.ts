@@ -118,7 +118,7 @@ export class LspClient {
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }>();
-  private buffer = '';
+  private buffer = Buffer.alloc(0);
   private openDocuments = new Set<string>();
   private diagnostics = new Map<string, Diagnostic[]>();
   private workspaceRoot: string;
@@ -155,7 +155,7 @@ export class LspClient {
       });
 
       this.process.stdout?.on('data', (data: Buffer) => {
-        this.handleData(data.toString());
+        this.handleData(data);
       });
 
       this.process.stderr?.on('data', (data: Buffer) => {
@@ -209,19 +209,19 @@ export class LspClient {
   /**
    * Handle incoming data from the server
    */
-  private handleData(data: string): void {
-    this.buffer += data;
+  private handleData(data: Buffer): void {
+    this.buffer = Buffer.concat([this.buffer, data]);
 
     while (true) {
       // Look for Content-Length header
       const headerEnd = this.buffer.indexOf('\r\n\r\n');
       if (headerEnd === -1) break;
 
-      const header = this.buffer.slice(0, headerEnd);
+      const header = this.buffer.subarray(0, headerEnd).toString();
       const contentLengthMatch = header.match(/Content-Length: (\d+)/i);
       if (!contentLengthMatch) {
         // Invalid header, try to recover
-        this.buffer = this.buffer.slice(headerEnd + 4);
+        this.buffer = this.buffer.subarray(headerEnd + 4);
         continue;
       }
 
@@ -233,8 +233,8 @@ export class LspClient {
         break; // Not enough data yet
       }
 
-      const messageJson = this.buffer.slice(messageStart, messageEnd);
-      this.buffer = this.buffer.slice(messageEnd);
+      const messageJson = this.buffer.subarray(messageStart, messageEnd).toString();
+      this.buffer = this.buffer.subarray(messageEnd);
 
       try {
         const message = JSON.parse(messageJson);
