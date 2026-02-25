@@ -25,6 +25,12 @@ export type {
   WebhookNotificationConfig,
   EventNotificationConfig,
 } from "./types.js";
+export type {
+  HookNotificationConfig,
+  HookEventConfig,
+  PlatformTemplateOverride,
+  TemplateVariable,
+} from "./hook-config-types.js";
 
 export {
   dispatchNotifications,
@@ -57,9 +63,22 @@ export {
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
+export {
+  getHookConfig,
+  resolveEventTemplate,
+  resetHookConfigCache,
+  mergeHookConfigIntoNotificationConfig,
+} from "./hook-config.js";
+export {
+  interpolateTemplate,
+  getDefaultTemplate,
+  validateTemplate,
+  computeTemplateVariables,
+} from "./template-engine.js";
 
 import type {
   NotificationEvent,
+  NotificationPlatform,
   NotificationPayload,
   DispatchResult,
 } from "./types.js";
@@ -73,6 +92,8 @@ import {
 import { formatNotification } from "./formatter.js";
 import { dispatchNotifications } from "./dispatcher.js";
 import { getCurrentTmuxSession } from "./tmux.js";
+import { getHookConfig, resolveEventTemplate } from "./hook-config.js";
+import { interpolateTemplate } from "./template-engine.js";
 import { basename } from "path";
 
 /**
@@ -155,11 +176,38 @@ export async function notify(
       }
     }
 
-    // Format the message
-    payload.message = data.message || formatNotification(payload);
+    // Format the message (default for all platforms)
+    const defaultMessage = data.message || formatNotification(payload);
+    payload.message = defaultMessage;
+
+    // Per-platform template resolution (only when hook config has overrides)
+    let platformMessages: Map<NotificationPlatform, string> | undefined;
+    if (!data.message) {
+      const hookConfig = getHookConfig();
+      if (hookConfig?.enabled) {
+        const platforms: NotificationPlatform[] = [
+          "discord", "discord-bot", "telegram", "slack", "webhook",
+        ];
+        const map = new Map<NotificationPlatform, string>();
+        for (const platform of platforms) {
+          const template = resolveEventTemplate(hookConfig, event, platform);
+          if (template) {
+            const resolved = interpolateTemplate(template, payload);
+            if (resolved !== defaultMessage) {
+              map.set(platform, resolved);
+            }
+          }
+        }
+        if (map.size > 0) {
+          platformMessages = map;
+        }
+      }
+    }
 
     // Dispatch to all enabled platforms
-    const result = await dispatchNotifications(config, event, payload);
+    const result = await dispatchNotifications(
+      config, event, payload, platformMessages,
+    );
 
     // NEW: Register message IDs for reply correlation
     if (result.anySuccess && payload.tmuxPaneId) {

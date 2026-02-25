@@ -510,8 +510,15 @@ export async function dispatchNotifications(
   config: NotificationConfig,
   event: NotificationEvent,
   payload: NotificationPayload,
+  platformMessages?: Map<NotificationPlatform, string>,
 ): Promise<DispatchResult> {
   const promises: Promise<NotificationResult>[] = [];
+
+  /** Get payload for a platform, using per-platform message if available. */
+  const payloadFor = (platform: NotificationPlatform): NotificationPayload =>
+    platformMessages?.has(platform)
+      ? { ...payload, message: platformMessages.get(platform)! }
+      : payload;
 
   // Discord
   const discordConfig = getEffectivePlatformConfig<DiscordNotificationConfig>(
@@ -520,7 +527,7 @@ export async function dispatchNotifications(
     event,
   );
   if (discordConfig?.enabled) {
-    promises.push(sendDiscord(discordConfig, payload));
+    promises.push(sendDiscord(discordConfig, payloadFor("discord")));
   }
 
   // Telegram
@@ -530,7 +537,7 @@ export async function dispatchNotifications(
     event,
   );
   if (telegramConfig?.enabled) {
-    promises.push(sendTelegram(telegramConfig, payload));
+    promises.push(sendTelegram(telegramConfig, payloadFor("telegram")));
   }
 
   // Slack
@@ -540,7 +547,7 @@ export async function dispatchNotifications(
     event,
   );
   if (slackConfig?.enabled) {
-    promises.push(sendSlack(slackConfig, payload));
+    promises.push(sendSlack(slackConfig, payloadFor("slack")));
   }
 
   // Webhook
@@ -550,7 +557,7 @@ export async function dispatchNotifications(
     event,
   );
   if (webhookConfig?.enabled) {
-    promises.push(sendWebhook(webhookConfig, payload));
+    promises.push(sendWebhook(webhookConfig, payloadFor("webhook")));
   }
 
   // Discord Bot
@@ -561,7 +568,7 @@ export async function dispatchNotifications(
       event,
     );
   if (discordBotConfig?.enabled) {
-    promises.push(sendDiscordBot(discordBotConfig, payload));
+    promises.push(sendDiscordBot(discordBotConfig, payloadFor("discord-bot")));
   }
 
   if (promises.length === 0) {
