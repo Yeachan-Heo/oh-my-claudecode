@@ -5,7 +5,7 @@
  * Minimal continuation enforcer for all OMC modes.
  * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
  *
- * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline
+ * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
  */
 
 const {
@@ -406,6 +406,7 @@ async function main() {
     const ultrawork = readStateFileWithSession(stateDir, "ultrawork-state.json", sessionId);
     const ultraqa = readStateFileWithSession(stateDir, "ultraqa-state.json", sessionId);
     const pipeline = readStateFileWithSession(stateDir, "pipeline-state.json", sessionId);
+    const team = readStateFileWithSession(stateDir, "team-state.json", sessionId);
 
     // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
@@ -541,7 +542,32 @@ async function main() {
       }
     }
 
-    // Priority 6: UltraQA (QA cycling)
+    // Priority 6: Team (omc-teams / staged pipeline)
+    if (team.state?.active && !isStaleState(team.state) && isSessionMatch(team.state, sessionId)) {
+      const phase = team.state.current_phase || "executing";
+      const terminalPhases = ["completed", "complete", "failed", "cancelled"];
+      if (!terminalPhases.includes(phase)) {
+        const newCount = (team.state.reinforcement_count || 0) + 1;
+        if (newCount <= 20) {
+          team.state.reinforcement_count = newCount;
+          team.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(team.path, team.state);
+
+          // Fire-and-forget notification
+          sendStopNotification('team', team.state, sessionId, directory).catch(() => {});
+
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: `[TEAM - Phase: ${phase}] Team mode active. Continue working. When all team tasks complete, run /oh-my-claudecode:cancel to cleanly exit. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
+            }),
+          );
+          return;
+        }
+      }
+    }
+
+    // Priority 7: UltraQA (QA cycling)
     if (ultraqa.state?.active && !isStaleState(ultraqa.state) && isSessionMatch(ultraqa.state, sessionId)) {
       const cycle = ultraqa.state.cycle || 1;
       const maxCycles = ultraqa.state.max_cycles || 10;
@@ -563,7 +589,7 @@ async function main() {
       }
     }
 
-    // Priority 7: Ultrawork - ALWAYS continue while active (not just when tasks exist)
+    // Priority 8: Ultrawork - ALWAYS continue while active (not just when tasks exist)
     // This prevents false stops from bash errors, transient failures, etc.
     // Session isolation: only block if state belongs to this session (issue #311)
     // Project isolation: only block if state belongs to this project

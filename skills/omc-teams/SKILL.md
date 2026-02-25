@@ -68,10 +68,17 @@ Break the task into exactly N subtasks. Each subtask must be:
 
 Choose a `teamName` slug from the task (e.g., `auth-security-review`).
 
-### Phase 3: Start the team (non-blocking)
+### Phase 3: Activate team state & start the team
 
-MCP tools block Claude Code while running, so we use a two-tool async pattern.
-Call `mcp__team__omc_run_team_start` — it spawns workers in the background and returns a
+**CRITICAL: Activate team state BEFORE calling MCP tools.** This prevents the session from
+stopping prematurely after MCP tool calls return. The persistent-mode Stop hook checks
+`team-state.json` to know whether to block the stop or allow it.
+
+```
+state_write(mode="team", current_phase="team-exec", active=true)
+```
+
+Then call `mcp__team__omc_run_team_start` — it spawns workers in the background and returns a
 `jobId` immediately. No Bash, no path resolution; the MCP server finds `runtime-cli.cjs`
 from its own install directory automatically.
 

@@ -5,7 +5,7 @@
  * Minimal continuation enforcer for all OMC modes.
  * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
  *
- * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline
+ * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
  */
 
 import {
@@ -467,8 +467,15 @@ async function main() {
       "pipeline-state.json",
       sessionId,
     );
+    const team = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "team-state.json",
+      sessionId,
+    );
 
     // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
+    // Note: Swarm only reads from local stateDir, never global fallback
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
     const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
 
@@ -679,7 +686,46 @@ async function main() {
       }
     }
 
-    // Priority 6: UltraQA (QA cycling)
+    // Priority 6: Team (omc-teams / staged pipeline)
+    if (
+      team.state?.active &&
+      !isStaleState(team.state) &&
+      isStateForCurrentProject(team.state, directory, team.isGlobal)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? team.state.session_id === sessionId
+        : !team.state.session_id || team.state.session_id === sessionId;
+      if (sessionMatches) {
+        const phase = team.state.current_phase || "executing";
+        const terminalPhases = ["completed", "complete", "failed", "cancelled"];
+        if (!terminalPhases.includes(phase)) {
+          const newCount = (team.state.reinforcement_count || 0) + 1;
+          if (newCount <= 20) {
+            const toolError = readLastToolError(stateDir);
+            const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+            team.state.reinforcement_count = newCount;
+            team.state.last_checked_at = new Date().toISOString();
+            writeJsonFile(team.path, team.state);
+
+            let reason = `[TEAM - Phase: ${phase}] Team mode active. Continue working. When all team tasks complete, run /oh-my-claudecode:cancel to cleanly exit. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
+            if (errorGuidance) {
+              reason = errorGuidance + reason;
+            }
+
+            console.log(
+              JSON.stringify({
+                decision: "block",
+                reason,
+              }),
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    // Priority 7: UltraQA (QA cycling)
     if (
       ultraqa.state?.active &&
       !isStaleState(ultraqa.state) &&
@@ -713,7 +759,7 @@ async function main() {
       }
     }
 
-    // Priority 7: Ultrawork - ALWAYS continue while active (not just when tasks exist)
+    // Priority 8: Ultrawork - ALWAYS continue while active (not just when tasks exist)
     // This prevents false stops from bash errors, transient failures, etc.
     // Session isolation: only block if state belongs to this session (issue #311)
     // If state has session_id, it must match. If no session_id (legacy), allow.
