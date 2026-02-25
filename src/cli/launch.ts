@@ -16,6 +16,11 @@ const MADMAX_FLAG = '--madmax';
 const YOLO_FLAG = '--yolo';
 const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
 const NOTIFY_FLAG = '--notify';
+const OPENCLAW_FLAG = '--openclaw';
+const TELEGRAM_FLAG = '--telegram';
+const DISCORD_FLAG = '--discord';
+const SLACK_FLAG = '--slack';
+const WEBHOOK_FLAG = '--webhook';
 
 /**
  * Extract the OMC-specific --notify flag from launch args.
@@ -42,6 +47,149 @@ export function extractNotifyFlag(args: string[]): { notifyEnabled: boolean; rem
   }
 
   return { notifyEnabled, remainingArgs };
+}
+
+/**
+ * Extract the OMC-specific --openclaw flag from launch args.
+ * Purely presence-based (like --madmax/--yolo):
+ *   --openclaw        -> enable OpenClaw (OMC_OPENCLAW=1)
+ *   --openclaw=true   -> enable OpenClaw
+ *   --openclaw=false  -> disable OpenClaw
+ *   --openclaw=1      -> enable OpenClaw
+ *   --openclaw=0      -> disable OpenClaw
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractOpenClawFlag(args: string[]): { openclawEnabled: boolean; remainingArgs: string[] } {
+  let openclawEnabled = false;
+  const remainingArgs: string[] = [];
+
+  for (const arg of args) {
+    if (arg === OPENCLAW_FLAG) {
+      // Bare --openclaw means enabled (does NOT consume next arg)
+      openclawEnabled = true;
+      continue;
+    }
+
+    if (arg.startsWith(`${OPENCLAW_FLAG}=`)) {
+      const val = arg.slice(OPENCLAW_FLAG.length + 1).toLowerCase();
+      openclawEnabled = val !== 'false' && val !== '0';
+      continue;
+    }
+
+    remainingArgs.push(arg);
+  }
+
+  return { openclawEnabled, remainingArgs };
+}
+
+/**
+ * Extract the OMC-specific --telegram flag from launch args.
+ * Purely presence-based:
+ *   --telegram        -> enable Telegram notifications (OMC_TELEGRAM=1)
+ *   --telegram=true   -> enable
+ *   --telegram=false  -> disable
+ *   --telegram=1      -> enable
+ *   --telegram=0      -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractTelegramFlag(args: string[]): { telegramEnabled: boolean; remainingArgs: string[] } {
+  let telegramEnabled = false;
+  const remainingArgs: string[] = [];
+  for (const arg of args) {
+    if (arg === TELEGRAM_FLAG) { telegramEnabled = true; continue; }
+    if (arg.startsWith(`${TELEGRAM_FLAG}=`)) {
+      const val = arg.slice(TELEGRAM_FLAG.length + 1).toLowerCase();
+      telegramEnabled = val !== 'false' && val !== '0';
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+  return { telegramEnabled, remainingArgs };
+}
+
+/**
+ * Extract the OMC-specific --discord flag from launch args.
+ * Purely presence-based:
+ *   --discord        -> enable Discord notifications (OMC_DISCORD=1)
+ *   --discord=true   -> enable
+ *   --discord=false  -> disable
+ *   --discord=1      -> enable
+ *   --discord=0      -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractDiscordFlag(args: string[]): { discordEnabled: boolean; remainingArgs: string[] } {
+  let discordEnabled = false;
+  const remainingArgs: string[] = [];
+  for (const arg of args) {
+    if (arg === DISCORD_FLAG) { discordEnabled = true; continue; }
+    if (arg.startsWith(`${DISCORD_FLAG}=`)) {
+      const val = arg.slice(DISCORD_FLAG.length + 1).toLowerCase();
+      discordEnabled = val !== 'false' && val !== '0';
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+  return { discordEnabled, remainingArgs };
+}
+
+/**
+ * Extract the OMC-specific --slack flag from launch args.
+ * Purely presence-based:
+ *   --slack        -> enable Slack notifications (OMC_SLACK=1)
+ *   --slack=true   -> enable
+ *   --slack=false  -> disable
+ *   --slack=1      -> enable
+ *   --slack=0      -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractSlackFlag(args: string[]): { slackEnabled: boolean; remainingArgs: string[] } {
+  let slackEnabled = false;
+  const remainingArgs: string[] = [];
+  for (const arg of args) {
+    if (arg === SLACK_FLAG) { slackEnabled = true; continue; }
+    if (arg.startsWith(`${SLACK_FLAG}=`)) {
+      const val = arg.slice(SLACK_FLAG.length + 1).toLowerCase();
+      slackEnabled = val !== 'false' && val !== '0';
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+  return { slackEnabled, remainingArgs };
+}
+
+/**
+ * Extract the OMC-specific --webhook flag from launch args.
+ * Purely presence-based:
+ *   --webhook        -> enable Webhook notifications (OMC_WEBHOOK=1)
+ *   --webhook=true   -> enable
+ *   --webhook=false  -> disable
+ *   --webhook=1      -> enable
+ *   --webhook=0      -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractWebhookFlag(args: string[]): { webhookEnabled: boolean; remainingArgs: string[] } {
+  let webhookEnabled = false;
+  const remainingArgs: string[] = [];
+  for (const arg of args) {
+    if (arg === WEBHOOK_FLAG) { webhookEnabled = true; continue; }
+    if (arg.startsWith(`${WEBHOOK_FLAG}=`)) {
+      const val = arg.slice(WEBHOOK_FLAG.length + 1).toLowerCase();
+      webhookEnabled = val !== 'false' && val !== '0';
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+  return { webhookEnabled, remainingArgs };
 }
 
 /**
@@ -119,17 +267,10 @@ export function runClaude(cwd: string, args: string[], sessionId: string): void 
  * Launches Claude in current pane
  */
 function runClaudeInsideTmux(cwd: string, args: string[]): void {
-  // Enable mouse support in the current tmux session (non-fatal if it fails)
+  // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
   try {
     execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
-    // Unbind disruptive mouse actions from root table
-    execFileSync('tmux', ['unbind-key', '-T', 'root', 'MouseDrag1Pane'], { stdio: 'ignore' });
-    execFileSync('tmux', ['unbind-key', '-T', 'root', 'DoubleClick1Pane'], { stdio: 'ignore' });
-    execFileSync('tmux', ['unbind-key', '-T', 'root', 'TripleClick1Pane'], { stdio: 'ignore' });
-    // Bind pane selection and stop-selection for copy modes
-    execFileSync('tmux', ['bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t='], { stdio: 'ignore' });
-    execFileSync('tmux', ['bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection'], { stdio: 'ignore' });
-    execFileSync('tmux', ['bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection'], { stdio: 'ignore' });
+    execFileSync('tmux', ['set-option', 'terminal-overrides', '*:smcup@:rmcup@'], { stdio: 'ignore' });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
   // Launch Claude in current pane
@@ -163,14 +304,7 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
     'new-session', '-d', '-s', sessionName, '-c', cwd,
     claudeCmd,
     ';', 'set-option', '-t', sessionName, 'mouse', 'on',
-    // Unbind disruptive mouse actions from root table
-    ';', 'unbind-key', '-T', 'root', 'MouseDrag1Pane',
-    ';', 'unbind-key', '-T', 'root', 'DoubleClick1Pane',
-    ';', 'unbind-key', '-T', 'root', 'TripleClick1Pane',
-    // Bind pane selection and stop-selection for copy modes
-    ';', 'bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t=',
-    ';', 'bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection',
-    ';', 'bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection',
+    ';', 'set-option', '-t', sessionName, 'terminal-overrides', '*:smcup@:rmcup@',
   ];
 
   // Attach to session
@@ -225,6 +359,36 @@ export async function launchCommand(args: string[]): Promise<void> {
     process.env.OMC_NOTIFY = '0';
   }
 
+  // Extract OMC-specific --openclaw flag (presence-based, no value consumption)
+  const { openclawEnabled, remainingArgs: argsAfterOpenclaw } = extractOpenClawFlag(remainingArgs);
+  if (openclawEnabled) {
+    process.env.OMC_OPENCLAW = '1';
+  }
+
+  // Extract OMC-specific --telegram flag (presence-based)
+  const { telegramEnabled, remainingArgs: argsAfterTelegram } = extractTelegramFlag(argsAfterOpenclaw);
+  if (telegramEnabled) {
+    process.env.OMC_TELEGRAM = '1';
+  }
+
+  // Extract OMC-specific --discord flag (presence-based)
+  const { discordEnabled, remainingArgs: argsAfterDiscord } = extractDiscordFlag(argsAfterTelegram);
+  if (discordEnabled) {
+    process.env.OMC_DISCORD = '1';
+  }
+
+  // Extract OMC-specific --slack flag (presence-based)
+  const { slackEnabled, remainingArgs: argsAfterSlack } = extractSlackFlag(argsAfterDiscord);
+  if (slackEnabled) {
+    process.env.OMC_SLACK = '1';
+  }
+
+  // Extract OMC-specific --webhook flag (presence-based)
+  const { webhookEnabled, remainingArgs: argsAfterWebhook } = extractWebhookFlag(argsAfterSlack);
+  if (webhookEnabled) {
+    process.env.OMC_WEBHOOK = '1';
+  }
+
   const cwd = process.cwd();
 
   // Pre-flight: check for nested session
@@ -240,7 +404,7 @@ export async function launchCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const normalizedArgs = normalizeClaudeLaunchArgs(remainingArgs);
+  const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWebhook);
   const sessionId = `omc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Phase 1: preLaunch

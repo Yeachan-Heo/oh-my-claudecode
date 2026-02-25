@@ -25,7 +25,7 @@ vi.mock('../tmux-utils.js', () => ({
   isClaudeAvailable: vi.fn(() => true),
 }));
 
-import { runClaude, extractNotifyFlag, normalizeClaudeLaunchArgs } from '../launch.js';
+import { runClaude, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs } from '../launch.js';
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
@@ -276,33 +276,15 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     expect(tmuxArgs).not.toContain('-g');
   });
 
-  it('does not set terminal-overrides smcup@/rmcup@ (issue #1018)', () => {
+  it('sets terminal-overrides to disable alternate screen so scroll works in TUI', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
     const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
     const tmuxArgs = tmuxCall![1] as string[];
 
-    expect(tmuxArgs).not.toContain('terminal-overrides');
-    expect(tmuxArgs).not.toContain('*:smcup@:rmcup@');
-  });
-
-  it('unbinds disruptive mouse actions and binds pane selection (issue #1018)', () => {
-    runClaude('/tmp', [], 'sid');
-
-    const calls = vi.mocked(execFileSync).mock.calls;
-    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
-    const tmuxArgs = tmuxCall![1] as string[];
-
-    expect(tmuxArgs).toContain('unbind-key');
-    expect(tmuxArgs).toContain('MouseDrag1Pane');
-    expect(tmuxArgs).toContain('DoubleClick1Pane');
-    expect(tmuxArgs).toContain('TripleClick1Pane');
-    expect(tmuxArgs).toContain('bind-key');
-    expect(tmuxArgs).toContain('MouseDown1Pane');
-    expect(tmuxArgs).toContain('select-pane');
-    expect(tmuxArgs).toContain('MouseDragEnd1Pane');
-    expect(tmuxArgs).toContain('stop-selection');
+    expect(tmuxArgs).toContain('terminal-overrides');
+    expect(tmuxArgs).toContain('*:smcup@:rmcup@');
   });
 
   it('places mouse mode setup before attach-session', () => {
@@ -337,32 +319,20 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
     processExitSpy.mockRestore();
   });
 
-  it('enables mouse mode and mouse bindings before launching claude (issue #1018)', () => {
+  it('enables mouse mode and terminal-overrides before launching claude', () => {
     runClaude('/tmp', [], 'sid');
 
     const calls = vi.mocked(execFileSync).mock.calls;
 
-    // Mouse config calls + claude launch
-    expect(calls.length).toBeGreaterThanOrEqual(8);
+    // First two calls should be tmux set-option for mouse config
+    expect(calls.length).toBeGreaterThanOrEqual(3);
     expect(calls[0][0]).toBe('tmux');
     expect(calls[0][1]).toEqual(['set-option', 'mouse', 'on']);
-    // Unbind disruptive mouse actions
-    expect(calls[1][1]).toEqual(['unbind-key', '-T', 'root', 'MouseDrag1Pane']);
-    expect(calls[2][1]).toEqual(['unbind-key', '-T', 'root', 'DoubleClick1Pane']);
-    expect(calls[3][1]).toEqual(['unbind-key', '-T', 'root', 'TripleClick1Pane']);
-    // Bind pane selection and stop-selection
-    expect(calls[4][1]).toEqual(['bind-key', '-T', 'root', 'MouseDown1Pane', 'select-pane', '-t=']);
-    expect(calls[5][1]).toEqual(['bind-key', '-T', 'copy-mode', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection']);
-    expect(calls[6][1]).toEqual(['bind-key', '-T', 'copy-mode-vi', 'MouseDragEnd1Pane', 'send-keys', '-X', 'stop-selection']);
+    expect(calls[1][0]).toBe('tmux');
+    expect(calls[1][1]).toEqual(['set-option', 'terminal-overrides', '*:smcup@:rmcup@']);
 
-    // No terminal-overrides (issue #1018)
-    const termOverrideCalls = calls.filter(([, args]) =>
-      Array.isArray(args) && args.includes('terminal-overrides'));
-    expect(termOverrideCalls).toHaveLength(0);
-
-    // Last call should be claude
-    const lastCall = calls[calls.length - 1];
-    expect(lastCall[0]).toBe('claude');
+    // Third call should be claude
+    expect(calls[2][0]).toBe('claude');
   });
 
   it('still launches claude even if tmux mouse config fails', () => {
@@ -379,5 +349,316 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
     const calls = vi.mocked(execFileSync).mock.calls;
     const claudeCall = calls.find(([cmd]) => cmd === 'claude');
     expect(claudeCall).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTelegramFlag
+// ---------------------------------------------------------------------------
+describe('extractTelegramFlag', () => {
+  it('returns telegramEnabled=false when --telegram flag is not present', () => {
+    const result = extractTelegramFlag(['--madmax']);
+    expect(result.telegramEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables telegram with bare --telegram flag', () => {
+    const result = extractTelegramFlag(['--telegram']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables telegram with --telegram=true', () => {
+    const result = extractTelegramFlag(['--telegram=true']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables telegram with --telegram=false', () => {
+    const result = extractTelegramFlag(['--telegram=false']);
+    expect(result.telegramEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables telegram with --telegram=1', () => {
+    const result = extractTelegramFlag(['--telegram=1']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables telegram with --telegram=0', () => {
+    const result = extractTelegramFlag(['--telegram=0']);
+    expect(result.telegramEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('strips --telegram from remainingArgs', () => {
+    const result = extractTelegramFlag(['--madmax', '--telegram', '--print']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --telegram does NOT consume the next positional arg', () => {
+    const result = extractTelegramFlag(['--telegram', 'myfile.txt']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('returns telegramEnabled=false for empty args', () => {
+    const result = extractTelegramFlag([]);
+    expect(result.telegramEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('handles multiple flags: extracts --telegram and preserves --discord and positional args', () => {
+    const result = extractTelegramFlag(['--telegram', '--discord', 'file.txt']);
+    expect(result.telegramEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--discord', 'file.txt']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDiscordFlag
+// ---------------------------------------------------------------------------
+describe('extractDiscordFlag', () => {
+  it('returns discordEnabled=false when --discord flag is not present', () => {
+    const result = extractDiscordFlag(['--madmax']);
+    expect(result.discordEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables discord with bare --discord flag', () => {
+    const result = extractDiscordFlag(['--discord']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables discord with --discord=true', () => {
+    const result = extractDiscordFlag(['--discord=true']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables discord with --discord=false', () => {
+    const result = extractDiscordFlag(['--discord=false']);
+    expect(result.discordEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables discord with --discord=1', () => {
+    const result = extractDiscordFlag(['--discord=1']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables discord with --discord=0', () => {
+    const result = extractDiscordFlag(['--discord=0']);
+    expect(result.discordEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('strips --discord from remainingArgs', () => {
+    const result = extractDiscordFlag(['--madmax', '--discord', '--print']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --discord does NOT consume the next positional arg', () => {
+    const result = extractDiscordFlag(['--discord', 'myfile.txt']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('returns discordEnabled=false for empty args', () => {
+    const result = extractDiscordFlag([]);
+    expect(result.discordEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('handles multiple flags: extracts --discord and preserves --telegram and positional args', () => {
+    const result = extractDiscordFlag(['--telegram', '--discord', 'file.txt']);
+    expect(result.discordEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--telegram', 'file.txt']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractOpenClawFlag
+// ---------------------------------------------------------------------------
+describe('extractOpenClawFlag', () => {
+  it('returns openclawEnabled=false with no --openclaw flag', () => {
+    const result = extractOpenClawFlag(['--madmax']);
+    expect(result.openclawEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables openclaw with bare --openclaw flag', () => {
+    const result = extractOpenClawFlag(['--openclaw']);
+    expect(result.openclawEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('strips --openclaw from remainingArgs', () => {
+    const result = extractOpenClawFlag(['--madmax', '--openclaw', '--print']);
+    expect(result.openclawEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --openclaw does NOT consume the next positional arg', () => {
+    const result = extractOpenClawFlag(['--openclaw', 'myfile.txt']);
+    expect(result.openclawEnabled).toBe(true);
+    // myfile.txt must remain as a positional arg
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('enables openclaw with --openclaw=true', () => {
+    const result = extractOpenClawFlag(['--openclaw=true']);
+    expect(result.openclawEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables openclaw with --openclaw=1', () => {
+    const result = extractOpenClawFlag(['--openclaw=1']);
+    expect(result.openclawEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables openclaw with --openclaw=false', () => {
+    const result = extractOpenClawFlag(['--openclaw=false']);
+    expect(result.openclawEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables openclaw with --openclaw=0', () => {
+    const result = extractOpenClawFlag(['--openclaw=0']);
+    expect(result.openclawEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('handles --openclaw=FALSE (case insensitive)', () => {
+    const result = extractOpenClawFlag(['--openclaw=FALSE']);
+    expect(result.openclawEnabled).toBe(false);
+  });
+
+  it('returns openclawEnabled=false for empty args', () => {
+    const result = extractOpenClawFlag([]);
+    expect(result.openclawEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('handles multiple flags correctly', () => {
+    const result = extractOpenClawFlag(['--madmax', '--openclaw', '--print', 'myfile.txt']);
+    expect(result.openclawEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print', 'myfile.txt']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractSlackFlag
+// ---------------------------------------------------------------------------
+describe('extractSlackFlag', () => {
+  it('returns slackEnabled=false when --slack flag is not present', () => {
+    const result = extractSlackFlag(['--madmax']);
+    expect(result.slackEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables slack with bare --slack flag', () => {
+    const result = extractSlackFlag(['--slack']);
+    expect(result.slackEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables slack with --slack=true', () => {
+    const result = extractSlackFlag(['--slack=true']);
+    expect(result.slackEnabled).toBe(true);
+  });
+
+  it('disables slack with --slack=false', () => {
+    const result = extractSlackFlag(['--slack=false']);
+    expect(result.slackEnabled).toBe(false);
+  });
+
+  it('enables slack with --slack=1', () => {
+    const result = extractSlackFlag(['--slack=1']);
+    expect(result.slackEnabled).toBe(true);
+  });
+
+  it('disables slack with --slack=0', () => {
+    const result = extractSlackFlag(['--slack=0']);
+    expect(result.slackEnabled).toBe(false);
+  });
+
+  it('strips --slack from remainingArgs', () => {
+    const result = extractSlackFlag(['--madmax', '--slack', '--print']);
+    expect(result.slackEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --slack does NOT consume the next positional arg', () => {
+    const result = extractSlackFlag(['--slack', 'myfile.txt']);
+    expect(result.slackEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('returns slackEnabled=false for empty args', () => {
+    const result = extractSlackFlag([]);
+    expect(result.slackEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractWebhookFlag
+// ---------------------------------------------------------------------------
+describe('extractWebhookFlag', () => {
+  it('returns webhookEnabled=false when --webhook flag is not present', () => {
+    const result = extractWebhookFlag(['--madmax']);
+    expect(result.webhookEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables webhook with bare --webhook flag', () => {
+    const result = extractWebhookFlag(['--webhook']);
+    expect(result.webhookEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables webhook with --webhook=true', () => {
+    const result = extractWebhookFlag(['--webhook=true']);
+    expect(result.webhookEnabled).toBe(true);
+  });
+
+  it('disables webhook with --webhook=false', () => {
+    const result = extractWebhookFlag(['--webhook=false']);
+    expect(result.webhookEnabled).toBe(false);
+  });
+
+  it('enables webhook with --webhook=1', () => {
+    const result = extractWebhookFlag(['--webhook=1']);
+    expect(result.webhookEnabled).toBe(true);
+  });
+
+  it('disables webhook with --webhook=0', () => {
+    const result = extractWebhookFlag(['--webhook=0']);
+    expect(result.webhookEnabled).toBe(false);
+  });
+
+  it('strips --webhook from remainingArgs', () => {
+    const result = extractWebhookFlag(['--madmax', '--webhook', '--print']);
+    expect(result.webhookEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --webhook does NOT consume the next positional arg', () => {
+    const result = extractWebhookFlag(['--webhook', 'myfile.txt']);
+    expect(result.webhookEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('returns webhookEnabled=false for empty args', () => {
+    const result = extractWebhookFlag([]);
+    expect(result.webhookEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
   });
 });
