@@ -758,3 +758,180 @@ Env vars are auto-detected by the notification system without needing `.omc-conf
 | Here | `<!here>` | `<!here>` |
 | Everyone | `<!everyone>` | `<!everyone>` |
 | User Group | `<!subteam^GROUP_ID>` | `<!subteam^S1234567890>` |
+
+---
+
+## Platform Activation Flags
+
+All notification platforms require activation via CLI flags per session:
+
+- `omc --telegram` — Activates Telegram notifications (sets `OMC_TELEGRAM=1`)
+- `omc --discord` — Activates Discord notifications (sets `OMC_DISCORD=1`)
+- `omc --slack` — Activates Slack notifications (sets `OMC_SLACK=1`)
+- `omc --webhook` — Activates webhook notifications (sets `OMC_WEBHOOK=1`)
+- `omc --openclaw` — Activates OpenClaw gateway integration (sets `OMC_OPENCLAW=1`)
+
+Without these flags, configured platforms remain dormant. This prevents unwanted notifications during development while keeping configuration persistent.
+
+**Examples:**
+- `omc --telegram --discord` — Telegram + Discord active
+- `omc --telegram --slack --webhook` — Telegram + Slack + Webhook active
+- `omc --telegram --openclaw` — Telegram + OpenClaw active
+- `omc` — No notifications sent (all platforms require explicit activation)
+
+---
+
+## Hook Event Templates
+
+Customize notification messages per event and per platform using `omc_config.hook.json`.
+
+### Routing
+
+If the trigger or argument contains "hook", "template", or "customize messages" → follow this section.
+
+### Step 1: Detect Existing Hook Config
+
+Check if `~/.claude/omc_config.hook.json` exists. If it does, show the current configuration. If not, explain what it does.
+
+```
+Hook event templates let you customize the notification messages sent to each platform.
+You can set different messages for Discord vs Telegram vs Slack, and control which
+events fire on which platform.
+
+Config file: ~/.claude/omc_config.hook.json
+```
+
+### Step 2: Choose Event to Configure
+
+Use AskUserQuestion:
+
+**Question:** "Which event would you like to configure templates for?"
+
+**Options:**
+1. **session-end** - When a Claude session finishes (most common)
+2. **ask-user-question** - When Claude is waiting for input
+3. **session-idle** - When Claude finishes and waits for input
+4. **session-start** - When a new session begins
+
+### Step 3: Show Available Variables
+
+Display the template variables available for the chosen event:
+
+```
+Available template variables:
+
+RAW FIELDS:
+  {{sessionId}}      - Session identifier
+  {{timestamp}}      - ISO timestamp
+  {{tmuxSession}}    - tmux session name
+  {{projectPath}}    - Full project directory path
+  {{projectName}}    - Project directory basename
+  {{reason}}         - Stop/end reason
+  {{activeMode}}     - Active OMC mode name
+  {{question}}       - Question text (ask-user-question only)
+  {{agentName}}      - Agent name (agent-call only)
+  {{agentType}}      - Agent type (agent-call only)
+
+COMPUTED (smart formatting):
+  {{duration}}       - Human-readable duration (e.g., "5m 23s")
+  {{time}}           - Locale time string
+  {{modesDisplay}}   - Comma-separated modes or empty
+  {{iterationDisplay}} - "3/10" format or empty
+  {{agentDisplay}}   - "2/5 completed" or empty
+  {{projectDisplay}} - Project name with fallbacks
+  {{footer}}         - tmux + project info line
+  {{tmuxTailBlock}}  - Recent output in code fence or empty
+  {{reasonDisplay}}  - Reason with "unknown" fallback
+
+CONDITIONALS:
+  {{#if variableName}}content shown when truthy{{/if}}
+```
+
+### Step 4: Collect Template
+
+Use AskUserQuestion:
+
+**Question:** "Enter the message template for this event (use {{variables}} for dynamic content)"
+
+**Options:**
+1. **Use default template** - Keep the built-in message format
+2. **Simple summary** - Short one-line format
+3. **Custom** - Enter your own template
+
+If "Simple summary", use a pre-built compact template:
+- session-end: `{{projectDisplay}} session ended ({{duration}}) — {{reasonDisplay}}`
+- ask-user-question: `Input needed on {{projectDisplay}}: {{question}}`
+- session-idle: `{{projectDisplay}} is idle. {{#if reason}}Reason: {{reason}}{{/if}}`
+- session-start: `Session started: {{projectDisplay}} at {{time}}`
+
+### Step 5: Per-Platform Overrides
+
+Use AskUserQuestion:
+
+**Question:** "Do you want different messages for specific platforms?"
+
+**Options:**
+1. **No, same for all (Recommended)** - Use the same template everywhere
+2. **Yes, customize per platform** - Set different templates for Discord, Telegram, Slack
+
+If per-platform: ask for each enabled platform's template separately.
+
+### Step 6: Write Configuration
+
+Read or create `~/.claude/omc_config.hook.json` and merge the new settings:
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "events": {
+    "<event-name>": {
+      "enabled": true,
+      "template": "<user-provided-template>",
+      "platforms": {
+        "discord": { "template": "<discord-specific>" },
+        "telegram": { "template": "<telegram-specific>" }
+      }
+    }
+  }
+}
+```
+
+### Step 7: Validate and Test
+
+Validate the template using `validateTemplate()` to check for unknown variables. If any are found, warn the user and offer to correct.
+
+Offer to send a test notification with the new template.
+
+### Example Config
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "events": {
+    "session-end": {
+      "enabled": true,
+      "template": "Session {{sessionId}} ended after {{duration}}. Reason: {{reasonDisplay}}",
+      "platforms": {
+        "discord": {
+          "template": "**Session Complete** | `{{projectDisplay}}` | {{duration}} | {{reasonDisplay}}"
+        },
+        "telegram": {
+          "template": "Done: {{projectDisplay}} ({{duration}})\n{{#if contextSummary}}Summary: {{contextSummary}}{{/if}}"
+        }
+      }
+    },
+    "ask-user-question": {
+      "enabled": true,
+      "template": "{{#if question}}{{question}}{{/if}}\nWaiting for input on {{projectDisplay}}"
+    }
+  }
+}
+```
+
+---
+
+## Related
+
+- `/oh-my-claudecode:configure-openclaw` — Configure OpenClaw gateway integration
