@@ -45,7 +45,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     // Codex accepts prompt as a positional argument (no flag needed):
     //   codex [OPTIONS] [PROMPT]
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
-      const args = ['--dangerously-bypass-approvals-and-sandbox'];
+      const args = ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'];
       if (model) args.push('--model', model);
       return [...args, ...extraFlags];
     },

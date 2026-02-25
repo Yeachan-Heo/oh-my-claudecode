@@ -34,10 +34,13 @@ describe('model-contract', () => {
             const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
             expect(args).toContain('--dangerously-skip-permissions');
         });
-        it('codex includes --dangerously-bypass-approvals-and-sandbox', () => {
+        it('codex includes exec subcommand and required flags', () => {
             const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp' });
-            expect(args).not.toContain('--full-auto');
+            expect(args[0]).toBe('exec');
+            expect(args).toContain('--json');
             expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
+            expect(args).toContain('--skip-git-repo-check');
+            expect(args).not.toContain('--full-auto');
         });
         it('gemini includes --yolo', () => {
             const args = buildLaunchArgs('gemini', { teamName: 't', workerName: 'w', cwd: '/tmp' });
@@ -64,7 +67,10 @@ describe('model-contract', () => {
         it('builds binary + args', () => {
             expect(buildWorkerArgv('codex', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' })).toEqual([
                 'codex',
+                'exec',
+                '--json',
                 '--dangerously-bypass-approvals-and-sandbox',
+                '--skip-git-repo-check',
             ]);
         });
     });
@@ -99,16 +105,22 @@ describe('model-contract', () => {
         it('claude does not support prompt mode', () => {
             expect(isPromptModeAgent('claude')).toBe(false);
         });
-        it('codex does not support prompt mode', () => {
-            expect(isPromptModeAgent('codex')).toBe(false);
+        it('codex supports prompt mode (positional argument, no flag)', () => {
+            expect(isPromptModeAgent('codex')).toBe(true);
+            const c = getContract('codex');
+            expect(c.supportsPromptMode).toBe(true);
+            expect(c.promptModeFlag).toBeUndefined();
         });
         it('getPromptModeArgs returns flag + instruction for gemini', () => {
             const args = getPromptModeArgs('gemini', 'Read inbox');
             expect(args).toEqual(['-p', 'Read inbox']);
         });
+        it('getPromptModeArgs returns instruction only (positional) for codex', () => {
+            const args = getPromptModeArgs('codex', 'Read inbox');
+            expect(args).toEqual(['Read inbox']);
+        });
         it('getPromptModeArgs returns empty array for non-prompt-mode agents', () => {
             expect(getPromptModeArgs('claude', 'Read inbox')).toEqual([]);
-            expect(getPromptModeArgs('codex', 'Read inbox')).toEqual([]);
         });
     });
 });
