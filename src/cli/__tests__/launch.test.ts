@@ -356,9 +356,9 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
 // extractTelegramFlag
 // ---------------------------------------------------------------------------
 describe('extractTelegramFlag', () => {
-  it('returns telegramEnabled=false when --telegram flag is not present', () => {
+  it('returns telegramEnabled=undefined when --telegram flag is not present', () => {
     const result = extractTelegramFlag(['--madmax']);
-    expect(result.telegramEnabled).toBe(false);
+    expect(result.telegramEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual(['--madmax']);
   });
 
@@ -404,9 +404,9 @@ describe('extractTelegramFlag', () => {
     expect(result.remainingArgs).toEqual(['myfile.txt']);
   });
 
-  it('returns telegramEnabled=false for empty args', () => {
+  it('returns telegramEnabled=undefined for empty args', () => {
     const result = extractTelegramFlag([]);
-    expect(result.telegramEnabled).toBe(false);
+    expect(result.telegramEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual([]);
   });
 
@@ -421,9 +421,9 @@ describe('extractTelegramFlag', () => {
 // extractDiscordFlag
 // ---------------------------------------------------------------------------
 describe('extractDiscordFlag', () => {
-  it('returns discordEnabled=false when --discord flag is not present', () => {
+  it('returns discordEnabled=undefined when --discord flag is not present', () => {
     const result = extractDiscordFlag(['--madmax']);
-    expect(result.discordEnabled).toBe(false);
+    expect(result.discordEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual(['--madmax']);
   });
 
@@ -469,9 +469,9 @@ describe('extractDiscordFlag', () => {
     expect(result.remainingArgs).toEqual(['myfile.txt']);
   });
 
-  it('returns discordEnabled=false for empty args', () => {
+  it('returns discordEnabled=undefined for empty args', () => {
     const result = extractDiscordFlag([]);
-    expect(result.discordEnabled).toBe(false);
+    expect(result.discordEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual([]);
   });
 
@@ -557,9 +557,9 @@ describe('extractOpenClawFlag', () => {
 // extractSlackFlag
 // ---------------------------------------------------------------------------
 describe('extractSlackFlag', () => {
-  it('returns slackEnabled=false when --slack flag is not present', () => {
+  it('returns slackEnabled=undefined when --slack flag is not present', () => {
     const result = extractSlackFlag(['--madmax']);
-    expect(result.slackEnabled).toBe(false);
+    expect(result.slackEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual(['--madmax']);
   });
 
@@ -601,9 +601,9 @@ describe('extractSlackFlag', () => {
     expect(result.remainingArgs).toEqual(['myfile.txt']);
   });
 
-  it('returns slackEnabled=false for empty args', () => {
+  it('returns slackEnabled=undefined for empty args', () => {
     const result = extractSlackFlag([]);
-    expect(result.slackEnabled).toBe(false);
+    expect(result.slackEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual([]);
   });
 });
@@ -612,9 +612,9 @@ describe('extractSlackFlag', () => {
 // extractWebhookFlag
 // ---------------------------------------------------------------------------
 describe('extractWebhookFlag', () => {
-  it('returns webhookEnabled=false when --webhook flag is not present', () => {
+  it('returns webhookEnabled=undefined when --webhook flag is not present', () => {
     const result = extractWebhookFlag(['--madmax']);
-    expect(result.webhookEnabled).toBe(false);
+    expect(result.webhookEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual(['--madmax']);
   });
 
@@ -656,9 +656,9 @@ describe('extractWebhookFlag', () => {
     expect(result.remainingArgs).toEqual(['myfile.txt']);
   });
 
-  it('returns webhookEnabled=false for empty args', () => {
+  it('returns webhookEnabled=undefined for empty args', () => {
     const result = extractWebhookFlag([]);
-    expect(result.webhookEnabled).toBe(false);
+    expect(result.webhookEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual([]);
   });
 });
@@ -757,6 +757,20 @@ describe('launchCommand — env var propagation', () => {
     process.env.OMC_TELEGRAM = '1';
     await launchCommand(['--telegram=0']);
     expect(process.env.OMC_TELEGRAM).toBe('0');
+  });
+
+  it('preserves inherited platform env vars when no platform flags are passed', async () => {
+    process.env.OMC_TELEGRAM = '1';
+    process.env.OMC_DISCORD = '1';
+    process.env.OMC_SLACK = '1';
+    process.env.OMC_WEBHOOK = '1';
+
+    await launchCommand(['--print']);
+
+    expect(process.env.OMC_TELEGRAM).toBe('1');
+    expect(process.env.OMC_DISCORD).toBe('1');
+    expect(process.env.OMC_SLACK).toBe('1');
+    expect(process.env.OMC_WEBHOOK).toBe('1');
   });
 
   it('OMC flags are stripped from args passed to Claude', async () => {
