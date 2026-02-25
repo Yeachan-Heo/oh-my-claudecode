@@ -99,7 +99,7 @@ function setupTaskDir(cwd: string): void {
   mkdirSync(workerDir, { recursive: true });
 }
 
-describe('spawnWorkerForTask – Gemini prompt mode', () => {
+describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
   let cwd: string;
 
   beforeEach(() => {
@@ -159,22 +159,39 @@ describe('spawnWorkerForTask – Gemini prompt mode', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('codex worker does NOT include -p flag (interactive mode)', async () => {
+  it('codex worker launch args include positional prompt (no -p flag)', async () => {
     const runtime = makeRuntime(cwd, 'codex');
 
-    try {
-      await spawnWorkerForTask(runtime, 'worker-1', 0);
-    } catch {
-      // May fail on interactive path mock limitations; that's OK
-    }
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
 
+    // Find the send-keys call that launches the worker (contains -l flag)
     const launchCall = tmuxCalls.args.find(
       args => args[0] === 'send-keys' && args.includes('-l')
     );
-    if (launchCall) {
-      const launchCmd = launchCall[launchCall.length - 1];
-      expect(launchCmd).not.toContain("'-p'");
-    }
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // Should NOT contain -p flag (codex uses positional argument, not a flag)
+    expect(launchCmd).not.toContain("'-p'");
+    // Should contain the inbox path as a positional argument
+    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('codex worker skips interactive send-keys notification (uses prompt mode)', async () => {
+    const runtime = makeRuntime(cwd, 'codex');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    // After the initial launch send-keys, there should be NO follow-up
+    // send-keys with "Read and execute" text (prompt-mode agents skip the
+    // interactive notification path).
+    const sendKeysCalls = tmuxCalls.args.filter(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    // Only one send-keys call: the launch command itself
+    expect(sendKeysCalls.length).toBe(1);
 
     rmSync(cwd, { recursive: true, force: true });
   });

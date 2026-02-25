@@ -65,6 +65,9 @@ var CONTRACTS = {
     agentType: "codex",
     binary: "codex",
     installInstructions: "Install Codex CLI: npm install -g @openai/codex",
+    supportsPromptMode: true,
+    // Codex accepts prompt as a positional argument (no flag needed):
+    //   codex [OPTIONS] [PROMPT]
     buildLaunchArgs(model, extraFlags = []) {
       const args = ["--dangerously-bypass-approvals-and-sandbox"];
       if (model) args.push("--model", model);
@@ -146,14 +149,17 @@ function getWorkerEnv(teamName, workerName2, agentType) {
 }
 function isPromptModeAgent(agentType) {
   const contract = getContract(agentType);
-  return !!(contract.supportsPromptMode && contract.promptModeFlag);
+  return !!contract.supportsPromptMode;
 }
 function getPromptModeArgs(agentType, instruction) {
   const contract = getContract(agentType);
-  if (contract.supportsPromptMode && contract.promptModeFlag) {
+  if (!contract.supportsPromptMode) {
+    return [];
+  }
+  if (contract.promptModeFlag) {
     return [contract.promptModeFlag, instruction];
   }
-  return [];
+  return [instruction];
 }
 
 // src/team/tmux-session.ts
