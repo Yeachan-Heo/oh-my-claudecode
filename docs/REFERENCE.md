@@ -92,6 +92,31 @@ If both configurations exist, **project-scoped takes precedence** over global:
 ./.claude/CLAUDE.md  (project)   →  Overrides  →  ~/.claude/CLAUDE.md  (global)
 ```
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMC_STATE_DIR` | _(unset)_ | Centralized state directory. When set, OMC stores state at `$OMC_STATE_DIR/{project-id}/` instead of `{worktree}/.omc/`. This preserves state across worktree deletions. The project identifier is derived from the git remote URL (or worktree path for local-only repos). |
+| `OMC_BRIDGE_SCRIPT` | _(auto-detected)_ | Path to the Python bridge script |
+| `OMC_PARALLEL_EXECUTION` | `true` | Enable/disable parallel agent execution |
+| `OMC_CODEX_DEFAULT_MODEL` | _(provider default)_ | Default model for Codex CLI workers |
+| `OMC_GEMINI_DEFAULT_MODEL` | _(provider default)_ | Default model for Gemini CLI workers |
+| `DISABLE_OMC` | _(unset)_ | Set to any value to disable all OMC hooks |
+| `OMC_SKIP_HOOKS` | _(unset)_ | Comma-separated list of hook names to skip |
+
+#### Centralized State with `OMC_STATE_DIR`
+
+By default, OMC stores state in `{worktree}/.omc/`. This is lost when worktrees are deleted. To preserve state across worktree lifecycles, set `OMC_STATE_DIR`:
+
+```bash
+# In your shell profile (~/.bashrc, ~/.zshrc, etc.)
+export OMC_STATE_DIR="$HOME/.claude/omc"
+```
+
+This resolves to `~/.claude/omc/{project-identifier}/` where the project identifier uses a hash of the git remote URL (stable across worktrees/clones) with a fallback to the directory path hash for local-only repos.
+
+If both a legacy `{worktree}/.omc/` directory and a centralized directory exist, OMC logs a notice and uses the centralized directory. You can then migrate data from the legacy directory and remove it.
+
 ### When to Re-run Setup
 
 - **First time**: Run after installation (choose project or global)

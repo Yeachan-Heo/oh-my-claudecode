@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, existsSync, mkdtempSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import {
@@ -23,6 +23,8 @@ import {
   resolveToWorktreeRoot,
   validateWorkingDirectory,
   getWorktreeRoot,
+  getProjectIdentifier,
+  clearDualDirWarnings,
 } from '../worktree-paths.js';
 
 const TEST_DIR = '/tmp/worktree-paths-test';
@@ -30,11 +32,13 @@ const TEST_DIR = '/tmp/worktree-paths-test';
 describe('worktree-paths', () => {
   beforeEach(() => {
     clearWorktreeCache();
+    clearDualDirWarnings();
     mkdirSync(TEST_DIR, { recursive: true });
   });
 
   afterEach(() => {
     rmSync(TEST_DIR, { recursive: true, force: true });
+    delete process.env.OMC_STATE_DIR;
   });
 
   describe('validatePath', () => {
@@ -291,6 +295,291 @@ describe('worktree-paths', () => {
       // but the PID portion will be the same so we just check they're strings
       expect(typeof id2).toBe('string');
       expect(id2).toMatch(/^pid-\d+-\d+$/);
+    });
+  });
+
+  // ==========================================================================
+  // OMC_STATE_DIR TESTS (Issue #1014)
+  // ==========================================================================
+
+  describe('getProjectIdentifier', () => {
+    it('should return a string with dirName-hash format', () => {
+      const id = getProjectIdentifier(TEST_DIR);
+      // Format: {dirName}-{16-char hex hash}
+      expect(id).toMatch(/^[a-zA-Z0-9_-]+-[a-f0-9]{16}$/);
+    });
+
+    it('should include the directory basename in the identifier', () => {
+      const id = getProjectIdentifier(TEST_DIR);
+      expect(id).toContain('worktree-paths-test-');
+    });
+
+    it('should return stable results for the same input', () => {
+      const id1 = getProjectIdentifier(TEST_DIR);
+      const id2 = getProjectIdentifier(TEST_DIR);
+      expect(id1).toBe(id2);
+    });
+
+    it('should return different results for different directories', () => {
+      const dir2 = mkdtempSync('/tmp/worktree-paths-other-');
+      try {
+        const id1 = getProjectIdentifier(TEST_DIR);
+        const id2 = getProjectIdentifier(dir2);
+        expect(id1).not.toBe(id2);
+      } finally {
+        rmSync(dir2, { recursive: true, force: true });
+      }
+    });
+
+    it('should use git remote URL when available (stable across worktrees)', () => {
+      // Create a git repo with a remote
+      const repoDir = mkdtempSync('/tmp/worktree-paths-remote-');
+      try {
+        execSync('git init', { cwd: repoDir, stdio: 'pipe' });
+        execSync('git remote add origin https://github.com/test/my-repo.git', {
+          cwd: repoDir,
+          stdio: 'pipe',
+        });
+        clearWorktreeCache();
+
+        const id = getProjectIdentifier(repoDir);
+        expect(id).toMatch(/^[a-zA-Z0-9_-]+-[a-f0-9]{16}$/);
+
+        // Create a second repo with the same remote — should produce the same hash
+        const repoDir2 = mkdtempSync('/tmp/worktree-paths-remote2-');
+        try {
+          execSync('git init', { cwd: repoDir2, stdio: 'pipe' });
+          execSync('git remote add origin https://github.com/test/my-repo.git', {
+            cwd: repoDir2,
+            stdio: 'pipe',
+          });
+          clearWorktreeCache();
+
+          const id2 = getProjectIdentifier(repoDir2);
+          // Same remote URL → same hash suffix
+          const hash1 = id.split('-').pop();
+          const hash2 = id2.split('-').pop();
+          expect(hash1).toBe(hash2);
+        } finally {
+          rmSync(repoDir2, { recursive: true, force: true });
+        }
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should fall back to path hash for repos without remotes', () => {
+      const repoDir = mkdtempSync('/tmp/worktree-paths-noremote-');
+      try {
+        execSync('git init', { cwd: repoDir, stdio: 'pipe' });
+        clearWorktreeCache();
+
+        const id = getProjectIdentifier(repoDir);
+        expect(id).toMatch(/^[a-zA-Z0-9_-]+-[a-f0-9]{16}$/);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should sanitize special characters in directory names', () => {
+      const specialDir = '/tmp/worktree paths test!@#';
+      mkdirSync(specialDir, { recursive: true });
+      try {
+        const id = getProjectIdentifier(specialDir);
+        // Special chars should be replaced with underscores
+        expect(id).toMatch(/^[a-zA-Z0-9_-]+-[a-f0-9]{16}$/);
+        expect(id).not.toContain(' ');
+        expect(id).not.toContain('!');
+        expect(id).not.toContain('@');
+        expect(id).not.toContain('#');
+      } finally {
+        rmSync(specialDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('getOmcRoot with OMC_STATE_DIR (Issue #1014)', () => {
+    it('should return default .omc path when OMC_STATE_DIR is not set', () => {
+      delete process.env.OMC_STATE_DIR;
+      const result = getOmcRoot(TEST_DIR);
+      expect(result).toBe(join(TEST_DIR, '.omc'));
+    });
+
+    it('should return centralized path when OMC_STATE_DIR is set', () => {
+      const stateDir = mkdtempSync('/tmp/omc-state-dir-');
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        const result = getOmcRoot(TEST_DIR);
+        const projectId = getProjectIdentifier(TEST_DIR);
+        expect(result).toBe(join(stateDir, projectId));
+        expect(result).not.toContain('.omc');
+      } finally {
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should log warning when both legacy and centralized dirs exist', () => {
+      const stateDir = mkdtempSync('/tmp/omc-state-dir-');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        const projectId = getProjectIdentifier(TEST_DIR);
+
+        // Create both directories
+        mkdirSync(join(TEST_DIR, '.omc'), { recursive: true });
+        mkdirSync(join(stateDir, projectId), { recursive: true });
+
+        clearDualDirWarnings();
+        getOmcRoot(TEST_DIR);
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Both legacy state dir')
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Using centralized dir')
+        );
+      } finally {
+        warnSpy.mockRestore();
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should not log warning when only centralized dir exists', () => {
+      const stateDir = mkdtempSync('/tmp/omc-state-dir-');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        const projectId = getProjectIdentifier(TEST_DIR);
+
+        // Create only centralized dir (no legacy .omc/)
+        mkdirSync(join(stateDir, projectId), { recursive: true });
+
+        clearDualDirWarnings();
+        getOmcRoot(TEST_DIR);
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should only log dual-dir warning once per path pair', () => {
+      const stateDir = mkdtempSync('/tmp/omc-state-dir-');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        const projectId = getProjectIdentifier(TEST_DIR);
+
+        mkdirSync(join(TEST_DIR, '.omc'), { recursive: true });
+        mkdirSync(join(stateDir, projectId), { recursive: true });
+
+        clearDualDirWarnings();
+        getOmcRoot(TEST_DIR);
+        getOmcRoot(TEST_DIR);
+        getOmcRoot(TEST_DIR);
+
+        // Should only warn once despite 3 calls
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('path functions with OMC_STATE_DIR', () => {
+    let stateDir: string;
+
+    beforeEach(() => {
+      stateDir = mkdtempSync('/tmp/omc-state-dir-paths-');
+      process.env.OMC_STATE_DIR = stateDir;
+    });
+
+    afterEach(() => {
+      delete process.env.OMC_STATE_DIR;
+      rmSync(stateDir, { recursive: true, force: true });
+    });
+
+    it('resolveOmcPath should resolve under centralized dir', () => {
+      const result = resolveOmcPath('state/ralph.json', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'state', 'ralph.json'));
+    });
+
+    it('resolveStatePath should resolve under centralized dir', () => {
+      const result = resolveStatePath('ralph', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'state', 'ralph-state.json'));
+    });
+
+    it('getWorktreeNotepadPath should resolve under centralized dir', () => {
+      const result = getWorktreeNotepadPath(TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'notepad.md'));
+    });
+
+    it('getWorktreeProjectMemoryPath should resolve under centralized dir', () => {
+      const result = getWorktreeProjectMemoryPath(TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'project-memory.json'));
+    });
+
+    it('resolvePlanPath should resolve under centralized dir', () => {
+      const result = resolvePlanPath('my-feature', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'plans', 'my-feature.md'));
+    });
+
+    it('resolveResearchPath should resolve under centralized dir', () => {
+      const result = resolveResearchPath('api-research', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'research', 'api-research'));
+    });
+
+    it('resolveLogsPath should resolve under centralized dir', () => {
+      const result = resolveLogsPath(TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'logs'));
+    });
+
+    it('resolveWisdomPath should resolve under centralized dir', () => {
+      const result = resolveWisdomPath('my-plan', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'notepads', 'my-plan'));
+    });
+
+    it('isPathUnderOmc should check against centralized dir', () => {
+      const projectId = getProjectIdentifier(TEST_DIR);
+      const centralPath = join(stateDir, projectId, 'state', 'ralph.json');
+      expect(isPathUnderOmc(centralPath, TEST_DIR)).toBe(true);
+
+      // Legacy path should NOT be under omc when centralized
+      expect(isPathUnderOmc(join(TEST_DIR, '.omc', 'state', 'ralph.json'), TEST_DIR)).toBe(false);
+    });
+
+    it('ensureAllOmcDirs should create dirs under centralized path', () => {
+      ensureAllOmcDirs(TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      const centralRoot = join(stateDir, projectId);
+
+      expect(existsSync(centralRoot)).toBe(true);
+      expect(existsSync(join(centralRoot, 'state'))).toBe(true);
+      expect(existsSync(join(centralRoot, 'plans'))).toBe(true);
+      expect(existsSync(join(centralRoot, 'research'))).toBe(true);
+      expect(existsSync(join(centralRoot, 'logs'))).toBe(true);
+      expect(existsSync(join(centralRoot, 'notepads'))).toBe(true);
+      expect(existsSync(join(centralRoot, 'drafts'))).toBe(true);
+
+      // Legacy .omc/ should NOT be created
+      expect(existsSync(join(TEST_DIR, '.omc'))).toBe(false);
+    });
+
+    it('ensureOmcDir should create dir under centralized path', () => {
+      const result = ensureOmcDir('state', TEST_DIR);
+      const projectId = getProjectIdentifier(TEST_DIR);
+      expect(result).toBe(join(stateDir, projectId, 'state'));
+      expect(existsSync(result)).toBe(true);
     });
   });
 });

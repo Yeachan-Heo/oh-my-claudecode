@@ -3,11 +3,16 @@
  *
  * Provides strict path validation and resolution for .omc/ paths,
  * ensuring all operations stay within the worktree boundary.
+ *
+ * Supports OMC_STATE_DIR environment variable for centralized state storage.
+ * When set, state is stored at $OMC_STATE_DIR/{project-identifier}/ instead
+ * of {worktree}/.omc/. This preserves state across worktree deletions.
  */
 
+import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, realpathSync, readdirSync } from 'fs';
-import { resolve, normalize, relative, sep, join, isAbsolute } from 'path';
+import { resolve, normalize, relative, sep, join, isAbsolute, basename } from 'path';
 
 /** Standard .omc subdirectories */
 export const OmcPaths = {
@@ -76,26 +81,108 @@ export function validatePath(inputPath: string): void {
   }
 }
 
+// ============================================================================
+// OMC_STATE_DIR SUPPORT (Issue #1014)
+// ============================================================================
+
+/** Track which dual-dir warnings have been logged to avoid repeated warnings */
+const dualDirWarnings = new Set<string>();
+
+/**
+ * Clear the dual-directory warning cache (useful for testing).
+ * @internal
+ */
+export function clearDualDirWarnings(): void {
+  dualDirWarnings.clear();
+}
+
+/**
+ * Get a stable project identifier for centralized state storage.
+ *
+ * Uses a hybrid strategy:
+ * 1. Git remote URL hash (stable across worktrees and clones of the same repo)
+ * 2. Fallback to worktree root path hash (for local-only repos without remotes)
+ *
+ * Format: `{dirName}-{hash}` where hash is first 16 chars of SHA-256.
+ * Example: `my-project-a1b2c3d4e5f6g7h8`
+ *
+ * @param worktreeRoot - Optional worktree root path
+ * @returns A stable project identifier string
+ */
+export function getProjectIdentifier(worktreeRoot?: string): string {
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+
+  let source: string;
+  try {
+    const remoteUrl = execSync('git remote get-url origin', {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    source = remoteUrl || root;
+  } catch {
+    // No git remote (local-only repo or not a git repo) — use path
+    source = root;
+  }
+
+  const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
+  const dirName = basename(root).replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${dirName}-${hash}`;
+}
+
+/**
+ * Get the .omc root directory path.
+ *
+ * When OMC_STATE_DIR is set, returns $OMC_STATE_DIR/{project-identifier}/
+ * instead of {worktree}/.omc/. This allows centralized state storage that
+ * survives worktree deletion.
+ *
+ * @param worktreeRoot - Optional worktree root
+ * @returns Absolute path to the omc root directory
+ */
+export function getOmcRoot(worktreeRoot?: string): string {
+  const customDir = process.env.OMC_STATE_DIR;
+  if (customDir) {
+    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+    const projectId = getProjectIdentifier(root);
+    const centralizedPath = join(customDir, projectId);
+
+    // Log notice if both legacy .omc/ and new centralized dir exist
+    const legacyPath = join(root, OmcPaths.ROOT);
+    const warningKey = `${legacyPath}:${centralizedPath}`;
+    if (!dualDirWarnings.has(warningKey) && existsSync(legacyPath) && existsSync(centralizedPath)) {
+      dualDirWarnings.add(warningKey);
+      console.warn(
+        `[omc] Both legacy state dir (${legacyPath}) and centralized state dir (${centralizedPath}) exist. ` +
+        `Using centralized dir. Consider migrating data from the legacy dir and removing it.`
+      );
+    }
+
+    return centralizedPath;
+  }
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  return join(root, OmcPaths.ROOT);
+}
+
 /**
  * Resolve a relative path under .omc/ to an absolute path.
- * Validates the path is within the worktree boundary.
+ * Validates the path is within the omc boundary.
  *
  * @param relativePath - Path relative to .omc/ (e.g., "state/ralph.json")
  * @param worktreeRoot - Optional worktree root (auto-detected if not provided)
  * @returns Absolute path
- * @throws Error if path would escape worktree
+ * @throws Error if path would escape omc boundary
  */
 export function resolveOmcPath(relativePath: string, worktreeRoot?: string): string {
   validatePath(relativePath);
 
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  const omcDir = join(root, OmcPaths.ROOT);
+  const omcDir = getOmcRoot(worktreeRoot);
   const fullPath = normalize(resolve(omcDir, relativePath));
 
-  // Verify resolved path is still under worktree
-  const relativeToRoot = relative(root, fullPath);
-  if (relativeToRoot.startsWith('..') || relativeToRoot.startsWith(sep + '..')) {
-    throw new Error(`Path escapes worktree boundary: ${relativePath}`);
+  // Verify resolved path is still under omc directory
+  const relativeToOmc = relative(omcDir, fullPath);
+  if (relativeToOmc.startsWith('..') || relativeToOmc.startsWith(sep + '..')) {
+    throw new Error(`Path escapes omc boundary: ${relativePath}`);
   }
 
   return fullPath;
@@ -149,24 +236,14 @@ export function ensureOmcDir(relativePath: string, worktreeRoot?: string): strin
  * This version auto-detects worktree root.
  */
 export function getWorktreeNotepadPath(worktreeRoot?: string): string {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.NOTEPAD);
+  return join(getOmcRoot(worktreeRoot), 'notepad.md');
 }
 
 /**
  * Get the absolute path to the project memory file.
  */
 export function getWorktreeProjectMemoryPath(worktreeRoot?: string): string {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.PROJECT_MEMORY);
-}
-
-/**
- * Get the .omc root directory path.
- */
-export function getOmcRoot(worktreeRoot?: string): string {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.ROOT);
+  return join(getOmcRoot(worktreeRoot), 'project-memory.json');
 }
 
 /**
@@ -175,8 +252,7 @@ export function getOmcRoot(worktreeRoot?: string): string {
  */
 export function resolvePlanPath(planName: string, worktreeRoot?: string): string {
   validatePath(planName);
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.PLANS, `${planName}.md`);
+  return join(getOmcRoot(worktreeRoot), 'plans', `${planName}.md`);
 }
 
 /**
@@ -185,16 +261,14 @@ export function resolvePlanPath(planName: string, worktreeRoot?: string): string
  */
 export function resolveResearchPath(name: string, worktreeRoot?: string): string {
   validatePath(name);
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.RESEARCH, name);
+  return join(getOmcRoot(worktreeRoot), 'research', name);
 }
 
 /**
  * Resolve the logs directory path.
  */
 export function resolveLogsPath(worktreeRoot?: string): string {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.LOGS);
+  return join(getOmcRoot(worktreeRoot), 'logs');
 }
 
 /**
@@ -203,8 +277,7 @@ export function resolveLogsPath(worktreeRoot?: string): string {
  */
 export function resolveWisdomPath(planName: string, worktreeRoot?: string): string {
   validatePath(planName);
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.NOTEPADS, planName);
+  return join(getOmcRoot(worktreeRoot), 'notepads', planName);
 }
 
 /**
@@ -212,8 +285,7 @@ export function resolveWisdomPath(planName: string, worktreeRoot?: string): stri
  * @param absolutePath - Absolute path to check
  */
 export function isPathUnderOmc(absolutePath: string, worktreeRoot?: string): boolean {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  const omcRoot = join(root, OmcPaths.ROOT);
+  const omcRoot = getOmcRoot(worktreeRoot);
   const normalizedPath = normalize(absolutePath);
   const normalizedOmc = normalize(omcRoot);
   return normalizedPath.startsWith(normalizedOmc + sep) || normalizedPath === normalizedOmc;
@@ -223,18 +295,10 @@ export function isPathUnderOmc(absolutePath: string, worktreeRoot?: string): boo
  * Ensure all standard .omc subdirectories exist.
  */
 export function ensureAllOmcDirs(worktreeRoot?: string): void {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  const dirs = [
-    OmcPaths.ROOT,
-    OmcPaths.STATE,
-    OmcPaths.PLANS,
-    OmcPaths.RESEARCH,
-    OmcPaths.LOGS,
-    OmcPaths.NOTEPADS,
-    OmcPaths.DRAFTS,
-  ];
-  for (const dir of dirs) {
-    const fullPath = join(root, dir);
+  const omcRoot = getOmcRoot(worktreeRoot);
+  const subdirs = ['', 'state', 'plans', 'research', 'logs', 'notepads', 'drafts'];
+  for (const subdir of subdirs) {
+    const fullPath = subdir ? join(omcRoot, subdir) : omcRoot;
     if (!existsSync(fullPath)) {
       mkdirSync(fullPath, { recursive: true });
     }
@@ -317,7 +381,7 @@ export function validateSessionId(sessionId: string): void {
 
 /**
  * Resolve a session-scoped state file path.
- * Path: .omc/state/sessions/{sessionId}/{mode}-state.json
+ * Path: {omcRoot}/state/sessions/{sessionId}/{mode}-state.json
  *
  * @param stateName - State name (e.g., "ralph", "ultrawork")
  * @param sessionId - Session identifier
@@ -338,7 +402,7 @@ export function resolveSessionStatePath(stateName: string, sessionId: string, wo
 
 /**
  * Get the session state directory path.
- * Path: .omc/state/sessions/{sessionId}/
+ * Path: {omcRoot}/state/sessions/{sessionId}/
  *
  * @param sessionId - Session identifier
  * @param worktreeRoot - Optional worktree root
@@ -346,8 +410,7 @@ export function resolveSessionStatePath(stateName: string, sessionId: string, wo
  */
 export function getSessionStateDir(sessionId: string, worktreeRoot?: string): string {
   validateSessionId(sessionId);
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return join(root, OmcPaths.SESSIONS, sessionId);
+  return join(getOmcRoot(worktreeRoot), 'state', 'sessions', sessionId);
 }
 
 /**
@@ -357,8 +420,7 @@ export function getSessionStateDir(sessionId: string, worktreeRoot?: string): st
  * @returns Array of session IDs
  */
 export function listSessionIds(worktreeRoot?: string): string[] {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  const sessionsDir = join(root, OmcPaths.SESSIONS);
+  const sessionsDir = join(getOmcRoot(worktreeRoot), 'state', 'sessions');
 
   if (!existsSync(sessionsDir)) {
     return [];
