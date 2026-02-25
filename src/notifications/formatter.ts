@@ -177,6 +177,21 @@ const UI_CHROME_RE = /^[●⎿✻·◼]/;
 /** Matches the "ctrl+o to expand" hint injected by OMC. */
 const CTRL_O_RE = /ctrl\+o to expand/i;
 
+/** Lines composed entirely of box-drawing characters and whitespace. */
+const BOX_DRAWING_RE = /^[\s─═│║┌┐└┘┬┴├┤╔╗╚╝╠╣╦╩╬╟╢╤╧╪━┃┏┓┗┛┣┫┳┻╋┠┨┯┷┿╂]+$/;
+
+/** OMC HUD status lines: [OMC#...] or [OMC] (unversioned). */
+const OMC_HUD_RE = /\[OMC[#\]]/;
+
+/** Bypass-permissions indicator lines starting with ⏵. */
+const BYPASS_PERM_RE = /^⏵/;
+
+/** Bare shell prompt with no command after it. */
+const BARE_PROMPT_RE = /^[❯>$%#]+$/;
+
+/** Minimum ratio of alphanumeric characters for a line to be "meaningful". */
+const MIN_ALNUM_RATIO = 0.15;
+
 /** Maximum number of meaningful lines to include in a notification. */
 const MAX_TAIL_LINES = 10;
 
@@ -197,6 +212,14 @@ export function parseTmuxTail(raw: string): string {
     if (!trimmed) continue;
     if (UI_CHROME_RE.test(trimmed)) continue;
     if (CTRL_O_RE.test(trimmed)) continue;
+    if (BOX_DRAWING_RE.test(trimmed)) continue;
+    if (OMC_HUD_RE.test(trimmed)) continue;
+    if (BYPASS_PERM_RE.test(trimmed)) continue;
+    if (BARE_PROMPT_RE.test(trimmed)) continue;
+
+    // Alphanumeric density check: drop lines mostly composed of special characters
+    const alnumCount = (trimmed.match(/[a-zA-Z0-9]/g) || []).length;
+    if (trimmed.length >= 8 && alnumCount / trimmed.length < MIN_ALNUM_RATIO) continue;
 
     meaningful.push(stripped.trimEnd());
   }

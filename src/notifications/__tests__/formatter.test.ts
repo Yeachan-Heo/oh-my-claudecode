@@ -231,6 +231,89 @@ describe("parseTmuxTail", () => {
   });
 });
 
+describe("parseTmuxTail noise filters", () => {
+  it("drops box-drawing-only lines", () => {
+    expect(parseTmuxTail("────────────────────────")).toBe("");
+  });
+
+  it("drops box-drawing lines with surrounding whitespace", () => {
+    expect(parseTmuxTail("  ━━━━━━━━━━  ")).toBe("");
+  });
+
+  it("preserves text lines mixed with box-drawing separators", () => {
+    const result = parseTmuxTail("Table ─── Header\n────────────");
+    expect(result).toBe("Table ─── Header");
+  });
+
+  it("drops OMC HUD versioned status lines", () => {
+    expect(
+      parseTmuxTail("[OMC#4.4.5] | thinking | session:510m | ctx:61% | 🔧57"),
+    ).toBe("");
+  });
+
+  it("drops unversioned OMC HUD lines", () => {
+    expect(parseTmuxTail("[OMC] | session:5m")).toBe("");
+  });
+
+  it("drops bypass-permissions indicator lines starting with ⏵", () => {
+    expect(
+      parseTmuxTail(
+        "⏵⏵ bypass permissions on · python3 -m intentio mission missions/py… (running)",
+      ),
+    ).toBe("");
+  });
+
+  it("drops bare ❯ prompt with no command", () => {
+    expect(parseTmuxTail("❯")).toBe("");
+  });
+
+  it("preserves prompt line that has a command after it", () => {
+    const result = parseTmuxTail("❯ npm test\nAll tests passed");
+    expect(result).toBe("❯ npm test\nAll tests passed");
+  });
+
+  it("drops lines with low alphanumeric density (mostly special chars)", () => {
+    // 20 special chars + 1 letter = ~5% alnum ratio, well below 15% threshold
+    const noisyLine = "@@@@@@@@@@@@@@@@@@@@a";
+    expect(parseTmuxTail(noisyLine)).toBe("");
+  });
+
+  it("preserves URLs which have sufficient alphanumeric density", () => {
+    expect(parseTmuxTail("https://example.com/api/v2")).toBe(
+      "https://example.com/api/v2",
+    );
+  });
+
+  it("exempts short lines (< 8 chars) from alphanumeric density check", () => {
+    // "..." is 3 chars, 0% alnum — but too short to trigger the density filter
+    expect(parseTmuxTail("...")).toBe("...");
+  });
+
+  it("returns empty string when all lines are noise types", () => {
+    const input = [
+      "────────────────────────",
+      "[OMC#4.4.5] | thinking | session:510m",
+      "⏵⏵ bypass permissions on",
+      "❯",
+      "@@@@@@@@@@@@@@@@@@@@",
+    ].join("\n");
+    expect(parseTmuxTail(input)).toBe("");
+  });
+
+  it("keeps only signal lines when noise and signal are mixed", () => {
+    const input = [
+      "────────────────────────",
+      "Build complete",
+      "[OMC#4.4.5] | thinking | session:510m",
+      "Tests passed: 42",
+      "⏵⏵ bypass permissions on",
+      "❯",
+      "@@@@@@@@@@@@@@@@@@@@",
+    ].join("\n");
+    expect(parseTmuxTail(input)).toBe("Build complete\nTests passed: 42");
+  });
+});
+
 describe("tmuxTail in formatters", () => {
   it("should include tmux tail in formatSessionIdle when present", () => {
     const payload: NotificationPayload = {
