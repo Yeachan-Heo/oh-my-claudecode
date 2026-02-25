@@ -472,6 +472,16 @@ export function clearAllModeStates(cwd: string): boolean {
     }
   }
 
+  // Clear skill-active-state.json (issue #1033)
+  const skillStatePath = join(getStateDir(cwd), 'skill-active-state.json');
+  try {
+    if (existsSync(skillStatePath)) {
+      unlinkSync(skillStatePath);
+    }
+  } catch {
+    success = false;
+  }
+
   // Also clean up session directories
   try {
     const sessionIds = listSessionIds(cwd);

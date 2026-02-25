@@ -794,8 +794,25 @@ export async function checkPersistentModes(
     return ultraworkResult;
   }
 
-  // NOTE: Priority 3 (Todo Continuation) removed to prevent false positives.
-  // Only explicit modes (ralph, autopilot, ultrawork, etc.) trigger continuation enforcement.
+  // Priority 3: Skill Active State (issue #1033)
+  // Skills like code-review, plan, tdd, etc. write skill-active-state.json
+  // when invoked via the Skill tool. This prevents premature stops mid-skill.
+  try {
+    const { checkSkillActiveState } = await import('../skill-state/index.js');
+    const skillResult = checkSkillActiveState(workingDir, sessionId);
+    if (skillResult.shouldBlock) {
+      return {
+        shouldBlock: true,
+        message: skillResult.message,
+        mode: 'ultrawork' as const, // Reuse ultrawork mode type for compatibility
+        metadata: {
+          phase: `skill:${skillResult.skillName || 'unknown'}`,
+        }
+      };
+    }
+  } catch {
+    // If skill-state module is unavailable, skip gracefully
+  }
 
   // No blocking needed
   return {

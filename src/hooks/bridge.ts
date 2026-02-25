@@ -921,6 +921,18 @@ function processPreToolUse(input: HookInput): HookOutput {
     _notify.askUserQuestion(input.sessionId, directory, input.toolInput);
   }
 
+  // Activate skill state when Skill tool is invoked (issue #1033)
+  // This writes skill-active-state.json so the Stop hook can prevent premature
+  // session termination while a skill is executing.
+  if (input.toolName === "Skill") {
+    const skillName = getInvokedSkillName(input.toolInput);
+    if (skillName) {
+      import("./skill-state/index.js").then(({ writeSkillActiveState }) => {
+        writeSkillActiveState(directory, skillName, input.sessionId);
+      }).catch(() => {});
+    }
+  }
+
   // Notify when a new agent is spawned via Task tool (issue #761)
   // Fire-and-forget: verbosity filtering is handled inside notify()
   if (input.toolName === "Task" && input.sessionId) {
