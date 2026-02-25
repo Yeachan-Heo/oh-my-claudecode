@@ -356,7 +356,7 @@ function paneHasTrustPrompt(captured) {
     const hasChoices = tail.some(l => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
     return hasQuestion && hasChoices;
 }
-function paneHasActiveTask(captured) {
+export function paneHasActiveTask(captured) {
     const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
     const tail = lines.slice(-40);
     if (tail.some(l => /esc to interrupt/i.test(l)))
@@ -365,7 +365,7 @@ function paneHasActiveTask(captured) {
         return true;
     return false;
 }
-function paneLooksReady(captured) {
+export function paneLooksReady(captured) {
     const lines = captured
         .split('\n')
         .map(line => line.replace(/\r/g, '').trim())

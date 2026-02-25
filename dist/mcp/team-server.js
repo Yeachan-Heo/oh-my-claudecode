@@ -23,6 +23,7 @@ import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { killWorkerPanes } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
+import { NudgeTracker } from '../team/idle-nudge.js';
 const omcTeamJobs = new Map();
 const OMC_JOBS_DIR = join(homedir(), '.omc', 'team-jobs');
 function persistJob(jobId, job) {
@@ -73,6 +74,9 @@ const statusSchema = z.object({
 const waitSchema = z.object({
     job_id: z.string().describe('Job ID returned by omc_run_team_start'),
     timeout_ms: z.number().optional().describe('Maximum wait time in ms (default: 300000, max: 3600000)'),
+    nudge_delay_ms: z.number().optional().describe('Milliseconds a pane must be idle before nudging (default: 30000)'),
+    nudge_max_count: z.number().optional().describe('Maximum nudges per pane (default: 3)'),
+    nudge_message: z.string().optional().describe('Message sent as nudge (default: "Continue working on your assigned task.")'),
 });
 // ---------------------------------------------------------------------------
 // Tool handlers
@@ -160,11 +164,17 @@ async function handleStatus(args) {
     return { content: [{ type: 'text', text: JSON.stringify(out) }] };
 }
 async function handleWait(args) {
-    const { job_id, timeout_ms = 300_000 } = waitSchema.parse(args);
+    const { job_id, timeout_ms = 300_000, nudge_delay_ms, nudge_max_count, nudge_message } = waitSchema.parse(args);
     validateJobId(job_id);
     // Cap at 1 hour — matches Codex/Gemini wait_for_job behaviour
     const deadline = Date.now() + Math.min(timeout_ms, 3_600_000);
     let pollDelay = 500; // ms; grows to 2000ms via 1.5× backoff
+    // Auto-nudge idle teammate panes (issue #1047)
+    const nudgeTracker = new NudgeTracker({
+        ...(nudge_delay_ms != null ? { delayMs: nudge_delay_ms } : {}),
+        ...(nudge_max_count != null ? { maxCount: nudge_max_count } : {}),
+        ...(nudge_message != null ? { message: nudge_message } : {}),
+    });
     while (Date.now() < deadline) {
         const job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
         if (!job) {
@@ -200,6 +210,8 @@ async function handleWait(args) {
             }
             if (job.stderr)
                 out.stderr = job.stderr;
+            if (nudgeTracker.totalNudges > 0)
+                out.nudges = nudgeTracker.getSummary();
             return { content: [{ type: 'text', text: JSON.stringify(out) }] };
         }
         // Yield to Node.js event loop — lets child.on('close', ...) fire between polls.
@@ -207,12 +219,24 @@ async function handleWait(args) {
         // back into this MCP server.
         await new Promise(r => setTimeout(r, pollDelay));
         pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
+        // Auto-nudge idle panes (issue #1047): check worker panes for idle state
+        // and send continuation nudge via tmux send-keys.
+        try {
+            const panes = await loadPaneIds(job_id);
+            if (panes?.paneIds?.length) {
+                await nudgeTracker.checkAndNudge(panes.paneIds, panes.leaderPaneId, job.teamName ?? '');
+            }
+        }
+        catch { /* nudge is best-effort — never fail the wait loop */ }
     }
     // Timeout: leave workers running — caller must use omc_run_team_cleanup to stop them explicitly.
     // Do NOT kill the process or panes here; the user may call omc_run_team_wait again to keep
     // waiting, or omc_run_team_status to check progress.
     const elapsed = ((Date.now() - (omcTeamJobs.get(job_id)?.startedAt ?? Date.now())) / 1000).toFixed(1);
-    return { content: [{ type: 'text', text: JSON.stringify({ error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s — workers are still running; call omc_run_team_wait again to keep waiting or omc_run_team_cleanup to stop them`, jobId: job_id, status: 'running', elapsedSeconds: elapsed }) }] };
+    const timeoutOut = { error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s — workers are still running; call omc_run_team_wait again to keep waiting or omc_run_team_cleanup to stop them`, jobId: job_id, status: 'running', elapsedSeconds: elapsed };
+    if (nudgeTracker.totalNudges > 0)
+        timeoutOut.nudges = nudgeTracker.getSummary();
+    return { content: [{ type: 'text', text: JSON.stringify(timeoutOut) }] };
 }
 // ---------------------------------------------------------------------------
 // MCP server
@@ -256,12 +280,15 @@ const TOOLS = [
     },
     {
         name: 'omc_run_team_wait',
-        description: 'Block (poll internally) until a background omc_run_team job reaches a terminal state (completed or failed). Returns the result when done. One call instead of N polling calls. Uses exponential backoff (500ms → 2000ms). If this wait call times out, workers are left running — call omc_run_team_wait again to keep waiting, or omc_run_team_cleanup to stop them explicitly.',
+        description: 'Block (poll internally) until a background omc_run_team job reaches a terminal state (completed or failed). Returns the result when done. One call instead of N polling calls. Uses exponential backoff (500ms → 2000ms). Auto-nudges idle teammate panes via tmux send-keys. If this wait call times out, workers are left running — call omc_run_team_wait again to keep waiting, or omc_run_team_cleanup to stop them explicitly.',
         inputSchema: {
             type: 'object',
             properties: {
                 job_id: { type: 'string', description: 'Job ID returned by omc_run_team_start' },
                 timeout_ms: { type: 'number', description: 'Maximum wait time in ms (default: 300000, max: 3600000)' },
+                nudge_delay_ms: { type: 'number', description: 'Milliseconds a pane must be idle before nudging (default: 30000)' },
+                nudge_max_count: { type: 'number', description: 'Maximum nudges per pane (default: 3)' },
+                nudge_message: { type: 'string', description: 'Message sent as nudge (default: "Continue working on your assigned task.")' },
             },
             required: ['job_id'],
         },

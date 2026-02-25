@@ -427,7 +427,7 @@ function paneHasTrustPrompt(captured: string): boolean {
   return hasQuestion && hasChoices;
 }
 
-function paneHasActiveTask(captured: string): boolean {
+export function paneHasActiveTask(captured: string): boolean {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
   const tail = lines.slice(-40);
   if (tail.some(l => /esc to interrupt/i.test(l))) return true;
@@ -435,7 +435,7 @@ function paneHasActiveTask(captured: string): boolean {
   return false;
 }
 
-function paneLooksReady(captured: string): boolean {
+export function paneLooksReady(captured: string): boolean {
   const lines = captured
     .split('\n')
     .map(line => line.replace(/\r/g, '').trim())
