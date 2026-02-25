@@ -25,7 +25,7 @@ vi.mock('../tmux-utils.js', () => ({
   isClaudeAvailable: vi.fn(() => true),
 }));
 
-import { runClaude, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs } from '../launch.js';
+import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs } from '../launch.js';
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
@@ -660,5 +660,117 @@ describe('extractWebhookFlag', () => {
     const result = extractWebhookFlag([]);
     expect(result.webhookEnabled).toBe(false);
     expect(result.remainingArgs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// launchCommand — env var propagation (Issue: --flag=false must override inherited env)
+// ---------------------------------------------------------------------------
+describe('launchCommand — env var propagation', () => {
+  let processExitSpy: ReturnType<typeof vi.spyOn>;
+
+  // Save original env values to restore after each test
+  const envKeys = ['OMC_NOTIFY', 'OMC_OPENCLAW', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'CLAUDECODE'] as const;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    // Save and clear env
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    // Mock execFileSync to prevent actual claude launch
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('direct');
+  });
+
+  afterEach(() => {
+    processExitSpy.mockRestore();
+    // Restore env
+    for (const key of envKeys) {
+      if (savedEnv[key] !== undefined) {
+        process.env[key] = savedEnv[key];
+      } else {
+        delete process.env[key];
+      }
+    }
+  });
+
+  it('bare --telegram sets OMC_TELEGRAM to 1', async () => {
+    await launchCommand(['--telegram']);
+    expect(process.env.OMC_TELEGRAM).toBe('1');
+  });
+
+  it('bare --discord sets OMC_DISCORD to 1', async () => {
+    await launchCommand(['--discord']);
+    expect(process.env.OMC_DISCORD).toBe('1');
+  });
+
+  it('bare --slack sets OMC_SLACK to 1', async () => {
+    await launchCommand(['--slack']);
+    expect(process.env.OMC_SLACK).toBe('1');
+  });
+
+  it('bare --webhook sets OMC_WEBHOOK to 1', async () => {
+    await launchCommand(['--webhook']);
+    expect(process.env.OMC_WEBHOOK).toBe('1');
+  });
+
+  it('bare --openclaw sets OMC_OPENCLAW to 1', async () => {
+    await launchCommand(['--openclaw']);
+    expect(process.env.OMC_OPENCLAW).toBe('1');
+  });
+
+  it('--telegram=false overrides inherited OMC_TELEGRAM=1', async () => {
+    process.env.OMC_TELEGRAM = '1';
+    await launchCommand(['--telegram=false']);
+    expect(process.env.OMC_TELEGRAM).toBe('0');
+  });
+
+  it('--discord=false overrides inherited OMC_DISCORD=1', async () => {
+    process.env.OMC_DISCORD = '1';
+    await launchCommand(['--discord=false']);
+    expect(process.env.OMC_DISCORD).toBe('0');
+  });
+
+  it('--slack=false overrides inherited OMC_SLACK=1', async () => {
+    process.env.OMC_SLACK = '1';
+    await launchCommand(['--slack=false']);
+    expect(process.env.OMC_SLACK).toBe('0');
+  });
+
+  it('--webhook=false overrides inherited OMC_WEBHOOK=1', async () => {
+    process.env.OMC_WEBHOOK = '1';
+    await launchCommand(['--webhook=false']);
+    expect(process.env.OMC_WEBHOOK).toBe('0');
+  });
+
+  it('--openclaw=false overrides inherited OMC_OPENCLAW=1', async () => {
+    process.env.OMC_OPENCLAW = '1';
+    await launchCommand(['--openclaw=false']);
+    expect(process.env.OMC_OPENCLAW).toBe('0');
+  });
+
+  it('--telegram=0 overrides inherited OMC_TELEGRAM=1', async () => {
+    process.env.OMC_TELEGRAM = '1';
+    await launchCommand(['--telegram=0']);
+    expect(process.env.OMC_TELEGRAM).toBe('0');
+  });
+
+  it('OMC flags are stripped from args passed to Claude', async () => {
+    await launchCommand(['--telegram', '--discord', '--slack', '--webhook', '--openclaw', '--print']);
+
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const claudeCall = calls.find(([cmd]) => cmd === 'claude');
+    expect(claudeCall).toBeDefined();
+    const claudeArgs = claudeCall![1] as string[];
+    expect(claudeArgs).not.toContain('--telegram');
+    expect(claudeArgs).not.toContain('--discord');
+    expect(claudeArgs).not.toContain('--slack');
+    expect(claudeArgs).not.toContain('--webhook');
+    expect(claudeArgs).not.toContain('--openclaw');
+    expect(claudeArgs).toContain('--print');
   });
 });

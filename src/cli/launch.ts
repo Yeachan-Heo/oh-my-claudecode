@@ -361,32 +361,42 @@ export async function launchCommand(args: string[]): Promise<void> {
 
   // Extract OMC-specific --openclaw flag (presence-based, no value consumption)
   const { openclawEnabled, remainingArgs: argsAfterOpenclaw } = extractOpenClawFlag(remainingArgs);
-  if (openclawEnabled) {
+  if (openclawEnabled === true) {
     process.env.OMC_OPENCLAW = '1';
+  } else if (openclawEnabled === false) {
+    process.env.OMC_OPENCLAW = '0';
   }
 
   // Extract OMC-specific --telegram flag (presence-based)
   const { telegramEnabled, remainingArgs: argsAfterTelegram } = extractTelegramFlag(argsAfterOpenclaw);
-  if (telegramEnabled) {
+  if (telegramEnabled === true) {
     process.env.OMC_TELEGRAM = '1';
+  } else if (telegramEnabled === false) {
+    process.env.OMC_TELEGRAM = '0';
   }
 
   // Extract OMC-specific --discord flag (presence-based)
   const { discordEnabled, remainingArgs: argsAfterDiscord } = extractDiscordFlag(argsAfterTelegram);
-  if (discordEnabled) {
+  if (discordEnabled === true) {
     process.env.OMC_DISCORD = '1';
+  } else if (discordEnabled === false) {
+    process.env.OMC_DISCORD = '0';
   }
 
   // Extract OMC-specific --slack flag (presence-based)
   const { slackEnabled, remainingArgs: argsAfterSlack } = extractSlackFlag(argsAfterDiscord);
-  if (slackEnabled) {
+  if (slackEnabled === true) {
     process.env.OMC_SLACK = '1';
+  } else if (slackEnabled === false) {
+    process.env.OMC_SLACK = '0';
   }
 
   // Extract OMC-specific --webhook flag (presence-based)
   const { webhookEnabled, remainingArgs: argsAfterWebhook } = extractWebhookFlag(argsAfterSlack);
-  if (webhookEnabled) {
+  if (webhookEnabled === true) {
     process.env.OMC_WEBHOOK = '1';
+  } else if (webhookEnabled === false) {
+    process.env.OMC_WEBHOOK = '0';
   }
 
   const cwd = process.cwd();
