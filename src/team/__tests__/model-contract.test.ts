@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getContract, buildLaunchArgs, buildWorkerArgv, buildWorkerCommand, getWorkerEnv, parseCliOutput, isPromptModeAgent, getPromptModeArgs } from '../model-contract.js';
+import { spawnSync } from 'child_process';
+import { getContract, buildLaunchArgs, buildWorkerArgv, buildWorkerCommand, getWorkerEnv, parseCliOutput, isPromptModeAgent, getPromptModeArgs, isCliAvailable } from '../model-contract.js';
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    spawnSync: vi.fn(actual.spawnSync),
+  };
+});
 
 describe('model-contract', () => {
   describe('getContract', () => {
@@ -76,6 +85,18 @@ describe('model-contract', () => {
     });
     it('codex falls back to raw output if no JSONL', () => {
       expect(parseCliOutput('codex', 'plain text')).toBe('plain text');
+    });
+  });
+
+  describe('isCliAvailable', () => {
+    it('passes shell: true to spawnSync so .cmd wrappers are found on Windows', () => {
+      const mockSpawnSync = vi.mocked(spawnSync);
+      mockSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null });
+
+      isCliAvailable('codex');
+
+      expect(mockSpawnSync).toHaveBeenCalledWith('codex', ['--version'], { timeout: 5000, shell: true });
+      mockSpawnSync.mockRestore();
     });
   });
 

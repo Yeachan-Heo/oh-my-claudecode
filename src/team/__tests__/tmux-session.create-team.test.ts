@@ -32,6 +32,13 @@ vi.mock('child_process', async (importOriginal) => {
     return { stdout: '', stderr: '' };
   };
 
+  /** Parse a shell command like: tmux "arg1" "arg2" into ['arg1', 'arg2'] */
+  const parseTmuxShellCmd = (cmd: string): string[] | null => {
+    const match = cmd.match(/^tmux\s+(.+)$/);
+    if (!match) return null;
+    return match[1].match(/"([^"]*)"/g)?.map(s => s.slice(1, -1)) ?? [];
+  };
+
   const execFileMock = vi.fn((_cmd: string, args: string[], cb: ExecFileCallback) => {
     const { stdout, stderr } = runMockExec(args);
     cb(null, stdout, stderr);
@@ -42,8 +49,23 @@ vi.mock('child_process', async (importOriginal) => {
   (execFileMock as unknown as Record<symbol, unknown>)[promisifyCustom] =
     async (_cmd: string, args: string[]) => runMockExec(args);
 
+  // Mock exec for tmuxAsync shell-routed calls (format strings with #{})
+  type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
+  const execMock = vi.fn((cmd: string, cb: ExecCallback) => {
+    const args = parseTmuxShellCmd(cmd);
+    const { stdout, stderr } = args ? runMockExec(args) : { stdout: '', stderr: '' };
+    cb(null, stdout, stderr);
+    return {} as never;
+  });
+  (execMock as unknown as Record<symbol, unknown>)[promisifyCustom] =
+    async (cmd: string) => {
+      const args = parseTmuxShellCmd(cmd);
+      return args ? runMockExec(args) : { stdout: '', stderr: '' };
+    };
+
   return {
     ...actual,
+    exec: execMock,
     execFile: execFileMock,
   };
 });

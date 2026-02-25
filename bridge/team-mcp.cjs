@@ -17763,6 +17763,7 @@ var import_os = require("os");
 // src/team/tmux-session.ts
 var import_child_process = require("child_process");
 var import_path = require("path");
+var import_util5 = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
 
 // src/team/team-name.ts
@@ -17778,6 +17779,8 @@ function validateTeamName(teamName) {
 
 // src/team/tmux-session.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var promisifiedExec = (0, import_util5.promisify)(import_child_process.exec);
+var promisifiedExecFile = (0, import_util5.promisify)(import_child_process.execFile);
 async function killWorkerPanes(opts) {
   const { paneIds, leaderPaneId, teamName, cwd, graceMs = 1e4 } = opts;
   if (!paneIds.length) return;
@@ -17787,9 +17790,9 @@ async function killWorkerPanes(opts) {
     await sleep(graceMs);
   } catch {
   }
-  const { execFile } = await import("child_process");
-  const { promisify } = await import("util");
-  const execFileAsync = promisify(execFile);
+  const { execFile: execFile2 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile2);
   for (const paneId of paneIds) {
     if (paneId === leaderPaneId) continue;
     try {
