@@ -39,6 +39,7 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const LOCK_TIMEOUT_MS = 2000;
 const LOCK_RETRY_MS = 20;
 const LOCK_STALE_MS = 10000;
+const LOCK_MAX_WAIT_MS = 10000;
 
 /**
  * Return the registry state directory.
@@ -244,17 +245,19 @@ function acquireRegistryLock(): RegistryLockHandle | null {
 }
 
 /**
- * Acquire registry lock with retries across timeout windows.
- * Prevents dropped writes when a single lock-timeout window is exhausted.
+ * Acquire registry lock with retries up to a cumulative deadline.
+ * Returns null if the deadline is exceeded (e.g. lock holder is a hung process).
  */
-function acquireRegistryLockOrWait(): RegistryLockHandle {
-  while (true) {
+function acquireRegistryLockOrWait(maxWaitMs: number = LOCK_MAX_WAIT_MS): RegistryLockHandle | null {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
     const lock = acquireRegistryLock();
     if (lock !== null) {
       return lock;
     }
     sleepMs(LOCK_RETRY_MS);
   }
+  return null;
 }
 
 /**
@@ -277,10 +280,15 @@ function releaseRegistryLock(lock: RegistryLockHandle): void {
 }
 
 /**
- * Execute critical section with registry lock, waiting across timeout windows.
+ * Execute critical section with registry lock, waiting up to cumulative deadline.
+ * If the lock cannot be acquired within the deadline, proceeds best-effort without lock.
  */
 function withRegistryLockOrWait<T>(onLocked: () => T): T {
   const lock = acquireRegistryLockOrWait();
+  if (lock === null) {
+    // Lock timed out (hung lock holder). Proceed best-effort without lock.
+    return onLocked();
+  }
   try {
     return onLocked();
   } finally {
