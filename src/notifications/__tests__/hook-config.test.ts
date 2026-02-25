@@ -152,6 +152,10 @@ describe("hook-config reader", () => {
       );
     });
 
+    it("returns null when hookConfig is null", () => {
+      expect(resolveEventTemplate(null as any, "session-start", "discord")).toBeNull();
+    });
+
     it("returns event template when no platform override", () => {
       expect(resolveEventTemplate(baseConfig, "session-end", "slack")).toBe(
         "Event: {{duration}}",

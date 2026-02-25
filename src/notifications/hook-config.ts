@@ -65,10 +65,12 @@ export function resetHookConfigCache(): void {
  * Cascade: platform override > event template > defaultTemplate > null
  */
 export function resolveEventTemplate(
-  hookConfig: HookNotificationConfig,
+  hookConfig: HookNotificationConfig | null,
   event: NotificationEvent,
   platform: NotificationPlatform,
 ): string | null {
+  if (!hookConfig) return null;
+
   const eventConfig = hookConfig.events?.[event];
 
   if (eventConfig) {
