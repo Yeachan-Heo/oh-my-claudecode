@@ -110,9 +110,11 @@ async function readJsonSafe<T>(filePath: string): Promise<T | null> {
     return JSON.parse(content) as T;
   } catch {
     // Gemini CLI sometimes replaces double-quotes with backslashes in JSON output.
-    // Attempt recovery by converting stray backslashes back to double-quotes.
+    // Only attempt recovery when the content has no double-quotes at all (total
+    // substitution), to avoid destroying legitimate escape sequences.
     try {
       const content = await readFile(filePath, 'utf-8');
+      if (content.includes('"')) return null;
       const recovered = content.replace(/\\/g, '"');
       return JSON.parse(recovered) as T;
     } catch {
