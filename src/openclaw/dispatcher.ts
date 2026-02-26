@@ -25,7 +25,7 @@ function validateGatewayUrl(url: string): boolean {
     if (parsed.protocol === "https:") return true;
     if (
       parsed.protocol === "http:" &&
-      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1")
     ) {
       return true;
     }

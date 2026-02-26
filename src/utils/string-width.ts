@@ -227,9 +227,19 @@ export function sliceByWidth(
   for (const char of str) {
     const charWidth = getCharWidth(char);
 
-    // Check if we've reached the start position
-    if (!started && currentWidth + charWidth > startWidth) {
-      started = true;
+    // Check if we've reached the start position.
+    if (!started) {
+      if (currentWidth >= startWidth) {
+        // Landed exactly on or past the start boundary — begin collecting.
+        started = true;
+      } else if (currentWidth + charWidth > startWidth) {
+        // A double-width char straddles the start boundary.
+        // Pad with a space so the output column-aligns correctly.
+        started = true;
+        result += ' ';
+        currentWidth += charWidth;
+        continue;
+      }
     }
 
     // Check if we've reached the end position
@@ -238,8 +248,9 @@ export function sliceByWidth(
     }
 
     if (started) {
-      // Check if adding this character would exceed endWidth
+      // If a double-width char would be cut at the end boundary, pad with space
       if (endWidth !== undefined && currentWidth + charWidth > endWidth) {
+        result += ' ';
         break;
       }
       result += char;

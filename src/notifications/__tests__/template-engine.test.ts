@@ -100,8 +100,17 @@ describe("{{#if}} conditionals", () => {
     expect(result).toBe("");
   });
 
-  it("handles incompleteTasks=0 as falsy", () => {
+  it("handles incompleteTasks=0 as truthy (distinguishable from undefined)", () => {
     const payload = makePayload({ incompleteTasks: 0 });
+    const result = interpolateTemplate(
+      "{{#if incompleteTasks}}Tasks: {{incompleteTasks}}{{/if}}",
+      payload,
+    );
+    expect(result).toBe("Tasks: 0");
+  });
+
+  it("handles incompleteTasks=undefined as falsy", () => {
+    const payload = makePayload({ incompleteTasks: undefined });
     const result = interpolateTemplate(
       "{{#if incompleteTasks}}Tasks: {{incompleteTasks}}{{/if}}",
       payload,

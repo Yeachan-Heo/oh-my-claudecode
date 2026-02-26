@@ -81,7 +81,7 @@ export function detectArchitecturalChanges(files: string[]): boolean {
     /config\.(ts|js|json)$/i,
     /schema\.(ts|prisma|sql)$/i,
     /definitions\.ts$/i,
-    /types\.ts$/i,
+    /(?:^|\/)types\.ts$/i,
     /package\.json$/i,
     /tsconfig\.json$/i,
   ];

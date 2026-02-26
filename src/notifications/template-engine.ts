@@ -110,9 +110,10 @@ export function computeTemplateVariables(
   vars.maxIterations =
     payload.maxIterations != null ? String(payload.maxIterations) : "";
   vars.question = payload.question || "";
-  // incompleteTasks: 0 or null → "" (so {{#if}} is falsy for 0)
+  // incompleteTasks: undefined/null → "" (so {{#if}} is falsy when unset)
+  // 0 → "0" (distinguishable from unset; templates can display "0 incomplete tasks")
   vars.incompleteTasks =
-    payload.incompleteTasks != null && payload.incompleteTasks > 0
+    payload.incompleteTasks != null
       ? String(payload.incompleteTasks)
       : "";
   vars.agentName = payload.agentName || "";

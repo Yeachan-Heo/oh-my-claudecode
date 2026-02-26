@@ -10,10 +10,12 @@
 
 // Windows terminals (cmd.exe, PowerShell, Windows Terminal) may not render
 // multi-byte emoji correctly, causing HUD layout corruption.
-const isWin = process.platform === 'win32';
-const TOOL_ICON = isWin ? 'T:' : '\u{1F527}';
-const AGENT_ICON = isWin ? 'A:' : '\u{1F916}';
-const SKILL_ICON = isWin ? 'S:' : '\u26A1';
+// WSL terminals may also lack emoji support.
+import { isWSL } from '../../platform/index.js';
+const useAscii = process.platform === 'win32' || isWSL();
+const TOOL_ICON = useAscii ? 'T:' : '\u{1F527}';
+const AGENT_ICON = useAscii ? 'A:' : '\u{1F916}';
+const SKILL_ICON = useAscii ? 'S:' : '\u26A1';
 
 /**
  * Render call counts badge.
