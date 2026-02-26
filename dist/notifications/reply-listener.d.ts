@@ -44,6 +44,11 @@ export interface DaemonResponse {
     error?: string;
 }
 /**
+ * Build daemon config from notification config.
+ * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
+ */
+export declare function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null>;
+/**
  * Check if daemon is currently running
  */
 export declare function isDaemonRunning(): boolean;

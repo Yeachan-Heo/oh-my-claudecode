@@ -215,7 +215,7 @@ function writeDaemonState(state: ReplyListenerState): void {
  * Build daemon config from notification config.
  * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
-async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
+export async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
   try {
     const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
     const replyConfig = getReplyConfig();
@@ -362,8 +362,8 @@ function injectReply(
   const content = capturePaneContent(paneId, 15);
   const analysis = analyzePaneContent(content);
 
-  if (analysis.confidence < 0.4) {
-    log(`WARN: Pane ${paneId} does not appear to be running Claude Code (confidence: ${analysis.confidence}). Skipping injection, removing stale mapping.`);
+  if (!content.trim()) {
+    log(`WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
     removeMessagesByPane(paneId);
     return false;
   }
