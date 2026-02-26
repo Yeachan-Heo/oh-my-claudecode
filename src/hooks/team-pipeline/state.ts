@@ -128,8 +128,9 @@ export function markTeamPhase(
   nextPhase: TeamPipelinePhase,
   reason?: string,
 ): TeamTransitionResult {
-  // Idempotent: if already in target phase, return success without mutating state
-  if (state.phase === nextPhase) {
+  // Idempotent: if already in target phase, return success without mutating state.
+  // Exception: team-fix -> team-fix is a retry increment and must not short-circuit.
+  if (state.phase === nextPhase && nextPhase !== 'team-fix') {
     return { ok: true, state };
   }
 
