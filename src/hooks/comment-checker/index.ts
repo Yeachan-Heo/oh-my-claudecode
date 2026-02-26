@@ -249,7 +249,9 @@ export function createCommentCheckerHook(config?: CommentCheckerConfig) {
 
   if (!cleanupIntervalStarted) {
     cleanupIntervalStarted = true;
-    setInterval(cleanupOldPendingCalls, 10_000);
+    // Note: setInterval is intentionally NOT used here — this module runs in
+    // short-lived hook processes that exit before any timer fires. Pending
+    // calls are cleaned up lazily via TTL checks on the next invocation.
   }
 
   return {

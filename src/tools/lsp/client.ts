@@ -121,6 +121,7 @@ export class LspClient {
   private buffer = Buffer.alloc(0);
   private openDocuments = new Set<string>();
   private diagnostics = new Map<string, Diagnostic[]>();
+  private diagnosticWaiters = new Map<string, Array<() => void>>();
   private workspaceRoot: string;
   private serverConfig: LspServerConfig;
   private initialized = false;
@@ -281,6 +282,12 @@ export class LspClient {
     if (notification.method === 'textDocument/publishDiagnostics') {
       const params = notification.params as { uri: string; diagnostics: Diagnostic[] };
       this.diagnostics.set(params.uri, params.diagnostics);
+      // Wake any waiters registered via waitForDiagnostics()
+      const waiters = this.diagnosticWaiters.get(params.uri);
+      if (waiters && waiters.length > 0) {
+        this.diagnosticWaiters.delete(params.uri);
+        for (const wake of waiters) wake();
+      }
     }
     // Handle other notifications as needed
   }
@@ -524,6 +531,43 @@ export class LspClient {
   getDiagnostics(filePath: string): Diagnostic[] {
     const uri = fileUri(filePath);
     return this.diagnostics.get(uri) || [];
+  }
+
+  /**
+   * Wait for the server to publish diagnostics for a file.
+   * Resolves as soon as textDocument/publishDiagnostics fires for the URI,
+   * or after `timeoutMs` milliseconds (whichever comes first).
+   * This replaces fixed-delay sleeps with a notification-driven approach.
+   */
+  waitForDiagnostics(filePath: string, timeoutMs = 2000): Promise<void> {
+    const uri = fileUri(filePath);
+
+    // If diagnostics are already present, resolve immediately.
+    if (this.diagnostics.has(uri)) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          this.diagnosticWaiters.delete(uri);
+          resolve();
+        }
+      }, timeoutMs);
+
+      // Store the resolver so handleNotification can wake it up.
+      const existing = this.diagnosticWaiters.get(uri) || [];
+      existing.push(() => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      this.diagnosticWaiters.set(uri, existing);
+    });
   }
 
   /**

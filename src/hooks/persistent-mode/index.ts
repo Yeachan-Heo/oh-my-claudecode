@@ -10,7 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
-import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -296,6 +296,30 @@ export function recordIdleNotificationSent(stateDir: string, sessionId?: string)
   }
 }
 
+/** Max bytes to read from the tail of a transcript for architect approval detection. */
+const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
+
+/**
+ * Read the tail of a potentially large transcript file.
+ * Architect approval/rejection markers appear near the end of the conversation,
+ * so reading only the last N bytes avoids loading megabyte-sized transcripts.
+ */
+function readTranscriptTail(transcriptPath: string): string {
+  const size = statSync(transcriptPath).size;
+  if (size <= TRANSCRIPT_TAIL_BYTES) {
+    return readFileSync(transcriptPath, 'utf-8');
+  }
+  const fd = openSync(transcriptPath, 'r');
+  try {
+    const offset = size - TRANSCRIPT_TAIL_BYTES;
+    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
+    const bytesRead = readSync(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    return buf.subarray(0, bytesRead).toString('utf-8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /**
  * Check for architect approval in session transcript
  */
@@ -310,7 +334,7 @@ function checkArchitectApprovalInTranscript(sessionId: string): boolean {
   for (const transcriptPath of possiblePaths) {
     if (existsSync(transcriptPath)) {
       try {
-        const content = readFileSync(transcriptPath, 'utf-8');
+        const content = readTranscriptTail(transcriptPath);
         if (detectArchitectApproval(content)) {
           return true;
         }
@@ -336,7 +360,7 @@ function checkArchitectRejectionInTranscript(sessionId: string): { rejected: boo
   for (const transcriptPath of possiblePaths) {
     if (existsSync(transcriptPath)) {
       try {
-        const content = readFileSync(transcriptPath, 'utf-8');
+        const content = readTranscriptTail(transcriptPath);
         const result = detectArchitectRejection(content);
         if (result.rejected) {
           return result;

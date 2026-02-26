@@ -218,7 +218,9 @@ export function createPreemptiveCompactionHook(
 
   if (!cleanupIntervalStarted) {
     cleanupIntervalStarted = true;
-    setInterval(cleanupSessionStates, 5 * 60 * 1000); // Every 5 minutes
+    // Note: setInterval is intentionally NOT used here — this module runs in
+    // short-lived hook processes that exit before any timer fires. Cleanup is
+    // done lazily on each invocation via the rapid-fire debounce path instead.
   }
 
   return {

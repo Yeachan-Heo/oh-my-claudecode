@@ -28,6 +28,7 @@ import {
 } from "../hud/background-tasks.js";
 import { readHudState, writeHudState } from "../hud/state.js";
 import { loadConfig } from "../config/loader.js";
+import { writeSkillActiveState } from "./skill-state/index.js";
 import {
   ULTRAWORK_MESSAGE,
   ULTRATHINK_MESSAGE,
@@ -870,9 +871,14 @@ function processPreToolUse(input: HookInput): HookOutput {
   if (input.toolName === "Skill") {
     const skillName = getInvokedSkillName(input.toolInput);
     if (skillName) {
-      import("./skill-state/index.js").then(({ writeSkillActiveState }) => {
+      // Use the statically-imported synchronous write so it completes before
+      // the Stop hook can fire. The previous fire-and-forget .then() raced with
+      // the Stop hook in short-lived processes.
+      try {
         writeSkillActiveState(directory, skillName, input.sessionId);
-      }).catch(() => {});
+      } catch {
+        // Skill-state write is best-effort; don't fail the hook on error.
+      }
     }
   }
 

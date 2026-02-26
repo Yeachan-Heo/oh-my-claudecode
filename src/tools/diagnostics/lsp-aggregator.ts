@@ -89,8 +89,10 @@ export async function runLspAggregatedDiagnostics(
         // Open document to trigger diagnostics
         await client.openDocument(file);
 
-        // Wait for diagnostics to be published
-        await new Promise(resolve => setTimeout(resolve, LSP_DIAGNOSTICS_WAIT_MS));
+        // Wait for the server to publish diagnostics via textDocument/publishDiagnostics
+        // notification instead of using a fixed delay. Falls back to LSP_DIAGNOSTICS_WAIT_MS
+        // as a timeout so we don't hang forever on servers that omit the notification.
+        await client.waitForDiagnostics(file, LSP_DIAGNOSTICS_WAIT_MS);
 
         // Get diagnostics for this file
         const diagnostics = client.getDiagnostics(file);

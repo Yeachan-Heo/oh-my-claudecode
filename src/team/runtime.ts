@@ -431,20 +431,26 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
     if (tickInFlight) return;
     tickInFlight = true;
     try {
-      const entries = [...runtime.activeWorkers.entries()];
+      const workers = [...runtime.activeWorkers.entries()];
+      if (workers.length === 0) return;
+
       const root = stateRoot(runtime.cwd, runtime.teamName);
 
-      // Run isWorkerAlive checks in parallel (O(1) wall-clock instead of O(N))
-      const aliveResults = await Promise.all(
-        entries.map(([, active]) => isWorkerAlive(active.paneId))
-      );
+      // Collect done signals and alive checks in parallel to avoid O(N×300ms) sequential tmux calls.
+      const [doneSignals, aliveResults] = await Promise.all([
+        Promise.all(workers.map(([wName]) => {
+          const donePath = join(root, 'workers', wName, 'done.json');
+          return readJsonSafe<DoneSignal>(donePath);
+        })),
+        Promise.all(workers.map(([, active]) => isWorkerAlive(active.paneId))),
+      ]);
 
-      for (let idx = 0; idx < entries.length; idx++) {
-        const [wName, active] = entries[idx];
+      for (let i = 0; i < workers.length; i++) {
+        const [wName, active] = workers[i];
         const donePath = join(root, 'workers', wName, 'done.json');
+        const signal = doneSignals[i];
 
         // Process done.json first if present
-        const signal = await readJsonSafe<DoneSignal>(donePath);
         if (signal) {
           await markTaskFromDone(root, signal.taskId || active.taskId, signal.status, signal.summary);
           try {
@@ -464,7 +470,7 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         }
 
         // Dead pane without done.json => fail task, do not requeue
-        const alive = aliveResults[idx];
+        const alive = aliveResults[i];
         if (!alive) {
           await markTaskFailedDeadPane(root, active.taskId, wName);
           await killWorkerPane(runtime, wName, active.paneId);
