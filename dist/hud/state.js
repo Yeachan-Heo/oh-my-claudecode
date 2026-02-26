@@ -178,6 +178,7 @@ function mergeWithDefaults(config) {
             ...config.contextLimitWarning,
         },
         ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
+        ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
     };
 }
 /**
