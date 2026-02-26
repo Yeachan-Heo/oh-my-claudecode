@@ -12,6 +12,7 @@ import {
 import {
   composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay,
 } from './worker-bootstrap.js';
+import { withTaskLock } from './task-file-ops.js';
 
 export interface TeamConfig {
   teamName: string;
@@ -146,14 +147,18 @@ async function writeTask(root: string, task: TeamTaskRecord): Promise<void> {
   await writeJson(taskPath(root, task.id), task);
 }
 
-async function markTaskInProgress(root: string, taskId: string, owner: string): Promise<boolean> {
-  const task = await readTask(root, taskId);
-  if (!task || task.status !== 'pending') return false;
-  task.status = 'in_progress';
-  task.owner = owner;
-  task.assignedAt = new Date().toISOString();
-  await writeTask(root, task);
-  return true;
+async function markTaskInProgress(root: string, taskId: string, owner: string, teamName: string, cwd: string): Promise<boolean> {
+  const result = await withTaskLock(teamName, taskId, async () => {
+    const task = await readTask(root, taskId);
+    if (!task || task.status !== 'pending') return false;
+    task.status = 'in_progress';
+    task.owner = owner;
+    task.assignedAt = new Date().toISOString();
+    await writeTask(root, task);
+    return true;
+  }, { cwd });
+  // withTaskLock returns null if the lock could not be acquired — treat as not claimed
+  return result ?? false;
 }
 
 async function resetTaskToPending(root: string, taskId: string): Promise<void> {
@@ -483,7 +488,7 @@ export async function spawnWorkerForTask(
   const taskId = String(taskIndex + 1);
   const task = runtime.config.tasks[taskIndex];
   if (!task) return '';
-  const marked = await markTaskInProgress(root, taskId, workerNameValue);
+  const marked = await markTaskInProgress(root, taskId, workerNameValue, runtime.teamName, runtime.cwd);
   if (!marked) return '';
 
   const { execFile } = await import('child_process');
@@ -628,21 +633,27 @@ export async function assignTask(
   cwd: string
 ): Promise<void> {
   const root = stateRoot(cwd, teamName);
-  const taskPath = join(root, 'tasks', `${taskId}.json`);
+  const taskFilePath = join(root, 'tasks', `${taskId}.json`);
 
-  // Update task ownership atomically (using file write — task-file-ops withTaskLock not directly applicable here)
-  const task = await readJsonSafe<TeamTaskRecord>(taskPath);
-  const previousTaskState = task ? {
-    status: task.status,
-    owner: task.owner,
-    assignedAt: task.assignedAt,
-  } : null;
-  if (task) {
-    task.owner = targetWorkerName;
-    task.status = 'in_progress';
-    task.assignedAt = new Date().toISOString();
-    await writeJson(taskPath, task);
-  }
+  // Update task ownership under an exclusive lock to prevent concurrent double-claims
+  type TaskSnapshot = { status: string; owner: string | null; assignedAt: string | undefined };
+  let previousTaskState: TaskSnapshot | null = null;
+  let lockedTask: TeamTaskRecord | null = null;
+  await withTaskLock(teamName, taskId, async () => {
+    const t = await readJsonSafe<TeamTaskRecord>(taskFilePath);
+    lockedTask = t;
+    previousTaskState = t ? {
+      status: t.status,
+      owner: t.owner,
+      assignedAt: t.assignedAt,
+    } : null;
+    if (t) {
+      t.owner = targetWorkerName;
+      t.status = 'in_progress';
+      t.assignedAt = new Date().toISOString();
+      await writeJson(taskFilePath, t);
+    }
+  }, { cwd });
 
   // Write to worker inbox
   const inboxPath = join(root, 'workers', targetWorkerName, 'inbox.md');
@@ -654,11 +665,12 @@ export async function assignTask(
   // Send tmux trigger
   const notified = await notifyPaneWithRetry(sessionName, paneId, `new-task:${taskId}`);
   if (!notified) {
-    if (task && previousTaskState) {
-      task.status = previousTaskState.status;
-      task.owner = previousTaskState.owner;
-      task.assignedAt = previousTaskState.assignedAt;
-      await writeJson(taskPath, task);
+    if (lockedTask && previousTaskState) {
+      const rollback = lockedTask as TeamTaskRecord;
+      rollback.status = (previousTaskState as TaskSnapshot).status as TeamTaskRecord['status'];
+      rollback.owner = (previousTaskState as TaskSnapshot).owner;
+      rollback.assignedAt = (previousTaskState as TaskSnapshot).assignedAt;
+      await writeJson(taskFilePath, rollback);
     }
     throw new Error(`worker_notify_failed:${targetWorkerName}:new-task:${taskId}`);
   }
@@ -683,23 +695,35 @@ export async function shutdownTeam(
     teamName,
   });
 
-  // Poll for ACK files (timeout 30s)
-  const deadline = Date.now() + timeoutMs;
   const configData = await readJsonSafe<TeamConfig>(join(root, 'config.json'));
-  const workerCount = configData?.workerCount ?? 0;
-  const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
 
-  while (Date.now() < deadline && expectedAcks.length > 0) {
-    for (const wName of [...expectedAcks]) {
-      const ackPath = join(root, 'workers', wName, 'shutdown-ack.json');
-      if (existsSync(ackPath)) {
-        expectedAcks.splice(expectedAcks.indexOf(wName), 1);
+  // CLI workers (claude/codex/gemini tmux pane processes) never write shutdown-ack.json.
+  // Polling for ACK files on CLI worker teams wastes the full timeoutMs on every shutdown.
+  // Detect CLI worker teams by checking if all agent types are known CLI types, and skip
+  // ACK polling — the tmux kill below handles process cleanup instead.
+  const CLI_AGENT_TYPES = new Set<string>(['claude', 'codex', 'gemini']);
+  const agentTypes: string[] = configData?.agentTypes ?? [];
+  const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every(t => CLI_AGENT_TYPES.has(t));
+
+  if (!isCliWorkerTeam) {
+    // Bridge daemon workers do write shutdown-ack.json — poll for them.
+    const deadline = Date.now() + timeoutMs;
+    const workerCount = configData?.workerCount ?? 0;
+    const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
+
+    while (Date.now() < deadline && expectedAcks.length > 0) {
+      for (const wName of [...expectedAcks]) {
+        const ackPath = join(root, 'workers', wName, 'shutdown-ack.json');
+        if (existsSync(ackPath)) {
+          expectedAcks.splice(expectedAcks.indexOf(wName), 1);
+        }
+      }
+      if (expectedAcks.length > 0) {
+        await new Promise(r => setTimeout(r, 500));
       }
     }
-    if (expectedAcks.length > 0) {
-      await new Promise(r => setTimeout(r, 500));
-    }
   }
+  // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
 
   // Kill tmux session (or just worker panes in split-pane mode)
   await killTeamSession(sessionName, workerPaneIds, leaderPaneId);
