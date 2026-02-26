@@ -7,7 +7,7 @@
 import type { HudRenderContext, HudConfig } from './types.js';
 import { DEFAULT_HUD_CONFIG } from './types.js';
 import { bold, dim } from './colors.js';
-import { stringWidth, stripAnsi } from '../utils/string-width.js';
+import { stringWidth, getCharWidth } from '../utils/string-width.js';
 import { renderRalph } from './elements/ralph.js';
 import { renderAgentsByFormat, renderAgentsMultiLine } from './elements/agents.js';
 import { renderTodosWithCurrent } from './elements/todos.js';
@@ -51,6 +51,7 @@ export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
 
   let visibleWidth = 0;
   let result = '';
+  let hasAnsi = false;
   let i = 0;
 
   while (i < line.length) {
@@ -61,26 +62,28 @@ export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
     if (ansiMatch && ansiMatch.index === 0) {
       // Pass through the entire ANSI sequence without counting width
       result += ansiMatch[0];
+      hasAnsi = true;
       i += ansiMatch[0].length;
       continue;
     }
 
-    // Regular character - check width
-    const char = line[i];
-    const codePoint = char.codePointAt(0)!;
-    const charWidth = (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
-      (codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
-      (codePoint >= 0xac00 && codePoint <= 0xd7af) ||
-      (codePoint >= 0xff01 && codePoint <= 0xff60) ? 2 : 1;
+    // Read the full code point (handles surrogate pairs for astral-plane chars like emoji)
+    const codePoint = line.codePointAt(i)!;
+    const codeUnits = codePoint > 0xFFFF ? 2 : 1;
+    const char = line.slice(i, i + codeUnits);
+    const charWidth = getCharWidth(char);
 
     if (visibleWidth + charWidth > targetWidth) break;
 
     result += char;
     visibleWidth += charWidth;
-    i++;
+    i += codeUnits;
   }
 
-  return result + ELLIPSIS;
+  // Append ANSI reset before ellipsis if any escape codes were seen,
+  // to prevent color/style bleed into subsequent terminal output
+  const reset = hasAnsi ? '\x1b[0m' : '';
+  return result + reset + ELLIPSIS;
 }
 
 /**
