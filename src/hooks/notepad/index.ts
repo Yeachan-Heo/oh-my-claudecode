@@ -441,17 +441,21 @@ export function getNotepadStats(directory: string): NotepadStats {
   const priorityContext = extractSection(content, PRIORITY_HEADER) || "";
   const workingMemory = extractSection(content, WORKING_MEMORY_HEADER) || "";
 
-  // Count entries using unambiguous HTML comment delimiter
-  const entryMatches = workingMemory.match(
+  // Count entries — support both legacy ### and new HTML comment delimiter formats
+  const wmMatches = workingMemory.match(
     /<\!-- WM:\d{4}-\d{2}-\d{2} \d{2}:\d{2} -->/g,
   );
+  const legacyMatches = workingMemory.match(/### \d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);
+  const entryMatches = wmMatches ?? legacyMatches;
   const entryCount = entryMatches ? entryMatches.length : 0;
 
   // Find oldest entry
   let oldestEntry: string | null = null;
   if (entryMatches && entryMatches.length > 0) {
     // Extract just the timestamp part
-    const timestamps = entryMatches.map((m) => m.replace(/^<\!-- WM:| -->$/g, ""));
+    const timestamps = entryMatches.map((m) =>
+      m.startsWith("<!--") ? m.replace(/^<\!-- WM:| -->$/g, "") : m.replace("### ", "")
+    );
     timestamps.sort();
     oldestEntry = timestamps[0];
   }
