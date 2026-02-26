@@ -64,6 +64,29 @@ function isUserAbort(data) {
 }
 
 /**
+ * Resolve a transcript path that may be mismatched in worktree sessions (issue #1094).
+ * When Claude Code runs inside .claude/worktrees/X, the encoded project directory
+ * contains `--claude-worktrees-X` which doesn't exist. Strip it to find the real path.
+ */
+function resolveTranscriptPath(transcriptPath, cwd) {
+  if (!transcriptPath) return transcriptPath;
+  try {
+    if (existsSync(transcriptPath)) return transcriptPath;
+  } catch { /* fallthrough */ }
+
+  // Strip worktree segment from encoded project directory
+  const worktreePattern = /--claude-worktrees-[^/\\]+/;
+  if (worktreePattern.test(transcriptPath)) {
+    const resolved = transcriptPath.replace(worktreePattern, '');
+    try {
+      if (existsSync(resolved)) return resolved;
+    } catch { /* fallthrough */ }
+  }
+
+  return transcriptPath;
+}
+
+/**
  * Estimate context usage percentage from the transcript file.
  */
 function estimateContextPercent(transcriptPath) {
@@ -148,7 +171,8 @@ async function main() {
     }
 
     const sessionId = data.session_id || data.sessionId || '';
-    const transcriptPath = data.transcript_path || data.transcriptPath || '';
+    const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
+    const transcriptPath = resolveTranscriptPath(rawTranscriptPath, data.cwd);
     const pct = estimateContextPercent(transcriptPath);
 
     if (pct >= THRESHOLD) {

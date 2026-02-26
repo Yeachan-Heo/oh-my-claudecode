@@ -31,6 +31,7 @@ import type {
 } from "./types.js";
 import { getRuntimePackageVersion } from "../lib/version.js";
 import { compareVersions } from "../features/auto-update.js";
+import { resolveTranscriptPath } from "../lib/worktree-paths.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -94,8 +95,11 @@ async function main(watchMode = false): Promise<void> {
     // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
     const config = readHudConfig();
 
+    // Resolve worktree-mismatched transcript paths (issue #1094)
+    const resolvedTranscriptPath = resolveTranscriptPath(stdin.transcript_path, cwd);
+
     // Parse transcript for agents and todos
-    const transcriptData = await parseTranscript(stdin.transcript_path, {
+    const transcriptData = await parseTranscript(resolvedTranscriptPath, {
       staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
     });
 
@@ -115,7 +119,7 @@ async function main(watchMode = false): Promise<void> {
     // We persist the real start time in HUD state on first observation.
     // Scoped per session ID so a new session in the same cwd resets the timestamp.
     let sessionStart = transcriptData.sessionStart;
-    const currentSessionId = extractSessionIdFromPath(stdin.transcript_path);
+    const currentSessionId = extractSessionIdFromPath(resolvedTranscriptPath ?? stdin.transcript_path);
     const sameSession = hudState?.sessionId === currentSessionId;
     if (sameSession && hudState?.sessionStartTimestamp) {
       // Use persisted value (the real session start) - but validate first
