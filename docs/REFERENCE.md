@@ -101,6 +101,7 @@ If both configurations exist, **project-scoped takes precedence** over global:
 | `OMC_PARALLEL_EXECUTION` | `true` | Enable/disable parallel agent execution |
 | `OMC_CODEX_DEFAULT_MODEL` | _(provider default)_ | Default model for Codex CLI workers |
 | `OMC_GEMINI_DEFAULT_MODEL` | _(provider default)_ | Default model for Gemini CLI workers |
+| `OMC_LSP_TIMEOUT_MS` | `15000` | Timeout (ms) for LSP requests. Increase for large repos or slow language servers |
 | `DISABLE_OMC` | _(unset)_ | Set to any value to disable all OMC hooks |
 | `OMC_SKIP_HOOKS` | _(unset)_ | Comma-separated list of hook names to skip |
 
