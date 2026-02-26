@@ -560,7 +560,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       if (existsSync(projectsDir)) {
         // Encode the main project root the same way Claude Code does:
         // replace path separators with `-`, replace dots with `-`.
-        const encodedMain = mainProjectRoot.replace(/[/\\]/g, '-').replace(/\./g, '-');
+        const encodedMain = mainProjectRoot.replace(/[/\\]/g, '-');
         const resolvedPath = join(projectsDir, encodedMain, sessionFile);
         if (existsSync(resolvedPath)) return resolvedPath;
       }
