@@ -56,8 +56,8 @@ const CONTRACTS = {
         promptModeFlag: '-p',
         buildLaunchArgs(model, extraFlags = []) {
             const args = ['--yolo'];
-            if (model)
-                args.push('--model', model);
+            const effectiveModel = model || 'gemini-2.5-pro';
+            args.push('--model', effectiveModel);
             return [...args, ...extraFlags];
         },
         parseOutput(rawOutput) {

@@ -76,7 +76,8 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     promptModeFlag: '-p',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--yolo'];
-      if (model) args.push('--model', model);
+      const effectiveModel = model || 'gemini-2.5-pro';
+      args.push('--model', effectiveModel);
       return [...args, ...extraFlags];
     },
     parseOutput(rawOutput: string): string {

@@ -56,10 +56,10 @@ To claim a task, update the task file atomically:
   \`\`\`
 
 ## Task Completion Protocol
-When you finish a task (success or failure), write a done signal file:
-- Path: ${donePath}
-- Content (JSON, one line):
-  {"taskId":"<id>","status":"completed","summary":"<1-2 sentence summary>","completedAt":"<ISO timestamp>"}
+When you finish a task (success or failure), write a done signal using a bash command (do NOT use a file-write tool):
+\`\`\`bash
+mkdir -p $(dirname ${donePath}) && echo '{"taskId":"<id>","status":"completed","summary":"<1-2 sentence summary>","completedAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ${donePath}
+\`\`\`
 - For failures, set status to "failed" and include the error in summary.
 - Use "completed" or "failed" only for status.
 
