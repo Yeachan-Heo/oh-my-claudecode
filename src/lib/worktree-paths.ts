@@ -509,9 +509,10 @@ export function resolveToWorktreeRoot(directory?: string): string {
  * But the actual transcript lives at the original project's path:
  *   ~/.claude/projects/-path-to-project/<session>.jsonl
  *
- * Claude Code encodes both `/` and `.` as `-`, so `.claude/worktrees/` becomes
- * `-claude-worktrees-`, preceded by a `-` from the path separator, yielding
- * the distinctive `--claude-worktrees-` pattern in the encoded directory name.
+ * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
+ * separator, yielding the distinctive `--claude-worktrees-` pattern in the
+ * encoded directory name.
  *
  * This function detects the mismatch and resolves to the correct path.
  *
