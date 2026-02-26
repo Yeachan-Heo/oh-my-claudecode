@@ -342,9 +342,27 @@ export async function spawnBridgeServer(
     }
   });
 
-  // Wait for socket to appear
+  // Track early process exit so we can short-circuit the socket poll
+  let procExitCode: number | null = null;
+  proc.on('exit', (code) => {
+    procExitCode = code ?? 1;
+  });
+
+  // Wait for socket to appear, short-circuiting immediately if the process exits
   const startTime = Date.now();
   while (!isSocket(socketPath)) {
+    // Short-circuit: process exited before creating the socket
+    if (procExitCode !== null) {
+      // Clean up any non-socket file that might exist (poisoning attempt)
+      if (fs.existsSync(socketPath) && !isSocket(socketPath)) {
+        safeUnlinkSocket(socketPath);
+      }
+      throw new Error(
+        `Bridge process exited with code ${procExitCode} before creating socket. ` +
+          `Stderr: ${stderrBuffer || '(empty)'}`
+      );
+    }
+
     if (Date.now() - startTime > BRIDGE_SPAWN_TIMEOUT_MS) {
       // Kill the process on timeout
       if (proc.pid) {

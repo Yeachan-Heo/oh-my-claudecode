@@ -414,7 +414,9 @@ export class LspClient {
    * Get the language ID for a file
    */
   private getLanguageId(filePath: string): string {
-    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    // parse().ext correctly handles dotfiles: parse('.eslintrc').ext === ''
+    // whereas split('.').pop() returns 'eslintrc' for dotfiles (incorrect)
+    const ext = parse(filePath).ext.slice(1).toLowerCase();
     const langMap: Record<string, string> = {
       'ts': 'typescript',
       'tsx': 'typescriptreact',
