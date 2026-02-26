@@ -93,14 +93,16 @@ export declare function extractWebhookFlag(args: string[]): {
     remainingArgs: string[];
 };
 /**
- * Extract the OMC-specific --worktree / -w flag from launch args.
+ * Extract the OMC-specific --wt flag from launch args.
  * Purely presence-based:
- *   --worktree       -> enable worktree path in session name (OMC_WORKTREE=1)
- *   -w               -> enable worktree path in session name (OMC_WORKTREE=1)
- *   --worktree=true  -> enable
- *   --worktree=false -> disable
- *   --worktree=1     -> enable
- *   --worktree=0     -> disable
+ *   --wt       -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   --wt=true  -> enable
+ *   --wt=false -> disable
+ *   --wt=1     -> enable
+ *   --wt=0     -> disable
+ *
+ * Note: We use --wt (not --worktree or -w) to avoid collision with
+ * Claude CLI's own -w/--worktree [name] flag.
  *
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.

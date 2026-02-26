@@ -14,8 +14,9 @@ const TELEGRAM_FLAG = '--telegram';
 const DISCORD_FLAG = '--discord';
 const SLACK_FLAG = '--slack';
 const WEBHOOK_FLAG = '--webhook';
-const WORKTREE_FLAG = '--worktree';
-const WORKTREE_SHORT_FLAG = '-w';
+// Use --wt instead of --worktree to avoid collision with Claude CLI's
+// own -w/--worktree [name] flag (which creates a native Claude worktree).
+const WORKTREE_FLAG = '--wt';
 /**
  * Extract the OMC-specific --notify flag from launch args.
  * --notify false  → disable notifications (OMC_NOTIFY=0)
@@ -189,14 +190,16 @@ export function extractWebhookFlag(args) {
     return { webhookEnabled, remainingArgs };
 }
 /**
- * Extract the OMC-specific --worktree / -w flag from launch args.
+ * Extract the OMC-specific --wt flag from launch args.
  * Purely presence-based:
- *   --worktree       -> enable worktree path in session name (OMC_WORKTREE=1)
- *   -w               -> enable worktree path in session name (OMC_WORKTREE=1)
- *   --worktree=true  -> enable
- *   --worktree=false -> disable
- *   --worktree=1     -> enable
- *   --worktree=0     -> disable
+ *   --wt       -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   --wt=true  -> enable
+ *   --wt=false -> disable
+ *   --wt=1     -> enable
+ *   --wt=0     -> disable
+ *
+ * Note: We use --wt (not --worktree or -w) to avoid collision with
+ * Claude CLI's own -w/--worktree [name] flag.
  *
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
@@ -205,7 +208,7 @@ export function extractWorktreeFlag(args) {
     let worktreeEnabled = false;
     const remainingArgs = [];
     for (const arg of args) {
-        if (arg === WORKTREE_FLAG || arg === WORKTREE_SHORT_FLAG) {
+        if (arg === WORKTREE_FLAG) {
             worktreeEnabled = true;
             continue;
         }

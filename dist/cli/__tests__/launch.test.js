@@ -639,7 +639,7 @@ describe('launchCommand — env var propagation', () => {
     });
 });
 // ---------------------------------------------------------------------------
-// extractWorktreeFlag
+// extractWorktreeFlag (uses --wt to avoid collision with Claude CLI's --worktree)
 // ---------------------------------------------------------------------------
 describe('extractWorktreeFlag', () => {
     it('returns worktreeEnabled=false when no flag is present', () => {
@@ -647,48 +647,38 @@ describe('extractWorktreeFlag', () => {
         expect(result.worktreeEnabled).toBe(false);
         expect(result.remainingArgs).toEqual(['--madmax']);
     });
-    it('enables worktree with bare --worktree flag', () => {
-        const result = extractWorktreeFlag(['--worktree']);
+    it('enables worktree with bare --wt flag', () => {
+        const result = extractWorktreeFlag(['--wt']);
         expect(result.worktreeEnabled).toBe(true);
         expect(result.remainingArgs).toEqual([]);
     });
-    it('enables worktree with -w short flag', () => {
-        const result = extractWorktreeFlag(['-w']);
+    it('enables worktree with --wt=true', () => {
+        const result = extractWorktreeFlag(['--wt=true']);
         expect(result.worktreeEnabled).toBe(true);
         expect(result.remainingArgs).toEqual([]);
     });
-    it('enables worktree with --worktree=true', () => {
-        const result = extractWorktreeFlag(['--worktree=true']);
-        expect(result.worktreeEnabled).toBe(true);
-        expect(result.remainingArgs).toEqual([]);
-    });
-    it('disables worktree with --worktree=false', () => {
-        const result = extractWorktreeFlag(['--worktree=false']);
+    it('disables worktree with --wt=false', () => {
+        const result = extractWorktreeFlag(['--wt=false']);
         expect(result.worktreeEnabled).toBe(false);
         expect(result.remainingArgs).toEqual([]);
     });
-    it('enables worktree with --worktree=1', () => {
-        const result = extractWorktreeFlag(['--worktree=1']);
+    it('enables worktree with --wt=1', () => {
+        const result = extractWorktreeFlag(['--wt=1']);
         expect(result.worktreeEnabled).toBe(true);
         expect(result.remainingArgs).toEqual([]);
     });
-    it('disables worktree with --worktree=0', () => {
-        const result = extractWorktreeFlag(['--worktree=0']);
+    it('disables worktree with --wt=0', () => {
+        const result = extractWorktreeFlag(['--wt=0']);
         expect(result.worktreeEnabled).toBe(false);
         expect(result.remainingArgs).toEqual([]);
     });
-    it('strips --worktree and -w from remainingArgs', () => {
-        const result = extractWorktreeFlag(['--madmax', '--worktree', '--print']);
+    it('strips --wt from remainingArgs', () => {
+        const result = extractWorktreeFlag(['--madmax', '--wt', '--print']);
         expect(result.worktreeEnabled).toBe(true);
         expect(result.remainingArgs).toEqual(['--madmax', '--print']);
     });
-    it('bare --worktree does NOT consume the next positional arg', () => {
-        const result = extractWorktreeFlag(['--worktree', 'myfile.txt']);
-        expect(result.worktreeEnabled).toBe(true);
-        expect(result.remainingArgs).toEqual(['myfile.txt']);
-    });
-    it('-w does NOT consume the next positional arg', () => {
-        const result = extractWorktreeFlag(['-w', 'myfile.txt']);
+    it('bare --wt does NOT consume the next positional arg', () => {
+        const result = extractWorktreeFlag(['--wt', 'myfile.txt']);
         expect(result.worktreeEnabled).toBe(true);
         expect(result.remainingArgs).toEqual(['myfile.txt']);
     });
@@ -696,6 +686,16 @@ describe('extractWorktreeFlag', () => {
         const result = extractWorktreeFlag([]);
         expect(result.worktreeEnabled).toBe(false);
         expect(result.remainingArgs).toEqual([]);
+    });
+    it('does NOT intercept Claude CLI --worktree flag', () => {
+        const result = extractWorktreeFlag(['--worktree', 'myname']);
+        expect(result.worktreeEnabled).toBe(false);
+        expect(result.remainingArgs).toEqual(['--worktree', 'myname']);
+    });
+    it('does NOT intercept Claude CLI -w flag', () => {
+        const result = extractWorktreeFlag(['-w', 'myname']);
+        expect(result.worktreeEnabled).toBe(false);
+        expect(result.remainingArgs).toEqual(['-w', 'myname']);
     });
 });
 // ---------------------------------------------------------------------------
@@ -721,31 +721,27 @@ describe('launchCommand — worktree flag', () => {
             delete process.env.OMC_WORKTREE;
         }
     });
-    it('--worktree sets OMC_WORKTREE to 1', async () => {
-        await launchCommand(['--worktree']);
+    it('--wt sets OMC_WORKTREE to 1', async () => {
+        await launchCommand(['--wt']);
         expect(process.env.OMC_WORKTREE).toBe('1');
     });
-    it('-w sets OMC_WORKTREE to 1', async () => {
-        await launchCommand(['-w']);
-        expect(process.env.OMC_WORKTREE).toBe('1');
-    });
-    it('--worktree is stripped from args passed to Claude', async () => {
-        await launchCommand(['--worktree', '--print']);
+    it('--wt is stripped from args passed to Claude', async () => {
+        await launchCommand(['--wt', '--print']);
         const calls = vi.mocked(execFileSync).mock.calls;
         const claudeCall = calls.find(([cmd]) => cmd === 'claude');
         expect(claudeCall).toBeDefined();
         const claudeArgs = claudeCall[1];
-        expect(claudeArgs).not.toContain('--worktree');
-        expect(claudeArgs).not.toContain('-w');
+        expect(claudeArgs).not.toContain('--wt');
         expect(claudeArgs).toContain('--print');
     });
-    it('-w is stripped from args passed to Claude', async () => {
-        await launchCommand(['-w', '--print']);
+    it('Claude --worktree flag passes through to Claude unmodified', async () => {
+        await launchCommand(['--worktree', 'myname', '--print']);
         const calls = vi.mocked(execFileSync).mock.calls;
         const claudeCall = calls.find(([cmd]) => cmd === 'claude');
         expect(claudeCall).toBeDefined();
         const claudeArgs = claudeCall[1];
-        expect(claudeArgs).not.toContain('-w');
+        expect(claudeArgs).toContain('--worktree');
+        expect(claudeArgs).toContain('myname');
         expect(claudeArgs).toContain('--print');
     });
 });
