@@ -118,6 +118,12 @@ export declare function extractWorktreeFlag(args: string[]): {
  */
 export declare function normalizeClaudeLaunchArgs(args: string[]): string[];
 /**
+ * Collect all OMC_* environment variables and build shell export statements.
+ * Used to forward platform env vars (OMC_TELEGRAM, OMC_DISCORD, etc.) into
+ * tmux sessions where the parent process.env is not automatically inherited.
+ */
+export declare function collectOmcEnvExports(env?: NodeJS.ProcessEnv): string;
+/**
  * preLaunch: Prepare environment before Claude starts
  * Currently a placeholder - can be extended for:
  * - Session state initialization

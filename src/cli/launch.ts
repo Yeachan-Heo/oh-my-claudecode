@@ -261,6 +261,22 @@ export function normalizeClaudeLaunchArgs(args: string[]): string[] {
 }
 
 /**
+ * Collect all OMC_* environment variables and build shell export statements.
+ * Used to forward platform env vars (OMC_TELEGRAM, OMC_DISCORD, etc.) into
+ * tmux sessions where the parent process.env is not automatically inherited.
+ */
+export function collectOmcEnvExports(env: NodeJS.ProcessEnv = process.env): string {
+  const exports: string[] = [];
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('OMC_') && /^[A-Z_][A-Z0-9_]*$/.test(key) && env[key] !== undefined) {
+      // Shell-safe: values are 0/1 flags, but quote defensively
+      exports.push(`export ${key}='${env[key]!.replace(/'/g, `'\\''`)}'`);
+    }
+  }
+  return exports.length > 0 ? exports.join('; ') + '; ' : '';
+}
+
+/**
  * preLaunch: Prepare environment before Claude starts
  * Currently a placeholder - can be extended for:
  * - Session state initialization
@@ -325,11 +341,15 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
  */
 function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string, options?: { worktree?: boolean }): void {
   const rawClaudeCmd = buildTmuxShellCommand('claude', args);
+  // Forward all OMC_* env vars into the tmux session shell.
+  // tmux new-session starts a shell that inherits the tmux server's env,
+  // not the calling process's env, so we must explicitly export them.
+  const omcExports = collectOmcEnvExports();
   // Drain any pending terminal Device Attributes (DA1) response from stdin.
   // When tmux attach-session sends a DA1 query, the terminal replies with
   // \e[?6c which lands in the pty buffer before Claude reads input.
   // A short sleep lets the response arrive, then tcflush discards it.
-  const claudeCmd = `sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
+  const claudeCmd = `${omcExports}sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
   const sessionName = buildTmuxSessionName(cwd, { worktree: options?.worktree });
 
   const tmuxArgs = [
