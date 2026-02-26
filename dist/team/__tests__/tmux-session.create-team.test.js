@@ -119,6 +119,27 @@ describe('createTeamSession context resolution', () => {
         expect(session.sessionName).toBe('omc-team-no-tmux-team');
         expect(session.workerPaneIds).toEqual([]);
     });
+    it('throws helpful error when TMUX is not set and tmux is not installed', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('TMUX_PANE', '');
+        // Make execSync throw to simulate tmux not installed
+        const { execSync } = await import('child_process');
+        execSync.mockImplementationOnce(() => {
+            throw new Error('command not found: tmux');
+        });
+        await expect(createTeamSession('no-tmux-team', 0, '/tmp')).rejects.toThrow(/tmux is not available/);
+    });
+    it('creates worker panes in detached session when TMUX is not set (issue #1085)', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('TMUX_PANE', '');
+        const session = await createTeamSession('detached-workers', 2, '/tmp');
+        // First split should target the leader pane resolved from the detached session
+        const firstSplit = mockedCalls.execFileArgs.find(args => args[0] === 'split-window' && args.includes('-h'));
+        expect(firstSplit).toBeDefined();
+        expect(firstSplit).toEqual(expect.arrayContaining(['-t', '%99']));
+        expect(session.sessionName).toBe('omc-team-detached-workers');
+        expect(session.workerPaneIds).toHaveLength(2);
+    });
     it('falls back to default context discovery when TMUX_PANE is invalid', async () => {
         vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
         vi.stubEnv('TMUX_PANE', 'not-a-pane-id');

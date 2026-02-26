@@ -288,7 +288,10 @@ export async function createTeamSession(
 
     const sName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`;
 
-    // Kill stale session with same name if present
+    // Kill stale session with same name if present.
+    // Note: concurrent calls with the same teamName could race here — the second
+    // call would kill the session the first just created. This is acceptable since
+    // concurrent identical teamName usage is an unusual pattern.
     try {
       execFileSync('tmux', ['kill-session', '-t', sName], { stdio: 'pipe', timeout: 5000 });
     } catch { /* session may not exist */ }

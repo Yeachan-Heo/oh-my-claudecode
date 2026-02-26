@@ -230,7 +230,10 @@ export async function createTeamSession(teamName, workerCount, cwd) {
         // from the terminal without omc CLI (issue #1085).
         validateTmux();
         const sName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`;
-        // Kill stale session with same name if present
+        // Kill stale session with same name if present.
+        // Note: concurrent calls with the same teamName could race here — the second
+        // call would kill the session the first just created. This is acceptable since
+        // concurrent identical teamName usage is an unusual pattern.
         try {
             execFileSync('tmux', ['kill-session', '-t', sName], { stdio: 'pipe', timeout: 5000 });
         }
