@@ -24,6 +24,10 @@ import {
  * Model IDs are resolved from environment variables (OMC_MODEL_HIGH,
  * OMC_MODEL_MEDIUM, OMC_MODEL_LOW) with built-in fallbacks.
  * User/project config files can further override via deepMerge.
+ *
+ * Note: env vars for external model defaults (OMC_CODEX_DEFAULT_MODEL,
+ * OMC_GEMINI_DEFAULT_MODEL) are read lazily in loadEnvConfig() to avoid
+ * capturing stale values at module load time.
  */
 export const DEFAULT_CONFIG: PluginConfig = {
   agents: {
@@ -92,10 +96,11 @@ export const DEFAULT_CONFIG: PluginConfig = {
     ]
   },
   // External models configuration (Codex, Gemini)
+  // Static defaults only — env var overrides applied in loadEnvConfig()
   externalModels: {
     defaults: {
-      codexModel: process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.3-codex',
-      geminiModel: process.env.OMC_GEMINI_DEFAULT_MODEL || 'gemini-3.1-pro-preview',
+      codexModel: 'gpt-5.3-codex',
+      geminiModel: 'gemini-3.1-pro-preview',
     },
     fallbackPolicy: {
       onModelFailure: 'provider_chain',

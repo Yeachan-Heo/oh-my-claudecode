@@ -14,6 +14,8 @@ export const MODES = {
   ULTRAQA: 'ultraqa',
   TEAM: 'team',
   PIPELINE: 'pipeline',
+  SWARM: 'swarm',
+  RALPLAN: 'ralplan',
 } as const;
 export type ModeName = typeof MODES[keyof typeof MODES];
 

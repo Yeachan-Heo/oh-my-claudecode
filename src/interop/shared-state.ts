@@ -9,6 +9,7 @@
 
 import { join } from 'path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
+import { z } from 'zod';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 
 export interface InteropConfig {
@@ -43,6 +44,40 @@ export interface SharedMessage {
   timestamp: string;
   read: boolean;
 }
+
+// Zod schemas for runtime validation
+const InteropConfigSchema = z.object({
+  sessionId: z.string(),
+  createdAt: z.string(),
+  omcCwd: z.string(),
+  omxCwd: z.string().optional(),
+  status: z.enum(['active', 'completed', 'failed']),
+});
+
+const SharedTaskSchema = z.object({
+  id: z.string(),
+  source: z.enum(['omc', 'omx']),
+  target: z.enum(['omc', 'omx']),
+  type: z.enum(['analyze', 'implement', 'review', 'test', 'custom']),
+  description: z.string(),
+  context: z.record(z.unknown()).optional(),
+  files: z.array(z.string()).optional(),
+  createdAt: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed', 'failed']),
+  result: z.string().optional(),
+  error: z.string().optional(),
+  completedAt: z.string().optional(),
+});
+
+const SharedMessageSchema = z.object({
+  id: z.string(),
+  source: z.enum(['omc', 'omx']),
+  target: z.enum(['omc', 'omx']),
+  content: z.string(),
+  metadata: z.record(z.unknown()).optional(),
+  timestamp: z.string(),
+  read: z.boolean(),
+});
 
 /**
  * Get the interop directory path for a worktree
@@ -93,7 +128,8 @@ export function readInteropConfig(cwd: string): InteropConfig | null {
 
   try {
     const content = readFileSync(configPath, 'utf-8');
-    return JSON.parse(content) as InteropConfig;
+    const result = InteropConfigSchema.safeParse(JSON.parse(content));
+    return result.success ? result.data : null;
   } catch {
     return null;
   }
@@ -148,7 +184,9 @@ export function readSharedTasks(cwd: string, filter?: {
   for (const file of files) {
     try {
       const content = readFileSync(join(tasksDir, file), 'utf-8');
-      const task = JSON.parse(content) as SharedTask;
+      const parsed = SharedTaskSchema.safeParse(JSON.parse(content));
+      if (!parsed.success) continue;
+      const task = parsed.data;
 
       // Apply filters
       if (filter?.source && task.source !== filter.source) continue;
@@ -183,7 +221,9 @@ export function updateSharedTask(
 
   try {
     const content = readFileSync(taskPath, 'utf-8');
-    const task = JSON.parse(content) as SharedTask;
+    const parsed = SharedTaskSchema.safeParse(JSON.parse(content));
+    if (!parsed.success) return null;
+    const task = parsed.data;
 
     const updatedTask: SharedTask = {
       ...task,
@@ -255,7 +295,9 @@ export function readSharedMessages(cwd: string, filter?: {
   for (const file of files) {
     try {
       const content = readFileSync(join(messagesDir, file), 'utf-8');
-      const message = JSON.parse(content) as SharedMessage;
+      const parsed = SharedMessageSchema.safeParse(JSON.parse(content));
+      if (!parsed.success) continue;
+      const message = parsed.data;
 
       // Apply filters
       if (filter?.source && message.source !== filter.source) continue;
@@ -286,7 +328,9 @@ export function markMessageAsRead(cwd: string, messageId: string): boolean {
 
   try {
     const content = readFileSync(messagePath, 'utf-8');
-    const message = JSON.parse(content) as SharedMessage;
+    const parsed = SharedMessageSchema.safeParse(JSON.parse(content));
+    if (!parsed.success) return false;
+    const message = parsed.data;
 
     message.read = true;
     atomicWriteJsonSync(messagePath, message);
@@ -326,7 +370,9 @@ export function cleanupInterop(cwd: string, options?: {
 
           if (options?.olderThan) {
             const content = readFileSync(filePath, 'utf-8');
-            const task = JSON.parse(content) as SharedTask;
+            const taskParsed = SharedTaskSchema.safeParse(JSON.parse(content));
+            if (!taskParsed.success) continue;
+            const task = taskParsed.data;
             const taskTime = new Date(task.createdAt).getTime();
 
             if (taskTime < cutoffTime) {
@@ -356,7 +402,9 @@ export function cleanupInterop(cwd: string, options?: {
 
           if (options?.olderThan) {
             const content = readFileSync(filePath, 'utf-8');
-            const message = JSON.parse(content) as SharedMessage;
+            const msgParsed = SharedMessageSchema.safeParse(JSON.parse(content));
+            if (!msgParsed.success) continue;
+            const message = msgParsed.data;
             const messageTime = new Date(message.timestamp).getTime();
 
             if (messageTime < cutoffTime) {

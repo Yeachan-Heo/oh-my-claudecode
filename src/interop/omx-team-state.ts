@@ -16,6 +16,7 @@ import { readFile, readdir, appendFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 
 // ============================================================================
@@ -105,6 +106,42 @@ export interface OmxTeamManifestV2 {
 }
 
 // ============================================================================
+// Zod schemas for runtime validation
+// ============================================================================
+
+const OmxWorkerInfoSchema = z.object({
+  name: z.string(),
+  index: z.number(),
+  role: z.string(),
+  assigned_tasks: z.array(z.string()),
+  pid: z.number().optional(),
+  pane_id: z.string().optional(),
+});
+
+const OmxTeamManifestV2Schema = z.object({
+  schema_version: z.literal(2),
+  name: z.string(),
+  task: z.string(),
+  tmux_session: z.string(),
+  worker_count: z.number(),
+  workers: z.array(OmxWorkerInfoSchema),
+  next_task_id: z.number(),
+  created_at: z.string(),
+}).passthrough();
+
+const OmxTeamConfigSchema = z.object({
+  name: z.string(),
+  task: z.string(),
+  agent_type: z.string(),
+  worker_count: z.number(),
+  max_workers: z.number(),
+  workers: z.array(OmxWorkerInfoSchema),
+  created_at: z.string(),
+  tmux_session: z.string(),
+  next_task_id: z.number(),
+});
+
+// ============================================================================
 // Path helpers
 // ============================================================================
 
@@ -168,8 +205,9 @@ export async function readOmxTeamConfig(teamName: string, cwd: string): Promise<
   if (existsSync(manifestPath)) {
     try {
       const raw = await readFile(manifestPath, 'utf8');
-      const manifest = JSON.parse(raw) as OmxTeamManifestV2;
-      if (manifest.schema_version === 2 && manifest.name) {
+      const manifestResult = OmxTeamManifestV2Schema.safeParse(JSON.parse(raw));
+      if (manifestResult.success) {
+        const manifest = manifestResult.data;
         return {
           name: manifest.name,
           task: manifest.task,
@@ -193,9 +231,8 @@ export async function readOmxTeamConfig(teamName: string, cwd: string): Promise<
 
   try {
     const raw = await readFile(configPath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed as OmxTeamConfig;
+    const configResult = OmxTeamConfigSchema.safeParse(JSON.parse(raw));
+    return configResult.success ? configResult.data : null;
   } catch {
     return null;
   }
