@@ -158,9 +158,6 @@ export {
   ANALYST_PROMPT_METADATA,
   plannerAgent,
   PLANNER_PROMPT_METADATA,
-  // Deprecated (backward compat - will be removed in v4.0.0)
-  coordinatorAgent,
-  ORCHESTRATOR_COORDINATOR_PROMPT_METADATA
 } from './agents/index.js';
 
 // Command expansion utilities for SDK integration
