@@ -21251,6 +21251,7 @@ var import_fs9 = require("fs");
 var import_crypto2 = require("crypto");
 var import_child_process8 = require("child_process");
 var import_fs7 = require("fs");
+var import_os = require("os");
 var import_path7 = require("path");
 var OmcPaths = {
   ROOT: ".omc",
@@ -23103,8 +23104,8 @@ var import_path11 = require("path");
 
 // src/hooks/rules-injector/constants.ts
 var import_path10 = require("path");
-var import_os = require("os");
-var OMC_STORAGE_DIR = (0, import_path10.join)((0, import_os.homedir)(), ".omc");
+var import_os2 = require("os");
+var OMC_STORAGE_DIR = (0, import_path10.join)((0, import_os2.homedir)(), ".omc");
 var RULES_INJECTOR_STORAGE = (0, import_path10.join)(OMC_STORAGE_DIR, "rules-injector");
 
 // src/hooks/project-memory/storage.ts

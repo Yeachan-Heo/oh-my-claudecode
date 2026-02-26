@@ -48,7 +48,7 @@ __export(bridge_entry_exports, {
 module.exports = __toCommonJS(bridge_entry_exports);
 var import_fs10 = require("fs");
 var import_path12 = require("path");
-var import_os2 = require("os");
+var import_os3 = require("os");
 
 // src/team/mcp-team-bridge.ts
 var import_child_process2 = require("child_process");
@@ -1658,6 +1658,7 @@ ${violationSummary}`);
 var import_crypto = require("crypto");
 var import_child_process3 = require("child_process");
 var import_fs9 = require("fs");
+var import_os2 = require("os");
 var import_path11 = require("path");
 var MAX_WORKTREE_CACHE_SIZE = 8;
 var worktreeCacheMap = /* @__PURE__ */ new Map();
@@ -1718,7 +1719,7 @@ function validateBridgeWorkingDirectory(workingDirectory) {
     throw new Error(`workingDirectory is not a directory: ${workingDirectory}`);
   }
   const resolved = (0, import_fs10.realpathSync)(workingDirectory);
-  const home = (0, import_os2.homedir)();
+  const home = (0, import_os3.homedir)();
   if (!resolved.startsWith(home + "/") && resolved !== home) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
@@ -1734,7 +1735,7 @@ function main() {
     process.exit(1);
   }
   const configPath2 = (0, import_path12.resolve)(process.argv[configIdx + 1]);
-  const home = (0, import_os2.homedir)();
+  const home = (0, import_os3.homedir)();
   const claudeConfigDir = getClaudeConfigDir();
   if (!validateConfigPath(configPath2, home, claudeConfigDir)) {
     console.error(`Config path must be under ~/ with ${claudeConfigDir} or ~/.omc/ subpath: ${configPath2}`);
