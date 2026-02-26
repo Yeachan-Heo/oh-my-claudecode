@@ -554,7 +554,7 @@ export async function teleportListCommand(options: { json?: boolean }): Promise<
 export async function teleportRemoveCommand(
   pathOrName: string,
   options: { force?: boolean; json?: boolean }
-): Promise<void> {
+): Promise<number> {
   const worktreeRoot = DEFAULT_WORKTREE_ROOT;
 
   // Resolve path - could be relative name or full path
@@ -570,7 +570,7 @@ export async function teleportRemoveCommand(
     } else {
       console.error(chalk.red(error));
     }
-    return;
+    return 1;
   }
 
   // Safety check: must be under worktree root
@@ -582,7 +582,7 @@ export async function teleportRemoveCommand(
     } else {
       console.error(chalk.red(error));
     }
-    return;
+    return 1;
   }
 
   try {
@@ -600,7 +600,7 @@ export async function teleportRemoveCommand(
         } else {
           console.error(chalk.red(error));
         }
-        return;
+        return 1;
       }
     }
 
@@ -631,6 +631,7 @@ export async function teleportRemoveCommand(
     } else {
       console.log(chalk.green(`Removed worktree: ${worktreePath}`));
     }
+    return 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) {
@@ -638,5 +639,6 @@ export async function teleportRemoveCommand(
     } else {
       console.error(chalk.red(`Failed to remove worktree: ${message}`));
     }
+    return 1;
   }
 }

@@ -1237,7 +1237,8 @@ teleportCmd
   .option('-f, --force', 'Force removal even with uncommitted changes')
   .option('--json', 'Output as JSON')
   .action(async (path: string, options) => {
-    await teleportRemoveCommand(path, options);
+    const exitCode = await teleportRemoveCommand(path, options);
+    if (exitCode !== 0) process.exit(exitCode);
   });
 
 /**
