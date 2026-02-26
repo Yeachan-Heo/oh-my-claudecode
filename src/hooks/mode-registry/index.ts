@@ -9,7 +9,8 @@
  * All modes store state in `.omc/state/` subdirectory for consistency.
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, readdirSync, statSync, rmdirSync, rmSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, mkdirSync, readdirSync, statSync, rmdirSync, rmSync } from 'fs';
+import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join, dirname } from 'path';
 import type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from './types.js';
 import { listSessionIds, resolveSessionStatePath, getSessionStateDir } from '../../lib/worktree-paths.js';
@@ -629,13 +630,11 @@ export function createModeMarker(
       mkdirSync(dir, { recursive: true });
     }
 
-    const content = JSON.stringify({
+    atomicWriteJsonSync(markerPath, {
       mode,
       startedAt: new Date().toISOString(),
       ...metadata
-    }, null, 2);
-
-    writeFileSync(markerPath, content);
+    });
     return true;
   } catch (error) {
     console.error(`Failed to create marker file for ${mode}:`, error);

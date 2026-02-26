@@ -10,8 +10,9 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
+import { join } from 'path';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 import {
@@ -289,11 +290,7 @@ export function shouldSendIdleNotification(stateDir: string, sessionId?: string)
 export function recordIdleNotificationSent(stateDir: string, sessionId?: string): void {
   const cooldownPath = getIdleNotificationCooldownPath(stateDir, sessionId);
   try {
-    const dir = dirname(cooldownPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(cooldownPath, JSON.stringify({ lastSentAt: new Date().toISOString() }, null, 2));
+    atomicWriteJsonSync(cooldownPath, { lastSentAt: new Date().toISOString() });
   } catch {
     // ignore write errors
   }
