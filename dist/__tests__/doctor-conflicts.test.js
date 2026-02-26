@@ -15,8 +15,18 @@ const TEST_PROJECT_CLAUDE_DIR = join(TEST_PROJECT_DIR, '.claude');
 vi.mock('../utils/paths.js', () => ({
     getClaudeConfigDir: () => TEST_CLAUDE_DIR,
 }));
+// Mock builtin skills to return a known list for testing
+vi.mock('../features/builtin-skills/skills.js', () => ({
+    listBuiltinSkillNames: ({ includeAliases } = {}) => {
+        const names = ['autopilot', 'ralph', 'ultrawork', 'plan', 'team', 'cancel', 'note'];
+        if (includeAliases) {
+            return [...names, 'psm'];
+        }
+        return names;
+    },
+}));
 // Import after mock setup
-import { checkHookConflicts, runConflictCheck } from '../cli/commands/doctor-conflicts.js';
+import { checkHookConflicts, checkClaudeMdStatus, checkLegacySkills, runConflictCheck } from '../cli/commands/doctor-conflicts.js';
 describe('doctor-conflicts: hook ownership classification', () => {
     let cwdSpy;
     beforeEach(() => {
@@ -223,6 +233,139 @@ describe('doctor-conflicts: hook ownership classification', () => {
         expect(conflicts).toHaveLength(1);
         expect(conflicts[0].event).toBe('PreToolUse');
         expect(conflicts[0].isOmc).toBe(true);
+    });
+});
+describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', () => {
+    let cwdSpy;
+    beforeEach(() => {
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+        mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+        mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
+        cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(TEST_PROJECT_DIR);
+    });
+    afterEach(() => {
+        cwdSpy.mockRestore();
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+    });
+    it('detects OMC markers in main CLAUDE.md', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n');
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.hasMarkers).toBe(true);
+        expect(status.companionFile).toBeUndefined();
+    });
+    it('detects OMC markers in companion file when main CLAUDE.md lacks them', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# My custom config\n');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n');
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.hasMarkers).toBe(true);
+        expect(status.companionFile).toContain('CLAUDE-omc.md');
+    });
+    it('does not false-positive when companion file has no markers', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# My config\n');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE-custom.md'), '# Custom stuff\n');
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.hasMarkers).toBe(false);
+        expect(status.companionFile).toBeUndefined();
+    });
+    it('detects companion file reference in CLAUDE.md', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# Config\nSee CLAUDE-omc.md for OMC settings\n');
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.hasMarkers).toBe(false);
+        expect(status.companionFile).toBe(join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md'));
+    });
+    it('prefers main file markers over companion file', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# Also OMC\n<!-- OMC:END -->\n');
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.hasMarkers).toBe(true);
+        expect(status.companionFile).toBeUndefined();
+    });
+    it('returns null when no CLAUDE.md exists', () => {
+        const status = checkClaudeMdStatus();
+        expect(status).toBeNull();
+    });
+});
+describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {
+    let cwdSpy;
+    beforeEach(() => {
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+        mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+        mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
+        cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(TEST_PROJECT_DIR);
+    });
+    afterEach(() => {
+        cwdSpy.mockRestore();
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+    });
+    it('flags legacy skills that collide with plugin skill names', () => {
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'autopilot.md'), '# Legacy autopilot skill');
+        writeFileSync(join(skillsDir, 'ralph.md'), '# Legacy ralph skill');
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(2);
+        expect(collisions.map(c => c.name)).toContain('autopilot');
+        expect(collisions.map(c => c.name)).toContain('ralph');
+    });
+    it('does NOT flag custom skills that do not collide with plugin names', () => {
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'my-custom-skill.md'), '# My custom skill');
+        writeFileSync(join(skillsDir, 'deploy-helper.md'), '# Deploy helper');
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(0);
+    });
+    it('flags collisions in mixed custom and legacy skills', () => {
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'plan.md'), '# Legacy plan skill');
+        writeFileSync(join(skillsDir, 'my-workflow.md'), '# Custom workflow');
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(1);
+        expect(collisions[0].name).toBe('plan');
+    });
+    it('returns empty array when no skills directory exists', () => {
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(0);
+    });
+    it('flags directory entries that match plugin skill names', () => {
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(join(skillsDir, 'team'), { recursive: true });
+        mkdirSync(join(skillsDir, 'my-thing'), { recursive: true });
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(1);
+        expect(collisions[0].name).toBe('team');
+    });
+    it('reports hasConflicts when legacy skills collide (issue #1101)', () => {
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'cancel.md'), '# Legacy cancel');
+        // Need a CLAUDE.md for the report to work
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        const report = runConflictCheck();
+        expect(report.legacySkills).toHaveLength(1);
+        expect(report.hasConflicts).toBe(true);
     });
 });
 //# sourceMappingURL=doctor-conflicts.test.js.map
