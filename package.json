@@ -55,7 +55,6 @@
     "sync-metadata": "tsx scripts/sync-metadata.ts",
     "sync-metadata:verify": "tsx scripts/sync-metadata.ts --verify",
     "sync-metadata:dry-run": "tsx scripts/sync-metadata.ts --dry-run",
-    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm run compose-docs"
   },
   "dependencies": {
