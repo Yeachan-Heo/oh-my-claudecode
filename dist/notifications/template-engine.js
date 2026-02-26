@@ -15,6 +15,7 @@ const KNOWN_VARIABLES = new Set([
     "reason", "activeMode", "iteration", "maxIterations",
     "question", "incompleteTasks", "agentName", "agentType",
     "tmuxTail", "tmuxPaneId",
+    "replyChannel", "replyTarget", "replyThread",
     // Computed variables
     "duration", "time", "modesDisplay", "iterationDisplay",
     "agentDisplay", "projectDisplay", "footer", "tmuxTailBlock",
@@ -113,6 +114,9 @@ export function computeTemplateVariables(payload) {
     vars.agentType = payload.agentType || "";
     vars.tmuxTail = payload.tmuxTail || "";
     vars.tmuxPaneId = payload.tmuxPaneId || "";
+    vars.replyChannel = payload.replyChannel || "";
+    vars.replyTarget = payload.replyTarget || "";
+    vars.replyThread = payload.replyThread || "";
     // Computed variables
     vars.duration = formatDuration(payload.durationMs);
     vars.time = payload.timestamp

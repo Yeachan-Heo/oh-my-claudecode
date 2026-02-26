@@ -16,6 +16,7 @@ export type TemplateVariable =
   | "reason" | "activeMode" | "iteration" | "maxIterations"
   | "question" | "incompleteTasks" | "agentName" | "agentType"
   | "tmuxTail" | "tmuxPaneId"
+  | "replyChannel" | "replyTarget" | "replyThread"
   // Computed variables (derived from payload, not direct fields)
   | "duration"          // human-readable from durationMs (e.g., "5m 23s")
   | "time"              // locale time string from timestamp

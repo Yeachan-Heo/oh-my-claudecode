@@ -155,6 +155,9 @@ export async function notify(
       incompleteTasks: data.incompleteTasks,
       agentName: data.agentName,
       agentType: data.agentType,
+      replyChannel: data.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? undefined,
+      replyTarget: data.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? undefined,
+      replyThread: data.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? undefined,
     };
 
     // Capture tmux tail for events that benefit from it

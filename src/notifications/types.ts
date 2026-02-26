@@ -175,6 +175,12 @@ export interface NotificationPayload {
   agentType?: string;
   /** Captured tmux pane content (last N lines) */
   tmuxTail?: string;
+  /** Reply channel name (from OPENCLAW_REPLY_CHANNEL env var) */
+  replyChannel?: string;
+  /** Reply target (from OPENCLAW_REPLY_TARGET env var) */
+  replyTarget?: string;
+  /** Reply thread ID (from OPENCLAW_REPLY_THREAD env var) */
+  replyThread?: string;
 }
 
 /** Named notification profiles (keyed by profile name) */

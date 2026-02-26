@@ -375,4 +375,36 @@ describe("post-processing", () => {
         expect(result).toBe("Content");
     });
 });
+describe("reply channel template variables", () => {
+    it("includes replyChannel, replyTarget, replyThread in computed variables", () => {
+        const payload = makePayload({
+            replyChannel: "#general",
+            replyTarget: "@bot",
+            replyThread: "thread-123",
+        });
+        const vars = computeTemplateVariables(payload);
+        expect(vars.replyChannel).toBe("#general");
+        expect(vars.replyTarget).toBe("@bot");
+        expect(vars.replyThread).toBe("thread-123");
+    });
+    it("returns empty string for reply channel fields when not set", () => {
+        const payload = makePayload();
+        const vars = computeTemplateVariables(payload);
+        expect(vars.replyChannel).toBe("");
+        expect(vars.replyTarget).toBe("");
+        expect(vars.replyThread).toBe("");
+    });
+    it("validates replyChannel, replyTarget, replyThread as known variables", () => {
+        const result = validateTemplate("{{replyChannel}} {{replyTarget}} {{replyThread}}");
+        expect(result.valid).toBe(true);
+        expect(result.unknownVars).toEqual([]);
+    });
+    it("supports {{#if replyChannel}} conditional", () => {
+        const withChannel = makePayload({ replyChannel: "#general" });
+        const without = makePayload();
+        const template = "{{#if replyChannel}}Channel: {{replyChannel}}{{/if}}";
+        expect(interpolateTemplate(template, withChannel)).toBe("Channel: #general");
+        expect(interpolateTemplate(template, without)).toBe("");
+    });
+});
 //# sourceMappingURL=template-engine.test.js.map
