@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join, extname, normalize } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 // =============================================================================
 // SECURITY UTILITIES
@@ -74,14 +74,10 @@ export function getFormatter(ext: string): string | null {
  * Check if a formatter is available
  */
 export function isFormatterAvailable(command: string): boolean {
-  try {
-    const binary = command.split(' ')[0];
-    const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-    execSync(`${checkCommand} ${binary}`, { encoding: 'utf-8', stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  const binary = command.split(' ')[0];
+  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(checkCommand, [binary], { stdio: 'ignore' });
+  return result.status === 0;
 }
 
 /**
@@ -105,7 +101,8 @@ export function formatFile(filePath: string): { success: boolean; message: strin
   }
 
   try {
-    execSync(`${formatter} "${filePath}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    const [formatterBin, ...formatterArgs] = formatter.split(' ');
+    execFileSync(formatterBin, [...formatterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Formatted ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Format failed: ${_error}` };
@@ -158,16 +155,16 @@ export function lintFile(filePath: string): { success: boolean; message: string 
     return { success: true, message: `No linter configured for ${ext}` };
   }
 
-  try {
-    const binary = linter.split(' ')[0];
-    const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-    execSync(`${checkCommand} ${binary}`, { encoding: 'utf-8', stdio: 'pipe' });
-  } catch {
+  const linterBin = linter.split(' ')[0];
+  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
+  const checkResult = spawnSync(checkCommand, [linterBin], { stdio: 'ignore' });
+  if (checkResult.status !== 0) {
     return { success: true, message: `Linter ${linter} not available` };
   }
 
   try {
-    execSync(`${linter} "${filePath}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    const [linterCmd, ...linterArgs] = linter.split(' ');
+    execFileSync(linterCmd, [...linterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Lint passed for ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Lint errors in ${filePath}` };
@@ -274,19 +271,17 @@ export function runTypeCheck(directory: string): { success: boolean; message: st
     return { success: true, message: 'No tsconfig.json found' };
   }
 
-  try {
-    const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-    execSync(`${checkCommand} tsc`, { encoding: 'utf-8', stdio: 'pipe' });
-  } catch {
+  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
+  const tscCheck = spawnSync(checkCommand, ['tsc'], { stdio: 'ignore' });
+  if (tscCheck.status !== 0) {
     return { success: true, message: 'TypeScript not installed' };
   }
 
-  try {
-    execSync('tsc --noEmit', { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+  const tscResult = spawnSync('npx', ['tsc', '--noEmit'], { cwd: directory, stdio: 'pipe' });
+  if (tscResult.status === 0) {
     return { success: true, message: 'Type check passed' };
-  } catch (_error) {
-    return { success: false, message: 'Type errors found' };
   }
+  return { success: false, message: 'Type errors found' };
 }
 
 // =============================================================================
@@ -303,7 +298,7 @@ export function runTests(directory: string): { success: boolean; message: string
     try {
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.test) {
-        execSync('npm test', { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+        execFileSync('npm', ['test'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
         return { success: true, message: 'Tests passed' };
       }
     } catch (_error) {
@@ -314,7 +309,7 @@ export function runTests(directory: string): { success: boolean; message: string
   // Check for pytest
   if (existsSync(join(directory, 'pytest.ini')) || existsSync(join(directory, 'pyproject.toml'))) {
     try {
-      execSync('pytest', { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+      execFileSync('pytest', [], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
       return { success: true, message: 'Tests passed' };
     } catch (_error) {
       return { success: false, message: 'Tests failed' };
@@ -339,7 +334,7 @@ export function runLint(directory: string): { success: boolean; message: string 
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.lint) {
         try {
-          execSync('npm run lint', { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+          execFileSync('npm', ['run', 'lint'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
           return { success: true, message: 'Lint passed' };
         } catch (_error) {
           return { success: false, message: 'Lint errors found' };

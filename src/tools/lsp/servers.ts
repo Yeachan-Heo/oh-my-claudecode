@@ -5,7 +5,7 @@
  * Supports auto-detection and installation hints.
  */
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { extname } from 'path';
 
 export interface LspServerConfig {
@@ -153,13 +153,9 @@ export const LSP_SERVERS: Record<string, LspServerConfig> = {
  * Check if a command exists in PATH
  */
 export function commandExists(command: string): boolean {
-  try {
-    const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-    execSync(`${checkCommand} ${command}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(checkCommand, [command], { stdio: 'ignore' });
+  return result.status === 0;
 }
 
 /**
