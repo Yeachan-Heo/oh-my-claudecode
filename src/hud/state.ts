@@ -203,6 +203,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
       ...config.contextLimitWarning,
     },
     ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
+    ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
   };
 }
 

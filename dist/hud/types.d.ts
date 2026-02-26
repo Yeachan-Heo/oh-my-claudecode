@@ -322,6 +322,8 @@ export interface HudConfig {
     contextLimitWarning: ContextLimitWarningConfig;
     /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
     rateLimitsProvider?: RateLimitsProviderConfig;
+    /** Optional maximum width (columns) for statusline output. Lines exceeding this width are truncated with ellipsis. Useful when the terminal shares space with IDE panels or tabs. */
+    maxWidth?: number;
 }
 export declare const DEFAULT_HUD_CONFIG: HudConfig;
 export declare const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>>;

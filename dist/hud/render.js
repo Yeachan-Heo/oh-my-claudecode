@@ -5,6 +5,7 @@
  */
 import { DEFAULT_HUD_CONFIG } from './types.js';
 import { bold, dim } from './colors.js';
+import { stringWidth } from '../utils/string-width.js';
 import { renderRalph } from './elements/ralph.js';
 import { renderAgentsByFormat, renderAgentsMultiLine } from './elements/agents.js';
 import { renderTodosWithCurrent } from './elements/todos.js';
@@ -23,6 +24,55 @@ import { renderGitRepo, renderGitBranch } from './elements/git.js';
 import { renderModel } from './elements/model.js';
 import { renderCallCounts } from './elements/call-counts.js';
 import { renderContextLimitWarning } from './elements/context-warning.js';
+/**
+ * ANSI escape sequence regex (matches SGR and other CSI sequences).
+ * Used to skip escape codes when measuring/truncating visible width.
+ */
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/;
+/**
+ * Truncate a single line to a maximum visual width, preserving ANSI escape codes.
+ * When the visible content exceeds maxWidth columns, it is truncated with an ellipsis.
+ *
+ * @param line - The line to truncate (may contain ANSI codes)
+ * @param maxWidth - Maximum visual width in terminal columns
+ * @returns Truncated line that fits within maxWidth visible columns
+ */
+export function truncateLineToMaxWidth(line, maxWidth) {
+    if (maxWidth <= 0)
+        return '';
+    if (stringWidth(line) <= maxWidth)
+        return line;
+    const ELLIPSIS = '...';
+    const ellipsisWidth = 3;
+    const targetWidth = Math.max(0, maxWidth - ellipsisWidth);
+    let visibleWidth = 0;
+    let result = '';
+    let i = 0;
+    while (i < line.length) {
+        // Check for ANSI escape sequence at current position
+        const remaining = line.slice(i);
+        const ansiMatch = remaining.match(ANSI_REGEX);
+        if (ansiMatch && ansiMatch.index === 0) {
+            // Pass through the entire ANSI sequence without counting width
+            result += ansiMatch[0];
+            i += ansiMatch[0].length;
+            continue;
+        }
+        // Regular character - check width
+        const char = line[i];
+        const codePoint = char.codePointAt(0);
+        const charWidth = (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+            (codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+            (codePoint >= 0xac00 && codePoint <= 0xd7af) ||
+            (codePoint >= 0xff01 && codePoint <= 0xff60) ? 2 : 1;
+        if (visibleWidth + charWidth > targetWidth)
+            break;
+        result += char;
+        visibleWidth += charWidth;
+        i++;
+    }
+    return result + ELLIPSIS;
+}
 /**
  * Limit output lines to prevent input field shrinkage (Issue #222).
  * Trims lines from the end while preserving the first (header) line.
@@ -215,6 +265,11 @@ export async function render(context, config) {
         if (todos)
             detailLines.push(todos);
     }
-    return limitOutputLines([...outputLines, ...detailLines], config.elements.maxOutputLines).join('\n');
+    let finalLines = limitOutputLines([...outputLines, ...detailLines], config.elements.maxOutputLines);
+    // Apply maxWidth truncation if configured (Issue #1086)
+    if (config.maxWidth && config.maxWidth > 0) {
+        finalLines = finalLines.map(line => truncateLineToMaxWidth(line, config.maxWidth));
+    }
+    return finalLines.join('\n');
 }
 //# sourceMappingURL=render.js.map
