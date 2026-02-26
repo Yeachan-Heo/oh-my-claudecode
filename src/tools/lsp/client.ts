@@ -12,6 +12,16 @@ import { pathToFileURL } from 'url';
 import type { LspServerConfig } from './servers.js';
 import { getServerForFile, commandExists } from './servers.js';
 
+/** Default timeout (ms) for LSP requests. Override with OMC_LSP_TIMEOUT_MS env var. */
+export const DEFAULT_LSP_REQUEST_TIMEOUT_MS: number = (() => {
+  const env = process.env.OMC_LSP_TIMEOUT_MS;
+  if (env) {
+    const parsed = parseInt(env, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 15_000;
+})();
+
 /** Convert a file path to a valid file:// URI (cross-platform) */
 function fileUri(filePath: string): string {
   return pathToFileURL(resolve(filePath)).href;
@@ -303,7 +313,7 @@ export class LspClient {
   /**
    * Send a request to the server
    */
-  private async request<T>(method: string, params: unknown, timeout = 15000): Promise<T> {
+  private async request<T>(method: string, params: unknown, timeout = DEFAULT_LSP_REQUEST_TIMEOUT_MS): Promise<T> {
     if (!this.process?.stdin) {
       throw new Error('LSP server not connected');
     }

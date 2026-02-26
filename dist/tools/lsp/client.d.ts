@@ -5,6 +5,8 @@
  * Handles server lifecycle, message buffering, and request/response matching.
  */
 import type { LspServerConfig } from './servers.js';
+/** Default timeout (ms) for LSP requests. Override with OMC_LSP_TIMEOUT_MS env var. */
+export declare const DEFAULT_LSP_REQUEST_TIMEOUT_MS: number;
 export interface Position {
     line: number;
     character: number;
