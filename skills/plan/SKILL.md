@@ -1,5 +1,5 @@
 ---
-name: plan
+name: omc-plan
 description: Strategic planning with optional interview workflow
 ---
 
