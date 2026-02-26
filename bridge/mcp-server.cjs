@@ -20794,7 +20794,8 @@ async function ensureBridge(sessionId, projectDir) {
       await deleteBridgeMeta(sessionId);
       return spawnBridgeServer(sessionId, projectDir);
     }
-    if (meta.socketPath !== expectedSocketPath) {
+    const isTcpMeta = meta.socketPath.startsWith("tcp:");
+    if (!isTcpMeta && meta.socketPath !== expectedSocketPath) {
       await deleteBridgeMeta(sessionId);
       return spawnBridgeServer(sessionId, projectDir);
     }

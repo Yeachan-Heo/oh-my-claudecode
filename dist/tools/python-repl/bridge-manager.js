@@ -406,7 +406,9 @@ export async function ensureBridge(sessionId, projectDir) {
             return spawnBridgeServer(sessionId, projectDir);
         }
         // Security validation 2: Anti-hijack - verify socket path is expected
-        if (meta.socketPath !== expectedSocketPath) {
+        // TCP meta uses "tcp:<port>" encoding which won't match the raw socket path; skip for TCP.
+        const isTcpMeta = meta.socketPath.startsWith('tcp:');
+        if (!isTcpMeta && meta.socketPath !== expectedSocketPath) {
             await deleteBridgeMeta(sessionId);
             return spawnBridgeServer(sessionId, projectDir);
         }
