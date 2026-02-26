@@ -309,7 +309,7 @@ describe('inbox-outbox edge cases', () => {
   });
 
   describe('readNewInboxMessages with malformed JSONL mixed with valid', () => {
-    it('returns valid messages before first malformed line and stops', () => {
+    it('skips malformed lines, advances cursor past them, and returns all valid messages', () => {
       // Use a unique worker name to avoid any cursor conflicts
       const workerName = 'w-malformed-test';
       const inbox = join(TEAMS_IO_DIR, 'inbox', `${workerName}.jsonl`);
@@ -317,12 +317,12 @@ describe('inbox-outbox edge cases', () => {
 
       const validMsg1: InboxMessage = { type: 'message', content: 'first', timestamp: '2026-01-01T00:00:00Z' };
       const validMsg2: InboxMessage = { type: 'message', content: 'second', timestamp: '2026-01-01T00:01:00Z' };
-      const unreachableMsg: InboxMessage = { type: 'message', content: 'unreachable', timestamp: '2026-01-01T00:02:00Z' };
+      const afterMalformedMsg: InboxMessage = { type: 'message', content: 'after-malformed', timestamp: '2026-01-01T00:02:00Z' };
       const content = [
         JSON.stringify(validMsg1),
         JSON.stringify(validMsg2),
         'this is not json',
-        JSON.stringify(unreachableMsg),
+        JSON.stringify(afterMalformedMsg),
       ].join('\n') + '\n';
       writeFileSync(inbox, content);
 
@@ -333,10 +333,16 @@ describe('inbox-outbox edge cases', () => {
       // Verify no stale cursor
       expect(existsSync(cursorFile)).toBe(false);
 
+      // Malformed line is skipped and cursor advances past it — all 3 valid messages returned
       const msgs = readNewInboxMessages(EDGE_TEAM_IO, workerName);
-      expect(msgs).toHaveLength(2);
+      expect(msgs).toHaveLength(3);
       expect(msgs[0].content).toBe('first');
       expect(msgs[1].content).toBe('second');
+      expect(msgs[2].content).toBe('after-malformed');
+
+      // Cursor should be advanced to end of file (no re-reads on next call)
+      const cursor = JSON.parse(readFileSync(cursorFile, 'utf-8'));
+      expect(cursor.bytesRead).toBe(Buffer.byteLength(content, 'utf-8'));
     });
   });
 

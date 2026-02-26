@@ -424,13 +424,23 @@ export async function monitorTeam(teamName: string, cwd: string, workerPaneIds: 
  */
 export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => void {
   let tickInFlight = false;
+  let consecutiveFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 3;
 
   const tick = async () => {
     if (tickInFlight) return;
     tickInFlight = true;
     try {
-      for (const [wName, active] of [...runtime.activeWorkers.entries()]) {
-        const root = stateRoot(runtime.cwd, runtime.teamName);
+      const entries = [...runtime.activeWorkers.entries()];
+      const root = stateRoot(runtime.cwd, runtime.teamName);
+
+      // Run isWorkerAlive checks in parallel (O(1) wall-clock instead of O(N))
+      const aliveResults = await Promise.all(
+        entries.map(([, active]) => isWorkerAlive(active.paneId))
+      );
+
+      for (let idx = 0; idx < entries.length; idx++) {
+        const [wName, active] = entries[idx];
         const donePath = join(root, 'workers', wName, 'done.json');
 
         // Process done.json first if present
@@ -454,7 +464,7 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         }
 
         // Dead pane without done.json => fail task, do not requeue
-        const alive = await isWorkerAlive(active.paneId);
+        const alive = aliveResults[idx];
         if (!alive) {
           await markTaskFailedDeadPane(root, active.taskId, wName);
           await killWorkerPane(runtime, wName, active.paneId);
@@ -466,12 +476,31 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           }
         }
       }
+      // Reset failure counter on a successful tick
+      consecutiveFailures = 0;
+    } catch (err) {
+      consecutiveFailures++;
+      console.warn('[watchdog] tick error:', err);
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn(`[watchdog] ${consecutiveFailures} consecutive failures — marking team as failed`);
+        try {
+          const root = stateRoot(runtime.cwd, runtime.teamName);
+          await writeJson(join(root, 'watchdog-failed.json'), {
+            failedAt: new Date().toISOString(),
+            consecutiveFailures,
+            lastError: err instanceof Error ? err.message : String(err),
+          });
+        } catch {
+          // best-effort
+        }
+        clearInterval(intervalId);
+      }
     } finally {
       tickInFlight = false;
     }
   };
 
-  const intervalId = setInterval(() => { tick().catch(err => console.warn('[watchdog] tick error:', err)); }, intervalMs);
+  const intervalId = setInterval(() => { tick(); }, intervalMs);
 
   return () => clearInterval(intervalId);
 }
@@ -738,6 +767,8 @@ export async function shutdownTeam(
 
 /**
  * Resume an existing team from persisted state.
+ * Reconstructs activeWorkers by scanning task files for in_progress tasks
+ * so the watchdog loop can continue processing without stalling.
  */
 export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRuntime | null> {
   const root = stateRoot(cwd, teamName);
@@ -765,6 +796,26 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
   const workerPaneIds = allPanes.slice(1);
   const workerNames = workerPaneIds.map((_, i) => `worker-${i + 1}`);
 
+  // Reconstruct activeWorkers by scanning task files for in_progress tasks.
+  // Build a paneId lookup: worker-N maps to workerPaneIds[N-1].
+  const paneByWorker = new Map<string, string>(
+    workerNames.map((wName, i) => [wName, workerPaneIds[i] ?? ''])
+  );
+
+  const activeWorkers = new Map<string, ActiveWorkerState>();
+  for (let i = 0; i < configData.tasks.length; i++) {
+    const taskId = String(i + 1);
+    const task = await readTask(root, taskId);
+    if (task?.status === 'in_progress' && task.owner) {
+      const paneId = paneByWorker.get(task.owner) ?? '';
+      activeWorkers.set(task.owner, {
+        paneId,
+        taskId,
+        spawnedAt: task.assignedAt ? new Date(task.assignedAt).getTime() : Date.now(),
+      });
+    }
+  }
+
   return {
     teamName,
     sessionName: sName,
@@ -772,7 +823,7 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
     config: configData,
     workerNames,
     workerPaneIds,
-    activeWorkers: new Map(),
+    activeWorkers,
     cwd,
   };
 }

@@ -128,6 +128,11 @@ export function markTeamPhase(
   nextPhase: TeamPipelinePhase,
   reason?: string,
 ): TeamTransitionResult {
+  // Idempotent: if already in target phase, return success without mutating state
+  if (state.phase === nextPhase) {
+    return { ok: true, state };
+  }
+
   const updated = { ...state };
   updated.phase = nextPhase;
 
