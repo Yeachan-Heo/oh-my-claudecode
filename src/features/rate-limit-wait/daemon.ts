@@ -115,8 +115,11 @@ function writeSecureFile(filePath: string, content: string): void {
   // Ensure permissions are set even if file existed
   try {
     chmodSync(filePath, SECURE_FILE_MODE);
-  } catch {
-    // Ignore permission errors (e.g., on Windows)
+  } catch (err) {
+    // chmod is not supported on Windows; warn on other platforms
+    if (process.platform !== 'win32') {
+      console.warn(`[RateLimitDaemon] Failed to set permissions on ${filePath}:`, err);
+    }
   }
 }
 
@@ -313,8 +316,13 @@ async function pollLoop(config: Required<DaemonConfig>): Promise<void> {
     try {
       state.lastPollAt = new Date();
 
-      // Check rate limit status
-      const rateLimitStatus = await checkRateLimitStatus();
+      // Check rate limit status with a 30s timeout to prevent poll loop stalls
+      const rateLimitStatus = await Promise.race([
+        checkRateLimitStatus(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('checkRateLimitStatus timed out after 30s')), 30_000)
+        ),
+      ]);
       const wasLimited = state.rateLimitStatus?.isLimited ?? false;
       const isNowLimited = rateLimitStatus?.isLimited ?? false;
 

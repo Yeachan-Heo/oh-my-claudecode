@@ -424,6 +424,8 @@ export async function monitorTeam(teamName: string, cwd: string, workerPaneIds: 
  */
 export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => void {
   let tickInFlight = false;
+  let consecutiveFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 3;
 
   const tick = async () => {
     if (tickInFlight) return;
@@ -466,12 +468,31 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           }
         }
       }
+      // Reset failure counter on a successful tick
+      consecutiveFailures = 0;
+    } catch (err) {
+      consecutiveFailures++;
+      console.warn('[watchdog] tick error:', err);
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn(`[watchdog] ${consecutiveFailures} consecutive failures — marking team as failed`);
+        try {
+          const root = stateRoot(runtime.cwd, runtime.teamName);
+          await writeJson(join(root, 'watchdog-failed.json'), {
+            failedAt: new Date().toISOString(),
+            consecutiveFailures,
+            lastError: err instanceof Error ? err.message : String(err),
+          });
+        } catch {
+          // best-effort
+        }
+        clearInterval(intervalId);
+      }
     } finally {
       tickInFlight = false;
     }
   };
 
-  const intervalId = setInterval(() => { tick().catch(err => console.warn('[watchdog] tick error:', err)); }, intervalMs);
+  const intervalId = setInterval(() => { tick(); }, intervalMs);
 
   return () => clearInterval(intervalId);
 }

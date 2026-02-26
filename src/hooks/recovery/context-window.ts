@@ -288,8 +288,9 @@ function getSessionState(sessionId: string): SessionState {
   let state = sessionStates.get(sessionId);
   const now = Date.now();
 
-  // Reset stale state
+  // Reset stale state and remove expired entry from Map
   if (state && now - state.lastErrorTime > STATE_TTL) {
+    sessionStates.delete(sessionId);
     state = undefined;
   }
 
