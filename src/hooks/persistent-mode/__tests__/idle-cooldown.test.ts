@@ -3,10 +3,15 @@
  * Verifies that idle notifications are rate-limited per session.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import * as os from 'os';
+import {
+  getIdleNotificationCooldownSeconds,
+  shouldSendIdleNotification,
+  recordIdleNotificationSent,
+} from '../index.js';
+import { atomicWriteJsonSync } from '../../../lib/atomic-write.js';
 
 // Mock fs and os modules (hoisted before all imports)
 vi.mock('fs', async () => {
@@ -20,6 +25,11 @@ vi.mock('fs', async () => {
   };
 });
 
+// Mock atomic-write module
+vi.mock('../../../lib/atomic-write.js', () => ({
+  atomicWriteJsonSync: vi.fn(),
+}));
+
 vi.mock('os', async () => {
   const actual = await vi.importActual('os');
   return {
@@ -27,23 +37,6 @@ vi.mock('os', async () => {
     homedir: vi.fn().mockReturnValue('/home/testuser'),
   };
 });
-
-import {
-  getIdleNotificationCooldownSeconds,
-  shouldSendIdleNotification,
-  recordIdleNotificationSent,
-} from '../index.js';
-
-// Aliases for convenience in the mocked-fs tests
-const { existsSync, readFileSync, mkdirSync } = fs;
-
-// Real fs functions for use in recordIdleNotificationSent tests (which need real I/O)
-// vi.importActual is used at runtime to get real implementations
-const realFs = await vi.importActual<typeof import('fs')>('fs');
-const realExistsSync = realFs.existsSync;
-const realReadFileSync = realFs.readFileSync;
-const realMkdirSync = realFs.mkdirSync;
-const { rmSync } = realFs;
 
 const TEST_STATE_DIR = '/project/.omc/state';
 const COOLDOWN_PATH = join(TEST_STATE_DIR, 'idle-notif-cooldown.json');
@@ -313,60 +306,46 @@ describe('shouldSendIdleNotification', () => {
 });
 
 describe('recordIdleNotificationSent', () => {
-  // These tests use real filesystem I/O because atomicWriteJsonSync uses
-  // ESM named imports that cannot be intercepted via vi.mock/vi.spyOn.
-  // We forward the mocked fs functions to real implementations so atomicWriteFileSync works.
-  let tmpDir: string;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    tmpDir = os.tmpdir() + '/omc-idle-cooldown-test-' + Date.now();
-    // Forward mocked fs functions to real implementations for write tests
-    (fs.existsSync as ReturnType<typeof vi.fn>).mockImplementation(realExistsSync);
-    (fs.mkdirSync as ReturnType<typeof vi.fn>).mockImplementation(realMkdirSync);
-    (fs.readFileSync as ReturnType<typeof vi.fn>).mockImplementation(realReadFileSync);
-  });
-
-  afterEach(() => {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* best-effort */ }
   });
 
   it('writes cooldown file with current timestamp', () => {
     const before = Date.now();
-    recordIdleNotificationSent(tmpDir);
+    recordIdleNotificationSent(TEST_STATE_DIR);
     const after = Date.now();
 
-    const cooldownPath = join(tmpDir, 'idle-notif-cooldown.json');
-    expect(realExistsSync(cooldownPath)).toBe(true);
-    const written = JSON.parse(realReadFileSync(cooldownPath, 'utf-8') as string) as { lastSentAt: string };
+    expect(atomicWriteJsonSync).toHaveBeenCalledOnce();
+    const [calledPath, calledData] = (atomicWriteJsonSync as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledPath).toBe(COOLDOWN_PATH);
+
+    const written = calledData as { lastSentAt: string };
     const ts = new Date(written.lastSentAt).getTime();
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(after);
   });
 
   it('writes session-scoped cooldown file when sessionId is provided', () => {
-    recordIdleNotificationSent(tmpDir, TEST_SESSION_ID);
+    recordIdleNotificationSent(TEST_STATE_DIR, TEST_SESSION_ID);
 
-    const sessionCooldownPath = join(tmpDir, 'sessions', TEST_SESSION_ID, 'idle-notif-cooldown.json');
-    expect(realExistsSync(sessionCooldownPath)).toBe(true);
-    const written = JSON.parse(realReadFileSync(sessionCooldownPath, 'utf-8') as string) as { lastSentAt: string };
-    expect(typeof written.lastSentAt).toBe('string');
+    expect(atomicWriteJsonSync).toHaveBeenCalledOnce();
+    const [calledPath] = (atomicWriteJsonSync as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledPath).toBe(SESSION_COOLDOWN_PATH);
   });
 
   it('creates state directory if it does not exist', () => {
-    // tmpDir does not exist yet
-    expect(realExistsSync(tmpDir)).toBe(false);
+    recordIdleNotificationSent(TEST_STATE_DIR);
 
-    recordIdleNotificationSent(tmpDir);
-
-    const cooldownPath = join(tmpDir, 'idle-notif-cooldown.json');
-    expect(realExistsSync(cooldownPath)).toBe(true);
+    expect(atomicWriteJsonSync).toHaveBeenCalledOnce();
+    const [calledPath] = (atomicWriteJsonSync as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledPath).toBe(COOLDOWN_PATH);
   });
 
-  it('does not throw when the write target is an unwritable path', () => {
-    // Pass a path that cannot be created (file where dir should be)
-    expect(() => recordIdleNotificationSent('/dev/null/cannot-create-subdir')).not.toThrow();
+  it('does not throw when atomicWriteJsonSync fails', () => {
+    (atomicWriteJsonSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+
+    expect(() => recordIdleNotificationSent(TEST_STATE_DIR)).not.toThrow();
   });
 });
