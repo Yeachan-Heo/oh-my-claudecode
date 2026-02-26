@@ -248,9 +248,8 @@ export function sliceByWidth(
     }
 
     if (started) {
-      // If a double-width char would be cut at the end boundary, pad with space
+      // If a double-width char would be cut at the end boundary, stop without padding
       if (endWidth !== undefined && currentWidth + charWidth > endWidth) {
-        result += ' ';
         break;
       }
       result += char;
