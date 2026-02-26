@@ -303,12 +303,43 @@ function createInitialState(): DaemonState {
 }
 
 /**
+ * Register cleanup handlers for the daemon process.
+ * Ensures PID file and state are cleaned up on exit signals.
+ */
+function registerDaemonCleanup(config: Required<DaemonConfig>): void {
+  const cleanup = () => {
+    try {
+      removePidFile(config);
+    } catch {
+      // Ignore cleanup errors
+    }
+    try {
+      const state = readDaemonState(config);
+      if (state) {
+        state.isRunning = false;
+        state.pid = null;
+        writeDaemonState(state, config);
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+  };
+
+  process.once('SIGINT', () => { cleanup(); process.exit(0); });
+  process.once('SIGTERM', () => { cleanup(); process.exit(0); });
+  process.once('exit', cleanup);
+}
+
+/**
  * Main daemon polling loop
  */
 async function pollLoop(config: Required<DaemonConfig>): Promise<void> {
   const state = readDaemonState(config) || createInitialState();
   state.isRunning = true;
   state.pid = process.pid;
+
+  // Register cleanup handlers so PID/state files are cleaned up on exit
+  registerDaemonCleanup(config);
 
   log('Starting poll loop', config);
 

@@ -173,12 +173,8 @@ export class LspClient {
         if (code !== 0) {
           console.error(`LSP server exited with code ${code}`);
         }
-        // Reject all pending requests so they don't hang until their individual timeouts
-        for (const [id, pending] of this.pendingRequests) {
-          clearTimeout(pending.timeout);
-          pending.reject(new Error('LSP server exited'));
-          this.pendingRequests.delete(id);
-        }
+        // Reject all pending requests to avoid unresolved promises
+        this.rejectPendingRequests(new Error(`LSP server exited (code ${code})`));
       });
 
       // Send initialize request
@@ -210,6 +206,18 @@ export class LspClient {
     this.pendingRequests.clear();
     this.openDocuments.clear();
     this.diagnostics.clear();
+  }
+
+  /**
+   * Reject all pending requests with the given error.
+   * Called on process exit to avoid dangling unresolved promises.
+   */
+  private rejectPendingRequests(error: Error): void {
+    for (const [id, pending] of this.pendingRequests.entries()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pendingRequests.delete(id);
+    }
   }
 
   /**

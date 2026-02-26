@@ -426,6 +426,9 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
   let tickInFlight = false;
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
+  // Track consecutive unresponsive ticks per worker
+  const unresponsiveCounts = new Map<string, number>();
+  const UNRESPONSIVE_KILL_THRESHOLD = 3;
 
   const tick = async () => {
     if (tickInFlight) return;
@@ -446,6 +449,7 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         // Process done.json first if present
         const signal = await readJsonSafe<DoneSignal>(donePath);
         if (signal) {
+          unresponsiveCounts.delete(wName);
           await markTaskFromDone(root, signal.taskId || active.taskId, signal.status, signal.summary);
           try {
             const { unlink } = await import('fs/promises');
@@ -466,6 +470,7 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         // Dead pane without done.json => fail task, do not requeue
         const alive = aliveResults[idx];
         if (!alive) {
+          unresponsiveCounts.delete(wName);
           await markTaskFailedDeadPane(root, active.taskId, wName);
           await killWorkerPane(runtime, wName, active.paneId);
           if (!(await allTasksTerminal(runtime))) {
@@ -474,6 +479,36 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
               await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
             }
           }
+          continue;
+        }
+
+        // Pane is alive but no done.json — check heartbeat for stall detection
+        const heartbeatPath = join(root, 'workers', wName, 'heartbeat.json');
+        const heartbeat = await readJsonSafe<{ updatedAt: string }>(heartbeatPath);
+        const isStalled = heartbeat?.updatedAt
+          ? Date.now() - new Date(heartbeat.updatedAt).getTime() > 60_000
+          : false;
+
+        if (isStalled) {
+          const count = (unresponsiveCounts.get(wName) ?? 0) + 1;
+          unresponsiveCounts.set(wName, count);
+          if (count < UNRESPONSIVE_KILL_THRESHOLD) {
+            console.warn(`[watchdog] worker ${wName} unresponsive (${count}/${UNRESPONSIVE_KILL_THRESHOLD}), task ${active.taskId}`);
+          } else {
+            console.warn(`[watchdog] worker ${wName} unresponsive ${count} consecutive ticks — killing and reassigning task ${active.taskId}`);
+            unresponsiveCounts.delete(wName);
+            await markTaskFailedDeadPane(root, active.taskId, wName);
+            await killWorkerPane(runtime, wName, active.paneId);
+            if (!(await allTasksTerminal(runtime))) {
+              const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
+              if (nextTaskIndexValue != null) {
+                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+              }
+            }
+          }
+        } else {
+          // Worker is responsive — reset counter
+          unresponsiveCounts.delete(wName);
         }
       }
       // Reset failure counter on a successful tick

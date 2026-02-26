@@ -50,6 +50,26 @@ const sessionStates = new Map<string, SessionState>();
 const STATE_TTL = 300_000; // 5 minutes
 
 /**
+ * Remove session state for a given session ID (call on context window exhaustion).
+ */
+export function clearSessionState(sessionId: string): void {
+  sessionStates.delete(sessionId);
+}
+
+/**
+ * GC: remove all session state entries older than STATE_TTL.
+ * Called automatically on context window exhaustion to free memory.
+ */
+function gcSessionStates(): void {
+  const now = Date.now();
+  for (const [id, state] of sessionStates.entries()) {
+    if (now - state.lastErrorTime > STATE_TTL) {
+      sessionStates.delete(id);
+    }
+  }
+}
+
+/**
  * Patterns indicating thinking block structure errors (NOT token limit)
  */
 const THINKING_BLOCK_ERROR_PATTERNS = [
@@ -385,6 +405,9 @@ export function handleContextWindowRecovery(
   }
 
   debugLog('detected token limit error', { sessionId, parsed });
+
+  // GC stale session state on every context window exhaustion event
+  gcSessionStates();
 
   const state = getSessionState(sessionId);
   state.lastErrorTime = Date.now();
