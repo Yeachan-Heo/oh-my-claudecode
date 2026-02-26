@@ -14,6 +14,8 @@ const TELEGRAM_FLAG = '--telegram';
 const DISCORD_FLAG = '--discord';
 const SLACK_FLAG = '--slack';
 const WEBHOOK_FLAG = '--webhook';
+const WORKTREE_FLAG = '--worktree';
+const WORKTREE_SHORT_FLAG = '-w';
 /**
  * Extract the OMC-specific --notify flag from launch args.
  * --notify false  → disable notifications (OMC_NOTIFY=0)
@@ -187,6 +189,36 @@ export function extractWebhookFlag(args) {
     return { webhookEnabled, remainingArgs };
 }
 /**
+ * Extract the OMC-specific --worktree / -w flag from launch args.
+ * Purely presence-based:
+ *   --worktree       -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   -w               -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   --worktree=true  -> enable
+ *   --worktree=false -> disable
+ *   --worktree=1     -> enable
+ *   --worktree=0     -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export function extractWorktreeFlag(args) {
+    let worktreeEnabled = false;
+    const remainingArgs = [];
+    for (const arg of args) {
+        if (arg === WORKTREE_FLAG || arg === WORKTREE_SHORT_FLAG) {
+            worktreeEnabled = true;
+            continue;
+        }
+        if (arg.startsWith(`${WORKTREE_FLAG}=`)) {
+            const val = arg.slice(WORKTREE_FLAG.length + 1).toLowerCase();
+            worktreeEnabled = val !== 'false' && val !== '0';
+            continue;
+        }
+        remainingArgs.push(arg);
+    }
+    return { worktreeEnabled, remainingArgs };
+}
+/**
  * Normalize Claude launch arguments
  * Maps --madmax/--yolo to --dangerously-skip-permissions
  * All other flags pass through unchanged
@@ -233,14 +265,14 @@ export async function preLaunch(_cwd, _sessionId) {
  * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
  */
-export function runClaude(cwd, args, sessionId) {
+export function runClaude(cwd, args, sessionId, options) {
     const policy = resolveLaunchPolicy(process.env);
     switch (policy) {
         case 'inside-tmux':
             runClaudeInsideTmux(cwd, args);
             break;
         case 'outside-tmux':
-            runClaudeOutsideTmux(cwd, args, sessionId);
+            runClaudeOutsideTmux(cwd, args, sessionId, options);
             break;
         case 'direct':
             runClaudeDirect(cwd, args);
@@ -275,14 +307,14 @@ function runClaudeInsideTmux(cwd, args) {
  * Run Claude outside tmux - create new session
  * Creates tmux session with Claude
  */
-function runClaudeOutsideTmux(cwd, args, _sessionId) {
+function runClaudeOutsideTmux(cwd, args, _sessionId, options) {
     const rawClaudeCmd = buildTmuxShellCommand('claude', args);
     // Drain any pending terminal Device Attributes (DA1) response from stdin.
     // When tmux attach-session sends a DA1 query, the terminal replies with
     // \e[?6c which lands in the pty buffer before Claude reads input.
     // A short sleep lets the response arrive, then tcflush discards it.
     const claudeCmd = `sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
-    const sessionName = buildTmuxSessionName(cwd);
+    const sessionName = buildTmuxSessionName(cwd, { worktree: options?.worktree });
     const tmuxArgs = [
         'new-session', '-d', '-s', sessionName, '-c', cwd,
         claudeCmd,
@@ -377,6 +409,11 @@ export async function launchCommand(args) {
     else if (webhookEnabled === false) {
         process.env.OMC_WEBHOOK = '0';
     }
+    // Extract OMC-specific --worktree / -w flag (presence-based)
+    const { worktreeEnabled, remainingArgs: argsAfterWorktree } = extractWorktreeFlag(argsAfterWebhook);
+    if (worktreeEnabled) {
+        process.env.OMC_WORKTREE = '1';
+    }
     const cwd = process.cwd();
     // Pre-flight: check for nested session
     if (process.env.CLAUDECODE) {
@@ -389,7 +426,7 @@ export async function launchCommand(args) {
         console.error('  npm install -g @anthropic-ai/claude-code');
         process.exit(1);
     }
-    const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWebhook);
+    const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWorktree);
     const sessionId = `omc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Phase 1: preLaunch
     try {
@@ -401,7 +438,7 @@ export async function launchCommand(args) {
     }
     // Phase 2: run
     try {
-        runClaude(cwd, normalizedArgs, sessionId);
+        runClaude(cwd, normalizedArgs, sessionId, { worktree: worktreeEnabled });
     }
     finally {
         // Phase 3: postLaunch

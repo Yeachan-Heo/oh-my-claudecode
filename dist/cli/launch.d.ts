@@ -93,6 +93,23 @@ export declare function extractWebhookFlag(args: string[]): {
     remainingArgs: string[];
 };
 /**
+ * Extract the OMC-specific --worktree / -w flag from launch args.
+ * Purely presence-based:
+ *   --worktree       -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   -w               -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   --worktree=true  -> enable
+ *   --worktree=false -> disable
+ *   --worktree=1     -> enable
+ *   --worktree=0     -> disable
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export declare function extractWorktreeFlag(args: string[]): {
+    worktreeEnabled: boolean;
+    remainingArgs: string[];
+};
+/**
  * Normalize Claude launch arguments
  * Maps --madmax/--yolo to --dangerously-skip-permissions
  * All other flags pass through unchanged
@@ -113,7 +130,9 @@ export declare function preLaunch(_cwd: string, _sessionId: string): Promise<voi
  * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
  */
-export declare function runClaude(cwd: string, args: string[], sessionId: string): void;
+export declare function runClaude(cwd: string, args: string[], sessionId: string, options?: {
+    worktree?: boolean;
+}): void;
 /**
  * postLaunch: Cleanup after Claude exits
  * Currently a placeholder - can be extended for:
