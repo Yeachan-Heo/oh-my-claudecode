@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getClaudeConfigDir } from "../utils/paths.js";
-import type { OpenClawConfig, OpenClawHookEvent, OpenClawGatewayConfig } from "./types.js";
+import type { OpenClawConfig, OpenClawHookEvent, OpenClawGatewayConfig, OpenClawCommandGatewayConfig } from "./types.js";
 
 const CONFIG_FILE = process.env.OMC_OPENCLAW_CONFIG
   || join(getClaudeConfigDir(), "omc_config.openclaw.json");
@@ -71,8 +71,15 @@ export function resolveGateway(
   }
 
   const gateway = config.gateways[mapping.gateway];
-  if (!gateway || !gateway.url) {
+  if (!gateway) {
     return null;
+  }
+  // Validate based on gateway type
+  if ((gateway as OpenClawCommandGatewayConfig).type === "command") {
+    if (!(gateway as OpenClawCommandGatewayConfig).command) return null;
+  } else {
+    // HTTP gateway (default when type is absent or "http")
+    if (!("url" in gateway) || !gateway.url) return null;
   }
 
   return { gatewayName: mapping.gateway, gateway, instruction: mapping.instruction };

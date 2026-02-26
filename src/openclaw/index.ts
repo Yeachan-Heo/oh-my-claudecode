@@ -8,21 +8,23 @@
  */
 
 export type {
+  OpenClawCommandGatewayConfig,
   OpenClawConfig,
   OpenClawContext,
   OpenClawGatewayConfig,
   OpenClawHookEvent,
   OpenClawHookMapping,
+  OpenClawHttpGatewayConfig,
   OpenClawPayload,
   OpenClawResult,
 } from "./types.js";
 
 export { getOpenClawConfig, resolveGateway, resetOpenClawConfigCache } from "./config.js";
-export { wakeGateway, interpolateInstruction } from "./dispatcher.js";
+export { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGateway, shellEscapeArg } from "./dispatcher.js";
 
 import type { OpenClawHookEvent, OpenClawContext, OpenClawResult } from "./types.js";
 import { getOpenClawConfig, resolveGateway } from "./config.js";
-import { wakeGateway, interpolateInstruction } from "./dispatcher.js";
+import { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGateway } from "./dispatcher.js";
 import { basename } from "path";
 import { getCurrentTmuxSession } from "../notifications/tmux.js";
 
@@ -43,6 +45,7 @@ function buildWhitelistedContext(context: OpenClawContext): OpenClawContext {
   if (context.contextSummary !== undefined) result.contextSummary = context.contextSummary;
   if (context.reason !== undefined) result.reason = context.reason;
   if (context.question !== undefined) result.question = context.question;
+  if (context.tmuxTail !== undefined) result.tmuxTail = context.tmuxTail;
   return result;
 }
 
@@ -76,6 +79,20 @@ export async function wakeOpenClaw(
     // Auto-detect tmux session if not provided in context
     const tmuxSession = context.tmuxSession ?? getCurrentTmuxSession() ?? undefined;
 
+    // Auto-capture tmux pane content for stop/session-end events (best-effort)
+    let tmuxTail = context.tmuxTail;
+    if (!tmuxTail && (event === "stop" || event === "session-end") && process.env.TMUX) {
+      try {
+        const { capturePaneContent } = await import("../features/rate-limit-wait/tmux-detector.js");
+        const paneId = process.env.TMUX_PANE;
+        if (paneId) {
+          tmuxTail = capturePaneContent(paneId, 15) ?? undefined;
+        }
+      } catch {
+        // Non-blocking: tmux capture is best-effort
+      }
+    }
+
     // Build template variables from whitelisted context fields
     const variables: Record<string, string | undefined> = {
       sessionId: context.sessionId,
@@ -87,24 +104,35 @@ export async function wakeOpenClaw(
       contextSummary: context.contextSummary,
       reason: context.reason,
       question: context.question,
+      tmuxTail,
       event,
       timestamp: now,
     };
 
+    // Add interpolated instruction to variables for command gateway {{instruction}} placeholder
     const interpolatedInstruction = interpolateInstruction(instruction, variables);
+    variables.instruction = interpolatedInstruction;
 
-    const payload = {
-      event,
-      instruction: interpolatedInstruction,
-      timestamp: now,
-      sessionId: context.sessionId,
-      projectPath: context.projectPath,
-      projectName: context.projectPath ? basename(context.projectPath) : undefined,
-      tmuxSession,
-      context: buildWhitelistedContext(context),
-    };
+    let result: OpenClawResult;
 
-    const result = await wakeGateway(gatewayName, gateway, payload);
+    if (isCommandGateway(gateway)) {
+      // Command gateway: execute shell command with shell-escaped variables
+      result = await wakeCommandGateway(gatewayName, gateway, variables);
+    } else {
+      // HTTP gateway: send JSON payload
+      const payload = {
+        event,
+        instruction: interpolatedInstruction,
+        timestamp: now,
+        sessionId: context.sessionId,
+        projectPath: context.projectPath,
+        projectName: context.projectPath ? basename(context.projectPath) : undefined,
+        tmuxSession,
+        tmuxTail,
+        context: buildWhitelistedContext(context),
+      };
+      result = await wakeGateway(gatewayName, gateway, payload);
+    }
 
     if (DEBUG) {
       console.error(`[openclaw] wake ${event} -> ${gatewayName}: ${result.success ? "ok" : result.error}`);

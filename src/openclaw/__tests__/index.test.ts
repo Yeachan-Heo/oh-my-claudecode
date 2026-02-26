@@ -9,6 +9,9 @@ vi.mock("../config.js", () => ({
 
 vi.mock("../dispatcher.js", () => ({
   wakeGateway: vi.fn(),
+  wakeCommandGateway: vi.fn(),
+  isCommandGateway: vi.fn((config: { type?: string }) => config?.type === "command"),
+  shellEscapeArg: vi.fn((value: string) => "'" + value.replace(/'/g, "'\\''") + "'"),
   interpolateInstruction: vi.fn((template: string, vars: Record<string, string | undefined>) => {
     // Simple implementation for tests
     return template.replace(/\{\{(\w+)\}\}/g, (match: string, key: string) => vars[key] ?? match);
@@ -17,7 +20,7 @@ vi.mock("../dispatcher.js", () => ({
 
 import { wakeOpenClaw } from "../index.js";
 import { getOpenClawConfig, resolveGateway } from "../config.js";
-import { wakeGateway } from "../dispatcher.js";
+import { wakeGateway, wakeCommandGateway } from "../dispatcher.js";
 import type { OpenClawConfig } from "../types.js";
 
 const mockConfig: OpenClawConfig = {
@@ -220,5 +223,62 @@ describe("wakeOpenClaw", () => {
     const call = vi.mocked(wakeGateway).mock.calls[0];
     const payload = call[2];
     expect(payload.projectName).toBeUndefined();
+  });
+
+  it("routes to wakeCommandGateway for command gateways and does not call wakeGateway", async () => {
+    const commandGateway = { type: "command" as const, command: "echo {{instruction}}" };
+    vi.mocked(resolveGateway).mockReturnValue({
+      gatewayName: "cmd-gw",
+      gateway: commandGateway,
+      instruction: "hello",
+    });
+    vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
+
+    const result = await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+
+    expect(wakeCommandGateway).toHaveBeenCalledOnce();
+    expect(wakeGateway).not.toHaveBeenCalled();
+    expect(result).toEqual({ gateway: "cmd-gw", success: true });
+  });
+
+  it("routes to wakeGateway for HTTP gateways and does not call wakeCommandGateway", async () => {
+    // The default beforeEach already sets up an HTTP gateway mock
+    const result = await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+
+    expect(wakeGateway).toHaveBeenCalledOnce();
+    expect(wakeCommandGateway).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+  });
+
+  it("returns null and never throws when wakeCommandGateway rejects", async () => {
+    vi.mocked(resolveGateway).mockReturnValue({
+      gatewayName: "cmd-gw",
+      gateway: { type: "command" as const, command: "echo test" },
+      instruction: "test",
+    });
+    vi.mocked(wakeCommandGateway).mockRejectedValue(new Error("Command exploded"));
+
+    const result = await wakeOpenClaw("session-start", {});
+    expect(result).toBeNull();
+  });
+
+  it("passes the interpolated instruction as the instruction variable to wakeCommandGateway", async () => {
+    const commandGateway = { type: "command" as const, command: "notify {{instruction}}" };
+    vi.mocked(resolveGateway).mockReturnValue({
+      gatewayName: "cmd-gw",
+      gateway: commandGateway,
+      instruction: "Session started for {{projectName}}",
+    });
+    vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
+
+    await wakeOpenClaw("session-start", { projectPath: "/home/user/myproject" });
+
+    expect(wakeCommandGateway).toHaveBeenCalledOnce();
+    const call = vi.mocked(wakeCommandGateway).mock.calls[0];
+    // call[0] = gatewayName, call[1] = config, call[2] = variables
+    const variables = call[2];
+    expect(variables).toHaveProperty("instruction");
+    // The instruction variable should be the interpolated result
+    expect(variables.instruction).toContain("myproject");
   });
 });
