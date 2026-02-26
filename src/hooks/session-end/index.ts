@@ -5,6 +5,7 @@ import { triggerStopCallbacks } from './callbacks.js';
 import { notify } from '../../notifications/index.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
 import { resolveToWorktreeRoot } from '../../lib/worktree-paths.js';
+import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -64,16 +65,7 @@ function getModesUsed(directory: string): string[] {
     return modes;
   }
 
-  const modeStateFiles = [
-    { file: 'autopilot-state.json', mode: 'autopilot' },
-    { file: 'ultrapilot-state.json', mode: 'ultrapilot' },
-    { file: 'ralph-state.json', mode: 'ralph' },
-    { file: 'ultrawork-state.json', mode: 'ultrawork' },
-    { file: 'swarm-state.json', mode: 'swarm' },
-    { file: 'pipeline-state.json', mode: 'pipeline' },
-  ];
-
-  for (const { file, mode } of modeStateFiles) {
+  for (const { file, mode } of SESSION_METRICS_MODE_FILES) {
     const statePath = path.join(stateDir, file);
     if (fs.existsSync(statePath)) {
       modes.push(mode);
@@ -253,19 +245,8 @@ export function cleanupTransientState(directory: string): number {
 
 /**
  * Mode state files that should be cleaned up on session end.
- * These files track active execution modes that should not persist across sessions.
+ * Imported from the shared mode-names module (issue #1058).
  */
-const MODE_STATE_FILES = [
-  { file: 'autopilot-state.json', mode: 'autopilot' },
-  { file: 'ultrapilot-state.json', mode: 'ultrapilot' },
-  { file: 'ralph-state.json', mode: 'ralph' },
-  { file: 'ultrawork-state.json', mode: 'ultrawork' },
-  { file: 'ultraqa-state.json', mode: 'ultraqa' },
-  { file: 'pipeline-state.json', mode: 'pipeline' },
-  // Swarm uses marker file + SQLite
-  { file: 'swarm-active.marker', mode: 'swarm' },
-  { file: 'swarm-summary.json', mode: 'swarm' },
-];
 
 const PYTHON_REPL_TOOL_NAMES = new Set(['python_repl', 'mcp__t__python_repl']);
 
@@ -349,7 +330,7 @@ export function cleanupModeStates(directory: string, sessionId?: string): { file
     return { filesRemoved, modesCleaned };
   }
 
-  for (const { file, mode } of MODE_STATE_FILES) {
+  for (const { file, mode } of SESSION_END_MODE_STATE_FILES) {
     const localPath = path.join(stateDir, file);
 
     // Check if local state exists and is active

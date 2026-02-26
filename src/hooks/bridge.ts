@@ -468,110 +468,14 @@ async function processStopContinuation(_input: HookInput): Promise<HookOutput> {
 }
 
 /**
- * Process Ralph hook (session.idle event)
- * Continues work loops until completion promise is detected and architect verifies
- */
-async function processRalph(input: HookInput): Promise<HookOutput> {
-  const sessionId = input.sessionId;
-  const directory = resolveToWorktreeRoot(input.directory);
-
-  if (!sessionId) {
-    return { continue: true };
-  }
-
-  // Lazy-load ralph module
-  const {
-    readRalphState,
-    incrementRalphIteration,
-    clearRalphState,
-    readVerificationState,
-    getArchitectVerificationPrompt,
-    clearVerificationState,
-  } = await import("./ralph/index.js");
-  const { isExplicitCancelCommand } = await import("./todo-continuation/index.js");
-
-  const stopContext: StopContext = {
-    stop_reason: (input as Record<string, unknown>).stop_reason as string | undefined,
-    stopReason: (input as Record<string, unknown>).stopReason as string | undefined,
-    end_turn_reason: (input as Record<string, unknown>).end_turn_reason as string | undefined,
-    endTurnReason: (input as Record<string, unknown>).endTurnReason as string | undefined,
-    prompt: input.prompt,
-    tool_name: (input as Record<string, unknown>).tool_name as string | undefined,
-    toolName: input.toolName,
-    tool_input: (input as Record<string, unknown>).tool_input,
-    toolInput: input.toolInput,
-  };
-
-  // Explicit cancel should bypass legacy ralph-loop re-enforcement.
-  if (isExplicitCancelCommand(stopContext)) {
-    return { continue: true };
-  }
-
-  // Read Ralph state
-  const state = readRalphState(directory, sessionId);
-
-  if (!state || !state.active) {
-    return { continue: true };
-  }
-
-  // Strict session isolation: only process state for matching session
-  if (state.session_id !== sessionId) {
-    return { continue: true };
-  }
-
-  // Check for existing verification state (architect verification in progress)
-  const verificationState = readVerificationState(directory, sessionId);
-
-  if (verificationState?.pending) {
-    // Check if architect has approved (by looking for the tag in transcript)
-    // This is handled more thoroughly in persistent-mode hook
-    // Here we just remind to spawn architect if verification is pending
-    const verificationPrompt =
-      getArchitectVerificationPrompt(verificationState);
-    return {
-      continue: true,
-      message: verificationPrompt,
-    };
-  }
-
-  // Check max iterations
-  if (state.iteration >= state.max_iterations) {
-    clearRalphState(directory, sessionId);
-    clearVerificationState(directory, sessionId);
-    return {
-      continue: true,
-      message: `[RALPH LOOP STOPPED] Max iterations (${state.max_iterations}) reached without completion.`,
-    };
-  }
-
-  // Increment and continue
-  const newState = incrementRalphIteration(directory, sessionId);
-  if (!newState) {
-    return { continue: true };
-  }
-
-  const continuationPrompt = `[RALPH LOOP - ITERATION ${newState.iteration}/${newState.max_iterations}]
-
-The task is NOT complete yet. Continue working.
-
-IMPORTANT:
-- Review your progress so far
-- Continue from where you left off
-- When FULLY complete (after Architect verification), run \`/oh-my-claudecode:cancel\` to cleanly exit and clean up state files. If cancel fails, retry with \`/oh-my-claudecode:cancel --force\`.
-- Do not stop until the task is truly done
-
-Original task:
-${newState.prompt}`;
-
-  return {
-    continue: true,
-    message: continuationPrompt,
-  };
-}
-
-/**
  * Process persistent mode hook (enhanced stop continuation)
- * Unified handler for ultrawork, ralph, and todo-continuation
+ * Unified handler for ultrawork, ralph, and todo-continuation.
+ *
+ * NOTE: The legacy `processRalph` function was removed in issue #1058.
+ * Ralph is now handled exclusively by `checkRalphLoop` inside
+ * `persistent-mode/index.ts`, which has richer logic (PRD checks,
+ * team pipeline coordination, tool-error injection, cancel caching,
+ * ultrawork self-heal, and architect rejection handling).
  */
 async function processPersistentMode(input: HookInput): Promise<HookOutput> {
   const rawSessionId = (input as Record<string, unknown>).session_id as string | undefined;
@@ -1284,7 +1188,8 @@ export async function processHook(
         return await processStopContinuation(input);
 
       case "ralph":
-        return await processRalph(input);
+        // Ralph is now handled by the unified persistent-mode handler (issue #1058).
+        return await processPersistentMode(input);
 
       case "persistent-mode":
         return await processPersistentMode(input);

@@ -80,11 +80,12 @@ export function clearBoulderState(directory: string): boolean {
   const filePath = getBoulderFilePath(directory);
 
   try {
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
-    }
+    unlinkSync(filePath);
     return true;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return true; // Already gone — success
+    }
     return false;
   }
 }
@@ -158,11 +159,14 @@ export function createBoulderState(
   planPath: string,
   sessionId: string
 ): BoulderState {
+  const now = new Date().toISOString();
   return {
     active_plan: planPath,
-    started_at: new Date().toISOString(),
+    started_at: now,
     session_ids: [sessionId],
     plan_name: getPlanName(planPath),
+    active: true,
+    updatedAt: now,
   };
 }
 

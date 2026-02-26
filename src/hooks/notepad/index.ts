@@ -441,9 +441,9 @@ export function getNotepadStats(directory: string): NotepadStats {
   const priorityContext = extractSection(content, PRIORITY_HEADER) || "";
   const workingMemory = extractSection(content, WORKING_MEMORY_HEADER) || "";
 
-  // Count entries
+  // Count entries using unambiguous HTML comment delimiter
   const entryMatches = workingMemory.match(
-    /### \d{4}-\d{2}-\d{2} \d{2}:\d{2}/g,
+    /<\!-- WM:\d{4}-\d{2}-\d{2} \d{2}:\d{2} -->/g,
   );
   const entryCount = entryMatches ? entryMatches.length : 0;
 
@@ -451,7 +451,7 @@ export function getNotepadStats(directory: string): NotepadStats {
   let oldestEntry: string | null = null;
   if (entryMatches && entryMatches.length > 0) {
     // Extract just the timestamp part
-    const timestamps = entryMatches.map((m) => m.replace("### ", ""));
+    const timestamps = entryMatches.map((m) => m.replace(/^<\!-- WM:| -->$/g, ""));
     timestamps.sort();
     oldestEntry = timestamps[0];
   }

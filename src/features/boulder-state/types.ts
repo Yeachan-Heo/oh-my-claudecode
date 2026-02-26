@@ -19,6 +19,10 @@ export interface BoulderState {
   session_ids: string[];
   /** Plan name derived from filename */
   plan_name: string;
+  /** Whether this boulder is currently active */
+  active: boolean;
+  /** ISO timestamp of last state update (for stale detection) */
+  updatedAt: string;
   /** Optional metadata */
   metadata?: Record<string, unknown>;
 }

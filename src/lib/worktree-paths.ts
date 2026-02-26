@@ -31,8 +31,13 @@ export const OmcPaths = {
   SKILLS: '.omc/skills',
 } as const;
 
-/** Cache for worktree root to avoid repeated git calls */
-let worktreeCache: { cwd: string; root: string } | null = null;
+/**
+ * LRU cache for worktree root lookups to avoid repeated git subprocess calls.
+ * Bounded to MAX_WORKTREE_CACHE_SIZE entries to prevent memory growth when
+ * alternating between many different cwds (cache thrashing).
+ */
+const MAX_WORKTREE_CACHE_SIZE = 8;
+const worktreeCacheMap = new Map<string, string>();
 
 /**
  * Get the git worktree root for the current or specified directory.
@@ -41,9 +46,13 @@ let worktreeCache: { cwd: string; root: string } | null = null;
 export function getWorktreeRoot(cwd?: string): string | null {
   const effectiveCwd = cwd || process.cwd();
 
-  // Return cached value if cwd matches
-  if (worktreeCache && worktreeCache.cwd === effectiveCwd) {
-    return worktreeCache.root || null;
+  // Return cached value if present (LRU: move to end on access)
+  if (worktreeCacheMap.has(effectiveCwd)) {
+    const root = worktreeCacheMap.get(effectiveCwd)!;
+    // Refresh insertion order for LRU eviction
+    worktreeCacheMap.delete(effectiveCwd);
+    worktreeCacheMap.set(effectiveCwd, root);
+    return root || null;
   }
 
   try {
@@ -53,8 +62,14 @@ export function getWorktreeRoot(cwd?: string): string | null {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
-    // Only cache actual git worktree roots
-    worktreeCache = { cwd: effectiveCwd, root };
+    // Evict oldest entry when at capacity
+    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = worktreeCacheMap.keys().next().value;
+      if (oldest !== undefined) {
+        worktreeCacheMap.delete(oldest);
+      }
+    }
+    worktreeCacheMap.set(effectiveCwd, root);
     return root;
   } catch {
     // Not in a git repository - do NOT cache fallback
@@ -309,7 +324,7 @@ export function ensureAllOmcDirs(worktreeRoot?: string): void {
  * Clear the worktree cache (useful for testing).
  */
 export function clearWorktreeCache(): void {
-  worktreeCache = null;
+  worktreeCacheMap.clear();
 }
 
 // ============================================================================
