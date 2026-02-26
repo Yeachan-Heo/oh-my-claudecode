@@ -167,6 +167,7 @@ var import_child_process2 = require("child_process");
 var import_path = require("path");
 var import_util = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
+var TMUX_SESSION_PREFIX = "omc-team";
 var promisifiedExec = (0, import_util.promisify)(import_child_process2.exec);
 var promisifiedExecFile = (0, import_util.promisify)(import_child_process2.execFile);
 function isUnixLikeOnWindows() {
@@ -248,6 +249,15 @@ function buildWorkerStartCommand(config) {
   const sourceCmd = rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : "";
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
+function validateTmux() {
+  try {
+    (0, import_child_process2.execSync)("tmux -V", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
+  } catch {
+    throw new Error(
+      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux"
+    );
+  }
+}
 function sanitizeName(name) {
   const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
   if (sanitized.length === 0) {
@@ -262,41 +272,63 @@ async function createTeamSession(teamName, workerCount, cwd) {
   const { execFile: execFile2 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
   const execFileAsync = promisify2(execFile2);
-  if (!process.env.TMUX) {
-    throw new Error("Team mode requires running inside tmux. Start one: tmux new-session");
-  }
-  const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
   let sessionAndWindow = "";
-  let leaderPaneId = envPaneId;
-  if (envPaneId) {
+  let leaderPaneId = "";
+  if (!process.env.TMUX) {
+    validateTmux();
+    const sName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`;
     try {
-      const targetedContextResult = await execFileAsync("tmux", [
+      (0, import_child_process2.execFileSync)("tmux", ["kill-session", "-t", sName], { stdio: "pipe", timeout: 5e3 });
+    } catch {
+    }
+    const newArgs = ["new-session", "-d", "-s", sName, "-x", "200", "-y", "50"];
+    if (cwd) newArgs.push("-c", cwd);
+    (0, import_child_process2.execFileSync)("tmux", newArgs, { stdio: "pipe", timeout: 5e3 });
+    const paneResult = await tmuxAsync([
+      "display-message",
+      "-t",
+      sName,
+      "-p",
+      "#{pane_id}"
+    ]);
+    leaderPaneId = paneResult.stdout.trim();
+    if (!leaderPaneId || !/^%\d+$/.test(leaderPaneId)) {
+      throw new Error(`Failed to resolve pane ID for auto-created tmux session "${sName}"`);
+    }
+    sessionAndWindow = sName;
+  } else {
+    const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
+    const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
+    leaderPaneId = envPaneId;
+    if (envPaneId) {
+      try {
+        const targetedContextResult = await execFileAsync("tmux", [
+          "display-message",
+          "-p",
+          "-t",
+          envPaneId,
+          "#S:#I"
+        ]);
+        sessionAndWindow = targetedContextResult.stdout.trim();
+      } catch {
+        sessionAndWindow = "";
+        leaderPaneId = "";
+      }
+    }
+    if (!sessionAndWindow || !leaderPaneId) {
+      const contextResult = await tmuxAsync([
         "display-message",
         "-p",
-        "-t",
-        envPaneId,
-        "#S:#I"
+        "#S:#I #{pane_id}"
       ]);
-      sessionAndWindow = targetedContextResult.stdout.trim();
-    } catch {
-      sessionAndWindow = "";
-      leaderPaneId = "";
+      const contextLine = contextResult.stdout.trim();
+      const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+      if (!contextMatch) {
+        throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+      }
+      sessionAndWindow = contextMatch[1];
+      leaderPaneId = contextMatch[2];
     }
-  }
-  if (!sessionAndWindow || !leaderPaneId) {
-    const contextResult = await tmuxAsync([
-      "display-message",
-      "-p",
-      "#S:#I #{pane_id}"
-    ]);
-    const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
-    if (!contextMatch) {
-      throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
-    }
-    sessionAndWindow = contextMatch[1];
-    leaderPaneId = contextMatch[2];
   }
   const teamTarget = sessionAndWindow;
   const resolvedSessionName = teamTarget.split(":")[0];

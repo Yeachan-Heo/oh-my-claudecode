@@ -277,41 +277,72 @@ export async function createTeamSession(
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
-  if (!process.env.TMUX) {
-    throw new Error('Team mode requires running inside tmux. Start one: tmux new-session');
-  }
-
-  // Prefer the invoking pane from environment to avoid focus races when users
-  // switch tmux windows during startup (issue #966).
-  const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
   let sessionAndWindow = '';
-  let leaderPaneId = envPaneId;
+  let leaderPaneId = '';
 
-  if (envPaneId) {
+  if (!process.env.TMUX) {
+    // Auto-create a detached tmux session when not running inside tmux.
+    // This allows team tools to work when Claude Code is launched directly
+    // from the terminal without omc CLI (issue #1085).
+    validateTmux();
+
+    const sName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`;
+
+    // Kill stale session with same name if present
     try {
-      const targetedContextResult = await execFileAsync('tmux', [
-        'display-message', '-p', '-t', envPaneId, '#S:#I'
-      ]);
-      sessionAndWindow = targetedContextResult.stdout.trim();
-    } catch {
-      sessionAndWindow = '';
-      leaderPaneId = '';
-    }
-  }
+      execFileSync('tmux', ['kill-session', '-t', sName], { stdio: 'pipe', timeout: 5000 });
+    } catch { /* session may not exist */ }
 
-  if (!sessionAndWindow || !leaderPaneId) {
-    // Fallback when TMUX_PANE is unavailable/invalid.
-    const contextResult = await tmuxAsync([
-      'display-message', '-p', '#S:#I #{pane_id}'
+    // Create detached session with reasonable terminal size
+    const newArgs = ['new-session', '-d', '-s', sName, '-x', '200', '-y', '50'];
+    if (cwd) newArgs.push('-c', cwd);
+    execFileSync('tmux', newArgs, { stdio: 'pipe', timeout: 5000 });
+
+    // Resolve the pane ID of the initial pane
+    const paneResult = await tmuxAsync([
+      'display-message', '-t', sName, '-p', '#{pane_id}'
     ]);
-    const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
-    if (!contextMatch) {
-      throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+    leaderPaneId = paneResult.stdout.trim();
+    if (!leaderPaneId || !/^%\d+$/.test(leaderPaneId)) {
+      throw new Error(`Failed to resolve pane ID for auto-created tmux session "${sName}"`);
     }
-    sessionAndWindow = contextMatch[1];
-    leaderPaneId = contextMatch[2];
+
+    // Use bare session name (no ':window' suffix) so killTeamSession
+    // kills the entire auto-created session on cleanup.
+    sessionAndWindow = sName;
+  } else {
+    // Running inside tmux — resolve from current session context.
+    // Prefer the invoking pane from environment to avoid focus races when users
+    // switch tmux windows during startup (issue #966).
+    const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
+    const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
+    leaderPaneId = envPaneId;
+
+    if (envPaneId) {
+      try {
+        const targetedContextResult = await execFileAsync('tmux', [
+          'display-message', '-p', '-t', envPaneId, '#S:#I'
+        ]);
+        sessionAndWindow = targetedContextResult.stdout.trim();
+      } catch {
+        sessionAndWindow = '';
+        leaderPaneId = '';
+      }
+    }
+
+    if (!sessionAndWindow || !leaderPaneId) {
+      // Fallback when TMUX_PANE is unavailable/invalid.
+      const contextResult = await tmuxAsync([
+        'display-message', '-p', '#S:#I #{pane_id}'
+      ]);
+      const contextLine = contextResult.stdout.trim();
+      const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+      if (!contextMatch) {
+        throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+      }
+      sessionAndWindow = contextMatch[1];
+      leaderPaneId = contextMatch[2];
+    }
   }
 
   const teamTarget = sessionAndWindow; // "session:window" form
