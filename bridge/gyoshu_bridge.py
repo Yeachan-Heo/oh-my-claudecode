@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Gyoshu Python Bridge - JSON-RPC 2.0 over Unix Socket.
+"""Gyoshu Python Bridge - JSON-RPC 2.0 over Unix Socket (or TCP on Windows).
 
 This bridge provides a protocol-based interface for executing Python code
-from the Scientist agent. Communication happens over Unix socket using
-Newline-Delimited JSON (NDJSON) with JSON-RPC 2.0 message format.
+from the Scientist agent. Communication happens over Unix socket (or TCP
+localhost on platforms without AF_UNIX) using Newline-Delimited JSON (NDJSON)
+with JSON-RPC 2.0 message format.
 
 Protocol Format (JSON-RPC 2.0):
   Request:  {"jsonrpc": "2.0", "id": "req_001", "method": "execute", "params": {...}}
@@ -703,8 +704,18 @@ def process_request(line: str) -> None:
 # =============================================================================
 
 
+HAS_AF_UNIX = hasattr(socket_module, "AF_UNIX")
+
+
 def safe_unlink_socket(socket_path: str) -> None:
     """Safely unlink a socket file, handling races and verifying type."""
+    if not HAS_AF_UNIX:
+        # No Unix sockets on this platform; just remove if exists
+        try:
+            os.unlink(socket_path)
+        except OSError:
+            pass
+        return
     try:
         st = os.lstat(socket_path)
         if stat.S_ISSOCK(st.st_mode):
@@ -715,16 +726,15 @@ def safe_unlink_socket(socket_path: str) -> None:
         pass  # Best effort
 
 
-def run_socket_server(socket_path: str) -> None:
-    """Run the JSON-RPC server over Unix socket."""
-    global _protocol_out
+def _get_port_file(socket_path: str) -> str:
+    """Return the path of the TCP port file derived from the socket path."""
+    return os.path.join(os.path.dirname(socket_path), "bridge.port")
 
-    # Safely remove existing socket
+
+def _bind_unix(server: socket_module.socket, socket_path: str) -> None:
+    """Bind a Unix socket with umask and post-bind security checks."""
     safe_unlink_socket(socket_path)
 
-    server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
-
-    # Set umask to ensure socket mode 0600 (owner only)
     old_umask = os.umask(0o177)
     try:
         server.bind(socket_path)
@@ -751,19 +761,49 @@ def run_socket_server(socket_path: str) -> None:
     finally:
         os.umask(old_umask)
 
-    server.listen(1)
 
-    print(
-        f"[gyoshu_bridge] Socket server started at {socket_path}, PID={os.getpid()}",
-        file=sys.stderr,
-    )
+def run_socket_server(socket_path: str) -> None:
+    """Run the JSON-RPC server over Unix socket or TCP localhost fallback."""
+    global _protocol_out
+
+    port_file: Optional[str] = None
+
+    if HAS_AF_UNIX:
+        server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        _bind_unix(server, socket_path)
+        server.listen(1)
+        print(
+            f"[gyoshu_bridge] Socket server started at {socket_path}, PID={os.getpid()}",
+            file=sys.stderr,
+        )
+    else:
+        # TCP localhost fallback (Windows / platforms without AF_UNIX)
+        server = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+        server.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        port = server.getsockname()[1]
+        server.listen(1)
+        port_file = _get_port_file(socket_path)
+        with open(port_file, "w") as f:
+            f.write(str(port))
+        print(
+            f"[gyoshu_bridge] TCP server started on 127.0.0.1:{port}, PID={os.getpid()}",
+            file=sys.stderr,
+        )
+
     sys.stderr.flush()
 
     def shutdown_handler(signum, frame):
         print("[gyoshu_bridge] Shutdown signal received", file=sys.stderr)
         sys.stderr.flush()
         server.close()
-        safe_unlink_socket(socket_path)
+        if HAS_AF_UNIX:
+            safe_unlink_socket(socket_path)
+        elif port_file:
+            try:
+                os.unlink(port_file)
+            except OSError:
+                pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, shutdown_handler)
@@ -772,13 +812,23 @@ def run_socket_server(socket_path: str) -> None:
     try:
         while True:
             conn, addr = server.accept()
+            # TCP security: only accept connections from localhost
+            if not HAS_AF_UNIX and addr and addr[0] != "127.0.0.1":
+                conn.close()
+                continue
             handle_socket_connection(conn)
     except Exception as e:
         print(f"[gyoshu_bridge] Server error: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
     finally:
         server.close()
-        safe_unlink_socket(socket_path)
+        if HAS_AF_UNIX:
+            safe_unlink_socket(socket_path)
+        elif port_file:
+            try:
+                os.unlink(port_file)
+            except OSError:
+                pass
 
 
 def handle_socket_connection(conn: socket_module.socket) -> None:
@@ -821,12 +871,12 @@ def handle_socket_connection(conn: socket_module.socket) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Gyoshu Python Bridge - JSON-RPC 2.0 over Unix Socket"
+        description="Gyoshu Python Bridge - JSON-RPC 2.0 over Unix Socket / TCP"
     )
     parser.add_argument(
         "socket_path",
         nargs="?",
-        help="Unix socket path (required)",
+        help="Unix socket path (or base path for TCP port file on Windows)",
     )
     return parser.parse_args()
 

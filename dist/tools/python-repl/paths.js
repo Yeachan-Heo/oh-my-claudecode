@@ -157,6 +157,16 @@ export function getBridgeMetaPath(sessionId) {
     return path.join(getSessionDir(sessionId), "bridge_meta.json");
 }
 /**
+ * Get the path to a session's TCP port file (used on Windows where AF_UNIX is unavailable).
+ * The Python bridge writes the listening port number to this file.
+ *
+ * @param sessionId - Unique identifier for the session
+ * @returns Path to bridge.port in session's runtime directory
+ */
+export function getBridgePortPath(sessionId) {
+    return path.join(getSessionDir(sessionId), "bridge.port");
+}
+/**
  * Get the path to a session's lock file.
  *
  * @param sessionId - Unique identifier for the session

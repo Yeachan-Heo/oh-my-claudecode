@@ -90,8 +90,14 @@ export async function sendSocketRequest<T>(
       socket.destroy();
     };
 
-    // Create socket connection
-    const socket = net.createConnection({ path: socketPath });
+    // Create socket connection (TCP fallback when socketPath is "tcp:<port>")
+    let socket: net.Socket;
+    if (socketPath.startsWith('tcp:')) {
+      const port = parseInt(socketPath.slice(4), 10);
+      socket = net.createConnection({ host: '127.0.0.1', port });
+    } else {
+      socket = net.createConnection({ path: socketPath });
+    }
 
     // Connection established - send request
     socket.on('connect', () => {

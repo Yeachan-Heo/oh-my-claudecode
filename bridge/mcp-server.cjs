@@ -19806,6 +19806,9 @@ function getBridgeSocketPath(sessionId) {
 function getBridgeMetaPath(sessionId) {
   return path.join(getSessionDir(sessionId), "bridge_meta.json");
 }
+function getBridgePortPath(sessionId) {
+  return path.join(getSessionDir(sessionId), "bridge.port");
+}
 function getSessionLockPath(sessionId) {
   return path.join(getSessionDir(sessionId), "session.lock");
 }
@@ -20448,7 +20451,13 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
       socket.removeAllListeners();
       socket.destroy();
     };
-    const socket = net.createConnection({ path: socketPath });
+    let socket;
+    if (socketPath.startsWith("tcp:")) {
+      const port = parseInt(socketPath.slice(4), 10);
+      socket = net.createConnection({ host: "127.0.0.1", port });
+    } else {
+      socket = net.createConnection({ path: socketPath });
+    }
     socket.on("connect", () => {
       socket.write(requestLine);
     });
@@ -20611,6 +20620,7 @@ async function verifyProcessIdentity(meta) {
   }
   return true;
 }
+var USE_TCP_FALLBACK = process.platform === "win32";
 function isSocket(socketPath) {
   try {
     const stat = fs4.lstatSync(socketPath);
@@ -20619,10 +20629,37 @@ function isSocket(socketPath) {
     return false;
   }
 }
+function isBridgeReady(socketPath, sessionId) {
+  if (USE_TCP_FALLBACK) {
+    return fs4.existsSync(getBridgePortPath(sessionId));
+  }
+  return isSocket(socketPath);
+}
+function readTcpPort(sessionId) {
+  const portPath = getBridgePortPath(sessionId);
+  try {
+    const content = fs4.readFileSync(portPath, "utf-8").trim();
+    const port = parseInt(content, 10);
+    if (Number.isFinite(port) && port > 0 && port <= 65535) {
+      return port;
+    }
+  } catch {
+  }
+  return void 0;
+}
 function safeUnlinkSocket(socketPath) {
   try {
     if (fs4.existsSync(socketPath)) {
       fs4.unlinkSync(socketPath);
+    }
+  } catch {
+  }
+}
+function safeUnlinkPortFile(sessionId) {
+  try {
+    const portPath = getBridgePortPath(sessionId);
+    if (fs4.existsSync(portPath)) {
+      fs4.unlinkSync(portPath);
     }
   } catch {
   }
@@ -20668,6 +20705,9 @@ async function spawnBridgeServer(sessionId, projectDir) {
     throw new Error(`Bridge script not found: ${bridgePath}`);
   }
   safeUnlinkSocket(socketPath);
+  if (USE_TCP_FALLBACK) {
+    safeUnlinkPortFile(sessionId);
+  }
   const effectiveProjectDir = projectDir || process.cwd();
   const pythonEnv = await ensurePythonEnvironment(effectiveProjectDir);
   const bridgeArgs = [bridgePath, socketPath];
@@ -20696,10 +20736,13 @@ async function spawnBridgeServer(sessionId, projectDir) {
     procExitCode = code ?? 1;
   });
   const startTime = Date.now();
-  while (!isSocket(socketPath)) {
+  while (!isBridgeReady(socketPath, sessionId)) {
     if (procExitCode !== null) {
-      if (fs4.existsSync(socketPath) && !isSocket(socketPath)) {
+      if (!USE_TCP_FALLBACK && fs4.existsSync(socketPath) && !isSocket(socketPath)) {
         safeUnlinkSocket(socketPath);
+      }
+      if (USE_TCP_FALLBACK) {
+        safeUnlinkPortFile(sessionId);
       }
       throw new Error(
         `Bridge process exited with code ${procExitCode} before creating socket. Stderr: ${stderrBuffer || "(empty)"}`
@@ -20709,8 +20752,11 @@ async function spawnBridgeServer(sessionId, projectDir) {
       if (proc.pid) {
         killProcessGroup(proc.pid, "SIGKILL");
       }
-      if (fs4.existsSync(socketPath) && !isSocket(socketPath)) {
+      if (!USE_TCP_FALLBACK && fs4.existsSync(socketPath) && !isSocket(socketPath)) {
         safeUnlinkSocket(socketPath);
+      }
+      if (USE_TCP_FALLBACK) {
+        safeUnlinkPortFile(sessionId);
       }
       throw new Error(
         `Bridge failed to create socket in ${BRIDGE_SPAWN_TIMEOUT_MS}ms. Stderr: ${stderrBuffer || "(empty)"}`
@@ -20719,9 +20765,17 @@ async function spawnBridgeServer(sessionId, projectDir) {
     await sleep2(100);
   }
   const processStartTime = proc.pid ? await getProcessStartTime(proc.pid) : void 0;
+  let effectiveSocketPath = socketPath;
+  if (USE_TCP_FALLBACK) {
+    const port = readTcpPort(sessionId);
+    if (port === void 0) {
+      throw new Error("Bridge created port file but content is invalid");
+    }
+    effectiveSocketPath = `tcp:${port}`;
+  }
   const meta = {
     pid: proc.pid,
-    socketPath,
+    socketPath: effectiveSocketPath,
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
     sessionId,
     pythonEnv,
@@ -20746,13 +20800,16 @@ async function ensureBridge(sessionId, projectDir) {
     }
     const stillOurs = await verifyProcessIdentity(meta);
     if (stillOurs) {
-      if (isSocket(meta.socketPath)) {
-        return meta;
-      } else {
-        try {
-          process.kill(meta.pid, "SIGKILL");
-        } catch {
+      if (meta.socketPath.startsWith("tcp:")) {
+        if (fs4.existsSync(getBridgePortPath(sessionId))) {
+          return meta;
         }
+      } else if (isSocket(meta.socketPath)) {
+        return meta;
+      }
+      try {
+        process.kill(meta.pid, "SIGKILL");
+      } catch {
       }
     }
     await deleteBridgeMeta(sessionId);
@@ -20800,7 +20857,9 @@ async function killBridgeWithEscalation(sessionId, options) {
   await deleteBridgeMeta(sessionId);
   const sessionDir = getSessionDir(sessionId);
   const socketPath = meta.socketPath;
-  if (socketPath.startsWith(sessionDir)) {
+  if (socketPath.startsWith("tcp:")) {
+    safeUnlinkPortFile(sessionId);
+  } else if (socketPath.startsWith(sessionDir)) {
     safeUnlinkSocket(socketPath);
   }
   return {
