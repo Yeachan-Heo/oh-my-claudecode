@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { BuiltinSkill } from './types.js';
+import { parseFrontmatter, parseFrontmatterAliases } from '../../utils/frontmatter.js';
 
 // Get the project root directory (go up from src/features/builtin-skills/)
 const __filename = fileURLToPath(import.meta.url);
@@ -21,72 +22,22 @@ const PROJECT_ROOT = join(__dirname, '..', '..', '..');
 const SKILLS_DIR = join(PROJECT_ROOT, 'skills');
 
 /**
- * Parse YAML-like frontmatter from markdown file
+ * Claude Code native commands that must not be shadowed by OMC skill short names.
+ * Skills with these names will still load but their name will be prefixed with 'omc-'
+ * to avoid overriding built-in /review, /plan, /security-review etc.
  */
-function parseFrontmatter(content: string): { data: Record<string, string>; body: string } {
-  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
-
-  if (!match) {
-    return { data: {}, body: content };
-  }
-
-  const [, yamlContent, body] = match;
-  const data: Record<string, string> = {};
-
-  for (const line of yamlContent.split('\n')) {
-    const colonIndex = line.indexOf(':');
-    if (colonIndex === -1) continue;
-
-    const key = line.slice(0, colonIndex).trim();
-    let value = line.slice(colonIndex + 1).trim();
-
-    // Remove surrounding quotes
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-
-    data[key] = value;
-  }
-
-  return { data, body };
-}
-
-function stripOptionalQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
-}
-
-function parseFrontmatterAliases(rawAliases: string | undefined): string[] {
-  if (!rawAliases) return [];
-
-  const trimmed = rawAliases.trim();
-  if (!trimmed) return [];
-
-  // Supports inline YAML list: aliases: [psm, swarm]
-  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    const inner = trimmed.slice(1, -1).trim();
-    if (!inner) return [];
-
-    return inner
-      .split(',')
-      .map((alias) => stripOptionalQuotes(alias))
-      .filter((alias) => alias.length > 0);
-  }
-
-  // Fallback single alias value
-  const singleAlias = stripOptionalQuotes(trimmed);
-  return singleAlias ? [singleAlias] : [];
-}
+const CC_NATIVE_COMMANDS = new Set([
+  'review',
+  'plan',
+  'security-review',
+  'init',
+  'doctor',
+  'help',
+  'config',
+  'clear',
+  'compact',
+  'memory',
+]);
 
 function toSafeSkillName(name: string): string {
   const normalized = name.trim();
@@ -101,15 +52,15 @@ function toSafeSkillName(name: string): string {
 function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[] {
   try {
     const content = readFileSync(skillPath, 'utf-8');
-    const { data, body } = parseFrontmatter(content);
+    const { metadata, body } = parseFrontmatter(content);
 
-    const resolvedName = data.name || skillName;
+    const resolvedName = metadata.name || skillName;
     const safePrimaryName = toSafeSkillName(resolvedName);
     const safeAliases = Array.from(
       new Set(
-        parseFrontmatterAliases(data.aliases)
-          .map(alias => toSafeSkillName(alias))
-          .filter(alias => alias.length > 0 && alias.toLowerCase() !== safePrimaryName.toLowerCase())
+        parseFrontmatterAliases(metadata.aliases)
+          .map((alias: string) => toSafeSkillName(alias))
+          .filter((alias: string) => alias.length > 0 && alias.toLowerCase() !== safePrimaryName.toLowerCase())
       )
     );
 
@@ -130,12 +81,12 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
         deprecationMessage: name === safePrimaryName
           ? undefined
           : `Skill alias "${name}" is deprecated. Use "${safePrimaryName}" instead.`,
-        description: data.description || '',
+        description: metadata.description || '',
         template: body.trim(),
         // Optional fields from frontmatter
-        model: data.model,
-        agent: data.agent,
-        argumentHint: data['argument-hint'],
+        model: metadata.model,
+        agent: metadata.agent,
+        argumentHint: metadata['argument-hint'],
       });
     }
 
@@ -144,24 +95,6 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
     return [];
   }
 }
-
-/**
- * Claude Code native commands that must not be shadowed by OMC skill short names.
- * Skills with these names will still load but their name will be prefixed with 'omc-'
- * to avoid overriding built-in /review, /plan, /security-review etc.
- */
-const CC_NATIVE_COMMANDS = new Set([
-  'review',
-  'plan',
-  'security-review',
-  'init',
-  'doctor',
-  'help',
-  'config',
-  'clear',
-  'compact',
-  'memory',
-]);
 
 /**
  * Load all skills from the skills/ directory
