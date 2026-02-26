@@ -8,7 +8,7 @@
  * - State/PID/log files use restrictive permissions (0600)
  * - Bot tokens stored in state file, NOT in environment variables
  * - Two-layer input sanitization (sanitizeReplyInput + sanitizeForTmux)
- * - Pane verification via analyzePaneContent before every injection
+ * - Pane verification via empty-content check before every injection
  * - Authorization: only configured user IDs (Discord) / chat ID (Telegram) can inject
  * - Rate limiting to prevent spam/abuse
  *
@@ -23,7 +23,6 @@ import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
 import {
   capturePaneContent,
-  analyzePaneContent,
   sendToPane,
   isTmuxAvailable,
 } from '../features/rate-limit-wait/tmux-detector.js';
@@ -215,7 +214,7 @@ function writeDaemonState(state: ReplyListenerState): void {
  * Build daemon config from notification config.
  * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
-async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
+export async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
   try {
     const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
     const replyConfig = getReplyConfig();
@@ -358,12 +357,11 @@ function injectReply(
   platform: string,
   config: ReplyListenerDaemonConfig,
 ): boolean {
-  // 1. Verify pane is running Claude Code
+  // 1. Verify pane has content (non-empty pane = active session per registry)
   const content = capturePaneContent(paneId, 15);
-  const analysis = analyzePaneContent(content);
 
-  if (analysis.confidence < 0.4) {
-    log(`WARN: Pane ${paneId} does not appear to be running Claude Code (confidence: ${analysis.confidence}). Skipping injection, removing stale mapping.`);
+  if (!content.trim()) {
+    log(`WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
     removeMessagesByPane(paneId);
     return false;
   }
