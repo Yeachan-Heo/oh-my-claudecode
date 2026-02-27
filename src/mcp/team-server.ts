@@ -27,6 +27,7 @@ import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { killWorkerPanes } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
+import { resolvedEnv } from '../team/shell-path.js';
 import { NudgeTracker } from '../team/idle-nudge.js';
 
 // ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
   omcTeamJobs.set(jobId, job);
 
   const child = spawn('node', [runtimeCliPath], {
-    env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+    env: resolvedEnv({ OMC_JOB_ID: jobId, OMC_JOBS_DIR }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   job.pid = child.pid;
