@@ -95,7 +95,7 @@ describe('model-contract', () => {
 
       isCliAvailable('codex');
 
-      expect(mockSpawnSync).toHaveBeenCalledWith('codex', ['--version'], { timeout: 5000, shell: true });
+      expect(mockSpawnSync).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ timeout: 5000, shell: true }));
       mockSpawnSync.mockRestore();
     });
   });
