@@ -17754,7 +17754,7 @@ var StdioServerTransport = class {
 };
 
 // src/mcp/team-server.ts
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_path2 = require("path");
 var import_fs = require("fs");
 var import_promises2 = require("fs/promises");
@@ -17952,8 +17952,44 @@ async function killWorkerPanes(opts) {
   }
 }
 
-// src/team/idle-nudge.ts
+// src/team/shell-path.ts
 var import_child_process2 = require("child_process");
+var _resolved = null;
+function resolveShellPath() {
+  if (_resolved !== null) return _resolved;
+  if (process.platform === "win32") {
+    _resolved = process.env.PATH || "";
+    return _resolved;
+  }
+  try {
+    const shell = process.env.SHELL || "/bin/sh";
+    const result = (0, import_child_process2.spawnSync)(shell, ["-ilc", "env"], {
+      timeout: 5e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    if (result.status === 0) {
+      const stdout = result.stdout?.toString() ?? "";
+      const pathLine = stdout.split("\n").find((l) => l.startsWith("PATH="));
+      const path = pathLine?.slice(5)?.trim();
+      if (path) {
+        _resolved = path;
+        return _resolved;
+      }
+    }
+  } catch {
+  }
+  _resolved = process.env.PATH || "";
+  return _resolved;
+}
+function resolvedEnv(extra) {
+  const env = { ...process.env };
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  env[pathKey] = resolveShellPath();
+  return { ...env, ...extra };
+}
+
+// src/team/idle-nudge.ts
+var import_child_process3 = require("child_process");
 var DEFAULT_NUDGE_CONFIG = {
   delayMs: 3e4,
   maxCount: 3,
@@ -17961,7 +17997,7 @@ var DEFAULT_NUDGE_CONFIG = {
 };
 function capturePane(paneId) {
   return new Promise((resolve) => {
-    (0, import_child_process2.execFile)("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"], (err, stdout) => {
+    (0, import_child_process3.execFile)("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"], (err, stdout) => {
       if (err) resolve("");
       else resolve(stdout ?? "");
     });
@@ -18102,8 +18138,8 @@ async function handleStart(args) {
   const runtimeCliPath = (0, import_path2.join)(__dirname, "runtime-cli.cjs");
   const job = { status: "running", startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
-  const child = (0, import_child_process3.spawn)("node", [runtimeCliPath], {
-    env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+  const child = (0, import_child_process4.spawn)("node", [runtimeCliPath], {
+    env: resolvedEnv({ OMC_JOB_ID: jobId, OMC_JOBS_DIR }),
     stdio: ["pipe", "pipe", "pipe"]
   });
   job.pid = child.pid;

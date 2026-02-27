@@ -9,10 +9,9 @@ import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { resolveStatePath, ensureOmcDir, validateWorkingDirectory, resolveSessionStatePath, ensureSessionStateDir, listSessionIds, validateSessionId, } from '../lib/worktree-paths.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { isModeActive, getActiveModes, getAllModeStatuses, clearModeState, getStateFilePath, MODE_CONFIGS, getActiveSessionsForMode } from '../hooks/mode-registry/index.js';
-// ExecutionMode from mode-registry (8 modes - NO ralplan)
+// ExecutionMode from mode-registry (5 modes - NO ralplan)
 const EXECUTION_MODES = [
-    'autopilot', 'ultrapilot', 'swarm', 'pipeline', 'team',
-    'ralph', 'ultrawork', 'ultraqa'
+    'autopilot', 'team', 'ralph', 'ultrawork', 'ultraqa'
 ];
 // Extended type for state tools - includes ralplan which has state but isn't in mode-registry
 const STATE_TOOL_MODES = [...EXECUTION_MODES, 'ralplan'];
@@ -48,24 +47,6 @@ export const stateReadTool = {
         try {
             const root = validateWorkingDirectory(workingDirectory);
             const sessionId = session_id;
-            // Special handling for swarm (SQLite database - no session support)
-            if (mode === 'swarm') {
-                const statePath = getStatePath(mode, root);
-                if (!existsSync(statePath)) {
-                    return {
-                        content: [{
-                                type: 'text',
-                                text: `No state found for mode: swarm\nNote: Swarm uses SQLite (swarm.db), not JSON. Expected path: ${statePath}`
-                            }]
-                    };
-                }
-                return {
-                    content: [{
-                            type: 'text',
-                            text: `## State for swarm\n\nPath: ${statePath}\n\nNote: Swarm uses SQLite database. Use swarm-specific tools to query state.`
-                        }]
-                };
-            }
             // If session_id provided, read from session-scoped path
             if (sessionId) {
                 validateSessionId(sessionId);
@@ -183,16 +164,6 @@ export const stateWriteTool = {
         try {
             const root = validateWorkingDirectory(workingDirectory);
             const sessionId = session_id;
-            // Swarm uses SQLite - cannot be written via this tool
-            if (mode === 'swarm') {
-                return {
-                    content: [{
-                            type: 'text',
-                            text: `Error: Swarm uses SQLite database (swarm.db), not JSON. Use swarm-specific APIs to modify state.`
-                        }],
-                    isError: true
-                };
-            }
             // Determine state path based on session_id
             let statePath;
             if (sessionId) {

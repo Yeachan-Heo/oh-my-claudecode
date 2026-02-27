@@ -24,13 +24,10 @@ describe('Consolidation contracts', () => {
         });
     });
     describe('Alias fidelity contracts', () => {
-        it('keeps alias skills pointing to canonical implementations', () => {
+        it('swarm alias was removed in #1131', () => {
             const swarm = getBuiltinSkill('swarm');
-            const team = getBuiltinSkill('team');
-            // swarm is an alias defined in team/SKILL.md frontmatter
-            expect(swarm).toBeDefined();
-            expect(swarm?.template.includes('/oh-my-claudecode:team') ||
-                swarm?.template === team?.template).toBe(true);
+            // swarm alias removed from team/SKILL.md in #1131
+            expect(swarm).toBeUndefined();
         });
         it('keeps native-command collisions prefixed to omc-* names', () => {
             const names = listBuiltinSkillNames();
@@ -45,7 +42,7 @@ describe('Consolidation contracts', () => {
         });
         it('hides deprecated compatibility aliases from default listings', () => {
             const names = listBuiltinSkillNames();
-            expect(names).not.toContain('swarm');
+            expect(names).not.toContain('swarm'); // removed in #1131
             expect(names).not.toContain('psm');
         });
     });

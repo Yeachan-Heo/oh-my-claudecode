@@ -11,6 +11,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -30,7 +31,7 @@ export function getProgressPath(directory) {
  * Get the path to progress.txt in .omc subdirectory
  */
 export function getOmcProgressPath(directory) {
-    return join(directory, '.omc', PROGRESS_FILENAME);
+    return join(getOmcRoot(directory), PROGRESS_FILENAME);
 }
 /**
  * Find progress.txt in a directory (checks both root and .omc)
@@ -169,7 +170,7 @@ export function readProgress(directory) {
  * Initialize a new progress.txt file
  */
 export function initProgress(directory) {
-    const omcDir = join(directory, '.omc');
+    const omcDir = getOmcRoot(directory);
     if (!existsSync(omcDir)) {
         try {
             mkdirSync(omcDir, { recursive: true });

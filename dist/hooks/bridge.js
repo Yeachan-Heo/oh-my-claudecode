@@ -15,9 +15,9 @@
 import { pathToFileURL } from 'url';
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
+import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN, detectDeprecatedKeywords } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import { addBackgroundTask, getRunningTaskCount, } from "../hud/background-tasks.js";
@@ -43,7 +43,7 @@ const TEAM_TERMINAL_VALUES = new Set([
     "done",
 ]);
 function readTeamStagedState(directory, sessionId) {
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = join(getOmcRoot(directory), "state");
     const statePaths = sessionId
         ? [
             join(stateDir, "sessions", sessionId, "team-state.json"),
@@ -166,6 +166,11 @@ async function processKeywordDetector(input) {
     const sessionId = input.sessionId;
     const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
+    // Check for deprecated keywords and emit warnings (#1131)
+    const deprecationWarnings = detectDeprecatedKeywords(cleanedText);
+    if (deprecationWarnings.length > 0) {
+        messages.push(...deprecationWarnings);
+    }
     // Record prompt submission time in HUD state
     try {
         const hudState = readHudState(directory) || {
@@ -272,7 +277,6 @@ async function processKeywordDetector(input) {
             case "cancel":
             case "autopilot":
             case "team":
-            case "pipeline":
             case "ralplan":
             case "tdd":
                 messages.push(`[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`);
@@ -353,7 +357,7 @@ async function processPersistentMode(input) {
                 _openclaw.wake("stop", { sessionId, projectPath: directory });
                 // Per-session cooldown: prevent notification spam when the session idles repeatedly.
                 // Uses session-scoped state so one session does not suppress another.
-                const stateDir = join(directory, ".omc", "state");
+                const stateDir = join(getOmcRoot(directory), "state");
                 if (shouldSendIdleNotification(stateDir, sessionId)) {
                     recordIdleNotificationSent(stateDir, sessionId);
                     import("../notifications/index.js").then(({ notify }) => notify("session-idle", {
@@ -634,6 +638,19 @@ function processPreToolUse(input) {
             message: enforcementResult.message,
         };
     }
+    // Force-inherit: strip `model` parameter from Task calls so agents inherit
+    // the user's Claude Code model setting instead of OMC per-agent routing (issue #1135)
+    let forceInheritInput;
+    if (input.toolName === "Task") {
+        const taskInput = input.toolInput;
+        if (taskInput?.model) {
+            const config = loadConfig();
+            if (config.routing?.forceInherit) {
+                const { model: _stripped, ...rest } = taskInput;
+                forceInheritInput = rest;
+            }
+        }
+    }
     // Notify when AskUserQuestion is about to execute (issue #597)
     // Fire-and-forget: notify users that input is needed BEFORE the tool blocks
     if (input.toolName === "AskUserQuestion" && input.sessionId) {
@@ -744,6 +761,7 @@ function processPreToolUse(input) {
             return {
                 continue: true,
                 message: combined,
+                ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
             };
         }
     }
@@ -758,6 +776,7 @@ function processPreToolUse(input) {
     return {
         continue: true,
         ...(enforcementResult.message ? { message: enforcementResult.message } : {}),
+        ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
     };
 }
 /**

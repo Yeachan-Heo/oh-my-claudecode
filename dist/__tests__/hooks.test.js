@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import { execSync } from 'child_process';
-// Mock isTeamEnabled so team/ultrapilot/swarm keywords are detected in CI
+// Mock isTeamEnabled so team keywords are detected in CI
 vi.mock('../features/auto-update.js', async (importOriginal) => {
     const actual = await importOriginal();
     return {
@@ -11,7 +11,7 @@ vi.mock('../features/auto-update.js', async (importOriginal) => {
         isTeamEnabled: () => true,
     };
 });
-import { extractPromptText, removeCodeBlocks, detectKeywordsWithType, hasKeyword, getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
+import { extractPromptText, removeCodeBlocks, detectKeywordsWithType, detectDeprecatedKeywords, hasKeyword, getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
 import { formatTodoStatus, getNextPendingTodo } from '../hooks/todo-continuation/index.js';
 import { resetTodoContinuationAttempts } from '../hooks/persistent-mode/index.js';
 import { startUltraQA, clearUltraQAState, isRalphLoopActive } from '../hooks/ultraqa/index.js';
@@ -194,51 +194,32 @@ describe('Keyword Detector', () => {
                 expect(detected[0].keyword).toBe(term);
             }
         });
-        it('should route legacy ultrapilot keyword to team (with dual-emission)', () => {
+        it('should not detect deprecated ultrapilot keyword (#1131)', () => {
             const detected = detectKeywordsWithType('use ultrapilot for this');
-            expect(detected).toHaveLength(2);
-            expect(detected[0].type).toBe('ultrapilot');
-            expect(detected[1].type).toBe('team');
-            expect(detected[0].keyword).toBe('ultrapilot');
+            expect(detected).toHaveLength(0);
         });
-        it('should route legacy ultrapilot patterns to team', () => {
-            const patterns = [
-                'ultrapilot this project',
-                'parallel build the app',
-                'swarm build the system'
-            ];
-            for (const pattern of patterns) {
-                const detected = detectKeywordsWithType(pattern);
-                expect(detected.length).toBeGreaterThan(0);
-                const hasTeam = detected.some(d => d.type === 'team');
-                expect(hasTeam).toBe(true);
-            }
+        it('should emit deprecation warning for ultrapilot (#1131)', () => {
+            const warnings = detectDeprecatedKeywords('use ultrapilot for this');
+            expect(warnings.length).toBeGreaterThan(0);
+            expect(warnings[0]).toContain('DEPRECATED');
         });
-        it('should route legacy swarm keyword to team (with dual-emission)', () => {
+        it('should not detect deprecated swarm keyword (#1131)', () => {
             const detected = detectKeywordsWithType('swarm 5 agents to fix this');
-            expect(detected).toHaveLength(2);
-            expect(detected[0].type).toBe('swarm');
-            expect(detected[1].type).toBe('team');
-            expect(detected[0].keyword).toBe('swarm 5 agents');
+            expect(detected).toHaveLength(0);
         });
-        it('should route coordinated agents pattern to team (with dual-emission)', () => {
-            const detected = detectKeywordsWithType('use coordinated agents');
-            expect(detected).toHaveLength(2);
-            expect(detected[0].type).toBe('swarm');
-            expect(detected[1].type).toBe('team');
-            expect(detected[0].keyword).toBe('coordinated agents');
+        it('should emit deprecation warning for swarm (#1131)', () => {
+            const warnings = detectDeprecatedKeywords('swarm 5 agents to fix this');
+            expect(warnings.length).toBeGreaterThan(0);
+            expect(warnings[0]).toContain('DEPRECATED');
         });
-        it('should detect pipeline keyword', () => {
+        it('should not detect deprecated pipeline keyword (#1131)', () => {
             const detected = detectKeywordsWithType('use agent pipeline for this');
-            expect(detected).toHaveLength(1);
-            expect(detected[0].type).toBe('pipeline');
-            expect(detected[0].keyword).toBe('agent pipeline');
+            expect(detected).toHaveLength(0);
         });
-        it('should detect chain agents pattern', () => {
-            const detected = detectKeywordsWithType('chain agents together');
-            expect(detected).toHaveLength(1);
-            expect(detected[0].type).toBe('pipeline');
-            expect(detected[0].keyword).toBe('chain agents');
+        it('should emit deprecation warning for pipeline (#1131)', () => {
+            const warnings = detectDeprecatedKeywords('use agent pipeline for this');
+            expect(warnings.length).toBeGreaterThan(0);
+            expect(warnings[0]).toContain('DEPRECATED');
         });
         it('should detect ralplan keyword', () => {
             const detected = detectKeywordsWithType('ralplan this feature');
@@ -440,20 +421,17 @@ describe('Keyword Detector', () => {
             expect(ralphMatch).toBeDefined();
             expect(ralphMatch.keyword).toBe('ralph');
         });
-        it('should prioritize ultrapilot for legacy ultrapilot trigger', () => {
+        it('should return null for deprecated ultrapilot (#1131)', () => {
             const primary = getPrimaryKeyword('ultrapilot this task');
-            expect(primary).not.toBeNull();
-            expect(primary.type).toBe('ultrapilot');
+            expect(primary).toBeNull();
         });
-        it('should prioritize team for legacy swarm trigger', () => {
+        it('should return null for deprecated swarm (#1131)', () => {
             const primary = getPrimaryKeyword('swarm 5 agents for this');
-            expect(primary).not.toBeNull();
-            expect(primary.type).toBe('team');
+            expect(primary).toBeNull();
         });
-        it('should prioritize pipeline correctly', () => {
+        it('should return null for deprecated pipeline (#1131)', () => {
             const primary = getPrimaryKeyword('agent pipeline the task');
-            expect(primary).not.toBeNull();
-            expect(primary.type).toBe('pipeline');
+            expect(primary).toBeNull();
         });
         it('should prioritize ralplan over plan', () => {
             const primary = getPrimaryKeyword('ralplan this project');

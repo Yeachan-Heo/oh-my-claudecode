@@ -72,6 +72,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   routing: {
     enabled: true,
     defaultTier: 'MEDIUM',
+    forceInherit: false,
     escalationEnabled: true,
     maxEscalations: 2,
     tierModels: {
@@ -243,6 +244,13 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     config.routing = {
       ...config.routing,
       enabled: process.env.OMC_ROUTING_ENABLED === 'true'
+    };
+  }
+
+  if (process.env.OMC_ROUTING_FORCE_INHERIT !== undefined) {
+    config.routing = {
+      ...config.routing,
+      forceInherit: process.env.OMC_ROUTING_FORCE_INHERIT === 'true'
     };
   }
 
@@ -513,6 +521,15 @@ export function generateConfigSchema(): object {
           search: { type: 'array', items: { type: 'string' } },
           analyze: { type: 'array', items: { type: 'string' } },
           ultrathink: { type: 'array', items: { type: 'string' } }
+        }
+      },
+      routing: {
+        type: 'object',
+        description: 'Intelligent model routing configuration',
+        properties: {
+          enabled: { type: 'boolean', default: true, description: 'Enable intelligent model routing' },
+          defaultTier: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM', description: 'Default tier when no rules match' },
+          forceInherit: { type: 'boolean', default: false, description: 'Force all agents to inherit the parent model, bypassing OMC model routing. When true, no model parameter is passed to Task calls, so agents use the user\'s Claude Code model setting.' },
         }
       },
       externalModels: {

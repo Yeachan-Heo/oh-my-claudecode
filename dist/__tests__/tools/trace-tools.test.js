@@ -6,9 +6,13 @@ import { appendReplayEvent, resetSessionStartTimes, detectCycles } from '../../h
 import { traceTimelineTool, traceSummaryTool } from '../../tools/trace-tools.js';
 // Mock validateWorkingDirectory to return our test directory
 let testDir;
-vi.mock('../../lib/worktree-paths.js', () => ({
-    validateWorkingDirectory: (dir) => dir || testDir,
-}));
+vi.mock('../../lib/worktree-paths.js', async () => {
+    const { join } = await import('path');
+    return {
+        validateWorkingDirectory: (dir) => dir || testDir,
+        getOmcRoot: (dir) => join(dir || testDir, '.omc'),
+    };
+});
 describe('trace-tools', () => {
     beforeEach(() => {
         testDir = join(tmpdir(), `trace-tools-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

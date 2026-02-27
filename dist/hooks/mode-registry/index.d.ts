@@ -11,13 +11,6 @@
 import type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from './types.js';
 export type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from './types.js';
 /**
- * Stale marker threshold (1 hour)
- * Markers older than this are auto-removed to prevent crashed sessions from blocking indefinitely.
- * NOTE: We cannot check database activity here due to circular dependency constraints.
- * Legitimate long-running swarms (>1 hour) may have markers removed - acceptable trade-off.
- */
-export declare const STALE_MARKER_THRESHOLD: number;
-/**
  * Mode configuration registry
  *
  * Maps each mode to its state file location and detection method.
@@ -140,8 +133,6 @@ export declare function clearStaleSessionDirs(cwd: string, maxAgeMs?: number): s
 /**
  * Create a marker file to indicate a mode is active
  *
- * Called when starting a SQLite-based mode (like swarm).
- *
  * @param mode - The mode being started
  * @param cwd - Working directory
  * @param metadata - Optional metadata to store in marker
@@ -149,8 +140,6 @@ export declare function clearStaleSessionDirs(cwd: string, maxAgeMs?: number): s
 export declare function createModeMarker(mode: ExecutionMode, cwd: string, metadata?: Record<string, unknown>): boolean;
 /**
  * Remove a marker file to indicate a mode has stopped
- *
- * Called when stopping a SQLite-based mode (like swarm).
  *
  * @param mode - The mode being stopped
  * @param cwd - Working directory

@@ -65,6 +65,7 @@ export const DEFAULT_CONFIG = {
     routing: {
         enabled: true,
         defaultTier: 'MEDIUM',
+        forceInherit: false,
         escalationEnabled: true,
         maxEscalations: 2,
         tierModels: {
@@ -217,6 +218,12 @@ export function loadEnvConfig() {
         config.routing = {
             ...config.routing,
             enabled: process.env.OMC_ROUTING_ENABLED === 'true'
+        };
+    }
+    if (process.env.OMC_ROUTING_FORCE_INHERIT !== undefined) {
+        config.routing = {
+            ...config.routing,
+            forceInherit: process.env.OMC_ROUTING_FORCE_INHERIT === 'true'
         };
     }
     if (process.env.OMC_ROUTING_DEFAULT_TIER) {
@@ -464,14 +471,13 @@ export function generateConfigSchema() {
                     ultrathink: { type: 'array', items: { type: 'string' } }
                 }
             },
-            swarm: {
+            routing: {
                 type: 'object',
-                description: 'Swarm mode settings',
+                description: 'Intelligent model routing configuration',
                 properties: {
-                    defaultMaxConcurrent: { type: 'integer', default: 5, minimum: 1, maximum: 50 },
-                    wavePollingInterval: { type: 'integer', default: 5000, minimum: 1000, maximum: 30000 },
-                    aggressiveThreshold: { type: 'integer', default: 5 },
-                    enableFileOwnership: { type: 'boolean', default: true }
+                    enabled: { type: 'boolean', default: true, description: 'Enable intelligent model routing' },
+                    defaultTier: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM', description: 'Default tier when no rules match' },
+                    forceInherit: { type: 'boolean', default: false, description: 'Force all agents to inherit the parent model, bypassing OMC model routing. When true, no model parameter is passed to Task calls, so agents use the user\'s Claude Code model setting.' },
                 }
             },
             externalModels: {

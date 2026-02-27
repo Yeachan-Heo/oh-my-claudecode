@@ -187,18 +187,11 @@ export function resolveOmcPath(relativePath, worktreeRoot) {
  * State files follow the naming convention: {mode}-state.json
  * Examples: ralph-state.json, ultrawork-state.json, autopilot-state.json
  *
- * Special case: swarm uses swarm.db (SQLite), not swarm-state.json.
- * This function is for JSON state files only. For swarm, use getStateFilePath from mode-registry.
- *
  * @param stateName - State name (e.g., "ralph", "ultrawork", or "ralph-state")
  * @param worktreeRoot - Optional worktree root
  * @returns Absolute path to state file
  */
 export function resolveStatePath(stateName, worktreeRoot) {
-    // Special case: swarm uses swarm.db, not swarm-state.json
-    if (stateName === 'swarm' || stateName === 'swarm-state') {
-        throw new Error('Swarm uses SQLite (swarm.db), not JSON state. Use getStateFilePath from mode-registry instead.');
-    }
     // Normalize: ensure -state suffix is present, then add .json
     const normalizedName = stateName.endsWith('-state') ? stateName : `${stateName}-state`;
     return resolveOmcPath(`state/${normalizedName}.json`, worktreeRoot);
@@ -362,10 +355,6 @@ export function validateSessionId(sessionId) {
  */
 export function resolveSessionStatePath(stateName, sessionId, worktreeRoot) {
     validateSessionId(sessionId);
-    // Special case: swarm uses SQLite, not session-scoped JSON
-    if (stateName === 'swarm' || stateName === 'swarm-state') {
-        throw new Error('Swarm uses SQLite (swarm.db), not session-scoped JSON state.');
-    }
     const normalizedName = stateName.endsWith('-state') ? stateName : `${stateName}-state`;
     return resolveOmcPath(`state/sessions/${sessionId}/${normalizedName}.json`, worktreeRoot);
 }

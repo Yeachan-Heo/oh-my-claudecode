@@ -21420,9 +21420,6 @@ function resolveOmcPath(relativePath, worktreeRoot) {
   return fullPath;
 }
 function resolveStatePath(stateName, worktreeRoot) {
-  if (stateName === "swarm" || stateName === "swarm-state") {
-    throw new Error("Swarm uses SQLite (swarm.db), not JSON state. Use getStateFilePath from mode-registry instead.");
-  }
   const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
   return resolveOmcPath(`state/${normalizedName}.json`, worktreeRoot);
 }
@@ -21453,9 +21450,6 @@ function validateSessionId(sessionId) {
 }
 function resolveSessionStatePath(stateName, sessionId, worktreeRoot) {
   validateSessionId(sessionId);
-  if (stateName === "swarm" || stateName === "swarm-state") {
-    throw new Error("Swarm uses SQLite (swarm.db), not session-scoped JSON state.");
-  }
   const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
   return resolveOmcPath(`state/sessions/${sessionId}/${normalizedName}.json`, worktreeRoot);
 }
@@ -21532,9 +21526,6 @@ var import_path8 = require("path");
 // src/lib/mode-names.ts
 var MODE_NAMES = {
   AUTOPILOT: "autopilot",
-  ULTRAPILOT: "ultrapilot",
-  SWARM: "swarm",
-  PIPELINE: "pipeline",
   TEAM: "team",
   RALPH: "ralph",
   ULTRAWORK: "ultrawork",
@@ -21542,9 +21533,6 @@ var MODE_NAMES = {
 };
 var ALL_MODE_NAMES = [
   MODE_NAMES.AUTOPILOT,
-  MODE_NAMES.ULTRAPILOT,
-  MODE_NAMES.SWARM,
-  MODE_NAMES.PIPELINE,
   MODE_NAMES.TEAM,
   MODE_NAMES.RALPH,
   MODE_NAMES.ULTRAWORK,
@@ -21552,9 +21540,6 @@ var ALL_MODE_NAMES = [
 ];
 var MODE_STATE_FILE_MAP = {
   [MODE_NAMES.AUTOPILOT]: "autopilot-state.json",
-  [MODE_NAMES.ULTRAPILOT]: "ultrapilot-state.json",
-  [MODE_NAMES.SWARM]: "swarm.db",
-  [MODE_NAMES.PIPELINE]: "pipeline-state.json",
   [MODE_NAMES.TEAM]: "team-state.json",
   [MODE_NAMES.RALPH]: "ralph-state.json",
   [MODE_NAMES.ULTRAWORK]: "ultrawork-state.json",
@@ -21562,47 +21547,21 @@ var MODE_STATE_FILE_MAP = {
 };
 var SESSION_END_MODE_STATE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT], mode: MODE_NAMES.ULTRAPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE], mode: MODE_NAMES.PIPELINE },
-  // Swarm uses marker file + SQLite
-  { file: "swarm-active.marker", mode: MODE_NAMES.SWARM },
-  { file: "swarm-summary.json", mode: MODE_NAMES.SWARM }
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA }
 ];
 var SESSION_METRICS_MODE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT], mode: MODE_NAMES.ULTRAPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
-  { file: "swarm-state.json", mode: MODE_NAMES.SWARM },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE], mode: MODE_NAMES.PIPELINE }
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK }
 ];
 
 // src/hooks/mode-registry/index.ts
-var STALE_MARKER_THRESHOLD = 60 * 60 * 1e3;
 var MODE_CONFIGS = {
   [MODE_NAMES.AUTOPILOT]: {
     name: "Autopilot",
     stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT],
-    activeProperty: "active"
-  },
-  [MODE_NAMES.ULTRAPILOT]: {
-    name: "Ultrapilot",
-    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT],
-    markerFile: "ultrapilot-ownership.json",
-    activeProperty: "active"
-  },
-  [MODE_NAMES.SWARM]: {
-    name: "Swarm",
-    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.SWARM],
-    markerFile: "swarm-active.marker",
-    isSqlite: true
-  },
-  [MODE_NAMES.PIPELINE]: {
-    name: "Pipeline",
-    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE],
     activeProperty: "active"
   },
   [MODE_NAMES.TEAM]: {
@@ -21630,13 +21589,13 @@ var MODE_CONFIGS = {
     activeProperty: "active"
   }
 };
-var EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT, MODE_NAMES.ULTRAPILOT, MODE_NAMES.SWARM, MODE_NAMES.PIPELINE];
+var EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT];
 function getStateDir(cwd) {
-  return (0, import_path8.join)(cwd, ".omc", "state");
+  return (0, import_path8.join)(getOmcRoot(cwd), "state");
 }
 function getStateFilePath(cwd, mode, sessionId) {
   const config2 = MODE_CONFIGS[mode];
-  if (sessionId && !config2.isSqlite) {
+  if (sessionId) {
     return resolveSessionStatePath(mode, sessionId, cwd);
   }
   return (0, import_path8.join)(getStateDir(cwd), config2.stateFile);
@@ -21648,7 +21607,7 @@ function getMarkerFilePath(cwd, mode) {
 }
 function isJsonModeActive(cwd, mode, sessionId) {
   const config2 = MODE_CONFIGS[mode];
-  if (sessionId && !config2.isSqlite) {
+  if (sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     if (!(0, import_fs8.existsSync)(sessionStateFile)) {
       return false;
@@ -21682,34 +21641,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
     return false;
   }
 }
-function isSqliteModeActive(cwd, mode) {
-  const markerPath = getMarkerFilePath(cwd, mode);
-  if (markerPath && (0, import_fs8.existsSync)(markerPath)) {
-    try {
-      const content = (0, import_fs8.readFileSync)(markerPath, "utf-8");
-      const marker = JSON.parse(content);
-      if (marker.startedAt) {
-        const startTime = new Date(marker.startedAt).getTime();
-        const age = Date.now() - startTime;
-        if (age > STALE_MARKER_THRESHOLD) {
-          console.warn(`Stale ${mode} marker detected (${Math.round(age / 6e4)} min old). Auto-removing.`);
-          (0, import_fs8.unlinkSync)(markerPath);
-          return false;
-        }
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  const dbPath = getStateFilePath(cwd, mode);
-  return (0, import_fs8.existsSync)(dbPath);
-}
 function isModeActive(mode, cwd, sessionId) {
-  const config2 = MODE_CONFIGS[mode];
-  if (config2.isSqlite) {
-    return isSqliteModeActive(cwd, mode);
-  }
   return isJsonModeActive(cwd, mode, sessionId);
 }
 function getActiveModes(cwd, sessionId) {
@@ -21732,7 +21664,7 @@ function clearModeState(mode, cwd, sessionId) {
   const config2 = MODE_CONFIGS[mode];
   let success = true;
   const markerFile = getMarkerFilePath(cwd, mode);
-  const isSessionScopedClear = Boolean(sessionId && !config2.isSqlite);
+  const isSessionScopedClear = Boolean(sessionId);
   if (isSessionScopedClear && sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     try {
@@ -21786,20 +21718,6 @@ function clearModeState(mode, cwd, sessionId) {
         success = false;
       }
     }
-    if (config2.isSqlite) {
-      const walFile = stateFile + "-wal";
-      const shmFile = stateFile + "-shm";
-      try {
-        (0, import_fs8.unlinkSync)(walFile);
-      } catch (e) {
-        if (e.code !== "ENOENT") success = false;
-      }
-      try {
-        (0, import_fs8.unlinkSync)(shmFile);
-      } catch (e) {
-        if (e.code !== "ENOENT") success = false;
-      }
-    }
   }
   if (markerFile) {
     if (isSessionScopedClear) {
@@ -21837,10 +21755,6 @@ function clearModeState(mode, cwd, sessionId) {
   return success;
 }
 function getActiveSessionsForMode(mode, cwd) {
-  const config2 = MODE_CONFIGS[mode];
-  if (config2.isSqlite) {
-    return [];
-  }
   const sessionIds = listSessionIds(cwd);
   return sessionIds.filter((sid) => isJsonModeActive(cwd, mode, sid));
 }
@@ -21848,9 +21762,6 @@ function getActiveSessionsForMode(mode, cwd) {
 // src/tools/state-tools.ts
 var EXECUTION_MODES = [
   "autopilot",
-  "ultrapilot",
-  "swarm",
-  "pipeline",
   "team",
   "ralph",
   "ultrawork",
@@ -21877,28 +21788,6 @@ var stateReadTool = {
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id;
-      if (mode === "swarm") {
-        const statePath2 = getStatePath(mode, root);
-        if (!(0, import_fs9.existsSync)(statePath2)) {
-          return {
-            content: [{
-              type: "text",
-              text: `No state found for mode: swarm
-Note: Swarm uses SQLite (swarm.db), not JSON. Expected path: ${statePath2}`
-            }]
-          };
-        }
-        return {
-          content: [{
-            type: "text",
-            text: `## State for swarm
-
-Path: ${statePath2}
-
-Note: Swarm uses SQLite database. Use swarm-specific tools to query state.`
-          }]
-        };
-      }
       if (sessionId) {
         validateSessionId(sessionId);
         const statePath2 = MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sessionId) : resolveSessionStatePath(mode, sessionId, root);
@@ -22053,15 +21942,6 @@ var stateWriteTool = {
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id;
-      if (mode === "swarm") {
-        return {
-          content: [{
-            type: "text",
-            text: `Error: Swarm uses SQLite database (swarm.db), not JSON. Use swarm-specific APIs to modify state.`
-          }],
-          isError: true
-        };
-      }
       let statePath;
       if (sessionId) {
         validateSessionId(sessionId);
@@ -22541,10 +22421,10 @@ var PRIORITY_HEADER = "## Priority Context";
 var WORKING_MEMORY_HEADER = "## Working Memory";
 var MANUAL_HEADER = "## MANUAL";
 function getNotepadPath(directory) {
-  return (0, import_path9.join)(directory, ".omc", NOTEPAD_FILENAME);
+  return (0, import_path9.join)(getOmcRoot(directory), NOTEPAD_FILENAME);
 }
 function initNotepad(directory) {
-  const omcDir = (0, import_path9.join)(directory, ".omc");
+  const omcDir = getOmcRoot(directory);
   if (!(0, import_fs10.existsSync)(omcDir)) {
     try {
       (0, import_fs10.mkdirSync)(omcDir, { recursive: true });
@@ -23503,7 +23383,7 @@ var import_path16 = require("path");
 var REPLAY_PREFIX = "agent-replay-";
 var MAX_REPLAY_SIZE_BYTES = 5 * 1024 * 1024;
 function getReplayFilePath(directory, sessionId) {
-  const stateDir = (0, import_path16.join)(directory, ".omc", "state");
+  const stateDir = (0, import_path16.join)(getOmcRoot(directory), "state");
   if (!(0, import_fs12.existsSync)(stateDir)) {
     (0, import_fs12.mkdirSync)(stateDir, { recursive: true });
   }

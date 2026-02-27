@@ -14,7 +14,7 @@ import { join } from "path";
 import { readPrd, getPrdStatus, formatNextStoryPrompt, formatPrdStatus, } from "./prd.js";
 import { getProgressContext, appendProgress, initProgress, addPattern, } from "./progress.js";
 import { readUltraworkState as readUltraworkStateFromModule, writeUltraworkState as writeUltraworkStateFromModule, } from "../ultrawork/index.js";
-import { resolveSessionStatePath, ensureSessionStateDir } from "../../lib/worktree-paths.js";
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
 // Forward declaration to avoid circular import - check ultraqa state file directly
 export function isUltraQAActive(directory, sessionId) {
@@ -34,7 +34,7 @@ export function isUltraQAActive(directory, sessionId) {
         }
     }
     // No sessionId: legacy path (backward compat)
-    const omcDir = join(directory, ".omc");
+    const omcDir = getOmcRoot(directory);
     const stateFile = join(omcDir, "state", "ultraqa-state.json");
     if (!existsSync(stateFile)) {
         return false;
@@ -56,7 +56,7 @@ function getStateFilePath(directory, sessionId) {
     if (sessionId) {
         return resolveSessionStatePath('ralph', sessionId, directory);
     }
-    const omcDir = join(directory, ".omc");
+    const omcDir = getOmcRoot(directory);
     return join(omcDir, "state", "ralph-state.json");
 }
 /**
@@ -67,7 +67,7 @@ function ensureStateDir(directory, sessionId) {
         ensureSessionStateDir(sessionId, directory);
         return;
     }
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = join(getOmcRoot(directory), "state");
     if (!existsSync(stateDir)) {
         mkdirSync(stateDir, { recursive: true });
     }
@@ -162,7 +162,7 @@ export function clearLinkedUltraworkState(directory, sessionId) {
         }
     }
     // Fallback to legacy path
-    const omcDir = join(directory, ".omc");
+    const omcDir = getOmcRoot(directory);
     const stateFile = join(omcDir, "state", "ultrawork-state.json");
     try {
         unlinkSync(stateFile);

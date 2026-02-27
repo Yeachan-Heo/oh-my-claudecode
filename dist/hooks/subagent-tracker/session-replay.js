@@ -8,6 +8,7 @@
  */
 import { existsSync, appendFileSync, readFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -23,7 +24,7 @@ const sessionStartTimes = new Map();
  * Get the replay file path for a session
  */
 export function getReplayFilePath(directory, sessionId) {
-    const stateDir = join(directory, '.omc', 'state');
+    const stateDir = join(getOmcRoot(directory), 'state');
     if (!existsSync(stateDir)) {
         mkdirSync(stateDir, { recursive: true });
     }
@@ -354,7 +355,7 @@ export function getReplaySummary(directory, sessionId) {
  * Clean up old replay files, keeping only the most recent ones
  */
 export function cleanupReplayFiles(directory) {
-    const stateDir = join(directory, '.omc', 'state');
+    const stateDir = join(getOmcRoot(directory), 'state');
     if (!existsSync(stateDir))
         return 0;
     try {

@@ -172,6 +172,12 @@ export interface RoutingConfig {
   enabled: boolean;
   /** Default tier when no rules match */
   defaultTier: ComplexityTier;
+  /**
+   * Force all agents to inherit the parent model, bypassing all routing.
+   * When true, routeTask returns 'inherit' model type so no model parameter
+   * is passed to Task calls.
+   */
+  forceInherit?: boolean;
   /** Minimum tier to allow (e.g. disable LOW tier by setting minTier to MEDIUM) */
   minTier?: ComplexityTier;
   /** Whether automatic escalation is enabled */

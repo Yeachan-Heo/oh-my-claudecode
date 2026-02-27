@@ -8,8 +8,9 @@
  * - HUD integration for agent status display
  * - Automatic cleanup of orphaned agent state
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, } from "fs";
 import { join } from "path";
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { recordAgentStart, recordAgentStop } from './session-replay.js';
 export const COST_LIMIT_USD = 1.0;
 export const DEADLOCK_CHECK_THRESHOLD = 3;
@@ -110,8 +111,8 @@ export function mergeTrackerStates(diskState, pendingState) {
  * Acquire file lock with timeout and stale lock detection
  */
 function acquireLock(directory) {
-    const lockPath = join(directory, ".omc", "state", "subagent-tracker.lock");
-    const lockDir = join(directory, ".omc", "state");
+    const lockPath = join(getOmcRoot(directory), "state", "subagent-tracker.lock");
+    const lockDir = join(getOmcRoot(directory), "state");
     if (!existsSync(lockDir)) {
         mkdirSync(lockDir, { recursive: true });
     }
@@ -183,7 +184,7 @@ function acquireLock(directory) {
  * Release file lock
  */
 function releaseLock(directory) {
-    const lockPath = join(directory, ".omc", "state", "subagent-tracker.lock");
+    const lockPath = join(getOmcRoot(directory), "state", "subagent-tracker.lock");
     try {
         unlinkSync(lockPath);
     }
@@ -195,7 +196,7 @@ function releaseLock(directory) {
  * Get the state file path
  */
 export function getStateFilePath(directory) {
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = join(getOmcRoot(directory), "state");
     if (!existsSync(stateDir)) {
         mkdirSync(stateDir, { recursive: true });
     }
@@ -351,35 +352,22 @@ export function flushPendingWrites() {
  * Detect the current parent mode from state files
  */
 function detectParentMode(directory) {
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = join(getOmcRoot(directory), "state");
     if (!existsSync(stateDir)) {
         return "none";
     }
     // Check in order of specificity
     const modeFiles = [
-        { file: "ultrapilot-state.json", mode: "ultrapilot" },
         { file: "autopilot-state.json", mode: "autopilot" },
-        { file: "swarm.db", mode: "swarm" },
         { file: "ultrawork-state.json", mode: "ultrawork" },
         { file: "ralph-state.json", mode: "ralph" },
+        { file: "team-state.json", mode: "team" },
     ];
     for (const { file, mode } of modeFiles) {
         const filePath = join(stateDir, file);
         if (existsSync(filePath)) {
-            // Special case for swarm.db - just check existence and size
-            if (file === 'swarm.db') {
-                try {
-                    const stats = statSync(filePath);
-                    if (stats.size > 0) {
-                        return mode;
-                    }
-                }
-                catch {
-                    continue;
-                }
-            }
-            else {
-                // JSON file check (existing logic)
+            {
+                // JSON file check
                 try {
                     const content = readFileSync(filePath, "utf-8");
                     const state = JSON.parse(content);

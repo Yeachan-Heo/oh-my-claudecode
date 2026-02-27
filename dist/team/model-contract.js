@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { resolvedEnv } from './shell-path.js';
 import { validateTeamName } from './team-name.js';
 const CONTRACTS = {
     claude: {
@@ -75,7 +76,11 @@ export function getContract(agentType) {
 export function isCliAvailable(agentType) {
     const contract = getContract(agentType);
     try {
-        const result = spawnSync(contract.binary, ['--version'], { timeout: 5000, shell: true });
+        const result = spawnSync(contract.binary, ['--version'], {
+            timeout: 5000,
+            shell: true,
+            env: resolvedEnv(),
+        });
         return result.status === 0;
     }
     catch {

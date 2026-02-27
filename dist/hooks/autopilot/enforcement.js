@@ -13,6 +13,7 @@ import { OmcPaths } from '../../lib/worktree-paths.js';
 import { readAutopilotState, writeAutopilotState, transitionPhase, transitionRalphToUltraQA, transitionUltraQAToValidation, transitionToComplete } from './state.js';
 import { getPhasePrompt } from './prompts.js';
 import { readLastToolError, getToolErrorRetryGuidance } from '../persistent-mode/index.js';
+import { readPipelineTracking, hasPipelineTracking, getCurrentStageAdapter, getCurrentCompletionSignal, advanceStage, incrementStageIteration, generateTransitionPrompt, formatPipelineHUD, } from './pipeline.js';
 // ============================================================================
 // SIGNAL DETECTION
 // ============================================================================
@@ -135,6 +136,17 @@ export async function checkAutopilot(sessionId, directory) {
             phase: 'failed'
         };
     }
+    // ====================================================================
+    // PIPELINE-AWARE ENFORCEMENT
+    // If the state has pipeline tracking, use the pipeline orchestrator
+    // for signal detection and stage transitions instead of legacy phases.
+    // ====================================================================
+    if (hasPipelineTracking(state)) {
+        return checkPipelineAutopilot(state, sessionId, workingDir);
+    }
+    // ====================================================================
+    // LEGACY ENFORCEMENT (pre-pipeline states)
+    // ====================================================================
     // Check for phase completion signal
     const expectedSignal = getExpectedSignalForPhase(state.phase);
     if (expectedSignal && sessionId && detectSignal(sessionId, expectedSignal)) {
@@ -223,5 +235,155 @@ IMPORTANT: When the phase is complete, output the appropriate signal:
             toolError: toolError || undefined
         }
     };
+}
+// ============================================================================
+// PIPELINE-AWARE ENFORCEMENT
+// ============================================================================
+/**
+ * Pipeline-aware enforcement for autopilot states that have pipeline tracking.
+ * Uses the pipeline orchestrator for signal detection and stage transitions.
+ */
+function checkPipelineAutopilot(state, sessionId, directory) {
+    const tracking = readPipelineTracking(state);
+    if (!tracking)
+        return null;
+    const currentAdapter = getCurrentStageAdapter(tracking);
+    if (!currentAdapter) {
+        // No more stages — pipeline is complete
+        return {
+            shouldBlock: false,
+            message: '[AUTOPILOT COMPLETE] All pipeline stages finished successfully!',
+            phase: 'complete',
+        };
+    }
+    // Check if the current stage's completion signal has been emitted
+    const completionSignal = getCurrentCompletionSignal(tracking);
+    if (completionSignal && sessionId && detectPipelineSignal(sessionId, completionSignal)) {
+        // Current stage complete — advance to next stage
+        const { adapter: nextAdapter, phase: nextPhase } = advanceStage(directory, sessionId);
+        if (!nextAdapter || nextPhase === 'complete') {
+            // Pipeline complete
+            transitionPhase(directory, 'complete', sessionId);
+            return {
+                shouldBlock: false,
+                message: '[AUTOPILOT COMPLETE] All pipeline stages finished successfully!',
+                phase: 'complete',
+            };
+        }
+        if (nextPhase === 'failed') {
+            return {
+                shouldBlock: false,
+                message: '[AUTOPILOT FAILED] Pipeline stage transition failed.',
+                phase: 'failed',
+            };
+        }
+        // Generate transition + next stage prompt
+        const transitionMsg = generateTransitionPrompt(currentAdapter.id, nextAdapter.id);
+        // Re-read tracking to get updated state
+        const updatedState = readAutopilotState(directory, sessionId);
+        const updatedTracking = updatedState ? readPipelineTracking(updatedState) : null;
+        const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : '';
+        const context = {
+            idea: state.originalIdea,
+            directory: state.project_path || directory,
+            sessionId,
+            specPath: state.expansion.spec_path || '.omc/autopilot/spec.md',
+            planPath: state.planning.plan_path || '.omc/plans/autopilot-impl.md',
+            config: tracking.pipelineConfig,
+        };
+        const stagePrompt = nextAdapter.getPrompt(context);
+        return {
+            shouldBlock: true,
+            message: `<autopilot-pipeline-transition>
+${hudLine}
+
+${transitionMsg}
+
+${stagePrompt}
+</autopilot-pipeline-transition>
+
+---
+
+`,
+            phase: state.phase,
+            metadata: {
+                iteration: state.iteration,
+                maxIterations: state.max_iterations,
+            },
+        };
+    }
+    // No signal detected — continue current stage
+    incrementStageIteration(directory, sessionId);
+    const toolError = readLastToolError(directory);
+    const errorGuidance = getToolErrorRetryGuidance(toolError);
+    // Increment overall iteration
+    state.iteration += 1;
+    writeAutopilotState(directory, state, sessionId);
+    const updatedTracking = readPipelineTracking(readAutopilotState(directory, sessionId));
+    const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : '';
+    const context = {
+        idea: state.originalIdea,
+        directory: state.project_path || directory,
+        sessionId,
+        specPath: state.expansion.spec_path || '.omc/autopilot/spec.md',
+        planPath: state.planning.plan_path || '.omc/plans/autopilot-impl.md',
+        config: tracking.pipelineConfig,
+    };
+    const stagePrompt = currentAdapter.getPrompt(context);
+    const continuationPrompt = `<autopilot-pipeline-continuation>
+${errorGuidance ? errorGuidance + '\n' : ''}
+${hudLine}
+
+[AUTOPILOT PIPELINE - STAGE: ${currentAdapter.name.toUpperCase()} | ITERATION ${state.iteration}/${state.max_iterations}]
+
+Your previous response did not signal stage completion. Continue working on the current stage.
+
+${stagePrompt}
+
+IMPORTANT: When this stage is complete, output the signal: ${currentAdapter.completionSignal}
+
+</autopilot-pipeline-continuation>
+
+---
+
+`;
+    return {
+        shouldBlock: true,
+        message: continuationPrompt,
+        phase: state.phase,
+        metadata: {
+            iteration: state.iteration,
+            maxIterations: state.max_iterations,
+            tasksCompleted: state.execution.tasks_completed,
+            tasksTotal: state.execution.tasks_total,
+            toolError: toolError || undefined,
+        },
+    };
+}
+/**
+ * Detect a pipeline-specific signal in the session transcript.
+ */
+function detectPipelineSignal(sessionId, signal) {
+    const claudeDir = getClaudeConfigDir();
+    const possiblePaths = [
+        join(claudeDir, 'sessions', sessionId, 'transcript.md'),
+        join(claudeDir, 'sessions', sessionId, 'messages.json'),
+        join(claudeDir, 'transcripts', `${sessionId}.md`),
+    ];
+    const pattern = new RegExp(signal, 'i');
+    for (const transcriptPath of possiblePaths) {
+        if (existsSync(transcriptPath)) {
+            try {
+                const content = readFileSync(transcriptPath, 'utf-8');
+                if (pattern.test(content)) {
+                    return true;
+                }
+            }
+            catch {
+                continue;
+            }
+        }
+    }
+    return false;
 }
 //# sourceMappingURL=enforcement.js.map

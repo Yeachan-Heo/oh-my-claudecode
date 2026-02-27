@@ -81,9 +81,6 @@ export declare function resolveOmcPath(relativePath: string, worktreeRoot?: stri
  * State files follow the naming convention: {mode}-state.json
  * Examples: ralph-state.json, ultrawork-state.json, autopilot-state.json
  *
- * Special case: swarm uses swarm.db (SQLite), not swarm-state.json.
- * This function is for JSON state files only. For swarm, use getStateFilePath from mode-registry.
- *
  * @param stateName - State name (e.g., "ralph", "ultrawork", or "ralph-state")
  * @param worktreeRoot - Optional worktree root
  * @returns Absolute path to state file
@@ -222,9 +219,10 @@ export declare function resolveToWorktreeRoot(directory?: string): string;
  * But the actual transcript lives at the original project's path:
  *   ~/.claude/projects/-path-to-project/<session>.jsonl
  *
- * Claude Code encodes both `/` and `.` as `-`, so `.claude/worktrees/` becomes
- * `-claude-worktrees-`, preceded by a `-` from the path separator, yielding
- * the distinctive `--claude-worktrees-` pattern in the encoded directory name.
+ * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
+ * separator, yielding the distinctive `--claude-worktrees-` pattern in the
+ * encoded directory name.
  *
  * This function detects the mismatch and resolves to the correct path.
  *

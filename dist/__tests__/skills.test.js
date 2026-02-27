@@ -9,11 +9,12 @@ describe('Builtin Skills', () => {
         it('should return correct number of skills (38)', () => {
             const skills = createBuiltinSkills();
             // 38 skills: analyze, autopilot, build-fix, cancel, ccg, code-review, configure-notifications,
-            // deepinit, omc-doctor, external-context, omc-help, hud, learn-about-omc, learner, mcp-setup,
-            // note, omc-setup, omc-teams, pipeline, omc-plan, project-session-manager, psm, ralph, ralph-init,
-            // ralplan, release, omc-review, sciomc, omc-security-review, skill, swarm, tdd, team, trace,
-            // ultrapilot, ultraqa, ultrawork, writer-memory
-            expect(skills).toHaveLength(39);
+            // configure-openclaw, deepinit, omc-doctor, external-context, omc-help, hud, learn-about-omc,
+            // learner, mcp-setup, note, omc-setup, omc-teams, pipeline, omc-plan, project-session-manager,
+            // psm, ralph, ralph-init, ralplan, release, omc-review, sciomc, omc-security-review, skill,
+            // tdd, team, trace, ultrapilot, ultraqa, ultrawork, writer-memory
+            // (swarm alias removed in #1131)
+            expect(skills).toHaveLength(38);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -87,7 +88,6 @@ describe('Builtin Skills', () => {
                 'sciomc',
                 'omc-security-review',
                 'skill',
-                'swarm',
                 'tdd',
                 'team',
                 'trace',
@@ -147,7 +147,7 @@ describe('Builtin Skills', () => {
             expect(names).toContain('hud');
             expect(names).toContain('note');
             expect(names).toContain('omc-setup');
-            expect(names).not.toContain('swarm');
+            expect(names).not.toContain('swarm'); // removed in #1131
             expect(names).not.toContain('psm');
         });
         it('should return an array of strings', () => {
@@ -158,8 +158,8 @@ describe('Builtin Skills', () => {
         });
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
-            expect(names).toHaveLength(39);
-            expect(names).toContain('swarm');
+            // swarm alias removed in #1131, psm still exists
+            expect(names).not.toContain('swarm');
             expect(names).toContain('psm');
         });
     });

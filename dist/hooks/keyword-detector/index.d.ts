@@ -7,12 +7,16 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 import { type TaskSizeResult } from '../task-size-detector/index.js';
-export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'ultrapilot' | 'team' | 'ultrawork' | 'swarm' | 'pipeline' | 'ralplan' | 'tdd' | 'ultrathink' | 'deepsearch' | 'analyze' | 'codex' | 'gemini' | 'ccg';
+export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'team' | 'ultrawork' | 'ralplan' | 'tdd' | 'ultrathink' | 'deepsearch' | 'analyze' | 'codex' | 'gemini' | 'ccg';
+/** Deprecated keyword types that emit deprecation warnings (removed in #1131). */
+export type DeprecatedKeywordType = 'ultrapilot' | 'swarm' | 'pipeline';
 export interface DetectedKeyword {
     type: KeywordType;
     keyword: string;
     position: number;
 }
+/** Deprecation messages for removed modes. */
+export declare const DEPRECATION_MESSAGES: Record<DeprecatedKeywordType, string>;
 /**
  * Remove code blocks from text to prevent false positives
  * Handles both fenced code blocks and inline code
@@ -37,6 +41,11 @@ export declare function extractPromptText(parts: Array<{
     text?: string;
     [key: string]: unknown;
 }>): string;
+/**
+ * Detect deprecated keywords in text and return deprecation warnings.
+ * Returns an array of deprecation messages for any matched deprecated keywords.
+ */
+export declare function detectDeprecatedKeywords(text: string): string[];
 /**
  * Detect keywords in text and return matches with type info
  */

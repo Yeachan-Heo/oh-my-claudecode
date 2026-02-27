@@ -856,6 +856,20 @@ function processPreToolUse(input: HookInput): HookOutput {
     };
   }
 
+  // Force-inherit: strip `model` parameter from Task calls so agents inherit
+  // the user's Claude Code model setting instead of OMC per-agent routing (issue #1135)
+  let forceInheritInput: Record<string, unknown> | undefined;
+  if (input.toolName === "Task") {
+    const taskInput = input.toolInput as Record<string, unknown> | undefined;
+    if (taskInput?.model) {
+      const config = loadConfig();
+      if (config.routing?.forceInherit) {
+        const { model: _stripped, ...rest } = taskInput;
+        forceInheritInput = rest;
+      }
+    }
+  }
+
   // Notify when AskUserQuestion is about to execute (issue #597)
   // Fire-and-forget: notify users that input is needed BEFORE the tool blocks
   if (input.toolName === "AskUserQuestion" && input.sessionId) {
@@ -1006,6 +1020,7 @@ function processPreToolUse(input: HookInput): HookOutput {
       return {
         continue: true,
         message: combined,
+        ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
       };
     }
   }
@@ -1022,6 +1037,7 @@ function processPreToolUse(input: HookInput): HookOutput {
   return {
     continue: true,
     ...(enforcementResult.message ? { message: enforcementResult.message } : {}),
+    ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
   };
 }
 

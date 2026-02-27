@@ -10,6 +10,7 @@
  * Polls task files, builds prompts, spawns CLI processes, reports results.
  */
 import { spawn, execSync } from 'child_process';
+import { resolvedEnv } from './shell-path.js';
 import { existsSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
@@ -333,6 +334,7 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
     const child = spawn(cmd, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd,
+        env: resolvedEnv(),
         ...(process.platform === 'win32' ? { shell: true } : {})
     });
     const result = new Promise((resolve, reject) => {
