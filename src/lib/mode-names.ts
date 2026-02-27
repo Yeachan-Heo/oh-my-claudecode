@@ -9,13 +9,20 @@
 /** All supported execution mode identifiers. */
 export const MODE_NAMES = {
   AUTOPILOT: 'autopilot',
-  ULTRAPILOT: 'ultrapilot',
-  SWARM: 'swarm',
-  PIPELINE: 'pipeline',
   TEAM: 'team',
   RALPH: 'ralph',
   ULTRAWORK: 'ultrawork',
   ULTRAQA: 'ultraqa',
+} as const;
+
+/**
+ * Deprecated mode names removed in #1131 (pipeline unification).
+ * Kept as constants for deprecation warnings and migration paths.
+ */
+export const DEPRECATED_MODE_NAMES = {
+  ULTRAPILOT: 'ultrapilot',
+  SWARM: 'swarm',
+  PIPELINE: 'pipeline',
 } as const;
 
 /** Union type derived from the constant map. */
@@ -27,9 +34,6 @@ export type ModeName = typeof MODE_NAMES[keyof typeof MODE_NAMES];
  */
 export const ALL_MODE_NAMES: readonly ModeName[] = [
   MODE_NAMES.AUTOPILOT,
-  MODE_NAMES.ULTRAPILOT,
-  MODE_NAMES.SWARM,
-  MODE_NAMES.PIPELINE,
   MODE_NAMES.TEAM,
   MODE_NAMES.RALPH,
   MODE_NAMES.ULTRAWORK,
@@ -42,9 +46,6 @@ export const ALL_MODE_NAMES: readonly ModeName[] = [
  */
 export const MODE_STATE_FILE_MAP: Readonly<Record<ModeName, string>> = {
   [MODE_NAMES.AUTOPILOT]: 'autopilot-state.json',
-  [MODE_NAMES.ULTRAPILOT]: 'ultrapilot-state.json',
-  [MODE_NAMES.SWARM]: 'swarm.db',
-  [MODE_NAMES.PIPELINE]: 'pipeline-state.json',
   [MODE_NAMES.TEAM]: 'team-state.json',
   [MODE_NAMES.RALPH]: 'ralph-state.json',
   [MODE_NAMES.ULTRAWORK]: 'ultrawork-state.json',
@@ -57,14 +58,9 @@ export const MODE_STATE_FILE_MAP: Readonly<Record<ModeName, string>> = {
  */
 export const SESSION_END_MODE_STATE_FILES: readonly { file: string; mode: string }[] = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT], mode: MODE_NAMES.ULTRAPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE], mode: MODE_NAMES.PIPELINE },
-  // Swarm uses marker file + SQLite
-  { file: 'swarm-active.marker', mode: MODE_NAMES.SWARM },
-  { file: 'swarm-summary.json', mode: MODE_NAMES.SWARM },
 ];
 
 /**
@@ -72,9 +68,6 @@ export const SESSION_END_MODE_STATE_FILES: readonly { file: string; mode: string
  */
 export const SESSION_METRICS_MODE_FILES: readonly { file: string; mode: string }[] = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT], mode: MODE_NAMES.ULTRAPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
-  { file: 'swarm-state.json', mode: MODE_NAMES.SWARM },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE], mode: MODE_NAMES.PIPELINE },
 ];

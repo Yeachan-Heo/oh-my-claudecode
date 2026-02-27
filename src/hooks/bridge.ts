@@ -19,7 +19,7 @@ import { join } from "path";
 import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
-import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
+import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN, detectDeprecatedKeywords } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import {
@@ -300,6 +300,12 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
   const directory = resolveToWorktreeRoot(input.directory);
   const messages: string[] = [];
 
+  // Check for deprecated keywords and emit warnings (#1131)
+  const deprecationWarnings = detectDeprecatedKeywords(cleanedText);
+  if (deprecationWarnings.length > 0) {
+    messages.push(...deprecationWarnings);
+  }
+
   // Record prompt submission time in HUD state
   try {
     const hudState = readHudState(directory) || {
@@ -422,7 +428,6 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
       case "cancel":
       case "autopilot":
       case "team":
-      case "pipeline":
       case "ralplan":
       case "tdd":
         messages.push(

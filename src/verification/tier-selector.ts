@@ -2,7 +2,7 @@
  * Verification Tier Selector
  *
  * Scales verification effort with task complexity to optimize cost
- * while maintaining quality. Used by ralph, autopilot, and ultrapilot.
+ * while maintaining quality. Used by ralph and autopilot.
  */
 
 export interface ChangeMetadata {

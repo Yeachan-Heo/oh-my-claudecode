@@ -515,16 +515,6 @@ export function generateConfigSchema(): object {
           ultrathink: { type: 'array', items: { type: 'string' } }
         }
       },
-      swarm: {
-        type: 'object',
-        description: 'Swarm mode settings',
-        properties: {
-          defaultMaxConcurrent: { type: 'integer', default: 5, minimum: 1, maximum: 50 },
-          wavePollingInterval: { type: 'integer', default: 5000, minimum: 1000, maximum: 30000 },
-          aggressiveThreshold: { type: 'integer', default: 5 },
-          enableFileOwnership: { type: 'boolean', default: true }
-        }
-      },
       externalModels: {
         type: 'object',
         description: 'External model provider configuration (Codex, Gemini)',

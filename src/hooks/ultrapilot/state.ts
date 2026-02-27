@@ -9,7 +9,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from '
 import { join } from 'path';
 import type { UltrapilotState, UltrapilotConfig, WorkerState, FileOwnership } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
-import { canStartMode } from '../mode-registry/index.js';
 import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 
 const STATE_FILE = 'ultrapilot-state.json';
@@ -136,13 +135,6 @@ export function initUltrapilot(
   sessionId?: string,
   config?: Partial<UltrapilotConfig>
 ): UltrapilotState | null {
-  // Mutual exclusion check via mode-registry
-  const canStart = canStartMode('ultrapilot', directory);
-  if (!canStart.allowed) {
-    console.error(canStart.message);
-    return null;
-  }
-
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
   const now = new Date().toISOString();
 

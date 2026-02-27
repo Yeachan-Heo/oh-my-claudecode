@@ -29,7 +29,7 @@ export interface SubagentInfo {
   agent_id: string;
   agent_type: string;
   started_at: string;
-  parent_mode: string; // 'autopilot' | 'ultrapilot' | 'ultrawork' | 'swarm' | 'none'
+  parent_mode: string; // 'autopilot' | 'ultrawork' | 'team' | 'ralph' | 'none'
   task_description?: string;
   file_ownership?: string[];
   status: "running" | "completed" | "failed";
@@ -515,28 +515,17 @@ function detectParentMode(directory: string): string {
 
   // Check in order of specificity
   const modeFiles = [
-    { file: "ultrapilot-state.json", mode: "ultrapilot" },
     { file: "autopilot-state.json", mode: "autopilot" },
-    { file: "swarm.db", mode: "swarm" },
     { file: "ultrawork-state.json", mode: "ultrawork" },
     { file: "ralph-state.json", mode: "ralph" },
+    { file: "team-state.json", mode: "team" },
   ];
 
   for (const { file, mode } of modeFiles) {
     const filePath = join(stateDir, file);
     if (existsSync(filePath)) {
-      // Special case for swarm.db - just check existence and size
-      if (file === 'swarm.db') {
-        try {
-          const stats = statSync(filePath);
-          if (stats.size > 0) {
-            return mode;
-          }
-        } catch {
-          continue;
-        }
-      } else {
-        // JSON file check (existing logic)
+      {
+        // JSON file check
         try {
           const content = readFileSync(filePath, "utf-8");
           const state = JSON.parse(content);

@@ -29,10 +29,9 @@ import {
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
 
-// ExecutionMode from mode-registry (8 modes - NO ralplan)
+// ExecutionMode from mode-registry (5 modes - NO ralplan)
 const EXECUTION_MODES: [string, ...string[]] = [
-  'autopilot', 'ultrapilot', 'swarm', 'pipeline', 'team',
-  'ralph', 'ultrawork', 'ultraqa'
+  'autopilot', 'team', 'ralph', 'ultrawork', 'ultraqa'
 ];
 
 // Extended type for state tools - includes ralplan which has state but isn't in mode-registry
@@ -78,25 +77,6 @@ export const stateReadTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
-
-      // Special handling for swarm (SQLite database - no session support)
-      if (mode === 'swarm') {
-        const statePath = getStatePath(mode, root);
-        if (!existsSync(statePath)) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `No state found for mode: swarm\nNote: Swarm uses SQLite (swarm.db), not JSON. Expected path: ${statePath}`
-            }]
-          };
-        }
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `## State for swarm\n\nPath: ${statePath}\n\nNote: Swarm uses SQLite database. Use swarm-specific tools to query state.`
-          }]
-        };
-      }
 
       // If session_id provided, read from session-scoped path
       if (sessionId) {
@@ -255,17 +235,6 @@ export const stateWriteTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
-
-      // Swarm uses SQLite - cannot be written via this tool
-      if (mode === 'swarm') {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: Swarm uses SQLite database (swarm.db), not JSON. Use swarm-specific APIs to modify state.`
-          }],
-          isError: true
-        };
-      }
 
       // Determine state path based on session_id
       let statePath: string;

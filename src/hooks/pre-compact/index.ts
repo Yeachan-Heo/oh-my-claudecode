@@ -2,7 +2,7 @@
  * PreCompact Hook - State Preservation Before Context Compaction
  *
  * Creates checkpoints before compaction to preserve critical state including:
- * - Active mode states (autopilot, ralph, ultrawork, swarm)
+ * - Active mode states (autopilot, ralph, ultrawork)
  * - TODO summary
  * - Wisdom from notepads
  *
@@ -43,9 +43,6 @@ export interface CompactCheckpoint {
     autopilot?: { phase: string; originalIdea: string };
     ralph?: { iteration: number; prompt: string };
     ultrawork?: { original_prompt: string };
-    swarm?: { session_id: string; task_count: number };
-    ultrapilot?: { session_id: string; worker_count: number };
-    pipeline?: { preset: string; current_stage: number };
     ultraqa?: { cycle: number; prompt: string };
   };
   todo_summary: {
@@ -82,7 +79,7 @@ const CHECKPOINT_DIR = "checkpoints";
  * When a compaction is already running for a directory, new callers
  * await the existing promise instead of running concurrently.
  * This prevents race conditions when multiple subagent results
- * arrive simultaneously (swarm/ultrawork).
+ * arrive simultaneously (ultrawork/team).
  */
 const inflightCompactions = new Map<string, Promise<HookOutput>>();
 
@@ -196,39 +193,6 @@ export async function saveModeSummary(
       extract: (s: any) =>
         s.active
           ? { original_prompt: s.original_prompt || s.prompt || "" }
-          : null,
-    },
-    {
-      file: "swarm-summary.json",
-      key: "swarm",
-      extract: (s: any) =>
-        s.active
-          ? {
-              session_id: s.session_id || "active",
-              task_count: s.task_count || 0,
-            }
-          : null,
-    },
-    {
-      file: "ultrapilot-state.json",
-      key: "ultrapilot",
-      extract: (s: any) =>
-        s.active
-          ? {
-              session_id: s.session_id || "",
-              worker_count: s.worker_count || 0,
-            }
-          : null,
-    },
-    {
-      file: "pipeline-state.json",
-      key: "pipeline",
-      extract: (s: any) =>
-        s.active
-          ? {
-              preset: s.preset || "custom",
-              current_stage: s.current_stage || 0,
-            }
           : null,
     },
     {
@@ -412,25 +376,6 @@ export function formatCompactSummary(checkpoint: CompactCheckpoint): string {
       lines.push(`  Prompt: ${uw.original_prompt}`);
     }
 
-    if (checkpoint.active_modes.swarm) {
-      const swarm = checkpoint.active_modes.swarm;
-      lines.push(
-        `- **Swarm** (Session: ${swarm.session_id}, Tasks: ${swarm.task_count})`,
-      );
-    }
-
-    if (checkpoint.active_modes.ultrapilot) {
-      const up = checkpoint.active_modes.ultrapilot;
-      lines.push(`- **Ultrapilot** (Workers: ${up.worker_count})`);
-    }
-
-    if (checkpoint.active_modes.pipeline) {
-      const pipe = checkpoint.active_modes.pipeline;
-      lines.push(
-        `- **Pipeline** (Preset: ${pipe.preset}, Stage: ${pipe.current_stage})`,
-      );
-    }
-
     if (checkpoint.active_modes.ultraqa) {
       const qa = checkpoint.active_modes.ultraqa;
       lines.push(`- **UltraQA** (Cycle: ${qa.cycle})`);
@@ -554,7 +499,7 @@ async function doProcessPreCompact(
  * Main handler for PreCompact hook.
  *
  * Uses a per-directory mutex to prevent concurrent compaction.
- * When multiple subagent results arrive simultaneously (swarm/ultrawork),
+ * When multiple subagent results arrive simultaneously (ultrawork/team),
  * only the first call runs the compaction; subsequent calls await
  * the in-flight result. This fixes issue #453.
  */

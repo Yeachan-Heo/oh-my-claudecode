@@ -10,6 +10,7 @@ import {
   getAllKeywordsWithSizeCheck,
   isUnderspecifiedForExecution,
   applyRalplanGate,
+  detectDeprecatedKeywords,
   NON_LATIN_SCRIPT_PATTERN,
   type KeywordType,
   type DetectedKeyword,
@@ -300,29 +301,18 @@ World`);
       });
     });
 
-    describe('pipeline keyword', () => {
-      it('should detect agent pipeline phrase', () => {
+    describe('deprecated pipeline keyword (#1131)', () => {
+      it('should NOT detect agent pipeline as active keyword', () => {
         const result = detectKeywordsWithType('agent pipeline build the API');
-        const pipelineMatch = result.find((r) => r.type === 'pipeline');
-        expect(pipelineMatch).toBeDefined();
-      });
-
-      it('should detect chain agents phrase', () => {
-        const result = detectKeywordsWithType('chain agents to build');
-        const pipelineMatch = result.find((r) => r.type === 'pipeline');
-        expect(pipelineMatch).toBeDefined();
-      });
-
-      it('should NOT detect bare pipeline keyword', () => {
-        const result = detectKeywordsWithType('pipeline fix this');
-        const pipelineMatch = result.find((r) => r.type === 'pipeline');
+        const pipelineMatch = result.find((r) => (r.type as string) === 'pipeline');
         expect(pipelineMatch).toBeUndefined();
       });
 
-      it('should NOT detect CI/CD pipeline', () => {
-        const result = detectKeywordsWithType('the CI pipeline is broken');
-        const pipelineMatch = result.find((r) => r.type === 'pipeline');
-        expect(pipelineMatch).toBeUndefined();
+      it('should emit deprecation warning for agent pipeline', () => {
+        const warnings = detectDeprecatedKeywords('agent pipeline build the API');
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(warnings[0]).toContain('DEPRECATED');
+        expect(warnings[0]).toContain('/pipeline');
       });
     });
 
@@ -829,18 +819,16 @@ World`);
       expect(getAllKeywords('cancelomc ralph ultrawork')).toEqual(['cancel']);
     });
 
-    it('should return team and ultrapilot when legacy ultrapilot trigger is present', () => {
+    it('should not detect deprecated ultrapilot keyword (#1131)', () => {
       const result = getAllKeywords('autopilot ultrapilot build');
-      expect(result).toContain('ultrapilot');
-      expect(result).toContain('team');
-      // team beats autopilot, but original ultrapilot is preserved
-      expect(result).not.toContain('autopilot');
+      expect(result).not.toContain('ultrapilot');
+      // ultrapilot is deprecated, only autopilot should be detected
+      expect(result).toContain('autopilot');
     });
 
-    it('should return team and swarm for legacy swarm trigger', () => {
+    it('should not detect deprecated swarm keyword (#1131)', () => {
       const result = getAllKeywords('swarm 5 agents build this');
-      expect(result).toContain('swarm');
-      expect(result).toContain('team');
+      expect(result).not.toContain('swarm');
     });
 
     it('should return ralph with ultrawork (not mutually exclusive)', () => {
@@ -972,16 +960,15 @@ World`);
       expect(result).toContain('team');
     });
 
-    it('should detect team via ultrapilot legacy keyword and preserve ultrapilot', () => {
+    it('should not detect deprecated ultrapilot as team trigger (#1131)', () => {
       const result = getAllKeywords('ultrapilot build all components');
-      expect(result).toContain('team');
-      expect(result).toContain('ultrapilot');
+      expect(result).not.toContain('ultrapilot');
+      // deprecated keywords no longer activate any mode
     });
 
-    it('should detect team via swarm N agents pattern and preserve swarm', () => {
+    it('should not detect deprecated swarm as team trigger (#1131)', () => {
       const result = getAllKeywords('swarm 5 agents fix all errors');
-      expect(result).toContain('team');
-      expect(result).toContain('swarm');
+      expect(result).not.toContain('swarm');
     });
 
     // Mixed keyword precedence tests
@@ -1023,15 +1010,13 @@ World`);
         expect(result).not.toContain('team');
       });
 
-      it('should NOT detect ultrapilot or team when disabled', () => {
+      it('should not detect deprecated ultrapilot regardless of team setting (#1131)', () => {
         const result = getAllKeywords('ultrapilot build all');
-        expect(result).not.toContain('team');
         expect(result).not.toContain('ultrapilot');
       });
 
-      it('should NOT detect swarm or team when disabled', () => {
+      it('should not detect deprecated swarm regardless of team setting (#1131)', () => {
         const result = getAllKeywords('swarm 5 agents fix errors');
-        expect(result).not.toContain('team');
         expect(result).not.toContain('swarm');
       });
 
