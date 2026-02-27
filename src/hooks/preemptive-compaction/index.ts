@@ -75,7 +75,7 @@ const sessionStates = new Map<
 /**
  * Clean up stale session states
  */
-function cleanupSessionStates(): void {
+function _cleanupSessionStates(): void {
   const now = Date.now();
   const MAX_AGE = 30 * 60 * 1000; // 30 minutes
 

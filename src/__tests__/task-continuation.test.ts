@@ -18,8 +18,7 @@ import {
   isValidSessionId,
   type Todo,
   type IncompleteTodosResult,
-  type StopContext,
-  type TaskCheckResult
+  type StopContext
 } from '../hooks/todo-continuation/index.js';
 
 // Mock fs and os modules

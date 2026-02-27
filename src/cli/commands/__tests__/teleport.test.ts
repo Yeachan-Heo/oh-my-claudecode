@@ -26,7 +26,7 @@ vi.mock('../../../providers/index.js', () => ({
   getProvider: vi.fn(),
 }));
 
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync } from 'fs';
 import { teleportCommand } from '../teleport.js';
 
 describe('createWorktree — no shell injection via execFileSync', () => {

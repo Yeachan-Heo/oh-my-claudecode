@@ -10,8 +10,6 @@ import {
   renderAgentsCoded,
   renderAgentsCodedWithDuration,
   renderAgentsDetailed,
-  renderAgentsWithDescriptions,
-  renderAgentsDescOnly,
   renderAgentsByFormat,
   renderAgentsMultiLine,
 } from '../hud/elements/agents.js';

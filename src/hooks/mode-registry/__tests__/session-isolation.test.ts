@@ -13,19 +13,20 @@ import {
   isModeActiveInAnySession,
   getActiveSessionsForMode,
   clearStaleSessionDirs,
-  canStartMode,
 } from '../index.js';
 
 import {
   validateSessionId,
   resolveSessionStatePath,
-  getSessionStateDir,
   listSessionIds,
-  ensureSessionStateDir,
 } from '../../../lib/worktree-paths.js';
 
 describe('Session-Scoped State Isolation', () => {
   let tempDir: string;
+
+  function normalizePathForAssert(path: string): string {
+    return path.replaceAll('\\', '/');
+  }
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'session-isolation-test-'));
@@ -75,7 +76,7 @@ describe('Session-Scoped State Isolation', () => {
   describe('resolveSessionStatePath', () => {
     it('should return session-scoped path', () => {
       const path = resolveSessionStatePath('ultrawork', 'session-123', tempDir);
-      expect(path).toContain('.omc/state/sessions/session-123/ultrawork-state.json');
+      expect(normalizePathForAssert(path)).toContain('.omc/state/sessions/session-123/ultrawork-state.json');
     });
 
     it('should normalize state name', () => {
@@ -107,7 +108,7 @@ describe('Session-Scoped State Isolation', () => {
   describe('Session-scoped path resolution', () => {
     it('should return session-scoped path when sessionId provided', () => {
       const path = getStateFilePath(tempDir, 'ultrawork', 'session-123');
-      expect(path).toContain('sessions/session-123');
+      expect(normalizePathForAssert(path)).toContain('sessions/session-123');
     });
 
     it('should return legacy path when no sessionId', () => {
@@ -314,8 +315,9 @@ describe('Session-Scoped State Isolation', () => {
 
     it('should return correct state file path for team mode', () => {
       const path = getStateFilePath(tempDir, 'team', 'session-team-123');
-      expect(path).toContain('sessions/session-team-123');
-      expect(path).toContain('team-state.json');
+      const normalizedPath = normalizePathForAssert(path);
+      expect(normalizedPath).toContain('sessions/session-team-123');
+      expect(normalizedPath).toContain('team-state.json');
     });
 
     it('should isolate team state between sessions', () => {

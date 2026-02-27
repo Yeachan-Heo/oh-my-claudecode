@@ -20,7 +20,7 @@ vi.mock('../utils/paths.js', () => ({
 }));
 
 // Import after mock setup
-import { checkHookConflicts, runConflictCheck, type ConflictReport } from '../cli/commands/doctor-conflicts.js';
+import { checkHookConflicts, runConflictCheck } from '../cli/commands/doctor-conflicts.js';
 
 describe('doctor-conflicts: hook ownership classification', () => {
   let cwdSpy: ReturnType<typeof vi.spyOn>;

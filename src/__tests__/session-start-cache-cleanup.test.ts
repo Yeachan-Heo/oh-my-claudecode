@@ -96,7 +96,7 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
     expect(v1Stat.isSymbolicLink()).toBe(true);
 
     const target = readlinkSync(join(fakeCacheBase, '4.4.1'));
-    expect(target).toBe('4.4.3');
+    expect(target.replaceAll('\\', '/')).toMatch(/(^|\/)4\.4\.3$/);
   });
 
   it('with only 2 versions, no symlinks are created', () => {
@@ -141,10 +141,10 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
 
     // 4.4.1 and 4.4.0: symlinks to 4.4.3
     expect(lstatSync(join(fakeCacheBase, '4.4.1')).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1')).replaceAll('\\', '/')).toMatch(/(^|\/)4\.4\.3$/);
 
     expect(lstatSync(join(fakeCacheBase, '4.4.0')).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(fakeCacheBase, '4.4.0'))).toBe('4.4.3');
+    expect(readlinkSync(join(fakeCacheBase, '4.4.0')).replaceAll('\\', '/')).toMatch(/(^|\/)4\.4\.3$/);
   });
 
   it('updates an existing symlink pointing to a non-latest target', () => {
@@ -153,14 +153,20 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
 
     // Manually create a stale symlink: 4.4.1 -> 4.4.2 (not the latest 4.4.3)
     const { symlinkSync } = require('fs');
-    symlinkSync('4.4.2', join(fakeCacheBase, '4.4.1'));
+    const staleLink = join(fakeCacheBase, '4.4.1');
+    const staleTarget = process.platform === 'win32' ? join(fakeCacheBase, '4.4.2') : '4.4.2';
+    if (process.platform === 'win32') {
+      symlinkSync(staleTarget, staleLink, 'junction');
+    } else {
+      symlinkSync(staleTarget, staleLink);
+    }
 
     runSessionStart();
 
     // 4.4.1 should now be a symlink to 4.4.3 (updated from 4.4.2)
     const v1Stat = lstatSync(join(fakeCacheBase, '4.4.1'));
     expect(v1Stat.isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1')).replaceAll('\\', '/')).toMatch(/(^|\/)4\.4\.3$/);
 
     // 4.4.3 and 4.4.2 remain as real directories
     expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);

@@ -6,7 +6,7 @@
  * processPreToolUse integration in bridge.ts
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   processOrchestratorPreTool,
   isAllowedPath,
@@ -561,12 +561,12 @@ describe('delegation-enforcement-levels', () => {
       });
 
       expect(result.continue).toBe(true);
-      expect(mockAddTask).toHaveBeenCalledWith(
-        expect.stringContaining('task-'),
-        'Test task',
-        'executor',
-        process.cwd()
-      );
+      expect(mockAddTask).toHaveBeenCalledTimes(1);
+      const [taskId, description, agentType, directory] = mockAddTask.mock.calls[0]!;
+      expect(taskId).toEqual(expect.stringContaining('task-'));
+      expect(description).toBe('Test task');
+      expect(agentType).toBe('executor');
+      expect(directory?.replaceAll('\\', '/')).toBe(process.cwd().replaceAll('\\', '/'));
     });
   });
 

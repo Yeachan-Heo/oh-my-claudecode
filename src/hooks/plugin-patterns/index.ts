@@ -13,6 +13,33 @@ import { existsSync, readFileSync } from 'fs';
 import { join, extname, normalize } from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
+function runCommand(directory: string, command: string, args: string[]): { status: number | null } {
+  if (process.platform === 'win32') {
+    const shell = process.env.ComSpec || 'cmd.exe';
+    const result = spawnSync(shell, ['/d', '/s', '/c', command, ...args], {
+      cwd: directory,
+      stdio: 'pipe',
+      encoding: 'utf-8'
+    });
+    return { status: result.status };
+  }
+
+  const result = spawnSync(command, args, {
+    cwd: directory,
+    stdio: 'pipe',
+    encoding: 'utf-8'
+  });
+  return { status: result.status };
+}
+
+function runNpmCommand(directory: string, args: string[]): { status: number | null } {
+  return runCommand(directory, 'npm', args);
+}
+
+function runNpxCommand(directory: string, args: string[]): { status: number | null } {
+  return runCommand(directory, 'npx', args);
+}
+
 // =============================================================================
 // SECURITY UTILITIES
 // =============================================================================
@@ -277,7 +304,7 @@ export function runTypeCheck(directory: string): { success: boolean; message: st
     return { success: true, message: 'TypeScript not installed' };
   }
 
-  const tscResult = spawnSync('npx', ['tsc', '--noEmit'], { cwd: directory, stdio: 'pipe' });
+  const tscResult = runNpxCommand(directory, ['tsc', '--noEmit']);
   if (tscResult.status === 0) {
     return { success: true, message: 'Type check passed' };
   }
@@ -298,8 +325,11 @@ export function runTests(directory: string): { success: boolean; message: string
     try {
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.test) {
-        execFileSync('npm', ['test'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
-        return { success: true, message: 'Tests passed' };
+        const testResult = runNpmCommand(directory, ['test']);
+        if (testResult.status === 0) {
+          return { success: true, message: 'Tests passed' };
+        }
+        return { success: false, message: 'Tests failed' };
       }
     } catch (_error) {
       return { success: false, message: 'Tests failed' };
@@ -333,12 +363,11 @@ export function runLint(directory: string): { success: boolean; message: string 
     try {
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.lint) {
-        try {
-          execFileSync('npm', ['run', 'lint'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+        const lintResult = runNpmCommand(directory, ['run', 'lint']);
+        if (lintResult.status === 0) {
           return { success: true, message: 'Lint passed' };
-        } catch (_error) {
-          return { success: false, message: 'Lint errors found' };
         }
+        return { success: false, message: 'Lint errors found' };
       }
     } catch {
       // Could not read package.json

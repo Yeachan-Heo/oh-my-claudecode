@@ -10,6 +10,10 @@
 
 import { relative, resolve } from 'node:path';
 
+function normalizeRelativePath(path: string): string {
+  return path.replaceAll('\\', '/');
+}
+
 export interface WorkerPermissions {
   workerName: string;
   allowedPaths: string[];   // glob patterns relative to workingDirectory
@@ -113,10 +117,10 @@ export function isPathAllowed(
 ): boolean {
   // Normalize to relative path
   const absPath = resolve(workingDirectory, filePath);
-  const relPath = relative(workingDirectory, absPath);
+  const relPath = normalizeRelativePath(relative(workingDirectory, absPath));
 
   // If path escapes working directory, always deny
-  if (relPath.startsWith('..')) return false;
+  if (relPath === '..' || relPath.startsWith('../')) return false;
 
   // Check denied paths first (they override)
   for (const pattern of permissions.deniedPaths) {
@@ -253,10 +257,10 @@ export function findPermissionViolations(
     if (!isPathAllowed(permissions, filePath, cwd)) {
       // Determine which deny pattern matched for the reason
       const absPath = resolve(cwd, filePath);
-      const relPath = relative(cwd, absPath);
+      const relPath = normalizeRelativePath(relative(cwd, absPath));
 
       let reason: string;
-      if (relPath.startsWith('..')) {
+      if (relPath === '..' || relPath.startsWith('../')) {
         reason = `Path escapes working directory: ${relPath}`;
       } else {
         // Find which deny pattern matched

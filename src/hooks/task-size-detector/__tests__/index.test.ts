@@ -8,8 +8,6 @@ import {
   isHeavyMode,
   HEAVY_MODE_KEYWORDS,
   DEFAULT_THRESHOLDS,
-  type TaskSize,
-  type TaskSizeResult,
 } from '../index.js';
 
 describe('task-size-detector', () => {

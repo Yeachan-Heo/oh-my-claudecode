@@ -16,7 +16,6 @@ import {
   transitionPhase,
   readAutopilotState
 } from '../state.js';
-import type { AutopilotState } from '../types.js';
 
 describe('AutopilotSummary', () => {
   let testDir: string;

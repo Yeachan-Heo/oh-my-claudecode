@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readHudConfig } from '../../hud/state.js';
 import { DEFAULT_HUD_CONFIG } from '../../hud/types.js';
 

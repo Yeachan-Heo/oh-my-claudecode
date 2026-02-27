@@ -2,13 +2,12 @@
  * Tests for tmux-detector.ts
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   analyzePaneContent,
   isTmuxAvailable,
   listTmuxPanes,
   capturePaneContent,
-  scanForBlockedPanes,
   formatBlockedPanesSummary,
 } from '../../features/rate-limit-wait/tmux-detector.js';
 import type { BlockedPane } from '../../features/rate-limit-wait/types.js';

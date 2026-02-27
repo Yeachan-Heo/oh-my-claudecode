@@ -14,7 +14,6 @@ import {
   renderTree,
   shouldSkipEntry,
   extractPackageMetadata,
-  type CodebaseMapOptions,
 } from '../codebase-map.js';
 import { buildAgentsOverlay } from '../agents-overlay.js';
 

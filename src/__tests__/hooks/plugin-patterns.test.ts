@@ -244,7 +244,7 @@ describe('runLint', () => {
   it('returns failure when lint script exits with error', () => {
     writeFileSync(
       join(testDir, 'package.json'),
-      JSON.stringify({ scripts: { lint: 'exit 1' } })
+      JSON.stringify({ scripts: { lint: 'this-command-should-fail' } })
     );
     const result = runLint(testDir);
     expect(result.success).toBe(false);
@@ -254,7 +254,7 @@ describe('runLint', () => {
   it('returns success when lint script passes', () => {
     writeFileSync(
       join(testDir, 'package.json'),
-      JSON.stringify({ scripts: { lint: 'exit 0' } })
+      JSON.stringify({ scripts: { lint: 'echo lint-ok' } })
     );
     const result = runLint(testDir);
     expect(result.success).toBe(true);

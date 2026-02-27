@@ -5,7 +5,7 @@
  * Issue #892: Node.js not in PATH for nvm/fnm users causes hook errors.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { existsSync } from 'fs';
 
 // We test the pure helper directly without mocking the filesystem

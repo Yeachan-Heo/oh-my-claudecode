@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   extractLexicalSignals,
   extractStructuralSignals,
@@ -33,7 +33,6 @@ import type {
 } from '../features/model-routing/types.js';
 import {
   getDefaultModelHigh,
-  getDefaultModelMedium,
   getDefaultModelLow,
 } from '../config/models.js';
 
