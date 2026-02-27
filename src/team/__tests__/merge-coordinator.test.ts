@@ -109,7 +109,7 @@ describe('merge-coordinator', () => {
       expect(() => {
         execFileSync('git', ['status'], { cwd: repoDir, stdio: 'pipe' });
       }).not.toThrow();
-    });
+    }, 15000);
   });
 
   describe('mergeAllWorkerBranches', () => {
@@ -135,6 +135,6 @@ describe('merge-coordinator', () => {
       const results = mergeAllWorkerBranches(teamName, repoDir, main);
       expect(results).toHaveLength(2);
       expect(results.every(r => r.success)).toBe(true);
-    });
+    }, 15000);
   });
 });

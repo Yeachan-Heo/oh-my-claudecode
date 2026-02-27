@@ -111,10 +111,6 @@ describe('Safe Installer - Hook Conflict Detection', () => {
             }
         };
         writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-        const options = {
-            verbose: true,
-            skipClaudeCheck: true
-        };
         // Simulate install logic (we'd need to mock or refactor install function for full test)
         // For now, test the detection logic directly
         const conflicts = detectConflicts(existingSettings.hooks);

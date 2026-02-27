@@ -95,7 +95,7 @@ describe('buildTaskPrompt structure', () => {
     config: { workingDirectory: string }
   ): string {
     const sanitizedSubject = sanitizePromptContent(task.subject, 500);
-    let sanitizedDescription = sanitizePromptContent(task.description, 10000);
+    const sanitizedDescription = sanitizePromptContent(task.description, 10000);
 
     let inboxContext = '';
     if (messages.length > 0) {

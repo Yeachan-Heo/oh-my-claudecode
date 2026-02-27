@@ -47,7 +47,7 @@ const SESSION_COOLDOWN_PATH = join(
   TEST_SESSION_ID,
   'idle-notif-cooldown.json'
 );
-const CONFIG_PATH = '/home/testuser/.omc/config.json';
+const CONFIG_PATH = join('/home/testuser', '.omc', 'config.json');
 
 describe('getIdleNotificationCooldownSeconds', () => {
   beforeEach(() => {

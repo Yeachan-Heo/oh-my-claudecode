@@ -216,7 +216,6 @@ describe('Integration: Continuation message with tool error', () => {
     });
     it('continuation message includes error context when tool error present', () => {
         const testDir = '/test';
-        const errorPath = join(testDir, '.omc', 'state', 'last-tool-error.json');
         const recentError = {
             tool_name: 'Bash',
             error: 'Command not found: invalid-command',

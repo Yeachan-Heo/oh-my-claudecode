@@ -9,7 +9,6 @@ import {
   getTrackingStats,
   readTrackingState,
   writeTrackingState,
-  clearTrackingState,
   recordToolUsageWithTiming,
   getAgentPerformance,
   updateTokenUsage,
@@ -22,7 +21,6 @@ import {
   type SubagentInfo,
   type SubagentTrackingState,
   type ToolUsageEntry,
-  type TokenUsage,
 } from "../index.js";
 
 describe("subagent-tracker", () => {

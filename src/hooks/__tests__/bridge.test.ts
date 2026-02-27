@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { processHook, resetSkipHooksCache, type HookInput, type HookOutput, type HookType } from '../bridge.js';
+import { processHook, resetSkipHooksCache, type HookInput, type HookType } from '../bridge.js';
 
 describe('processHook - Environment Kill-Switches', () => {
   const originalEnv = process.env;

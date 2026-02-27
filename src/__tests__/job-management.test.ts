@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { findJobStatusFile, handleKillJob, handleWaitForJob, handleCheckJobStatus, handleListJobs } from '../mcp/job-management.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { findJobStatusFile, handleKillJob, handleWaitForJob, handleCheckJobStatus } from '../mcp/job-management.js';
 import * as promptPersistence from '../mcp/prompt-persistence.js';
 
 // Mock the prompt-persistence module
@@ -187,8 +187,6 @@ describe('job-management', () => {
           return callCount === 1 ? mockStatus as any : completedStatus as any;
         });
 
-        const writeJobStatusSpy = vi.spyOn(promptPersistence, 'writeJobStatus');
-
         // Mock process.kill to throw ESRCH
         const esrchError = new Error('ESRCH') as NodeJS.ErrnoException;
         esrchError.code = 'ESRCH';
@@ -197,9 +195,6 @@ describe('job-management', () => {
         const result = await handleKillJob('codex', 'ab12cd34', 'SIGTERM');
 
         // Should NOT overwrite to failed since job is completed
-        const failedWrites = writeJobStatusSpy.mock.calls.filter(
-          call => (call[0] as any).status === 'failed'
-        );
         // The initial killedByUser write happens, but after ESRCH with completed status, no failed write
         expect(result.content[0].text).toContain('completed successfully');
       });

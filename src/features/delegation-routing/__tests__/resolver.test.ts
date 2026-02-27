@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveDelegation, parseFallbackChain } from '../resolver.js';
-import type { DelegationRoutingConfig, ResolveDelegationOptions } from '../../../shared/types.js';
+import type { DelegationRoutingConfig } from '../../../shared/types.js';
 
 describe('resolveDelegation', () => {
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;

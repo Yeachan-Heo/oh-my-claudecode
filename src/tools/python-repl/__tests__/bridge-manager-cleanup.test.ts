@@ -10,12 +10,15 @@ import type { BridgeMeta } from '../types.js';
 describe('bridge-manager cleanup', () => {
   let tmpRuntimeRoot: string;
   let originalXdgRuntimeDir: string | undefined;
+  let originalLocalAppData: string | undefined;
 
   beforeEach(() => {
     originalXdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    originalLocalAppData = process.env.LOCALAPPDATA;
     tmpRuntimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-bridge-cleanup-'));
     fs.chmodSync(tmpRuntimeRoot, 0o700);
     process.env.XDG_RUNTIME_DIR = tmpRuntimeRoot;
+    process.env.LOCALAPPDATA = tmpRuntimeRoot;
     fs.mkdirSync(getRuntimeDir(), { recursive: true });
   });
 
@@ -24,6 +27,11 @@ describe('bridge-manager cleanup', () => {
       delete process.env.XDG_RUNTIME_DIR;
     } else {
       process.env.XDG_RUNTIME_DIR = originalXdgRuntimeDir;
+    }
+    if (originalLocalAppData === undefined) {
+      delete process.env.LOCALAPPDATA;
+    } else {
+      process.env.LOCALAPPDATA = originalLocalAppData;
     }
     fs.rmSync(tmpRuntimeRoot, { recursive: true, force: true });
   });

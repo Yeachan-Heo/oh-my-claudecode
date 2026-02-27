@@ -418,7 +418,7 @@ function paneLooksReady(captured) {
 function paneTailContainsLiteralLine(captured, text) {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
-async function paneInCopyMode(paneId, execFileAsync) {
+async function paneInCopyMode(paneId) {
   try {
     const result = await tmuxAsync(["display-message", "-t", paneId, "-p", "#{pane_in_mode}"]);
     return result.stdout.trim() === "1";
@@ -450,7 +450,7 @@ async function sendToWorker(_sessionName, paneId, message) {
     const sendKey = async (key) => {
       await execFileAsync("tmux", ["send-keys", "-t", paneId, key]);
     };
-    if (await paneInCopyMode(paneId, execFileAsync)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
     const initialCapture = await capturePaneAsync(paneId, execFileAsync);
@@ -480,11 +480,11 @@ async function sendToWorker(_sessionName, paneId, message) {
       if (!paneTailContainsLiteralLine(checkCapture, message)) return true;
       await sleep(140);
     }
-    if (await paneInCopyMode(paneId, execFileAsync)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
     const finalCapture = await capturePaneAsync(paneId, execFileAsync);
-    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId, execFileAsync);
+    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId);
     if (shouldAttemptAdaptiveRetry({
       paneBusy,
       latestCapture: finalCapture,
@@ -492,12 +492,12 @@ async function sendToWorker(_sessionName, paneId, message) {
       paneInCopyMode: paneModeBeforeAdaptiveRetry,
       retriesAttempted: 0
     })) {
-      if (await paneInCopyMode(paneId, execFileAsync)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await sendKey("C-u");
       await sleep(80);
-      if (await paneInCopyMode(paneId, execFileAsync)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await execFileAsync("tmux", ["send-keys", "-t", paneId, "-l", "--", message]);
@@ -511,7 +511,7 @@ async function sendToWorker(_sessionName, paneId, message) {
         if (!paneTailContainsLiteralLine(retryCapture, message)) return true;
       }
     }
-    if (await paneInCopyMode(paneId, execFileAsync)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
     await sendKey("C-m");
@@ -524,9 +524,6 @@ async function sendToWorker(_sessionName, paneId, message) {
 }
 async function isWorkerAlive(paneId) {
   try {
-    const { execFile: execFile2 } = await import("child_process");
-    const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile2);
     const result = await tmuxAsync([
       "display-message",
       "-t",

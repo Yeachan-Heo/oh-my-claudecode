@@ -3,10 +3,9 @@
  * Tests the functions that read tool error state and generate retry messages
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync } from 'fs';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import {
   readLastToolError,
   clearToolErrorState,
@@ -292,7 +291,6 @@ describe('Integration: Continuation message with tool error', () => {
 
   it('continuation message includes error context when tool error present', () => {
     const testDir = '/test';
-    const errorPath = join(testDir, '.omc', 'state', 'last-tool-error.json');
     const recentError: ToolErrorState = {
       tool_name: 'Bash',
       error: 'Command not found: invalid-command',

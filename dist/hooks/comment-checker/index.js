@@ -190,6 +190,7 @@ export function createCommentCheckerHook(config) {
          * PreToolUse - Track pending write/edit calls
          */
         preToolUse: (input) => {
+            cleanupOldPendingCalls();
             const toolLower = input.tool_name.toLowerCase();
             if (toolLower !== 'write' &&
                 toolLower !== 'edit' &&
@@ -231,6 +232,7 @@ export function createCommentCheckerHook(config) {
          * PostToolUse - Check for comments after successful write/edit
          */
         postToolUse: (input) => {
+            cleanupOldPendingCalls();
             const toolLower = input.tool_name.toLowerCase();
             if (toolLower !== 'write' &&
                 toolLower !== 'edit' &&

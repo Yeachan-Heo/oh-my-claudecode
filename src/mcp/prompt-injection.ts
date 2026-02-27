@@ -13,7 +13,22 @@ export {
 } from '../agents/prompt-helpers.js';
 export type { AgentRole } from '../agents/prompt-helpers.js';
 
-import { resolve } from 'path';
+import { posix, resolve } from 'path';
+
+function normalizeForCompare(path: string): string {
+  return path.replaceAll('\\', '/').replace(/\/+$/, '');
+}
+
+function canonicalizePath(path: string): string {
+  const slashNormalized = path.replaceAll('\\', '/');
+  const hasWindowsDrive = /^[A-Za-z]:\//.test(slashNormalized);
+
+  if (slashNormalized.startsWith('/') && !hasWindowsDrive) {
+    return normalizeForCompare(posix.normalize(slashNormalized));
+  }
+
+  return normalizeForCompare(resolve(path));
+}
 
 /**
  * Subagent mode marker prepended to all prompts sent to external CLI agents.
@@ -35,7 +50,7 @@ export function validateContextFilePaths(
 ): { validPaths: string[]; errors: string[] } {
   const validPaths: string[] = [];
   const errors: string[] = [];
-  const resolvedBase = resolve(baseDir);
+  const resolvedBase = canonicalizePath(baseDir);
 
   for (const p of paths) {
     // Injection check: reject control characters (\n, \r, \0)
@@ -46,8 +61,8 @@ export function validateContextFilePaths(
 
     if (!allowExternal) {
       // Traversal check: resolved absolute path must remain within baseDir
-      const abs = resolve(baseDir, p);
-      if (!abs.startsWith(resolvedBase + '/') && abs !== resolvedBase) {
+      const abs = canonicalizePath(p.replaceAll('\\', '/').startsWith('/') ? p : `${baseDir}/${p}`);
+      if (!abs.startsWith(`${resolvedBase}/`) && abs !== resolvedBase) {
         errors.push(`E_CONTEXT_FILE_TRAVERSAL: Path escapes baseDir: ${p}`);
         continue;
       }

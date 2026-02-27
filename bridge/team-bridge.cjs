@@ -718,6 +718,9 @@ function logAuditEvent(workingDirectory, event) {
 
 // src/team/permissions.ts
 var import_node_path3 = require("node:path");
+function normalizeRelativePath(path) {
+  return path.replaceAll("\\", "/");
+}
 function matchGlob(pattern, path) {
   let pi = 0;
   let si = 0;
@@ -772,8 +775,8 @@ function matchGlob(pattern, path) {
 }
 function isPathAllowed(permissions, filePath, workingDirectory) {
   const absPath = (0, import_node_path3.resolve)(workingDirectory, filePath);
-  const relPath = (0, import_node_path3.relative)(workingDirectory, absPath);
-  if (relPath.startsWith("..")) return false;
+  const relPath = normalizeRelativePath((0, import_node_path3.relative)(workingDirectory, absPath));
+  if (relPath === ".." || relPath.startsWith("../")) return false;
   for (const pattern of permissions.deniedPaths) {
     if (matchGlob(pattern, relPath)) return false;
   }
@@ -817,9 +820,9 @@ function findPermissionViolations(changedPaths, permissions, cwd) {
   for (const filePath of changedPaths) {
     if (!isPathAllowed(permissions, filePath, cwd)) {
       const absPath = (0, import_node_path3.resolve)(cwd, filePath);
-      const relPath = (0, import_node_path3.relative)(cwd, absPath);
+      const relPath = normalizeRelativePath((0, import_node_path3.relative)(cwd, absPath));
       let reason;
-      if (relPath.startsWith("..")) {
+      if (relPath === ".." || relPath.startsWith("../")) {
         reason = `Path escapes working directory: ${relPath}`;
       } else {
         const matchedDeny = permissions.deniedPaths.find((p) => matchGlob(p, relPath));
@@ -1689,18 +1692,30 @@ function getWorktreeRoot(cwd) {
 }
 
 // src/team/bridge-entry.ts
+function normalizeForCompare(path) {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+function canonicalizePath(path) {
+  const slashNormalized = path.replaceAll("\\", "/");
+  const hasWindowsDrive = /^[A-Za-z]:\//.test(slashNormalized);
+  if (slashNormalized.startsWith("/") && !hasWindowsDrive) {
+    return normalizeForCompare(import_path12.posix.normalize(slashNormalized));
+  }
+  return normalizeForCompare((0, import_path12.resolve)(path));
+}
 function validateConfigPath(configPath2, homeDir, claudeConfigDir) {
-  const resolved = (0, import_path12.resolve)(configPath2);
-  const isUnderHome = resolved.startsWith(homeDir + "/") || resolved === homeDir;
-  const normalizedConfigDir = (0, import_path12.resolve)(claudeConfigDir);
-  const normalizedOmcDir = (0, import_path12.resolve)(homeDir, ".omc");
+  const resolved = canonicalizePath(configPath2);
+  const normalizedHomeDir = canonicalizePath(homeDir);
+  const isUnderHome = resolved.startsWith(`${normalizedHomeDir}/`) || resolved === normalizedHomeDir;
+  const normalizedConfigDir = canonicalizePath(claudeConfigDir);
+  const normalizedOmcDir = canonicalizePath(`${homeDir}/.omc`);
   const hasOmcComponent = resolved.includes("/.omc/") || resolved.endsWith("/.omc");
   const isTrustedSubpath = resolved === normalizedConfigDir || resolved.startsWith(normalizedConfigDir + "/") || resolved === normalizedOmcDir || resolved.startsWith(normalizedOmcDir + "/") || hasOmcComponent;
   if (!isUnderHome || !isTrustedSubpath) return false;
   try {
-    const parentDir = (0, import_path12.resolve)(resolved, "..");
-    const realParent = (0, import_fs10.realpathSync)(parentDir);
-    if (!realParent.startsWith(homeDir + "/") && realParent !== homeDir) {
+    const parentDir = resolved.startsWith("/") && !/^[A-Za-z]:\//.test(resolved) ? import_path12.posix.dirname(resolved) : (0, import_path12.resolve)(resolved, "..");
+    const realParent = normalizeForCompare((0, import_fs10.realpathSync)(parentDir));
+    if (!realParent.startsWith(`${normalizedHomeDir}/`) && realParent !== normalizedHomeDir) {
       return false;
     }
   } catch {
@@ -1719,7 +1734,9 @@ function validateBridgeWorkingDirectory(workingDirectory) {
   }
   const resolved = (0, import_fs10.realpathSync)(workingDirectory);
   const home = (0, import_os2.homedir)();
-  if (!resolved.startsWith(home + "/") && resolved !== home) {
+  const normalizedResolved = normalizeForCompare(resolved);
+  const normalizedHome = normalizeForCompare(home);
+  if (!(resolved.startsWith(home + "/") || resolved === home) && !(normalizedResolved.startsWith(`${normalizedHome}/`) || normalizedResolved === normalizedHome)) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
   const root = getWorktreeRoot(workingDirectory);

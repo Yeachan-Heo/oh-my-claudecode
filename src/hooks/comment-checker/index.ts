@@ -263,6 +263,7 @@ export function createCommentCheckerHook(config?: CommentCheckerConfig) {
       session_id: string;
       tool_input: Record<string, unknown>;
     }): { decision: string } | null => {
+      cleanupOldPendingCalls();
       const toolLower = input.tool_name.toLowerCase();
 
       if (
@@ -321,6 +322,7 @@ export function createCommentCheckerHook(config?: CommentCheckerConfig) {
       tool_input: Record<string, unknown>;
       tool_response?: string;
     }): string | null => {
+      cleanupOldPendingCalls();
       const toolLower = input.tool_name.toLowerCase();
 
       if (

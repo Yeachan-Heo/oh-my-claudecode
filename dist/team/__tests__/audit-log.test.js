@@ -22,7 +22,12 @@ describe('audit-log', () => {
             logAuditEvent(testDir, event);
             const logPath = join(testDir, '.omc', 'logs', 'team-bridge-team1.jsonl');
             const stat = statSync(logPath);
-            expect(stat.mode & 0o777).toBe(0o600);
+            if (process.platform === 'win32') {
+                expect(stat.mode & 0o777).toBeGreaterThan(0);
+            }
+            else {
+                expect(stat.mode & 0o777).toBe(0o600);
+            }
         });
         it('appends events to existing log', () => {
             const event1 = {
@@ -256,7 +261,6 @@ describe('audit-log', () => {
                 };
                 logAuditEvent(testDir, event);
             }
-            const logPath = join(testDir, '.omc', 'logs', 'team-bridge-team1.jsonl');
             // Force rotation by setting low threshold
             rotateAuditLog(testDir, 'team1', 100);
             const events = readAuditLog(testDir, 'team1');
@@ -278,7 +282,12 @@ describe('audit-log', () => {
             rotateAuditLog(testDir, 'team1', 100);
             const logPath = join(testDir, '.omc', 'logs', 'team-bridge-team1.jsonl');
             const stat = statSync(logPath);
-            expect(stat.mode & 0o777).toBe(0o600);
+            if (process.platform === 'win32') {
+                expect(stat.mode & 0o777).toBeGreaterThan(0);
+            }
+            else {
+                expect(stat.mode & 0o777).toBe(0o600);
+            }
         });
         it('handles custom size threshold', () => {
             const event = {

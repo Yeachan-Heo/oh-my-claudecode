@@ -140,7 +140,7 @@ describe('Ultrawork Session Isolation (Issue #269)', () => {
       // Session A activates ultrawork
       activateUltrawork('Session A task', sessionA, tempDir);
 
-      let state = readUltraworkState(tempDir, sessionA);
+      const state = readUltraworkState(tempDir, sessionA);
       expect(state?.active).toBe(true);
       expect(state?.session_id).toBe(sessionA);
 

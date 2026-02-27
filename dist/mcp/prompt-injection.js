@@ -1,7 +1,18 @@
 // src/mcp/prompt-injection.ts
 // Re-export shared prompt utilities from agents/prompt-helpers
 export { resolveSystemPrompt, getValidAgentRoles, isValidAgentRoleName, VALID_AGENT_ROLES, wrapUntrustedFileContent, wrapUntrustedCliResponse, sanitizePromptContent, singleErrorBlock, inlineSuccessBlocks, } from '../agents/prompt-helpers.js';
-import { resolve } from 'path';
+import { posix, resolve } from 'path';
+function normalizeForCompare(path) {
+    return path.replaceAll('\\', '/').replace(/\/+$/, '');
+}
+function canonicalizePath(path) {
+    const slashNormalized = path.replaceAll('\\', '/');
+    const hasWindowsDrive = /^[A-Za-z]:\//.test(slashNormalized);
+    if (slashNormalized.startsWith('/') && !hasWindowsDrive) {
+        return normalizeForCompare(posix.normalize(slashNormalized));
+    }
+    return normalizeForCompare(resolve(path));
+}
 /**
  * Subagent mode marker prepended to all prompts sent to external CLI agents.
  * Prevents recursive subagent spawning within subagent tool calls.
@@ -17,7 +28,7 @@ Complete the task directly with your available tools.`;
 export function validateContextFilePaths(paths, baseDir, allowExternal = false) {
     const validPaths = [];
     const errors = [];
-    const resolvedBase = resolve(baseDir);
+    const resolvedBase = canonicalizePath(baseDir);
     for (const p of paths) {
         // Injection check: reject control characters (\n, \r, \0)
         if (/[\n\r\0]/.test(p)) {
@@ -26,8 +37,8 @@ export function validateContextFilePaths(paths, baseDir, allowExternal = false) 
         }
         if (!allowExternal) {
             // Traversal check: resolved absolute path must remain within baseDir
-            const abs = resolve(baseDir, p);
-            if (!abs.startsWith(resolvedBase + '/') && abs !== resolvedBase) {
+            const abs = canonicalizePath(p.replaceAll('\\', '/').startsWith('/') ? p : `${baseDir}/${p}`);
+            if (!abs.startsWith(`${resolvedBase}/`) && abs !== resolvedBase) {
                 errors.push(`E_CONTEXT_FILE_TRAVERSAL: Path escapes baseDir: ${p}`);
                 continue;
             }

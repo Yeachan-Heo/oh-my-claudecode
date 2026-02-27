@@ -456,10 +456,7 @@ function paneTailContainsLiteralLine(captured: string, text: string): boolean {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
 
-async function paneInCopyMode(
-  paneId: string,
-  execFileAsync: (cmd: string, args: string[]) => Promise<{ stdout: string }>
-): Promise<boolean> {
+async function paneInCopyMode(paneId: string): Promise<boolean> {
   try {
     const result = await tmuxAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
     return result.stdout.trim() === '1';
@@ -513,7 +510,7 @@ export async function sendToWorker(
     };
 
     // Guard: copy-mode captures keys; skip injection entirely.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
@@ -558,13 +555,13 @@ export async function sendToWorker(
     }
 
     // Safety gate: copy-mode can turn on while we retry; never send fallback control keys when active.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
     // Adaptive fallback: for busy panes, retry once without interrupting active turns.
     const finalCapture = await capturePaneAsync(paneId, execFileAsync as never);
-    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId, execFileAsync as never);
+    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId);
     if (shouldAttemptAdaptiveRetry({
       paneBusy,
       latestCapture: finalCapture,
@@ -572,12 +569,12 @@ export async function sendToWorker(
       paneInCopyMode: paneModeBeforeAdaptiveRetry,
       retriesAttempted: 0,
     })) {
-      if (await paneInCopyMode(paneId, execFileAsync as never)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await sendKey('C-u');
       await sleep(80);
-      if (await paneInCopyMode(paneId, execFileAsync as never)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await execFileAsync('tmux', ['send-keys', '-t', paneId, '-l', '--', message]);
@@ -594,7 +591,7 @@ export async function sendToWorker(
     }
 
     // Before fallback control keys, re-check copy-mode to avoid mutating scrollback UI state.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
@@ -629,7 +626,7 @@ export async function injectToLeaderPane(
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
-    if (await paneInCopyMode(leaderPaneId, execFileAsync as never)) {
+    if (await paneInCopyMode(leaderPaneId)) {
       return false;
     }
     const captured = await capturePaneAsync(leaderPaneId, execFileAsync as never);
@@ -648,9 +645,6 @@ export async function injectToLeaderPane(
  */
 export async function isWorkerAlive(paneId: string): Promise<boolean> {
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
     const result = await tmuxAsync([
       'display-message', '-t', paneId, '-p', '#{pane_dead}'
     ]);

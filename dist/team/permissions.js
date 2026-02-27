@@ -7,6 +7,9 @@
  * prompts as instructions for the LLM to follow.
  */
 import { relative, resolve } from 'node:path';
+function normalizeRelativePath(path) {
+    return path.replaceAll('\\', '/');
+}
 /**
  * Simple glob matching for path patterns.
  * Supports: * (any non-/ chars), ** (any depth including /), ? (single non-/ char), exact match.
@@ -89,9 +92,9 @@ function matchGlob(pattern, path) {
 export function isPathAllowed(permissions, filePath, workingDirectory) {
     // Normalize to relative path
     const absPath = resolve(workingDirectory, filePath);
-    const relPath = relative(workingDirectory, absPath);
+    const relPath = normalizeRelativePath(relative(workingDirectory, absPath));
     // If path escapes working directory, always deny
-    if (relPath.startsWith('..'))
+    if (relPath === '..' || relPath.startsWith('../'))
         return false;
     // Check denied paths first (they override)
     for (const pattern of permissions.deniedPaths) {
@@ -196,9 +199,9 @@ export function findPermissionViolations(changedPaths, permissions, cwd) {
         if (!isPathAllowed(permissions, filePath, cwd)) {
             // Determine which deny pattern matched for the reason
             const absPath = resolve(cwd, filePath);
-            const relPath = relative(cwd, absPath);
+            const relPath = normalizeRelativePath(relative(cwd, absPath));
             let reason;
-            if (relPath.startsWith('..')) {
+            if (relPath === '..' || relPath.startsWith('../')) {
                 reason = `Path escapes working directory: ${relPath}`;
             }
             else {

@@ -409,7 +409,7 @@ describe('AutopilotCancel', () => {
             expect(formatted).not.toContain('Progress Summary');
         });
         it('should format success message with preserved state and progress summary', () => {
-            const state = initAutopilot(testDir, 'test idea');
+            initAutopilot(testDir, 'test idea');
             transitionPhase(testDir, 'execution');
             updateExecution(testDir, {
                 files_created: ['file1.ts', 'file2.ts', 'file3.ts'],

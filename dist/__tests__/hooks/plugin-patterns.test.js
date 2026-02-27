@@ -188,13 +188,13 @@ describe('runLint', () => {
         expect(result.message).toContain('No lint script found');
     });
     it('returns failure when lint script exits with error', () => {
-        writeFileSync(join(testDir, 'package.json'), JSON.stringify({ scripts: { lint: 'exit 1' } }));
+        writeFileSync(join(testDir, 'package.json'), JSON.stringify({ scripts: { lint: 'this-command-should-fail' } }));
         const result = runLint(testDir);
         expect(result.success).toBe(false);
         expect(result.message).toContain('Lint errors found');
     });
     it('returns success when lint script passes', () => {
-        writeFileSync(join(testDir, 'package.json'), JSON.stringify({ scripts: { lint: 'exit 0' } }));
+        writeFileSync(join(testDir, 'package.json'), JSON.stringify({ scripts: { lint: 'echo lint-ok' } }));
         const result = runLint(testDir);
         expect(result.success).toBe(true);
         expect(result.message).toContain('Lint passed');

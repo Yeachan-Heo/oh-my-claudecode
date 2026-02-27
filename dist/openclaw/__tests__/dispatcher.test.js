@@ -245,7 +245,6 @@ describe("isCommandGateway", () => {
     });
 });
 describe("wakeCommandGateway", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     let execFileMock;
     beforeEach(async () => {
         // Grab the mock installed by vi.mock("child_process") and wire it up

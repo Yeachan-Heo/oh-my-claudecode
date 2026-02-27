@@ -385,7 +385,6 @@ describe('Normalization Fast-Path', () => {
         expect(isAlreadyCamelCase({ foo: 'bar', baz: 123 })).toBe(false);
     });
     it('should skip Zod parse on camelCase-only input', () => {
-        const safeParseOrig = HookInputSchema.safeParse.bind(HookInputSchema);
         const safeParseSpy = vi.spyOn(HookInputSchema, 'safeParse');
         const camelInput = {
             sessionId: 'abc',

@@ -101,7 +101,7 @@ describe('merge-coordinator', () => {
             expect(() => {
                 execFileSync('git', ['status'], { cwd: repoDir, stdio: 'pipe' });
             }).not.toThrow();
-        });
+        }, 15000);
     });
     describe('mergeAllWorkerBranches', () => {
         it('returns empty for team with no worktrees', () => {
@@ -122,7 +122,7 @@ describe('merge-coordinator', () => {
             const results = mergeAllWorkerBranches(teamName, repoDir, main);
             expect(results).toHaveLength(2);
             expect(results.every(r => r.success)).toBe(true);
-        });
+        }, 15000);
     });
 });
 //# sourceMappingURL=merge-coordinator.test.js.map

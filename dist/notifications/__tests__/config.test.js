@@ -121,7 +121,6 @@ describe("validateSlackMention", () => {
     });
 });
 describe("buildConfigFromEnv", () => {
-    const originalEnv = process.env;
     beforeEach(() => {
         vi.stubEnv("OMC_DISCORD_NOTIFIER_BOT_TOKEN", "");
         vi.stubEnv("OMC_DISCORD_NOTIFIER_CHANNEL", "");
@@ -235,8 +234,6 @@ describe("buildConfigFromEnv", () => {
     });
 });
 describe("getNotificationConfig - deep merge", () => {
-    let mockExistsSync;
-    let mockReadFileSync;
     beforeEach(() => {
         // Clear env vars
         vi.stubEnv("OMC_DISCORD_NOTIFIER_BOT_TOKEN", "");
@@ -250,8 +247,6 @@ describe("getNotificationConfig - deep merge", () => {
         vi.stubEnv("OMC_TELEGRAM_NOTIFIER_UID", "");
         vi.stubEnv("OMC_SLACK_WEBHOOK_URL", "");
         vi.stubEnv("OMC_SLACK_MENTION", "");
-        mockExistsSync = vi.fn().mockReturnValue(false);
-        mockReadFileSync = vi.fn().mockReturnValue("{}");
     });
     afterEach(() => {
         vi.unstubAllEnvs();

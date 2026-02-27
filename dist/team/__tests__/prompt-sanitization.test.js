@@ -79,7 +79,7 @@ describe('buildTaskPrompt structure', () => {
     // We simulate what buildTaskPrompt does based on the known implementation
     function buildTaskPrompt(task, messages, config) {
         const sanitizedSubject = sanitizePromptContent(task.subject, 500);
-        let sanitizedDescription = sanitizePromptContent(task.description, 10000);
+        const sanitizedDescription = sanitizePromptContent(task.description, 10000);
         let inboxContext = '';
         if (messages.length > 0) {
             let totalInboxSize = 0;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   // Detector functions
   removeCodeBlocks,
@@ -22,7 +22,7 @@ import {
   shouldActivateThinkMode,
   shouldActivateUltrathink,
 } from '../index.js';
-import type { ThinkModeState, ThinkModeInput } from '../types.js';
+import type { ThinkModeInput } from '../types.js';
 
 describe('think-mode', () => {
   // Clean up state after each test

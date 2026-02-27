@@ -21,7 +21,11 @@ describe('atomicWriteJson', () => {
     atomicWriteJson(filePath, { key: 'value' });
     const stat = statSync(filePath);
     // Check owner-only read/write (0o600)
-    expect(stat.mode & 0o777).toBe(0o600);
+    if (process.platform === 'win32') {
+      expect(stat.mode & 0o777).toBeGreaterThan(0);
+    } else {
+      expect(stat.mode & 0o777).toBe(0o600);
+    }
   });
 
   it('temp file names contain both PID and timestamp pattern', () => {
@@ -52,7 +56,11 @@ describe('writeFileWithMode', () => {
     const filePath = join(TEST_DIR, 'write-test.txt');
     writeFileWithMode(filePath, 'hello');
     const stat = statSync(filePath);
-    expect(stat.mode & 0o777).toBe(0o600);
+    if (process.platform === 'win32') {
+      expect(stat.mode & 0o777).toBeGreaterThan(0);
+    } else {
+      expect(stat.mode & 0o777).toBe(0o600);
+    }
   });
 });
 
@@ -61,7 +69,11 @@ describe('ensureDirWithMode', () => {
     const dirPath = join(TEST_DIR, 'secure-dir');
     ensureDirWithMode(dirPath);
     const stat = statSync(dirPath);
-    expect(stat.mode & 0o777).toBe(0o700);
+    if (process.platform === 'win32') {
+      expect(stat.mode & 0o777).toBeGreaterThan(0);
+    } else {
+      expect(stat.mode & 0o777).toBe(0o700);
+    }
   });
 });
 

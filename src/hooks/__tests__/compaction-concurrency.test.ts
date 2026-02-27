@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from 'fs';
+import { mkdtempSync, mkdirSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -171,7 +171,11 @@ describe('processPreCompact - Compaction Mutex (issue #453)', () => {
         expect(files2.length).toBe(1);
       }
     } finally {
-      rmSync(tempDir2, { recursive: true, force: true });
+      try {
+        rmSync(tempDir2, { recursive: true, force: true });
+      } catch {
+        // Windows can keep transient handles briefly; cleanup is best-effort.
+      }
     }
   });
 

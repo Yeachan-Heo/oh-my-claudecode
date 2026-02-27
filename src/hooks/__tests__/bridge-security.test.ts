@@ -22,7 +22,7 @@ import {
   PermissionRequestInput,
 } from '../permission-handler/index.js';
 import { validatePath } from '../../lib/worktree-paths.js';
-import { normalizeHookInput, SENSITIVE_HOOKS, KNOWN_FIELDS, isAlreadyCamelCase, HookInputSchema } from '../bridge-normalize.js';
+import { normalizeHookInput, SENSITIVE_HOOKS, isAlreadyCamelCase, HookInputSchema } from '../bridge-normalize.js';
 import { readAutopilotState } from '../autopilot/state.js';
 
 // ============================================================================
@@ -508,7 +508,6 @@ describe('Normalization Fast-Path', () => {
   });
 
   it('should skip Zod parse on camelCase-only input', () => {
-    const safeParseOrig = HookInputSchema.safeParse.bind(HookInputSchema);
     const safeParseSpy = vi.spyOn(HookInputSchema, 'safeParse');
 
     const camelInput = {

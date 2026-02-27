@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, normalize } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import {
@@ -37,7 +37,7 @@ describe('git-worktree', () => {
     it('creates worktree at correct path', () => {
       const info = createWorkerWorktree(teamName, 'worker1', repoDir);
 
-      expect(info.path).toContain('.omc/worktrees');
+      expect(normalize(info.path)).toContain(normalize('.omc/worktrees'));
       expect(info.branch).toBe(`omc-team/${teamName}/worker1`);
       expect(info.workerName).toBe('worker1');
       expect(info.teamName).toBe(teamName);

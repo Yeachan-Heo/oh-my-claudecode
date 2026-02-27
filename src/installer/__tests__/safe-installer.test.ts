@@ -4,10 +4,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { isOmcHook, install, InstallOptions } from '../index.js';
+import { isOmcHook } from '../index.js';
 
 /**
  * Detect hook conflicts using the real isOmcHook function.
@@ -129,11 +129,6 @@ describe('Safe Installer - Hook Conflict Detection', () => {
       }
     };
     writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(existingSettings, null, 2));
-
-    const options: InstallOptions = {
-      verbose: true,
-      skipClaudeCheck: true
-    };
 
     // Simulate install logic (we'd need to mock or refactor install function for full test)
     // For now, test the detection logic directly

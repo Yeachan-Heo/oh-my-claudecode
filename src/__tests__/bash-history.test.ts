@@ -3,10 +3,9 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { tmpdir, homedir } from 'os';
-import { execSync } from 'child_process';
+import { tmpdir } from 'os';
 
 describe('Bash History Integration', () => {
   const testHistoryPath = join(tmpdir(), `.bash_history_test_${process.pid}`);

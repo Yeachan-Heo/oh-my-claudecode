@@ -620,7 +620,13 @@ describe('processHook - Routing Matrix', () => {
                 expect(existsSync(checkpointDir)).toBe(true);
             }
             finally {
-                rmSync(tempDir, { recursive: true, force: true });
+                try {
+                    rmSync(tempDir, { recursive: true, force: true });
+                }
+                catch {
+                    // Windows can transiently lock files/directories in this flow.
+                    // Cleanup is best-effort for this test.
+                }
             }
         });
     });

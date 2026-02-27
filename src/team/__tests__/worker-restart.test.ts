@@ -78,7 +78,6 @@ describe('worker-restart', () => {
 
     it('updates lastRestartAt timestamp', () => {
       recordRestart(testDir, teamName, workerName);
-      const state1 = readRestartState(testDir, teamName, workerName);
       // Small delay to ensure different timestamp
       recordRestart(testDir, teamName, workerName);
       const state2 = readRestartState(testDir, teamName, workerName);

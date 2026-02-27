@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, statSync, realpathSync } from 'fs';
-import { join, resolve } from 'path';
+import type { Stats } from 'fs';
+import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { BridgeConfig, TaskFile, OutboxMessage } from '../types.js';
 import { readTask, updateTask } from '../task-file-ops.js';
@@ -294,7 +295,7 @@ describe('validateBridgeWorkingDirectory logic', () => {
   // replicate its core checks to validate the security properties.
 
   function validateBridgeWorkingDirectory(workingDirectory: string): void {
-    let stat;
+    let stat: Stats;
     try {
       stat = statSync(workingDirectory);
     } catch {
@@ -303,22 +304,24 @@ describe('validateBridgeWorkingDirectory logic', () => {
     if (!stat.isDirectory()) {
       throw new Error(`workingDirectory is not a directory: ${workingDirectory}`);
     }
-    const resolved = realpathSync(workingDirectory);
-    const home = homedir();
+    const resolved = realpathSync(workingDirectory).replaceAll('\\', '/');
+    const home = homedir().replaceAll('\\', '/');
     if (!resolved.startsWith(home + '/') && resolved !== home) {
       throw new Error(`workingDirectory is outside home directory: ${resolved}`);
     }
   }
 
   it('rejects /etc as working directory', () => {
-    expect(() => validateBridgeWorkingDirectory('/etc')).toThrow('outside home directory');
+    const outsideDir = process.platform === 'win32' ? 'C:\\Windows' : '/etc';
+    expect(() => validateBridgeWorkingDirectory(outsideDir)).toThrow('outside home directory');
   });
 
   it('rejects /tmp as working directory (outside home)', () => {
-    // /tmp is typically outside $HOME
-    const home = homedir();
-    if (!'/tmp'.startsWith(home)) {
-      expect(() => validateBridgeWorkingDirectory('/tmp')).toThrow('outside home directory');
+    const outsideTmp = process.platform === 'win32' ? 'C:\\Windows\\Temp' : '/tmp';
+    const home = homedir().replaceAll('\\', '/');
+    const normalizedOutside = outsideTmp.replaceAll('\\', '/');
+    if (!normalizedOutside.startsWith(home + '/') && normalizedOutside !== home) {
+      expect(() => validateBridgeWorkingDirectory(outsideTmp)).toThrow('outside home directory');
     }
   });
 

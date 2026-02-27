@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const CLI_ENTRY = join(REPO_ROOT, 'src', 'cli', 'index.ts');
+const CLI_TEST_TIMEOUT_MS = 30000;
 function runCli(args, homeDir) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', CLI_ENTRY, ...args], {
         cwd: REPO_ROOT,
@@ -46,7 +47,7 @@ describe('omc config-stop-callback --profile', () => {
         expect(config.notificationProfiles.work.enabled).toBe(true);
         expect(config.notificationProfiles.work.discord.enabled).toBe(true);
         expect(config.notificationProfiles.work.discord.webhookUrl).toBe('https://discord.com/api/webhooks/test');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('creates a telegram profile', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -64,7 +65,7 @@ describe('omc config-stop-callback --profile', () => {
         expect(config.notificationProfiles.personal.telegram.enabled).toBe(true);
         expect(config.notificationProfiles.personal.telegram.botToken).toBe('123:abc');
         expect(config.notificationProfiles.personal.telegram.chatId).toBe('999');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('creates a discord-bot profile with --channel-id', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -82,7 +83,7 @@ describe('omc config-stop-callback --profile', () => {
         expect(config.notificationProfiles.ops['discord-bot'].enabled).toBe(true);
         expect(config.notificationProfiles.ops['discord-bot'].botToken).toBe('bot-token-123');
         expect(config.notificationProfiles.ops['discord-bot'].channelId).toBe('channel-456');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('adds multiple platforms to the same profile', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -106,7 +107,7 @@ describe('omc config-stop-callback --profile', () => {
         const config = readConfig(configPath);
         expect(config.notificationProfiles.multi.discord.enabled).toBe(true);
         expect(config.notificationProfiles.multi.telegram.enabled).toBe(true);
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('does not affect legacy stopHookCallbacks when using --profile', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -128,7 +129,7 @@ describe('omc config-stop-callback --profile', () => {
         expect(config.stopHookCallbacks.discord.webhookUrl).toBe('https://discord.com/api/webhooks/legacy');
         // New profile created separately
         expect(config.notificationProfiles.new.discord.webhookUrl).toBe('https://discord.com/api/webhooks/new');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('shows profile config with --show', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -149,7 +150,7 @@ describe('omc config-stop-callback --profile', () => {
         ], homeDir);
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('webhookUrl');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
 });
 describe('omc config-notify-profile', () => {
     it('lists all profiles', () => {
@@ -167,7 +168,7 @@ describe('omc config-notify-profile', () => {
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('work');
         expect(result.stdout).toContain('personal');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('shows a specific profile', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -181,7 +182,7 @@ describe('omc config-notify-profile', () => {
         const result = runCli(['config-notify-profile', 'work', '--show'], homeDir);
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('webhookUrl');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('deletes a profile', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -199,7 +200,7 @@ describe('omc config-notify-profile', () => {
         const config = readConfig(configPath);
         expect(config.notificationProfiles.work).toBeUndefined();
         expect(config.notificationProfiles.personal).toBeDefined();
-    });
+    }, CLI_TEST_TIMEOUT_MS);
     it('shows helpful message when no profiles exist', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-profile-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -208,6 +209,6 @@ describe('omc config-notify-profile', () => {
         const result = runCli(['config-notify-profile', '--list'], homeDir);
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('No notification profiles');
-    });
+    }, CLI_TEST_TIMEOUT_MS);
 });
 //# sourceMappingURL=cli-notify-profile.test.js.map

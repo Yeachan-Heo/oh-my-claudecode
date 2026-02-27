@@ -29,7 +29,7 @@ import {
   transitionToFailed,
   TransitionResult,
 } from '../state.js';
-import { AutopilotPhase, AutopilotState } from '../types.js';
+import { AutopilotPhase } from '../types.js';
 
 describe('Autopilot State Machine Transitions', () => {
   let testDir: string;
