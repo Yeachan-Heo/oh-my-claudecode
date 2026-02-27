@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, normalize } from 'path';
 import { tmpdir } from 'os';
 import { findSkillFiles, getSkillsDir, ensureSkillsDir } from '../../hooks/learner/finder.js';
 import { PROJECT_SKILLS_SUBDIR } from '../../hooks/learner/constants.js';
@@ -99,7 +99,7 @@ describe('Skill Finder', () => {
         expect(result).toBe(hint);
     });
     it('should construct PROJECT_SKILLS_SUBDIR with path.join', () => {
-        expect(PROJECT_SKILLS_SUBDIR).toBe(join('.omc', 'skills'));
+        expect(normalize(PROJECT_SKILLS_SUBDIR)).toBe(normalize(join('.omc', 'skills')));
     });
 });
 //# sourceMappingURL=finder.test.js.map

@@ -17,7 +17,7 @@ describe('AutopilotState', () => {
             expect(state).toBeNull();
         });
         it('should return parsed state when file exists', () => {
-            const state = initAutopilot(testDir, 'test idea');
+            initAutopilot(testDir, 'test idea');
             const readState = readAutopilotState(testDir);
             expect(readState).not.toBeNull();
             expect(readState?.originalIdea).toBe('test idea');

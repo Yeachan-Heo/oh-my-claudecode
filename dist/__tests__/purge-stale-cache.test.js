@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { join } from 'path';
+const MOCK_CONFIG_DIR = join('/mock', '.claude');
 vi.mock('fs', async () => {
     const actual = await vi.importActual('fs');
     return {
@@ -13,7 +14,7 @@ vi.mock('fs', async () => {
     };
 });
 vi.mock('../utils/config-dir.js', () => ({
-    getConfigDir: vi.fn(() => '/mock/.claude'),
+    getConfigDir: vi.fn(() => MOCK_CONFIG_DIR),
 }));
 import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'fs';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
@@ -48,7 +49,7 @@ describe('purgeStalePluginCacheVersions', () => {
         expect(mockedRmSync).not.toHaveBeenCalled();
     });
     it('removes stale versions not in installed_plugins.json', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         const activeVersion = join(cacheDir, 'my-marketplace/my-plugin/2.0.0');
         const staleVersion = join(cacheDir, 'my-marketplace/my-plugin/1.0.0');
         mockedExistsSync.mockImplementation((p) => {
@@ -90,7 +91,7 @@ describe('purgeStalePluginCacheVersions', () => {
         expect(mockedRmSync).not.toHaveBeenCalledWith(activeVersion, expect.anything());
     });
     it('handles multiple marketplaces and plugins', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         const active1 = join(cacheDir, 'official/hookify/aa11');
         const active2 = join(cacheDir, 'omc/oh-my-claudecode/4.3.0');
         const stale1 = join(cacheDir, 'official/hookify/bb22');
@@ -132,7 +133,7 @@ describe('purgeStalePluginCacheVersions', () => {
         expect(result.removedPaths).toContain(stale2);
     });
     it('does nothing when all cache versions are active', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         const active = join(cacheDir, 'omc/oh-my-claudecode/4.3.0');
         mockedExistsSync.mockImplementation((p) => {
             const ps = String(p);
@@ -172,7 +173,7 @@ describe('purgeStalePluginCacheVersions', () => {
     });
     // --- C2 fix: trailing slash in installPath ---
     it('matches installPath with trailing slash correctly', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         const versionDir = join(cacheDir, 'omc/plugin/1.0.0');
         mockedExistsSync.mockReturnValue(true);
         mockedReadFileSync.mockReturnValue(JSON.stringify({
@@ -201,7 +202,7 @@ describe('purgeStalePluginCacheVersions', () => {
     });
     // --- C2 fix: installPath points to subdirectory ---
     it('preserves version when installPath points to a subdirectory', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         const versionDir = join(cacheDir, 'omc/plugin/2.0.0');
         mockedExistsSync.mockReturnValue(true);
         mockedReadFileSync.mockReturnValue(JSON.stringify({
@@ -230,7 +231,7 @@ describe('purgeStalePluginCacheVersions', () => {
     });
     // --- C3 fix: recently modified directories are skipped ---
     it('skips recently modified directories (race condition guard)', () => {
-        const cacheDir = '/mock/.claude/plugins/cache';
+        const cacheDir = join(MOCK_CONFIG_DIR, 'plugins', 'cache');
         mockedExistsSync.mockReturnValue(true);
         mockedReadFileSync.mockReturnValue(JSON.stringify({
             version: 2,

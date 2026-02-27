@@ -129,7 +129,12 @@ describe('processPreCompact - Compaction Mutex (issue #453)', () => {
             }
         }
         finally {
-            rmSync(tempDir2, { recursive: true, force: true });
+            try {
+                rmSync(tempDir2, { recursive: true, force: true });
+            }
+            catch {
+                // Windows can keep transient handles briefly; cleanup is best-effort.
+            }
         }
     });
     it('should propagate rejection to all coalesced callers and clear mutex', async () => {

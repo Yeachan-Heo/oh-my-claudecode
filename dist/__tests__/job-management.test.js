@@ -159,14 +159,12 @@ describe('job-management', () => {
                     callCount++;
                     return callCount === 1 ? mockStatus : completedStatus;
                 });
-                const writeJobStatusSpy = vi.spyOn(promptPersistence, 'writeJobStatus');
                 // Mock process.kill to throw ESRCH
                 const esrchError = new Error('ESRCH');
                 esrchError.code = 'ESRCH';
                 vi.spyOn(process, 'kill').mockImplementation(() => { throw esrchError; });
                 const result = await handleKillJob('codex', 'ab12cd34', 'SIGTERM');
                 // Should NOT overwrite to failed since job is completed
-                const failedWrites = writeJobStatusSpy.mock.calls.filter(call => call[0].status === 'failed');
                 // The initial killedByUser write happens, but after ESRCH with completed status, no failed write
                 expect(result.content[0].text).toContain('completed successfully');
             });

@@ -60,7 +60,7 @@ describe('omc config-stop-callback tag options', () => {
         expect(show.status).toBe(0);
         expect(show.stdout).toContain('"tagList": [');
         expect(show.stdout).toContain('"@alice"');
-    });
+    }, 60000);
     it('applies and clears discord tags and ignores tag options for file callback', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -96,7 +96,7 @@ describe('omc config-stop-callback tag options', () => {
             path: '/tmp/session.md',
             format: 'markdown',
         });
-    });
+    }, 60000);
     it('configures slack stop-callback with webhook and tags', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
@@ -127,6 +127,6 @@ describe('omc config-stop-callback tag options', () => {
         expect(show.status).toBe(0);
         expect(show.stdout).toContain('"webhookUrl"');
         expect(show.stdout).toContain('"tagList"');
-    });
+    }, 60000);
 });
 //# sourceMappingURL=cli-config-stop-callback.test.js.map

@@ -9,7 +9,7 @@
 //
 // Config via temp file, not inline JSON argument.
 import { readFileSync, statSync, realpathSync } from 'fs';
-import { resolve } from 'path';
+import { posix, resolve } from 'path';
 import { homedir } from 'os';
 import { runBridge } from './mcp-team-bridge.js';
 import { deleteHeartbeat } from './heartbeat.js';
@@ -17,6 +17,17 @@ import { unregisterMcpWorker } from './team-registration.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../utils/paths.js';
 import { sanitizeName } from './tmux-session.js';
+function normalizeForCompare(path) {
+    return path.replaceAll('\\', '/').replace(/\/+$/, '');
+}
+function canonicalizePath(path) {
+    const slashNormalized = path.replaceAll('\\', '/');
+    const hasWindowsDrive = /^[A-Za-z]:\//.test(slashNormalized);
+    if (slashNormalized.startsWith('/') && !hasWindowsDrive) {
+        return normalizeForCompare(posix.normalize(slashNormalized));
+    }
+    return normalizeForCompare(resolve(path));
+}
 /**
  * Validate that a config path is under the user's home directory
  * and contains a trusted subpath (Claude config dir or ~/.omc/).
@@ -24,10 +35,11 @@ import { sanitizeName } from './tmux-session.js';
  */
 export function validateConfigPath(configPath, homeDir, claudeConfigDir) {
     // Resolve to canonical absolute path to defeat ".." traversal
-    const resolved = resolve(configPath);
-    const isUnderHome = resolved.startsWith(homeDir + '/') || resolved === homeDir;
-    const normalizedConfigDir = resolve(claudeConfigDir);
-    const normalizedOmcDir = resolve(homeDir, '.omc');
+    const resolved = canonicalizePath(configPath);
+    const normalizedHomeDir = canonicalizePath(homeDir);
+    const isUnderHome = resolved.startsWith(`${normalizedHomeDir}/`) || resolved === normalizedHomeDir;
+    const normalizedConfigDir = canonicalizePath(claudeConfigDir);
+    const normalizedOmcDir = canonicalizePath(`${homeDir}/.omc`);
     const hasOmcComponent = resolved.includes('/.omc/') || resolved.endsWith('/.omc');
     const isTrustedSubpath = resolved === normalizedConfigDir ||
         resolved.startsWith(normalizedConfigDir + '/') ||
@@ -39,9 +51,11 @@ export function validateConfigPath(configPath, homeDir, claudeConfigDir) {
     // Additionally verify via realpathSync on the parent directory (if it exists)
     // to defeat symlink attacks where the parent is a symlink outside home
     try {
-        const parentDir = resolve(resolved, '..');
-        const realParent = realpathSync(parentDir);
-        if (!realParent.startsWith(homeDir + '/') && realParent !== homeDir) {
+        const parentDir = resolved.startsWith('/') && !/^[A-Za-z]:\//.test(resolved)
+            ? posix.dirname(resolved)
+            : resolve(resolved, '..');
+        const realParent = normalizeForCompare(realpathSync(parentDir));
+        if (!realParent.startsWith(`${normalizedHomeDir}/`) && realParent !== normalizedHomeDir) {
             return false;
         }
     }
@@ -71,7 +85,10 @@ function validateBridgeWorkingDirectory(workingDirectory) {
     // Resolve symlinks and verify under homedir
     const resolved = realpathSync(workingDirectory);
     const home = homedir();
-    if (!resolved.startsWith(home + '/') && resolved !== home) {
+    const normalizedResolved = normalizeForCompare(resolved);
+    const normalizedHome = normalizeForCompare(home);
+    if (!(resolved.startsWith(home + '/') || resolved === home) &&
+        !(normalizedResolved.startsWith(`${normalizedHome}/`) || normalizedResolved === normalizedHome)) {
         throw new Error(`workingDirectory is outside home directory: ${resolved}`);
     }
     // Must be inside a git worktree

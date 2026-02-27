@@ -41,6 +41,8 @@ describe('sessionName', () => {
 describe('getDefaultShell', () => {
     it('uses COMSPEC on win32', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('MSYSTEM', '');
+        vi.stubEnv('MINGW_PREFIX', '');
         vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
         expect(getDefaultShell()).toBe('C:\\Windows\\System32\\cmd.exe');
     });
@@ -81,6 +83,8 @@ describe('buildWorkerStartCommand', () => {
     });
     it('builds a Windows startup command without POSIX constructs', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('MSYSTEM', '');
+        vi.stubEnv('MINGW_PREFIX', '');
         vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
         const cmd = buildWorkerStartCommand({
             teamName: 't',

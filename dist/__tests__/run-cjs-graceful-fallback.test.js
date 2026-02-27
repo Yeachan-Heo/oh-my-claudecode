@@ -77,7 +77,7 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     });
     it('falls back to latest version when target version is missing', () => {
         // Create a valid latest version with the target script
-        const latestDir = createFakeVersion('4.4.5', {
+        createFakeVersion('4.4.5', {
             'test-hook.cjs': '#!/usr/bin/env node\nconsole.log("hook-ok"); process.exit(0);',
         });
         // Target points to a non-existent old version
@@ -115,7 +115,12 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
         });
         // Create a symlink from old version to latest
         const symlinkVersion = join(fakeCacheBase, '4.4.3');
-        symlinkSync('4.4.5', symlinkVersion);
+        if (process.platform === 'win32') {
+            symlinkSync(latestDir, symlinkVersion, 'junction');
+        }
+        else {
+            symlinkSync('4.4.5', symlinkVersion);
+        }
         // Target uses the symlinked version
         const target = join(symlinkVersion, 'scripts', 'test-hook.cjs');
         const result = runCjs(target, {

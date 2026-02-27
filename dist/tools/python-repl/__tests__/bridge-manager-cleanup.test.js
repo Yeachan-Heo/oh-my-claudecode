@@ -7,11 +7,14 @@ import { getBridgeMetaPath, getBridgeSocketPath, getSessionDir, getSessionLockPa
 describe('bridge-manager cleanup', () => {
     let tmpRuntimeRoot;
     let originalXdgRuntimeDir;
+    let originalLocalAppData;
     beforeEach(() => {
         originalXdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+        originalLocalAppData = process.env.LOCALAPPDATA;
         tmpRuntimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-bridge-cleanup-'));
         fs.chmodSync(tmpRuntimeRoot, 0o700);
         process.env.XDG_RUNTIME_DIR = tmpRuntimeRoot;
+        process.env.LOCALAPPDATA = tmpRuntimeRoot;
         fs.mkdirSync(getRuntimeDir(), { recursive: true });
     });
     afterEach(() => {
@@ -20,6 +23,12 @@ describe('bridge-manager cleanup', () => {
         }
         else {
             process.env.XDG_RUNTIME_DIR = originalXdgRuntimeDir;
+        }
+        if (originalLocalAppData === undefined) {
+            delete process.env.LOCALAPPDATA;
+        }
+        else {
+            process.env.LOCALAPPDATA = originalLocalAppData;
         }
         fs.rmSync(tmpRuntimeRoot, { recursive: true, force: true });
     });

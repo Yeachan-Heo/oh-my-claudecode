@@ -169,10 +169,15 @@ describe('summary-report', () => {
             });
             const filePath = saveTeamReport(testDir, teamName);
             expect(existsSync(filePath)).toBe(true);
-            expect(filePath).toContain('.omc/reports/');
+            expect(filePath.replaceAll('\\', '/')).toContain('.omc/reports/');
             expect(filePath).toContain(teamName);
             const stat = statSync(filePath);
-            expect(stat.mode & 0o777).toBe(0o600);
+            if (process.platform === 'win32') {
+                expect(stat.mode & 0o777).toBeGreaterThan(0);
+            }
+            else {
+                expect(stat.mode & 0o777).toBe(0o600);
+            }
             const content = readFileSync(filePath, 'utf-8');
             expect(content).toContain('# Team Report');
         });
