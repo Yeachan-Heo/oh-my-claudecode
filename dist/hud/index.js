@@ -15,7 +15,7 @@ import { render } from "./render.js";
 import { sanitizeOutput } from "./sanitize.js";
 import { getRuntimePackageVersion } from "../lib/version.js";
 import { compareVersions } from "../features/auto-update.js";
-import { resolveTranscriptPath } from "../lib/worktree-paths.js";
+import { resolveToWorktreeRoot, resolveTranscriptPath } from "../lib/worktree-paths.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -69,7 +69,7 @@ async function main(watchMode = false) {
             console.log("[OMC] run /omc-setup to install properly");
             return;
         }
-        const cwd = stdin.cwd || process.cwd();
+        const cwd = resolveToWorktreeRoot(stdin.cwd || undefined);
         // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
         const config = readHudConfig();
         // Resolve worktree-mismatched transcript paths (issue #1094)
