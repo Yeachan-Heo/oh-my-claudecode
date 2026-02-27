@@ -2,6 +2,12 @@ import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { CliAgentType } from './model-contract.js';
+import type { WorkerInteropConfig } from '../interop/adapter-types.js';
+import { getInteropMode } from '../interop/mcp-bridge.js';
+import {
+  bridgeBootstrapToOmx, pollOmxCompletion,
+} from '../interop/worker-adapter.js';
+import { appendOmxTeamEvent } from '../interop/omx-team-state.js';
 import { buildWorkerArgv, validateCliAvailable, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
 import {
@@ -20,6 +26,8 @@ export interface TeamConfig {
   agentTypes: CliAgentType[];
   tasks: Array<{ subject: string; description: string; }>;
   cwd: string;
+  /** Per-worker interop config for OMC-OMX cross-platform bridging (issue #1117) */
+  workerInteropConfigs?: WorkerInteropConfig[];
 }
 
 export interface ActiveWorkerState {
@@ -128,6 +136,19 @@ function parseWorkerIndex(workerNameValue: string): number {
   if (!match) return 0;
   const parsed = Number.parseInt(match[1], 10) - 1;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+/** Check if a worker uses OMX state conventions based on runtime config */
+function isOmxInteropWorker(runtime: TeamRuntime, workerNameValue: string): boolean {
+  const wConfig = runtime.config.workerInteropConfigs?.find(c => c.workerName === workerNameValue);
+  return wConfig?.interopMode === 'omx';
+}
+
+/** Build an AdapterContext from runtime state (returns null if interop is off) */
+function buildAdapterContext(runtime: TeamRuntime): import('../interop/adapter-types.js').AdapterContext | null {
+  const mode = getInteropMode();
+  if (mode === 'off') return null;
+  return { lead: 'omc', teamName: runtime.teamName, cwd: runtime.cwd, interopMode: mode };
 }
 
 function taskPath(root: string, taskId: string): string {
@@ -452,6 +473,16 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
 
       const root = stateRoot(runtime.cwd, runtime.teamName);
 
+      // Interop: poll OMX task files for completion and synthesize done.json shims (issue #1117).
+      // This runs BEFORE the done.json collection below so the shim is available on the same tick.
+      const adapterCtx = buildAdapterContext(runtime);
+      if (adapterCtx) {
+        await Promise.all(workers
+          .filter(([wName]) => isOmxInteropWorker(runtime, wName))
+          .map(([wName, active]) => pollOmxCompletion(adapterCtx, wName, active.taskId).catch(() => null))
+        );
+      }
+
       // Collect done signals and alive checks in parallel to avoid O(N×300ms) sequential tmux calls.
       const [doneSignals, aliveResults] = await Promise.all([
         Promise.all(workers.map(([wName]) => {
@@ -671,6 +702,14 @@ export async function spawnWorkerForTask(
   // Prompt-mode agents: instruction already passed via CLI flag at spawn.
   // No trust-confirm or tmux send-keys interaction needed.
 
+  // Interop: bridge bootstrap to OMX format for cross-platform workers (issue #1117)
+  if (isOmxInteropWorker(runtime, workerNameValue)) {
+    const ctx = buildAdapterContext(runtime);
+    if (ctx) {
+      await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
+    }
+  }
+
   return paneId;
 }
 
@@ -807,6 +846,23 @@ export async function shutdownTeam(
     }
   }
   // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
+
+  // Interop: write shutdown event to OMX event log for cross-platform workers (issue #1117)
+  const interopMode = getInteropMode();
+  if (interopMode !== 'off' && configData?.workerInteropConfigs) {
+    const omxWorkers = configData.workerInteropConfigs.filter(c => c.interopMode === 'omx');
+    for (const wConfig of omxWorkers) {
+      try {
+        await appendOmxTeamEvent(teamName, {
+          type: 'worker_stopped',
+          worker: wConfig.workerName,
+          task_id: undefined,
+        }, cwd);
+      } catch {
+        // best-effort: OMX event log may not exist
+      }
+    }
+  }
 
   // Kill tmux session (or just worker panes in split-pane mode)
   await killTeamSession(sessionName, workerPaneIds, leaderPaneId);
