@@ -16,7 +16,7 @@
 import { pathToFileURL } from 'url';
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
+import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
@@ -92,7 +92,7 @@ function readTeamStagedState(
   directory: string,
   sessionId?: string,
 ): TeamStagedState | null {
-  const stateDir = join(directory, ".omc", "state");
+  const stateDir = join(getOmcRoot(directory), "state");
   const statePaths = sessionId
     ? [
         join(stateDir, "sessions", sessionId, "team-state.json"),
@@ -532,7 +532,7 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
 
         // Per-session cooldown: prevent notification spam when the session idles repeatedly.
         // Uses session-scoped state so one session does not suppress another.
-        const stateDir = join(directory, ".omc", "state");
+        const stateDir = join(getOmcRoot(directory), "state");
         if (shouldSendIdleNotification(stateDir, sessionId)) {
           recordIdleNotificationSent(stateDir, sessionId);
           import("../notifications/index.js").then(({ notify }) =>

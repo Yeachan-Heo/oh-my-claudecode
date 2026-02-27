@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
-import { resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,7 +143,7 @@ export function getSkillStatePath(directory: string, sessionId?: string): string
   if (sessionId) {
     return resolveSessionStatePath('skill-active', sessionId, directory);
   }
-  return join(directory, '.omc', 'state', 'skill-active-state.json');
+  return join(getOmcRoot(directory), 'state', 'skill-active-state.json');
 }
 
 /**

@@ -23,7 +23,7 @@ import {
   getUltraworkPersistenceMessage,
   type UltraworkState
 } from '../ultrawork/index.js';
-import { resolveToWorktreeRoot, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import {
   readRalphState,
   writeRalphState,
@@ -130,7 +130,7 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): boole
  * Returns null if file doesn't exist or error is stale (>60 seconds old).
  */
 export function readLastToolError(directory: string): ToolErrorState | null {
-  const stateDir = join(directory, '.omc', 'state');
+  const stateDir = join(getOmcRoot(directory), 'state');
   const errorPath = join(stateDir, 'last-tool-error.json');
 
   try {
@@ -165,7 +165,7 @@ export function readLastToolError(directory: string): ToolErrorState | null {
  * Clear tool error state file atomically.
  */
 export function clearToolErrorState(directory: string): void {
-  const stateDir = join(directory, '.omc', 'state');
+  const stateDir = join(getOmcRoot(directory), 'state');
   const errorPath = join(stateDir, 'last-tool-error.json');
 
   try {

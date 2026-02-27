@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 export interface PermissionRequestInput {
   session_id: string;
@@ -112,7 +113,7 @@ export function isHeredocWithSafeBase(command: string): boolean {
  * Check if an active mode (autopilot/ultrawork/ralph/team/swarm) is running
  */
 export function isActiveModeRunning(directory: string): boolean {
-  const stateDir = path.join(directory, '.omc', 'state');
+  const stateDir = path.join(getOmcRoot(directory), 'state');
 
   if (!fs.existsSync(stateDir)) {
     return false;

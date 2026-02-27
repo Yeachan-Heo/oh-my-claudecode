@@ -27,6 +27,7 @@ function debugLog(message: string, ...args: unknown[]): void {
 
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 
 /**
@@ -281,7 +282,7 @@ function getTodoFilePaths(sessionId?: string, directory?: string): string[] {
 
   // Project-specific todos
   if (directory) {
-    paths.push(join(directory, '.omc', 'todos.json'));
+    paths.push(join(getOmcRoot(directory), 'todos.json'));
     paths.push(join(directory, '.claude', 'todos.json'));
   }
 

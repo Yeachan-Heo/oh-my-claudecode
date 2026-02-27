@@ -35,6 +35,7 @@ import { resolveToWorktreeRoot, resolveTranscriptPath } from "../lib/worktree-pa
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { getOmcRoot } from "../lib/worktree-paths.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -218,7 +219,7 @@ async function main(watchMode = false): Promise<void> {
       context.contextPercent >= config.contextLimitWarning.threshold
     ) {
       try {
-        const omcStateDir = join(cwd, '.omc', 'state');
+        const omcStateDir = join(getOmcRoot(cwd), 'state');
         if (!existsSync(omcStateDir)) {
           mkdirSync(omcStateDir, { recursive: true });
         }

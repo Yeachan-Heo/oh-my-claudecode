@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 
 export interface VerificationState {
   /** Whether verification is pending */
@@ -45,7 +45,7 @@ function getVerificationStatePath(directory: string, sessionId?: string): string
   if (sessionId) {
     return resolveSessionStatePath('ralph-verification', sessionId, directory);
   }
-  return join(directory, '.omc', 'ralph-verification.json');
+  return join(getOmcRoot(directory), 'ralph-verification.json');
 }
 
 /**
@@ -73,7 +73,7 @@ export function writeVerificationState(directory: string, state: VerificationSta
   if (sessionId) {
     ensureSessionStateDir(sessionId, directory);
   } else {
-    const stateDir = join(directory, '.omc');
+    const stateDir = getOmcRoot(directory);
     if (!existsSync(stateDir)) {
       try {
         mkdirSync(stateDir, { recursive: true });

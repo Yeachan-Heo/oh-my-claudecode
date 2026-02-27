@@ -13,7 +13,7 @@ import { existsSync, readFileSync, unlinkSync, mkdirSync, readdirSync, statSync,
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join, dirname } from 'path';
 import type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from './types.js';
-import { listSessionIds, resolveSessionStatePath, getSessionStateDir } from '../../lib/worktree-paths.js';
+import { listSessionIds, resolveSessionStatePath, getSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 import { MODE_STATE_FILE_MAP, MODE_NAMES } from '../../lib/mode-names.js';
 
 export type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from './types.js';
@@ -93,7 +93,7 @@ const EXCLUSIVE_MODES: ExecutionMode[] = [MODE_NAMES.AUTOPILOT, MODE_NAMES.ULTRA
  * Get the state directory path
  */
 export function getStateDir(cwd: string): string {
-  return join(cwd, '.omc', 'state');
+  return join(getOmcRoot(cwd), 'state');
 }
 
 /**
@@ -566,7 +566,7 @@ export function getActiveSessionsForMode(mode: ExecutionMode, cwd: string): stri
  * @returns Array of removed session IDs
  */
 export function clearStaleSessionDirs(cwd: string, maxAgeMs: number = 24 * 60 * 60 * 1000): string[] {
-  const sessionsDir = join(cwd, '.omc', 'state', 'sessions');
+  const sessionsDir = join(getOmcRoot(cwd), 'state', 'sessions');
   if (!existsSync(sessionsDir)) {
     return [];
   }

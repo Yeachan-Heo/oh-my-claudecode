@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/paths.js';
-import { getWorktreeRoot, resolveToWorktreeRoot } from '../lib/worktree-paths.js';
+import { getWorktreeRoot, resolveToWorktreeRoot, getOmcRoot } from '../lib/worktree-paths.js';
 import type { OmcHudState, BackgroundTask, HudConfig } from './types.js';
 import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from './types.js';
 import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './background-cleanup.js';
@@ -22,7 +22,7 @@ import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './backgro
  */
 function getLocalStateFilePath(directory?: string): string {
   const baseDir = resolveToWorktreeRoot(directory);
-  const omcStateDir = join(baseDir, '.omc', 'state');
+  const omcStateDir = join(getOmcRoot(baseDir), 'state');
   return join(omcStateDir, 'hud-state.json');
 }
 
@@ -46,7 +46,7 @@ function getConfigFilePath(): string {
  */
 function ensureStateDir(directory?: string): void {
   const baseDir = resolveToWorktreeRoot(directory);
-  const omcStateDir = join(baseDir, '.omc', 'state');
+  const omcStateDir = join(getOmcRoot(baseDir), 'state');
   if (!existsSync(omcStateDir)) {
     mkdirSync(omcStateDir, { recursive: true });
   }
@@ -75,7 +75,7 @@ export function readHudState(directory?: string): OmcHudState | null {
 
   // Check legacy local state (.omc/hud-state.json)
   const baseDir = resolveToWorktreeRoot(directory);
-  const legacyStateFile = join(baseDir, '.omc', 'hud-state.json');
+  const legacyStateFile = join(getOmcRoot(baseDir), 'hud-state.json');
   if (existsSync(legacyStateFile)) {
     try {
       const content = readFileSync(legacyStateFile, 'utf-8');

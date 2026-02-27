@@ -10,6 +10,7 @@
 
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 import { existsSync, readFileSync } from 'fs';
 import {
@@ -66,7 +67,7 @@ function getEnforcementLevel(directory: string): EnforcementLevel {
     return enforcementCache.level;
   }
 
-  const localConfig = path.join(directory, '.omc', 'config.json');
+  const localConfig = path.join(getOmcRoot(directory), 'config.json');
   const globalConfig = path.join(getClaudeConfigDir(), '.omc-config.json');
 
   let level: EnforcementLevel = 'warn'; // Default

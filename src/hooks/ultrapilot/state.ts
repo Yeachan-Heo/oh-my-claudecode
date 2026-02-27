@@ -10,7 +10,7 @@ import { join } from 'path';
 import type { UltrapilotState, UltrapilotConfig, WorkerState, FileOwnership } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 
 const STATE_FILE = 'ultrapilot-state.json';
 const OWNERSHIP_FILE = 'ultrapilot-ownership.json';
@@ -22,7 +22,7 @@ function getStateFilePath(directory: string, sessionId?: string): string {
   if (sessionId) {
     return resolveSessionStatePath('ultrapilot', sessionId, directory);
   }
-  const omcDir = join(directory, '.omc', 'state');
+  const omcDir = join(getOmcRoot(directory), 'state');
   return join(omcDir, STATE_FILE);
 }
 
@@ -32,10 +32,10 @@ function getStateFilePath(directory: string, sessionId?: string): string {
 function getOwnershipFilePath(directory: string, sessionId?: string): string {
   if (sessionId) {
     // Store ownership file next to state file in session directory
-    const sessionDir = join(directory, '.omc', 'state', 'sessions', sessionId);
+    const sessionDir = join(getOmcRoot(directory), 'state', 'sessions', sessionId);
     return join(sessionDir, OWNERSHIP_FILE);
   }
-  const omcDir = join(directory, '.omc', 'state');
+  const omcDir = join(getOmcRoot(directory), 'state');
   return join(omcDir, OWNERSHIP_FILE);
 }
 
@@ -47,7 +47,7 @@ function ensureStateDir(directory: string, sessionId?: string): void {
     ensureSessionStateDir(sessionId, directory);
     return;
   }
-  const stateDir = join(directory, '.omc', 'state');
+  const stateDir = join(getOmcRoot(directory), 'state');
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }

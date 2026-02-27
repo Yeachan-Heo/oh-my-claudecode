@@ -37,7 +37,7 @@ import {
   readUltraworkState as readUltraworkStateFromModule,
   writeUltraworkState as writeUltraworkStateFromModule,
 } from "../ultrawork/index.js";
-import { resolveSessionStatePath, ensureSessionStateDir } from "../../lib/worktree-paths.js";
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
 import type { TeamPipelinePhase } from "../team-pipeline/types.js";
 
@@ -59,7 +59,7 @@ export function isUltraQAActive(directory: string, sessionId?: string): boolean 
   }
 
   // No sessionId: legacy path (backward compat)
-  const omcDir = join(directory, ".omc");
+  const omcDir = getOmcRoot(directory);
   const stateFile = join(omcDir, "state", "ultraqa-state.json");
   if (!existsSync(stateFile)) {
     return false;
@@ -122,7 +122,7 @@ function getStateFilePath(directory: string, sessionId?: string): string {
   if (sessionId) {
     return resolveSessionStatePath('ralph', sessionId, directory);
   }
-  const omcDir = join(directory, ".omc");
+  const omcDir = getOmcRoot(directory);
   return join(omcDir, "state", "ralph-state.json");
 }
 
@@ -134,7 +134,7 @@ function ensureStateDir(directory: string, sessionId?: string): void {
     ensureSessionStateDir(sessionId, directory);
     return;
   }
-  const stateDir = join(directory, ".omc", "state");
+  const stateDir = join(getOmcRoot(directory), "state");
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -239,7 +239,7 @@ export function clearLinkedUltraworkState(directory: string, sessionId?: string)
   }
 
   // Fallback to legacy path
-  const omcDir = join(directory, ".omc");
+  const omcDir = getOmcRoot(directory);
   const stateFile = join(omcDir, "state", "ultrawork-state.json");
   try {
     unlinkSync(stateFile);
