@@ -349,6 +349,8 @@ async function processPersistentMode(input) {
             const isAbort = stopContext.user_requested === true || stopContext.userRequested === true;
             const isContextLimit = stopContext.stop_reason === "context_limit" || stopContext.stopReason === "context_limit";
             if (!isAbort && !isContextLimit) {
+                // Always wake OpenClaw on stop — cooldown only applies to user-facing notifications
+                _openclaw.wake("stop", { sessionId, projectPath: directory });
                 // Per-session cooldown: prevent notification spam when the session idles repeatedly.
                 // Uses session-scoped state so one session does not suppress another.
                 const stateDir = join(directory, ".omc", "state");
@@ -359,8 +361,6 @@ async function processPersistentMode(input) {
                         projectPath: directory,
                         profileName: process.env.OMC_NOTIFY_PROFILE,
                     }).catch(() => { })).catch(() => { });
-                    // Wake OpenClaw gateway for stop event (non-blocking)
-                    _openclaw.wake("stop", { sessionId, projectPath: directory });
                 }
             }
             // IMPORTANT: Do NOT clean up reply-listener/session-registry on Stop hooks.
