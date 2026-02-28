@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SlackSocketClient, type SlackSocketConfig, type SlackMessageEvent } from '../notifications/slack-socket.js';
+import { SlackSocketClient, type SlackSocketConfig } from '../notifications/slack-socket.js';
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket
@@ -47,6 +47,7 @@ beforeEach(() => {
   (globalThis as any).WebSocket = class extends MockWebSocket {
     constructor(_url: string) {
       super();
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- capturing instance for test assertions
       lastWs = this;
       // auto-fire open on next tick
       queueMicrotask(() => this.fire('open'));

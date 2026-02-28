@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
+
 
 const TEST_DIR = '/tmp/cancel-integration-test';
 
@@ -17,7 +17,6 @@ vi.mock('../../lib/worktree-paths.js', async () => {
 });
 
 import {
-  stateWriteTool,
   stateClearTool,
 } from '../state-tools.js';
 import { cleanupStaleStates } from '../../features/state-manager/index.js';
