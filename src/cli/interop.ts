@@ -7,7 +7,7 @@
 
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { isTmuxAvailable, isClaudeAvailable } from './tmux-utils.js';
+import { isTmuxAvailable, isClaudeAvailable, wrapWithLoginShell } from './tmux-utils.js';
 import { initInteropSession } from '../interop/shared-state.js';
 
 export type InteropMode = 'off' | 'observe' | 'active';
@@ -134,7 +134,7 @@ export function launchInteropSession(cwd: string = process.cwd()): void {
         '-h',
         '-c', cwd,
         '-t', currentPaneId,
-        'codex',
+        wrapWithLoginShell('codex'),
       ], { stdio: 'inherit' });
 
       // Select left pane (original/current)

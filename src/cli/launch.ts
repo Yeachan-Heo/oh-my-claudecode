@@ -8,6 +8,7 @@ import {
   resolveLaunchPolicy,
   buildTmuxSessionName,
   buildTmuxShellCommand,
+  wrapWithLoginShell,
   isClaudeAvailable,
 } from './tmux-utils.js';
 
@@ -296,7 +297,9 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
   // When tmux attach-session sends a DA1 query, the terminal replies with
   // \e[?6c which lands in the pty buffer before Claude reads input.
   // A short sleep lets the response arrive, then tcflush discards it.
-  const claudeCmd = `sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
+  const innerCmd = `sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`;
+  // Wrap in a login shell so the user's rc files (.zshrc, .bashrc) are sourced
+  const claudeCmd = wrapWithLoginShell(innerCmd);
   const sessionName = buildTmuxSessionName(cwd);
 
   const tmuxArgs = [

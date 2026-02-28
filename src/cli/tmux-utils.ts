@@ -100,6 +100,20 @@ export function sanitizeTmuxToken(value: string): string {
 }
 
 /**
+ * Wrap a shell command to run inside a login shell, ensuring the user's
+ * shell rc files (.zshrc, .bashrc, etc.) are sourced.
+ *
+ * When tmux creates a pane with an explicit command, it uses a non-login
+ * shell ($SHELL -c 'command'), so rc files are not loaded. This wrapper
+ * replaces the outer shell with a login shell via exec, ensuring PATH
+ * and other environment from rc files are available.
+ */
+export function wrapWithLoginShell(command: string): string {
+  const shell = process.env.SHELL || '/bin/bash';
+  return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(command)}`;
+}
+
+/**
  * Build shell command string for tmux with proper quoting
  */
 export function buildTmuxShellCommand(command: string, args: string[]): string {
@@ -177,7 +191,7 @@ export function createHudWatchPane(cwd: string, hudCmd: string): string | null {
   try {
     const output = execFileSync(
       'tmux',
-      ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', hudCmd],
+      ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', wrapWithLoginShell(hudCmd)],
       { encoding: 'utf-8' }
     );
     const paneId = output.split('\n')[0]?.trim() || '';

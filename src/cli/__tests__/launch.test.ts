@@ -21,6 +21,7 @@ vi.mock('../tmux-utils.js', () => ({
   resolveLaunchPolicy: vi.fn(),
   buildTmuxSessionName: vi.fn(() => 'test-session'),
   buildTmuxShellCommand: vi.fn((cmd: string, args: string[]) => `${cmd} ${args.join(' ')}`),
+  wrapWithLoginShell: vi.fn((cmd: string) => `exec '/bin/zsh' -lc '${cmd}'`),
   quoteShellArg: vi.fn((s: string) => s),
   isClaudeAvailable: vi.fn(() => true),
 }));
@@ -29,6 +30,7 @@ import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extra
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
+  wrapWithLoginShell,
 } from '../tmux-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -784,5 +786,58 @@ describe('launchCommand — env var propagation', () => {
     expect(claudeArgs).not.toContain('--webhook');
     expect(claudeArgs).not.toContain('--openclaw');
     expect(claudeArgs).toContain('--print');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runClaude — outside-tmux login shell wrapping (issue #1153)
+// ---------------------------------------------------------------------------
+describe('runClaude outside-tmux — login shell wrapping (issue #1153)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('outside-tmux');
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+  });
+
+  it('wraps claude command with wrapWithLoginShell for tmux new-session', () => {
+    runClaude('/tmp', ['--print'], 'sid');
+
+    // wrapWithLoginShell should have been called
+    expect(wrapWithLoginShell).toHaveBeenCalled();
+
+    // The tmux new-session command should contain the login-shell-wrapped command
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    expect(tmuxCall).toBeDefined();
+    const tmuxArgs = tmuxCall![1] as string[];
+
+    // The command passed to new-session should be the login-shell-wrapped version
+    const newSessionIdx = tmuxArgs.indexOf('new-session');
+    expect(newSessionIdx).toBeGreaterThanOrEqual(0);
+
+    // Find the command arg (after -s sessionName -c cwd)
+    const cmdArg = tmuxArgs[newSessionIdx + 6]; // new-session -d -s name -c cwd CMD
+    expect(cmdArg).toContain('-lc');
+  });
+
+  it('sources launch.ts uses wrapWithLoginShell import', () => {
+    const { readFileSync } = require('fs');
+    const { join } = require('path');
+    const source = readFileSync(join(__dirname, '..', 'launch.ts'), 'utf-8');
+    expect(source).toContain('wrapWithLoginShell');
+    expect(source).toContain("import");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// interop — login shell wrapping (issue #1153)
+// ---------------------------------------------------------------------------
+describe('interop — login shell wrapping (issue #1153)', () => {
+  it('interop.ts wraps codex command with wrapWithLoginShell', () => {
+    const { readFileSync } = require('fs');
+    const { join } = require('path');
+    const source = readFileSync(join(__dirname, '..', 'interop.ts'), 'utf-8');
+    expect(source).toContain("wrapWithLoginShell('codex')");
+    expect(source).toContain("import");
   });
 });
