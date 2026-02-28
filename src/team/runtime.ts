@@ -641,10 +641,13 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
   });
 
-  // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
-  // flag so tmux send-keys never needs to interact with the TUI input widget.
+  // For prompt-mode agents (e.g. Gemini Ink TUI), pass the full task
+  // instruction inline via CLI flag. This bypasses gitignore restrictions
+  // (e.g. Gemini's respectGitIgnore=true ignoring .omc/ paths) by embedding
+  // the task content directly in the CLI argument instead of referencing an
+  // inbox file that may be invisible to the worker. See #1148.
   if (usePromptMode) {
-    const promptArgs = getPromptModeArgs(agentType, `Read and execute your task from: ${relInboxPath}`);
+    const promptArgs = getPromptModeArgs(agentType, instruction);
     launchArgs.push(...promptArgs);
   }
 

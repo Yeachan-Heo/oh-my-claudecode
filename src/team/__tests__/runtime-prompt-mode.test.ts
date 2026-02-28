@@ -108,7 +108,7 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     setupTaskDir(cwd);
   });
 
-  it('gemini worker launch args include -p flag with inbox path', async () => {
+  it('gemini worker launch args include -p flag with inline task content', async () => {
     const runtime = makeRuntime(cwd, 'gemini');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
@@ -122,8 +122,12 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
 
     // Should contain -p flag for prompt mode
     expect(launchCmd).toContain("'-p'");
-    // Should contain the inbox path reference
-    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+    // Should contain the task content inline (not a file reference) — #1148
+    expect(launchCmd).toContain('Initial Task Assignment');
+    expect(launchCmd).toContain('Test task');
+    expect(launchCmd).toContain('Do something');
+    // Should NOT reference inbox.md file path in the prompt arg
+    expect(launchCmd).not.toContain('Read and execute your task from:');
 
     rmSync(cwd, { recursive: true, force: true });
   });
@@ -159,7 +163,7 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('codex worker launch args include positional prompt (no -p flag)', async () => {
+  it('codex worker launch args include positional prompt with inline task content (no -p flag)', async () => {
     const runtime = makeRuntime(cwd, 'codex');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
@@ -173,8 +177,11 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
 
     // Should NOT contain -p flag (codex uses positional argument, not a flag)
     expect(launchCmd).not.toContain("'-p'");
-    // Should contain the inbox path as a positional argument
-    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+    // Should contain the task content inline (not a file reference) — #1148
+    expect(launchCmd).toContain('Initial Task Assignment');
+    expect(launchCmd).toContain('Test task');
+    // Should NOT reference inbox.md file path in the prompt arg
+    expect(launchCmd).not.toContain('Read and execute your task from:');
 
     rmSync(cwd, { recursive: true, force: true });
   });
@@ -192,6 +199,90 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     );
     // Only one send-keys call: the launch command itself
     expect(sendKeysCalls.length).toBe(1);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe('spawnWorkerForTask – gitignore bypass (#1148)', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    tmuxCalls.args = [];
+    cwd = mkdtempSync(join(tmpdir(), 'runtime-gitignore-bypass-'));
+    setupTaskDir(cwd);
+  });
+
+  it('prompt-mode agents receive full task content inline, not a file reference', async () => {
+    // When .omc/ is gitignored and Gemini has respectGitIgnore=true,
+    // the worker cannot read .omc/state/.../inbox.md. The fix inlines
+    // the task content directly into the CLI prompt argument.
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // The prompt must contain the actual task description, not a file path
+    expect(launchCmd).toContain('Do something');
+    expect(launchCmd).toContain('done.json');
+    // Must not tell the worker to read from the gitignored inbox path
+    expect(launchCmd).not.toContain('Read and execute your task from:');
+    expect(launchCmd).not.toMatch(/inbox\.md/);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('inbox.md is still written for debugging even when content is inlined', async () => {
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    // Inbox file should still exist for debugging/reference
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    expect(content).toContain('Initial Task Assignment');
+    expect(content).toContain('Test task');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('interactive agents (claude) still reference inbox via tmux send-keys', async () => {
+    // Claude does not have respectGitIgnore, so the interactive path
+    // continues to use the file reference via tmux send-keys.
+    const runtime = makeRuntime(cwd, 'claude');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    // Interactive mode sends "Read and execute your task from: ..." via send-keys
+    const sendKeysCalls = tmuxCalls.args.filter(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    // First call is launch command, second is the inbox path notification
+    const inboxNotification = sendKeysCalls.find(args =>
+      args.some(a => typeof a === 'string' && a.includes('Read and execute your task from:'))
+    );
+    expect(inboxNotification).toBeDefined();
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('inline prompt contains done.json path so worker can signal completion', async () => {
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // Done signal path must be present so the worker can write completion
+    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/done.json');
 
     rmSync(cwd, { recursive: true, force: true });
   });
