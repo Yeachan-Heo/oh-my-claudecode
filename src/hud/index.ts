@@ -24,6 +24,7 @@ import {
 import { getUsage } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
+import { detectApiKeySource } from "./elements/api-key-source.js";
 import { sanitizeOutput } from "./sanitize.js";
 import type {
   HudRenderContext,
@@ -192,6 +193,9 @@ async function main(watchMode = false): Promise<void> {
       skillCallCount: transcriptData.skillCallCount,
       promptTime: hudState?.lastPromptTimestamp
         ? new Date(hudState.lastPromptTimestamp)
+        : null,
+      apiKeySource: config.elements.apiKeySource
+        ? detectApiKeySource(cwd)
         : null,
     };
 
