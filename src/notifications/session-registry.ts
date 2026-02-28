@@ -79,7 +79,7 @@ interface LockFileSnapshot {
 // ============================================================================
 
 export interface SessionMapping {
-  platform: "discord-bot" | "telegram";
+  platform: "discord-bot" | "telegram" | "slack-bot";
   messageId: string;
   sessionId: string;
   tmuxPaneId: string;

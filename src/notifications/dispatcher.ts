@@ -12,6 +12,7 @@ import type {
   DiscordBotNotificationConfig,
   TelegramNotificationConfig,
   SlackNotificationConfig,
+  SlackBotNotificationConfig,
   WebhookNotificationConfig,
   NotificationPayload,
   NotificationResult,
@@ -407,6 +408,68 @@ export async function sendSlack(
 }
 
 /**
+ * Send notification via Slack Bot Web API (chat.postMessage).
+ * Returns message timestamp (ts) as messageId for reply correlation.
+ */
+export async function sendSlackBot(
+  config: SlackBotNotificationConfig,
+  payload: NotificationPayload,
+): Promise<NotificationResult> {
+  if (!config.enabled) {
+    return { platform: "slack-bot", success: false, error: "Not enabled" };
+  }
+
+  const botToken = config.botToken;
+  const channelId = config.channelId;
+
+  if (!botToken || !channelId) {
+    return {
+      platform: "slack-bot",
+      success: false,
+      error: "Missing botToken or channelId",
+    };
+  }
+
+  try {
+    const text = composeSlackText(payload.message, config.mention);
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${botToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: channelId, text }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return {
+        platform: "slack-bot",
+        success: false,
+        error: `HTTP ${response.status}`,
+      };
+    }
+
+    const data = await response.json() as { ok: boolean; ts?: string; error?: string };
+    if (!data.ok) {
+      return {
+        platform: "slack-bot",
+        success: false,
+        error: data.error || "Slack API error",
+      };
+    }
+
+    return { platform: "slack-bot", success: true, messageId: data.ts };
+  } catch (error) {
+    return {
+      platform: "slack-bot",
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
  * Send notification via generic webhook (POST JSON).
  */
 export async function sendWebhook(
@@ -572,6 +635,17 @@ export async function dispatchNotifications(
     );
   if (discordBotConfig?.enabled) {
     promises.push(sendDiscordBot(discordBotConfig, payloadFor("discord-bot")));
+  }
+
+  // Slack Bot
+  const slackBotConfig =
+    getEffectivePlatformConfig<SlackBotNotificationConfig>(
+      "slack-bot",
+      config,
+      event,
+    );
+  if (slackBotConfig?.enabled) {
+    promises.push(sendSlackBot(slackBotConfig, payloadFor("slack-bot")));
   }
 
   if (promises.length === 0) {
