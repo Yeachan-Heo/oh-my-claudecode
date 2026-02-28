@@ -16,6 +16,7 @@ import type {
   DiscordNotificationConfig,
   DiscordBotNotificationConfig,
   TelegramNotificationConfig,
+  SlackBotNotificationConfig,
   VerbosityLevel,
 } from "./types.js";
 import {
@@ -184,12 +185,26 @@ export function buildConfigFromEnv(): NotificationConfig | null {
     hasAnyPlatform = true;
   }
 
-  // Slack
+  // Slack Webhook
   const slackWebhook = process.env.OMC_SLACK_WEBHOOK_URL;
   if (slackWebhook) {
     config.slack = {
       enabled: true,
       webhookUrl: slackWebhook,
+      mention: validateSlackMention(process.env.OMC_SLACK_MENTION),
+    };
+    hasAnyPlatform = true;
+  }
+
+  // Slack Bot (app token + bot token + channel)
+  const slackBotToken = process.env.OMC_SLACK_BOT_TOKEN;
+  const slackBotChannel = process.env.OMC_SLACK_BOT_CHANNEL;
+  if (slackBotToken && slackBotChannel) {
+    config["slack-bot"] = {
+      enabled: true,
+      appToken: process.env.OMC_SLACK_APP_TOKEN,
+      botToken: slackBotToken,
+      channelId: slackBotChannel,
       mention: validateSlackMention(process.env.OMC_SLACK_MENTION),
     };
     hasAnyPlatform = true;
@@ -278,6 +293,27 @@ function mergeEnvIntoFileConfig(
     };
   }
 
+  // Merge slack-bot
+  if (!merged["slack-bot"] && envConfig["slack-bot"]) {
+    merged["slack-bot"] = envConfig["slack-bot"];
+  } else if (merged["slack-bot"] && envConfig["slack-bot"]) {
+    merged["slack-bot"] = {
+      ...merged["slack-bot"],
+      appToken: merged["slack-bot"].appToken || envConfig["slack-bot"].appToken,
+      botToken: merged["slack-bot"].botToken || envConfig["slack-bot"].botToken,
+      channelId: merged["slack-bot"].channelId || envConfig["slack-bot"].channelId,
+      mention:
+        merged["slack-bot"].mention !== undefined
+          ? validateSlackMention(merged["slack-bot"].mention)
+          : envConfig["slack-bot"].mention,
+    };
+  } else if (merged["slack-bot"]) {
+    merged["slack-bot"] = {
+      ...merged["slack-bot"],
+      mention: validateSlackMention(merged["slack-bot"].mention),
+    };
+  }
+
   return merged;
 }
 
@@ -323,6 +359,9 @@ function applyEnvMerge(config: NotificationConfig): NotificationConfig {
   if (envSlackMention) {
     if (merged.slack && merged.slack.mention == null) {
       merged = { ...merged, slack: { ...merged.slack, mention: envSlackMention } };
+    }
+    if (merged["slack-bot"] && merged["slack-bot"].mention == null) {
+      merged = { ...merged, "slack-bot": { ...merged["slack-bot"], mention: envSlackMention } };
     }
   }
 
@@ -467,7 +506,8 @@ function isPlatformActivated(platform: NotificationPlatform): boolean {
   if (platform === "telegram") return process.env.OMC_TELEGRAM === "1";
   if (platform === "discord" || platform === "discord-bot")
     return process.env.OMC_DISCORD === "1";
-  if (platform === "slack") return process.env.OMC_SLACK === "1";
+  if (platform === "slack" || platform === "slack-bot")
+    return process.env.OMC_SLACK === "1";
   if (platform === "webhook") return process.env.OMC_WEBHOOK === "1";
   return false;
 }
@@ -493,6 +533,7 @@ export function isEventEnabled(
       (isPlatformActivated("discord-bot") && config["discord-bot"]?.enabled) ||
       (isPlatformActivated("telegram") && config.telegram?.enabled) ||
       (isPlatformActivated("slack") && config.slack?.enabled) ||
+      (isPlatformActivated("slack-bot") && config["slack-bot"]?.enabled) ||
       (isPlatformActivated("webhook") && config.webhook?.enabled)
     );
   }
@@ -503,6 +544,7 @@ export function isEventEnabled(
     (isPlatformActivated("discord-bot") && eventConfig["discord-bot"]?.enabled) ||
     (isPlatformActivated("telegram") && eventConfig.telegram?.enabled) ||
     (isPlatformActivated("slack") && eventConfig.slack?.enabled) ||
+    (isPlatformActivated("slack-bot") && eventConfig["slack-bot"]?.enabled) ||
     (isPlatformActivated("webhook") && eventConfig.webhook?.enabled)
   ) {
     return true;
@@ -514,6 +556,7 @@ export function isEventEnabled(
     (isPlatformActivated("discord-bot") && config["discord-bot"]?.enabled) ||
     (isPlatformActivated("telegram") && config.telegram?.enabled) ||
     (isPlatformActivated("slack") && config.slack?.enabled) ||
+    (isPlatformActivated("slack-bot") && config["slack-bot"]?.enabled) ||
     (isPlatformActivated("webhook") && config.webhook?.enabled)
   );
 }
@@ -565,6 +608,7 @@ export function getEnabledPlatforms(
   checkPlatform("discord-bot");
   checkPlatform("telegram");
   checkPlatform("slack");
+  checkPlatform("slack-bot");
   checkPlatform("webhook");
 
   return platforms;
@@ -591,7 +635,7 @@ const REPLY_PLATFORM_EVENTS: NotificationEvent[] = [
  */
 function getEnabledReplyPlatformConfig<T extends { enabled: boolean }>(
   config: NotificationConfig,
-  platform: "discord-bot" | "telegram",
+  platform: "discord-bot" | "telegram" | "slack-bot",
 ): T | undefined {
   const topLevel = config[platform] as T | undefined;
   if (topLevel?.enabled) {
@@ -628,6 +672,9 @@ export function getReplyListenerPlatformConfig(
   discordBotToken?: string;
   discordChannelId?: string;
   discordMention?: string;
+  slackAppToken?: string;
+  slackBotToken?: string;
+  slackChannelId?: string;
 } {
   if (!config) return {};
 
@@ -641,6 +688,11 @@ export function getReplyListenerPlatformConfig(
       config,
       "discord-bot",
     );
+  const slackBotConfig =
+    getEnabledReplyPlatformConfig<SlackBotNotificationConfig>(
+      config,
+      "slack-bot",
+    );
 
   return {
     telegramBotToken: telegramConfig?.botToken || config.telegram?.botToken,
@@ -651,6 +703,12 @@ export function getReplyListenerPlatformConfig(
       discordBotConfig?.channelId || config["discord-bot"]?.channelId,
     discordMention:
       discordBotConfig?.mention || config["discord-bot"]?.mention,
+    slackAppToken:
+      slackBotConfig?.appToken || config["slack-bot"]?.appToken,
+    slackBotToken:
+      slackBotConfig?.botToken || config["slack-bot"]?.botToken,
+    slackChannelId:
+      slackBotConfig?.channelId || config["slack-bot"]?.channelId,
   };
 }
 
@@ -703,7 +761,7 @@ export function getReplyConfig(): import("./types.js").ReplyConfig | null {
   const notifConfig = getNotificationConfig();
   if (!notifConfig?.enabled) return null;
 
-  // Check if any reply-capable platform (discord-bot or telegram) is enabled.
+  // Check if any reply-capable platform (discord-bot, telegram, or slack-bot) is enabled.
   // Supports event-level platform config (not just top-level defaults).
   const hasDiscordBot = !!getEnabledReplyPlatformConfig<DiscordBotNotificationConfig>(
     notifConfig,
@@ -713,7 +771,11 @@ export function getReplyConfig(): import("./types.js").ReplyConfig | null {
     notifConfig,
     "telegram",
   );
-  if (!hasDiscordBot && !hasTelegram) return null;
+  const hasSlackBot = !!getEnabledReplyPlatformConfig<SlackBotNotificationConfig>(
+    notifConfig,
+    "slack-bot",
+  );
+  if (!hasDiscordBot && !hasTelegram && !hasSlackBot) return null;
 
   // Read reply-specific config
   const raw = readRawConfig();

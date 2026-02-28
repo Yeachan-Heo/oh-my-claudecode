@@ -22,6 +22,7 @@ export type {
   DiscordBotNotificationConfig,
   TelegramNotificationConfig,
   SlackNotificationConfig,
+  SlackBotNotificationConfig,
   WebhookNotificationConfig,
   EventNotificationConfig,
 } from "./types.js";
@@ -38,6 +39,7 @@ export {
   sendDiscordBot,
   sendTelegram,
   sendSlack,
+  sendSlackBot,
   sendWebhook,
 } from "./dispatcher.js";
 export {
@@ -189,7 +191,7 @@ export async function notify(
       const hookConfig = getHookConfig();
       if (hookConfig?.enabled) {
         const platforms: NotificationPlatform[] = [
-          "discord", "discord-bot", "telegram", "slack", "webhook",
+          "discord", "discord-bot", "telegram", "slack", "slack-bot", "webhook",
         ];
         const map = new Map<NotificationPlatform, string>();
         for (const platform of platforms) {
@@ -220,7 +222,7 @@ export async function notify(
           if (
             r.success &&
             r.messageId &&
-            (r.platform === "discord-bot" || r.platform === "telegram")
+            (r.platform === "discord-bot" || r.platform === "telegram" || r.platform === "slack-bot")
           ) {
             registerMessage({
               platform: r.platform,
