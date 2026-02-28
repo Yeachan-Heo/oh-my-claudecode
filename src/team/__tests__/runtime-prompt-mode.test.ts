@@ -29,7 +29,7 @@ vi.mock('child_process', async (importOriginal) => {
     if (args[0] === 'split-window') {
       cb(null, '%42\n', '');
     } else if (args[0] === 'capture-pane') {
-      cb(null, '', '');
+      cb(null, 'user@host:~$ ', '');
     } else if (args[0] === 'display-message') {
       // pane_dead check → "0" means alive; pane_in_mode → "0" means not in copy mode
       cb(null, '0', '');
@@ -46,7 +46,7 @@ vi.mock('child_process', async (importOriginal) => {
       return { stdout: '%42\n', stderr: '' };
     }
     if (args[0] === 'capture-pane') {
-      return { stdout: '', stderr: '' };
+      return { stdout: 'user@host:~$ ', stderr: '' };
     }
     if (args[0] === 'display-message') {
       return { stdout: '0', stderr: '' };

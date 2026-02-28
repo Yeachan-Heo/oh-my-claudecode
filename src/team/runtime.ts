@@ -657,7 +657,12 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
   };
 
-  await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig);
+  // For promptMode agents, wait for the shell to be ready before sending keys
+  // to avoid the race condition where send-keys fires before zsh is ready (#1144).
+  // Non-promptMode agents already have a 4s post-spawn delay, so skip the wait.
+  await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig, {
+    waitForShell: usePromptMode,
+  });
 
   runtime.workerPaneIds.push(paneId);
   runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
