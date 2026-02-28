@@ -137,11 +137,24 @@ export function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunch
 
 export function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType): Record<string, string> {
   validateTeamName(teamName);
-  return {
+  const workerEnv: Record<string, string> = {
     OMC_TEAM_WORKER: `${teamName}/${workerName}`,
     OMC_TEAM_NAME: teamName,
     OMC_WORKER_AGENT_TYPE: agentType,
   };
+
+  // Keep worker spawn PATH aligned with CLI preflight checks (validateCliAvailable)
+  // while preserving key casing where possible (PATH vs Path).
+  const env = resolvedEnv();
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH');
+  if (pathKey) {
+    const pathValue = env[pathKey];
+    if (typeof pathValue === 'string') {
+      workerEnv[pathKey] = pathValue;
+    }
+  }
+
+  return workerEnv;
 }
 
 export function parseCliOutput(agentType: CliAgentType, rawOutput: string): string {

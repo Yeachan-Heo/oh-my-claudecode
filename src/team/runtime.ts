@@ -722,7 +722,12 @@ export async function spawnWorkerForTask(
   if (isOmxInteropWorker(runtime, workerNameValue)) {
     const ctx = buildAdapterContext(runtime);
     if (ctx) {
-      await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
+      try {
+        await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[spawnWorkerForTask] interop bootstrap failed for ${workerNameValue} task ${taskId}: ${message}`);
+      }
     }
   }
 

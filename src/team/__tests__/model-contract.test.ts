@@ -1,6 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
-import { spawnSync } from 'child_process';
-import { getContract, buildLaunchArgs, buildWorkerArgv, buildWorkerCommand, getWorkerEnv, parseCliOutput, isPromptModeAgent, getPromptModeArgs, isCliAvailable } from '../model-contract.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  resolvedEnv: vi.fn<() => NodeJS.ProcessEnv>(() => ({ PATH: '/mock/path' })),
+}));
+
+vi.mock('../shell-path.js', () => ({
+  resolvedEnv: mocks.resolvedEnv,
+}));
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -10,7 +16,15 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
+import { spawnSync } from 'child_process';
+import { getContract, buildLaunchArgs, buildWorkerArgv, buildWorkerCommand, getWorkerEnv, parseCliOutput, isPromptModeAgent, getPromptModeArgs, isCliAvailable } from '../model-contract.js';
+
 describe('model-contract', () => {
+  beforeEach(() => {
+    mocks.resolvedEnv.mockReset();
+    mocks.resolvedEnv.mockReturnValue({ PATH: '/mock/path' });
+  });
+
   describe('getContract', () => {
     it('returns contract for claude', () => {
       const c = getContract('claude');
@@ -63,6 +77,19 @@ describe('model-contract', () => {
 
     it('rejects invalid team names', () => {
       expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
+    });
+
+    it('includes resolved PATH in worker env for spawn parity with CLI preflight', () => {
+      mocks.resolvedEnv.mockReturnValue({ PATH: '/resolved/path' });
+      const env = getWorkerEnv('my-team', 'worker-1', 'codex');
+      expect(env.PATH).toBe('/resolved/path');
+    });
+
+    it('preserves path key casing when resolved env uses Path', () => {
+      mocks.resolvedEnv.mockReturnValue({ Path: 'C:\\Tools\\bin' } as Record<string, string>);
+      const env = getWorkerEnv('my-team', 'worker-1', 'codex');
+      expect(env.Path).toBe('C:\\Tools\\bin');
+      expect(env.PATH).toBeUndefined();
     });
   });
 
