@@ -278,6 +278,7 @@ function buildInitialTaskInstruction(
   task: { subject: string; description: string },
   taskId: string
 ): string {
+  const readyPath = `.omc/state/team/${teamName}/workers/${workerName}/.ready`;
   const donePath = `.omc/state/team/${teamName}/workers/${workerName}/done.json`;
   const doneDir = `.omc/state/team/${teamName}/workers/${workerName}`;
   return [
@@ -286,12 +287,19 @@ function buildInitialTaskInstruction(
     `Worker: ${workerName}`,
     `Subject: ${task.subject}`,
     ``,
+    `## FIRST ACTION REQUIRED`,
+    `Before doing anything else, write your ready sentinel file:`,
+    '```bash',
+    `mkdir -p $(dirname ${readyPath}) && touch ${readyPath}`,
+    '```',
+    ``,
     task.description,
     ``,
     `When complete, write done signal using a bash command (do NOT use a file-write tool):`,
     '```bash',
     `mkdir -p ${doneDir} && echo '{"taskId":"${taskId}","status":"completed","summary":"done","completedAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ${donePath}`,
     '```',
+    `For failures, set status to "failed" and include the error in summary.`,
     ``,
     `IMPORTANT: Execute ONLY the task assigned to you in this inbox. After writing done.json, exit immediately. Do not read from the task directory or claim other tasks.`,
   ].join('\n');

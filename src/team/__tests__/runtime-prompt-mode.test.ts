@@ -202,6 +202,66 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
 
     rmSync(cwd, { recursive: true, force: true });
   });
+
+  it('gemini worker inbox contains .ready sentinel instruction', async () => {
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    expect(content).toContain('FIRST ACTION REQUIRED');
+    expect(content).toContain('.ready');
+    expect(content).toContain('touch');
+    expect(content).toContain('.omc/state/team/test-team/workers/worker-1/.ready');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('gemini worker inbox contains done.json completion protocol', async () => {
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    expect(content).toContain('done signal');
+    expect(content).toContain('done.json');
+    expect(content).toContain('.omc/state/team/test-team/workers/worker-1/done.json');
+    expect(content).toContain('"status":"completed"');
+    expect(content).toContain('For failures, set status to "failed"');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('codex worker inbox contains .ready sentinel instruction', async () => {
+    const runtime = makeRuntime(cwd, 'codex');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    expect(content).toContain('FIRST ACTION REQUIRED');
+    expect(content).toContain('.omc/state/team/test-team/workers/worker-1/.ready');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('sentinel instruction appears before task description in inbox', async () => {
+    const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    const readyIdx = content.indexOf('.ready');
+    const descIdx = content.indexOf('Do something');
+    expect(readyIdx).toBeGreaterThan(-1);
+    expect(descIdx).toBeGreaterThan(-1);
+    expect(readyIdx).toBeLessThan(descIdx);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
 });
 
 describe('spawnWorkerForTask – gitignore bypass (#1148)', () => {
