@@ -36,6 +36,7 @@ export const TOOL_CATEGORIES = {
   INTEROP: 'interop',
   CODEX: 'codex',
   GEMINI: 'gemini',
+  SHARED_MEMORY: 'shared-memory',
 } as const;
 export type ToolCategory = typeof TOOL_CATEGORIES[keyof typeof TOOL_CATEGORIES];
 

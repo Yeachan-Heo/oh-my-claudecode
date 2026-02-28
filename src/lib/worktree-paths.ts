@@ -30,6 +30,7 @@ export const OmcPaths = {
   SCIENTIST: '.omc/scientist',
   AUTOPILOT: '.omc/autopilot',
   SKILLS: '.omc/skills',
+  SHARED_MEMORY: '.omc/state/shared-memory',
 } as const;
 
 /**
