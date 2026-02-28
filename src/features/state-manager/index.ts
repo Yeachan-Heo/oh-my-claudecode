@@ -16,7 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { atomicWriteJsonSync } from "../../lib/atomic-write.js";
-import { OmcPaths, getWorktreeRoot } from "../../lib/worktree-paths.js";
+import { OmcPaths, getWorktreeRoot, validateWorkingDirectory } from "../../lib/worktree-paths.js";
 import {
   StateLocation,
   StateConfig,
@@ -35,7 +35,7 @@ import {
 // Standard state directories
 /** Get the absolute path to the local state directory, resolved from the git worktree root. */
 function getLocalStateDir(): string {
-  return path.join(getWorktreeRoot() || process.cwd(), OmcPaths.STATE);
+  return path.join(validateWorkingDirectory(), OmcPaths.STATE);
 }
 /**
  * @deprecated for mode state. Global state directory is only used for analytics and daemon state.
@@ -65,18 +65,18 @@ export function clearStateCache(): void {
 
 // Legacy state locations (for backward compatibility)
 const LEGACY_LOCATIONS: Record<string, string[]> = {
-  boulder: [".omc/boulder.json"],
-  autopilot: [".omc/autopilot-state.json"],
-  "autopilot-state": [".omc/autopilot-state.json"],
-  ralph: [".omc/ralph-state.json"],
-  "ralph-state": [".omc/ralph-state.json"],
-  "ralph-verification": [".omc/ralph-verification.json"],
-  ultrawork: [".omc/ultrawork-state.json"],
-  "ultrawork-state": [".omc/ultrawork-state.json"],
-  ultraqa: [".omc/ultraqa-state.json"],
-  "ultraqa-state": [".omc/ultraqa-state.json"],
-  "hud-state": [".omc/hud-state.json"],
-  prd: [".omc/prd.json"],
+  boulder: [".omc/state/boulder.json"],
+  autopilot: [".omc/state/autopilot-state.json"],
+  "autopilot-state": [".omc/state/autopilot-state.json"],
+  ralph: [".omc/state/ralph-state.json"],
+  "ralph-state": [".omc/state/ralph-state.json"],
+  "ralph-verification": [".omc/state/ralph-verification.json"],
+  ultrawork: [".omc/state/ultrawork-state.json"],
+  "ultrawork-state": [".omc/state/ultrawork-state.json"],
+  ultraqa: [".omc/state/ultraqa-state.json"],
+  "ultraqa-state": [".omc/state/ultraqa-state.json"],
+  "hud-state": [".omc/state/hud-state.json"],
+  prd: [".omc/state/prd.json"],
 };
 
 /**
@@ -564,38 +564,59 @@ export function cleanupStaleStates(
   let cleaned = 0;
   const now = Date.now();
 
-  try {
-    const files = fs.readdirSync(stateDir);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
+  // Helper: scan JSON files in a directory and mark stale active states inactive
+  const scanDir = (dir: string): void => {
+    try {
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
 
-      const filePath = path.join(stateDir, file);
-      try {
-        const content = fs.readFileSync(filePath, "utf-8");
-        const data = JSON.parse(content) as Record<string, unknown>;
+        const filePath = path.join(dir, file);
+        try {
+          const content = fs.readFileSync(filePath, "utf-8");
+          const data = JSON.parse(content) as Record<string, unknown>;
 
-        if (data.active !== true) continue;
+          if (data.active !== true) continue;
 
-        const meta = (data._meta as Record<string, unknown> | undefined) ?? {};
+          const meta = (data._meta as Record<string, unknown> | undefined) ?? {};
 
-        if (isStateStale(meta as { updatedAt?: string; heartbeatAt?: string }, now, maxAgeMs)) {
-          console.warn(
-            `[state-manager] cleanupStaleStates: marking "${file}" inactive (last updated ${meta.updatedAt ?? "unknown"})`,
-          );
-          data.active = false;
-          // Invalidate cache for this path
-          stateCache.delete(filePath);
-          try {
-            atomicWriteJsonSync(filePath, data);
-            cleaned++;
-          } catch { /* best-effort */ }
+          if (isStateStale(meta as { updatedAt?: string; heartbeatAt?: string }, now, maxAgeMs)) {
+            console.warn(
+              `[state-manager] cleanupStaleStates: marking "${file}" inactive (last updated ${meta.updatedAt ?? "unknown"})`,
+            );
+            data.active = false;
+            // Invalidate cache for this path
+            stateCache.delete(filePath);
+            try {
+              atomicWriteJsonSync(filePath, data);
+              cleaned++;
+            } catch { /* best-effort */ }
+          }
+        } catch {
+          // Skip files that can't be read/parsed
         }
-      } catch {
-        // Skip files that can't be read/parsed
       }
+    } catch {
+      // Directory read error
     }
-  } catch {
-    // Directory read error
+  };
+
+  // Scan top-level state files (.omc/state/*.json)
+  scanDir(stateDir);
+
+  // Scan session directories (.omc/state/sessions/*/*.json)
+  const sessionsDir = path.join(stateDir, "sessions");
+  if (fs.existsSync(sessionsDir)) {
+    try {
+      const sessionEntries = fs.readdirSync(sessionsDir, { withFileTypes: true });
+      for (const entry of sessionEntries) {
+        if (entry.isDirectory()) {
+          scanDir(path.join(sessionsDir, entry.name));
+        }
+      }
+    } catch {
+      // Sessions directory read error
+    }
   }
 
   return cleaned;
@@ -605,6 +626,8 @@ export function cleanupStaleStates(
  * State Manager Class
  *
  * Object-oriented interface for managing a specific state.
+ *
+ * @deprecated For mode state (autopilot, ralph, ultrawork, etc.), use `writeModeState`/`readModeState` from `src/lib/mode-state-io.ts` instead. StateManager is retained for non-mode state only.
  */
 export class StateManager<T = StateData> {
   constructor(

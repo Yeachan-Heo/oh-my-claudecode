@@ -19,6 +19,7 @@ vi.mock('../../../lib/worktree-paths.js', () => ({
     STATE: TEST_STATE_DIR,
   },
   getWorktreeRoot: () => '/',
+  validateWorkingDirectory: () => '/',
 }));
 
 // Import after mocks are set up (vi.mock is hoisted)
