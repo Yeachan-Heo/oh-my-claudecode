@@ -383,6 +383,52 @@ export async function createTeamSession(
   return { sessionName: teamTarget, leaderPaneId, workerPaneIds };
 }
 
+export interface WaitForShellReadyOptions {
+  /** Maximum time to wait in ms (default: 10000) */
+  timeoutMs?: number;
+  /** Polling interval in ms (default: 200) */
+  intervalMs?: number;
+  /** Regex pattern to detect shell prompt (default: common prompt chars) */
+  promptPattern?: RegExp;
+}
+
+const DEFAULT_PROMPT_PATTERN = /[$#%>❯›]\s*$/m;
+
+/**
+ * Poll tmux capture-pane until a shell prompt character is detected,
+ * indicating the shell in the pane is ready to receive input.
+ *
+ * Resolves `true` when prompt is detected, `false` on timeout.
+ */
+export async function waitForShellReady(
+  paneId: string,
+  opts: WaitForShellReadyOptions = {}
+): Promise<boolean> {
+  const {
+    timeoutMs = 10_000,
+    intervalMs = 200,
+    promptPattern = DEFAULT_PROMPT_PATTERN,
+  } = opts;
+
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const content = await capturePaneAsync(paneId, execFileAsync as never);
+      if (promptPattern.test(content)) {
+        return true;
+      }
+    } catch {
+      // pane may not exist yet; keep polling
+    }
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
 /**
  * Spawn a CLI agent in a specific pane.
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
@@ -390,7 +436,8 @@ export async function createTeamSession(
 export async function spawnWorkerInPane(
   sessionName: string,
   paneId: string,
-  config: WorkerPaneConfig
+  config: WorkerPaneConfig,
+  opts?: { waitForShell?: boolean; shellReadyOpts?: WaitForShellReadyOptions }
 ): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
@@ -398,6 +445,12 @@ export async function spawnWorkerInPane(
 
   validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
+
+  // Wait for shell to be ready before sending keys.
+  // Prevents race condition where send-keys fires before zsh is ready (#1144).
+  if (opts?.waitForShell !== false) {
+    await waitForShellReady(paneId, opts?.shellReadyOpts);
+  }
 
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string
   await execFileAsync('tmux', [
