@@ -413,6 +413,12 @@ export function isTaskRetryExhausted(
   return failure.retryCount >= maxRetries;
 }
 
+/** Backward-compatible alias for writeTaskFailure. */
+export const recordTaskFailure = writeTaskFailure;
+
+/** Backward-compatible alias for isTaskRetryExhausted. */
+export const isExhausted = isTaskRetryExhausted;
+
 /** List all task IDs in a team directory, sorted ascending */
 export function listTaskIds(teamName: string, opts?: { cwd?: string }): string[] {
   const scanDir = (dir: string): string[] => {

@@ -12,7 +12,13 @@ import {
 import {
   composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay,
 } from './worker-bootstrap.js';
-import { withTaskLock } from './task-file-ops.js';
+import {
+  withTaskLock,
+  readTaskFailure,
+  recordTaskFailure,
+  isExhausted,
+  DEFAULT_MAX_TASK_RETRIES,
+} from './task-file-ops.js';
 
 export interface TeamConfig {
   teamName: string;
@@ -473,11 +479,30 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           continue;
         }
 
-        // Dead pane without done.json => fail task, do not requeue
+        // Dead pane without done.json => retry as transient failure when possible
         const alive = aliveResults[i];
         if (!alive) {
           unresponsiveCounts.delete(wName);
-          await markTaskFailedDeadPane(root, active.taskId, wName);
+          const priorFailure = readTaskFailure(runtime.teamName, active.taskId, { cwd: runtime.cwd });
+          const retryCount = (priorFailure?.retryCount ?? 0) + 1;
+          recordTaskFailure(
+            runtime.teamName,
+            active.taskId,
+            `Worker pane died before done.json was written (${wName})`,
+            { cwd: runtime.cwd }
+          );
+          const exhausted = isExhausted(
+            runtime.teamName,
+            active.taskId,
+            DEFAULT_MAX_TASK_RETRIES,
+            { cwd: runtime.cwd }
+          );
+          if (!exhausted) {
+            console.warn(`[watchdog] worker ${wName} dead pane — requeuing task ${active.taskId} (retry ${retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
+            await resetTaskToPending(root, active.taskId);
+          } else {
+            await markTaskFailedDeadPane(root, active.taskId, wName);
+          }
           await killWorkerPane(runtime, wName, active.paneId);
           if (!(await allTasksTerminal(runtime))) {
             const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
