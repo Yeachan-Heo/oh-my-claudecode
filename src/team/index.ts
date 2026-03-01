@@ -173,6 +173,15 @@ export type { WorkerPermissions } from './permissions.js';
 
 export { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 
+export {
+  checkSentinelReadiness,
+} from './sentinel-gate.js';
+
+export type {
+  SentinelReadinessOptions,
+  SentinelGateResult,
+} from './sentinel-gate.js';
+
 // New tmux-based multi-CLI team modules
 // model-contract: getWorkerEnv is exported via worker-bootstrap (single source of truth)
 export type { CliAgentType, CliAgentContract, WorkerLaunchConfig } from './model-contract.js';
