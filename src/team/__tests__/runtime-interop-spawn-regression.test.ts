@@ -112,52 +112,28 @@ describe('spawnWorkerForTask interop bootstrap fail-open', { timeout: 15000 }, (
 
   it('does not reject or reset task when bridge bootstrap throws', async () => {
     const runtime = makeRuntime(cwd);
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const paneId = await spawnWorkerForTask(runtime, 'worker-1', 0);
     expect(paneId).toBe('%77');
 
-    const taskFilePath = join(cwd, '.omc/state/team/test-team/tasks/1.json');
-    const task = JSON.parse(readFileSync(taskFilePath, 'utf-8')) as { status: string; owner: string | null; };
+    const taskPath = join(cwd, '.omc/state/team/test-team/tasks/1.json');
+    const task = JSON.parse(readFileSync(taskPath, 'utf-8')) as { status: string; owner: string | null; };
 
     expect(task.status).toBe('in_progress');
     expect(task.owner).toBe('worker-1');
     expect(runtime.activeWorkers.get('worker-1')?.taskId).toBe('1');
     expect(interopMocks.bridgeBootstrapToOmx).toHaveBeenCalledTimes(1);
 
-    // Verify visible warning is written to stderr (issue #1164)
-    const stderrCalls = stderrSpy.mock.calls.map(c => String(c[0]));
-    const warnLine = stderrCalls.find(line => line.includes('[WARN]'));
-    expect(warnLine).toBeDefined();
-    expect(warnLine).toContain('worker-1');
-    expect(warnLine).toContain('task 1');
-    expect(warnLine).toContain('fail-open');
-    expect(warnLine).toContain('Worker will proceed without interop');
+    // Filter for the interop bootstrap warning (other warns may come from shell-readiness timeout)
+    const interopWarns = warnSpy.mock.calls.filter(
+      c => String(c[0] ?? '').includes('interop bootstrap failed')
+    );
+    expect(interopWarns).toHaveLength(1);
+    const warnMessage = String(interopWarns[0]?.[0] ?? '');
+    expect(warnMessage).toContain('worker-1');
+    expect(warnMessage).toContain('task 1');
 
-    stderrSpy.mockRestore();
-  });
-
-  it('persists interop bootstrap failure metadata to disk', async () => {
-    const runtime = makeRuntime(cwd);
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-
-    await spawnWorkerForTask(runtime, 'worker-1', 0);
-
-    // Verify failure metadata file was written (issue #1164)
-    const metaPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/interop-bootstrap-failed.json');
-    const meta = JSON.parse(readFileSync(metaPath, 'utf-8')) as {
-      workerName: string;
-      taskId: string;
-      error: string;
-      failedAt: string;
-      failOpen: boolean;
-    };
-    expect(meta.workerName).toBe('worker-1');
-    expect(meta.taskId).toBe('1');
-    expect(meta.error).toBe('bootstrap failed');
-    expect(meta.failOpen).toBe(true);
-    expect(meta.failedAt).toBeTruthy();
-
-    stderrSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });

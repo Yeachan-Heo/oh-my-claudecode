@@ -521,10 +521,16 @@ export async function createTeamSession(
 }
 
 export interface WaitForShellReadyOptions {
-  /** Maximum time to wait in ms (default: 10000) */
+  /** Maximum time to wait in ms (default: 10_000). Override via OMC_SHELL_READY_TIMEOUT_MS env var. */
   timeoutMs?: number;
-  /** Polling interval in ms (default: 200) */
+  /** Initial polling interval in ms (default: 200) */
   intervalMs?: number;
+  /** Maximum polling interval in ms after backoff (default: 1000) */
+  maxIntervalMs?: number;
+  /** Backoff multiplier applied each poll cycle (default: 1.5) */
+  backoffFactor?: number;
+  /** Per-poll timeout for tmux capture-pane command in ms (default: 5000) */
+  perPollTimeoutMs?: number;
   /** Regex pattern to detect shell prompt (default: common prompt chars) */
   promptPattern?: RegExp;
 }
@@ -535,15 +541,26 @@ const DEFAULT_PROMPT_PATTERN = /[$#%>❯›]\s*$/m;
  * Poll tmux capture-pane until a shell prompt character is detected,
  * indicating the shell in the pane is ready to receive input.
  *
+ * Uses progressive backoff to reduce polling pressure. Each individual
+ * capture-pane call is bounded by perPollTimeoutMs to prevent a hung
+ * tmux from blocking the entire wait indefinitely.
+ *
  * Resolves `true` when prompt is detected, `false` on timeout.
+ * Logs a warning on timeout with actionable guidance.
  */
 export async function waitForShellReady(
   paneId: string,
   opts: WaitForShellReadyOptions = {}
 ): Promise<boolean> {
+  const envTimeoutMs = process.env.OMC_SHELL_READY_TIMEOUT_MS
+    ? parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS, 10)
+    : undefined;
   const {
-    timeoutMs = 10_000,
+    timeoutMs = envTimeoutMs ?? 10_000,
     intervalMs = 200,
+    maxIntervalMs = 1000,
+    backoffFactor = 1.5,
+    perPollTimeoutMs = 5000,
     promptPattern = DEFAULT_PROMPT_PATTERN,
   } = opts;
 
@@ -552,17 +569,36 @@ export async function waitForShellReady(
   const execFileAsync = promisify(execFile);
 
   const deadline = Date.now() + timeoutMs;
+  let currentInterval = intervalMs;
+  let pollCount = 0;
+
   while (Date.now() < deadline) {
+    pollCount++;
     try {
-      const content = await capturePaneAsync(paneId, execFileAsync as never);
-      if (promptPattern.test(content)) {
+      // Per-poll timeout prevents individual tmux calls from hanging indefinitely (#1171)
+      const result = await execFileAsync('tmux',
+        ['capture-pane', '-t', paneId, '-p', '-S', '-80'],
+        { timeout: perPollTimeoutMs }
+      );
+      if (promptPattern.test(result.stdout)) {
         return true;
       }
     } catch {
-      // pane may not exist yet; keep polling
+      // pane may not exist yet or tmux call timed out; keep polling
     }
-    await sleep(intervalMs);
+
+    // Progressive backoff: don't sleep past the deadline
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(currentInterval, remaining));
+    currentInterval = Math.min(currentInterval * backoffFactor, maxIntervalMs);
   }
+
+  console.warn(
+    `[waitForShellReady] Shell in pane ${paneId} did not become ready within ${timeoutMs}ms ` +
+    `(${pollCount} polls). The pane may have crashed or the shell prompt is non-standard. ` +
+    `Set OMC_SHELL_READY_TIMEOUT_MS to adjust timeout.`
+  );
   return false;
 }
 
@@ -604,7 +640,13 @@ export async function spawnWorkerInPane(
   // Wait for shell to be ready before sending keys.
   // Prevents race condition where send-keys fires before zsh is ready (#1144).
   if (opts?.waitForShell !== false) {
-    await waitForShellReady(paneId, opts?.shellReadyOpts);
+    const ready = await waitForShellReady(paneId, opts?.shellReadyOpts);
+    if (!ready) {
+      console.warn(
+        `[spawnWorkerInPane] Shell readiness timed out for worker ${config.workerName} ` +
+        `in pane ${paneId}. Proceeding with command dispatch (fail-open).`
+      );
+    }
   }
 
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string

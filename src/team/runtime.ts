@@ -671,8 +671,10 @@ export async function spawnWorkerForTask(
   // For promptMode agents, wait for the shell to be ready before sending keys
   // to avoid the race condition where send-keys fires before zsh is ready (#1144).
   // Non-promptMode agents already have a 4s post-spawn delay, so skip the wait.
+  // Timeout is configurable via OMC_SHELL_READY_TIMEOUT_MS env var (#1171).
   await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig, {
     waitForShell: usePromptMode,
+    shellReadyOpts: { timeoutMs: undefined }, // uses env var or 10s default
   });
 
   runtime.workerPaneIds.push(paneId);
