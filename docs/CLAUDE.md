@@ -1,5 +1,5 @@
 <!-- OMC:START -->
-<!-- OMC:VERSION:4.5.2 -->
+<!-- OMC:VERSION:4.5.5 -->
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
 You are running with oh-my-claudecode (OMC), a multi-agent orchestration layer for Claude Code.
