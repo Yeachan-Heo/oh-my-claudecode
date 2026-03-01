@@ -379,7 +379,13 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
   for (let i = 0; i < maxConcurrentWorkers; i++) {
     const taskIndex = await nextPendingTaskIndex(runtime);
     if (taskIndex == null) break;
-    await spawnWorkerForTask(runtime, workerName(i), taskIndex);
+    try {
+      await spawnWorkerForTask(runtime, workerName(i), taskIndex);
+    } catch (err) {
+      // One worker failing to spawn must not prevent remaining workers from starting.
+      // The watchdog will pick up pending tasks once it begins.
+      console.warn(`[startTeam] spawn ${workerName(i)} failed:`, err instanceof Error ? err.message : err);
+    }
   }
 
   runtime.stopWatchdog = watchdogCliWorkers(runtime, 1000);
@@ -527,7 +533,11 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           if (!(await allTasksTerminal(runtime))) {
             const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
             if (nextTaskIndexValue != null) {
-              await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+              try {
+                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+              } catch (spawnErr) {
+                console.warn(`[watchdog] respawn ${wName} after completion failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
+              }
             }
           }
           continue;
@@ -542,7 +552,11 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           if (!(await allTasksTerminal(runtime))) {
             const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
             if (nextTaskIndexValue != null) {
-              await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+              try {
+                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+              } catch (spawnErr) {
+                console.warn(`[watchdog] respawn ${wName} after dead pane failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
+              }
             }
           }
           continue;
@@ -568,7 +582,11 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
             if (!(await allTasksTerminal(runtime))) {
               const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
               if (nextTaskIndexValue != null) {
-                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+                try {
+                  await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
+                } catch (spawnErr) {
+                  console.warn(`[watchdog] respawn ${wName} after unresponsive kill failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
+                }
               }
             }
           }

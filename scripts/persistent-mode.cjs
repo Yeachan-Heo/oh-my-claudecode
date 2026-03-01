@@ -407,6 +407,7 @@ async function main() {
     const ultraqa = readStateFileWithSession(stateDir, "ultraqa-state.json", sessionId);
     const pipeline = readStateFileWithSession(stateDir, "pipeline-state.json", sessionId);
     const team = readStateFileWithSession(stateDir, "team-state.json", sessionId);
+    const omcTeams = readStateFileWithSession(stateDir, "omc-teams-state.json", sessionId);
 
     // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
@@ -542,7 +543,7 @@ async function main() {
       }
     }
 
-    // Priority 6: Team (omc-teams / staged pipeline)
+    // Priority 6: Team (native Claude Code teams)
     if (team.state?.active && !isStaleState(team.state) && isSessionMatch(team.state, sessionId)) {
       const phase = team.state.current_phase || "executing";
       const terminalPhases = ["completed", "complete", "failed", "cancelled"];
@@ -560,6 +561,31 @@ async function main() {
             JSON.stringify({
               decision: "block",
               reason: `[TEAM - Phase: ${phase}] Team mode active. Continue working. When all team tasks complete, run /oh-my-claudecode:cancel to cleanly exit. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
+            }),
+          );
+          return;
+        }
+      }
+    }
+
+    // Priority 6.5: OMC Teams (tmux CLI workers — independent of native team state)
+    if (omcTeams.state?.active && !isStaleState(omcTeams.state) && isSessionMatch(omcTeams.state, sessionId)) {
+      const phase = omcTeams.state.current_phase || "executing";
+      const terminalPhases = ["completed", "complete", "failed", "cancelled"];
+      if (!terminalPhases.includes(phase)) {
+        const newCount = (omcTeams.state.reinforcement_count || 0) + 1;
+        if (newCount <= 20) {
+          omcTeams.state.reinforcement_count = newCount;
+          omcTeams.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(omcTeams.path, omcTeams.state);
+
+          // Fire-and-forget notification
+          sendStopNotification('omc-teams', omcTeams.state, sessionId, directory).catch(() => {});
+
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: `[OMC TEAMS - Phase: ${phase}] OMC Teams workers active. Continue working. When all workers complete, run /oh-my-claudecode:cancel to cleanly exit. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
             }),
           );
           return;
