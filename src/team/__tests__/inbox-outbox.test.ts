@@ -260,3 +260,51 @@ describe('path traversal guard on teamsDir', () => {
       .toThrow();
   });
 });
+
+describe('path traversal guard on worker inbox paths (issue #1170)', () => {
+  it('rejects traversal in worker name for readNewInboxMessages', () => {
+    // sanitizeName strips traversal chars, so '../../../etc/passwd' becomes 'etcpasswd'
+    // This prevents writing/reading outside the expected inbox directory
+    const msgs = readNewInboxMessages(TEST_TEAM, '../../../etc/passwd');
+    expect(msgs).toEqual([]); // no file at sanitized path, returns empty
+  });
+
+  it('rejects traversal in worker name for appendOutbox', () => {
+    // Should not throw — sanitizeName cleans the name
+    const msg: OutboxMessage = { type: 'idle', timestamp: '2026-01-01T00:00:00Z' };
+    appendOutbox(TEST_TEAM, '../../../tmp/evil', msg);
+    // The file should be created under the team outbox dir with sanitized name, not at /tmp/evil
+    expect(existsSync(join(TEAMS_DIR, 'outbox', 'tmpevil.jsonl'))).toBe(true);
+    expect(existsSync('/tmp/evil.jsonl')).toBe(false);
+  });
+
+  it('rejects traversal in worker name for writeShutdownSignal', () => {
+    writeShutdownSignal(TEST_TEAM, '../signals/../../../tmp/evil', 'req-1', 'test');
+    // Should write to sanitized path, not escape
+    expect(existsSync('/tmp/evil.shutdown')).toBe(false);
+  });
+
+  it('rejects traversal in worker name for writeDrainSignal', () => {
+    writeDrainSignal(TEST_TEAM, '../../tmp/evil', 'req-1', 'test');
+    expect(existsSync('/tmp/evil.drain')).toBe(false);
+  });
+
+  it('rejects traversal in team name for readNewInboxMessages', () => {
+    const msgs = readNewInboxMessages('../../tmp', 'worker1');
+    expect(msgs).toEqual([]);
+  });
+
+  it('all-special-char worker name throws from sanitizeName', () => {
+    expect(() => readNewInboxMessages(TEST_TEAM, '...///...'))
+      .toThrow();
+  });
+
+  it('clearInbox with traversal worker name does not escape', () => {
+    // Should not throw or affect files outside team dir
+    clearInbox(TEST_TEAM, '../../../tmp/evil');
+  });
+
+  it('cleanupWorkerFiles with traversal worker name does not escape', () => {
+    cleanupWorkerFiles(TEST_TEAM, '../../../tmp/evil');
+  });
+});

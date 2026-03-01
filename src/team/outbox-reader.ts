@@ -115,7 +115,15 @@ export function readAllTeamOutboxMessages(
   const results: { workerName: string; messages: OutboxMessage[] }[] = [];
 
   for (const file of files) {
-    const workerName = file.replace('.jsonl', '');
+    const rawName = file.replace('.jsonl', '');
+    // Sanitize worker name extracted from filesystem to prevent path traversal
+    let workerName: string;
+    try {
+      workerName = sanitizeName(rawName);
+    } catch {
+      // Invalid name (e.g., all special chars) — skip this file
+      continue;
+    }
     const messages = readNewOutboxMessages(teamName, workerName);
     if (messages.length > 0) {
       results.push({ workerName, messages });
