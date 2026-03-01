@@ -866,7 +866,7 @@ export const stateGetStatusTool: ToolDefinition<{
           const content = readFileSync(omcTeamsPath, 'utf-8');
           const state = JSON.parse(content);
           omcTeamsActive = state.active === true;
-        } catch { }
+        } catch { /* ignore parse errors */ }
       }
       const omcTeamsIcon = omcTeamsActive ? '[ACTIVE]' : '[INACTIVE]';
       lines.push(`${omcTeamsIcon} **omc-teams**: ${omcTeamsActive ? 'Active' : 'Inactive'}`);
