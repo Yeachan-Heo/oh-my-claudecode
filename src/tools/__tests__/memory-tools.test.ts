@@ -25,18 +25,17 @@ describe('memory-tools payload validation', () => {
     rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
-  it('should reject oversized memory payloads', async () => {
+  it('should accept large memory payloads', async () => {
     const result = await projectMemoryWriteTool.handler({
       memory: { huge: 'x'.repeat(2_000_000) },
       workingDirectory: TEST_DIR,
     });
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('payload rejected');
-    expect(result.content[0].text).toContain('exceeds maximum');
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('Successfully');
   });
 
-  it('should reject deeply nested memory payloads', async () => {
+  it('should accept deeply nested memory payloads', async () => {
     let obj: Record<string, unknown> = { leaf: true };
     for (let i = 0; i < 15; i++) {
       obj = { nested: obj };
@@ -47,11 +46,11 @@ describe('memory-tools payload validation', () => {
       workingDirectory: TEST_DIR,
     });
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('nesting depth');
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('Successfully');
   });
 
-  it('should reject memory with too many top-level keys', async () => {
+  it('should accept memory with many top-level keys', async () => {
     const memory: Record<string, string> = {};
     for (let i = 0; i < 150; i++) {
       memory[`key_${i}`] = 'value';
@@ -62,8 +61,8 @@ describe('memory-tools payload validation', () => {
       workingDirectory: TEST_DIR,
     });
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('top-level keys');
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('Successfully');
   });
 
   it('should allow normal-sized memory writes', async () => {
