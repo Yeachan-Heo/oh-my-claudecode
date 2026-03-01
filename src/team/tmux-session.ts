@@ -17,6 +17,18 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 const TMUX_SESSION_PREFIX = 'omc-team';
 
+/**
+ * Known CLI binary names used in team mode workers.
+ * Used by validateCliBinaryPath() to scope validation to expected binaries.
+ */
+const KNOWN_CLI_BINARIES = new Set(['claude', 'codex', 'gemini', 'node']);
+
+/**
+ * Directories considered suspicious for CLI binary resolution.
+ * Binaries resolved to these paths trigger a validation warning.
+ */
+const SUSPICIOUS_PATH_PREFIXES = ['/tmp/', '/var/tmp/', '/dev/shm/'];
+
 const promisifiedExec = promisify(exec);
 const promisifiedExecFile = promisify(execFile);
 
@@ -84,6 +96,87 @@ function assertSafeEnvKey(key: string): void {
   }
 }
 
+/**
+ * Trust boundary: shell rc loading in worker contexts.
+ *
+ * Workers run with the user's shell environment by design. Shell rc files
+ * (.bashrc/.zshrc) are sourced to resolve PATH and ensure CLI binaries
+ * (claude, codex, gemini) are discoverable.
+ *
+ * However, rc files may contain arbitrary code that:
+ * - Modifies PATH (could shadow expected binaries)
+ * - Sets unexpected environment variables
+ * - Defines shell functions (mitigated by exec "$@" pattern)
+ *
+ * Set OMC_TEAM_NO_RC=1 to skip rc file loading entirely.
+ * When disabled, PATH must already contain the required CLI binaries.
+ */
+export function shouldLoadShellRc(): boolean {
+  const val = process.env.OMC_TEAM_NO_RC;
+  return !(val === '1' || val === 'true');
+}
+
+export interface CliBinaryValidation {
+  binary: string;
+  resolvedPath: string | null;
+  isValid: boolean;
+  warnings: string[];
+}
+
+/**
+ * Validate that a CLI binary resolves to a trusted path.
+ *
+ * Checks that the binary exists in PATH and doesn't resolve to a suspicious
+ * location (e.g. /tmp/, /var/tmp/). This guards against rc files or PATH
+ * manipulation redirecting expected binaries to untrusted replacements.
+ *
+ * Returns validation result with warnings. Does not throw — callers decide
+ * how to handle validation failures.
+ */
+export function validateCliBinaryPath(binary: string): CliBinaryValidation {
+  const result: CliBinaryValidation = {
+    binary,
+    resolvedPath: null,
+    isValid: true,
+    warnings: [],
+  };
+
+  if (!KNOWN_CLI_BINARIES.has(binary)) {
+    return result;
+  }
+
+  try {
+    const whichResult = execFileSync('which', [binary], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    result.resolvedPath = whichResult;
+
+    for (const prefix of SUSPICIOUS_PATH_PREFIXES) {
+      if (whichResult.startsWith(prefix)) {
+        result.isValid = false;
+        result.warnings.push(
+          `CLI binary '${binary}' resolved to suspicious path: ${whichResult}`
+        );
+      }
+    }
+
+    if (whichResult.includes('..')) {
+      result.isValid = false;
+      result.warnings.push(
+        `CLI binary '${binary}' resolved path contains traversal: ${whichResult}`
+      );
+    }
+  } catch {
+    result.resolvedPath = null;
+    result.warnings.push(`CLI binary '${binary}' not found in PATH`);
+  }
+
+  return result;
+}
+
 function getLaunchWords(config: WorkerPaneConfig): string[] {
   if (config.launchBinary) {
     return [config.launchBinary, ...(config.launchArgs ?? [])];
@@ -119,10 +212,19 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     });
 
     const shellName = shellNameFromPath(shell) || 'bash';
-    const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
-    const script = rcFile
-      ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; exec "$@"`
-      : 'exec "$@"';
+    const loadRc = shouldLoadShellRc();
+    const rcFile = loadRc && process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
+
+    // Build shell script: optionally source rc, log binary resolution, then exec.
+    // The exec "$@" pattern bypasses aliases/functions (trust boundary mitigation).
+    const parts: string[] = [];
+    if (rcFile) {
+      parts.push(`[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}`);
+    }
+    // Log resolved binary path for debugging (trust boundary audit trail)
+    parts.push('_omc_p=$(command -v "$1" 2>/dev/null); printf "[omc-team] %s -> %s\\n" "$1" "$_omc_p" >&2');
+    parts.push('exec "$@"');
+    const script = parts.join('; ');
 
     return [
       'env',
@@ -143,7 +245,8 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     .join(' ');
 
   const shellName = shellNameFromPath(shell) || 'bash';
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
+  const loadRc = shouldLoadShellRc();
+  const rcFile = loadRc && process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
   // Quote rcFile to prevent shell injection if HOME contains metacharacters
   const sourceCmd = rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : '';
 
@@ -478,6 +581,24 @@ export async function spawnWorkerInPane(
   const execFileAsync = promisify(execFile);
 
   validateTeamName(config.teamName);
+
+  // Trust boundary: validate CLI binary path before spawning
+  if (config.launchBinary) {
+    const validation = validateCliBinaryPath(config.launchBinary);
+    if (validation.resolvedPath) {
+      console.info(`[omc-team] CLI binary: ${config.launchBinary} -> ${validation.resolvedPath}`);
+    }
+    for (const warning of validation.warnings) {
+      console.warn(`[omc-team] WARNING: ${warning}`);
+    }
+    if (!validation.isValid) {
+      throw new Error(
+        `CLI binary validation failed for '${config.launchBinary}': ${validation.warnings.join('; ')}. ` +
+        `Set OMC_TEAM_NO_RC=1 to skip shell rc loading or ensure the binary is in a trusted location.`
+      );
+    }
+  }
+
   const startCmd = buildWorkerStartCommand(config);
 
   // Wait for shell to be ready before sending keys.

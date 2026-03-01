@@ -43,7 +43,11 @@ export {
   isSessionAlive,
   listActiveSessions,
   spawnBridgeInSession,
+  shouldLoadShellRc,
+  validateCliBinaryPath,
 } from './tmux-session.js';
+
+export type { CliBinaryValidation } from './tmux-session.js';
 
 export {
   appendOutbox,
