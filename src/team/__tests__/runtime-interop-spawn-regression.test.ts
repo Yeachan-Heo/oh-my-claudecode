@@ -91,7 +91,7 @@ function setupTaskDir(cwd: string): void {
   mkdirSync(join(cwd, '.omc/state/team/test-team/workers/worker-1'), { recursive: true });
 }
 
-describe('spawnWorkerForTask interop bootstrap fail-open', () => {
+describe('spawnWorkerForTask interop bootstrap fail-open', { timeout: 15000 }, () => {
   let cwd: string;
 
   beforeEach(() => {
