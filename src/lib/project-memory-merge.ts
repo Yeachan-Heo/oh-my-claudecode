@@ -1,5 +1,5 @@
 /**
- * Shared Memory - Deep merge strategy for cross-session sync.
+ * Project Memory Merge - Deep merge strategy for cross-session sync.
  *
  * Fixes issue #1168: cross-session sync previously used full overwrite
  * (shallow spread) which lost nested fields when merging project memory.

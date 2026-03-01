@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deepMerge, mergeProjectMemory } from '../lib/shared-memory.js';
+import { deepMerge, mergeProjectMemory } from '../lib/project-memory-merge.js';
 import type { ProjectMemory } from '../hooks/project-memory/types.js';
 
 // ---------------------------------------------------------------------------
@@ -181,9 +181,7 @@ describe('mergeProjectMemory', () => {
 
     const incoming: Partial<ProjectMemory> = {
       customNotes: [
-        // Same note, newer timestamp
         { timestamp: 2000, source: 'learned', category: 'runtime', content: 'Node.js v18' },
-        // New note
         { timestamp: 2000, source: 'learned', category: 'env', content: 'Requires CI=true' },
       ],
     };
@@ -192,14 +190,10 @@ describe('mergeProjectMemory', () => {
 
     expect(merged.customNotes).toHaveLength(3);
 
-    // Node.js note should be the newer one
     const nodeNote = merged.customNotes.find(n => n.content === 'Node.js v18');
     expect(nodeNote?.timestamp).toBe(2000);
 
-    // Build note preserved
     expect(merged.customNotes.find(n => n.content === 'Use pnpm')).toBeDefined();
-
-    // New note added
     expect(merged.customNotes.find(n => n.content === 'Requires CI=true')).toBeDefined();
   });
 
@@ -213,9 +207,7 @@ describe('mergeProjectMemory', () => {
 
     const incoming: Partial<ProjectMemory> = {
       userDirectives: [
-        // Updated directive with new priority
         { timestamp: 2000, directive: 'Use bun', context: 'for speed', source: 'explicit', priority: 'high' },
-        // New directive
         { timestamp: 2000, directive: 'Never auto-commit', context: '', source: 'explicit', priority: 'normal' },
       ],
     };
@@ -242,9 +234,7 @@ describe('mergeProjectMemory', () => {
 
     const incoming: Partial<ProjectMemory> = {
       hotPaths: [
-        // Same path, higher count from other session
         { path: 'src/index.ts', accessCount: 8, lastAccessed: 2000, type: 'file' },
-        // New path
         { path: 'src/utils.ts', accessCount: 2, lastAccessed: 1500, type: 'file' },
       ],
     };
@@ -277,12 +267,10 @@ describe('mergeProjectMemory', () => {
 
     const merged = mergeProjectMemory(base, incoming);
 
-    // src updated
     expect(merged.directoryMap['src'].fileCount).toBe(12);
     expect(merged.directoryMap['src'].purpose).toBe('source code');
     expect(merged.directoryMap['src'].keyFiles).toEqual(['index.ts', 'main.ts']);
 
-    // tests added
     expect(merged.directoryMap['tests']).toBeDefined();
     expect(merged.directoryMap['tests'].fileCount).toBe(5);
   });
@@ -311,9 +299,9 @@ describe('mergeProjectMemory', () => {
     const merged = mergeProjectMemory(base, incoming);
 
     expect(merged.build.lintCommand).toBe('eslint src');
-    expect(merged.build.scripts.build).toBe('tsc'); // preserved from base
-    expect(merged.build.scripts.test).toBe('vitest run'); // updated by incoming
-    expect(merged.build.scripts.lint).toBe('eslint src'); // new from incoming
+    expect(merged.build.scripts.build).toBe('tsc');
+    expect(merged.build.scripts.test).toBe('vitest run');
+    expect(merged.build.scripts.lint).toBe('eslint src');
   });
 
   it('should merge workspaces and mainDirectories as scalar arrays', () => {
@@ -398,9 +386,6 @@ describe('mergeProjectMemory', () => {
       ],
     });
 
-    // Incoming only updates build - the old code would do { ...base, ...incoming }
-    // which would be fine at top level but if incoming had a partial techStack
-    // it would wipe languages/frameworks
     const incoming: Partial<ProjectMemory> = {
       build: {
         buildCommand: 'poetry build',

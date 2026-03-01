@@ -20,6 +20,7 @@ import {
   type UserDirective,
 } from '../hooks/project-memory/index.js';
 import { validatePayload } from '../lib/payload-limits.js';
+import { mergeProjectMemory } from '../lib/project-memory-merge.js';
 import { ToolDefinition } from './types.js';
 
 // ============================================================================
@@ -138,7 +139,7 @@ export const projectMemoryWriteTool: ToolDefinition<{
         if (merge) {
           const existing = await loadProjectMemory(root);
           if (existing) {
-            finalMemory = { ...existing, ...memory } as unknown as ProjectMemory;
+            finalMemory = mergeProjectMemory(existing, memory as unknown as Partial<ProjectMemory>);
           } else {
             finalMemory = memory as unknown as ProjectMemory;
           }
