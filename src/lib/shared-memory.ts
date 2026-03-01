@@ -18,7 +18,7 @@
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1119
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, renameSync } from 'fs';
 import { join, basename } from 'path';
 import { getOmcRoot } from './worktree-paths.js';
 
@@ -180,7 +180,9 @@ export function writeEntry(
     entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
   }
 
-  writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf-8');
+  const tmpPath = filePath + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
+  renameSync(tmpPath, filePath);
   return entry;
 }
 

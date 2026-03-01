@@ -6,7 +6,7 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'fs';
 import {
   resolveStatePath,
   resolveSessionStatePath,
@@ -59,7 +59,9 @@ export function writeModeState(
     }
     const filePath = resolveFile(mode, directory, sessionId);
     const envelope = { ...state, _meta: { written_at: new Date().toISOString(), mode } };
-    writeFileSync(filePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+    const tmpPath = filePath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+    renameSync(tmpPath, filePath);
     return true;
   } catch {
     return false;

@@ -63,6 +63,29 @@ describe('mode-state-io', () => {
       // 0o600 = owner read+write only (on Linux the file mode bits are in the lower 12 bits)
       expect(mode & 0o777).toBe(0o600);
     });
+
+    it('should not leave temp file after successful write', () => {
+      writeModeState('ralph', { active: true }, tempDir);
+
+      const filePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
+      expect(existsSync(filePath)).toBe(true);
+      expect(existsSync(filePath + '.tmp')).toBe(false);
+    });
+
+    it('should preserve original file when a leftover .tmp exists from a prior crash', () => {
+      // Simulate: a previous write crashed, leaving a .tmp file
+      writeModeState('ralph', { active: true, iteration: 1 }, tempDir);
+      const filePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
+      writeFileSync(filePath + '.tmp', 'partial-garbage');
+
+      // A new write should overwrite the stale .tmp and succeed
+      writeModeState('ralph', { active: true, iteration: 2 }, tempDir);
+
+      const state = readModeState<Record<string, unknown>>('ralph', tempDir);
+      expect(state).not.toBeNull();
+      expect(state!.iteration).toBe(2);
+      expect(existsSync(filePath + '.tmp')).toBe(false);
+    });
   });
 
   // -----------------------------------------------------------------------

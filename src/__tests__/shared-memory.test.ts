@@ -372,6 +372,35 @@ describe('Shared Memory', () => {
   });
 
   // =========================================================================
+  // Atomic writes
+  // =========================================================================
+
+  describe('atomic writes', () => {
+    it('should not leave temp file after successful write', () => {
+      writeEntry('ns', 'clean-test', 'data');
+      const filePath = join(omcDir, 'state', 'shared-memory', 'ns', 'clean-test.json');
+      expect(existsSync(filePath)).toBe(true);
+      expect(existsSync(filePath + '.tmp')).toBe(false);
+    });
+
+    it('should preserve original file when a leftover .tmp exists from a prior crash', () => {
+      writeEntry('ns', 'crash-test', 'original');
+      const filePath = join(omcDir, 'state', 'shared-memory', 'ns', 'crash-test.json');
+
+      // Simulate a leftover .tmp from a crashed write
+      writeFileSync(filePath + '.tmp', 'partial-garbage');
+
+      // A new write should overwrite the stale .tmp and succeed
+      writeEntry('ns', 'crash-test', 'updated');
+
+      const entry = readEntry('ns', 'crash-test');
+      expect(entry).not.toBeNull();
+      expect(entry!.value).toBe('updated');
+      expect(existsSync(filePath + '.tmp')).toBe(false);
+    });
+  });
+
+  // =========================================================================
   // Corrupted file handling
   // =========================================================================
 
