@@ -13,13 +13,12 @@ import {
 import {
   loadProjectMemory,
   saveProjectMemory,
-  withProjectMemoryLock,
   addCustomNote,
   addDirective,
   type ProjectMemory,
   type UserDirective,
 } from '../hooks/project-memory/index.js';
-import { validatePayload } from '../lib/payload-limits.js';
+import { mergeProjectMemory } from '../lib/project-memory-merge.js';
 import { ToolDefinition } from './types.js';
 
 // ============================================================================
@@ -116,43 +115,28 @@ export const projectMemoryWriteTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
 
-      // Validate payload size before writing
-      const validation = validatePayload(memory);
-      if (!validation.valid) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: payload rejected — ${validation.error}`
-          }],
-          isError: true
-        };
-      }
-
       // Ensure .omc directory exists
       ensureOmcDir('', root);
 
-      // Use file lock for merge operations to prevent read-modify-write races
-      await withProjectMemoryLock(root, async () => {
-        let finalMemory: ProjectMemory;
+      let finalMemory: ProjectMemory;
 
-        if (merge) {
-          const existing = await loadProjectMemory(root);
-          if (existing) {
-            finalMemory = { ...existing, ...memory } as unknown as ProjectMemory;
-          } else {
-            finalMemory = memory as unknown as ProjectMemory;
-          }
+      if (merge) {
+        const existing = await loadProjectMemory(root);
+        if (existing) {
+          finalMemory = mergeProjectMemory(existing, memory as Partial<ProjectMemory>);
         } else {
           finalMemory = memory as unknown as ProjectMemory;
         }
+      } else {
+        finalMemory = memory as unknown as ProjectMemory;
+      }
 
-        // Ensure required fields
-        if (!finalMemory.version) finalMemory.version = '1.0.0';
-        if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
-        if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
+      // Ensure required fields
+      if (!finalMemory.version) finalMemory.version = '1.0.0';
+      if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
+      if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
 
-        await saveProjectMemory(root, finalMemory);
-      });
+      await saveProjectMemory(root, finalMemory);
 
       return {
         content: [{
@@ -258,22 +242,16 @@ export const projectMemoryAddDirectiveTool: ToolDefinition<{
         };
       }
 
-      await withProjectMemoryLock(root, async () => {
-        // Re-load under lock to get latest state
-        const freshMemory = await loadProjectMemory(root);
-        if (!freshMemory) return;
+      const newDirective: UserDirective = {
+        timestamp: Date.now(),
+        directive,
+        context,
+        source: 'explicit',
+        priority,
+      };
 
-        const newDirective: UserDirective = {
-          timestamp: Date.now(),
-          directive,
-          context,
-          source: 'explicit',
-          priority,
-        };
-
-        freshMemory.userDirectives = addDirective(freshMemory.userDirectives, newDirective);
-        await saveProjectMemory(root, freshMemory);
-      });
+      memory.userDirectives = addDirective(memory.userDirectives, newDirective);
+      await saveProjectMemory(root, memory);
 
       return {
         content: [{
