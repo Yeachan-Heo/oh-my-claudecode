@@ -187,7 +187,7 @@ export {
 
 // cli-detection: only export symbols not already covered by model-contract
 export type { CliInfo } from './cli-detection.js';
-export { detectCli, detectAllClis } from './cli-detection.js';
+export { detectCli, detectAllClis, resolveCliBinaryPath, clearResolvedPathCache } from './cli-detection.js';
 
 // worker-bootstrap
 export type { WorkerBootstrapParams } from './worker-bootstrap.js';

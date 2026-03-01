@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { isAbsolute, normalize } from 'path';
 import { resolvedEnv } from './shell-path.js';
 import { validateTeamName } from './team-name.js';
 
@@ -87,6 +88,139 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
   },
 };
 
+/**
+ * Patterns matching directories that must never contain trusted CLI binaries.
+ * These locations are world-writable and trivially exploitable for PATH hijacking.
+ */
+const UNTRUSTED_PATH_PATTERNS: RegExp[] = [
+  /^\/tmp\b/,
+  /^\/var\/tmp\b/,
+  /^\/dev\/shm\b/,
+];
+
+/**
+ * Well-known prefixes where CLI binaries are typically installed.
+ * Binaries outside these directories produce a warning but are not blocked,
+ * supporting custom user setups while maintaining audit visibility.
+ *
+ * Extend via `OMC_TRUSTED_CLI_DIRS` (colon-separated) for non-standard layouts.
+ */
+function getTrustedPrefixes(): string[] {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const prefixes = [
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    '/usr/bin',
+    '/usr/sbin',
+    '/opt/',
+    '/snap/',
+    '/nix/',
+    '/opt/homebrew/',
+  ];
+  if (home) {
+    prefixes.push(
+      `${home}/.local/bin`,
+      `${home}/.npm-global/`,
+      `${home}/.nvm/`,
+      `${home}/.volta/`,
+      `${home}/.fnm/`,
+      `${home}/.cargo/bin`,
+      `${home}/.bun/bin`,
+      `${home}/n/bin`,
+    );
+  }
+  const extra = process.env.OMC_TRUSTED_CLI_DIRS;
+  if (extra) {
+    for (const dir of extra.split(':').filter(Boolean)) {
+      if (isAbsolute(dir)) prefixes.push(dir);
+    }
+  }
+  return prefixes;
+}
+
+/** Session-scoped cache of binary-name → resolved-absolute-path. */
+const resolvedPathCache = new Map<string, string>();
+
+/**
+ * Resolve a CLI binary name to its absolute filesystem path with security
+ * validation. The result is cached for the lifetime of this process so that
+ * subsequent calls are deterministic (PATH is only consulted once per binary).
+ *
+ * Security guarantees:
+ *  - Rejects binary names containing path separators or shell metacharacters.
+ *  - Rejects paths in world-writable temp directories (/tmp, /var/tmp, /dev/shm).
+ *  - Rejects non-absolute resolution results.
+ *  - Logs a warning for binaries outside well-known installation prefixes.
+ *
+ * @returns Absolute path to the binary.
+ * @throws  If the binary is not found, the name is invalid, or the resolved
+ *          path fails validation.
+ */
+export function resolveCliBinaryPath(binary: string): string {
+  const cached = resolvedPathCache.get(binary);
+  if (cached) return cached;
+
+  if (/[/\\;|&$`()"'\s]/.test(binary)) {
+    throw new Error(`Invalid CLI binary name: "${binary}"`);
+  }
+
+  const whichCmd =
+    process.platform === 'win32' && !process.env.MSYSTEM ? 'where' : 'which';
+  const result = spawnSync(whichCmd, [binary], {
+    timeout: 5000,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: resolvedEnv(),
+  });
+
+  if (result.status !== 0 || !result.stdout?.trim()) {
+    throw new Error(`CLI binary '${binary}' not found in PATH`);
+  }
+
+  const resolvedPath = normalize(result.stdout.trim().split('\n')[0].trim());
+
+  if (!isAbsolute(resolvedPath)) {
+    throw new Error(
+      `CLI binary '${binary}' resolved to a relative path: "${resolvedPath}". ` +
+        'Only absolute paths are accepted.',
+    );
+  }
+
+  for (const pattern of UNTRUSTED_PATH_PATTERNS) {
+    if (pattern.test(resolvedPath)) {
+      throw new Error(
+        `CLI binary '${binary}' resolved to an untrusted location: "${resolvedPath}". ` +
+          'Binaries in temporary directories are not allowed for security reasons.',
+      );
+    }
+  }
+
+  const trustedPrefixes = getTrustedPrefixes();
+  const inTrustedDir = trustedPrefixes.some((p) => resolvedPath.startsWith(p));
+  if (!inTrustedDir) {
+    console.warn(
+      `[omc:cli-security] CLI binary '${binary}' resolved to '${resolvedPath}' ` +
+        'which is not in a standard installation directory. ' +
+        'This may indicate PATH manipulation. ' +
+        `Expected prefixes include: ${trustedPrefixes.slice(0, 5).join(', ')}, ...`,
+    );
+  }
+
+  resolvedPathCache.set(binary, resolvedPath);
+  return resolvedPath;
+}
+
+/** Clear the resolved-path cache (for testing or session reset). */
+export function clearResolvedPathCache(): void {
+  resolvedPathCache.clear();
+}
+
+/** @internal Exposed for testing only. */
+export const _testInternals = {
+  UNTRUSTED_PATH_PATTERNS,
+  getTrustedPrefixes,
+};
+
 export function getContract(agentType: CliAgentType): CliAgentContract {
   const contract = CONTRACTS[agentType];
   if (!contract) {
@@ -98,11 +232,8 @@ export function getContract(agentType: CliAgentType): CliAgentContract {
 export function isCliAvailable(agentType: CliAgentType): boolean {
   const contract = getContract(agentType);
   try {
-    const result = spawnSync(contract.binary, ['--version'], {
-      timeout: 5000,
-      shell: true,
-      env: resolvedEnv(),
-    });
+    const resolvedBinary = resolveCliBinaryPath(contract.binary);
+    const result = spawnSync(resolvedBinary, ['--version'], { timeout: 5000 });
     return result.status === 0;
   } catch {
     return false;
@@ -125,8 +256,9 @@ export function buildLaunchArgs(agentType: CliAgentType, config: WorkerLaunchCon
 export function buildWorkerArgv(agentType: CliAgentType, config: WorkerLaunchConfig): string[] {
   validateTeamName(config.teamName);
   const contract = getContract(agentType);
+  const resolvedBinary = resolveCliBinaryPath(contract.binary);
   const args = buildLaunchArgs(agentType, config);
-  return [contract.binary, ...args];
+  return [resolvedBinary, ...args];
 }
 
 export function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunchConfig): string {
