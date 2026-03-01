@@ -36,6 +36,11 @@ import {
 import type { ReplyConfig } from './types.js';
 import { parseMentionAllowedMentions } from './config.js';
 import { redactTokens } from './redact.js';
+import {
+  validateSlackMessage,
+  SlackConnectionStateTracker,
+  type SlackValidationResult,
+} from './slack-socket.js';
 
 // ESM compatibility: __filename is not available in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -102,6 +107,8 @@ export interface ReplyListenerDaemonConfig extends ReplyConfig {
   slackBotToken?: string;
   /** Slack channel ID to listen in */
   slackChannelId?: string;
+  /** Slack signing secret for verifying incoming WebSocket messages */
+  slackSigningSecret?: string;
 }
 
 /** Response from daemon operations */
@@ -1063,6 +1070,118 @@ export function getReplyListenerStatus(): DaemonResponse {
     state: state ?? undefined,
   };
 }
+
+// ============================================================================
+// Slack WebSocket Message Validation Gate
+// ============================================================================
+
+/**
+ * Validate and process an incoming Slack WebSocket message before session injection.
+ *
+ * This function is the security gate for Slack Socket Mode messages.
+ * All Slack messages MUST pass through this function before reaching injectReply().
+ *
+ * Validation steps:
+ * 1. Slack message validation (envelope, signing secret, connection state)
+ * 2. Rate limiting
+ * 3. Session registry lookup
+ * 4. Pane verification and injection
+ *
+ * @param rawMessage - Raw WebSocket message string
+ * @param connectionState - Slack connection state tracker
+ * @param paneId - Target tmux pane ID (from session registry lookup by caller)
+ * @param config - Daemon configuration
+ * @param state - Daemon state (mutated: errors/messagesInjected counters)
+ * @param rateLimiter - Rate limiter instance
+ * @param signature - Slack request signature header (x-slack-signature)
+ * @param timestamp - Slack request timestamp header (x-slack-request-timestamp)
+ * @returns Object with injection result and validation details
+ */
+export function processSlackSocketMessage(
+  rawMessage: string,
+  connectionState: SlackConnectionStateTracker,
+  paneId: string | null,
+  config: ReplyListenerDaemonConfig,
+  state: ReplyListenerState,
+  rateLimiter: RateLimiter,
+  signature?: string,
+  timestamp?: string,
+): { injected: boolean; validation: SlackValidationResult } {
+  // 1. Validate the Slack message
+  const validation = validateSlackMessage(
+    rawMessage,
+    connectionState,
+    config.slackSigningSecret,
+    signature,
+    timestamp,
+  );
+
+  if (!validation.valid) {
+    log(`REJECTED Slack message: ${validation.reason}`);
+    state.errors++;
+    return { injected: false, validation };
+  }
+
+  // 2. Must have a target pane
+  if (!paneId) {
+    log('REJECTED Slack message: no target pane ID');
+    state.errors++;
+    return {
+      injected: false,
+      validation: { valid: false, reason: 'No target pane ID' },
+    };
+  }
+
+  // 3. Rate limiting
+  if (!rateLimiter.canProceed()) {
+    log('WARN: Rate limit exceeded, dropping Slack message');
+    state.errors++;
+    return {
+      injected: false,
+      validation: { valid: false, reason: 'Rate limit exceeded' },
+    };
+  }
+
+  // 4. Extract text from the validated message
+  let text: string;
+  try {
+    const parsed = JSON.parse(rawMessage);
+    const payload = parsed.payload;
+    text = payload?.event?.text || payload?.text || '';
+  } catch {
+    log('REJECTED Slack message: failed to extract text from validated message');
+    state.errors++;
+    return {
+      injected: false,
+      validation: { valid: false, reason: 'Failed to extract message text' },
+    };
+  }
+
+  if (!text) {
+    log('REJECTED Slack message: empty message text');
+    return {
+      injected: false,
+      validation: { valid: false, reason: 'Empty message text' },
+    };
+  }
+
+  // 5. Inject reply (applies sanitization + pane verification)
+  const success = injectReply(paneId, text, 'slack', config);
+  if (success) {
+    state.messagesInjected++;
+  } else {
+    state.errors++;
+  }
+
+  return { injected: success, validation };
+}
+
+// Re-export for Slack integration
+export { SlackConnectionStateTracker } from './slack-socket.js';
+export type { SlackValidationResult } from './slack-socket.js';
+
+// Export RateLimiter for external use (e.g., Slack Socket Mode handler)
+export { RateLimiter };
 
 // Export pollLoop for use by the daemon subprocess
 export { pollLoop };

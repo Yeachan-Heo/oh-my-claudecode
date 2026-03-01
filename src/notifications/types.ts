@@ -71,6 +71,8 @@ export interface SlackNotificationConfig {
   username?: string;
   /** Optional mention to prepend to messages (e.g. "<@U12345678>" for user, "<!subteam^S12345>" for group, "<!channel>" / "<!here>" / "<!everyone>") */
   mention?: string;
+  /** Slack signing secret for verifying incoming WebSocket/Events API messages */
+  signingSecret?: string;
 }
 
 /** Slack Bot API configuration (Socket Mode for inbound, Web API for outbound) */
