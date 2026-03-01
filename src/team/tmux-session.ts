@@ -539,6 +539,30 @@ export function paneLooksReady(captured: string): boolean {
   return hasCodexHint;
 }
 
+/**
+ * Poll until a pane looks ready (prompt visible) or timeout.
+ * Replaces blind setTimeout waits with active readiness confirmation,
+ * closing the TOCTOU gap between readiness check and task delivery.
+ * Returns true if ready, false on timeout.
+ */
+export async function waitForPaneReady(
+  paneId: string,
+  opts?: { timeoutMs?: number; pollIntervalMs?: number }
+): Promise<boolean> {
+  const { timeoutMs = 8000, pollIntervalMs = 500 } = opts ?? {};
+  const deadline = Date.now() + timeoutMs;
+  const { execFile: execFileCb } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFileCb);
+
+  while (Date.now() < deadline) {
+    const captured = await capturePaneAsync(paneId, execFileAsync as never);
+    if (paneLooksReady(captured)) return true;
+    await sleep(pollIntervalMs);
+  }
+  return false;
+}
+
 function paneTailContainsLiteralLine(captured: string, text: string): boolean {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
@@ -613,6 +637,12 @@ export async function sendToWorker(
       await sleep(120);
       await sendKey('C-m');
       await sleep(200);
+    }
+
+    // Re-verify pane state right before text injection (TOCTOU mitigation).
+    // The pane may have entered copy-mode or changed state since the initial check.
+    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+      return false;
     }
 
     // Send text in literal mode with -- separator
