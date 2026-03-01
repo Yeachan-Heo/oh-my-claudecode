@@ -37,6 +37,8 @@ export interface SlackSocketConfig {
 type MessageHandler = (event: SlackMessageEvent) => void | Promise<void>;
 type LogFn = (message: string) => void;
 
+import { redactTokens } from './redact.js';
+
 /** Timeout for Slack API calls */
 const API_TIMEOUT_MS = 10_000;
 
@@ -59,11 +61,16 @@ export class SlackSocketClient {
   private isShuttingDown = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private readonly log: LogFn;
+
   constructor(
     private readonly config: SlackSocketConfig,
     private readonly onMessage: MessageHandler,
-    private readonly log: LogFn,
-  ) {}
+    log: LogFn,
+  ) {
+    // Wrap the log function to automatically redact tokens from all messages
+    this.log = (msg: string) => log(redactTokens(msg));
+  }
 
   /**
    * Start the Socket Mode connection.

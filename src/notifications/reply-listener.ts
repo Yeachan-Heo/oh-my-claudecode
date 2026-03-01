@@ -35,6 +35,7 @@ import {
 } from './session-registry.js';
 import type { ReplyConfig } from './types.js';
 import { parseMentionAllowedMentions } from './config.js';
+import { redactTokens } from './redact.js';
 
 // ESM compatibility: __filename is not available in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -186,7 +187,7 @@ function log(message: string): void {
     rotateLogIfNeeded(LOG_FILE_PATH);
 
     const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] ${message}\n`;
+    const logLine = `[${timestamp}] ${redactTokens(message)}\n`;
 
     appendFileSync(LOG_FILE_PATH, logLine, { mode: SECURE_FILE_MODE });
   } catch {
@@ -550,7 +551,7 @@ async function pollDiscord(
 
   } catch (error) {
     state.errors++;
-    state.lastError = error instanceof Error ? error.message : String(error);
+    state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
     log(`Discord polling error: ${state.lastError}`);
   }
 }
@@ -714,7 +715,7 @@ async function pollTelegram(
 
   } catch (error) {
     state.errors++;
-    state.lastError = error instanceof Error ? error.message : String(error);
+    state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
     log(`Telegram polling error: ${state.lastError}`);
   }
 }
@@ -883,7 +884,7 @@ async function pollLoop(): Promise<void> {
 
     } catch (error) {
       state.errors++;
-      state.lastError = error instanceof Error ? error.message : String(error);
+      state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
 
@@ -935,7 +936,7 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
   const daemonScript = `
     import('${modulePath}').then(({ pollLoop }) => {
       return pollLoop();
-    }).catch((err) => { console.error(err); process.exit(1); });
+    }).catch((err) => { console.error('[reply-listener] Fatal:', err instanceof Error ? err.message : 'unknown error'); process.exit(1); });
   `;
 
   try {
