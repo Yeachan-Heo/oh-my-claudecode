@@ -116,6 +116,31 @@ export interface PluginConfig {
     maxDepth?: number;
   };
 
+  // Guards configuration (factcheck + sentinel) (issue #1155)
+  guards?: {
+    factcheck?: {
+      enabled?: boolean;
+      mode?: 'strict' | 'declared' | 'manual' | 'quick';
+      strict_project_patterns?: string[];
+      forbidden_path_prefixes?: string[];
+      forbidden_path_substrings?: string[];
+      readonly_command_prefixes?: string[];
+      warn_on_cwd_mismatch?: boolean;
+      enforce_cwd_parity_in_quick?: boolean;
+      warn_on_unverified_gates?: boolean;
+      warn_on_unverified_gates_when_no_source_files?: boolean;
+    };
+    sentinel?: {
+      enabled?: boolean;
+      readiness?: {
+        min_pass_rate?: number;
+        max_timeout_rate?: number;
+        max_warn_plus_fail_rate?: number;
+        min_reason_coverage_rate?: number;
+      };
+    };
+  };
+
   // Task size detection configuration (issue #790)
   taskSizeDetection?: {
     /** Enable task-size detection to prevent over-orchestration for small tasks. Default: true */
