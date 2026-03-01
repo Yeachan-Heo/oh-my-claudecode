@@ -75,6 +75,18 @@ export {
   validateTemplate,
   computeTemplateVariables,
 } from "./template-engine.js";
+export {
+  verifySlackSignature,
+  isTimestampValid,
+  validateSlackEnvelope,
+  validateSlackMessage,
+  SlackConnectionStateTracker,
+} from "./slack-socket.js";
+export type {
+  SlackConnectionState,
+  SlackValidationResult,
+  SlackSocketEnvelope,
+} from "./slack-socket.js";
 
 import type {
   NotificationEvent,
