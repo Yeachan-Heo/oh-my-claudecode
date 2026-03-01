@@ -726,7 +726,27 @@ export async function spawnWorkerForTask(
         await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[spawnWorkerForTask] interop bootstrap failed for ${workerNameValue} task ${taskId}: ${message}`);
+        // Visible warning: fail-open means the worker proceeds without interop,
+        // which may cause subtle issues.  Log prominently AND persist to disk
+        // so the failure is discoverable after the fact (issue #1164).
+        process.stderr.write(
+          `[WARN][spawnWorkerForTask] interop bootstrap failed (fail-open) for ${workerNameValue} task ${taskId}: ${message}. Worker will proceed without interop.\n`
+        );
+        const failureMeta = {
+          workerName: workerNameValue,
+          taskId,
+          error: message,
+          failedAt: new Date().toISOString(),
+          failOpen: true,
+        };
+        try {
+          await writeJson(
+            join(stateRoot(runtime.cwd, runtime.teamName), 'workers', workerNameValue, 'interop-bootstrap-failed.json'),
+            failureMeta,
+          );
+        } catch {
+          // best-effort: persist failure is non-fatal
+        }
       }
     }
   }
