@@ -16,6 +16,9 @@
  */
 
 import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { execSync } from 'node:child_process';
 import { readStdin } from './lib/stdin.mjs';
 
 /**
@@ -29,7 +32,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
     if (existsSync(transcriptPath)) return transcriptPath;
   } catch { /* fallthrough */ }
 
-  // Strip worktree segment from encoded project directory
+  // Strategy 1: Strip Claude worktree segment from encoded project directory
   const worktreePattern = /--claude-worktrees-[^/\\]+/;
   if (worktreePattern.test(transcriptPath)) {
     const resolved = transcriptPath.replace(worktreePattern, '');
@@ -37,6 +40,44 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       if (existsSync(resolved)) return resolved;
     } catch { /* fallthrough */ }
   }
+
+  // Strategy 2: Detect native git worktree via git-common-dir.
+  // When CWD is a linked worktree (created by `git worktree add`), the
+  // transcript path encodes the worktree CWD, but the file lives under
+  // the main repo's encoded path.
+  const effectiveCwd = cwd || process.cwd();
+  try {
+    const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
+    const mainRepoRoot = dirname(absoluteCommonDir);
+
+    const worktreeTop = execSync('git rev-parse --show-toplevel', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (mainRepoRoot !== worktreeTop) {
+      const lastSep = transcriptPath.lastIndexOf('/');
+      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+      if (sessionFile) {
+        const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+        const projectsDir = join(configDir, 'projects');
+        if (existsSync(projectsDir)) {
+          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+          try {
+            if (existsSync(resolvedPath)) return resolvedPath;
+          } catch { /* fallthrough */ }
+        }
+      }
+    }
+  } catch { /* not in a git repo or git not available — skip */ }
 
   return transcriptPath;
 }

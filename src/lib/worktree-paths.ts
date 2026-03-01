@@ -13,7 +13,7 @@ import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, realpathSync, readdirSync } from 'fs';
 import { homedir } from 'os';
-import { resolve, normalize, relative, sep, join, isAbsolute, basename } from 'path';
+import { resolve, normalize, relative, sep, join, isAbsolute, basename, dirname } from 'path';
 
 /** Standard .omc subdirectories */
 export const OmcPaths = {
@@ -554,6 +554,44 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
         if (existsSync(resolvedPath)) return resolvedPath;
       }
     }
+  }
+
+  // Strategy 3: Detect native git worktree via git-common-dir.
+  // When CWD is a linked worktree (created by `git worktree add`), the
+  // transcript path encodes the worktree CWD, but the file lives under
+  // the main repo's encoded path. Use `git rev-parse --git-common-dir`
+  // to find the main repo root and re-encode.
+  try {
+    const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
+    const mainRepoRoot = dirname(absoluteCommonDir);
+
+    const worktreeTop = execSync('git rev-parse --show-toplevel', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (mainRepoRoot !== worktreeTop) {
+      const lastSep = transcriptPath.lastIndexOf('/');
+      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+      if (sessionFile) {
+        const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+        const projectsDir = join(configDir, 'projects');
+        if (existsSync(projectsDir)) {
+          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+          if (existsSync(resolvedPath)) return resolvedPath;
+        }
+      }
+    }
+  } catch {
+    // Not in a git repo or git not available — skip
   }
 
   // No resolution found — return original path.
