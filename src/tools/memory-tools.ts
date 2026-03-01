@@ -13,6 +13,7 @@ import {
 import {
   loadProjectMemory,
   saveProjectMemory,
+  withProjectMemoryLock,
   addCustomNote,
   addDirective,
   type ProjectMemory,
@@ -117,25 +118,28 @@ export const projectMemoryWriteTool: ToolDefinition<{
       // Ensure .omc directory exists
       ensureOmcDir('', root);
 
-      let finalMemory: ProjectMemory;
+      // Use file lock for merge operations to prevent read-modify-write races
+      await withProjectMemoryLock(root, async () => {
+        let finalMemory: ProjectMemory;
 
-      if (merge) {
-        const existing = await loadProjectMemory(root);
-        if (existing) {
-          finalMemory = { ...existing, ...memory } as unknown as ProjectMemory;
+        if (merge) {
+          const existing = await loadProjectMemory(root);
+          if (existing) {
+            finalMemory = { ...existing, ...memory } as unknown as ProjectMemory;
+          } else {
+            finalMemory = memory as unknown as ProjectMemory;
+          }
         } else {
           finalMemory = memory as unknown as ProjectMemory;
         }
-      } else {
-        finalMemory = memory as unknown as ProjectMemory;
-      }
 
-      // Ensure required fields
-      if (!finalMemory.version) finalMemory.version = '1.0.0';
-      if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
-      if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
+        // Ensure required fields
+        if (!finalMemory.version) finalMemory.version = '1.0.0';
+        if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
+        if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
 
-      await saveProjectMemory(root, finalMemory);
+        await saveProjectMemory(root, finalMemory);
+      });
 
       return {
         content: [{
@@ -241,16 +245,22 @@ export const projectMemoryAddDirectiveTool: ToolDefinition<{
         };
       }
 
-      const newDirective: UserDirective = {
-        timestamp: Date.now(),
-        directive,
-        context,
-        source: 'explicit',
-        priority,
-      };
+      await withProjectMemoryLock(root, async () => {
+        // Re-load under lock to get latest state
+        const freshMemory = await loadProjectMemory(root);
+        if (!freshMemory) return;
 
-      memory.userDirectives = addDirective(memory.userDirectives, newDirective);
-      await saveProjectMemory(root, memory);
+        const newDirective: UserDirective = {
+          timestamp: Date.now(),
+          directive,
+          context,
+          source: 'explicit',
+          priority,
+        };
+
+        freshMemory.userDirectives = addDirective(freshMemory.userDirectives, newDirective);
+        await saveProjectMemory(root, freshMemory);
+      });
 
       return {
         content: [{
