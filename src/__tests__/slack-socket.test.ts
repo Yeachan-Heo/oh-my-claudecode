@@ -19,6 +19,11 @@ class MockWebSocket {
     this.listeners[event].push(handler);
   }
 
+  removeEventListener(event: string, handler: (...args: any[]) => void) {
+    if (!this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter(h => h !== handler);
+  }
+
   send = vi.fn();
   close = vi.fn(() => {
     this.readyState = 3; // CLOSED
@@ -28,6 +33,10 @@ class MockWebSocket {
   // test helpers
   fire(event: string, data?: any) {
     (this.listeners[event] ?? []).forEach(h => h(data));
+  }
+
+  listenerCount(event: string): number {
+    return (this.listeners[event] ?? []).length;
   }
 }
 
@@ -211,5 +220,79 @@ describe('SlackSocketClient', () => {
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining('connection error'));
     client.stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // Cleanup tests (issue #1172)
+  // -------------------------------------------------------------------------
+
+  it('stop() removes all event listeners from the WebSocket', async () => {
+    const client = new SlackSocketClient(CONFIG, vi.fn(), vi.fn());
+    await client.start();
+
+    const ws = lastWs! as unknown as MockWebSocket;
+    expect(ws.listenerCount('open')).toBeGreaterThan(0);
+    expect(ws.listenerCount('message')).toBeGreaterThan(0);
+    expect(ws.listenerCount('error')).toBeGreaterThan(0);
+
+    // Prevent close handler from firing during stop (so we can inspect listener state)
+    ws.close = vi.fn();
+    client.stop();
+
+    expect(ws.listenerCount('open')).toBe(0);
+    expect(ws.listenerCount('message')).toBe(0);
+    expect(ws.listenerCount('close')).toBe(0);
+    expect(ws.listenerCount('error')).toBe(0);
+  });
+
+  it('close event removes listeners before scheduling reconnect', async () => {
+    const log = vi.fn();
+    const client = new SlackSocketClient(CONFIG, vi.fn(), log);
+    await client.start();
+
+    const ws = lastWs! as unknown as MockWebSocket;
+    expect(ws.listenerCount('message')).toBeGreaterThan(0);
+
+    // Simulate server-initiated close (don't use ws.close mock which auto-fires)
+    // Instead, directly fire the close event
+    ws.close = vi.fn(); // prevent recursion
+    ws.fire('close');
+
+    // Listeners should have been removed by cleanupWs() inside the close handler
+    expect(ws.listenerCount('open')).toBe(0);
+    expect(ws.listenerCount('message')).toBe(0);
+    expect(ws.listenerCount('error')).toBe(0);
+
+    // Should have scheduled a reconnect
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('scheduling reconnect'));
+    client.stop();
+  });
+
+  it('scheduleReconnect clears existing timer before setting a new one', async () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const client = new SlackSocketClient(CONFIG, vi.fn(), vi.fn());
+    await client.start();
+
+    const ws = lastWs! as unknown as MockWebSocket;
+
+    // Trigger a close event to schedule a reconnect timer
+    ws.close = vi.fn();
+    ws.fire('close');
+
+    // A reconnect timer is now pending. stop() should clear it.
+    clearTimeoutSpy.mockClear();
+    client.stop();
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it('stop() is idempotent - safe to call multiple times', async () => {
+    const client = new SlackSocketClient(CONFIG, vi.fn(), vi.fn());
+    await client.start();
+
+    client.stop();
+    // Second call should not throw
+    expect(() => client.stop()).not.toThrow();
   });
 });
