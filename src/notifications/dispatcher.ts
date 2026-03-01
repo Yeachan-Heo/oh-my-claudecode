@@ -21,7 +21,12 @@ import type {
   NotificationEvent,
 } from "./types.js";
 
-import { parseMentionAllowedMentions } from "./config.js";
+import {
+  parseMentionAllowedMentions,
+  validateSlackMention,
+  validateSlackChannel,
+  validateSlackUsername,
+} from "./config.js";
 
 /** Per-request timeout for individual platform sends */
 const SEND_TIMEOUT_MS = 10_000;
@@ -345,13 +350,17 @@ export async function sendTelegram(
  * Compose Slack message text with mention prefix.
  * Slack mentions use formats like <@U12345678>, <!channel>, <!here>, <!everyone>,
  * or <!subteam^S12345> for user groups.
+ *
+ * Defense-in-depth: re-validates mention at point of use (config layer validates
+ * at read time, but we validate again here to guard against untrusted config).
  */
 function composeSlackText(
   message: string,
   mention: string | undefined,
 ): string {
-  if (mention) {
-    return `${mention}\n${message}`;
+  const validatedMention = validateSlackMention(mention);
+  if (validatedMention) {
+    return `${validatedMention}\n${message}`;
   }
   return message;
 }
@@ -374,11 +383,16 @@ export async function sendSlack(
   try {
     const text = composeSlackText(payload.message, config.mention);
     const body: Record<string, unknown> = { text };
-    if (config.channel) {
-      body.channel = config.channel;
+    // Defense-in-depth: validate channel/username at point of use to guard
+    // against crafted config values containing shell metacharacters or
+    // path traversal sequences.
+    const validatedChannel = validateSlackChannel(config.channel);
+    if (validatedChannel) {
+      body.channel = validatedChannel;
     }
-    if (config.username) {
-      body.username = config.username;
+    const validatedUsername = validateSlackUsername(config.username);
+    if (validatedUsername) {
+      body.username = validatedUsername;
     }
 
     const response = await fetch(config.webhookUrl, {

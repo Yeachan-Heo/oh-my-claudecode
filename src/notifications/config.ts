@@ -103,6 +103,39 @@ export function validateMention(raw: string | undefined): string | undefined {
 }
 
 /**
+ * Validate Slack channel name or ID format.
+ * Accepts:
+ *   - Channel ID: C or G followed by 8-11 uppercase alphanumeric chars (e.g. "C1234567890")
+ *   - Channel name: optional # prefix, lowercase letters/numbers/hyphens/underscores (max 80 chars)
+ * Rejects control characters, shell metacharacters, and path traversal sequences.
+ * Returns the channel string if valid, undefined otherwise.
+ */
+export function validateSlackChannel(raw: string | undefined): string | undefined {
+  const channel = normalizeOptional(raw);
+  if (!channel) return undefined;
+  // Channel ID: C or G followed by alphanumeric (e.g., C1234567890)
+  if (/^[CG][A-Z0-9]{8,11}$/.test(channel)) return channel;
+  // Channel name: optional # prefix, lowercase letters, numbers, hyphens, underscores (max 80 chars)
+  if (/^#?[a-z0-9][a-z0-9_-]{0,79}$/.test(channel)) return channel;
+  return undefined;
+}
+
+/**
+ * Validate Slack username format.
+ * Accepts alphanumeric characters, spaces, hyphens, underscores, periods, apostrophes (max 80 chars).
+ * Rejects control characters, shell metacharacters, and path traversal sequences.
+ * Returns the username string if valid, undefined otherwise.
+ */
+export function validateSlackUsername(raw: string | undefined): string | undefined {
+  const username = normalizeOptional(raw);
+  if (!username) return undefined;
+  if (username.length > 80) return undefined;
+  // Allow reasonable display names: letters, digits, spaces, hyphens, underscores, periods, apostrophes
+  if (/^[a-zA-Z0-9][a-zA-Z0-9 _.'"-]{0,79}$/.test(username)) return username;
+  return undefined;
+}
+
+/**
  * Validate Slack mention format.
  * Accepts: <@UXXXXXXXX> (user), <!channel>, <!here>, <!everyone>, <!subteam^SXXXXXXXXX> (user group).
  * Returns the mention string if valid, undefined otherwise.
