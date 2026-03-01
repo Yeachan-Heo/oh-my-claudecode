@@ -227,6 +227,9 @@ export type {
 } from './runtime.js';
 export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
 
+export { LayoutStabilizer } from './layout-stabilizer.js';
+export type { LayoutStabilizerOptions } from './layout-stabilizer.js';
+
 export { injectToLeaderPane } from './tmux-session.js';
 
 export type { DoneSignal } from './types.js';

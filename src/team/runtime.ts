@@ -15,6 +15,7 @@ import {
   isWorkerAlive, killTeamSession, waitForPaneReady,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
+import { LayoutStabilizer } from './layout-stabilizer.js';
 import {
   composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay,
 } from './worker-bootstrap.js';
@@ -46,6 +47,7 @@ export interface TeamRuntime {
   activeWorkers: Map<string, ActiveWorkerState>;
   cwd: string;
   stopWatchdog?: () => void;
+  layoutStabilizer?: LayoutStabilizer;
 }
 
 export interface WorkerStatus {
@@ -356,6 +358,11 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
   // Create tmux session with ZERO worker panes (leader only).
   // Workers are spawned on-demand by the orchestrator.
   const session: TeamSession = await createTeamSession(teamName, 0, cwd);
+  const layoutStabilizer = new LayoutStabilizer({
+    sessionTarget: session.sessionName,
+    leaderPaneId: session.leaderPaneId,
+  });
+
   const runtime: TeamRuntime = {
     teamName,
     sessionName: session.sessionName,
@@ -365,6 +372,7 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
     workerPaneIds: session.workerPaneIds, // initially empty []
     activeWorkers: new Map(),
     cwd,
+    layoutStabilizer,
   };
 
   const maxConcurrentWorkers = agentTypes.length;
@@ -569,6 +577,12 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           unresponsiveCounts.delete(wName);
         }
       }
+      // Flush any pending debounced layout operations at the end of the tick
+      // to ensure layout is stable after processing all workers (#1158)
+      if (runtime.layoutStabilizer) {
+        await runtime.layoutStabilizer.flush();
+      }
+
       // Reset failure counter on a successful tick
       consecutiveFailures = 0;
     } catch (err) {
@@ -595,7 +609,11 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
 
   const intervalId = setInterval(() => { tick(); }, intervalMs);
 
-  return () => clearInterval(intervalId);
+  return () => {
+    clearInterval(intervalId);
+    // Dispose layout stabilizer on watchdog stop to cancel any pending operations (#1158)
+    runtime.layoutStabilizer?.dispose();
+  };
 }
 
 /**
@@ -678,10 +696,15 @@ export async function spawnWorkerForTask(
   runtime.workerPaneIds.push(paneId);
   runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
 
-  try {
-    await execFileAsync('tmux', ['select-layout', '-t', runtime.sessionName, 'main-vertical']);
-  } catch {
-    // layout update is best-effort
+  // Debounced layout recalculation — prevents thrashing during rapid spawn cycles (#1158)
+  if (runtime.layoutStabilizer) {
+    runtime.layoutStabilizer.requestLayout();
+  } else {
+    try {
+      await execFileAsync('tmux', ['select-layout', '-t', runtime.sessionName, 'main-vertical']);
+    } catch {
+      // layout update is best-effort
+    }
   }
 
   try {
@@ -782,6 +805,9 @@ export async function killWorkerPane(
     runtime.workerPaneIds.splice(paneIndex, 1);
   }
   runtime.activeWorkers.delete(workerNameValue);
+
+  // Debounced layout recalculation after pane removal (#1158)
+  runtime.layoutStabilizer?.requestLayout();
 
   try {
     await writePanesTrackingFileIfPresent(runtime);
