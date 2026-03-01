@@ -27,6 +27,7 @@ import { existsSync, readFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { getOmcRoot } from "../../lib/worktree-paths.js";
 import { atomicWriteFileSync } from "../../lib/atomic-write.js";
+import { lockPathFor, withFileLockSync } from "../../lib/file-lock.js";
 
 // ============================================================================
 // Types
@@ -249,20 +250,23 @@ export function setPriorityContext(
   }
 
   const notepadPath = getNotepadPath(directory);
-  let notepadContent = readFileSync(notepadPath, "utf-8");
-
-  // Check size
-  const warning =
-    content.length > config.priorityMaxChars
-      ? `Priority Context exceeds ${config.priorityMaxChars} chars (${content.length} chars). Consider condensing.`
-      : undefined;
-
-  // Replace the section
-  notepadContent = replaceSection(notepadContent, PRIORITY_HEADER, content);
 
   try {
-    atomicWriteFileSync(notepadPath, notepadContent);
-    return { success: true, warning };
+    return withFileLockSync(lockPathFor(notepadPath), () => {
+      let notepadContent = readFileSync(notepadPath, "utf-8");
+
+      // Check size
+      const warning =
+        content.length > config.priorityMaxChars
+          ? `Priority Context exceeds ${config.priorityMaxChars} chars (${content.length} chars). Consider condensing.`
+          : undefined;
+
+      // Replace the section
+      notepadContent = replaceSection(notepadContent, PRIORITY_HEADER, content);
+
+      atomicWriteFileSync(notepadPath, notepadContent);
+      return { success: true, warning } as PriorityContextResult;
+    }, { timeoutMs: 5000 });
   } catch {
     return { success: false };
   }
@@ -283,32 +287,35 @@ export function addWorkingMemoryEntry(
   }
 
   const notepadPath = getNotepadPath(directory);
-  let notepadContent = readFileSync(notepadPath, "utf-8");
-
-  // Get current Working Memory content
-  const currentMemory =
-    extractSection(notepadContent, WORKING_MEMORY_HEADER) || "";
-
-  // Format timestamp
-  const now = new Date();
-  const timestamp = now.toISOString().slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
-
-  // Add new entry
-  const newEntry = `### ${timestamp}\n${content}\n`;
-  const updatedMemory = currentMemory
-    ? currentMemory + "\n" + newEntry
-    : newEntry;
-
-  // Replace the section
-  notepadContent = replaceSection(
-    notepadContent,
-    WORKING_MEMORY_HEADER,
-    updatedMemory,
-  );
 
   try {
-    atomicWriteFileSync(notepadPath, notepadContent);
-    return true;
+    return withFileLockSync(lockPathFor(notepadPath), () => {
+      let notepadContent = readFileSync(notepadPath, "utf-8");
+
+      // Get current Working Memory content
+      const currentMemory =
+        extractSection(notepadContent, WORKING_MEMORY_HEADER) || "";
+
+      // Format timestamp
+      const now = new Date();
+      const timestamp = now.toISOString().slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
+
+      // Add new entry
+      const newEntry = `### ${timestamp}\n${content}\n`;
+      const updatedMemory = currentMemory
+        ? currentMemory + "\n" + newEntry
+        : newEntry;
+
+      // Replace the section
+      notepadContent = replaceSection(
+        notepadContent,
+        WORKING_MEMORY_HEADER,
+        updatedMemory,
+      );
+
+      atomicWriteFileSync(notepadPath, notepadContent);
+      return true;
+    }, { timeoutMs: 5000 });
   } catch {
     return false;
   }
@@ -326,25 +333,28 @@ export function addManualEntry(directory: string, content: string): boolean {
   }
 
   const notepadPath = getNotepadPath(directory);
-  let notepadContent = readFileSync(notepadPath, "utf-8");
-
-  // Get current MANUAL content
-  const currentManual = extractSection(notepadContent, MANUAL_HEADER) || "";
-
-  // Add new entry with timestamp
-  const now = new Date();
-  const timestamp = now.toISOString().slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
-  const newEntry = `### ${timestamp}\n${content}\n`;
-  const updatedManual = currentManual
-    ? currentManual + "\n" + newEntry
-    : newEntry;
-
-  // Replace the section
-  notepadContent = replaceSection(notepadContent, MANUAL_HEADER, updatedManual);
 
   try {
-    atomicWriteFileSync(notepadPath, notepadContent);
-    return true;
+    return withFileLockSync(lockPathFor(notepadPath), () => {
+      let notepadContent = readFileSync(notepadPath, "utf-8");
+
+      // Get current MANUAL content
+      const currentManual = extractSection(notepadContent, MANUAL_HEADER) || "";
+
+      // Add new entry with timestamp
+      const now = new Date();
+      const timestamp = now.toISOString().slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
+      const newEntry = `### ${timestamp}\n${content}\n`;
+      const updatedManual = currentManual
+        ? currentManual + "\n" + newEntry
+        : newEntry;
+
+      // Replace the section
+      notepadContent = replaceSection(notepadContent, MANUAL_HEADER, updatedManual);
+
+      atomicWriteFileSync(notepadPath, notepadContent);
+      return true;
+    }, { timeoutMs: 5000 });
   } catch {
     return false;
   }
@@ -366,55 +376,57 @@ export function pruneOldEntries(
     return { pruned: 0, remaining: 0 };
   }
 
-  let notepadContent = readFileSync(notepadPath, "utf-8");
-  const workingMemory = extractSection(notepadContent, WORKING_MEMORY_HEADER);
-
-  if (!workingMemory) {
-    return { pruned: 0, remaining: 0 };
-  }
-
-  // Parse entries
-  const entryRegex =
-    /### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)/g;
-  const entries: Array<{ timestamp: string; content: string }> = [];
-  let match: RegExpExecArray | null = entryRegex.exec(workingMemory);
-
-  while (match !== null) {
-    entries.push({
-      timestamp: match[1],
-      content: match[2].trim(),
-    });
-    match = entryRegex.exec(workingMemory);
-  }
-
-  // Calculate cutoff date
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - daysOld);
-
-  // Filter entries
-  const kept = entries.filter((entry) => {
-    const entryDate = new Date(entry.timestamp);
-    return entryDate >= cutoff;
-  });
-
-  const pruned = entries.length - kept.length;
-
-  // Rebuild Working Memory section
-  const newContent = kept
-    .map((entry) => `### ${entry.timestamp}\n${entry.content}`)
-    .join("\n\n");
-
-  notepadContent = replaceSection(
-    notepadContent,
-    WORKING_MEMORY_HEADER,
-    newContent,
-  );
-
   try {
-    atomicWriteFileSync(notepadPath, notepadContent);
-    return { pruned, remaining: kept.length };
+    return withFileLockSync(lockPathFor(notepadPath), () => {
+      let notepadContent = readFileSync(notepadPath, "utf-8");
+      const workingMemory = extractSection(notepadContent, WORKING_MEMORY_HEADER);
+
+      if (!workingMemory) {
+        return { pruned: 0, remaining: 0 } as PruneResult;
+      }
+
+      // Parse entries
+      const entryRegex =
+        /### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)/g;
+      const entries: Array<{ timestamp: string; content: string }> = [];
+      let match: RegExpExecArray | null = entryRegex.exec(workingMemory);
+
+      while (match !== null) {
+        entries.push({
+          timestamp: match[1],
+          content: match[2].trim(),
+        });
+        match = entryRegex.exec(workingMemory);
+      }
+
+      // Calculate cutoff date
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - daysOld);
+
+      // Filter entries
+      const kept = entries.filter((entry) => {
+        const entryDate = new Date(entry.timestamp);
+        return entryDate >= cutoff;
+      });
+
+      const pruned = entries.length - kept.length;
+
+      // Rebuild Working Memory section
+      const newContent = kept
+        .map((entry) => `### ${entry.timestamp}\n${entry.content}`)
+        .join("\n\n");
+
+      notepadContent = replaceSection(
+        notepadContent,
+        WORKING_MEMORY_HEADER,
+        newContent,
+      );
+
+      atomicWriteFileSync(notepadPath, notepadContent);
+      return { pruned, remaining: kept.length } as PruneResult;
+    }, { timeoutMs: 5000 });
   } catch {
-    return { pruned: 0, remaining: entries.length };
+    return { pruned: 0, remaining: 0 };
   }
 }
 

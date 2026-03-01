@@ -116,7 +116,7 @@ export async function rescanProjectEnvironment(projectRoot: string): Promise<voi
 }
 
 // Re-export utilities for use in other modules
-export { loadProjectMemory, saveProjectMemory } from './storage.js';
+export { loadProjectMemory, saveProjectMemory, withProjectMemoryLock } from './storage.js';
 export { detectProjectEnvironment } from './detector.js';
 export { formatContextSummary, formatFullContext } from './formatter.js';
 export { learnFromToolOutput, addCustomNote } from './learner.js';

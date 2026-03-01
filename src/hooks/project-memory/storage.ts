@@ -8,6 +8,7 @@ import path from 'path';
 import { ProjectMemory } from './types.js';
 import { MEMORY_FILE, MEMORY_DIR, CACHE_EXPIRY_MS } from './constants.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
+import { lockPathFor, withFileLock, type FileLockOptions } from '../../lib/file-lock.js';
 
 /**
  * Get the path to the project memory file
@@ -57,6 +58,25 @@ export async function saveProjectMemory(projectRoot: string, memory: ProjectMemo
     // Silently fail - we don't want to break the session
     console.error('Failed to save project memory:', error);
   }
+}
+
+/** Default lock options for project memory operations */
+const MEMORY_LOCK_OPTS: FileLockOptions = { timeoutMs: 5000 };
+
+/**
+ * Execute an async function while holding an exclusive lock on the project memory file.
+ * Prevents concurrent read-modify-write races across processes.
+ *
+ * @param projectRoot Project root directory
+ * @param fn Function to execute under lock
+ * @returns The function's return value
+ */
+export async function withProjectMemoryLock<T>(
+  projectRoot: string,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  const memoryPath = getMemoryPath(projectRoot);
+  return withFileLock(lockPathFor(memoryPath), fn, MEMORY_LOCK_OPTS);
 }
 
 /**
