@@ -85,6 +85,47 @@ describe('wrapWithLoginShell', () => {
     expect(result).toContain('/usr/local/bin/fish');
     expect(result).toContain('-lc');
   });
+
+  it('sources ~/.zshrc for zsh shells', () => {
+    vi.stubEnv('SHELL', '/bin/zsh');
+    vi.stubEnv('HOME', '/home/testuser');
+    const result = wrapWithLoginShell('claude');
+    expect(result).toContain('.zshrc');
+    expect(result).toContain('/home/testuser/.zshrc');
+  });
+
+  it('sources ~/.bashrc for bash shells', () => {
+    vi.stubEnv('SHELL', '/bin/bash');
+    vi.stubEnv('HOME', '/home/testuser');
+    const result = wrapWithLoginShell('claude');
+    expect(result).toContain('.bashrc');
+    expect(result).toContain('/home/testuser/.bashrc');
+  });
+
+  it('sources ~/.fishrc for fish shells', () => {
+    vi.stubEnv('SHELL', '/usr/local/bin/fish');
+    vi.stubEnv('HOME', '/home/testuser');
+    const result = wrapWithLoginShell('codex');
+    expect(result).toContain('.fishrc');
+    expect(result).toContain('/home/testuser/.fishrc');
+  });
+
+  it('skips rc sourcing when HOME is not set', () => {
+    vi.stubEnv('SHELL', '/bin/zsh');
+    vi.stubEnv('HOME', '');
+    const result = wrapWithLoginShell('claude');
+    expect(result).not.toContain('.zshrc');
+    expect(result).toContain('claude');
+  });
+
+  it('uses conditional test before sourcing rc file', () => {
+    vi.stubEnv('SHELL', '/bin/zsh');
+    vi.stubEnv('HOME', '/home/testuser');
+    const result = wrapWithLoginShell('claude');
+    // Should guard with [ -f ... ] to avoid errors if rc file doesn't exist
+    expect(result).toContain('[ -f');
+    expect(result).toContain('] && .');
+  });
 });
 
 // ---------------------------------------------------------------------------

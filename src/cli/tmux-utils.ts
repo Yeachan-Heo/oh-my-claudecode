@@ -118,10 +118,21 @@ export function sanitizeTmuxToken(value: string): string {
  * shell ($SHELL -c 'command'), so rc files are not loaded. This wrapper
  * replaces the outer shell with a login shell via exec, ensuring PATH
  * and other environment from rc files are available.
+ *
+ * Note: `-lc` alone starts a login+non-interactive shell which sources
+ * .zprofile/.bash_profile but NOT .zshrc/.bashrc (those require an
+ * interactive shell). We explicitly source the rc file so that PATH
+ * and user environment are fully available.
  */
 export function wrapWithLoginShell(command: string): string {
   const shell = process.env.SHELL || '/bin/bash';
-  return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(command)}`;
+  const shellName = basename(shell).replace(/\.(exe|cmd|bat)$/i, '');
+  const home = process.env.HOME || '';
+  const rcFile = home ? `${home}/.${shellName}rc` : '';
+  const sourceRc = rcFile
+    ? `[ -f ${quoteShellArg(rcFile)} ] && . ${quoteShellArg(rcFile)}; `
+    : '';
+  return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(sourceRc + command)}`;
 }
 
 /**
