@@ -51,3 +51,35 @@ export function getDefaultTierModels(): Record<'LOW' | 'MEDIUM' | 'HIGH', string
     HIGH: getDefaultModelHigh(),
   };
 }
+
+/**
+ * Detect whether the user is running a non-Claude model provider.
+ *
+ * CC Switch and similar tools set CLAUDE_MODEL or ANTHROPIC_MODEL to a
+ * non-Claude model ID (e.g. "glm-5", "MiniMax-Text-01", "kimi-k2").
+ * When a custom ANTHROPIC_BASE_URL is set, the provider is likely not
+ * Anthropic's native API.
+ *
+ * Returns true when OMC should avoid passing Claude-specific model tier
+ * names (sonnet/opus/haiku) to the Agent tool.
+ */
+export function isNonClaudeProvider(): boolean {
+  // Explicit opt-in: user has already set forceInherit via env var
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') {
+    return true;
+  }
+
+  // Check CLAUDE_MODEL / ANTHROPIC_MODEL for non-Claude model IDs
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (modelId && !modelId.toLowerCase().includes('claude')) {
+    return true;
+  }
+
+  // Custom base URL suggests a proxy/gateway (CC Switch, LiteLLM, OneAPI, etc.)
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (baseUrl && !baseUrl.includes('anthropic.com')) {
+    return true;
+  }
+
+  return false;
+}

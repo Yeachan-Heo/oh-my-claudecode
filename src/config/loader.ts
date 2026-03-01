@@ -16,6 +16,7 @@ import {
   getDefaultModelHigh,
   getDefaultModelMedium,
   getDefaultModelLow,
+  isNonClaudeProvider,
 } from './models.js';
 
 /**
@@ -360,6 +361,22 @@ export function loadConfig(): PluginConfig {
   const envConfig = loadEnvConfig();
   config = deepMerge(config, envConfig);
 
+  // Auto-enable forceInherit for non-Claude providers (issue #1201)
+  // Only auto-enable if user hasn't explicitly set it via config or env var.
+  // When a non-Claude model is detected (CC Switch, LiteLLM, etc.), passing
+  // Claude-specific tier names (sonnet/opus/haiku) to the Agent tool causes
+  // 400 errors because the provider doesn't recognize them.
+  if (
+    config.routing?.forceInherit !== true &&
+    process.env.OMC_ROUTING_FORCE_INHERIT === undefined &&
+    isNonClaudeProvider()
+  ) {
+    config.routing = {
+      ...config.routing,
+      forceInherit: true,
+    };
+  }
+
   return config;
 }
 
@@ -529,7 +546,7 @@ export function generateConfigSchema(): object {
         properties: {
           enabled: { type: 'boolean', default: true, description: 'Enable intelligent model routing' },
           defaultTier: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM', description: 'Default tier when no rules match' },
-          forceInherit: { type: 'boolean', default: false, description: 'Force all agents to inherit the parent model, bypassing OMC model routing. When true, no model parameter is passed to Task calls, so agents use the user\'s Claude Code model setting.' },
+          forceInherit: { type: 'boolean', default: false, description: 'Force all agents to inherit the parent model, bypassing OMC model routing. When true, no model parameter is passed to Task calls, so agents use the user\'s Claude Code model setting. Auto-enabled when a non-Claude provider is detected (CC Switch, custom ANTHROPIC_BASE_URL, etc.).' },
         }
       },
       externalModels: {
