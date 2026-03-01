@@ -77,6 +77,7 @@ export {
   validateTemplate,
   computeTemplateVariables,
 } from "./template-engine.js";
+export { redactTokens } from "./redact.js";
 
 import type {
   NotificationEvent,
