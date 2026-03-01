@@ -126,30 +126,6 @@ describe('readAllTeamOutboxMessages', () => {
         expect(results[0].workerName).toBe('w1');
     });
 });
-describe('readAllTeamOutboxMessages path traversal guard (issue #1170)', () => {
-    it('sanitizes worker names extracted from filenames', () => {
-        // Simulate a malicious filename in the outbox directory
-        // Even if someone created a file named '../../../etc/passwd.jsonl',
-        // sanitizeName would strip the traversal characters
-        const outbox = join(TEAMS_DIR, 'outbox', 'w1.jsonl');
-        const msg = { type: 'idle', timestamp: '2026-01-01T00:00:00Z' };
-        writeFileSync(outbox, JSON.stringify(msg) + '\n');
-        const results = readAllTeamOutboxMessages(TEST_TEAM);
-        // Worker names in results should be sanitized
-        for (const r of results) {
-            expect(r.workerName).toMatch(/^[a-zA-Z0-9-]+$/);
-        }
-    });
-    it('skips files with all-special-char names', () => {
-        // Create a file with a name that sanitizes to empty string
-        const maliciousFile = join(TEAMS_DIR, 'outbox', '....jsonl');
-        const msg = { type: 'idle', timestamp: '2026-01-01T00:00:00Z' };
-        writeFileSync(maliciousFile, JSON.stringify(msg) + '\n');
-        // Should skip the file (sanitizeName throws on empty result)
-        const results = readAllTeamOutboxMessages(TEST_TEAM);
-        expect(results).toEqual([]);
-    });
-});
 describe('resetOutboxCursor', () => {
     it('resets cursor to 0', () => {
         const outbox = join(TEAMS_DIR, 'outbox', 'w1.jsonl');

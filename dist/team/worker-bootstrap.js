@@ -56,12 +56,12 @@ To claim a task, update the task file atomically:
   \`\`\`
 
 ## Task Completion Protocol
-When you finish a task (success or failure), write a done signal using a bash command (do NOT use a file-write tool):
-\`\`\`bash
-mkdir -p $(dirname ${donePath}) && echo '{"taskId":"<id>","status":"completed","summary":"done","completedAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ${donePath}
-\`\`\`
-- For failures, replace "completed" with "failed" and "done" with "failed".
-- Use "completed" or "failed" only for status. Use "done" or "failed" only for summary.
+When you finish a task (success or failure), write a done signal file:
+- Path: ${donePath}
+- Content (JSON, one line):
+  {"taskId":"<id>","status":"completed","summary":"<1-2 sentence summary>","completedAt":"<ISO timestamp>"}
+- For failures, set status to "failed" and include the error in summary.
+- Use "completed" or "failed" only for status.
 
 ## Shutdown Protocol
 When you see a shutdown request (check .omc/state/team/${teamName}/shutdown.json):

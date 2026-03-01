@@ -1,17 +1,16 @@
 // Re-exports from model-contract.ts for backward compatibility
 // and additional CLI detection utilities
-export { isCliAvailable, validateCliAvailable, getContract, resolveCliBinaryPath, clearResolvedPathCache } from './model-contract.js';
+export { isCliAvailable, validateCliAvailable, getContract } from './model-contract.js';
 import { spawnSync } from 'child_process';
-import { resolveCliBinaryPath } from './model-contract.js';
 export function detectCli(binary) {
     try {
-        const resolvedPath = resolveCliBinaryPath(binary);
-        const versionResult = spawnSync(resolvedPath, ['--version'], { timeout: 5000 });
+        const versionResult = spawnSync(binary, ['--version'], { timeout: 5000 });
         if (versionResult.status === 0) {
+            const pathResult = spawnSync('which', [binary], { timeout: 5000 });
             return {
                 available: true,
                 version: versionResult.stdout?.toString().trim(),
-                path: resolvedPath,
+                path: pathResult.stdout?.toString().trim(),
             };
         }
         return { available: false };

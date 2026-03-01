@@ -1,4 +1,4 @@
-export { isCliAvailable, validateCliAvailable, getContract, resolveCliBinaryPath, clearResolvedPathCache, type CliAgentType } from './model-contract.js';
+export { isCliAvailable, validateCliAvailable, getContract, type CliAgentType } from './model-contract.js';
 export interface CliInfo {
     available: boolean;
     version?: string;

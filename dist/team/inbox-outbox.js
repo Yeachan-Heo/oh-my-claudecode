@@ -19,34 +19,19 @@ function teamsDir(teamName) {
     return result;
 }
 function inboxPath(teamName, workerName) {
-    const base = join(getClaudeConfigDir(), 'teams');
-    const result = join(teamsDir(teamName), 'inbox', `${sanitizeName(workerName)}.jsonl`);
-    validateResolvedPath(result, base);
-    return result;
+    return join(teamsDir(teamName), 'inbox', `${sanitizeName(workerName)}.jsonl`);
 }
 function inboxCursorPath(teamName, workerName) {
-    const base = join(getClaudeConfigDir(), 'teams');
-    const result = join(teamsDir(teamName), 'inbox', `${sanitizeName(workerName)}.offset`);
-    validateResolvedPath(result, base);
-    return result;
+    return join(teamsDir(teamName), 'inbox', `${sanitizeName(workerName)}.offset`);
 }
 function outboxPath(teamName, workerName) {
-    const base = join(getClaudeConfigDir(), 'teams');
-    const result = join(teamsDir(teamName), 'outbox', `${sanitizeName(workerName)}.jsonl`);
-    validateResolvedPath(result, base);
-    return result;
+    return join(teamsDir(teamName), 'outbox', `${sanitizeName(workerName)}.jsonl`);
 }
 function signalPath(teamName, workerName) {
-    const base = join(getClaudeConfigDir(), 'teams');
-    const result = join(teamsDir(teamName), 'signals', `${sanitizeName(workerName)}.shutdown`);
-    validateResolvedPath(result, base);
-    return result;
+    return join(teamsDir(teamName), 'signals', `${sanitizeName(workerName)}.shutdown`);
 }
 function drainSignalPath(teamName, workerName) {
-    const base = join(getClaudeConfigDir(), 'teams');
-    const result = join(teamsDir(teamName), 'signals', `${sanitizeName(workerName)}.drain`);
-    validateResolvedPath(result, base);
-    return result;
+    return join(teamsDir(teamName), 'signals', `${sanitizeName(workerName)}.drain`);
 }
 /** Ensure directory exists for a file path */
 function ensureDir(filePath) {

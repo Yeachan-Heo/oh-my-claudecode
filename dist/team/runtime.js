@@ -1,13 +1,9 @@
 import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { getInteropMode } from '../interop/mcp-bridge.js';
-import { bridgeBootstrapToOmx, pollOmxCompletion, } from '../interop/worker-adapter.js';
-import { appendOmxTeamEvent } from '../interop/omx-team-state.js';
 import { buildWorkerArgv, validateCliAvailable, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
-import { createTeamSession, spawnWorkerInPane, sendToWorker, isWorkerAlive, killTeamSession, waitForPaneReady, } from './tmux-session.js';
-import { LayoutStabilizer } from './layout-stabilizer.js';
+import { createTeamSession, spawnWorkerInPane, sendToWorker, isWorkerAlive, killTeamSession, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, } from './worker-bootstrap.js';
 import { withTaskLock } from './task-file-ops.js';
 function workerName(index) {
@@ -27,19 +23,7 @@ async function readJsonSafe(filePath) {
         return JSON.parse(content);
     }
     catch {
-        // Gemini CLI sometimes replaces double-quotes with backslashes in JSON output.
-        // Only attempt recovery when the content has no double-quotes at all (total
-        // substitution), to avoid destroying legitimate escape sequences.
-        try {
-            const content = await readFile(filePath, 'utf-8');
-            if (content.includes('"'))
-                return null;
-            const recovered = content.replace(/\\/g, '"');
-            return JSON.parse(recovered);
-        }
-        catch {
-            return null;
-        }
+        return null;
     }
 }
 function parseWorkerIndex(workerNameValue) {
@@ -48,18 +32,6 @@ function parseWorkerIndex(workerNameValue) {
         return 0;
     const parsed = Number.parseInt(match[1], 10) - 1;
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-/** Check if a worker uses OMX state conventions based on runtime config */
-function isOmxInteropWorker(runtime, workerNameValue) {
-    const wConfig = runtime.config.workerInteropConfigs?.find(c => c.workerName === workerNameValue);
-    return wConfig?.interopMode === 'omx';
-}
-/** Build an AdapterContext from runtime state (returns null if interop is off) */
-function buildAdapterContext(runtime) {
-    const mode = getInteropMode();
-    if (mode === 'off')
-        return null;
-    return { lead: 'omc', teamName: runtime.teamName, cwd: runtime.cwd, interopMode: mode };
 }
 function taskPath(root, taskId) {
     return join(root, 'tasks', `${taskId}.json`);
@@ -165,28 +137,17 @@ export async function allTasksTerminal(runtime) {
  * Includes task ID, subject, full description, and done-signal path.
  */
 function buildInitialTaskInstruction(teamName, workerName, task, taskId) {
-    const readyPath = `.omc/state/team/${teamName}/workers/${workerName}/.ready`;
     const donePath = `.omc/state/team/${teamName}/workers/${workerName}/done.json`;
-    const doneDir = `.omc/state/team/${teamName}/workers/${workerName}`;
     return [
         `## Initial Task Assignment`,
         `Task ID: ${taskId}`,
         `Worker: ${workerName}`,
         `Subject: ${task.subject}`,
         ``,
-        `## FIRST ACTION REQUIRED`,
-        `Before doing anything else, write your ready sentinel file:`,
-        '```bash',
-        `mkdir -p $(dirname ${readyPath}) && touch ${readyPath}`,
-        '```',
-        ``,
         task.description,
         ``,
-        `When complete, write done signal using a bash command (do NOT use a file-write tool):`,
-        '```bash',
-        `mkdir -p ${doneDir} && echo '{"taskId":"${taskId}","status":"completed","summary":"done","completedAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ${donePath}`,
-        '```',
-        `For failures, set status to "failed" and include the error in summary.`,
+        `When complete, write done signal to ${donePath}:`,
+        `{"taskId":"${taskId}","status":"completed","summary":"<brief summary>","completedAt":"<ISO timestamp>"}`,
         ``,
         `IMPORTANT: Execute ONLY the task assigned to you in this inbox. After writing done.json, exit immediately. Do not read from the task directory or claim other tasks.`,
     ].join('\n');
@@ -236,10 +197,6 @@ export async function startTeam(config) {
     // Create tmux session with ZERO worker panes (leader only).
     // Workers are spawned on-demand by the orchestrator.
     const session = await createTeamSession(teamName, 0, cwd);
-    const layoutStabilizer = new LayoutStabilizer({
-        sessionTarget: session.sessionName,
-        leaderPaneId: session.leaderPaneId,
-    });
     const runtime = {
         teamName,
         sessionName: session.sessionName,
@@ -249,21 +206,13 @@ export async function startTeam(config) {
         workerPaneIds: session.workerPaneIds, // initially empty []
         activeWorkers: new Map(),
         cwd,
-        layoutStabilizer,
     };
     const maxConcurrentWorkers = agentTypes.length;
     for (let i = 0; i < maxConcurrentWorkers; i++) {
         const taskIndex = await nextPendingTaskIndex(runtime);
         if (taskIndex == null)
             break;
-        try {
-            await spawnWorkerForTask(runtime, workerName(i), taskIndex);
-        }
-        catch (err) {
-            // One worker failing to spawn must not prevent remaining workers from starting.
-            // The watchdog will pick up pending tasks once it begins.
-            console.warn(`[startTeam] spawn ${workerName(i)} failed:`, err instanceof Error ? err.message : err);
-        }
+        await spawnWorkerForTask(runtime, workerName(i), taskIndex);
     }
     runtime.stopWatchdog = watchdogCliWorkers(runtime, 1000);
     return runtime;
@@ -369,14 +318,6 @@ export function watchdogCliWorkers(runtime, intervalMs) {
             if (workers.length === 0)
                 return;
             const root = stateRoot(runtime.cwd, runtime.teamName);
-            // Interop: poll OMX task files for completion and synthesize done.json shims (issue #1117).
-            // This runs BEFORE the done.json collection below so the shim is available on the same tick.
-            const adapterCtx = buildAdapterContext(runtime);
-            if (adapterCtx) {
-                await Promise.all(workers
-                    .filter(([wName]) => isOmxInteropWorker(runtime, wName))
-                    .map(([wName, active]) => pollOmxCompletion(adapterCtx, wName, active.taskId).catch(() => null)));
-            }
             // Collect done signals and alive checks in parallel to avoid O(N×300ms) sequential tmux calls.
             const [doneSignals, aliveResults] = await Promise.all([
                 Promise.all(workers.map(([wName]) => {
@@ -404,12 +345,7 @@ export function watchdogCliWorkers(runtime, intervalMs) {
                     if (!(await allTasksTerminal(runtime))) {
                         const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
                         if (nextTaskIndexValue != null) {
-                            try {
-                                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-                            }
-                            catch (spawnErr) {
-                                console.warn(`[watchdog] respawn ${wName} after completion failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
-                            }
+                            await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
                         }
                     }
                     continue;
@@ -423,12 +359,7 @@ export function watchdogCliWorkers(runtime, intervalMs) {
                     if (!(await allTasksTerminal(runtime))) {
                         const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
                         if (nextTaskIndexValue != null) {
-                            try {
-                                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-                            }
-                            catch (spawnErr) {
-                                console.warn(`[watchdog] respawn ${wName} after dead pane failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
-                            }
+                            await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
                         }
                     }
                     continue;
@@ -453,12 +384,7 @@ export function watchdogCliWorkers(runtime, intervalMs) {
                         if (!(await allTasksTerminal(runtime))) {
                             const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
                             if (nextTaskIndexValue != null) {
-                                try {
-                                    await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-                                }
-                                catch (spawnErr) {
-                                    console.warn(`[watchdog] respawn ${wName} after unresponsive kill failed:`, spawnErr instanceof Error ? spawnErr.message : spawnErr);
-                                }
+                                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
                             }
                         }
                     }
@@ -467,11 +393,6 @@ export function watchdogCliWorkers(runtime, intervalMs) {
                     // Worker is responsive — reset counter
                     unresponsiveCounts.delete(wName);
                 }
-            }
-            // Flush any pending debounced layout operations at the end of the tick
-            // to ensure layout is stable after processing all workers (#1158)
-            if (runtime.layoutStabilizer) {
-                await runtime.layoutStabilizer.flush();
             }
             // Reset failure counter on a successful tick
             consecutiveFailures = 0;
@@ -500,11 +421,7 @@ export function watchdogCliWorkers(runtime, intervalMs) {
         }
     };
     const intervalId = setInterval(() => { tick(); }, intervalMs);
-    return () => {
-        clearInterval(intervalId);
-        // Dispose layout stabilizer on watchdog stop to cancel any pending operations (#1158)
-        runtime.layoutStabilizer?.dispose();
-    };
+    return () => clearInterval(intervalId);
 }
 /**
  * Spawn a worker pane for an explicit task assignment.
@@ -550,13 +467,10 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
         workerName: workerNameValue,
         cwd: runtime.cwd,
     });
-    // For prompt-mode agents (e.g. Gemini Ink TUI), pass the full task
-    // instruction inline via CLI flag. This bypasses gitignore restrictions
-    // (e.g. Gemini's respectGitIgnore=true ignoring .omc/ paths) by embedding
-    // the task content directly in the CLI argument instead of referencing an
-    // inbox file that may be invisible to the worker. See #1148.
+    // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
+    // flag so tmux send-keys never needs to interact with the TUI input widget.
     if (usePromptMode) {
-        const promptArgs = getPromptModeArgs(agentType, instruction);
+        const promptArgs = getPromptModeArgs(agentType, `Read and execute your task from: ${relInboxPath}`);
         launchArgs.push(...promptArgs);
     }
     const paneConfig = {
@@ -567,25 +481,14 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
         launchArgs,
         cwd: runtime.cwd,
     };
-    // For promptMode agents, wait for the shell to be ready before sending keys
-    // to avoid the race condition where send-keys fires before zsh is ready (#1144).
-    // Non-promptMode agents already have a 4s post-spawn delay, so skip the wait.
-    await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig, {
-        waitForShell: usePromptMode,
-    });
+    await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig);
     runtime.workerPaneIds.push(paneId);
     runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
-    // Debounced layout recalculation — prevents thrashing during rapid spawn cycles (#1158)
-    if (runtime.layoutStabilizer) {
-        runtime.layoutStabilizer.requestLayout();
+    try {
+        await execFileAsync('tmux', ['select-layout', '-t', runtime.sessionName, 'main-vertical']);
     }
-    else {
-        try {
-            await execFileAsync('tmux', ['select-layout', '-t', runtime.sessionName, 'main-vertical']);
-        }
-        catch {
-            // layout update is best-effort
-        }
+    catch {
+        // layout update is best-effort
     }
     try {
         await writePanesTrackingFileIfPresent(runtime);
@@ -594,15 +497,9 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
         // panes tracking is best-effort
     }
     if (!usePromptMode) {
-        // Interactive mode: poll for CLI readiness instead of blind wait.
-        // waitForPaneReady polls paneLooksReady() to confirm the pane has a
-        // visible prompt, closing the TOCTOU gap between readiness and delivery.
-        const paneReady = await waitForPaneReady(paneId, { timeoutMs: 8000, pollIntervalMs: 500 });
-        if (!paneReady) {
-            await killWorkerPane(runtime, workerNameValue, paneId);
-            await resetTaskToPending(root, taskId);
-            throw new Error(`worker_pane_not_ready:${workerNameValue}`);
-        }
+        // Interactive mode: wait for CLI startup, handle trust-confirm, then
+        // send instruction via tmux send-keys.
+        await new Promise(r => setTimeout(r, 4000));
         if (agentType === 'gemini') {
             const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, '1');
             if (!confirmed) {
@@ -621,35 +518,6 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     }
     // Prompt-mode agents: instruction already passed via CLI flag at spawn.
     // No trust-confirm or tmux send-keys interaction needed.
-    // Interop: bridge bootstrap to OMX format for cross-platform workers (issue #1117)
-    if (isOmxInteropWorker(runtime, workerNameValue)) {
-        const ctx = buildAdapterContext(runtime);
-        if (ctx) {
-            try {
-                await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                // Visible warning: fail-open means the worker proceeds without interop,
-                // which may cause subtle issues.  Log prominently AND persist to disk
-                // so the failure is discoverable after the fact (issue #1164).
-                process.stderr.write(`[WARN][spawnWorkerForTask] interop bootstrap failed (fail-open) for ${workerNameValue} task ${taskId}: ${message}. Worker will proceed without interop.\n`);
-                const failureMeta = {
-                    workerName: workerNameValue,
-                    taskId,
-                    error: message,
-                    failedAt: new Date().toISOString(),
-                    failOpen: true,
-                };
-                try {
-                    await writeJson(join(stateRoot(runtime.cwd, runtime.teamName), 'workers', workerNameValue, 'interop-bootstrap-failed.json'), failureMeta);
-                }
-                catch {
-                    // best-effort: persist failure is non-fatal
-                }
-            }
-        }
-    }
     return paneId;
 }
 /**
@@ -670,8 +538,6 @@ export async function killWorkerPane(runtime, workerNameValue, paneId) {
         runtime.workerPaneIds.splice(paneIndex, 1);
     }
     runtime.activeWorkers.delete(workerNameValue);
-    // Debounced layout recalculation after pane removal (#1158)
-    runtime.layoutStabilizer?.requestLayout();
     try {
         await writePanesTrackingFileIfPresent(runtime);
     }
@@ -757,23 +623,6 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
         }
     }
     // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
-    // Interop: write shutdown event to OMX event log for cross-platform workers (issue #1117)
-    const interopMode = getInteropMode();
-    if (interopMode !== 'off' && configData?.workerInteropConfigs) {
-        const omxWorkers = configData.workerInteropConfigs.filter(c => c.interopMode === 'omx');
-        for (const wConfig of omxWorkers) {
-            try {
-                await appendOmxTeamEvent(teamName, {
-                    type: 'worker_stopped',
-                    worker: wConfig.workerName,
-                    task_id: undefined,
-                }, cwd);
-            }
-            catch {
-                // best-effort: OMX event log may not exist
-            }
-        }
-    }
     // Kill tmux session (or just worker panes in split-pane mode)
     await killTeamSession(sessionName, workerPaneIds, leaderPaneId);
     // Clean up state

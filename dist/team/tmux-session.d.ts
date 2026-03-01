@@ -19,39 +19,6 @@ export interface WorkerPaneConfig {
     cwd: string;
 }
 export declare function getDefaultShell(): string;
-/**
- * Trust boundary: shell rc loading in worker contexts.
- *
- * Workers run with the user's shell environment by design. Shell rc files
- * (.bashrc/.zshrc) are sourced to resolve PATH and ensure CLI binaries
- * (claude, codex, gemini) are discoverable.
- *
- * However, rc files may contain arbitrary code that:
- * - Modifies PATH (could shadow expected binaries)
- * - Sets unexpected environment variables
- * - Defines shell functions (mitigated by exec "$@" pattern)
- *
- * Set OMC_TEAM_NO_RC=1 to skip rc file loading entirely.
- * When disabled, PATH must already contain the required CLI binaries.
- */
-export declare function shouldLoadShellRc(): boolean;
-export interface CliBinaryValidation {
-    binary: string;
-    resolvedPath: string | null;
-    isValid: boolean;
-    warnings: string[];
-}
-/**
- * Validate that a CLI binary resolves to a trusted path.
- *
- * Checks that the binary exists in PATH and doesn't resolve to a suspicious
- * location (e.g. /tmp/, /var/tmp/). This guards against rc files or PATH
- * manipulation redirecting expected binaries to untrusted replacements.
- *
- * Returns validation result with warnings. Does not throw — callers decide
- * how to handle validation failures.
- */
-export declare function validateCliBinaryPath(binary: string): CliBinaryValidation;
 export declare function buildWorkerStartCommand(config: WorkerPaneConfig): string;
 /** Validate tmux is available. Throws with install instructions if not. */
 export declare function validateTmux(): void;
@@ -89,45 +56,13 @@ export declare function spawnBridgeInSession(tmuxSession: string, bridgeScriptPa
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
  */
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string): Promise<TeamSession>;
-export interface WaitForShellReadyOptions {
-    /** Maximum time to wait in ms (default: 10_000). Override via OMC_SHELL_READY_TIMEOUT_MS env var. */
-    timeoutMs?: number;
-    /** Initial polling interval in ms (default: 200). Increases with progressive backoff. */
-    intervalMs?: number;
-    /** Regex pattern to detect shell prompt (default: common prompt chars) */
-    promptPattern?: RegExp;
-}
-/**
- * Poll tmux capture-pane until a shell prompt character is detected,
- * indicating the shell in the pane is ready to receive input.
- *
- * Uses progressive backoff: starts at `intervalMs` and increases by 1.5x
- * each iteration up to a 2s ceiling, reducing unnecessary polling.
- *
- * Resolves `true` when prompt is detected, `false` on timeout.
- * Logs a warning on timeout for operational visibility.
- */
-export declare function waitForShellReady(paneId: string, opts?: WaitForShellReadyOptions): Promise<boolean>;
 /**
  * Spawn a CLI agent in a specific pane.
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
  */
-export declare function spawnWorkerInPane(sessionName: string, paneId: string, config: WorkerPaneConfig, opts?: {
-    waitForShell?: boolean;
-    shellReadyOpts?: WaitForShellReadyOptions;
-}): Promise<void>;
+export declare function spawnWorkerInPane(sessionName: string, paneId: string, config: WorkerPaneConfig): Promise<void>;
 export declare function paneHasActiveTask(captured: string): boolean;
 export declare function paneLooksReady(captured: string): boolean;
-/**
- * Poll until a pane looks ready (prompt visible) or timeout.
- * Replaces blind setTimeout waits with active readiness confirmation,
- * closing the TOCTOU gap between readiness check and task delivery.
- * Returns true if ready, false on timeout.
- */
-export declare function waitForPaneReady(paneId: string, opts?: {
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-}): Promise<boolean>;
 export declare function shouldAttemptAdaptiveRetry(args: {
     paneBusy: boolean;
     latestCapture: string | null;

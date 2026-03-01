@@ -89,28 +89,4 @@ describe('cleanupTeamHeartbeats', () => {
         cleanupTeamHeartbeats(TEST_DIR, 'nonexistent-team');
     });
 });
-describe('path traversal guard (issue #1170)', () => {
-    it('sanitizeName prevents traversal in team name', () => {
-        // Path traversal characters are stripped by sanitizeName
-        const hb = makeHeartbeat({ teamName: '../../../etc' });
-        writeHeartbeat(TEST_DIR, hb);
-        // Should write under sanitized name 'etc', not escape
-        const read = readHeartbeat(TEST_DIR, '../../../etc', 'w1');
-        expect(read?.teamName).toBe('../../../etc'); // data preserved, path sanitized
-    });
-    it('sanitizeName prevents traversal in worker name', () => {
-        const hb = makeHeartbeat({ workerName: '../../../tmp/evil' });
-        writeHeartbeat(TEST_DIR, hb);
-        // Should write under sanitized name, not escape to /tmp/evil
-        const read = readHeartbeat(TEST_DIR, TEST_TEAM, '../../../tmp/evil');
-        expect(read?.workerName).toBe('../../../tmp/evil'); // data preserved, path sanitized
-    });
-    it('deleteHeartbeat with traversal worker name does not escape', () => {
-        // Should not throw or affect files outside the heartbeat directory
-        deleteHeartbeat(TEST_DIR, TEST_TEAM, '../../../tmp/evil');
-    });
-    it('isWorkerAlive with traversal name does not escape', () => {
-        expect(isWorkerAlive(TEST_DIR, '../../../etc', '../../../tmp/evil', 60_000)).toBe(false);
-    });
-});
 //# sourceMappingURL=heartbeat.test.js.map

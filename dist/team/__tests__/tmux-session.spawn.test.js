@@ -29,7 +29,7 @@ describe('spawnWorkerInPane', () => {
             launchBinary: 'codex',
             launchArgs: ['--full-auto', '--model', 'gpt-5;touch /tmp/pwn'],
             cwd: '/tmp',
-        }, { waitForShell: false });
+        });
         const literalSend = mockedCalls.execFileArgs.find((args) => args[0] === 'send-keys' && args.includes('-l'));
         expect(literalSend).toBeDefined();
         const launchLine = literalSend?.[literalSend.length - 1] ?? '';

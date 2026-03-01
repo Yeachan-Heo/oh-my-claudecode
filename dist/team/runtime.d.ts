@@ -1,6 +1,4 @@
 import type { CliAgentType } from './model-contract.js';
-import type { WorkerInteropConfig } from '../interop/adapter-types.js';
-import { LayoutStabilizer } from './layout-stabilizer.js';
 export interface TeamConfig {
     teamName: string;
     workerCount: number;
@@ -10,8 +8,6 @@ export interface TeamConfig {
         description: string;
     }>;
     cwd: string;
-    /** Per-worker interop config for OMC-OMX cross-platform bridging (issue #1117) */
-    workerInteropConfigs?: WorkerInteropConfig[];
 }
 export interface ActiveWorkerState {
     paneId: string;
@@ -28,7 +24,6 @@ export interface TeamRuntime {
     activeWorkers: Map<string, ActiveWorkerState>;
     cwd: string;
     stopWatchdog?: () => void;
-    layoutStabilizer?: LayoutStabilizer;
 }
 export interface WorkerStatus {
     workerName: string;

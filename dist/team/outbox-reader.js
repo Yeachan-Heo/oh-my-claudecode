@@ -90,16 +90,7 @@ export function readAllTeamOutboxMessages(teamName) {
     const files = readdirSync(outboxDir).filter(f => f.endsWith('.jsonl'));
     const results = [];
     for (const file of files) {
-        const rawName = file.replace('.jsonl', '');
-        // Sanitize worker name extracted from filesystem to prevent path traversal
-        let workerName;
-        try {
-            workerName = sanitizeName(rawName);
-        }
-        catch {
-            // Invalid name (e.g., all special chars) — skip this file
-            continue;
-        }
+        const workerName = file.replace('.jsonl', '');
         const messages = readNewOutboxMessages(teamName, workerName);
         if (messages.length > 0) {
             results.push({ workerName, messages });
