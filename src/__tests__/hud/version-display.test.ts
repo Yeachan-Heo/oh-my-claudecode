@@ -27,6 +27,7 @@ function createMinimalContext(overrides: Partial<HudRenderContext> = {}): HudRen
     agentCallCount: 0,
     skillCallCount: 0,
     promptTime: null,
+    apiKeySource: null,
     ...overrides,
   };
 }

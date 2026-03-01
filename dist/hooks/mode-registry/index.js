@@ -11,15 +11,8 @@
 import { existsSync, readFileSync, unlinkSync, mkdirSync, readdirSync, statSync, rmdirSync, rmSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join, dirname } from 'path';
-import { listSessionIds, resolveSessionStatePath, getSessionStateDir } from '../../lib/worktree-paths.js';
+import { listSessionIds, resolveSessionStatePath, getSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 import { MODE_STATE_FILE_MAP, MODE_NAMES } from '../../lib/mode-names.js';
-/**
- * Stale marker threshold (1 hour)
- * Markers older than this are auto-removed to prevent crashed sessions from blocking indefinitely.
- * NOTE: We cannot check database activity here due to circular dependency constraints.
- * Legitimate long-running swarms (>1 hour) may have markers removed - acceptable trade-off.
- */
-export const STALE_MARKER_THRESHOLD = 60 * 60 * 1000; // 1 hour in milliseconds
 /**
  * Mode configuration registry
  *
@@ -30,23 +23,6 @@ const MODE_CONFIGS = {
     [MODE_NAMES.AUTOPILOT]: {
         name: 'Autopilot',
         stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT],
-        activeProperty: 'active'
-    },
-    [MODE_NAMES.ULTRAPILOT]: {
-        name: 'Ultrapilot',
-        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAPILOT],
-        markerFile: 'ultrapilot-ownership.json',
-        activeProperty: 'active'
-    },
-    [MODE_NAMES.SWARM]: {
-        name: 'Swarm',
-        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.SWARM],
-        markerFile: 'swarm-active.marker',
-        isSqlite: true
-    },
-    [MODE_NAMES.PIPELINE]: {
-        name: 'Pipeline',
-        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.PIPELINE],
         activeProperty: 'active'
     },
     [MODE_NAMES.TEAM]: {
@@ -79,12 +55,12 @@ export { MODE_CONFIGS };
 /**
  * Modes that are mutually exclusive (cannot run concurrently)
  */
-const EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT, MODE_NAMES.ULTRAPILOT, MODE_NAMES.SWARM, MODE_NAMES.PIPELINE];
+const EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT];
 /**
  * Get the state directory path
  */
 export function getStateDir(cwd) {
-    return join(cwd, '.omc', 'state');
+    return join(getOmcRoot(cwd), 'state');
 }
 /**
  * Ensure the state directory exists
@@ -100,7 +76,7 @@ export function ensureStateDir(cwd) {
  */
 export function getStateFilePath(cwd, mode, sessionId) {
     const config = MODE_CONFIGS[mode];
-    if (sessionId && !config.isSqlite) {
+    if (sessionId) {
         return resolveSessionStatePath(mode, sessionId, cwd);
     }
     return join(getStateDir(cwd), config.stateFile);
@@ -131,7 +107,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
     // When sessionId is provided, ONLY check session-scoped path — no legacy fallback.
     // This prevents cross-session state leakage where one session's legacy file
     // could cause another session to see mode as active.
-    if (sessionId && !config.isSqlite) {
+    if (sessionId) {
         const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
         if (!existsSync(sessionStateFile)) {
             return false;
@@ -171,43 +147,6 @@ function isJsonModeActive(cwd, mode, sessionId) {
     }
 }
 /**
- * Check if a SQLite-based mode is active by checking its marker file
- *
- * We use a marker file instead of querying SQLite directly to avoid:
- * 1. Requiring sqlite3 CLI or better-sqlite3 dependency
- * 2. Opening database connections from the registry
- */
-function isSqliteModeActive(cwd, mode) {
-    const markerPath = getMarkerFilePath(cwd, mode);
-    // Check marker file first (authoritative)
-    if (markerPath && existsSync(markerPath)) {
-        try {
-            const content = readFileSync(markerPath, 'utf-8');
-            const marker = JSON.parse(content);
-            // Check if marker is stale (older than 1 hour)
-            // NOTE: We cannot check database activity here due to circular dependency constraints.
-            // This means legitimate long-running swarms (>1 hour) may have their markers removed.
-            // This is a deliberate trade-off to prevent crashed swarms from blocking indefinitely.
-            if (marker.startedAt) {
-                const startTime = new Date(marker.startedAt).getTime();
-                const age = Date.now() - startTime;
-                if (age > STALE_MARKER_THRESHOLD) {
-                    console.warn(`Stale ${mode} marker detected (${Math.round(age / 60000)} min old). Auto-removing.`);
-                    unlinkSync(markerPath);
-                    return false;
-                }
-            }
-            return true;
-        }
-        catch {
-            return false;
-        }
-    }
-    // Fallback: check if database file exists (may have stale data)
-    const dbPath = getStateFilePath(cwd, mode);
-    return existsSync(dbPath);
-}
-/**
  * Check if a specific mode is currently active
  *
  * @param mode - The mode to check
@@ -216,10 +155,6 @@ function isSqliteModeActive(cwd, mode) {
  * @returns true if the mode is active
  */
 export function isModeActive(mode, cwd, sessionId) {
-    const config = MODE_CONFIGS[mode];
-    if (config.isSqlite) {
-        return isSqliteModeActive(cwd, mode);
-    }
     return isJsonModeActive(cwd, mode, sessionId);
 }
 /**
@@ -317,7 +252,7 @@ export function clearModeState(mode, cwd, sessionId) {
     const config = MODE_CONFIGS[mode];
     let success = true;
     const markerFile = getMarkerFilePath(cwd, mode);
-    const isSessionScopedClear = Boolean(sessionId && !config.isSqlite);
+    const isSessionScopedClear = Boolean(sessionId);
     // Delete session-scoped state file if sessionId provided
     if (isSessionScopedClear && sessionId) {
         const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
@@ -382,25 +317,6 @@ export function clearModeState(mode, cwd, sessionId) {
         catch (err) {
             if (err.code !== 'ENOENT') {
                 success = false;
-            }
-        }
-        // For SQLite, also delete WAL and SHM files
-        if (config.isSqlite) {
-            const walFile = stateFile + '-wal';
-            const shmFile = stateFile + '-shm';
-            try {
-                unlinkSync(walFile);
-            }
-            catch (e) {
-                if (e.code !== 'ENOENT')
-                    success = false;
-            }
-            try {
-                unlinkSync(shmFile);
-            }
-            catch (e) {
-                if (e.code !== 'ENOENT')
-                    success = false;
             }
         }
     }
@@ -489,10 +405,6 @@ export function clearAllModeStates(cwd) {
  * @returns true if the mode is active in any session or legacy path
  */
 export function isModeActiveInAnySession(mode, cwd) {
-    const config = MODE_CONFIGS[mode];
-    if (config.isSqlite) {
-        return isSqliteModeActive(cwd, mode);
-    }
     // Check legacy path first
     if (isJsonModeActive(cwd, mode)) {
         return true;
@@ -514,10 +426,6 @@ export function isModeActiveInAnySession(mode, cwd) {
  * @returns Array of session IDs with this mode active
  */
 export function getActiveSessionsForMode(mode, cwd) {
-    const config = MODE_CONFIGS[mode];
-    if (config.isSqlite) {
-        return [];
-    }
     const sessionIds = listSessionIds(cwd);
     return sessionIds.filter(sid => isJsonModeActive(cwd, mode, sid));
 }
@@ -531,7 +439,7 @@ export function getActiveSessionsForMode(mode, cwd) {
  * @returns Array of removed session IDs
  */
 export function clearStaleSessionDirs(cwd, maxAgeMs = 24 * 60 * 60 * 1000) {
-    const sessionsDir = join(cwd, '.omc', 'state', 'sessions');
+    const sessionsDir = join(getOmcRoot(cwd), 'state', 'sessions');
     if (!existsSync(sessionsDir)) {
         return [];
     }
@@ -568,12 +476,10 @@ export function clearStaleSessionDirs(cwd, maxAgeMs = 24 * 60 * 60 * 1000) {
     return removed;
 }
 // ============================================================================
-// MARKER FILE MANAGEMENT (for SQLite-based modes)
+// MARKER FILE MANAGEMENT
 // ============================================================================
 /**
  * Create a marker file to indicate a mode is active
- *
- * Called when starting a SQLite-based mode (like swarm).
  *
  * @param mode - The mode being started
  * @param cwd - Working directory
@@ -605,8 +511,6 @@ export function createModeMarker(mode, cwd, metadata) {
 }
 /**
  * Remove a marker file to indicate a mode has stopped
- *
- * Called when stopping a SQLite-based mode (like swarm).
  *
  * @param mode - The mode being stopped
  * @param cwd - Working directory

@@ -26,7 +26,7 @@ vi.mock('../tmux-utils.js', () => ({
   isClaudeAvailable: vi.fn(() => true),
 }));
 
-import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs } from '../launch.js';
+import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, extractWorktreeFlag, normalizeClaudeLaunchArgs, collectOmcEnvExports } from '../launch.js';
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
@@ -790,7 +790,178 @@ describe('launchCommand — env var propagation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runClaude — outside-tmux login shell wrapping (issue #1153)
+// extractWorktreeFlag (uses --wt to avoid collision with Claude CLI's --worktree)
+// ---------------------------------------------------------------------------
+describe('extractWorktreeFlag', () => {
+  it('returns worktreeEnabled=false when no flag is present', () => {
+    const result = extractWorktreeFlag(['--madmax']);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--madmax']);
+  });
+
+  it('enables worktree with bare --wt flag', () => {
+    const result = extractWorktreeFlag(['--wt']);
+    expect(result.worktreeEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables worktree with --wt=true', () => {
+    const result = extractWorktreeFlag(['--wt=true']);
+    expect(result.worktreeEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables worktree with --wt=false', () => {
+    const result = extractWorktreeFlag(['--wt=false']);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('enables worktree with --wt=1', () => {
+    const result = extractWorktreeFlag(['--wt=1']);
+    expect(result.worktreeEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('disables worktree with --wt=0', () => {
+    const result = extractWorktreeFlag(['--wt=0']);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('strips --wt from remainingArgs', () => {
+    const result = extractWorktreeFlag(['--madmax', '--wt', '--print']);
+    expect(result.worktreeEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--madmax', '--print']);
+  });
+
+  it('bare --wt does NOT consume the next positional arg', () => {
+    const result = extractWorktreeFlag(['--wt', 'myfile.txt']);
+    expect(result.worktreeEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['myfile.txt']);
+  });
+
+  it('returns worktreeEnabled=false for empty args', () => {
+    const result = extractWorktreeFlag([]);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual([]);
+  });
+
+  it('does NOT intercept Claude CLI --worktree flag', () => {
+    const result = extractWorktreeFlag(['--worktree', 'myname']);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['--worktree', 'myname']);
+  });
+
+  it('does NOT intercept Claude CLI -w flag', () => {
+    const result = extractWorktreeFlag(['-w', 'myname']);
+    expect(result.worktreeEnabled).toBe(false);
+    expect(result.remainingArgs).toEqual(['-w', 'myname']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectOmcEnvExports
+// ---------------------------------------------------------------------------
+describe('collectOmcEnvExports', () => {
+  it('returns empty string when no OMC_* vars exist', () => {
+    expect(collectOmcEnvExports({})).toBe('');
+  });
+
+  it('collects a single OMC_* var', () => {
+    expect(collectOmcEnvExports({ OMC_TELEGRAM: '1' })).toBe("export OMC_TELEGRAM='1'; ");
+  });
+
+  it('collects multiple OMC_* vars', () => {
+    const result = collectOmcEnvExports({ OMC_TELEGRAM: '1', OMC_DISCORD: '1' });
+    expect(result).toContain("export OMC_TELEGRAM='1'");
+    expect(result).toContain("export OMC_DISCORD='1'");
+    expect(result).toMatch(/; $/);
+  });
+
+  it('ignores non-OMC_* vars', () => {
+    const result = collectOmcEnvExports({ HOME: '/home/user', OMC_SLACK: '1', PATH: '/usr/bin' });
+    expect(result).toBe("export OMC_SLACK='1'; ");
+  });
+
+  it('handles OMC_* vars with value 0', () => {
+    expect(collectOmcEnvExports({ OMC_TELEGRAM: '0' })).toBe("export OMC_TELEGRAM='0'; ");
+  });
+
+  it('skips OMC_* vars with undefined values', () => {
+    expect(collectOmcEnvExports({ OMC_TELEGRAM: undefined } as NodeJS.ProcessEnv)).toBe('');
+  });
+
+  it('escapes single quotes in values defensively', () => {
+    const result = collectOmcEnvExports({ OMC_TEST: "it's" });
+    expect(result).toBe("export OMC_TEST='it'\\''s'; ");
+  });
+
+  it('rejects keys with shell metacharacters', () => {
+    const result = collectOmcEnvExports({ 'OMC_FOO; evil #': '1' } as unknown as NodeJS.ProcessEnv);
+    expect(result).toBe('');
+  });
+
+  it('rejects keys with lowercase letters', () => {
+    const result = collectOmcEnvExports({ 'OMC_foo': '1' } as unknown as NodeJS.ProcessEnv);
+    expect(result).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// launchCommand — worktree flag env var propagation
+// ---------------------------------------------------------------------------
+describe('launchCommand — worktree flag', () => {
+  let processExitSpy: ReturnType<typeof vi.spyOn>;
+  const savedWorktree = process.env.OMC_WORKTREE;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    delete process.env.OMC_WORKTREE;
+    delete process.env.CLAUDECODE;
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('direct');
+  });
+
+  afterEach(() => {
+    processExitSpy.mockRestore();
+    if (savedWorktree !== undefined) {
+      process.env.OMC_WORKTREE = savedWorktree;
+    } else {
+      delete process.env.OMC_WORKTREE;
+    }
+  });
+
+  it('--wt sets OMC_WORKTREE to 1', async () => {
+    await launchCommand(['--wt']);
+    expect(process.env.OMC_WORKTREE).toBe('1');
+  });
+
+  it('--wt is stripped from args passed to Claude', async () => {
+    await launchCommand(['--wt', '--print']);
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const claudeCall = calls.find(([cmd]) => cmd === 'claude');
+    expect(claudeCall).toBeDefined();
+    const claudeArgs = claudeCall![1] as string[];
+    expect(claudeArgs).not.toContain('--wt');
+    expect(claudeArgs).toContain('--print');
+  });
+
+  it('Claude --worktree flag passes through to Claude unmodified', async () => {
+    await launchCommand(['--worktree', 'myname', '--print']);
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const claudeCall = calls.find(([cmd]) => cmd === 'claude');
+    expect(claudeCall).toBeDefined();
+    const claudeArgs = claudeCall![1] as string[];
+    expect(claudeArgs).toContain('--worktree');
+    expect(claudeArgs).toContain('myname');
+    expect(claudeArgs).toContain('--print');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runClaude outside-tmux — login shell wrapping (issue #1153)
 // ---------------------------------------------------------------------------
 describe('runClaude outside-tmux — login shell wrapping (issue #1153)', () => {
   beforeEach(() => {
@@ -839,5 +1010,84 @@ describe('interop — login shell wrapping (issue #1153)', () => {
     const source = readFileSync(join(__dirname, '..', 'interop.ts'), 'utf-8');
     expect(source).toContain("wrapWithLoginShell('codex')");
     expect(source).toContain("import");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runClaude outside-tmux — OMC_* env var forwarding (issue #1090)
+// ---------------------------------------------------------------------------
+describe('runClaude outside-tmux — OMC_* env forwarding (issue #1090)', () => {
+  // Save and clear ALL OMC_* env vars (not just platform flags) to isolate tests
+  // from the real environment (e.g. OMC_TELEGRAM_NOTIFIER_BOT_TOKEN, etc.)
+  let savedOmcEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    savedOmcEnv = {};
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('OMC_')) {
+        savedOmcEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+    (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('outside-tmux');
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+  });
+
+  afterEach(() => {
+    // Remove any OMC_* vars set during the test
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('OMC_')) {
+        delete process.env[key];
+      }
+    }
+    // Restore original OMC_* vars
+    for (const [key, val] of Object.entries(savedOmcEnv)) {
+      if (val !== undefined) {
+        process.env[key] = val;
+      }
+    }
+  });
+
+  it('includes OMC_TELEGRAM export in tmux shell command when set', () => {
+    process.env.OMC_TELEGRAM = '1';
+    runClaude('/tmp', [], 'sid');
+
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    expect(tmuxCall).toBeDefined();
+    const tmuxArgs = tmuxCall![1] as string[];
+    // The shell command is the arg after -c <cwd>
+    const shellCmd = tmuxArgs.find((arg) => typeof arg === 'string' && arg.includes('export OMC_TELEGRAM'));
+    expect(shellCmd).toBeDefined();
+    expect(shellCmd).toContain("export OMC_TELEGRAM='1'");
+    // Exports must appear before the sleep/perl drain prefix
+    expect(shellCmd!.indexOf("export OMC_TELEGRAM")).toBeLessThan(shellCmd!.indexOf('sleep 0.3'));
+  });
+
+  it('includes multiple OMC_* exports in tmux shell command', () => {
+    process.env.OMC_TELEGRAM = '1';
+    process.env.OMC_DISCORD = '1';
+    process.env.OMC_SLACK = '1';
+    runClaude('/tmp', [], 'sid');
+
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    const tmuxArgs = tmuxCall![1] as string[];
+    const shellCmd = tmuxArgs.find((arg) => typeof arg === 'string' && arg.includes('export OMC_'));
+    expect(shellCmd).toContain("export OMC_TELEGRAM='1'");
+    expect(shellCmd).toContain("export OMC_DISCORD='1'");
+    expect(shellCmd).toContain("export OMC_SLACK='1'");
+  });
+
+  it('does not include OMC exports when no OMC_* vars are set', () => {
+    runClaude('/tmp', [], 'sid');
+
+    const calls = vi.mocked(execFileSync).mock.calls;
+    const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+    const tmuxArgs = tmuxCall![1] as string[];
+    const shellCmd = tmuxArgs.find((arg) => typeof arg === 'string' && arg.includes('sleep 0.3'));
+    expect(shellCmd).toBeDefined();
+    expect(shellCmd).not.toContain('export OMC_');
   });
 });

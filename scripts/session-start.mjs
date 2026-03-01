@@ -491,6 +491,17 @@ ${cleanContent}
           projectPath: directory,
           timestamp: new Date().toISOString(),
         }).catch(() => {}); // swallow errors silently
+
+        // Start reply listener daemon if notification reply config is available
+        try {
+          const { startReplyListener, buildDaemonConfig } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'reply-listener.js')).href);
+          const replyConfig = await buildDaemonConfig();
+          if (replyConfig) {
+            startReplyListener(replyConfig);
+          }
+        } catch {
+          // Reply listener not available or not configured, skip silently
+        }
       }
     } catch {
       // Notification module not available, skip silently

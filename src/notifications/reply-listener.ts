@@ -2,13 +2,14 @@
  * Reply Listener Daemon
  *
  * Background daemon that polls Discord and Telegram for replies to notification messages,
- * sanitizes input, verifies the target pane, and injects reply text via sendToPane().
+ * listens for Slack messages via Socket Mode, sanitizes input, verifies the target pane,
+ * and injects reply text via sendToPane().
  *
  * Security considerations:
  * - State/PID/log files use restrictive permissions (0600)
  * - Bot tokens stored in state file, NOT in environment variables
  * - Two-layer input sanitization (sanitizeReplyInput + sanitizeForTmux)
- * - Pane verification via analyzePaneContent before every injection
+ * - Pane verification via empty-content check before every injection
  * - Authorization: only configured user IDs (Discord) / chat ID (Telegram) can inject
  * - Rate limiting to prevent spam/abuse
  *
@@ -23,12 +24,12 @@ import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
 import {
   capturePaneContent,
-  analyzePaneContent,
   sendToPane,
   isTmuxAvailable,
 } from '../features/rate-limit-wait/tmux-detector.js';
 import {
   lookupByMessageId,
+  loadAllMappings,
   removeMessagesByPane,
   pruneStale,
 } from './session-registry.js';
@@ -94,6 +95,12 @@ export interface ReplyListenerDaemonConfig extends ReplyConfig {
   discordChannelId?: string;
   /** Discord mention tag to include in injection feedback (e.g. "<@123456>") */
   discordMention?: string;
+  /** Slack app-level token for Socket Mode (xapp-...) */
+  slackAppToken?: string;
+  /** Slack bot token for Web API (xoxb-...) */
+  slackBotToken?: string;
+  /** Slack channel ID to listen in */
+  slackChannelId?: string;
 }
 
 /** Response from daemon operations */
@@ -215,7 +222,7 @@ function writeDaemonState(state: ReplyListenerState): void {
  * Build daemon config from notification config.
  * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
-async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
+export async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
   try {
     const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
     const replyConfig = getReplyConfig();
@@ -358,12 +365,11 @@ function injectReply(
   platform: string,
   config: ReplyListenerDaemonConfig,
 ): boolean {
-  // 1. Verify pane is running Claude Code
+  // 1. Verify pane has content (non-empty pane = active session per registry)
   const content = capturePaneContent(paneId, 15);
-  const analysis = analyzePaneContent(content);
 
-  if (analysis.confidence < 0.4) {
-    log(`WARN: Pane ${paneId} does not appear to be running Claude Code (confidence: ${analysis.confidence}). Skipping injection, removing stale mapping.`);
+  if (!content.trim()) {
+    log(`WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
     removeMessagesByPane(paneId);
     return false;
   }
@@ -749,10 +755,92 @@ async function pollLoop(): Promise<void> {
   const rateLimiter = new RateLimiter(config.rateLimitPerMinute);
   let lastPruneAt = Date.now();
 
+  // Start Slack Socket Mode listener if configured
+  let slackSocket: import('./slack-socket.js').SlackSocketClient | null = null;
+  if (config.slackAppToken && config.slackBotToken && config.slackChannelId) {
+    if (typeof WebSocket === 'undefined') {
+      log('WARN: WebSocket not available (requires Node 20.10+), Slack Socket Mode disabled');
+    } else {
+      try {
+        const { SlackSocketClient, addSlackReaction } = await import('./slack-socket.js');
+        const slackChannelId = config.slackChannelId;
+        const slackBotToken = config.slackBotToken;
+
+        slackSocket = new SlackSocketClient(
+          {
+            appToken: config.slackAppToken,
+            botToken: slackBotToken,
+            channelId: slackChannelId,
+          },
+          async (event) => {
+            // Rate limiting
+            if (!rateLimiter.canProceed()) {
+              log(`WARN: Rate limit exceeded, dropping Slack message ${event.ts}`);
+              state.errors++;
+              return;
+            }
+
+            // Find target pane for injection
+            let targetPaneId: string | null = null;
+
+            // Thread replies: look up parent message in session registry
+            if (event.thread_ts && event.thread_ts !== event.ts) {
+              const mapping = lookupByMessageId('slack-bot', event.thread_ts);
+              if (mapping) {
+                targetPaneId = mapping.tmuxPaneId;
+              }
+            }
+
+            // No thread match: use most recent registered pane
+            if (!targetPaneId) {
+              const mappings = loadAllMappings();
+              if (mappings.length > 0) {
+                targetPaneId = mappings[mappings.length - 1].tmuxPaneId;
+              }
+            }
+
+            if (!targetPaneId) {
+              log('WARN: No target pane found for Slack message, skipping');
+              return;
+            }
+
+            // Inject reply
+            const success = injectReply(targetPaneId, event.text, 'slack', config);
+            if (success) {
+              state.messagesInjected++;
+              writeDaemonState(state);
+
+              // Send confirmation reaction (non-critical)
+              try {
+                await addSlackReaction(slackBotToken, slackChannelId, event.ts);
+              } catch (e) {
+                log(`WARN: Failed to add Slack reaction: ${e}`);
+              }
+            } else {
+              state.errors++;
+              writeDaemonState(state);
+            }
+          },
+          log,
+        );
+
+        await slackSocket.start();
+        log('Slack Socket Mode listener started');
+      } catch (e) {
+        log(`ERROR: Failed to start Slack Socket Mode: ${e instanceof Error ? e.message : String(e)}`);
+        slackSocket = null;
+      }
+    }
+  }
+
   // Graceful shutdown handlers
   const shutdown = () => {
     log('Shutdown signal received');
     state.isRunning = false;
+    if (slackSocket) {
+      slackSocket.stop();
+      slackSocket = null;
+    }
     writeDaemonState(state);
     removePidFile();
     process.exit(0);

@@ -5,9 +5,10 @@
  */
 
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import type { ApiKeySource } from './elements/api-key-source.js';
 
 // Re-export for convenience
-export type { AutopilotStateForHud };
+export type { AutopilotStateForHud, ApiKeySource };
 
 // ============================================================================
 // HUD State
@@ -308,6 +309,9 @@ export interface HudRenderContext {
 
   /** Last prompt submission time (from HUD state) */
   promptTime: Date | null;
+
+  /** API key source: 'project', 'global', or 'env' */
+  apiKeySource: ApiKeySource | null;
 }
 
 // ============================================================================
@@ -376,6 +380,7 @@ export interface HudElementConfig {
   permissionStatus: boolean;  // Show pending permission indicator
   thinking: boolean;          // Show extended thinking indicator
   thinkingFormat: ThinkingFormat;  // Thinking indicator format
+  apiKeySource: boolean;       // Show API key source (project/global/env)
   promptTime: boolean;        // Show last prompt submission time (HH:MM:SS)
   sessionHealth: boolean;     // Show session health/duration
   showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
@@ -414,6 +419,8 @@ export interface HudConfig {
   contextLimitWarning: ContextLimitWarningConfig;
   /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
   rateLimitsProvider?: RateLimitsProviderConfig;
+  /** Optional maximum width (columns) for statusline output. Lines exceeding this width are truncated with ellipsis. Useful when the terminal shares space with IDE panels or tabs. */
+  maxWidth?: number;
 }
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
@@ -441,6 +448,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     permissionStatus: false,  // Disabled: heuristic-based, causes false positives
     thinking: true,
     thinkingFormat: 'text',   // Text format for backward compatibility
+    apiKeySource: false, // Disabled by default
     promptTime: true,  // Show last prompt time by default
     sessionHealth: true,
     useBars: false,  // Disabled by default for backwards compatibility
@@ -485,6 +493,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     permissionStatus: false,
     thinking: false,
     thinkingFormat: 'text',
+    apiKeySource: false,
     promptTime: false,
     sessionHealth: false,
     useBars: false,
@@ -515,6 +524,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     permissionStatus: false,
     thinking: true,
     thinkingFormat: 'text',
+    apiKeySource: false,
     promptTime: true,
     sessionHealth: true,
     useBars: true,
@@ -545,6 +555,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     permissionStatus: false,
     thinking: true,
     thinkingFormat: 'text',
+    apiKeySource: true,
     promptTime: true,
     sessionHealth: true,
     useBars: true,
@@ -575,6 +586,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     permissionStatus: false,
     thinking: true,
     thinkingFormat: 'text',
+    apiKeySource: false,
     promptTime: true,
     sessionHealth: true,
     useBars: false,
@@ -605,6 +617,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     permissionStatus: false,
     thinking: true,
     thinkingFormat: 'text',
+    apiKeySource: true,
     promptTime: true,
     sessionHealth: true,
     useBars: true,

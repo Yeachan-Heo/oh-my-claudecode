@@ -306,10 +306,16 @@ export function sendToPane(paneId: string, text: string, pressEnter = true): boo
 
   try {
     const sanitizedText = sanitizeForTmux(text);
-    const enterSuffix = pressEnter ? ' Enter' : '';
-    execSync(`tmux send-keys -t '${paneId}' '${sanitizedText}'${enterSuffix}`, {
+    // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
+    execSync(`tmux send-keys -t '${paneId}' -l '${sanitizedText}'`, {
       timeout: 2000,
     });
+    // Send Enter as a separate command so it is interpreted as a key press
+    if (pressEnter) {
+      execSync(`tmux send-keys -t '${paneId}' Enter`, {
+        timeout: 2000,
+      });
+    }
     return true;
   } catch (error) {
     console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);

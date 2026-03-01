@@ -3,7 +3,7 @@
  *
  * Defines the supported execution modes and their state file locations.
  */
-export type ExecutionMode = 'autopilot' | 'ultrapilot' | 'swarm' | 'pipeline' | 'team' | 'ralph' | 'ultrawork' | 'ultraqa';
+export type ExecutionMode = 'autopilot' | 'team' | 'ralph' | 'ultrawork' | 'ultraqa';
 export interface ModeConfig {
     /** Display name for the mode */
     name: string;

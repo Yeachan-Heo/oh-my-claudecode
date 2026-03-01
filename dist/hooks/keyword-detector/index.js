@@ -15,11 +15,8 @@ const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
     ralph: /\b(ralph)\b(?!-)/i,
     autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b/i,
-    ultrapilot: /\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b/i,
     ultrawork: /\b(ultrawork|ulw)\b/i,
-    swarm: /\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b|\bteam\s+mode\b/i,
     team: /(?<!\b(?:my|the|our|a|his|her|their|its)\s)\bteam\b|\bcoordinated\s+team\b/i,
-    pipeline: /\bagent\s+pipeline\b|\bchain\s+agents\b/i,
     ralplan: /\b(ralplan)\b/i,
     tdd: /\b(tdd)\b|\btest\s+first\b/i,
     ultrathink: /\b(ultrathink)\b/i,
@@ -30,11 +27,26 @@ const KEYWORD_PATTERNS = {
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
 };
 /**
+ * Patterns for deprecated keywords that trigger deprecation warnings.
+ * These modes were removed in #1131 (pipeline unification).
+ */
+const DEPRECATED_KEYWORD_PATTERNS = {
+    ultrapilot: /\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b/i,
+    swarm: /\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b|\bteam\s+mode\b/i,
+    pipeline: /\bagent\s+pipeline\b|\bchain\s+agents\b/i,
+};
+/** Deprecation messages for removed modes. */
+export const DEPRECATION_MESSAGES = {
+    ultrapilot: '[DEPRECATED] /ultrapilot has been removed. Use /autopilot or /team instead.',
+    swarm: '[DEPRECATED] /swarm has been removed. Use /team instead.',
+    pipeline: '[DEPRECATED] /pipeline has been removed. Use /autopilot instead.',
+};
+/**
  * Priority order for keyword detection
  */
 const KEYWORD_PRIORITY = [
-    'cancel', 'ralph', 'autopilot', 'ultrapilot', 'team', 'ultrawork',
-    'swarm', 'pipeline', 'ccg', 'ralplan', 'tdd',
+    'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
+    'ccg', 'ralplan', 'tdd',
     'ultrathink', 'deepsearch', 'analyze', 'codex', 'gemini'
 ];
 /**
@@ -84,6 +96,20 @@ export function extractPromptText(parts) {
         .join(' ');
 }
 /**
+ * Detect deprecated keywords in text and return deprecation warnings.
+ * Returns an array of deprecation messages for any matched deprecated keywords.
+ */
+export function detectDeprecatedKeywords(text) {
+    const cleanedText = sanitizeForKeywordDetection(text);
+    const warnings = [];
+    for (const [type, pattern] of Object.entries(DEPRECATED_KEYWORD_PATTERNS)) {
+        if (pattern.test(cleanedText)) {
+            warnings.push(DEPRECATION_MESSAGES[type]);
+        }
+    }
+    return warnings;
+}
+/**
  * Detect keywords in text and return matches with type info
  */
 export function detectKeywordsWithType(text, _agentName) {
@@ -91,8 +117,8 @@ export function detectKeywordsWithType(text, _agentName) {
     const cleanedText = sanitizeForKeywordDetection(text);
     // Check each keyword type
     for (const type of KEYWORD_PRIORITY) {
-        // Skip team-related types when team feature is disabled
-        if ((type === 'team' || type === 'ultrapilot' || type === 'swarm') && !isTeamEnabled()) {
+        // Skip team when team feature is disabled
+        if (type === 'team' && !isTeamEnabled()) {
             continue;
         }
         const pattern = KEYWORD_PATTERNS[type];
@@ -103,14 +129,6 @@ export function detectKeywordsWithType(text, _agentName) {
                 keyword: match[0],
                 position: match.index
             });
-            // Legacy ultrapilot/swarm also activate team mode internally
-            if (type === 'ultrapilot' || type === 'swarm') {
-                detected.push({
-                    type: 'team',
-                    keyword: match[0],
-                    position: match.index
-                });
-            }
         }
     }
     return detected;
@@ -132,7 +150,7 @@ export function getAllKeywords(text) {
     // Exclusive: cancel suppresses everything
     if (types.includes('cancel'))
         return ['cancel'];
-    // Mutual exclusion: team beats autopilot (ultrapilot/swarm now map to team at detection)
+    // Mutual exclusion: team beats autopilot
     if (types.includes('team') && types.includes('autopilot')) {
         types = types.filter(t => t !== 'autopilot');
     }
@@ -196,7 +214,6 @@ export const EXECUTION_GATE_KEYWORDS = new Set([
     'autopilot',
     'team',
     'ultrawork',
-    'ultrapilot',
 ]);
 /**
  * Escape hatch prefixes that bypass the ralplan gate.
@@ -259,7 +276,7 @@ export function isUnderspecifiedForExecution(text) {
         return false;
     // Strip mode keywords for effective word counting
     const stripped = trimmed
-        .replace(/\b(?:ralph|autopilot|team|ultrawork|ultrapilot|ulw|swarm)\b/gi, '')
+        .replace(/\b(?:ralph|autopilot|team|ultrawork|ulw)\b/gi, '')
         .trim();
     const effectiveWords = stripped.split(/\s+/).filter(w => w.length > 0).length;
     // Short prompts without well-specified signals are underspecified

@@ -6,6 +6,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -206,6 +207,31 @@ try {
   }
 } catch (e) {
   console.log('[OMC] Warning: Could not patch hooks.json:', e.message);
+}
+
+// 5. Ensure runtime dependencies are installed in the plugin cache directory.
+//    The npm-published tarball includes only the files listed in "files" (package.json),
+//    which does NOT include node_modules.  When Claude Code extracts the plugin into its
+//    cache the dependencies are therefore missing, causing ERR_MODULE_NOT_FOUND at runtime.
+//    We detect this by probing for a known production dependency (commander) and running a
+//    production-only install when it is absent.  --ignore-scripts avoids re-triggering this
+//    very setup script (and any other lifecycle hooks).  Fixes #1113.
+const packageDir = join(__dirname, '..');
+const commanderCheck = join(packageDir, 'node_modules', 'commander');
+if (!existsSync(commanderCheck)) {
+  console.log('[OMC] Installing runtime dependencies...');
+  try {
+    execSync('npm install --omit=dev --ignore-scripts', {
+      cwd: packageDir,
+      stdio: 'pipe',
+      timeout: 60000,
+    });
+    console.log('[OMC] Runtime dependencies installed successfully');
+  } catch (e) {
+    console.log('[OMC] Warning: Could not install dependencies:', e.message);
+  }
+} else {
+  console.log('[OMC] Runtime dependencies already present');
 }
 
 console.log('[OMC] Setup complete! Restart Claude Code to activate HUD.');

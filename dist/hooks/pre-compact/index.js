@@ -2,7 +2,7 @@
  * PreCompact Hook - State Preservation Before Context Compaction
  *
  * Creates checkpoints before compaction to preserve critical state including:
- * - Active mode states (autopilot, ralph, ultrawork, swarm)
+ * - Active mode states (autopilot, ralph, ultrawork)
  * - TODO summary
  * - Wisdom from notepads
  *
@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, } from "fs";
 import { promises as fsPromises } from "fs";
 import { join } from "path";
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { initJobDb, getActiveJobs, getRecentJobs, getJobStats } from '../../lib/job-state-db.js';
 // ============================================================================
 // Constants
@@ -24,7 +25,7 @@ const CHECKPOINT_DIR = "checkpoints";
  * When a compaction is already running for a directory, new callers
  * await the existing promise instead of running concurrently.
  * This prevents race conditions when multiple subagent results
- * arrive simultaneously (swarm/ultrawork).
+ * arrive simultaneously (ultrawork/team).
  */
 const inflightCompactions = new Map();
 /**
@@ -39,7 +40,7 @@ const compactionQueueDepth = new Map();
  * Get the checkpoint directory path
  */
 export function getCheckpointPath(directory) {
-    const checkpointDir = join(directory, ".omc", "state", CHECKPOINT_DIR);
+    const checkpointDir = join(getOmcRoot(directory), "state", CHECKPOINT_DIR);
     if (!existsSync(checkpointDir)) {
         mkdirSync(checkpointDir, { recursive: true });
     }
@@ -49,7 +50,7 @@ export function getCheckpointPath(directory) {
  * Export wisdom from notepads to checkpoint
  */
 export async function exportWisdomToNotepad(directory) {
-    const notepadsDir = join(directory, ".omc", "notepads");
+    const notepadsDir = join(getOmcRoot(directory), "notepads");
     if (!existsSync(notepadsDir)) {
         return { wisdom: "", exported: false };
     }
@@ -93,7 +94,7 @@ export async function exportWisdomToNotepad(directory) {
  * Save summary of active modes
  */
 export async function saveModeSummary(directory) {
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = join(getOmcRoot(directory), "state");
     const modes = {};
     const stateFiles = [
         {
@@ -118,36 +119,6 @@ export async function saveModeSummary(directory) {
             key: "ultrawork",
             extract: (s) => s.active
                 ? { original_prompt: s.original_prompt || s.prompt || "" }
-                : null,
-        },
-        {
-            file: "swarm-summary.json",
-            key: "swarm",
-            extract: (s) => s.active
-                ? {
-                    session_id: s.session_id || "active",
-                    task_count: s.task_count || 0,
-                }
-                : null,
-        },
-        {
-            file: "ultrapilot-state.json",
-            key: "ultrapilot",
-            extract: (s) => s.active
-                ? {
-                    session_id: s.session_id || "",
-                    worker_count: s.worker_count || 0,
-                }
-                : null,
-        },
-        {
-            file: "pipeline-state.json",
-            key: "pipeline",
-            extract: (s) => s.active
-                ? {
-                    preset: s.preset || "custom",
-                    current_stage: s.current_stage || 0,
-                }
                 : null,
         },
         {
@@ -188,7 +159,7 @@ export async function saveModeSummary(directory) {
 function readTodoSummary(directory) {
     const todoPaths = [
         join(directory, ".claude", "todos.json"),
-        join(directory, ".omc", "state", "todos.json"),
+        join(getOmcRoot(directory), "state", "todos.json"),
     ];
     for (const todoPath of todoPaths) {
         if (existsSync(todoPath)) {
@@ -301,18 +272,6 @@ export function formatCompactSummary(checkpoint) {
             lines.push(`- **Ultrawork**`);
             lines.push(`  Prompt: ${uw.original_prompt}`);
         }
-        if (checkpoint.active_modes.swarm) {
-            const swarm = checkpoint.active_modes.swarm;
-            lines.push(`- **Swarm** (Session: ${swarm.session_id}, Tasks: ${swarm.task_count})`);
-        }
-        if (checkpoint.active_modes.ultrapilot) {
-            const up = checkpoint.active_modes.ultrapilot;
-            lines.push(`- **Ultrapilot** (Workers: ${up.worker_count})`);
-        }
-        if (checkpoint.active_modes.pipeline) {
-            const pipe = checkpoint.active_modes.pipeline;
-            lines.push(`- **Pipeline** (Preset: ${pipe.preset}, Stage: ${pipe.current_stage})`);
-        }
         if (checkpoint.active_modes.ultraqa) {
             const qa = checkpoint.active_modes.ultraqa;
             lines.push(`- **UltraQA** (Cycle: ${qa.cycle})`);
@@ -414,7 +373,7 @@ async function doProcessPreCompact(input) {
  * Main handler for PreCompact hook.
  *
  * Uses a per-directory mutex to prevent concurrent compaction.
- * When multiple subagent results arrive simultaneously (swarm/ultrawork),
+ * When multiple subagent results arrive simultaneously (ultrawork/team),
  * only the first call runs the compaction; subsequent calls await
  * the in-flight result. This fixes issue #453.
  */

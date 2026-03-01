@@ -169,6 +169,27 @@ export interface AutopilotConfig {
     autoCommit?: boolean;
     /** Types of validation to perform */
     validationArchitects?: ValidationVerdictType[];
+    /**
+     * Pipeline configuration for the unified orchestrator.
+     * When set, autopilot uses the pipeline orchestrator instead of the legacy
+     * hard-coded phase sequence. This is the path forward for unifying
+     * autopilot/ultrawork/ultrapilot.
+     *
+     * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1130
+     */
+    pipeline?: {
+        /** Planning stage: 'ralplan' for consensus, 'direct' for simple, false to skip */
+        planning?: 'ralplan' | 'direct' | false;
+        /** Execution backend: 'team' for multi-worker, 'solo' for single-session */
+        execution?: 'team' | 'solo';
+        /** Verification config, or false to skip */
+        verification?: {
+            engine: 'ralph';
+            maxIterations: number;
+        } | false;
+        /** Whether to run QA stage */
+        qa?: boolean;
+    };
 }
 /**
  * Result returned when autopilot completes or fails

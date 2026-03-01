@@ -46,6 +46,9 @@ function buildWhitelistedContext(context: OpenClawContext): OpenClawContext {
   if (context.reason !== undefined) result.reason = context.reason;
   if (context.question !== undefined) result.question = context.question;
   if (context.tmuxTail !== undefined) result.tmuxTail = context.tmuxTail;
+  if (context.replyChannel !== undefined) result.replyChannel = context.replyChannel;
+  if (context.replyTarget !== undefined) result.replyTarget = context.replyTarget;
+  if (context.replyThread !== undefined) result.replyThread = context.replyThread;
   return result;
 }
 
@@ -93,6 +96,19 @@ export async function wakeOpenClaw(
       }
     }
 
+    // Read reply channel context from environment variables
+    const replyChannel = context.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? undefined;
+    const replyTarget = context.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? undefined;
+    const replyThread = context.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? undefined;
+
+    // Enrich context with reply channel from env vars
+    const enrichedContext: OpenClawContext = {
+      ...context,
+      ...(replyChannel && { replyChannel }),
+      ...(replyTarget && { replyTarget }),
+      ...(replyThread && { replyThread }),
+    };
+
     // Build template variables from whitelisted context fields
     const variables: Record<string, string | undefined> = {
       sessionId: context.sessionId,
@@ -107,6 +123,9 @@ export async function wakeOpenClaw(
       tmuxTail,
       event,
       timestamp: now,
+      replyChannel,
+      replyTarget,
+      replyThread,
     };
 
     // Add interpolated instruction to variables for command gateway {{instruction}} placeholder
@@ -129,7 +148,10 @@ export async function wakeOpenClaw(
         projectName: context.projectPath ? basename(context.projectPath) : undefined,
         tmuxSession,
         tmuxTail,
-        context: buildWhitelistedContext(context),
+        ...(replyChannel && { channel: replyChannel }),
+        ...(replyTarget && { to: replyTarget }),
+        ...(replyThread && { threadId: replyThread }),
+        context: buildWhitelistedContext(enrichedContext),
       };
       result = await wakeGateway(gatewayName, gateway, payload);
     }

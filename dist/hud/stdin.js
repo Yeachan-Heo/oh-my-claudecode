@@ -6,11 +6,13 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { getWorktreeRoot } from '../lib/worktree-paths.js';
 // ============================================================================
 // Stdin Cache (for --watch mode)
 // ============================================================================
 function getStdinCachePath() {
-    return join(process.cwd(), '.omc', 'state', 'hud-stdin-cache.json');
+    const root = getWorktreeRoot() || process.cwd();
+    return join(root, '.omc', 'state', 'hud-stdin-cache.json');
 }
 /**
  * Persist the last successful stdin read to disk.
@@ -18,7 +20,8 @@ function getStdinCachePath() {
  */
 export function writeStdinCache(stdin) {
     try {
-        const cacheDir = join(process.cwd(), '.omc', 'state');
+        const root = getWorktreeRoot() || process.cwd();
+        const cacheDir = join(root, '.omc', 'state');
         if (!existsSync(cacheDir)) {
             mkdirSync(cacheDir, { recursive: true });
         }

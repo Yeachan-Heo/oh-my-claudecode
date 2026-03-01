@@ -91,7 +91,9 @@ describe('Project Memory Integration', () => {
     });
 
     it('should not inject if project has no useful info', async () => {
-      // Empty directory with no config files
+      // Empty directory with no config files — add .git so findProjectRoot
+      // stops here instead of walking up to the real repo root
+      await fs.mkdir(path.join(tempDir, '.git'));
       const sessionId = 'test-session-4';
       const registered = await registerProjectMemoryContext(sessionId, tempDir);
 

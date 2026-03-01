@@ -81,9 +81,6 @@ export declare function resolveOmcPath(relativePath: string, worktreeRoot?: stri
  * State files follow the naming convention: {mode}-state.json
  * Examples: ralph-state.json, ultrawork-state.json, autopilot-state.json
  *
- * Special case: swarm uses swarm.db (SQLite), not swarm-state.json.
- * This function is for JSON state files only. For swarm, use getStateFilePath from mode-registry.
- *
  * @param stateName - State name (e.g., "ralph", "ultrawork", or "ralph-state")
  * @param worktreeRoot - Optional worktree root
  * @returns Absolute path to state file
@@ -212,6 +209,28 @@ export declare function ensureSessionStateDir(sessionId: string, worktreeRoot?: 
  * @returns The worktree root (never a subdirectory)
  */
 export declare function resolveToWorktreeRoot(directory?: string): string;
+/**
+ * Resolve a Claude Code transcript path that may be mismatched in worktree sessions.
+ *
+ * When Claude Code runs inside a worktree (.claude/worktrees/X), it encodes the
+ * worktree CWD into the project directory path, creating a transcript_path like:
+ *   ~/.claude/projects/-path-to-project--claude-worktrees-X/<session>.jsonl
+ *
+ * But the actual transcript lives at the original project's path:
+ *   ~/.claude/projects/-path-to-project/<session>.jsonl
+ *
+ * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
+ * separator, yielding the distinctive `--claude-worktrees-` pattern in the
+ * encoded directory name.
+ *
+ * This function detects the mismatch and resolves to the correct path.
+ *
+ * @param transcriptPath - The transcript_path from Claude Code hook input
+ * @param cwd - Optional CWD for fallback detection
+ * @returns The resolved transcript path (original if already correct or no resolution found)
+ */
+export declare function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: string): string | undefined;
 /**
  * Validate that a workingDirectory is within the trusted worktree root.
  * The trusted root is derived from process.cwd(), NOT from user input.

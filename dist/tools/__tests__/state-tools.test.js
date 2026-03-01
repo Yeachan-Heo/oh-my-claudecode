@@ -103,7 +103,7 @@ describe('state-tools', () => {
             expect(existsSync(join(sessionDir, 'ralplan-state.json'))).toBe(false);
         });
         it('should clear only the requested session for every execution mode', async () => {
-            const modes = ['autopilot', 'ultrapilot', 'pipeline', 'ralph', 'ultrawork', 'ultraqa'];
+            const modes = ['autopilot', 'ralph', 'ultrawork', 'ultraqa', 'team'];
             const sessionA = 'session-a';
             const sessionB = 'session-b';
             for (const mode of modes) {

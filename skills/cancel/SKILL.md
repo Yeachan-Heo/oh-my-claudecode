@@ -205,127 +205,42 @@ Team "{team_name}" cancelled:
 4. Wait briefly for shutdown responses (15s per member timeout)
 5. Re-read config.json to check for remaining members (reconciliation pass)
 6. Call `TeamDelete()` to clean up
-7. Remove any local state: `rm -f .omc/state/team-state.json`
+7. Clear team state: `state_clear(mode="team", session_id)`
 8. Report structured summary to user
 
 #### If Autopilot Active
 
-Call `cancelAutopilot()` from `src/hooks/autopilot/cancel.ts:27-78`:
+Autopilot handles its own cleanup including linked ralph and ultraqa.
 
-```bash
-# Autopilot handles its own cleanup + ralph + ultraqa
-# Just mark autopilot as inactive (preserves state for resume)
-if [[ -f .omc/state/autopilot-state.json ]]; then
-  # Clean up ralph if active
-  if [[ -f .omc/state/ralph-state.json ]]; then
-    RALPH_STATE=$(cat .omc/state/ralph-state.json)
-    LINKED_UW=$(echo "$RALPH_STATE" | jq -r '.linked_ultrawork // false')
-
-    # Clean linked ultrawork first
-    if [[ "$LINKED_UW" == "true" ]] && [[ -f .omc/state/ultrawork-state.json ]]; then
-      rm -f .omc/state/ultrawork-state.json
-      echo "Cleaned up: ultrawork (linked to ralph)"
-    fi
-
-    # Clean ralph
-    rm -f .omc/state/ralph-state.json
-    rm -f .omc/state/ralph-verification.json
-    echo "Cleaned up: ralph"
-  fi
-
-  # Clean up ultraqa if active
-  if [[ -f .omc/state/ultraqa-state.json ]]; then
-    rm -f .omc/state/ultraqa-state.json
-    echo "Cleaned up: ultraqa"
-  fi
-
-  # Mark autopilot inactive but preserve state
-  CURRENT_STATE=$(cat .omc/state/autopilot-state.json)
-  CURRENT_PHASE=$(echo "$CURRENT_STATE" | jq -r '.phase // "unknown"')
-  echo "$CURRENT_STATE" | jq '.active = false' > .omc/state/autopilot-state.json
-
-  echo "Autopilot cancelled at phase: $CURRENT_PHASE. Progress preserved for resume."
-  echo "Run /oh-my-claudecode:autopilot to resume."
-fi
-```
+1. Read autopilot state via `state_read(mode="autopilot", session_id)` to get current phase
+2. Check for linked ralph via `state_read(mode="ralph", session_id)`:
+   - If ralph is active and has `linked_ultrawork: true`, clear ultrawork first: `state_clear(mode="ultrawork", session_id)`
+   - Clear ralph: `state_clear(mode="ralph", session_id)`
+3. Check for linked ultraqa via `state_read(mode="ultraqa", session_id)`:
+   - If active, clear it: `state_clear(mode="ultraqa", session_id)`
+4. Mark autopilot inactive (preserve state for resume) via `state_write(mode="autopilot", session_id, state={active: false, ...existing})`
 
 #### If Ralph Active (but not Autopilot)
 
-Call `clearRalphState()` + `clearLinkedUltraworkState()` from `src/hooks/ralph-loop/index.ts:147-182`:
-
-```bash
-if [[ -f .omc/state/ralph-state.json ]]; then
-  # Check if ultrawork is linked
-  RALPH_STATE=$(cat .omc/state/ralph-state.json)
-  LINKED_UW=$(echo "$RALPH_STATE" | jq -r '.linked_ultrawork // false')
-
-  # Clean linked ultrawork first
-  if [[ "$LINKED_UW" == "true" ]] && [[ -f .omc/state/ultrawork-state.json ]]; then
-    UW_STATE=$(cat .omc/state/ultrawork-state.json)
-    UW_LINKED=$(echo "$UW_STATE" | jq -r '.linked_to_ralph // false')
-
-    # Only clear if it was linked to ralph
-    if [[ "$UW_LINKED" == "true" ]]; then
-      rm -f .omc/state/ultrawork-state.json
-      echo "Cleaned up: ultrawork (linked to ralph)"
-    fi
-  fi
-
-  # Clean ralph state
-  rm -f .omc/state/ralph-state.json
-  rm -f .omc/state/ralph-plan-state.json
-  rm -f .omc/state/ralph-verification.json
-
-  echo "Ralph cancelled. Persistent mode deactivated."
-fi
-```
+1. Read ralph state via `state_read(mode="ralph", session_id)` to check for linked ultrawork
+2. If `linked_ultrawork: true`:
+   - Read ultrawork state to verify `linked_to_ralph: true`
+   - If linked, clear ultrawork: `state_clear(mode="ultrawork", session_id)`
+3. Clear ralph: `state_clear(mode="ralph", session_id)`
 
 #### If Ultrawork Active (standalone, not linked)
 
-Call `deactivateUltrawork()` from `src/hooks/ultrawork/index.ts:150-173`:
-
-```bash
-if [[ -f .omc/state/ultrawork-state.json ]]; then
-  # Check if linked to ralph
-  UW_STATE=$(cat .omc/state/ultrawork-state.json)
-  LINKED=$(echo "$UW_STATE" | jq -r '.linked_to_ralph // false')
-
-  if [[ "$LINKED" == "true" ]]; then
-    echo "Ultrawork is linked to Ralph. Use /oh-my-claudecode:cancel to cancel both."
-    exit 1
-  fi
-
-  # Remove local state
-  rm -f .omc/state/ultrawork-state.json
-
-  echo "Ultrawork cancelled. Parallel execution mode deactivated."
-fi
-```
+1. Read ultrawork state via `state_read(mode="ultrawork", session_id)`
+2. If `linked_to_ralph: true`, warn user to cancel ralph instead (which cascades)
+3. Otherwise clear: `state_clear(mode="ultrawork", session_id)`
 
 #### If UltraQA Active (standalone)
 
-Call `clearUltraQAState()` from `src/hooks/ultraqa/index.ts:107-120`:
-
-```bash
-if [[ -f .omc/state/ultraqa-state.json ]]; then
-  rm -f .omc/state/ultraqa-state.json
-  echo "UltraQA cancelled. QA cycling workflow stopped."
-fi
-```
+Clear directly: `state_clear(mode="ultraqa", session_id)`
 
 #### No Active Modes
 
-```bash
-echo "No active OMC modes detected."
-echo ""
-echo "Checked for:"
-echo "  - Autopilot (.omc/state/autopilot-state.json)"
-echo "  - Ralph (.omc/state/ralph-state.json)"
-echo "  - Ultrawork (.omc/state/ultrawork-state.json)"
-echo "  - UltraQA (.omc/state/ultraqa-state.json)"
-echo ""
-echo "Use --force to clear all state files anyway."
-```
+Report: "No active OMC modes detected. Use --force to clear all state files anyway."
 
 ## Implementation Notes
 

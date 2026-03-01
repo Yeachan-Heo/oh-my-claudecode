@@ -996,4 +996,58 @@ describe("dispatcher mention separation", () => {
         vi.restoreAllMocks();
     });
 });
+describe("sendWebhook reply channel context", () => {
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+    it("includes channel, to, thread_id in webhook payload when reply fields are set", async () => {
+        const config = {
+            enabled: true,
+            url: "https://example.com/hook",
+        };
+        const payload = {
+            ...basePayload,
+            replyChannel: "#general",
+            replyTarget: "@bot",
+            replyThread: "thread-123",
+        };
+        await sendWebhook(config, payload);
+        const call = vi.mocked(fetch).mock.calls[0];
+        const body = JSON.parse(call[1].body);
+        expect(body.channel).toBe("#general");
+        expect(body.to).toBe("@bot");
+        expect(body.thread_id).toBe("thread-123");
+    });
+    it("does not include channel fields in webhook payload when reply fields are not set", async () => {
+        const config = {
+            enabled: true,
+            url: "https://example.com/hook",
+        };
+        await sendWebhook(config, basePayload);
+        const call = vi.mocked(fetch).mock.calls[0];
+        const body = JSON.parse(call[1].body);
+        expect(body).not.toHaveProperty("channel");
+        expect(body).not.toHaveProperty("to");
+        expect(body).not.toHaveProperty("thread_id");
+    });
+    it("includes only partial reply channel fields in webhook payload", async () => {
+        const config = {
+            enabled: true,
+            url: "https://example.com/hook",
+        };
+        const payload = {
+            ...basePayload,
+            replyChannel: "#alerts",
+        };
+        await sendWebhook(config, payload);
+        const call = vi.mocked(fetch).mock.calls[0];
+        const body = JSON.parse(call[1].body);
+        expect(body.channel).toBe("#alerts");
+        expect(body).not.toHaveProperty("to");
+        expect(body).not.toHaveProperty("thread_id");
+    });
+});
 //# sourceMappingURL=dispatcher.test.js.map

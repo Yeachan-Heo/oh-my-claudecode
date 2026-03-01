@@ -8,7 +8,7 @@
  * - State/PID/log files use restrictive permissions (0600)
  * - Bot tokens stored in state file, NOT in environment variables
  * - Two-layer input sanitization (sanitizeReplyInput + sanitizeForTmux)
- * - Pane verification via analyzePaneContent before every injection
+ * - Pane verification via empty-content check before every injection
  * - Authorization: only configured user IDs (Discord) / chat ID (Telegram) can inject
  * - Rate limiting to prevent spam/abuse
  *
@@ -43,6 +43,11 @@ export interface DaemonResponse {
     state?: ReplyListenerState;
     error?: string;
 }
+/**
+ * Build daemon config from notification config.
+ * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
+ */
+export declare function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null>;
 /**
  * Check if daemon is currently running
  */

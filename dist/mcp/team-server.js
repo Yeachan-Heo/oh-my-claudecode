@@ -23,6 +23,7 @@ import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { killWorkerPanes } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
+import { resolvedEnv } from '../team/shell-path.js';
 import { NudgeTracker } from '../team/idle-nudge.js';
 const omcTeamJobs = new Map();
 const OMC_JOBS_DIR = join(homedir(), '.omc', 'team-jobs');
@@ -94,7 +95,7 @@ async function handleStart(args) {
     const job = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
     omcTeamJobs.set(jobId, job);
     const child = spawn('node', [runtimeCliPath], {
-        env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+        env: resolvedEnv({ OMC_JOB_ID: jobId, OMC_JOBS_DIR }),
         stdio: ['pipe', 'pipe', 'pipe'],
     });
     job.pid = child.pid;

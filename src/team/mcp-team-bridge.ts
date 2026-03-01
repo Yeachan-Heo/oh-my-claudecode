@@ -12,6 +12,7 @@
  */
 
 import { spawn, execSync, ChildProcess } from 'child_process';
+import { resolvedEnv } from './shell-path.js';
 import { existsSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
@@ -382,6 +383,7 @@ function spawnCliProcess(
   const child = spawn(cmd, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd,
+    env: resolvedEnv(),
     ...(process.platform === 'win32' ? { shell: true } : {})
   });
 

@@ -1,5 +1,5 @@
 ---
-name: review
+name: omc-review
 description: Alias for /plan --review
 ---
 

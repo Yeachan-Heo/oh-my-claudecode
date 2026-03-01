@@ -55,9 +55,20 @@ export function resolveLaunchPolicy(env: NodeJS.ProcessEnv = process.env): Claud
  * Build tmux session name from directory, git branch, and UTC timestamp
  * Format: omc-{dir}-{branch}-{utctimestamp}
  * e.g.  omc-myproject-dev-20260221143052
+ *
+ * When worktree option is enabled, uses last 2 path segments instead of
+ * just the basename, so worktree paths like ~/omc-worktrees/feat/issue-42
+ * produce "omc-feat-issue-42-..." instead of generic "omc-issue-42-...".
  */
-export function buildTmuxSessionName(cwd: string): string {
-  const dirToken = sanitizeTmuxToken(basename(cwd));
+export function buildTmuxSessionName(cwd: string, options?: { worktree?: boolean }): string {
+  let dirToken: string;
+  if (options?.worktree) {
+    const parts = cwd.replace(/\/+$/, '').split('/').filter(Boolean);
+    const meaningful = parts.slice(-2).join('/');
+    dirToken = sanitizeTmuxToken(meaningful);
+  } else {
+    dirToken = sanitizeTmuxToken(basename(cwd));
+  }
   let branchToken = 'detached';
 
   try {

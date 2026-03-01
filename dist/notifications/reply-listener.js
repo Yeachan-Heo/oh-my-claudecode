@@ -8,7 +8,7 @@
  * - State/PID/log files use restrictive permissions (0600)
  * - Bot tokens stored in state file, NOT in environment variables
  * - Two-layer input sanitization (sanitizeReplyInput + sanitizeForTmux)
- * - Pane verification via analyzePaneContent before every injection
+ * - Pane verification via empty-content check before every injection
  * - Authorization: only configured user IDs (Discord) / chat ID (Telegram) can inject
  * - Rate limiting to prevent spam/abuse
  *
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
-import { capturePaneContent, analyzePaneContent, sendToPane, isTmuxAvailable, } from '../features/rate-limit-wait/tmux-detector.js';
+import { capturePaneContent, sendToPane, isTmuxAvailable, } from '../features/rate-limit-wait/tmux-detector.js';
 import { lookupByMessageId, removeMessagesByPane, pruneStale, } from './session-registry.js';
 import { parseMentionAllowedMentions } from './config.js';
 // ESM compatibility: __filename is not available in ES modules
@@ -158,7 +158,7 @@ function writeDaemonState(state) {
  * Build daemon config from notification config.
  * Derives bot tokens, channel IDs, and reply settings from getNotificationConfig().
  */
-async function buildDaemonConfig() {
+export async function buildDaemonConfig() {
     try {
         const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
         const replyConfig = getReplyConfig();
@@ -285,11 +285,10 @@ class RateLimiter {
  * Returns true if injection succeeded, false otherwise.
  */
 function injectReply(paneId, text, platform, config) {
-    // 1. Verify pane is running Claude Code
+    // 1. Verify pane has content (non-empty pane = active session per registry)
     const content = capturePaneContent(paneId, 15);
-    const analysis = analyzePaneContent(content);
-    if (analysis.confidence < 0.4) {
-        log(`WARN: Pane ${paneId} does not appear to be running Claude Code (confidence: ${analysis.confidence}). Skipping injection, removing stale mapping.`);
+    if (!content.trim()) {
+        log(`WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
         removeMessagesByPane(paneId);
         return false;
     }

@@ -216,10 +216,8 @@ export function pruneOldStateFiles(directory, maxAgeDays = DEFAULT_STATE_MAX_AGE
                     // to prevent stale state reuse across sessions (issue #609).
                     const modeStateFiles = [
                         'autopilot-state.json',
-                        'ultrapilot-state.json',
                         'ralph-state.json',
                         'ultrawork-state.json',
-                        'swarm-state.json'
                     ];
                     if (modeStateFiles.includes(file)) {
                         try {

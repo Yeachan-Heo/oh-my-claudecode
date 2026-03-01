@@ -8,9 +8,13 @@ import { traceTimelineTool, traceSummaryTool } from '../../tools/trace-tools.js'
 // Mock validateWorkingDirectory to return our test directory
 let testDir: string;
 
-vi.mock('../../lib/worktree-paths.js', () => ({
-  validateWorkingDirectory: (dir?: string) => dir || testDir,
-}));
+vi.mock('../../lib/worktree-paths.js', async () => {
+  const { join } = await import('path');
+  return {
+    validateWorkingDirectory: (dir?: string) => dir || testDir,
+    getOmcRoot: (dir?: string) => join(dir || testDir, '.omc'),
+  };
+});
 
 describe('trace-tools', () => {
   beforeEach(() => {

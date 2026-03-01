@@ -24,6 +24,7 @@ function debugLog(message, ...args) {
 }
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 /**
  * Validates that a session ID is safe to use in file paths.
@@ -178,7 +179,7 @@ function getTodoFilePaths(sessionId, directory) {
     }
     // Project-specific todos
     if (directory) {
-        paths.push(join(directory, '.omc', 'todos.json'));
+        paths.push(join(getOmcRoot(directory), 'todos.json'));
         paths.push(join(directory, '.claude', 'todos.json'));
     }
     // NOTE: Global todos directory scan removed to prevent false positives.

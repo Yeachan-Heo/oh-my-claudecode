@@ -232,4 +232,86 @@ describe("wakeOpenClaw", () => {
         expect(variables.instruction).toContain("myproject");
     });
 });
+describe("reply channel context", () => {
+    beforeEach(() => {
+        vi.mocked(getOpenClawConfig).mockReturnValue(mockConfig);
+        vi.mocked(resolveGateway).mockReturnValue(mockResolvedGateway);
+        vi.mocked(wakeGateway).mockResolvedValue({
+            gateway: "my-gateway",
+            success: true,
+            statusCode: 200,
+        });
+    });
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        vi.clearAllMocks();
+    });
+    it("reads OPENCLAW_REPLY_CHANNEL, OPENCLAW_REPLY_TARGET, OPENCLAW_REPLY_THREAD from env and includes in HTTP payload", async () => {
+        vi.stubEnv("OPENCLAW_REPLY_CHANNEL", "#general");
+        vi.stubEnv("OPENCLAW_REPLY_TARGET", "@bot");
+        vi.stubEnv("OPENCLAW_REPLY_THREAD", "thread-123");
+        await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+        const call = vi.mocked(wakeGateway).mock.calls[0];
+        const payload = call[2];
+        expect(payload.channel).toBe("#general");
+        expect(payload.to).toBe("@bot");
+        expect(payload.threadId).toBe("thread-123");
+    });
+    it("does not include channel fields in HTTP payload when env vars are not set", async () => {
+        await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+        const call = vi.mocked(wakeGateway).mock.calls[0];
+        const payload = call[2];
+        expect(payload).not.toHaveProperty("channel");
+        expect(payload).not.toHaveProperty("to");
+        expect(payload).not.toHaveProperty("threadId");
+    });
+    it("includes partial env vars (only OPENCLAW_REPLY_CHANNEL set)", async () => {
+        vi.stubEnv("OPENCLAW_REPLY_CHANNEL", "#alerts");
+        await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+        const call = vi.mocked(wakeGateway).mock.calls[0];
+        const payload = call[2];
+        expect(payload.channel).toBe("#alerts");
+        expect(payload).not.toHaveProperty("to");
+        expect(payload).not.toHaveProperty("threadId");
+    });
+    it("includes reply channel fields in whitelisted context", async () => {
+        vi.stubEnv("OPENCLAW_REPLY_CHANNEL", "#general");
+        vi.stubEnv("OPENCLAW_REPLY_TARGET", "@bot");
+        vi.stubEnv("OPENCLAW_REPLY_THREAD", "thread-123");
+        await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+        const call = vi.mocked(wakeGateway).mock.calls[0];
+        const payload = call[2];
+        expect(payload.context.replyChannel).toBe("#general");
+        expect(payload.context.replyTarget).toBe("@bot");
+        expect(payload.context.replyThread).toBe("thread-123");
+    });
+    it("adds replyChannel, replyTarget, replyThread as template variables for command gateways", async () => {
+        vi.stubEnv("OPENCLAW_REPLY_CHANNEL", "#general");
+        vi.stubEnv("OPENCLAW_REPLY_TARGET", "@bot");
+        vi.stubEnv("OPENCLAW_REPLY_THREAD", "thread-123");
+        const commandGateway = { type: "command", command: "notify {{replyChannel}} {{replyTarget}} {{replyThread}}" };
+        vi.mocked(resolveGateway).mockReturnValue({
+            gatewayName: "cmd-gw",
+            gateway: commandGateway,
+            instruction: "test",
+        });
+        vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
+        await wakeOpenClaw("session-start", { sessionId: "sid-1" });
+        const call = vi.mocked(wakeCommandGateway).mock.calls[0];
+        const variables = call[2];
+        expect(variables.replyChannel).toBe("#general");
+        expect(variables.replyTarget).toBe("@bot");
+        expect(variables.replyThread).toBe("thread-123");
+    });
+    it("context fields override env vars when both are provided", async () => {
+        vi.stubEnv("OPENCLAW_REPLY_CHANNEL", "#from-env");
+        await wakeOpenClaw("session-start", {
+            sessionId: "sid-1",
+            replyChannel: "#from-context",
+        });
+        const call = vi.mocked(wakeGateway).mock.calls[0];
+        const payload = call[2];
+        expect(payload.channel).toBe("#from-context");
+    });
+});
 //# sourceMappingURL=index.test.js.map

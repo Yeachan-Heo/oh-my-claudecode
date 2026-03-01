@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import type { HookInput } from './bridge.js';
+import { resolveTranscriptPath } from '../lib/worktree-paths.js';
 
 // --- Zod schemas for hook input validation ---
 
@@ -149,6 +150,14 @@ export function normalizeHookInput(raw: unknown, hookType?: string): HookInput {
 
   // Fast path: if input is already camelCase, skip Zod parse entirely
   if (isAlreadyCamelCase(rawObj)) {
+    const passthrough = filterPassthrough(rawObj, hookType);
+    // Resolve worktree-mismatched transcript paths (issue #1094)
+    if (passthrough.transcript_path) {
+      passthrough.transcript_path = resolveTranscriptPath(
+        passthrough.transcript_path as string,
+        rawObj.directory as string | undefined,
+      );
+    }
     return {
       sessionId: rawObj.sessionId as string | undefined,
       toolName: rawObj.toolName as string | undefined,
@@ -158,7 +167,7 @@ export function normalizeHookInput(raw: unknown, hookType?: string): HookInput {
       prompt: rawObj.prompt as string | undefined,
       message: rawObj.message as HookInput['message'],
       parts: rawObj.parts as HookInput['parts'],
-      ...filterPassthrough(rawObj, hookType),
+      ...passthrough,
     } as HookInput;
   }
 
@@ -171,6 +180,15 @@ export function normalizeHookInput(raw: unknown, hookType?: string): HookInput {
 
   const input = (parsed.success ? parsed.data : raw) as RawHookInput;
 
+  const extraFields = filterPassthrough(input, hookType);
+  // Resolve worktree-mismatched transcript paths (issue #1094)
+  if (extraFields.transcript_path) {
+    extraFields.transcript_path = resolveTranscriptPath(
+      extraFields.transcript_path as string,
+      (input.cwd ?? input.directory) as string | undefined,
+    );
+  }
+
   return {
     sessionId: input.session_id ?? input.sessionId,
     toolName: input.tool_name ?? input.toolName,
@@ -182,7 +200,7 @@ export function normalizeHookInput(raw: unknown, hookType?: string): HookInput {
     message: input.message,
     parts: input.parts,
     // Pass through extra fields with sensitivity filtering
-    ...filterPassthrough(input, hookType),
+    ...extraFields,
   } as HookInput;
 }
 

@@ -13,6 +13,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -31,7 +32,7 @@ export function getPrdPath(directory) {
  * Get the path to the prd.json in .omc subdirectory
  */
 export function getOmcPrdPath(directory) {
-    return join(directory, '.omc', PRD_FILENAME);
+    return join(getOmcRoot(directory), PRD_FILENAME);
 }
 /**
  * Find prd.json in a directory (checks both root and .omc)
@@ -75,7 +76,7 @@ export function writePrd(directory, prd) {
     // Prefer writing to existing location, or .omc by default
     let prdPath = findPrdPath(directory);
     if (!prdPath) {
-        const omcDir = join(directory, '.omc');
+        const omcDir = getOmcRoot(directory);
         if (!existsSync(omcDir)) {
             try {
                 mkdirSync(omcDir, { recursive: true });

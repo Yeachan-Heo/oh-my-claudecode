@@ -18,6 +18,7 @@ import {
   statSync,
 } from "fs";
 import { join } from "path";
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { recordAgentStart, recordAgentStop } from './session-replay.js';
 
 // ============================================================================
@@ -28,7 +29,7 @@ export interface SubagentInfo {
   agent_id: string;
   agent_type: string;
   started_at: string;
-  parent_mode: string; // 'autopilot' | 'ultrapilot' | 'ultrawork' | 'swarm' | 'none'
+  parent_mode: string; // 'autopilot' | 'ultrawork' | 'team' | 'ralph' | 'none'
   task_description?: string;
   file_ownership?: string[];
   status: "running" | "completed" | "failed";
@@ -241,8 +242,8 @@ export function mergeTrackerStates(
  * Acquire file lock with timeout and stale lock detection
  */
 function acquireLock(directory: string): boolean {
-  const lockPath = join(directory, ".omc", "state", "subagent-tracker.lock");
-  const lockDir = join(directory, ".omc", "state");
+  const lockPath = join(getOmcRoot(directory), "state", "subagent-tracker.lock");
+  const lockDir = join(getOmcRoot(directory), "state");
 
   if (!existsSync(lockDir)) {
     mkdirSync(lockDir, { recursive: true });
@@ -316,7 +317,7 @@ function acquireLock(directory: string): boolean {
  * Release file lock
  */
 function releaseLock(directory: string): void {
-  const lockPath = join(directory, ".omc", "state", "subagent-tracker.lock");
+  const lockPath = join(getOmcRoot(directory), "state", "subagent-tracker.lock");
   try {
     unlinkSync(lockPath);
   } catch {
@@ -328,7 +329,7 @@ function releaseLock(directory: string): void {
  * Get the state file path
  */
 export function getStateFilePath(directory: string): string {
-  const stateDir = join(directory, ".omc", "state");
+  const stateDir = join(getOmcRoot(directory), "state");
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -506,7 +507,7 @@ export function flushPendingWrites(): void {
  * Detect the current parent mode from state files
  */
 function detectParentMode(directory: string): string {
-  const stateDir = join(directory, ".omc", "state");
+  const stateDir = join(getOmcRoot(directory), "state");
 
   if (!existsSync(stateDir)) {
     return "none";
@@ -514,28 +515,17 @@ function detectParentMode(directory: string): string {
 
   // Check in order of specificity
   const modeFiles = [
-    { file: "ultrapilot-state.json", mode: "ultrapilot" },
     { file: "autopilot-state.json", mode: "autopilot" },
-    { file: "swarm.db", mode: "swarm" },
     { file: "ultrawork-state.json", mode: "ultrawork" },
     { file: "ralph-state.json", mode: "ralph" },
+    { file: "team-state.json", mode: "team" },
   ];
 
   for (const { file, mode } of modeFiles) {
     const filePath = join(stateDir, file);
     if (existsSync(filePath)) {
-      // Special case for swarm.db - just check existence and size
-      if (file === 'swarm.db') {
-        try {
-          const stats = statSync(filePath);
-          if (stats.size > 0) {
-            return mode;
-          }
-        } catch {
-          continue;
-        }
-      } else {
-        // JSON file check (existing logic)
+      {
+        // JSON file check
         try {
           const content = readFileSync(filePath, "utf-8");
           const state = JSON.parse(content);

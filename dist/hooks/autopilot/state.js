@@ -12,7 +12,7 @@ import { DEFAULT_CONFIG } from './types.js';
 import { readRalphState, clearRalphState, clearLinkedUltraworkState } from '../ralph/index.js';
 import { startUltraQA, clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 const STATE_FILE = 'autopilot-state.json';
 const SPEC_DIR = 'autopilot';
 // ============================================================================
@@ -25,7 +25,7 @@ function getStateFilePath(directory, sessionId) {
     if (sessionId) {
         return resolveSessionStatePath('autopilot', sessionId, directory);
     }
-    const omcDir = join(directory, '.omc');
+    const omcDir = getOmcRoot(directory);
     return join(omcDir, 'state', STATE_FILE);
 }
 /**
@@ -36,7 +36,7 @@ function ensureStateDir(directory, sessionId) {
         ensureSessionStateDir(sessionId, directory);
         return;
     }
-    const stateDir = join(directory, '.omc', 'state');
+    const stateDir = join(getOmcRoot(directory), 'state');
     if (!existsSync(stateDir)) {
         mkdirSync(stateDir, { recursive: true });
     }
@@ -46,7 +46,7 @@ function ensureStateDir(directory, sessionId) {
  */
 export function ensureAutopilotDir(directory) {
     ensureStateDir(directory);
-    const autopilotDir = join(directory, '.omc', SPEC_DIR);
+    const autopilotDir = join(getOmcRoot(directory), SPEC_DIR);
     if (!existsSync(autopilotDir)) {
         mkdirSync(autopilotDir, { recursive: true });
     }
@@ -291,13 +291,13 @@ export function updateValidation(directory, updates, sessionId) {
  * Get the spec file path
  */
 export function getSpecPath(directory) {
-    return join(directory, '.omc', SPEC_DIR, 'spec.md');
+    return join(getOmcRoot(directory), SPEC_DIR, 'spec.md');
 }
 /**
  * Get the plan file path
  */
 export function getPlanPath(directory) {
-    return join(directory, '.omc', 'plans', 'autopilot-impl.md');
+    return join(getOmcRoot(directory), 'plans', 'autopilot-impl.md');
 }
 /**
  * Transition from Ralph (Phase 2: Execution) to UltraQA (Phase 3: QA)

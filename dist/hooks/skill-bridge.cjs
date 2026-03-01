@@ -35,12 +35,13 @@ __export(bridge_exports, {
 module.exports = __toCommonJS(bridge_exports);
 var import_fs2 = require("fs");
 var import_path2 = require("path");
-var import_os = require("os");
+var import_os2 = require("os");
 
 // src/lib/worktree-paths.ts
 var import_crypto = require("crypto");
 var import_child_process = require("child_process");
 var import_fs = require("fs");
+var import_os = require("os");
 var import_path = require("path");
 var OmcPaths = {
   ROOT: ".omc",
@@ -60,12 +61,12 @@ var OmcPaths = {
 
 // src/hooks/learner/bridge.ts
 var USER_SKILLS_DIR = (0, import_path2.join)(
-  (0, import_os.homedir)(),
+  (0, import_os2.homedir)(),
   ".claude",
   "skills",
   "omc-learned"
 );
-var GLOBAL_SKILLS_DIR = (0, import_path2.join)((0, import_os.homedir)(), ".omc", "skills");
+var GLOBAL_SKILLS_DIR = (0, import_path2.join)((0, import_os2.homedir)(), ".omc", "skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
 var SKILL_EXTENSION = ".md";
 var SESSION_TTL_MS = 60 * 60 * 1e3;

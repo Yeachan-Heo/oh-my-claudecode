@@ -97,6 +97,13 @@ export interface PluginConfig {
         enabled?: boolean;
         /** Default tier when no rules match */
         defaultTier?: 'LOW' | 'MEDIUM' | 'HIGH';
+        /**
+         * Force all agents to inherit the parent model instead of using OMC model routing.
+         * When true, the `model` parameter is stripped from all Task calls so agents use
+         * the user's Claude Code model setting. Overrides all per-agent model recommendations.
+         * Env: OMC_ROUTING_FORCE_INHERIT=true
+         */
+        forceInherit?: boolean;
         /** Enable automatic escalation on failure */
         escalationEnabled?: boolean;
         /** Maximum escalation attempts */

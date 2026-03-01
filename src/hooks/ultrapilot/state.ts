@@ -10,7 +10,8 @@ import { join } from 'path';
 import type { UltrapilotState, UltrapilotConfig, WorkerState, FileOwnership } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
+import { writeModeState, readModeState } from '../../lib/mode-state-io.js';
 
 const STATE_FILE = 'ultrapilot-state.json';
 const OWNERSHIP_FILE = 'ultrapilot-ownership.json';
@@ -22,7 +23,7 @@ function getStateFilePath(directory: string, sessionId?: string): string {
   if (sessionId) {
     return resolveSessionStatePath('ultrapilot', sessionId, directory);
   }
-  const omcDir = join(directory, '.omc', 'state');
+  const omcDir = join(getOmcRoot(directory), 'state');
   return join(omcDir, STATE_FILE);
 }
 
@@ -32,10 +33,10 @@ function getStateFilePath(directory: string, sessionId?: string): string {
 function getOwnershipFilePath(directory: string, sessionId?: string): string {
   if (sessionId) {
     // Store ownership file next to state file in session directory
-    const sessionDir = join(directory, '.omc', 'state', 'sessions', sessionId);
+    const sessionDir = join(getOmcRoot(directory), 'state', 'sessions', sessionId);
     return join(sessionDir, OWNERSHIP_FILE);
   }
-  const omcDir = join(directory, '.omc', 'state');
+  const omcDir = join(getOmcRoot(directory), 'state');
   return join(omcDir, OWNERSHIP_FILE);
 }
 
@@ -47,7 +48,7 @@ function ensureStateDir(directory: string, sessionId?: string): void {
     ensureSessionStateDir(sessionId, directory);
     return;
   }
-  const stateDir = join(directory, '.omc', 'state');
+  const stateDir = join(getOmcRoot(directory), 'state');
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -57,45 +58,14 @@ function ensureStateDir(directory: string, sessionId?: string): void {
  * Read ultrapilot state from disk
  */
 export function readUltrapilotState(directory: string, sessionId?: string): UltrapilotState | null {
-  // Try session-scoped path first
-  if (sessionId) {
-    const sessionFile = getStateFilePath(directory, sessionId);
-    if (existsSync(sessionFile)) {
-      try {
-        const content = readFileSync(sessionFile, 'utf-8');
-        return JSON.parse(content);
-      } catch {
-        // Fall through to legacy path
-      }
-    }
-  }
-
-  // Fallback to legacy path
-  const stateFile = getStateFilePath(directory);
-  if (!existsSync(stateFile)) {
-    return null;
-  }
-
-  try {
-    const content = readFileSync(stateFile, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+  return readModeState<UltrapilotState>('ultrapilot', directory, sessionId);
 }
 
 /**
  * Write ultrapilot state to disk
  */
 export function writeUltrapilotState(directory: string, state: UltrapilotState, sessionId?: string): boolean {
-  try {
-    ensureStateDir(directory, sessionId);
-    const stateFile = getStateFilePath(directory, sessionId);
-    writeFileSync(stateFile, JSON.stringify(state, null, 2));
-    return true;
-  } catch {
-    return false;
-  }
+  return writeModeState('ultrapilot', state as unknown as Record<string, unknown>, directory, sessionId);
 }
 
 /**
@@ -136,13 +106,6 @@ export function initUltrapilot(
   sessionId?: string,
   config?: Partial<UltrapilotConfig>
 ): UltrapilotState | null {
-  // Mutual exclusion check via mode-registry
-  const canStart = canStartMode('ultrapilot', directory);
-  if (!canStart.allowed) {
-    console.error(canStart.message);
-    return null;
-  }
-
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
   const now = new Date().toISOString();
 

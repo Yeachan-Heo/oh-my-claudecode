@@ -24,6 +24,7 @@ import {
 import { getUsage } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
+import { detectApiKeySource } from "./elements/api-key-source.js";
 import { sanitizeOutput } from "./sanitize.js";
 import type {
   HudRenderContext,
@@ -31,9 +32,11 @@ import type {
 } from "./types.js";
 import { getRuntimePackageVersion } from "../lib/version.js";
 import { compareVersions } from "../features/auto-update.js";
+import { resolveToWorktreeRoot, resolveTranscriptPath } from "../lib/worktree-paths.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { getOmcRoot } from "../lib/worktree-paths.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -89,13 +92,16 @@ async function main(watchMode = false): Promise<void> {
       return;
     }
 
-    const cwd = stdin.cwd || process.cwd();
+    const cwd = resolveToWorktreeRoot(stdin.cwd || undefined);
 
     // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
     const config = readHudConfig();
 
+    // Resolve worktree-mismatched transcript paths (issue #1094)
+    const resolvedTranscriptPath = resolveTranscriptPath(stdin.transcript_path, cwd);
+
     // Parse transcript for agents and todos
-    const transcriptData = await parseTranscript(stdin.transcript_path, {
+    const transcriptData = await parseTranscript(resolvedTranscriptPath, {
       staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
     });
 
@@ -115,7 +121,7 @@ async function main(watchMode = false): Promise<void> {
     // We persist the real start time in HUD state on first observation.
     // Scoped per session ID so a new session in the same cwd resets the timestamp.
     let sessionStart = transcriptData.sessionStart;
-    const currentSessionId = extractSessionIdFromPath(stdin.transcript_path);
+    const currentSessionId = extractSessionIdFromPath(resolvedTranscriptPath ?? stdin.transcript_path);
     const sameSession = hudState?.sessionId === currentSessionId;
     if (sameSession && hudState?.sessionStartTimestamp) {
       // Use persisted value (the real session start) - but validate first
@@ -193,6 +199,9 @@ async function main(watchMode = false): Promise<void> {
       promptTime: hudState?.lastPromptTimestamp
         ? new Date(hudState.lastPromptTimestamp)
         : null,
+      apiKeySource: config.elements.apiKeySource
+        ? detectApiKeySource(cwd)
+        : null,
     };
 
     // Debug: log data if OMC_DEBUG is set
@@ -214,7 +223,7 @@ async function main(watchMode = false): Promise<void> {
       context.contextPercent >= config.contextLimitWarning.threshold
     ) {
       try {
-        const omcStateDir = join(cwd, '.omc', 'state');
+        const omcStateDir = join(getOmcRoot(cwd), 'state');
         if (!existsSync(omcStateDir)) {
           mkdirSync(omcStateDir, { recursive: true });
         }

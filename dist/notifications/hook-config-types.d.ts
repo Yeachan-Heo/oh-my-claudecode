@@ -6,7 +6,7 @@
  */
 import type { NotificationPlatform } from "./types.js";
 /** Template variables available for interpolation in message templates. */
-export type TemplateVariable = "event" | "sessionId" | "message" | "timestamp" | "tmuxSession" | "projectPath" | "projectName" | "modesUsed" | "contextSummary" | "durationMs" | "agentsSpawned" | "agentsCompleted" | "reason" | "activeMode" | "iteration" | "maxIterations" | "question" | "incompleteTasks" | "agentName" | "agentType" | "tmuxTail" | "tmuxPaneId" | "duration" | "time" | "modesDisplay" | "iterationDisplay" | "agentDisplay" | "projectDisplay" | "footer" | "tmuxTailBlock" | "reasonDisplay";
+export type TemplateVariable = "event" | "sessionId" | "message" | "timestamp" | "tmuxSession" | "projectPath" | "projectName" | "modesUsed" | "contextSummary" | "durationMs" | "agentsSpawned" | "agentsCompleted" | "reason" | "activeMode" | "iteration" | "maxIterations" | "question" | "incompleteTasks" | "agentName" | "agentType" | "tmuxTail" | "tmuxPaneId" | "replyChannel" | "replyTarget" | "replyThread" | "duration" | "time" | "modesDisplay" | "iterationDisplay" | "agentDisplay" | "projectDisplay" | "footer" | "tmuxTailBlock" | "reasonDisplay";
 /** Per-platform message template override */
 export interface PlatformTemplateOverride {
     /** Message template with {{variable}} placeholders */

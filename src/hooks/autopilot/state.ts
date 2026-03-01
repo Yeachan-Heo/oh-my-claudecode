@@ -7,8 +7,10 @@
  * - State machine operations
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { writeModeState, readModeState, clearModeStateFile } from '../../lib/mode-state-io.js';
+import { resolveStatePath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import type { AutopilotState, AutopilotPhase, AutopilotConfig } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
 import {
@@ -22,9 +24,8 @@ import {
   readUltraQAState
 } from '../ultraqa/index.js';
 import { canStartMode } from '../mode-registry/index.js';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 
-const STATE_FILE = 'autopilot-state.json';
 const SPEC_DIR = 'autopilot';
 
 // ============================================================================
@@ -32,36 +33,10 @@ const SPEC_DIR = 'autopilot';
 // ============================================================================
 
 /**
- * Get the state file path
- */
-function getStateFilePath(directory: string, sessionId?: string): string {
-  if (sessionId) {
-    return resolveSessionStatePath('autopilot', sessionId, directory);
-  }
-  const omcDir = join(directory, '.omc');
-  return join(omcDir, 'state', STATE_FILE);
-}
-
-/**
- * Ensure the .omc/state directory exists
- */
-function ensureStateDir(directory: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory);
-    return;
-  }
-  const stateDir = join(directory, '.omc', 'state');
-  if (!existsSync(stateDir)) {
-    mkdirSync(stateDir, { recursive: true });
-  }
-}
-
-/**
  * Ensure the autopilot directory exists
  */
 export function ensureAutopilotDir(directory: string): string {
-  ensureStateDir(directory);
-  const autopilotDir = join(directory, '.omc', SPEC_DIR);
+  const autopilotDir = join(getOmcRoot(directory), SPEC_DIR);
   if (!existsSync(autopilotDir)) {
     mkdirSync(autopilotDir, { recursive: true });
   }
@@ -72,65 +47,28 @@ export function ensureAutopilotDir(directory: string): string {
  * Read autopilot state from disk
  */
 export function readAutopilotState(directory: string, sessionId?: string): AutopilotState | null {
-  if (sessionId) {
-    // Session-scoped ONLY — no legacy fallback
-    const sessionFile = getStateFilePath(directory, sessionId);
-    if (!existsSync(sessionFile)) return null;
-    try {
-      const content = readFileSync(sessionFile, 'utf-8');
-      const state = JSON.parse(content);
-      // Validate session identity
-      if (state.session_id && state.session_id !== sessionId) return null;
-      return state;
-    } catch {
-      return null;
-    }
-  }
+  const state = readModeState<AutopilotState>('autopilot', directory, sessionId);
 
-  // No sessionId: legacy path (backward compat)
-  const stateFile = getStateFilePath(directory);
-  if (!existsSync(stateFile)) {
+  // Validate session identity
+  if (state && sessionId && state.session_id && state.session_id !== sessionId) {
     return null;
   }
 
-  try {
-    const content = readFileSync(stateFile, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+  return state;
 }
 
 /**
  * Write autopilot state to disk
  */
 export function writeAutopilotState(directory: string, state: AutopilotState, sessionId?: string): boolean {
-  try {
-    ensureStateDir(directory, sessionId);
-    const stateFile = getStateFilePath(directory, sessionId);
-    writeFileSync(stateFile, JSON.stringify(state, null, 2));
-    return true;
-  } catch {
-    return false;
-  }
+  return writeModeState('autopilot', state as unknown as Record<string, unknown>, directory, sessionId);
 }
 
 /**
  * Clear autopilot state
  */
 export function clearAutopilotState(directory: string, sessionId?: string): boolean {
-  const stateFile = getStateFilePath(directory, sessionId);
-
-  if (!existsSync(stateFile)) {
-    return true;
-  }
-
-  try {
-    unlinkSync(stateFile);
-    return true;
-  } catch {
-    return false;
-  }
+  return clearModeStateFile('autopilot', directory, sessionId);
 }
 
 /**
@@ -138,7 +76,9 @@ export function clearAutopilotState(directory: string, sessionId?: string): bool
  * Returns null if no state file exists.
  */
 export function getAutopilotStateAge(directory: string, sessionId?: string): number | null {
-  const stateFile = getStateFilePath(directory, sessionId);
+  const stateFile = sessionId
+    ? resolveSessionStatePath('autopilot', sessionId, directory)
+    : resolveStatePath('autopilot', directory);
   if (!existsSync(stateFile)) return null;
   try {
     const stats = statSync(stateFile);
@@ -361,14 +301,14 @@ export function updateValidation(
  * Get the spec file path
  */
 export function getSpecPath(directory: string): string {
-  return join(directory, '.omc', SPEC_DIR, 'spec.md');
+  return join(getOmcRoot(directory), SPEC_DIR, 'spec.md');
 }
 
 /**
  * Get the plan file path
  */
 export function getPlanPath(directory: string): string {
-  return join(directory, '.omc', 'plans', 'autopilot-impl.md');
+  return join(getOmcRoot(directory), 'plans', 'autopilot-impl.md');
 }
 
 // ============================================================================

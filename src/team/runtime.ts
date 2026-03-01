@@ -2,6 +2,12 @@ import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { CliAgentType } from './model-contract.js';
+import type { WorkerInteropConfig } from '../interop/adapter-types.js';
+import { getInteropMode } from '../interop/mcp-bridge.js';
+import {
+  bridgeBootstrapToOmx, pollOmxCompletion,
+} from '../interop/worker-adapter.js';
+import { appendOmxTeamEvent } from '../interop/omx-team-state.js';
 import { buildWorkerArgv, validateCliAvailable, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
 import {
@@ -20,6 +26,8 @@ export interface TeamConfig {
   agentTypes: CliAgentType[];
   tasks: Array<{ subject: string; description: string; }>;
   cwd: string;
+  /** Per-worker interop config for OMC-OMX cross-platform bridging (issue #1117) */
+  workerInteropConfigs?: WorkerInteropConfig[];
 }
 
 export interface ActiveWorkerState {
@@ -109,7 +117,17 @@ async function readJsonSafe<T>(filePath: string): Promise<T | null> {
     const content = await readFile(filePath, 'utf-8');
     return JSON.parse(content) as T;
   } catch {
-    return null;
+    // Gemini CLI sometimes replaces double-quotes with backslashes in JSON output.
+    // Only attempt recovery when the content has no double-quotes at all (total
+    // substitution), to avoid destroying legitimate escape sequences.
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      if (content.includes('"')) return null;
+      const recovered = content.replace(/\\/g, '"');
+      return JSON.parse(recovered) as T;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -118,6 +136,19 @@ function parseWorkerIndex(workerNameValue: string): number {
   if (!match) return 0;
   const parsed = Number.parseInt(match[1], 10) - 1;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+/** Check if a worker uses OMX state conventions based on runtime config */
+function isOmxInteropWorker(runtime: TeamRuntime, workerNameValue: string): boolean {
+  const wConfig = runtime.config.workerInteropConfigs?.find(c => c.workerName === workerNameValue);
+  return wConfig?.interopMode === 'omx';
+}
+
+/** Build an AdapterContext from runtime state (returns null if interop is off) */
+function buildAdapterContext(runtime: TeamRuntime): import('../interop/adapter-types.js').AdapterContext | null {
+  const mode = getInteropMode();
+  if (mode === 'off') return null;
+  return { lead: 'omc', teamName: runtime.teamName, cwd: runtime.cwd, interopMode: mode };
 }
 
 function taskPath(root: string, taskId: string): string {
@@ -247,17 +278,28 @@ function buildInitialTaskInstruction(
   task: { subject: string; description: string },
   taskId: string
 ): string {
+  const readyPath = `.omc/state/team/${teamName}/workers/${workerName}/.ready`;
   const donePath = `.omc/state/team/${teamName}/workers/${workerName}/done.json`;
+  const doneDir = `.omc/state/team/${teamName}/workers/${workerName}`;
   return [
     `## Initial Task Assignment`,
     `Task ID: ${taskId}`,
     `Worker: ${workerName}`,
     `Subject: ${task.subject}`,
     ``,
+    `## FIRST ACTION REQUIRED`,
+    `Before doing anything else, write your ready sentinel file:`,
+    '```bash',
+    `mkdir -p $(dirname ${readyPath}) && touch ${readyPath}`,
+    '```',
+    ``,
     task.description,
     ``,
-    `When complete, write done signal to ${donePath}:`,
-    `{"taskId":"${taskId}","status":"completed","summary":"<brief summary>","completedAt":"<ISO timestamp>"}`,
+    `When complete, write done signal using a bash command (do NOT use a file-write tool):`,
+    '```bash',
+    `mkdir -p ${doneDir} && echo '{"taskId":"${taskId}","status":"completed","summary":"done","completedAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ${donePath}`,
+    '```',
+    `For failures, set status to "failed" and include the error in summary.`,
     ``,
     `IMPORTANT: Execute ONLY the task assigned to you in this inbox. After writing done.json, exit immediately. Do not read from the task directory or claim other tasks.`,
   ].join('\n');
@@ -439,6 +481,16 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
 
       const root = stateRoot(runtime.cwd, runtime.teamName);
 
+      // Interop: poll OMX task files for completion and synthesize done.json shims (issue #1117).
+      // This runs BEFORE the done.json collection below so the shim is available on the same tick.
+      const adapterCtx = buildAdapterContext(runtime);
+      if (adapterCtx) {
+        await Promise.all(workers
+          .filter(([wName]) => isOmxInteropWorker(runtime, wName))
+          .map(([wName, active]) => pollOmxCompletion(adapterCtx, wName, active.taskId).catch(() => null))
+        );
+      }
+
       // Collect done signals and alive checks in parallel to avoid O(N×300ms) sequential tmux calls.
       const [doneSignals, aliveResults] = await Promise.all([
         Promise.all(workers.map(([wName]) => {
@@ -597,10 +649,13 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
   });
 
-  // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
-  // flag so tmux send-keys never needs to interact with the TUI input widget.
+  // For prompt-mode agents (e.g. Gemini Ink TUI), pass the full task
+  // instruction inline via CLI flag. This bypasses gitignore restrictions
+  // (e.g. Gemini's respectGitIgnore=true ignoring .omc/ paths) by embedding
+  // the task content directly in the CLI argument instead of referencing an
+  // inbox file that may be invisible to the worker. See #1148.
   if (usePromptMode) {
-    const promptArgs = getPromptModeArgs(agentType, `Read and execute your task from: ${relInboxPath}`);
+    const promptArgs = getPromptModeArgs(agentType, instruction);
     launchArgs.push(...promptArgs);
   }
 
@@ -613,7 +668,12 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
   };
 
-  await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig);
+  // For promptMode agents, wait for the shell to be ready before sending keys
+  // to avoid the race condition where send-keys fires before zsh is ready (#1144).
+  // Non-promptMode agents already have a 4s post-spawn delay, so skip the wait.
+  await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig, {
+    waitForShell: usePromptMode,
+  });
 
   runtime.workerPaneIds.push(paneId);
   runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
@@ -657,6 +717,14 @@ export async function spawnWorkerForTask(
   }
   // Prompt-mode agents: instruction already passed via CLI flag at spawn.
   // No trust-confirm or tmux send-keys interaction needed.
+
+  // Interop: bridge bootstrap to OMX format for cross-platform workers (issue #1117)
+  if (isOmxInteropWorker(runtime, workerNameValue)) {
+    const ctx = buildAdapterContext(runtime);
+    if (ctx) {
+      await bridgeBootstrapToOmx(ctx, workerNameValue, { id: taskId, subject: task.subject, description: task.description });
+    }
+  }
 
   return paneId;
 }
@@ -794,6 +862,23 @@ export async function shutdownTeam(
     }
   }
   // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
+
+  // Interop: write shutdown event to OMX event log for cross-platform workers (issue #1117)
+  const interopMode = getInteropMode();
+  if (interopMode !== 'off' && configData?.workerInteropConfigs) {
+    const omxWorkers = configData.workerInteropConfigs.filter(c => c.interopMode === 'omx');
+    for (const wConfig of omxWorkers) {
+      try {
+        await appendOmxTeamEvent(teamName, {
+          type: 'worker_stopped',
+          worker: wConfig.workerName,
+          task_id: undefined,
+        }, cwd);
+      } catch {
+        // best-effort: OMX event log may not exist
+      }
+    }
+  }
 
   // Kill tmux session (or just worker panes in split-pane mode)
   await killTeamSession(sessionName, workerPaneIds, leaderPaneId);

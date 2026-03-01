@@ -48,10 +48,48 @@ __export(bridge_entry_exports, {
 module.exports = __toCommonJS(bridge_entry_exports);
 var import_fs10 = require("fs");
 var import_path12 = require("path");
-var import_os2 = require("os");
+var import_os3 = require("os");
 
 // src/team/mcp-team-bridge.ts
-var import_child_process2 = require("child_process");
+var import_child_process3 = require("child_process");
+
+// src/team/shell-path.ts
+var import_child_process = require("child_process");
+var _resolved = null;
+function resolveShellPath() {
+  if (_resolved !== null) return _resolved;
+  if (process.platform === "win32") {
+    _resolved = process.env.PATH || "";
+    return _resolved;
+  }
+  try {
+    const shell = process.env.SHELL || "/bin/sh";
+    const result = (0, import_child_process.spawnSync)(shell, ["-ilc", "env"], {
+      timeout: 5e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    if (result.status === 0) {
+      const stdout = result.stdout?.toString() ?? "";
+      const pathLine = stdout.split("\n").find((l) => l.startsWith("PATH="));
+      const path = pathLine?.slice(5)?.trim();
+      if (path) {
+        _resolved = path;
+        return _resolved;
+      }
+    }
+  } catch {
+  }
+  _resolved = process.env.PATH || "";
+  return _resolved;
+}
+function resolvedEnv(extra) {
+  const env = { ...process.env };
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  env[pathKey] = resolveShellPath();
+  return { ...env, ...extra };
+}
+
+// src/team/mcp-team-bridge.ts
 var import_fs8 = require("fs");
 var import_path10 = require("path");
 
@@ -124,13 +162,13 @@ function getClaudeConfigDir() {
 var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/team/tmux-session.ts
-var import_child_process = require("child_process");
+var import_child_process2 = require("child_process");
 var import_path3 = require("path");
 var import_util = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
 var TMUX_SESSION_PREFIX = "omc-team";
-var promisifiedExec = (0, import_util.promisify)(import_child_process.exec);
-var promisifiedExecFile = (0, import_util.promisify)(import_child_process.execFile);
+var promisifiedExec = (0, import_util.promisify)(import_child_process2.exec);
+var promisifiedExecFile = (0, import_util.promisify)(import_child_process2.execFile);
 function sanitizeName(name) {
   const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
   if (sanitized.length === 0) {
@@ -147,7 +185,7 @@ function sessionName(teamName, workerName) {
 function killSession(teamName, workerName) {
   const name = sessionName(teamName, workerName);
   try {
-    (0, import_child_process.execFileSync)("tmux", ["kill-session", "-t", name], { stdio: "pipe", timeout: 5e3 });
+    (0, import_child_process2.execFileSync)("tmux", ["kill-session", "-t", name], { stdio: "pipe", timeout: 5e3 });
   } catch {
   }
 }
@@ -1036,7 +1074,7 @@ function sleep(ms) {
 function captureFileSnapshot(cwd) {
   const files = /* @__PURE__ */ new Set();
   try {
-    const statusOutput = (0, import_child_process2.execSync)("git status --porcelain", { cwd, encoding: "utf-8", timeout: 1e4 });
+    const statusOutput = (0, import_child_process3.execSync)("git status --porcelain", { cwd, encoding: "utf-8", timeout: 1e4 });
     for (const line of statusOutput.split("\n")) {
       if (!line.trim()) continue;
       const filePart = line.slice(3);
@@ -1044,7 +1082,7 @@ function captureFileSnapshot(cwd) {
       const fileName = arrowIdx !== -1 ? filePart.slice(arrowIdx + 4) : filePart;
       files.add(fileName.trim());
     }
-    const untrackedOutput = (0, import_child_process2.execSync)("git ls-files --others --exclude-standard", { cwd, encoding: "utf-8", timeout: 1e4 });
+    const untrackedOutput = (0, import_child_process3.execSync)("git ls-files --others --exclude-standard", { cwd, encoding: "utf-8", timeout: 1e4 });
     for (const line of untrackedOutput.split("\n")) {
       if (line.trim()) files.add(line.trim());
     }
@@ -1262,9 +1300,10 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
     args = ["--yolo"];
     if (model) args.push("--model", model);
   }
-  const child = (0, import_child_process2.spawn)(cmd, args, {
+  const child = (0, import_child_process3.spawn)(cmd, args, {
     stdio: ["pipe", "pipe", "pipe"],
     cwd,
+    env: resolvedEnv(),
     ...process.platform === "win32" ? { shell: true } : {}
   });
   const result = new Promise((resolve5, reject) => {
@@ -1656,8 +1695,9 @@ ${violationSummary}`);
 
 // src/lib/worktree-paths.ts
 var import_crypto = require("crypto");
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_fs9 = require("fs");
+var import_os2 = require("os");
 var import_path11 = require("path");
 var MAX_WORKTREE_CACHE_SIZE = 8;
 var worktreeCacheMap = /* @__PURE__ */ new Map();
@@ -1670,7 +1710,7 @@ function getWorktreeRoot(cwd) {
     return root || null;
   }
   try {
-    const root = (0, import_child_process3.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process4.execSync)("git rev-parse --show-toplevel", {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"]
@@ -1718,7 +1758,7 @@ function validateBridgeWorkingDirectory(workingDirectory) {
     throw new Error(`workingDirectory is not a directory: ${workingDirectory}`);
   }
   const resolved = (0, import_fs10.realpathSync)(workingDirectory);
-  const home = (0, import_os2.homedir)();
+  const home = (0, import_os3.homedir)();
   if (!resolved.startsWith(home + "/") && resolved !== home) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
@@ -1734,7 +1774,7 @@ function main() {
     process.exit(1);
   }
   const configPath2 = (0, import_path12.resolve)(process.argv[configIdx + 1]);
-  const home = (0, import_os2.homedir)();
+  const home = (0, import_os3.homedir)();
   const claudeConfigDir = getClaudeConfigDir();
   if (!validateConfigPath(configPath2, home, claudeConfigDir)) {
     console.error(`Config path must be under ~/ with ${claudeConfigDir} or ~/.omc/ subpath: ${configPath2}`);

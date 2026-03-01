@@ -362,6 +362,9 @@ export async function sendWebhook(config, payload) {
                 reason: payload.reason,
                 active_mode: payload.activeMode,
                 question: payload.question,
+                ...(payload.replyChannel && { channel: payload.replyChannel }),
+                ...(payload.replyTarget && { to: payload.replyTarget }),
+                ...(payload.replyThread && { thread_id: payload.replyThread }),
             }),
             signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
         });

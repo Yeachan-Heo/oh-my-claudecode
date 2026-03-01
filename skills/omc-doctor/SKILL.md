@@ -49,13 +49,24 @@ ls -la ~/.claude/hooks/*.sh 2>/dev/null
 # Check if CLAUDE.md exists
 ls -la ~/.claude/CLAUDE.md 2>/dev/null
 
-# Check for OMC marker
-grep -q "oh-my-claudecode Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config"
+# Check for OMC markers (<!-- OMC:START --> is the canonical marker)
+grep -q "<!-- OMC:START -->" ~/.claude/CLAUDE.md 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config in CLAUDE.md"
+
+# Check companion files for file-split pattern (e.g. CLAUDE-omc.md)
+ls ~/.claude/CLAUDE-*.md 2>/dev/null
+for f in ~/.claude/CLAUDE-*.md; do
+  [ -f "$f" ] && grep -q "<!-- OMC:START -->" "$f" 2>/dev/null && echo "Has OMC config in companion: $f"
+done
+
+# Check if CLAUDE.md references a companion file
+grep -o "CLAUDE-[^ )]*\.md" ~/.claude/CLAUDE.md 2>/dev/null
 ```
 
 **Diagnosis**:
-- If missing: CRITICAL - CLAUDE.md not configured
-- If missing OMC marker: WARN - outdated CLAUDE.md
+- If CLAUDE.md missing: CRITICAL - CLAUDE.md not configured
+- If `<!-- OMC:START -->` found in CLAUDE.md: OK
+- If `<!-- OMC:START -->` found in a companion file (e.g. `CLAUDE-omc.md`): OK - file-split pattern detected
+- If no OMC markers in CLAUDE.md or any companion file: WARN - outdated CLAUDE.md
 
 ### Step 5: Check for Stale Plugin Cache
 
@@ -69,7 +80,8 @@ node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=pro
 
 ### Step 6: Check for Legacy Curl-Installed Content
 
-Check for legacy agents, commands, and skills installed via curl (before plugin system):
+Check for legacy agents, commands, and skills installed via curl (before plugin system).
+**Important**: Only flag files whose names match actual plugin-provided names. Do NOT flag user's custom agents/commands/skills that are unrelated to OMC.
 
 ```bash
 # Check for legacy agents directory
@@ -83,14 +95,19 @@ ls -la ~/.claude/skills/ 2>/dev/null
 ```
 
 **Diagnosis**:
-- If `~/.claude/agents/` exists with oh-my-claudecode-related files: WARN - legacy agents (now provided by plugin)
-- If `~/.claude/commands/` exists with oh-my-claudecode-related files: WARN - legacy commands (now provided by plugin)
-- If `~/.claude/skills/` exists with oh-my-claudecode-related files: WARN - legacy skills (now provided by plugin)
+- If `~/.claude/agents/` exists with files matching plugin agent names: WARN - legacy agents (now provided by plugin)
+- If `~/.claude/commands/` exists with files matching plugin command names: WARN - legacy commands (now provided by plugin)
+- If `~/.claude/skills/` exists with files matching plugin skill names: WARN - legacy skills (now provided by plugin)
+- If custom files exist that do NOT match plugin names: OK - these are user custom content, do not flag them
 
-Look for files like:
-- `architect.md`, `document-specialist.md`, `explore.md`, `executor.md`, etc. in agents/
-- `ultrawork.md`, `deepsearch.md`, etc. in commands/
-- Any oh-my-claudecode-related `.md` files in skills/
+**Known plugin agent names** (check agents/ for these):
+`architect.md`, `document-specialist.md`, `explore.md`, `executor.md`, `debugger.md`, `planner.md`, `analyst.md`, `critic.md`, `verifier.md`, `test-engineer.md`, `build-fixer.md`, `designer.md`, `writer.md`, `qa-tester.md`, `scientist.md`, `security-reviewer.md`, `code-reviewer.md`, `quality-reviewer.md`, `deep-executor.md`
+
+**Known plugin skill names** (check skills/ for these):
+`autopilot`, `ralph`, `ultrawork`, `team`, `ultrapilot`, `pipeline`, `ultraqa`, `plan`, `ralplan`, `analyze`, `build-fix`, `cancel`, `ccg`, `code-review`, `configure-notifications`, `configure-openclaw`, `deepinit`, `external-context`, `hud`, `learn-about-omc`, `learner`, `mcp-setup`, `note`, `omc-doctor`, `omc-help`, `omc-setup`, `omc-teams`, `project-session-manager`, `ralph-init`, `release`, `review`, `sciomc`, `security-review`, `skill`, `tdd`, `trace`, `writer-memory`
+
+**Known plugin command names** (check commands/ for these):
+`ultrawork.md`, `deepsearch.md`
 
 ---
 

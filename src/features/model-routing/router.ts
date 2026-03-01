@@ -28,6 +28,18 @@ export function routeTask(
 ): RoutingDecision {
   const mergedConfig = { ...DEFAULT_ROUTING_CONFIG, ...config };
 
+  // If forceInherit is enabled, bypass all routing so agents inherit the parent model (issue #1135)
+  if (mergedConfig.forceInherit) {
+    return {
+      model: 'inherit',
+      modelType: 'inherit',
+      tier: 'MEDIUM',
+      confidence: 1.0,
+      reasons: ['forceInherit enabled: agents inherit parent model'],
+      escalated: false,
+    };
+  }
+
   // If routing is disabled, use default tier
   if (!mergedConfig.enabled) {
     return createDecision(mergedConfig.defaultTier, mergedConfig.tierModels, ['Routing disabled, using default tier'], false);

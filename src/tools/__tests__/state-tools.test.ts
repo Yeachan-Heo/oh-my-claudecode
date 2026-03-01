@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import {
   stateReadTool,
@@ -138,7 +138,7 @@ describe('state-tools', () => {
     });
 
     it('should clear only the requested session for every execution mode', async () => {
-      const modes = ['autopilot', 'ultrapilot', 'pipeline', 'ralph', 'ultrawork', 'ultraqa'] as const;
+      const modes = ['autopilot', 'ralph', 'ultrawork', 'ultraqa', 'team'] as const;
       const sessionA = 'session-a';
       const sessionB = 'session-b';
 
@@ -377,13 +377,14 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain('active');
     });
 
-    it('should clear session-specific state without affecting legacy', async () => {
+    it('should clear session-specific state without affecting legacy owned by another session', async () => {
       const sessionId = 'test-session-clear';
+      const otherSessionId = 'other-session-owner';
 
-      // Create both legacy and session-scoped state
+      // Create legacy state owned by a different session
       writeFileSync(
         join(TEST_DIR, '.omc', 'state', 'ralph-state.json'),
-        JSON.stringify({ active: true, source: 'legacy' })
+        JSON.stringify({ active: true, source: 'legacy', _meta: { sessionId: otherSessionId } })
       );
       const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
       mkdirSync(sessionDir, { recursive: true });
@@ -401,7 +402,7 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain('cleared');
       // Session-scoped file should be gone
       expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
-      // Legacy file should remain
+      // Legacy file should remain (belongs to different session)
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'ralph-state.json'))).toBe(true);
     });
   });

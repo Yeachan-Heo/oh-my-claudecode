@@ -17,7 +17,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
-import { resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 // ---------------------------------------------------------------------------
 // Protection configuration per level
 // ---------------------------------------------------------------------------
@@ -44,11 +44,9 @@ const SKILL_PROTECTION = {
     autopilot: 'none',
     ralph: 'none',
     ultrawork: 'none',
-    ultrapilot: 'none',
     team: 'none',
     'omc-teams': 'none',
     ultraqa: 'none',
-    pipeline: 'none',
     cancel: 'none',
     // === Instant / read-only → no protection needed ===
     trace: 'none',
@@ -106,7 +104,7 @@ export function getSkillStatePath(directory, sessionId) {
     if (sessionId) {
         return resolveSessionStatePath('skill-active', sessionId, directory);
     }
-    return join(directory, '.omc', 'state', 'skill-active-state.json');
+    return join(getOmcRoot(directory), 'state', 'skill-active-state.json');
 }
 /**
  * Read the current skill active state.

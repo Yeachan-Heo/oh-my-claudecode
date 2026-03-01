@@ -8,13 +8,19 @@
 /** All supported execution mode identifiers. */
 export declare const MODE_NAMES: {
     readonly AUTOPILOT: "autopilot";
-    readonly ULTRAPILOT: "ultrapilot";
-    readonly SWARM: "swarm";
-    readonly PIPELINE: "pipeline";
     readonly TEAM: "team";
     readonly RALPH: "ralph";
     readonly ULTRAWORK: "ultrawork";
     readonly ULTRAQA: "ultraqa";
+};
+/**
+ * Deprecated mode names removed in #1131 (pipeline unification).
+ * Kept as constants for deprecation warnings and migration paths.
+ */
+export declare const DEPRECATED_MODE_NAMES: {
+    readonly ULTRAPILOT: "ultrapilot";
+    readonly SWARM: "swarm";
+    readonly PIPELINE: "pipeline";
 };
 /** Union type derived from the constant map. */
 export type ModeName = typeof MODE_NAMES[keyof typeof MODE_NAMES];

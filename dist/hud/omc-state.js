@@ -6,6 +6,7 @@
  */
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { getOmcRoot } from '../lib/worktree-paths.js';
 /**
  * Maximum age for state files to be considered "active".
  * Files older than this are treated as stale/abandoned.
@@ -37,7 +38,8 @@ function resolveStatePath(directory, filename) {
     let bestPath = null;
     let bestMtime = 0;
     // Check session-scoped paths first (most likely location after Issue #456 fix)
-    const sessionsDir = join(directory, '.omc', 'state', 'sessions');
+    const omcRoot = getOmcRoot(directory);
+    const sessionsDir = join(omcRoot, 'state', 'sessions');
     if (existsSync(sessionsDir)) {
         try {
             const entries = readdirSync(sessionsDir, { withFileTypes: true });
@@ -64,7 +66,7 @@ function resolveStatePath(directory, filename) {
         }
     }
     // Check standard path
-    const newPath = join(directory, '.omc', 'state', filename);
+    const newPath = join(omcRoot, 'state', filename);
     if (existsSync(newPath)) {
         try {
             const mtime = statSync(newPath).mtimeMs;
@@ -79,7 +81,7 @@ function resolveStatePath(directory, filename) {
         }
     }
     // Check legacy path
-    const legacyPath = join(directory, '.omc', filename);
+    const legacyPath = join(omcRoot, filename);
     if (existsSync(legacyPath)) {
         try {
             const mtime = statSync(legacyPath).mtimeMs;
@@ -159,7 +161,7 @@ export function readPrdStateForHud(directory) {
     let prdPath = join(directory, 'prd.json');
     if (!existsSync(prdPath)) {
         // Check .omc
-        prdPath = join(directory, '.omc', 'prd.json');
+        prdPath = join(getOmcRoot(directory), 'prd.json');
         if (!existsSync(prdPath)) {
             return null;
         }

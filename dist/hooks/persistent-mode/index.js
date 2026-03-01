@@ -15,7 +15,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 import { readUltraworkState, writeUltraworkState, incrementReinforcement, deactivateUltrawork, getUltraworkPersistenceMessage } from '../ultrawork/index.js';
-import { resolveToWorktreeRoot, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { readRalphState, writeRalphState, incrementRalphIteration, clearRalphState, getPrdCompletionStatus, getRalphContext, readVerificationState, recordArchitectFeedback, getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection, clearVerificationState } from '../ralph/index.js';
 import { checkIncompleteTodos, getNextPendingTodo, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
@@ -66,7 +66,7 @@ function isSessionCancelInProgress(directory, sessionId) {
  * Returns null if file doesn't exist or error is stale (>60 seconds old).
  */
 export function readLastToolError(directory) {
-    const stateDir = join(directory, '.omc', 'state');
+    const stateDir = join(getOmcRoot(directory), 'state');
     const errorPath = join(stateDir, 'last-tool-error.json');
     try {
         if (!existsSync(errorPath)) {
@@ -96,7 +96,7 @@ export function readLastToolError(directory) {
  * Clear tool error state file atomically.
  */
 export function clearToolErrorState(directory) {
-    const stateDir = join(directory, '.omc', 'state');
+    const stateDir = join(getOmcRoot(directory), 'state');
     const errorPath = join(stateDir, 'last-tool-error.json');
     try {
         if (existsSync(errorPath)) {

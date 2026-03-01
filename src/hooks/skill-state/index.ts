@@ -16,9 +16,7 @@
  * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1033
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { writeModeState, readModeState, clearModeStateFile } from '../../lib/mode-state-io.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,11 +71,9 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
   autopilot: 'none',
   ralph: 'none',
   ultrawork: 'none',
-  ultrapilot: 'none',
   team: 'none',
   'omc-teams': 'none',
   ultraqa: 'none',
-  pipeline: 'none',
   cancel: 'none',
 
   // === Instant / read-only → no protection needed ===
@@ -136,17 +132,6 @@ export function getSkillConfig(skillName: string): SkillStateConfig {
 }
 
 /**
- * Resolve the path to skill-active-state.json.
- * Uses session-scoped path when sessionId is provided.
- */
-export function getSkillStatePath(directory: string, sessionId?: string): string {
-  if (sessionId) {
-    return resolveSessionStatePath('skill-active', sessionId, directory);
-  }
-  return join(directory, '.omc', 'state', 'skill-active-state.json');
-}
-
-/**
  * Read the current skill active state.
  * Returns null if no state exists or state is invalid.
  */
@@ -154,23 +139,11 @@ export function readSkillActiveState(
   directory: string,
   sessionId?: string
 ): SkillActiveState | null {
-  const statePath = getSkillStatePath(directory, sessionId);
-
-  try {
-    if (!existsSync(statePath)) {
-      return null;
-    }
-    const content = readFileSync(statePath, 'utf-8');
-    const state = JSON.parse(content) as SkillActiveState;
-
-    if (!state || typeof state.active !== 'boolean') {
-      return null;
-    }
-
-    return state;
-  } catch {
+  const state = readModeState<SkillActiveState>('skill-active', directory, sessionId);
+  if (!state || typeof state.active !== 'boolean') {
     return null;
   }
+  return state;
 }
 
 /**
@@ -204,18 +177,8 @@ export function writeSkillActiveState(
     stale_ttl_ms: config.staleTtlMs,
   };
 
-  const statePath = getSkillStatePath(directory, sessionId);
-
-  try {
-    const dir = dirname(statePath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(statePath, JSON.stringify(state, null, 2));
-    return state;
-  } catch {
-    return null;
-  }
+  const success = writeModeState('skill-active', state as unknown as Record<string, unknown>, directory, sessionId);
+  return success ? state : null;
 }
 
 /**
@@ -223,16 +186,7 @@ export function writeSkillActiveState(
  * Called when a skill completes or is cancelled.
  */
 export function clearSkillActiveState(directory: string, sessionId?: string): boolean {
-  const statePath = getSkillStatePath(directory, sessionId);
-
-  try {
-    if (existsSync(statePath)) {
-      unlinkSync(statePath);
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return clearModeStateFile('skill-active', directory, sessionId);
 }
 
 /**
@@ -292,10 +246,8 @@ export function checkSkillActiveState(
   state.reinforcement_count += 1;
   state.last_checked_at = new Date().toISOString();
 
-  const statePath = getSkillStatePath(directory, sessionId);
-  try {
-    writeFileSync(statePath, JSON.stringify(state, null, 2));
-  } catch {
+  const written = writeModeState('skill-active', state as unknown as Record<string, unknown>, directory, sessionId);
+  if (!written) {
     // If we can't write, don't block
     return { shouldBlock: false, message: '' };
   }

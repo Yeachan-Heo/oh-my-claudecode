@@ -2,7 +2,7 @@
  * PreCompact Hook - State Preservation Before Context Compaction
  *
  * Creates checkpoints before compaction to preserve critical state including:
- * - Active mode states (autopilot, ralph, ultrawork, swarm)
+ * - Active mode states (autopilot, ralph, ultrawork)
  * - TODO summary
  * - Wisdom from notepads
  *
@@ -31,18 +31,6 @@ export interface CompactCheckpoint {
         };
         ultrawork?: {
             original_prompt: string;
-        };
-        swarm?: {
-            session_id: string;
-            task_count: number;
-        };
-        ultrapilot?: {
-            session_id: string;
-            worker_count: number;
-        };
-        pipeline?: {
-            preset: string;
-            current_stage: number;
         };
         ultraqa?: {
             cycle: number;
@@ -110,7 +98,7 @@ export declare function formatCompactSummary(checkpoint: CompactCheckpoint): str
  * Main handler for PreCompact hook.
  *
  * Uses a per-directory mutex to prevent concurrent compaction.
- * When multiple subagent results arrive simultaneously (swarm/ultrawork),
+ * When multiple subagent results arrive simultaneously (ultrawork/team),
  * only the first call runs the compaction; subsequent calls await
  * the in-flight result. This fixes issue #453.
  */

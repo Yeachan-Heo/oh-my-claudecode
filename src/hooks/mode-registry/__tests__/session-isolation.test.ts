@@ -84,8 +84,10 @@ describe('Session-Scoped State Isolation', () => {
       expect(path1).toBe(path2);
     });
 
-    it('should reject swarm mode', () => {
-      expect(() => resolveSessionStatePath('swarm', 'sid', tempDir)).toThrow('SQLite');
+    it('should resolve swarm as regular JSON path after #1131 removal', () => {
+      // swarm SQLite special-casing removed in #1131
+      const result = resolveSessionStatePath('swarm', 'sid', tempDir);
+      expect(result).toContain('swarm-state.json');
     });
   });
 

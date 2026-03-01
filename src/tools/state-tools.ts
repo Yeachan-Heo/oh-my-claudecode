@@ -29,10 +29,9 @@ import {
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
 
-// ExecutionMode from mode-registry (8 modes - NO ralplan)
+// ExecutionMode from mode-registry (5 modes - NO ralplan)
 const EXECUTION_MODES: [string, ...string[]] = [
-  'autopilot', 'ultrapilot', 'swarm', 'pipeline', 'team',
-  'ralph', 'ultrawork', 'ultraqa'
+  'autopilot', 'team', 'ralph', 'ultrawork', 'ultraqa'
 ];
 
 // Extended type for state tools - includes ralplan which has state but isn't in mode-registry
@@ -78,25 +77,6 @@ export const stateReadTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
-
-      // Special handling for swarm (SQLite database - no session support)
-      if (mode === 'swarm') {
-        const statePath = getStatePath(mode, root);
-        if (!existsSync(statePath)) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `No state found for mode: swarm\nNote: Swarm uses SQLite (swarm.db), not JSON. Expected path: ${statePath}`
-            }]
-          };
-        }
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `## State for swarm\n\nPath: ${statePath}\n\nNote: Swarm uses SQLite database. Use swarm-specific tools to query state.`
-          }]
-        };
-      }
 
       // If session_id provided, read from session-scoped path
       if (sessionId) {
@@ -256,17 +236,6 @@ export const stateWriteTool: ToolDefinition<{
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
 
-      // Swarm uses SQLite - cannot be written via this tool
-      if (mode === 'swarm') {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error: Swarm uses SQLite database (swarm.db), not JSON. Use swarm-specific APIs to modify state.`
-          }],
-          isError: true
-        };
-      }
-
       // Determine state path based on session_id
       let statePath: string;
       if (sessionId) {
@@ -375,18 +344,37 @@ export const stateClearTool: ToolDefinition<{
         if (MODE_CONFIGS[mode as ExecutionMode]) {
           const success = clearModeState(mode as ExecutionMode, root, sessionId);
 
+          // Ghost-legacy cleanup: after clearing session file, also remove
+          // any legacy file at .omc/state/{mode}-state.json if it belongs
+          // to this session (matching _meta.sessionId) or has no _meta block.
+          let ghostCleaned = false;
+          try {
+            const legacyPath = getStateFilePath(root, mode as ExecutionMode);
+            if (existsSync(legacyPath)) {
+              const raw = JSON.parse(readFileSync(legacyPath, 'utf-8')) as Record<string, unknown>;
+              const meta = raw._meta as Record<string, unknown> | undefined;
+              if (!meta || meta.sessionId === sessionId) {
+                unlinkSync(legacyPath);
+                ghostCleaned = true;
+              }
+            }
+          } catch {
+            // Best-effort ghost cleanup — ignore errors
+          }
+
+          const ghostNote = ghostCleaned ? ' (ghost legacy file also removed)' : '';
           if (success) {
             return {
               content: [{
                 type: 'text' as const,
-                text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}`
+                text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}${ghostNote}`
               }]
             };
           } else {
             return {
               content: [{
                 type: 'text' as const,
-                text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}`
+                text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}${ghostNote}`
               }]
             };
           }
@@ -396,20 +384,31 @@ export const stateClearTool: ToolDefinition<{
         const statePath = resolveSessionStatePath(mode, sessionId, root);
         if (existsSync(statePath)) {
           unlinkSync(statePath);
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}\nRemoved: ${statePath}`
-            }]
-          };
-        } else {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `No state found to clear for mode: ${mode} in session: ${sessionId}`
-            }]
-          };
         }
+
+        // Ghost-legacy cleanup for non-registry modes
+        let ghostCleaned = false;
+        try {
+          const legacyPath = resolveStatePath(mode, root);
+          if (existsSync(legacyPath)) {
+            const raw = JSON.parse(readFileSync(legacyPath, 'utf-8')) as Record<string, unknown>;
+            const meta = raw._meta as Record<string, unknown> | undefined;
+            if (!meta || meta.sessionId === sessionId) {
+              unlinkSync(legacyPath);
+              ghostCleaned = true;
+            }
+          }
+        } catch {
+          // Best-effort ghost cleanup
+        }
+
+        const ghostNote = ghostCleaned ? ' (ghost legacy file also removed)' : '';
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}${ghostNote}`
+          }]
+        };
       }
 
       // No session_id: clear from all locations (legacy + all sessions)

@@ -6,9 +6,9 @@
  * this module ensures the mode persists until all work is done.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { writeModeState, readModeState } from '../../lib/mode-state-io.js';
+import { resolveStatePath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 
 export interface UltraworkState {
   /** Whether ultrawork mode is currently active */
@@ -38,31 +38,14 @@ const _DEFAULT_STATE: UltraworkState = {
 };
 
 /**
- * Get the state file path for Ultrawork
+ * Get the state file path for Ultrawork (used only by deactivateUltrawork for ghost-legacy cleanup)
  */
 function getStateFilePath(directory?: string, sessionId?: string): string {
   const baseDir = directory || process.cwd();
   if (sessionId) {
     return resolveSessionStatePath('ultrawork', sessionId, baseDir);
   }
-  const omcDir = join(baseDir, '.omc');
-  return join(omcDir, 'state', 'ultrawork-state.json');
-}
-
-
-/**
- * Ensure the .omc/state directory exists
- */
-function ensureStateDir(directory?: string, sessionId?: string): void {
-  if (sessionId) {
-    ensureSessionStateDir(sessionId, directory || process.cwd());
-    return;
-  }
-  const baseDir = directory || process.cwd();
-  const omcDir = join(baseDir, '.omc', 'state');
-  if (!existsSync(omcDir)) {
-    mkdirSync(omcDir, { recursive: true });
-  }
+  return resolveStatePath('ultrawork', baseDir);
 }
 
 
@@ -73,55 +56,21 @@ function ensureStateDir(directory?: string, sessionId?: string): void {
  * This prevents cross-session state leakage.
  */
 export function readUltraworkState(directory?: string, sessionId?: string): UltraworkState | null {
-  // When sessionId is provided, ONLY check session-scoped path — no legacy fallback.
-  if (sessionId) {
-    const sessionFile = getStateFilePath(directory, sessionId);
-    if (!existsSync(sessionFile)) {
-      return null;
-    }
-    try {
-      const content = readFileSync(sessionFile, 'utf-8');
-      const state: UltraworkState = JSON.parse(content);
+  const state = readModeState<UltraworkState>('ultrawork', directory, sessionId);
 
-      // Validate session identity: state must belong to this session
-      if (state.session_id && state.session_id !== sessionId) {
-        return null;
-      }
-
-      return state;
-    } catch (error) {
-      console.error('[ultrawork] Failed to read session state file:', error);
-      return null;
-    }
+  // Validate session identity: state must belong to this session
+  if (state && sessionId && state.session_id && state.session_id !== sessionId) {
+    return null;
   }
 
-  // No sessionId: read legacy path (backward compat)
-  const localStateFile = getStateFilePath(directory);
-  if (existsSync(localStateFile)) {
-    try {
-      const content = readFileSync(localStateFile, 'utf-8');
-      return JSON.parse(content);
-    } catch (error) {
-      console.error('[ultrawork] Failed to read state file:', error);
-      return null;
-    }
-  }
-
-  return null;
+  return state;
 }
 
 /**
  * Write Ultrawork state to disk (local only)
  */
 export function writeUltraworkState(state: UltraworkState, directory?: string, sessionId?: string): boolean {
-  try {
-    ensureStateDir(directory, sessionId);
-    const localStateFile = getStateFilePath(directory, sessionId);
-    writeFileSync(localStateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
+  return writeModeState('ultrawork', state as unknown as Record<string, unknown>, directory, sessionId);
 }
 
 /**

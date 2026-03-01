@@ -277,41 +277,75 @@ export async function createTeamSession(
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
-  if (!process.env.TMUX) {
-    throw new Error('Team mode requires running inside tmux. Start one: tmux new-session');
-  }
-
-  // Prefer the invoking pane from environment to avoid focus races when users
-  // switch tmux windows during startup (issue #966).
-  const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
   let sessionAndWindow = '';
-  let leaderPaneId = envPaneId;
+  let leaderPaneId = '';
 
-  if (envPaneId) {
+  if (!process.env.TMUX) {
+    // Auto-create a detached tmux session when not running inside tmux.
+    // This allows team tools to work when Claude Code is launched directly
+    // from the terminal without omc CLI (issue #1085).
+    validateTmux();
+
+    const sName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`;
+
+    // Kill stale session with same name if present.
+    // Note: concurrent calls with the same teamName could race here — the second
+    // call would kill the session the first just created. This is acceptable since
+    // concurrent identical teamName usage is an unusual pattern.
     try {
-      const targetedContextResult = await execFileAsync('tmux', [
-        'display-message', '-p', '-t', envPaneId, '#S:#I'
-      ]);
-      sessionAndWindow = targetedContextResult.stdout.trim();
-    } catch {
-      sessionAndWindow = '';
-      leaderPaneId = '';
-    }
-  }
+      execFileSync('tmux', ['kill-session', '-t', sName], { stdio: 'pipe', timeout: 5000 });
+    } catch { /* session may not exist */ }
 
-  if (!sessionAndWindow || !leaderPaneId) {
-    // Fallback when TMUX_PANE is unavailable/invalid.
-    const contextResult = await tmuxAsync([
-      'display-message', '-p', '#S:#I #{pane_id}'
+    // Create detached session with reasonable terminal size
+    const newArgs = ['new-session', '-d', '-s', sName, '-x', '200', '-y', '50'];
+    if (cwd) newArgs.push('-c', cwd);
+    execFileSync('tmux', newArgs, { stdio: 'pipe', timeout: 5000 });
+
+    // Resolve the pane ID of the initial pane
+    const paneResult = await tmuxAsync([
+      'display-message', '-t', sName, '-p', '#{pane_id}'
     ]);
-    const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
-    if (!contextMatch) {
-      throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+    leaderPaneId = paneResult.stdout.trim();
+    if (!leaderPaneId || !/^%\d+$/.test(leaderPaneId)) {
+      throw new Error(`Failed to resolve pane ID for auto-created tmux session "${sName}"`);
     }
-    sessionAndWindow = contextMatch[1];
-    leaderPaneId = contextMatch[2];
+
+    // Use bare session name (no ':window' suffix) so killTeamSession
+    // kills the entire auto-created session on cleanup.
+    sessionAndWindow = sName;
+  } else {
+    // Running inside tmux — resolve from current session context.
+    // Prefer the invoking pane from environment to avoid focus races when users
+    // switch tmux windows during startup (issue #966).
+    const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
+    const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
+    leaderPaneId = envPaneId;
+
+    if (envPaneId) {
+      try {
+        const targetedContextResult = await execFileAsync('tmux', [
+          'display-message', '-p', '-t', envPaneId, '#S:#I'
+        ]);
+        sessionAndWindow = targetedContextResult.stdout.trim();
+      } catch {
+        sessionAndWindow = '';
+        leaderPaneId = '';
+      }
+    }
+
+    if (!sessionAndWindow || !leaderPaneId) {
+      // Fallback when TMUX_PANE is unavailable/invalid.
+      const contextResult = await tmuxAsync([
+        'display-message', '-p', '#S:#I #{pane_id}'
+      ]);
+      const contextLine = contextResult.stdout.trim();
+      const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+      if (!contextMatch) {
+        throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
+      }
+      sessionAndWindow = contextMatch[1];
+      leaderPaneId = contextMatch[2];
+    }
   }
 
   const teamTarget = sessionAndWindow; // "session:window" form
@@ -383,6 +417,52 @@ export async function createTeamSession(
   return { sessionName: teamTarget, leaderPaneId, workerPaneIds };
 }
 
+export interface WaitForShellReadyOptions {
+  /** Maximum time to wait in ms (default: 10000) */
+  timeoutMs?: number;
+  /** Polling interval in ms (default: 200) */
+  intervalMs?: number;
+  /** Regex pattern to detect shell prompt (default: common prompt chars) */
+  promptPattern?: RegExp;
+}
+
+const DEFAULT_PROMPT_PATTERN = /[$#%>❯›]\s*$/m;
+
+/**
+ * Poll tmux capture-pane until a shell prompt character is detected,
+ * indicating the shell in the pane is ready to receive input.
+ *
+ * Resolves `true` when prompt is detected, `false` on timeout.
+ */
+export async function waitForShellReady(
+  paneId: string,
+  opts: WaitForShellReadyOptions = {}
+): Promise<boolean> {
+  const {
+    timeoutMs = 10_000,
+    intervalMs = 200,
+    promptPattern = DEFAULT_PROMPT_PATTERN,
+  } = opts;
+
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const content = await capturePaneAsync(paneId, execFileAsync as never);
+      if (promptPattern.test(content)) {
+        return true;
+      }
+    } catch {
+      // pane may not exist yet; keep polling
+    }
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
 /**
  * Spawn a CLI agent in a specific pane.
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
@@ -390,7 +470,8 @@ export async function createTeamSession(
 export async function spawnWorkerInPane(
   sessionName: string,
   paneId: string,
-  config: WorkerPaneConfig
+  config: WorkerPaneConfig,
+  opts?: { waitForShell?: boolean; shellReadyOpts?: WaitForShellReadyOptions }
 ): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
@@ -398,6 +479,12 @@ export async function spawnWorkerInPane(
 
   validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
+
+  // Wait for shell to be ready before sending keys.
+  // Prevents race condition where send-keys fires before zsh is ready (#1144).
+  if (opts?.waitForShell !== false) {
+    await waitForShellReady(paneId, opts?.shellReadyOpts);
+  }
 
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string
   await execFileAsync('tmux', [

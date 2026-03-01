@@ -48,9 +48,10 @@ describe('worktree-paths', () => {
             const result = resolveStatePath('ultrawork-state', TEST_DIR);
             expect(result).toBe(join(TEST_DIR, '.omc', 'state', 'ultrawork-state.json'));
         });
-        it('should throw for swarm (uses SQLite, not JSON)', () => {
-            expect(() => resolveStatePath('swarm', TEST_DIR)).toThrow('SQLite');
-            expect(() => resolveStatePath('swarm-state', TEST_DIR)).toThrow('SQLite');
+        it('should resolve swarm as regular JSON path after #1131 removal', () => {
+            // swarm SQLite special-casing removed in #1131
+            const result = resolveStatePath('swarm', TEST_DIR);
+            expect(result).toContain('swarm-state.json');
         });
     });
     describe('ensureOmcDir', () => {

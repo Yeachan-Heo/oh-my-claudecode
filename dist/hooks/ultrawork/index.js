@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { resolveSessionStatePath, ensureSessionStateDir } from '../../lib/worktree-paths.js';
+import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 const _DEFAULT_STATE = {
     active: false,
     started_at: '',
@@ -23,7 +23,7 @@ function getStateFilePath(directory, sessionId) {
     if (sessionId) {
         return resolveSessionStatePath('ultrawork', sessionId, baseDir);
     }
-    const omcDir = join(baseDir, '.omc');
+    const omcDir = getOmcRoot(baseDir);
     return join(omcDir, 'state', 'ultrawork-state.json');
 }
 /**
@@ -35,7 +35,7 @@ function ensureStateDir(directory, sessionId) {
         return;
     }
     const baseDir = directory || process.cwd();
-    const omcDir = join(baseDir, '.omc', 'state');
+    const omcDir = join(getOmcRoot(baseDir), 'state');
     if (!existsSync(omcDir)) {
         mkdirSync(omcDir, { recursive: true });
     }

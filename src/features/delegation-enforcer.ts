@@ -11,6 +11,7 @@
 import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import type { ModelType } from '../shared/types.js';
+import { loadConfig } from '../config/loader.js';
 
 /**
  * Agent input structure from Claude Agent SDK
@@ -51,6 +52,21 @@ export interface EnforcementResult {
  * @throws Error if agent type has no default model
  */
 export function enforceModel(agentInput: AgentInput): EnforcementResult {
+  // If forceInherit is enabled, skip model injection entirely so agents
+  // inherit the user's Claude Code model setting (issue #1135)
+  const config = loadConfig();
+  if (config.routing?.forceInherit) {
+    // Strip model if present, or leave as-is if not
+    const { model: _existing, ...rest } = agentInput;
+    const cleanedInput: AgentInput = rest as AgentInput;
+    return {
+      originalInput: agentInput,
+      modifiedInput: cleanedInput,
+      injected: false,
+      model: 'inherit' as ModelType,
+    };
+  }
+
   // If model is already specified, return as-is
   if (agentInput.model) {
     return {

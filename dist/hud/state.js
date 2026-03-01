@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/paths.js';
-import { getWorktreeRoot } from '../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, getOmcRoot } from '../lib/worktree-paths.js';
 import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from './types.js';
 import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './background-cleanup.js';
 // ============================================================================
@@ -17,8 +17,8 @@ import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './backgro
  * Get the HUD state file path in the project's .omc/state directory
  */
 function getLocalStateFilePath(directory) {
-    const baseDir = directory || getWorktreeRoot() || process.cwd();
-    const omcStateDir = join(baseDir, '.omc', 'state');
+    const baseDir = resolveToWorktreeRoot(directory);
+    const omcStateDir = join(getOmcRoot(baseDir), 'state');
     return join(omcStateDir, 'hud-state.json');
 }
 /**
@@ -37,8 +37,8 @@ function getConfigFilePath() {
  * Ensure the .omc/state directory exists
  */
 function ensureStateDir(directory) {
-    const baseDir = directory || getWorktreeRoot() || process.cwd();
-    const omcStateDir = join(baseDir, '.omc', 'state');
+    const baseDir = resolveToWorktreeRoot(directory);
+    const omcStateDir = join(getOmcRoot(baseDir), 'state');
     if (!existsSync(omcStateDir)) {
         mkdirSync(omcStateDir, { recursive: true });
     }
@@ -62,8 +62,8 @@ export function readHudState(directory) {
         }
     }
     // Check legacy local state (.omc/hud-state.json)
-    const baseDir = directory || getWorktreeRoot() || process.cwd();
-    const legacyStateFile = join(baseDir, '.omc', 'hud-state.json');
+    const baseDir = resolveToWorktreeRoot(directory);
+    const legacyStateFile = join(getOmcRoot(baseDir), 'hud-state.json');
     if (existsSync(legacyStateFile)) {
         try {
             const content = readFileSync(legacyStateFile, 'utf-8');
@@ -178,6 +178,7 @@ function mergeWithDefaults(config) {
             ...config.contextLimitWarning,
         },
         ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
+        ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
     };
 }
 /**

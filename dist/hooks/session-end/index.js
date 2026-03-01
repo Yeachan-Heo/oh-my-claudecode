@@ -4,13 +4,13 @@ import * as readline from 'readline';
 import { triggerStopCallbacks } from './callbacks.js';
 import { notify } from '../../notifications/index.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
-import { resolveToWorktreeRoot } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, getOmcRoot } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 /**
  * Read agent tracking to get spawn/completion counts
  */
 function getAgentCounts(directory) {
-    const trackingPath = path.join(directory, '.omc', 'state', 'subagent-tracking.json');
+    const trackingPath = path.join(getOmcRoot(directory), 'state', 'subagent-tracking.json');
     if (!fs.existsSync(trackingPath)) {
         return { spawned: 0, completed: 0 };
     }
@@ -29,7 +29,7 @@ function getAgentCounts(directory) {
  * Detect which modes were used during the session
  */
 function getModesUsed(directory) {
-    const stateDir = path.join(directory, '.omc', 'state');
+    const stateDir = path.join(getOmcRoot(directory), 'state');
     const modes = [];
     if (!fs.existsSync(stateDir)) {
         return modes;
@@ -58,7 +58,7 @@ function getModesUsed(directory) {
  * ultrawork).
  */
 export function getSessionStartTime(directory, sessionId) {
-    const stateDir = path.join(directory, '.omc', 'state');
+    const stateDir = path.join(getOmcRoot(directory), 'state');
     if (!fs.existsSync(stateDir)) {
         return undefined;
     }
@@ -136,7 +136,7 @@ export function recordSessionMetrics(directory, input) {
  */
 export function cleanupTransientState(directory) {
     let filesRemoved = 0;
-    const omcDir = path.join(directory, '.omc');
+    const omcDir = getOmcRoot(directory);
     if (!fs.existsSync(omcDir)) {
         return filesRemoved;
     }
@@ -261,7 +261,7 @@ export async function extractPythonReplSessionIdsFromTranscript(transcriptPath) 
 export function cleanupModeStates(directory, sessionId) {
     let filesRemoved = 0;
     const modesCleaned = [];
-    const stateDir = path.join(directory, '.omc', 'state');
+    const stateDir = path.join(getOmcRoot(directory), 'state');
     if (!fs.existsSync(stateDir)) {
         return { filesRemoved, modesCleaned };
     }
@@ -310,7 +310,7 @@ export function cleanupModeStates(directory, sessionId) {
  * Export session summary to .omc/sessions/
  */
 export function exportSessionSummary(directory, metrics) {
-    const sessionsDir = path.join(directory, '.omc', 'sessions');
+    const sessionsDir = path.join(getOmcRoot(directory), 'sessions');
     // Create sessions directory if it doesn't exist
     if (!fs.existsSync(sessionsDir)) {
         fs.mkdirSync(sessionsDir, { recursive: true });
@@ -373,14 +373,20 @@ export async function processSessionEnd(input) {
     catch {
         // Notification failures should never block session end
     }
-    // Wake OpenClaw gateway for session-end (non-blocking)
+    // Wake OpenClaw gateway for session-end (awaited so it completes before process exits in claude -p)
     if (process.env.OMC_OPENCLAW === "1") {
-        import("../../openclaw/index.js").then(({ wakeOpenClaw }) => wakeOpenClaw("session-end", {
-            sessionId: input.session_id,
-            projectPath: input.cwd,
-            contextSummary: `Duration: ${metrics.duration_ms}ms, Agents: ${metrics.agents_completed}/${metrics.agents_spawned}`,
-            reason: metrics.reason,
-        }).catch(() => { })).catch(() => { });
+        try {
+            const { wakeOpenClaw } = await import("../../openclaw/index.js");
+            await wakeOpenClaw("session-end", {
+                sessionId: input.session_id,
+                projectPath: input.cwd,
+                contextSummary: `Duration: ${metrics.duration_ms}ms, Agents: ${metrics.agents_completed}/${metrics.agents_spawned}`,
+                reason: metrics.reason,
+            });
+        }
+        catch {
+            // Never let OpenClaw failures block session end
+        }
     }
     // Clean up reply session registry and stop daemon if no active sessions remain
     try {

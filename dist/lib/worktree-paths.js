@@ -11,6 +11,7 @@
 import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, realpathSync, readdirSync } from 'fs';
+import { homedir } from 'os';
 import { resolve, normalize, relative, sep, join, isAbsolute, basename } from 'path';
 /** Standard .omc subdirectories */
 export const OmcPaths = {
@@ -186,18 +187,11 @@ export function resolveOmcPath(relativePath, worktreeRoot) {
  * State files follow the naming convention: {mode}-state.json
  * Examples: ralph-state.json, ultrawork-state.json, autopilot-state.json
  *
- * Special case: swarm uses swarm.db (SQLite), not swarm-state.json.
- * This function is for JSON state files only. For swarm, use getStateFilePath from mode-registry.
- *
  * @param stateName - State name (e.g., "ralph", "ultrawork", or "ralph-state")
  * @param worktreeRoot - Optional worktree root
  * @returns Absolute path to state file
  */
 export function resolveStatePath(stateName, worktreeRoot) {
-    // Special case: swarm uses swarm.db, not swarm-state.json
-    if (stateName === 'swarm' || stateName === 'swarm-state') {
-        throw new Error('Swarm uses SQLite (swarm.db), not JSON state. Use getStateFilePath from mode-registry instead.');
-    }
     // Normalize: ensure -state suffix is present, then add .json
     const normalizedName = stateName.endsWith('-state') ? stateName : `${stateName}-state`;
     return resolveOmcPath(`state/${normalizedName}.json`, worktreeRoot);
@@ -361,10 +355,6 @@ export function validateSessionId(sessionId) {
  */
 export function resolveSessionStatePath(stateName, sessionId, worktreeRoot) {
     validateSessionId(sessionId);
-    // Special case: swarm uses SQLite, not session-scoped JSON
-    if (stateName === 'swarm' || stateName === 'swarm-state') {
-        throw new Error('Swarm uses SQLite (swarm.db), not session-scoped JSON state.');
-    }
     const normalizedName = stateName.endsWith('-state') ? stateName : `${stateName}-state`;
     return resolveOmcPath(`state/sessions/${sessionId}/${normalizedName}.json`, worktreeRoot);
 }
@@ -439,6 +429,77 @@ export function resolveToWorktreeRoot(directory) {
     }
     // Fallback: derive from process CWD (the MCP server / CLI entry point)
     return getWorktreeRoot(process.cwd()) || process.cwd();
+}
+// ============================================================================
+// TRANSCRIPT PATH RESOLUTION (Issue #1094)
+// ============================================================================
+/**
+ * Resolve a Claude Code transcript path that may be mismatched in worktree sessions.
+ *
+ * When Claude Code runs inside a worktree (.claude/worktrees/X), it encodes the
+ * worktree CWD into the project directory path, creating a transcript_path like:
+ *   ~/.claude/projects/-path-to-project--claude-worktrees-X/<session>.jsonl
+ *
+ * But the actual transcript lives at the original project's path:
+ *   ~/.claude/projects/-path-to-project/<session>.jsonl
+ *
+ * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
+ * separator, yielding the distinctive `--claude-worktrees-` pattern in the
+ * encoded directory name.
+ *
+ * This function detects the mismatch and resolves to the correct path.
+ *
+ * @param transcriptPath - The transcript_path from Claude Code hook input
+ * @param cwd - Optional CWD for fallback detection
+ * @returns The resolved transcript path (original if already correct or no resolution found)
+ */
+export function resolveTranscriptPath(transcriptPath, cwd) {
+    if (!transcriptPath)
+        return undefined;
+    // Fast path: if the file already exists, no resolution needed
+    if (existsSync(transcriptPath))
+        return transcriptPath;
+    // Strategy 1: Detect worktree-encoded segment in the transcript path itself.
+    // The pattern `--claude-worktrees-` appears when Claude Code encodes a CWD
+    // containing `/.claude/worktrees/` (separator `/` → `-`, dot `.` → `-`).
+    // Strip everything from this pattern to the next `/` to recover the original
+    // project directory encoding.
+    const worktreeSegmentPattern = /--claude-worktrees-[^/\\]+/;
+    if (worktreeSegmentPattern.test(transcriptPath)) {
+        const resolved = transcriptPath.replace(worktreeSegmentPattern, '');
+        if (existsSync(resolved))
+            return resolved;
+    }
+    // Strategy 2: Use CWD to detect worktree and reconstruct the path.
+    // When the CWD contains `/.claude/worktrees/`, we can derive the main
+    // project root and look for the transcript there.
+    const effectiveCwd = cwd || process.cwd();
+    const worktreeMarker = '.claude/worktrees/';
+    const markerIdx = effectiveCwd.indexOf(worktreeMarker);
+    if (markerIdx !== -1) {
+        // Adjust index to exclude the preceding path separator
+        const mainProjectRoot = effectiveCwd.substring(0, markerIdx > 0 && effectiveCwd[markerIdx - 1] === sep ? markerIdx - 1 : markerIdx);
+        // Extract session filename from the original path
+        const lastSep = transcriptPath.lastIndexOf('/');
+        const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+        if (sessionFile) {
+            // The projects directory is under the Claude config dir
+            const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+            const projectsDir = join(configDir, 'projects');
+            if (existsSync(projectsDir)) {
+                // Encode the main project root the same way Claude Code does:
+                // replace path separators with `-`, replace dots with `-`.
+                const encodedMain = mainProjectRoot.replace(/[/\\]/g, '-');
+                const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+                if (existsSync(resolvedPath))
+                    return resolvedPath;
+            }
+        }
+    }
+    // No resolution found — return original path.
+    // Callers should handle non-existent paths gracefully.
+    return transcriptPath;
 }
 /**
  * Validate that a workingDirectory is within the trusted worktree root.

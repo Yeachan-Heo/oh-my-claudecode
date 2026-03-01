@@ -93,11 +93,36 @@ export declare function extractWebhookFlag(args: string[]): {
     remainingArgs: string[];
 };
 /**
+ * Extract the OMC-specific --wt flag from launch args.
+ * Purely presence-based:
+ *   --wt       -> enable worktree path in session name (OMC_WORKTREE=1)
+ *   --wt=true  -> enable
+ *   --wt=false -> disable
+ *   --wt=1     -> enable
+ *   --wt=0     -> disable
+ *
+ * Note: We use --wt (not --worktree or -w) to avoid collision with
+ * Claude CLI's own -w/--worktree [name] flag.
+ *
+ * Does NOT consume the next positional arg (no space-separated value).
+ * This flag is stripped before passing args to Claude CLI.
+ */
+export declare function extractWorktreeFlag(args: string[]): {
+    worktreeEnabled: boolean;
+    remainingArgs: string[];
+};
+/**
  * Normalize Claude launch arguments
  * Maps --madmax/--yolo to --dangerously-skip-permissions
  * All other flags pass through unchanged
  */
 export declare function normalizeClaudeLaunchArgs(args: string[]): string[];
+/**
+ * Collect all OMC_* environment variables and build shell export statements.
+ * Used to forward platform env vars (OMC_TELEGRAM, OMC_DISCORD, etc.) into
+ * tmux sessions where the parent process.env is not automatically inherited.
+ */
+export declare function collectOmcEnvExports(env?: NodeJS.ProcessEnv): string;
 /**
  * preLaunch: Prepare environment before Claude starts
  * Currently a placeholder - can be extended for:
@@ -113,7 +138,9 @@ export declare function preLaunch(_cwd: string, _sessionId: string): Promise<voi
  * 2. outside-tmux: Create new tmux session with claude
  * 3. direct: tmux not available, run claude directly
  */
-export declare function runClaude(cwd: string, args: string[], sessionId: string): void;
+export declare function runClaude(cwd: string, args: string[], sessionId: string, options?: {
+    worktree?: boolean;
+}): void;
 /**
  * postLaunch: Cleanup after Claude exits
  * Currently a placeholder - can be extended for:

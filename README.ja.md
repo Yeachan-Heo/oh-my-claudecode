@@ -85,7 +85,7 @@ Codex + Gemini を一つのコマンドで使うには **`/ccg`** スキルを�
 
 ワーカーはオンデマンドで起動し、タスク完了後に終了します — アイドルリソースの無駄なし。`codex` / `gemini` CLI のインストールとアクティブな tmux セッションが必要です。
 
-> **注意: パッケージ名について** — プロジェクトのブランド名は **oh-my-claudecode**（リポジトリ、プラグイン、コマンド）ですが、npmパッケージは [`oh-my-claudecode`](https://www.npmjs.com/package/oh-my-claude-sisyphus) として公開されています。npm/bunでCLIツールをインストールする場合は `npm install -g oh-my-claude-sisyphus` を使用してください。
+> **注意: パッケージ名について** — プロジェクトのブランド名は **oh-my-claudecode**（リポジトリ、プラグイン、コマンド）ですが、npmパッケージは [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) として公開されています。npm/bunでCLIツールをインストールする場合は `npm install -g oh-my-claude-sisyphus` を使用してください。
 
 ### アップデート
 

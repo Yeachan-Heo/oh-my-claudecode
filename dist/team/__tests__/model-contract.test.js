@@ -85,7 +85,7 @@ describe('model-contract', () => {
             const mockSpawnSync = vi.mocked(spawnSync);
             mockSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null });
             isCliAvailable('codex');
-            expect(mockSpawnSync).toHaveBeenCalledWith('codex', ['--version'], { timeout: 5000, shell: true });
+            expect(mockSpawnSync).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ timeout: 5000, shell: true }));
             mockSpawnSync.mockRestore();
         });
     });

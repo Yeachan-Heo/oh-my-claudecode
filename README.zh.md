@@ -85,7 +85,7 @@ Team 按阶段化流水线运行：
 
 工作者按需生成，任务完成后自动退出 — 无空闲资源浪费。需要安装 `codex` / `gemini` CLI 并有活跃的 tmux 会话。
 
-> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claudecode`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g oh-my-claude-sisyphus`。
+> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g oh-my-claude-sisyphus`。
 
 ### 更新
 

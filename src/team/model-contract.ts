@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { resolvedEnv } from './shell-path.js';
 import { validateTeamName } from './team-name.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
@@ -76,7 +77,8 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     promptModeFlag: '-p',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--yolo'];
-      if (model) args.push('--model', model);
+      const effectiveModel = model || 'gemini-2.5-pro';
+      args.push('--model', effectiveModel);
       return [...args, ...extraFlags];
     },
     parseOutput(rawOutput: string): string {
@@ -96,7 +98,11 @@ export function getContract(agentType: CliAgentType): CliAgentContract {
 export function isCliAvailable(agentType: CliAgentType): boolean {
   const contract = getContract(agentType);
   try {
-    const result = spawnSync(contract.binary, ['--version'], { timeout: 5000, shell: true });
+    const result = spawnSync(contract.binary, ['--version'], {
+      timeout: 5000,
+      shell: true,
+      env: resolvedEnv(),
+    });
     return result.status === 0;
   } catch {
     return false;

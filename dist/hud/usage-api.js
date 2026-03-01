@@ -15,6 +15,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { getClaudeConfigDir } from '../utils/paths.js';
 import { join, dirname } from 'path';
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 import https from 'https';
 // Cache configuration
 const CACHE_TTL_SUCCESS_MS = 30 * 1000; // 30 seconds for successful responses
@@ -110,13 +111,26 @@ function isCacheValid(cache) {
     return Date.now() - cache.timestamp < ttl;
 }
 /**
+ * Get the Keychain service name for the current config directory.
+ * Claude Code uses "Claude Code-credentials-{sha256(configDir)[:8]}" for non-default dirs.
+ */
+function getKeychainServiceName() {
+    const configDir = process.env.CLAUDE_CONFIG_DIR;
+    if (configDir) {
+        const hash = createHash('sha256').update(configDir).digest('hex').slice(0, 8);
+        return `Claude Code-credentials-${hash}`;
+    }
+    return 'Claude Code-credentials';
+}
+/**
  * Read OAuth credentials from macOS Keychain
  */
 function readKeychainCredentials() {
     if (process.platform !== 'darwin')
         return null;
     try {
-        const result = execSync('/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null', { encoding: 'utf-8', timeout: 2000 }).trim();
+        const serviceName = getKeychainServiceName();
+        const result = execSync(`/usr/bin/security find-generic-password -s "${serviceName}" -w 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 }).trim();
         if (!result)
             return null;
         const parsed = JSON.parse(result);

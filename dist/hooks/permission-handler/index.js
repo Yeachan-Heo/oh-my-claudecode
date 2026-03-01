@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 const SAFE_PATTERNS = [
     /^git (status|diff|log|branch|show|fetch)/,
     /^npm (test|run (test|lint|build|check|typecheck))/,
@@ -69,28 +70,22 @@ export function isHeredocWithSafeBase(command) {
     return SAFE_HEREDOC_PATTERNS.some(pattern => pattern.test(firstLine));
 }
 /**
- * Check if an active mode (autopilot/ultrawork/ralph/team/swarm) is running
+ * Check if an active mode (autopilot/ultrawork/ralph/team) is running
  */
 export function isActiveModeRunning(directory) {
-    const stateDir = path.join(directory, '.omc', 'state');
+    const stateDir = path.join(getOmcRoot(directory), 'state');
     if (!fs.existsSync(stateDir)) {
         return false;
     }
     const activeStateFiles = [
         'autopilot-state.json',
-        'ultrapilot-state.json',
         'ralph-state.json',
         'ultrawork-state.json',
         'team-state.json',
-        'swarm-active.marker',
     ];
     for (const stateFile of activeStateFiles) {
         const statePath = path.join(stateDir, stateFile);
         if (fs.existsSync(statePath)) {
-            // Marker files: existence alone indicates active mode
-            if (stateFile.endsWith('.marker')) {
-                return true;
-            }
             // JSON state files: check active/status fields
             try {
                 const content = fs.readFileSync(statePath, 'utf-8');

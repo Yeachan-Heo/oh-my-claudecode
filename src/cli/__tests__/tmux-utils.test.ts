@@ -1,12 +1,30 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+/**
+ * Tests for src/cli/tmux-utils.ts
+ *
+ * Covers:
+ * - wrapWithLoginShell (issue #1153)
+ * - quoteShellArg
+ * - sanitizeTmuxToken
+ * - buildTmuxSessionName worktree mode (issue #1088)
+ * - createHudWatchPane login shell wrapping
+ */
+
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'child_process';
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: vi.fn(),
+  };
+});
+
 import {
   wrapWithLoginShell,
   quoteShellArg,
-  buildTmuxShellCommand,
   sanitizeTmuxToken,
   buildTmuxSessionName,
-  resolveLaunchPolicy,
-  createHudWatchPane,
 } from '../tmux-utils.js';
 
 afterEach(() => {
@@ -89,12 +107,17 @@ describe('quoteShellArg', () => {
 // ---------------------------------------------------------------------------
 describe('sanitizeTmuxToken', () => {
   it('lowercases and replaces non-alphanumeric with hyphens', () => {
+    expect(sanitizeTmuxToken('My_Project.Name')).toBe('my-project-name');
     expect(sanitizeTmuxToken('MyProject')).toBe('myproject');
-    // Trailing non-alphanumeric chars become hyphens then get stripped
     expect(sanitizeTmuxToken('my project!')).toBe('my-project');
   });
 
-  it('returns unknown for empty result', () => {
+  it('strips leading and trailing hyphens', () => {
+    expect(sanitizeTmuxToken('--hello--')).toBe('hello');
+  });
+
+  it('returns "unknown" for empty result', () => {
+    expect(sanitizeTmuxToken('...')).toBe('unknown');
     expect(sanitizeTmuxToken('!!!')).toBe('unknown');
   });
 });
@@ -106,15 +129,75 @@ describe('createHudWatchPane login shell wrapping', () => {
   it('wraps hudCmd with login shell in split-window args', () => {
     vi.stubEnv('SHELL', '/bin/zsh');
 
-    // Mock execFileSync to capture args
-    const { execFileSync } = require('child_process');
-    const mockExecFileSync = vi.fn().mockReturnValue('%42\n');
-
     // We need to verify the source code wraps the command
     // Read the source to verify wrapWithLoginShell is used
     const { readFileSync } = require('fs');
     const { join } = require('path');
     const source = readFileSync(join(__dirname, '..', 'tmux-utils.ts'), 'utf-8');
     expect(source).toContain('wrapWithLoginShell(hudCmd)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTmuxSessionName — default (no worktree)
+// ---------------------------------------------------------------------------
+describe('buildTmuxSessionName — default mode', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // Mock git branch detection
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue('main\n');
+  });
+
+  it('uses basename of cwd as dirToken', () => {
+    const name = buildTmuxSessionName('/home/user/projects/myapp');
+    expect(name).toMatch(/^omc-myapp-main-\d{14}$/);
+  });
+
+  it('only includes the last path segment', () => {
+    const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/feat/issue-1088');
+    // Default mode: only basename "issue-1088"
+    expect(name).toMatch(/^omc-issue-1088-main-\d{14}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTmuxSessionName — worktree mode (issue #1088)
+// ---------------------------------------------------------------------------
+describe('buildTmuxSessionName — worktree mode', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue('dev\n');
+  });
+
+  it('includes last 2 path segments when worktree option is enabled', () => {
+    const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/feat/issue-1088', { worktree: true });
+    // Should include "feat-issue-1088" instead of just "issue-1088"
+    expect(name).toMatch(/^omc-feat-issue-1088-dev-\d{14}$/);
+  });
+
+  it('includes parent context for better identification', () => {
+    const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/pr/myrepo-42', { worktree: true });
+    expect(name).toMatch(/^omc-pr-myrepo-42-dev-\d{14}$/);
+  });
+
+  it('handles single-segment paths gracefully', () => {
+    const name = buildTmuxSessionName('/myapp', { worktree: true });
+    expect(name).toMatch(/^omc-myapp-dev-\d{14}$/);
+  });
+
+  it('handles trailing slashes', () => {
+    const name = buildTmuxSessionName('/home/user/feat/issue-99/', { worktree: true });
+    expect(name).toMatch(/^omc-feat-issue-99-dev-\d{14}$/);
+  });
+
+  it('falls back to basename behavior when worktree is false', () => {
+    const name = buildTmuxSessionName('/home/user/feat/issue-1088', { worktree: false });
+    expect(name).toMatch(/^omc-issue-1088-dev-\d{14}$/);
+  });
+
+  it('truncates session name to 120 chars max', () => {
+    const longPath = '/home/user/' + 'a'.repeat(60) + '/' + 'b'.repeat(60);
+    const name = buildTmuxSessionName(longPath, { worktree: true });
+    expect(name.length).toBeLessThanOrEqual(120);
   });
 });
