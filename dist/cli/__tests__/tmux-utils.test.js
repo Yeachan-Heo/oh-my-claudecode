@@ -2,14 +2,12 @@
  * Tests for src/cli/tmux-utils.ts
  *
  * Covers:
- * - wrapWithLoginShell (issue #1153)
+ * - wrapWithLoginShell (issue #1153 — shell RC not loaded in tmux)
  * - quoteShellArg
  * - sanitizeTmuxToken
- * - buildTmuxSessionName worktree mode (issue #1088)
  * - createHudWatchPane login shell wrapping
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'child_process';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
     return {
@@ -17,7 +15,7 @@ vi.mock('child_process', async (importOriginal) => {
         execFileSync: vi.fn(),
     };
 });
-import { wrapWithLoginShell, quoteShellArg, sanitizeTmuxToken, buildTmuxSessionName, } from '../tmux-utils.js';
+import { wrapWithLoginShell, quoteShellArg, sanitizeTmuxToken, } from '../tmux-utils.js';
 afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -43,9 +41,7 @@ describe('wrapWithLoginShell', () => {
     it('properly quotes the inner command containing single quotes', () => {
         vi.stubEnv('SHELL', '/bin/zsh');
         const result = wrapWithLoginShell("perl -e 'print 1'");
-        // The shell arg quoting should handle embedded single quotes
         expect(result).toContain('-lc');
-        // Verify the command is recoverable (contains the original content)
         expect(result).toContain('perl');
         expect(result).toContain('print 1');
     });
@@ -60,7 +56,6 @@ describe('wrapWithLoginShell', () => {
         const result = wrapWithLoginShell(cmd);
         expect(result).toContain('/bin/zsh');
         expect(result).toContain('-lc');
-        // All parts of the command should be present in the quoted argument
         expect(result).toContain('sleep 0.3');
         expect(result).toContain('claude');
     });
@@ -102,7 +97,6 @@ describe('wrapWithLoginShell', () => {
         vi.stubEnv('SHELL', '/bin/zsh');
         vi.stubEnv('HOME', '/home/testuser');
         const result = wrapWithLoginShell('claude');
-        // Should guard with [ -f ... ] to avoid errors if rc file doesn't exist
         expect(result).toContain('[ -f');
         expect(result).toContain('] && .');
     });
@@ -116,7 +110,6 @@ describe('quoteShellArg', () => {
     });
     it('escapes embedded single quotes', () => {
         const result = quoteShellArg("it's");
-        // Should break out of single quotes, add escaped quote, re-enter
         expect(result).toContain("'\"'\"'");
     });
 });
@@ -141,68 +134,12 @@ describe('sanitizeTmuxToken', () => {
 // createHudWatchPane — login shell wrapping
 // ---------------------------------------------------------------------------
 describe('createHudWatchPane login shell wrapping', () => {
-    it('wraps hudCmd with login shell in split-window args', () => {
-        vi.stubEnv('SHELL', '/bin/zsh');
-        // We need to verify the source code wraps the command
-        // Read the source to verify wrapWithLoginShell is used
-        const { readFileSync } = require('fs');
-        const { join } = require('path');
-        const source = readFileSync(join(__dirname, '..', 'tmux-utils.ts'), 'utf-8');
+    it('wraps hudCmd with wrapWithLoginShell in source code', () => {
+        // Verify the source uses wrapWithLoginShell for the HUD command
+        const fs = require('fs');
+        const path = require('path');
+        const source = fs.readFileSync(path.join(__dirname, '..', 'tmux-utils.ts'), 'utf-8');
         expect(source).toContain('wrapWithLoginShell(hudCmd)');
-    });
-});
-// ---------------------------------------------------------------------------
-// buildTmuxSessionName — default (no worktree)
-// ---------------------------------------------------------------------------
-describe('buildTmuxSessionName — default mode', () => {
-    beforeEach(() => {
-        vi.resetAllMocks();
-        // Mock git branch detection
-        execFileSync.mockReturnValue('main\n');
-    });
-    it('uses basename of cwd as dirToken', () => {
-        const name = buildTmuxSessionName('/home/user/projects/myapp');
-        expect(name).toMatch(/^omc-myapp-main-\d{14}$/);
-    });
-    it('only includes the last path segment', () => {
-        const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/feat/issue-1088');
-        // Default mode: only basename "issue-1088"
-        expect(name).toMatch(/^omc-issue-1088-main-\d{14}$/);
-    });
-});
-// ---------------------------------------------------------------------------
-// buildTmuxSessionName — worktree mode (issue #1088)
-// ---------------------------------------------------------------------------
-describe('buildTmuxSessionName — worktree mode', () => {
-    beforeEach(() => {
-        vi.resetAllMocks();
-        execFileSync.mockReturnValue('dev\n');
-    });
-    it('includes last 2 path segments when worktree option is enabled', () => {
-        const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/feat/issue-1088', { worktree: true });
-        // Should include "feat-issue-1088" instead of just "issue-1088"
-        expect(name).toMatch(/^omc-feat-issue-1088-dev-\d{14}$/);
-    });
-    it('includes parent context for better identification', () => {
-        const name = buildTmuxSessionName('/home/user/Workspace/omc-worktrees/pr/myrepo-42', { worktree: true });
-        expect(name).toMatch(/^omc-pr-myrepo-42-dev-\d{14}$/);
-    });
-    it('handles single-segment paths gracefully', () => {
-        const name = buildTmuxSessionName('/myapp', { worktree: true });
-        expect(name).toMatch(/^omc-myapp-dev-\d{14}$/);
-    });
-    it('handles trailing slashes', () => {
-        const name = buildTmuxSessionName('/home/user/feat/issue-99/', { worktree: true });
-        expect(name).toMatch(/^omc-feat-issue-99-dev-\d{14}$/);
-    });
-    it('falls back to basename behavior when worktree is false', () => {
-        const name = buildTmuxSessionName('/home/user/feat/issue-1088', { worktree: false });
-        expect(name).toMatch(/^omc-issue-1088-dev-\d{14}$/);
-    });
-    it('truncates session name to 120 chars max', () => {
-        const longPath = '/home/user/' + 'a'.repeat(60) + '/' + 'b'.repeat(60);
-        const name = buildTmuxSessionName(longPath, { worktree: true });
-        expect(name.length).toBeLessThanOrEqual(120);
     });
 });
 //# sourceMappingURL=tmux-utils.test.js.map

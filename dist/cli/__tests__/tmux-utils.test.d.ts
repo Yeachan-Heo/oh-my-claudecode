@@ -2,10 +2,9 @@
  * Tests for src/cli/tmux-utils.ts
  *
  * Covers:
- * - wrapWithLoginShell (issue #1153)
+ * - wrapWithLoginShell (issue #1153 — shell RC not loaded in tmux)
  * - quoteShellArg
  * - sanitizeTmuxToken
- * - buildTmuxSessionName worktree mode (issue #1088)
  * - createHudWatchPane login shell wrapping
  */
 export {};

@@ -21,6 +21,7 @@ vi.mock('../tmux-utils.js', () => ({
   resolveLaunchPolicy: vi.fn(),
   buildTmuxSessionName: vi.fn(() => 'test-session'),
   buildTmuxShellCommand: vi.fn((cmd: string, args: string[]) => `${cmd} ${args.join(' ')}`),
+  wrapWithLoginShell: vi.fn((cmd: string) => cmd),
   quoteShellArg: vi.fn((s: string) => s),
   isClaudeAvailable: vi.fn(() => true),
 }));

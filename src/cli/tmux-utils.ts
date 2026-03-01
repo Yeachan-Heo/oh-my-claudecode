@@ -107,6 +107,25 @@ export function buildTmuxShellCommand(command: string, args: string[]): string {
 }
 
 /**
+ * Wrap a command string in the user's login shell with RC file sourcing.
+ * Ensures PATH and other environment setup from .bashrc/.zshrc is available
+ * when tmux spawns new sessions or panes with a command argument.
+ *
+ * tmux new-session / split-window run commands via a non-login, non-interactive
+ * shell, so tools installed via nvm, pyenv, conda, etc. are invisible.
+ * This wrapper starts a login shell (`-lc`) and explicitly sources the RC file.
+ */
+export function wrapWithLoginShell(command: string): string {
+  const shell = process.env.SHELL || '/bin/bash';
+  const shellName = basename(shell).replace(/\.(exe|cmd|bat)$/i, '');
+  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
+  const sourcePrefix = rcFile
+    ? `[ -f ${quoteShellArg(rcFile)} ] && . ${quoteShellArg(rcFile)}; `
+    : '';
+  return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(`${sourcePrefix}${command}`)}`;
+}
+
+/**
  * Quote shell argument for safe shell execution
  * Uses single quotes with proper escaping
  */
@@ -175,9 +194,10 @@ export function listHudWatchPaneIdsInCurrentWindow(currentPaneId?: string): stri
  */
 export function createHudWatchPane(cwd: string, hudCmd: string): string | null {
   try {
+    const wrappedCmd = wrapWithLoginShell(hudCmd);
     const output = execFileSync(
       'tmux',
-      ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', hudCmd],
+      ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', wrappedCmd],
       { encoding: 'utf-8' }
     );
     const paneId = output.split('\n')[0]?.trim() || '';

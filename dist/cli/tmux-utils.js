@@ -44,21 +44,9 @@ export function resolveLaunchPolicy(env = process.env) {
  * Build tmux session name from directory, git branch, and UTC timestamp
  * Format: omc-{dir}-{branch}-{utctimestamp}
  * e.g.  omc-myproject-dev-20260221143052
- *
- * When worktree option is enabled, uses last 2 path segments instead of
- * just the basename, so worktree paths like ~/omc-worktrees/feat/issue-42
- * produce "omc-feat-issue-42-..." instead of generic "omc-issue-42-...".
  */
-export function buildTmuxSessionName(cwd, options) {
-    let dirToken;
-    if (options?.worktree) {
-        const parts = cwd.replace(/\/+$/, '').split('/').filter(Boolean);
-        const meaningful = parts.slice(-2).join('/');
-        dirToken = sanitizeTmuxToken(meaningful);
-    }
-    else {
-        dirToken = sanitizeTmuxToken(basename(cwd));
-    }
+export function buildTmuxSessionName(cwd) {
+    const dirToken = sanitizeTmuxToken(basename(cwd));
     let branchToken = 'detached';
     try {
         const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
@@ -96,34 +84,28 @@ export function sanitizeTmuxToken(value) {
     return cleaned || 'unknown';
 }
 /**
- * Wrap a shell command to run inside a login shell, ensuring the user's
- * shell rc files (.zshrc, .bashrc, etc.) are sourced.
- *
- * When tmux creates a pane with an explicit command, it uses a non-login
- * shell ($SHELL -c 'command'), so rc files are not loaded. This wrapper
- * replaces the outer shell with a login shell via exec, ensuring PATH
- * and other environment from rc files are available.
- *
- * Note: `-lc` alone starts a login+non-interactive shell which sources
- * .zprofile/.bash_profile but NOT .zshrc/.bashrc (those require an
- * interactive shell). We explicitly source the rc file so that PATH
- * and user environment are fully available.
- */
-export function wrapWithLoginShell(command) {
-    const shell = process.env.SHELL || '/bin/bash';
-    const shellName = basename(shell).replace(/\.(exe|cmd|bat)$/i, '');
-    const home = process.env.HOME || '';
-    const rcFile = home ? `${home}/.${shellName}rc` : '';
-    const sourceRc = rcFile
-        ? `[ -f ${quoteShellArg(rcFile)} ] && . ${quoteShellArg(rcFile)}; `
-        : '';
-    return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(sourceRc + command)}`;
-}
-/**
  * Build shell command string for tmux with proper quoting
  */
 export function buildTmuxShellCommand(command, args) {
     return [quoteShellArg(command), ...args.map(quoteShellArg)].join(' ');
+}
+/**
+ * Wrap a command string in the user's login shell with RC file sourcing.
+ * Ensures PATH and other environment setup from .bashrc/.zshrc is available
+ * when tmux spawns new sessions or panes with a command argument.
+ *
+ * tmux new-session / split-window run commands via a non-login, non-interactive
+ * shell, so tools installed via nvm, pyenv, conda, etc. are invisible.
+ * This wrapper starts a login shell (`-lc`) and explicitly sources the RC file.
+ */
+export function wrapWithLoginShell(command) {
+    const shell = process.env.SHELL || '/bin/bash';
+    const shellName = basename(shell).replace(/\.(exe|cmd|bat)$/i, '');
+    const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
+    const sourcePrefix = rcFile
+        ? `[ -f ${quoteShellArg(rcFile)} ] && . ${quoteShellArg(rcFile)}; `
+        : '';
+    return `exec ${quoteShellArg(shell)} -lc ${quoteShellArg(`${sourcePrefix}${command}`)}`;
 }
 /**
  * Quote shell argument for safe shell execution
@@ -186,7 +168,8 @@ export function listHudWatchPaneIdsInCurrentWindow(currentPaneId) {
  */
 export function createHudWatchPane(cwd, hudCmd) {
     try {
-        const output = execFileSync('tmux', ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', wrapWithLoginShell(hudCmd)], { encoding: 'utf-8' });
+        const wrappedCmd = wrapWithLoginShell(hudCmd);
+        const output = execFileSync('tmux', ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', wrappedCmd], { encoding: 'utf-8' });
         const paneId = output.split('\n')[0]?.trim() || '';
         return paneId.startsWith('%') ? paneId : null;
     }

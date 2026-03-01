@@ -27,38 +27,27 @@ export declare function resolveLaunchPolicy(env?: NodeJS.ProcessEnv): ClaudeLaun
  * Build tmux session name from directory, git branch, and UTC timestamp
  * Format: omc-{dir}-{branch}-{utctimestamp}
  * e.g.  omc-myproject-dev-20260221143052
- *
- * When worktree option is enabled, uses last 2 path segments instead of
- * just the basename, so worktree paths like ~/omc-worktrees/feat/issue-42
- * produce "omc-feat-issue-42-..." instead of generic "omc-issue-42-...".
  */
-export declare function buildTmuxSessionName(cwd: string, options?: {
-    worktree?: boolean;
-}): string;
+export declare function buildTmuxSessionName(cwd: string): string;
 /**
  * Sanitize string for use in tmux session/window names
  * Lowercase, alphanumeric + hyphens only
  */
 export declare function sanitizeTmuxToken(value: string): string;
 /**
- * Wrap a shell command to run inside a login shell, ensuring the user's
- * shell rc files (.zshrc, .bashrc, etc.) are sourced.
- *
- * When tmux creates a pane with an explicit command, it uses a non-login
- * shell ($SHELL -c 'command'), so rc files are not loaded. This wrapper
- * replaces the outer shell with a login shell via exec, ensuring PATH
- * and other environment from rc files are available.
- *
- * Note: `-lc` alone starts a login+non-interactive shell which sources
- * .zprofile/.bash_profile but NOT .zshrc/.bashrc (those require an
- * interactive shell). We explicitly source the rc file so that PATH
- * and user environment are fully available.
- */
-export declare function wrapWithLoginShell(command: string): string;
-/**
  * Build shell command string for tmux with proper quoting
  */
 export declare function buildTmuxShellCommand(command: string, args: string[]): string;
+/**
+ * Wrap a command string in the user's login shell with RC file sourcing.
+ * Ensures PATH and other environment setup from .bashrc/.zshrc is available
+ * when tmux spawns new sessions or panes with a command argument.
+ *
+ * tmux new-session / split-window run commands via a non-login, non-interactive
+ * shell, so tools installed via nvm, pyenv, conda, etc. are invisible.
+ * This wrapper starts a login shell (`-lc`) and explicitly sources the RC file.
+ */
+export declare function wrapWithLoginShell(command: string): string;
 /**
  * Quote shell argument for safe shell execution
  * Uses single quotes with proper escaping
