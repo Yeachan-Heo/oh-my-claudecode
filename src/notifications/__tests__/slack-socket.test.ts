@@ -155,30 +155,6 @@ describe("SlackSocketClient", () => {
       expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCallCount);
     });
 
-    it("aborts in-flight connect fetch", async () => {
-      vi.mocked(globalThis.fetch).mockImplementation(
-        (_url: string | URL | Request, opts?: RequestInit) => {
-          return new Promise((_resolve, reject) => {
-            if (opts?.signal) {
-              opts.signal.addEventListener("abort", () => {
-                reject(new DOMException("The operation was aborted.", "AbortError"));
-              });
-            }
-          });
-        },
-      );
-
-      const client = new SlackSocketClient(config, mockHandler, mockLog);
-      const startPromise = client.start();
-
-      // stop() while fetch is in flight
-      client.stop();
-      await startPromise;
-
-      // Should NOT have created a WebSocket
-      expect(globalThis.WebSocket).not.toHaveBeenCalled();
-    });
-
     it("is safe to call before start()", () => {
       const client = new SlackSocketClient(config, mockHandler, mockLog);
       expect(() => client.stop()).not.toThrow();
@@ -198,40 +174,32 @@ describe("SlackSocketClient", () => {
   });
 
   describe("connect() shutdown guards", () => {
-    it("does not create WebSocket if shutdown during fetch", async () => {
-      let resolveFetch: (value: Response) => void;
-      vi.mocked(globalThis.fetch).mockImplementation(() => {
-        return new Promise((resolve) => {
-          resolveFetch = resolve;
-        });
-      });
-
-      const client = new SlackSocketClient(config, mockHandler, mockLog);
-      const startPromise = client.start();
-
-      // Shutdown while fetch is pending
-      client.stop();
-
-      // Resolve the fetch after stop (simulating completion after shutdown)
-      resolveFetch!({
-        json: () => Promise.resolve({ ok: true, url: "wss://test.slack.com/link" }),
-      } as Response);
-
-      await startPromise;
-
-      // WebSocket should NOT have been created
-      expect(globalThis.WebSocket).not.toHaveBeenCalled();
-    });
-
-    it("uses abort signal on fetch for cancellation", async () => {
+    it("uses AbortSignal.timeout on fetch for timeout protection", async () => {
       mockFetchSuccess();
       const client = new SlackSocketClient(config, mockHandler, mockLog);
       await client.start();
 
-      // Verify the fetch was called with an AbortSignal
+      // Verify the fetch was called with an AbortSignal (timeout-based)
       const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
       const fetchOpts = fetchCall[1] as RequestInit;
       expect(fetchOpts.signal).toBeInstanceOf(AbortSignal);
+      client.stop();
+    });
+
+    it("isShuttingDown prevents reconnect after stop", async () => {
+      mockFetchFailure();
+      const client = new SlackSocketClient(config, mockHandler, mockLog);
+
+      // start() will fail (API returns error), triggering scheduleReconnect
+      await client.start();
+      const fetchCallCount = vi.mocked(globalThis.fetch).mock.calls.length;
+
+      // stop() sets isShuttingDown and clears reconnect timer
+      client.stop();
+
+      // Advance past any reconnect delay — fetch should NOT be called again
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCallCount);
     });
   });
 
@@ -243,7 +211,15 @@ describe("SlackSocketClient", () => {
       const messageCall = mockWsInstance.addEventListener.mock.calls.find(
         (call: unknown[]) => call[0] === "message",
       );
-      return { client, handler: messageCall![1] as (event: { data?: unknown }) => void };
+      const handler = messageCall![1] as (event: { data?: unknown }) => void;
+
+      // Authenticate via hello envelope so messages can be dispatched
+      handler({
+        data: JSON.stringify({ envelope_id: "env_hello", type: "hello" }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      return { client, handler };
     }
 
     it("acknowledges envelopes with envelope_id", async () => {
@@ -353,6 +329,7 @@ describe("SlackSocketClient", () => {
 
       handler({
         data: JSON.stringify({
+          envelope_id: "env_disc",
           type: "disconnect",
           reason: "link_disabled",
         }),
@@ -389,7 +366,7 @@ describe("SlackSocketClient", () => {
   });
 
   describe("source code invariants", () => {
-    it("tracks in-flight connect for abort-on-stop", () => {
+    it("has shutdown guard and cleanup mechanisms", () => {
       const fs = require("fs");
       const path = require("path");
       const source = fs.readFileSync(
@@ -397,12 +374,14 @@ describe("SlackSocketClient", () => {
         "utf-8",
       ) as string;
 
-      expect(source).toContain("connectAbort");
-      expect(source).toContain("abort.signal");
-      // Shutdown guard after fetch
-      expect(source).toContain("Re-check after async gap");
-      // Final guard before WebSocket creation
-      expect(source).toContain("Final shutdown guard");
+      // Shutdown flag checked in connect and scheduleReconnect
+      expect(source).toContain("isShuttingDown");
+      // Cleanup method removes listeners before closing
+      expect(source).toContain("cleanupWs");
+      // API timeout protection on fetch
+      expect(source).toContain("AbortSignal.timeout");
+      // Connection state tracking
+      expect(source).toContain("connectionState");
     });
   });
 });

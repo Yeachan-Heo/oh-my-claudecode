@@ -102,6 +102,16 @@ function envelope(overrides: Record<string, any> = {}) {
   });
 }
 
+function helloEnvelope() {
+  return JSON.stringify({ envelope_id: 'env_hello', type: 'hello' });
+}
+
+/** Send a hello envelope to authenticate the connection */
+async function authenticate(ws: MockWebSocket) {
+  ws.fire('message', { data: helloEnvelope() });
+  await new Promise(r => setTimeout(r, 0));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -124,6 +134,7 @@ describe('SlackSocketClient', () => {
     const onMessage = vi.fn();
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
+    await authenticate(lastWs!);
 
     // simulate envelope
     lastWs!.fire('message', { data: envelope() });
@@ -135,6 +146,7 @@ describe('SlackSocketClient', () => {
     const onMessage = vi.fn();
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', { data: envelope() });
 
@@ -150,6 +162,7 @@ describe('SlackSocketClient', () => {
     const onMessage = vi.fn();
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', {
       data: envelope({
@@ -166,6 +179,7 @@ describe('SlackSocketClient', () => {
     const onMessage = vi.fn();
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', {
       data: envelope({
@@ -184,7 +198,7 @@ describe('SlackSocketClient', () => {
     await client.start();
 
     lastWs!.fire('message', {
-      data: JSON.stringify({ type: 'disconnect', reason: 'link_disabled' }),
+      data: JSON.stringify({ envelope_id: 'env_disc', type: 'disconnect', reason: 'link_disabled' }),
     });
 
     expect(lastWs!.close).toHaveBeenCalled();
@@ -208,7 +222,7 @@ describe('SlackSocketClient', () => {
 
     lastWs!.fire('message', { data: 'not-json{{{' });
 
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('envelope parse error'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Invalid JSON'));
     client.stop();
   });
 
@@ -219,6 +233,7 @@ describe('SlackSocketClient', () => {
     await client.start();
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining('connection error'));
+    // The source now also schedules a reconnect on failure, which logs too
     client.stop();
   });
 
@@ -264,7 +279,7 @@ describe('SlackSocketClient', () => {
     expect(ws.listenerCount('error')).toBe(0);
 
     // Should have scheduled a reconnect
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('scheduling reconnect'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('reconnecting in'));
     client.stop();
   });
 

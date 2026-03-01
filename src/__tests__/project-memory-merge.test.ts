@@ -50,19 +50,22 @@ function baseMemory(overrides: Partial<ProjectMemory> = {}): ProjectMemory {
 
 describe('deepMerge', () => {
   it('should merge flat objects without loss', () => {
-    const result = deepMerge({ a: 1, b: 2 }, { b: 3, c: 4 });
+    const result = deepMerge(
+      { a: 1, b: 2 } as Record<string, unknown>,
+      { b: 3, c: 4 },
+    );
     expect(result).toEqual({ a: 1, b: 3, c: 4 });
   });
 
   it('should recursively merge nested objects', () => {
-    const base = { nested: { x: 1, y: 2 } };
+    const base = { nested: { x: 1, y: 2 } } as Record<string, unknown>;
     const incoming = { nested: { y: 3, z: 4 } };
     const result = deepMerge(base, incoming);
     expect(result).toEqual({ nested: { x: 1, y: 3, z: 4 } });
   });
 
   it('should not mutate inputs', () => {
-    const base = { a: 1, nested: { x: 10 } };
+    const base = { a: 1, nested: { x: 10 } } as Record<string, unknown>;
     const incoming = { nested: { y: 20 } };
     const baseCopy = JSON.parse(JSON.stringify(base));
     const incomingCopy = JSON.parse(JSON.stringify(incoming));
@@ -74,12 +77,18 @@ describe('deepMerge', () => {
   });
 
   it('should handle incoming null (intentional clear)', () => {
-    const result = deepMerge({ a: 1, b: 2 }, { b: null as unknown as number });
+    const result = deepMerge(
+      { a: 1, b: 2 } as Record<string, unknown>,
+      { b: null },
+    );
     expect(result).toEqual({ a: 1, b: null });
   });
 
   it('should handle incoming undefined', () => {
-    const result = deepMerge({ a: 1, b: 2 }, { b: undefined as unknown as number });
+    const result = deepMerge(
+      { a: 1, b: 2 } as Record<string, unknown>,
+      { b: undefined },
+    );
     expect(result).toEqual({ a: 1, b: undefined });
   });
 

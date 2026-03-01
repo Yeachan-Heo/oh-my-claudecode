@@ -117,6 +117,16 @@ function makeEnvelope(overrides: Record<string, any> = {}): string {
   });
 }
 
+function helloEnvelope(): string {
+  return JSON.stringify({ envelope_id: 'env_hello', type: 'hello' });
+}
+
+/** Send a hello envelope to authenticate the connection */
+async function authenticate(ws: MockWebSocket) {
+  ws.fire('message', { data: helloEnvelope() });
+  await new Promise(r => setTimeout(r, 0));
+}
+
 // ---------------------------------------------------------------------------
 // Describe: SlackSocketClient
 // ---------------------------------------------------------------------------
@@ -145,16 +155,17 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
     vi.restoreAllMocks();
   });
 
-  it('hello envelope: no ACK sent (no envelope_id), no message dispatch', async () => {
+  it('hello envelope: acknowledged but no message dispatch', async () => {
     const onMessage = vi.fn();
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
     await new Promise(r => queueMicrotask(r as any)); // flush open
 
-    lastWs!.fire('message', { data: JSON.stringify({ type: 'hello' }) });
+    lastWs!.fire('message', { data: JSON.stringify({ envelope_id: 'env_hello_1', type: 'hello' }) });
     await new Promise(r => setTimeout(r, 10));
 
-    expect(lastWs!.send).not.toHaveBeenCalled();
+    // hello is acknowledged (has envelope_id) but does not dispatch to onMessage
+    expect(lastWs!.send).toHaveBeenCalledWith(JSON.stringify({ envelope_id: 'env_hello_1' }));
     expect(onMessage).not.toHaveBeenCalled();
     client.stop();
   });
@@ -167,7 +178,7 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
 
     const ws = lastWs!;
     lastWs!.fire('message', {
-      data: JSON.stringify({ type: 'disconnect', reason: 'refresh_requested' }),
+      data: JSON.stringify({ envelope_id: 'env_disconnect_1', type: 'disconnect', reason: 'refresh_requested' }),
     });
 
     expect(ws.close).toHaveBeenCalled();
@@ -179,6 +190,7 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
     await new Promise(r => queueMicrotask(r as any));
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', { data: makeEnvelope() });
     await new Promise(r => setTimeout(r, 20));
@@ -197,6 +209,7 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
     await new Promise(r => queueMicrotask(r as any));
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', {
       data: makeEnvelope({
@@ -215,6 +228,7 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
     await new Promise(r => queueMicrotask(r as any));
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', {
       data: makeEnvelope({
@@ -240,6 +254,7 @@ describe('SMOKE: SlackSocketClient — envelope parsing & filtering (issue #1139
     const client = new SlackSocketClient(CONFIG, onMessage, vi.fn());
     await client.start();
     await new Promise(r => queueMicrotask(r as any));
+    await authenticate(lastWs!);
 
     lastWs!.fire('message', {
       data: makeEnvelope({
