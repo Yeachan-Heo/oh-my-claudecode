@@ -18,6 +18,7 @@ import {
   type ProjectMemory,
   type UserDirective,
 } from '../hooks/project-memory/index.js';
+import { validatePayload } from '../lib/payload-limits.js';
 import { ToolDefinition } from './types.js';
 
 // ============================================================================
@@ -113,6 +114,18 @@ export const projectMemoryWriteTool: ToolDefinition<{
 
     try {
       const root = validateWorkingDirectory(workingDirectory);
+
+      // Validate payload size before writing
+      const validation = validatePayload(memory);
+      if (!validation.valid) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error: payload rejected — ${validation.error}`
+          }],
+          isError: true
+        };
+      }
 
       // Ensure .omc directory exists
       ensureOmcDir('', root);

@@ -17,6 +17,7 @@ import {
   validateSessionId,
 } from '../lib/worktree-paths.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
+import { validatePayload } from '../lib/payload-limits.js';
 import {
   isModeActive,
   getActiveModes,
@@ -205,12 +206,12 @@ export const stateWriteTool: ToolDefinition<{
     active: z.boolean().optional().describe('Whether the mode is currently active'),
     iteration: z.number().optional().describe('Current iteration number'),
     max_iterations: z.number().optional().describe('Maximum iterations allowed'),
-    current_phase: z.string().optional().describe('Current execution phase'),
-    task_description: z.string().optional().describe('Description of the task being executed'),
-    plan_path: z.string().optional().describe('Path to the plan file'),
-    started_at: z.string().optional().describe('ISO timestamp when the mode started'),
-    completed_at: z.string().optional().describe('ISO timestamp when the mode completed'),
-    error: z.string().optional().describe('Error message if the mode failed'),
+    current_phase: z.string().max(200).optional().describe('Current execution phase'),
+    task_description: z.string().max(2000).optional().describe('Description of the task being executed'),
+    plan_path: z.string().max(500).optional().describe('Path to the plan file'),
+    started_at: z.string().max(100).optional().describe('ISO timestamp when the mode started'),
+    completed_at: z.string().max(100).optional().describe('ISO timestamp when the mode completed'),
+    error: z.string().max(2000).optional().describe('Error message if the mode failed'),
     state: z.record(z.string(), z.unknown()).optional().describe('Additional custom state fields (merged with explicit parameters)'),
     workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
     session_id: z.string().optional().describe('Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).'),
@@ -235,6 +236,20 @@ export const stateWriteTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
+
+      // Validate custom state payload size if provided
+      if (state) {
+        const validation = validatePayload(state);
+        if (!validation.valid) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Error: state payload rejected — ${validation.error}`
+            }],
+            isError: true
+          };
+        }
+      }
 
       // Determine state path based on session_id
       let statePath: string;

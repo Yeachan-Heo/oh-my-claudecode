@@ -459,4 +459,71 @@ describe('state-tools', () => {
       expect(existsSync(legacyPath)).toBe(true);
     });
   });
+
+  describe('payload size validation', () => {
+    it('should reject oversized custom state payloads', async () => {
+      const result = await stateWriteTool.handler({
+        mode: 'ralph',
+        state: { huge: 'x'.repeat(2_000_000) },
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('payload rejected');
+      expect(result.content[0].text).toContain('exceeds maximum');
+    });
+
+    it('should reject deeply nested custom state payloads', async () => {
+      let obj: Record<string, unknown> = { leaf: true };
+      for (let i = 0; i < 15; i++) {
+        obj = { nested: obj };
+      }
+
+      const result = await stateWriteTool.handler({
+        mode: 'ralph',
+        state: obj,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('nesting depth');
+    });
+
+    it('should reject state with too many top-level keys', async () => {
+      const state: Record<string, string> = {};
+      for (let i = 0; i < 150; i++) {
+        state[`key_${i}`] = 'value';
+      }
+
+      const result = await stateWriteTool.handler({
+        mode: 'ralph',
+        state,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('top-level keys');
+    });
+
+    it('should still allow normal-sized state writes', async () => {
+      const result = await stateWriteTool.handler({
+        mode: 'ralph',
+        state: { active: true, task: 'normal task', items: [1, 2, 3] },
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('Successfully wrote');
+    });
+
+    it('should not validate when no custom state is provided', async () => {
+      const result = await stateWriteTool.handler({
+        mode: 'ralph',
+        active: true,
+        iteration: 1,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('Successfully wrote');
+    });
+  });
 });
