@@ -29,7 +29,8 @@ vi.mock('child_process', async (importOriginal) => {
     if (args[0] === 'split-window') {
       cb(null, '%42\n', '');
     } else if (args[0] === 'capture-pane') {
-      cb(null, 'user@host:~$ ', '');
+      // Return a prompt recognized by paneLooksReady (matches /^\s*[›>❯]\s*/u)
+      cb(null, '❯ ', '');
     } else if (args[0] === 'display-message') {
       // pane_dead check → "0" means alive; pane_in_mode → "0" means not in copy mode
       cb(null, '0', '');
@@ -46,7 +47,8 @@ vi.mock('child_process', async (importOriginal) => {
       return { stdout: '%42\n', stderr: '' };
     }
     if (args[0] === 'capture-pane') {
-      return { stdout: 'user@host:~$ ', stderr: '' };
+      // Return a prompt recognized by paneLooksReady (matches /^\s*[›>❯]\s*/u)
+      return { stdout: '❯ ', stderr: '' };
     }
     if (args[0] === 'display-message') {
       return { stdout: '0', stderr: '' };
@@ -56,8 +58,12 @@ vi.mock('child_process', async (importOriginal) => {
 
   return {
     ...actual,
-    spawnSync: vi.fn((_cmd: string, args: string[]) => {
+    spawnSync: vi.fn((cmd: string, args: string[]) => {
       if (args?.[0] === '--version') return { status: 0 };
+      // Handle 'which'/'where' binary lookup from resolveCliBinaryPath (#1190)
+      if (cmd === 'which' || cmd === 'where') {
+        return { status: 0, stdout: `/usr/bin/${args[0]}\n` };
+      }
       return { status: 1 };
     }),
     execFile: mockExecFile,

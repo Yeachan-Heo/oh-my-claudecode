@@ -51,6 +51,14 @@ vi.mock('child_process', async (importOriginal) => {
   return {
     ...actual,
     execFile: mockExecFile,
+    // Mock spawnSync for resolveCliBinaryPath 'which'/'where' calls (#1190)
+    spawnSync: vi.fn((cmd: string, args: string[]) => {
+      if (cmd === 'which' || cmd === 'where') {
+        return { status: 0, stdout: `/usr/bin/${args[0]}\n` };
+      }
+      if (args?.[0] === '--version') return { status: 0 };
+      return { status: 1 };
+    }),
   };
 });
 
