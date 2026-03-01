@@ -426,6 +426,13 @@ export class SlackSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly connectionState = new SlackConnectionStateTracker();
 
+  // Bound listener references for proper removal on cleanup.
+  // Typed as generic handlers for addEventListener/removeEventListener compat.
+  private onWsOpen: ((...args: unknown[]) => void) | null = null;
+  private onWsMessage: ((...args: unknown[]) => void) | null = null;
+  private onWsClose: ((...args: unknown[]) => void) | null = null;
+  private onWsError: ((...args: unknown[]) => void) | null = null;
+
   private readonly log: LogFn;
 
   constructor(
@@ -465,13 +472,33 @@ export class SlackSocketClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {
-        // Ignore close errors
-      }
-      this.ws = null;
+    this.cleanupWs();
+  }
+
+  /**
+   * Remove all event listeners from the current WebSocket, close it,
+   * and null the reference. Safe to call multiple times.
+   */
+  private cleanupWs(): void {
+    const ws = this.ws;
+    if (!ws) return;
+
+    this.ws = null;
+
+    // Remove listeners before closing to prevent callbacks on dead socket
+    if (this.onWsOpen) ws.removeEventListener('open', this.onWsOpen);
+    if (this.onWsMessage) ws.removeEventListener('message', this.onWsMessage);
+    if (this.onWsClose) ws.removeEventListener('close', this.onWsClose);
+    if (this.onWsError) ws.removeEventListener('error', this.onWsError);
+    this.onWsOpen = null;
+    this.onWsMessage = null;
+    this.onWsClose = null;
+    this.onWsError = null;
+
+    try {
+      ws.close();
+    } catch {
+      // Ignore close errors on already-closed sockets
     }
   }
 
@@ -481,6 +508,9 @@ export class SlackSocketClient {
   private async connect(): Promise<void> {
     if (this.isShuttingDown) return;
     this.connectionState.onConnecting();
+
+    // Clean up any previous connection before creating a new one
+    this.cleanupWs();
 
     try {
       // Step 1: Get WebSocket URL via apps.connections.open
@@ -498,30 +528,33 @@ export class SlackSocketClient {
         throw new Error(`apps.connections.open failed: ${data.error || 'no url returned'}`);
       }
 
-      // Step 2: Connect via WebSocket
+      // Step 2: Connect via WebSocket with tracked listeners
       this.ws = new WebSocket(data.url);
 
-      this.ws.addEventListener('open', () => {
+      this.onWsOpen = () => {
         this.log('Slack Socket Mode connected');
         this.reconnectAttempts = 0;
-      });
-
-      this.ws.addEventListener('message', (event) => {
-        this.handleEnvelope(String(event.data));
-      });
-
-      this.ws.addEventListener('close', () => {
-        this.ws = null;
+      };
+      this.onWsMessage = (event) => {
+        const ev = event as { data?: unknown };
+        this.handleEnvelope(String(ev.data));
+      };
+      this.onWsClose = () => {
+        this.cleanupWs();
         if (!this.isShuttingDown) {
           this.connectionState.onReconnecting();
           this.log('Slack Socket Mode disconnected, scheduling reconnect');
           this.scheduleReconnect();
         }
-      });
-
-      this.ws.addEventListener('error', (e) => {
+      };
+      this.onWsError = (e) => {
         this.log(`Slack Socket Mode WebSocket error: ${e instanceof Error ? e.message : 'unknown'}`);
-      });
+      };
+
+      this.ws.addEventListener('open', this.onWsOpen);
+      this.ws.addEventListener('message', this.onWsMessage);
+      this.ws.addEventListener('close', this.onWsClose);
+      this.ws.addEventListener('error', this.onWsError);
 
     } catch (error) {
       this.log(`Slack Socket Mode connection error: ${error instanceof Error ? error.message : String(error)}`);
@@ -650,6 +683,12 @@ export class SlackSocketClient {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.log(`Slack Socket Mode max reconnect attempts (${this.maxReconnectAttempts}) reached`);
       return;
+    }
+
+    // Clear any existing reconnect timer to prevent leaks on rapid disconnects
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
     const delay = Math.min(

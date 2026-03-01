@@ -68,6 +68,11 @@ class MockWebSocket {
     this.listeners[event].push(handler);
   }
 
+  removeEventListener(event: string, handler: (...args: any[]) => void) {
+    if (!this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter(h => h !== handler);
+  }
+
   send = vi.fn();
   close = vi.fn(() => {
     this.readyState = 3; // CLOSED
