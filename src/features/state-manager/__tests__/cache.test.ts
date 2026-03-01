@@ -29,6 +29,7 @@ import {
   clearStateCache,
   cleanupStaleStates,
   isStateStale,
+  StateManager,
 } from '../index.js';
 import { StateLocation } from '../types.js';
 
@@ -217,6 +218,200 @@ describe('cleanupStaleStates', () => {
 
     const count = cleanupStaleStates(tmpDir);
     expect(count).toBe(0);
+  });
+});
+
+describe('cache TOCTOU prevention', () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_STATE_DIR, { recursive: true });
+    clearStateCache();
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
+    clearStateCache();
+    try {
+      fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true });
+    } catch { /* best-effort */ }
+  });
+
+  function writeStateToDisk(name: string, data: unknown) {
+    const filePath = path.join(TEST_STATE_DIR, `${name}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    return filePath;
+  }
+
+  it('should detect external file changes via mtime and not serve stale cache', () => {
+    writeStateToDisk('ext-change', { active: true, value: 'original' });
+
+    // First read populates cache
+    const r1 = readState('ext-change', StateLocation.LOCAL);
+    expect((r1.data as Record<string, unknown>).value).toBe('original');
+
+    // External modification (simulating another process writing to the file)
+    const filePath = path.join(TEST_STATE_DIR, 'ext-change.json');
+    // Force a different mtime by touching the file with a future timestamp
+    const futureTime = new Date(Date.now() + 10_000);
+    fs.writeFileSync(filePath, JSON.stringify({ active: true, value: 'updated' }), 'utf-8');
+    fs.utimesSync(filePath, futureTime, futureTime);
+
+    // Read should detect mtime change and return fresh data, not stale cache
+    const r2 = readState('ext-change', StateLocation.LOCAL);
+    expect((r2.data as Record<string, unknown>).value).toBe('updated');
+  });
+
+  it('should always re-read when file mtime changes between consecutive reads', () => {
+    writeStateToDisk('toctou-seq', { active: true, version: 1 });
+
+    // First read populates cache
+    const r1 = readState('toctou-seq', StateLocation.LOCAL);
+    expect((r1.data as Record<string, unknown>).version).toBe(1);
+
+    // Simulate rapid external modification (different content, different mtime)
+    const filePath = path.join(TEST_STATE_DIR, 'toctou-seq.json');
+    fs.writeFileSync(filePath, JSON.stringify({ active: true, version: 2 }), 'utf-8');
+    // Ensure mtime is clearly different from cached mtime
+    const futureTime = new Date(Date.now() + 5_000);
+    fs.utimesSync(filePath, futureTime, futureTime);
+
+    // Second read must detect the mtime change and return fresh data
+    const r2 = readState('toctou-seq', StateLocation.LOCAL);
+    expect((r2.data as Record<string, unknown>).version).toBe(2);
+
+    // Modify again with yet another mtime
+    fs.writeFileSync(filePath, JSON.stringify({ active: true, version: 3 }), 'utf-8');
+    const futureTime2 = new Date(Date.now() + 10_000);
+    fs.utimesSync(filePath, futureTime2, futureTime2);
+
+    // Third read must also get fresh data
+    const r3 = readState('toctou-seq', StateLocation.LOCAL);
+    expect((r3.data as Record<string, unknown>).version).toBe(3);
+  });
+
+  it('should serve cached data only when file is unchanged', () => {
+    writeStateToDisk('toctou-stable', { active: true, value: 'stable' });
+
+    // First read populates cache
+    const r1 = readState('toctou-stable', StateLocation.LOCAL);
+    expect((r1.data as Record<string, unknown>).value).toBe('stable');
+
+    // Second read without any file changes should return cached data
+    const r2 = readState('toctou-stable', StateLocation.LOCAL);
+    expect((r2.data as Record<string, unknown>).value).toBe('stable');
+
+    // Data should be equal but not the same reference (defensive cloning)
+    expect(r1.data).toEqual(r2.data);
+    expect(r1.data).not.toBe(r2.data);
+  });
+});
+
+describe('StateManager.update() atomicity', () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_STATE_DIR, { recursive: true });
+    clearStateCache();
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
+    clearStateCache();
+    // Clean up lock files
+    try {
+      const files = fs.readdirSync(TEST_STATE_DIR);
+      for (const f of files) {
+        if (f.endsWith('.lock')) {
+          fs.unlinkSync(path.join(TEST_STATE_DIR, f));
+        }
+      }
+    } catch { /* best-effort */ }
+    try {
+      fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true });
+    } catch { /* best-effort */ }
+  });
+
+  function writeStateToDisk(name: string, data: unknown) {
+    const filePath = path.join(TEST_STATE_DIR, `${name}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    return filePath;
+  }
+
+  it('should read fresh data during update, bypassing stale cache', () => {
+    writeStateToDisk('upd-fresh', { active: true, count: 0 });
+
+    const manager = new StateManager('upd-fresh', StateLocation.LOCAL);
+
+    // Populate cache with count: 0
+    manager.get();
+
+    // External modification: another process sets count to 5
+    writeStateToDisk('upd-fresh', { active: true, count: 5 });
+    // Ensure mtime differs so cache is invalidated
+    const filePath = path.join(TEST_STATE_DIR, 'upd-fresh.json');
+    const futureTime = new Date(Date.now() + 10_000);
+    fs.utimesSync(filePath, futureTime, futureTime);
+
+    // update() should invalidate cache, read fresh count=5, then increment
+    manager.update((current) => ({
+      ...(current as Record<string, unknown>),
+      count: ((current as Record<string, unknown>)?.count as number ?? 0) + 1,
+    }));
+
+    // Result should be 6 (fresh 5 + 1), not 1 (stale 0 + 1)
+    const result = manager.get();
+    expect((result as Record<string, unknown>).count).toBe(6);
+  });
+
+  it('should release lock even if updater throws', () => {
+    writeStateToDisk('lock-throw', { active: true });
+
+    const manager = new StateManager('lock-throw', StateLocation.LOCAL);
+
+    // Update with throwing updater
+    expect(() => {
+      manager.update(() => { throw new Error('updater failed'); });
+    }).toThrow('updater failed');
+
+    // Lock should be released — subsequent update should succeed
+    const result = manager.update((current) => ({
+      ...(current as Record<string, unknown>),
+      recovered: true,
+    }));
+    expect(result).toBe(true);
+  });
+
+  it('should clean up lock file after successful update', () => {
+    writeStateToDisk('lock-clean', { active: true, value: 1 });
+
+    const manager = new StateManager('lock-clean', StateLocation.LOCAL);
+    manager.update((current) => ({
+      ...(current as Record<string, unknown>),
+      value: 2,
+    }));
+
+    // Lock file should not exist after update completes
+    const lockPath = path.join(TEST_STATE_DIR, 'lock-clean.json.lock');
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('should handle update on non-existent state (first write)', () => {
+    const manager = new StateManager('brand-new', StateLocation.LOCAL);
+
+    const result = manager.update((current) => ({
+      active: true,
+      initialized: true,
+      previous: current ?? null,
+    }));
+
+    expect(result).toBe(true);
+    const data = manager.get() as Record<string, unknown>;
+    expect(data.active).toBe(true);
+    expect(data.initialized).toBe(true);
+    expect(data.previous).toBeNull();
   });
 });
 
