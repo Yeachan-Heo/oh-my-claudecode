@@ -25,7 +25,7 @@ vi.mock('child_process', () => {
     promisify: vi.fn((fn: unknown) => {
       return (...args: unknown[]) => {
         return new Promise((resolve, reject) => {
-          (fn as Function)(...args, (err: Error | null, result: unknown) => {
+          (fn as (...a: unknown[]) => void)(...args, (err: Error | null, result: unknown) => {
             if (err) reject(err);
             else resolve(result);
           });
@@ -43,7 +43,7 @@ vi.mock('util', async () => {
     promisify: vi.fn((fn: unknown) => {
       return (...args: unknown[]) => {
         return new Promise((resolve, reject) => {
-          (fn as Function)(...args, (err: Error | null, result: unknown) => {
+          (fn as (...a: unknown[]) => void)(...args, (err: Error | null, result: unknown) => {
             if (err) reject(err);
             else resolve(result);
           });
