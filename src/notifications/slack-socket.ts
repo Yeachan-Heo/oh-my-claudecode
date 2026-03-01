@@ -61,11 +61,12 @@ export class SlackSocketClient {
   private isShuttingDown = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Bound listener references for proper removal on cleanup
-  private onWsOpen: (() => void) | null = null;
-  private onWsMessage: ((event: { data: unknown }) => void) | null = null;
-  private onWsClose: (() => void) | null = null;
-  private onWsError: ((e: unknown) => void) | null = null;
+  // Bound listener references for proper removal on cleanup.
+  // Typed as generic handlers for addEventListener/removeEventListener compat.
+  private onWsOpen: ((...args: unknown[]) => void) | null = null;
+  private onWsMessage: ((...args: unknown[]) => void) | null = null;
+  private onWsClose: ((...args: unknown[]) => void) | null = null;
+  private onWsError: ((...args: unknown[]) => void) | null = null;
 
   private readonly log: LogFn;
 
@@ -114,9 +115,9 @@ export class SlackSocketClient {
 
     // Remove listeners before closing to prevent callbacks on dead socket
     if (this.onWsOpen) ws.removeEventListener('open', this.onWsOpen);
-    if (this.onWsMessage) ws.removeEventListener('message', this.onWsMessage as EventListener);
+    if (this.onWsMessage) ws.removeEventListener('message', this.onWsMessage);
     if (this.onWsClose) ws.removeEventListener('close', this.onWsClose);
-    if (this.onWsError) ws.removeEventListener('error', this.onWsError as EventListener);
+    if (this.onWsError) ws.removeEventListener('error', this.onWsError);
     this.onWsOpen = null;
     this.onWsMessage = null;
     this.onWsClose = null;
@@ -161,8 +162,9 @@ export class SlackSocketClient {
         this.log('Slack Socket Mode connected');
         this.reconnectAttempts = 0;
       };
-      this.onWsMessage = (event: { data: unknown }) => {
-        this.handleEnvelope(String(event.data));
+      this.onWsMessage = (event) => {
+        const ev = event as { data?: unknown };
+        this.handleEnvelope(String(ev.data));
       };
       this.onWsClose = () => {
         this.cleanupWs();
@@ -171,14 +173,14 @@ export class SlackSocketClient {
           this.scheduleReconnect();
         }
       };
-      this.onWsError = (e: unknown) => {
+      this.onWsError = (e) => {
         this.log(`Slack Socket Mode WebSocket error: ${e instanceof Error ? e.message : 'unknown'}`);
       };
 
       this.ws.addEventListener('open', this.onWsOpen);
-      this.ws.addEventListener('message', this.onWsMessage as EventListener);
+      this.ws.addEventListener('message', this.onWsMessage);
       this.ws.addEventListener('close', this.onWsClose);
-      this.ws.addEventListener('error', this.onWsError as EventListener);
+      this.ws.addEventListener('error', this.onWsError);
 
     } catch (error) {
       this.log(`Slack Socket Mode connection error: ${error instanceof Error ? error.message : String(error)}`);
