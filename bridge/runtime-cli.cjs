@@ -265,10 +265,36 @@ function getContract(agentType) {
   }
   return contract;
 }
+function validateBinaryRef(binary) {
+  if ((0, import_path.isAbsolute)(binary)) return;
+  if (/^[A-Za-z0-9._-]+$/.test(binary)) return;
+  throw new Error(`Unsafe CLI binary reference: ${binary}`);
+}
+function resolveBinaryPath(binary) {
+  validateBinaryRef(binary);
+  if ((0, import_path.isAbsolute)(binary)) return binary;
+  try {
+    const resolver = process.platform === "win32" ? "where" : "which";
+    const result = (0, import_child_process.spawnSync)(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
+    if (result.status !== 0) return binary;
+    const lines = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
+    const firstPath = lines[0];
+    const isResolvedAbsolute = !!firstPath && ((0, import_path.isAbsolute)(firstPath) || import_path.win32.isAbsolute(firstPath));
+    return isResolvedAbsolute ? firstPath : binary;
+  } catch {
+    return binary;
+  }
+}
 function isCliAvailable(agentType) {
   const contract = getContract(agentType);
   try {
-    const result = (0, import_child_process.spawnSync)(contract.binary, ["--version"], { timeout: 5e3, shell: true });
+    const resolvedBinary = resolveBinaryPath(contract.binary);
+    if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+      const comspec = process.env.COMSPEC || "cmd.exe";
+      const result2 = (0, import_child_process.spawnSync)(comspec, ["/d", "/s", "/c", `"${resolvedBinary}" --version`], { timeout: 5e3 });
+      return result2.status === 0;
+    }
+    const result = (0, import_child_process.spawnSync)(resolvedBinary, ["--version"], { timeout: 5e3 });
     return result.status === 0;
   } catch {
     return false;
@@ -288,8 +314,9 @@ function buildLaunchArgs(agentType, config) {
 function buildWorkerArgv(agentType, config) {
   validateTeamName(config.teamName);
   const contract = getContract(agentType);
+  const binary = resolveBinaryPath(contract.binary);
   const args = buildLaunchArgs(agentType, config);
-  return [contract.binary, ...args];
+  return [binary, ...args];
 }
 function getWorkerEnv(teamName, workerName2, agentType) {
   validateTeamName(teamName);
@@ -353,8 +380,14 @@ function assertSafeEnvKey(key) {
     throw new Error(`Invalid environment key: "${key}"`);
   }
 }
+function assertSafeLaunchBinary(binary) {
+  if (/^[A-Za-z0-9._/-]+$/.test(binary)) return;
+  if (/^[A-Za-z]:[\\/][A-Za-z0-9._\\/-]+$/.test(binary)) return;
+  throw new Error(`Invalid launchBinary: "${binary}"`);
+}
 function getLaunchWords(config) {
   if (config.launchBinary) {
+    assertSafeLaunchBinary(config.launchBinary);
     return [config.launchBinary, ...config.launchArgs ?? []];
   }
   if (config.launchCmd) {

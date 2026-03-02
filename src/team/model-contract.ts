@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { isAbsolute, normalize } from 'path';
+import { isAbsolute, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
@@ -213,10 +213,45 @@ export function getContract(agentType: CliAgentType): CliAgentContract {
   return contract;
 }
 
+function validateBinaryRef(binary: string): void {
+  if (isAbsolute(binary)) return;
+  if (/^[A-Za-z0-9._-]+$/.test(binary)) return;
+  throw new Error(`Unsafe CLI binary reference: ${binary}`);
+}
+
+function resolveBinaryPath(binary: string): string {
+  validateBinaryRef(binary);
+  if (isAbsolute(binary)) return binary;
+
+  try {
+    const resolver = process.platform === 'win32' ? 'where' : 'which';
+    const result = spawnSync(resolver, [binary], { timeout: 5000, encoding: 'utf8' });
+    if (result.status !== 0) return binary;
+
+    const lines = result.stdout
+      ?.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean) ?? [];
+
+    const firstPath = lines[0];
+    const isResolvedAbsolute = !!firstPath && (isAbsolute(firstPath) || win32Path.isAbsolute(firstPath));
+    return isResolvedAbsolute ? firstPath : binary;
+  } catch {
+    return binary;
+  }
+}
+
 export function isCliAvailable(agentType: CliAgentType): boolean {
   const contract = getContract(agentType);
   try {
-    const result = spawnSync(contract.binary, ['--version'], { timeout: 5000, shell: true });
+    const resolvedBinary = resolveBinaryPath(contract.binary);
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
+      const result = spawnSync(comspec, ['/d', '/s', '/c', `"${resolvedBinary}" --version`], { timeout: 5000 });
+      return result.status === 0;
+    }
+
+    const result = spawnSync(resolvedBinary, ['--version'], { timeout: 5000 });
     return result.status === 0;
   } catch {
     return false;
@@ -239,8 +274,9 @@ export function buildLaunchArgs(agentType: CliAgentType, config: WorkerLaunchCon
 export function buildWorkerArgv(agentType: CliAgentType, config: WorkerLaunchConfig): string[] {
   validateTeamName(config.teamName);
   const contract = getContract(agentType);
+  const binary = resolveBinaryPath(contract.binary);
   const args = buildLaunchArgs(agentType, config);
-  return [contract.binary, ...args];
+  return [binary, ...args];
 }
 
 export function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunchConfig): string {

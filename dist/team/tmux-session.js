@@ -55,8 +55,16 @@ function assertSafeEnvKey(key) {
         throw new Error(`Invalid environment key: "${key}"`);
     }
 }
+function assertSafeLaunchBinary(binary) {
+    if (/^[A-Za-z0-9._/-]+$/.test(binary))
+        return;
+    if (/^[A-Za-z]:[\\/][A-Za-z0-9._\\/-]+$/.test(binary))
+        return;
+    throw new Error(`Invalid launchBinary: "${binary}"`);
+}
 function getLaunchWords(config) {
     if (config.launchBinary) {
+        assertSafeLaunchBinary(config.launchBinary);
         return [config.launchBinary, ...(config.launchArgs ?? [])];
     }
     if (config.launchCmd) {

@@ -73,4 +73,16 @@ describe('spawnWorkerInPane', () => {
       })
     ).rejects.toThrow('Invalid environment key');
   });
+
+  it('rejects unsafe launchBinary values', async () => {
+    await expect(
+      spawnWorkerInPane('session:0', '%2', {
+        teamName: 'safe-team',
+        workerName: 'worker-1',
+        envVars: { OMC_TEAM_NAME: 'safe-team' },
+        launchBinary: 'codex;touch /tmp/pwn',
+        cwd: '/tmp',
+      })
+    ).rejects.toThrow('Invalid launchBinary');
+  });
 });

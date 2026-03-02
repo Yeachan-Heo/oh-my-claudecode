@@ -84,8 +84,15 @@ function assertSafeEnvKey(key: string): void {
   }
 }
 
+function assertSafeLaunchBinary(binary: string): void {
+  if (/^[A-Za-z0-9._/-]+$/.test(binary)) return;
+  if (/^[A-Za-z]:[\\/][A-Za-z0-9._\\/-]+$/.test(binary)) return;
+  throw new Error(`Invalid launchBinary: "${binary}"`);
+}
+
 function getLaunchWords(config: WorkerPaneConfig): string[] {
   if (config.launchBinary) {
+    assertSafeLaunchBinary(config.launchBinary);
     return [config.launchBinary, ...(config.launchArgs ?? [])];
   }
   if (config.launchCmd) {
