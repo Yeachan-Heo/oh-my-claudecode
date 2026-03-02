@@ -248,7 +248,7 @@ export function cleanupTransientState(directory: string): number {
  * Imported from the shared mode-names module (issue #1058).
  */
 
-const PYTHON_REPL_TOOL_NAMES = new Set(['python_repl', 'mcp__t__python_repl']);
+const PYTHON_REPL_TOOL_NAMES = new Set(['python_repl', 'mcp__t__python_repl', 'mcp__plugin_oh-my-claudecode_t__python_repl']);
 
 /**
  * Extract python_repl research session IDs from transcript JSONL.
