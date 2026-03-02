@@ -36,11 +36,14 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 
 <Steps>
 1. **Phase 0 - Expansion**: Turn the user's idea into a detailed spec
-   - Analyst (Opus): Extract requirements
-   - Architect (Opus): Create technical specification
+   - **If ralplan consensus plan exists** (`.omc/plans/ralplan-*.md` or `.omc/plans/consensus-*.md` from the 3-stage pipeline): Skip BOTH Phase 0 and Phase 1 — jump directly to Phase 2 (Execution). The plan has already been Planner/Architect/Critic validated.
+   - **If deep-interview spec exists** (`.omc/specs/deep-interview-*.md`): Skip analyst+architect expansion, use the pre-validated spec directly as Phase 0 output. Continue to Phase 1 (Planning).
+   - **If input is vague** (no file paths, function names, or concrete anchors): Offer redirect to `/deep-interview` for Socratic clarification before expanding
+   - **Otherwise**: Analyst (Opus) extracts requirements, Architect (Opus) creates technical specification
    - Output: `.omc/autopilot/spec.md`
 
 2. **Phase 1 - Planning**: Create an implementation plan from the spec
+   - **If ralplan consensus plan exists**: Skip — already done in the 3-stage pipeline
    - Architect (Opus): Create plan (direct mode, no interview)
    - Critic (Opus): Validate plan
    - Output: `.omc/plans/autopilot-impl.md`
@@ -101,7 +104,7 @@ Why bad: This is an exploration/brainstorming request. Respond conversationally 
 - Stop and report when the same QA error persists across 3 cycles (fundamental issue requiring human input)
 - Stop and report when validation keeps failing after 3 re-validation rounds
 - Stop when the user says "stop", "cancel", or "abort"
-- If requirements were too vague and expansion produces an unclear spec, pause and ask the user for clarification before proceeding
+- If requirements were too vague and expansion produces an unclear spec, offer redirect to `/deep-interview` for Socratic clarification, or pause and ask the user for clarification before proceeding
 </Escalation_And_Stop_Conditions>
 
 <Final_Checklist>
@@ -152,4 +155,34 @@ If autopilot was cancelled or failed, run `/oh-my-claudecode:autopilot` again to
 **QA cycles exhausted?** The same error 3 times indicates a fundamental issue. Review the error pattern; manual intervention may be needed.
 
 **Validation keeps failing?** Review the specific issues. Requirements may have been too vague -- cancel and provide more detail.
+
+## Deep Interview Integration
+
+When autopilot is invoked with a vague input, Phase 0 can redirect to `/deep-interview` for Socratic clarification:
+
+```
+User: "autopilot build me something cool"
+Autopilot: "Your request is open-ended. Would you like to run a deep interview first?"
+  [Yes, interview first (Recommended)] [No, expand directly]
+```
+
+If a deep-interview spec already exists at `.omc/specs/deep-interview-*.md`, autopilot uses it directly as Phase 0 output (the spec has already been mathematically validated for clarity).
+
+### 3-Stage Pipeline: deep-interview → ralplan → autopilot
+
+The recommended full pipeline chains three quality gates:
+
+```
+/deep-interview "vague idea"
+  → Socratic Q&A → spec (ambiguity ≤ 20%)
+  → /ralplan --direct → consensus plan (Planner/Architect/Critic approved)
+  → /autopilot → skips Phase 0+1, starts at Phase 2 (Execution)
+```
+
+When autopilot detects a ralplan consensus plan (`.omc/plans/ralplan-*.md` or `.omc/plans/consensus-*.md`), it skips both Phase 0 (Expansion) and Phase 1 (Planning) because the plan has already been:
+- Requirements-validated (deep-interview ambiguity gate)
+- Architecture-reviewed (ralplan Architect agent)
+- Quality-checked (ralplan Critic agent)
+
+Autopilot starts directly at Phase 2 (Execution via Ralph + Ultrawork).
 </Advanced>

@@ -3,7 +3,7 @@
 
 # skills
 
-40 skill directories for workflow automation and specialized behaviors (42 runtime skill names including compatibility aliases).
+42 skill directories for workflow automation and specialized behaviors (44 runtime skill names including compatibility aliases).
 
 ## Purpose
 
@@ -32,6 +32,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 |-----------|-------|---------|
 | `plan/SKILL.md` | plan | Strategic planning with interview workflow |
 | `ralplan/SKILL.md` | ralplan | Iterative planning (Planner+Architect+Critic) with RALPLAN-DR structured deliberation (`--deliberate` for high-risk) |
+| `deep-interview/SKILL.md` | deep-interview | Socratic deep interview with mathematical ambiguity gating (Ouroboros-inspired) |
 | `review/SKILL.md` | review | Review plan with Critic |
 | `analyze/SKILL.md` | analyze | Deep analysis and investigation |
 | `ralph-init/SKILL.md` | ralph-init | Initialize PRD for structured ralph |
@@ -177,7 +178,7 @@ None - pure markdown files.
 | Category | Skills | Trigger Keywords |
 |----------|--------|------------------|
 | Execution | autopilot, ultrawork, ralph, ultrapilot, swarm, pipeline | "autopilot", "ulw", "ralph", "swarm", "eco" |
-| Planning | plan, ralplan, review, analyze, ralph-init | "plan this", "analyze" |
+| Planning | plan, ralplan, deep-interview, review, analyze, ralph-init | "plan this", "analyze", "interview me", "ouroboros" |
 | Quality | code-review, security-review, tdd, build-fix | "review", "security", "tdd" |
 | Exploration | deepsearch, deepinit, research | "search", "research" |
 | Utility | learner, note, cancel, hud, doctor, omc-setup, mcp-setup, help | "stop", "cancel" |
@@ -192,6 +193,7 @@ Some skills activate automatically based on context:
 | autopilot | "autopilot", "build me", "I want a" |
 | ultrawork | "ulw", "ultrawork" |
 | ralph | "ralph", "don't stop until" |
+| deep-interview | "deep interview", "interview me", "ouroboros", "don't assume" |
 | frontend-ui-ux | UI/component work detected |
 | git-master | Git operations detected |
 | cancel | "stop", "cancel", "abort" |
