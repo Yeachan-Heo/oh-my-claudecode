@@ -494,7 +494,7 @@ describe('Team staged workflow integration', () => {
             sessionId,
             directory: testDir,
         });
-        expect(result.continue).toBe(true);
+        expect(result.continue).toBe(false);
         expect(result.message).toContain('[TEAM MODE CONTINUATION]');
         expect(result.message).toContain('team-verify');
         expect(result.message).toContain('Continue verification');
@@ -510,7 +510,7 @@ describe('Team staged workflow integration', () => {
             sessionId,
             directory: testDir,
         });
-        expect(result.continue).toBe(true);
+        expect(result.continue).toBe(false);
         expect(result.message).toContain('[TEAM MODE CONTINUATION]');
         expect(result.message).toContain('team-fix');
         expect(result.message).toContain('fix loop');

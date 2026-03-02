@@ -9,5 +9,15 @@ export interface SentinelGateResult {
     blockers: string[];
     skipped: boolean;
 }
+export interface SentinelWaitOptions extends SentinelReadinessOptions {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+}
+export interface SentinelWaitResult extends SentinelGateResult {
+    timedOut: boolean;
+    elapsedMs: number;
+    attempts: number;
+}
 export declare function checkSentinelReadiness(options?: SentinelReadinessOptions): SentinelGateResult;
+export declare function waitForSentinelReadiness(options?: SentinelWaitOptions): Promise<SentinelWaitResult>;
 //# sourceMappingURL=sentinel-gate.d.ts.map

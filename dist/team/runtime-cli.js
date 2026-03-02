@@ -9,6 +9,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { writeFile, rename } from 'fs/promises';
 import { join } from 'path';
 import { startTeam, monitorTeam, shutdownTeam } from './runtime.js';
+import { waitForSentinelReadiness } from './sentinel-gate.js';
 async function writePanesFile(jobId, paneIds, leaderPaneId) {
     const omcJobsDir = process.env.OMC_JOBS_DIR;
     if (!jobId || !omcJobsDir)
@@ -70,7 +71,7 @@ async function main() {
         process.stderr.write(`[runtime-cli] Missing required fields: ${missing.join(', ')}\n`);
         process.exit(1);
     }
-    const { teamName, agentTypes, tasks, cwd, pollIntervalMs = 5000, } = input;
+    const { teamName, agentTypes, tasks, cwd, pollIntervalMs = 5000, sentinelGateTimeoutMs = 30_000, sentinelGatePollIntervalMs = 250, } = input;
     const workerCount = input.workerCount ?? agentTypes.length;
     const stateRoot = join(cwd, `.omc/state/team/${teamName}`);
     const config = {
@@ -162,8 +163,20 @@ async function main() {
             process.stderr.write(`[runtime-cli] Failed to persist pane IDs: ${err}\n`);
         }
         process.stderr.write(`[runtime-cli] phase=${snap.phase} pending=${snap.taskCounts.pending} inProgress=${snap.taskCounts.inProgress} completed=${snap.taskCounts.completed} failed=${snap.taskCounts.failed} dead=${snap.deadWorkers.length} monitorMs=${snap.monitorPerformance.totalMs} tasksMs=${snap.monitorPerformance.listTasksMs} workerMs=${snap.monitorPerformance.workerScanMs}\n`);
-        // Check completion
+        // Check completion — enforce sentinel readiness gate before terminal success
         if (snap.phase === 'completed') {
+            const sentinelLogPath = join(cwd, 'sentinel_stop.jsonl');
+            const gateResult = await waitForSentinelReadiness({
+                workspace: cwd,
+                logPath: sentinelLogPath,
+                timeoutMs: sentinelGateTimeoutMs,
+                pollIntervalMs: sentinelGatePollIntervalMs,
+            });
+            if (!gateResult.ready) {
+                process.stderr.write(`[runtime-cli] Sentinel gate blocked completion (timedOut=${gateResult.timedOut}, attempts=${gateResult.attempts}, elapsedMs=${gateResult.elapsedMs}): ${gateResult.blockers.join('; ')}\n`);
+                await doShutdown('failed');
+                return;
+            }
             await doShutdown('completed');
             return;
         }

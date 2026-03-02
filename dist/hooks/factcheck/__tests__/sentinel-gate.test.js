@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { checkSentinelReadiness } from '../../../team/sentinel-gate.js';
+import { checkSentinelReadiness, waitForSentinelReadiness, } from '../../../team/sentinel-gate.js';
 function writeJsonl(path, rows) {
     const content = rows.map(row => JSON.stringify(row)).join('\n') + '\n';
     writeFileSync(path, content, 'utf-8');
@@ -84,6 +84,76 @@ describe('Sentinel readiness gate', () => {
         expect(result.skipped).toBe(false);
         expect(result.blockers.length).toBeGreaterThan(0);
         expect(result.blockers.some(blocker => blocker.includes('pass_rate'))).toBe(true);
+    });
+    it('does not throw on malformed claims and returns blockers instead', () => {
+        // files_modified as object instead of array — previously would throw
+        const result = checkSentinelReadiness({
+            claims: { files_modified: {}, files_created: 'not-an-array' },
+        });
+        expect(result.ready).toBe(false);
+        expect(result.skipped).toBe(false);
+        // Should have blockers (from factcheck) but should NOT have thrown
+        expect(result.blockers.length).toBeGreaterThan(0);
+    });
+    it('returns ready:false when enabled but no logPath or claims provided', () => {
+        // enabled defaults to true; no logPath, no claims
+        const result = checkSentinelReadiness({});
+        expect(result.ready).toBe(false);
+        expect(result.skipped).toBe(true);
+        expect(result.blockers.length).toBeGreaterThan(0);
+        expect(result.blockers[0]).toContain('no logPath or claims provided');
+    });
+    it('returns ready:false with explicit enabled:true and no inputs', () => {
+        const result = checkSentinelReadiness({ enabled: true });
+        expect(result.ready).toBe(false);
+        expect(result.skipped).toBe(true);
+        expect(result.blockers.some(b => b.includes('cannot verify readiness'))).toBe(true);
+    });
+    it('respects sentinel.enabled from config when enabled is omitted', () => {
+        writeFileSync(join(tempDir, '.claude', 'omc.jsonc'), JSON.stringify({
+            guards: {
+                sentinel: {
+                    enabled: false,
+                },
+            },
+        }), 'utf-8');
+        const result = checkSentinelReadiness({});
+        expect(result).toEqual({
+            ready: true,
+            blockers: [],
+            skipped: true,
+        });
+    });
+    it('times out and fails closed when readiness never arrives', async () => {
+        const logPath = join(tempDir, 'sentinel_stop.jsonl');
+        const result = await waitForSentinelReadiness({
+            logPath,
+            timeoutMs: 120,
+            pollIntervalMs: 50,
+        });
+        expect(result.ready).toBe(false);
+        expect(result.timedOut).toBe(true);
+        expect(result.blockers.some(b => b.includes('timed out'))).toBe(true);
+    });
+    it('waits until readiness signal appears before succeeding', async () => {
+        const logPath = join(tempDir, 'sentinel_stop.jsonl');
+        setTimeout(() => {
+            writeJsonl(logPath, [
+                { verdict: 'PASS', reason: 'ok-1', runtime: { timed_out: false } },
+                { verdict: 'PASS', reason: 'ok-2', runtime: { timed_out: false } },
+                { verdict: 'PASS', reason: 'ok-3', runtime: { timed_out: false } },
+                { verdict: 'PASS', reason: 'ok-4', runtime: { timed_out: false } },
+                { verdict: 'PASS', reason: 'ok-5', runtime: { timed_out: false } },
+            ]);
+        }, 60);
+        const result = await waitForSentinelReadiness({
+            logPath,
+            timeoutMs: 800,
+            pollIntervalMs: 40,
+        });
+        expect(result.ready).toBe(true);
+        expect(result.timedOut).toBe(false);
+        expect(result.blockers).toEqual([]);
     });
 });
 //# sourceMappingURL=sentinel-gate.test.js.map

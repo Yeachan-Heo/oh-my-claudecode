@@ -5,6 +5,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -22,10 +25,158 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// ../../../node_modules/jsonc-parser/lib/umd/main.js
+var require_main = __commonJS({
+  "../../../node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
+    (function(factory) {
+      if (typeof module2 === "object" && typeof module2.exports === "object") {
+        var v = factory(require, exports2);
+        if (v !== void 0) module2.exports = v;
+      } else if (typeof define === "function" && define.amd) {
+        define(["require", "exports", "./impl/format", "./impl/edit", "./impl/scanner", "./impl/parser"], factory);
+      }
+    })(function(require2, exports3) {
+      "use strict";
+      Object.defineProperty(exports3, "__esModule", { value: true });
+      exports3.applyEdits = exports3.modify = exports3.format = exports3.printParseErrorCode = exports3.ParseErrorCode = exports3.stripComments = exports3.visit = exports3.getNodeValue = exports3.getNodePath = exports3.findNodeAtOffset = exports3.findNodeAtLocation = exports3.parseTree = exports3.parse = exports3.getLocation = exports3.SyntaxKind = exports3.ScanError = exports3.createScanner = void 0;
+      const formatter = require2("./impl/format");
+      const edit = require2("./impl/edit");
+      const scanner = require2("./impl/scanner");
+      const parser = require2("./impl/parser");
+      exports3.createScanner = scanner.createScanner;
+      var ScanError;
+      (function(ScanError2) {
+        ScanError2[ScanError2["None"] = 0] = "None";
+        ScanError2[ScanError2["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
+        ScanError2[ScanError2["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
+        ScanError2[ScanError2["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
+        ScanError2[ScanError2["InvalidUnicode"] = 4] = "InvalidUnicode";
+        ScanError2[ScanError2["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
+        ScanError2[ScanError2["InvalidCharacter"] = 6] = "InvalidCharacter";
+      })(ScanError || (exports3.ScanError = ScanError = {}));
+      var SyntaxKind;
+      (function(SyntaxKind2) {
+        SyntaxKind2[SyntaxKind2["OpenBraceToken"] = 1] = "OpenBraceToken";
+        SyntaxKind2[SyntaxKind2["CloseBraceToken"] = 2] = "CloseBraceToken";
+        SyntaxKind2[SyntaxKind2["OpenBracketToken"] = 3] = "OpenBracketToken";
+        SyntaxKind2[SyntaxKind2["CloseBracketToken"] = 4] = "CloseBracketToken";
+        SyntaxKind2[SyntaxKind2["CommaToken"] = 5] = "CommaToken";
+        SyntaxKind2[SyntaxKind2["ColonToken"] = 6] = "ColonToken";
+        SyntaxKind2[SyntaxKind2["NullKeyword"] = 7] = "NullKeyword";
+        SyntaxKind2[SyntaxKind2["TrueKeyword"] = 8] = "TrueKeyword";
+        SyntaxKind2[SyntaxKind2["FalseKeyword"] = 9] = "FalseKeyword";
+        SyntaxKind2[SyntaxKind2["StringLiteral"] = 10] = "StringLiteral";
+        SyntaxKind2[SyntaxKind2["NumericLiteral"] = 11] = "NumericLiteral";
+        SyntaxKind2[SyntaxKind2["LineCommentTrivia"] = 12] = "LineCommentTrivia";
+        SyntaxKind2[SyntaxKind2["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
+        SyntaxKind2[SyntaxKind2["LineBreakTrivia"] = 14] = "LineBreakTrivia";
+        SyntaxKind2[SyntaxKind2["Trivia"] = 15] = "Trivia";
+        SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
+        SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
+      })(SyntaxKind || (exports3.SyntaxKind = SyntaxKind = {}));
+      exports3.getLocation = parser.getLocation;
+      exports3.parse = parser.parse;
+      exports3.parseTree = parser.parseTree;
+      exports3.findNodeAtLocation = parser.findNodeAtLocation;
+      exports3.findNodeAtOffset = parser.findNodeAtOffset;
+      exports3.getNodePath = parser.getNodePath;
+      exports3.getNodeValue = parser.getNodeValue;
+      exports3.visit = parser.visit;
+      exports3.stripComments = parser.stripComments;
+      var ParseErrorCode;
+      (function(ParseErrorCode2) {
+        ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
+        ParseErrorCode2[ParseErrorCode2["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
+        ParseErrorCode2[ParseErrorCode2["PropertyNameExpected"] = 3] = "PropertyNameExpected";
+        ParseErrorCode2[ParseErrorCode2["ValueExpected"] = 4] = "ValueExpected";
+        ParseErrorCode2[ParseErrorCode2["ColonExpected"] = 5] = "ColonExpected";
+        ParseErrorCode2[ParseErrorCode2["CommaExpected"] = 6] = "CommaExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBraceExpected"] = 7] = "CloseBraceExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBracketExpected"] = 8] = "CloseBracketExpected";
+        ParseErrorCode2[ParseErrorCode2["EndOfFileExpected"] = 9] = "EndOfFileExpected";
+        ParseErrorCode2[ParseErrorCode2["InvalidCommentToken"] = 10] = "InvalidCommentToken";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
+        ParseErrorCode2[ParseErrorCode2["InvalidUnicode"] = 14] = "InvalidUnicode";
+        ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
+        ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
+      })(ParseErrorCode || (exports3.ParseErrorCode = ParseErrorCode = {}));
+      function printParseErrorCode(code) {
+        switch (code) {
+          case 1:
+            return "InvalidSymbol";
+          case 2:
+            return "InvalidNumberFormat";
+          case 3:
+            return "PropertyNameExpected";
+          case 4:
+            return "ValueExpected";
+          case 5:
+            return "ColonExpected";
+          case 6:
+            return "CommaExpected";
+          case 7:
+            return "CloseBraceExpected";
+          case 8:
+            return "CloseBracketExpected";
+          case 9:
+            return "EndOfFileExpected";
+          case 10:
+            return "InvalidCommentToken";
+          case 11:
+            return "UnexpectedEndOfComment";
+          case 12:
+            return "UnexpectedEndOfString";
+          case 13:
+            return "UnexpectedEndOfNumber";
+          case 14:
+            return "InvalidUnicode";
+          case 15:
+            return "InvalidEscapeCharacter";
+          case 16:
+            return "InvalidCharacter";
+        }
+        return "<unknown ParseErrorCode>";
+      }
+      exports3.printParseErrorCode = printParseErrorCode;
+      function format(documentText, range, options) {
+        return formatter.format(documentText, range, options);
+      }
+      exports3.format = format;
+      function modify(text, path, value, options) {
+        return edit.setProperty(text, path, value, options);
+      }
+      exports3.modify = modify;
+      function applyEdits(text, edits) {
+        let sortedEdits = edits.slice(0).sort((a, b) => {
+          const diff = a.offset - b.offset;
+          if (diff === 0) {
+            return a.length - b.length;
+          }
+          return diff;
+        });
+        let lastModifiedOffset = text.length;
+        for (let i = sortedEdits.length - 1; i >= 0; i--) {
+          let e = sortedEdits[i];
+          if (e.offset + e.length <= lastModifiedOffset) {
+            text = edit.applyEdit(text, e);
+          } else {
+            throw new Error("Overlapping edit");
+          }
+          lastModifiedOffset = e.offset;
+        }
+        return text;
+      }
+      exports3.applyEdits = applyEdits;
+    });
+  }
+});
+
 // src/team/runtime-cli.ts
-var import_fs7 = require("fs");
+var import_fs10 = require("fs");
 var import_promises4 = require("fs/promises");
-var import_path10 = require("path");
+var import_path12 = require("path");
 
 // src/team/runtime.ts
 var import_promises3 = require("fs/promises");
@@ -722,11 +873,24 @@ var import_path8 = require("path");
 var import_path5 = require("path");
 var import_fs3 = require("fs");
 var import_os = require("os");
+function getConfigDir2() {
+  if (process.platform === "win32") {
+    return process.env.APPDATA || (0, import_path5.join)((0, import_os.homedir)(), "AppData", "Roaming");
+  }
+  return process.env.XDG_CONFIG_HOME || (0, import_path5.join)((0, import_os.homedir)(), ".config");
+}
 var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/team/fs-utils.ts
 var import_fs4 = require("fs");
 var import_path6 = require("path");
+function atomicWriteJson(filePath, data, mode = 384) {
+  const dir = (0, import_path6.dirname)(filePath);
+  if (!(0, import_fs4.existsSync)(dir)) (0, import_fs4.mkdirSync)(dir, { recursive: true, mode: 448 });
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+  (0, import_fs4.writeFileSync)(tmpPath, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
+  (0, import_fs4.renameSync)(tmpPath, filePath);
+}
 function ensureDirWithMode(dirPath, mode = 448) {
   if (!(0, import_fs4.existsSync)(dirPath)) (0, import_fs4.mkdirSync)(dirPath, { recursive: true, mode });
 }
@@ -780,6 +944,8 @@ function getTaskStoragePath(cwd, teamName, taskId) {
 
 // src/team/task-file-ops.ts
 var DEFAULT_STALE_LOCK_MS = 3e4;
+var FAILURE_LOCK_RETRY_ATTEMPTS = 40;
+var FAILURE_LOCK_RETRY_DELAY_MS = 5;
 function isPidAlive(pid) {
   if (pid <= 0 || !Number.isFinite(pid)) return false;
   try {
@@ -831,6 +997,19 @@ function releaseTaskLock(handle) {
   } catch {
   }
 }
+async function sleepAsync(ms) {
+  return new Promise((resolve4) => setTimeout(resolve4, ms));
+}
+async function acquireTaskLockWithRetry(teamName, taskId, opts) {
+  const attempts = opts?.attempts ?? FAILURE_LOCK_RETRY_ATTEMPTS;
+  const delayMs = opts?.delayMs ?? FAILURE_LOCK_RETRY_DELAY_MS;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const handle = acquireTaskLock(teamName, taskId, opts);
+    if (handle) return handle;
+    if (attempt < attempts - 1) await sleepAsync(delayMs);
+  }
+  throw new Error(`Failed to acquire lock for ${taskId} after ${attempts} attempts`);
+}
 async function withTaskLock(teamName, taskId, fn, opts) {
   const handle = acquireTaskLock(teamName, taskId, opts);
   if (!handle) return null;
@@ -868,6 +1047,38 @@ function canonicalTasksDir(teamName, cwd) {
   validateResolvedPath(dir, (0, import_path8.join)(root, ".omc", "state", "team"));
   return dir;
 }
+function failureSidecarPath(teamName, taskId, cwd) {
+  return (0, import_path8.join)(canonicalTasksDir(teamName, cwd), `${sanitizeTaskId(taskId)}.failure.json`);
+}
+async function writeTaskFailure(teamName, taskId, error, opts) {
+  const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
+  const handle = await acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
+  try {
+    const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+    const existing = readTaskFailure(teamName, taskId, opts);
+    const sidecar = {
+      taskId,
+      lastError: error,
+      retryCount: existing ? existing.retryCount + 1 : 1,
+      lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    atomicWriteJson(filePath, sidecar);
+    return sidecar;
+  } finally {
+    releaseTaskLock(handle);
+  }
+}
+function readTaskFailure(teamName, taskId, opts) {
+  const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+  if (!(0, import_fs5.existsSync)(filePath)) return null;
+  try {
+    const raw = (0, import_fs5.readFileSync)(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+var DEFAULT_MAX_TASK_RETRIES = 5;
 
 // src/team/runtime.ts
 function workerName(index) {
@@ -929,36 +1140,65 @@ async function markTaskInProgress(root, taskId, owner, teamName, cwd) {
   }, { cwd });
   return result ?? false;
 }
-async function resetTaskToPending(root, taskId) {
-  const task = await readTask(root, taskId);
-  if (!task) return;
-  task.status = "pending";
-  task.owner = null;
-  task.assignedAt = void 0;
-  await writeTask(root, task);
+async function resetTaskToPending(root, taskId, teamName, cwd) {
+  await withTaskLock(teamName, taskId, async () => {
+    const task = await readTask(root, taskId);
+    if (!task) return;
+    task.status = "pending";
+    task.owner = null;
+    task.assignedAt = void 0;
+    await writeTask(root, task);
+  }, { cwd });
 }
-async function markTaskFromDone(root, taskId, status, summary) {
-  const task = await readTask(root, taskId);
-  if (!task) return;
-  task.status = status;
-  task.result = summary;
-  task.summary = summary;
-  if (status === "completed") {
-    task.completedAt = (/* @__PURE__ */ new Date()).toISOString();
-  } else {
-    task.failedAt = (/* @__PURE__ */ new Date()).toISOString();
-  }
-  await writeTask(root, task);
+async function markTaskFromDone(root, teamName, cwd, taskId, status, summary) {
+  await withTaskLock(teamName, taskId, async () => {
+    const task = await readTask(root, taskId);
+    if (!task) return;
+    task.status = status;
+    task.result = summary;
+    task.summary = summary;
+    if (status === "completed") {
+      task.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+    } else {
+      task.failedAt = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    await writeTask(root, task);
+  }, { cwd });
 }
-async function markTaskFailedDeadPane(root, taskId, workerNameValue) {
-  const task = await readTask(root, taskId);
-  if (!task) return;
-  task.status = "failed";
-  task.owner = workerNameValue;
-  task.summary = `Worker pane died before done.json was written (${workerNameValue})`;
-  task.result = task.summary;
-  task.failedAt = (/* @__PURE__ */ new Date()).toISOString();
-  await writeTask(root, task);
+async function applyDeadPaneTransition(runtime, workerNameValue, taskId) {
+  const root = stateRoot(runtime.cwd, runtime.teamName);
+  const transition = await withTaskLock(runtime.teamName, taskId, async () => {
+    const task = await readTask(root, taskId);
+    if (!task) return { action: "skipped" };
+    if (task.status === "completed" || task.status === "failed") {
+      return { action: "skipped" };
+    }
+    if (task.status !== "in_progress" || task.owner !== workerNameValue) {
+      return { action: "skipped" };
+    }
+    const failure = await writeTaskFailure(
+      runtime.teamName,
+      taskId,
+      `Worker pane died before done.json was written (${workerNameValue})`,
+      { cwd: runtime.cwd }
+    );
+    const retryCount = failure.retryCount;
+    if (retryCount >= DEFAULT_MAX_TASK_RETRIES) {
+      task.status = "failed";
+      task.owner = workerNameValue;
+      task.summary = `Worker pane died before done.json was written (${workerNameValue})`;
+      task.result = task.summary;
+      task.failedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await writeTask(root, task);
+      return { action: "failed", retryCount };
+    }
+    task.status = "pending";
+    task.owner = null;
+    task.assignedAt = void 0;
+    await writeTask(root, task);
+    return { action: "requeued", retryCount };
+  }, { cwd: runtime.cwd });
+  return transition ?? { action: "skipped" };
 }
 async function nextPendingTaskIndex(runtime) {
   const root = stateRoot(runtime.cwd, runtime.teamName);
@@ -1153,7 +1393,7 @@ function watchdogCliWorkers(runtime, intervalMs) {
         const signal = doneSignals[i];
         if (signal) {
           unresponsiveCounts.delete(wName);
-          await markTaskFromDone(root, signal.taskId || active.taskId, signal.status, signal.summary);
+          await markTaskFromDone(root, runtime.teamName, runtime.cwd, signal.taskId || active.taskId, signal.status, signal.summary);
           try {
             const { unlink } = await import("fs/promises");
             await unlink(donePath);
@@ -1171,7 +1411,11 @@ function watchdogCliWorkers(runtime, intervalMs) {
         const alive = aliveResults[i];
         if (!alive) {
           unresponsiveCounts.delete(wName);
-          await markTaskFailedDeadPane(root, active.taskId, wName);
+          const transition = await applyDeadPaneTransition(runtime, wName, active.taskId);
+          if (transition.action === "requeued") {
+            const retryCount = transition.retryCount ?? 1;
+            console.warn(`[watchdog] worker ${wName} dead pane \u2014 requeuing task ${active.taskId} (retry ${retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
+          }
           await killWorkerPane(runtime, wName, active.paneId);
           if (!await allTasksTerminal(runtime)) {
             const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
@@ -1192,7 +1436,10 @@ function watchdogCliWorkers(runtime, intervalMs) {
           } else {
             console.warn(`[watchdog] worker ${wName} unresponsive ${count} consecutive ticks \u2014 killing and reassigning task ${active.taskId}`);
             unresponsiveCounts.delete(wName);
-            await markTaskFailedDeadPane(root, active.taskId, wName);
+            const transition = await applyDeadPaneTransition(runtime, wName, active.taskId);
+            if (transition.action === "requeued") {
+              console.warn(`[watchdog] worker ${wName} stall-killed \u2014 requeuing task ${active.taskId} (retry ${transition.retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
+            }
             await killWorkerPane(runtime, wName, active.paneId);
             if (!await allTasksTerminal(runtime)) {
               const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
@@ -1298,7 +1545,7 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
       const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, "1");
       if (!confirmed) {
         await killWorkerPane(runtime, workerNameValue, paneId);
-        await resetTaskToPending(root, taskId);
+        await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
         throw new Error(`worker_notify_failed:${workerNameValue}:trust-confirm`);
       }
       await new Promise((r) => setTimeout(r, 800));
@@ -1310,7 +1557,7 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     );
     if (!notified) {
       await killWorkerPane(runtime, workerNameValue, paneId);
-      await resetTaskToPending(root, taskId);
+      await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
       throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
     }
   }
@@ -1367,11 +1614,873 @@ async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerP
   }
 }
 
+// src/hooks/factcheck/checks.ts
+var import_fs7 = require("fs");
+var import_path10 = require("path");
+
+// src/hooks/factcheck/types.ts
+var REQUIRED_FIELDS = /* @__PURE__ */ new Set([
+  "schema_version",
+  "run_id",
+  "ts",
+  "cwd",
+  "mode",
+  "files_modified",
+  "files_created",
+  "artifacts_expected",
+  "gates"
+]);
+var REQUIRED_GATES = /* @__PURE__ */ new Set([
+  "selftest_ran",
+  "goldens_ran",
+  "sentinel_stop_smoke_ran",
+  "shadow_leak_check_ran"
+]);
+
+// src/hooks/factcheck/checks.ts
+function checkMissingFields(claims) {
+  const missing = [];
+  for (const field of REQUIRED_FIELDS) {
+    if (!(field in claims)) {
+      missing.push(field);
+    }
+  }
+  return missing.sort();
+}
+function checkMissingGates(claims) {
+  const gates = claims.gates ?? {};
+  const missing = [];
+  for (const gate of REQUIRED_GATES) {
+    if (!(gate in gates)) {
+      missing.push(gate);
+    }
+  }
+  return missing.sort();
+}
+function getFalseGates(claims) {
+  const gates = claims.gates ?? {};
+  const falseGates = [];
+  for (const gate of REQUIRED_GATES) {
+    if (gate in gates && !gates[gate]) {
+      falseGates.push(gate);
+    }
+  }
+  return falseGates.sort();
+}
+function sourceFileCount(claims) {
+  const modified = claims.files_modified ?? [];
+  const created = claims.files_created ?? [];
+  return modified.length + created.length;
+}
+function checkPaths(claims, policy) {
+  const out = [];
+  const allPaths = [
+    ...claims.files_modified ?? [],
+    ...claims.files_created ?? [],
+    ...claims.artifacts_expected ?? []
+  ];
+  const deleted = new Set(claims.files_deleted ?? []);
+  for (const pathStr of allPaths) {
+    if (deleted.has(pathStr)) continue;
+    let prefixBlocked = false;
+    for (const prefix of policy.forbidden_path_prefixes) {
+      if (pathStr.startsWith(prefix)) {
+        out.push({ check: "H", severity: "FAIL", detail: `Forbidden path prefix: ${pathStr}` });
+        prefixBlocked = true;
+        break;
+      }
+    }
+    if (!prefixBlocked) {
+      for (const fragment of policy.forbidden_path_substrings) {
+        if (pathStr.includes(fragment)) {
+          out.push({ check: "H", severity: "FAIL", detail: `Forbidden path fragment: ${pathStr}` });
+          break;
+        }
+      }
+    }
+    if (!(0, import_fs7.existsSync)(pathStr)) {
+      out.push({ check: "C", severity: "FAIL", detail: `File not found: ${pathStr}` });
+    }
+  }
+  return out;
+}
+function checkCommands(claims, policy) {
+  const out = [];
+  const commands = (claims.commands_executed ?? []).map(String);
+  for (const cmd of commands) {
+    const hitPrefix = policy.forbidden_path_prefixes.some(
+      (forbidden) => cmd.includes(forbidden)
+    );
+    if (!hitPrefix) continue;
+    const stripped = cmd.trim().replace(/^\(/, "");
+    const isReadOnly = policy.readonly_command_prefixes.some(
+      (prefix) => stripped.startsWith(prefix)
+    );
+    if (!isReadOnly) {
+      out.push({ check: "H", severity: "FAIL", detail: `Forbidden mutating command: ${cmd}` });
+    }
+  }
+  return out;
+}
+function checkCwdParity(claimsCwd, runtimeCwd, mode, policy) {
+  const enforceCwd = policy.warn_on_cwd_mismatch && (mode !== "quick" || policy.enforce_cwd_parity_in_quick);
+  if (!enforceCwd || !claimsCwd) return null;
+  const claimsCwdCanonical = (0, import_path10.resolve)(claimsCwd);
+  const runtimeCwdCanonical = (0, import_path10.resolve)(runtimeCwd);
+  if (claimsCwdCanonical !== runtimeCwdCanonical) {
+    const severity = mode === "strict" ? "FAIL" : "WARN";
+    return {
+      check: "argv_parity",
+      severity,
+      detail: `claims.cwd=${claimsCwdCanonical} runtime.cwd=${runtimeCwdCanonical}`
+    };
+  }
+  return null;
+}
+
+// src/hooks/factcheck/config.ts
+var import_os2 = require("os");
+
+// src/config/loader.ts
+var import_fs8 = require("fs");
+var import_path11 = require("path");
+var jsonc = __toESM(require_main(), 1);
+
+// src/config/models.ts
+var BUILTIN_MODEL_HIGH = "claude-opus-4-6-20260205";
+var BUILTIN_MODEL_MEDIUM = "claude-sonnet-4-6-20260217";
+var BUILTIN_MODEL_LOW = "claude-haiku-4-5-20251001";
+function getDefaultModelHigh() {
+  return process.env.OMC_MODEL_HIGH || BUILTIN_MODEL_HIGH;
+}
+function getDefaultModelMedium() {
+  return process.env.OMC_MODEL_MEDIUM || BUILTIN_MODEL_MEDIUM;
+}
+function getDefaultModelLow() {
+  return process.env.OMC_MODEL_LOW || BUILTIN_MODEL_LOW;
+}
+function isNonClaudeProvider() {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === "true") {
+    return true;
+  }
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || "";
+  if (modelId && !modelId.toLowerCase().includes("claude")) {
+    return true;
+  }
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || "";
+  if (baseUrl && !baseUrl.includes("anthropic.com")) {
+    return true;
+  }
+  return false;
+}
+
+// src/config/loader.ts
+var DEFAULT_CONFIG = {
+  agents: {
+    omc: { model: getDefaultModelHigh() },
+    explore: { model: getDefaultModelLow() },
+    analyst: { model: getDefaultModelHigh() },
+    planner: { model: getDefaultModelHigh() },
+    architect: { model: getDefaultModelHigh() },
+    debugger: { model: getDefaultModelMedium() },
+    executor: { model: getDefaultModelMedium() },
+    verifier: { model: getDefaultModelMedium() },
+    qualityReviewer: { model: getDefaultModelMedium() },
+    securityReviewer: { model: getDefaultModelMedium() },
+    codeReviewer: { model: getDefaultModelHigh() },
+    deepExecutor: { model: getDefaultModelHigh() },
+    testEngineer: { model: getDefaultModelMedium() },
+    buildFixer: { model: getDefaultModelMedium() },
+    designer: { model: getDefaultModelMedium() },
+    writer: { model: getDefaultModelLow() },
+    qaTester: { model: getDefaultModelMedium() },
+    scientist: { model: getDefaultModelMedium() },
+    gitMaster: { model: getDefaultModelMedium() },
+    codeSimplifier: { model: getDefaultModelHigh() },
+    critic: { model: getDefaultModelHigh() },
+    documentSpecialist: { model: getDefaultModelMedium() }
+  },
+  features: {
+    parallelExecution: true,
+    lspTools: true,
+    // Real LSP integration with language servers
+    astTools: true,
+    // Real AST tools using ast-grep
+    continuationEnforcement: true,
+    autoContextInjection: true
+  },
+  mcpServers: {
+    exa: { enabled: true },
+    context7: { enabled: true }
+  },
+  permissions: {
+    allowBash: true,
+    allowEdit: true,
+    allowWrite: true,
+    maxBackgroundTasks: 5
+  },
+  magicKeywords: {
+    ultrawork: ["ultrawork", "ulw", "uw"],
+    search: ["search", "find", "locate"],
+    analyze: ["analyze", "investigate", "examine"],
+    ultrathink: ["ultrathink", "think", "reason", "ponder"]
+  },
+  // Intelligent model routing configuration
+  routing: {
+    enabled: true,
+    defaultTier: "MEDIUM",
+    forceInherit: false,
+    escalationEnabled: true,
+    maxEscalations: 2,
+    tierModels: {
+      LOW: getDefaultModelLow(),
+      MEDIUM: getDefaultModelMedium(),
+      HIGH: getDefaultModelHigh()
+    },
+    agentOverrides: {
+      architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
+      planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
+      critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
+      analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
+      explore: { tier: "LOW", reason: "Exploration is search-focused" },
+      "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+    },
+    escalationKeywords: [
+      "critical",
+      "production",
+      "urgent",
+      "security",
+      "breaking",
+      "architecture",
+      "refactor",
+      "redesign",
+      "root cause"
+    ],
+    simplificationKeywords: [
+      "find",
+      "list",
+      "show",
+      "where",
+      "search",
+      "locate",
+      "grep"
+    ]
+  },
+  // External models configuration (Codex, Gemini)
+  // Static defaults only — env var overrides applied in loadEnvConfig()
+  externalModels: {
+    defaults: {
+      codexModel: "gpt-5.3-codex",
+      geminiModel: "gemini-3.1-pro-preview"
+    },
+    fallbackPolicy: {
+      onModelFailure: "provider_chain",
+      allowCrossProvider: false,
+      crossProviderOrder: ["codex", "gemini"]
+    }
+  },
+  // Delegation routing configuration (opt-in feature for external model routing)
+  delegationRouting: {
+    enabled: false,
+    // Opt-in feature
+    defaultProvider: "claude",
+    roles: {}
+  },
+  // Startup codebase map injection (issue #804)
+  startupCodebaseMap: {
+    enabled: true,
+    maxFiles: 200,
+    maxDepth: 4
+  },
+  // Task size detection (issue #790): prevent over-orchestration for small tasks
+  taskSizeDetection: {
+    enabled: true,
+    smallWordLimit: 50,
+    largeWordLimit: 200,
+    suppressHeavyModesForSmallTasks: true
+  }
+};
+function getConfigPaths() {
+  const userConfigDir = getConfigDir2();
+  return {
+    user: (0, import_path11.join)(userConfigDir, "claude-omc", "config.jsonc"),
+    project: (0, import_path11.join)(process.cwd(), ".claude", "omc.jsonc")
+  };
+}
+function loadJsoncFile(path) {
+  if (!(0, import_fs8.existsSync)(path)) {
+    return null;
+  }
+  try {
+    const content = (0, import_fs8.readFileSync)(path, "utf-8");
+    const errors = [];
+    const result = jsonc.parse(content, errors, {
+      allowTrailingComma: true,
+      allowEmptyContent: true
+    });
+    if (errors.length > 0) {
+      console.warn(`Warning: Parse errors in ${path}:`, errors);
+    }
+    return result;
+  } catch (error) {
+    console.error(`Error loading config from ${path}:`, error);
+    return null;
+  }
+}
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    const sourceValue = source[key];
+    const targetValue = result[key];
+    if (sourceValue !== void 0 && typeof sourceValue === "object" && sourceValue !== null && !Array.isArray(sourceValue) && typeof targetValue === "object" && targetValue !== null && !Array.isArray(targetValue)) {
+      result[key] = deepMerge(
+        targetValue,
+        sourceValue
+      );
+    } else if (sourceValue !== void 0) {
+      result[key] = sourceValue;
+    }
+  }
+  return result;
+}
+function loadEnvConfig() {
+  const config = {};
+  if (process.env.EXA_API_KEY) {
+    config.mcpServers = {
+      ...config.mcpServers,
+      exa: { enabled: true, apiKey: process.env.EXA_API_KEY }
+    };
+  }
+  if (process.env.OMC_PARALLEL_EXECUTION !== void 0) {
+    config.features = {
+      ...config.features,
+      parallelExecution: process.env.OMC_PARALLEL_EXECUTION === "true"
+    };
+  }
+  if (process.env.OMC_LSP_TOOLS !== void 0) {
+    config.features = {
+      ...config.features,
+      lspTools: process.env.OMC_LSP_TOOLS === "true"
+    };
+  }
+  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
+    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
+    if (!isNaN(maxTasks)) {
+      config.permissions = {
+        ...config.permissions,
+        maxBackgroundTasks: maxTasks
+      };
+    }
+  }
+  if (process.env.OMC_ROUTING_ENABLED !== void 0) {
+    config.routing = {
+      ...config.routing,
+      enabled: process.env.OMC_ROUTING_ENABLED === "true"
+    };
+  }
+  if (process.env.OMC_ROUTING_FORCE_INHERIT !== void 0) {
+    config.routing = {
+      ...config.routing,
+      forceInherit: process.env.OMC_ROUTING_FORCE_INHERIT === "true"
+    };
+  }
+  if (process.env.OMC_ROUTING_DEFAULT_TIER) {
+    const tier = process.env.OMC_ROUTING_DEFAULT_TIER.toUpperCase();
+    if (tier === "LOW" || tier === "MEDIUM" || tier === "HIGH") {
+      config.routing = {
+        ...config.routing,
+        defaultTier: tier
+      };
+    }
+  }
+  const aliasKeys = ["HAIKU", "SONNET", "OPUS"];
+  const modelAliases = {};
+  for (const key of aliasKeys) {
+    const envVal = process.env[`OMC_MODEL_ALIAS_${key}`];
+    if (envVal) {
+      const lower = key.toLowerCase();
+      modelAliases[lower] = envVal.toLowerCase();
+    }
+  }
+  if (Object.keys(modelAliases).length > 0) {
+    config.routing = {
+      ...config.routing,
+      modelAliases
+    };
+  }
+  if (process.env.OMC_ESCALATION_ENABLED !== void 0) {
+    config.routing = {
+      ...config.routing,
+      escalationEnabled: process.env.OMC_ESCALATION_ENABLED === "true"
+    };
+  }
+  const externalModelsDefaults = {};
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
+    if (provider === "codex" || provider === "gemini") {
+      externalModelsDefaults.provider = provider;
+    }
+  }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL) {
+    externalModelsDefaults.codexModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
+  } else if (process.env.OMC_CODEX_DEFAULT_MODEL) {
+    externalModelsDefaults.codexModel = process.env.OMC_CODEX_DEFAULT_MODEL;
+  }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL) {
+    externalModelsDefaults.geminiModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
+  } else if (process.env.OMC_GEMINI_DEFAULT_MODEL) {
+    externalModelsDefaults.geminiModel = process.env.OMC_GEMINI_DEFAULT_MODEL;
+  }
+  const externalModelsFallback = {
+    onModelFailure: "provider_chain"
+  };
+  if (process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY) {
+    const policy = process.env.OMC_EXTERNAL_MODELS_FALLBACK_POLICY;
+    if (policy === "provider_chain" || policy === "cross_provider" || policy === "claude_only") {
+      externalModelsFallback.onModelFailure = policy;
+    }
+  }
+  if (Object.keys(externalModelsDefaults).length > 0 || externalModelsFallback.onModelFailure !== "provider_chain") {
+    config.externalModels = {
+      defaults: externalModelsDefaults,
+      fallbackPolicy: externalModelsFallback
+    };
+  }
+  if (process.env.OMC_DELEGATION_ROUTING_ENABLED !== void 0) {
+    config.delegationRouting = {
+      ...config.delegationRouting,
+      enabled: process.env.OMC_DELEGATION_ROUTING_ENABLED === "true"
+    };
+  }
+  if (process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER) {
+    const provider = process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER;
+    if (["claude", "codex", "gemini"].includes(provider)) {
+      config.delegationRouting = {
+        ...config.delegationRouting,
+        defaultProvider: provider
+      };
+    }
+  }
+  return config;
+}
+function loadConfig() {
+  const paths = getConfigPaths();
+  let config = { ...DEFAULT_CONFIG };
+  const userConfig = loadJsoncFile(paths.user);
+  if (userConfig) {
+    config = deepMerge(config, userConfig);
+  }
+  const projectConfig = loadJsoncFile(paths.project);
+  if (projectConfig) {
+    config = deepMerge(config, projectConfig);
+  }
+  const envConfig = loadEnvConfig();
+  config = deepMerge(config, envConfig);
+  if (config.routing?.forceInherit !== true && process.env.OMC_ROUTING_FORCE_INHERIT === void 0 && isNonClaudeProvider()) {
+    config.routing = {
+      ...config.routing,
+      forceInherit: true
+    };
+  }
+  return config;
+}
+
+// src/hooks/factcheck/config.ts
+var DEFAULT_FACTCHECK_POLICY = {
+  enabled: false,
+  mode: "quick",
+  strict_project_patterns: [],
+  forbidden_path_prefixes: ["${HOME}/.claude/plugins/cache/omc/"],
+  forbidden_path_substrings: ["/.omc/", ".omc-config.json"],
+  readonly_command_prefixes: [
+    "ls ",
+    "cat ",
+    "find ",
+    "grep ",
+    "head ",
+    "tail ",
+    "stat ",
+    "echo ",
+    "wc "
+  ],
+  warn_on_cwd_mismatch: true,
+  enforce_cwd_parity_in_quick: false,
+  warn_on_unverified_gates: true,
+  warn_on_unverified_gates_when_no_source_files: false
+};
+var DEFAULT_SENTINEL_POLICY = {
+  enabled: false,
+  readiness: {
+    min_pass_rate: 0.6,
+    max_timeout_rate: 0.1,
+    max_warn_plus_fail_rate: 0.4,
+    min_reason_coverage_rate: 0.95
+  }
+};
+var DEFAULT_GUARDS_CONFIG = {
+  factcheck: { ...DEFAULT_FACTCHECK_POLICY },
+  sentinel: { ...DEFAULT_SENTINEL_POLICY }
+};
+function expandTokens(value, workspace) {
+  const home = (0, import_os2.homedir)();
+  const ws = workspace ?? process.env.OMC_WORKSPACE ?? process.cwd();
+  return value.replace(/\$\{HOME\}/g, home).replace(/\$\{WORKSPACE\}/g, ws);
+}
+function expandTokensDeep(obj, workspace) {
+  if (typeof obj === "string") {
+    return expandTokens(obj, workspace);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => expandTokensDeep(item, workspace));
+  }
+  if (typeof obj === "object" && obj !== null) {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = expandTokensDeep(value, workspace);
+    }
+    return result;
+  }
+  return obj;
+}
+function deepMergeGuards(target, source) {
+  const result = { ...target };
+  if (source.factcheck) {
+    result.factcheck = { ...result.factcheck, ...source.factcheck };
+  }
+  if (source.sentinel) {
+    result.sentinel = {
+      ...result.sentinel,
+      ...source.sentinel,
+      readiness: {
+        ...result.sentinel.readiness,
+        ...source.sentinel.readiness ?? {}
+      }
+    };
+  }
+  return result;
+}
+function loadGuardsConfig(workspace) {
+  try {
+    const fullConfig = loadConfig();
+    const guardsRaw = fullConfig.guards ?? {};
+    const merged = deepMergeGuards(DEFAULT_GUARDS_CONFIG, guardsRaw);
+    return expandTokensDeep(merged, workspace);
+  } catch {
+    return expandTokensDeep({ ...DEFAULT_GUARDS_CONFIG }, workspace);
+  }
+}
+
+// src/hooks/factcheck/index.ts
+function severityRank(value) {
+  if (value === "FAIL") return 2;
+  if (value === "WARN") return 1;
+  return 0;
+}
+function runChecks(claims, mode, policy, runtimeCwd) {
+  const mismatches = [];
+  const notes = [];
+  const missingFields = checkMissingFields(claims);
+  if (missingFields.length > 0) {
+    mismatches.push({
+      check: "A",
+      severity: "FAIL",
+      detail: `Missing required fields: ${JSON.stringify(missingFields)}`
+    });
+  }
+  const missingGates = checkMissingGates(claims);
+  if (missingGates.length > 0) {
+    mismatches.push({
+      check: "A",
+      severity: "FAIL",
+      detail: `Missing required gates: ${JSON.stringify(missingGates)}`
+    });
+  }
+  const falseGates = getFalseGates(claims);
+  const srcFiles = sourceFileCount(claims);
+  if (mode === "strict" && falseGates.length > 0) {
+    mismatches.push({
+      check: "B",
+      severity: "FAIL",
+      detail: `Strict mode requires all gates true, got false: ${JSON.stringify(falseGates)}`
+    });
+  } else if ((mode === "declared" || mode === "manual") && falseGates.length > 0 && policy.warn_on_unverified_gates) {
+    if (srcFiles > 0 || policy.warn_on_unverified_gates_when_no_source_files) {
+      mismatches.push({
+        check: "B",
+        severity: "WARN",
+        detail: `Unverified gates in declared/manual mode: ${JSON.stringify(falseGates)}`
+      });
+    } else {
+      notes.push("No source files declared; unverified gates are ignored by policy");
+    }
+  }
+  mismatches.push(...checkPaths(claims, policy));
+  mismatches.push(...checkCommands(claims, policy));
+  const claimsCwd = String(claims.cwd ?? "").trim();
+  const cwdMismatch = checkCwdParity(
+    claimsCwd,
+    runtimeCwd ?? process.cwd(),
+    mode,
+    policy
+  );
+  if (cwdMismatch) {
+    mismatches.push(cwdMismatch);
+  }
+  const maxRank = mismatches.reduce(
+    (max, m) => Math.max(max, severityRank(m.severity)),
+    0
+  );
+  let verdict = "PASS";
+  if (maxRank === 2) verdict = "FAIL";
+  else if (maxRank === 1) verdict = "WARN";
+  return {
+    verdict,
+    mode,
+    mismatches,
+    notes,
+    claims_evidence: {
+      source_files: srcFiles,
+      commands_count: (claims.commands_executed ?? []).length,
+      models_count: (claims.models_used ?? []).length
+    }
+  };
+}
+function runFactcheck(claims, options) {
+  const config = loadGuardsConfig(options?.workspace);
+  const mode = options?.mode ?? config.factcheck.mode;
+  return runChecks(claims, mode, config.factcheck, options?.runtimeCwd);
+}
+
+// src/hooks/factcheck/sentinel.ts
+var import_fs9 = require("fs");
+function computeRate(numerator, denominator) {
+  if (denominator === 0) return 0;
+  return numerator / denominator;
+}
+function getPassRate(stats) {
+  return computeRate(stats.pass_count, stats.total_runs);
+}
+function getTimeoutRate(stats) {
+  return computeRate(stats.timeout_count, stats.total_runs);
+}
+function getWarnPlusFailRate(stats) {
+  return computeRate(stats.warn_count + stats.fail_count, stats.total_runs);
+}
+function getReasonCoverageRate(stats) {
+  return computeRate(stats.reason_coverage_count, stats.total_runs);
+}
+function extractVerdict(entry) {
+  const raw = String(entry.verdict ?? "").toUpperCase().trim();
+  if (raw === "PASS") return "PASS";
+  if (raw === "WARN") return "WARN";
+  return "FAIL";
+}
+function hasReason(entry) {
+  return !!(entry.reason || entry.error || entry.message);
+}
+function isTimeout(entry) {
+  if (entry.runtime?.timed_out === true) return true;
+  if (entry.runtime?.global_timeout === true) return true;
+  const reason = String(entry.reason ?? "").toLowerCase();
+  return reason.includes("timeout");
+}
+function analyzeLog(logPath) {
+  const stats = {
+    total_runs: 0,
+    pass_count: 0,
+    warn_count: 0,
+    fail_count: 0,
+    timeout_count: 0,
+    reason_coverage_count: 0
+  };
+  if (!(0, import_fs9.existsSync)(logPath)) {
+    return stats;
+  }
+  let content;
+  try {
+    content = (0, import_fs9.readFileSync)(logPath, "utf-8");
+  } catch {
+    return stats;
+  }
+  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  for (const line of lines) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    stats.total_runs++;
+    const verdict = extractVerdict(entry);
+    if (verdict === "PASS") stats.pass_count++;
+    else if (verdict === "WARN") stats.warn_count++;
+    else stats.fail_count++;
+    if (isTimeout(entry)) stats.timeout_count++;
+    if (hasReason(entry)) stats.reason_coverage_count++;
+  }
+  return stats;
+}
+function isUpstreamReady(stats, policy) {
+  const blockers = [];
+  const passRate = getPassRate(stats);
+  if (passRate < policy.min_pass_rate) {
+    blockers.push(
+      `pass_rate ${passRate.toFixed(3)} < min ${policy.min_pass_rate}`
+    );
+  }
+  const timeoutRate = getTimeoutRate(stats);
+  if (timeoutRate > policy.max_timeout_rate) {
+    blockers.push(
+      `timeout_rate ${timeoutRate.toFixed(3)} > max ${policy.max_timeout_rate}`
+    );
+  }
+  const warnFailRate = getWarnPlusFailRate(stats);
+  if (warnFailRate > policy.max_warn_plus_fail_rate) {
+    blockers.push(
+      `warn_plus_fail_rate ${warnFailRate.toFixed(3)} > max ${policy.max_warn_plus_fail_rate}`
+    );
+  }
+  const reasonRate = getReasonCoverageRate(stats);
+  if (reasonRate < policy.min_reason_coverage_rate) {
+    blockers.push(
+      `reason_coverage_rate ${reasonRate.toFixed(3)} < min ${policy.min_reason_coverage_rate}`
+    );
+  }
+  return [blockers.length === 0, blockers];
+}
+function checkSentinelHealth(logPath, workspace) {
+  const config = loadGuardsConfig(workspace);
+  const stats = analyzeLog(logPath);
+  const [ready, blockers] = isUpstreamReady(stats, config.sentinel.readiness);
+  return { ready, blockers, stats };
+}
+
+// src/team/sentinel-gate.ts
+function mapFactcheckToBlockers(result) {
+  if (result.verdict === "PASS") {
+    return [];
+  }
+  if (result.mismatches.length === 0) {
+    return [`[factcheck] verdict ${result.verdict}`];
+  }
+  return result.mismatches.map(
+    (mismatch) => `[factcheck] ${mismatch.severity} ${mismatch.check}: ${mismatch.detail}`
+  );
+}
+function coerceArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  if (typeof value === "object" && !Array.isArray(value)) return [];
+  return [value];
+}
+function sanitizeClaims(raw) {
+  const out = { ...raw };
+  const arrayFields = [
+    "files_modified",
+    "files_created",
+    "files_deleted",
+    "artifacts_expected",
+    "commands_executed",
+    "models_used"
+  ];
+  for (const field of arrayFields) {
+    if (field in out) {
+      out[field] = coerceArray(out[field]);
+    }
+  }
+  return out;
+}
+function checkSentinelReadiness(options = {}) {
+  const {
+    logPath,
+    workspace,
+    claims,
+    enabled = loadGuardsConfig(workspace).sentinel.enabled
+  } = options;
+  if (!enabled) {
+    return {
+      ready: true,
+      blockers: [],
+      skipped: true
+    };
+  }
+  const blockers = [];
+  let ranCheck = false;
+  if (logPath) {
+    ranCheck = true;
+    const health = checkSentinelHealth(logPath, workspace);
+    blockers.push(...health.blockers);
+  }
+  if (claims) {
+    ranCheck = true;
+    try {
+      const sanitized = sanitizeClaims(claims);
+      const factcheck = runFactcheck(sanitized, { workspace });
+      blockers.push(...mapFactcheckToBlockers(factcheck));
+    } catch (err) {
+      blockers.push(
+        `[factcheck] execution error: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  if (!ranCheck) {
+    return {
+      ready: false,
+      blockers: ["[sentinel] gate enabled but no logPath or claims provided \u2014 cannot verify readiness"],
+      skipped: true
+    };
+  }
+  const dedupedBlockers = [...new Set(blockers)];
+  return {
+    ready: dedupedBlockers.length === 0,
+    blockers: dedupedBlockers,
+    skipped: false
+  };
+}
+async function waitForSentinelReadiness(options = {}) {
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 3e4);
+  const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 250);
+  const startedAt = Date.now();
+  let attempts = 1;
+  let latest = checkSentinelReadiness(options);
+  if (latest.ready) {
+    return {
+      ...latest,
+      timedOut: false,
+      elapsedMs: Date.now() - startedAt,
+      attempts
+    };
+  }
+  const deadline = startedAt + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve4) => setTimeout(resolve4, pollIntervalMs));
+    attempts += 1;
+    latest = checkSentinelReadiness(options);
+    if (latest.ready) {
+      return {
+        ...latest,
+        timedOut: false,
+        elapsedMs: Date.now() - startedAt,
+        attempts
+      };
+    }
+  }
+  const timeoutBlocker = `[sentinel] readiness check timed out after ${timeoutMs}ms`;
+  const blockers = latest.blockers.includes(timeoutBlocker) ? latest.blockers : [...latest.blockers, timeoutBlocker];
+  return {
+    ...latest,
+    blockers,
+    timedOut: true,
+    elapsedMs: Date.now() - startedAt,
+    attempts
+  };
+}
+
 // src/team/runtime-cli.ts
 async function writePanesFile(jobId, paneIds, leaderPaneId) {
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
-  const panesPath = (0, import_path10.join)(omcJobsDir, `${jobId}-panes.json`);
+  const panesPath = (0, import_path12.join)(omcJobsDir, `${jobId}-panes.json`);
   await (0, import_promises4.writeFile)(
     panesPath + ".tmp",
     JSON.stringify({ paneIds: [...paneIds], leaderPaneId })
@@ -1379,12 +2488,12 @@ async function writePanesFile(jobId, paneIds, leaderPaneId) {
   await (0, import_promises4.rename)(panesPath + ".tmp", panesPath);
 }
 function collectTaskResults(stateRoot2) {
-  const tasksDir = (0, import_path10.join)(stateRoot2, "tasks");
+  const tasksDir = (0, import_path12.join)(stateRoot2, "tasks");
   try {
-    const files = (0, import_fs7.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
+    const files = (0, import_fs10.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
-        const raw = (0, import_fs7.readFileSync)((0, import_path10.join)(tasksDir, f), "utf-8");
+        const raw = (0, import_fs10.readFileSync)((0, import_path12.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
         return {
           taskId: task.id ?? f.replace(".json", ""),
@@ -1429,10 +2538,12 @@ async function main() {
     agentTypes,
     tasks,
     cwd,
-    pollIntervalMs = 5e3
+    pollIntervalMs = 5e3,
+    sentinelGateTimeoutMs = 3e4,
+    sentinelGatePollIntervalMs = 250
   } = input;
   const workerCount = input.workerCount ?? agentTypes.length;
-  const stateRoot2 = (0, import_path10.join)(cwd, `.omc/state/team/${teamName}`);
+  const stateRoot2 = (0, import_path12.join)(cwd, `.omc/state/team/${teamName}`);
   const config = {
     teamName,
     workerCount,
@@ -1523,6 +2634,21 @@ async function main() {
 `
     );
     if (snap.phase === "completed") {
+      const sentinelLogPath = (0, import_path12.join)(cwd, "sentinel_stop.jsonl");
+      const gateResult = await waitForSentinelReadiness({
+        workspace: cwd,
+        logPath: sentinelLogPath,
+        timeoutMs: sentinelGateTimeoutMs,
+        pollIntervalMs: sentinelGatePollIntervalMs
+      });
+      if (!gateResult.ready) {
+        process.stderr.write(
+          `[runtime-cli] Sentinel gate blocked completion (timedOut=${gateResult.timedOut}, attempts=${gateResult.attempts}, elapsedMs=${gateResult.elapsedMs}): ${gateResult.blockers.join("; ")}
+`
+        );
+        await doShutdown("failed");
+        return;
+      }
       await doShutdown("completed");
       return;
     }

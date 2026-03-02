@@ -186,6 +186,8 @@ function getLegacyTaskStoragePath(claudeConfigDir, teamName, taskId) {
 
 // src/team/task-file-ops.ts
 var DEFAULT_STALE_LOCK_MS = 3e4;
+var FAILURE_LOCK_RETRY_ATTEMPTS = 40;
+var FAILURE_LOCK_RETRY_DELAY_MS = 5;
 function isPidAlive(pid) {
   if (pid <= 0 || !Number.isFinite(pid)) return false;
   try {
@@ -236,6 +238,19 @@ function releaseTaskLock(handle) {
     (0, import_fs3.unlinkSync)(handle.path);
   } catch {
   }
+}
+async function sleepAsync(ms) {
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
+}
+async function acquireTaskLockWithRetry(teamName, taskId, opts) {
+  const attempts = opts?.attempts ?? FAILURE_LOCK_RETRY_ATTEMPTS;
+  const delayMs = opts?.delayMs ?? FAILURE_LOCK_RETRY_DELAY_MS;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const handle = acquireTaskLock(teamName, taskId, opts);
+    if (handle) return handle;
+    if (attempt < attempts - 1) await sleepAsync(delayMs);
+  }
+  throw new Error(`Failed to acquire lock for ${taskId} after ${attempts} attempts`);
 }
 function isLockStale(lockPath, staleLockMs) {
   try {
@@ -378,16 +393,23 @@ function areBlockersResolved(teamName, blockedBy, opts) {
   }
   return true;
 }
-function writeTaskFailure(teamName, taskId, error, opts) {
-  const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
-  const existing = readTaskFailure(teamName, taskId, opts);
-  const sidecar = {
-    taskId,
-    lastError: error,
-    retryCount: existing ? existing.retryCount + 1 : 1,
-    lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  atomicWriteJson(filePath, sidecar);
+async function writeTaskFailure(teamName, taskId, error, opts) {
+  const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
+  const handle = await acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
+  try {
+    const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+    const existing = readTaskFailure(teamName, taskId, opts);
+    const sidecar = {
+      taskId,
+      lastError: error,
+      retryCount: existing ? existing.retryCount + 1 : 1,
+      lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    atomicWriteJson(filePath, sidecar);
+    return sidecar;
+  } finally {
+    releaseTaskLock(handle);
+  }
 }
 function readTaskFailure(teamName, taskId, opts) {
   const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
