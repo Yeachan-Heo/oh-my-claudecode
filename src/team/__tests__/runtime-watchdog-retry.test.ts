@@ -86,6 +86,27 @@ function makeRuntime(cwd: string, teamName: string): TeamRuntime {
   };
 }
 
+function makeRuntimeWithTask(cwd: string, teamName: string, taskId: string): TeamRuntime {
+  return {
+    teamName,
+    sessionName: 'test-session:0',
+    leaderPaneId: '%0',
+    config: {
+      teamName,
+      workerCount: 1,
+      agentTypes: ['codex'],
+      tasks: [{ subject: 'Task 1', description: 'Do work' }],
+      cwd,
+    },
+    workerNames: ['worker-1'],
+    workerPaneIds: ['%1'],
+    activeWorkers: new Map([
+      ['worker-1', { paneId: '%1', taskId, spawnedAt: Date.now() }],
+    ]),
+    cwd,
+  };
+}
+
 function initTask(cwd: string, teamName: string): string {
   const root = join(cwd, '.omc', 'state', 'team', teamName);
   mkdirSync(join(root, 'tasks'), { recursive: true });
@@ -259,5 +280,75 @@ describe('watchdogCliWorkers dead-pane retry behavior', () => {
     expect(task.summary).toContain('Worker pane died before done.json was written');
     expect(failure?.retryCount).toBe(DEFAULT_MAX_TASK_RETRIES);
     expect(tmuxMocks.spawnWorkerInPane).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent dead-pane retries across watchdog instances', async () => {
+    const teamName = 'dead-pane-contention-team';
+    const root = initTask(cwd, teamName);
+    const runtimeA = makeRuntime(cwd, teamName);
+    const runtimeB = makeRuntime(cwd, teamName);
+
+    const stopA = watchdogCliWorkers(runtimeA, 20);
+    const stopB = watchdogCliWorkers(runtimeB, 20);
+
+    await waitFor(() => tmuxMocks.spawnWorkerInPane.mock.calls.length > 0);
+    stopA();
+    stopB();
+
+    // Give the second watchdog one more tick to observe the settled state.
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf-8')) as {
+      status: string;
+      owner: string | null;
+    };
+    const failure = readTaskFailure(teamName, '1', { cwd });
+
+    expect(task.status).toBe('in_progress');
+    expect(task.owner).toBe('worker-1');
+    expect(failure?.retryCount).toBe(1);
+    expect(tmuxMocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not requeue or increment retries when dead-pane detection races with completion', async () => {
+    const teamName = 'dead-pane-completed-race-team';
+    const root = join(cwd, '.omc', 'state', 'team', teamName);
+    mkdirSync(join(root, 'tasks'), { recursive: true });
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+
+    writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
+      id: '1',
+      subject: 'Task 1',
+      description: 'Do work',
+      status: 'completed',
+      owner: 'worker-1',
+      summary: 'already completed elsewhere',
+      result: 'already completed elsewhere',
+      completedAt: new Date().toISOString(),
+    }), 'utf-8');
+
+    const runtime = makeRuntimeWithTask(cwd, teamName, '1');
+    const stop = watchdogCliWorkers(runtime, 20);
+
+    await waitFor(() => runtime.activeWorkers.size === 0);
+    stop();
+
+    const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf-8')) as {
+      status: string;
+      owner: string | null;
+      summary?: string;
+      completedAt?: string;
+    };
+    const failure = readTaskFailure(teamName, '1', { cwd });
+
+    expect(task.status).toBe('completed');
+    expect(task.owner).toBe('worker-1');
+    expect(task.summary).toBe('already completed elsewhere');
+    expect(task.completedAt).toBeTruthy();
+    expect(failure).toBeNull();
+    expect(tmuxMocks.spawnWorkerInPane).not.toHaveBeenCalled();
+    expect(
+      warnSpy.mock.calls.some(([msg]: [unknown]) => String(msg).includes('dead pane — requeuing task'))
+    ).toBe(false);
   });
 });
