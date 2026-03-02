@@ -25,18 +25,27 @@ import { getDefaultModelHigh, getDefaultModelMedium, getDefaultModelLow, isNonCl
 export const DEFAULT_CONFIG = {
     agents: {
         omc: { model: getDefaultModelHigh() },
-        architect: { model: getDefaultModelHigh(), enabled: true },
-        researcher: { model: getDefaultModelMedium() },
         explore: { model: getDefaultModelLow() },
-        frontendEngineer: { model: getDefaultModelMedium(), enabled: true },
-        documentWriter: { model: getDefaultModelLow(), enabled: true },
-        multimodalLooker: { model: getDefaultModelMedium(), enabled: true },
-        // New agents from oh-my-opencode
-        critic: { model: getDefaultModelHigh(), enabled: true },
-        analyst: { model: getDefaultModelHigh(), enabled: true },
-        coordinator: { model: getDefaultModelMedium(), enabled: true },
-        executor: { model: getDefaultModelMedium(), enabled: true },
-        planner: { model: getDefaultModelHigh(), enabled: true }
+        analyst: { model: getDefaultModelHigh() },
+        planner: { model: getDefaultModelHigh() },
+        architect: { model: getDefaultModelHigh() },
+        debugger: { model: getDefaultModelMedium() },
+        executor: { model: getDefaultModelMedium() },
+        verifier: { model: getDefaultModelMedium() },
+        qualityReviewer: { model: getDefaultModelMedium() },
+        securityReviewer: { model: getDefaultModelMedium() },
+        codeReviewer: { model: getDefaultModelHigh() },
+        deepExecutor: { model: getDefaultModelHigh() },
+        testEngineer: { model: getDefaultModelMedium() },
+        buildFixer: { model: getDefaultModelMedium() },
+        designer: { model: getDefaultModelMedium() },
+        writer: { model: getDefaultModelLow() },
+        qaTester: { model: getDefaultModelMedium() },
+        scientist: { model: getDefaultModelMedium() },
+        gitMaster: { model: getDefaultModelMedium() },
+        codeSimplifier: { model: getDefaultModelHigh() },
+        critic: { model: getDefaultModelHigh() },
+        documentSpecialist: { model: getDefaultModelMedium() },
     },
     features: {
         parallelExecution: true,
@@ -235,6 +244,22 @@ export function loadEnvConfig() {
             };
         }
     }
+    // Model alias overrides from environment (issue #1211)
+    const aliasKeys = ['HAIKU', 'SONNET', 'OPUS'];
+    const modelAliases = {};
+    for (const key of aliasKeys) {
+        const envVal = process.env[`OMC_MODEL_ALIAS_${key}`];
+        if (envVal) {
+            const lower = key.toLowerCase();
+            modelAliases[lower] = envVal.toLowerCase();
+        }
+    }
+    if (Object.keys(modelAliases).length > 0) {
+        config.routing = {
+            ...config.routing,
+            modelAliases: modelAliases,
+        };
+    }
     if (process.env.OMC_ESCALATION_ENABLED !== undefined) {
         config.routing = {
             ...config.routing,
@@ -398,41 +423,89 @@ export function generateConfigSchema() {
                             model: { type: 'string', description: 'Model ID for the main orchestrator' }
                         }
                     },
-                    architect: {
-                        type: 'object',
-                        properties: {
-                            model: { type: 'string' },
-                            enabled: { type: 'boolean' }
-                        }
-                    },
-                    researcher: {
-                        type: 'object',
-                        properties: { model: { type: 'string' } }
-                    },
                     explore: {
                         type: 'object',
                         properties: { model: { type: 'string' } }
                     },
-                    frontendEngineer: {
+                    analyst: {
                         type: 'object',
-                        properties: {
-                            model: { type: 'string' },
-                            enabled: { type: 'boolean' }
-                        }
+                        properties: { model: { type: 'string' } }
                     },
-                    documentWriter: {
+                    planner: {
                         type: 'object',
-                        properties: {
-                            model: { type: 'string' },
-                            enabled: { type: 'boolean' }
-                        }
+                        properties: { model: { type: 'string' } }
                     },
-                    multimodalLooker: {
+                    architect: {
                         type: 'object',
-                        properties: {
-                            model: { type: 'string' },
-                            enabled: { type: 'boolean' }
-                        }
+                        properties: { model: { type: 'string' } }
+                    },
+                    debugger: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    executor: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    verifier: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    qualityReviewer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    securityReviewer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    codeReviewer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    deepExecutor: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    testEngineer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    buildFixer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    designer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    writer: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    qaTester: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    scientist: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    gitMaster: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    codeSimplifier: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    critic: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
+                    },
+                    documentSpecialist: {
+                        type: 'object',
+                        properties: { model: { type: 'string' } }
                     }
                 }
             },

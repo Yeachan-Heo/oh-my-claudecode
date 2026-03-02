@@ -49,9 +49,9 @@ Most non-trivial software tasks require coordinated phases: understanding requir
    - Output: `.omc/plans/autopilot-impl.md`
 
 3. **Phase 2 - Execution**: Implement the plan using Ralph + Ultrawork
-   - Executor-low (Haiku): Simple tasks
+   - Executor (Haiku): Simple tasks
    - Executor (Sonnet): Standard tasks
-   - Executor-high (Opus): Complex tasks
+   - Executor (Opus): Complex tasks
    - Run independent tasks in parallel
 
 4. **Phase 3 - QA**: Cycle until all tests pass (UltraQA mode)

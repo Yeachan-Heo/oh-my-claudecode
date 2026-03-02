@@ -91,8 +91,8 @@ Workflow:
 - `omc-teams` ("omc-teams", "codex", "gemini"): spawn CLI workers in tmux panes
 - `ccg` ("ccg", "tri-model", "claude codex gemini"): fan out to Codex + Gemini, Claude synthesizes
 - `ultraqa` (activated by autopilot): QA cycling -- test, verify, fix, repeat
-- `plan` ("plan this", "plan the"): strategic planning; supports `--consensus` and `--review`
-- `ralplan` ("ralplan", "consensus plan"): alias for `/plan --consensus` -- iterative planning with Planner, Architect, Critic until consensus; short deliberation by default, `--deliberate` for high-risk work (adds pre-mortem + expanded unit/integration/e2e/observability test planning)
+- `omc-plan` ("plan this", "plan the"): strategic planning; supports `--consensus` and `--review`
+- `ralplan` ("ralplan", "consensus plan"): alias for `/omc-plan --consensus` -- iterative planning with Planner, Architect, Critic until consensus; short deliberation by default, `--deliberate` for high-risk work (adds pre-mortem + expanded unit/integration/e2e/observability test planning)
 - `sciomc` ("sciomc"): parallel scientist agents for comprehensive analysis
 - `external-context`: parallel document-specialist agents for web searches
 - `deepinit` ("deepinit"): deep codebase init with hierarchical AGENTS.md
@@ -103,12 +103,12 @@ Agent Shortcuts (thin wrappers):
 - `build-fix` -> `build-fixer`: "fix build", "type errors"
 - `code-review` -> `code-reviewer`: "review code"
 - `security-review` -> `security-reviewer`: "security review"
-- `review` -> `plan --review`: "review plan", "critique plan"
+- `review` -> `omc-plan --review`: "review plan", "critique plan"
 
 Notifications: `configure-notifications` ("configure discord", "setup telegram", "configure slack")
 Utilities: `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `ralph-init`, `learn-about-omc`
 
-Disambiguation: bare "codex"/"gemini" -> omc-teams; "claude codex gemini" -> ccg. Ralph includes ultrawork. Autopilot and ultrapilot are mutually exclusive.
+Disambiguation: bare "codex"/"gemini" -> omc-teams; "claude codex gemini" -> ccg. Ralph includes ultrawork.
 </skills>
 
 <team_pipeline>

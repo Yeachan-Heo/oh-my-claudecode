@@ -10,7 +10,6 @@ import {
   getAllKeywordsWithSizeCheck,
   isUnderspecifiedForExecution,
   applyRalplanGate,
-  detectDeprecatedKeywords,
   NON_LATIN_SCRIPT_PATTERN,
 } from '../index.js';
 
@@ -296,21 +295,6 @@ World`);
         const result = detectKeywordsWithType('uw this code');
         const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
         expect(ultraworkMatch).toBeUndefined();
-      });
-    });
-
-    describe('deprecated pipeline keyword (#1131)', () => {
-      it('should NOT detect agent pipeline as active keyword', () => {
-        const result = detectKeywordsWithType('agent pipeline build the API');
-        const pipelineMatch = result.find((r) => (r.type as string) === 'pipeline');
-        expect(pipelineMatch).toBeUndefined();
-      });
-
-      it('should emit deprecation warning for agent pipeline', () => {
-        const warnings = detectDeprecatedKeywords('agent pipeline build the API');
-        expect(warnings.length).toBeGreaterThan(0);
-        expect(warnings[0]).toContain('DEPRECATED');
-        expect(warnings[0]).toContain('/pipeline');
       });
     });
 

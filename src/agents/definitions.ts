@@ -24,11 +24,7 @@ export { qaTesterAgent } from './qa-tester.js';
 export { scientistAgent } from './scientist.js';
 export { exploreAgent } from './explore.js';
 
-// Backward compatibility: Deprecated aliases
-/** @deprecated Use document-specialist agent instead */
 export { documentSpecialistAgent } from './document-specialist.js';
-/** @deprecated Use document-specialist agent instead */
-export { documentSpecialistAgent as researcherAgent } from './document-specialist.js';
 
 // Import base agents for use in getAgentDefinitions
 import { deepExecutorAgent } from './deep-executor.js';

@@ -70,9 +70,9 @@ Complex tasks often fail silently: partial implementations get declared "done", 
 <Good>
 Correct parallel delegation:
 ```
-Task(subagent_type="oh-my-claudecode:executor-low", model="haiku", prompt="Add type export for UserConfig")
+Task(subagent_type="oh-my-claudecode:executor", model="haiku", prompt="Add type export for UserConfig")
 Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="Implement the caching layer for API responses")
-Task(subagent_type="oh-my-claudecode:executor-high", model="opus", prompt="Refactor auth module to support OAuth2 flow")
+Task(subagent_type="oh-my-claudecode:executor", model="opus", prompt="Refactor auth module to support OAuth2 flow")
 ```
 Why good: Three independent tasks fired simultaneously at appropriate tiers.
 </Good>
@@ -98,9 +98,9 @@ Why bad: Uses "should" and "look good" -- no fresh test/build output, no archite
 <Bad>
 Sequential execution of independent tasks:
 ```
-Task(executor-low, "Add type export") → wait →
+Task(executor, "Add type export") → wait →
 Task(executor, "Implement caching") → wait →
-Task(executor-high, "Refactor auth")
+Task(executor, "Refactor auth")
 ```
 Why bad: These are independent tasks that should run in parallel, not sequentially.
 </Bad>

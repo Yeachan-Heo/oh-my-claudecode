@@ -250,6 +250,106 @@ describe('delegation-enforcer', () => {
             expect(result.agentOrModel).toBe('document-specialist');
         });
     });
+    describe('modelAliases config override (issue #1211)', () => {
+        const savedEnv = {};
+        const aliasEnvKeys = ['OMC_MODEL_ALIAS_HAIKU', 'OMC_MODEL_ALIAS_SONNET', 'OMC_MODEL_ALIAS_OPUS'];
+        beforeEach(() => {
+            for (const key of aliasEnvKeys) {
+                savedEnv[key] = process.env[key];
+                delete process.env[key];
+            }
+        });
+        afterEach(() => {
+            for (const key of aliasEnvKeys) {
+                if (savedEnv[key] === undefined) {
+                    delete process.env[key];
+                }
+                else {
+                    process.env[key] = savedEnv[key];
+                }
+            }
+        });
+        it('remaps haiku agents to inherit via env var', () => {
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'inherit';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'explore' // explore defaults to haiku
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('inherit');
+            expect(result.modifiedInput.model).toBeUndefined();
+        });
+        it('remaps haiku agents to sonnet via env var', () => {
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'sonnet';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'explore' // explore defaults to haiku
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('sonnet');
+            expect(result.modifiedInput.model).toBe('sonnet');
+        });
+        it('does not remap when no alias configured for the tier', () => {
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'sonnet';
+            // executor defaults to sonnet — no alias for sonnet
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'executor'
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('sonnet');
+            expect(result.modifiedInput.model).toBe('sonnet');
+        });
+        it('explicit model param takes priority over alias', () => {
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'sonnet';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'explore',
+                model: 'opus' // explicit param wins
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('opus');
+            expect(result.modifiedInput.model).toBe('opus');
+        });
+        it('forceInherit takes priority over alias', () => {
+            process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'sonnet';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'explore'
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('inherit');
+            expect(result.modifiedInput.model).toBeUndefined();
+        });
+        it('remaps opus agents to inherit via env var', () => {
+            process.env.OMC_MODEL_ALIAS_OPUS = 'inherit';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'architect' // architect defaults to opus
+            };
+            const result = enforceModel(input);
+            expect(result.model).toBe('inherit');
+            expect(result.modifiedInput.model).toBeUndefined();
+        });
+        it('includes alias note in debug warning', () => {
+            process.env.OMC_MODEL_ALIAS_HAIKU = 'sonnet';
+            process.env.OMC_DEBUG = 'true';
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'explore'
+            };
+            const result = enforceModel(input);
+            expect(result.warning).toContain('aliased from haiku');
+        });
+    });
     describe('non-Claude provider support (issue #1201)', () => {
         const savedEnv = {};
         const envKeys = ['CLAUDE_MODEL', 'ANTHROPIC_BASE_URL', 'OMC_ROUTING_FORCE_INHERIT'];

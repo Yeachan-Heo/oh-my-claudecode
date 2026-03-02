@@ -44,7 +44,7 @@ describe('Tier-0 contract docs consistency', () => {
   });
 
   it('keeps ralplan documented as the /plan --consensus alias', () => {
-    expect(claudeDoc).toContain('`ralplan` ("ralplan", "consensus plan"): alias for `/plan --consensus`');
+    expect(claudeDoc).toContain('`ralplan` ("ralplan", "consensus plan"): alias for `/omc-plan --consensus`');
   });
 
   it('keeps deprecated compatibility aliases documented for project session manager', () => {

@@ -20,19 +20,27 @@ export interface PluginConfig {
   // Agent model overrides
   agents?: {
     omc?: { model?: string };
-    architect?: { model?: string; enabled?: boolean };
-    researcher?: { model?: string };
-    'document-specialist'?: { model?: string };
     explore?: { model?: string };
-    frontendEngineer?: { model?: string; enabled?: boolean };
-    documentWriter?: { model?: string; enabled?: boolean };
-    multimodalLooker?: { model?: string; enabled?: boolean };
-    // New agents from oh-my-opencode
-    critic?: { model?: string; enabled?: boolean };
-    analyst?: { model?: string; enabled?: boolean };
-    coordinator?: { model?: string; enabled?: boolean };
-    executor?: { model?: string; enabled?: boolean };
-    planner?: { model?: string; enabled?: boolean };
+    analyst?: { model?: string };
+    planner?: { model?: string };
+    architect?: { model?: string };
+    debugger?: { model?: string };
+    executor?: { model?: string };
+    verifier?: { model?: string };
+    qualityReviewer?: { model?: string };
+    securityReviewer?: { model?: string };
+    codeReviewer?: { model?: string };
+    deepExecutor?: { model?: string };
+    testEngineer?: { model?: string };
+    buildFixer?: { model?: string };
+    designer?: { model?: string };
+    writer?: { model?: string };
+    qaTester?: { model?: string };
+    scientist?: { model?: string };
+    gitMaster?: { model?: string };
+    codeSimplifier?: { model?: string };
+    critic?: { model?: string };
+    documentSpecialist?: { model?: string };
   };
 
   // Feature toggles
