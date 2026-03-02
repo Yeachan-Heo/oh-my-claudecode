@@ -265,6 +265,23 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     }
   }
 
+  // Model alias overrides from environment (issue #1211)
+  const aliasKeys = ['HAIKU', 'SONNET', 'OPUS'] as const;
+  const modelAliases: Record<string, string> = {};
+  for (const key of aliasKeys) {
+    const envVal = process.env[`OMC_MODEL_ALIAS_${key}`];
+    if (envVal) {
+      const lower = key.toLowerCase();
+      modelAliases[lower] = envVal.toLowerCase();
+    }
+  }
+  if (Object.keys(modelAliases).length > 0) {
+    config.routing = {
+      ...config.routing,
+      modelAliases: modelAliases as Record<string, 'haiku' | 'sonnet' | 'opus' | 'inherit'>,
+    };
+  }
+
   if (process.env.OMC_ESCALATION_ENABLED !== undefined) {
     config.routing = {
       ...config.routing,

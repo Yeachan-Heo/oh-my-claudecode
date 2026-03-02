@@ -94,6 +94,21 @@ export interface PluginConfig {
       tier: 'LOW' | 'MEDIUM' | 'HIGH';
       reason: string;
     }>;
+    /**
+     * Model alias overrides.
+     *
+     * Maps agent-definition model tier names to replacement values.
+     * Checked AFTER explicit model params (highest priority) but BEFORE
+     * agent-definition defaults (lowest priority).
+     *
+     * Use cases:
+     * - `{ haiku: 'inherit' }` — haiku agents inherit the parent model
+     *   (useful on non-Anthropic backends without the nuclear forceInherit)
+     * - `{ haiku: 'sonnet' }` — promote all haiku agents to sonnet tier
+     *
+     * Env: OMC_MODEL_ALIAS_HAIKU, OMC_MODEL_ALIAS_SONNET, OMC_MODEL_ALIAS_OPUS
+     */
+    modelAliases?: Partial<Record<'haiku' | 'sonnet' | 'opus', ModelType>>;
     /** Keywords that force escalation to higher tier */
     escalationKeywords?: string[];
     /** Keywords that suggest lower tier */
