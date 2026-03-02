@@ -41,9 +41,9 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     agentType: 'codex',
     binary: 'codex',
     installInstructions: 'Install Codex CLI: npm install -g @openai/codex',
-    supportsPromptMode: true,
-    // Codex accepts prompt as a positional argument (no flag needed):
-    //   codex [OPTIONS] [PROMPT]
+    // Keep Codex on interactive inbox-trigger path (no prompt-mode injection).
+    // See: #1204
+    supportsPromptMode: false,
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--dangerously-bypass-approvals-and-sandbox'];
       if (model) args.push('--model', model);

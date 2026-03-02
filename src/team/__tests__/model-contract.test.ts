@@ -112,10 +112,10 @@ describe('model-contract', () => {
       expect(isPromptModeAgent('claude')).toBe(false);
     });
 
-    it('codex supports prompt mode (positional argument, no flag)', () => {
-      expect(isPromptModeAgent('codex')).toBe(true);
+    it('codex does not support prompt mode (uses interactive inbox trigger)', () => {
+      expect(isPromptModeAgent('codex')).toBe(false);
       const c = getContract('codex');
-      expect(c.supportsPromptMode).toBe(true);
+      expect(c.supportsPromptMode).toBe(false);
       expect(c.promptModeFlag).toBeUndefined();
     });
 
@@ -124,9 +124,9 @@ describe('model-contract', () => {
       expect(args).toEqual(['-p', 'Read inbox']);
     });
 
-    it('getPromptModeArgs returns instruction only (positional) for codex', () => {
+    it('getPromptModeArgs returns empty array for codex', () => {
       const args = getPromptModeArgs('codex', 'Read inbox');
-      expect(args).toEqual(['Read inbox']);
+      expect(args).toEqual([]);
     });
 
     it('getPromptModeArgs returns empty array for non-prompt-mode agents', () => {

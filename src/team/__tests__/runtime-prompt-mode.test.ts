@@ -159,7 +159,7 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('codex worker launch args include positional prompt (no -p flag)', async () => {
+  it('codex worker launch args do not include prompt-mode instruction injection', async () => {
     const runtime = makeRuntime(cwd, 'codex');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
@@ -171,27 +171,29 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     expect(launchCall).toBeDefined();
     const launchCmd = launchCall![launchCall!.length - 1];
 
-    // Should NOT contain -p flag (codex uses positional argument, not a flag)
+    // Codex prompt-mode is disabled, so launch command should not carry inbox prompt text.
     expect(launchCmd).not.toContain("'-p'");
-    // Should contain the inbox path as a positional argument
-    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+    expect(launchCmd).not.toContain('Read and execute your task from:');
+    expect(launchCmd).not.toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
 
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('codex worker skips interactive send-keys notification (uses prompt mode)', async () => {
+  it('codex worker uses interactive send-keys notification', async () => {
     const runtime = makeRuntime(cwd, 'codex');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
 
-    // After the initial launch send-keys, there should be NO follow-up
-    // send-keys with "Read and execute" text (prompt-mode agents skip the
-    // interactive notification path).
-    const sendKeysCalls = tmuxCalls.args.filter(
-      args => args[0] === 'send-keys' && args.includes('-l')
+    // Non-prompt-mode path should send a follow-up inbox trigger via send-keys.
+    const literalMessages = tmuxCalls.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args[args.length - 1]);
+
+    const inboxTriggerSent = literalMessages.some(msg =>
+      msg.includes('Read and execute your task from: .omc/state/team/test-team/workers/worker-1/inbox.md')
     );
-    // Only one send-keys call: the launch command itself
-    expect(sendKeysCalls.length).toBe(1);
+
+    expect(inboxTriggerSent).toBe(true);
 
     rmSync(cwd, { recursive: true, force: true });
   });
