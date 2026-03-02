@@ -106,4 +106,34 @@ describe('Sentinel readiness gate', () => {
     expect(result.blockers.length).toBeGreaterThan(0);
     expect(result.blockers.some(blocker => blocker.includes('pass_rate'))).toBe(true);
   });
+
+  it('does not throw on malformed claims and returns blockers instead', () => {
+    // files_modified as object instead of array — previously would throw
+    const result = checkSentinelReadiness({
+      claims: { files_modified: {}, files_created: 'not-an-array' } as unknown as Record<string, unknown>,
+    });
+
+    expect(result.ready).toBe(false);
+    expect(result.skipped).toBe(false);
+    // Should have blockers (from factcheck) but should NOT have thrown
+    expect(result.blockers.length).toBeGreaterThan(0);
+  });
+
+  it('returns ready:false when enabled but no logPath or claims provided', () => {
+    // enabled defaults to true; no logPath, no claims
+    const result = checkSentinelReadiness({});
+
+    expect(result.ready).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(result.blockers.length).toBeGreaterThan(0);
+    expect(result.blockers[0]).toContain('no logPath or claims provided');
+  });
+
+  it('returns ready:false with explicit enabled:true and no inputs', () => {
+    const result = checkSentinelReadiness({ enabled: true });
+
+    expect(result.ready).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(result.blockers.some(b => b.includes('cannot verify readiness'))).toBe(true);
+  });
 });

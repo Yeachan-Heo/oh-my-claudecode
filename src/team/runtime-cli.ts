@@ -6,11 +6,12 @@
  * Bundled as CJS via esbuild (scripts/build-runtime-cli.mjs).
  */
 
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, existsSync } from 'fs';
 import { writeFile, rename } from 'fs/promises';
 import { join } from 'path';
 import { startTeam, monitorTeam, shutdownTeam } from './runtime.js';
 import type { TeamConfig, TeamRuntime } from './runtime.js';
+import { checkSentinelReadiness } from './sentinel-gate.js';
 
 interface CliInput {
   teamName: string;
@@ -223,8 +224,22 @@ async function main(): Promise<void> {
       `[runtime-cli] phase=${snap.phase} pending=${snap.taskCounts.pending} inProgress=${snap.taskCounts.inProgress} completed=${snap.taskCounts.completed} failed=${snap.taskCounts.failed} dead=${snap.deadWorkers.length} monitorMs=${snap.monitorPerformance.totalMs} tasksMs=${snap.monitorPerformance.listTasksMs} workerMs=${snap.monitorPerformance.workerScanMs}\n`,
     );
 
-    // Check completion
+    // Check completion — enforce sentinel readiness gate before terminal success
     if (snap.phase === 'completed') {
+      const sentinelLogPath = join(cwd, 'sentinel_stop.jsonl');
+      const gateResult = checkSentinelReadiness({
+        workspace: cwd,
+        logPath: existsSync(sentinelLogPath) ? sentinelLogPath : undefined,
+      });
+
+      if (!gateResult.ready && !gateResult.skipped) {
+        process.stderr.write(
+          `[runtime-cli] Sentinel gate blocked completion: ${gateResult.blockers.join('; ')}\n`,
+        );
+        await doShutdown('failed');
+        return;
+      }
+
       await doShutdown('completed');
       return;
     }
