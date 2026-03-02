@@ -335,9 +335,18 @@ describe('writeTaskFailure / readTaskFailure', () => {
     expect(failure?.lastError).toBe('err2');
   });
 
-  it('returns null for missing sidecar', () => {
-    expect(readTaskFailure(TEST_TEAM, '999', { cwd: TEST_CWD })).toBeNull();
+  it('returns the persisted sidecar with latest retryCount', () => {
+    const first = writeTaskFailure(TEST_TEAM, '1', 'err1', { cwd: TEST_CWD });
+    expect(first.retryCount).toBe(1);
+
+    const second = writeTaskFailure(TEST_TEAM, '1', 'err2', { cwd: TEST_CWD });
+    expect(second.retryCount).toBe(2);
+    expect(second.lastError).toBe('err2');
+
+    const failure = readTaskFailure(TEST_TEAM, '1', { cwd: TEST_CWD });
+    expect(failure).toEqual(second);
   });
+
 });
 
 describe('listTaskIds', () => {

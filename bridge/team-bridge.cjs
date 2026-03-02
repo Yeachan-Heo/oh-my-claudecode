@@ -393,23 +393,17 @@ function areBlockersResolved(teamName, blockedBy, opts) {
   }
   return true;
 }
-async function writeTaskFailure(teamName, taskId, error, opts) {
-  const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
-  const handle = await acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
-  try {
-    const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
-    const existing = readTaskFailure(teamName, taskId, opts);
-    const sidecar = {
-      taskId,
-      lastError: error,
-      retryCount: existing ? existing.retryCount + 1 : 1,
-      lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    atomicWriteJson(filePath, sidecar);
-    return sidecar;
-  } finally {
-    releaseTaskLock(handle);
-  }
+function writeTaskFailure(teamName, taskId, error, opts) {
+  const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+  const existing = readTaskFailure(teamName, taskId, opts);
+  const sidecar = {
+    taskId,
+    lastError: error,
+    retryCount: existing ? existing.retryCount + 1 : 1,
+    lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  atomicWriteJson(filePath, sidecar);
+  return sidecar;
 }
 function readTaskFailure(teamName, taskId, opts) {
   const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
@@ -420,12 +414,6 @@ function readTaskFailure(teamName, taskId, opts) {
   } catch {
     return null;
   }
-}
-var DEFAULT_MAX_TASK_RETRIES = 5;
-function isTaskRetryExhausted(teamName, taskId, maxRetries = DEFAULT_MAX_TASK_RETRIES, opts) {
-  const failure = readTaskFailure(teamName, taskId, opts);
-  if (!failure) return false;
-  return failure.retryCount >= maxRetries;
 }
 function listTaskIds(teamName, opts) {
   const scanDir = (dir) => {
@@ -1592,10 +1580,9 @@ ${violationSummary}`);
           } else {
             audit(config, "cli_error", task.id, { error: errorMsg });
           }
-          writeTaskFailure(teamName, task.id, errorMsg);
-          const failure = readTaskFailure(teamName, task.id);
-          const attempt = failure?.retryCount || 1;
-          if (isTaskRetryExhausted(teamName, task.id, config.maxRetries)) {
+          const failure = writeTaskFailure(teamName, task.id, errorMsg, { cwd: workingDirectory });
+          const attempt = failure.retryCount;
+          if (attempt >= (config.maxRetries ?? 5)) {
             updateTask(teamName, task.id, {
               status: "completed",
               metadata: {

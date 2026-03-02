@@ -48,8 +48,10 @@ describe('mcp-team-bridge usage recording', () => {
     rmSync(workingDirectory, { recursive: true, force: true });
   });
 
-  it('skips usage parsing during idle auto-cleanup status polling', () => {
+  it('uses writeTaskFailure return value for retry attempt checks', () => {
     const source = readFileSync(join(__dirname, '..', 'mcp-team-bridge.ts'), 'utf-8');
-    expect(source).toContain('getTeamStatus(teamName, workingDirectory, 30000, { includeUsage: false })');
+    expect(source).toContain("const failure = writeTaskFailure(teamName, task.id, errorMsg, { cwd: workingDirectory });");
+    expect(source).toContain('const attempt = failure.retryCount;');
+    expect(source).toContain('if (attempt >= (config.maxRetries ?? 5))');
   });
 });

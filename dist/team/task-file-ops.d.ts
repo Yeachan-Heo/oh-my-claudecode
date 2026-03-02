@@ -75,11 +75,11 @@ export declare function areBlockersResolved(teamName: string, blockedBy: string[
 /**
  * Write failure sidecar for a task.
  * If sidecar already exists, increments retryCount.
- * Uses an exclusive task lock to prevent lost updates from concurrent writers.
+ * Returns the persisted sidecar payload.
  */
 export declare function writeTaskFailure(teamName: string, taskId: string, error: string, opts?: {
     cwd?: string;
-}): Promise<TaskFailureSidecar>;
+}): TaskFailureSidecar;
 /** Read failure sidecar if it exists */
 export declare function readTaskFailure(teamName: string, taskId: string, opts?: {
     cwd?: string;

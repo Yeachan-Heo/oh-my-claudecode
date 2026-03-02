@@ -16,7 +16,7 @@ import { existsSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
 import type { BridgeConfig, TaskFile, HeartbeatData, InboxMessage } from './types.js';
-import { findNextTask, updateTask, writeTaskFailure, readTaskFailure, isTaskRetryExhausted } from './task-file-ops.js';
+import { findNextTask, updateTask, writeTaskFailure } from './task-file-ops.js';
 import {
   readNewInboxMessages, appendOutbox, rotateOutboxIfNeeded, rotateInboxIfNeeded,
   checkShutdownSignal, deleteShutdownSignal, checkDrainSignal, deleteDrainSignal
@@ -786,13 +786,11 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
             audit(config, 'cli_error', task.id, { error: errorMsg });
           }
 
-          writeTaskFailure(teamName, task.id, errorMsg);
-
-          const failure = readTaskFailure(teamName, task.id);
-          const attempt = failure?.retryCount || 1;
+          const failure = writeTaskFailure(teamName, task.id, errorMsg, { cwd: workingDirectory });
+          const attempt = failure.retryCount;
 
           // Check if retries exhausted
-          if (isTaskRetryExhausted(teamName, task.id, config.maxRetries)) {
+          if (attempt >= (config.maxRetries ?? 5)) {
             // Permanently fail: mark completed with error metadata
             updateTask(teamName, task.id, {
               status: 'completed',
