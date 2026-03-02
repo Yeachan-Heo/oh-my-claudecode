@@ -11,6 +11,7 @@ import { writeFile, rename } from 'fs/promises';
 import { join } from 'path';
 import { startTeam, monitorTeam, shutdownTeam } from './runtime.js';
 import type { TeamConfig, TeamRuntime } from './runtime.js';
+import { waitForSentinelReadiness } from './sentinel-gate.js';
 
 interface CliInput {
   teamName: string;
@@ -19,6 +20,8 @@ interface CliInput {
   tasks: Array<{ subject: string; description: string }>;
   cwd: string;
   pollIntervalMs?: number;
+  sentinelGateTimeoutMs?: number;
+  sentinelGatePollIntervalMs?: number;
 }
 
 interface TaskResult {
@@ -108,6 +111,8 @@ async function main(): Promise<void> {
     tasks,
     cwd,
     pollIntervalMs = 5000,
+    sentinelGateTimeoutMs = 30_000,
+    sentinelGatePollIntervalMs = 250,
   } = input;
 
   const workerCount = input.workerCount ?? agentTypes.length;
@@ -223,8 +228,24 @@ async function main(): Promise<void> {
       `[runtime-cli] phase=${snap.phase} pending=${snap.taskCounts.pending} inProgress=${snap.taskCounts.inProgress} completed=${snap.taskCounts.completed} failed=${snap.taskCounts.failed} dead=${snap.deadWorkers.length} monitorMs=${snap.monitorPerformance.totalMs} tasksMs=${snap.monitorPerformance.listTasksMs} workerMs=${snap.monitorPerformance.workerScanMs}\n`,
     );
 
-    // Check completion
+    // Check completion — enforce sentinel readiness gate before terminal success
     if (snap.phase === 'completed') {
+      const sentinelLogPath = join(cwd, 'sentinel_stop.jsonl');
+      const gateResult = await waitForSentinelReadiness({
+        workspace: cwd,
+        logPath: sentinelLogPath,
+        timeoutMs: sentinelGateTimeoutMs,
+        pollIntervalMs: sentinelGatePollIntervalMs,
+      });
+
+      if (!gateResult.ready) {
+        process.stderr.write(
+          `[runtime-cli] Sentinel gate blocked completion (timedOut=${gateResult.timedOut}, attempts=${gateResult.attempts}, elapsedMs=${gateResult.elapsedMs}): ${gateResult.blockers.join('; ')}\n`,
+        );
+        await doShutdown('failed');
+        return;
+      }
+
       await doShutdown('completed');
       return;
     }
