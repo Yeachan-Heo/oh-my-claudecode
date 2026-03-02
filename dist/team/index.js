@@ -24,12 +24,15 @@ export { checkMergeConflicts, mergeWorkerBranch, mergeAllWorkerBranches, } from 
 export { generateTeamReport, saveTeamReport } from './summary-report.js';
 export { isPathAllowed, isCommandAllowed, formatPermissionInstructions, getDefaultPermissions, } from './permissions.js';
 export { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
-export { checkSentinelReadiness, waitForSentinelReadiness, } from './sentinel-gate.js';
-export { getContract, isCliAvailable as isCliAvailableForAgent, validateCliAvailable as validateCliAvailableForAgent, buildLaunchArgs, buildWorkerCommand, parseCliOutput, } from './model-contract.js';
+export { getContract, isCliAvailable as isCliAvailableForAgent, validateCliAvailable as validateCliAvailableForAgent, buildLaunchArgs, buildWorkerCommand, parseCliOutput, 
+// Deprecated backward-compat exports kept for downstream consumers.
+shouldLoadShellRc, validateCliBinaryPath, resolveCliBinaryPath, clearResolvedPathCache, } from './model-contract.js';
 export { detectCli, detectAllClis } from './cli-detection.js';
 export { generateWorkerOverlay, composeInitialInbox, appendToInbox, getWorkerEnv, ensureWorkerStateDir, writeWorkerOverlay, } from './worker-bootstrap.js';
 // tmux-comm
 export { sendTmuxTrigger, queueInboxInstruction, queueDirectMessage, queueBroadcastMessage, readMailbox, } from './tmux-comm.js';
+// Deprecated backward-compat exports for older layout APIs.
+export { LayoutStabilizer } from './layout-stabilizer.js';
 export { inferPhase, getPhaseTransitionLog, isTerminalPhase } from './phase-controller.js';
 export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
 export { injectToLeaderPane } from './tmux-session.js';

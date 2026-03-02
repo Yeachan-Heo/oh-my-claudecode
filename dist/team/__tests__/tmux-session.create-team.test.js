@@ -7,6 +7,9 @@ vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
     const runMockExec = (args) => {
         mockedCalls.execFileArgs.push(args);
+        if (args[0] === 'new-session') {
+            return { stdout: 'omc-team-race-team-detached:0 %91\n', stderr: '' };
+        }
         if (args[0] === 'display-message' && args.includes('#S:#I #{pane_id}')) {
             return { stdout: 'fallback:2 %42\n', stderr: '' };
         }
@@ -64,10 +67,21 @@ describe('createTeamSession context resolution', () => {
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
+    it('creates a detached session when running outside tmux', async () => {
+        vi.unstubAllEnvs();
+        const session = await createTeamSession('race-team', 0, '/tmp');
+        const detachedCreateCall = mockedCalls.execFileArgs.find(args => args[0] === 'new-session' && args.includes('-d') && args.includes('-P'));
+        expect(detachedCreateCall).toBeDefined();
+        expect(session.leaderPaneId).toBe('%91');
+        expect(session.sessionName).toBe('omc-team-race-team-detached:0');
+        expect(session.workerPaneIds).toEqual([]);
+    });
     it('anchors context to TMUX_PANE to avoid focus races', async () => {
         vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
         vi.stubEnv('TMUX_PANE', '%732');
         const session = await createTeamSession('race-team', 1, '/tmp');
+        const detachedCreateCall = mockedCalls.execFileArgs.find(args => args[0] === 'new-session');
+        expect(detachedCreateCall).toBeUndefined();
         const targetedContextCall = mockedCalls.execFileArgs.find(args => args[0] === 'display-message' &&
             args[1] === '-p' &&
             args[2] === '-t' &&
@@ -82,23 +96,6 @@ describe('createTeamSession context resolution', () => {
         expect(session.leaderPaneId).toBe('%732');
         expect(session.sessionName).toBe('omx:4');
         expect(session.workerPaneIds).toEqual(['%501']);
-    });
-    it('falls back to default context discovery when TMUX_PANE is invalid', async () => {
-        vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
-        vi.stubEnv('TMUX_PANE', 'not-a-pane-id');
-        const session = await createTeamSession('race-team', 0, '/tmp');
-        const targetedContextCall = mockedCalls.execFileArgs.find(args => args[0] === 'display-message' &&
-            args[1] === '-p' &&
-            args[2] === '-t' &&
-            args[4] === '#S:#I');
-        expect(targetedContextCall).toBeUndefined();
-        const fallbackContextCall = mockedCalls.execFileArgs.find(args => args[0] === 'display-message' &&
-            args[1] === '-p' &&
-            args[2] === '#S:#I #{pane_id}');
-        expect(fallbackContextCall).toBeDefined();
-        expect(session.leaderPaneId).toBe('%42');
-        expect(session.sessionName).toBe('fallback:2');
-        expect(session.workerPaneIds).toEqual([]);
     });
 });
 //# sourceMappingURL=tmux-session.create-team.test.js.map

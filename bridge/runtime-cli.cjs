@@ -176,15 +176,16 @@ var require_main = __commonJS({
 // src/team/runtime-cli.ts
 var import_fs10 = require("fs");
 var import_promises4 = require("fs/promises");
-var import_path12 = require("path");
+var import_path11 = require("path");
 
 // src/team/runtime.ts
 var import_promises3 = require("fs/promises");
-var import_path9 = require("path");
+var import_path10 = require("path");
 var import_fs6 = require("fs");
 
 // src/team/model-contract.ts
 var import_child_process = require("child_process");
+var import_path = require("path");
 
 // src/team/team-name.ts
 var TEAM_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$/;
@@ -315,9 +316,10 @@ function getPromptModeArgs(agentType, instruction) {
 
 // src/team/tmux-session.ts
 var import_child_process2 = require("child_process");
-var import_path = require("path");
+var import_path2 = require("path");
 var import_util = require("util");
 var import_promises = __toESM(require("fs/promises"), 1);
+var TMUX_SESSION_PREFIX = "omc-team";
 var promisifiedExec = (0, import_util.promisify)(import_child_process2.exec);
 var promisifiedExecFile = (0, import_util.promisify)(import_child_process2.execFile);
 function isUnixLikeOnWindows() {
@@ -340,7 +342,7 @@ function escapeForCmdSet(value) {
   return value.replace(/"/g, '""');
 }
 function shellNameFromPath(shellPath) {
-  const shellName = (0, import_path.basename)(shellPath.replace(/\\/g, "/"));
+  const shellName = (0, import_path2.basename)(shellPath.replace(/\\/g, "/"));
   return shellName.replace(/\.(exe|cmd|bat)$/i, "");
 }
 function shellEscape(value) {
@@ -413,14 +415,33 @@ async function createTeamSession(teamName, workerCount, cwd) {
   const { execFile: execFile2 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
   const execFileAsync = promisify2(execFile2);
-  if (!process.env.TMUX) {
-    throw new Error("Team mode requires running inside tmux. Start one: tmux new-session");
-  }
+  const inTmux = Boolean(process.env.TMUX);
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
   const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
   let sessionAndWindow = "";
   let leaderPaneId = envPaneId;
-  if (envPaneId) {
+  if (!inTmux) {
+    const detachedSessionName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${Date.now().toString(36)}`;
+    const detachedResult = await execFileAsync("tmux", [
+      "new-session",
+      "-d",
+      "-P",
+      "-F",
+      "#S:0 #{pane_id}",
+      "-s",
+      detachedSessionName,
+      "-c",
+      cwd
+    ]);
+    const detachedLine = detachedResult.stdout.trim();
+    const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
+    if (!detachedMatch) {
+      throw new Error(`Failed to create detached tmux session: "${detachedLine}"`);
+    }
+    sessionAndWindow = detachedMatch[1];
+    leaderPaneId = detachedMatch[2];
+  }
+  if (inTmux && envPaneId) {
     try {
       const targetedContextResult = await execFileAsync("tmux", [
         "display-message",
@@ -713,16 +734,16 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId) {
 
 // src/team/worker-bootstrap.ts
 var import_promises2 = require("fs/promises");
-var import_path4 = require("path");
+var import_path5 = require("path");
 
 // src/agents/prompt-helpers.ts
 var import_fs2 = require("fs");
-var import_path3 = require("path");
+var import_path4 = require("path");
 var import_url2 = require("url");
 
 // src/agents/utils.ts
 var import_fs = require("fs");
-var import_path2 = require("path");
+var import_path3 = require("path");
 var import_url = require("url");
 
 // src/agents/prompt-helpers.ts
@@ -731,13 +752,13 @@ function getPackageDir() {
   try {
     if (import_meta?.url) {
       const __filename = (0, import_url2.fileURLToPath)(import_meta.url);
-      const __dirname2 = (0, import_path3.dirname)(__filename);
-      return (0, import_path3.join)(__dirname2, "..", "..");
+      const __dirname2 = (0, import_path4.dirname)(__filename);
+      return (0, import_path4.join)(__dirname2, "..", "..");
     }
   } catch {
   }
   if (typeof __dirname !== "undefined") {
-    return (0, import_path3.join)(__dirname, "..");
+    return (0, import_path4.join)(__dirname, "..");
   }
   return process.cwd();
 }
@@ -752,9 +773,9 @@ function getValidAgentRoles() {
   } catch {
   }
   try {
-    const agentsDir = (0, import_path3.join)(getPackageDir(), "agents");
+    const agentsDir = (0, import_path4.join)(getPackageDir(), "agents");
     const files = (0, import_fs2.readdirSync)(agentsDir);
-    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => (0, import_path3.basename)(f, ".md")).sort();
+    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => (0, import_path4.basename)(f, ".md")).sort();
   } catch (err) {
     console.error("[prompt-injection] CRITICAL: Could not scan agents/ directory for role discovery:", err);
     _cachedRoles = [];
@@ -844,33 +865,33 @@ ${bootstrapInstructions}
 ` : ""}`;
 }
 async function composeInitialInbox(teamName, workerName2, content, cwd) {
-  const inboxPath = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/inbox.md`);
-  await (0, import_promises2.mkdir)((0, import_path4.dirname)(inboxPath), { recursive: true });
+  const inboxPath = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/inbox.md`);
+  await (0, import_promises2.mkdir)((0, import_path5.dirname)(inboxPath), { recursive: true });
   await (0, import_promises2.writeFile)(inboxPath, content, "utf-8");
 }
 async function ensureWorkerStateDir(teamName, workerName2, cwd) {
-  const workerDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}`);
+  const workerDir = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}`);
   await (0, import_promises2.mkdir)(workerDir, { recursive: true });
-  const mailboxDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/mailbox`);
+  const mailboxDir = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/mailbox`);
   await (0, import_promises2.mkdir)(mailboxDir, { recursive: true });
-  const tasksDir = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/tasks`);
+  const tasksDir = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/tasks`);
   await (0, import_promises2.mkdir)(tasksDir, { recursive: true });
 }
 async function writeWorkerOverlay(params) {
   const { teamName, workerName: workerName2, cwd } = params;
   const overlay = generateWorkerOverlay(params);
-  const overlayPath = (0, import_path4.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`);
-  await (0, import_promises2.mkdir)((0, import_path4.dirname)(overlayPath), { recursive: true });
+  const overlayPath = (0, import_path5.join)(cwd, `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`);
+  await (0, import_promises2.mkdir)((0, import_path5.dirname)(overlayPath), { recursive: true });
   await (0, import_promises2.writeFile)(overlayPath, overlay, "utf-8");
   return overlayPath;
 }
 
 // src/team/task-file-ops.ts
 var import_fs5 = require("fs");
-var import_path8 = require("path");
+var import_path9 = require("path");
 
 // src/utils/paths.ts
-var import_path5 = require("path");
+var import_path6 = require("path");
 var import_fs3 = require("fs");
 var import_os = require("os");
 function getConfigDir2() {
@@ -883,14 +904,7 @@ var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/team/fs-utils.ts
 var import_fs4 = require("fs");
-var import_path6 = require("path");
-function atomicWriteJson(filePath, data, mode = 384) {
-  const dir = (0, import_path6.dirname)(filePath);
-  if (!(0, import_fs4.existsSync)(dir)) (0, import_fs4.mkdirSync)(dir, { recursive: true, mode: 448 });
-  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  (0, import_fs4.writeFileSync)(tmpPath, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
-  (0, import_fs4.renameSync)(tmpPath, filePath);
-}
+var import_path7 = require("path");
 function ensureDirWithMode(dirPath, mode = 448) {
   if (!(0, import_fs4.existsSync)(dirPath)) (0, import_fs4.mkdirSync)(dirPath, { recursive: true, mode });
 }
@@ -898,26 +912,26 @@ function safeRealpath(p) {
   try {
     return (0, import_fs4.realpathSync)(p);
   } catch {
-    const parent = (0, import_path6.dirname)(p);
-    const name = (0, import_path6.basename)(p);
+    const parent = (0, import_path7.dirname)(p);
+    const name = (0, import_path7.basename)(p);
     try {
-      return (0, import_path6.resolve)((0, import_fs4.realpathSync)(parent), name);
+      return (0, import_path7.resolve)((0, import_fs4.realpathSync)(parent), name);
     } catch {
-      return (0, import_path6.resolve)(p);
+      return (0, import_path7.resolve)(p);
     }
   }
 }
 function validateResolvedPath(resolvedPath, expectedBase) {
   const absResolved = safeRealpath(resolvedPath);
   const absBase = safeRealpath(expectedBase);
-  const rel = (0, import_path6.relative)(absBase, absResolved);
-  if (rel.startsWith("..") || (0, import_path6.resolve)(absBase, rel) !== absResolved) {
+  const rel = (0, import_path7.relative)(absBase, absResolved);
+  if (rel.startsWith("..") || (0, import_path7.resolve)(absBase, rel) !== absResolved) {
     throw new Error(`Path traversal detected: "${resolvedPath}" escapes base "${expectedBase}"`);
   }
 }
 
 // src/team/state-paths.ts
-var import_path7 = require("path");
+var import_path8 = require("path");
 var TeamPaths = {
   root: (teamName) => `.omc/state/team/${teamName}`,
   config: (teamName) => `.omc/state/team/${teamName}/config.json`,
@@ -937,9 +951,9 @@ var TeamPaths = {
 };
 function getTaskStoragePath(cwd, teamName, taskId) {
   if (taskId !== void 0) {
-    return (0, import_path7.join)(cwd, TeamPaths.taskFile(teamName, taskId));
+    return (0, import_path8.join)(cwd, TeamPaths.taskFile(teamName, taskId));
   }
-  return (0, import_path7.join)(cwd, TeamPaths.tasks(teamName));
+  return (0, import_path8.join)(cwd, TeamPaths.tasks(teamName));
 }
 
 // src/team/task-file-ops.ts
@@ -960,7 +974,7 @@ function acquireTaskLock(teamName, taskId, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
   const dir = canonicalTasksDir(teamName, opts?.cwd);
   ensureDirWithMode(dir);
-  const lockPath = (0, import_path8.join)(dir, `${sanitizeTaskId(taskId)}.lock`);
+  const lockPath = (0, import_path9.join)(dir, `${sanitizeTaskId(taskId)}.lock`);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = (0, import_fs5.openSync)(lockPath, import_fs5.constants.O_CREAT | import_fs5.constants.O_EXCL | import_fs5.constants.O_WRONLY, 384);
@@ -1044,7 +1058,7 @@ function sanitizeTaskId(taskId) {
 function canonicalTasksDir(teamName, cwd) {
   const root = cwd ?? process.cwd();
   const dir = getTaskStoragePath(root, sanitizeName(teamName));
-  validateResolvedPath(dir, (0, import_path8.join)(root, ".omc", "state", "team"));
+  validateResolvedPath(dir, (0, import_path9.join)(root, ".omc", "state", "team"));
   return dir;
 }
 function failureSidecarPath(teamName, taskId, cwd) {
@@ -1086,10 +1100,10 @@ function workerName(index) {
 }
 function stateRoot(cwd, teamName) {
   validateTeamName(teamName);
-  return (0, import_path9.join)(cwd, `.omc/state/team/${teamName}`);
+  return (0, import_path10.join)(cwd, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-  await (0, import_promises3.mkdir)((0, import_path9.join)(filePath, ".."), { recursive: true });
+  await (0, import_promises3.mkdir)((0, import_path10.join)(filePath, ".."), { recursive: true });
   await (0, import_promises3.writeFile)(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 async function readJsonSafe(filePath) {
@@ -1107,13 +1121,13 @@ function parseWorkerIndex(workerNameValue) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 function taskPath(root, taskId) {
-  return (0, import_path9.join)(root, "tasks", `${taskId}.json`);
+  return (0, import_path10.join)(root, "tasks", `${taskId}.json`);
 }
 async function writePanesTrackingFileIfPresent(runtime) {
   const jobId = process.env.OMC_JOB_ID;
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
-  const panesPath = (0, import_path9.join)(omcJobsDir, `${jobId}-panes.json`);
+  const panesPath = (0, import_path10.join)(omcJobsDir, `${jobId}-panes.json`);
   const tempPath = `${panesPath}.tmp`;
   await (0, import_promises3.writeFile)(
     tempPath,
@@ -1251,12 +1265,12 @@ async function startTeam(config) {
     validateCliAvailable(agentType);
   }
   const root = stateRoot(cwd, teamName);
-  await (0, import_promises3.mkdir)((0, import_path9.join)(root, "tasks"), { recursive: true });
-  await (0, import_promises3.mkdir)((0, import_path9.join)(root, "mailbox"), { recursive: true });
-  await writeJson((0, import_path9.join)(root, "config.json"), config);
+  await (0, import_promises3.mkdir)((0, import_path10.join)(root, "tasks"), { recursive: true });
+  await (0, import_promises3.mkdir)((0, import_path10.join)(root, "mailbox"), { recursive: true });
+  await writeJson((0, import_path10.join)(root, "config.json"), config);
   for (let i = 0; i < tasks.length; i++) {
     const taskId = String(i + 1);
-    await writeJson((0, import_path9.join)(root, "tasks", `${taskId}.json`), {
+    await writeJson((0, import_path10.join)(root, "tasks", `${taskId}.json`), {
       id: taskId,
       subject: tasks[i].subject,
       description: tasks[i].description,
@@ -1309,9 +1323,9 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
   const taskCounts = { pending: 0, inProgress: 0, completed: 0, failed: 0 };
   try {
     const { readdir } = await import("fs/promises");
-    const taskFiles = await readdir((0, import_path9.join)(root, "tasks"));
+    const taskFiles = await readdir((0, import_path10.join)(root, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
-      const task = await readJsonSafe((0, import_path9.join)(root, "tasks", f));
+      const task = await readJsonSafe((0, import_path10.join)(root, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
       else if (task?.status === "in_progress") taskCounts.inProgress++;
       else if (task?.status === "completed") taskCounts.completed++;
@@ -1327,7 +1341,7 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
     const wName = `worker-${i + 1}`;
     const paneId = workerPaneIds[i];
     const alive = await isWorkerAlive(paneId);
-    const heartbeatPath = (0, import_path9.join)(root, "workers", wName, "heartbeat.json");
+    const heartbeatPath = (0, import_path10.join)(root, "workers", wName, "heartbeat.json");
     const heartbeat = await readJsonSafe(heartbeatPath);
     let stalled = false;
     if (heartbeat?.updatedAt) {
@@ -1382,14 +1396,14 @@ function watchdogCliWorkers(runtime, intervalMs) {
       const root = stateRoot(runtime.cwd, runtime.teamName);
       const [doneSignals, aliveResults] = await Promise.all([
         Promise.all(workers.map(([wName]) => {
-          const donePath = (0, import_path9.join)(root, "workers", wName, "done.json");
+          const donePath = (0, import_path10.join)(root, "workers", wName, "done.json");
           return readJsonSafe(donePath);
         })),
         Promise.all(workers.map(([, active]) => isWorkerAlive(active.paneId)))
       ]);
       for (let i = 0; i < workers.length; i++) {
         const [wName, active] = workers[i];
-        const donePath = (0, import_path9.join)(root, "workers", wName, "done.json");
+        const donePath = (0, import_path10.join)(root, "workers", wName, "done.json");
         const signal = doneSignals[i];
         if (signal) {
           unresponsiveCounts.delete(wName);
@@ -1425,7 +1439,7 @@ function watchdogCliWorkers(runtime, intervalMs) {
           }
           continue;
         }
-        const heartbeatPath = (0, import_path9.join)(root, "workers", wName, "heartbeat.json");
+        const heartbeatPath = (0, import_path10.join)(root, "workers", wName, "heartbeat.json");
         const heartbeat = await readJsonSafe(heartbeatPath);
         const isStalled = heartbeat?.updatedAt ? Date.now() - new Date(heartbeat.updatedAt).getTime() > 6e4 : false;
         if (isStalled) {
@@ -1460,7 +1474,7 @@ function watchdogCliWorkers(runtime, intervalMs) {
         console.warn(`[watchdog] ${consecutiveFailures} consecutive failures \u2014 marking team as failed`);
         try {
           const root = stateRoot(runtime.cwd, runtime.teamName);
-          await writeJson((0, import_path9.join)(root, "watchdog-failed.json"), {
+          await writeJson((0, import_path10.join)(root, "watchdog-failed.json"), {
             failedAt: (/* @__PURE__ */ new Date()).toISOString(),
             consecutiveFailures,
             lastError: err instanceof Error ? err.message : String(err)
@@ -1583,11 +1597,11 @@ async function killWorkerPane(runtime, workerNameValue, paneId) {
 }
 async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerPaneIds, leaderPaneId) {
   const root = stateRoot(cwd, teamName);
-  await writeJson((0, import_path9.join)(root, "shutdown.json"), {
+  await writeJson((0, import_path10.join)(root, "shutdown.json"), {
     requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
     teamName
   });
-  const configData = await readJsonSafe((0, import_path9.join)(root, "config.json"));
+  const configData = await readJsonSafe((0, import_path10.join)(root, "config.json"));
   const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
@@ -1597,7 +1611,7 @@ async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerP
     const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
     while (Date.now() < deadline && expectedAcks.length > 0) {
       for (const wName of [...expectedAcks]) {
-        const ackPath = (0, import_path9.join)(root, "workers", wName, "shutdown-ack.json");
+        const ackPath = (0, import_path10.join)(root, "workers", wName, "shutdown-ack.json");
         if ((0, import_fs6.existsSync)(ackPath)) {
           expectedAcks.splice(expectedAcks.indexOf(wName), 1);
         }
@@ -2480,7 +2494,7 @@ async function waitForSentinelReadiness(options = {}) {
 async function writePanesFile(jobId, paneIds, leaderPaneId) {
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
-  const panesPath = (0, import_path12.join)(omcJobsDir, `${jobId}-panes.json`);
+  const panesPath = (0, import_path11.join)(omcJobsDir, `${jobId}-panes.json`);
   await (0, import_promises4.writeFile)(
     panesPath + ".tmp",
     JSON.stringify({ paneIds: [...paneIds], leaderPaneId })
@@ -2488,12 +2502,12 @@ async function writePanesFile(jobId, paneIds, leaderPaneId) {
   await (0, import_promises4.rename)(panesPath + ".tmp", panesPath);
 }
 function collectTaskResults(stateRoot2) {
-  const tasksDir = (0, import_path12.join)(stateRoot2, "tasks");
+  const tasksDir = (0, import_path11.join)(stateRoot2, "tasks");
   try {
     const files = (0, import_fs10.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
-        const raw = (0, import_fs10.readFileSync)((0, import_path12.join)(tasksDir, f), "utf-8");
+        const raw = (0, import_fs7.readFileSync)((0, import_path11.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
         return {
           taskId: task.id ?? f.replace(".json", ""),
@@ -2543,7 +2557,7 @@ async function main() {
     sentinelGatePollIntervalMs = 250
   } = input;
   const workerCount = input.workerCount ?? agentTypes.length;
-  const stateRoot2 = (0, import_path12.join)(cwd, `.omc/state/team/${teamName}`);
+  const stateRoot2 = (0, import_path11.join)(cwd, `.omc/state/team/${teamName}`);
   const config = {
     teamName,
     workerCount,

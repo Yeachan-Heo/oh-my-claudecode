@@ -1,5 +1,99 @@
 import { spawnSync } from 'child_process';
+import { isAbsolute, normalize } from 'path';
 import { validateTeamName } from './team-name.js';
+const resolvedPathCache = new Map();
+const UNTRUSTED_PATH_PATTERNS = [
+    /^\/tmp(\/|$)/,
+    /^\/var\/tmp(\/|$)/,
+    /^\/dev\/shm(\/|$)/,
+];
+function getTrustedPrefixes() {
+    const trusted = [
+        '/usr/local/bin',
+        '/usr/bin',
+        '/opt/homebrew/',
+    ];
+    const home = process.env.HOME;
+    if (home) {
+        trusted.push(`${home}/.local/bin`);
+        trusted.push(`${home}/.nvm/`);
+        trusted.push(`${home}/.cargo/bin`);
+    }
+    const custom = (process.env.OMC_TRUSTED_CLI_DIRS ?? '')
+        .split(':')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .filter(part => isAbsolute(part));
+    trusted.push(...custom);
+    return trusted;
+}
+function isTrustedPrefix(resolvedPath) {
+    const normalized = normalize(resolvedPath);
+    return getTrustedPrefixes().some(prefix => normalized.startsWith(normalize(prefix)));
+}
+function assertBinaryName(binary) {
+    if (!/^[A-Za-z0-9._-]+$/.test(binary)) {
+        throw new Error(`Invalid CLI binary name: ${binary}`);
+    }
+}
+/** @deprecated Backward-compat shim; non-interactive shells should generally skip RC files. */
+export function shouldLoadShellRc() {
+    return false;
+}
+/** @deprecated Backward-compat shim retained for API compatibility. */
+export function resolveCliBinaryPath(binary) {
+    assertBinaryName(binary);
+    const cached = resolvedPathCache.get(binary);
+    if (cached)
+        return cached;
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    const result = spawnSync(finder, [binary], {
+        timeout: 5000,
+        env: process.env,
+    });
+    if (result.status !== 0) {
+        throw new Error(`CLI binary '${binary}' not found in PATH`);
+    }
+    const stdout = result.stdout?.toString().trim() ?? '';
+    const firstLine = stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+    if (!firstLine) {
+        throw new Error(`CLI binary '${binary}' not found in PATH`);
+    }
+    const resolvedPath = normalize(firstLine);
+    if (!isAbsolute(resolvedPath)) {
+        throw new Error(`Resolved CLI binary '${binary}' to relative path`);
+    }
+    if (UNTRUSTED_PATH_PATTERNS.some(pattern => pattern.test(resolvedPath))) {
+        throw new Error(`Resolved CLI binary '${binary}' to untrusted location: ${resolvedPath}`);
+    }
+    if (!isTrustedPrefix(resolvedPath)) {
+        console.warn(`[omc:cli-security] CLI binary '${binary}' resolved to non-standard path: ${resolvedPath}`);
+    }
+    resolvedPathCache.set(binary, resolvedPath);
+    return resolvedPath;
+}
+/** @deprecated Backward-compat shim retained for API compatibility. */
+export function clearResolvedPathCache() {
+    resolvedPathCache.clear();
+}
+/** @deprecated Backward-compat shim retained for API compatibility. */
+export function validateCliBinaryPath(binary) {
+    try {
+        const resolvedPath = resolveCliBinaryPath(binary);
+        return { valid: true, binary, resolvedPath };
+    }
+    catch (error) {
+        return {
+            valid: false,
+            binary,
+            reason: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+export const _testInternals = {
+    UNTRUSTED_PATH_PATTERNS,
+    getTrustedPrefixes,
+};
 const CONTRACTS = {
     claude: {
         agentType: 'claude',
