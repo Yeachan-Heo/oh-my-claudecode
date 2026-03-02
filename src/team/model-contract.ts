@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { isAbsolute, win32 as win32Path } from 'path';
+import { isAbsolute, normalize, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';

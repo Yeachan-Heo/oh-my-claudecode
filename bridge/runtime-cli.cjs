@@ -25,9 +25,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../node_modules/jsonc-parser/lib/umd/main.js
+// node_modules/jsonc-parser/lib/umd/main.js
 var require_main = __commonJS({
-  "../../../node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
+  "node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
     (function(factory) {
       if (typeof module2 === "object" && typeof module2.exports === "object") {
         var v = factory(require, exports2);
@@ -176,7 +176,7 @@ var require_main = __commonJS({
 // src/team/runtime-cli.ts
 var import_fs10 = require("fs");
 var import_promises4 = require("fs/promises");
-var import_path11 = require("path");
+var import_path13 = require("path");
 
 // src/team/runtime.ts
 var import_promises3 = require("fs/promises");
@@ -929,15 +929,22 @@ var import_fs3 = require("fs");
 var import_os = require("os");
 function getConfigDir2() {
   if (process.platform === "win32") {
-    return process.env.APPDATA || (0, import_path5.join)((0, import_os.homedir)(), "AppData", "Roaming");
+    return process.env.APPDATA || (0, import_path6.join)((0, import_os.homedir)(), "AppData", "Roaming");
   }
-  return process.env.XDG_CONFIG_HOME || (0, import_path5.join)((0, import_os.homedir)(), ".config");
+  return process.env.XDG_CONFIG_HOME || (0, import_path6.join)((0, import_os.homedir)(), ".config");
 }
 var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/team/fs-utils.ts
 var import_fs4 = require("fs");
 var import_path7 = require("path");
+function atomicWriteJson(filePath, data, mode = 384) {
+  const dir = (0, import_path7.dirname)(filePath);
+  if (!(0, import_fs4.existsSync)(dir)) (0, import_fs4.mkdirSync)(dir, { recursive: true, mode: 448 });
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+  (0, import_fs4.writeFileSync)(tmpPath, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
+  (0, import_fs4.renameSync)(tmpPath, filePath);
+}
 function ensureDirWithMode(dirPath, mode = 448) {
   if (!(0, import_fs4.existsSync)(dirPath)) (0, import_fs4.mkdirSync)(dirPath, { recursive: true, mode });
 }
@@ -991,8 +998,6 @@ function getTaskStoragePath(cwd, teamName, taskId) {
 
 // src/team/task-file-ops.ts
 var DEFAULT_STALE_LOCK_MS = 3e4;
-var FAILURE_LOCK_RETRY_ATTEMPTS = 40;
-var FAILURE_LOCK_RETRY_DELAY_MS = 5;
 function isPidAlive(pid) {
   if (pid <= 0 || !Number.isFinite(pid)) return false;
   try {
@@ -1044,19 +1049,6 @@ function releaseTaskLock(handle) {
   } catch {
   }
 }
-async function sleepAsync(ms) {
-  return new Promise((resolve4) => setTimeout(resolve4, ms));
-}
-async function acquireTaskLockWithRetry(teamName, taskId, opts) {
-  const attempts = opts?.attempts ?? FAILURE_LOCK_RETRY_ATTEMPTS;
-  const delayMs = opts?.delayMs ?? FAILURE_LOCK_RETRY_DELAY_MS;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const handle = acquireTaskLock(teamName, taskId, opts);
-    if (handle) return handle;
-    if (attempt < attempts - 1) await sleepAsync(delayMs);
-  }
-  throw new Error(`Failed to acquire lock for ${taskId} after ${attempts} attempts`);
-}
 async function withTaskLock(teamName, taskId, fn, opts) {
   const handle = acquireTaskLock(teamName, taskId, opts);
   if (!handle) return null;
@@ -1095,25 +1087,19 @@ function canonicalTasksDir(teamName, cwd) {
   return dir;
 }
 function failureSidecarPath(teamName, taskId, cwd) {
-  return (0, import_path8.join)(canonicalTasksDir(teamName, cwd), `${sanitizeTaskId(taskId)}.failure.json`);
+  return (0, import_path9.join)(canonicalTasksDir(teamName, cwd), `${sanitizeTaskId(taskId)}.failure.json`);
 }
-async function writeTaskFailure(teamName, taskId, error, opts) {
-  const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
-  const handle = await acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
-  try {
-    const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
-    const existing = readTaskFailure(teamName, taskId, opts);
-    const sidecar = {
-      taskId,
-      lastError: error,
-      retryCount: existing ? existing.retryCount + 1 : 1,
-      lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    atomicWriteJson(filePath, sidecar);
-    return sidecar;
-  } finally {
-    releaseTaskLock(handle);
-  }
+function writeTaskFailure(teamName, taskId, error, opts) {
+  const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+  const existing = readTaskFailure(teamName, taskId, opts);
+  const sidecar = {
+    taskId,
+    lastError: error,
+    retryCount: existing ? existing.retryCount + 1 : 1,
+    lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  atomicWriteJson(filePath, sidecar);
+  return sidecar;
 }
 function readTaskFailure(teamName, taskId, opts) {
   const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
@@ -1663,7 +1649,7 @@ async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 3e4, workerP
 
 // src/hooks/factcheck/checks.ts
 var import_fs7 = require("fs");
-var import_path10 = require("path");
+var import_path11 = require("path");
 
 // src/hooks/factcheck/types.ts
 var REQUIRED_FIELDS = /* @__PURE__ */ new Set([
@@ -1772,8 +1758,8 @@ function checkCommands(claims, policy) {
 function checkCwdParity(claimsCwd, runtimeCwd, mode, policy) {
   const enforceCwd = policy.warn_on_cwd_mismatch && (mode !== "quick" || policy.enforce_cwd_parity_in_quick);
   if (!enforceCwd || !claimsCwd) return null;
-  const claimsCwdCanonical = (0, import_path10.resolve)(claimsCwd);
-  const runtimeCwdCanonical = (0, import_path10.resolve)(runtimeCwd);
+  const claimsCwdCanonical = (0, import_path11.resolve)(claimsCwd);
+  const runtimeCwdCanonical = (0, import_path11.resolve)(runtimeCwd);
   if (claimsCwdCanonical !== runtimeCwdCanonical) {
     const severity = mode === "strict" ? "FAIL" : "WARN";
     return {
@@ -1790,7 +1776,7 @@ var import_os2 = require("os");
 
 // src/config/loader.ts
 var import_fs8 = require("fs");
-var import_path11 = require("path");
+var import_path12 = require("path");
 var jsonc = __toESM(require_main(), 1);
 
 // src/config/models.ts
@@ -1950,8 +1936,8 @@ var DEFAULT_CONFIG = {
 function getConfigPaths() {
   const userConfigDir = getConfigDir2();
   return {
-    user: (0, import_path11.join)(userConfigDir, "claude-omc", "config.jsonc"),
-    project: (0, import_path11.join)(process.cwd(), ".claude", "omc.jsonc")
+    user: (0, import_path12.join)(userConfigDir, "claude-omc", "config.jsonc"),
+    project: (0, import_path12.join)(process.cwd(), ".claude", "omc.jsonc")
   };
 }
 function loadJsoncFile(path) {
@@ -2527,7 +2513,7 @@ async function waitForSentinelReadiness(options = {}) {
 async function writePanesFile(jobId, paneIds, leaderPaneId) {
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
-  const panesPath = (0, import_path11.join)(omcJobsDir, `${jobId}-panes.json`);
+  const panesPath = (0, import_path13.join)(omcJobsDir, `${jobId}-panes.json`);
   await (0, import_promises4.writeFile)(
     panesPath + ".tmp",
     JSON.stringify({ paneIds: [...paneIds], leaderPaneId })
@@ -2535,12 +2521,12 @@ async function writePanesFile(jobId, paneIds, leaderPaneId) {
   await (0, import_promises4.rename)(panesPath + ".tmp", panesPath);
 }
 function collectTaskResults(stateRoot2) {
-  const tasksDir = (0, import_path11.join)(stateRoot2, "tasks");
+  const tasksDir = (0, import_path13.join)(stateRoot2, "tasks");
   try {
     const files = (0, import_fs10.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
-        const raw = (0, import_fs7.readFileSync)((0, import_path11.join)(tasksDir, f), "utf-8");
+        const raw = (0, import_fs10.readFileSync)((0, import_path13.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
         return {
           taskId: task.id ?? f.replace(".json", ""),
@@ -2590,7 +2576,7 @@ async function main() {
     sentinelGatePollIntervalMs = 250
   } = input;
   const workerCount = input.workerCount ?? agentTypes.length;
-  const stateRoot2 = (0, import_path11.join)(cwd, `.omc/state/team/${teamName}`);
+  const stateRoot2 = (0, import_path13.join)(cwd, `.omc/state/team/${teamName}`);
   const config = {
     teamName,
     workerCount,
@@ -2681,7 +2667,7 @@ async function main() {
 `
     );
     if (snap.phase === "completed") {
-      const sentinelLogPath = (0, import_path12.join)(cwd, "sentinel_stop.jsonl");
+      const sentinelLogPath = (0, import_path13.join)(cwd, "sentinel_stop.jsonl");
       const gateResult = await waitForSentinelReadiness({
         workspace: cwd,
         logPath: sentinelLogPath,
