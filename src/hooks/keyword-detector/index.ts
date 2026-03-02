@@ -25,6 +25,7 @@ export type KeywordType =
   | 'tdd'         // Priority 9
   | 'ultrathink'  // Priority 11
   | 'deepsearch'  // Priority 12
+  | 'deep-interview' // Priority 13.5
   | 'analyze'     // Priority 13
   | 'codex'       // Priority 14
   | 'gemini'      // Priority 15
@@ -54,6 +55,7 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   ultrathink: /\b(ultrathink)\b/i,
   deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b/i,
   analyze: /\b(deep[\s-]?analyze|deepanalyze)\b/i,
+  'deep-interview': /\b(deep[\s-]interview|ouroboros)\b/i,
   ccg: /\b(ccg|claude-codex-gemini)\b/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
@@ -82,7 +84,7 @@ export const DEPRECATION_MESSAGES: Record<DeprecatedKeywordType, string> = {
 const KEYWORD_PRIORITY: KeywordType[] = [
   'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
   'ccg', 'ralplan', 'tdd',
-  'ultrathink', 'deepsearch', 'analyze', 'codex', 'gemini'
+  'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini'
 ];
 
 /**
