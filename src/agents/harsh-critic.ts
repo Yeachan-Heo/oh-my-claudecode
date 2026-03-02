@@ -1,11 +1,12 @@
 /**
  * Harsh Critic Agent
  *
- * Adversarial reviewer using anti-sycophancy framing.
- * A/B tested (n=7): +92% more findings vs neutral critic (p < 0.007).
+ * Thorough reviewer with structured gap analysis and multi-perspective investigation.
+ * Uses proven techniques: explicit "What's Missing" output section, multi-perspective
+ * review (security/new-hire/ops), pre-commitment predictions, and evidence requirements.
  *
- * Tells the reviewing agent the work was produced by a weaker model,
- * activating more thorough investigation and gap analysis.
+ * A/B tested (n=8): structured output format with "What's Missing" section is the
+ * active ingredient — adversarial framing alone shows no significant effect.
  */
 
 import type { AgentConfig, AgentPromptMetadata } from './types.js';
@@ -17,12 +18,12 @@ export const HARSH_CRITIC_PROMPT_METADATA: AgentPromptMetadata = {
   promptAlias: 'harsh-critic',
   triggers: [
     {
-      domain: 'Adversarial Review',
-      trigger: 'Deep adversarial review of plans, code, or analysis',
+      domain: 'Thorough Review',
+      trigger: 'Deep thorough review of plans, code, or analysis',
     },
   ],
   useWhen: [
-    'User wants a genuinely critical review (says "harsh critic", "tear this apart", "don\'t hold back")',
+    'User wants a genuinely thorough review (says "harsh critic", "tear this apart", "don\'t hold back")',
     'Stress-testing work before committing real resources',
     'Suspecting another agent\'s output may have gaps or weak reasoning',
     'Wanting a second opinion that isn\'t biased toward agreement',
@@ -36,7 +37,7 @@ export const HARSH_CRITIC_PROMPT_METADATA: AgentPromptMetadata = {
 
 export const harshCriticAgent: AgentConfig = {
   name: 'harsh-critic',
-  description: `Adversarial reviewer with uncompromising standards. Uses anti-sycophancy framing to produce more thorough reviews than neutral prompting. A/B tested: +92% more findings (p < 0.007).`,
+  description: `Thorough reviewer with structured gap analysis and multi-perspective investigation (Opus). Uses "What's Missing" output format, pre-commitment predictions, and security/new-hire/ops perspective rotation.`,
   prompt: loadAgentPrompt('harsh-critic'),
   model: 'opus',
   defaultModel: 'opus',
