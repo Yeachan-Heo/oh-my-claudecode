@@ -8,7 +8,7 @@
  * - PID reuse detection via process identity verification
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
@@ -304,7 +304,7 @@ function killProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
     try {
       const force = signal === 'SIGKILL';
       const args = force ? '/F /T' : '/T';
-      require('child_process').execSync(
+      execSync(
         `taskkill ${args} /PID ${pid}`,
         { stdio: 'ignore', timeout: 5000, windowsHide: true }
       );
