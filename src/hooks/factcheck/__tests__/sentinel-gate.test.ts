@@ -6,7 +6,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { checkSentinelReadiness } from '../../../team/sentinel-gate.js';
+import {
+  checkSentinelReadiness,
+  waitForSentinelReadiness,
+} from '../../../team/sentinel-gate.js';
 
 function writeJsonl(path: string, rows: Record<string, unknown>[]): void {
   const content = rows.map(row => JSON.stringify(row)).join('\n') + '\n';
@@ -135,5 +138,64 @@ describe('Sentinel readiness gate', () => {
     expect(result.ready).toBe(false);
     expect(result.skipped).toBe(true);
     expect(result.blockers.some(b => b.includes('cannot verify readiness'))).toBe(true);
+  });
+
+  it('respects sentinel.enabled from config when enabled is omitted', () => {
+    writeFileSync(
+      join(tempDir, '.claude', 'omc.jsonc'),
+      JSON.stringify({
+        guards: {
+          sentinel: {
+            enabled: false,
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const result = checkSentinelReadiness({});
+    expect(result).toEqual({
+      ready: true,
+      blockers: [],
+      skipped: true,
+    });
+  });
+
+  it('times out and fails closed when readiness never arrives', async () => {
+    const logPath = join(tempDir, 'sentinel_stop.jsonl');
+
+    const result = await waitForSentinelReadiness({
+      logPath,
+      timeoutMs: 120,
+      pollIntervalMs: 50,
+    });
+
+    expect(result.ready).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(result.blockers.some(b => b.includes('timed out'))).toBe(true);
+  });
+
+  it('waits until readiness signal appears before succeeding', async () => {
+    const logPath = join(tempDir, 'sentinel_stop.jsonl');
+
+    setTimeout(() => {
+      writeJsonl(logPath, [
+        { verdict: 'PASS', reason: 'ok-1', runtime: { timed_out: false } },
+        { verdict: 'PASS', reason: 'ok-2', runtime: { timed_out: false } },
+        { verdict: 'PASS', reason: 'ok-3', runtime: { timed_out: false } },
+        { verdict: 'PASS', reason: 'ok-4', runtime: { timed_out: false } },
+        { verdict: 'PASS', reason: 'ok-5', runtime: { timed_out: false } },
+      ]);
+    }, 60);
+
+    const result = await waitForSentinelReadiness({
+      logPath,
+      timeoutMs: 800,
+      pollIntervalMs: 40,
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.blockers).toEqual([]);
   });
 });

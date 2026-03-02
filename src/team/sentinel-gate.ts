@@ -1,5 +1,6 @@
 import { runFactcheck } from '../hooks/factcheck/index.js';
 import { checkSentinelHealth } from '../hooks/factcheck/sentinel.js';
+import { loadGuardsConfig } from '../hooks/factcheck/config.js';
 import type { FactcheckResult } from '../hooks/factcheck/types.js';
 
 export interface SentinelReadinessOptions {
@@ -13,6 +14,17 @@ export interface SentinelGateResult {
   ready: boolean;
   blockers: string[];
   skipped: boolean;
+}
+
+export interface SentinelWaitOptions extends SentinelReadinessOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+export interface SentinelWaitResult extends SentinelGateResult {
+  timedOut: boolean;
+  elapsedMs: number;
+  attempts: number;
 }
 
 function mapFactcheckToBlockers(result: FactcheckResult): string[] {
@@ -67,7 +79,7 @@ export function checkSentinelReadiness(
     logPath,
     workspace,
     claims,
-    enabled = true,
+    enabled = loadGuardsConfig(workspace).sentinel.enabled,
   } = options;
 
   if (!enabled) {
@@ -114,5 +126,52 @@ export function checkSentinelReadiness(
     ready: dedupedBlockers.length === 0,
     blockers: dedupedBlockers,
     skipped: false,
+  };
+}
+
+export async function waitForSentinelReadiness(
+  options: SentinelWaitOptions = {},
+): Promise<SentinelWaitResult> {
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 30_000);
+  const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 250);
+  const startedAt = Date.now();
+
+  let attempts = 1;
+  let latest = checkSentinelReadiness(options);
+  if (latest.ready) {
+    return {
+      ...latest,
+      timedOut: false,
+      elapsedMs: Date.now() - startedAt,
+      attempts,
+    };
+  }
+
+  const deadline = startedAt + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    attempts += 1;
+    latest = checkSentinelReadiness(options);
+    if (latest.ready) {
+      return {
+        ...latest,
+        timedOut: false,
+        elapsedMs: Date.now() - startedAt,
+        attempts,
+      };
+    }
+  }
+
+  const timeoutBlocker = `[sentinel] readiness check timed out after ${timeoutMs}ms`;
+  const blockers = latest.blockers.includes(timeoutBlocker)
+    ? latest.blockers
+    : [...latest.blockers, timeoutBlocker];
+
+  return {
+    ...latest,
+    blockers,
+    timedOut: true,
+    elapsedMs: Date.now() - startedAt,
+    attempts,
   };
 }

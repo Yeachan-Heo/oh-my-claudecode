@@ -175,11 +175,14 @@ export { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 
 export {
   checkSentinelReadiness,
+  waitForSentinelReadiness,
 } from './sentinel-gate.js';
 
 export type {
   SentinelReadinessOptions,
   SentinelGateResult,
+  SentinelWaitOptions,
+  SentinelWaitResult,
 } from './sentinel-gate.js';
 
 // New tmux-based multi-CLI team modules
