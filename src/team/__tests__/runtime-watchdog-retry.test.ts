@@ -153,6 +153,90 @@ describe('watchdogCliWorkers dead-pane retry behavior', () => {
     ).toBe(true);
   });
 
+  it('multi-task requeue: nextPendingTaskIndex picks requeued task, not a different pending task', async () => {
+    const teamName = 'multi-task-requeue-team';
+    const root = join(cwd, '.omc', 'state', 'team', teamName);
+    mkdirSync(join(root, 'tasks'), { recursive: true });
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+
+    // Task 1: in_progress, assigned to worker-1 (will be requeued when pane dies)
+    writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
+      id: '1',
+      subject: 'Task 1',
+      description: 'First task',
+      status: 'in_progress',
+      owner: 'worker-1',
+      assignedAt: new Date().toISOString(),
+    }), 'utf-8');
+
+    // Task 2: already completed — should NOT be picked up
+    writeFileSync(join(root, 'tasks', '2.json'), JSON.stringify({
+      id: '2',
+      subject: 'Task 2',
+      description: 'Second task',
+      status: 'completed',
+      owner: 'worker-2',
+      completedAt: new Date().toISOString(),
+    }), 'utf-8');
+
+    // Task 3: pending — this exists but task 1 should be requeued and picked first
+    writeFileSync(join(root, 'tasks', '3.json'), JSON.stringify({
+      id: '3',
+      subject: 'Task 3',
+      description: 'Third task',
+      status: 'pending',
+      owner: null,
+    }), 'utf-8');
+
+    const runtime: TeamRuntime = {
+      teamName,
+      sessionName: 'test-session:0',
+      leaderPaneId: '%0',
+      config: {
+        teamName,
+        workerCount: 1,
+        agentTypes: ['codex'],
+        tasks: [
+          { subject: 'Task 1', description: 'First task' },
+          { subject: 'Task 2', description: 'Second task' },
+          { subject: 'Task 3', description: 'Third task' },
+        ],
+        cwd,
+      },
+      workerNames: ['worker-1'],
+      workerPaneIds: ['%1'],
+      activeWorkers: new Map([
+        ['worker-1', { paneId: '%1', taskId: '1', spawnedAt: Date.now() }],
+      ]),
+      cwd,
+    };
+
+    const stop = watchdogCliWorkers(runtime, 20);
+    await waitFor(() => tmuxMocks.spawnWorkerInPane.mock.calls.length > 0);
+    stop();
+
+    // After requeue, task 1 should be pending (requeued) and task 3 stays pending.
+    // nextPendingTaskIndex iterates by index, so task 1 (index 0) is picked first.
+    // The spawnWorkerInPane call confirms a respawn happened.
+    // The task that got re-assigned should be task 1 (not task 3),
+    // because nextPendingTaskIndex scans from index 0 and task 1 was requeued to pending.
+    const task1 = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf-8')) as {
+      status: string;
+      owner: string | null;
+    };
+    // Task 1 should have been requeued to pending, then immediately re-assigned (in_progress)
+    expect(task1.status).toBe('in_progress');
+    expect(task1.owner).toBe('worker-1');
+
+    // Task 3 should still be pending and unowned — it was NOT the one picked
+    const task3 = JSON.parse(readFileSync(join(root, 'tasks', '3.json'), 'utf-8')) as {
+      status: string;
+      owner: string | null;
+    };
+    expect(task3.status).toBe('pending');
+    expect(task3.owner).toBeNull();
+  });
+
   it('permanently fails task when dead pane exhausts retry budget', async () => {
     const teamName = 'dead-pane-exhausted-team';
     const root = initTask(cwd, teamName);

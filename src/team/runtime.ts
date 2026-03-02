@@ -15,8 +15,8 @@ import {
 import {
   withTaskLock,
   readTaskFailure,
-  recordTaskFailure,
-  isExhausted,
+  writeTaskFailure,
+  isTaskRetryExhausted,
   DEFAULT_MAX_TASK_RETRIES,
 } from './task-file-ops.js';
 
@@ -167,13 +167,15 @@ async function markTaskInProgress(root: string, taskId: string, owner: string, t
   return result ?? false;
 }
 
-async function resetTaskToPending(root: string, taskId: string): Promise<void> {
-  const task = await readTask(root, taskId);
-  if (!task) return;
-  task.status = 'pending';
-  task.owner = null;
-  task.assignedAt = undefined;
-  await writeTask(root, task);
+async function resetTaskToPending(root: string, taskId: string, teamName: string, cwd: string): Promise<void> {
+  await withTaskLock(teamName, taskId, async () => {
+    const task = await readTask(root, taskId);
+    if (!task) return;
+    task.status = 'pending';
+    task.owner = null;
+    task.assignedAt = undefined;
+    await writeTask(root, task);
+  }, { cwd });
 }
 
 async function markTaskFromDone(
@@ -483,15 +485,16 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         const alive = aliveResults[i];
         if (!alive) {
           unresponsiveCounts.delete(wName);
-          const priorFailure = readTaskFailure(runtime.teamName, active.taskId, { cwd: runtime.cwd });
-          const retryCount = (priorFailure?.retryCount ?? 0) + 1;
-          recordTaskFailure(
+          // Record the failure first, then read back the updated count (single read)
+          writeTaskFailure(
             runtime.teamName,
             active.taskId,
             `Worker pane died before done.json was written (${wName})`,
             { cwd: runtime.cwd }
           );
-          const exhausted = isExhausted(
+          const failure = readTaskFailure(runtime.teamName, active.taskId, { cwd: runtime.cwd });
+          const retryCount = failure?.retryCount ?? 1;
+          const exhausted = isTaskRetryExhausted(
             runtime.teamName,
             active.taskId,
             DEFAULT_MAX_TASK_RETRIES,
@@ -499,7 +502,7 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           );
           if (!exhausted) {
             console.warn(`[watchdog] worker ${wName} dead pane — requeuing task ${active.taskId} (retry ${retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
-            await resetTaskToPending(root, active.taskId);
+            await resetTaskToPending(root, active.taskId, runtime.teamName, runtime.cwd);
           } else {
             await markTaskFailedDeadPane(root, active.taskId, wName);
           }
@@ -663,7 +666,7 @@ export async function spawnWorkerForTask(
       const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, '1');
       if (!confirmed) {
         await killWorkerPane(runtime, workerNameValue, paneId);
-        await resetTaskToPending(root, taskId);
+        await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
         throw new Error(`worker_notify_failed:${workerNameValue}:trust-confirm`);
       }
       await new Promise(r => setTimeout(r, 800));
@@ -676,7 +679,7 @@ export async function spawnWorkerForTask(
     );
     if (!notified) {
       await killWorkerPane(runtime, workerNameValue, paneId);
-      await resetTaskToPending(root, taskId);
+      await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
       throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
     }
   }

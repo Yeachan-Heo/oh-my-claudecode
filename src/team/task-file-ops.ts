@@ -373,17 +373,24 @@ export function areBlockersResolved(teamName: string, blockedBy: string[], opts?
 /**
  * Write failure sidecar for a task.
  * If sidecar already exists, increments retryCount.
+ * Uses an exclusive task lock to prevent lost updates from concurrent writers.
  */
 export function writeTaskFailure(teamName: string, taskId: string, error: string, opts?: { cwd?: string }): void {
-  const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
-  const existing = readTaskFailure(teamName, taskId, opts);
-  const sidecar: TaskFailureSidecar = {
-    taskId,
-    lastError: error,
-    retryCount: existing ? existing.retryCount + 1 : 1,
-    lastFailedAt: new Date().toISOString(),
-  };
-  atomicWriteJson(filePath, sidecar);
+  const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
+  const handle = acquireTaskLock(teamName, failureLockId, { cwd: opts?.cwd });
+  try {
+    const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
+    const existing = readTaskFailure(teamName, taskId, opts);
+    const sidecar: TaskFailureSidecar = {
+      taskId,
+      lastError: error,
+      retryCount: existing ? existing.retryCount + 1 : 1,
+      lastFailedAt: new Date().toISOString(),
+    };
+    atomicWriteJson(filePath, sidecar);
+  } finally {
+    if (handle) releaseTaskLock(handle);
+  }
 }
 
 /** Read failure sidecar if it exists */
@@ -413,11 +420,6 @@ export function isTaskRetryExhausted(
   return failure.retryCount >= maxRetries;
 }
 
-/** Backward-compatible alias for writeTaskFailure. */
-export const recordTaskFailure = writeTaskFailure;
-
-/** Backward-compatible alias for isTaskRetryExhausted. */
-export const isExhausted = isTaskRetryExhausted;
 
 /** List all task IDs in a team directory, sorted ascending */
 export function listTaskIds(teamName: string, opts?: { cwd?: string }): string[] {
