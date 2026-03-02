@@ -17,6 +17,9 @@
  */
 
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Parse args
 const args = process.argv.slice(2);
@@ -30,6 +33,12 @@ const PORT = Number(getArg("--port", "OPENCLAW_GATEWAY_PORT", "19876"));
 const CLAWDBOT_URL = getArg("--clawdbot-url", "CLAWDBOT_GATEWAY_URL", "http://127.0.0.1:18789");
 const HOOKS_TOKEN = process.env.CLAWDBOT_HOOKS_TOKEN;
 const CHANNEL_ID = getArg("--channel-id", "OPENCLAW_DISCORD_CHANNEL", "1468539002985644084");
+const START_TIME = Date.now();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8"));
+const VERSION = typeof pkg.version === "string" ? pkg.version : "unknown";
 
 if (!HOOKS_TOKEN) {
   console.error("[openclaw-gateway] CLAWDBOT_HOOKS_TOKEN is required");
@@ -133,7 +142,11 @@ const server = createServer(async (req, res) => {
   // Health check
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, gateway: "openclaw-demo", clawdbot: CLAWDBOT_URL }));
+    res.end(JSON.stringify({
+      status: "ok",
+      uptime: Math.floor((Date.now() - START_TIME) / 1000),
+      version: VERSION,
+    }));
     return;
   }
 
