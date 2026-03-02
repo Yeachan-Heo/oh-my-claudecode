@@ -37,7 +37,6 @@ const DEFAULT_STALE_LOCK_MS = 30_000;
 const FAILURE_LOCK_RETRY_ATTEMPTS = 40;
 const FAILURE_LOCK_RETRY_DELAY_MS = 5;
 
-const LOCK_RETRY_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
 
 /**
  * Check if a process with the given PID is alive.
@@ -111,22 +110,22 @@ export function releaseTaskLock(handle: LockHandle): void {
   try { unlinkSync(handle.path); } catch { /* already removed */ }
 }
 
-function sleepSync(ms: number): void {
-  Atomics.wait(LOCK_RETRY_SIGNAL, 0, 0, ms);
+async function sleepAsync(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function acquireTaskLockWithRetry(
+async function acquireTaskLockWithRetry(
   teamName: string,
   taskId: string,
   opts?: { staleLockMs?: number; workerName?: string; cwd?: string; attempts?: number; delayMs?: number },
-): LockHandle {
+): Promise<LockHandle> {
   const attempts = opts?.attempts ?? FAILURE_LOCK_RETRY_ATTEMPTS;
   const delayMs = opts?.delayMs ?? FAILURE_LOCK_RETRY_DELAY_MS;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const handle = acquireTaskLock(teamName, taskId, opts);
     if (handle) return handle;
-    if (attempt < attempts - 1) sleepSync(delayMs);
+    if (attempt < attempts - 1) await sleepAsync(delayMs);
   }
 
   throw new Error(`Failed to acquire lock for ${taskId} after ${attempts} attempts`);
@@ -400,9 +399,9 @@ export function areBlockersResolved(teamName: string, blockedBy: string[], opts?
  * If sidecar already exists, increments retryCount.
  * Uses an exclusive task lock to prevent lost updates from concurrent writers.
  */
-export function writeTaskFailure(teamName: string, taskId: string, error: string, opts?: { cwd?: string }): TaskFailureSidecar {
+export async function writeTaskFailure(teamName: string, taskId: string, error: string, opts?: { cwd?: string }): Promise<TaskFailureSidecar> {
   const failureLockId = `${sanitizeTaskId(taskId)}-failure`;
-  const handle = acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
+  const handle = await acquireTaskLockWithRetry(teamName, failureLockId, { cwd: opts?.cwd });
   try {
     const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
     const existing = readTaskFailure(teamName, taskId, opts);

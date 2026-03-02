@@ -204,16 +204,6 @@ async function markTaskFromDone(
   }, { cwd });
 }
 
-async function markTaskFailedDeadPane(root: string, taskId: string, workerNameValue: string): Promise<void> {
-  const task = await readTask(root, taskId);
-  if (!task) return;
-  task.status = 'failed';
-  task.owner = workerNameValue;
-  task.summary = `Worker pane died before done.json was written (${workerNameValue})`;
-  task.result = task.summary;
-  task.failedAt = new Date().toISOString();
-  await writeTask(root, task);
-}
 
 async function applyDeadPaneTransition(
   runtime: TeamRuntime,
@@ -232,7 +222,7 @@ async function applyDeadPaneTransition(
       return { action: 'skipped' } as DeadPaneTransition;
     }
 
-    const failure = writeTaskFailure(
+    const failure = await writeTaskFailure(
       runtime.teamName,
       taskId,
       `Worker pane died before done.json was written (${workerNameValue})`,
@@ -566,7 +556,10 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
           } else {
             console.warn(`[watchdog] worker ${wName} unresponsive ${count} consecutive ticks — killing and reassigning task ${active.taskId}`);
             unresponsiveCounts.delete(wName);
-            await markTaskFailedDeadPane(root, active.taskId, wName);
+            const transition = await applyDeadPaneTransition(runtime, wName, active.taskId);
+            if (transition.action === 'requeued') {
+              console.warn(`[watchdog] worker ${wName} stall-killed — requeuing task ${active.taskId} (retry ${transition.retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
+            }
             await killWorkerPane(runtime, wName, active.paneId);
             if (!(await allTasksTerminal(runtime))) {
               const nextTaskIndexValue = await nextPendingTaskIndex(runtime);

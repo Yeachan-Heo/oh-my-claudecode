@@ -75,10 +75,11 @@ export declare function areBlockersResolved(teamName: string, blockedBy: string[
 /**
  * Write failure sidecar for a task.
  * If sidecar already exists, increments retryCount.
+ * Uses an exclusive task lock to prevent lost updates from concurrent writers.
  */
 export declare function writeTaskFailure(teamName: string, taskId: string, error: string, opts?: {
     cwd?: string;
-}): void;
+}): Promise<TaskFailureSidecar>;
 /** Read failure sidecar if it exists */
 export declare function readTaskFailure(teamName: string, taskId: string, opts?: {
     cwd?: string;
@@ -89,12 +90,6 @@ export declare const DEFAULT_MAX_TASK_RETRIES = 5;
 export declare function isTaskRetryExhausted(teamName: string, taskId: string, maxRetries?: number, opts?: {
     cwd?: string;
 }): boolean;
-/** Backward-compatible alias for writeTaskFailure. */
-export declare const recordTaskFailure: typeof writeTaskFailure;
-/** Backward-compatible alias for isTaskRetryExhausted. */
-export declare const isExhausted: typeof isTaskRetryExhausted;
-export declare const recordTaskFailure: typeof writeTaskFailure;
-export declare const isExhausted: typeof isTaskRetryExhausted;
 /** List all task IDs in a team directory, sorted ascending */
 export declare function listTaskIds(teamName: string, opts?: {
     cwd?: string;
