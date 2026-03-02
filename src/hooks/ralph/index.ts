@@ -21,6 +21,10 @@ export {
   createRalphLoopHook,
   isUltraQAActive,
 
+  // PRD flag helpers
+  detectNoPrdFlag,
+  stripNoPrdFlag,
+
   // Team coordination
   getTeamPhaseDirective,
 

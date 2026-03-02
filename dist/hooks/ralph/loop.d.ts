@@ -65,6 +65,14 @@ export declare function clearLinkedUltraworkState(directory: string, sessionId?:
  */
 export declare function incrementRalphIteration(directory: string, sessionId?: string): RalphLoopState | null;
 /**
+ * Detect if prompt contains --no-prd flag (case-insensitive)
+ */
+export declare function detectNoPrdFlag(prompt: string): boolean;
+/**
+ * Strip --no-prd flag from prompt text and trim whitespace
+ */
+export declare function stripNoPrdFlag(prompt: string): string;
+/**
  * Create a Ralph Loop hook instance
  */
 export declare function createRalphLoopHook(directory: string): RalphLoopHook;
