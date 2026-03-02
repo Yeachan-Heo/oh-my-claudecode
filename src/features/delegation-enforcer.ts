@@ -99,10 +99,22 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
     throw new Error(`No default model defined for agent: ${agentType}`);
   }
 
-  // If the agent's default model is 'inherit', don't inject any model parameter.
+  // Apply modelAliases from config (issue #1211).
+  // Priority: explicit param (already handled above) > modelAliases > agent default.
+  // This lets users remap tier names without the nuclear forceInherit option.
+  let resolvedModel: ModelType = agentDef.model;
+  const aliases = config.routing?.modelAliases;
+  if (aliases && agentDef.model !== 'inherit') {
+    const alias = aliases[agentDef.model as keyof typeof aliases];
+    if (alias) {
+      resolvedModel = alias;
+    }
+  }
+
+  // If the resolved model is 'inherit', don't inject any model parameter.
   // This lets the agent inherit the parent session's model, which is essential
   // for non-Claude providers where tier names like 'sonnet' cause 400 errors.
-  if (agentDef.model === 'inherit') {
+  if (resolvedModel === 'inherit') {
     const { model: _existing, ...rest } = agentInput;
     const cleanedInput: AgentInput = rest as AgentInput;
     return {
@@ -114,7 +126,7 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   }
 
   // Convert ModelType to SDK model type
-  const sdkModel = convertToSdkModel(agentDef.model);
+  const sdkModel = convertToSdkModel(resolvedModel);
 
   // Create modified input with model injected
   const modifiedInput: AgentInput = {
@@ -125,14 +137,17 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   // Create warning message (only shown if OMC_DEBUG=true)
   let warning: string | undefined;
   if (process.env.OMC_DEBUG === 'true') {
-    warning = `[OMC] Auto-injecting model: ${sdkModel} for ${agentType}`;
+    const aliasNote = resolvedModel !== agentDef.model
+      ? ` (aliased from ${agentDef.model})`
+      : '';
+    warning = `[OMC] Auto-injecting model: ${sdkModel} for ${agentType}${aliasNote}`;
   }
 
   return {
     originalInput: agentInput,
     modifiedInput,
     injected: true,
-    model: agentDef.model,
+    model: resolvedModel,
     warning,
   };
 }
