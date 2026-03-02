@@ -841,17 +841,16 @@ export async function checkPersistentModes(
 }
 
 /**
- * Create hook output for Claude Code
- * NOTE: Always returns continue: true with soft enforcement via message injection.
- * Never returns continue: false to avoid blocking user intent.
+ * Create hook output for Claude Code.
+ * Returns `continue: false` when `shouldBlock` is true to hard-block the stop event.
+ * Returns `continue: true` for terminal states, escape hatches, and errors.
  */
 export function createHookOutput(result: PersistentModeResult): {
   continue: boolean;
   message?: string;
 } {
-  // Always allow stop, but inject message for soft enforcement
   return {
-    continue: true,
+    continue: !result.shouldBlock,
     message: result.message || undefined
   };
 }

@@ -173,6 +173,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -231,7 +232,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       expect(output.decision).toBeUndefined();
     });
 
-    it("should not block legacy state when invalid sessionId is provided", () => {
+    it("should block legacy state when invalid sessionId is provided (falls back to legacy)", () => {
       const stateDir = join(tempDir, ".omc", "state");
       mkdirSync(stateDir, { recursive: true });
       writeFileSync(
@@ -254,7 +255,9 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
         sessionId: "../session-valid",
       });
 
-      expect(output.continue ?? output.decision).toBeTruthy();
+      // Invalid sessionId sanitizes to "", falls back to legacy path, blocks
+      expect(output.continue).toBe(false);
+      expect(output.decision).toBe("block");
     });
 
     it("should NOT block for legacy autopilot state when sessionId is provided", () => {
@@ -307,6 +310,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
 
       // Legacy state blocks when no sessionId (backward compat)
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -332,6 +336,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("AUTOPILOT");
     });
   });
@@ -397,6 +402,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -410,6 +416,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -423,6 +430,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -438,6 +446,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -453,6 +462,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -468,6 +478,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -482,6 +493,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
   });
@@ -541,6 +553,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
 
@@ -630,7 +643,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       expect(output.decision).toBeUndefined();
     });
 
-    it("should not block legacy state when invalid sessionId is provided (project isolation)", () => {
+    it("should block legacy state when invalid sessionId is provided (falls back to legacy, project isolation)", () => {
       const stateDir = join(tempDir, ".omc", "state");
       mkdirSync(stateDir, { recursive: true });
       writeFileSync(
@@ -653,7 +666,9 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
         sessionId: "..\\session-valid",
       });
 
-      expect(output.continue ?? output.decision).toBeTruthy();
+      // Invalid sessionId sanitizes to "", falls back to legacy path, blocks
+      expect(output.continue).toBe(false);
+      expect(output.decision).toBe("block");
     });
 
     it("should block for legacy local state when no sessionId (backward compat)", () => {
@@ -680,6 +695,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
 
       // Legacy state blocks when no sessionId
       expect(output.decision).toBe("block");
+      expect(output.continue).toBe(false);
       expect(output.reason).toContain("ULTRAWORK");
     });
   });

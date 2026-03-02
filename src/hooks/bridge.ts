@@ -464,9 +464,8 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 }
 
 /**
- * Process stop continuation hook
- * NOTE: Simplified to always return continue: true (soft enforcement only).
- * All continuation enforcement is now done via message injection, not blocking.
+ * Process stop continuation hook (legacy path).
+ * Always returns continue: true — real enforcement is in processPersistentMode().
  */
 async function processStopContinuation(_input: HookInput): Promise<HookOutput> {
   // Always allow stop - no hard blocking
@@ -569,6 +568,7 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
 
   return {
     ...output,
+    continue: false,
     message: `${currentMessage}<team-stage-continuation>
 
 [TEAM MODE CONTINUATION]
