@@ -98,6 +98,21 @@ export function incrementRalphIteration(directory, sessionId) {
     }
     return null;
 }
+// ============================================================================
+// PRD Flag Helpers
+// ============================================================================
+/**
+ * Detect if prompt contains --no-prd flag (case-insensitive)
+ */
+export function detectNoPrdFlag(prompt) {
+    return /--no-prd/i.test(prompt);
+}
+/**
+ * Strip --no-prd flag from prompt text and trim whitespace
+ */
+export function stripNoPrdFlag(prompt) {
+    return prompt.replace(/--no-prd/gi, '').replace(/\s+/g, ' ').trim();
+}
 /**
  * Create a Ralph Loop hook instance
  */
@@ -135,6 +150,18 @@ export function createRalphLoopHook(directory) {
                 project_path: directory,
             };
             writeUltraworkStateFromModule(ultraworkState, directory, sessionId);
+        }
+        // Auto-enable PRD mode if prd.json exists
+        if (ralphSuccess && hasPrd(directory)) {
+            state.prd_mode = true;
+            const prdCompletion = getPrdCompletionStatus(directory);
+            if (prdCompletion.nextStory) {
+                state.current_story_id = prdCompletion.nextStory.id;
+            }
+            // Initialize progress.txt if it doesn't exist
+            initProgress(directory);
+            // Write updated state with PRD fields
+            writeRalphState(directory, state, sessionId);
         }
         return ralphSuccess;
     };

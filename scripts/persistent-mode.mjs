@@ -495,6 +495,7 @@ async function main() {
 
           console.log(
             JSON.stringify({
+              continue: false,
               decision: "block",
               reason,
             }),
@@ -509,6 +510,7 @@ async function main() {
 
         console.log(
           JSON.stringify({
+            continue: false,
             decision: "block",
             reason: `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`,
           }),
@@ -545,6 +547,7 @@ async function main() {
 
             console.log(
               JSON.stringify({
+                continue: false,
                 decision: "block",
                 reason,
               }),
@@ -585,6 +588,7 @@ async function main() {
 
           console.log(
             JSON.stringify({
+              continue: false,
               decision: "block",
               reason,
             }),
@@ -620,6 +624,7 @@ async function main() {
 
           console.log(
             JSON.stringify({
+              continue: false,
               decision: "block",
               reason,
             }),
@@ -657,6 +662,7 @@ async function main() {
 
           console.log(
             JSON.stringify({
+              continue: false,
               decision: "block",
               reason,
             }),
@@ -695,6 +701,7 @@ async function main() {
 
             console.log(
               JSON.stringify({
+                continue: false,
                 decision: "block",
                 reason,
               }),
@@ -732,7 +739,7 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            console.log(JSON.stringify({ decision: "block", reason }));
+            console.log(JSON.stringify({ continue: false, decision: "block", reason }));
             return;
           }
         }
@@ -765,6 +772,7 @@ async function main() {
 
         console.log(
           JSON.stringify({
+            continue: false,
             decision: "block",
             reason,
           }),
@@ -823,7 +831,7 @@ async function main() {
         reason = errorGuidance + reason;
       }
 
-      console.log(JSON.stringify({ decision: "block", reason }));
+      console.log(JSON.stringify({ continue: false, decision: "block", reason }));
       return;
     }
 
