@@ -394,10 +394,32 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     switch (keywordType) {
       case "ralph": {
         // Lazy-load ralph module
-        const { createRalphLoopHook } = await import("./ralph/index.js");
+        const { createRalphLoopHook, findPrdPath: findPrd, initPrd: initPrdFn, initProgress: initProgressFn, detectNoPrdFlag: detectNoPrd, stripNoPrdFlag: stripNoPrd } = await import("./ralph/index.js");
+
+        // Handle --no-prd flag
+        const noPrd = detectNoPrd(promptText);
+        const cleanPrompt = noPrd ? stripNoPrd(promptText) : promptText;
+
+        // Auto-generate scaffold PRD if none exists and --no-prd not set
+        const existingPrd = findPrd(directory);
+        if (!noPrd && !existingPrd) {
+          const { basename } = await import("path");
+          const { execSync } = await import("child_process");
+          const projectName = basename(directory);
+          let branchName = 'ralph/task';
+          try {
+            branchName = execSync('git rev-parse --abbrev-ref HEAD', { cwd: directory, encoding: 'utf-8' }).trim();
+          } catch {
+            // Not a git repo or git not available — use fallback
+          }
+          initPrdFn(directory, projectName, branchName, cleanPrompt);
+          initProgressFn(directory);
+        }
+
         // Activate ralph state which also auto-activates ultrawork
         const hook = createRalphLoopHook(directory);
-        hook.startLoop(sessionId, promptText);
+        hook.startLoop(sessionId, cleanPrompt);
+
         messages.push(RALPH_MESSAGE);
         break;
       }
@@ -1079,13 +1101,34 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
   if (toolName === "skill") {
     const skillName = getInvokedSkillName(input.toolInput);
     if (skillName === "ralph") {
-      const { createRalphLoopHook } = await import("./ralph/index.js");
-      const promptText =
+      const { createRalphLoopHook, findPrdPath: findPrd, initPrd: initPrdFn, initProgress: initProgressFn, detectNoPrdFlag: detectNoPrd, stripNoPrdFlag: stripNoPrd } = await import("./ralph/index.js");
+      const rawPrompt =
         typeof input.prompt === "string" && input.prompt.trim().length > 0
           ? input.prompt
           : "Ralph loop activated via Skill tool";
+
+      // Handle --no-prd flag
+      const noPrd = detectNoPrd(rawPrompt);
+      const cleanPrompt = noPrd ? stripNoPrd(rawPrompt) : rawPrompt;
+
+      // Auto-generate scaffold PRD if none exists and --no-prd not set
+      const existingPrd = findPrd(directory);
+      if (!noPrd && !existingPrd) {
+        const { basename } = await import("path");
+        const { execSync } = await import("child_process");
+        const projectName = basename(directory);
+        let branchName = 'ralph/task';
+        try {
+          branchName = execSync('git rev-parse --abbrev-ref HEAD', { cwd: directory, encoding: 'utf-8' }).trim();
+        } catch {
+          // Not a git repo or git not available — use fallback
+        }
+        initPrdFn(directory, projectName, branchName, cleanPrompt);
+        initProgressFn(directory);
+      }
+
       const hook = createRalphLoopHook(directory);
-      hook.startLoop(input.sessionId, promptText);
+      hook.startLoop(input.sessionId, cleanPrompt);
     }
   }
 

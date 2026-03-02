@@ -37,7 +37,7 @@ import {
   getArchitectRejectionContinuationPrompt,
   detectArchitectApproval,
   detectArchitectRejection,
-  clearVerificationState
+  clearVerificationState,
 } from '../ralph/index.js';
 import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
@@ -520,7 +520,10 @@ async function checkRalphLoop(
     }
 
     // Verification still pending - remind to spawn architect
-    const verificationPrompt = getArchitectVerificationPrompt(verificationState);
+    // Get current story for story-aware verification
+    const prdInfo = getPrdCompletionStatus(workingDir);
+    const currentStory = prdInfo.nextStory ?? undefined;
+    const verificationPrompt = getArchitectVerificationPrompt(verificationState, currentStory);
     return {
       shouldBlock: true,
       message: verificationPrompt,
@@ -554,7 +557,7 @@ async function checkRalphLoop(
   // Get PRD context for injection
   const ralphContext = getRalphContext(workingDir);
   const prdInstruction = prdStatus.hasPrd
-    ? `2. Check prd.json - are ALL stories marked passes: true?`
+    ? `2. Check prd.json - verify the current story's acceptance criteria are met, then mark it passes: true. Are ALL stories complete?`
     : `2. Check your todo list - are ALL items marked complete?`;
 
   const continuationPrompt = `<ralph-continuation>
