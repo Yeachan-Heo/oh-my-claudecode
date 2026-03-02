@@ -22,24 +22,10 @@ const KEYWORD_PATTERNS = {
     ultrathink: /\b(ultrathink)\b/i,
     deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b/i,
     analyze: /\b(deep[\s-]?analyze|deepanalyze)\b/i,
+    'deep-interview': /\b(deep[\s-]interview|ouroboros)\b/i,
     ccg: /\b(ccg|claude-codex-gemini)\b/i,
     codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
-};
-/**
- * Patterns for deprecated keywords that trigger deprecation warnings.
- * These modes were removed in #1131 (pipeline unification).
- */
-const DEPRECATED_KEYWORD_PATTERNS = {
-    ultrapilot: /\b(ultrapilot|ultra-pilot)\b|\bparallel\s+build\b|\bswarm\s+build\b/i,
-    swarm: /\bswarm\s+\d+\s+agents?\b|\bcoordinated\s+agents\b|\bteam\s+mode\b/i,
-    pipeline: /\bagent\s+pipeline\b|\bchain\s+agents\b/i,
-};
-/** Deprecation messages for removed modes. */
-export const DEPRECATION_MESSAGES = {
-    ultrapilot: '[DEPRECATED] /ultrapilot has been removed. Use /autopilot or /team instead.',
-    swarm: '[DEPRECATED] /swarm has been removed. Use /team instead.',
-    pipeline: '[DEPRECATED] /pipeline has been removed. Use /autopilot instead.',
 };
 /**
  * Priority order for keyword detection
@@ -47,7 +33,7 @@ export const DEPRECATION_MESSAGES = {
 const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
     'ccg', 'ralplan', 'tdd',
-    'ultrathink', 'deepsearch', 'analyze', 'codex', 'gemini'
+    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini'
 ];
 /**
  * Remove code blocks from text to prevent false positives
@@ -94,20 +80,6 @@ export function extractPromptText(parts) {
         .filter(p => p.type === 'text' && p.text)
         .map(p => p.text)
         .join(' ');
-}
-/**
- * Detect deprecated keywords in text and return deprecation warnings.
- * Returns an array of deprecation messages for any matched deprecated keywords.
- */
-export function detectDeprecatedKeywords(text) {
-    const cleanedText = sanitizeForKeywordDetection(text);
-    const warnings = [];
-    for (const [type, pattern] of Object.entries(DEPRECATED_KEYWORD_PATTERNS)) {
-        if (pattern.test(cleanedText)) {
-            warnings.push(DEPRECATION_MESSAGES[type]);
-        }
-    }
-    return warnings;
 }
 /**
  * Detect keywords in text and return matches with type info

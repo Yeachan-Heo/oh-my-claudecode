@@ -11,7 +11,7 @@ vi.mock('../features/auto-update.js', async (importOriginal) => {
         isTeamEnabled: () => true,
     };
 });
-import { extractPromptText, removeCodeBlocks, detectKeywordsWithType, detectDeprecatedKeywords, hasKeyword, getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
+import { extractPromptText, removeCodeBlocks, detectKeywordsWithType, hasKeyword, getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
 import { formatTodoStatus, getNextPendingTodo } from '../hooks/todo-continuation/index.js';
 import { resetTodoContinuationAttempts } from '../hooks/persistent-mode/index.js';
 import { startUltraQA, clearUltraQAState, isRalphLoopActive } from '../hooks/ultraqa/index.js';
@@ -197,29 +197,6 @@ describe('Keyword Detector', () => {
         it('should not detect deprecated ultrapilot keyword (#1131)', () => {
             const detected = detectKeywordsWithType('use ultrapilot for this');
             expect(detected).toHaveLength(0);
-        });
-        it('should emit deprecation warning for ultrapilot (#1131)', () => {
-            const warnings = detectDeprecatedKeywords('use ultrapilot for this');
-            expect(warnings.length).toBeGreaterThan(0);
-            expect(warnings[0]).toContain('DEPRECATED');
-        });
-        it('should not detect deprecated swarm keyword (#1131)', () => {
-            const detected = detectKeywordsWithType('swarm 5 agents to fix this');
-            expect(detected).toHaveLength(0);
-        });
-        it('should emit deprecation warning for swarm (#1131)', () => {
-            const warnings = detectDeprecatedKeywords('swarm 5 agents to fix this');
-            expect(warnings.length).toBeGreaterThan(0);
-            expect(warnings[0]).toContain('DEPRECATED');
-        });
-        it('should not detect deprecated pipeline keyword (#1131)', () => {
-            const detected = detectKeywordsWithType('use agent pipeline for this');
-            expect(detected).toHaveLength(0);
-        });
-        it('should emit deprecation warning for pipeline (#1131)', () => {
-            const warnings = detectDeprecatedKeywords('use agent pipeline for this');
-            expect(warnings.length).toBeGreaterThan(0);
-            expect(warnings[0]).toContain('DEPRECATED');
         });
         it('should detect ralplan keyword', () => {
             const detected = detectKeywordsWithType('ralplan this feature');

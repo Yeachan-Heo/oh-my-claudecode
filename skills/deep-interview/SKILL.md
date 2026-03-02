@@ -19,7 +19,7 @@ Deep Interview implements Ouroboros-inspired Socratic questioning with mathemati
 
 <Do_Not_Use_When>
 - User has a detailed, specific request with file paths, function names, or acceptance criteria -- execute directly
-- User wants to explore options or brainstorm -- use `plan` skill instead
+- User wants to explore options or brainstorm -- use `omc-plan` skill instead
 - User wants a quick fix or single change -- delegate to executor or ralph
 - User says "just do it" or "skip the questions" -- respect their intent
 - User already has a PRD or plan file -- use ralph or autopilot with that plan
@@ -282,8 +282,8 @@ After the spec is written, present execution options via `AskUserQuestion`:
 
 1. **Ralplan → Autopilot (Recommended)**
    - Description: "3-stage pipeline: consensus-refine this spec with Planner/Architect/Critic, then execute with full autopilot. Maximum quality."
-   - Action: Invoke `Skill("oh-my-claudecode:plan")` with `--consensus --direct` flags and the spec file path as context. The `--direct` flag skips the plan skill's interview phase (the deep interview already gathered requirements), while `--consensus` triggers the Planner/Architect/Critic loop. When consensus completes and produces a plan in `.omc/plans/`, invoke `Skill("oh-my-claudecode:autopilot")` with the consensus plan as Phase 0+1 output — autopilot skips both Expansion and Planning, starting directly at Phase 2 (Execution).
-   - Pipeline: `deep-interview spec → plan --consensus --direct → autopilot execution`
+   - Action: Invoke `Skill("oh-my-claudecode:omc-plan")` with `--consensus --direct` flags and the spec file path as context. The `--direct` flag skips the omc-plan skill's interview phase (the deep interview already gathered requirements), while `--consensus` triggers the Planner/Architect/Critic loop. When consensus completes and produces a plan in `.omc/plans/`, invoke `Skill("oh-my-claudecode:autopilot")` with the consensus plan as Phase 0+1 output — autopilot skips both Expansion and Planning, starting directly at Phase 2 (Execution).
+   - Pipeline: `deep-interview spec → omc-plan --consensus --direct → autopilot execution`
 
 2. **Execute with autopilot (skip ralplan)**
    - Description: "Full autonomous pipeline — planning, parallel implementation, QA, validation. Faster but without consensus refinement."
@@ -435,7 +435,7 @@ Why bad: 45% ambiguity means nearly half the requirements are unclear. The mathe
 - [ ] Spec includes: goal, constraints, acceptance criteria, clarity breakdown, transcript
 - [ ] Execution bridge presented via AskUserQuestion
 - [ ] Selected execution mode invoked via Skill() (never direct implementation)
-- [ ] If 3-stage pipeline selected: plan --consensus --direct invoked, then autopilot with consensus plan
+- [ ] If 3-stage pipeline selected: omc-plan --consensus --direct invoked, then autopilot with consensus plan
 - [ ] State cleaned up after execution handoff
 </Final_Checklist>
 
@@ -486,7 +486,7 @@ The recommended execution path chains three quality gates:
   → Socratic Q&A until ambiguity ≤ 20%
   → Spec written to .omc/specs/deep-interview-{slug}.md
   → User selects "Ralplan → Autopilot"
-  → /plan --consensus --direct (spec as input, skip interview)
+  → /omc-plan --consensus --direct (spec as input, skip interview)
     → Planner creates implementation plan from spec
     → Architect reviews for architectural soundness
     → Critic validates quality and testability
@@ -499,7 +499,7 @@ The recommended execution path chains three quality gates:
     → Phase 5: Cleanup
 ```
 
-**The plan skill receives the spec with `--consensus --direct` flags** because the deep interview already did the requirements gathering. The `--direct` flag (supported by the plan skill, which ralplan aliases) skips the interview phase and goes straight to Planner → Architect → Critic consensus. The consensus plan includes:
+**The omc-plan skill receives the spec with `--consensus --direct` flags** because the deep interview already did the requirements gathering. The `--direct` flag (supported by the omc-plan skill, which ralplan aliases) skips the interview phase and goes straight to Planner → Architect → Critic consensus. The consensus plan includes:
 - RALPLAN-DR summary (Principles, Decision Drivers, Options)
 - ADR (Decision, Drivers, Alternatives, Why chosen, Consequences)
 - Testable acceptance criteria (inherited from deep-interview spec)

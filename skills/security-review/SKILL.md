@@ -258,7 +258,7 @@ The security-reviewer agent verifies:
 ```
 /pipeline security "review authentication module"
 ```
-Uses: explore → security-reviewer → executor → security-reviewer-low (re-verify)
+Uses: explore → security-reviewer → executor → security-reviewer (re-verify)
 
 **With Swarm:**
 ```

@@ -151,6 +151,16 @@ Why bad: Uses "should" and "look good" -- no fresh evidence, no story-by-story v
 </Bad>
 
 <Bad>
+Sequential execution of independent tasks:
+```
+Task(executor, "Add type export") → wait →
+Task(executor, "Implement caching") → wait →
+Task(executor, "Refactor auth")
+```
+Why bad: These are independent tasks that should run in parallel, not sequentially.
+</Bad>
+
+<Bad>
 Keeping generic acceptance criteria:
 "prd.json created with criteria: Implementation is complete, Code compiles. Moving on to coding."
 Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD theater.

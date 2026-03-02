@@ -47,13 +47,13 @@ describe('Type Tests', () => {
             const config = {
                 agents: {
                     omc: { model: 'claude-sonnet-4-6' },
-                    architect: { model: 'claude-opus-4-6', enabled: true },
-                    researcher: { model: 'claude-haiku-4-5' },
-                    'document-specialist': { model: 'claude-haiku-4-5' },
+                    architect: { model: 'claude-opus-4-6' },
+                    explore: { model: 'claude-haiku-4-5' },
+                    documentSpecialist: { model: 'claude-haiku-4-5' },
                 },
             };
             expect(config.agents?.omc?.model).toBe('claude-sonnet-4-6');
-            expect(config.agents?.architect?.enabled).toBe(true);
+            expect(config.agents?.architect?.model).toBe('claude-opus-4-6');
         });
         it('should support routing configuration', () => {
             const config = {

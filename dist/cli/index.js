@@ -138,30 +138,41 @@ Examples:
       // Main orchestrator - uses the most capable model
       "model": "${modelHigh}"
     },
-    "architect": {
-      // Architecture and debugging expert
-      "model": "${modelHigh}",
-      "enabled": true
-    },
-    "researcher": {
-      // Documentation and codebase analysis
-      "model": "${modelMedium}"
-    },
     "explore": {
       // Fast pattern matching - uses fastest model
       "model": "${modelLow}"
     },
-    "frontendEngineer": {
-      "model": "${modelMedium}",
-      "enabled": true
+    "analyst": {
+      // Requirements analysis and acceptance criteria
+      "model": "${modelHigh}"
     },
-    "documentWriter": {
-      "model": "${modelLow}",
-      "enabled": true
+    "planner": {
+      // Strategic task sequencing and execution plans
+      "model": "${modelHigh}"
     },
-    "multimodalLooker": {
-      "model": "${modelMedium}",
-      "enabled": true
+    "architect": {
+      // System design, boundaries, interfaces
+      "model": "${modelHigh}"
+    },
+    "debugger": {
+      // Root-cause analysis, regression isolation
+      "model": "${modelMedium}"
+    },
+    "executor": {
+      // Code implementation, refactoring
+      "model": "${modelMedium}"
+    },
+    "verifier": {
+      // Completion evidence, claim validation
+      "model": "${modelMedium}"
+    },
+    "critic": {
+      // Plan/design critical challenge
+      "model": "${modelHigh}"
+    },
+    "writer": {
+      // Docs, migration notes, user guidance
+      "model": "${modelLow}"
     }
   },
 
