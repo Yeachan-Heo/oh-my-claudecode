@@ -55,15 +55,67 @@ export function getDefaultTierModels(): Record<'LOW' | 'MEDIUM' | 'HIGH', string
 }
 
 /**
- * Detect whether the user is running a non-Claude model provider.
+ * Detect whether Claude Code is running on AWS Bedrock.
  *
- * CC Switch and similar tools set CLAUDE_MODEL or ANTHROPIC_MODEL to a
- * non-Claude model ID (e.g. "glm-5", "MiniMax-Text-01", "kimi-k2").
- * When a custom ANTHROPIC_BASE_URL is set, the provider is likely not
- * Anthropic's native API.
+ * Claude Code sets CLAUDE_CODE_USE_BEDROCK=1 when configured for Bedrock.
+ * As a fallback, Bedrock model IDs use prefixed formats like:
+ *   - us.anthropic.claude-sonnet-4-6-v1:0
+ *   - global.anthropic.claude-3-5-sonnet-20241022-v2:0
+ *   - anthropic.claude-3-haiku-20240307-v1:0
  *
- * Returns true when OMC should avoid passing Claude-specific model tier
+ * On Bedrock, passing bare tier names (sonnet/opus/haiku) to spawned
+ * agents causes 400 errors because the provider expects full Bedrock
+ * model IDs with region/inference-profile prefixes.
+ */
+export function isBedrock(): boolean {
+  // Primary signal: Claude Code's own env var
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+    return true;
+  }
+
+  // Fallback: detect Bedrock model ID patterns in CLAUDE_MODEL / ANTHROPIC_MODEL
+  // Covers region prefixes (us, eu, ap), cross-region (global), and bare (anthropic.)
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (modelId && /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detect whether Claude Code is running on Google Vertex AI.
+ *
+ * Claude Code sets CLAUDE_CODE_USE_VERTEX=1 when configured for Vertex AI.
+ * Vertex model IDs typically use a "vertex_ai/" prefix.
+ *
+ * On Vertex, passing bare tier names causes errors because the provider
+ * expects full Vertex model paths.
+ */
+export function isVertexAI(): boolean {
+  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+    return true;
+  }
+
+  // Fallback: detect vertex_ai/ prefix in model ID
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (modelId && modelId.toLowerCase().startsWith('vertex_ai/')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detect whether OMC should avoid passing Claude-specific model tier
  * names (sonnet/opus/haiku) to the Agent tool.
+ *
+ * Returns true when:
+ * - User explicitly set OMC_ROUTING_FORCE_INHERIT=true
+ * - Running on AWS Bedrock — needs full Bedrock model IDs, not bare tier names
+ * - Running on Google Vertex AI — needs full Vertex model paths
+ * - A non-Claude model ID is detected (CC Switch, LiteLLM, etc.)
+ * - A custom ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
  */
 export function isNonClaudeProvider(): boolean {
   // Explicit opt-in: user has already set forceInherit via env var
@@ -71,7 +123,19 @@ export function isNonClaudeProvider(): boolean {
     return true;
   }
 
+  // AWS Bedrock: Claude via AWS, but needs full Bedrock model IDs
+  if (isBedrock()) {
+    return true;
+  }
+
+  // Google Vertex AI: Claude via GCP, needs full Vertex model paths
+  if (isVertexAI()) {
+    return true;
+  }
+
   // Check CLAUDE_MODEL / ANTHROPIC_MODEL for non-Claude model IDs
+  // Note: this check comes AFTER Bedrock/Vertex because their model IDs
+  // contain "claude" and would incorrectly return false here.
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   if (modelId && !modelId.toLowerCase().includes('claude')) {
     return true;
