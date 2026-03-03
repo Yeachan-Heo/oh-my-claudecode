@@ -35,10 +35,10 @@ describe('Cleanup Validation', () => {
         expect(agentKeys).not.toContain('multimodalLooker');
         expect(agentKeys).not.toContain('coordinator');
     });
-    it('agent registry has 21 agents', async () => {
+    it('agent registry has 22 agents', async () => {
         const { getAgentDefinitions } = await import('../agents/definitions.js');
         const defs = getAgentDefinitions();
-        expect(Object.keys(defs)).toHaveLength(21);
+        expect(Object.keys(defs)).toHaveLength(22);
     });
 });
 //# sourceMappingURL=cleanup-validation.test.js.map

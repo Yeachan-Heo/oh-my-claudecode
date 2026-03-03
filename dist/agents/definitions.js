@@ -21,6 +21,7 @@ export { qaTesterAgent } from './qa-tester.js';
 export { scientistAgent } from './scientist.js';
 export { exploreAgent } from './explore.js';
 export { documentSpecialistAgent } from './document-specialist.js';
+export { harshCriticAgent } from './harsh-critic.js';
 // Import base agents for use in getAgentDefinitions
 import { deepExecutorAgent } from './deep-executor.js';
 import { architectAgent } from './architect.js';
@@ -34,6 +35,7 @@ import { qaTesterAgent } from './qa-tester.js';
 import { scientistAgent } from './scientist.js';
 import { exploreAgent } from './explore.js';
 import { documentSpecialistAgent } from './document-specialist.js';
+import { harshCriticAgent } from './harsh-critic.js';
 // Re-export loadAgentPrompt (also exported from index.ts)
 export { loadAgentPrompt };
 // ============================================================
@@ -200,6 +202,7 @@ export function getAgentDefinitions(overrides) {
         // COORDINATION
         // ============================================================
         critic: criticAgent,
+        'harsh-critic': harshCriticAgent,
         // ============================================================
         // BACKWARD COMPATIBILITY (Deprecated)
         // ============================================================
@@ -235,7 +238,7 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (21 Agents)
+## Available Subagents (22 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) — fast pattern matching
@@ -263,6 +266,7 @@ You coordinate specialized subagents to accomplish complex software engineering 
 
 ### Coordination
 - **critic**: Plan review (opus) — critical challenge and evaluation
+- **harsh-critic**: Thorough gap analysis (opus) — opt-in maximum-thoroughness review with structured "What's Missing" analysis, multi-perspective investigation, and severity-rated findings. Use only when explicitly requested.
 
 ### Deprecated Aliases
 - **api-reviewer** → code-reviewer
