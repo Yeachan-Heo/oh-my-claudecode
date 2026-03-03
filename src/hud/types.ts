@@ -174,6 +174,25 @@ export interface RateLimits {
   monthlyResetsAt?: Date | null;
 }
 
+/**
+ * Categorized error reasons for API usage fetch failures.
+ * - 'network': Network error or timeout
+ * - 'auth': Authentication failure (token expired, refresh failed)
+ * - 'no_credentials': No OAuth credentials available (expected for API key users)
+ */
+export type UsageErrorReason = 'network' | 'auth' | 'no_credentials';
+
+/**
+ * Result of fetching usage data from the API.
+ * Wraps RateLimits with error information so the HUD can distinguish
+ * between "no data available" and "API call failed".
+ */
+export interface UsageResult {
+  data: RateLimits | null;
+  /** Error reason when API call fails (undefined on success) */
+  error?: UsageErrorReason;
+}
+
 // ============================================================================
 // Custom Rate Limit Provider
 // ============================================================================
@@ -279,6 +298,9 @@ export interface HudRenderContext {
 
   /** Rate limits (5h and weekly) from built-in Anthropic/z.ai providers */
   rateLimits: RateLimits | null;
+
+  /** Error reason when built-in rate limit API call fails (undefined on success or no credentials) */
+  rateLimitsError?: UsageErrorReason;
 
   /** Custom rate limit buckets from rateLimitsProvider command (null when not configured) */
   customBuckets: CustomProviderResult | null;

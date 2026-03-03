@@ -18,7 +18,8 @@ const RATE_LIMIT_THRESHOLD = 100;
  */
 export async function checkRateLimitStatus(): Promise<RateLimitStatus | null> {
   try {
-    const usage = await getUsage();
+    const result = await getUsage();
+    const usage = result.data;
 
     if (!usage) {
       // No OAuth credentials or API unavailable

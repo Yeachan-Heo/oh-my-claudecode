@@ -21,6 +21,10 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
+vi.mock('child_process', () => ({
+  execSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
+}));
+
 vi.mock('https', () => ({
   default: {
     request: vi.fn(),
@@ -194,9 +198,10 @@ describe('getUsage routing', () => {
     process.env = { ...originalEnv };
   });
 
-  it('returns null when no credentials and no z.ai env', async () => {
+  it('returns no_credentials error when no credentials and no z.ai env', async () => {
     const result = await getUsage();
-    expect(result).toBeNull();
+    expect(result.data).toBeNull();
+    expect(result.error).toBe('no_credentials');
     // No network call should be made without credentials
     expect(httpsModule.default.request).not.toHaveBeenCalled();
   });
@@ -207,7 +212,8 @@ describe('getUsage routing', () => {
 
     // https.request mock not wired, so fetchUsageFromZai resolves to null
     const result = await getUsage();
-    expect(result).toBeNull();
+    expect(result.data).toBeNull();
+    expect(result.error).toBe('network');
 
     // Verify z.ai quota endpoint was called
     expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
@@ -221,7 +227,8 @@ describe('getUsage routing', () => {
     process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
 
     const result = await getUsage();
-    expect(result).toBeNull();
+    expect(result.data).toBeNull();
+    expect(result.error).toBe('no_credentials');
 
     // Should NOT call https.request with z.ai endpoint.
     // Falls through to OAuth path which has no credentials (mocked),
