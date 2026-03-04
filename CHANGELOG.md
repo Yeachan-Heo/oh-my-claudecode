@@ -1,3 +1,15 @@
+# oh-my-claudecode v4.6.3: CLI ESM Format Fix
+
+## Release Notes
+
+Hotfix release to fix CLI runtime error caused by CJS/ESM incompatibility.
+
+### Bug Fixes
+
+- **CLI ESM Format** (#1310): Changed CLI build format from CJS to ESM to fix `import.meta.url` undefined error.
+
+---
+
 # oh-my-claudecode v4.6.2: CLI Shebang Hotfix
 
 ## Release Notes

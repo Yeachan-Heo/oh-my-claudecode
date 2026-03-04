@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "4.6.2",
+  "version": "4.6.3",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",
@@ -12,9 +12,9 @@
     }
   },
   "bin": {
-    "oh-my-claudecode": "bridge/cli.cjs",
-    "omc": "bridge/cli.cjs",
-    "omc-cli": "bridge/cli.cjs"
+    "oh-my-claudecode": "bridge/cli.mjs",
+    "omc": "bridge/cli.mjs",
+    "omc-cli": "bridge/cli.mjs"
   },
   "files": [
     "dist",
@@ -23,7 +23,7 @@
     "bridge/mcp-server.cjs",
     "bridge/team-bridge.cjs",
     "bridge/team-mcp.cjs",
-    "bridge/cli.cjs",
+    "bridge/cli.mjs",
     "bridge/runtime-cli.cjs",
     "commands",
     "hooks",

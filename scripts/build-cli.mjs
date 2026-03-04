@@ -2,7 +2,7 @@
 import * as esbuild from 'esbuild';
 import { mkdir } from 'fs/promises';
 
-const outfile = 'bridge/cli.cjs';
+const outfile = 'bridge/cli.mjs';
 await mkdir('bridge', { recursive: true });
 
 await esbuild.build({
@@ -10,7 +10,7 @@ await esbuild.build({
   bundle: true,
   platform: 'node',
   target: 'node18',
-  format: 'cjs',
+  format: 'esm',
   outfile,
   // Note: shebang is preserved from entry file, no banner needed
   external: [
