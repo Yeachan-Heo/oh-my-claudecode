@@ -20,6 +20,12 @@ Patch release focused on bundled CJS runtime stability and daemon startup correc
 - **Reply listener daemon bootstrap module path**: Applied the same bundled module path fix to reply listener daemon startup.
   - Updated `src/notifications/reply-listener.ts`
 
+- **Fish worker spawn argument forwarding**: Fixed worker launch forwarding in bundled runtime CLI for Fish shell by using `exec $argv` instead of `exec "$@"` (which Fish does not support), while preserving `exec "$@"` for bash/zsh and other POSIX shells.
+  - Updated `src/team/tmux-session.ts`
+  - Added regression tests in `src/team/__tests__/tmux-session.test.ts`
+  - Regenerated `bridge/runtime-cli.cjs`
+  - Fixes #1326
+
 - **Regression coverage**:
   - Added `src/__tests__/package-dir-resolution-regression.test.ts`
   - Regenerated bridge/dist artifacts
