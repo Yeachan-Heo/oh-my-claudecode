@@ -669,6 +669,13 @@ Configure HUD elements in `~/.claude/settings.json`:
 | `ralph` | Show ralph loop status | `true` |
 | `autopilot` | Show autopilot status | `true` |
 
+Additional `omcHud` layout options (top-level):
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `maxWidth` | Maximum HUD line width (terminal columns) | unset |
+| `wrapMode` | `truncate` (ellipsis) or `wrap` (break at ` \| ` boundaries) when `maxWidth` is set | `truncate` |
+
 Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode`
 
 ### Common Issues

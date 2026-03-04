@@ -205,6 +205,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
     },
     ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
     ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
+    ...(config.wrapMode != null ? { wrapMode: config.wrapMode } : {}),
   };
 }
 
