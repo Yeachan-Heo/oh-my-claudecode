@@ -589,7 +589,7 @@ echo "Default execution mode set to: USER_CHOICE"
 
 ## Step 3.8: Install OMC CLI Tool
 
-The OMC CLI (`omc` command) provides standalone token analytics and management commands (`omc stats`, `omc agents`, `omc tui`).
+The OMC CLI (`omc` command) provides standalone monitoring and analytics commands (HUD statusline + cost/session reporting).
 
 First, check if the CLI is already installed:
 
@@ -608,7 +608,7 @@ If `OMC_CLI_INSTALLED` is `"true"`, skip the rest of this step.
 
 If `OMC_CLI_INSTALLED` is `"false"`, use the AskUserQuestion tool to prompt the user:
 
-**Question:** "Would you like to install the OMC CLI globally for standalone analytics? (`omc stats`, `omc agents`, `omc tui`)"
+**Question:** "Would you like to install the OMC CLI globally for standalone monitoring and analytics? (`omc`, `omc cost`, `omc sessions`)"
 
 **Options:**
 1. **Yes (Recommended)** - Install `oh-my-claude-sisyphus` via `npm install -g`
@@ -971,10 +971,10 @@ HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
 CLI ANALYTICS (if installed):
-- omc           - Full dashboard (stats + agents + cost)
-- omc stats     - View token usage and costs
-- omc agents    - See agent breakdown by cost
-- omc tui       - Launch interactive TUI dashboard
+- omc           - Default analytics dashboard
+- omc cost      - View cost reports (daily/weekly/monthly)
+- omc sessions  - Inspect session history
+- omc backfill  - Import transcript analytics
 
 That's it! Just use Claude Code normally.
 ```
@@ -1012,10 +1012,10 @@ HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
 CLI ANALYTICS (if installed):
-- omc           - Full dashboard (stats + agents + cost)
-- omc stats     - View token usage and costs
-- omc agents    - See agent breakdown by cost
-- omc tui       - Launch interactive TUI dashboard
+- omc           - Default analytics dashboard
+- omc cost      - View cost reports (daily/weekly/monthly)
+- omc sessions  - Inspect session history
+- omc backfill  - Import transcript analytics
 
 Your workflow won't break - it just got easier!
 ```

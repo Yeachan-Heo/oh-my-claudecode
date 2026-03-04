@@ -585,18 +585,18 @@ For complete documentation, see **[Performance Monitoring Guide](./PERFORMANCE-M
 | Feature | Description | Access |
 |---------|-------------|--------|
 | **Agent Observatory** | Real-time agent status, efficiency, bottlenecks | HUD / API |
-| **Token Analytics** | Cost tracking, usage reports, budget warnings | `omc stats`, `omc cost` |
+| **Token Analytics** | Cost tracking, usage reports, budget warnings | HUD (`analytics` preset), `omc cost` |
 | **Session Replay** | Event timeline for post-session analysis | `.omc/state/agent-replay-*.jsonl` |
 | **Intervention System** | Auto-detection of stale agents, cost overruns | Automatic |
 
 ### CLI Commands
 
 ```bash
-omc stats          # Current session statistics
+omc                # Default analytics dashboard
 omc cost daily     # Daily cost report
 omc cost weekly    # Weekly cost report
-omc agents         # Agent breakdown
 omc backfill       # Import historical transcript data
+# Agent breakdown: use HUD observatory / replay logs
 ```
 
 ### HUD Analytics Preset

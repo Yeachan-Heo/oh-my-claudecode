@@ -59,9 +59,6 @@ Use `analytics` preset for detailed display.
 # View everything (default dashboard)
 omc
 
-# View current session stats
-omc stats
-
 # Cost reports
 omc cost daily
 omc cost weekly
@@ -70,8 +67,8 @@ omc cost monthly
 # Session history
 omc sessions
 
-# Agent breakdown
-omc agents
+# Agent observability is shown in HUD/replay logs
+# (legacy standalone agent-breakdown command was removed)
 
 # Export data
 omc export cost csv ./costs.csv

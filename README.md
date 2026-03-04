@@ -207,6 +207,15 @@ omc wait --stop   # Disable daemon
 
 **Requires:** tmux (for session detection)
 
+### Monitoring & Analytics
+
+Use the HUD for live observability and `omc` for cost/session reporting:
+
+- HUD analytics preset: `/oh-my-claudecode:hud setup` then set `"omcHud": { "preset": "analytics" }`
+- Cost reports: `omc cost daily|weekly|monthly`
+- Session history/backfill: `omc sessions`, `omc backfill`
+- Raw logs: `.omc/state/token-tracking.jsonl`, `.omc/state/agent-replay-*.jsonl`
+
 ### Notification Tags (Telegram/Discord/Slack)
 
 You can configure who gets tagged when stop callbacks send session summaries.
