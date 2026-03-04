@@ -172,8 +172,8 @@ async function detectBuildInfo(projectRoot: string): Promise<BuildInfo> {
       if (pkgScripts.dev || pkgScripts.start) {
         devCommand = `${pm} ${pm === 'npm' ? 'run ' : ''}${pkgScripts.dev ? 'dev' : 'start'}`;
       }
-    } catch (_error) {
-      // Invalid JSON, skip
+    } catch (error) {
+      console.warn('[project-memory] Warning: Failed to parse package.json:', error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -229,8 +229,8 @@ async function detectConventions(projectRoot: string): Promise<CodeConventions> 
             sampleFiles.push(path.join(dirPath, file));
           }
         }
-      } catch (_error) {
-        // Skip unreadable directories
+      } catch (error) {
+        console.warn('[project-memory] Warning: Failed to read directory:', error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -279,8 +279,8 @@ async function detectConventions(projectRoot: string): Promise<CodeConventions> 
           else if (testFile.startsWith('test_')) testPattern = 'test_*.py';
           break;
         }
-      } catch (_error) {
-        // Skip
+      } catch (error) {
+        console.warn('[project-memory] Warning: Failed to detect test pattern:', error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -325,7 +325,7 @@ async function detectStructure(projectRoot: string): Promise<ProjectStructure> {
           ? packageJson.workspaces
           : packageJson.workspaces.packages || []));
       }
-    } catch (_error) {
+    } catch (error) {
       // Invalid JSON
     }
   }
@@ -345,7 +345,7 @@ async function detectStructure(projectRoot: string): Promise<ProjectStructure> {
         mainDirectories.push(entry.name);
       }
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -395,7 +395,7 @@ async function extractVersion(filePath: string, _language: string): Promise<stri
       const match = content.match(/^python\s*=\s*"([^"]+)"/m);
       if (match) return match[1];
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -422,7 +422,7 @@ async function detectFrameworksFromPackageJson(filePath: string): Promise<Framew
         });
       }
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -449,7 +449,7 @@ async function detectFrameworksFromCargoToml(filePath: string): Promise<Framewor
         });
       }
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -476,7 +476,7 @@ async function detectFrameworksFromPyproject(filePath: string): Promise<Framewor
         });
       }
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -495,7 +495,7 @@ async function detectRuntime(filePath: string): Promise<string | null> {
       const version = packageJson.engines.node.replace(/[\^~><= ]/g, '');
       return `Node.js ${version}`;
     }
-  } catch (_error) {
+  } catch (error) {
     // Skip
   }
 
@@ -523,7 +523,7 @@ async function detectGitBranch(projectRoot: string): Promise<GitBranchPattern | 
         branchingStrategy: null, // Could detect git-flow vs trunk-based, but skipping for now
       };
     }
-  } catch (_error) {
+  } catch (error) {
     // Not a git repo or no remote
   }
 

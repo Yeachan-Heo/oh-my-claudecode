@@ -139,7 +139,7 @@ export function isActiveModeRunning(directory: string): boolean {
         if (state.active === true || state.status === 'running' || state.status === 'active') {
           return true;
         }
-      } catch (_error) {
+      } catch (error) {
         // Ignore parse errors, continue checking
         continue;
       }

@@ -34,7 +34,7 @@ export async function loadProjectMemory(projectRoot: string): Promise<ProjectMem
     }
 
     return memory;
-  } catch (_error) {
+  } catch (error) {
     // File doesn't exist or invalid JSON
     return null;
   }
@@ -96,7 +96,7 @@ export async function deleteProjectMemory(projectRoot: string): Promise<void> {
 
   try {
     await fs.unlink(memoryPath);
-  } catch (_error) {
+  } catch (error) {
     // Ignore if file doesn't exist
   }
 }

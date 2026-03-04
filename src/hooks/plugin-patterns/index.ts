@@ -104,8 +104,8 @@ export function formatFile(filePath: string): { success: boolean; message: strin
     const [formatterBin, ...formatterArgs] = formatter.split(' ');
     execFileSync(formatterBin, [...formatterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Formatted ${filePath}` };
-  } catch (_error) {
-    return { success: false, message: `Format failed: ${_error}` };
+  } catch (error) {
+    return { success: false, message: `Format failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -166,7 +166,7 @@ export function lintFile(filePath: string): { success: boolean; message: string 
     const [linterCmd, ...linterArgs] = linter.split(' ');
     execFileSync(linterCmd, [...linterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Lint passed for ${filePath}` };
-  } catch (_error) {
+  } catch (error) {
     return { success: false, message: `Lint errors in ${filePath}` };
   }
 }
@@ -301,7 +301,7 @@ export function runTests(directory: string): { success: boolean; message: string
         execFileSync('npm', ['test'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
         return { success: true, message: 'Tests passed' };
       }
-    } catch (_error) {
+    } catch (error) {
       return { success: false, message: 'Tests failed' };
     }
   }
@@ -311,7 +311,7 @@ export function runTests(directory: string): { success: boolean; message: string
     try {
       execFileSync('pytest', [], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
       return { success: true, message: 'Tests passed' };
-    } catch (_error) {
+    } catch (error) {
       return { success: false, message: 'Tests failed' };
     }
   }
@@ -336,7 +336,7 @@ export function runLint(directory: string): { success: boolean; message: string 
         try {
           execFileSync('npm', ['run', 'lint'], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
           return { success: true, message: 'Lint passed' };
-        } catch (_error) {
+        } catch (error) {
           return { success: false, message: 'Lint errors found' };
         }
       }

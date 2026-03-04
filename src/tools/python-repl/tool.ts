@@ -422,7 +422,7 @@ async function handleReset(sessionId: string, socketPath: string): Promise<strin
   try {
     const result = await sendSocketRequest<ResetResult>(socketPath, 'reset', {}, 10000);
     return formatResetResult(result, sessionId);
-  } catch (_error) {
+  } catch (error) {
     // If reset fails, try to kill and restart the bridge
     await killBridgeWithEscalation(sessionId);
 

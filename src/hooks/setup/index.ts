@@ -74,7 +74,7 @@ export function ensureDirectoryStructure(directory: string): string[] {
       try {
         mkdirSync(fullPath, { recursive: true });
         created.push(fullPath);
-      } catch (_err) {
+      } catch (err) {
         // Will be reported in errors
       }
     }

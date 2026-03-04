@@ -49,7 +49,8 @@ function getAgentCounts(directory: string): { spawned: number; completed: number
     const completed = tracking.agents?.filter((a: any) => a.status === 'completed').length || 0;
 
     return { spawned, completed };
-  } catch (_error) {
+  } catch (error) {
+    console.warn('[session-end] Warning: Failed to read agent counts:', error instanceof Error ? error.message : String(error));
     return { spawned: 0, completed: 0 };
   }
 }
@@ -133,7 +134,8 @@ export function getSessionStartTime(directory: string, sessionId?: string): stri
         }
       }
       // else: state has a different session_id — stale, skip
-    } catch (_error) {
+    } catch (error) {
+      console.warn('[session-end] Warning: Failed to read state file:', error instanceof Error ? error.message : String(error));
       continue;
     }
   }
@@ -166,8 +168,8 @@ export function recordSessionMetrics(directory: string, input: SessionEndInput):
       const startTime = new Date(startedAt).getTime();
       const endTime = new Date(endedAt).getTime();
       metrics.duration_ms = endTime - startTime;
-    } catch (_error) {
-      // Invalid date, skip duration
+    } catch (error) {
+      console.warn('[session-end] Warning: Invalid date format:', error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -191,7 +193,7 @@ export function cleanupTransientState(directory: string): number {
     try {
       fs.unlinkSync(trackingPath);
       filesRemoved++;
-    } catch (_error) {
+    } catch (error) {
       // Ignore removal errors
     }
   }
@@ -213,7 +215,7 @@ export function cleanupTransientState(directory: string): number {
           filesRemoved++;
         }
       }
-    } catch (_error) {
+    } catch (error) {
       // Ignore cleanup errors
     }
   }
@@ -233,7 +235,7 @@ export function cleanupTransientState(directory: string): number {
           filesRemoved++;
         }
       }
-    } catch (_error) {
+    } catch (error) {
       // Ignore errors
     }
   };
@@ -398,7 +400,7 @@ export function exportSessionSummary(directory: string, metrics: SessionMetrics)
 
   try {
     fs.writeFileSync(sessionFile, JSON.stringify(metrics, null, 2), 'utf-8');
-  } catch (_error) {
+  } catch (error) {
     // Ignore write errors
   }
 }

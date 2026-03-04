@@ -441,7 +441,7 @@ export class SessionLock {
         acquired: true,
         reason: existingLock ? 'stale_broken' : 'success',
       };
-    } catch (_err: any) {
+    } catch (err: any) {
       return {
         acquired: false,
         reason: 'error',
