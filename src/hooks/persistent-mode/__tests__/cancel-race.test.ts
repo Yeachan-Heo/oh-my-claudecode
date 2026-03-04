@@ -249,6 +249,49 @@ describe('persistent-mode.cjs cancel-signal check (issue #1058)', () => {
     }
   });
 
+  it('should return continue:true when cancel signal has only requested_at (no expires_at)', () => {
+    const sessionId = 'session-1058-cjs-fallback-ttl';
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-cancel-fallback-'));
+
+    try {
+      const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(stateDir, { recursive: true });
+
+      // Write active ultrawork state
+      writeFileSync(
+        join(stateDir, 'ultrawork-state.json'),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: 'test task',
+          session_id: sessionId,
+          project_path: tempDir,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      // Write cancel signal with ONLY requested_at (no expires_at) — should use 30s TTL fallback
+      writeFileSync(
+        join(stateDir, 'cancel-signal-state.json'),
+        JSON.stringify({
+          requested_at: new Date().toISOString(),
+          source: 'test',
+        })
+      );
+
+      const result = runCjsHook({
+        cwd: tempDir,
+        sessionId,
+        stop_reason: 'end_turn',
+      });
+
+      expect(result.continue).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('should NOT honor expired cancel signals', () => {
     const sessionId = 'session-1058-cjs-expired';
     const tempDir = mkdtempSync(join(tmpdir(), 'cjs-expired-cancel-'));
@@ -292,6 +335,169 @@ describe('persistent-mode.cjs cancel-signal check (issue #1058)', () => {
 
       // Expired signal file should have been cleaned up
       expect(existsSync(join(stateDir, 'cancel-signal-state.json'))).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('persistent-mode.cjs isExplicitCancelCommand guard (issue #1058)', () => {
+  function runCjsHook(input: Record<string, unknown>): Record<string, unknown> {
+    const stdout = execFileSync(process.execPath, [CJS_SCRIPT], {
+      input: JSON.stringify(input),
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const lines = stdout.trim().split('\n');
+    return JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+  }
+
+  function makeUltraworkSession(tempDir: string, sessionId: string): string {
+    const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ultrawork-state.json'),
+      JSON.stringify({
+        active: true,
+        started_at: new Date().toISOString(),
+        original_prompt: 'test task',
+        session_id: sessionId,
+        project_path: tempDir,
+        reinforcement_count: 0,
+        last_checked_at: new Date().toISOString(),
+      })
+    );
+    return stateDir;
+  }
+
+  it.each([
+    '/oh-my-claudecode:cancel',
+    '/oh-my-claudecode:cancel --force',
+    '/cancel',
+    'cancelomc',
+    'stopomc',
+  ])('should bypass ultrawork when prompt is "%s"', (prompt: string) => {
+    const sessionId = `session-1058-cancel-cmd-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-cancel-cmd-'));
+
+    try {
+      makeUltraworkSession(tempDir, sessionId);
+      const result = runCjsHook({ cwd: tempDir, sessionId, prompt });
+      expect(result.continue).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'cancel',
+    'cancelled',
+    'user_cancel',
+    'cancel_force',
+  ])('should bypass ultrawork when stop_reason is "%s"', (stop_reason: string) => {
+    const sessionId = `session-1058-cancel-reason-${stop_reason}`;
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-cancel-reason-'));
+
+    try {
+      makeUltraworkSession(tempDir, sessionId);
+      const result = runCjsHook({ cwd: tempDir, sessionId, stop_reason });
+      expect(result.continue).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should bypass ultrawork when Skill tool invokes cancel skill', () => {
+    const sessionId = 'session-1058-skill-cancel';
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-skill-cancel-'));
+
+    try {
+      makeUltraworkSession(tempDir, sessionId);
+      const result = runCjsHook({
+        cwd: tempDir,
+        sessionId,
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:cancel' },
+      });
+      expect(result.continue).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('persistent-mode.cjs isRateLimitStop guard (issue #777)', () => {
+  function runCjsHook(input: Record<string, unknown>): Record<string, unknown> {
+    const stdout = execFileSync(process.execPath, [CJS_SCRIPT], {
+      input: JSON.stringify(input),
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const lines = stdout.trim().split('\n');
+    return JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+  }
+
+  it.each([
+    'rate_limit',
+    'rate_limited',
+    'too_many_requests',
+    '429',
+    'quota_exceeded',
+    'overloaded',
+  ])('should bypass ultrawork when stop_reason is "%s"', (stop_reason: string) => {
+    const sessionId = `session-777-ratelimit-${stop_reason.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-ratelimit-'));
+
+    try {
+      const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(
+        join(stateDir, 'ultrawork-state.json'),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: 'test task',
+          session_id: sessionId,
+          project_path: tempDir,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const result = runCjsHook({ cwd: tempDir, sessionId, stop_reason });
+      expect(result.continue).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should bypass ultrawork when end_turn_reason indicates rate limiting', () => {
+    const sessionId = 'session-777-endturn-ratelimit';
+    const tempDir = mkdtempSync(join(tmpdir(), 'cjs-endturn-ratelimit-'));
+
+    try {
+      const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(
+        join(stateDir, 'ultrawork-state.json'),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: 'test task',
+          session_id: sessionId,
+          project_path: tempDir,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const result = runCjsHook({
+        cwd: tempDir,
+        sessionId,
+        stop_reason: 'end_turn',
+        end_turn_reason: 'quota_exhausted',
+      });
+      expect(result.continue).toBe(true);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

@@ -386,6 +386,72 @@ function isContextLimitStop(data) {
 }
 
 /**
+ * Detect explicit /cancel command paths that should bypass stop-hook reinforcement.
+ * Stricter than generic user-abort detection — prevents re-enforcement races when
+ * the user explicitly invokes /cancel or /cancel --force.
+ * Mirrors isExplicitCancelCommand() from src/hooks/todo-continuation/index.ts.
+ */
+function isExplicitCancelCommand(data) {
+  if (!data) return false;
+
+  // Check prompt for /cancel patterns
+  const prompt = (data.prompt || "").trim();
+  if (prompt) {
+    const slashCancelPattern = /^\/(?:oh-my-claudecode:)?cancel(?:\s+--force)?\s*$/i;
+    const keywordCancelPattern = /^(?:cancelomc|stopomc)\s*$/i;
+    if (slashCancelPattern.test(prompt) || keywordCancelPattern.test(prompt)) {
+      return true;
+    }
+  }
+
+  // Check stop_reason for explicit cancel reasons
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+  const endTurnReason = (data.end_turn_reason || data.endTurnReason || "").toLowerCase();
+  const explicitReasonPatterns = [
+    /^cancel$/, /^cancelled$/, /^canceled$/,
+    /^user_cancel$/, /^cancel_force$/, /^force_cancel$/,
+  ];
+  if (explicitReasonPatterns.some((p) => p.test(reason) || p.test(endTurnReason))) {
+    return true;
+  }
+
+  // Check for Skill tool invocation with cancel skill
+  const toolName = String(data.tool_name || data.toolName || "").toLowerCase();
+  const toolInput = data.tool_input || data.toolInput;
+  if (toolName.includes("skill") && toolInput && typeof toolInput.skill === "string") {
+    const skill = toolInput.skill.toLowerCase();
+    if (skill === "oh-my-claudecode:cancel" || skill.endsWith(":cancel")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detect if stop was triggered by rate limiting (HTTP 429 / quota exhausted).
+ * Blocking these stops causes an infinite retry loop.
+ * Mirrors isRateLimitStop() from src/hooks/todo-continuation/index.ts.
+ * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/777
+ */
+function isRateLimitStop(data) {
+  if (!data) return false;
+
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+  const endTurnReason = (data.end_turn_reason || data.endTurnReason || "").toLowerCase();
+
+  const rateLimitPatterns = [
+    "rate_limit", "rate_limited", "ratelimit",
+    "too_many_requests", "429",
+    "quota_exceeded", "quota_limit", "quota_exhausted",
+    "request_limit", "api_limit",
+    "overloaded", "capacity",
+  ];
+
+  return rateLimitPatterns.some((p) => reason.includes(p) || endTurnReason.includes(p));
+}
+
+/**
  * Detect if stop was triggered by user abort (Ctrl+C, cancel button, etc.)
  */
 function isUserAbort(data) {
@@ -428,8 +494,10 @@ async function main() {
       return;
     }
 
-    // Respect user abort (Ctrl+C, cancel)
-    if (isUserAbort(data)) {
+    // Explicit /cancel command paths bypass all stop-hook reinforcement.
+    // Checked before file-based cancel signal to close TOCTOU window where
+    // /cancel has been invoked but cancel-signal-state.json is not yet written.
+    if (isExplicitCancelCommand(data)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -437,6 +505,21 @@ async function main() {
     // Check for cancel signal from /cancel flow (issue #1058)
     // Prevents infinite loop when persistent modes are active during cancellation.
     if (isSessionCancelInProgress(stateDir, sessionId)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Respect user abort (Ctrl+C, cancel)
+    if (isUserAbort(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // CRITICAL: Never block rate-limit stops.
+    // Blocking these causes an infinite retry loop: hook injects continuation
+    // prompt → Claude hits rate limit again → stops again → loops.
+    // Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/777
+    if (isRateLimitStop(data)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
