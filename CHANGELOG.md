@@ -1,3 +1,23 @@
+# oh-my-claudecode v4.7.0: Upstream Sync Release
+
+## Release Notes
+
+Syncs fork with upstream oh-my-claudecode v4.6.6, incorporating 960 commits of improvements across agent architecture, team runtime, security, and CLI tooling.
+
+### Highlights (v4.2.0 - v4.6.6)
+
+- **Agent Architecture Reform**: Comprehensive agent refactor v2 — deprecated tiered agents, consolidated CLAUDE.md
+- **Team Runtime Hardening**: Atomic task claiming with O_EXCL lock files, post-execution permission enforcement, transient failure retry, watchdog improvements
+- **Security Fixes**: SSRF protection, shell injection prevention, config injection hardening, CLI path trust validation
+- **PRD-Driven Ralph**: Ralph now auto-generates `prd.json` for PRD-driven iteration by default
+- **Deep Interview Skill**: Ouroboros-inspired Socratic questioning for requirements elicitation
+- **CLI Bundle**: Bundled CLI entry point eliminating node_modules dependency, ESM/CJS path resolution fixes
+- **HUD Improvements**: Configurable git info position, async file I/O to prevent event loop blocking
+- **Hook Session Isolation**: Eliminated cross-session state leakage in mode detection
+- **Internal JSONC Parser**: Replaced external `jsonc-parser` dependency with lightweight internal implementation
+
+---
+
 # oh-my-claudecode v4.6.5: Remove jsonc-parser Dependency
 
 ## Release Notes
