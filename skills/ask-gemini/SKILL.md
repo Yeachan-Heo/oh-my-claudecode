@@ -24,9 +24,7 @@ omc ask gemini "{{ARGUMENTS}}"
 Wrapper alias (compatibility):
 
 ```bash
-npm run ask:gemini -- "{{ARGUMENTS}}"
-# or
-./scripts/ask-gemini.sh "{{ARGUMENTS}}"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/ask-gemini.sh" "{{ARGUMENTS}}"
 ```
 
 ## Requirements

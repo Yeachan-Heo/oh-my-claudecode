@@ -24,9 +24,7 @@ omc ask codex "{{ARGUMENTS}}"
 Wrapper alias (compatibility):
 
 ```bash
-npm run ask:codex -- "{{ARGUMENTS}}"
-# or
-./scripts/ask-codex.sh "{{ARGUMENTS}}"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "{{ARGUMENTS}}"
 ```
 
 ## Requirements
