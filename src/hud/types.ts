@@ -178,9 +178,10 @@ export interface RateLimits {
  * Categorized error reasons for API usage fetch failures.
  * - 'network': Network error or timeout
  * - 'auth': Authentication failure (token expired, refresh failed)
+ * - 'rate_limited': API returned 429 even after token refresh (genuine rate limit)
  * - 'no_credentials': No OAuth credentials available (expected for API key users)
  */
-export type UsageErrorReason = 'network' | 'timeout' | 'http' | 'auth' | 'no_credentials';
+export type UsageErrorReason = 'network' | 'timeout' | 'http' | 'auth' | 'rate_limited' | 'no_credentials';
 
 /**
  * Result of fetching usage data from the API.

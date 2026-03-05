@@ -154,6 +154,7 @@ export function renderRateLimitsWithBar(limits, barWidth = 8) {
  *
  * - 'network': API timeout, HTTP error, or parse failure → [API err]
  * - 'auth': credentials expired, refresh failed → [API auth]
+ * - 'rate_limited': API returned 429 even after token refresh → [429]
  * - 'no_credentials': no OAuth credentials (expected for API key users) → null (no display)
  */
 export function renderRateLimitsError(result) {
@@ -163,6 +164,8 @@ export function renderRateLimitsError(result) {
         return null;
     if (result.error === 'auth')
         return `${YELLOW}[API auth]${RESET}`;
+    if (result.error === 'rate_limited')
+        return `${DIM}[429]${RESET}`;
     return `${YELLOW}[API err]${RESET}`;
 }
 // ============================================================================

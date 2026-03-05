@@ -23,7 +23,7 @@ import type { RateLimits, UsageResult } from './types.js';
 
 // Cache configuration
 const CACHE_TTL_SUCCESS_MS = 30 * 1000; // 30 seconds for successful responses
-const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for failures
+const CACHE_TTL_FAILURE_MS = 120 * 1000; // 120 seconds for failures (avoid 429 loops)
 const API_TIMEOUT_MS = 10000;
 const TOKEN_REFRESH_URL_HOSTNAME = 'platform.claude.com';
 const TOKEN_REFRESH_URL_PATH = '/v1/oauth/token';
@@ -323,10 +323,15 @@ function refreshAccessToken(refreshToken: string): Promise<OAuthCredentials | nu
   });
 }
 
+/** Sentinel value indicating the API returned HTTP 429 */
+interface RateLimitedResponse { _rateLimited: true }
+
 /**
- * Fetch usage from Anthropic API
+ * Fetch usage from Anthropic API.
+ * Returns the parsed response on success, a RateLimitedResponse sentinel on 429,
+ * or null on any other failure (network error, timeout, non-200 status).
  */
-function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | null> {
+function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | RateLimitedResponse | null> {
   return new Promise((resolve) => {
     const req = https.request(
       {
@@ -354,6 +359,8 @@ function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | null
             } catch {
               resolve(null);
             }
+          } else if (res.statusCode === 429) {
+            resolve({ _rateLimited: true });
           } else {
             resolve(null);
           }
@@ -369,6 +376,10 @@ function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | null
 
     req.end();
   });
+}
+
+function isRateLimited(response: UsageApiResponse | RateLimitedResponse | null): response is RateLimitedResponse {
+  return response != null && '_rateLimited' in response;
 }
 
 /**
@@ -437,11 +448,50 @@ function fetchUsageFromZai(): Promise<ZaiQuotaResponse | null> {
 }
 
 /**
- * Persist refreshed credentials back to the file-based credential store.
- * Keychain write-back is not supported (read-only for HUD).
- * Updates only the claudeAiOauth fields, preserving other data.
+ * Write refreshed credentials back to macOS Keychain.
+ * Reads the existing entry, updates token fields, and re-adds it.
+ */
+function writeKeychainCredentials(creds: OAuthCredentials): boolean {
+  if (process.platform !== 'darwin') return false;
+
+  try {
+    const serviceName = getKeychainServiceName();
+    const existing = execSync(
+      `/usr/bin/security find-generic-password -s "${serviceName}" -w 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 2000 }
+    ).trim();
+
+    if (!existing) return false;
+
+    const parsed = JSON.parse(existing);
+    const target = parsed.claudeAiOauth || parsed;
+    target.accessToken = creds.accessToken;
+    if (creds.expiresAt != null) target.expiresAt = creds.expiresAt;
+    if (creds.refreshToken) target.refreshToken = creds.refreshToken;
+
+    const updated = JSON.stringify(parsed);
+
+    // Delete and re-add (security CLI doesn't support in-place update)
+    execSync(`/usr/bin/security delete-generic-password -s "${serviceName}" 2>/dev/null`, { timeout: 2000 });
+    execSync(
+      `/usr/bin/security add-generic-password -s "${serviceName}" -a "Claude Code" -w ${JSON.stringify(updated)} -U`,
+      { timeout: 2000 }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Persist refreshed credentials back to credential stores.
+ * Writes to both Keychain (macOS) and file fallback.
  */
 function writeBackCredentials(creds: OAuthCredentials): void {
+  // Write to Keychain first (macOS)
+  writeKeychainCredentials(creds);
+
+  // Also write to file store as fallback
   try {
     const credPath = join(getClaudeConfigDir(), '.credentials.json');
     if (!existsSync(credPath)) return;
@@ -644,10 +694,22 @@ export async function getUsage(): Promise<UsageResult> {
 
     // If we still have valid credentials, use Anthropic OAuth flow
     if (creds) {
-      const response = await fetchUsageFromApi(creds.accessToken);
-      if (!response) {
+      let response = await fetchUsageFromApi(creds.accessToken);
+
+      // The usage endpoint returns 429 for server-side invalidated sessions
+      // (not just genuine rate limits). Attempt a token refresh and retry once.
+      if (isRateLimited(response) && creds.refreshToken) {
+        const refreshed = await refreshAccessToken(creds.refreshToken);
+        if (refreshed) {
+          creds = { ...creds, ...refreshed };
+          writeBackCredentials(creds);
+          response = await fetchUsageFromApi(creds.accessToken);
+        }
+      }
+
+      if (!response || isRateLimited(response)) {
         writeCache(null, true, 'anthropic');
-        return { rateLimits: null, error: 'network' };
+        return { rateLimits: null, error: isRateLimited(response) ? 'rate_limited' : 'network' };
       }
 
       const usage = parseUsageResponse(response);

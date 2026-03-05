@@ -28,6 +28,7 @@ export declare function renderRateLimitsWithBar(limits: RateLimits | null, barWi
  *
  * - 'network': API timeout, HTTP error, or parse failure → [API err]
  * - 'auth': credentials expired, refresh failed → [API auth]
+ * - 'rate_limited': API returned 429 even after token refresh → [429]
  * - 'no_credentials': no OAuth credentials (expected for API key users) → null (no display)
  */
 export declare function renderRateLimitsError(result: UsageResult | null): string | null;
