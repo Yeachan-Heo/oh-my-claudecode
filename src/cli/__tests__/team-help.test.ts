@@ -11,8 +11,8 @@ describe('team cli help text surfaces', () => {
     expect(source).toContain('omc team [ralph] <N:agent-type>');
   });
 
-  it('index.ts help text includes team api/resume/shutdown', () => {
-    const source = readFileSync(join(__dirname, '..', 'index.ts'), 'utf-8');
+  it('team.ts help text includes team api/resume/shutdown', () => {
+    const source = readFileSync(join(__dirname, '..', 'team.ts'), 'utf-8');
     expect(source).toContain('omc team resume <team_name>');
     expect(source).toContain('omc team shutdown <team_name>');
     expect(source).toContain('omc team api <operation>');

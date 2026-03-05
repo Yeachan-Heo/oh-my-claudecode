@@ -352,7 +352,7 @@ async function main(): Promise<void> {
 
       try {
         await writePanesFile(jobId, runtime.workerPaneIds, runtime.leaderPaneId);
-      } catch {}
+      } catch { /* best-effort panes file write */ }
 
       process.stderr.write(
         `[runtime-cli/v2] phase=${snap.phase} pending=${snap.tasks.pending} in_progress=${snap.tasks.in_progress} completed=${snap.tasks.completed} failed=${snap.tasks.failed} dead=${snap.deadWorkers.length} totalMs=${snap.performance.total_ms}\n`,

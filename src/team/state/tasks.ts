@@ -188,7 +188,7 @@ export async function transitionTaskStatus(
   return lock.value;
 }
 
-interface ReleaseDeps extends ClaimTaskDeps {}
+type ReleaseDeps = ClaimTaskDeps;
 
 export async function releaseTaskClaim(
   taskId: string,

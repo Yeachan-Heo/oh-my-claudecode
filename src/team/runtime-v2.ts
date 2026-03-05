@@ -340,7 +340,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<string | null>
   if (!usePromptMode) {
     const paneReady = await waitForPaneReady(paneId);
     if (!paneReady) {
-      try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch {}
+      try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch { /* best-effort cleanup */ }
       return null;
     }
 
@@ -348,7 +348,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<string | null>
     if (opts.agentType === 'gemini') {
       const confirmed = await notifyPaneWithRetry(opts.sessionName, paneId, '1');
       if (!confirmed) {
-        try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch {}
+        try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch { /* best-effort cleanup */ }
         return null;
       }
       await new Promise(r => setTimeout(r, 800));
@@ -360,7 +360,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<string | null>
       `Read and execute your task from: ${relInboxPath}`,
     );
     if (!notified) {
-      try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch {}
+      try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch { /* best-effort cleanup */ }
       return null;
     }
   }
@@ -820,7 +820,7 @@ export async function shutdownTeamV2(
     try {
       const { killTeamSession } = await import('./tmux-session.js');
       await killTeamSession(`omc-team-${sanitized}`, [], undefined);
-    } catch {}
+    } catch { /* best-effort session cleanup */ }
     await cleanupTeamState(sanitized, cwd);
     return;
   }

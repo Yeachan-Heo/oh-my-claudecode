@@ -129,13 +129,13 @@ export async function scaleUp(
           if (w.pane_id) {
             execFileSync('tmux', ['kill-pane', '-t', w.pane_id], { stdio: 'pipe' });
           }
-        } catch {}
+        } catch { /* best-effort pane cleanup */ }
       }
 
       if (paneId) {
         try {
           execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'pipe' });
-        } catch {}
+        } catch { /* best-effort pane cleanup */ }
       }
 
       config.worker_count = config.workers.length;
@@ -197,7 +197,7 @@ export async function scaleUp(
         const pidStr = (pidResult.stdout || '').trim();
         const parsed = Number.parseInt(pidStr, 10);
         if (Number.isFinite(parsed)) panePid = parsed;
-      } catch {}
+      } catch { /* best-effort pid lookup */ }
 
       // Resolve per-worker role from assigned task roles
       const workerTaskRoles = tasks.filter(t => t.owner === workerName).map(t => t.role).filter(Boolean) as string[];
