@@ -153,7 +153,7 @@ export async function listTasks(teamName, cwd, deps) {
     const matched = entries.flatMap((entry) => {
         if (!entry.isFile())
             return [];
-        const match = /^task-(\d+)\.json$/.exec(entry.name);
+        const match = /^(?:task-)?(\d+)\.json$/.exec(entry.name);
         if (!match)
             return [];
         return [{ id: match[1], fileName: entry.name }];

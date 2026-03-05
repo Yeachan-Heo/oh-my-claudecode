@@ -58,6 +58,9 @@ import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
+const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+const WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
+const WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 
 const TEAM_TERMINAL_VALUES = new Set([
   "completed",
@@ -157,6 +160,27 @@ function getTeamStagePrompt(stage: string): string {
     default:
       return "Continue from the current Team stage and preserve staged workflow semantics.";
   }
+}
+
+function teamWorkerIdentityFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const omc = typeof env.OMC_TEAM_WORKER === "string" ? env.OMC_TEAM_WORKER.trim() : "";
+  if (omc) return omc;
+  const omx = typeof env.OMX_TEAM_WORKER === "string" ? env.OMX_TEAM_WORKER.trim() : "";
+  return omx;
+}
+
+function workerBashBlockReason(command: string): string | null {
+  if (!command.trim()) return null;
+  if (WORKER_BLOCKED_TMUX_PATTERN.test(command)) {
+    return "Team worker cannot run tmux pane/session orchestration commands.";
+  }
+  if (WORKER_BLOCKED_TEAM_CLI_PATTERN.test(command)) {
+    return "Team worker cannot run team orchestration commands. Use only `omc team api ... --json`.";
+  }
+  if (WORKER_BLOCKED_SKILL_PATTERN.test(command)) {
+    return "Team worker cannot invoke orchestration skills (`$team`, `$ultrawork`, `$autopilot`, `$ralph`).";
+  }
+  return null;
 }
 
 /**
@@ -867,6 +891,38 @@ export const _openclaw = {
  */
 function processPreToolUse(input: HookInput): HookOutput {
   const directory = resolveToWorktreeRoot(input.directory);
+  const teamWorkerIdentity = teamWorkerIdentityFromEnv();
+
+  if (teamWorkerIdentity) {
+    if (input.toolName === "Task") {
+      return {
+        continue: false,
+        reason: "team-worker-task-blocked",
+        message: `Worker ${teamWorkerIdentity} is not allowed to spawn/delegate Task tool calls. Execute directly in worker context.`,
+      };
+    }
+
+    if (input.toolName === "Skill") {
+      const skillName = getInvokedSkillName(input.toolInput) ?? "unknown";
+      return {
+        continue: false,
+        reason: "team-worker-skill-blocked",
+        message: `Worker ${teamWorkerIdentity} cannot invoke Skill(${skillName}) in team-worker mode.`,
+      };
+    }
+
+    if (input.toolName === "Bash") {
+      const command = (input.toolInput as { command?: string } | undefined)?.command ?? "";
+      const reason = workerBashBlockReason(command);
+      if (reason) {
+        return {
+          continue: false,
+          reason: "team-worker-bash-blocked",
+          message: `${reason}\nCommand blocked: ${command}`,
+        };
+      }
+    }
+  }
 
   // Check delegation enforcement FIRST
   const enforcementResult = processOrchestratorPreTool({

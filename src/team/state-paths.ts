@@ -9,7 +9,7 @@ import { join } from 'path';
  *     config.json
  *     shutdown.json
  *     tasks/
- *       {taskId}.json
+ *       task-{taskId}.json
  *     workers/
  *       {workerName}/
  *         heartbeat.json
@@ -19,8 +19,15 @@ import { join } from 'path';
  *         AGENTS.md       ← worker overlay
  *         shutdown-ack.json
  *     mailbox/
- *       {workerName}.jsonl
+ *       {workerName}.json
  */
+export function normalizeTaskFileStem(taskId: string): string {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, '');
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
+
 export const TeamPaths = {
   root: (teamName: string) =>
     `.omc/state/team/${teamName}`,
@@ -35,7 +42,7 @@ export const TeamPaths = {
     `.omc/state/team/${teamName}/tasks`,
 
   taskFile: (teamName: string, taskId: string) =>
-    `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+    `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
 
   workers: (teamName: string) =>
     `.omc/state/team/${teamName}/workers`,
@@ -62,7 +69,7 @@ export const TeamPaths = {
     `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
 
   mailbox: (teamName: string, workerName: string) =>
-    `.omc/state/team/${teamName}/mailbox/${workerName}.jsonl`,
+    `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
 
   mailboxLockDir: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
@@ -131,7 +138,7 @@ export function teamStateRoot(cwd: string, teamName: string): string {
  * Canonical task storage path builder.
  *
  * All task files live at:
- *   {cwd}/.omc/state/team/{teamName}/tasks/{taskId}.json
+ *   {cwd}/.omc/state/team/{teamName}/tasks/task-{taskId}.json
  *
  * When taskId is omitted, returns the tasks directory:
  *   {cwd}/.omc/state/team/{teamName}/tasks/

@@ -165,9 +165,10 @@ export async function listTasksFromFiles(teamName, cwd) {
     const entries = await readdir(tasksDir);
     const tasks = [];
     for (const entry of entries) {
-        if (!entry.endsWith('.json'))
+        const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
+        if (!match)
             continue;
-        const task = await readJsonSafe(absPath(cwd, TeamPaths.taskFile(teamName, entry.replace('.json', ''))));
+        const task = await readJsonSafe(absPath(cwd, `${TeamPaths.tasks(teamName)}/${entry}`));
         if (task)
             tasks.push(task);
     }

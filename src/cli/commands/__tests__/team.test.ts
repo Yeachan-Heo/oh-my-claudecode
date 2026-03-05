@@ -174,4 +174,17 @@ describe('teamCommand api operations', () => {
       console.log = originalLog;
     }
   });
+
+  it('blocks team start when running inside worker context', async () => {
+    const previousWorker = process.env.OMC_TEAM_WORKER;
+    try {
+      process.env.OMC_TEAM_WORKER = 'demo-team/worker-1';
+      const logs = await captureLog(() => teamCommand(['1:executor', 'do work']));
+      expect(logs[0]).toContain('omc team [N:agent-type]');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.env.OMC_TEAM_WORKER = previousWorker;
+      process.exitCode = 0;
+    }
+  });
 });

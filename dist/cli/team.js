@@ -27,6 +27,20 @@ Usage:
 Supported operations:
   ${Array.from(SUPPORTED_API_OPERATIONS).join(', ')}
 `.trim();
+function getTeamWorkerIdentityFromEnv(env = process.env) {
+    const omc = typeof env.OMC_TEAM_WORKER === 'string' ? env.OMC_TEAM_WORKER.trim() : '';
+    if (omc)
+        return omc;
+    const omx = typeof env.OMX_TEAM_WORKER === 'string' ? env.OMX_TEAM_WORKER.trim() : '';
+    return omx || null;
+}
+function assertTeamSpawnAllowed(env = process.env) {
+    const workerIdentity = getTeamWorkerIdentityFromEnv(env);
+    if (!workerIdentity)
+        return;
+    throw new Error(`Worker context (${workerIdentity}) cannot start/spawn new teams. ` +
+        `Use only "omc team api ..." operations from worker sessions.`);
+}
 function resolveJobsDir(env = process.env) {
     return env.OMC_JOBS_DIR || join(homedir(), '.omc', 'team-jobs');
 }
@@ -205,6 +219,7 @@ async function readTaskFiles(cwd, teamName) {
     return loaded.filter((v) => v !== null);
 }
 export async function startTeamJob(input) {
+    assertTeamSpawnAllowed();
     validateTeamName(input.teamName);
     if (!Array.isArray(input.agentTypes) || input.agentTypes.length === 0) {
         throw new Error('agentTypes must be a non-empty array');

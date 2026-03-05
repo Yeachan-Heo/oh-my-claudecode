@@ -930,6 +930,29 @@ function sanitizePromptContent(content, maxLength = 4e3) {
 }
 
 // src/team/worker-bootstrap.ts
+function agentTypeGuidance(agentType) {
+  switch (agentType) {
+    case "codex":
+      return [
+        "### Agent-Type Guidance (codex)",
+        "- Prefer short, explicit `omc team api ... --json` commands and parse outputs before next step.",
+        "- If a command fails, report the exact stderr to leader-fixed before retrying."
+      ].join("\n");
+    case "gemini":
+      return [
+        "### Agent-Type Guidance (gemini)",
+        "- Execute task work in small, verifiable increments and report each milestone to leader-fixed.",
+        "- Keep commit-sized changes scoped to assigned files only; no broad refactors."
+      ].join("\n");
+    case "claude":
+    default:
+      return [
+        "### Agent-Type Guidance (claude)",
+        "- Keep reasoning focused on assigned task IDs and send concise progress acks to leader-fixed.",
+        "- Before any risky command, send a blocker/proposal message to leader-fixed and wait for updated inbox instructions."
+      ].join("\n");
+  }
+}
 function generateWorkerOverlay(params) {
   const { teamName, workerName: workerName2, agentType, tasks, bootstrapInstructions } = params;
   const sanitizedTasks = tasks.map((t) => ({
@@ -946,6 +969,8 @@ function generateWorkerOverlay(params) {
   Description: ${t.description}
   Status: pending`).join("\n") : "- No tasks assigned yet. Check your inbox for assignments.";
   return `# Team Worker Protocol
+
+You are a **team worker**, not the team leader. Operate strictly within worker protocol.
 
 ## FIRST ACTION REQUIRED
 Before doing anything else, write your ready sentinel file:
@@ -965,7 +990,7 @@ ${taskList}
 ## Task Lifecycle Protocol (CLI API)
 Use the CLI API for all task lifecycle operations. Do NOT directly edit task files.
 
-1. Read your task file at \`${taskDir}/{taskId}.json\`
+1. Read your task file at \`${taskDir}/task-{taskId}.json\`
 2. Task id format: State/CLI APIs use task_id: "<id>" (example: "1"), not "task-1"
 3. Claim a task via CLI interop:
    \`omc team api claim-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName2}\\"}" --json\`
@@ -1007,10 +1032,16 @@ When you see a shutdown request in your inbox:
 3. Exit your session
 
 ## Rules
+- You are NOT the leader. Never run leader orchestration workflows.
 - Do NOT edit files outside the paths listed in your task description
 - Do NOT write lifecycle fields (status, owner, result, error) directly in task files; use CLI API
 - Do NOT spawn sub-agents. Complete work in this worker session only.
+- Do NOT create tmux panes/sessions (\`tmux split-window\`, \`tmux new-session\`, etc.).
+- Do NOT run team spawning/orchestration commands (for example: \`omc team ...\`, \`omx team ...\`, \`$team\`, \`$ultrawork\`, \`$autopilot\`, \`$ralph\`).
+- Worker-allowed control surface is only: \`omc team api ... --json\` (and equivalent \`omx team api ... --json\` where configured).
 - If blocked, write {"state": "blocked", "reason": "..."} to your status file
+
+${agentTypeGuidance(agentType)}
 
 ${bootstrapInstructions ? `## Additional Instructions
 ${bootstrapInstructions}
@@ -1094,12 +1125,18 @@ function validateResolvedPath(resolvedPath, expectedBase) {
 
 // src/team/state-paths.ts
 var import_path8 = require("path");
+function normalizeTaskFileStem(taskId) {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, "");
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
 var TeamPaths = {
   root: (teamName) => `.omc/state/team/${teamName}`,
   config: (teamName) => `.omc/state/team/${teamName}/config.json`,
   shutdown: (teamName) => `.omc/state/team/${teamName}/shutdown.json`,
   tasks: (teamName) => `.omc/state/team/${teamName}/tasks`,
-  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
   workers: (teamName) => `.omc/state/team/${teamName}/workers`,
   workerDir: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}`,
   heartbeat: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/heartbeat.json`,
@@ -1108,7 +1145,7 @@ var TeamPaths = {
   ready: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/.ready`,
   overlay: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`,
   shutdownAck: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/shutdown-ack.json`,
-  mailbox: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/${workerName2}.jsonl`,
+  mailbox: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/${workerName2}.json`,
   mailboxLockDir: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName2}`,
   dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
   dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
@@ -2952,8 +2989,9 @@ async function listTasksFromFiles(teamName, cwd) {
   const entries = await readdir2(tasksDir);
   const tasks = [];
   for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    const task = await readJsonSafe2(absPath(cwd, TeamPaths.taskFile(teamName, entry.replace(".json", ""))));
+    const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
+    if (!match) continue;
+    const task = await readJsonSafe2(absPath(cwd, `${TeamPaths.tasks(teamName)}/${entry}`));
     if (task) tasks.push(task);
   }
   return tasks.sort((a, b) => Number(a.id) - Number(b.id));

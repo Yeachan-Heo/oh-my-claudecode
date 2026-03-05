@@ -88,8 +88,25 @@ function workerDir(teamName: string, workerName: string, cwd: string): string {
   return absPath(cwd, TeamPaths.workerDir(teamName, workerName));
 }
 
-function taskFilePath(teamName: string, taskId: string, cwd: string): string {
-  return absPath(cwd, TeamPaths.taskFile(teamName, `task-${taskId}`));
+function normalizeTaskId(taskId: string): string {
+  const raw = String(taskId).trim();
+  return raw.startsWith('task-') ? raw.slice('task-'.length) : raw;
+}
+
+function canonicalTaskFilePath(teamName: string, taskId: string, cwd: string): string {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  return join(absPath(cwd, TeamPaths.tasks(teamName)), `task-${normalizedTaskId}.json`);
+}
+
+function legacyTaskFilePath(teamName: string, taskId: string, cwd: string): string {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  return join(absPath(cwd, TeamPaths.tasks(teamName)), `${normalizedTaskId}.json`);
+}
+
+function taskFileCandidates(teamName: string, taskId: string, cwd: string): string[] {
+  const canonical = canonicalTaskFilePath(teamName, taskId, cwd);
+  const legacy = legacyTaskFilePath(teamName, taskId, cwd);
+  return canonical === legacy ? [canonical] : [canonical, legacy];
 }
 
 async function writeAtomic(path: string, data: string): Promise<void> {
@@ -160,9 +177,18 @@ async function withTaskClaimLock<T>(teamName: string, taskId: string, cwd: strin
 
 async function withMailboxLock<T>(teamName: string, workerName: string, cwd: string, fn: () => Promise<T>): Promise<T> {
   const lockDir = absPath(cwd, TeamPaths.mailboxLockDir(teamName, workerName));
-  const result = await withLock(lockDir, fn);
-  if (!result.ok) throw new Error(`Failed to acquire mailbox lock for ${workerName}`);
-  return result.value;
+  const timeoutMs = 5_000;
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 20;
+
+  while (Date.now() < deadline) {
+    const result = await withLock(lockDir, fn);
+    if (result.ok) return result.value;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs * 2, 200);
+  }
+
+  throw new Error(`Failed to acquire mailbox lock for ${workerName} after ${timeoutMs}ms`);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,10 +322,12 @@ export async function teamCreateTask(
 }
 
 export async function teamReadTask(teamName: string, taskId: string, cwd: string): Promise<TeamTask | null> {
-  const p = join(absPath(cwd, TeamPaths.tasks(teamName)), `task-${taskId}.json`);
-  const task = await readJsonSafe<TeamTask>(p);
-  if (!task || !isTeamTask(task)) return null;
-  return normalizeTask(task);
+  for (const candidate of taskFileCandidates(teamName, taskId, cwd)) {
+    const task = await readJsonSafe<TeamTask>(candidate);
+    if (!task || !isTeamTask(task)) continue;
+    return normalizeTask(task);
+  }
+  return null;
 }
 
 export async function teamListTasks(teamName: string, cwd: string): Promise<TeamTask[]> {
@@ -327,7 +355,7 @@ export async function teamUpdateTask(
     version: Math.max(1, existing.version ?? 1) + 1,
   };
 
-  const p = join(absPath(cwd, TeamPaths.tasks(teamName)), `task-${taskId}.json`);
+  const p = canonicalTaskFilePath(teamName, taskId, cwd);
   await writeAtomic(p, JSON.stringify(merged, null, 2));
   return merged;
 }
@@ -347,7 +375,7 @@ export async function teamClaimTask(
     withTaskClaimLock,
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
-    taskFilePath: (tn: string, tid: string, c: string) => join(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
   });
 }
@@ -369,7 +397,7 @@ export async function teamTransitionTaskStatus(
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
     canTransitionTaskStatus: canTransitionTeamTaskStatus,
-    taskFilePath: (tn: string, tid: string, c: string) => join(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
     appendTeamEvent: teamAppendEvent,
     readMonitorSnapshot: teamReadMonitorSnapshot,
@@ -392,7 +420,7 @@ export async function teamReleaseTaskClaim(
     withTaskClaimLock,
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
-    taskFilePath: (tn: string, tid: string, c: string) => join(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
   });
 }
@@ -401,11 +429,69 @@ export async function teamReleaseTaskClaim(
 // Messaging
 // ---------------------------------------------------------------------------
 
+function normalizeLegacyMailboxMessage(raw: Record<string, unknown>): TeamMailboxMessage | null {
+  if (raw.type === 'notified') return null;
+  const messageId = typeof raw.message_id === 'string' && raw.message_id.trim() !== ''
+    ? raw.message_id
+    : (typeof raw.id === 'string' && raw.id.trim() !== '' ? raw.id : '');
+  const fromWorker = typeof raw.from_worker === 'string' && raw.from_worker.trim() !== ''
+    ? raw.from_worker
+    : (typeof raw.from === 'string' ? raw.from : '');
+  const toWorker = typeof raw.to_worker === 'string' && raw.to_worker.trim() !== ''
+    ? raw.to_worker
+    : (typeof raw.to === 'string' ? raw.to : '');
+  const body = typeof raw.body === 'string' ? raw.body : '';
+  const createdAt = typeof raw.created_at === 'string' && raw.created_at.trim() !== ''
+    ? raw.created_at
+    : (typeof raw.createdAt === 'string' ? raw.createdAt : '');
+
+  if (!messageId || !fromWorker || !toWorker || !body || !createdAt) return null;
+  return {
+    message_id: messageId,
+    from_worker: fromWorker,
+    to_worker: toWorker,
+    body,
+    created_at: createdAt,
+    ...(typeof raw.notified_at === 'string' ? { notified_at: raw.notified_at } : {}),
+    ...(typeof raw.notifiedAt === 'string' ? { notified_at: raw.notifiedAt } : {}),
+    ...(typeof raw.delivered_at === 'string' ? { delivered_at: raw.delivered_at } : {}),
+    ...(typeof raw.deliveredAt === 'string' ? { delivered_at: raw.deliveredAt } : {}),
+  };
+}
+
+async function readLegacyMailboxJsonl(teamName: string, workerName: string, cwd: string): Promise<TeamMailbox> {
+  const legacyPath = absPath(cwd, TeamPaths.mailbox(teamName, workerName).replace(/\.json$/i, '.jsonl'));
+  if (!existsSync(legacyPath)) return { worker: workerName, messages: [] };
+
+  try {
+    const raw = await readFile(legacyPath, 'utf8');
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+    const byMessageId = new Map<string, TeamMailboxMessage>();
+    for (const line of lines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== 'object') continue;
+      const normalized = normalizeLegacyMailboxMessage(parsed as Record<string, unknown>);
+      if (!normalized) continue;
+      byMessageId.set(normalized.message_id, normalized);
+    }
+    return { worker: workerName, messages: [...byMessageId.values()] };
+  } catch {
+    return { worker: workerName, messages: [] };
+  }
+}
+
 async function readMailbox(teamName: string, workerName: string, cwd: string): Promise<TeamMailbox> {
   const p = absPath(cwd, TeamPaths.mailbox(teamName, workerName));
   const mailbox = await readJsonSafe<TeamMailbox>(p);
-  if (!mailbox || !Array.isArray(mailbox.messages)) return { worker: workerName, messages: [] };
-  return { worker: workerName, messages: mailbox.messages };
+  if (mailbox && Array.isArray(mailbox.messages)) {
+    return { worker: workerName, messages: mailbox.messages };
+  }
+  return readLegacyMailboxJsonl(teamName, workerName, cwd);
 }
 
 async function writeMailbox(teamName: string, workerName: string, mailbox: TeamMailbox, cwd: string): Promise<void> {

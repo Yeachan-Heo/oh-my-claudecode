@@ -435,14 +435,56 @@ async function defaultInjector(request: DispatchRequest, config: TeamConfig, cwd
 async function updateMailboxNotified(stateDir: string, teamName: string, workerName: string, messageId: string): Promise<boolean> {
   const teamDirPath = join(stateDir, 'team', teamName);
   const mailboxPath = join(teamDirPath, 'mailbox', `${workerName}.json`);
+  const legacyMailboxPath = join(teamDirPath, 'mailbox', `${workerName}.jsonl`);
   return await withMailboxLock(teamDirPath, workerName, async () => {
-    const mailbox = await readJson<{ worker: string; messages: Array<Record<string, unknown>> }>(mailboxPath, { worker: workerName, messages: [] });
-    if (!mailbox || !Array.isArray(mailbox.messages)) return false;
-    const msg = mailbox.messages.find((c) => c?.message_id === messageId);
-    if (!msg) return false;
-    if (!msg.notified_at) msg.notified_at = new Date().toISOString();
-    await writeJsonAtomic(mailboxPath, mailbox);
-    return true;
+    const canonical = await readJson<{ worker: string; messages: Array<Record<string, unknown>> }>(mailboxPath, { worker: workerName, messages: [] });
+    if (canonical && Array.isArray(canonical.messages)) {
+      const msg = canonical.messages.find((c) => c?.message_id === messageId);
+      if (msg) {
+        if (!msg.notified_at) msg.notified_at = new Date().toISOString();
+        await writeJsonAtomic(mailboxPath, canonical);
+        return true;
+      }
+    }
+
+    // Legacy fallback: mailbox/*.jsonl
+    if (!existsSync(legacyMailboxPath)) return false;
+    try {
+      const raw = await readFile(legacyMailboxPath, 'utf8');
+      const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+      const messagesById = new Map<string, Record<string, unknown>>();
+      for (const line of lines) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== 'object') continue;
+        const candidate = parsed as Record<string, unknown>;
+        const id = safeString(candidate.message_id || candidate.id).trim();
+        if (!id) continue;
+        messagesById.set(id, candidate);
+      }
+      const message = messagesById.get(messageId);
+      if (!message) return false;
+      if (!message.notified_at) {
+        message.notified_at = new Date().toISOString();
+      }
+      const normalizedMessages = [...messagesById.values()].map((candidate) => ({
+        message_id: safeString(candidate.message_id || candidate.id),
+        from_worker: safeString(candidate.from_worker || candidate.from),
+        to_worker: safeString(candidate.to_worker || candidate.to),
+        body: safeString(candidate.body),
+        created_at: safeString(candidate.created_at || candidate.createdAt),
+        ...(safeString(candidate.notified_at || candidate.notifiedAt) ? { notified_at: safeString(candidate.notified_at || candidate.notifiedAt) } : {}),
+        ...(safeString(candidate.delivered_at || candidate.deliveredAt) ? { delivered_at: safeString(candidate.delivered_at || candidate.deliveredAt) } : {}),
+      }));
+      await writeJsonAtomic(mailboxPath, { worker: workerName, messages: normalizedMessages });
+      return true;
+    } catch {
+      return false;
+    }
   });
 }
 

@@ -12,6 +12,30 @@ export interface WorkerBootstrapParams {
   cwd: string;
 }
 
+function agentTypeGuidance(agentType: CliAgentType): string {
+  switch (agentType) {
+    case 'codex':
+      return [
+        '### Agent-Type Guidance (codex)',
+        '- Prefer short, explicit `omc team api ... --json` commands and parse outputs before next step.',
+        '- If a command fails, report the exact stderr to leader-fixed before retrying.',
+      ].join('\n');
+    case 'gemini':
+      return [
+        '### Agent-Type Guidance (gemini)',
+        '- Execute task work in small, verifiable increments and report each milestone to leader-fixed.',
+        '- Keep commit-sized changes scoped to assigned files only; no broad refactors.',
+      ].join('\n');
+    case 'claude':
+    default:
+      return [
+        '### Agent-Type Guidance (claude)',
+        '- Keep reasoning focused on assigned task IDs and send concise progress acks to leader-fixed.',
+        '- Before any risky command, send a blocker/proposal message to leader-fixed and wait for updated inbox instructions.',
+      ].join('\n');
+  }
+}
+
 /**
  * Generate the worker overlay markdown.
  * This is injected as AGENTS.md content for the worker agent.
@@ -40,6 +64,8 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
 
   return `# Team Worker Protocol
 
+You are a **team worker**, not the team leader. Operate strictly within worker protocol.
+
 ## FIRST ACTION REQUIRED
 Before doing anything else, write your ready sentinel file:
 \`\`\`bash
@@ -58,7 +84,7 @@ ${taskList}
 ## Task Lifecycle Protocol (CLI API)
 Use the CLI API for all task lifecycle operations. Do NOT directly edit task files.
 
-1. Read your task file at \`${taskDir}/{taskId}.json\`
+1. Read your task file at \`${taskDir}/task-{taskId}.json\`
 2. Task id format: State/CLI APIs use task_id: "<id>" (example: "1"), not "task-1"
 3. Claim a task via CLI interop:
    \`omc team api claim-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName}\\"}" --json\`
@@ -100,10 +126,16 @@ When you see a shutdown request in your inbox:
 3. Exit your session
 
 ## Rules
+- You are NOT the leader. Never run leader orchestration workflows.
 - Do NOT edit files outside the paths listed in your task description
 - Do NOT write lifecycle fields (status, owner, result, error) directly in task files; use CLI API
 - Do NOT spawn sub-agents. Complete work in this worker session only.
+- Do NOT create tmux panes/sessions (\`tmux split-window\`, \`tmux new-session\`, etc.).
+- Do NOT run team spawning/orchestration commands (for example: \`omc team ...\`, \`omx team ...\`, \`$team\`, \`$ultrawork\`, \`$autopilot\`, \`$ralph\`).
+- Worker-allowed control surface is only: \`omc team api ... --json\` (and equivalent \`omx team api ... --json\` where configured).
 - If blocked, write {"state": "blocked", "reason": "..."} to your status file
+
+${agentTypeGuidance(agentType)}
 
 ${bootstrapInstructions ? `## Additional Instructions\n${bootstrapInstructions}\n` : ''}`;
 }

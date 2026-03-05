@@ -154,12 +154,18 @@ function killSession(teamName, workerName) {
 
 // src/team/state-paths.ts
 var import_path4 = require("path");
+function normalizeTaskFileStem(taskId) {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, "");
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
 var TeamPaths = {
   root: (teamName) => `.omc/state/team/${teamName}`,
   config: (teamName) => `.omc/state/team/${teamName}/config.json`,
   shutdown: (teamName) => `.omc/state/team/${teamName}/shutdown.json`,
   tasks: (teamName) => `.omc/state/team/${teamName}/tasks`,
-  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
   workers: (teamName) => `.omc/state/team/${teamName}/workers`,
   workerDir: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}`,
   heartbeat: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/heartbeat.json`,
@@ -168,7 +174,7 @@ var TeamPaths = {
   ready: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/.ready`,
   overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
   shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
-  mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.jsonl`,
+  mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
   mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
   dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
   dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,

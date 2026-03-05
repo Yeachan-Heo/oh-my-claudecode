@@ -94,6 +94,20 @@ function slugifyTask(task) {
         .replace(/^-|-$/g, '')
         .slice(0, 30) || 'team-task';
 }
+function getTeamWorkerIdentityFromEnv(env = process.env) {
+    const omc = typeof env.OMC_TEAM_WORKER === 'string' ? env.OMC_TEAM_WORKER.trim() : '';
+    if (omc)
+        return omc;
+    const omx = typeof env.OMX_TEAM_WORKER === 'string' ? env.OMX_TEAM_WORKER.trim() : '';
+    return omx || null;
+}
+function assertTeamSpawnAllowed(env = process.env) {
+    const workerIdentity = getTeamWorkerIdentityFromEnv(env);
+    if (!workerIdentity)
+        return;
+    throw new Error(`Worker context (${workerIdentity}) cannot start/spawn new teams. ` +
+        `Use only "omc team api ..." operations from worker sessions.`);
+}
 function parseTeamArgs(tokens) {
     const args = [...tokens];
     let workerCount = 3;
@@ -247,6 +261,7 @@ function parseTeamApiArgs(args) {
 // Team start (spawns tmux workers)
 // ---------------------------------------------------------------------------
 async function handleTeamStart(parsed, cwd) {
+    assertTeamSpawnAllowed();
     // Create tasks from the task description (one per worker, like OMX)
     const tasks = [];
     for (let i = 0; i < parsed.workerCount; i++) {

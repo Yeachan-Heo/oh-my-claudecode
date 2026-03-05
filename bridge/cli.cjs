@@ -20381,6 +20381,12 @@ var init_usage_api = __esm({
 });
 
 // src/team/state-paths.ts
+function normalizeTaskFileStem(taskId) {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, "");
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
 function absPath(cwd2, relativePath) {
   return (0, import_path85.join)(cwd2, relativePath);
 }
@@ -20403,7 +20409,7 @@ var init_state_paths = __esm({
       config: (teamName) => `.omc/state/team/${teamName}/config.json`,
       shutdown: (teamName) => `.omc/state/team/${teamName}/shutdown.json`,
       tasks: (teamName) => `.omc/state/team/${teamName}/tasks`,
-      taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+      taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
       workers: (teamName) => `.omc/state/team/${teamName}/workers`,
       workerDir: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}`,
       heartbeat: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/heartbeat.json`,
@@ -20412,7 +20418,7 @@ var init_state_paths = __esm({
       ready: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/.ready`,
       overlay: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/AGENTS.md`,
       shutdownAck: (teamName, workerName2) => `.omc/state/team/${teamName}/workers/${workerName2}/shutdown-ack.json`,
-      mailbox: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/${workerName2}.jsonl`,
+      mailbox: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/${workerName2}.json`,
       mailboxLockDir: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName2}`,
       dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
       dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
@@ -20519,8 +20525,9 @@ async function listTasksFromFiles(teamName, cwd2) {
   const entries = await readdir7(tasksDir);
   const tasks = [];
   for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    const task = await readJsonSafe2(absPath(cwd2, TeamPaths.taskFile(teamName, entry.replace(".json", ""))));
+    const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
+    if (!match) continue;
+    const task = await readJsonSafe2(absPath(cwd2, `${TeamPaths.tasks(teamName)}/${entry}`));
     if (task) tasks.push(task);
   }
   return tasks.sort((a, b) => Number(a.id) - Number(b.id));
@@ -21476,6 +21483,29 @@ var init_tmux_session = __esm({
 });
 
 // src/team/worker-bootstrap.ts
+function agentTypeGuidance(agentType) {
+  switch (agentType) {
+    case "codex":
+      return [
+        "### Agent-Type Guidance (codex)",
+        "- Prefer short, explicit `omc team api ... --json` commands and parse outputs before next step.",
+        "- If a command fails, report the exact stderr to leader-fixed before retrying."
+      ].join("\n");
+    case "gemini":
+      return [
+        "### Agent-Type Guidance (gemini)",
+        "- Execute task work in small, verifiable increments and report each milestone to leader-fixed.",
+        "- Keep commit-sized changes scoped to assigned files only; no broad refactors."
+      ].join("\n");
+    case "claude":
+    default:
+      return [
+        "### Agent-Type Guidance (claude)",
+        "- Keep reasoning focused on assigned task IDs and send concise progress acks to leader-fixed.",
+        "- Before any risky command, send a blocker/proposal message to leader-fixed and wait for updated inbox instructions."
+      ].join("\n");
+  }
+}
 function generateWorkerOverlay(params) {
   const { teamName, workerName: workerName2, agentType, tasks, bootstrapInstructions } = params;
   const sanitizedTasks = tasks.map((t) => ({
@@ -21492,6 +21522,8 @@ function generateWorkerOverlay(params) {
   Description: ${t.description}
   Status: pending`).join("\n") : "- No tasks assigned yet. Check your inbox for assignments.";
   return `# Team Worker Protocol
+
+You are a **team worker**, not the team leader. Operate strictly within worker protocol.
 
 ## FIRST ACTION REQUIRED
 Before doing anything else, write your ready sentinel file:
@@ -21511,7 +21543,7 @@ ${taskList}
 ## Task Lifecycle Protocol (CLI API)
 Use the CLI API for all task lifecycle operations. Do NOT directly edit task files.
 
-1. Read your task file at \`${taskDir}/{taskId}.json\`
+1. Read your task file at \`${taskDir}/task-{taskId}.json\`
 2. Task id format: State/CLI APIs use task_id: "<id>" (example: "1"), not "task-1"
 3. Claim a task via CLI interop:
    \`omc team api claim-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName2}\\"}" --json\`
@@ -21553,10 +21585,16 @@ When you see a shutdown request in your inbox:
 3. Exit your session
 
 ## Rules
+- You are NOT the leader. Never run leader orchestration workflows.
 - Do NOT edit files outside the paths listed in your task description
 - Do NOT write lifecycle fields (status, owner, result, error) directly in task files; use CLI API
 - Do NOT spawn sub-agents. Complete work in this worker session only.
+- Do NOT create tmux panes/sessions (\`tmux split-window\`, \`tmux new-session\`, etc.).
+- Do NOT run team spawning/orchestration commands (for example: \`omc team ...\`, \`omx team ...\`, \`$team\`, \`$ultrawork\`, \`$autopilot\`, \`$ralph\`).
+- Worker-allowed control surface is only: \`omc team api ... --json\` (and equivalent \`omx team api ... --json\` where configured).
 - If blocked, write {"state": "blocked", "reason": "..."} to your status file
+
+${agentTypeGuidance(agentType)}
 
 ${bootstrapInstructions ? `## Additional Instructions
 ${bootstrapInstructions}
@@ -58765,6 +58803,9 @@ init_session_replay();
 init_prompt_helpers();
 var PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 var PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
+var WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+var WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
+var WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 var TEAM_TERMINAL_VALUES = /* @__PURE__ */ new Set([
   "completed",
   "complete",
@@ -58828,6 +58869,25 @@ function getTeamStagePrompt(stage) {
     default:
       return "Continue from the current Team stage and preserve staged workflow semantics.";
   }
+}
+function teamWorkerIdentityFromEnv(env2 = process.env) {
+  const omc = typeof env2.OMC_TEAM_WORKER === "string" ? env2.OMC_TEAM_WORKER.trim() : "";
+  if (omc) return omc;
+  const omx = typeof env2.OMX_TEAM_WORKER === "string" ? env2.OMX_TEAM_WORKER.trim() : "";
+  return omx;
+}
+function workerBashBlockReason(command) {
+  if (!command.trim()) return null;
+  if (WORKER_BLOCKED_TMUX_PATTERN.test(command)) {
+    return "Team worker cannot run tmux pane/session orchestration commands.";
+  }
+  if (WORKER_BLOCKED_TEAM_CLI_PATTERN.test(command)) {
+    return "Team worker cannot run team orchestration commands. Use only `omc team api ... --json`.";
+  }
+  if (WORKER_BLOCKED_SKILL_PATTERN.test(command)) {
+    return "Team worker cannot invoke orchestration skills (`$team`, `$ultrawork`, `$autopilot`, `$ralph`).";
+  }
+  return null;
 }
 function requiredKeysForHook(hookType) {
   switch (hookType) {
@@ -59293,6 +59353,36 @@ var _openclaw = {
 };
 function processPreToolUse(input) {
   const directory = resolveToWorktreeRoot(input.directory);
+  const teamWorkerIdentity = teamWorkerIdentityFromEnv();
+  if (teamWorkerIdentity) {
+    if (input.toolName === "Task") {
+      return {
+        continue: false,
+        reason: "team-worker-task-blocked",
+        message: `Worker ${teamWorkerIdentity} is not allowed to spawn/delegate Task tool calls. Execute directly in worker context.`
+      };
+    }
+    if (input.toolName === "Skill") {
+      const skillName = getInvokedSkillName(input.toolInput) ?? "unknown";
+      return {
+        continue: false,
+        reason: "team-worker-skill-blocked",
+        message: `Worker ${teamWorkerIdentity} cannot invoke Skill(${skillName}) in team-worker mode.`
+      };
+    }
+    if (input.toolName === "Bash") {
+      const command = input.toolInput?.command ?? "";
+      const reason = workerBashBlockReason(command);
+      if (reason) {
+        return {
+          continue: false,
+          reason: "team-worker-bash-blocked",
+          message: `${reason}
+Command blocked: ${command}`
+        };
+      }
+    }
+  }
   const enforcementResult = processOrchestratorPreTool({
     toolName: input.toolName || "",
     toolInput: input.toolInput || {},
@@ -61640,7 +61730,7 @@ async function listTasks(teamName, cwd2, deps) {
   const entries = await (0, import_promises6.readdir)(tasksRoot, { withFileTypes: true });
   const matched = entries.flatMap((entry) => {
     if (!entry.isFile()) return [];
-    const match = /^task-(\d+)\.json$/.exec(entry.name);
+    const match = /^(?:task-)?(\d+)\.json$/.exec(entry.name);
     if (!match) return [];
     return [{ id: match[1], fileName: entry.name }];
   });
@@ -61669,6 +61759,23 @@ async function listTasks(teamName, cwd2, deps) {
 // src/team/team-ops.ts
 function teamDir2(teamName, cwd2) {
   return absPath(cwd2, TeamPaths.root(teamName));
+}
+function normalizeTaskId(taskId) {
+  const raw = String(taskId).trim();
+  return raw.startsWith("task-") ? raw.slice("task-".length) : raw;
+}
+function canonicalTaskFilePath(teamName, taskId, cwd2) {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  return (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `task-${normalizedTaskId}.json`);
+}
+function legacyTaskFilePath(teamName, taskId, cwd2) {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  return (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `${normalizedTaskId}.json`);
+}
+function taskFileCandidates(teamName, taskId, cwd2) {
+  const canonical = canonicalTaskFilePath(teamName, taskId, cwd2);
+  const legacy = legacyTaskFilePath(teamName, taskId, cwd2);
+  return canonical === legacy ? [canonical] : [canonical, legacy];
 }
 async function writeAtomic(path20, data) {
   const tmp = `${path20}.${process.pid}.tmp`;
@@ -61734,9 +61841,16 @@ async function withTaskClaimLock(teamName, taskId, cwd2, fn) {
 }
 async function withMailboxLock(teamName, workerName2, cwd2, fn) {
   const lockDir = absPath(cwd2, TeamPaths.mailboxLockDir(teamName, workerName2));
-  const result = await withLock(lockDir, fn);
-  if (!result.ok) throw new Error(`Failed to acquire mailbox lock for ${workerName2}`);
-  return result.value;
+  const timeoutMs = 5e3;
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 20;
+  while (Date.now() < deadline) {
+    const result = await withLock(lockDir, fn);
+    if (result.ok) return result.value;
+    await new Promise((resolve11) => setTimeout(resolve11, delayMs));
+    delayMs = Math.min(delayMs * 2, 200);
+  }
+  throw new Error(`Failed to acquire mailbox lock for ${workerName2} after ${timeoutMs}ms`);
 }
 async function teamReadConfig(teamName, cwd2) {
   const manifest = await teamReadManifest(teamName, cwd2);
@@ -61814,10 +61928,12 @@ async function teamCreateTask(teamName, task, cwd2) {
   return created;
 }
 async function teamReadTask(teamName, taskId, cwd2) {
-  const p = (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `task-${taskId}.json`);
-  const task = await readJsonSafe(p);
-  if (!task || !isTeamTask(task)) return null;
-  return normalizeTask(task);
+  for (const candidate of taskFileCandidates(teamName, taskId, cwd2)) {
+    const task = await readJsonSafe(candidate);
+    if (!task || !isTeamTask(task)) continue;
+    return normalizeTask(task);
+  }
+  return null;
 }
 async function teamListTasks(teamName, cwd2) {
   return listTasks(teamName, cwd2, {
@@ -61836,7 +61952,7 @@ async function teamUpdateTask(teamName, taskId, updates, cwd2) {
     created_at: existing.created_at,
     version: Math.max(1, existing.version ?? 1) + 1
   };
-  const p = (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `task-${taskId}.json`);
+  const p = canonicalTaskFilePath(teamName, taskId, cwd2);
   await writeAtomic(p, JSON.stringify(merged, null, 2));
   return merged;
 }
@@ -61849,7 +61965,7 @@ async function teamClaimTask(teamName, taskId, workerName2, expectedVersion, cwd
     withTaskClaimLock,
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
-    taskFilePath: (tn, tid, c) => (0, import_node_path5.join)(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn, tid, c) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic
   });
 }
@@ -61863,7 +61979,7 @@ async function teamTransitionTaskStatus(teamName, taskId, from, to, claimToken, 
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
     canTransitionTaskStatus: canTransitionTeamTaskStatus,
-    taskFilePath: (tn, tid, c) => (0, import_node_path5.join)(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn, tid, c) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
     appendTeamEvent: teamAppendEvent,
     readMonitorSnapshot: teamReadMonitorSnapshot,
@@ -61879,15 +61995,61 @@ async function teamReleaseTaskClaim(teamName, taskId, claimToken, workerName2, c
     withTaskClaimLock,
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
-    taskFilePath: (tn, tid, c) => (0, import_node_path5.join)(absPath(c, TeamPaths.tasks(tn)), `task-${tid}.json`),
+    taskFilePath: (tn, tid, c) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic
   });
+}
+function normalizeLegacyMailboxMessage(raw) {
+  if (raw.type === "notified") return null;
+  const messageId = typeof raw.message_id === "string" && raw.message_id.trim() !== "" ? raw.message_id : typeof raw.id === "string" && raw.id.trim() !== "" ? raw.id : "";
+  const fromWorker = typeof raw.from_worker === "string" && raw.from_worker.trim() !== "" ? raw.from_worker : typeof raw.from === "string" ? raw.from : "";
+  const toWorker = typeof raw.to_worker === "string" && raw.to_worker.trim() !== "" ? raw.to_worker : typeof raw.to === "string" ? raw.to : "";
+  const body = typeof raw.body === "string" ? raw.body : "";
+  const createdAt = typeof raw.created_at === "string" && raw.created_at.trim() !== "" ? raw.created_at : typeof raw.createdAt === "string" ? raw.createdAt : "";
+  if (!messageId || !fromWorker || !toWorker || !body || !createdAt) return null;
+  return {
+    message_id: messageId,
+    from_worker: fromWorker,
+    to_worker: toWorker,
+    body,
+    created_at: createdAt,
+    ...typeof raw.notified_at === "string" ? { notified_at: raw.notified_at } : {},
+    ...typeof raw.notifiedAt === "string" ? { notified_at: raw.notifiedAt } : {},
+    ...typeof raw.delivered_at === "string" ? { delivered_at: raw.delivered_at } : {},
+    ...typeof raw.deliveredAt === "string" ? { delivered_at: raw.deliveredAt } : {}
+  };
+}
+async function readLegacyMailboxJsonl(teamName, workerName2, cwd2) {
+  const legacyPath = absPath(cwd2, TeamPaths.mailbox(teamName, workerName2).replace(/\.json$/i, ".jsonl"));
+  if (!(0, import_node_fs2.existsSync)(legacyPath)) return { worker: workerName2, messages: [] };
+  try {
+    const raw = await (0, import_promises7.readFile)(legacyPath, "utf8");
+    const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+    const byMessageId = /* @__PURE__ */ new Map();
+    for (const line of lines) {
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      const normalized = normalizeLegacyMailboxMessage(parsed);
+      if (!normalized) continue;
+      byMessageId.set(normalized.message_id, normalized);
+    }
+    return { worker: workerName2, messages: [...byMessageId.values()] };
+  } catch {
+    return { worker: workerName2, messages: [] };
+  }
 }
 async function readMailbox(teamName, workerName2, cwd2) {
   const p = absPath(cwd2, TeamPaths.mailbox(teamName, workerName2));
   const mailbox = await readJsonSafe(p);
-  if (!mailbox || !Array.isArray(mailbox.messages)) return { worker: workerName2, messages: [] };
-  return { worker: workerName2, messages: mailbox.messages };
+  if (mailbox && Array.isArray(mailbox.messages)) {
+    return { worker: workerName2, messages: mailbox.messages };
+  }
+  return readLegacyMailboxJsonl(teamName, workerName2, cwd2);
 }
 async function writeMailbox(teamName, workerName2, mailbox, cwd2) {
   const p = absPath(cwd2, TeamPaths.mailbox(teamName, workerName2));
@@ -62651,6 +62813,19 @@ var TEAM_API_OPERATION_NOTES = {
 function slugifyTask(task) {
   return task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "team-task";
 }
+function getTeamWorkerIdentityFromEnv(env2 = process.env) {
+  const omc = typeof env2.OMC_TEAM_WORKER === "string" ? env2.OMC_TEAM_WORKER.trim() : "";
+  if (omc) return omc;
+  const omx = typeof env2.OMX_TEAM_WORKER === "string" ? env2.OMX_TEAM_WORKER.trim() : "";
+  return omx || null;
+}
+function assertTeamSpawnAllowed(env2 = process.env) {
+  const workerIdentity = getTeamWorkerIdentityFromEnv(env2);
+  if (!workerIdentity) return;
+  throw new Error(
+    `Worker context (${workerIdentity}) cannot start/spawn new teams. Use only "omc team api ..." operations from worker sessions.`
+  );
+}
 function parseTeamArgs(tokens) {
   const args = [...tokens];
   let workerCount = 3;
@@ -62824,6 +62999,7 @@ Supported operations: ${TEAM_API_OPERATIONS.join(", ")}`);
   return { operation, input, json };
 }
 async function handleTeamStart(parsed, cwd2) {
+  assertTeamSpawnAllowed();
   const tasks = [];
   for (let i = 0; i < parsed.workerCount; i++) {
     tasks.push({

@@ -52,6 +52,19 @@ describe('worker-bootstrap', () => {
       expect(overlay).toContain('Additional Instructions');
       expect(overlay).toContain('Focus on TypeScript');
     });
+
+    it('includes explicit worker-not-leader prohibitions', () => {
+      const overlay = generateWorkerOverlay(baseParams);
+      expect(overlay).toContain('You are a **team worker**, not the team leader');
+      expect(overlay).toContain('Do NOT create tmux panes/sessions');
+      expect(overlay).toContain('Do NOT run team spawning/orchestration commands');
+    });
+
+    it('injects agent-type-specific guidance section', () => {
+      const geminiOverlay = generateWorkerOverlay({ ...baseParams, agentType: 'gemini' });
+      expect(geminiOverlay).toContain('Agent-Type Guidance (gemini)');
+      expect(geminiOverlay).toContain('milestone');
+    });
   });
 
   describe('getWorkerEnv', () => {

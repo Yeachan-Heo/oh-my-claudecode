@@ -1,6 +1,100 @@
-import { mkdir, appendFile } from 'fs/promises';
+import { mkdir, appendFile, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { sendToWorker } from './tmux-session.js';
+import { TeamPaths, absPath } from './state-paths.js';
+
+interface MailboxMessage {
+  message_id: string;
+  from_worker: string;
+  to_worker: string;
+  body: string;
+  created_at: string;
+  notified_at?: string;
+  delivered_at?: string;
+}
+
+interface MailboxFile {
+  worker: string;
+  messages: MailboxMessage[];
+}
+
+function mailboxPath(teamName: string, workerName: string, cwd: string): string {
+  return absPath(cwd, TeamPaths.mailbox(teamName, workerName));
+}
+
+function legacyMailboxPath(teamName: string, workerName: string, cwd: string): string {
+  return mailboxPath(teamName, workerName, cwd).replace(/\.json$/i, '.jsonl');
+}
+
+function normalizeLegacyMessage(raw: Record<string, unknown>): MailboxMessage | null {
+  if (raw.type === 'notified') return null;
+  const messageId = typeof raw.message_id === 'string' && raw.message_id.trim() !== ''
+    ? raw.message_id
+    : (typeof raw.id === 'string' && raw.id.trim() !== '' ? raw.id : '');
+  const fromWorker = typeof raw.from_worker === 'string' && raw.from_worker.trim() !== ''
+    ? raw.from_worker
+    : (typeof raw.from === 'string' ? raw.from : '');
+  const toWorker = typeof raw.to_worker === 'string' && raw.to_worker.trim() !== ''
+    ? raw.to_worker
+    : (typeof raw.to === 'string' ? raw.to : '');
+  const body = typeof raw.body === 'string' ? raw.body : '';
+  const createdAt = typeof raw.created_at === 'string' && raw.created_at.trim() !== ''
+    ? raw.created_at
+    : (typeof raw.createdAt === 'string' ? raw.createdAt : '');
+  if (!messageId || !fromWorker || !toWorker || !body || !createdAt) return null;
+  return {
+    message_id: messageId,
+    from_worker: fromWorker,
+    to_worker: toWorker,
+    body,
+    created_at: createdAt,
+    ...(typeof raw.notified_at === 'string' ? { notified_at: raw.notified_at } : {}),
+    ...(typeof raw.notifiedAt === 'string' ? { notified_at: raw.notifiedAt } : {}),
+    ...(typeof raw.delivered_at === 'string' ? { delivered_at: raw.delivered_at } : {}),
+    ...(typeof raw.deliveredAt === 'string' ? { delivered_at: raw.deliveredAt } : {}),
+  };
+}
+
+async function readMailboxFile(teamName: string, workerName: string, cwd: string): Promise<MailboxFile> {
+  const canonicalPath = mailboxPath(teamName, workerName, cwd);
+  try {
+    const raw = await readFile(canonicalPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<MailboxFile>;
+    if (parsed && Array.isArray(parsed.messages)) {
+      return { worker: workerName, messages: parsed.messages as MailboxMessage[] };
+    }
+  } catch {
+    // fallback to legacy JSONL below
+  }
+
+  const legacyPath = legacyMailboxPath(teamName, workerName, cwd);
+  try {
+    const raw = await readFile(legacyPath, 'utf-8');
+    const messagesById = new Map<string, MailboxMessage>();
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== 'object') continue;
+      const normalized = normalizeLegacyMessage(parsed as Record<string, unknown>);
+      if (!normalized) continue;
+      messagesById.set(normalized.message_id, normalized);
+    }
+    return { worker: workerName, messages: [...messagesById.values()] };
+  } catch {
+    return { worker: workerName, messages: [] };
+  }
+}
+
+async function writeMailboxFile(teamName: string, workerName: string, cwd: string, mailbox: MailboxFile): Promise<void> {
+  const canonicalPath = mailboxPath(teamName, workerName, cwd);
+  await mkdir(join(canonicalPath, '..'), { recursive: true });
+  await writeFile(canonicalPath, JSON.stringify(mailbox, null, 2), 'utf-8');
+}
 
 /**
  * Send a short trigger to a worker via tmux send-keys.
@@ -58,27 +152,26 @@ export async function queueDirectMessage(
   toPaneId: string,
   cwd: string
 ): Promise<void> {
-  const mailboxPath = join(cwd, `.omc/state/team/${teamName}/mailbox/${toWorker}.jsonl`);
-  await mkdir(join(mailboxPath, '..'), { recursive: true });
-
-  const message = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    from: fromWorker,
-    to: toWorker,
+  const mailbox = await readMailboxFile(teamName, toWorker, cwd);
+  const message: MailboxMessage = {
+    message_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    from_worker: fromWorker,
+    to_worker: toWorker,
     body,
-    createdAt: new Date().toISOString(),
-    notifiedAt: null as string | null,
+    created_at: new Date().toISOString(),
   };
 
   // Write FIRST
-  await appendFile(mailboxPath, JSON.stringify(message) + '\n', 'utf-8');
+  mailbox.messages.push(message);
+  await writeMailboxFile(teamName, toWorker, cwd, mailbox);
 
   // Update notifiedAt after successful trigger
   const notified = await sendTmuxTrigger(toPaneId, 'new-message', fromWorker);
   if (notified) {
-    message.notifiedAt = new Date().toISOString();
-    // Re-append updated entry (append-only log; reader uses last entry per id)
-    await appendFile(mailboxPath, JSON.stringify({ ...message, type: 'notified' }) + '\n', 'utf-8');
+    const updated = await readMailboxFile(teamName, toWorker, cwd);
+    const entry = updated.messages.find((candidate) => candidate.message_id === message.message_id);
+    if (entry) entry.notified_at = new Date().toISOString();
+    await writeMailboxFile(teamName, toWorker, cwd, updated);
   }
 }
 
@@ -98,17 +191,16 @@ export async function queueBroadcastMessage(
   // Write to all mailboxes FIRST
   const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   for (const toWorker of workerNames) {
-    const mailboxPath = join(cwd, `.omc/state/team/${teamName}/mailbox/${toWorker}.jsonl`);
-    await mkdir(join(mailboxPath, '..'), { recursive: true });
-    const message = {
-      id: messageId,
-      from: fromWorker,
-      to: toWorker,
+    const mailbox = await readMailboxFile(teamName, toWorker, cwd);
+    const message: MailboxMessage = {
+      message_id: messageId,
+      from_worker: fromWorker,
+      to_worker: toWorker,
       body,
-      createdAt: new Date().toISOString(),
-      broadcast: true,
+      created_at: new Date().toISOString(),
     };
-    await appendFile(mailboxPath, JSON.stringify(message) + '\n', 'utf-8');
+    mailbox.messages.push(message);
+    await writeMailboxFile(teamName, toWorker, cwd, mailbox);
   }
 
   // Send triggers to all (best-effort)
@@ -128,25 +220,11 @@ export async function readMailbox(
   workerName: string,
   cwd: string
 ): Promise<Array<{ id: string; from: string; body: string; createdAt: string }>> {
-  const mailboxPath = join(cwd, `.omc/state/team/${teamName}/mailbox/${workerName}.jsonl`);
-  try {
-    const { readFile } = await import('fs/promises');
-    const content = await readFile(mailboxPath, 'utf-8');
-    const lines = content.trim().split('\n').filter(Boolean);
-    const seen = new Set<string>();
-    const messages: Array<{ id: string; from: string; body: string; createdAt: string }> = [];
-    for (const line of lines) {
-      try {
-        const msg = JSON.parse(line) as { id: string; from: string; body: string; createdAt: string; type?: string };
-        if (msg.type === 'notified') continue; // skip notification acks
-        if (!seen.has(msg.id)) {
-          seen.add(msg.id);
-          messages.push({ id: msg.id, from: msg.from, body: msg.body, createdAt: msg.createdAt });
-        }
-      } catch { /* skip malformed lines */ }
-    }
-    return messages;
-  } catch {
-    return [];
-  }
+  const mailbox = await readMailboxFile(teamName, workerName, cwd);
+  return mailbox.messages.map((message) => ({
+    id: message.message_id,
+    from: message.from_worker,
+    body: message.body,
+    createdAt: message.created_at,
+  }));
 }

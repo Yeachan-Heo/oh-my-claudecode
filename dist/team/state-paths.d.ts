@@ -7,7 +7,7 @@
  *     config.json
  *     shutdown.json
  *     tasks/
- *       {taskId}.json
+ *       task-{taskId}.json
  *     workers/
  *       {workerName}/
  *         heartbeat.json
@@ -17,8 +17,9 @@
  *         AGENTS.md       ← worker overlay
  *         shutdown-ack.json
  *     mailbox/
- *       {workerName}.jsonl
+ *       {workerName}.json
  */
+export declare function normalizeTaskFileStem(taskId: string): string;
 export declare const TeamPaths: {
     readonly root: (teamName: string) => string;
     readonly config: (teamName: string) => string;
@@ -63,7 +64,7 @@ export declare function teamStateRoot(cwd: string, teamName: string): string;
  * Canonical task storage path builder.
  *
  * All task files live at:
- *   {cwd}/.omc/state/team/{teamName}/tasks/{taskId}.json
+ *   {cwd}/.omc/state/team/{teamName}/tasks/task-{taskId}.json
  *
  * When taskId is omitted, returns the tasks directory:
  *   {cwd}/.omc/state/team/{teamName}/tasks/
