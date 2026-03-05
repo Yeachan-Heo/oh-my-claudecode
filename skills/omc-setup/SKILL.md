@@ -589,7 +589,7 @@ echo "Default execution mode set to: USER_CHOICE"
 
 ## Step 3.8: Install OMC CLI Tool
 
-The OMC CLI (`omc` command) provides standalone monitoring and analytics commands (HUD statusline + cost/session reporting).
+The OMC CLI (`omc` command) provides standalone monitoring and observability commands (HUD statusline + replay/token logs).
 
 First, check if the CLI is already installed:
 
@@ -608,7 +608,7 @@ If `OMC_CLI_INSTALLED` is `"true"`, skip the rest of this step.
 
 If `OMC_CLI_INSTALLED` is `"false"`, use the AskUserQuestion tool to prompt the user:
 
-**Question:** "Would you like to install the OMC CLI globally for standalone monitoring and analytics? (`omc`, `omc cost`, `omc sessions`)"
+**Question:** "Would you like to install the OMC CLI globally for standalone monitoring and observability? (`omc`, `omc hud`)"
 
 **Options:**
 1. **Yes (Recommended)** - Install `oh-my-claude-sisyphus` via `npm install -g`
@@ -642,7 +642,7 @@ fi
 
 If user chooses **No - Skip**, continue to the next step without installing.
 
-**Note**: The CLI is optional. All core functionality is also available through the plugin system (`/oh-my-claudecode:omc-help`, `/oh-my-claudecode:omc-doctor`). The CLI adds standalone terminal commands for analytics outside of Claude Code sessions.
+**Note**: The CLI is optional. All core functionality is also available through the plugin system (`/oh-my-claudecode:omc-help`, `/oh-my-claudecode:omc-doctor`). The CLI adds standalone terminal commands for runtime observability outside of Claude Code sessions.
 
 ## Step 3.8.5: Select Task Management Tool
 
@@ -970,11 +970,11 @@ Run /oh-my-claudecode:mcp-setup to add tools like web search, GitHub, etc.
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
-CLI ANALYTICS (if installed):
-- omc           - Default analytics dashboard
-- omc cost      - View cost reports (daily/weekly/monthly)
-- omc sessions  - Inspect session history
-- omc backfill  - Import transcript analytics
+CLI OBSERVABILITY (if installed):
+- omc       - Launch OMC runtime
+- omc hud   - Print current HUD statusline output
+- replay logs: `.omc/state/agent-replay-*.jsonl`
+- token log: `.omc/state/token-tracking.jsonl`
 
 That's it! Just use Claude Code normally.
 ```
@@ -1011,11 +1011,11 @@ Spawn coordinated agents with shared task lists and real-time messaging:
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
-CLI ANALYTICS (if installed):
-- omc           - Default analytics dashboard
-- omc cost      - View cost reports (daily/weekly/monthly)
-- omc sessions  - Inspect session history
-- omc backfill  - Import transcript analytics
+CLI OBSERVABILITY (if installed):
+- omc       - Launch OMC runtime
+- omc hud   - Print current HUD statusline output
+- replay logs: `.omc/state/agent-replay-*.jsonl`
+- token log: `.omc/state/token-tracking.jsonl`
 
 Your workflow won't break - it just got easier!
 ```

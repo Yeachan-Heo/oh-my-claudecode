@@ -9,7 +9,7 @@ Comprehensive guide to monitoring, debugging, and optimizing Claude Code and oh-
 - [Overview](#overview)
 - [Built-in Monitoring](#built-in-monitoring)
   - [Agent Observatory](#agent-observatory)
-  - [Token & Cost Analytics](#token--cost-analytics)
+  - [Token Tracking & Runtime Signals](#token-tracking--runtime-signals)
   - [Session Replay](#session-replay)
 - [HUD Integration](#hud-integration)
 - [Debugging Techniques](#debugging-techniques)
@@ -29,8 +29,8 @@ oh-my-claudecode provides comprehensive monitoring capabilities for tracking age
 |--------|------|-------------|
 | Agent lifecycle | Agent Observatory | Per-agent |
 | Tool timing | Session Replay | Per-tool call |
-| Token usage | Analytics System | Per-session/agent |
-| API costs | Analytics System | Per-session/daily/monthly |
+| Token usage | HUD + token log | Per-session/runtime |
+| API costs (estimated) | Agent Observatory | Per-agent/runtime |
 | File ownership | Subagent Tracker | Per-file |
 | Parallel efficiency | Observatory | Real-time |
 
@@ -83,66 +83,43 @@ Agent Observatory (3 active, 85% efficiency)
 | `files:N` | Files being modified |
 | `bottleneck` | Slowest repeated tool operation |
 
-### Token & Cost Analytics
+### Token Tracking & Runtime Signals
 
-OMC automatically tracks token usage and costs across all sessions.
+OMC tracks runtime token usage and exposes observability signals via HUD + replay/token logs.
 
 #### CLI Commands
 
 ```bash
-# View everything (default dashboard)
+# Launch runtime
 omc
 
-# View daily/weekly/monthly cost reports
-omc cost daily
-omc cost weekly
-omc cost monthly
+# Print current HUD line
+omc hud
 
-# View session history
-omc sessions
+# Replay logs
+ls .omc/state/agent-replay-*.jsonl
 
-# Agent observability is shown in HUD/replay logs
-# (legacy standalone agent-breakdown command was removed)
-
-# Export data
-omc export cost csv ./costs.csv
+# Token tracking log
+tail -20 .omc/state/token-tracking.jsonl
 ```
 
 #### Real-time HUD Display
 
-Enable the analytics preset for detailed cost tracking in your status line:
+Enable a supported HUD preset for detailed observability in your status line:
 
 ```json
 {
   "omcHud": {
-    "preset": "analytics"
+    "preset": "focused"
   }
 }
 ```
 
-This shows:
-- Session cost and tokens
-- Cost per hour
-- Cache efficiency (% of tokens from cache)
-- Budget warnings (>$2 warning, >$5 critical)
+This setup helps you monitor:
+- Session duration/health
+- Active agents and progress
+- Context pressure and rate-limit state
 
-#### Backfill Historical Data
-
-Analyze historical Claude Code transcripts:
-
-```bash
-# Preview available transcripts
-omc backfill --dry-run
-
-# Backfill all transcripts
-omc backfill
-
-# Backfill specific project
-omc backfill --project "*my-project*"
-
-# Backfill recent only
-omc backfill --from "2026-01-01"
-```
 
 ### Session Replay
 
@@ -201,7 +178,7 @@ The replay system automatically identifies bottlenecks:
 | `minimal` | Clean status | Context bar only |
 | `focused` | Task progress | Todos, agents, modes |
 | `full` | Everything | All elements enabled |
-| `analytics` | Cost tracking | Tokens, costs, efficiency |
+| `opencode` | OpenCode parity | OpenCode-like HUD style |
 | `dense` | Compact all | Compressed format |
 
 ### Configuration
@@ -216,7 +193,7 @@ Edit `~/.claude/settings.json`:
       "agents": true,
       "todos": true,
       "contextBar": true,
-      "analytics": true
+      "sessionHealth": true
     }
   }
 }
@@ -231,7 +208,7 @@ Edit `~/.claude/settings.json`:
 | `ralph` | Ralph loop iteration count |
 | `autopilot` | Autopilot phase indicator |
 | `contextBar` | Context window usage % |
-| `analytics` | Token/cost summary |
+| `sessionHealth` | Session duration/health/tokens summary |
 
 ---
 
@@ -360,7 +337,7 @@ Track Claude's performance across standard benchmarks:
 ```bash
 # Set up budget warnings in HUD
 /oh-my-claudecode:hud
-# Select "analytics" preset
+# Select "focused" (or "dense") preset
 ```
 
 ### 2. Use Appropriate Model Tiers
@@ -420,7 +397,7 @@ cleanupReplayFiles(process.cwd()); // Keeps last 10 sessions
 1. Use `eco` mode for token-efficient execution: `eco fix all errors`
 2. Check for unnecessary file reads in agent prompts
 3. Review the Agent Observatory in HUD (or replay logs) for agent-level breakdown
-4. Enable cache - check cache efficiency in analytics
+4. Use replay + token logs to identify spikes and repeated expensive loops
 
 ### Slow Agent Execution
 
@@ -442,15 +419,15 @@ cleanupReplayFiles(process.cwd()); // Keeps last 10 sessions
 3. Review file_ownership in agent state
 4. Use `swarm` mode with explicit task isolation
 
-### Missing Analytics Data
+### Missing Token/Replay Data
 
-**Symptoms**: Empty cost reports, no session history
+**Symptoms**: No token log growth, replay files missing
 
 **Solutions**:
-1. Run `omc backfill` to import historical transcripts
-2. Verify HUD is running: `/oh-my-claudecode:hud setup`
-3. Check `.omc/state/` directory exists
-4. Review `token-tracking.jsonl` for raw data
+1. Verify HUD is running: `/oh-my-claudecode:hud setup`
+2. Check `.omc/state/` directory exists
+3. Review `token-tracking.jsonl` for raw data
+4. Confirm current session is writing replay events (`.omc/state/agent-replay-*.jsonl`)
 
 ### Stale Agent State
 
@@ -470,7 +447,6 @@ cleanupReplayFiles(process.cwd()); // Keeps last 10 sessions
 | `.omc/state/subagent-tracking.json` | Current agent states | JSON |
 | `.omc/state/agent-replay-{id}.jsonl` | Session event timeline | JSONL |
 | `.omc/state/token-tracking.jsonl` | Token usage log | JSONL |
-| `.omc/state/analytics-summary-{id}.json` | Cached session summaries | JSON |
 | `.omc/state/subagent-tracker.lock` | Concurrent access lock | Text |
 
 ---
@@ -525,6 +501,5 @@ cleanupReplayFiles(directory: string): number
 
 ## See Also
 
-- [Analytics System](./ANALYTICS-SYSTEM.md) - Detailed token tracking documentation
 - [Reference](./REFERENCE.md) - Complete feature reference
 - [Architecture](./ARCHITECTURE.md) - System architecture overview

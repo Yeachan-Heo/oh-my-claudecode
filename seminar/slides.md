@@ -1029,38 +1029,22 @@ Note: Wisdom persists across sessions - future work on the same plan gets this c
 
 ---
 
-## Analytics & Cost Tracking
+## Runtime Observability
 
-**Track token usage and costs:**
+**Track session health, replay events, and token usage:**
 
-```
-$ omc-analytics summary
+```bash
+$ omc
+$ omc hud
 
-Session Summary (last 7 days)
------------------------------
-Total sessions: 23
-Total tokens: 1,234,567
-Total cost: $18.45
+# Replay logs
+$ ls .omc/state/agent-replay-*.jsonl
 
-By Model:
-  Haiku:  890,000 tokens  ($0.89)
-  Sonnet: 300,000 tokens  ($4.50)
-  Opus:    44,567 tokens  ($13.06)
-
-By Mode:
-  autopilot:  45% of cost
-  ultrawork:  30% of cost
-  :    10% of cost
-  other:      15% of cost
-
-Top 5 Expensive Sessions:
-  1. "build fullstack app"     $4.23
-  2. "debug auth race cond"    $2.15
-  3. "refactor database"       $1.89
-  ...
+# Token tracking log
+$ tail -20 .omc/state/token-tracking.jsonl
 ```
 
-Note: Analytics help you understand where tokens are going and optimize your usage patterns.
+Note: Legacy standalone analytics commands were removed. Use HUD + replay/token logs for observability.
 
 ---
 <!-- .slide: data-background="#1a1a2e" -->

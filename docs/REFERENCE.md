@@ -585,28 +585,27 @@ For complete documentation, see **[Performance Monitoring Guide](./PERFORMANCE-M
 | Feature | Description | Access |
 |---------|-------------|--------|
 | **Agent Observatory** | Real-time agent status, efficiency, bottlenecks | HUD / API |
-| **Token Analytics** | Cost tracking, usage reports, budget warnings | HUD (`analytics` preset), `omc cost` |
+| **Token Tracking** | Session token logging and runtime trends | `.omc/state/token-tracking.jsonl` |
 | **Session Replay** | Event timeline for post-session analysis | `.omc/state/agent-replay-*.jsonl` |
 | **Intervention System** | Auto-detection of stale agents, cost overruns | Automatic |
 
 ### CLI Commands
 
 ```bash
-omc                # Default analytics dashboard
-omc cost daily     # Daily cost report
-omc cost weekly    # Weekly cost report
-omc backfill       # Import historical transcript data
-# Agent breakdown: use HUD observatory / replay logs
+omc                    # Launch OMC runtime
+omc hud                # Print current HUD statusline output
+# Agent/session observability: use HUD + replay logs
+# Token tracking log: .omc/state/token-tracking.jsonl
 ```
 
-### HUD Analytics Preset
+### HUD Preset
 
-Enable detailed cost tracking in your status line:
+Enable HUD observability in your status line:
 
 ```json
 {
   "omcHud": {
-    "preset": "analytics"
+    "preset": "focused"
   }
 }
 ```
@@ -676,7 +675,7 @@ Additional `omcHud` layout options (top-level):
 | `maxWidth` | Maximum HUD line width (terminal columns) | unset |
 | `wrapMode` | `truncate` (ellipsis) or `wrap` (break at ` \| ` boundaries) when `maxWidth` is set | `truncate` |
 
-Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode`
+Available presets: `minimal`, `focused`, `full`, `dense`, `opencode`
 
 ### Common Issues
 
