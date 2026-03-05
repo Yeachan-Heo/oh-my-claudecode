@@ -120,9 +120,6 @@ function parseWaitSeconds(text) {
     const m = hm[2] ? parseInt(hm[2], 10) : 0;
     return h * 3600 + m * 60;
   }
-  // "X hours"
-  const hours = text.match(/(\d+)\s*hours?/i);
-  if (hours) return parseInt(hours[1], 10) * 3600;
   // "X minutes"
   const mins = text.match(/(\d+)\s*min(?:utes?)?/i);
   if (mins) return parseInt(mins[1], 10) * 60;
@@ -159,10 +156,12 @@ function sendNotification(title, body) {
     }
   } catch { /* fall through to system notifications */ }
 
-  // macOS — use argument array to avoid shell injection
+  // macOS — use argument array; strip newlines before JSON-quoting for AppleScript compat
   try {
+    const safeBody  = body.replace(/[\r\n]+/g, ' ');
+    const safeTitle = title.replace(/[\r\n]+/g, ' ');
     spawnSync('osascript', [
-      '-e', `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`,
+      '-e', `display notification ${JSON.stringify(safeBody)} with title ${JSON.stringify(safeTitle)}`,
     ], { timeout: 5_000 });
   } catch { /* non-critical */ }
 
@@ -205,7 +204,8 @@ function countdown(waitSeconds, logStream) {
 
 // ─── Claude runner ────────────────────────────────────────────────────────────
 
-let activeChild = null; // module-level — for signal handler cleanup
+let activeChild = null;  // module-level — for signal handler cleanup
+let logStream   = null;  // module-level — for .catch() flush on fatal error
 
 /**
  * Spawns a claude process, streams output to terminal + logStream.
@@ -270,8 +270,8 @@ async function main() {
   log(`Log file    : ${LOG_FILE}`);
   if (sessionNameArg) log(`tmux session: ${sessionNameArg}`);
 
-  // Open a persistent log stream for the whole session
-  const logStream = createWriteStream(LOG_FILE, { flags: 'w' });
+  // Open a persistent log stream for the whole session (module-level for .catch() flush)
+  logStream = createWriteStream(LOG_FILE, { flags: 'w' });
   logStream.on('error', (err) => log(`Log stream error: ${err.message}`));
   logStream.write([
     `# omc-autoretry session: ${SESSION_ID}`,
@@ -395,5 +395,9 @@ async function main() {
 
 main().catch((err) => {
   console.error(`[omc-autoretry] Fatal error: ${err.message}`);
-  process.exit(1);
+  if (logStream && !logStream.destroyed) {
+    logStream.end(`\n# FATAL: ${err.message}\n`, () => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
