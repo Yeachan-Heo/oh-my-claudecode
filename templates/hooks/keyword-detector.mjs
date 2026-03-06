@@ -11,7 +11,6 @@
  * 3. autopilot: Full autonomous execution
  * 4. team: Coordinated team execution
  * 5. ultrawork/ulw: Maximum parallel execution
-* 6. pipeline: Sequential agent chaining
  * 7. ralplan: Iterative planning with consensus
  * 8. plan: Planning interview mode
  * 9. tdd: Test-driven development
@@ -230,7 +229,7 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
 const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
-    'pipeline','ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
+    'ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -337,10 +336,6 @@ async function main() {
       matches.push({ name: 'ultrawork', args: '' });
     }
 
-    // Pipeline keywords
-    if (/\bagent\s+pipeline\b/i.test(cleanPrompt) || /\bchain\s+agents\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'pipeline', args: '' });
-    }
 
     // CCG keywords (Claude-Codex-Gemini tri-model orchestration)
     if (/\b(ccg|claude-codex-gemini)\b/i.test(cleanPrompt)) {
@@ -396,7 +391,7 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork', 'pipeline']);
+      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork']);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }

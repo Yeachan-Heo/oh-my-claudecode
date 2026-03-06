@@ -296,6 +296,12 @@ World`);
         const ultraworkMatch = result.find((r) => r.type === 'ultrawork');
         expect(ultraworkMatch).toBeUndefined();
       });
+
+      it('should NOT detect deprecated pipeline phrases', () => {
+        const keywordResult = detectKeywordsWithType('agent pipeline the task and chain agents');
+        const pipelineLikeMatches = keywordResult.filter((r) => (r as { type: string }).type === 'pipeline');
+        expect(pipelineLikeMatches).toHaveLength(0);
+      });
     });
 
     describe('tdd keyword', () => {
