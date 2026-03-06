@@ -805,7 +805,12 @@ export function install(options = {}) {
                     // Use absolute node path so nvm/fnm users don't get "node not found"
                     // errors when Claude Code invokes the statusLine in a non-interactive shell.
                     const nodeBin = resolveNodeBinary();
-                    const statusLineCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+                    const absoluteCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+                    // Prefer portable $HOME path on Unix for multi-machine settings sync.
+                    // Claude Code expands $HOME and resolves bare node from PATH at runtime.
+                    const statusLineCommand = isWindows()
+                        ? absoluteCommand
+                        : 'node $HOME/.claude/hud/omc-hud.mjs';
                     // Auto-migrate legacy string format (pre-v4.5) to object format
                     const needsMigration = typeof existingSettings.statusLine === 'string'
                         && isOmcStatusLine(existingSettings.statusLine);
