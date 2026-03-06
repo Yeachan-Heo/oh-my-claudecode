@@ -115,6 +115,26 @@ export declare function isRunningAsPlugin(): boolean;
  */
 export declare function isProjectScopedPlugin(): boolean;
 /**
+ * Extract the embedded OMC version from a CLAUDE.md file.
+ *
+ * Primary source of truth is the injected `<!-- OMC:VERSION:x.y.z -->` marker.
+ * Falls back to legacy headings that may include a version string inline.
+ */
+export declare function extractOmcVersionFromClaudeMd(content: string): string | null;
+/**
+ * Keep persisted setup metadata in sync with the installed OMC runtime version.
+ *
+ * This intentionally updates only already-configured users by default so
+ * installer/reconciliation flows do not accidentally mark fresh installs as if
+ * the interactive setup wizard had been completed.
+ */
+export declare function syncPersistedSetupVersion(options?: {
+    configPath?: string;
+    claudeMdPath?: string;
+    version?: string;
+    onlyIfConfigured?: boolean;
+}): boolean;
+/**
  * Merge OMC content into existing CLAUDE.md using markers
  * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
  * @param omcContent - New OMC content to inject

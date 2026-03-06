@@ -5906,6 +5906,148 @@ var init_mode_registry = __esm({
   }
 });
 
+// src/lib/file-lock.ts
+function isPidAlive(pid) {
+  if (pid <= 0 || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && e.code === "EPERM")
+      return true;
+    return false;
+  }
+}
+function isLockStale(lockPath, staleLockMs) {
+  try {
+    const stat2 = (0, import_fs17.statSync)(lockPath);
+    const ageMs = Date.now() - stat2.mtimeMs;
+    if (ageMs < staleLockMs) return false;
+    try {
+      const raw = (0, import_fs17.readFileSync)(lockPath, "utf-8");
+      const payload = JSON.parse(raw);
+      if (payload.pid && isPidAlive(payload.pid)) return false;
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function lockPathFor(filePath) {
+  return filePath + ".lock";
+}
+function tryAcquireSync(lockPath, staleLockMs) {
+  ensureDirSync(path6.dirname(lockPath));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = (0, import_fs17.openSync)(
+        lockPath,
+        import_fs17.constants.O_CREAT | import_fs17.constants.O_EXCL | import_fs17.constants.O_WRONLY,
+        384
+      );
+      const payload = JSON.stringify({
+        pid: process.pid,
+        timestamp: Date.now()
+      });
+      (0, import_fs17.writeSync)(fd, payload, null, "utf-8");
+      return { fd, path: lockPath };
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+        if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
+          try {
+            (0, import_fs17.unlinkSync)(lockPath);
+          } catch {
+          }
+          continue;
+        }
+        return null;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+function acquireFileLockSync(lockPath, opts) {
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const timeoutMs = opts?.timeoutMs ?? 0;
+  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const handle = tryAcquireSync(lockPath, staleLockMs);
+  if (handle || timeoutMs <= 0) return handle;
+  const deadline = Date.now() + timeoutMs;
+  const sharedBuf = new SharedArrayBuffer(4);
+  const sharedArr = new Int32Array(sharedBuf);
+  while (Date.now() < deadline) {
+    Atomics.wait(sharedArr, 0, 0, Math.min(retryDelayMs, deadline - Date.now()));
+    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
+    if (retryHandle) return retryHandle;
+  }
+  return null;
+}
+function releaseFileLockSync(handle) {
+  try {
+    (0, import_fs17.closeSync)(handle.fd);
+  } catch {
+  }
+  try {
+    (0, import_fs17.unlinkSync)(handle.path);
+  } catch {
+  }
+}
+function withFileLockSync(lockPath, fn, opts) {
+  const handle = acquireFileLockSync(lockPath, opts);
+  if (!handle) {
+    throw new Error(`Failed to acquire file lock: ${lockPath}`);
+  }
+  try {
+    return fn();
+  } finally {
+    releaseFileLockSync(handle);
+  }
+}
+function sleep3(ms) {
+  return new Promise((resolve11) => setTimeout(resolve11, ms));
+}
+async function acquireFileLock(lockPath, opts) {
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const timeoutMs = opts?.timeoutMs ?? 0;
+  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const handle = tryAcquireSync(lockPath, staleLockMs);
+  if (handle || timeoutMs <= 0) return handle;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep3(Math.min(retryDelayMs, deadline - Date.now()));
+    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
+    if (retryHandle) return retryHandle;
+  }
+  return null;
+}
+function releaseFileLock(handle) {
+  releaseFileLockSync(handle);
+}
+async function withFileLock(lockPath, fn, opts) {
+  const handle = await acquireFileLock(lockPath, opts);
+  if (!handle) {
+    throw new Error(`Failed to acquire file lock: ${lockPath}`);
+  }
+  try {
+    return await fn();
+  } finally {
+    releaseFileLock(handle);
+  }
+}
+var import_fs17, path6, DEFAULT_STALE_LOCK_MS, DEFAULT_RETRY_DELAY_MS;
+var init_file_lock = __esm({
+  "src/lib/file-lock.ts"() {
+    "use strict";
+    import_fs17 = require("fs");
+    path6 = __toESM(require("path"), 1);
+    init_atomic_write();
+    DEFAULT_STALE_LOCK_MS = 3e4;
+    DEFAULT_RETRY_DELAY_MS = 50;
+  }
+});
+
 // src/features/context-injector/collector.ts
 var PRIORITY_ORDER, CONTEXT_SEPARATOR, ContextCollector, contextCollector;
 var init_collector = __esm({
@@ -6830,6 +6972,51 @@ function loadClaudeMdContent() {
   }
   return (0, import_fs28.readFileSync)(claudeMdPath, "utf-8");
 }
+function extractOmcVersionFromClaudeMd(content) {
+  const versionMarkerMatch = content.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+  if (versionMarkerMatch?.[1]) {
+    const markerVersion = versionMarkerMatch[1].trim();
+    return markerVersion.startsWith("v") ? markerVersion : `v${markerVersion}`;
+  }
+  const headingMatch = content.match(/^#\s+oh-my-claudecode.*?\b(v?\d+\.\d+\.\d+(?:[-+][^\s]+)?)\b/m);
+  if (headingMatch?.[1]) {
+    const headingVersion = headingMatch[1].trim();
+    return headingVersion.startsWith("v") ? headingVersion : `v${headingVersion}`;
+  }
+  return null;
+}
+function syncPersistedSetupVersion(options) {
+  const configPath = options?.configPath ?? (0, import_path36.join)(CLAUDE_CONFIG_DIR, ".omc-config.json");
+  let config2 = {};
+  if ((0, import_fs28.existsSync)(configPath)) {
+    const rawConfig = (0, import_fs28.readFileSync)(configPath, "utf-8").trim();
+    if (rawConfig.length > 0) {
+      config2 = JSON.parse(rawConfig);
+    }
+  }
+  const onlyIfConfigured = options?.onlyIfConfigured ?? true;
+  const isConfigured = typeof config2.setupCompleted === "string" || typeof config2.setupVersion === "string";
+  if (onlyIfConfigured && !isConfigured) {
+    return false;
+  }
+  let detectedVersion = options?.version?.trim();
+  if (!detectedVersion) {
+    const claudeMdPath = options?.claudeMdPath ?? (0, import_path36.join)(CLAUDE_CONFIG_DIR, "CLAUDE.md");
+    if ((0, import_fs28.existsSync)(claudeMdPath)) {
+      detectedVersion = extractOmcVersionFromClaudeMd((0, import_fs28.readFileSync)(claudeMdPath, "utf-8")) ?? void 0;
+    }
+  }
+  const normalizedVersion = (() => {
+    const candidate = detectedVersion && detectedVersion !== "unknown" ? detectedVersion : VERSION;
+    return candidate.startsWith("v") ? candidate : `v${candidate}`;
+  })();
+  if (config2.setupVersion === normalizedVersion) {
+    return false;
+  }
+  (0, import_fs28.mkdirSync)((0, import_path36.dirname)(configPath), { recursive: true });
+  (0, import_fs28.writeFileSync)(configPath, JSON.stringify({ ...config2, setupVersion: normalizedVersion }, null, 2));
+  return true;
+}
 function mergeClaudeMd(existingContent, omcContent, version3) {
   const START_MARKER = "<!-- OMC:START -->";
   const END_MARKER = "<!-- OMC:END -->";
@@ -7214,6 +7401,18 @@ function install(options = {}) {
       log3("Saved version metadata");
     } else {
       log3("Skipping version metadata (project-scoped plugin)");
+    }
+    try {
+      const setupVersionSynced = syncPersistedSetupVersion({
+        version: options.version ?? VERSION,
+        onlyIfConfigured: true
+      });
+      if (setupVersionSynced) {
+        log3("Updated persisted setupVersion");
+      }
+    } catch (error2) {
+      const message = error2 instanceof Error ? error2.message : String(error2);
+      log3(`  Warning: Could not refresh setupVersion metadata (non-fatal): ${message}`);
     }
     result.success = true;
     result.message = `Successfully installed ${result.installedAgents.length} agents, ${result.installedCommands.length} commands, ${result.installedSkills.length} skills (hooks delivered via plugin)`;
@@ -20594,6 +20793,24 @@ async function getUsage() {
     const cachedError = cache.error && !cache.data ? cache.errorReason || "network" : void 0;
     return { rateLimits: cache.data, error: cachedError };
   }
+  try {
+    return await withFileLock(
+      lockPathFor(getCachePath()),
+      () => fetchUsageWithLock(isZai, authToken),
+      { staleLockMs: LOCK_STALE_MS2 }
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Failed to acquire file lock")) {
+      if (cache?.data) {
+        return { rateLimits: cache.data };
+      }
+      return { rateLimits: null, error: "network" };
+    }
+    return { rateLimits: null, error: "network" };
+  }
+}
+async function fetchUsageWithLock(isZai, authToken) {
+  const cache = readCache();
   if (isZai && authToken) {
     const result = await fetchUsageFromZai();
     if (result.rateLimited) {
@@ -20653,7 +20870,7 @@ async function getUsage() {
   writeCache(null, true, "anthropic", false, 0, "no_credentials");
   return { rateLimits: null, error: "no_credentials" };
 }
-var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_SUCCESS_MS, CACHE_TTL_FAILURE_MS, CACHE_TTL_RATE_LIMITED_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, TOKEN_REFRESH_URL_HOSTNAME, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
+var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_SUCCESS_MS, CACHE_TTL_FAILURE_MS, CACHE_TTL_RATE_LIMITED_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, LOCK_STALE_MS2, TOKEN_REFRESH_URL_HOSTNAME, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
@@ -20664,11 +20881,13 @@ var init_usage_api = __esm({
     import_crypto12 = require("crypto");
     import_https3 = __toESM(require("https"), 1);
     init_ssrf_guard();
+    init_file_lock();
     CACHE_TTL_SUCCESS_MS = 30 * 1e3;
     CACHE_TTL_FAILURE_MS = 15 * 1e3;
     CACHE_TTL_RATE_LIMITED_MS = 120 * 1e3;
     MAX_RATE_LIMITED_BACKOFF_MS = 600 * 1e3;
     API_TIMEOUT_MS2 = 1e4;
+    LOCK_STALE_MS2 = API_TIMEOUT_MS2 + 5e3;
     TOKEN_REFRESH_URL_HOSTNAME = "platform.claude.com";
     TOKEN_REFRESH_URL_PATH = "/v1/oauth/token";
     DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -20858,7 +21077,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
       if (err.code !== "EEXIST") throw error2;
       try {
         const info = await (0, import_promises8.stat)(lockDir);
-        if (Date.now() - info.mtimeMs > LOCK_STALE_MS2) {
+        if (Date.now() - info.mtimeMs > LOCK_STALE_MS3) {
           await (0, import_promises8.rm)(lockDir, { recursive: true, force: true });
           continue;
         }
@@ -21031,7 +21250,7 @@ async function markDispatchRequestDelivered(teamName, requestId, patch = {}, cwd
   if (current.status === "delivered") return current;
   return await transitionDispatchRequest(teamName, requestId, current.status, "delivered", patch, cwd2);
 }
-var import_crypto14, import_fs77, import_promises8, import_path88, OMC_DISPATCH_LOCK_TIMEOUT_ENV, DEFAULT_DISPATCH_LOCK_TIMEOUT_MS, MIN_DISPATCH_LOCK_TIMEOUT_MS, MAX_DISPATCH_LOCK_TIMEOUT_MS, DISPATCH_LOCK_INITIAL_POLL_MS, DISPATCH_LOCK_MAX_POLL_MS, LOCK_STALE_MS2;
+var import_crypto14, import_fs77, import_promises8, import_path88, OMC_DISPATCH_LOCK_TIMEOUT_ENV, DEFAULT_DISPATCH_LOCK_TIMEOUT_MS, MIN_DISPATCH_LOCK_TIMEOUT_MS, MAX_DISPATCH_LOCK_TIMEOUT_MS, DISPATCH_LOCK_INITIAL_POLL_MS, DISPATCH_LOCK_MAX_POLL_MS, LOCK_STALE_MS3;
 var init_dispatch_queue = __esm({
   "src/team/dispatch-queue.ts"() {
     "use strict";
@@ -21048,7 +21267,7 @@ var init_dispatch_queue = __esm({
     MAX_DISPATCH_LOCK_TIMEOUT_MS = 12e4;
     DISPATCH_LOCK_INITIAL_POLL_MS = 25;
     DISPATCH_LOCK_MAX_POLL_MS = 500;
-    LOCK_STALE_MS2 = 5 * 60 * 1e3;
+    LOCK_STALE_MS3 = 5 * 60 * 1e3;
   }
 });
 
@@ -26052,12 +26271,12 @@ async function render(context, config2) {
     }
   }
   if (enabledElements.rateLimits && context.rateLimitsResult) {
-    const errorIndicator = renderRateLimitsError(context.rateLimitsResult);
-    if (errorIndicator) {
-      elements.push(errorIndicator);
-    } else if (context.rateLimitsResult.rateLimits) {
+    if (context.rateLimitsResult.rateLimits) {
       const limits = enabledElements.useBars ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits) : renderRateLimits(context.rateLimitsResult.rateLimits);
       if (limits) elements.push(limits);
+    } else {
+      const errorIndicator = renderRateLimitsError(context.rateLimitsResult);
+      if (errorIndicator) elements.push(errorIndicator);
     }
   }
   if (context.customBuckets) {
@@ -55116,144 +55335,7 @@ var import_fs18 = require("fs");
 var import_path21 = require("path");
 init_worktree_paths();
 init_atomic_write();
-
-// src/lib/file-lock.ts
-var import_fs17 = require("fs");
-var path6 = __toESM(require("path"), 1);
-init_atomic_write();
-var DEFAULT_STALE_LOCK_MS = 3e4;
-var DEFAULT_RETRY_DELAY_MS = 50;
-function isPidAlive(pid) {
-  if (pid <= 0 || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if (e && typeof e === "object" && "code" in e && e.code === "EPERM")
-      return true;
-    return false;
-  }
-}
-function isLockStale(lockPath, staleLockMs) {
-  try {
-    const stat2 = (0, import_fs17.statSync)(lockPath);
-    const ageMs = Date.now() - stat2.mtimeMs;
-    if (ageMs < staleLockMs) return false;
-    try {
-      const raw = (0, import_fs17.readFileSync)(lockPath, "utf-8");
-      const payload = JSON.parse(raw);
-      if (payload.pid && isPidAlive(payload.pid)) return false;
-    } catch {
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-function lockPathFor(filePath) {
-  return filePath + ".lock";
-}
-function tryAcquireSync(lockPath, staleLockMs) {
-  ensureDirSync(path6.dirname(lockPath));
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = (0, import_fs17.openSync)(
-        lockPath,
-        import_fs17.constants.O_CREAT | import_fs17.constants.O_EXCL | import_fs17.constants.O_WRONLY,
-        384
-      );
-      const payload = JSON.stringify({
-        pid: process.pid,
-        timestamp: Date.now()
-      });
-      (0, import_fs17.writeSync)(fd, payload, null, "utf-8");
-      return { fd, path: lockPath };
-    } catch (err) {
-      if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
-        if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
-          try {
-            (0, import_fs17.unlinkSync)(lockPath);
-          } catch {
-          }
-          continue;
-        }
-        return null;
-      }
-      throw err;
-    }
-  }
-  return null;
-}
-function acquireFileLockSync(lockPath, opts) {
-  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
-  const timeoutMs = opts?.timeoutMs ?? 0;
-  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const handle = tryAcquireSync(lockPath, staleLockMs);
-  if (handle || timeoutMs <= 0) return handle;
-  const deadline = Date.now() + timeoutMs;
-  const sharedBuf = new SharedArrayBuffer(4);
-  const sharedArr = new Int32Array(sharedBuf);
-  while (Date.now() < deadline) {
-    Atomics.wait(sharedArr, 0, 0, Math.min(retryDelayMs, deadline - Date.now()));
-    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
-    if (retryHandle) return retryHandle;
-  }
-  return null;
-}
-function releaseFileLockSync(handle) {
-  try {
-    (0, import_fs17.closeSync)(handle.fd);
-  } catch {
-  }
-  try {
-    (0, import_fs17.unlinkSync)(handle.path);
-  } catch {
-  }
-}
-function withFileLockSync(lockPath, fn, opts) {
-  const handle = acquireFileLockSync(lockPath, opts);
-  if (!handle) {
-    throw new Error(`Failed to acquire file lock: ${lockPath}`);
-  }
-  try {
-    return fn();
-  } finally {
-    releaseFileLockSync(handle);
-  }
-}
-function sleep3(ms) {
-  return new Promise((resolve11) => setTimeout(resolve11, ms));
-}
-async function acquireFileLock(lockPath, opts) {
-  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
-  const timeoutMs = opts?.timeoutMs ?? 0;
-  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const handle = tryAcquireSync(lockPath, staleLockMs);
-  if (handle || timeoutMs <= 0) return handle;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await sleep3(Math.min(retryDelayMs, deadline - Date.now()));
-    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
-    if (retryHandle) return retryHandle;
-  }
-  return null;
-}
-function releaseFileLock(handle) {
-  releaseFileLockSync(handle);
-}
-async function withFileLock(lockPath, fn, opts) {
-  const handle = await acquireFileLock(lockPath, opts);
-  if (!handle) {
-    throw new Error(`Failed to acquire file lock: ${lockPath}`);
-  }
-  try {
-    return await fn();
-  } finally {
-    releaseFileLock(handle);
-  }
-}
-
-// src/hooks/notepad/index.ts
+init_file_lock();
 var NOTEPAD_FILENAME = "notepad.md";
 var DEFAULT_CONFIG2 = {
   priorityMaxChars: 500,
@@ -55817,6 +55899,7 @@ var CACHE_EXPIRY_MS = 24 * 60 * 60 * 1e3;
 // src/hooks/project-memory/storage.ts
 init_atomic_write();
 init_worktree_paths();
+init_file_lock();
 function getMemoryPath(projectRoot) {
   return getWorktreeProjectMemoryPath(projectRoot);
 }

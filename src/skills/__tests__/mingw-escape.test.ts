@@ -125,5 +125,23 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
       expect(content).toContain("if(v==='')");
       expect(content).not.toContain('if(!v)');
     });
+
+    it('omc-setup SKILL.md extracts CLAUDE.md version from OMC marker', () => {
+      const content = readFileSync(
+        join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md'),
+        'utf-8'
+      );
+      expect(content).toContain("grep -m1 'OMC:VERSION:'");
+      expect(content).not.toContain('grep -m1 "^# oh-my-claudecode"');
+    });
+
+    it('omc-setup SKILL.md explicitly tells the agent to execute immediately', () => {
+      const content = readFileSync(
+        join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md'),
+        'utf-8'
+      );
+      expect(content).toContain('immediately execute the workflow below');
+      expect(content).toContain('Do not only restate or summarize');
+    });
   });
 });

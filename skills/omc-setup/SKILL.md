@@ -7,6 +7,8 @@ description: Setup and configure oh-my-claudecode (the ONLY command you need to 
 
 This is the **only command you need to learn**. After running this, everything else is automatic.
 
+**When this skill is invoked, immediately execute the workflow below. Do not only restate or summarize these instructions back to the user.**
+
 Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set.
 
 ## Pre-Setup Check: Already Configured?
@@ -203,7 +205,13 @@ mkdir -p .claude && echo ".claude directory ready"
 TARGET_PATH=".claude/CLAUDE.md"
 
 # Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+OLD_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION="none"
+fi
 
 # Backup existing
 if [ -f "$TARGET_PATH" ]; then
@@ -274,7 +282,13 @@ else
 fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION="unknown"
+fi
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -343,7 +357,13 @@ Do not continue to HUD setup or other steps.
 TARGET_PATH="$HOME/.claude/CLAUDE.md"
 
 # Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+OLD_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION="none"
+fi
 
 # Backup existing
 if [ -f "$TARGET_PATH" ]; then
@@ -414,7 +434,13 @@ else
 fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION="unknown"
+fi
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -1083,9 +1109,15 @@ mkdir -p "$(dirname "$CONFIG_FILE")"
 # Get current OMC version from CLAUDE.md
 OMC_VERSION=""
 if [ -f ".claude/CLAUDE.md" ]; then
-  OMC_VERSION=$(grep -m1 "^# oh-my-claudecode" .claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+  OMC_VERSION=$(grep -m1 'OMC:VERSION:' .claude/CLAUDE.md 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
 elif [ -f "$HOME/.claude/CLAUDE.md" ]; then
-  OMC_VERSION=$(grep -m1 "^# oh-my-claudecode" "$HOME/.claude/CLAUDE.md" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+  OMC_VERSION=$(grep -m1 'OMC:VERSION:' "$HOME/.claude/CLAUDE.md" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+fi
+if [ -z "$OMC_VERSION" ]; then
+  OMC_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OMC_VERSION" ]; then
+  OMC_VERSION="unknown"
 fi
 
 if [ -f "$CONFIG_FILE" ]; then

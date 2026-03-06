@@ -407,6 +407,79 @@ function loadClaudeMdContent(): string {
 }
 
 /**
+ * Extract the embedded OMC version from a CLAUDE.md file.
+ *
+ * Primary source of truth is the injected `<!-- OMC:VERSION:x.y.z -->` marker.
+ * Falls back to legacy headings that may include a version string inline.
+ */
+export function extractOmcVersionFromClaudeMd(content: string): string | null {
+  const versionMarkerMatch = content.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+  if (versionMarkerMatch?.[1]) {
+    const markerVersion = versionMarkerMatch[1].trim();
+    return markerVersion.startsWith('v') ? markerVersion : `v${markerVersion}`;
+  }
+
+  const headingMatch = content.match(/^#\s+oh-my-claudecode.*?\b(v?\d+\.\d+\.\d+(?:[-+][^\s]+)?)\b/m);
+  if (headingMatch?.[1]) {
+    const headingVersion = headingMatch[1].trim();
+    return headingVersion.startsWith('v') ? headingVersion : `v${headingVersion}`;
+  }
+
+  return null;
+}
+
+/**
+ * Keep persisted setup metadata in sync with the installed OMC runtime version.
+ *
+ * This intentionally updates only already-configured users by default so
+ * installer/reconciliation flows do not accidentally mark fresh installs as if
+ * the interactive setup wizard had been completed.
+ */
+export function syncPersistedSetupVersion(options?: {
+  configPath?: string;
+  claudeMdPath?: string;
+  version?: string;
+  onlyIfConfigured?: boolean;
+}): boolean {
+  const configPath = options?.configPath ?? join(CLAUDE_CONFIG_DIR, '.omc-config.json');
+  let config: Record<string, unknown> = {};
+
+  if (existsSync(configPath)) {
+    const rawConfig = readFileSync(configPath, 'utf-8').trim();
+    if (rawConfig.length > 0) {
+      config = JSON.parse(rawConfig) as Record<string, unknown>;
+    }
+  }
+
+  const onlyIfConfigured = options?.onlyIfConfigured ?? true;
+  const isConfigured = typeof config.setupCompleted === 'string' || typeof config.setupVersion === 'string';
+  if (onlyIfConfigured && !isConfigured) {
+    return false;
+  }
+
+  let detectedVersion = options?.version?.trim();
+  if (!detectedVersion) {
+    const claudeMdPath = options?.claudeMdPath ?? join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
+    if (existsSync(claudeMdPath)) {
+      detectedVersion = extractOmcVersionFromClaudeMd(readFileSync(claudeMdPath, 'utf-8')) ?? undefined;
+    }
+  }
+
+  const normalizedVersion = (() => {
+    const candidate = (detectedVersion && detectedVersion !== 'unknown') ? detectedVersion : VERSION;
+    return candidate.startsWith('v') ? candidate : `v${candidate}`;
+  })();
+
+  if (config.setupVersion === normalizedVersion) {
+    return false;
+  }
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({ ...config, setupVersion: normalizedVersion }, null, 2));
+  return true;
+}
+
+/**
  * Merge OMC content into existing CLAUDE.md using markers
  * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
  * @param omcContent - New OMC content to inject
@@ -896,6 +969,19 @@ export function install(options: InstallOptions = {}): InstallResult {
       log('Saved version metadata');
     } else {
       log('Skipping version metadata (project-scoped plugin)');
+    }
+
+    try {
+      const setupVersionSynced = syncPersistedSetupVersion({
+        version: options.version ?? VERSION,
+        onlyIfConfigured: true,
+      });
+      if (setupVersionSynced) {
+        log('Updated persisted setupVersion');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`  Warning: Could not refresh setupVersion metadata (non-fatal): ${message}`);
     }
 
     result.success = true;
