@@ -20,6 +20,7 @@ import { createHash } from 'crypto';
 import https from 'https';
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 import type { RateLimits, UsageResult, UsageErrorReason } from './types.js';
+import { lockPathFor, withFileLock, type FileLockOptions } from '../lib/file-lock.js';
 
 // Cache configuration
 const CACHE_TTL_SUCCESS_MS = 90 * 1000; // 90 seconds for successful responses to reduce usage API polling
@@ -28,6 +29,7 @@ const CACHE_TTL_RATE_LIMITED_MS = 120 * 1000; // 2 minutes base for 429
 const MAX_RATE_LIMITED_BACKOFF_MS = 600 * 1000; // 10 minutes max
 const API_TIMEOUT_MS = 10000;
 const TOKEN_REFRESH_URL_HOSTNAME = 'platform.claude.com';
+const USAGE_CACHE_LOCK_OPTS: FileLockOptions = { timeoutMs: API_TIMEOUT_MS + 2000 };
 const TOKEN_REFRESH_URL_PATH = '/v1/oauth/token';
 
 /**
@@ -185,6 +187,17 @@ function isCacheValid(cache: UsageCache): boolean {
   }
   const ttl = cache.error ? CACHE_TTL_FAILURE_MS : CACHE_TTL_SUCCESS_MS;
   return Date.now() - cache.timestamp < ttl;
+}
+
+function getCachedUsageResult(cache: UsageCache): UsageResult {
+  if (cache.rateLimited) {
+    return { rateLimits: cache.data, error: 'rate_limited' };
+  }
+
+  const cachedError = cache.error && !cache.data
+    ? (cache.errorReason || 'network')
+    : undefined;
+  return { rateLimits: cache.data, error: cachedError };
 }
 
 /**
@@ -641,77 +654,66 @@ export async function getUsage(): Promise<UsageResult> {
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const currentSource: 'anthropic' | 'zai' = isZai && authToken ? 'zai' : 'anthropic';
 
-  // Check cache first (source must match to avoid cross-provider stale data)
-  const cache = readCache();
-  if (cache && isCacheValid(cache) && cache.source === currentSource) {
-    if (cache.rateLimited) {
-      // Serve stale data if available, otherwise report rate_limited
-      return { rateLimits: cache.data, error: 'rate_limited' };
-    }
-    // Use stored errorReason if available, fall back to 'network' for legacy cache entries
-    const cachedError = cache.error && !cache.data
-      ? (cache.errorReason || 'network')
-      : undefined;
-    return { rateLimits: cache.data, error: cachedError };
+  const initialCache = readCache();
+  if (initialCache && isCacheValid(initialCache) && initialCache.source === currentSource) {
+    return getCachedUsageResult(initialCache);
   }
 
-  // z.ai path (must precede OAuth check to avoid stale Anthropic credentials)
-  if (isZai && authToken) {
-    const result = await fetchUsageFromZai();
+  return withFileLock(lockPathFor(getCachePath()), async () => {
+    const cache = readCache();
+    if (cache && isCacheValid(cache) && cache.source === currentSource) {
+      return getCachedUsageResult(cache);
+    }
 
-    if (result.rateLimited) {
-      const prevCount = cache?.rateLimitedCount || 0;
-      const newCount = prevCount + 1;
-      // Serve stale data if available
-      writeCache(cache?.data || null, !cache?.data, 'zai', true, newCount, 'rate_limited');
-      if (cache?.data) {
-        return { rateLimits: cache.data, error: 'rate_limited' };
+    // z.ai path (must precede OAuth check to avoid stale Anthropic credentials)
+    if (isZai && authToken) {
+      const result = await fetchUsageFromZai();
+
+      if (result.rateLimited) {
+        const prevCount = cache?.rateLimitedCount || 0;
+        const newCount = prevCount + 1;
+        // Serve stale data if available
+        writeCache(cache?.data || null, !cache?.data, 'zai', true, newCount, 'rate_limited');
+        if (cache?.data) {
+          return { rateLimits: cache.data, error: 'rate_limited' };
+        }
+        return { rateLimits: null, error: 'rate_limited' };
       }
-      return { rateLimits: null, error: 'rate_limited' };
+
+      if (!result.data) {
+        writeCache(null, true, 'zai', false, 0, 'network');
+        return { rateLimits: null, error: 'network' };
+      }
+
+      const usage = parseZaiResponse(result.data);
+      writeCache(usage, !usage, 'zai');
+      return { rateLimits: usage };
     }
 
-    if (!result.data) {
-      writeCache(null, true, 'zai', false, 0, 'network');
-      return { rateLimits: null, error: 'network' };
-    }
-
-    const usage = parseZaiResponse(result.data);
-    writeCache(usage, !usage, 'zai');
-    return { rateLimits: usage };
-  }
-
-  // Anthropic OAuth path (official Claude Code support)
-  let creds = getCredentials();
-  if (creds) {
-    // If credentials are expired, attempt token refresh
-    if (!validateCredentials(creds)) {
-      if (creds.refreshToken) {
-        const refreshed = await refreshAccessToken(creds.refreshToken);
-        if (refreshed) {
-          // Update in-memory credentials
-          creds = { ...creds, ...refreshed };
-          // Persist refreshed credentials back to store
-          writeBackCredentials(creds);
+    // Anthropic OAuth path (official Claude Code support)
+    let creds = getCredentials();
+    if (creds) {
+      if (!validateCredentials(creds)) {
+        if (creds.refreshToken) {
+          const refreshed = await refreshAccessToken(creds.refreshToken);
+          if (refreshed) {
+            creds = { ...creds, ...refreshed };
+            writeBackCredentials(creds);
+          } else {
+            writeCache(null, true, 'anthropic', false, 0, 'auth');
+            return { rateLimits: null, error: 'auth' };
+          }
         } else {
-          // Refresh failed - auth error
           writeCache(null, true, 'anthropic', false, 0, 'auth');
           return { rateLimits: null, error: 'auth' };
         }
-      } else {
-        // No refresh token available - auth error
-        writeCache(null, true, 'anthropic', false, 0, 'auth');
-        return { rateLimits: null, error: 'auth' };
       }
-    }
 
-    // If we still have valid credentials, use Anthropic OAuth flow
-    if (creds) {
       const result = await fetchUsageFromApi(creds.accessToken);
 
       if (result.rateLimited) {
         const prevCount = cache?.rateLimitedCount || 0;
         const newCount = prevCount + 1;
-        // Serve stale data if available — better UX than [API err]
         writeCache(cache?.data || null, !cache?.data, 'anthropic', true, newCount, 'rate_limited');
         if (cache?.data) {
           return { rateLimits: cache.data, error: 'rate_limited' };
@@ -728,9 +730,8 @@ export async function getUsage(): Promise<UsageResult> {
       writeCache(usage, !usage, 'anthropic');
       return { rateLimits: usage };
     }
-  }
 
-  // No credentials available (expected for API key users)
-  writeCache(null, true, 'anthropic', false, 0, 'no_credentials');
-  return { rateLimits: null, error: 'no_credentials' };
+    writeCache(null, true, 'anthropic', false, 0, 'no_credentials');
+    return { rateLimits: null, error: 'no_credentials' };
+  }, USAGE_CACHE_LOCK_OPTS);
 }
