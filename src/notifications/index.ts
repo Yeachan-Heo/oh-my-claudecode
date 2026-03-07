@@ -62,6 +62,7 @@ export {
   isEventEnabled,
   getEnabledPlatforms,
   getVerbosity,
+  getTmuxTailLines,
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
@@ -101,6 +102,7 @@ import {
   getNotificationConfig,
   isEventEnabled,
   getVerbosity,
+  getTmuxTailLines,
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
@@ -185,7 +187,7 @@ export async function notify(
         const { capturePaneContent } = await import(
           "../features/rate-limit-wait/tmux-detector.js"
         );
-        const tail = capturePaneContent(payload.tmuxPaneId, 15);
+        const tail = capturePaneContent(payload.tmuxPaneId, getTmuxTailLines(config));
         if (tail) {
           payload.tmuxTail = tail;
         }

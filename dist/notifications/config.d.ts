@@ -52,6 +52,13 @@ export declare function buildConfigFromEnv(): NotificationConfig | null;
  */
 export declare function getVerbosity(config: NotificationConfig): VerbosityLevel;
 /**
+ * Get the effective tmux tail line count.
+ *
+ * Priority: OMC_NOTIFY_TMUX_TAIL_LINES env var > config.tmuxTailLines > 15 default.
+ * Invalid values are ignored (fall back to config or default).
+ */
+export declare function getTmuxTailLines(config: NotificationConfig): number;
+/**
  * Check if an event is allowed by the given verbosity level.
  *
  * Level matrix:

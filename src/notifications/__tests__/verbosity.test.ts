@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  getTmuxTailLines,
   getVerbosity,
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
@@ -141,6 +142,46 @@ describe("isEventAllowedByVerbosity", () => {
         expect(isEventAllowedByVerbosity("verbose", event)).toBe(true);
       }
     });
+  });
+});
+
+describe("getTmuxTailLines", () => {
+  const baseConfig: NotificationConfig = {
+    enabled: true,
+  };
+
+  beforeEach(() => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns 15 by default when no config or env", () => {
+    expect(getTmuxTailLines(baseConfig)).toBe(15);
+  });
+
+  it("returns config value when set", () => {
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 25 };
+    expect(getTmuxTailLines(config)).toBe(25);
+  });
+
+  it("returns env var value when set (overrides config)", () => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "30");
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 25 };
+    expect(getTmuxTailLines(config)).toBe(30);
+  });
+
+  it("ignores invalid env var values", () => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "0");
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 22 };
+    expect(getTmuxTailLines(config)).toBe(22);
+  });
+
+  it("falls back to default for invalid config values", () => {
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 0 };
+    expect(getTmuxTailLines(config)).toBe(15);
   });
 });
 

@@ -215,11 +215,16 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         tmuxCalls.args = [];
         tmuxCalls.capturePaneText = '❯ ready\n';
         delete process.env.OMC_SHELL_READY_TIMEOUT_MS;
-        // Clear model env vars before each test
+        // Clear model/provider env vars before each test
         delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
         delete process.env.OMC_CODEX_DEFAULT_MODEL;
         delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
         delete process.env.OMC_GEMINI_DEFAULT_MODEL;
+        delete process.env.ANTHROPIC_MODEL;
+        delete process.env.CLAUDE_MODEL;
+        delete process.env.ANTHROPIC_BASE_URL;
+        delete process.env.CLAUDE_CODE_USE_BEDROCK;
+        delete process.env.CLAUDE_CODE_USE_VERTEX;
         cwd = mkdtempSync(join(tmpdir(), 'runtime-model-passthrough-'));
         setupTaskDir(cwd);
     });
@@ -256,9 +261,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
         expect(launchCall).toBeDefined();
         const launchCmd = launchCall[launchCall.length - 1];
-        expect(launchCmd).toContain("'--model'");
-        expect(launchCmd).toContain("'gpt-4o'");
-        expect(launchCmd).not.toContain("'o3-mini'");
+        expect(launchCmd).toContain("'--model' 'gpt-4o'");
     });
     it('gemini worker passes model from OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL', async () => {
         process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
@@ -288,9 +291,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
         expect(launchCall).toBeDefined();
         const launchCmd = launchCall[launchCall.length - 1];
-        expect(launchCmd).toContain("'--model'");
-        expect(launchCmd).toContain("'gemini-2.0-flash'");
-        expect(launchCmd).not.toContain("'gemini-1.5-pro'");
+        expect(launchCmd).toContain("'--model' 'gemini-2.0-flash'");
     });
     it('claude worker does not pass model flag (not supported)', async () => {
         process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL = 'gpt-4o';
@@ -301,6 +302,30 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         const launchCmd = launchCall[launchCall.length - 1];
         // Claude worker should not have --model flag
         expect(launchCmd).not.toContain("'--model'");
+    });
+    it('claude worker propagates ANTHROPIC_MODEL into the pane startup env', async () => {
+        process.env.ANTHROPIC_MODEL = 'claude-opus-4-1';
+        const runtime = makeRuntime(cwd, 'claude');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+        expect(launchCall).toBeDefined();
+        const launchCmd = launchCall[launchCall.length - 1];
+        expect(launchCmd).toContain('ANTHROPIC_MODEL=');
+        expect(launchCmd).toContain('claude-opus-4-1');
+        expect(launchCmd).not.toContain("'--model'");
+    });
+    it('claude worker propagates custom provider env needed for inherited model selection', async () => {
+        process.env.CLAUDE_MODEL = 'vertex_ai/claude-3-5-sonnet';
+        process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.invalid';
+        const runtime = makeRuntime(cwd, 'claude');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+        expect(launchCall).toBeDefined();
+        const launchCmd = launchCall[launchCall.length - 1];
+        expect(launchCmd).toContain('CLAUDE_MODEL=');
+        expect(launchCmd).toContain('vertex_ai/claude-3-5-sonnet');
+        expect(launchCmd).toContain('ANTHROPIC_BASE_URL=');
+        expect(launchCmd).toContain('https://gateway.example.invalid');
     });
     it('codex worker does not pass model flag when no env var is set', async () => {
         const runtime = makeRuntime(cwd, 'codex');

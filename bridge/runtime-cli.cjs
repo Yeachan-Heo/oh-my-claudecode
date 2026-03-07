@@ -829,13 +829,31 @@ function buildWorkerArgv(agentType, config) {
   const args = buildLaunchArgs(agentType, config);
   return [binary, ...args];
 }
-function getWorkerEnv(teamName, workerName2, agentType) {
+var WORKER_MODEL_ENV_ALLOWLIST = [
+  "ANTHROPIC_MODEL",
+  "CLAUDE_MODEL",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL",
+  "OMC_CODEX_DEFAULT_MODEL",
+  "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",
+  "OMC_GEMINI_DEFAULT_MODEL"
+];
+function getWorkerEnv(teamName, workerName2, agentType, env = process.env) {
   validateTeamName(teamName);
-  return {
+  const workerEnv = {
     OMC_TEAM_WORKER: `${teamName}/${workerName2}`,
     OMC_TEAM_NAME: teamName,
     OMC_WORKER_AGENT_TYPE: agentType
   };
+  for (const key of WORKER_MODEL_ENV_ALLOWLIST) {
+    const value = env[key];
+    if (typeof value === "string" && value.length > 0) {
+      workerEnv[key] = value;
+    }
+  }
+  return workerEnv;
 }
 function isPromptModeAgent(agentType) {
   const contract = getContract(agentType);

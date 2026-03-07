@@ -134,6 +134,26 @@ describe('model-contract', () => {
       expect(env.OMC_WORKER_AGENT_TYPE).toBe('codex');
     });
 
+    it('propagates allowlisted model selection env vars into worker startup env', () => {
+      const env = getWorkerEnv('my-team', 'worker-1', 'claude', {
+        ANTHROPIC_MODEL: 'claude-opus-4-1',
+        CLAUDE_MODEL: 'claude-sonnet-4-5',
+        ANTHROPIC_BASE_URL: 'https://example-gateway.invalid',
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL: 'gpt-5',
+        OMC_GEMINI_DEFAULT_MODEL: 'gemini-2.5-pro',
+        ANTHROPIC_API_KEY: 'should-not-be-forwarded',
+      });
+
+      expect(env.ANTHROPIC_MODEL).toBe('claude-opus-4-1');
+      expect(env.CLAUDE_MODEL).toBe('claude-sonnet-4-5');
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://example-gateway.invalid');
+      expect(env.CLAUDE_CODE_USE_BEDROCK).toBe('1');
+      expect(env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL).toBe('gpt-5');
+      expect(env.OMC_GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-pro');
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    });
+
     it('rejects invalid team names', () => {
       expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
     });

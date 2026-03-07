@@ -119,6 +119,31 @@ function writeFakeProviderBinary(dir: string, provider: 'claude' | 'gemini'): st
   return binDir;
 }
 
+
+function writeFakeCodexBinary(dir: string): string {
+  const binDir = join(dir, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  const binPath = join(binDir, 'codex');
+  writeFileSync(
+    binPath,
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "fake"; exit 0; fi
+if [ "$1" = "exec" ]; then
+  echo "CODEX_OK"
+  if [ -n "\${RUST_LOG:-}" ] || [ -n "\${RUST_BACKTRACE:-}" ]; then
+    echo "RUST_LEAK:\${RUST_LOG:-}:\${RUST_BACKTRACE:-}" 1>&2
+  fi
+  exit 0
+fi
+echo "unexpected" 1>&2
+exit 9
+`,
+    'utf8',
+  );
+  chmodSync(binPath, 0o755);
+  return binDir;
+}
+
 function writeFakeOmcBinary(dir: string): string {
   const binDir = join(dir, 'bin');
   mkdirSync(binDir, { recursive: true });
@@ -285,6 +310,34 @@ describe('run-provider-advisor script contract', () => {
       const artifactPath = result.stdout.trim();
       const artifact = readFileSync(artifactPath, 'utf8');
       expect(artifact).toContain('## Original task\n\nlegacy original task');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('sanitizes Rust env vars for codex so artifacts do not capture Rust stderr logs', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-rust-env-'));
+    try {
+      const binDir = writeFakeCodexBinary(wd);
+      const result = runAdvisorScript(
+        ['codex', '--prompt', 'keep artifact small'],
+        wd,
+        {
+          PATH: `${binDir}:${process.env.PATH || ''}`,
+          RUST_LOG: 'trace',
+          RUST_BACKTRACE: '1',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+
+      const artifactPath = result.stdout.trim();
+      const artifact = readFileSync(artifactPath, 'utf8');
+      expect(artifact).toContain('CODEX_OK');
+      expect(artifact).not.toContain('RUST_LEAK');
+      expect(artifact).not.toContain('trace');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

@@ -13,16 +13,23 @@ vi.mock("../tmux.js", () => ({
     getTeamTmuxSessions: () => [],
     formatTmuxInfo: () => null,
 }));
+const mockCapturePaneContent = vi.fn();
+vi.mock("../../features/rate-limit-wait/tmux-detector.js", () => ({
+    capturePaneContent: (paneId, lines) => mockCapturePaneContent(paneId, lines),
+}));
 // Mock config - use forwarding fns so we can swap implementations per-test
 const mockGetNotificationConfig = vi.fn();
 const mockIsEventEnabled = vi.fn();
+const mockShouldIncludeTmuxTail = vi.fn();
+const mockGetTmuxTailLines = vi.fn();
 vi.mock("../config.js", () => ({
     getNotificationConfig: (profileName) => mockGetNotificationConfig(profileName),
     isEventEnabled: (config, event) => mockIsEventEnabled(config, event),
     getEnabledPlatforms: () => ["discord-bot"],
     getVerbosity: () => "session",
+    getTmuxTailLines: (config) => mockGetTmuxTailLines(config),
     isEventAllowedByVerbosity: () => true,
-    shouldIncludeTmuxTail: () => false,
+    shouldIncludeTmuxTail: (verbosity) => mockShouldIncludeTmuxTail(verbosity),
     parseMentionAllowedMentions: () => ({
         users: undefined,
         roles: undefined,
@@ -71,6 +78,9 @@ describe("notify() -> session-registry integration", () => {
         mockGetCurrentTmuxSession.mockReturnValue("main");
         mockGetNotificationConfig.mockReturnValue(DEFAULT_CONFIG);
         mockIsEventEnabled.mockReturnValue(true);
+        mockShouldIncludeTmuxTail.mockReturnValue(false);
+        mockGetTmuxTailLines.mockReturnValue(15);
+        mockCapturePaneContent.mockReturnValue("");
     });
     afterEach(() => {
         vi.unstubAllGlobals();
@@ -159,6 +169,22 @@ describe("notify() -> session-registry integration", () => {
         expect(discordCall.messageId).toBe("discord-msg-456");
         const telegramCall = calls.find((c) => c.platform === "telegram");
         expect(telegramCall.messageId).toBe("77777");
+    });
+    it("captures tmux tail using the configured line count", async () => {
+        mockShouldIncludeTmuxTail.mockReturnValue(true);
+        mockGetTmuxTailLines.mockReturnValue(23);
+        mockCapturePaneContent.mockReturnValue("line 1\nline 2");
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "discord-msg-tail" }),
+        }));
+        const result = await notify("session-idle", {
+            sessionId: "sess-tail",
+            projectPath: "/test/project",
+        });
+        expect(result).not.toBeNull();
+        expect(mockCapturePaneContent).toHaveBeenCalledWith("%42", 23);
     });
     it("does NOT register when tmuxPaneId is unavailable", async () => {
         mockGetCurrentTmuxPaneId.mockReturnValue(null);

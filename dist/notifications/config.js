@@ -9,6 +9,7 @@ import { join } from "path";
 import { getClaudeConfigDir } from "../utils/paths.js";
 import { getHookConfig, mergeHookConfigIntoNotificationConfig, } from "./hook-config.js";
 const CONFIG_FILE = join(getClaudeConfigDir(), ".omc-config.json");
+const DEFAULT_TMUX_TAIL_LINES = 15;
 /**
  * Read raw config from .omc-config.json
  */
@@ -391,6 +392,23 @@ export function getVerbosity(config) {
         return config.verbosity;
     }
     return "session";
+}
+/**
+ * Get the effective tmux tail line count.
+ *
+ * Priority: OMC_NOTIFY_TMUX_TAIL_LINES env var > config.tmuxTailLines > 15 default.
+ * Invalid values are ignored (fall back to config or default).
+ */
+export function getTmuxTailLines(config) {
+    const envValue = Number.parseInt(process.env.OMC_NOTIFY_TMUX_TAIL_LINES ?? "", 10);
+    if (Number.isInteger(envValue) && envValue >= 1) {
+        return envValue;
+    }
+    const configValue = config.tmuxTailLines;
+    if (typeof configValue === "number" && Number.isInteger(configValue) && configValue >= 1) {
+        return configValue;
+    }
+    return DEFAULT_TMUX_TAIL_LINES;
 }
 /**
  * Check if an event is allowed by the given verbosity level.

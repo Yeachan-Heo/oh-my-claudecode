@@ -17,7 +17,7 @@ vi.mock("fs", async (importOriginal) => {
 vi.mock("../../utils/paths.js", () => ({
     getClaudeConfigDir: () => "/mock-claude-config",
 }));
-import { getNotificationConfig } from "../config.js";
+import { getNotificationConfig, getTmuxTailLines } from "../config.js";
 describe("getNotificationConfig - file + env deep merge", () => {
     beforeEach(() => {
         // Clear all env vars
@@ -109,6 +109,41 @@ describe("getNotificationConfig - file + env deep merge", () => {
         expect(config.telegram).toBeDefined();
         expect(config.telegram.botToken).toBe("123:tg-env");
         expect(config.telegram.chatId).toBe("tg-chat-env");
+    });
+    it("preserves tmuxTailLines from file config", () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+            notifications: {
+                enabled: true,
+                tmuxTailLines: 21,
+                slack: {
+                    enabled: true,
+                    webhookUrl: "https://hooks.slack.com/services/file-config",
+                },
+            },
+        }));
+        const config = getNotificationConfig();
+        expect(config).not.toBeNull();
+        expect(config.tmuxTailLines).toBe(21);
+        expect(getTmuxTailLines(config)).toBe(21);
+    });
+    it("allows OMC_NOTIFY_TMUX_TAIL_LINES to override file config", () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+            notifications: {
+                enabled: true,
+                tmuxTailLines: 21,
+                slack: {
+                    enabled: true,
+                    webhookUrl: "https://hooks.slack.com/services/file-config",
+                },
+            },
+        }));
+        vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "34");
+        const config = getNotificationConfig();
+        expect(config).not.toBeNull();
+        expect(config.tmuxTailLines).toBe(21);
+        expect(getTmuxTailLines(config)).toBe(34);
     });
     it("file config fields take precedence over env for same platform", () => {
         vi.mocked(existsSync).mockReturnValue(true);
