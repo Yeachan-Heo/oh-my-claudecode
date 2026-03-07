@@ -104,7 +104,16 @@ async function main() {
     }
   }
 
-  // 3. Fallback: provide targeted repair guidance
+  // 3. Marketplace clone (for marketplace installs without a populated cache)
+  const marketplaceHudPath = join(configDir, "plugins", "marketplaces", "omc", "dist/hud/index.js");
+  if (existsSync(marketplaceHudPath)) {
+    try {
+      await import(pathToFileURL(marketplaceHudPath).href);
+      return;
+    } catch { /* continue */ }
+  }
+
+  // 4. Fallback: provide targeted repair guidance
   if (pluginCacheDir && existsSync(pluginCacheDir)) {
     const distDir = join(pluginCacheDir, "dist");
     if (!existsSync(distDir)) {
