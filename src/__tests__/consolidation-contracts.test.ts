@@ -44,13 +44,21 @@ describe('Consolidation contracts', () => {
       const names = listBuiltinSkillNames();
 
       expect(names).toContain('omc-plan');
-      expect(names).toContain('omc-security-review');
       expect(names).toContain('omc-doctor');
       expect(names).toContain('omc-help');
       expect(names).not.toContain('plan');
-      expect(names).not.toContain('security-review');
       expect(names).not.toContain('doctor');
       expect(names).not.toContain('help');
+    });
+
+    it('deleted thin-wrapper skills are no longer registered', () => {
+      const names = listBuiltinSkillNames();
+
+      expect(names).not.toContain('analyze');
+      expect(names).not.toContain('build-fix');
+      expect(names).not.toContain('tdd');
+      expect(names).not.toContain('code-review');
+      expect(names).not.toContain('omc-security-review');
     });
 
     it('hides deprecated compatibility aliases from default listings', () => {

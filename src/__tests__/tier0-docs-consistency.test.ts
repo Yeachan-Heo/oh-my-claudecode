@@ -43,8 +43,8 @@ describe('Tier-0 contract docs consistency', () => {
     expect(referenceDoc).not.toContain('incl. )');
   });
 
-  it('keeps ralplan documented as the /plan --consensus alias', () => {
-    expect(claudeDoc).toContain('`ralplan` ("ralplan", "consensus plan"): alias for `/omc-plan --consensus`');
+  it('keeps ralplan documented as a keyword trigger', () => {
+    expect(claudeDoc).toContain('"ralplan"→ralplan');
   });
 
   it('keeps deprecated compatibility aliases documented for project session manager', () => {

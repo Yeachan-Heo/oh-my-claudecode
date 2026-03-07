@@ -229,7 +229,7 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
 const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
-    'ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
+    'ccg','ralplan','plan','research','ultrathink','deepsearch'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -347,12 +347,6 @@ async function main() {
       matches.push({ name: 'ralplan', args: '' });
     }
 
-    // TDD keywords
-    if (/\b(tdd)\b/i.test(cleanPrompt) ||
-        /\btest\s+first\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'tdd', args: '' });
-    }
-
     // Ultrathink keywords
     if (/\b(ultrathink)\b/i.test(cleanPrompt)) {
       matches.push({ name: 'ultrathink', args: '' });
@@ -363,11 +357,6 @@ async function main() {
         /\bsearch\s+the\s+codebase\b/i.test(cleanPrompt) ||
         /\bfind\s+in\s+(the\s+)?codebase\b/i.test(cleanPrompt)) {
       matches.push({ name: 'deepsearch', args: '' });
-    }
-
-    // Analyze keywords
-    if (/\b(deep[\s-]?analyze|deepanalyze)\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'analyze', args: '' });
     }
 
     // No matches - pass through

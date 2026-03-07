@@ -276,7 +276,7 @@ All 2.x commands continue to work. Here's what changed:
 | `/oh-my-claudecode:plan "description"` | Start planning naturally                           | ✅ YES                 |
 | `/oh-my-claudecode:review [path]`      | Invoke normally                                    | ✅ YES (unchanged)     |
 | `/oh-my-claudecode:deepsearch "query"` | Say "find" or "search"                             | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:analyze "target"`   | Say "analyze" or "investigate"                     | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:analyze "target"`   | Say "analyze" — routes to debugger/architect agent | ✅ YES (keyword route) |
 | `/oh-my-claudecode:deepinit [path]`    | Invoke normally                                    | ✅ YES (unchanged)     |
 | `/oh-my-claudecode:git-master`         | Say "git", "commit", "atomic commit"               | ✅ YES (auto-detect)   |
 | `/oh-my-claudecode:frontend-ui-ux`     | Say "UI", "styling", "component", "design"         | ✅ YES (auto-detect)   |

@@ -11,7 +11,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team](#cli-commands-askteam)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (28 Total)](#agents-28-total)
-- [Skills (38 Total)](#skills-38-total)
+- [Skills (33 Total)](#skills-33-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -81,7 +81,7 @@ Configure omc for all Claude Code sessions:
 | Feature           | Without     | With omc Config            |
 | ----------------- | ----------- | -------------------------- |
 | Agent delegation  | Manual only | Automatic based on task    |
-| Keyword detection | Disabled    | ultrawork, search, analyze |
+| Keyword detection | Disabled    | ultrawork, search |
 | Todo continuation | Basic       | Enforced completion        |
 | Model routing     | Default     | Smart tier selection       |
 | Skill composition | None        | Auto-combines skills       |
@@ -319,20 +319,17 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (38 Total)
+## Skills (33 Total)
 
-Includes **37 canonical skills + 1 deprecated alias** (`psm`).
+Includes **32 canonical skills + 1 deprecated alias** (`psm`).
 
 | Skill                     | Description                                                      | Manual Command                              |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| `analyze`                 | Deep analysis and investigation                                  | `/oh-my-claudecode:analyze`                 |
 | `ask-codex`               | Ask Codex via `omc ask codex` and store an ask artifact          | `/oh-my-claudecode:ask-codex`               |
 | `ask-gemini`              | Ask Gemini via `omc ask gemini` and store an ask artifact        | `/oh-my-claudecode:ask-gemini`              |
 | `autopilot`               | Full autonomous execution from idea to working code              | `/oh-my-claudecode:autopilot`               |
-| `build-fix`               | Fix build and TypeScript errors                                  | `/oh-my-claudecode:build-fix`               |
 | `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
 | `ccg`                     | Tri-model workflow via `ask-codex` + `ask-gemini`, then Claude synthesis | `/oh-my-claudecode:ccg`                     |
-| `code-review`             | Comprehensive code review                                        | `/oh-my-claudecode:code-review`             |
 | `configure-notifications` | Configure notifications (Discord/Telegram/Slack/OpenClaw)        | `/oh-my-claudecode:configure-notifications` |
 | `configure-openclaw`      | Configure OpenClaw notification bridge                           | `/oh-my-claudecode:configure-openclaw`      |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/oh-my-claudecode:deep-interview`          |
@@ -346,7 +343,6 @@ Includes **37 canonical skills + 1 deprecated alias** (`psm`).
 | `omc-doctor`              | Diagnose and fix installation issues                             | `/oh-my-claudecode:omc-doctor`              |
 | `omc-help`                | Show OMC usage guide                                             | `/oh-my-claudecode:omc-help`                |
 | `omc-plan`                | Planning workflow (`/plan` safe alias)                           | `/oh-my-claudecode:omc-plan`                |
-| `omc-security-review`     | Security review workflow (`/security-review` safe alias)         | `/oh-my-claudecode:omc-security-review`     |
 | `omc-setup`               | One-time setup wizard                                            | `/oh-my-claudecode:omc-setup`               |
 | `omc-teams`               | Legacy compatibility wrapper for `omc team` CLI                  | `/oh-my-claudecode:omc-teams`               |
 | `project-session-manager` | Manage isolated dev environments (git worktrees + tmux)          | `/oh-my-claudecode:project-session-manager` |
@@ -357,7 +353,6 @@ Includes **37 canonical skills + 1 deprecated alias** (`psm`).
 | `release`                 | Automated release workflow                                       | `/oh-my-claudecode:release`                 |
 | `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
-| `tdd`                     | Test-first workflow enforcement                                  | `/oh-my-claudecode:tdd`                     |
 | `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
 | `trace`                   | Show orchestration trace timeline                                | `/oh-my-claudecode:trace`                   |
 | `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |

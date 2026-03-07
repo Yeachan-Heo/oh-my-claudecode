@@ -34,6 +34,7 @@ import {
   ULTRATHINK_MESSAGE,
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
+  TDD_MESSAGE,
   RALPH_MESSAGE,
   PROMPT_TRANSLATION_MESSAGE,
 } from "../installer/hooks.js";
@@ -575,12 +576,15 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
         messages.push(ANALYZE_MESSAGE);
         break;
 
+      case "tdd":
+        messages.push(TDD_MESSAGE);
+        break;
+
       // For modes without dedicated message constants, return generic activation message
       // These are handled by UserPromptSubmit hook for skill invocation
       case "cancel":
       case "autopilot":
       case "ralplan":
-      case "tdd":
         messages.push(
           `[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`,
         );

@@ -67,6 +67,63 @@ disallowedTools: Write, Edit
     - Always review when: new API endpoints, auth code changes, user input handling, DB queries, file uploads, payment code, dependency updates.
   </Execution_Policy>
 
+  <OWASP_Top_10>
+    A01: Broken Access Control — authorization on every route, CORS configured
+    A02: Cryptographic Failures — strong algorithms (AES-256, RSA-2048+), proper key management, secrets in env vars
+    A03: Injection (SQL, NoSQL, Command, XSS) — parameterized queries, input sanitization, output escaping
+    A04: Insecure Design — threat modeling, secure design patterns
+    A05: Security Misconfiguration — defaults changed, debug disabled, security headers set
+    A06: Vulnerable Components — dependency audit, no CRITICAL/HIGH CVEs
+    A07: Auth Failures — strong password hashing (bcrypt/argon2), secure session management, JWT validation
+    A08: Integrity Failures — signed updates, verified CI/CD pipelines
+    A09: Logging Failures — security events logged, monitoring in place
+    A10: SSRF — URL validation, allowlists for outbound requests
+  </OWASP_Top_10>
+
+  <Security_Checklists>
+    ### Authentication & Authorization
+    - Passwords hashed with strong algorithm (bcrypt/argon2)
+    - Session tokens cryptographically random
+    - JWT tokens properly signed and validated
+    - Access control enforced on all protected resources
+
+    ### Input Validation
+    - All user inputs validated and sanitized
+    - SQL queries use parameterization
+    - File uploads validated (type, size, content)
+    - URLs validated to prevent SSRF
+
+    ### Output Encoding
+    - HTML output escaped to prevent XSS
+    - JSON responses properly encoded
+    - No user data in error messages
+    - Content-Security-Policy headers set
+
+    ### Secrets Management
+    - No hardcoded API keys, passwords, or tokens
+    - Environment variables used for secrets
+    - Secrets not logged or exposed in errors
+
+    ### Dependencies
+    - No known CRITICAL or HIGH CVEs
+    - Dependencies up to date
+    - Dependency sources verified
+  </Security_Checklists>
+
+  <Severity_Definitions>
+    CRITICAL: Exploitable vulnerability with severe impact (data breach, RCE, credential theft)
+    HIGH: Vulnerability requiring specific conditions but serious impact
+    MEDIUM: Security weakness with limited impact or difficult exploitation
+    LOW: Best practice violation or minor security concern
+
+    Remediation Priority:
+    1. Rotate exposed secrets — Immediate (within 1 hour)
+    2. Fix CRITICAL — Urgent (within 24 hours)
+    3. Fix HIGH — Important (within 1 week)
+    4. Fix MEDIUM — Planned (within 1 month)
+    5. Fix LOW — Backlog (when convenient)
+  </Severity_Definitions>
+
   <Output_Format>
     # Security Review Report
 
