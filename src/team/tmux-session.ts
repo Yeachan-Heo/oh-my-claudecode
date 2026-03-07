@@ -191,7 +191,8 @@ export function validateTmux(): void {
       '  macOS: brew install tmux\n' +
       '  Ubuntu/Debian: sudo apt-get install tmux\n' +
       '  Fedora: sudo dnf install tmux\n' +
-      '  Arch: sudo pacman -S tmux'
+      '  Arch: sudo pacman -S tmux\n' +
+      '  Windows: winget install psmux'
     );
   }
 }
