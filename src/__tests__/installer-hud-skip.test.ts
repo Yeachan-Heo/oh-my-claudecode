@@ -147,4 +147,11 @@ describe('isOmcStatusLine', () => {
       command: 'node $HOME/.claude/hud/omc-hud.mjs'
     })).toBe(true);
   });
+
+  it('should recognize find-node.sh statusLine as OMC', () => {
+    expect(isOmcStatusLine({
+      type: 'command',
+      command: 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs'
+    })).toBe(true);
+  });
 });
