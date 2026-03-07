@@ -18,7 +18,7 @@ This is the single source of truth for all agent tier information. All skill fil
 | **Pre-Planning** | - | - | analyst |
 | **Testing** | - | qa-tester | - |
 | **Security** | security-reviewer-low | - | security-reviewer |
-| **TDD** | tdd-guide-low | tdd-guide | - |
+| **TDD** | test-engineer (model=haiku) | test-engineer | - |
 | **Code Review** | - | - | code-reviewer |
 | **Data Science** | - | scientist | scientist-high |
 
@@ -55,8 +55,8 @@ This is the single source of truth for all agent tier information. All skill fil
 | Quick security scan | security-reviewer-low | LOW |
 | Fix build errors | debugger | MEDIUM |
 | Simple build fix | debugger (model=haiku) | LOW |
-| TDD workflow | tdd-guide | MEDIUM |
-| Quick test suggestions | tdd-guide-low | LOW |
+| TDD workflow | test-engineer | MEDIUM |
+| Quick test suggestions | test-engineer (model=haiku) | LOW |
 | Code review | code-reviewer | HIGH |
 | Quick code check | code-reviewer (model=haiku) | LOW |
 | Data analysis/stats | scientist | MEDIUM |
@@ -122,8 +122,7 @@ For token savings, prefer lower tiers when the task allows:
 | `executor` | yes | yes | - | - | - | - | - |
 | `executor-high` | yes | yes | - | - | yes | yes | - |
 | `debugger` | yes | yes | - | - | - | - | - |
-| `tdd-guide` | yes | - | - | - | - | - | - |
-| `tdd-guide-low` | yes | - | - | - | - | - | - |
+| `test-engineer` | yes | - | - | - | - | - | - |
 | `code-reviewer` | yes | - | - | - | yes | - | - |
 | `qa-tester` | yes | - | - | - | - | - | - |
 | `scientist` | - | - | - | - | - | - | yes |

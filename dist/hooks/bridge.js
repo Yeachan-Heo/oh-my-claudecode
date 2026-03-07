@@ -413,6 +413,7 @@ async function processKeywordDetector(input) {
             case "cancel":
             case "autopilot":
             case "ralplan":
+            case "deep-interview":
                 messages.push(`[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`);
                 break;
             case "codex":

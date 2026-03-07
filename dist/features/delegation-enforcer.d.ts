@@ -39,16 +39,6 @@ export interface EnforcementResult {
     /** Warning message (only if OMC_DEBUG=true) */
     warning?: string;
 }
-/**
- * Enforce model parameter for an agent delegation call
- *
- * If model is explicitly specified, it's preserved.
- * If not, the default model from agent definition is injected.
- *
- * @param agentInput - The agent/task input parameters
- * @returns Enforcement result with modified input
- * @throws Error if agent type has no default model
- */
 export declare function enforceModel(agentInput: AgentInput): EnforcementResult;
 /**
  * Check if tool input is an agent delegation call

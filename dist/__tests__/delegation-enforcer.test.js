@@ -67,6 +67,17 @@ describe('delegation-enforcer', () => {
             expect(result.injected).toBe(true);
             expect(result.modifiedInput.model).toBe('sonnet'); // debugger defaults to sonnet
         });
+        it('rewrites deprecated aliases to canonical agent names before injecting model', () => {
+            const input = {
+                description: 'Test task',
+                prompt: 'Do something',
+                subagent_type: 'oh-my-claudecode:build-fixer'
+            };
+            const result = enforceModel(input);
+            expect(result.injected).toBe(true);
+            expect(result.modifiedInput.subagent_type).toBe('oh-my-claudecode:debugger');
+            expect(result.modifiedInput.model).toBe('sonnet');
+        });
         it('throws error for unknown agent type', () => {
             const input = {
                 description: 'Test task',
@@ -167,6 +178,19 @@ describe('delegation-enforcer', () => {
             expect(result.modifiedInput).toEqual(toolInput);
             expect(result.warning).toBeUndefined();
         });
+        it('rewrites deprecated aliases in pre-tool-use enforcement even when model is explicit', () => {
+            const toolInput = {
+                description: 'Test',
+                prompt: 'Test',
+                subagent_type: 'quality-reviewer',
+                model: 'opus'
+            };
+            const result = processPreToolUse('Task', toolInput);
+            expect(result.modifiedInput).toEqual({
+                ...toolInput,
+                subagent_type: 'code-reviewer',
+            });
+        });
         it('enforces model for agent calls', () => {
             const toolInput = {
                 description: 'Test',
@@ -213,6 +237,7 @@ describe('delegation-enforcer', () => {
             expect(getModelForAgent('executor')).toBe('sonnet');
             expect(getModelForAgent('debugger')).toBe('sonnet');
             expect(getModelForAgent('architect')).toBe('opus');
+            expect(getModelForAgent('build-fixer')).toBe('sonnet');
         });
         it('throws error for unknown agent', () => {
             expect(() => getModelForAgent('unknown')).toThrow('Unknown agent type');

@@ -60118,6 +60118,7 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
       case "cancel":
       case "autopilot":
       case "ralplan":
+      case "deep-interview":
         messages.push(
           `[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`
         );

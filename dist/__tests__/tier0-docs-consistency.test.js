@@ -42,5 +42,13 @@ describe('Tier-0 contract docs consistency', () => {
         expect(referenceDoc).toContain('project-session-manager');
         expect(referenceDoc).toContain('`psm` | **Deprecated** compatibility alias for `project-session-manager`');
     });
+    it('does not document removed wrapper slash commands as installed skills', () => {
+        expect(referenceDoc).not.toContain('/oh-my-claudecode:analyze <target>');
+        expect(referenceDoc).not.toContain('/oh-my-claudecode:tdd <feature>');
+    });
+    it('documents team as explicit-only rather than an auto-triggered keyword', () => {
+        expect(claudeDoc).toContain('Team orchestration is explicit via `/team`.');
+        expect(referenceDoc).not.toContain('| `team`, `coordinated team`');
+    });
 });
 //# sourceMappingURL=tier0-docs-consistency.test.js.map

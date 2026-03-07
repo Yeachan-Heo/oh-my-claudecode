@@ -103,7 +103,7 @@ Sequential agent chaining with data passing between stages.
 | Preset | Stages |
 |--------|--------|
 | `review` | explore -> architect -> critic -> executor |
-| `implement` | planner -> executor -> tdd-guide |
+| `implement` | planner -> executor -> test-engineer |
 | `debug` | explore -> architect -> debugger |
 | `research` | parallel(document-specialist, explore) -> architect -> writer |
 | `refactor` | explore -> architect-medium -> executor-high -> qa-tester |

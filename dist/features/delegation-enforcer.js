@@ -25,14 +25,21 @@ import { loadConfig } from '../config/loader.js';
  * @returns Enforcement result with modified input
  * @throws Error if agent type has no default model
  */
+function canonicalizeSubagentType(subagentType) {
+    const hasPrefix = subagentType.startsWith('oh-my-claudecode:');
+    const rawAgentType = subagentType.replace(/^oh-my-claudecode:/, '');
+    const canonicalAgentType = normalizeDelegationRole(rawAgentType);
+    return hasPrefix ? `oh-my-claudecode:${canonicalAgentType}` : canonicalAgentType;
+}
 export function enforceModel(agentInput) {
+    const canonicalSubagentType = canonicalizeSubagentType(agentInput.subagent_type);
     // If forceInherit is enabled, skip model injection entirely so agents
     // inherit the user's Claude Code model setting (issue #1135)
     const config = loadConfig();
     if (config.routing?.forceInherit) {
         // Strip model if present, or leave as-is if not
         const { model: _existing, ...rest } = agentInput;
-        const cleanedInput = rest;
+        const cleanedInput = { ...rest, subagent_type: canonicalSubagentType };
         return {
             originalInput: agentInput,
             modifiedInput: cleanedInput,
@@ -44,15 +51,14 @@ export function enforceModel(agentInput) {
     if (agentInput.model) {
         return {
             originalInput: agentInput,
-            modifiedInput: agentInput,
+            modifiedInput: { ...agentInput, subagent_type: canonicalSubagentType },
             injected: false,
             model: agentInput.model,
         };
     }
     // Extract agent type (strip oh-my-claudecode: prefix if present)
-    const rawAgentType = agentInput.subagent_type.replace(/^oh-my-claudecode:/, '');
-    // Normalize deprecated role aliases before registry lookup
-    const agentType = normalizeDelegationRole(rawAgentType);
+    const rawAgentType = canonicalSubagentType.replace(/^oh-my-claudecode:/, '');
+    const agentType = rawAgentType;
     // Get agent definition
     const agentDefs = getAgentDefinitions();
     const agentDef = agentDefs[agentType];
@@ -78,7 +84,7 @@ export function enforceModel(agentInput) {
     // for non-Claude providers where tier names like 'sonnet' cause 400 errors.
     if (resolvedModel === 'inherit') {
         const { model: _existing, ...rest } = agentInput;
-        const cleanedInput = rest;
+        const cleanedInput = { ...rest, subagent_type: canonicalSubagentType };
         return {
             originalInput: agentInput,
             modifiedInput: cleanedInput,
@@ -91,6 +97,7 @@ export function enforceModel(agentInput) {
     // Create modified input with model injected
     const modifiedInput = {
         ...agentInput,
+        subagent_type: canonicalSubagentType,
         model: sdkModel,
     };
     // Create warning message (only shown if OMC_DEBUG=true)
@@ -170,7 +177,7 @@ export function processPreToolUse(toolName, toolInput) {
  * @throws Error if agent type not found or has no model
  */
 export function getModelForAgent(agentType) {
-    const normalizedType = agentType.replace(/^oh-my-claudecode:/, '');
+    const normalizedType = normalizeDelegationRole(agentType.replace(/^oh-my-claudecode:/, ''));
     const agentDefs = getAgentDefinitions();
     const agentDef = agentDefs[normalizedType];
     if (!agentDef) {
