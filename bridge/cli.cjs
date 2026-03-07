@@ -3651,10 +3651,6 @@ function generateConfigSchema() {
             type: "object",
             properties: { model: { type: "string" } }
           },
-          qualityReviewer: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
           securityReviewer: {
             type: "object",
             properties: { model: { type: "string" } }
@@ -3663,15 +3659,7 @@ function generateConfigSchema() {
             type: "object",
             properties: { model: { type: "string" } }
           },
-          deepExecutor: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
           testEngineer: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
-          buildFixer: {
             type: "object",
             properties: { model: { type: "string" } }
           },
@@ -3895,12 +3883,9 @@ var init_loader = __esm({
         debugger: { model: DEFAULT_TIER_MODELS.MEDIUM },
         executor: { model: DEFAULT_TIER_MODELS.MEDIUM },
         verifier: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        qualityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
         securityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
         codeReviewer: { model: DEFAULT_TIER_MODELS.HIGH },
-        deepExecutor: { model: DEFAULT_TIER_MODELS.HIGH },
         testEngineer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        buildFixer: { model: DEFAULT_TIER_MODELS.MEDIUM },
         designer: { model: DEFAULT_TIER_MODELS.MEDIUM },
         writer: { model: DEFAULT_TIER_MODELS.LOW },
         qaTester: { model: DEFAULT_TIER_MODELS.MEDIUM },
@@ -6433,7 +6418,7 @@ function loadTemplate(filename) {
 function isWindows() {
   return process.platform === "win32";
 }
-var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
+var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
 var init_hooks = __esm({
   "src/installer/hooks.ts"() {
     "use strict";
@@ -6575,6 +6560,29 @@ IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
 
 SYNTHESIZE findings before proceeding.
 </analyze-mode>
+
+---
+
+`;
+    TDD_MESSAGE = `<tdd-mode>
+[TDD MODE ACTIVATED]
+
+THE IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.
+Write code before test? DELETE IT. Start over. No exceptions.
+
+RED-GREEN-REFACTOR CYCLE:
+1. RED: Write failing test for NEXT functionality. Run it - MUST FAIL.
+2. GREEN: Write ONLY enough code to pass. No extras. Run test - MUST PASS.
+3. REFACTOR: Clean up. Run tests after EVERY change. Must stay green.
+4. REPEAT with next failing test.
+
+ENFORCEMENT:
+- Code written before test \u2192 STOP. Delete code. Write test first.
+- Test passes on first run \u2192 Test is wrong. Fix it to fail first.
+- Multiple features in one cycle \u2192 STOP. One test, one feature.
+
+Delegate to test-engineer agent for test strategy. The discipline IS the value.
+</tdd-mode>
 
 ---
 
@@ -10281,15 +10289,10 @@ var init_skill_state = __esm({
       "omc-help": "none",
       "learn-about-omc": "none",
       note: "none",
-      // === Light protection (simple agent shortcuts, 3 reinforcements) ===
-      tdd: "light",
-      "build-fix": "light",
-      analyze: "light",
+      // === Light protection (simple shortcuts, 3 reinforcements) ===
       skill: "light",
       "configure-notifications": "light",
       // === Medium protection (review/planning, 5 reinforcements) ===
-      "code-review": "medium",
-      "security-review": "medium",
       plan: "medium",
       ralplan: "medium",
       review: "medium",
@@ -11297,10 +11300,9 @@ var init_permission_handler = __esm({
     ];
     BACKGROUND_MUTATION_SUBAGENTS = /* @__PURE__ */ new Set([
       "executor",
-      "deep-executor",
       "designer",
       "writer",
-      "build-fixer",
+      "debugger",
       "git-master",
       "test-engineer",
       "qa-tester",
@@ -12051,7 +12053,7 @@ Task(
 2. **Fix** - Apply the fix
 \`\`\`
 Task(
-  subagent_type="oh-my-claudecode:build-fixer",
+  subagent_type="oh-my-claudecode:debugger",
   model="sonnet",
   prompt="Fix this error with minimal changes: [ERROR]"
 )
@@ -12782,8 +12784,8 @@ Use the Team orchestrator to execute tasks in parallel:
 Match agent types to task complexity:
 - Simple tasks (single file, config): \`executor\` with \`model="haiku"\`
 - Standard implementation: \`executor\` with \`model="sonnet"\`
-- Complex work (architecture, refactoring): \`deep-executor\` with \`model="opus"\`
-- Build issues: \`build-fixer\` with \`model="sonnet"\`
+- Complex work (architecture, refactoring): \`executor\` with \`model="opus"\`
+- Build issues: \`debugger\` with \`model="sonnet"\`
 - Test creation: \`test-engineer\` with \`model="sonnet"\`
 - UI work: \`designer\` with \`model="sonnet"\`
 
@@ -12828,7 +12830,7 @@ Task(subagent_type="oh-my-claudecode:executor", model="haiku", prompt="...")
 Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
 
 // For complex work (architecture, debugging, refactoring)
-Task(subagent_type="oh-my-claudecode:deep-executor", model="opus", prompt="...")
+Task(subagent_type="oh-my-claudecode:executor", model="opus", prompt="...")
 \`\`\`
 
 ### Progress Tracking
@@ -25297,16 +25299,16 @@ function renderAgentsDetailed(agents) {
     const parts = a.type.split(":");
     let name = parts[parts.length - 1] || a.type;
     if (name === "executor") name = "exec";
-    if (name === "deep-executor") name = "deep-x";
+    if (name === "deep-executor") name = "exec";
     if (name === "designer") name = "design";
     if (name === "qa-tester") name = "qa";
     if (name === "scientist") name = "sci";
     if (name === "security-reviewer") name = "sec";
-    if (name === "build-fixer") name = "build";
+    if (name === "build-fixer") name = "debug";
     if (name === "code-reviewer") name = "review";
     if (name === "git-master") name = "git";
     if (name === "style-reviewer") name = "style";
-    if (name === "quality-reviewer") name = "quality";
+    if (name === "quality-reviewer") name = "review";
     if (name === "api-reviewer") name = "api-rev";
     if (name === "performance-reviewer") name = "perf";
     if (name === "dependency-expert") name = "dep-exp";
@@ -25335,12 +25337,14 @@ function getShortAgentName(agentType) {
   const abbrevs = {
     // Build/Analysis Lane
     "executor": "exec",
-    "deep-executor": "deep-x",
+    "deep-executor": "exec",
+    // deprecated alias
     "debugger": "debug",
     "verifier": "verify",
     // Review Lane
     "style-reviewer": "style",
-    "quality-reviewer": "quality",
+    "quality-reviewer": "review",
+    // deprecated alias
     "api-reviewer": "api-rev",
     "security-reviewer": "sec",
     "performance-reviewer": "perf",
@@ -25350,7 +25354,8 @@ function getShortAgentName(agentType) {
     "document-specialist": "doc-spec",
     "test-engineer": "test-eng",
     "quality-strategist": "qs",
-    "build-fixer": "build",
+    "build-fixer": "debug",
+    // deprecated alias
     "designer": "design",
     "qa-tester": "qa",
     "scientist": "sci",
@@ -25498,12 +25503,9 @@ var init_agents = __esm({
       // Debugger - 'g' for debuGger (d taken by designer)
       debugger: "g",
       // sonnet
-      // Executor - 'X' for eXecutor
+      // Executor - 'x' for eXecutor (sonnet default, opus for complex tasks)
       executor: "x",
-      // sonnet
-      // Deep Executor - 'X' (same family as executor, opus tier)
-      "deep-executor": "X",
-      // opus
+      // sonnet/opus
       // Verifier - 'V' for Verifier (but vision uses 'v'... use uppercase 'V' for governance role)
       verifier: "V",
       // sonnet
@@ -25513,9 +25515,6 @@ var init_agents = __esm({
       // Style Reviewer - 'Y' for stYle
       "style-reviewer": "y",
       // haiku
-      // Quality Reviewer - 'Qr' for Quality Reviewer (disambiguated from quality-strategist)
-      "quality-reviewer": "Qr",
-      // sonnet
       // API Reviewer - 'I' for Interface/API
       "api-reviewer": "i",
       // sonnet
@@ -25539,9 +25538,6 @@ var init_agents = __esm({
       // sonnet
       // Quality Strategist - 'Qs' for Quality Strategist (disambiguated from quality-reviewer)
       "quality-strategist": "Qs",
-      // sonnet
-      // Build Fixer - 'B' for Build
-      "build-fixer": "b",
       // sonnet
       // Designer - 'd' for Designer
       designer: "d",
@@ -27275,41 +27271,6 @@ init_loader();
 // src/agents/definitions.ts
 init_utils();
 
-// src/agents/deep-executor.ts
-init_utils();
-var DEEP_EXECUTOR_PROMPT_METADATA = {
-  category: "specialist",
-  cost: "EXPENSIVE",
-  promptAlias: "Deep Executor",
-  triggers: [
-    { domain: "Complex tasks", trigger: "Multi-file changes, unclear scope, needs exploration" },
-    { domain: "Deep work", trigger: "Goal-oriented tasks requiring sustained focus" },
-    { domain: "Forge", trigger: "Complex implementation needing deep reasoning" }
-  ],
-  useWhen: [
-    "Complex multi-file tasks requiring thorough exploration first",
-    "Goal-oriented work with unclear implementation path",
-    "Tasks needing deep reasoning and 100% completion guarantee",
-    "Work where executor-high is not enough reasoning power"
-  ],
-  avoidWhen: [
-    "Simple single-file changes (use executor)",
-    "Quick lookups (use explore)",
-    "When explicit step-by-step guidance is provided",
-    "Cost-sensitive operations (use executor tiers instead)",
-    "Tasks requiring delegation to sub-agents (use orchestrator)"
-  ],
-  promptDescription: "Deep executor for complex goal-oriented tasks. Explores extensively before acting, executes all work itself, and guarantees completion with evidence."
-};
-var deepExecutorAgent = {
-  name: "deep-executor",
-  description: "Deep executor for complex goal-oriented tasks. Explores extensively, executes all work itself, guarantees 100% completion with evidence.",
-  prompt: loadAgentPrompt("deep-executor"),
-  model: "opus",
-  defaultModel: "opus",
-  metadata: DEEP_EXECUTOR_PROMPT_METADATA
-};
-
 // src/agents/architect.ts
 init_utils();
 var ARCHITECT_PROMPT_METADATA = {
@@ -27697,39 +27658,6 @@ var documentSpecialistAgent = {
   metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
 };
 
-// src/agents/harsh-critic.ts
-init_utils();
-var HARSH_CRITIC_PROMPT_METADATA = {
-  category: "reviewer",
-  cost: "EXPENSIVE",
-  promptAlias: "harsh-critic",
-  triggers: [
-    {
-      domain: "Thorough Review",
-      trigger: "Deep thorough review of plans, code, or analysis"
-    }
-  ],
-  useWhen: [
-    `User wants a genuinely thorough review (says "harsh critic", "tear this apart", "don't hold back")`,
-    "Stress-testing work before committing real resources",
-    "Suspecting another agent's output may have gaps or weak reasoning",
-    "Wanting a second opinion that isn't biased toward agreement"
-  ],
-  avoidWhen: [
-    "User wants constructive feedback with a balanced tone (use critic instead)",
-    "User wants code changes made (use executor)",
-    "Quick sanity check on something trivial"
-  ]
-};
-var harshCriticAgent = {
-  name: "harsh-critic",
-  description: `Thorough reviewer with structured gap analysis and multi-perspective investigation (Opus). Uses "What's Missing" output format, pre-commitment predictions, and security/new-hire/ops perspective rotation.`,
-  prompt: loadAgentPrompt("harsh-critic"),
-  model: "opus",
-  defaultModel: "opus",
-  metadata: HARSH_CRITIC_PROMPT_METADATA
-};
-
 // src/agents/definitions.ts
 var debuggerAgent = {
   name: "debugger",
@@ -27745,13 +27673,6 @@ var verifierAgent = {
   model: "sonnet",
   defaultModel: "sonnet"
 };
-var qualityReviewerAgent = {
-  name: "quality-reviewer",
-  description: "Logic defects, maintainability, anti-patterns (Sonnet).",
-  prompt: loadAgentPrompt("quality-reviewer"),
-  model: "sonnet",
-  defaultModel: "sonnet"
-};
 var testEngineerAgent = {
   name: "test-engineer",
   description: "Test strategy, coverage, flaky test hardening (Sonnet).",
@@ -27763,13 +27684,6 @@ var securityReviewerAgent = {
   name: "security-reviewer",
   description: "Security vulnerability detection specialist (Sonnet). Use for security audits and OWASP detection.",
   prompt: loadAgentPrompt("security-reviewer"),
-  model: "sonnet",
-  defaultModel: "sonnet"
-};
-var buildFixerAgent = {
-  name: "build-fixer",
-  description: "Build and compilation error resolution specialist (Sonnet). Use for fixing build/type errors in any language.",
-  prompt: loadAgentPrompt("build-fixer"),
   model: "sonnet",
   defaultModel: "sonnet"
 };
@@ -27809,15 +27723,12 @@ function getAgentDefinitions(options) {
     // ============================================================
     // REVIEW LANE
     // ============================================================
-    "quality-reviewer": qualityReviewerAgent,
     "security-reviewer": securityReviewerAgent,
     "code-reviewer": codeReviewerAgent,
     // ============================================================
     // DOMAIN SPECIALISTS
     // ============================================================
-    "deep-executor": deepExecutorAgent,
     "test-engineer": testEngineerAgent,
-    "build-fixer": buildFixerAgent,
     designer: designerAgent,
     writer: writerAgent,
     "qa-tester": qaTesterAgent,
@@ -27833,9 +27744,6 @@ function getAgentDefinitions(options) {
     // ============================================================
     "document-specialist": documentSpecialistAgent
   };
-  if (options?.enableHarshCritic) {
-    agents["harsh-critic"] = harshCriticAgent;
-  }
   const result = {};
   for (const [name, config2] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
@@ -27860,44 +27768,45 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (21 Agents)
+## Available Subagents (18 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) \u2014 fast pattern matching
 - **analyst**: Requirements clarity (opus) \u2014 hidden constraint analysis
 - **planner**: Task sequencing (opus) \u2014 execution plans and risk flags
 - **architect**: System design (opus) \u2014 boundaries, interfaces, tradeoffs
-- **debugger**: Root-cause analysis (sonnet) \u2014 regression isolation, diagnosis
-- **executor**: Code implementation (sonnet) \u2014 features and refactoring (use model=opus for complex tasks)
+- **debugger**: Root-cause analysis + build error fixing (sonnet) \u2014 regression isolation, diagnosis, type/compilation errors
+- **executor**: Code implementation (sonnet) \u2014 features, refactoring, autonomous complex tasks (use model=opus for complex multi-file changes)
 - **verifier**: Completion validation (sonnet) \u2014 evidence, claims, test adequacy
 
 ### Review Lane
-- **quality-reviewer**: Logic defects (sonnet) \u2014 maintainability, anti-patterns, performance hotspots, quality strategy, release readiness (use model=haiku for lightweight style-only checks)
 - **security-reviewer**: Security audits (sonnet) \u2014 vulns, trust boundaries, authn/authz
-- **code-reviewer**: Comprehensive review (opus) \u2014 API contracts, versioning, backward compatibility, orchestrates all review aspects
+- **code-reviewer**: Comprehensive review (opus) \u2014 API contracts, versioning, backward compatibility, logic defects, maintainability, anti-patterns, performance, quality strategy
 
 ### Domain Specialists
 - **test-engineer**: Test strategy (sonnet) \u2014 coverage, flaky test hardening
-- **build-fixer**: Build errors (sonnet) \u2014 toolchain/type failures
 - **designer**: UI/UX architecture (sonnet) \u2014 interaction design
 - **writer**: Documentation (haiku) \u2014 docs, migration notes
 - **qa-tester**: CLI testing (sonnet) \u2014 interactive runtime validation via tmux
 - **scientist**: Data analysis (sonnet) \u2014 statistics and research
 - **git-master**: Git operations (sonnet) \u2014 commits, rebasing, history
 - **document-specialist**: External docs & reference lookup (sonnet) \u2014 SDK/API/package research
+- **code-simplifier**: Code clarity (opus) \u2014 simplification and maintainability
 
 ### Coordination
-- **critic**: Plan review (opus) \u2014 critical challenge and evaluation
+- **critic**: Plan review + thorough gap analysis (opus) \u2014 critical challenge, multi-perspective investigation, structured "What's Missing" analysis
 
 ### Deprecated Aliases
 - **api-reviewer** \u2192 code-reviewer
-- **performance-reviewer** \u2192 quality-reviewer
+- **performance-reviewer** \u2192 code-reviewer
+- **quality-reviewer** \u2192 code-reviewer
+- **quality-strategist** \u2192 code-reviewer
 - **dependency-expert** \u2192 document-specialist
 - **researcher** \u2192 document-specialist
 - **tdd-guide** \u2192 test-engineer
-
-### Optional Agents (enable in config)
-- **harsh-critic**: Thorough gap analysis (opus) \u2014 structured "What's Missing" analysis, multi-perspective investigation, severity-rated findings. Enable with \`features.harshCritic: true\` in config.
+- **deep-executor** \u2192 executor
+- **build-fixer** \u2192 debugger
+- **harsh-critic** \u2192 critic
 
 ## Orchestration Principles
 1. **Delegate Aggressively**: Fire off subagents for specialized tasks - don't do everything yourself
@@ -60201,12 +60110,14 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
       case "analyze":
         messages.push(ANALYZE_MESSAGE);
         break;
+      case "tdd":
+        messages.push(TDD_MESSAGE);
+        break;
       // For modes without dedicated message constants, return generic activation message
       // These are handled by UserPromptSubmit hook for skill invocation
       case "cancel":
       case "autopilot":
       case "ralplan":
-      case "tdd":
         messages.push(
           `[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`
         );
@@ -61603,9 +61514,7 @@ ${options.customSystemPrompt}`;
   if (contextAddition) {
     systemPrompt += contextAddition;
   }
-  const agents = getAgentDefinitions({
-    enableHarshCritic: config2.features?.harshCritic === true
-  });
+  const agents = getAgentDefinitions();
   const externalMcpServers = getDefaultMcpServers({
     exaApiKey: config2.mcpServers?.exa?.apiKey,
     enableExa: config2.mcpServers?.exa?.enabled,
@@ -64071,7 +63980,7 @@ Examples:
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
-  code-reviewer, security-reviewer, test-engineer, build-fixer, designer, writer, scientist
+  code-reviewer, security-reviewer, test-engineer, debugger, designer, writer, scientist
 `;
 var TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]

@@ -8,7 +8,6 @@ This is the single source of truth for all agent tier information. All skill fil
 |--------|-------------|-----------------|-------------|
 | **Analysis** | architect-low | architect-medium | architect |
 | **Execution** | executor-low | executor | executor-high |
-| **Deep Work** | - | - | executor (model=opus) |
 | **Search** | explore | - | explore-high |
 | **Research** | - | document-specialist | - |
 | **Frontend** | designer-low | designer | designer-high |
@@ -19,7 +18,6 @@ This is the single source of truth for all agent tier information. All skill fil
 | **Pre-Planning** | - | - | analyst |
 | **Testing** | - | qa-tester | - |
 | **Security** | security-reviewer-low | - | security-reviewer |
-| **Build** | - | debugger | - |
 | **TDD** | tdd-guide-low | tdd-guide | - |
 | **Code Review** | - | - | code-reviewer |
 | **Data Science** | - | scientist | scientist-high |
@@ -71,8 +69,8 @@ This is the single source of truth for all agent tier information. All skill fil
 | Project-wide type checking | debugger | MEDIUM |
 | Check single file for errors | executor-low | LOW |
 | Data analysis / computation | scientist | MEDIUM |
-| Complex autonomous work | executor (model=opus) | HIGH |
-| Deep goal-oriented execution | executor (model=opus) | HIGH |
+| Complex autonomous work | executor-high | HIGH |
+| Deep goal-oriented execution | executor-high | HIGH |
 
 ## Usage
 
@@ -123,6 +121,7 @@ For token savings, prefer lower tiers when the task allows:
 | `executor-low` | yes | - | - | - | - | - | - |
 | `executor` | yes | yes | - | - | - | - | - |
 | `executor-high` | yes | yes | - | - | yes | yes | - |
+| `debugger` | yes | yes | - | - | - | - | - |
 | `tdd-guide` | yes | - | - | - | - | - | - |
 | `tdd-guide-low` | yes | - | - | - | - | - | - |
 | `code-reviewer` | yes | - | - | - | yes | - | - |

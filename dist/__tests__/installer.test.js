@@ -107,10 +107,8 @@ describe('Installer Constants', () => {
                 'qa-tester.md': 'claude-sonnet-4-6',
                 'debugger.md': 'claude-sonnet-4-6',
                 'verifier.md': 'claude-sonnet-4-6',
-                'quality-reviewer.md': 'claude-opus-4-6',
                 'test-engineer.md': 'claude-sonnet-4-6',
                 'security-reviewer.md': 'claude-opus-4-6',
-                'build-fixer.md': 'claude-sonnet-4-6',
                 'git-master.md': 'claude-sonnet-4-6',
             };
             for (const [filename, expectedModel] of Object.entries(modelExpectations)) {

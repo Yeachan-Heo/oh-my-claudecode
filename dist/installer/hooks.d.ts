@@ -47,6 +47,11 @@ export declare const SEARCH_MESSAGE = "<search-mode>\nMAXIMIZE SEARCH EFFORT. La
  */
 export declare const ANALYZE_MESSAGE = "<analyze-mode>\nANALYSIS MODE. Gather context before diving deep:\n\nCONTEXT GATHERING (parallel):\n- 1-2 explore agents (codebase patterns, implementations)\n- 1-2 document-specialist agents (if external library involved)\n- Direct tools: Grep, Glob, LSP for targeted searches\n\nIF COMPLEX (architecture, multi-system, debugging after 2+ failures):\n- Consult architect agent for strategic guidance\n\nSYNTHESIZE findings before proceeding.\n</analyze-mode>\n\n---\n\n";
 /**
+ * TDD mode message
+ * Replaces skills/tdd/SKILL.md after skill deletion
+ */
+export declare const TDD_MESSAGE = "<tdd-mode>\n[TDD MODE ACTIVATED]\n\nTHE IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.\nWrite code before test? DELETE IT. Start over. No exceptions.\n\nRED-GREEN-REFACTOR CYCLE:\n1. RED: Write failing test for NEXT functionality. Run it - MUST FAIL.\n2. GREEN: Write ONLY enough code to pass. No extras. Run test - MUST PASS.\n3. REFACTOR: Clean up. Run tests after EVERY change. Must stay green.\n4. REPEAT with next failing test.\n\nENFORCEMENT:\n- Code written before test \u2192 STOP. Delete code. Write test first.\n- Test passes on first run \u2192 Test is wrong. Fix it to fail first.\n- Multiple features in one cycle \u2192 STOP. One test, one feature.\n\nDelegate to test-engineer agent for test strategy. The discipline IS the value.\n</tdd-mode>\n\n---\n\n";
+/**
  * Todo continuation prompt
  * Ported from oh-my-opencode's todo-continuation-enforcer
  */

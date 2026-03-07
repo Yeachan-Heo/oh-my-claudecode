@@ -24,7 +24,7 @@ import { addBackgroundTask, getRunningTaskCount, } from "../hud/background-tasks
 import { readHudState, writeHudState } from "../hud/state.js";
 import { loadConfig } from "../config/loader.js";
 import { writeSkillActiveState } from "./skill-state/index.js";
-import { ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
+import { ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
 // Agent dashboard is used in pre/post-tool-use hot path
 import { getAgentDashboard, } from "./subagent-tracker/index.js";
 // Session replay recordFileTouch is used in pre-tool-use hot path
@@ -405,12 +405,14 @@ async function processKeywordDetector(input) {
             case "analyze":
                 messages.push(ANALYZE_MESSAGE);
                 break;
+            case "tdd":
+                messages.push(TDD_MESSAGE);
+                break;
             // For modes without dedicated message constants, return generic activation message
             // These are handled by UserPromptSubmit hook for skill invocation
             case "cancel":
             case "autopilot":
             case "ralplan":
-            case "tdd":
                 messages.push(`[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`);
                 break;
             case "codex":

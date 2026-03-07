@@ -9,20 +9,19 @@ describe('Agent Registry Validation', () => {
     test('agent count matches documentation', () => {
         const agentsDir = path.join(__dirname, '../../agents');
         const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
-        expect(promptFiles.length).toBe(22);
+        expect(promptFiles.length).toBe(18);
     });
-    test('default agent count is 21 (harsh-critic is opt-in)', () => {
+    test('agent count is always 18 (no conditional agents)', () => {
         const agents = getAgentDefinitions();
-        expect(Object.keys(agents).length).toBe(21);
+        expect(Object.keys(agents).length).toBe(18);
+        // Consolidated agents should not be in registry
         expect(Object.keys(agents)).not.toContain('harsh-critic');
-    });
-    test('includes harsh-critic when enableHarshCritic is true', () => {
-        const agents = getAgentDefinitions({ enableHarshCritic: true });
-        expect(Object.keys(agents)).toContain('harsh-critic');
-        expect(Object.keys(agents).length).toBe(22);
+        expect(Object.keys(agents)).not.toContain('quality-reviewer');
+        expect(Object.keys(agents)).not.toContain('deep-executor');
+        expect(Object.keys(agents)).not.toContain('build-fixer');
     });
     test('all agents have .md prompt files', () => {
-        const agents = Object.keys(getAgentDefinitions({ enableHarshCritic: true }));
+        const agents = Object.keys(getAgentDefinitions());
         const agentsDir = path.join(__dirname, '../../agents');
         const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
         for (const file of promptFiles) {
@@ -31,7 +30,7 @@ describe('Agent Registry Validation', () => {
         }
     });
     test('all registry agents are exported from index.ts', async () => {
-        const registryAgents = Object.keys(getAgentDefinitions({ enableHarshCritic: true }));
+        const registryAgents = Object.keys(getAgentDefinitions());
         const exports = await import('../agents/index.js');
         const deprecatedAliases = ['researcher', 'tdd-guide'];
         for (const name of registryAgents) {

@@ -237,6 +237,33 @@ SYNTHESIZE findings before proceeding.
 
 `;
 /**
+ * TDD mode message
+ * Replaces skills/tdd/SKILL.md after skill deletion
+ */
+export const TDD_MESSAGE = `<tdd-mode>
+[TDD MODE ACTIVATED]
+
+THE IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.
+Write code before test? DELETE IT. Start over. No exceptions.
+
+RED-GREEN-REFACTOR CYCLE:
+1. RED: Write failing test for NEXT functionality. Run it - MUST FAIL.
+2. GREEN: Write ONLY enough code to pass. No extras. Run test - MUST PASS.
+3. REFACTOR: Clean up. Run tests after EVERY change. Must stay green.
+4. REPEAT with next failing test.
+
+ENFORCEMENT:
+- Code written before test → STOP. Delete code. Write test first.
+- Test passes on first run → Test is wrong. Fix it to fail first.
+- Multiple features in one cycle → STOP. One test, one feature.
+
+Delegate to test-engineer agent for test strategy. The discipline IS the value.
+</tdd-mode>
+
+---
+
+`;
+/**
  * Todo continuation prompt
  * Ported from oh-my-opencode's todo-continuation-enforcer
  */
