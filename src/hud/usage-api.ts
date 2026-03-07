@@ -23,7 +23,7 @@ import { withFileLock, lockPathFor } from '../lib/file-lock.js';
 import type { RateLimits, UsageResult, UsageErrorReason } from './types.js';
 
 // Cache configuration
-const CACHE_TTL_SUCCESS_MS = 30 * 1000; // 30 seconds for successful responses
+const CACHE_TTL_SUCCESS_MS = 90 * 1000; // 90 seconds for successful responses to reduce usage API polling
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for failures
 const CACHE_TTL_RATE_LIMITED_MS = 120 * 1000; // 2 minutes base for 429
 const MAX_RATE_LIMITED_BACKOFF_MS = 600 * 1000; // 10 minutes max

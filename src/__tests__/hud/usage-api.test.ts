@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
 import { isZaiHost, parseZaiResponse, getUsage } from '../../hud/usage-api.js';
 
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
@@ -250,5 +251,45 @@ describe('getUsage routing', () => {
     const result = await getUsage();
     expect(result.rateLimits).toBeNull();
     expect(result.error).toBe('network');
+  });
+
+  it('reuses successful cached usage data for 90 seconds to avoid excessive polling', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.usage-cache.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.usage-cache.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 60_000,
+          source: 'anthropic',
+          data: {
+            fiveHourPercent: 42,
+            weeklyPercent: 17,
+            fiveHourResetsAt: null,
+            weeklyResetsAt: null,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 42,
+        weeklyPercent: 17,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+      error: undefined,
+    });
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
   });
 });
