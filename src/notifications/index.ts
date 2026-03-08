@@ -187,9 +187,11 @@ export async function notify(
         const { capturePaneContent } = await import(
           "../features/rate-limit-wait/tmux-detector.js"
         );
-        const tail = capturePaneContent(payload.tmuxPaneId, getTmuxTailLines(config));
+        const tailLines = getTmuxTailLines(config);
+        const tail = capturePaneContent(payload.tmuxPaneId, tailLines);
         if (tail) {
           payload.tmuxTail = tail;
+          payload.maxTailLines = tailLines;
         }
       } catch {
         // Non-blocking: tmux capture is best-effort

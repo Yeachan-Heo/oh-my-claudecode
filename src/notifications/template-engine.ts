@@ -74,7 +74,7 @@ function buildFooterText(payload: NotificationPayload): string {
  */
 function buildTmuxTailBlock(payload: NotificationPayload): string {
   if (!payload.tmuxTail) return "";
-  const parsed = parseTmuxTail(payload.tmuxTail);
+  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
   if (!parsed) return "";
   return `\n\n**Recent output:**\n\`\`\`\n${parsed}\n\`\`\``;
 }
