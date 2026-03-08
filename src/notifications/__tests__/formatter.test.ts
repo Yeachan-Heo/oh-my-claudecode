@@ -194,16 +194,25 @@ describe("parseTmuxTail", () => {
     expect(result).toBe("foo\nbar");
   });
 
-  it("caps output at 10 meaningful lines, returning the LAST 10", () => {
-    const input = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+  it("caps output at 15 meaningful lines by default, returning the LAST 15", () => {
+    const input = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join("\n");
     const result = parseTmuxTail(input);
     const lines = result.split("\n");
-    expect(lines).toHaveLength(10);
+    expect(lines).toHaveLength(15);
     expect(lines[0]).toBe("line 11");
-    expect(lines[9]).toBe("line 20");
+    expect(lines[14]).toBe("line 25");
   });
 
-  it("returns fewer than 10 lines when input has fewer meaningful lines", () => {
+  it("respects custom maxLines parameter", () => {
+    const input = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+    const result = parseTmuxTail(input, 5);
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toBe("line 16");
+    expect(lines[4]).toBe("line 20");
+  });
+
+  it("returns fewer than 15 lines when input has fewer meaningful lines", () => {
     const result = parseTmuxTail("line 1\nline 2\nline 3");
     expect(result.split("\n")).toHaveLength(3);
   });

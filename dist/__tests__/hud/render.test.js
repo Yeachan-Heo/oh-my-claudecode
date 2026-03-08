@@ -284,6 +284,26 @@ describe('gitInfoPosition configuration', () => {
             expect(firstLineIsGitInfo || firstLineIsHeader).toBe(true);
         });
     });
+    describe('rate limit rendering', () => {
+        it('prefers stale usage percentages over [API 429] when cached data exists', async () => {
+            const context = createMockContext();
+            context.rateLimitsResult = {
+                rateLimits: {
+                    fiveHourPercent: 45,
+                    weeklyPercent: 12,
+                    fiveHourResetsAt: null,
+                    weeklyResetsAt: null,
+                },
+                error: 'rate_limited',
+            };
+            const config = createMockConfig('above');
+            config.elements.rateLimits = true;
+            const result = await render(context, config);
+            expect(result).toContain('45%');
+            expect(result).toContain('12%');
+            expect(result).not.toContain('[API 429]');
+        });
+    });
 });
 describe('maxWidth wrapMode behavior', () => {
     const createMockContext = () => ({

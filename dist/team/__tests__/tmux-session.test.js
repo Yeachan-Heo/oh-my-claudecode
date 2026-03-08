@@ -181,6 +181,15 @@ describe('buildWorkerStartCommand', () => {
         expect(cmd).toContain('exec $argv');
         expect(cmd).not.toContain('exec "$@"');
         expect(cmd).toContain("'--' 'codex' '--full-auto'");
+        // Fish uses separate -l -c flags (not combined -lc)
+        expect(cmd).toContain("'-l' '-c'");
+        expect(cmd).not.toContain("'-lc'");
+        // Fish sources ~/.config/fish/config.fish, not ~/.fishrc
+        expect(cmd).toContain('.config/fish/config.fish');
+        expect(cmd).not.toContain('.fishrc');
+        // Fish uses test/and syntax, not [ ] && .
+        expect(cmd).toContain('test -f');
+        expect(cmd).toContain('; and source');
     });
     it('rejects relative launchBinary containing spaces', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');

@@ -3,7 +3,7 @@
 
 # skills
 
-37 skill directories for workflow automation and specialized behaviors.
+32 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -31,17 +31,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `plan/SKILL.md` | omc-plan | Strategic planning with interview workflow |
 | `ralplan/SKILL.md` | ralplan | Iterative planning (Planner+Architect+Critic) with RALPLAN-DR structured deliberation (`--deliberate` for high-risk) |
 | `deep-interview/SKILL.md` | deep-interview | Socratic deep interview with mathematical ambiguity gating (Ouroboros-inspired) |
-| `analyze/SKILL.md` | analyze | Deep analysis and investigation |
 | `ralph-init/SKILL.md` | ralph-init | Initialize PRD for structured ralph |
-
-### Code Quality Skills
-
-| File | Skill | Purpose |
-|-----------|-------|---------|
-| `code-review/SKILL.md` | code-review | Comprehensive code review |
-| `security-review/SKILL.md` | security-review | Security vulnerability detection |
-| `tdd/SKILL.md` | tdd | Test-driven development workflow |
-| `build-fix/SKILL.md` | build-fix | Fix build and TypeScript errors |
 
 ### Exploration Skills
 
@@ -173,8 +163,7 @@ None - pure markdown files.
 | Category | Skills | Trigger Keywords |
 |----------|--------|------------------|
 | Execution | autopilot, ultrawork, ralph, team, ultraqa | "autopilot", "ulw", "ralph", "team" |
-| Planning | omc-plan, ralplan, deep-interview, analyze, ralph-init | "plan this", "analyze", "interview me", "ouroboros" |
-| Quality | code-review, security-review, tdd, build-fix | "review", "security", "tdd" |
+| Planning | omc-plan, ralplan, deep-interview, ralph-init | "plan this", "interview me", "ouroboros" |
 | Exploration | deepinit, sciomc, external-context | "deepinit", "research" |
 | Utility | learner, note, cancel, hud, omc-doctor, omc-setup, omc-help, mcp-setup | "stop", "cancel" |
 | Domain | psm, writer-memory, release | psm context |

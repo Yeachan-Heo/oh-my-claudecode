@@ -51,16 +51,19 @@ describe('skill-state', () => {
     });
 
     it('returns light for simple agent shortcuts', () => {
-      expect(getSkillProtection('tdd')).toBe('light');
+      expect(getSkillProtection('skill')).toBe('light');
       expect(getSkillProtection('build-fix')).toBe('light');
       expect(getSkillProtection('analyze')).toBe('light');
     });
 
     it('returns medium for review/planning skills', () => {
-      expect(getSkillProtection('code-review')).toBe('medium');
-      expect(getSkillProtection('security-review')).toBe('medium');
       expect(getSkillProtection('plan')).toBe('medium');
+      expect(getSkillProtection('review')).toBe('medium');
       expect(getSkillProtection('external-context')).toBe('medium');
+    });
+
+    it('returns none for ralplan because persistent-mode enforces it directly', () => {
+      expect(getSkillProtection('ralplan')).toBe('none');
     });
 
     it('returns heavy for long-running skills', () => {
@@ -73,13 +76,13 @@ describe('skill-state', () => {
     });
 
     it('strips oh-my-claudecode: prefix', () => {
-      expect(getSkillProtection('oh-my-claudecode:code-review')).toBe('medium');
+      expect(getSkillProtection('oh-my-claudecode:plan')).toBe('medium');
       expect(getSkillProtection('oh-my-claudecode:ralph')).toBe('none');
     });
 
     it('is case-insensitive', () => {
-      expect(getSkillProtection('TDD')).toBe('light');
-      expect(getSkillProtection('Code-Review')).toBe('medium');
+      expect(getSkillProtection('SKILL')).toBe('light');
+      expect(getSkillProtection('Plan')).toBe('medium');
     });
   });
 
@@ -88,13 +91,13 @@ describe('skill-state', () => {
   // -----------------------------------------------------------------------
   describe('getSkillConfig', () => {
     it('returns correct config for light protection', () => {
-      const config = getSkillConfig('tdd');
+      const config = getSkillConfig('skill');
       expect(config.maxReinforcements).toBe(3);
       expect(config.staleTtlMs).toBe(5 * 60 * 1000);
     });
 
     it('returns correct config for medium protection', () => {
-      const config = getSkillConfig('code-review');
+      const config = getSkillConfig('plan');
       expect(config.maxReinforcements).toBe(5);
       expect(config.staleTtlMs).toBe(15 * 60 * 1000);
     });
@@ -117,10 +120,10 @@ describe('skill-state', () => {
   // -----------------------------------------------------------------------
   describe('writeSkillActiveState', () => {
     it('writes state file for protected skills', () => {
-      const state = writeSkillActiveState(tempDir, 'code-review', 'session-1');
+      const state = writeSkillActiveState(tempDir, 'plan', 'session-1');
       expect(state).not.toBeNull();
       expect(state!.active).toBe(true);
-      expect(state!.skill_name).toBe('code-review');
+      expect(state!.skill_name).toBe('plan');
       expect(state!.session_id).toBe('session-1');
       expect(state!.reinforcement_count).toBe(0);
       expect(state!.max_reinforcements).toBe(5);
@@ -132,24 +135,24 @@ describe('skill-state', () => {
     });
 
     it('creates state file on disk', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1');
+      writeSkillActiveState(tempDir, 'skill', 'session-1');
       const stateDir = join(tempDir, '.omc', 'state', 'sessions', 'session-1');
       const files = existsSync(stateDir);
       expect(files).toBe(true);
     });
 
     it('strips namespace prefix from skill name', () => {
-      const state = writeSkillActiveState(tempDir, 'oh-my-claudecode:code-review', 'session-1');
-      expect(state!.skill_name).toBe('code-review');
+      const state = writeSkillActiveState(tempDir, 'oh-my-claudecode:plan', 'session-1');
+      expect(state!.skill_name).toBe('plan');
     });
 
     it('overwrites existing state when new skill is invoked', () => {
-      writeSkillActiveState(tempDir, 'code-review', 'session-1');
-      const state2 = writeSkillActiveState(tempDir, 'security-review', 'session-1');
-      expect(state2!.skill_name).toBe('security-review');
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
+      const state2 = writeSkillActiveState(tempDir, 'external-context', 'session-1');
+      expect(state2!.skill_name).toBe('external-context');
 
       const readBack = readSkillActiveState(tempDir, 'session-1');
-      expect(readBack!.skill_name).toBe('security-review');
+      expect(readBack!.skill_name).toBe('external-context');
     });
   });
 
@@ -182,7 +185,7 @@ describe('skill-state', () => {
   // -----------------------------------------------------------------------
   describe('clearSkillActiveState', () => {
     it('removes the state file', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1');
+      writeSkillActiveState(tempDir, 'skill', 'session-1');
       expect(readSkillActiveState(tempDir, 'session-1')).not.toBeNull();
 
       clearSkillActiveState(tempDir, 'session-1');
@@ -201,7 +204,7 @@ describe('skill-state', () => {
     it('returns false for fresh state', () => {
       const state: SkillActiveState = {
         active: true,
-        skill_name: 'tdd',
+        skill_name: 'skill',
         started_at: new Date().toISOString(),
         last_checked_at: new Date().toISOString(),
         reinforcement_count: 0,
@@ -214,7 +217,7 @@ describe('skill-state', () => {
     it('returns true for inactive state', () => {
       const state: SkillActiveState = {
         active: false,
-        skill_name: 'tdd',
+        skill_name: 'skill',
         started_at: new Date().toISOString(),
         last_checked_at: new Date().toISOString(),
         reinforcement_count: 0,
@@ -228,7 +231,7 @@ describe('skill-state', () => {
       const past = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 min ago
       const state: SkillActiveState = {
         active: true,
-        skill_name: 'tdd',
+        skill_name: 'skill',
         started_at: past,
         last_checked_at: past,
         reinforcement_count: 0,
@@ -243,7 +246,7 @@ describe('skill-state', () => {
       const recent = new Date().toISOString();
       const state: SkillActiveState = {
         active: true,
-        skill_name: 'code-review',
+        skill_name: 'plan',
         started_at: past,
         last_checked_at: recent,
         reinforcement_count: 2,
@@ -256,7 +259,7 @@ describe('skill-state', () => {
     it('returns true when no timestamps are available', () => {
       const state: SkillActiveState = {
         active: true,
-        skill_name: 'tdd',
+        skill_name: 'skill',
         started_at: '',
         last_checked_at: '',
         reinforcement_count: 0,
@@ -277,15 +280,15 @@ describe('skill-state', () => {
     });
 
     it('blocks stop when skill is active within reinforcement limit', () => {
-      writeSkillActiveState(tempDir, 'code-review', 'session-1');
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
       const result = checkSkillActiveState(tempDir, 'session-1');
       expect(result.shouldBlock).toBe(true);
-      expect(result.message).toContain('code-review');
-      expect(result.skillName).toBe('code-review');
+      expect(result.message).toContain('plan');
+      expect(result.skillName).toBe('plan');
     });
 
     it('increments reinforcement count on each check', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1');
+      writeSkillActiveState(tempDir, 'skill', 'session-1');
 
       checkSkillActiveState(tempDir, 'session-1'); // count → 1
       checkSkillActiveState(tempDir, 'session-1'); // count → 2
@@ -295,7 +298,7 @@ describe('skill-state', () => {
     });
 
     it('allows stop when reinforcement limit is reached', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1'); // max_reinforcements = 3
+      writeSkillActiveState(tempDir, 'skill', 'session-1'); // max_reinforcements = 3
 
       checkSkillActiveState(tempDir, 'session-1'); // 1
       checkSkillActiveState(tempDir, 'session-1'); // 2
@@ -307,7 +310,7 @@ describe('skill-state', () => {
     });
 
     it('clears state when reinforcement limit is reached', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1');
+      writeSkillActiveState(tempDir, 'skill', 'session-1');
 
       for (let i = 0; i < 3; i++) {
         checkSkillActiveState(tempDir, 'session-1');
@@ -319,7 +322,7 @@ describe('skill-state', () => {
     });
 
     it('respects session isolation', () => {
-      writeSkillActiveState(tempDir, 'code-review', 'session-1');
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
 
       // Different session should not be blocked
       const result = checkSkillActiveState(tempDir, 'session-2');
@@ -327,7 +330,7 @@ describe('skill-state', () => {
     });
 
     it('clears stale state and allows stop', () => {
-      writeSkillActiveState(tempDir, 'tdd', 'session-1');
+      writeSkillActiveState(tempDir, 'skill', 'session-1');
 
       // Manually make the state stale
       const state = readSkillActiveState(tempDir, 'session-1')!;
@@ -344,9 +347,9 @@ describe('skill-state', () => {
     });
 
     it('includes skill name in blocking message', () => {
-      writeSkillActiveState(tempDir, 'security-review', 'session-1');
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
       const result = checkSkillActiveState(tempDir, 'session-1');
-      expect(result.message).toContain('security-review');
+      expect(result.message).toContain('plan');
       expect(result.message).toContain('SKILL ACTIVE');
     });
 

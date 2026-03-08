@@ -34,6 +34,7 @@ import {
   ULTRATHINK_MESSAGE,
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
+  TDD_MESSAGE,
   RALPH_MESSAGE,
   PROMPT_TRANSLATION_MESSAGE,
 } from "../installer/hooks.js";
@@ -575,12 +576,16 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
         messages.push(ANALYZE_MESSAGE);
         break;
 
+      case "tdd":
+        messages.push(TDD_MESSAGE);
+        break;
+
       // For modes without dedicated message constants, return generic activation message
       // These are handled by UserPromptSubmit hook for skill invocation
       case "cancel":
       case "autopilot":
       case "ralplan":
-      case "tdd":
+      case "deep-interview":
         messages.push(
           `[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`,
         );
@@ -673,6 +678,13 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
 
   const result = await checkPersistentModes(sessionId, directory, stopContext);
   const output = createHookOutput(result);
+
+  // Skip legacy bridge.ts team enforcement if persistent-mode already
+  // handled this stop event (or intentionally emitted a stop message).
+  // Prevents mixed/double continuation prompts across modes.
+  if (result.mode !== 'none' || Boolean(output.message)) {
+    return output;
+  }
 
   const teamState = readTeamStagedState(directory, sessionId);
   if (!teamState || teamState.active !== true || isTeamStateTerminal(teamState)) {
@@ -1360,6 +1372,11 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
       const hook = createRalphLoopHook(directory);
       hook.startLoop(input.sessionId, cleanPrompt);
     }
+
+    // Clear skill-active state on skill completion to prevent false-blocking.
+    // Without this, every non-'none' skill falsely blocks stops until TTL expires.
+    const { clearSkillActiveState } = await import("./skill-state/index.js");
+    clearSkillActiveState(directory, input.sessionId);
   }
 
   // Run orchestrator post-tool processing (remember tags, verification reminders, etc.)

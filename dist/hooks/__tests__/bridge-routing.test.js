@@ -171,7 +171,9 @@ describe('processHook - Routing Matrix', () => {
                     stop_reason: 'end_turn',
                 });
                 expect(result.continue).toBe(false);
-                expect(result.message).toContain('[TEAM MODE CONTINUATION]');
+                // checkTeamPipeline() in persistent-mode now handles team enforcement
+                // instead of bridge.ts's own team enforcement
+                expect(result.message).toContain('team-pipeline-continuation');
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });
@@ -193,6 +195,31 @@ describe('processHook - Routing Matrix', () => {
                 expect(result.continue).toBe(true);
                 expect(result.message).toMatch(/authentication/i);
                 expect(result.message).not.toContain('[TEAM MODE CONTINUATION]');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('should not append legacy team continuation when ralplan already blocks stop', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-team-'));
+            const sessionId = 'ralplan-team-double-block';
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionStateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionStateDir, { recursive: true });
+                writeFileSync(join(sessionStateDir, 'ralplan-state.json'), JSON.stringify({ active: true, session_id: sessionId, current_phase: 'ralplan' }, null, 2));
+                const globalStateDir = join(tempDir, '.omc', 'state');
+                mkdirSync(globalStateDir, { recursive: true });
+                writeFileSync(join(globalStateDir, 'team-state.json'), JSON.stringify({ active: true, stage: 'team-exec' }, null, 2));
+                const result = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(result.continue).toBe(false);
+                expect(result.message).toContain('ralplan-continuation');
+                expect(result.message).not.toContain('team-stage-continuation');
+                expect(result.message).not.toContain('team-pipeline-continuation');
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });

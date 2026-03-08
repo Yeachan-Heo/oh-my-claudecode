@@ -243,7 +243,7 @@ describe('tmux-detector', () => {
 
       expect(content).toBe('Line 1\nLine 2\nLine 3\n');
       expect(execSync).toHaveBeenCalledWith(
-        "tmux capture-pane -t '%0' -p -S -3",
+        'tmux capture-pane -t "%0" -p -S -3',
         expect.any(Object)
       );
     });

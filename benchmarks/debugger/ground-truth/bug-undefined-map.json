@@ -1,0 +1,41 @@
+{
+  "fixtureId": "bug-undefined-map",
+  "fixturePath": "fixtures/bugs/bug-undefined-map.md",
+  "domain": "bug",
+  "expectedVerdict": "root-cause",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "BUG-UNDEF-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "useState called without initial value — users is undefined on first render before useEffect completes",
+      "keywords": ["useState", "undefined", "initial", "render", "default value", "empty array"],
+      "explanation": "useState<User[]>() is called without an initial value, so users is undefined on the first render. The useEffect fetch is async and hasn't completed yet. When the component reaches users.map(), it crashes because undefined has no map method. Fix: useState<User[]>([]) to provide an empty array as default."
+    },
+    {
+      "id": "BUG-UNDEF-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Loading state check does not guard against undefined users — loading becomes false on error path too",
+      "keywords": ["loading", "guard", "check", "error", "false"],
+      "explanation": "The loading guard (if loading return spinner) only protects during the initial fetch. If the fetch fails, loading is set to false and error is set, but the error check only returns if error is truthy. If setError is called with null (edge case) or if the error path is reached after users is set to undefined, the component falls through to users.map()."
+    },
+    {
+      "id": "BUG-UNDEF-3",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Fix should use useState<User[]>([]) or add nullish guard before .map() call",
+      "keywords": ["fix", "initial", "array", "guard", "optional chaining", "nullish"],
+      "explanation": "The primary fix is useState<User[]>([]) to initialize with an empty array. A defense-in-depth approach adds optional chaining: users?.map() or a guard: if (!users) return null. Both together provide the most robust solution."
+    },
+    {
+      "id": "BUG-UNDEF-4",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "Hot-reload works because React preserves state — masks the bug during development",
+      "keywords": ["hot", "reload", "preserve", "state", "development", "HMR"],
+      "explanation": "The bug report notes it works after hot-reload. This is because Vite HMR preserves React state across module updates. After the first successful fetch, users has data. When the module is hot-reloaded, useState returns the preserved value (the fetched array) instead of the initial undefined. This masks the bug during development."
+    }
+  ]
+}

@@ -25,7 +25,7 @@ describe('Cleanup Validation', () => {
     expect('DEPRECATED_KEYWORD_PATTERNS' in keywordModule).toBe(false);
   });
 
-  it('PluginConfig.agents matches 21-agent registry + omc', async () => {
+  it('PluginConfig.agents matches 18-agent registry + omc', async () => {
     const { DEFAULT_CONFIG } = await import('../config/loader.js');
     const agentKeys = Object.keys(DEFAULT_CONFIG.agents || {});
     expect(agentKeys).toContain('omc');
@@ -39,11 +39,15 @@ describe('Cleanup Validation', () => {
     expect(agentKeys).not.toContain('documentWriter');
     expect(agentKeys).not.toContain('multimodalLooker');
     expect(agentKeys).not.toContain('coordinator');
+    // Absorbed agents (consolidated in v4.8)
+    expect(agentKeys).not.toContain('qualityReviewer');
+    expect(agentKeys).not.toContain('deepExecutor');
+    expect(agentKeys).not.toContain('buildFixer');
   });
 
-  it('agent registry has 22 agents', async () => {
+  it('agent registry has 18 agents', async () => {
     const { getAgentDefinitions } = await import('../agents/definitions.js');
     const defs = getAgentDefinitions();
-    expect(Object.keys(defs)).toHaveLength(21);
+    expect(Object.keys(defs)).toHaveLength(18);
   });
 });

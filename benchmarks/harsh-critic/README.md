@@ -1,14 +1,16 @@
 # Harsh-Critic Benchmark
 
-Evaluates whether the `harsh-critic` agent detects more gaps than the standard `critic` agent across a controlled set of fixtures with known ground truth.
+Evaluates whether the archived `harsh-critic` prompt detects more gaps than the standard `critic` agent across a controlled set of fixtures with known ground truth.
 
 ## What This Benchmark Measures
 
-This benchmark compares `harsh-critic` vs `critic` across 8 fixtures in 3 domains (plans, code, analysis).
+This benchmark compares an archived snapshot of `harsh-critic` vs the current `critic` prompt across 8 fixtures in 3 domains (plans, code, analysis).
 
 **Primary hypothesis**: The structured "What's Missing" output section and multi-perspective investigation protocol in `harsh-critic` improve gap detection compared to `critic`'s open-ended critical challenge format.
 
 **Based on**: A/B testing findings from issue #1240, which showed that structured output templates are the active ingredient — not adversarial framing. The key differentiator is whether the agent is prompted to enumerate missing coverage across multiple perspectives before rendering a verdict.
+
+The historical `harsh-critic` prompt was removed from the live agent registry during agent consolidation, so this benchmark now loads an archived prompt snapshot from `benchmarks/harsh-critic/prompts/harsh-critic.md`.
 
 ## Fixtures
 

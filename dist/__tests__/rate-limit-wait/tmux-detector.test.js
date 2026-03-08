@@ -189,7 +189,7 @@ describe('tmux-detector', () => {
             vi.mocked(execSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
             const content = capturePaneContent('%0', 3);
             expect(content).toBe('Line 1\nLine 2\nLine 3\n');
-            expect(execSync).toHaveBeenCalledWith("tmux capture-pane -t '%0' -p -S -3", expect.any(Object));
+            expect(execSync).toHaveBeenCalledWith('tmux capture-pane -t "%0" -p -S -3', expect.any(Object));
         });
         it('should return empty string when tmux not available', () => {
             vi.mocked(spawnSync).mockReturnValue({

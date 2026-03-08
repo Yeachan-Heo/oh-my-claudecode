@@ -10,8 +10,8 @@ export interface AgentConfig {
     tools?: string[];
     /** Tools explicitly disallowed for this agent */
     disallowedTools?: string[];
-    model?: ModelType;
-    defaultModel?: ModelType;
+    model?: string;
+    defaultModel?: string;
 }
 export interface PluginConfig {
     agents?: {
@@ -39,22 +39,13 @@ export interface PluginConfig {
         verifier?: {
             model?: string;
         };
-        qualityReviewer?: {
-            model?: string;
-        };
         securityReviewer?: {
             model?: string;
         };
         codeReviewer?: {
             model?: string;
         };
-        deepExecutor?: {
-            model?: string;
-        };
         testEngineer?: {
-            model?: string;
-        };
-        buildFixer?: {
             model?: string;
         };
         designer?: {
@@ -88,7 +79,6 @@ export interface PluginConfig {
         astTools?: boolean;
         continuationEnforcement?: boolean;
         autoContextInjection?: boolean;
-        harshCritic?: boolean;
     };
     mcpServers?: {
         exa?: {

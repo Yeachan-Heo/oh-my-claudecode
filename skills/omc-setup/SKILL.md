@@ -860,7 +860,7 @@ Use the AskUserQuestion tool with multiple questions:
 
 **Options:**
 1. **executor (Recommended)** - General-purpose code implementation agent
-2. **build-fixer** - Specialized for build/type error fixing
+2. **debugger** - Specialized for build/type error fixing and debugging
 3. **designer** - Specialized for UI/frontend work
 
 Store the team configuration in `~/.claude/.omc-config.json`:
@@ -987,7 +987,7 @@ Just include these words naturally in your request:
 TEAMS:
 Spawn coordinated agents with shared task lists and real-time messaging:
 - /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
-- /oh-my-claudecode:team 5:build-fixer "fix build errors in src/"
+- /oh-my-claudecode:team 5:debugger "fix build errors in src/"
 Teams use Claude Code native tools (TeamCreate/SendMessage/TaskCreate).
 
 MCP SERVERS:

@@ -730,14 +730,24 @@ function buildWorkerStartCommand(config) {
       return `${key}=${shellEscape(value)}`;
     });
     const shellName2 = shellNameFromPath(shell) || "bash";
-    const execArgsCommand = shellName2 === "fish" ? "exec $argv" : 'exec "$@"';
-    const rcFile2 = process.env.HOME ? `${process.env.HOME}/.${shellName2}rc` : "";
-    const script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    const isFish2 = shellName2 === "fish";
+    const execArgsCommand = isFish2 ? "exec $argv" : 'exec "$@"';
+    let rcFile2 = "";
+    if (process.env.HOME) {
+      rcFile2 = isFish2 ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName2}rc`;
+    }
+    let script;
+    if (isFish2) {
+      script = shouldSourceRc && rcFile2 ? `test -f ${shellEscape(rcFile2)}; and source ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    } else {
+      script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    }
+    const shellFlags = isFish2 ? ["-l", "-c"] : ["-lc"];
     return [
       "env",
       ...envAssignments,
       shell,
-      "-lc",
+      ...shellFlags,
       script,
       "--",
       ...launchWords
@@ -748,8 +758,15 @@ function buildWorkerStartCommand(config) {
     return `${k}=${shellEscape(v)}`;
   }).join(" ");
   const shellName = shellNameFromPath(shell) || "bash";
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : "";
-  const sourceCmd = shouldSourceRc && rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : "";
+  const isFish = shellName === "fish";
+  let rcFile = "";
+  if (process.env.HOME) {
+    rcFile = isFish ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName}rc`;
+  }
+  let sourceCmd = "";
+  if (shouldSourceRc && rcFile) {
+    sourceCmd = isFish ? `test -f "${rcFile}"; and source "${rcFile}"; ` : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
+  }
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
 function validateTmux() {
@@ -757,7 +774,7 @@ function validateTmux() {
     execSync("tmux -V", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
   } catch {
     throw new Error(
-      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux"
+      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux\n  Windows: winget install psmux"
     );
   }
 }
@@ -1545,6 +1562,15 @@ var init_model_contract = __esm({
       "ANTHROPIC_BASE_URL",
       "CLAUDE_CODE_USE_BEDROCK",
       "CLAUDE_CODE_USE_VERTEX",
+      "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+      "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+      "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "OMC_MODEL_HIGH",
+      "OMC_MODEL_MEDIUM",
+      "OMC_MODEL_LOW",
       "OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL",
       "OMC_CODEX_DEFAULT_MODEL",
       "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",

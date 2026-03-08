@@ -28,6 +28,8 @@ export {
   checkRateLimitStatus,
   formatTimeUntilReset,
   formatRateLimitStatus,
+  isRateLimitStatusDegraded,
+  shouldMonitorBlockedPanes,
 } from './rate-limit-monitor.js';
 
 // tmux detector exports

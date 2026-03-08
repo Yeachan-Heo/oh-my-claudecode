@@ -146,16 +146,17 @@ const BYPASS_PERM_RE = /^⏵/;
 const BARE_PROMPT_RE = /^[❯>$%#]+$/;
 /** Minimum ratio of alphanumeric characters for a line to be "meaningful". */
 const MIN_ALNUM_RATIO = 0.15;
-/** Maximum number of meaningful lines to include in a notification. */
-const MAX_TAIL_LINES = 10;
+/** Default maximum number of meaningful lines to include in a notification.
+ * Matches DEFAULT_TMUX_TAIL_LINES in config.ts. */
+const DEFAULT_MAX_TAIL_LINES = 15;
 /**
  * Parse raw tmux output into clean, human-readable lines.
  * - Strips ANSI escape codes
  * - Drops lines starting with OMC chrome characters (●, ⎿, ✻, ·, ◼)
  * - Drops "ctrl+o to expand" hint lines
- * - Returns at most 10 non-empty lines
+ * - Returns at most `maxLines` non-empty lines (default 10)
  */
-export function parseTmuxTail(raw) {
+export function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
     const meaningful = [];
     for (const line of raw.split("\n")) {
         const stripped = line.replace(ANSI_ESCAPE_RE, "");
@@ -180,14 +181,14 @@ export function parseTmuxTail(raw) {
             continue;
         meaningful.push(stripped.trimEnd());
     }
-    return meaningful.slice(-MAX_TAIL_LINES).join("\n");
+    return meaningful.slice(-maxLines).join("\n");
 }
 /**
  * Append tmux tail content to a message if present in the payload.
  */
 function appendTmuxTail(lines, payload) {
     if (payload.tmuxTail) {
-        const parsed = parseTmuxTail(payload.tmuxTail);
+        const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
         if (parsed) {
             lines.push("");
             lines.push("**Recent output:**");

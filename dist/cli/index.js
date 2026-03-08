@@ -39,6 +39,12 @@ warnIfWin32();
 async function defaultAction() {
     // Pass all CLI args through to launch (strip node + script path)
     const args = process.argv.slice(2);
+    // Defensive fallback: wrapper/bridge invocations must preserve explicit ask routing
+    // so nested Claude launch checks only apply to actual Claude launches.
+    if (args[0] === 'ask') {
+        await askCommand(args.slice(1));
+        return;
+    }
     await launchCommand(args);
 }
 program

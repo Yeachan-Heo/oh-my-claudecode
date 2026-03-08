@@ -12,6 +12,12 @@ const ALL_KEYS = [
   'OMC_MODEL_HIGH',
   'OMC_MODEL_MEDIUM',
   'OMC_MODEL_LOW',
+  'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+  'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+  'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -67,4 +73,32 @@ describe('loadConfig() — auto-forceInherit for non-standard providers', () => 
     // env var is defined → auto-detection skipped → remains at default (false)
     expect(config.routing?.forceInherit).toBe(false);
   });
+
+  it('maps Bedrock family env vars into agent defaults and routing tiers', () => {
+    process.env.CLAUDE_CODE_BEDROCK_OPUS_MODEL = 'us.anthropic.claude-opus-4-6-v1:0';
+    process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.CLAUDE_CODE_BEDROCK_HAIKU_MODEL = 'us.anthropic.claude-haiku-4-5-v1:0';
+
+    const config = loadConfig();
+
+    expect(config.agents?.architect?.model).toBe('us.anthropic.claude-opus-4-6-v1:0');
+    expect(config.agents?.executor?.model).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+    expect(config.agents?.explore?.model).toBe('us.anthropic.claude-haiku-4-5-v1:0');
+    expect(config.routing?.tierModels?.HIGH).toBe('us.anthropic.claude-opus-4-6-v1:0');
+    expect(config.routing?.tierModels?.MEDIUM).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+    expect(config.routing?.tierModels?.LOW).toBe('us.anthropic.claude-haiku-4-5-v1:0');
+  });
+
+  it('supports Anthropic family-default env vars for tiered routing defaults', () => {
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'claude-opus-4-6-custom';
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'claude-sonnet-4-6-custom';
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5-custom';
+
+    const config = loadConfig();
+
+    expect(config.agents?.architect?.model).toBe('claude-opus-4-6-custom');
+    expect(config.agents?.executor?.model).toBe('claude-sonnet-4-6-custom');
+    expect(config.agents?.explore?.model).toBe('claude-haiku-4-5-custom');
+  });
+
 });

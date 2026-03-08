@@ -1,0 +1,8 @@
+{
+  "fixtureId": "code-retry-handler",
+  "fixturePath": "fixtures/code/code-retry-handler.md",
+  "domain": "code",
+  "expectedVerdict": "ACCEPT",
+  "isCleanBaseline": true,
+  "findings": []
+}

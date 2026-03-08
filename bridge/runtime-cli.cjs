@@ -150,14 +150,24 @@ function buildWorkerStartCommand(config) {
       return `${key}=${shellEscape(value)}`;
     });
     const shellName2 = shellNameFromPath(shell) || "bash";
-    const execArgsCommand = shellName2 === "fish" ? "exec $argv" : 'exec "$@"';
-    const rcFile2 = process.env.HOME ? `${process.env.HOME}/.${shellName2}rc` : "";
-    const script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    const isFish2 = shellName2 === "fish";
+    const execArgsCommand = isFish2 ? "exec $argv" : 'exec "$@"';
+    let rcFile2 = "";
+    if (process.env.HOME) {
+      rcFile2 = isFish2 ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName2}rc`;
+    }
+    let script;
+    if (isFish2) {
+      script = shouldSourceRc && rcFile2 ? `test -f ${shellEscape(rcFile2)}; and source ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    } else {
+      script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    }
+    const shellFlags = isFish2 ? ["-l", "-c"] : ["-lc"];
     return [
       "env",
       ...envAssignments,
       shell,
-      "-lc",
+      ...shellFlags,
       script,
       "--",
       ...launchWords
@@ -168,8 +178,15 @@ function buildWorkerStartCommand(config) {
     return `${k}=${shellEscape(v)}`;
   }).join(" ");
   const shellName = shellNameFromPath(shell) || "bash";
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : "";
-  const sourceCmd = shouldSourceRc && rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : "";
+  const isFish = shellName === "fish";
+  let rcFile = "";
+  if (process.env.HOME) {
+    rcFile = isFish ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName}rc`;
+  }
+  let sourceCmd = "";
+  if (shouldSourceRc && rcFile) {
+    sourceCmd = isFish ? `test -f "${rcFile}"; and source "${rcFile}"; ` : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
+  }
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
 function validateTmux() {
@@ -177,7 +194,7 @@ function validateTmux() {
     (0, import_child_process2.execSync)("tmux -V", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
   } catch {
     throw new Error(
-      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux"
+      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux\n  Windows: winget install psmux"
     );
   }
 }
@@ -875,6 +892,15 @@ var WORKER_MODEL_ENV_ALLOWLIST = [
   "ANTHROPIC_BASE_URL",
   "CLAUDE_CODE_USE_BEDROCK",
   "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+  "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+  "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "OMC_MODEL_HIGH",
+  "OMC_MODEL_MEDIUM",
+  "OMC_MODEL_LOW",
   "OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL",
   "OMC_CODEX_DEFAULT_MODEL",
   "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",
@@ -2231,6 +2257,23 @@ function validateAnthropicBaseUrl(urlString) {
 }
 
 // src/config/models.ts
+var TIER_ENV_KEYS = {
+  LOW: [
+    "OMC_MODEL_LOW",
+    "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+  ],
+  MEDIUM: [
+    "OMC_MODEL_MEDIUM",
+    "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL"
+  ],
+  HIGH: [
+    "OMC_MODEL_HIGH",
+    "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL"
+  ]
+};
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
   SONNET: "claude-sonnet-4-6",
@@ -2250,14 +2293,23 @@ var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: "gpt-5.3-codex",
   geminiModel: "gemini-3.1-pro-preview"
 };
+function resolveTierModelFromEnv(tier) {
+  for (const key of TIER_ENV_KEYS[tier]) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return void 0;
+}
 function getDefaultModelHigh() {
-  return process.env.OMC_MODEL_HIGH || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
+  return resolveTierModelFromEnv("HIGH") || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
 }
 function getDefaultModelMedium() {
-  return process.env.OMC_MODEL_MEDIUM || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
+  return resolveTierModelFromEnv("MEDIUM") || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
 }
 function getDefaultModelLow() {
-  return process.env.OMC_MODEL_LOW || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
+  return resolveTierModelFromEnv("LOW") || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
 }
 function getDefaultTierModels() {
   return {
@@ -2315,128 +2367,125 @@ function isNonClaudeProvider() {
 }
 
 // src/config/loader.ts
-var DEFAULT_TIER_MODELS = getDefaultTierModels();
-var DEFAULT_CONFIG = {
-  agents: {
-    omc: { model: DEFAULT_TIER_MODELS.HIGH },
-    explore: { model: DEFAULT_TIER_MODELS.LOW },
-    analyst: { model: DEFAULT_TIER_MODELS.HIGH },
-    planner: { model: DEFAULT_TIER_MODELS.HIGH },
-    architect: { model: DEFAULT_TIER_MODELS.HIGH },
-    debugger: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    executor: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    verifier: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    qualityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    securityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    codeReviewer: { model: DEFAULT_TIER_MODELS.HIGH },
-    deepExecutor: { model: DEFAULT_TIER_MODELS.HIGH },
-    testEngineer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    buildFixer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    designer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    writer: { model: DEFAULT_TIER_MODELS.LOW },
-    qaTester: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    scientist: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    gitMaster: { model: DEFAULT_TIER_MODELS.MEDIUM },
-    codeSimplifier: { model: DEFAULT_TIER_MODELS.HIGH },
-    critic: { model: DEFAULT_TIER_MODELS.HIGH },
-    documentSpecialist: { model: DEFAULT_TIER_MODELS.MEDIUM }
-  },
-  features: {
-    parallelExecution: true,
-    lspTools: true,
-    // Real LSP integration with language servers
-    astTools: true,
-    // Real AST tools using ast-grep
-    continuationEnforcement: true,
-    autoContextInjection: true
-  },
-  mcpServers: {
-    exa: { enabled: true },
-    context7: { enabled: true }
-  },
-  permissions: {
-    allowBash: true,
-    allowEdit: true,
-    allowWrite: true,
-    maxBackgroundTasks: 5
-  },
-  magicKeywords: {
-    ultrawork: ["ultrawork", "ulw", "uw"],
-    search: ["search", "find", "locate"],
-    analyze: ["analyze", "investigate", "examine"],
-    ultrathink: ["ultrathink", "think", "reason", "ponder"]
-  },
-  // Intelligent model routing configuration
-  routing: {
-    enabled: true,
-    defaultTier: "MEDIUM",
-    forceInherit: false,
-    escalationEnabled: true,
-    maxEscalations: 2,
-    tierModels: { ...DEFAULT_TIER_MODELS },
-    agentOverrides: {
-      architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
-      planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
-      critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
-      analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
-      explore: { tier: "LOW", reason: "Exploration is search-focused" },
-      "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+function buildDefaultConfig() {
+  const defaultTierModels = getDefaultTierModels();
+  return {
+    agents: {
+      omc: { model: defaultTierModels.HIGH },
+      explore: { model: defaultTierModels.LOW },
+      analyst: { model: defaultTierModels.HIGH },
+      planner: { model: defaultTierModels.HIGH },
+      architect: { model: defaultTierModels.HIGH },
+      debugger: { model: defaultTierModels.MEDIUM },
+      executor: { model: defaultTierModels.MEDIUM },
+      verifier: { model: defaultTierModels.MEDIUM },
+      securityReviewer: { model: defaultTierModels.MEDIUM },
+      codeReviewer: { model: defaultTierModels.HIGH },
+      testEngineer: { model: defaultTierModels.MEDIUM },
+      designer: { model: defaultTierModels.MEDIUM },
+      writer: { model: defaultTierModels.LOW },
+      qaTester: { model: defaultTierModels.MEDIUM },
+      scientist: { model: defaultTierModels.MEDIUM },
+      gitMaster: { model: defaultTierModels.MEDIUM },
+      codeSimplifier: { model: defaultTierModels.HIGH },
+      critic: { model: defaultTierModels.HIGH },
+      documentSpecialist: { model: defaultTierModels.MEDIUM }
     },
-    escalationKeywords: [
-      "critical",
-      "production",
-      "urgent",
-      "security",
-      "breaking",
-      "architecture",
-      "refactor",
-      "redesign",
-      "root cause"
-    ],
-    simplificationKeywords: [
-      "find",
-      "list",
-      "show",
-      "where",
-      "search",
-      "locate",
-      "grep"
-    ]
-  },
-  // External models configuration (Codex, Gemini)
-  // Static defaults only — env var overrides applied in loadEnvConfig()
-  externalModels: {
-    defaults: {
-      codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
-      geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+    features: {
+      parallelExecution: true,
+      lspTools: true,
+      // Real LSP integration with language servers
+      astTools: true,
+      // Real AST tools using ast-grep
+      continuationEnforcement: true,
+      autoContextInjection: true
     },
-    fallbackPolicy: {
-      onModelFailure: "provider_chain",
-      allowCrossProvider: false,
-      crossProviderOrder: ["codex", "gemini"]
+    mcpServers: {
+      exa: { enabled: true },
+      context7: { enabled: true }
+    },
+    permissions: {
+      allowBash: true,
+      allowEdit: true,
+      allowWrite: true,
+      maxBackgroundTasks: 5
+    },
+    magicKeywords: {
+      ultrawork: ["ultrawork", "ulw", "uw"],
+      search: ["search", "find", "locate"],
+      analyze: ["analyze", "investigate", "examine"],
+      ultrathink: ["ultrathink", "think", "reason", "ponder"]
+    },
+    // Intelligent model routing configuration
+    routing: {
+      enabled: true,
+      defaultTier: "MEDIUM",
+      forceInherit: false,
+      escalationEnabled: true,
+      maxEscalations: 2,
+      tierModels: { ...defaultTierModels },
+      agentOverrides: {
+        architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
+        planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
+        critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
+        analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
+        explore: { tier: "LOW", reason: "Exploration is search-focused" },
+        "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+      },
+      escalationKeywords: [
+        "critical",
+        "production",
+        "urgent",
+        "security",
+        "breaking",
+        "architecture",
+        "refactor",
+        "redesign",
+        "root cause"
+      ],
+      simplificationKeywords: [
+        "find",
+        "list",
+        "show",
+        "where",
+        "search",
+        "locate",
+        "grep"
+      ]
+    },
+    // External models configuration (Codex, Gemini)
+    // Static defaults only — env var overrides applied in loadEnvConfig()
+    externalModels: {
+      defaults: {
+        codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
+        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+      },
+      fallbackPolicy: {
+        onModelFailure: "provider_chain",
+        allowCrossProvider: false,
+        crossProviderOrder: ["codex", "gemini"]
+      }
+    },
+    // Delegation routing configuration (opt-in feature for external model routing)
+    delegationRouting: {
+      enabled: false,
+      defaultProvider: "claude",
+      roles: {}
+    },
+    startupCodebaseMap: {
+      enabled: true,
+      maxFiles: 200,
+      maxDepth: 4
+    },
+    taskSizeDetection: {
+      enabled: true,
+      smallWordLimit: 50,
+      largeWordLimit: 200,
+      suppressHeavyModesForSmallTasks: true
     }
-  },
-  // Delegation routing configuration (opt-in feature for external model routing)
-  delegationRouting: {
-    enabled: false,
-    // Opt-in feature
-    defaultProvider: "claude",
-    roles: {}
-  },
-  // Startup codebase map injection (issue #804)
-  startupCodebaseMap: {
-    enabled: true,
-    maxFiles: 200,
-    maxDepth: 4
-  },
-  // Task size detection (issue #790): prevent over-orchestration for small tasks
-  taskSizeDetection: {
-    enabled: true,
-    smallWordLimit: 50,
-    largeWordLimit: 200,
-    suppressHeavyModesForSmallTasks: true
-  }
-};
+  };
+}
+var DEFAULT_CONFIG = buildDefaultConfig();
 function getConfigPaths() {
   const userConfigDir = getConfigDir2();
   return {
@@ -2459,16 +2508,17 @@ function loadJsoncFile(path) {
 }
 function deepMerge(target, source) {
   const result = { ...target };
+  const mutableResult = result;
   for (const key of Object.keys(source)) {
     const sourceValue = source[key];
-    const targetValue = result[key];
+    const targetValue = mutableResult[key];
     if (sourceValue !== void 0 && typeof sourceValue === "object" && sourceValue !== null && !Array.isArray(sourceValue) && typeof targetValue === "object" && targetValue !== null && !Array.isArray(targetValue)) {
-      result[key] = deepMerge(
+      mutableResult[key] = deepMerge(
         targetValue,
         sourceValue
       );
     } else if (sourceValue !== void 0) {
-      result[key] = sourceValue;
+      mutableResult[key] = sourceValue;
     }
   }
   return result;
@@ -2595,7 +2645,7 @@ function loadEnvConfig() {
 }
 function loadConfig() {
   const paths = getConfigPaths();
-  let config = { ...DEFAULT_CONFIG };
+  let config = buildDefaultConfig();
   const userConfig = loadJsoncFile(paths.user);
   if (userConfig) {
     config = deepMerge(config, userConfig);

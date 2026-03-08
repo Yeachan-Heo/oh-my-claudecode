@@ -248,7 +248,7 @@ Task(
 2. **Fix** - Apply the fix
 \`\`\`
 Task(
-  subagent_type="oh-my-claudecode:build-fixer",
+  subagent_type="oh-my-claudecode:debugger",
   model="sonnet",
   prompt="Fix this error with minimal changes: [ERROR]"
 )

@@ -1,0 +1,57 @@
+{
+  "fixtureId": "code-payment-refund",
+  "fixturePath": "fixtures/code/code-payment-refund.md",
+  "domain": "code",
+  "expectedVerdict": "REVISE",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "REF-CRIT-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Race condition in concurrent refunds — no locking between read and update of refundedAmount",
+      "keywords": ["race", "condition", "concurrent", "lock", "refundedAmount", "double refund"],
+      "explanation": "Two concurrent refund requests for the same order can both read the same refundedAmount, both pass the remainingRefundable check, and both update the database. This causes over-refunding beyond the order total. Needs optimistic locking (version column) or a database transaction with SELECT FOR UPDATE."
+    },
+    {
+      "id": "REF-CRIT-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "No transaction wrapping gateway refund and database updates — partial failure leaves inconsistent state",
+      "keywords": ["transaction", "atomic", "inconsistent", "gateway", "database", "partial"],
+      "explanation": "The gateway refund and two database writes (update order, create refund record) are not wrapped in a transaction. If the gateway refund succeeds but db.orders.update fails, money is refunded but the order record doesn't reflect it. Similarly, if db.refunds.create fails, there's no refund audit trail."
+    },
+    {
+      "id": "REF-MAJ-1",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Already-refunded orders not blocked — can process refund on 'refunded' status orders if amounts align",
+      "keywords": ["refunded", "status", "already", "block", "check"],
+      "explanation": "The status check only blocks 'cancelled' orders. An order with status 'refunded' (fully refunded) can still have processRefund called on it. While the amount check would prevent over-refunding, the status should be explicitly checked to prevent confusion."
+    },
+    {
+      "id": "REF-MAJ-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Floating-point comparison for refund amounts — currency arithmetic may produce rounding errors",
+      "keywords": ["floating", "point", "rounding", "currency", "decimal", "cents"],
+      "explanation": "The comparison amount > remainingRefundable and the addition order.refundedAmount + amount use floating-point arithmetic. For currency values like $19.99 - $9.99, this can produce rounding errors (e.g., 10.000000000000002). Should use integer cents or a decimal library."
+    },
+    {
+      "id": "REF-MAJ-3",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "bulkRefund processes sequentially and has no rate limiting — large batches can overwhelm the gateway",
+      "keywords": ["bulk", "sequential", "rate", "limit", "batch", "parallel"],
+      "explanation": "bulkRefund iterates sequentially with await, making it very slow for large batches. But more importantly, there's no rate limiting or concurrency control. If called with hundreds of orders, it will hammer the payment gateway. Should use controlled concurrency (e.g., p-limit) and batch size limits."
+    },
+    {
+      "id": "REF-MIN-1",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "getRefundHistory has no pagination — returns all refunds for an order",
+      "keywords": ["pagination", "limit", "history", "all"],
+      "explanation": "getRefundHistory returns all refunds without pagination. For orders with many partial refunds, this could return a large dataset. Should accept limit/offset parameters."
+    }
+  ]
+}

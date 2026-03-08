@@ -10,7 +10,8 @@
  */
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
 /**
- * Check if tmux is installed and available
+ * Check if tmux is installed and available.
+ * On Windows, a tmux-compatible binary such as psmux may provide tmux.
  */
 export declare function isTmuxAvailable(): boolean;
 /**

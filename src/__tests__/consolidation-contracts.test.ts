@@ -44,13 +44,21 @@ describe('Consolidation contracts', () => {
       const names = listBuiltinSkillNames();
 
       expect(names).toContain('omc-plan');
-      expect(names).toContain('omc-security-review');
       expect(names).toContain('omc-doctor');
       expect(names).toContain('omc-help');
       expect(names).not.toContain('plan');
-      expect(names).not.toContain('security-review');
       expect(names).not.toContain('doctor');
       expect(names).not.toContain('help');
+    });
+
+    it('deleted thin-wrapper skills are no longer registered', () => {
+      const names = listBuiltinSkillNames();
+
+      expect(names).not.toContain('analyze');
+      expect(names).not.toContain('build-fix');
+      expect(names).not.toContain('tdd');
+      expect(names).not.toContain('code-review');
+      expect(names).not.toContain('omc-security-review');
     });
 
     it('hides deprecated compatibility aliases from default listings', () => {
@@ -70,6 +78,16 @@ describe('Consolidation contracts', () => {
       expect(agents['document-specialist']).toBeDefined();
       expect(agents['researcher']).toBeUndefined();
       expect(agents['tdd-guide']).toBeUndefined();
+      // Agent consolidation: absorbed agents removed from registry
+      expect(agents['quality-reviewer']).toBeUndefined();
+      expect(agents['deep-executor']).toBeUndefined();
+      expect(agents['build-fixer']).toBeUndefined();
+      expect(agents['harsh-critic']).toBeUndefined();
+      // Survivors remain
+      expect(agents['code-reviewer']).toBeDefined();
+      expect(agents['executor']).toBeDefined();
+      expect(agents['debugger']).toBeDefined();
+      expect(agents['critic']).toBeDefined();
     });
 
     it('normalizes deprecated agent aliases in delegation routing', () => {
@@ -83,6 +101,18 @@ describe('Consolidation contracts', () => {
       expect(tddGuideRoute.provider).toBe('claude');
       expect(tddGuideRoute.tool).toBe('Task');
       expect(tddGuideRoute.agentOrModel).toBe('test-engineer');
+    });
+
+    it('normalizes consolidated agent aliases in delegation routing', () => {
+      const qualityReviewerRoute = resolveDelegation({ agentRole: 'quality-reviewer' });
+      const deepExecutorRoute = resolveDelegation({ agentRole: 'deep-executor' });
+      const buildFixerRoute = resolveDelegation({ agentRole: 'build-fixer' });
+      const harshCriticRoute = resolveDelegation({ agentRole: 'harsh-critic' });
+
+      expect(qualityReviewerRoute.agentOrModel).toBe('code-reviewer');
+      expect(deepExecutorRoute.agentOrModel).toBe('executor');
+      expect(buildFixerRoute.agentOrModel).toBe('debugger');
+      expect(harshCriticRoute.agentOrModel).toBe('critic');
     });
   });
 });

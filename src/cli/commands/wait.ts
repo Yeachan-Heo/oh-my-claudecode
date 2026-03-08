@@ -20,6 +20,7 @@ import chalk from 'chalk';
 import {
   checkRateLimitStatus,
   formatRateLimitStatus,
+  isRateLimitStatusDegraded,
   isTmuxAvailable,
   isInsideTmux,
   getDaemonStatus,
@@ -106,6 +107,14 @@ export async function waitCommand(options: WaitOptions): Promise<void> {
       console.log(chalk.green('✓ Auto-resume daemon is running'));
       console.log(chalk.gray('  Your session will resume automatically when the limit clears.\n'));
     }
+  } else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+    console.log(chalk.yellow.bold('⚠️  Usage API Rate Limited'));
+    console.log(chalk.yellow(`\n${formatRateLimitStatus(rateLimitStatus)}\n`));
+
+    if (daemonRunning) {
+      console.log(chalk.gray('Auto-resume daemon is running while usage data is stale.'));
+      console.log(chalk.gray('Blocked panes can still be tracked if detected.\n'));
+    }
   } else {
     // Not rate limited
     console.log(chalk.green('✓ Not rate limited\n'));
@@ -151,6 +160,8 @@ export async function waitStatusCommand(options: WaitStatusOptions): Promise<voi
       if (rateLimitStatus.weeklyLimited && rateLimitStatus.weeklyResetsAt) {
         console.log(chalk.gray(`    Weekly resets: ${rateLimitStatus.weeklyResetsAt.toLocaleString()}`));
       }
+    } else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+      console.log(chalk.yellow(`  ⚠ ${formatRateLimitStatus(rateLimitStatus)}`));
     } else {
       console.log(chalk.green('  ✓ Not rate limited'));
       console.log(chalk.gray(`    5-hour: ${rateLimitStatus.fiveHourLimited ? '100%' : 'OK'}`));

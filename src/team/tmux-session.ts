@@ -149,17 +149,36 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     });
 
     const shellName = shellNameFromPath(shell) || 'bash';
-    const execArgsCommand = shellName === 'fish' ? 'exec $argv' : 'exec "$@"';
-    const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
-    const script = shouldSourceRc && rcFile
-      ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; ${execArgsCommand}`
-      : execArgsCommand;
+    const isFish = shellName === 'fish';
+    const execArgsCommand = isFish ? 'exec $argv' : 'exec "$@"';
+
+    let rcFile = '';
+    if (process.env.HOME) {
+      rcFile = isFish
+        ? `${process.env.HOME}/.config/fish/config.fish`
+        : `${process.env.HOME}/.${shellName}rc`;
+    }
+
+    let script: string;
+    if (isFish) {
+      // Fish uses different syntax for conditionals and sourcing
+      script = shouldSourceRc && rcFile
+        ? `test -f ${shellEscape(rcFile)}; and source ${shellEscape(rcFile)}; ${execArgsCommand}`
+        : execArgsCommand;
+    } else {
+      script = shouldSourceRc && rcFile
+        ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; ${execArgsCommand}`
+        : execArgsCommand;
+    }
+
+    // Fish doesn't support combined -lc; use separate -l -c flags
+    const shellFlags = isFish ? ['-l', '-c'] : ['-lc'];
 
     return [
       'env',
       ...envAssignments,
       shell,
-      '-lc',
+      ...shellFlags,
       script,
       '--',
       ...launchWords,
@@ -174,9 +193,21 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     .join(' ');
 
   const shellName = shellNameFromPath(shell) || 'bash';
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
-  // Quote rcFile to prevent shell injection if HOME contains metacharacters
-  const sourceCmd = shouldSourceRc && rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : '';
+  const isFish = shellName === 'fish';
+
+  let rcFile = '';
+  if (process.env.HOME) {
+    rcFile = isFish
+      ? `${process.env.HOME}/.config/fish/config.fish`
+      : `${process.env.HOME}/.${shellName}rc`;
+  }
+
+  let sourceCmd = '';
+  if (shouldSourceRc && rcFile) {
+    sourceCmd = isFish
+      ? `test -f "${rcFile}"; and source "${rcFile}"; `
+      : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
+  }
 
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
@@ -191,7 +222,8 @@ export function validateTmux(): void {
       '  macOS: brew install tmux\n' +
       '  Ubuntu/Debian: sudo apt-get install tmux\n' +
       '  Fedora: sudo dnf install tmux\n' +
-      '  Arch: sudo pacman -S tmux'
+      '  Arch: sudo pacman -S tmux\n' +
+      '  Windows: winget install psmux'
     );
   }
 }

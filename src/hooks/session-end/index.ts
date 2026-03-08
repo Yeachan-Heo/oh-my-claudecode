@@ -4,8 +4,9 @@ import * as readline from 'readline';
 import { triggerStopCallbacks } from './callbacks.js';
 import { notify } from '../../notifications/index.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
-import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
+import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -333,12 +334,18 @@ export function cleanupModeStates(directory: string, sessionId?: string): { file
 
   for (const { file, mode } of SESSION_END_MODE_STATE_FILES) {
     const localPath = path.join(stateDir, file);
+    const sessionPath = sessionId ? resolveSessionStatePath(mode, sessionId, directory) : undefined;
 
-    // Check if local state exists and is active
-    if (fs.existsSync(localPath)) {
-      try {
-        // For JSON files, check if active before removing
-        if (file.endsWith('.json')) {
+    try {
+      // For JSON files, check if active before removing
+      if (file.endsWith('.json')) {
+        const sessionState = sessionId
+          ? readModeState<Record<string, unknown>>(mode, directory, sessionId)
+          : null;
+
+        let shouldCleanup = sessionState?.active === true;
+
+        if (!shouldCleanup && fs.existsSync(localPath)) {
           const content = fs.readFileSync(localPath, 'utf-8');
           const state = JSON.parse(content);
 
@@ -350,24 +357,37 @@ export function cleanupModeStates(directory: string, sessionId?: string): { file
             // If state.session_id matches our sessionId, clean it
             const stateSessionId = state.session_id as string | undefined;
             if (!sessionId || !stateSessionId || stateSessionId === sessionId) {
-              fs.unlinkSync(localPath);
-              filesRemoved++;
-              if (!modesCleaned.includes(mode)) {
-                modesCleaned.push(mode);
-              }
+              shouldCleanup = true;
             }
           }
-        } else {
-          // For marker files, always remove
-          fs.unlinkSync(localPath);
-          filesRemoved++;
-          if (!modesCleaned.includes(mode)) {
-            modesCleaned.push(mode);
+        }
+
+        if (shouldCleanup) {
+          const hadLocalPath = fs.existsSync(localPath);
+          const hadSessionPath = Boolean(sessionPath && fs.existsSync(sessionPath));
+
+          if (clearModeStateFile(mode, directory, sessionId)) {
+            if (hadLocalPath && !fs.existsSync(localPath)) {
+              filesRemoved++;
+            }
+            if (sessionPath && hadSessionPath && !fs.existsSync(sessionPath)) {
+              filesRemoved++;
+            }
+            if (!modesCleaned.includes(mode)) {
+              modesCleaned.push(mode);
+            }
           }
         }
-      } catch {
-        // Ignore errors, continue with other files
+      } else if (fs.existsSync(localPath)) {
+        // For marker files, always remove
+        fs.unlinkSync(localPath);
+        filesRemoved++;
+        if (!modesCleaned.includes(mode)) {
+          modesCleaned.push(mode);
+        }
       }
+    } catch {
+      // Ignore errors, continue with other files
     }
   }
 

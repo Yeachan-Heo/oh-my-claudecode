@@ -197,6 +197,8 @@ export interface NotificationPayload {
   agentType?: string;
   /** Captured tmux pane content (last N lines) */
   tmuxTail?: string;
+  /** Max meaningful lines to display from tmux tail */
+  maxTailLines?: number;
   /** Reply channel name (from OPENCLAW_REPLY_CHANNEL env var) */
   replyChannel?: string;
   /** Reply target (from OPENCLAW_REPLY_TARGET env var) */

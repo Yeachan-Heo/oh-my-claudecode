@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 
+vi.mock('child_process', () => ({
+  spawnSync: vi.fn(),
+}));
+
+import { spawnSync } from 'child_process';
+
 describe('CLI win32 platform warning (#923)', () => {
   const originalPlatform = process.platform;
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -15,8 +21,9 @@ describe('CLI win32 platform warning (#923)', () => {
     vi.resetModules();
   });
 
-  it('should warn on win32 platform', async () => {
+  it('should warn on win32 when tmux is not available', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.mocked(spawnSync).mockReturnValue({ status: 1 } as ReturnType<typeof spawnSync>);
 
     const { warnIfWin32 } = await import('../cli/win32-warning.js');
     warnIfWin32();
@@ -26,7 +33,17 @@ describe('CLI win32 platform warning (#923)', () => {
     expect(allOutput).toContain('win32');
     expect(allOutput).toContain('tmux');
     expect(allOutput).toContain('WSL2');
-    expect(allOutput).toContain('experimental');
+    expect(allOutput).toContain('psmux');
+  });
+
+  it('should NOT warn on win32 when tmux (or psmux) is available', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.mocked(spawnSync).mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+
+    const { warnIfWin32 } = await import('../cli/win32-warning.js');
+    warnIfWin32();
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('should NOT warn on linux platform', async () => {
@@ -49,6 +66,7 @@ describe('CLI win32 platform warning (#923)', () => {
 
   it('should not block execution after warning', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.mocked(spawnSync).mockReturnValue({ status: 1 } as ReturnType<typeof spawnSync>);
 
     const { warnIfWin32 } = await import('../cli/win32-warning.js');
     let continued = false;

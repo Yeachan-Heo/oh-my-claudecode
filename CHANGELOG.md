@@ -1,3 +1,58 @@
+# oh-my-claudecode v4.7.8: Stop-Hook Hardening & CLI Reliability Fixes
+
+## Release Notes
+
+Patch release focused on post-v4.7.7 stabilization on `dev`: stop-hook hardening, agent consolidation follow-up, LSP/session cleanup, and reliability fixes across routing, notifications, HUD polling, wait-state handling, ask-skill session behavior, status line portability, and fish-shell worker launches.
+
+### Highlights
+
+- **Stop-hook hardening for persistent flows** — Adds standalone protection for `team` and `ralplan`, fixes false-blocking after skill completion, and extends protection coverage to `deep-interview`. (#1424, #1432, #1435)
+- **Agent consolidation follow-up** — Consolidates 4 overlapping agent pairs (22→18 agents), removes 5 thin wrapper skills, and adds benchmark coverage for all 4 consolidated agents to make prompt tuning measurable. (#1425, #1426, #1437)
+- **Runtime cleanup and stability** — Cleans session-scoped mode state on exit and force-kills orphaned LSP server processes when the MCP bridge shuts down. (#1428, #1429)
+- **CLI and environment reliability** — Preserves `ask-codex` / `ask-gemini` behavior inside Claude Code sessions, makes `statusLine` paths portable across machines, and fixes Team worker pane launch commands for Fish shell users. (#1438, #1404, #1377)
+
+### Bug Fixes
+
+- **fix(platform): replace win32 hard-blocks with tmux capability checks** — Removes platform-level hard denial in favor of capability detection so supported Windows environments can proceed when tmux interoperability is available. (#1423)
+- **fix(stop-hook): add hard-blocking for standalone team and ralplan** — Adds first-class protection paths for standalone Team and Ralplan flows to prevent premature interruption of long-running orchestration. (#1424)
+- **fix(session-end): clean session-scoped mode state on exit** — Ensures session-local state is removed when execution ends so stale mode markers do not leak into later sessions. (#1428)
+- **fix(lsp): kill orphaned LSP server processes on MCP bridge exit** — Terminates managed child language servers during bridge shutdown to prevent orphan buildup and memory pressure. (#1429)
+- **fix(routing): respect env-configured Claude family models** — Keeps runtime model selection aligned with environment overrides instead of falling back to stale defaults. (#1430)
+- **fix(notifications): pass tmuxTailLines config to formatter parseTmuxTail** — Makes notification tail rendering honor the configured tmux line limit end to end. (#1431)
+- **fix(hud): reduce usage API polling to avoid 429s** — Lowers polling pressure and improves stale-cache behavior under rate limiting. (#1418)
+- **fix(wait): handle stale cached rate limit status** — Prevents misleading wait-state behavior when cached rate-limit data has expired. (#1433)
+- **fix: preserve ask-codex and ask-gemini inside Claude Code sessions** — Keeps ask-skill flows working correctly when invoked from inside Claude Code sessions instead of losing behavior to session context drift. (#1438)
+- **fix: use portable $HOME path in statusLine for multi-machine sync** — Replaces machine-specific status line paths with a portable home-based path better suited for synced dotfiles and multi-machine setups. (#1404)
+- **fix(team): support fish shell in worker pane launch commands** — Corrects Team worker pane launch behavior for Fish shell environments. (#1377)
+
+### Refactor & Testing
+
+- **refactor(skills): eliminate 5 thin wrapper skills + CLAUDE.md diet** — Removes redundant thin wrappers and trims docs to reduce maintenance overhead. (#1425)
+- **refactor(agents): consolidate 4 overlapping agent pairs (22→18 agents)** — Simplifies the registry while preserving compatibility aliases and downstream routing behavior. (#1426)
+- **test(skill-state): align ralplan expectations with stop-hook** — Updates test expectations to match the hardened stop-hook enforcement model. (#1435)
+- **feat(benchmarks): add per-agent prompt benchmark suite for all 4 consolidated agents** — Extends prompt benchmarking infrastructure so merged agents can be compared against archived pre-consolidation prompts. (#1437)
+
+### Build
+
+- **fix(release): add marketplace.json and docs/CLAUDE.md to version checklist** — Closes the release-process gap that allowed version drift in non-package metadata files.
+- **fix: bump marketplace.json version to 4.7.7** — Corrects the missed marketplace version bump required by version consistency checks.
+- **chore: bump version to 4.7.7** — Final version cut from the previous release lineage before this patch cycle.
+
+### Install / Update
+
+```bash
+npm install -g oh-my-claude-sisyphus@4.7.8
+```
+
+Or reinstall the plugin:
+```bash
+claude /install-plugin oh-my-claudecode
+```
+
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.7.7...v4.7.8
+
+---
+
 # oh-my-claudecode v4.7.5: Runtime Guardrails & Model Default Cleanup
 
 ## Release Notes

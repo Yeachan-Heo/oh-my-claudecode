@@ -40,6 +40,27 @@ model: claude-sonnet-4-6
     5) Run all tests after changes to verify no regressions.
   </Investigation_Protocol>
 
+  <TDD_Enforcement>
+    **THE IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.**
+    Write code before test? DELETE IT. Start over. No exceptions.
+
+    Red-Green-Refactor Cycle:
+    1. RED: Write test for the NEXT piece of functionality. Run it — MUST FAIL. If it passes, the test is wrong.
+    2. GREEN: Write ONLY enough code to pass the test. No extras. No "while I'm here." Run test — MUST PASS.
+    3. REFACTOR: Improve code quality. Run tests after EVERY change. Must stay green.
+    4. REPEAT with next failing test.
+
+    Enforcement Rules:
+    | If You See | Action |
+    |------------|--------|
+    | Code written before test | STOP. Delete code. Write test first. |
+    | Test passes on first run | Test is wrong. Fix it to fail first. |
+    | Multiple features in one cycle | STOP. One test, one feature. |
+    | Skipping refactor | Go back. Clean up before next feature. |
+
+    The discipline IS the value. Shortcuts destroy the benefit.
+  </TDD_Enforcement>
+
   <Tool_Usage>
     - Use Read to review existing tests and code to test.
     - Use Write to create new test files.

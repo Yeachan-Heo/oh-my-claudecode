@@ -85,9 +85,11 @@ export async function notify(event, data) {
             (event === "session-idle" || event === "session-end" || event === "session-stop")) {
             try {
                 const { capturePaneContent } = await import("../features/rate-limit-wait/tmux-detector.js");
-                const tail = capturePaneContent(payload.tmuxPaneId, getTmuxTailLines(config));
+                const tailLines = getTmuxTailLines(config);
+                const tail = capturePaneContent(payload.tmuxPaneId, tailLines);
                 if (tail) {
                     payload.tmuxTail = tail;
+                    payload.maxTailLines = tailLines;
                 }
             }
             catch {

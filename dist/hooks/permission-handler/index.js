@@ -34,10 +34,9 @@ const SAFE_HEREDOC_PATTERNS = [
 ];
 const BACKGROUND_MUTATION_SUBAGENTS = new Set([
     'executor',
-    'deep-executor',
     'designer',
     'writer',
-    'build-fixer',
+    'debugger',
     'git-master',
     'test-engineer',
     'qa-tester',

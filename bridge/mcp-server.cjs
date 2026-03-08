@@ -17996,6 +17996,20 @@ Install with: ${this.serverConfig.installHint}`
     });
   }
   /**
+   * Synchronously kill the LSP server process.
+   * Used in process exit handlers where async operations are not possible.
+   */
+  forceKill() {
+    if (this.process) {
+      try {
+        this.process.kill("SIGKILL");
+      } catch {
+      }
+      this.process = null;
+      this.initialized = false;
+    }
+  }
+  /**
    * Disconnect from the LSP server
    */
   async disconnect() {
@@ -18377,6 +18391,32 @@ var LspClientManager = class {
   idleTimer = null;
   constructor() {
     this.startIdleCheck();
+    this.registerCleanupHandlers();
+  }
+  /**
+   * Register process exit/signal handlers to kill all spawned LSP server processes.
+   * Prevents orphaned language server processes (e.g. kotlin-language-server)
+   * when the MCP bridge process exits or a claude session ends.
+   */
+  registerCleanupHandlers() {
+    const forceKillAll = () => {
+      for (const client of this.clients.values()) {
+        try {
+          client.forceKill();
+        } catch {
+        }
+      }
+      this.clients.clear();
+      this.lastUsed.clear();
+      this.inFlightCount.clear();
+    };
+    process.on("exit", forceKillAll);
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+      process.on(sig, () => {
+        forceKillAll();
+        process.exit(0);
+      });
+    }
   }
   /**
    * Get or create a client for a file
@@ -21606,9 +21646,11 @@ var MODE_STATE_FILE_MAP = {
 };
 var SESSION_END_MODE_STATE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.TEAM], mode: MODE_NAMES.TEAM },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA }
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
+  { file: "skill-active-state.json", mode: "skill-active" }
 ];
 var SESSION_METRICS_MODE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },

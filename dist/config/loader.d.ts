@@ -18,6 +18,7 @@ import type { PluginConfig } from '../shared/types.js';
  * OMC_GEMINI_DEFAULT_MODEL) are read lazily in loadEnvConfig() to avoid
  * capturing stale values at module load time.
  */
+export declare function buildDefaultConfig(): PluginConfig;
 export declare const DEFAULT_CONFIG: PluginConfig;
 /**
  * Configuration file locations
@@ -33,7 +34,7 @@ export declare function loadJsoncFile(path: string): PluginConfig | null;
 /**
  * Deep merge two objects
  */
-export declare function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T;
+export declare function deepMerge<T extends object>(target: T, source: Partial<T>): T;
 /**
  * Load configuration from environment variables
  */

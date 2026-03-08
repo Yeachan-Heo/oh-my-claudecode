@@ -1,4 +1,21 @@
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
+const TIER_ENV_KEYS = {
+    LOW: [
+        'OMC_MODEL_LOW',
+        'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    ],
+    MEDIUM: [
+        'OMC_MODEL_MEDIUM',
+        'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    ],
+    HIGH: [
+        'OMC_MODEL_HIGH',
+        'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    ],
+};
 /**
  * Canonical Claude family defaults.
  * Keep these date-less so version bumps are a one-line edit per family.
@@ -43,20 +60,37 @@ export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
  * Resolve the default model ID for a tier.
  *
  * Resolution order:
- * 1. Environment variable (OMC_MODEL_HIGH / OMC_MODEL_MEDIUM / OMC_MODEL_LOW)
- * 2. Built-in fallback
+ * 1. OMC tier env vars (OMC_MODEL_HIGH / OMC_MODEL_MEDIUM / OMC_MODEL_LOW)
+ * 2. Claude Code provider env vars (for example Bedrock app-profile model IDs)
+ * 3. Anthropic family-default env vars
+ * 4. Built-in fallback
  *
  * User/project config overrides are applied later by the config loader
  * via deepMerge, so they take precedence over these defaults.
  */
+function resolveTierModelFromEnv(tier) {
+    for (const key of TIER_ENV_KEYS[tier]) {
+        const value = process.env[key]?.trim();
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
+}
+export function hasTierModelEnvOverrides() {
+    return Object.values(TIER_ENV_KEYS).some((keys) => keys.some((key) => {
+        const value = process.env[key]?.trim();
+        return Boolean(value);
+    }));
+}
 export function getDefaultModelHigh() {
-    return process.env.OMC_MODEL_HIGH || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
+    return resolveTierModelFromEnv('HIGH') || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
 }
 export function getDefaultModelMedium() {
-    return process.env.OMC_MODEL_MEDIUM || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
+    return resolveTierModelFromEnv('MEDIUM') || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
 }
 export function getDefaultModelLow() {
-    return process.env.OMC_MODEL_LOW || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
+    return resolveTierModelFromEnv('LOW') || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
 }
 /**
  * Get all default tier models as a record.

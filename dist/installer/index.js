@@ -7,7 +7,7 @@
  * Cross-platform support via Node.js-based hook scripts (.mjs).
  * Bash hook scripts were removed in v3.9.0.
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -802,10 +802,26 @@ export function install(options = {}) {
                 }
                 // 2. Configure statusLine (always, even in plugin mode)
                 if (hudScriptPath) {
-                    // Use absolute node path so nvm/fnm users don't get "node not found"
-                    // errors when Claude Code invokes the statusLine in a non-interactive shell.
                     const nodeBin = resolveNodeBinary();
-                    const statusLineCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+                    const absoluteCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+                    // On Unix, use find-node.sh for portable $HOME paths (multi-machine sync)
+                    // and robust node discovery (nvm/fnm in non-interactive shells).
+                    // Copy find-node.sh into the HUD directory so statusLine can reference it
+                    // without depending on CLAUDE_PLUGIN_ROOT (which is only set for hooks).
+                    let statusLineCommand = absoluteCommand;
+                    if (!isWindows()) {
+                        try {
+                            const findNodeSrc = join(__dirname, '..', '..', 'scripts', 'find-node.sh');
+                            const findNodeDest = join(HUD_DIR, 'find-node.sh');
+                            copyFileSync(findNodeSrc, findNodeDest);
+                            chmodSync(findNodeDest, 0o755);
+                            statusLineCommand = 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+                        }
+                        catch {
+                            // Fallback to bare node if find-node.sh copy fails
+                            statusLineCommand = 'node $HOME/.claude/hud/omc-hud.mjs';
+                        }
+                    }
                     // Auto-migrate legacy string format (pre-v4.5) to object format
                     const needsMigration = typeof existingSettings.statusLine === 'string'
                         && isOmcStatusLine(existingSettings.statusLine);

@@ -16,7 +16,7 @@
  *   omc wait detect        - Scan for blocked Claude Code sessions
  */
 import chalk from 'chalk';
-import { checkRateLimitStatus, formatRateLimitStatus, isTmuxAvailable, isInsideTmux, getDaemonStatus, startDaemon, stopDaemon, detectBlockedPanes, runDaemonForeground, isDaemonRunning, } from '../../features/rate-limit-wait/index.js';
+import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, isTmuxAvailable, isInsideTmux, getDaemonStatus, startDaemon, stopDaemon, detectBlockedPanes, runDaemonForeground, isDaemonRunning, } from '../../features/rate-limit-wait/index.js';
 /**
  * Smart wait command - the main entry point
  * Follows "zero learning curve" philosophy
@@ -68,6 +68,14 @@ export async function waitCommand(options) {
             console.log(chalk.gray('  Your session will resume automatically when the limit clears.\n'));
         }
     }
+    else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+        console.log(chalk.yellow.bold('⚠️  Usage API Rate Limited'));
+        console.log(chalk.yellow(`\n${formatRateLimitStatus(rateLimitStatus)}\n`));
+        if (daemonRunning) {
+            console.log(chalk.gray('Auto-resume daemon is running while usage data is stale.'));
+            console.log(chalk.gray('Blocked panes can still be tracked if detected.\n'));
+        }
+    }
     else {
         // Not rate limited
         console.log(chalk.green('✓ Not rate limited\n'));
@@ -107,6 +115,9 @@ export async function waitStatusCommand(options) {
             if (rateLimitStatus.weeklyLimited && rateLimitStatus.weeklyResetsAt) {
                 console.log(chalk.gray(`    Weekly resets: ${rateLimitStatus.weeklyResetsAt.toLocaleString()}`));
             }
+        }
+        else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+            console.log(chalk.yellow(`  ⚠ ${formatRateLimitStatus(rateLimitStatus)}`));
         }
         else {
             console.log(chalk.green('  ✓ Not rate limited'));

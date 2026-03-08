@@ -1,14 +1,28 @@
 import chalk from 'chalk';
+import { spawnSync } from 'child_process';
 /**
- * Warn if running on native Windows (win32), where tmux is not available.
+ * Check if tmux (or a compatible implementation like psmux) is available.
+ */
+function hasTmuxBinary() {
+    try {
+        const result = spawnSync('tmux', ['-V'], { stdio: 'pipe', timeout: 3000 });
+        return result.status === 0;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Warn if running on native Windows (win32) without tmux available.
  * Called at CLI startup from src/cli/index.ts.
+ * If a tmux-compatible binary (e.g. psmux) is on PATH, the warning is skipped.
  */
 export function warnIfWin32() {
-    if (process.platform === 'win32') {
-        console.warn(chalk.yellow.bold('\n⚠  WARNING: Native Windows (win32) detected'));
-        console.warn(chalk.yellow('   OMC requires tmux, which is not available on native Windows.'));
-        console.warn(chalk.yellow('   Native Windows support is experimental and may have limited functionality.'));
-        console.warn(chalk.yellow('   WSL2 is strongly recommended: https://learn.microsoft.com/en-us/windows/wsl/install'));
+    if (process.platform === 'win32' && !hasTmuxBinary()) {
+        console.warn(chalk.yellow.bold('\n⚠  WARNING: Native Windows (win32) detected — no tmux found'));
+        console.warn(chalk.yellow('   OMC features that require tmux will not work.'));
+        console.warn(chalk.yellow('   Install psmux for native Windows tmux support: winget install psmux'));
+        console.warn(chalk.yellow('   Or use WSL2: https://learn.microsoft.com/en-us/windows/wsl/install'));
         console.warn('');
     }
 }

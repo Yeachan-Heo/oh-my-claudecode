@@ -4,9 +4,9 @@
  * Tracks when a skill is actively executing so the persistent-mode Stop hook
  * can prevent premature session termination.
  *
- * Skills like code-review, plan, tdd, analyze, build-fix, security-review,
- * external-context, deepinit etc. don't write mode state files (ralph-state.json,
- * etc.), so the Stop hook previously had no way to know they were running.
+ * Skills like plan, external-context, deepinit etc. don't write mode state
+ * files (ralph-state.json, etc.), so the Stop hook previously had no way to
+ * know they were running.
  *
  * This module provides:
  * 1. A protection level registry for all skills (none/light/medium/heavy)
@@ -33,7 +33,7 @@ const PROTECTION_CONFIGS = {
  *
  * - 'none': Already has dedicated mode state (ralph, autopilot, etc.) or is
  *   instant/read-only (trace, hud, omc-help, etc.)
- * - 'light': Quick agent shortcuts (tdd, build-fix, analyze)
+ * - 'light': Quick utility skills
  * - 'medium': Review/planning skills that run multiple agents
  * - 'heavy': Long-running skills (deepinit, omc-setup)
  */
@@ -53,17 +53,13 @@ const SKILL_PROTECTION = {
     'omc-help': 'none',
     'learn-about-omc': 'none',
     note: 'none',
-    // === Light protection (simple agent shortcuts, 3 reinforcements) ===
-    tdd: 'light',
-    'build-fix': 'light',
-    analyze: 'light',
+    // === Light protection (simple shortcuts, 3 reinforcements) ===
     skill: 'light',
     'configure-notifications': 'light',
     // === Medium protection (review/planning, 5 reinforcements) ===
-    'code-review': 'medium',
-    'security-review': 'medium',
     plan: 'medium',
-    ralplan: 'medium',
+    ralplan: 'none', // Has first-class checkRalplan() enforcement; no skill-active needed
+    'deep-interview': 'heavy',
     review: 'medium',
     'external-context': 'medium',
     sciomc: 'medium',

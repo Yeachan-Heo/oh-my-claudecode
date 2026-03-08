@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
-import { checkRateLimitStatus, formatRateLimitStatus } from './rate-limit-monitor.js';
+import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from './rate-limit-monitor.js';
 import { isTmuxAvailable, scanForBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, } from './tmux-detector.js';
 // ESM compatibility: __filename is not available in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -315,8 +315,8 @@ async function pollLoop(config) {
                 checkRateLimitStatus(),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('checkRateLimitStatus timed out after 30s')), 30_000)),
             ]);
-            const wasLimited = state.rateLimitStatus?.isLimited ?? false;
-            const isNowLimited = rateLimitStatus?.isLimited ?? false;
+            const wasLimited = shouldMonitorBlockedPanes(state.rateLimitStatus);
+            const isNowLimited = shouldMonitorBlockedPanes(rateLimitStatus);
             state.rateLimitStatus = rateLimitStatus;
             if (rateLimitStatus) {
                 log(`Rate limit status: ${formatRateLimitStatus(rateLimitStatus)}`, config);
@@ -326,7 +326,10 @@ async function pollLoop(config) {
             }
             // If currently rate limited, scan for blocked panes
             if (isNowLimited && isTmuxAvailable()) {
-                log('Rate limited - scanning for blocked panes', config);
+                const scanReason = rateLimitStatus?.isLimited
+                    ? 'Rate limited - scanning for blocked panes'
+                    : 'Usage API degraded (429/stale cache) - scanning for blocked panes';
+                log(scanReason, config);
                 const blockedPanes = scanForBlockedPanes(config.paneLinesToCapture);
                 // Add newly detected blocked panes
                 for (const pane of blockedPanes) {
@@ -610,7 +613,7 @@ export function formatDaemonState(state) {
     // Rate limit status
     lines.push('');
     if (state.rateLimitStatus) {
-        if (state.rateLimitStatus.isLimited) {
+        if (state.rateLimitStatus.isLimited || isRateLimitStatusDegraded(state.rateLimitStatus)) {
             lines.push(`⚠ ${formatRateLimitStatus(state.rateLimitStatus)}`);
         }
         else {

@@ -4,6 +4,7 @@
  * Types for the rate limit auto-resume daemon.
  * Reference: https://github.com/EvanOman/cc-wait
  */
+import type { UsageErrorReason } from '../../hud/types.js';
 export interface RateLimitStatus {
     /** Whether rate limited on 5-hour window */
     fiveHourLimited: boolean;
@@ -23,6 +24,16 @@ export interface RateLimitStatus {
     nextResetAt: Date | null;
     /** Time until reset in milliseconds */
     timeUntilResetMs: number | null;
+    /** Latest 5-hour usage percentage if available */
+    fiveHourPercent?: number;
+    /** Latest weekly usage percentage if available */
+    weeklyPercent?: number;
+    /** Latest monthly usage percentage if available */
+    monthlyPercent?: number;
+    /** Error reason from the underlying usage API call, if any */
+    apiErrorReason?: UsageErrorReason;
+    /** Whether the returned usage data came from stale cache */
+    usingStaleData?: boolean;
     /** Last check timestamp */
     lastCheckedAt: Date;
 }

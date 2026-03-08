@@ -29,9 +29,9 @@ export declare function formatSessionIdle(payload: NotificationPayload): string;
  * - Strips ANSI escape codes
  * - Drops lines starting with OMC chrome characters (●, ⎿, ✻, ·, ◼)
  * - Drops "ctrl+o to expand" hint lines
- * - Returns at most 10 non-empty lines
+ * - Returns at most `maxLines` non-empty lines (default 10)
  */
-export declare function parseTmuxTail(raw: string): string;
+export declare function parseTmuxTail(raw: string, maxLines?: number): string;
 /**
  * Format agent-call notification message.
  * Sent when a new agent (Task) is spawned.

@@ -3300,14 +3300,23 @@ var init_ssrf_guard = __esm({
 });
 
 // src/config/models.ts
+function resolveTierModelFromEnv(tier) {
+  for (const key of TIER_ENV_KEYS[tier]) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return void 0;
+}
 function getDefaultModelHigh() {
-  return process.env.OMC_MODEL_HIGH || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
+  return resolveTierModelFromEnv("HIGH") || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
 }
 function getDefaultModelMedium() {
-  return process.env.OMC_MODEL_MEDIUM || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
+  return resolveTierModelFromEnv("MEDIUM") || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
 }
 function getDefaultModelLow() {
-  return process.env.OMC_MODEL_LOW || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
+  return resolveTierModelFromEnv("LOW") || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
 }
 function getDefaultTierModels() {
   return {
@@ -3363,11 +3372,28 @@ function isNonClaudeProvider() {
   }
   return false;
 }
-var CLAUDE_FAMILY_DEFAULTS, BUILTIN_TIER_MODEL_DEFAULTS, CLAUDE_FAMILY_HIGH_VARIANTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS;
+var TIER_ENV_KEYS, CLAUDE_FAMILY_DEFAULTS, BUILTIN_TIER_MODEL_DEFAULTS, CLAUDE_FAMILY_HIGH_VARIANTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS;
 var init_models = __esm({
   "src/config/models.ts"() {
     "use strict";
     init_ssrf_guard();
+    TIER_ENV_KEYS = {
+      LOW: [
+        "OMC_MODEL_LOW",
+        "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      ],
+      MEDIUM: [
+        "OMC_MODEL_MEDIUM",
+        "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL"
+      ],
+      HIGH: [
+        "OMC_MODEL_HIGH",
+        "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL"
+      ]
+    };
     CLAUDE_FAMILY_DEFAULTS = {
       HAIKU: "claude-haiku-4-5",
       SONNET: "claude-sonnet-4-6",
@@ -3391,6 +3417,124 @@ var init_models = __esm({
 });
 
 // src/config/loader.ts
+function buildDefaultConfig() {
+  const defaultTierModels = getDefaultTierModels();
+  return {
+    agents: {
+      omc: { model: defaultTierModels.HIGH },
+      explore: { model: defaultTierModels.LOW },
+      analyst: { model: defaultTierModels.HIGH },
+      planner: { model: defaultTierModels.HIGH },
+      architect: { model: defaultTierModels.HIGH },
+      debugger: { model: defaultTierModels.MEDIUM },
+      executor: { model: defaultTierModels.MEDIUM },
+      verifier: { model: defaultTierModels.MEDIUM },
+      securityReviewer: { model: defaultTierModels.MEDIUM },
+      codeReviewer: { model: defaultTierModels.HIGH },
+      testEngineer: { model: defaultTierModels.MEDIUM },
+      designer: { model: defaultTierModels.MEDIUM },
+      writer: { model: defaultTierModels.LOW },
+      qaTester: { model: defaultTierModels.MEDIUM },
+      scientist: { model: defaultTierModels.MEDIUM },
+      gitMaster: { model: defaultTierModels.MEDIUM },
+      codeSimplifier: { model: defaultTierModels.HIGH },
+      critic: { model: defaultTierModels.HIGH },
+      documentSpecialist: { model: defaultTierModels.MEDIUM }
+    },
+    features: {
+      parallelExecution: true,
+      lspTools: true,
+      // Real LSP integration with language servers
+      astTools: true,
+      // Real AST tools using ast-grep
+      continuationEnforcement: true,
+      autoContextInjection: true
+    },
+    mcpServers: {
+      exa: { enabled: true },
+      context7: { enabled: true }
+    },
+    permissions: {
+      allowBash: true,
+      allowEdit: true,
+      allowWrite: true,
+      maxBackgroundTasks: 5
+    },
+    magicKeywords: {
+      ultrawork: ["ultrawork", "ulw", "uw"],
+      search: ["search", "find", "locate"],
+      analyze: ["analyze", "investigate", "examine"],
+      ultrathink: ["ultrathink", "think", "reason", "ponder"]
+    },
+    // Intelligent model routing configuration
+    routing: {
+      enabled: true,
+      defaultTier: "MEDIUM",
+      forceInherit: false,
+      escalationEnabled: true,
+      maxEscalations: 2,
+      tierModels: { ...defaultTierModels },
+      agentOverrides: {
+        architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
+        planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
+        critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
+        analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
+        explore: { tier: "LOW", reason: "Exploration is search-focused" },
+        "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+      },
+      escalationKeywords: [
+        "critical",
+        "production",
+        "urgent",
+        "security",
+        "breaking",
+        "architecture",
+        "refactor",
+        "redesign",
+        "root cause"
+      ],
+      simplificationKeywords: [
+        "find",
+        "list",
+        "show",
+        "where",
+        "search",
+        "locate",
+        "grep"
+      ]
+    },
+    // External models configuration (Codex, Gemini)
+    // Static defaults only — env var overrides applied in loadEnvConfig()
+    externalModels: {
+      defaults: {
+        codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
+        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+      },
+      fallbackPolicy: {
+        onModelFailure: "provider_chain",
+        allowCrossProvider: false,
+        crossProviderOrder: ["codex", "gemini"]
+      }
+    },
+    // Delegation routing configuration (opt-in feature for external model routing)
+    delegationRouting: {
+      enabled: false,
+      defaultProvider: "claude",
+      roles: {}
+    },
+    startupCodebaseMap: {
+      enabled: true,
+      maxFiles: 200,
+      maxDepth: 4
+    },
+    taskSizeDetection: {
+      enabled: true,
+      smallWordLimit: 50,
+      largeWordLimit: 200,
+      suppressHeavyModesForSmallTasks: true
+    }
+  };
+}
 function getConfigPaths() {
   const userConfigDir = getConfigDir2();
   return {
@@ -3413,16 +3557,17 @@ function loadJsoncFile(path20) {
 }
 function deepMerge(target, source) {
   const result = { ...target };
+  const mutableResult = result;
   for (const key of Object.keys(source)) {
     const sourceValue = source[key];
-    const targetValue = result[key];
+    const targetValue = mutableResult[key];
     if (sourceValue !== void 0 && typeof sourceValue === "object" && sourceValue !== null && !Array.isArray(sourceValue) && typeof targetValue === "object" && targetValue !== null && !Array.isArray(targetValue)) {
-      result[key] = deepMerge(
+      mutableResult[key] = deepMerge(
         targetValue,
         sourceValue
       );
     } else if (sourceValue !== void 0) {
-      result[key] = sourceValue;
+      mutableResult[key] = sourceValue;
     }
   }
   return result;
@@ -3549,7 +3694,7 @@ function loadEnvConfig() {
 }
 function loadConfig() {
   const paths = getConfigPaths();
-  let config2 = { ...DEFAULT_CONFIG };
+  let config2 = buildDefaultConfig();
   const userConfig = loadJsoncFile(paths.user);
   if (userConfig) {
     config2 = deepMerge(config2, userConfig);
@@ -3651,10 +3796,6 @@ function generateConfigSchema() {
             type: "object",
             properties: { model: { type: "string" } }
           },
-          qualityReviewer: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
           securityReviewer: {
             type: "object",
             properties: { model: { type: "string" } }
@@ -3663,15 +3804,7 @@ function generateConfigSchema() {
             type: "object",
             properties: { model: { type: "string" } }
           },
-          deepExecutor: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
           testEngineer: {
-            type: "object",
-            properties: { model: { type: "string" } }
-          },
-          buildFixer: {
             type: "object",
             properties: { model: { type: "string" } }
           },
@@ -3875,7 +4008,7 @@ function generateConfigSchema() {
     }
   };
 }
-var import_fs2, import_path2, DEFAULT_TIER_MODELS, DEFAULT_CONFIG;
+var import_fs2, import_path2, DEFAULT_CONFIG;
 var init_loader = __esm({
   "src/config/loader.ts"() {
     "use strict";
@@ -3884,128 +4017,7 @@ var init_loader = __esm({
     init_paths();
     init_jsonc();
     init_models();
-    DEFAULT_TIER_MODELS = getDefaultTierModels();
-    DEFAULT_CONFIG = {
-      agents: {
-        omc: { model: DEFAULT_TIER_MODELS.HIGH },
-        explore: { model: DEFAULT_TIER_MODELS.LOW },
-        analyst: { model: DEFAULT_TIER_MODELS.HIGH },
-        planner: { model: DEFAULT_TIER_MODELS.HIGH },
-        architect: { model: DEFAULT_TIER_MODELS.HIGH },
-        debugger: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        executor: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        verifier: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        qualityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        securityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        codeReviewer: { model: DEFAULT_TIER_MODELS.HIGH },
-        deepExecutor: { model: DEFAULT_TIER_MODELS.HIGH },
-        testEngineer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        buildFixer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        designer: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        writer: { model: DEFAULT_TIER_MODELS.LOW },
-        qaTester: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        scientist: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        gitMaster: { model: DEFAULT_TIER_MODELS.MEDIUM },
-        codeSimplifier: { model: DEFAULT_TIER_MODELS.HIGH },
-        critic: { model: DEFAULT_TIER_MODELS.HIGH },
-        documentSpecialist: { model: DEFAULT_TIER_MODELS.MEDIUM }
-      },
-      features: {
-        parallelExecution: true,
-        lspTools: true,
-        // Real LSP integration with language servers
-        astTools: true,
-        // Real AST tools using ast-grep
-        continuationEnforcement: true,
-        autoContextInjection: true
-      },
-      mcpServers: {
-        exa: { enabled: true },
-        context7: { enabled: true }
-      },
-      permissions: {
-        allowBash: true,
-        allowEdit: true,
-        allowWrite: true,
-        maxBackgroundTasks: 5
-      },
-      magicKeywords: {
-        ultrawork: ["ultrawork", "ulw", "uw"],
-        search: ["search", "find", "locate"],
-        analyze: ["analyze", "investigate", "examine"],
-        ultrathink: ["ultrathink", "think", "reason", "ponder"]
-      },
-      // Intelligent model routing configuration
-      routing: {
-        enabled: true,
-        defaultTier: "MEDIUM",
-        forceInherit: false,
-        escalationEnabled: true,
-        maxEscalations: 2,
-        tierModels: { ...DEFAULT_TIER_MODELS },
-        agentOverrides: {
-          architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
-          planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
-          critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
-          analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
-          explore: { tier: "LOW", reason: "Exploration is search-focused" },
-          "writer": { tier: "LOW", reason: "Documentation is straightforward" }
-        },
-        escalationKeywords: [
-          "critical",
-          "production",
-          "urgent",
-          "security",
-          "breaking",
-          "architecture",
-          "refactor",
-          "redesign",
-          "root cause"
-        ],
-        simplificationKeywords: [
-          "find",
-          "list",
-          "show",
-          "where",
-          "search",
-          "locate",
-          "grep"
-        ]
-      },
-      // External models configuration (Codex, Gemini)
-      // Static defaults only — env var overrides applied in loadEnvConfig()
-      externalModels: {
-        defaults: {
-          codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
-          geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
-        },
-        fallbackPolicy: {
-          onModelFailure: "provider_chain",
-          allowCrossProvider: false,
-          crossProviderOrder: ["codex", "gemini"]
-        }
-      },
-      // Delegation routing configuration (opt-in feature for external model routing)
-      delegationRouting: {
-        enabled: false,
-        // Opt-in feature
-        defaultProvider: "claude",
-        roles: {}
-      },
-      // Startup codebase map injection (issue #804)
-      startupCodebaseMap: {
-        enabled: true,
-        maxFiles: 200,
-        maxDepth: 4
-      },
-      // Task size detection (issue #790): prevent over-orchestration for small tasks
-      taskSizeDetection: {
-        enabled: true,
-        smallWordLimit: 50,
-        largeWordLimit: 200,
-        suppressHeavyModesForSmallTasks: true
-      }
-    };
+    DEFAULT_CONFIG = buildDefaultConfig();
   }
 });
 
@@ -5650,9 +5662,11 @@ var init_mode_names = __esm({
     };
     SESSION_END_MODE_STATE_FILES = [
       { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
+      { file: MODE_STATE_FILE_MAP[MODE_NAMES.TEAM], mode: MODE_NAMES.TEAM },
       { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
       { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
-      { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA }
+      { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
+      { file: "skill-active-state.json", mode: "skill-active" }
     ];
     SESSION_METRICS_MODE_FILES = [
       { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
@@ -6433,7 +6447,7 @@ function loadTemplate(filename) {
 function isWindows() {
   return process.platform === "win32";
 }
-var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
+var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
 var init_hooks = __esm({
   "src/installer/hooks.ts"() {
     "use strict";
@@ -6575,6 +6589,29 @@ IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
 
 SYNTHESIZE findings before proceeding.
 </analyze-mode>
+
+---
+
+`;
+    TDD_MESSAGE = `<tdd-mode>
+[TDD MODE ACTIVATED]
+
+THE IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.
+Write code before test? DELETE IT. Start over. No exceptions.
+
+RED-GREEN-REFACTOR CYCLE:
+1. RED: Write failing test for NEXT functionality. Run it - MUST FAIL.
+2. GREEN: Write ONLY enough code to pass. No extras. Run test - MUST PASS.
+3. REFACTOR: Clean up. Run tests after EVERY change. Must stay green.
+4. REPEAT with next failing test.
+
+ENFORCEMENT:
+- Code written before test \u2192 STOP. Delete code. Write test first.
+- Test passes on first run \u2192 Test is wrong. Fix it to fail first.
+- Multiple features in one cycle \u2192 STOP. One test, one feature.
+
+Delegate to test-engineer agent for test strategy. The discipline IS the value.
+</tdd-mode>
 
 ---
 
@@ -7358,7 +7395,19 @@ function install(options = {}) {
       }
       if (hudScriptPath) {
         const nodeBin = resolveNodeBinary();
-        const statusLineCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, "/") + '"';
+        const absoluteCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, "/") + '"';
+        let statusLineCommand = absoluteCommand;
+        if (!isWindows()) {
+          try {
+            const findNodeSrc = (0, import_path36.join)(__dirname, "..", "..", "scripts", "find-node.sh");
+            const findNodeDest = (0, import_path36.join)(HUD_DIR, "find-node.sh");
+            (0, import_fs28.copyFileSync)(findNodeSrc, findNodeDest);
+            (0, import_fs28.chmodSync)(findNodeDest, 493);
+            statusLineCommand = "sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs";
+          } catch {
+            statusLineCommand = "node $HOME/.claude/hud/omc-hud.mjs";
+          }
+        }
         const needsMigration = typeof existingSettings.statusLine === "string" && isOmcStatusLine(existingSettings.statusLine);
         if (!existingSettings.statusLine || needsMigration) {
           existingSettings.statusLine = {
@@ -10281,17 +10330,14 @@ var init_skill_state = __esm({
       "omc-help": "none",
       "learn-about-omc": "none",
       note: "none",
-      // === Light protection (simple agent shortcuts, 3 reinforcements) ===
-      tdd: "light",
-      "build-fix": "light",
-      analyze: "light",
+      // === Light protection (simple shortcuts, 3 reinforcements) ===
       skill: "light",
       "configure-notifications": "light",
       // === Medium protection (review/planning, 5 reinforcements) ===
-      "code-review": "medium",
-      "security-review": "medium",
       plan: "medium",
-      ralplan: "medium",
+      ralplan: "none",
+      // Has first-class checkRalplan() enforcement; no skill-active needed
+      "deep-interview": "heavy",
       review: "medium",
       "external-context": "medium",
       sciomc: "medium",
@@ -11297,10 +11343,9 @@ var init_permission_handler = __esm({
     ];
     BACKGROUND_MUTATION_SUBAGENTS = /* @__PURE__ */ new Set([
       "executor",
-      "deep-executor",
       "designer",
       "writer",
-      "build-fixer",
+      "debugger",
       "git-master",
       "test-engineer",
       "qa-tester",
@@ -12051,7 +12096,7 @@ Task(
 2. **Fix** - Apply the fix
 \`\`\`
 Task(
-  subagent_type="oh-my-claudecode:build-fixer",
+  subagent_type="oh-my-claudecode:debugger",
   model="sonnet",
   prompt="Fix this error with minimal changes: [ERROR]"
 )
@@ -12782,8 +12827,8 @@ Use the Team orchestrator to execute tasks in parallel:
 Match agent types to task complexity:
 - Simple tasks (single file, config): \`executor\` with \`model="haiku"\`
 - Standard implementation: \`executor\` with \`model="sonnet"\`
-- Complex work (architecture, refactoring): \`deep-executor\` with \`model="opus"\`
-- Build issues: \`build-fixer\` with \`model="sonnet"\`
+- Complex work (architecture, refactoring): \`executor\` with \`model="opus"\`
+- Build issues: \`debugger\` with \`model="sonnet"\`
 - Test creation: \`test-engineer\` with \`model="sonnet"\`
 - UI work: \`designer\` with \`model="sonnet"\`
 
@@ -12828,7 +12873,7 @@ Task(subagent_type="oh-my-claudecode:executor", model="haiku", prompt="...")
 Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
 
 // For complex work (architecture, debugging, refactoring)
-Task(subagent_type="oh-my-claudecode:deep-executor", model="opus", prompt="...")
+Task(subagent_type="oh-my-claudecode:executor", model="opus", prompt="...")
 \`\`\`
 
 ### Progress Tracking
@@ -14074,6 +14119,175 @@ ${newState.prompt ? `Original task: ${newState.prompt}` : ""}
     }
   };
 }
+function readStopBreaker(directory, name, sessionId, ttlMs) {
+  const stateDir = sessionId ? (0, import_path49.join)(getOmcRoot(directory), "state", "sessions", sessionId) : (0, import_path49.join)(getOmcRoot(directory), "state");
+  const breakerPath = (0, import_path49.join)(stateDir, `${name}-stop-breaker.json`);
+  try {
+    if (!(0, import_fs45.existsSync)(breakerPath)) return 0;
+    const raw = JSON.parse((0, import_fs45.readFileSync)(breakerPath, "utf-8"));
+    if (ttlMs && raw.updated_at) {
+      const updatedAt = new Date(raw.updated_at).getTime();
+      if (Number.isFinite(updatedAt) && Date.now() - updatedAt > ttlMs) {
+        (0, import_fs45.unlinkSync)(breakerPath);
+        return 0;
+      }
+    }
+    return typeof raw.count === "number" ? raw.count : 0;
+  } catch {
+    return 0;
+  }
+}
+function writeStopBreaker(directory, name, count, sessionId) {
+  const stateDir = sessionId ? (0, import_path49.join)(getOmcRoot(directory), "state", "sessions", sessionId) : (0, import_path49.join)(getOmcRoot(directory), "state");
+  try {
+    (0, import_fs45.mkdirSync)(stateDir, { recursive: true });
+    const breakerPath = (0, import_path49.join)(stateDir, `${name}-stop-breaker.json`);
+    const data = { count, updated_at: (/* @__PURE__ */ new Date()).toISOString() };
+    atomicWriteJsonSync(breakerPath, data);
+  } catch {
+  }
+}
+async function checkTeamPipeline(sessionId, directory, cancelInProgress) {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const teamState = readTeamPipelineState(workingDir, sessionId);
+  if (!teamState) {
+    return null;
+  }
+  if (!teamState.active) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  if (cancelInProgress) {
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const rawPhase = teamState.phase ?? teamState.current_phase ?? teamState.currentStage ?? teamState.current_stage ?? teamState.stage;
+  if (typeof rawPhase !== "string") {
+    return { shouldBlock: false, message: "", mode: "team" };
+  }
+  const phase = rawPhase.trim().toLowerCase();
+  if (phase === "complete" || phase === "completed" || phase === "failed" || phase === "cancelled" || phase === "canceled" || phase === "cancel") {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const KNOWN_ACTIVE_PHASES = /* @__PURE__ */ new Set(["team-plan", "team-prd", "team-exec", "team-verify", "team-fix"]);
+  if (!KNOWN_ACTIVE_PHASES.has(phase)) {
+    return { shouldBlock: false, message: "", mode: "team" };
+  }
+  const rawStatus = teamState.status;
+  const status = typeof rawStatus === "string" ? rawStatus.trim().toLowerCase() : null;
+  if (status === "cancelled" || status === "canceled" || status === "cancel" || status === "failed" || status === "complete" || status === "completed") {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  if (teamState.cancel?.requested) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const breakerCount = readStopBreaker(workingDir, "team-pipeline", sessionId, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS) + 1;
+  if (breakerCount > TEAM_PIPELINE_STOP_BLOCKER_MAX) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[TEAM PIPELINE CIRCUIT BREAKER] Stop enforcement exceeded ${TEAM_PIPELINE_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
+      mode: "team"
+    };
+  }
+  writeStopBreaker(workingDir, "team-pipeline", breakerCount, sessionId);
+  return {
+    shouldBlock: true,
+    message: `<team-pipeline-continuation>
+
+[TEAM PIPELINE - PHASE: ${phase.toUpperCase()} | REINFORCEMENT ${breakerCount}/${TEAM_PIPELINE_STOP_BLOCKER_MAX}]
+
+The team pipeline is active in phase "${phase}". Continue working on the team workflow.
+Do not stop until the pipeline reaches a terminal state (complete/failed/cancelled).
+When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
+
+</team-pipeline-continuation>
+
+---
+
+`,
+    mode: "team",
+    metadata: {
+      phase,
+      tasksCompleted: teamState.execution?.tasks_completed,
+      tasksTotal: teamState.execution?.tasks_total
+    }
+  };
+}
+async function checkRalplan(sessionId, directory, cancelInProgress) {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readModeState("ralplan", workingDir, sessionId);
+  if (!state || !state.active) {
+    return null;
+  }
+  if (sessionId && state.session_id && state.session_id !== sessionId) {
+    return null;
+  }
+  const currentPhase = state.current_phase;
+  if (typeof currentPhase === "string") {
+    const terminal = ["complete", "completed", "failed", "cancelled", "done"];
+    if (terminal.includes(currentPhase.toLowerCase())) {
+      writeStopBreaker(workingDir, "ralplan", 0, sessionId);
+      return { shouldBlock: false, message: "", mode: "ralplan" };
+    }
+  }
+  if (cancelInProgress) {
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "ralplan"
+    };
+  }
+  const breakerCount = readStopBreaker(workingDir, "ralplan", sessionId, RALPLAN_STOP_BLOCKER_TTL_MS) + 1;
+  if (breakerCount > RALPLAN_STOP_BLOCKER_MAX) {
+    writeStopBreaker(workingDir, "ralplan", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[RALPLAN CIRCUIT BREAKER] Stop enforcement exceeded ${RALPLAN_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
+      mode: "ralplan"
+    };
+  }
+  writeStopBreaker(workingDir, "ralplan", breakerCount, sessionId);
+  return {
+    shouldBlock: true,
+    message: `<ralplan-continuation>
+
+[RALPLAN - CONSENSUS PLANNING | REINFORCEMENT ${breakerCount}/${RALPLAN_STOP_BLOCKER_MAX}]
+
+The ralplan consensus workflow is active. Continue the Planner/Architect/Critic loop.
+Do not stop until consensus is reached or the workflow completes.
+When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
+
+</ralplan-continuation>
+
+---
+
+`,
+    mode: "ralplan"
+  };
+}
 async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readUltraworkState(workingDir, sessionId);
@@ -14173,6 +14387,14 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
       };
     }
   }
+  const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
+  if (teamResult) {
+    return teamResult;
+  }
+  const ralplanResult = await checkRalplan(sessionId, workingDir, cancelInProgress);
+  if (ralplanResult) {
+    return ralplanResult;
+  }
   const ultraworkResult = await checkUltrawork(sessionId, workingDir, hasIncompleteTodos, cancelInProgress);
   if (ultraworkResult?.shouldBlock) {
     return ultraworkResult;
@@ -14205,7 +14427,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_fs45, import_path49, import_os9, CANCEL_SIGNAL_TTL_MS2, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES;
+var import_fs45, import_path49, import_os9, CANCEL_SIGNAL_TTL_MS2, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -14216,6 +14438,7 @@ var init_persistent_mode = __esm({
     init_paths();
     init_ultrawork();
     init_worktree_paths();
+    init_mode_state_io();
     init_ralph();
     init_todo_continuation();
     init_hooks();
@@ -14225,6 +14448,10 @@ var init_persistent_mode = __esm({
     CANCEL_SIGNAL_TTL_MS2 = 3e4;
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
+    TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
+    TEAM_PIPELINE_STOP_BLOCKER_TTL_MS = 5 * 60 * 1e3;
+    RALPLAN_STOP_BLOCKER_MAX = 30;
+    RALPLAN_STOP_BLOCKER_TTL_MS = 45 * 60 * 1e3;
   }
 });
 
@@ -15102,7 +15329,7 @@ function formatSessionIdle(payload) {
   lines.push(buildFooter(payload, true));
   return lines.join("\n");
 }
-function parseTmuxTail(raw) {
+function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
   const meaningful = [];
   for (const line of raw.split("\n")) {
     const stripped = line.replace(ANSI_ESCAPE_RE, "");
@@ -15118,11 +15345,11 @@ function parseTmuxTail(raw) {
     if (trimmed.length >= 8 && alnumCount / trimmed.length < MIN_ALNUM_RATIO) continue;
     meaningful.push(stripped.trimEnd());
   }
-  return meaningful.slice(-MAX_TAIL_LINES).join("\n");
+  return meaningful.slice(-maxLines).join("\n");
 }
 function appendTmuxTail(lines, payload) {
   if (payload.tmuxTail) {
-    const parsed = parseTmuxTail(payload.tmuxTail);
+    const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
     if (parsed) {
       lines.push("");
       lines.push("**Recent output:**");
@@ -15173,7 +15400,7 @@ function formatNotification(payload) {
       return payload.message || `Event: ${payload.event}`;
   }
 }
-var import_path52, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, MAX_TAIL_LINES;
+var import_path52, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, DEFAULT_MAX_TAIL_LINES;
 var init_formatter = __esm({
   "src/notifications/formatter.ts"() {
     "use strict";
@@ -15186,7 +15413,7 @@ var init_formatter = __esm({
     BYPASS_PERM_RE = /^⏵/;
     BARE_PROMPT_RE = /^[❯>$%#]+$/;
     MIN_ALNUM_RATIO = 0.15;
-    MAX_TAIL_LINES = 10;
+    DEFAULT_MAX_TAIL_LINES = 15;
   }
 });
 
@@ -15219,7 +15446,7 @@ function buildFooterText(payload) {
 }
 function buildTmuxTailBlock(payload) {
   if (!payload.tmuxTail) return "";
-  const parsed = parseTmuxTail(payload.tmuxTail);
+  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
   if (!parsed) return "";
   return `
 
@@ -16752,15 +16979,13 @@ function sanitizeForTmux(text) {
   return text.replace(/'/g, "'\\''");
 }
 function isTmuxAvailable() {
-  if (process.platform === "win32") {
-    return false;
-  }
   try {
-    const result = (0, import_child_process16.spawnSync)("which", ["tmux"], {
+    const result = (0, import_child_process16.spawnSync)("tmux", ["-V"], {
       encoding: "utf-8",
-      timeout: 2e3
+      timeout: 3e3,
+      stdio: "pipe"
     });
-    return result.status === 0 && result.stdout.trim().length > 0;
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -16774,7 +16999,7 @@ function listTmuxPanes() {
   }
   try {
     const format = "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}";
-    const result = (0, import_child_process16.execSync)(`tmux list-panes -a -F '${format}'`, {
+    const result = (0, import_child_process16.execSync)(`tmux list-panes -a -F "${format}"`, {
       encoding: "utf-8",
       timeout: 5e3
     });
@@ -16812,7 +17037,7 @@ function capturePaneContent(paneId, lines = 15) {
   }
   const safeLines = Math.max(1, Math.min(100, Math.floor(lines)));
   try {
-    const result = (0, import_child_process16.execSync)(`tmux capture-pane -t '${paneId}' -p -S -${safeLines}`, {
+    const result = (0, import_child_process16.execSync)(`tmux capture-pane -t "${paneId}" -p -S -${safeLines}`, {
       encoding: "utf-8",
       timeout: 5e3
     });
@@ -17379,9 +17604,11 @@ async function notify(event, data) {
     if (shouldIncludeTmuxTail(verbosity) && payload.tmuxPaneId && (event === "session-idle" || event === "session-end" || event === "session-stop")) {
       try {
         const { capturePaneContent: capturePaneContent2 } = await Promise.resolve().then(() => (init_tmux_detector(), tmux_detector_exports));
-        const tail = capturePaneContent2(payload.tmuxPaneId, getTmuxTailLines(config2));
+        const tailLines = getTmuxTailLines(config2);
+        const tail = capturePaneContent2(payload.tmuxPaneId, tailLines);
         if (tail) {
           payload.tmuxTail = tail;
+          payload.maxTailLines = tailLines;
         }
       } catch {
       }
@@ -19200,30 +19427,44 @@ function cleanupModeStates(directory, sessionId) {
   }
   for (const { file, mode } of SESSION_END_MODE_STATE_FILES) {
     const localPath = path14.join(stateDir, file);
-    if (fs11.existsSync(localPath)) {
-      try {
-        if (file.endsWith(".json")) {
+    const sessionPath = sessionId ? resolveSessionStatePath(mode, sessionId, directory) : void 0;
+    try {
+      if (file.endsWith(".json")) {
+        const sessionState = sessionId ? readModeState(mode, directory, sessionId) : null;
+        let shouldCleanup = sessionState?.active === true;
+        if (!shouldCleanup && fs11.existsSync(localPath)) {
           const content = fs11.readFileSync(localPath, "utf-8");
           const state = JSON.parse(content);
           if (state.active === true) {
             const stateSessionId = state.session_id;
             if (!sessionId || !stateSessionId || stateSessionId === sessionId) {
-              fs11.unlinkSync(localPath);
-              filesRemoved++;
-              if (!modesCleaned.includes(mode)) {
-                modesCleaned.push(mode);
-              }
+              shouldCleanup = true;
             }
           }
-        } else {
-          fs11.unlinkSync(localPath);
-          filesRemoved++;
-          if (!modesCleaned.includes(mode)) {
-            modesCleaned.push(mode);
+        }
+        if (shouldCleanup) {
+          const hadLocalPath = fs11.existsSync(localPath);
+          const hadSessionPath = Boolean(sessionPath && fs11.existsSync(sessionPath));
+          if (clearModeStateFile(mode, directory, sessionId)) {
+            if (hadLocalPath && !fs11.existsSync(localPath)) {
+              filesRemoved++;
+            }
+            if (sessionPath && hadSessionPath && !fs11.existsSync(sessionPath)) {
+              filesRemoved++;
+            }
+            if (!modesCleaned.includes(mode)) {
+              modesCleaned.push(mode);
+            }
           }
         }
-      } catch {
+      } else if (fs11.existsSync(localPath)) {
+        fs11.unlinkSync(localPath);
+        filesRemoved++;
+        if (!modesCleaned.includes(mode)) {
+          modesCleaned.push(mode);
+        }
       }
+    } catch {
     }
   }
   return { filesRemoved, modesCleaned };
@@ -19302,6 +19543,7 @@ var init_session_end = __esm({
     init_bridge_manager();
     init_worktree_paths();
     init_mode_names();
+    init_mode_state_io();
     PYTHON_REPL_TOOL_NAMES = /* @__PURE__ */ new Set(["python_repl", "mcp__t__python_repl"]);
   }
 });
@@ -20474,6 +20716,13 @@ function isCacheValid(cache) {
   const ttl = cache.error ? CACHE_TTL_FAILURE_MS : CACHE_TTL_SUCCESS_MS;
   return Date.now() - cache.timestamp < ttl;
 }
+function getCachedUsageResult(cache) {
+  if (cache.rateLimited) {
+    return { rateLimits: cache.data, error: "rate_limited" };
+  }
+  const cachedError = cache.error && !cache.data ? cache.errorReason || "network" : void 0;
+  return { rateLimits: cache.data, error: cachedError };
+}
 function getKeychainServiceName() {
   const configDir = process.env.CLAUDE_CONFIG_DIR;
   if (configDir) {
@@ -20808,69 +21057,51 @@ async function getUsage() {
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const currentSource = isZai && authToken ? "zai" : "anthropic";
-  const cache = readCache();
-  if (cache && isCacheValid(cache) && cache.source === currentSource) {
-    if (cache.rateLimited) {
-      return { rateLimits: cache.data, error: "rate_limited" };
-    }
-    const cachedError = cache.error && !cache.data ? cache.errorReason || "network" : void 0;
-    return { rateLimits: cache.data, error: cachedError };
+  const initialCache = readCache();
+  if (initialCache && isCacheValid(initialCache) && initialCache.source === currentSource) {
+    return getCachedUsageResult(initialCache);
   }
-  try {
-    return await withFileLock(
-      lockPathFor(getCachePath()),
-      () => fetchUsageWithLock(isZai, authToken),
-      { staleLockMs: LOCK_STALE_MS2 }
-    );
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("Failed to acquire file lock")) {
-      if (cache?.data) {
-        return { rateLimits: cache.data };
+  return withFileLock(lockPathFor(getCachePath()), async () => {
+    const cache = readCache();
+    if (cache && isCacheValid(cache) && cache.source === currentSource) {
+      return getCachedUsageResult(cache);
+    }
+    if (isZai && authToken) {
+      const result = await fetchUsageFromZai();
+      if (result.rateLimited) {
+        const prevCount = cache?.rateLimitedCount || 0;
+        const newCount = prevCount + 1;
+        writeCache(cache?.data || null, !cache?.data, "zai", true, newCount, "rate_limited");
+        if (cache?.data) {
+          return { rateLimits: cache.data, error: "rate_limited" };
+        }
+        return { rateLimits: null, error: "rate_limited" };
       }
-      return { rateLimits: null, error: "network" };
-    }
-    return { rateLimits: null, error: "network" };
-  }
-}
-async function fetchUsageWithLock(isZai, authToken) {
-  const cache = readCache();
-  if (isZai && authToken) {
-    const result = await fetchUsageFromZai();
-    if (result.rateLimited) {
-      const prevCount = cache?.rateLimitedCount || 0;
-      const newCount = prevCount + 1;
-      writeCache(cache?.data || null, !cache?.data, "zai", true, newCount, "rate_limited");
-      if (cache?.data) {
-        return { rateLimits: cache.data, error: "rate_limited" };
+      if (!result.data) {
+        writeCache(null, true, "zai", false, 0, "network");
+        return { rateLimits: null, error: "network" };
       }
-      return { rateLimits: null, error: "rate_limited" };
+      const usage = parseZaiResponse(result.data);
+      writeCache(usage, !usage, "zai");
+      return { rateLimits: usage };
     }
-    if (!result.data) {
-      writeCache(null, true, "zai", false, 0, "network");
-      return { rateLimits: null, error: "network" };
-    }
-    const usage = parseZaiResponse(result.data);
-    writeCache(usage, !usage, "zai");
-    return { rateLimits: usage };
-  }
-  let creds = getCredentials();
-  if (creds) {
-    if (!validateCredentials(creds)) {
-      if (creds.refreshToken) {
-        const refreshed = await refreshAccessToken(creds.refreshToken);
-        if (refreshed) {
-          creds = { ...creds, ...refreshed };
-          writeBackCredentials(creds);
+    let creds = getCredentials();
+    if (creds) {
+      if (!validateCredentials(creds)) {
+        if (creds.refreshToken) {
+          const refreshed = await refreshAccessToken(creds.refreshToken);
+          if (refreshed) {
+            creds = { ...creds, ...refreshed };
+            writeBackCredentials(creds);
+          } else {
+            writeCache(null, true, "anthropic", false, 0, "auth");
+            return { rateLimits: null, error: "auth" };
+          }
         } else {
           writeCache(null, true, "anthropic", false, 0, "auth");
           return { rateLimits: null, error: "auth" };
         }
-      } else {
-        writeCache(null, true, "anthropic", false, 0, "auth");
-        return { rateLimits: null, error: "auth" };
       }
-    }
-    if (creds) {
       const result = await fetchUsageFromApi(creds.accessToken);
       if (result.rateLimited) {
         const prevCount = cache?.rateLimitedCount || 0;
@@ -20889,11 +21120,11 @@ async function fetchUsageWithLock(isZai, authToken) {
       writeCache(usage, !usage, "anthropic");
       return { rateLimits: usage };
     }
-  }
-  writeCache(null, true, "anthropic", false, 0, "no_credentials");
-  return { rateLimits: null, error: "no_credentials" };
+    writeCache(null, true, "anthropic", false, 0, "no_credentials");
+    return { rateLimits: null, error: "no_credentials" };
+  }, USAGE_CACHE_LOCK_OPTS);
 }
-var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_SUCCESS_MS, CACHE_TTL_FAILURE_MS, CACHE_TTL_RATE_LIMITED_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, LOCK_STALE_MS2, TOKEN_REFRESH_URL_HOSTNAME, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
+var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_SUCCESS_MS, CACHE_TTL_FAILURE_MS, CACHE_TTL_RATE_LIMITED_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
@@ -20905,13 +21136,13 @@ var init_usage_api = __esm({
     import_https3 = __toESM(require("https"), 1);
     init_ssrf_guard();
     init_file_lock();
-    CACHE_TTL_SUCCESS_MS = 30 * 1e3;
+    CACHE_TTL_SUCCESS_MS = 90 * 1e3;
     CACHE_TTL_FAILURE_MS = 15 * 1e3;
     CACHE_TTL_RATE_LIMITED_MS = 120 * 1e3;
     MAX_RATE_LIMITED_BACKOFF_MS = 600 * 1e3;
     API_TIMEOUT_MS2 = 1e4;
-    LOCK_STALE_MS2 = API_TIMEOUT_MS2 + 5e3;
     TOKEN_REFRESH_URL_HOSTNAME = "platform.claude.com";
+    USAGE_CACHE_LOCK_OPTS = { timeoutMs: API_TIMEOUT_MS2 + 2e3 };
     TOKEN_REFRESH_URL_PATH = "/v1/oauth/token";
     DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
   }
@@ -21100,7 +21331,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
       if (err.code !== "EEXIST") throw error2;
       try {
         const info = await (0, import_promises8.stat)(lockDir);
-        if (Date.now() - info.mtimeMs > LOCK_STALE_MS3) {
+        if (Date.now() - info.mtimeMs > LOCK_STALE_MS2) {
           await (0, import_promises8.rm)(lockDir, { recursive: true, force: true });
           continue;
         }
@@ -21273,7 +21504,7 @@ async function markDispatchRequestDelivered(teamName, requestId, patch = {}, cwd
   if (current.status === "delivered") return current;
   return await transitionDispatchRequest(teamName, requestId, current.status, "delivered", patch, cwd2);
 }
-var import_crypto14, import_fs77, import_promises8, import_path88, OMC_DISPATCH_LOCK_TIMEOUT_ENV, DEFAULT_DISPATCH_LOCK_TIMEOUT_MS, MIN_DISPATCH_LOCK_TIMEOUT_MS, MAX_DISPATCH_LOCK_TIMEOUT_MS, DISPATCH_LOCK_INITIAL_POLL_MS, DISPATCH_LOCK_MAX_POLL_MS, LOCK_STALE_MS3;
+var import_crypto14, import_fs77, import_promises8, import_path88, OMC_DISPATCH_LOCK_TIMEOUT_ENV, DEFAULT_DISPATCH_LOCK_TIMEOUT_MS, MIN_DISPATCH_LOCK_TIMEOUT_MS, MAX_DISPATCH_LOCK_TIMEOUT_MS, DISPATCH_LOCK_INITIAL_POLL_MS, DISPATCH_LOCK_MAX_POLL_MS, LOCK_STALE_MS2;
 var init_dispatch_queue = __esm({
   "src/team/dispatch-queue.ts"() {
     "use strict";
@@ -21290,7 +21521,7 @@ var init_dispatch_queue = __esm({
     MAX_DISPATCH_LOCK_TIMEOUT_MS = 12e4;
     DISPATCH_LOCK_INITIAL_POLL_MS = 25;
     DISPATCH_LOCK_MAX_POLL_MS = 500;
-    LOCK_STALE_MS3 = 5 * 60 * 1e3;
+    LOCK_STALE_MS2 = 5 * 60 * 1e3;
   }
 });
 
@@ -21663,14 +21894,24 @@ function buildWorkerStartCommand(config2) {
       return `${key}=${shellEscape(value)}`;
     });
     const shellName2 = shellNameFromPath(shell) || "bash";
-    const execArgsCommand = shellName2 === "fish" ? "exec $argv" : 'exec "$@"';
-    const rcFile2 = process.env.HOME ? `${process.env.HOME}/.${shellName2}rc` : "";
-    const script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    const isFish2 = shellName2 === "fish";
+    const execArgsCommand = isFish2 ? "exec $argv" : 'exec "$@"';
+    let rcFile2 = "";
+    if (process.env.HOME) {
+      rcFile2 = isFish2 ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName2}rc`;
+    }
+    let script;
+    if (isFish2) {
+      script = shouldSourceRc && rcFile2 ? `test -f ${shellEscape(rcFile2)}; and source ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    } else {
+      script = shouldSourceRc && rcFile2 ? `[ -f ${shellEscape(rcFile2)} ] && . ${shellEscape(rcFile2)}; ${execArgsCommand}` : execArgsCommand;
+    }
+    const shellFlags = isFish2 ? ["-l", "-c"] : ["-lc"];
     return [
       "env",
       ...envAssignments,
       shell,
-      "-lc",
+      ...shellFlags,
       script,
       "--",
       ...launchWords
@@ -21681,8 +21922,15 @@ function buildWorkerStartCommand(config2) {
     return `${k}=${shellEscape(v)}`;
   }).join(" ");
   const shellName = shellNameFromPath(shell) || "bash";
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : "";
-  const sourceCmd = shouldSourceRc && rcFile ? `[ -f "${rcFile}" ] && source "${rcFile}"; ` : "";
+  const isFish = shellName === "fish";
+  let rcFile = "";
+  if (process.env.HOME) {
+    rcFile = isFish ? `${process.env.HOME}/.config/fish/config.fish` : `${process.env.HOME}/.${shellName}rc`;
+  }
+  let sourceCmd = "";
+  if (shouldSourceRc && rcFile) {
+    sourceCmd = isFish ? `test -f "${rcFile}"; and source "${rcFile}"; ` : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
+  }
   return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
 }
 function validateTmux() {
@@ -21690,7 +21938,7 @@ function validateTmux() {
     (0, import_child_process24.execSync)("tmux -V", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
   } catch {
     throw new Error(
-      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux"
+      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux\n  Windows: winget install psmux"
     );
   }
 }
@@ -22404,6 +22652,15 @@ var init_model_contract = __esm({
       "ANTHROPIC_BASE_URL",
       "CLAUDE_CODE_USE_BEDROCK",
       "CLAUDE_CODE_USE_VERTEX",
+      "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+      "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+      "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "OMC_MODEL_HIGH",
+      "OMC_MODEL_MEDIUM",
+      "OMC_MODEL_LOW",
       "OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL",
       "OMC_CODEX_DEFAULT_MODEL",
       "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",
@@ -24953,7 +25210,7 @@ function isCacheValid2(cache) {
 function spawnWithTimeout(cmd, timeoutMs) {
   return new Promise((resolve11, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
-    const child = (0, import_child_process31.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = (0, import_child_process32.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -25041,11 +25298,11 @@ async function executeCustomProvider(config2) {
     return { buckets: [], stale: false, error: "command failed" };
   }
 }
-var import_child_process31, import_fs88, import_path103, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
+var import_child_process32, import_fs88, import_path103, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
 var init_custom_rate_provider = __esm({
   "src/hud/custom-rate-provider.ts"() {
     "use strict";
-    import_child_process31 = require("child_process");
+    import_child_process32 = require("child_process");
     import_fs88 = require("fs");
     import_path103 = require("path");
     init_paths();
@@ -25297,16 +25554,16 @@ function renderAgentsDetailed(agents) {
     const parts = a.type.split(":");
     let name = parts[parts.length - 1] || a.type;
     if (name === "executor") name = "exec";
-    if (name === "deep-executor") name = "deep-x";
+    if (name === "deep-executor") name = "exec";
     if (name === "designer") name = "design";
     if (name === "qa-tester") name = "qa";
     if (name === "scientist") name = "sci";
     if (name === "security-reviewer") name = "sec";
-    if (name === "build-fixer") name = "build";
+    if (name === "build-fixer") name = "debug";
     if (name === "code-reviewer") name = "review";
     if (name === "git-master") name = "git";
     if (name === "style-reviewer") name = "style";
-    if (name === "quality-reviewer") name = "quality";
+    if (name === "quality-reviewer") name = "review";
     if (name === "api-reviewer") name = "api-rev";
     if (name === "performance-reviewer") name = "perf";
     if (name === "dependency-expert") name = "dep-exp";
@@ -25335,12 +25592,14 @@ function getShortAgentName(agentType) {
   const abbrevs = {
     // Build/Analysis Lane
     "executor": "exec",
-    "deep-executor": "deep-x",
+    "deep-executor": "exec",
+    // deprecated alias
     "debugger": "debug",
     "verifier": "verify",
     // Review Lane
     "style-reviewer": "style",
-    "quality-reviewer": "quality",
+    "quality-reviewer": "review",
+    // deprecated alias
     "api-reviewer": "api-rev",
     "security-reviewer": "sec",
     "performance-reviewer": "perf",
@@ -25350,7 +25609,8 @@ function getShortAgentName(agentType) {
     "document-specialist": "doc-spec",
     "test-engineer": "test-eng",
     "quality-strategist": "qs",
-    "build-fixer": "build",
+    "build-fixer": "debug",
+    // deprecated alias
     "designer": "design",
     "qa-tester": "qa",
     "scientist": "sci",
@@ -25498,12 +25758,9 @@ var init_agents = __esm({
       // Debugger - 'g' for debuGger (d taken by designer)
       debugger: "g",
       // sonnet
-      // Executor - 'X' for eXecutor
+      // Executor - 'x' for eXecutor (sonnet default, opus for complex tasks)
       executor: "x",
-      // sonnet
-      // Deep Executor - 'X' (same family as executor, opus tier)
-      "deep-executor": "X",
-      // opus
+      // sonnet/opus
       // Verifier - 'V' for Verifier (but vision uses 'v'... use uppercase 'V' for governance role)
       verifier: "V",
       // sonnet
@@ -25513,9 +25770,6 @@ var init_agents = __esm({
       // Style Reviewer - 'Y' for stYle
       "style-reviewer": "y",
       // haiku
-      // Quality Reviewer - 'Qr' for Quality Reviewer (disambiguated from quality-strategist)
-      "quality-reviewer": "Qr",
-      // sonnet
       // API Reviewer - 'I' for Interface/API
       "api-reviewer": "i",
       // sonnet
@@ -25539,9 +25793,6 @@ var init_agents = __esm({
       // sonnet
       // Quality Strategist - 'Qs' for Quality Strategist (disambiguated from quality-reviewer)
       "quality-strategist": "Qs",
-      // sonnet
-      // Build Fixer - 'B' for Build
-      "build-fixer": "b",
       // sonnet
       // Designer - 'd' for Designer
       designer: "d",
@@ -25865,7 +26116,9 @@ function renderRateLimitsWithBar(limits, barWidth = 8) {
 function renderRateLimitsError(result) {
   if (!result?.error) return null;
   if (result.error === "no_credentials") return null;
-  if (result.error === "rate_limited") return `${DIM4}[API 429]${RESET}`;
+  if (result.error === "rate_limited") {
+    return result.rateLimits ? null : `${DIM4}[API 429]${RESET}`;
+  }
   if (result.error === "auth") return `${YELLOW6}[API auth]${RESET}`;
   return `${YELLOW6}[API err]${RESET}`;
 }
@@ -27274,41 +27527,7 @@ init_loader();
 
 // src/agents/definitions.ts
 init_utils();
-
-// src/agents/deep-executor.ts
-init_utils();
-var DEEP_EXECUTOR_PROMPT_METADATA = {
-  category: "specialist",
-  cost: "EXPENSIVE",
-  promptAlias: "Deep Executor",
-  triggers: [
-    { domain: "Complex tasks", trigger: "Multi-file changes, unclear scope, needs exploration" },
-    { domain: "Deep work", trigger: "Goal-oriented tasks requiring sustained focus" },
-    { domain: "Forge", trigger: "Complex implementation needing deep reasoning" }
-  ],
-  useWhen: [
-    "Complex multi-file tasks requiring thorough exploration first",
-    "Goal-oriented work with unclear implementation path",
-    "Tasks needing deep reasoning and 100% completion guarantee",
-    "Work where executor-high is not enough reasoning power"
-  ],
-  avoidWhen: [
-    "Simple single-file changes (use executor)",
-    "Quick lookups (use explore)",
-    "When explicit step-by-step guidance is provided",
-    "Cost-sensitive operations (use executor tiers instead)",
-    "Tasks requiring delegation to sub-agents (use orchestrator)"
-  ],
-  promptDescription: "Deep executor for complex goal-oriented tasks. Explores extensively before acting, executes all work itself, and guarantees completion with evidence."
-};
-var deepExecutorAgent = {
-  name: "deep-executor",
-  description: "Deep executor for complex goal-oriented tasks. Explores extensively, executes all work itself, guarantees 100% completion with evidence.",
-  prompt: loadAgentPrompt("deep-executor"),
-  model: "opus",
-  defaultModel: "opus",
-  metadata: DEEP_EXECUTOR_PROMPT_METADATA
-};
+init_loader();
 
 // src/agents/architect.ts
 init_utils();
@@ -27697,39 +27916,6 @@ var documentSpecialistAgent = {
   metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
 };
 
-// src/agents/harsh-critic.ts
-init_utils();
-var HARSH_CRITIC_PROMPT_METADATA = {
-  category: "reviewer",
-  cost: "EXPENSIVE",
-  promptAlias: "harsh-critic",
-  triggers: [
-    {
-      domain: "Thorough Review",
-      trigger: "Deep thorough review of plans, code, or analysis"
-    }
-  ],
-  useWhen: [
-    `User wants a genuinely thorough review (says "harsh critic", "tear this apart", "don't hold back")`,
-    "Stress-testing work before committing real resources",
-    "Suspecting another agent's output may have gaps or weak reasoning",
-    "Wanting a second opinion that isn't biased toward agreement"
-  ],
-  avoidWhen: [
-    "User wants constructive feedback with a balanced tone (use critic instead)",
-    "User wants code changes made (use executor)",
-    "Quick sanity check on something trivial"
-  ]
-};
-var harshCriticAgent = {
-  name: "harsh-critic",
-  description: `Thorough reviewer with structured gap analysis and multi-perspective investigation (Opus). Uses "What's Missing" output format, pre-commitment predictions, and security/new-hire/ops perspective rotation.`,
-  prompt: loadAgentPrompt("harsh-critic"),
-  model: "opus",
-  defaultModel: "opus",
-  metadata: HARSH_CRITIC_PROMPT_METADATA
-};
-
 // src/agents/definitions.ts
 var debuggerAgent = {
   name: "debugger",
@@ -27745,13 +27931,6 @@ var verifierAgent = {
   model: "sonnet",
   defaultModel: "sonnet"
 };
-var qualityReviewerAgent = {
-  name: "quality-reviewer",
-  description: "Logic defects, maintainability, anti-patterns (Sonnet).",
-  prompt: loadAgentPrompt("quality-reviewer"),
-  model: "sonnet",
-  defaultModel: "sonnet"
-};
 var testEngineerAgent = {
   name: "test-engineer",
   description: "Test strategy, coverage, flaky test hardening (Sonnet).",
@@ -27763,13 +27942,6 @@ var securityReviewerAgent = {
   name: "security-reviewer",
   description: "Security vulnerability detection specialist (Sonnet). Use for security audits and OWASP detection.",
   prompt: loadAgentPrompt("security-reviewer"),
-  model: "sonnet",
-  defaultModel: "sonnet"
-};
-var buildFixerAgent = {
-  name: "build-fixer",
-  description: "Build and compilation error resolution specialist (Sonnet). Use for fixing build/type errors in any language.",
-  prompt: loadAgentPrompt("build-fixer"),
   model: "sonnet",
   defaultModel: "sonnet"
 };
@@ -27794,6 +27966,30 @@ var codeSimplifierAgent = {
   model: "opus",
   defaultModel: "opus"
 };
+var AGENT_CONFIG_KEY_MAP = {
+  explore: "explore",
+  analyst: "analyst",
+  planner: "planner",
+  architect: "architect",
+  debugger: "debugger",
+  executor: "executor",
+  verifier: "verifier",
+  "security-reviewer": "securityReviewer",
+  "code-reviewer": "codeReviewer",
+  "test-engineer": "testEngineer",
+  designer: "designer",
+  writer: "writer",
+  "qa-tester": "qaTester",
+  scientist: "scientist",
+  "git-master": "gitMaster",
+  "code-simplifier": "codeSimplifier",
+  critic: "critic",
+  "document-specialist": "documentSpecialist"
+};
+function getConfiguredAgentModel(name, config2) {
+  const key = AGENT_CONFIG_KEY_MAP[name];
+  return key ? config2.agents?.[key]?.model : void 0;
+}
 function getAgentDefinitions(options) {
   const agents = {
     // ============================================================
@@ -27809,15 +28005,12 @@ function getAgentDefinitions(options) {
     // ============================================================
     // REVIEW LANE
     // ============================================================
-    "quality-reviewer": qualityReviewerAgent,
     "security-reviewer": securityReviewerAgent,
     "code-reviewer": codeReviewerAgent,
     // ============================================================
     // DOMAIN SPECIALISTS
     // ============================================================
-    "deep-executor": deepExecutorAgent,
     "test-engineer": testEngineerAgent,
-    "build-fixer": buildFixerAgent,
     designer: designerAgent,
     writer: writerAgent,
     "qa-tester": qaTesterAgent,
@@ -27833,20 +28026,21 @@ function getAgentDefinitions(options) {
     // ============================================================
     "document-specialist": documentSpecialistAgent
   };
-  if (options?.enableHarshCritic) {
-    agents["harsh-critic"] = harshCriticAgent;
-  }
+  const resolvedConfig = options?.config ?? loadConfig();
   const result = {};
-  for (const [name, config2] of Object.entries(agents)) {
+  for (const [name, agentConfig] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
-    const disallowedTools = config2.disallowedTools ?? parseDisallowedTools(name);
+    const configuredModel = getConfiguredAgentModel(name, resolvedConfig);
+    const disallowedTools = agentConfig.disallowedTools ?? parseDisallowedTools(name);
+    const resolvedModel = override?.model ?? configuredModel ?? agentConfig.model;
+    const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
     result[name] = {
-      description: override?.description ?? config2.description,
-      prompt: override?.prompt ?? config2.prompt,
-      tools: override?.tools ?? config2.tools,
+      description: override?.description ?? agentConfig.description,
+      prompt: override?.prompt ?? agentConfig.prompt,
+      tools: override?.tools ?? agentConfig.tools,
       disallowedTools,
-      model: override?.model ?? config2.model,
-      defaultModel: override?.defaultModel ?? config2.defaultModel
+      model: resolvedModel,
+      defaultModel: resolvedDefaultModel
     };
   }
   return result;
@@ -27860,44 +28054,45 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (21 Agents)
+## Available Subagents (18 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) \u2014 fast pattern matching
 - **analyst**: Requirements clarity (opus) \u2014 hidden constraint analysis
 - **planner**: Task sequencing (opus) \u2014 execution plans and risk flags
 - **architect**: System design (opus) \u2014 boundaries, interfaces, tradeoffs
-- **debugger**: Root-cause analysis (sonnet) \u2014 regression isolation, diagnosis
-- **executor**: Code implementation (sonnet) \u2014 features and refactoring (use model=opus for complex tasks)
+- **debugger**: Root-cause analysis + build error fixing (sonnet) \u2014 regression isolation, diagnosis, type/compilation errors
+- **executor**: Code implementation (sonnet) \u2014 features, refactoring, autonomous complex tasks (use model=opus for complex multi-file changes)
 - **verifier**: Completion validation (sonnet) \u2014 evidence, claims, test adequacy
 
 ### Review Lane
-- **quality-reviewer**: Logic defects (sonnet) \u2014 maintainability, anti-patterns, performance hotspots, quality strategy, release readiness (use model=haiku for lightweight style-only checks)
 - **security-reviewer**: Security audits (sonnet) \u2014 vulns, trust boundaries, authn/authz
-- **code-reviewer**: Comprehensive review (opus) \u2014 API contracts, versioning, backward compatibility, orchestrates all review aspects
+- **code-reviewer**: Comprehensive review (opus) \u2014 API contracts, versioning, backward compatibility, logic defects, maintainability, anti-patterns, performance, quality strategy
 
 ### Domain Specialists
 - **test-engineer**: Test strategy (sonnet) \u2014 coverage, flaky test hardening
-- **build-fixer**: Build errors (sonnet) \u2014 toolchain/type failures
 - **designer**: UI/UX architecture (sonnet) \u2014 interaction design
 - **writer**: Documentation (haiku) \u2014 docs, migration notes
 - **qa-tester**: CLI testing (sonnet) \u2014 interactive runtime validation via tmux
 - **scientist**: Data analysis (sonnet) \u2014 statistics and research
 - **git-master**: Git operations (sonnet) \u2014 commits, rebasing, history
 - **document-specialist**: External docs & reference lookup (sonnet) \u2014 SDK/API/package research
+- **code-simplifier**: Code clarity (opus) \u2014 simplification and maintainability
 
 ### Coordination
-- **critic**: Plan review (opus) \u2014 critical challenge and evaluation
+- **critic**: Plan review + thorough gap analysis (opus) \u2014 critical challenge, multi-perspective investigation, structured "What's Missing" analysis
 
 ### Deprecated Aliases
 - **api-reviewer** \u2192 code-reviewer
-- **performance-reviewer** \u2192 quality-reviewer
+- **performance-reviewer** \u2192 code-reviewer
+- **quality-reviewer** \u2192 code-reviewer
+- **quality-strategist** \u2192 code-reviewer
 - **dependency-expert** \u2192 document-specialist
 - **researcher** \u2192 document-specialist
 - **tdd-guide** \u2192 test-engineer
-
-### Optional Agents (enable in config)
-- **harsh-critic**: Thorough gap analysis (opus) \u2014 structured "What's Missing" analysis, multi-perspective investigation, severity-rated findings. Enable with \`features.harshCritic: true\` in config.
+- **deep-executor** \u2192 executor
+- **build-fixer** \u2192 debugger
+- **harsh-critic** \u2192 critic
 
 ## Orchestration Principles
 1. **Delegate Aggressively**: Fire off subagents for specialized tasks - don't do everything yourself
@@ -51908,6 +52103,20 @@ Install with: ${this.serverConfig.installHint}`
     });
   }
   /**
+   * Synchronously kill the LSP server process.
+   * Used in process exit handlers where async operations are not possible.
+   */
+  forceKill() {
+    if (this.process) {
+      try {
+        this.process.kill("SIGKILL");
+      } catch {
+      }
+      this.process = null;
+      this.initialized = false;
+    }
+  }
+  /**
    * Disconnect from the LSP server
    */
   async disconnect() {
@@ -52289,6 +52498,32 @@ var LspClientManager = class {
   idleTimer = null;
   constructor() {
     this.startIdleCheck();
+    this.registerCleanupHandlers();
+  }
+  /**
+   * Register process exit/signal handlers to kill all spawned LSP server processes.
+   * Prevents orphaned language server processes (e.g. kotlin-language-server)
+   * when the MCP bridge process exits or a claude session ends.
+   */
+  registerCleanupHandlers() {
+    const forceKillAll = () => {
+      for (const client of this.clients.values()) {
+        try {
+          client.forceKill();
+        } catch {
+        }
+      }
+      this.clients.clear();
+      this.lastUsed.clear();
+      this.inFlightCount.clear();
+    };
+    process.on("exit", forceKillAll);
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+      process.on(sig, () => {
+        forceKillAll();
+        process.exit(0);
+      });
+    }
   }
   /**
    * Get or create a client for a file
@@ -60201,12 +60436,15 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
       case "analyze":
         messages.push(ANALYZE_MESSAGE);
         break;
+      case "tdd":
+        messages.push(TDD_MESSAGE);
+        break;
       // For modes without dedicated message constants, return generic activation message
       // These are handled by UserPromptSubmit hook for skill invocation
       case "cancel":
       case "autopilot":
       case "ralplan":
-      case "tdd":
+      case "deep-interview":
         messages.push(
           `[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`
         );
@@ -60257,6 +60495,9 @@ async function processPersistentMode(input) {
   };
   const result = await checkPersistentModes2(sessionId, directory, stopContext);
   const output = createHookOutput2(result);
+  if (result.mode !== "none" || Boolean(output.message)) {
+    return output;
+  }
   const teamState = readTeamStagedState(directory, sessionId);
   if (!teamState || teamState.active !== true || isTeamStateTerminal(teamState)) {
     writeTeamStopBreakerCount(directory, sessionId, 0);
@@ -60767,6 +61008,8 @@ async function processPostToolUse(input) {
       const hook = createRalphLoopHook2(directory);
       hook.startLoop(input.sessionId, cleanPrompt);
     }
+    const { clearSkillActiveState: clearSkillActiveState2 } = await Promise.resolve().then(() => (init_skill_state(), skill_state_exports));
+    clearSkillActiveState2(directory, input.sessionId);
   }
   const orchestratorResult = processOrchestratorPostTool(
     {
@@ -61603,9 +61846,7 @@ ${options.customSystemPrompt}`;
   if (contextAddition) {
     systemPrompt += contextAddition;
   }
-  const agents = getAgentDefinitions({
-    enableHarshCritic: config2.features?.harshCritic === true
-  });
+  const agents = getAgentDefinitions({ config: config2 });
   const externalMcpServers = getDefaultMcpServers({
     exaApiKey: config2.mcpServers?.exa?.apiKey,
     enableExa: config2.mcpServers?.exa?.enabled,
@@ -61689,6 +61930,7 @@ async function checkRateLimitStatus() {
     const weeklyLimited = (usage.weeklyPercent ?? 0) >= RATE_LIMIT_THRESHOLD;
     const monthlyLimited = (usage.monthlyPercent ?? 0) >= RATE_LIMIT_THRESHOLD;
     const isLimited = fiveHourLimited || weeklyLimited || monthlyLimited;
+    const usingStaleData = result.error === "rate_limited" && !!result.rateLimits;
     let nextResetAt = null;
     let timeUntilResetMs = null;
     if (isLimited) {
@@ -61720,6 +61962,11 @@ async function checkRateLimitStatus() {
       monthlyResetsAt: usage.monthlyResetsAt ?? null,
       nextResetAt,
       timeUntilResetMs,
+      fiveHourPercent: usage.fiveHourPercent,
+      weeklyPercent: usage.weeklyPercent,
+      monthlyPercent: usage.monthlyPercent,
+      apiErrorReason: result.error,
+      usingStaleData,
       lastCheckedAt: /* @__PURE__ */ new Date()
     };
   } catch (error2) {
@@ -61742,6 +61989,22 @@ function formatTimeUntilReset(ms) {
   return `${seconds}s`;
 }
 function formatRateLimitStatus(status) {
+  if (status.apiErrorReason === "rate_limited" && !status.isLimited) {
+    const cachedUsageParts = [];
+    if (typeof status.fiveHourPercent === "number") {
+      cachedUsageParts.push(`5-hour ${status.fiveHourPercent}%`);
+    }
+    if (typeof status.weeklyPercent === "number") {
+      cachedUsageParts.push(`weekly ${status.weeklyPercent}%`);
+    }
+    if (typeof status.monthlyPercent === "number") {
+      cachedUsageParts.push(`monthly ${status.monthlyPercent}%`);
+    }
+    if (cachedUsageParts.length > 0) {
+      return `Usage API rate limited; showing stale cached usage (${cachedUsageParts.join(", ")})`;
+    }
+    return "Usage API rate limited; current limit status unavailable";
+  }
   if (!status.isLimited) {
     return "Not rate limited";
   }
@@ -61759,7 +62022,16 @@ function formatRateLimitStatus(status) {
   if (status.timeUntilResetMs !== null) {
     message += ` (resets in ${formatTimeUntilReset(status.timeUntilResetMs)})`;
   }
+  if (status.apiErrorReason === "rate_limited") {
+    message += " [usage API 429; cached data]";
+  }
   return message;
+}
+function isRateLimitStatusDegraded(status) {
+  return status?.apiErrorReason === "rate_limited";
+}
+function shouldMonitorBlockedPanes(status) {
+  return !!status && (status.isLimited || isRateLimitStatusDegraded(status));
 }
 
 // src/features/rate-limit-wait/index.ts
@@ -62012,8 +62284,8 @@ async function pollLoop2(config2) {
           (_, reject) => setTimeout(() => reject(new Error("checkRateLimitStatus timed out after 30s")), 3e4)
         )
       ]);
-      const wasLimited = state.rateLimitStatus?.isLimited ?? false;
-      const isNowLimited = rateLimitStatus?.isLimited ?? false;
+      const wasLimited = shouldMonitorBlockedPanes(state.rateLimitStatus);
+      const isNowLimited = shouldMonitorBlockedPanes(rateLimitStatus);
       state.rateLimitStatus = rateLimitStatus;
       if (rateLimitStatus) {
         log2(`Rate limit status: ${formatRateLimitStatus(rateLimitStatus)}`, config2);
@@ -62021,7 +62293,8 @@ async function pollLoop2(config2) {
         log2("Rate limit status unavailable (no OAuth credentials?)", config2);
       }
       if (isNowLimited && isTmuxAvailable()) {
-        log2("Rate limited - scanning for blocked panes", config2);
+        const scanReason = rateLimitStatus?.isLimited ? "Rate limited - scanning for blocked panes" : "Usage API degraded (429/stale cache) - scanning for blocked panes";
+        log2(scanReason, config2);
         const blockedPanes = scanForBlockedPanes(config2.paneLinesToCapture);
         for (const pane of blockedPanes) {
           const existing = state.blockedPanes.find((p) => p.id === pane.id);
@@ -62290,6 +62563,15 @@ ${formatRateLimitStatus(rateLimitStatus)}
       console.log(source_default.green("\u2713 Auto-resume daemon is running"));
       console.log(source_default.gray("  Your session will resume automatically when the limit clears.\n"));
     }
+  } else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+    console.log(source_default.yellow.bold("\u26A0\uFE0F  Usage API Rate Limited"));
+    console.log(source_default.yellow(`
+${formatRateLimitStatus(rateLimitStatus)}
+`));
+    if (daemonRunning) {
+      console.log(source_default.gray("Auto-resume daemon is running while usage data is stale."));
+      console.log(source_default.gray("Blocked panes can still be tracked if detected.\n"));
+    }
   } else {
     console.log(source_default.green("\u2713 Not rate limited\n"));
     if (daemonRunning) {
@@ -62324,6 +62606,8 @@ async function waitStatusCommand(options) {
       if (rateLimitStatus.weeklyLimited && rateLimitStatus.weeklyResetsAt) {
         console.log(source_default.gray(`    Weekly resets: ${rateLimitStatus.weeklyResetsAt.toLocaleString()}`));
       }
+    } else if (isRateLimitStatusDegraded(rateLimitStatus)) {
+      console.log(source_default.yellow(`  \u26A0 ${formatRateLimitStatus(rateLimitStatus)}`));
     } else {
       console.log(source_default.green("  \u2713 Not rate limited"));
       console.log(source_default.gray(`    5-hour: ${rateLimitStatus.fiveHourLimited ? "100%" : "OK"}`));
@@ -64071,7 +64355,7 @@ Examples:
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
-  code-reviewer, security-reviewer, test-engineer, build-fixer, designer, writer, scientist
+  code-reviewer, security-reviewer, test-engineer, debugger, designer, writer, scientist
 `;
 var TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]
@@ -66272,12 +66556,21 @@ ${parsed.prompt}`;
 }
 
 // src/cli/win32-warning.ts
+var import_child_process31 = require("child_process");
+function hasTmuxBinary() {
+  try {
+    const result = (0, import_child_process31.spawnSync)("tmux", ["-V"], { stdio: "pipe", timeout: 3e3 });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
 function warnIfWin32() {
-  if (process.platform === "win32") {
-    console.warn(source_default.yellow.bold("\n\u26A0  WARNING: Native Windows (win32) detected"));
-    console.warn(source_default.yellow("   OMC requires tmux, which is not available on native Windows."));
-    console.warn(source_default.yellow("   Native Windows support is experimental and may have limited functionality."));
-    console.warn(source_default.yellow("   WSL2 is strongly recommended: https://learn.microsoft.com/en-us/windows/wsl/install"));
+  if (process.platform === "win32" && !hasTmuxBinary()) {
+    console.warn(source_default.yellow.bold("\n\u26A0  WARNING: Native Windows (win32) detected \u2014 no tmux found"));
+    console.warn(source_default.yellow("   OMC features that require tmux will not work."));
+    console.warn(source_default.yellow("   Install psmux for native Windows tmux support: winget install psmux"));
+    console.warn(source_default.yellow("   Or use WSL2: https://learn.microsoft.com/en-us/windows/wsl/install"));
     console.warn("");
   }
 }
@@ -66289,6 +66582,10 @@ var program2 = new Command();
 warnIfWin32();
 async function defaultAction() {
   const args = process.argv.slice(2);
+  if (args[0] === "ask") {
+    await askCommand(args.slice(1));
+    return;
+  }
   await launchCommand(args);
 }
 program2.name("omc").description("Multi-agent orchestration system for Claude Agent SDK").version(version2).allowUnknownOption().action(defaultAction);

@@ -47,7 +47,6 @@ export const ROLE_CATEGORY_DEFAULTS: Record<string, string> = {
   // Review roles
   'code-reviewer': 'code-reviewer',
   'security-reviewer': 'security-reviewer',
-  'quality-reviewer': 'quality-reviewer',
 
   // Specialized roles
   designer: 'designer',
@@ -55,7 +54,6 @@ export const ROLE_CATEGORY_DEFAULTS: Record<string, string> = {
   'qa-tester': 'qa-tester',
   debugger: 'debugger',
   scientist: 'scientist',
-  'build-fixer': 'build-fixer',
   'git-master': 'executor',
   'code-simplifier': 'executor',
 };
@@ -67,10 +65,15 @@ export const DEPRECATED_ROLE_ALIASES: Readonly<Record<string, string>> = {
   researcher: 'document-specialist',
   'tdd-guide': 'test-engineer',
   'api-reviewer': 'code-reviewer',
-  'performance-reviewer': 'quality-reviewer',
+  'performance-reviewer': 'code-reviewer',
   'dependency-expert': 'document-specialist',
-  'quality-strategist': 'quality-reviewer',
+  'quality-strategist': 'code-reviewer',
   vision: 'document-specialist',
+  // Consolidated agent aliases (agent consolidation PR)
+  'quality-reviewer': 'code-reviewer',
+  'deep-executor': 'executor',
+  'build-fixer': 'debugger',
+  'harsh-critic': 'critic',
 };
 
 /**

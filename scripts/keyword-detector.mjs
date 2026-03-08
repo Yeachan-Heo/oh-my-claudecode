@@ -9,16 +9,15 @@
  * 1. cancelomc/stopomc: Stop active modes
  * 2. ralph: Persistence mode until task completion
  * 3. autopilot: Full autonomous execution
- * 4. team: Coordinated team execution (replaces ultrapilot/swarm)
+ * 4. team: Explicit-only via /team (not auto-triggered)
  * 5. ultrawork/ulw: Maximum parallel execution
- * 7. ccg: Claude-Codex-Gemini tri-model orchestration
- * 9. ralplan: Iterative planning with consensus
- * 10. plan: Planning interview mode
- * 11. tdd: Test-driven development
- * 12. research: Research orchestration
- * 13. ultrathink/think: Extended reasoning
- * 14. deepsearch: Codebase search (restricted patterns)
- * 15. analyze: Analysis mode (restricted patterns)
+ * 5. ccg: Claude-Codex-Gemini tri-model orchestration
+ * 6. ralplan: Iterative planning with consensus
+ * 7. deep interview: Socratic interview workflow
+ * 8. tdd: Test-driven development
+ * 9. ultrathink: Extended reasoning
+ * 10. deepsearch: Codebase search (restricted patterns)
+ * 11. analyze: Analysis mode (restricted patterns)
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
@@ -39,6 +38,24 @@ You are now in deep thinking mode. Take your time to:
 Use your extended thinking capabilities to provide the most thorough and well-reasoned response.
 
 </think-mode>
+
+---
+`;
+
+const ANALYZE_MESSAGE = `<analyze-mode>
+ANALYSIS MODE. Gather context before diving deep:
+- Search relevant code paths first
+- Compare working vs broken behavior
+- Synthesize findings before proposing changes
+</analyze-mode>
+
+---
+`;
+
+const TDD_MESSAGE = `<tdd-mode>
+[TDD MODE ACTIVATED]
+Write or update tests first when practical, confirm they fail for the right reason, then implement the minimal fix and re-run verification.
+</tdd-mode>
 
 ---
 `;
@@ -260,8 +277,8 @@ function resolveConflicts(matches) {
   // Team keyword detection removed — team is now explicit-only via /team skill.
 
   // Sort by priority order
-  const priorityOrder = ['cancel','ralph','autopilot','team','ultrawork',
-    'ccg','ralplan','plan','tdd','research','ultrathink','deepsearch','analyze'];
+  const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
+    'ccg','ralplan','deep-interview','tdd','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -363,16 +380,16 @@ async function main() {
       matches.push({ name: 'ralplan', args: '' });
     }
 
+    // Deep interview keywords
+    if (/\b(deep[\s-]interview|ouroboros)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'deep-interview', args: '' });
+    }
+
     // TDD keywords
     if (/\b(tdd)\b/i.test(cleanPrompt) ||
         /\btest\s+first\b/i.test(cleanPrompt) ||
         /\bred\s+green\b/i.test(cleanPrompt)) {
       matches.push({ name: 'tdd', args: '' });
-    }
-
-    // Sciomc keywords
-    if (/\banalyze\s+data\b/i.test(cleanPrompt)) {
-      matches.push({ name: 'sciomc', args: '' });
     }
 
     // Ultrathink keywords
@@ -388,9 +405,7 @@ async function main() {
     }
 
     // Analyze keywords
-    if (/\b(deep\s*analyze)\b/i.test(cleanPrompt) ||
-        /\binvestigate\s+(the|this|why)\b/i.test(cleanPrompt) ||
-        /\bdebug\s+(the|this|why)\b/i.test(cleanPrompt)) {
+    if (/\b(deep[\s-]?analyze|deepanalyze)\b/i.test(cleanPrompt)) {
       matches.push({ name: 'analyze', args: '' });
     }
 
@@ -451,27 +466,31 @@ async function main() {
       activateState(directory, prompt, 'ultrawork', sessionId);
     }
 
-    // Handle ultrathink specially - prepend message instead of skill invocation
-    const ultrathinkIndex = resolved.findIndex(m => m.name === 'ultrathink');
-    if (ultrathinkIndex !== -1) {
-      // Remove ultrathink from skill list
-      resolved.splice(ultrathinkIndex, 1);
-
-      // If ultrathink was the only match, emit message
-      if (resolved.length === 0) {
-        console.log(JSON.stringify(createHookOutput(ULTRATHINK_MESSAGE)));
-        return;
+    const additionalContextParts = [];
+    for (const [keywordName, message] of [
+      ['ultrathink', ULTRATHINK_MESSAGE],
+      ['analyze', ANALYZE_MESSAGE],
+      ['tdd', TDD_MESSAGE],
+    ]) {
+      const index = resolved.findIndex(m => m.name === keywordName);
+      if (index !== -1) {
+        resolved.splice(index, 1);
+        additionalContextParts.push(message);
       }
+    }
 
-      // Otherwise, prepend ultrathink message to skill invocation
-      const skillMessage = createMultiSkillInvocation(resolved, prompt);
-      console.log(JSON.stringify(createHookOutput(ULTRATHINK_MESSAGE + skillMessage)));
+    if (resolved.length === 0 && additionalContextParts.length > 0) {
+      console.log(JSON.stringify(createHookOutput(additionalContextParts.join(''))));
       return;
     }
 
-    const skillMatches = resolved;
-    if (skillMatches.length > 0) {
-      console.log(JSON.stringify(createHookOutput(createMultiSkillInvocation(skillMatches, prompt))));
+    if (resolved.length > 0) {
+      additionalContextParts.push(createMultiSkillInvocation(resolved, prompt));
+    }
+
+    if (additionalContextParts.length > 0) {
+      console.log(JSON.stringify(createHookOutput(additionalContextParts.join(''))));
+      return;
     }
   } catch (error) {
     // On any error, allow continuation

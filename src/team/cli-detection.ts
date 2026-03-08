@@ -13,7 +13,8 @@ export function detectCli(binary: string): CliInfo {
   try {
     const versionResult = spawnSync(binary, ['--version'], { timeout: 5000 });
     if (versionResult.status === 0) {
-      const pathResult = spawnSync('which', [binary], { timeout: 5000 });
+      const finder = process.platform === 'win32' ? 'where' : 'which';
+      const pathResult = spawnSync(finder, [binary], { timeout: 5000 });
       return {
         available: true,
         version: versionResult.stdout?.toString().trim(),

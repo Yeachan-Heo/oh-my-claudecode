@@ -72,5 +72,18 @@ describe('renderRateLimitsError', () => {
         expect(result).toContain('\x1b[2m'); // Dim ANSI code
         expect(result).not.toContain('\x1b[33m'); // Not yellow
     });
+    it('returns null for rate_limited error when stale rate limit data is available', () => {
+        const usageResult = {
+            rateLimits: {
+                fiveHourPercent: 50,
+                weeklyPercent: 30,
+                fiveHourResetsAt: null,
+                weeklyResetsAt: null,
+            },
+            error: 'rate_limited',
+        };
+        const result = renderRateLimitsError(usageResult);
+        expect(result).toBeNull();
+    });
 });
 //# sourceMappingURL=rate-limits-error.test.js.map

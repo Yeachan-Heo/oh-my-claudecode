@@ -288,6 +288,21 @@ Tag behavior:
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro subscription OR Anthropic API key
 
+### Platform & tmux
+
+OMC features like `omc team` and rate-limit detection require **tmux**:
+
+| Platform       | tmux provider                                            | Install                |
+| -------------- | -------------------------------------------------------- | ---------------------- |
+| macOS          | [tmux](https://github.com/tmux/tmux)                    | `brew install tmux`    |
+| Ubuntu/Debian  | tmux                                                     | `sudo apt install tmux`|
+| Fedora         | tmux                                                     | `sudo dnf install tmux`|
+| Arch           | tmux                                                     | `sudo pacman -S tmux`  |
+| Windows        | [psmux](https://github.com/marlocarlo/psmux) (native)   | `winget install psmux` |
+| Windows (WSL2) | tmux (inside WSL)                                        | `sudo apt install tmux`|
+
+> **Windows users:** [psmux](https://github.com/marlocarlo/psmux) provides a native `tmux` binary for Windows with 76 tmux-compatible commands. No WSL required.
+
 ### Optional: Multi-AI Orchestration
 
 OMC can optionally orchestrate external AI providers for cross-validation and design consistency. These are **not required** — OMC works fully without them.

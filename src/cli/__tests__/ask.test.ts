@@ -22,16 +22,32 @@ interface CliRunResult {
   error?: string;
 }
 
+interface RunOptions {
+  preserveClaudeSessionEnv?: boolean;
+}
+
+function buildChildEnv(
+  envOverrides: Record<string, string> = {},
+  options: RunOptions = {},
+): NodeJS.ProcessEnv {
+  if (options.preserveClaudeSessionEnv) {
+    return { ...process.env, ...envOverrides };
+  }
+
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
+  return { ...cleanEnv, ...envOverrides };
+}
+
 function runCli(
   args: string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
+  options: RunOptions = {},
 ): CliRunResult {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   const result = spawnSync(process.execPath, ['--import', TSX_LOADER, CLI_ENTRY, ...args], {
     cwd,
     encoding: 'utf-8',
-    env: { ...cleanEnv, ...envOverrides },
+    env: buildChildEnv(envOverrides, options),
   });
 
   return {
@@ -46,12 +62,12 @@ function runAdvisorScript(
   args: string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
+  options: RunOptions = {},
 ): CliRunResult {
-  const { CLAUDECODE: _cc2, ...cleanEnv2 } = process.env;
   const result = spawnSync(process.execPath, [ADVISOR_SCRIPT, ...args], {
     cwd,
     encoding: 'utf-8',
-    env: { ...cleanEnv2, ...envOverrides },
+    env: buildChildEnv(envOverrides, options),
   });
 
   return {
@@ -67,12 +83,12 @@ function runWrapperScript(
   args: string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
+  options: RunOptions = {},
 ): CliRunResult {
-  const { CLAUDECODE: _cc3, ...cleanEnv3 } = process.env;
   const result = spawnSync(wrapperPath, args, {
     cwd,
     encoding: 'utf-8',
-    env: { ...cleanEnv3, ...envOverrides },
+    env: buildChildEnv(envOverrides, options),
   });
 
   return {
@@ -236,6 +252,64 @@ describe('omc ask command', () => {
     }
   });
 
+  it('allows codex ask inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-codex-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runCli(
+        ['ask', 'codex', '--prompt', 'cli nested codex prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload).toEqual({
+        provider: 'codex',
+        prompt: 'cli nested codex prompt',
+        originalTask: 'cli nested codex prompt',
+        passthrough: null,
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('allows gemini ask inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-gemini-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runCli(
+        ['ask', 'gemini', '--prompt', 'cli nested gemini prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload.provider).toBe('gemini');
+      expect(payload.prompt).toBe('cli nested gemini prompt');
+      expect(payload.originalTask).toBe('cli nested gemini prompt');
+      expect(payload.passthrough).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
   it('loads --agent-prompt role from resolved prompts dir and prepends role content', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-agent-prompt-'));
     try {
@@ -382,6 +456,65 @@ describe('ask wrapper scripts contract', () => {
         originalTask: 'wrapper prompt',
         passthrough: 'wrapper-token',
       });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('ask-codex wrapper still works inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-codex-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runWrapperScript(
+        ASK_CODEX_WRAPPER,
+        ['--prompt', 'nested codex prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload).toEqual({
+        provider: 'codex',
+        prompt: 'nested codex prompt',
+        originalTask: 'nested codex prompt',
+        passthrough: null,
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('ask-gemini wrapper still works inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-gemini-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runWrapperScript(
+        ASK_GEMINI_WRAPPER,
+        ['--prompt', 'nested gemini prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload.provider).toBe('gemini');
+      expect(payload.prompt).toBe('nested gemini prompt');
+      expect(payload.originalTask).toBe('nested gemini prompt');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

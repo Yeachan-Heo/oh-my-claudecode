@@ -242,7 +242,7 @@ npm install -g oh-my-claude-sisyphus
 | `/oh-my-claudecode:plan "description"` | 자연스럽게 플래닝 시작                                     | ✅ 예               |
 | `/oh-my-claudecode:review [path]`      | 기존과 동일하게 호출                                       | ✅ 예 (변경 없음)   |
 | `/oh-my-claudecode:deepsearch "query"` | "find" 또는 "search"라고 말하기                            | ✅ 예 (자동 감지)   |
-| `/oh-my-claudecode:analyze "target"`   | "analyze" 또는 "investigate"라고 말하기                    | ✅ 예 (자동 감지)   |
+| `/oh-my-claudecode:analyze "target"`   | "analyze"라고 말하기 — debugger/architect 에이전트로 라우팅 | ✅ 예 (키워드 라우트) |
 | `/oh-my-claudecode:deepinit [path]`    | 기존과 동일하게 호출                                       | ✅ 예 (변경 없음)   |
 | `/oh-my-claudecode:git-master`         | "git", "commit", "atomic commit"이라고 말하기              | ✅ 예 (자동 감지)   |
 | `/oh-my-claudecode:frontend-ui-ux`     | "UI", "styling", "component", "design"이라고 말하기        | ✅ 예 (자동 감지)   |
@@ -637,7 +637,7 @@ npm update -g oh-my-claude-sisyphus
 
 - `review` - explore → architect → critic → executor
 - `implement` - planner → executor → tdd-guide
-- `debug` - explore → architect → build-fixer
+- `debug` - explore → architect → debugger
 - `research` - parallel(document-specialist, explore) → architect → writer
 - `refactor` - explore → architect-medium → executor-high → qa-tester
 - `security` - explore → security-reviewer → executor → security-reviewer-low

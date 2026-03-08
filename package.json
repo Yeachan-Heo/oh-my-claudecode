@@ -1,6 +1,6 @@
 {
   "name": "oh-my-claude-sisyphus",
-  "version": "4.7.7",
+  "version": "4.7.8",
   "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
   "type": "module",
   "main": "dist/index.js",
@@ -52,6 +52,9 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "vitest",
+    "bench:prompts": "tsx benchmarks/run-all.ts",
+    "bench:prompts:save": "tsx benchmarks/run-all.ts --save-baseline",
+    "bench:prompts:compare": "tsx benchmarks/run-all.ts --compare",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
