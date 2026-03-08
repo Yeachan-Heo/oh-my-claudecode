@@ -241,7 +241,7 @@ OpenClaw — это структурированный диспетчер веб
 | `pre-tool-use` | Перед вызовом инструмента (высокая частота) | `{{toolName}}`, `{{sessionId}}` |
 | `post-tool-use` | После вызова инструмента (высокая частота) | `{{toolName}}`, `{{sessionId}}` |
 
-> **Примечание:** `session-end` определён в типах, но в настоящее время не отправляется bridge.ts ([#1456](https://github.com/ohprettyhak/oh-my-claudecode/issues/1456)).
+> **Примечание:** `session-end` определён в типах, но в настоящее время не отправляется bridge.ts ([#1456](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1456)).
 
 **Переменные окружения канала ответа:**
 

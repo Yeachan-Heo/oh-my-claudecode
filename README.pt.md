@@ -279,7 +279,7 @@ OpenClaw é um despachante de webhooks estruturado que encaminha eventos de sess
 | `pre-tool-use` | Antes da invocação de ferramenta (alta frequência) | `{{toolName}}`, `{{sessionId}}` |
 | `post-tool-use` | Após a invocação de ferramenta (alta frequência) | `{{toolName}}`, `{{sessionId}}` |
 
-> **Observação:** `session-end` está definido nos tipos mas não é atualmente despachado por bridge.ts ([#1456](https://github.com/ohprettyhak/oh-my-claudecode/issues/1456)).
+> **Observação:** `session-end` está definido nos tipos mas não é atualmente despachado por bridge.ts ([#1456](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1456)).
 
 **Variáveis de ambiente do canal de resposta:**
 

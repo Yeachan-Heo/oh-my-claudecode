@@ -241,7 +241,7 @@ OpenClaw, Claude Code oturum olaylarını harici HTTPS uç noktalarına ileten y
 | `pre-tool-use` | Araç çağrısından önce (yüksek sıklık) | `{{toolName}}`, `{{sessionId}}` |
 | `post-tool-use` | Araç çağrısından sonra (yüksek sıklık) | `{{toolName}}`, `{{sessionId}}` |
 
-> **Not:** `session-end` tiplerde tanımlıdır ancak şu anda bridge.ts tarafından dağıtılmamaktadır ([#1456](https://github.com/ohprettyhak/oh-my-claudecode/issues/1456)).
+> **Not:** `session-end` tiplerde tanımlıdır ancak şu anda bridge.ts tarafından dağıtılmamaktadır ([#1456](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1456)).
 
 **Yanıt kanalı ortam değişkenleri:**
 
