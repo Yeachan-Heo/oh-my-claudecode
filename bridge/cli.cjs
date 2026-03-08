@@ -14077,6 +14077,167 @@ ${newState.prompt ? `Original task: ${newState.prompt}` : ""}
     }
   };
 }
+function readStopBreaker(directory, name, sessionId, ttlMs) {
+  const stateDir = sessionId ? (0, import_path49.join)(getOmcRoot(directory), "state", "sessions", sessionId) : (0, import_path49.join)(getOmcRoot(directory), "state");
+  const breakerPath = (0, import_path49.join)(stateDir, `${name}-stop-breaker.json`);
+  try {
+    if (!(0, import_fs45.existsSync)(breakerPath)) return 0;
+    const raw = JSON.parse((0, import_fs45.readFileSync)(breakerPath, "utf-8"));
+    if (ttlMs && raw.updated_at) {
+      const updatedAt = new Date(raw.updated_at).getTime();
+      if (Number.isFinite(updatedAt) && Date.now() - updatedAt > ttlMs) {
+        (0, import_fs45.unlinkSync)(breakerPath);
+        return 0;
+      }
+    }
+    return typeof raw.count === "number" ? raw.count : 0;
+  } catch {
+    return 0;
+  }
+}
+function writeStopBreaker(directory, name, count, sessionId) {
+  const stateDir = sessionId ? (0, import_path49.join)(getOmcRoot(directory), "state", "sessions", sessionId) : (0, import_path49.join)(getOmcRoot(directory), "state");
+  try {
+    (0, import_fs45.mkdirSync)(stateDir, { recursive: true });
+    const breakerPath = (0, import_path49.join)(stateDir, `${name}-stop-breaker.json`);
+    const data = { count, updated_at: (/* @__PURE__ */ new Date()).toISOString() };
+    atomicWriteJsonSync(breakerPath, data);
+  } catch {
+  }
+}
+async function checkTeamPipeline(sessionId, directory, cancelInProgress) {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const teamState = readTeamPipelineState(workingDir, sessionId);
+  if (!teamState) {
+    return null;
+  }
+  if (!teamState.active) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  if (cancelInProgress) {
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const rawPhase = teamState.phase ?? teamState.current_phase ?? teamState.currentStage ?? teamState.current_stage ?? teamState.stage;
+  if (typeof rawPhase !== "string") {
+    return null;
+  }
+  const phase = rawPhase.trim().toLowerCase();
+  if (phase === "complete" || phase === "completed" || phase === "failed" || phase === "cancelled" || phase === "canceled" || phase === "cancel") {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const KNOWN_ACTIVE_PHASES = /* @__PURE__ */ new Set(["team-plan", "team-prd", "team-exec", "team-verify", "team-fix"]);
+  if (!KNOWN_ACTIVE_PHASES.has(phase)) {
+    return null;
+  }
+  const rawStatus = teamState.status;
+  const status = typeof rawStatus === "string" ? rawStatus.trim().toLowerCase() : null;
+  if (status === "cancelled" || status === "canceled" || status === "cancel" || status === "failed" || status === "complete" || status === "completed") {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  if (teamState.cancel?.requested) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "team"
+    };
+  }
+  const breakerCount = readStopBreaker(workingDir, "team-pipeline", sessionId, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS) + 1;
+  if (breakerCount > TEAM_PIPELINE_STOP_BLOCKER_MAX) {
+    writeStopBreaker(workingDir, "team-pipeline", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[TEAM PIPELINE CIRCUIT BREAKER] Stop enforcement exceeded ${TEAM_PIPELINE_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
+      mode: "team"
+    };
+  }
+  writeStopBreaker(workingDir, "team-pipeline", breakerCount, sessionId);
+  return {
+    shouldBlock: true,
+    message: `<team-pipeline-continuation>
+
+[TEAM PIPELINE - PHASE: ${phase.toUpperCase()} | REINFORCEMENT ${breakerCount}/${TEAM_PIPELINE_STOP_BLOCKER_MAX}]
+
+The team pipeline is active in phase "${phase}". Continue working on the team workflow.
+Do not stop until the pipeline reaches a terminal state (complete/failed/cancelled).
+When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
+
+</team-pipeline-continuation>
+
+---
+
+`,
+    mode: "team",
+    metadata: {
+      phase,
+      tasksCompleted: teamState.execution?.tasks_completed,
+      tasksTotal: teamState.execution?.tasks_total
+    }
+  };
+}
+async function checkRalplan(sessionId, directory, cancelInProgress) {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readModeState("ralplan", workingDir, sessionId);
+  if (!state || !state.active) {
+    return null;
+  }
+  if (sessionId && state.session_id && state.session_id !== sessionId) {
+    return null;
+  }
+  if (cancelInProgress) {
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "none"
+    };
+  }
+  const breakerCount = readStopBreaker(workingDir, "ralplan", sessionId, RALPLAN_STOP_BLOCKER_TTL_MS) + 1;
+  if (breakerCount > RALPLAN_STOP_BLOCKER_MAX) {
+    writeStopBreaker(workingDir, "ralplan", 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[RALPLAN CIRCUIT BREAKER] Stop enforcement exceeded ${RALPLAN_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
+      mode: "none"
+    };
+  }
+  writeStopBreaker(workingDir, "ralplan", breakerCount, sessionId);
+  return {
+    shouldBlock: true,
+    message: `<ralplan-continuation>
+
+[RALPLAN - CONSENSUS PLANNING | REINFORCEMENT ${breakerCount}/${RALPLAN_STOP_BLOCKER_MAX}]
+
+The ralplan consensus workflow is active. Continue the Planner/Architect/Critic loop.
+Do not stop until consensus is reached or the workflow completes.
+When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
+
+</ralplan-continuation>
+
+---
+
+`,
+    mode: "ralplan"
+  };
+}
 async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readUltraworkState(workingDir, sessionId);
@@ -14176,6 +14337,14 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
       };
     }
   }
+  const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
+  if (teamResult) {
+    return teamResult;
+  }
+  const ralplanResult = await checkRalplan(sessionId, workingDir, cancelInProgress);
+  if (ralplanResult) {
+    return ralplanResult;
+  }
   const ultraworkResult = await checkUltrawork(sessionId, workingDir, hasIncompleteTodos, cancelInProgress);
   if (ultraworkResult?.shouldBlock) {
     return ultraworkResult;
@@ -14208,7 +14377,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_fs45, import_path49, import_os9, CANCEL_SIGNAL_TTL_MS2, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES;
+var import_fs45, import_path49, import_os9, CANCEL_SIGNAL_TTL_MS2, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -14219,6 +14388,7 @@ var init_persistent_mode = __esm({
     init_paths();
     init_ultrawork();
     init_worktree_paths();
+    init_mode_state_io();
     init_ralph();
     init_todo_continuation();
     init_hooks();
@@ -14228,6 +14398,10 @@ var init_persistent_mode = __esm({
     CANCEL_SIGNAL_TTL_MS2 = 3e4;
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
+    TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
+    TEAM_PIPELINE_STOP_BLOCKER_TTL_MS = 5 * 60 * 1e3;
+    RALPLAN_STOP_BLOCKER_MAX = 30;
+    RALPLAN_STOP_BLOCKER_TTL_MS = 45 * 60 * 1e3;
   }
 });
 
@@ -15105,7 +15279,7 @@ function formatSessionIdle(payload) {
   lines.push(buildFooter(payload, true));
   return lines.join("\n");
 }
-function parseTmuxTail(raw) {
+function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
   const meaningful = [];
   for (const line of raw.split("\n")) {
     const stripped = line.replace(ANSI_ESCAPE_RE, "");
@@ -15121,11 +15295,11 @@ function parseTmuxTail(raw) {
     if (trimmed.length >= 8 && alnumCount / trimmed.length < MIN_ALNUM_RATIO) continue;
     meaningful.push(stripped.trimEnd());
   }
-  return meaningful.slice(-MAX_TAIL_LINES).join("\n");
+  return meaningful.slice(-maxLines).join("\n");
 }
 function appendTmuxTail(lines, payload) {
   if (payload.tmuxTail) {
-    const parsed = parseTmuxTail(payload.tmuxTail);
+    const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
     if (parsed) {
       lines.push("");
       lines.push("**Recent output:**");
@@ -15176,7 +15350,7 @@ function formatNotification(payload) {
       return payload.message || `Event: ${payload.event}`;
   }
 }
-var import_path52, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, MAX_TAIL_LINES;
+var import_path52, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, DEFAULT_MAX_TAIL_LINES;
 var init_formatter = __esm({
   "src/notifications/formatter.ts"() {
     "use strict";
@@ -15189,7 +15363,7 @@ var init_formatter = __esm({
     BYPASS_PERM_RE = /^⏵/;
     BARE_PROMPT_RE = /^[❯>$%#]+$/;
     MIN_ALNUM_RATIO = 0.15;
-    MAX_TAIL_LINES = 10;
+    DEFAULT_MAX_TAIL_LINES = 15;
   }
 });
 
@@ -15222,7 +15396,7 @@ function buildFooterText(payload) {
 }
 function buildTmuxTailBlock(payload) {
   if (!payload.tmuxTail) return "";
-  const parsed = parseTmuxTail(payload.tmuxTail);
+  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
   if (!parsed) return "";
   return `
 
@@ -16755,15 +16929,13 @@ function sanitizeForTmux(text) {
   return text.replace(/'/g, "'\\''");
 }
 function isTmuxAvailable() {
-  if (process.platform === "win32") {
-    return false;
-  }
   try {
-    const result = (0, import_child_process16.spawnSync)("which", ["tmux"], {
+    const result = (0, import_child_process16.spawnSync)("tmux", ["-V"], {
       encoding: "utf-8",
-      timeout: 2e3
+      timeout: 3e3,
+      stdio: "pipe"
     });
-    return result.status === 0 && result.stdout.trim().length > 0;
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -16777,7 +16949,7 @@ function listTmuxPanes() {
   }
   try {
     const format = "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}";
-    const result = (0, import_child_process16.execSync)(`tmux list-panes -a -F '${format}'`, {
+    const result = (0, import_child_process16.execSync)(`tmux list-panes -a -F "${format}"`, {
       encoding: "utf-8",
       timeout: 5e3
     });
@@ -16815,7 +16987,7 @@ function capturePaneContent(paneId, lines = 15) {
   }
   const safeLines = Math.max(1, Math.min(100, Math.floor(lines)));
   try {
-    const result = (0, import_child_process16.execSync)(`tmux capture-pane -t '${paneId}' -p -S -${safeLines}`, {
+    const result = (0, import_child_process16.execSync)(`tmux capture-pane -t "${paneId}" -p -S -${safeLines}`, {
       encoding: "utf-8",
       timeout: 5e3
     });
@@ -17382,9 +17554,11 @@ async function notify(event, data) {
     if (shouldIncludeTmuxTail(verbosity) && payload.tmuxPaneId && (event === "session-idle" || event === "session-end" || event === "session-stop")) {
       try {
         const { capturePaneContent: capturePaneContent2 } = await Promise.resolve().then(() => (init_tmux_detector(), tmux_detector_exports));
-        const tail = capturePaneContent2(payload.tmuxPaneId, getTmuxTailLines(config2));
+        const tailLines = getTmuxTailLines(config2);
+        const tail = capturePaneContent2(payload.tmuxPaneId, tailLines);
         if (tail) {
           payload.tmuxTail = tail;
+          payload.maxTailLines = tailLines;
         }
       } catch {
       }
@@ -21708,7 +21882,7 @@ function validateTmux() {
     (0, import_child_process24.execSync)("tmux -V", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
   } catch {
     throw new Error(
-      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux"
+      "tmux is not available. Install it:\n  macOS: brew install tmux\n  Ubuntu/Debian: sudo apt-get install tmux\n  Fedora: sudo dnf install tmux\n  Arch: sudo pacman -S tmux\n  Windows: winget install psmux"
     );
   }
 }
@@ -24971,7 +25145,7 @@ function isCacheValid2(cache) {
 function spawnWithTimeout(cmd, timeoutMs) {
   return new Promise((resolve11, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
-    const child = (0, import_child_process31.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = (0, import_child_process32.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -25059,11 +25233,11 @@ async function executeCustomProvider(config2) {
     return { buckets: [], stale: false, error: "command failed" };
   }
 }
-var import_child_process31, import_fs88, import_path103, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
+var import_child_process32, import_fs88, import_path103, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
 var init_custom_rate_provider = __esm({
   "src/hud/custom-rate-provider.ts"() {
     "use strict";
-    import_child_process31 = require("child_process");
+    import_child_process32 = require("child_process");
     import_fs88 = require("fs");
     import_path103 = require("path");
     init_paths();
@@ -60185,6 +60359,9 @@ async function processPersistentMode(input) {
   };
   const result = await checkPersistentModes2(sessionId, directory, stopContext);
   const output = createHookOutput2(result);
+  if (result.mode !== "none" || Boolean(output.message)) {
+    return output;
+  }
   const teamState = readTeamStagedState(directory, sessionId);
   if (!teamState || teamState.active !== true || isTeamStateTerminal(teamState)) {
     writeTeamStopBreakerCount(directory, sessionId, 0);
@@ -66198,12 +66375,21 @@ ${parsed.prompt}`;
 }
 
 // src/cli/win32-warning.ts
+var import_child_process31 = require("child_process");
+function hasTmuxBinary() {
+  try {
+    const result = (0, import_child_process31.spawnSync)("tmux", ["-V"], { stdio: "pipe", timeout: 3e3 });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
 function warnIfWin32() {
-  if (process.platform === "win32") {
-    console.warn(source_default.yellow.bold("\n\u26A0  WARNING: Native Windows (win32) detected"));
-    console.warn(source_default.yellow("   OMC requires tmux, which is not available on native Windows."));
-    console.warn(source_default.yellow("   Native Windows support is experimental and may have limited functionality."));
-    console.warn(source_default.yellow("   WSL2 is strongly recommended: https://learn.microsoft.com/en-us/windows/wsl/install"));
+  if (process.platform === "win32" && !hasTmuxBinary()) {
+    console.warn(source_default.yellow.bold("\n\u26A0  WARNING: Native Windows (win32) detected \u2014 no tmux found"));
+    console.warn(source_default.yellow("   OMC features that require tmux will not work."));
+    console.warn(source_default.yellow("   Install psmux for native Windows tmux support: winget install psmux"));
+    console.warn(source_default.yellow("   Or use WSL2: https://learn.microsoft.com/en-us/windows/wsl/install"));
     console.warn("");
   }
 }
