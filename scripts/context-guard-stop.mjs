@@ -192,6 +192,14 @@ function incrementBlockCount(sessionId) {
   } catch { /* ignore */ }
 }
 
+function buildStopRecoveryAdvice(contextPercent, blockCount) {
+  const severity = contextPercent >= 90 ? 'CRITICAL' : 'HIGH';
+  return `[OMC ${severity}] Context at ${contextPercent}% (threshold: ${THRESHOLD}%). ` +
+    `Run /compact immediately before continuing. If /compact cannot complete, ` +
+    `stop spawning new agents and recover in a fresh session using existing checkpoints ` +
+    `(.omc/state, .omc/notepad.md). (Block ${blockCount}/${MAX_BLOCKS})`;
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -227,9 +235,7 @@ async function main() {
 
       console.log(JSON.stringify({
         decision: 'block',
-        reason: `[OMC] Context at ${pct}% (threshold: ${THRESHOLD}%). ` +
-          `Quality degrades at high context. Run /compact or start a fresh session. ` +
-          `(Block ${blockCount + 1}/${MAX_BLOCKS})`
+        reason: buildStopRecoveryAdvice(pct, blockCount + 1)
       }));
       return;
     }

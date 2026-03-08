@@ -6,7 +6,6 @@
  *
  * Ported from oh-my-opencode's keyword-detector hook.
  */
-import { isTeamEnabled } from '../../features/auto-update.js';
 import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
 /**
  * Keyword patterns for each mode
@@ -16,7 +15,9 @@ const KEYWORD_PATTERNS = {
     ralph: /\b(ralph)\b(?!-)/i,
     autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b/i,
     ultrawork: /\b(ultrawork|ulw)\b/i,
-    team: /(?<!\b(?:my|the|our|a|his|her|their|its)\s)\bteam\b|\bcoordinated\s+team\b/i,
+    // Team keyword detection disabled — team mode is now explicit-only via /team skill.
+    // This prevents infinite spawning when Claude workers receive prompts containing "team".
+    team: /(?!x)x/, // never-match placeholder (type system requires the key)
     ralplan: /\b(ralplan)\b/i,
     tdd: /\b(tdd)\b|\btest\s+first\b/i,
     ultrathink: /\b(ultrathink)\b/i,
@@ -89,8 +90,8 @@ export function detectKeywordsWithType(text, _agentName) {
     const cleanedText = sanitizeForKeywordDetection(text);
     // Check each keyword type
     for (const type of KEYWORD_PRIORITY) {
-        // Skip team when team feature is disabled
-        if (type === 'team' && !isTeamEnabled()) {
+        // Team keyword detection disabled — team mode is now explicit-only via /team skill
+        if (type === 'team') {
             continue;
         }
         const pattern = KEYWORD_PATTERNS[type];

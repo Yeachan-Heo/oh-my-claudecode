@@ -8,7 +8,7 @@
  */
 
 import { readFileSync } from 'fs';
-import { join, dirname, resolve, relative, isAbsolute } from 'path';
+import { join, dirname, basename, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 
 import type {
@@ -32,23 +32,34 @@ declare const __AGENT_PROMPTS__: Record<string, string> | undefined;
 /**
  * Get the package root directory (where agents/ folder lives).
  * Handles both ESM (import.meta.url) and CJS bundle (__dirname) contexts.
- * When esbuild bundles to CJS, import.meta is replaced with {} so we
- * fall back to __dirname which is natively available in CJS.
+ * In CJS bundles, __dirname is always reliable and should take precedence.
+ * This avoids path skew when import.meta.url is shimmed during bundling.
  */
 function getPackageDir(): string {
-  // ESM path (works in dev via ts/dist) - preferred for reliability
+  // __dirname is available in bundled CJS and in some test transpilation contexts.
+  if (typeof __dirname !== 'undefined' && __dirname) {
+    const currentDirName = basename(__dirname);
+    const parentDirName = basename(dirname(__dirname));
+
+    // Bundled CLI path: bridge/cli.cjs -> package root is one level up.
+    if (currentDirName === 'bridge') {
+      return join(__dirname, '..');
+    }
+
+    // Source/dist module path (src/agents or dist/agents) -> package root is two levels up.
+    if (currentDirName === 'agents' && (parentDirName === 'src' || parentDirName === 'dist')) {
+      return join(__dirname, '..', '..');
+    }
+  }
+
+  // ESM path (works in dev via ts/dist)
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     // From src/agents/ or dist/agents/ go up to package root
     return join(__dirname, '..', '..');
   } catch {
-    // import.meta.url unavailable — fall back to CJS path
-  }
-
-  // CJS bundle path (bridge/cli.cjs): from bridge/ go up 1 level to package root
-  if (typeof __dirname !== 'undefined' && __dirname) {
-    return join(__dirname, '..');
+    // import.meta.url unavailable — last resort
   }
 
   // Last resort

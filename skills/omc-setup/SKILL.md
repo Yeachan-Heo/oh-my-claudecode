@@ -7,6 +7,8 @@ description: Setup and configure oh-my-claudecode (the ONLY command you need to 
 
 This is the **only command you need to learn**. After running this, everything else is automatic.
 
+**When this skill is invoked, immediately execute the workflow below. Do not only restate or summarize these instructions back to the user.**
+
 Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set.
 
 ## Pre-Setup Check: Already Configured?
@@ -203,7 +205,13 @@ mkdir -p .claude && echo ".claude directory ready"
 TARGET_PATH=".claude/CLAUDE.md"
 
 # Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+OLD_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION="none"
+fi
 
 # Backup existing
 if [ -f "$TARGET_PATH" ]; then
@@ -274,7 +282,13 @@ else
 fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION="unknown"
+fi
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -343,7 +357,13 @@ Do not continue to HUD setup or other steps.
 TARGET_PATH="$HOME/.claude/CLAUDE.md"
 
 # Extract old version before download
-OLD_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+OLD_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OLD_VERSION" ]; then
+  OLD_VERSION="none"
+fi
 
 # Backup existing
 if [ -f "$TARGET_PATH" ]; then
@@ -414,7 +434,13 @@ else
 fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 "^# oh-my-claudecode" "$TARGET_PATH" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$NEW_VERSION" ]; then
+  NEW_VERSION="unknown"
+fi
 if [ "$OLD_VERSION" = "none" ]; then
   echo "Installed CLAUDE.md: $NEW_VERSION"
 elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
@@ -589,7 +615,7 @@ echo "Default execution mode set to: USER_CHOICE"
 
 ## Step 3.8: Install OMC CLI Tool
 
-The OMC CLI (`omc` command) provides standalone token analytics and management commands (`omc stats`, `omc agents`, `omc tui`).
+The OMC CLI (`omc` command) provides standalone monitoring and analytics commands (HUD statusline + cost/session reporting).
 
 First, check if the CLI is already installed:
 
@@ -608,7 +634,7 @@ If `OMC_CLI_INSTALLED` is `"true"`, skip the rest of this step.
 
 If `OMC_CLI_INSTALLED` is `"false"`, use the AskUserQuestion tool to prompt the user:
 
-**Question:** "Would you like to install the OMC CLI globally for standalone analytics? (`omc stats`, `omc agents`, `omc tui`)"
+**Question:** "Would you like to install the OMC CLI globally for standalone monitoring and analytics? (`omc`, `omc cost`, `omc sessions`)"
 
 **Options:**
 1. **Yes (Recommended)** - Install `oh-my-claude-sisyphus` via `npm install -g`
@@ -971,10 +997,10 @@ HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
 CLI ANALYTICS (if installed):
-- omc           - Full dashboard (stats + agents + cost)
-- omc stats     - View token usage and costs
-- omc agents    - See agent breakdown by cost
-- omc tui       - Launch interactive TUI dashboard
+- omc           - Default analytics dashboard
+- omc cost      - View cost reports (daily/weekly/monthly)
+- omc sessions  - Inspect session history
+- omc backfill  - Import transcript analytics
 
 That's it! Just use Claude Code normally.
 ```
@@ -1012,10 +1038,10 @@ HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
 
 CLI ANALYTICS (if installed):
-- omc           - Full dashboard (stats + agents + cost)
-- omc stats     - View token usage and costs
-- omc agents    - See agent breakdown by cost
-- omc tui       - Launch interactive TUI dashboard
+- omc           - Default analytics dashboard
+- omc cost      - View cost reports (daily/weekly/monthly)
+- omc sessions  - Inspect session history
+- omc backfill  - Import transcript analytics
 
 Your workflow won't break - it just got easier!
 ```
@@ -1083,9 +1109,15 @@ mkdir -p "$(dirname "$CONFIG_FILE")"
 # Get current OMC version from CLAUDE.md
 OMC_VERSION=""
 if [ -f ".claude/CLAUDE.md" ]; then
-  OMC_VERSION=$(grep -m1 "^# oh-my-claudecode" .claude/CLAUDE.md 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+  OMC_VERSION=$(grep -m1 'OMC:VERSION:' .claude/CLAUDE.md 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
 elif [ -f "$HOME/.claude/CLAUDE.md" ]; then
-  OMC_VERSION=$(grep -m1 "^# oh-my-claudecode" "$HOME/.claude/CLAUDE.md" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+  OMC_VERSION=$(grep -m1 'OMC:VERSION:' "$HOME/.claude/CLAUDE.md" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+fi
+if [ -z "$OMC_VERSION" ]; then
+  OMC_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+fi
+if [ -z "$OMC_VERSION" ]; then
+  OMC_VERSION="unknown"
 fi
 
 if [ -f "$CONFIG_FILE" ]; then

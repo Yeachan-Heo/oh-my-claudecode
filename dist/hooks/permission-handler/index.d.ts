@@ -23,6 +23,14 @@ export interface HookOutput {
         };
     };
 }
+export declare function getClaudePermissionAllowEntries(directory: string): string[];
+export declare function hasClaudePermissionApproval(directory: string, toolName: 'Edit' | 'Write' | 'Bash', command?: string): boolean;
+export interface BackgroundPermissionFallbackResult {
+    shouldFallback: boolean;
+    missingTools: string[];
+}
+export declare function getBackgroundTaskPermissionFallback(directory: string, subagentType?: string): BackgroundPermissionFallbackResult;
+export declare function getBackgroundBashPermissionFallback(directory: string, command?: string): BackgroundPermissionFallbackResult;
 /**
  * Check if a command matches safe patterns
  */

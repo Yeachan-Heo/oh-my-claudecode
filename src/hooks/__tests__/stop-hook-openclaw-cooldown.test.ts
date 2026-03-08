@@ -15,6 +15,7 @@ vi.mock("../persistent-mode/index.js", () => ({
 
 vi.mock("../todo-continuation/index.js", () => ({
   isExplicitCancelCommand: vi.fn().mockReturnValue(false),
+  isAuthenticationError: vi.fn().mockReturnValue(false),
 }));
 
 import { _openclaw, processHook, resetSkipHooksCache, type HookInput } from "../bridge.js";
@@ -50,11 +51,12 @@ describe("stop hook OpenClaw cooldown bypass (issue #1120)", () => {
     await processHook("persistent-mode", input);
 
     // OpenClaw stop should fire regardless of notification cooldown
-    const stopCall = wakeSpy.mock.calls.find((call) => call[0] === "stop");
-    expect(stopCall).toBeDefined();
-    expect(stopCall![1]).toMatchObject({
-      sessionId: "test-session-123",
-    });
+    expect(wakeSpy).toHaveBeenCalledWith(
+      "stop",
+      expect.objectContaining({
+        sessionId: "test-session-123",
+      }),
+    );
 
     wakeSpy.mockRestore();
   });

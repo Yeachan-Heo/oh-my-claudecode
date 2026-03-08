@@ -63,6 +63,27 @@ const FILE_MODIFY_PATTERNS = [
 
 // Source file pattern for command inspection
 const SOURCE_EXT_PATTERN = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyw|go|rs|java|kt|scala|c|cpp|cc|h|hpp|rb|php|svelte|vue|graphql|gql|sh|bash|zsh)/i;
+const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+const WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
+const WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
+
+function teamWorkerIdentity() {
+  return (process.env.OMC_TEAM_WORKER || process.env.OMX_TEAM_WORKER || '').trim();
+}
+
+function workerCommandViolation(command) {
+  if (!command) return null;
+  if (WORKER_BLOCKED_TMUX_PATTERN.test(command)) {
+    return 'Team worker cannot run tmux pane/session orchestration commands.';
+  }
+  if (WORKER_BLOCKED_TEAM_CLI_PATTERN.test(command)) {
+    return 'Team worker cannot run team orchestration commands (except `omc team api ...`).';
+  }
+  if (WORKER_BLOCKED_SKILL_PATTERN.test(command)) {
+    return 'Team worker cannot invoke orchestration skills (`$team`, `$ultrawork`, `$autopilot`, `$ralph`).';
+  }
+  return null;
+}
 
 function checkBashCommand(command) {
   // Check if command might modify files
@@ -94,11 +115,43 @@ async function main() {
 
   // Extract tool name (handle both cases)
   const toolName = data.tool_name || data.toolName || '';
+  const worker = teamWorkerIdentity();
+
+  if (worker) {
+    if (toolName === 'Task' || toolName === 'task') {
+      console.log(JSON.stringify({
+        continue: false,
+        reason: 'team-worker-task-blocked',
+        message: `Worker ${worker} cannot spawn/delegate Task calls in worker mode.`
+      }));
+      return;
+    }
+
+    if (toolName === 'Skill' || toolName === 'skill') {
+      console.log(JSON.stringify({
+        continue: false,
+        reason: 'team-worker-skill-blocked',
+        message: `Worker ${worker} cannot invoke Skill tool in worker mode.`
+      }));
+      return;
+    }
+  }
 
   // Handle Bash tool separately - check for file modification patterns
   if (toolName === 'Bash' || toolName === 'bash') {
     const toolInput = data.tool_input || data.toolInput || {};
     const command = toolInput.command || '';
+    if (worker) {
+      const violation = workerCommandViolation(command);
+      if (violation) {
+        console.log(JSON.stringify({
+          continue: false,
+          reason: 'team-worker-bash-blocked',
+          message: `${violation}\nCommand blocked: ${command}`
+        }));
+        return;
+      }
+    }
     const warning = checkBashCommand(command);
     if (warning) {
       console.log(JSON.stringify({

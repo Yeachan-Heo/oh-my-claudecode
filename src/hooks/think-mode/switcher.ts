@@ -8,6 +8,11 @@
  */
 
 import type { ThinkingConfig } from './types.js';
+import {
+  CLAUDE_FAMILY_DEFAULTS,
+  CLAUDE_FAMILY_HIGH_VARIANTS,
+  getClaudeHighVariantFromModel,
+} from '../../config/models.js';
 
 /**
  * Extract provider prefix from model ID.
@@ -34,14 +39,13 @@ function normalizeModelId(modelId: string): string {
 
 /**
  * Map of model IDs to their high-reasoning variants.
+ * Claude variants come from centralized family defaults.
  */
 const HIGH_VARIANT_MAP: Record<string, string> = {
-  // Claude
-  'claude-sonnet-4-5': 'claude-sonnet-4-5-high',
-  'claude-sonnet-4-6': 'claude-sonnet-4-6-high',
-  'claude-opus-4-6': 'claude-opus-4-6-high',
-  'claude-3-5-sonnet': 'claude-3-5-sonnet-high',
-  'claude-3-opus': 'claude-3-opus-high',
+  // Claude canonical families
+  [CLAUDE_FAMILY_DEFAULTS.SONNET]: CLAUDE_FAMILY_HIGH_VARIANTS.SONNET,
+  [CLAUDE_FAMILY_DEFAULTS.OPUS]: CLAUDE_FAMILY_HIGH_VARIANTS.OPUS,
+  [CLAUDE_FAMILY_DEFAULTS.HAIKU]: CLAUDE_FAMILY_HIGH_VARIANTS.HAIKU,
   // GPT-4
   'gpt-4': 'gpt-4-high',
   'gpt-4-turbo': 'gpt-4-turbo-high',
@@ -94,7 +98,7 @@ export const THINKING_CONFIGS: Record<string, ThinkingConfig> = {
  * Models capable of thinking mode by provider.
  */
 const THINKING_CAPABLE_MODELS: Record<string, readonly string[]> = {
-  anthropic: ['claude-sonnet-4', 'claude-opus-4', 'claude-3'],
+  anthropic: ['claude'],
   'amazon-bedrock': ['claude', 'anthropic'],
   google: ['gemini-2', 'gemini-3'],
   openai: ['gpt-4', 'gpt-5', 'o1', 'o3'],
@@ -113,11 +117,13 @@ export function getHighVariant(modelId: string): string | null {
     return null;
   }
 
-  // Look up high variant
+  // Resolve Claude families to canonical high variants.
+  const claudeHighBase = getClaudeHighVariantFromModel(base);
+  if (claudeHighBase) return prefix + claudeHighBase;
+
+  // Look up exact high variant for non-Claude models
   const highBase = HIGH_VARIANT_MAP[base];
-  if (!highBase) {
-    return null;
-  }
+  if (!highBase) return null;
 
   // Preserve prefix in the high variant
   return prefix + highBase;

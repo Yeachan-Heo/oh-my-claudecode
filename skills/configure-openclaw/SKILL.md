@@ -1,5 +1,68 @@
 ---
 name: configure-openclaw
+description: DEPRECATED - Use configure-notifications with Custom Integration instead
+triggers:
+  - "configure openclaw"
+  - "setup openclaw"
+  - "openclaw gateway"
+  - "openclaw setup"
+---
+
+# Configure OpenClaw (DEPRECATED)
+
+> **DEPRECATED**: This skill is deprecated and will be removed in a future version.
+> Please use `/oh-my-claudecode:configure-notifications` and select "Custom Integration (OpenClaw, n8n, CLI, etc.)" instead.
+> 
+> The new approach provides:
+> - Same OpenClaw functionality
+> - Additional presets (n8n, ClawdBot)
+> - Generic webhook and CLI support
+> - Migration tool for existing configs
+
+---
+
+## Migration Notice
+
+When this skill is invoked, show the deprecation warning and redirect:
+
+**Message to display:**
+```
+⚠️  DEPRECATION NOTICE
+
+The /configure-openclaw skill is deprecated and will be removed in a future version.
+
+Please use instead:
+  /oh-my-claudecode:configure-notifications
+
+Then select: "Custom Integration (OpenClaw, n8n, CLI, etc.)" → "OpenClaw Gateway"
+
+The new wizard will:
+1. Detect your existing OpenClaw config (if any)
+2. Offer to migrate it automatically
+3. Provide the same functionality with better UX
+```
+
+**AskUserQuestion:**
+
+**Question:** "The configure-openclaw skill is deprecated. How would you like to proceed?"
+
+**Options:**
+1. **Open the new configure-notifications wizard (Recommended)** - Redirect to the new skill
+2. **Continue with legacy setup** - Use this deprecated skill anyway
+3. **Learn more about the migration** - Show detailed migration information
+
+If option 1: Redirect to `/oh-my-claudecode:configure-notifications`
+If option 2: Continue with legacy instructions below
+If option 3: Show detailed migration guide
+
+---
+
+## Legacy Instructions
+
+The following instructions are kept for backward compatibility but will be removed.
+
+---
+name: configure-openclaw
 description: Configure OpenClaw gateway integration for waking external automations and AI agents on hook events
 triggers:
   - "configure openclaw"

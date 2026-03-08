@@ -154,12 +154,18 @@ function killSession(teamName, workerName) {
 
 // src/team/state-paths.ts
 var import_path4 = require("path");
+function normalizeTaskFileStem(taskId) {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, "");
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
 var TeamPaths = {
   root: (teamName) => `.omc/state/team/${teamName}`,
   config: (teamName) => `.omc/state/team/${teamName}/config.json`,
   shutdown: (teamName) => `.omc/state/team/${teamName}/shutdown.json`,
   tasks: (teamName) => `.omc/state/team/${teamName}/tasks`,
-  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+  taskFile: (teamName, taskId) => `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
   workers: (teamName) => `.omc/state/team/${teamName}/workers`,
   workerDir: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}`,
   heartbeat: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/heartbeat.json`,
@@ -168,8 +174,23 @@ var TeamPaths = {
   ready: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/.ready`,
   overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
   shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
-  done: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/done.json`,
-  mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.jsonl`
+  mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
+  mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
+  dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
+  dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
+  workerStatus: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/status.json`,
+  workerIdleNotify: (teamName) => `.omc/state/team/${teamName}/worker-idle-notify.json`,
+  workerPrevNotifyState: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/prev-notify-state.json`,
+  events: (teamName) => `.omc/state/team/${teamName}/events.jsonl`,
+  approval: (teamName, taskId) => `.omc/state/team/${teamName}/approvals/${taskId}.json`,
+  manifest: (teamName) => `.omc/state/team/${teamName}/manifest.json`,
+  monitorSnapshot: (teamName) => `.omc/state/team/${teamName}/monitor-snapshot.json`,
+  summarySnapshot: (teamName) => `.omc/state/team/${teamName}/summary-snapshot.json`,
+  phaseState: (teamName) => `.omc/state/team/${teamName}/phase-state.json`,
+  scalingLock: (teamName) => `.omc/state/team/${teamName}/.scaling-lock`,
+  workerIdentity: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/identity.json`,
+  workerAgentsMd: (teamName) => `.omc/state/team/${teamName}/worker-agents.md`,
+  shutdownRequest: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-request.json`
 };
 function getTaskStoragePath(cwd, teamName, taskId) {
   if (taskId !== void 0) {
@@ -830,6 +851,30 @@ function findPermissionViolations(changedPaths, permissions, cwd) {
   return violations;
 }
 
+// src/config/models.ts
+var CLAUDE_FAMILY_DEFAULTS = {
+  HAIKU: "claude-haiku-4-5",
+  SONNET: "claude-sonnet-4-6",
+  OPUS: "claude-opus-4-6"
+};
+var BUILTIN_TIER_MODEL_DEFAULTS = {
+  LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
+  MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
+  HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS
+};
+var CLAUDE_FAMILY_HIGH_VARIANTS = {
+  HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
+  SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
+  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
+};
+var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
+  codexModel: "gpt-5.3-codex",
+  geminiModel: "gemini-3.1-pro-preview"
+};
+function getBuiltinExternalDefaultModel(provider) {
+  return provider === "codex" ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+}
+
 // src/team/team-status.ts
 var import_fs7 = require("fs");
 var import_path9 = require("path");
@@ -1306,14 +1351,14 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
     args = [
       "exec",
       "-m",
-      model || "gpt-5.3-codex",
+      model || getBuiltinExternalDefaultModel("codex"),
       "--json",
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check"
     ];
   } else {
     cmd = "gemini";
-    args = ["--yolo"];
+    args = ["--approval-mode", "yolo"];
     if (model) args.push("--model", model);
   }
   const child = (0, import_child_process2.spawn)(cmd, args, {

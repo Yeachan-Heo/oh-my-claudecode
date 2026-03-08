@@ -37,4 +37,12 @@ export { LayoutStabilizer } from './layout-stabilizer.js';
 export { inferPhase, getPhaseTransitionLog, isTerminalPhase } from './phase-controller.js';
 export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
 export { injectToLeaderPane } from './tmux-session.js';
+// api-interop (CLI API for workers)
+export { TEAM_API_OPERATIONS, LEGACY_TEAM_MCP_TOOLS, resolveTeamApiOperation, executeTeamApiOperation, buildLegacyTeamDeprecationHint, } from './api-interop.js';
+// scaling (dynamic worker scaling)
+export { isScalingEnabled, scaleUp, scaleDown, } from './scaling.js';
+// team-leader-nudge-hook
+export { checkLeaderStaleness, maybeNudgeLeader } from '../hooks/team-leader-nudge-hook.js';
+// contracts
+export { TEAM_NAME_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN, TASK_ID_SAFE_PATTERN, TEAM_TASK_STATUSES, TEAM_TERMINAL_TASK_STATUSES, TEAM_TASK_STATUS_TRANSITIONS, TEAM_EVENT_TYPES, TEAM_TASK_APPROVAL_STATUSES, isTerminalTeamTaskStatus, canTransitionTeamTaskStatus, } from './contracts.js';
 //# sourceMappingURL=index.js.map

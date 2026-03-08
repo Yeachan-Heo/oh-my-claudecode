@@ -1,5 +1,38 @@
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 
+export type ModelTier = 'LOW' | 'MEDIUM' | 'HIGH';
+export type ClaudeModelFamily = 'HAIKU' | 'SONNET' | 'OPUS';
+
+/**
+ * Canonical Claude family defaults.
+ * Keep these date-less so version bumps are a one-line edit per family.
+ */
+export const CLAUDE_FAMILY_DEFAULTS: Record<ClaudeModelFamily, string> = {
+  HAIKU: 'claude-haiku-4-5',
+  SONNET: 'claude-sonnet-4-6',
+  OPUS: 'claude-opus-4-6',
+};
+
+/** Canonical tier->model mapping used as built-in defaults */
+export const BUILTIN_TIER_MODEL_DEFAULTS: Record<ModelTier, string> = {
+  LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
+  MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
+  HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS,
+};
+
+/** Canonical Claude high-reasoning variants by family */
+export const CLAUDE_FAMILY_HIGH_VARIANTS: Record<ClaudeModelFamily, string> = {
+  HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
+  SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
+  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`,
+};
+
+/** Built-in defaults for external provider models */
+export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
+  codexModel: 'gpt-5.3-codex',
+  geminiModel: 'gemini-3.1-pro-preview',
+} as const;
+
 /**
  * Centralized Model ID Constants
  *
@@ -15,11 +48,6 @@ import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
  * via `routing.tierModels` or per-agent `agents.<name>.model`.
  */
 
-/** Built-in fallback model IDs (used when no env var or config override is set) */
-const BUILTIN_MODEL_HIGH = 'claude-opus-4-6-20260205';
-const BUILTIN_MODEL_MEDIUM = 'claude-sonnet-4-6-20260217';
-const BUILTIN_MODEL_LOW = 'claude-haiku-4-5-20251001';
-
 /**
  * Resolve the default model ID for a tier.
  *
@@ -31,22 +59,22 @@ const BUILTIN_MODEL_LOW = 'claude-haiku-4-5-20251001';
  * via deepMerge, so they take precedence over these defaults.
  */
 export function getDefaultModelHigh(): string {
-  return process.env.OMC_MODEL_HIGH || BUILTIN_MODEL_HIGH;
+  return process.env.OMC_MODEL_HIGH || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
 }
 
 export function getDefaultModelMedium(): string {
-  return process.env.OMC_MODEL_MEDIUM || BUILTIN_MODEL_MEDIUM;
+  return process.env.OMC_MODEL_MEDIUM || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
 }
 
 export function getDefaultModelLow(): string {
-  return process.env.OMC_MODEL_LOW || BUILTIN_MODEL_LOW;
+  return process.env.OMC_MODEL_LOW || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
 }
 
 /**
  * Get all default tier models as a record.
  * Each call reads current env vars, so changes are reflected immediately.
  */
-export function getDefaultTierModels(): Record<'LOW' | 'MEDIUM' | 'HIGH', string> {
+export function getDefaultTierModels(): Record<ModelTier, string> {
   return {
     LOW: getDefaultModelLow(),
     MEDIUM: getDefaultModelMedium(),
@@ -55,12 +83,43 @@ export function getDefaultTierModels(): Record<'LOW' | 'MEDIUM' | 'HIGH', string
 }
 
 /**
+ * Resolve a Claude family from an arbitrary model ID.
+ * Supports Anthropic IDs and provider-prefixed forms (e.g. vertex_ai/...).
+ */
+export function resolveClaudeFamily(modelId: string): ClaudeModelFamily | null {
+  const lower = modelId.toLowerCase();
+  if (!lower.includes('claude')) return null;
+
+  if (lower.includes('sonnet')) return 'SONNET';
+  if (lower.includes('opus')) return 'OPUS';
+  if (lower.includes('haiku')) return 'HAIKU';
+
+  return null;
+}
+
+/**
+ * Resolve a canonical Claude high variant from a Claude model ID.
+ * Returns null for non-Claude model IDs.
+ */
+export function getClaudeHighVariantFromModel(modelId: string): string | null {
+  const family = resolveClaudeFamily(modelId);
+  return family ? CLAUDE_FAMILY_HIGH_VARIANTS[family] : null;
+}
+
+/** Get built-in default model for an external provider */
+export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini'): string {
+  return provider === 'codex'
+    ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel
+    : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+}
+
+/**
  * Detect whether Claude Code is running on AWS Bedrock.
  *
  * Claude Code sets CLAUDE_CODE_USE_BEDROCK=1 when configured for Bedrock.
  * As a fallback, Bedrock model IDs use prefixed formats like:
  *   - us.anthropic.claude-sonnet-4-6-v1:0
- *   - global.anthropic.claude-3-5-sonnet-20241022-v2:0
+ *   - global.anthropic.claude-sonnet-4-6-v1:0
  *   - anthropic.claude-3-haiku-20240307-v1:0
  *
  * On Bedrock, passing bare tier names (sonnet/opus/haiku) to spawned

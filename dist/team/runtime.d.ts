@@ -8,6 +8,10 @@ export interface TeamConfig {
         description: string;
     }>;
     cwd: string;
+    newWindow?: boolean;
+    tmuxSession?: string;
+    leaderPaneId?: string;
+    tmuxOwnsWindow?: boolean;
 }
 export interface ActiveWorkerState {
     paneId: string;
@@ -18,6 +22,7 @@ export interface TeamRuntime {
     teamName: string;
     sessionName: string;
     leaderPaneId: string;
+    ownsWindow?: boolean;
     config: TeamConfig;
     workerNames: string[];
     workerPaneIds: string[];
@@ -87,7 +92,7 @@ export declare function assignTask(teamName: string, taskId: string, targetWorke
 /**
  * Gracefully shut down all workers and clean up.
  */
-export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string): Promise<void>;
+export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string, ownsWindow?: boolean): Promise<void>;
 /**
  * Resume an existing team from persisted state.
  * Reconstructs activeWorkers by scanning task files for in_progress tasks

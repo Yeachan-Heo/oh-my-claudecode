@@ -129,6 +129,9 @@ export interface NotificationConfig {
   /** Verbosity level controlling which events fire and tmux tail inclusion */
   verbosity?: VerbosityLevel;
 
+  /** Number of tmux pane lines to capture for notification tail content */
+  tmuxTailLines?: number;
+
   /** Default platform configs (used when event-specific config is not set) */
   discord?: DiscordNotificationConfig;
   "discord-bot"?: DiscordBotNotificationConfig;
@@ -234,4 +237,65 @@ export interface ReplyConfig {
   includePrefix: boolean;
   /** Authorized Discord user IDs (REQUIRED for Discord, empty = Discord disabled) */
   authorizedDiscordUserIds: string[];
+}
+
+// ============================================================================
+// CUSTOM INTEGRATION TYPES (Added for Notification Refactor)
+// ============================================================================
+
+/** Type of custom integration */
+export type CustomIntegrationType = 'webhook' | 'cli';
+
+/** Configuration for webhook-based custom integrations */
+export interface WebhookIntegrationConfig {
+  /** Webhook URL (must be HTTPS for production) */
+  url: string;
+  /** HTTP method */
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** HTTP headers to include */
+  headers: Record<string, string>;
+  /** Body template with {{variable}} interpolation */
+  bodyTemplate: string;
+  /** Timeout in milliseconds (1000-60000) */
+  timeout: number;
+}
+
+/** Configuration for CLI-based custom integrations */
+export interface CliIntegrationConfig {
+  /** Command to execute (single executable, no spaces) */
+  command: string;
+  /** Arguments array (supports {{variable}} interpolation) */
+  args: string[];
+  /** Timeout in milliseconds (1000-60000) */
+  timeout: number;
+}
+
+/** Custom integration definition */
+export interface CustomIntegration {
+  /** Unique identifier for this integration (alphanumeric with hyphens/underscores) */
+  id: string;
+  /** Integration type: webhook or cli */
+  type: CustomIntegrationType;
+  /** Preset name if created from a preset (openclaw, n8n, etc.) */
+  preset?: string;
+  /** Whether this integration is enabled */
+  enabled: boolean;
+  /** Type-specific configuration */
+  config: WebhookIntegrationConfig | CliIntegrationConfig;
+  /** Events that trigger this integration */
+  events: NotificationEvent[];
+}
+
+/** Custom integrations configuration section */
+export interface CustomIntegrationsConfig {
+  /** Global enable/disable for all custom integrations */
+  enabled: boolean;
+  /** List of custom integrations */
+  integrations: CustomIntegration[];
+}
+
+/** Extended notification config including custom integrations */
+export interface ExtendedNotificationConfig extends NotificationConfig {
+  /** Custom webhook/CLI integrations (new in notification refactor) */
+  customIntegrations?: CustomIntegrationsConfig;
 }

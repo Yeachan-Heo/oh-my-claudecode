@@ -13,8 +13,8 @@
  * ```
  */
 import { pathToFileURL } from 'url';
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN } from "./keyword-detector/index.js";
@@ -29,10 +29,14 @@ import { ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE,
 import { getAgentDashboard, } from "./subagent-tracker/index.js";
 // Session replay recordFileTouch is used in pre-tool-use hot path
 import { recordFileTouch, } from "./subagent-tracker/session-replay.js";
+import { getBackgroundBashPermissionFallback, getBackgroundTaskPermissionFallback, } from "./permission-handler/index.js";
 // Security: wrap untrusted file content to prevent prompt injection
 import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
+const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+const WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
+const WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 const TEAM_TERMINAL_VALUES = new Set([
     "completed",
     "complete",
@@ -44,6 +48,25 @@ const TEAM_TERMINAL_VALUES = new Set([
     "terminated",
     "done",
 ]);
+const TEAM_ACTIVE_STAGES = new Set([
+    "team-plan",
+    "team-prd",
+    "team-exec",
+    "team-verify",
+    "team-fix",
+]);
+const TEAM_STOP_BLOCKER_MAX = 20;
+const TEAM_STOP_BLOCKER_TTL_MS = 5 * 60 * 1000;
+const TEAM_STAGE_ALIASES = {
+    planning: "team-plan",
+    prd: "team-prd",
+    executing: "team-exec",
+    execution: "team-exec",
+    verify: "team-verify",
+    verification: "team-verify",
+    fix: "team-fix",
+    fixing: "team-fix",
+};
 function readTeamStagedState(directory, sessionId) {
     const stateDir = join(getOmcRoot(directory), "state");
     const statePaths = sessionId
@@ -74,7 +97,75 @@ function readTeamStagedState(directory, sessionId) {
     return null;
 }
 function getTeamStage(state) {
-    return state.stage || state.current_stage || state.currentStage || "team-exec";
+    return (state.stage ||
+        state.current_stage ||
+        state.currentStage ||
+        state.current_phase ||
+        state.phase ||
+        "team-exec");
+}
+function getTeamStageForEnforcement(state) {
+    const rawStage = state.stage ?? state.current_stage ?? state.currentStage ?? state.current_phase ?? state.phase;
+    if (typeof rawStage !== "string") {
+        return null;
+    }
+    const stage = rawStage.trim().toLowerCase();
+    if (!stage) {
+        return null;
+    }
+    if (TEAM_ACTIVE_STAGES.has(stage)) {
+        return stage;
+    }
+    const alias = TEAM_STAGE_ALIASES[stage];
+    return alias && TEAM_ACTIVE_STAGES.has(alias) ? alias : null;
+}
+function readTeamStopBreakerCount(directory, sessionId) {
+    const stateDir = join(getOmcRoot(directory), "state");
+    const breakerPath = sessionId
+        ? join(stateDir, "sessions", sessionId, "team-stop-breaker.json")
+        : join(stateDir, "team-stop-breaker.json");
+    try {
+        if (!existsSync(breakerPath)) {
+            return 0;
+        }
+        const parsed = JSON.parse(readFileSync(breakerPath, "utf-8"));
+        if (typeof parsed.updated_at === "string") {
+            const updatedAt = new Date(parsed.updated_at).getTime();
+            if (Number.isFinite(updatedAt) && Date.now() - updatedAt > TEAM_STOP_BLOCKER_TTL_MS) {
+                return 0;
+            }
+        }
+        const count = typeof parsed.count === "number" ? parsed.count : Number.NaN;
+        return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
+    }
+    catch {
+        return 0;
+    }
+}
+function writeTeamStopBreakerCount(directory, sessionId, count) {
+    const stateDir = join(getOmcRoot(directory), "state");
+    const breakerPath = sessionId
+        ? join(stateDir, "sessions", sessionId, "team-stop-breaker.json")
+        : join(stateDir, "team-stop-breaker.json");
+    const safeCount = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+    if (safeCount === 0) {
+        try {
+            if (existsSync(breakerPath)) {
+                unlinkSync(breakerPath);
+            }
+        }
+        catch {
+            // no-op
+        }
+        return;
+    }
+    try {
+        mkdirSync(dirname(breakerPath), { recursive: true });
+        writeFileSync(breakerPath, JSON.stringify({ count: safeCount, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+    }
+    catch {
+        // no-op
+    }
 }
 function isTeamStateTerminal(state) {
     if (state.terminal === true || state.cancelled === true || state.canceled === true || state.completed === true) {
@@ -99,6 +190,27 @@ function getTeamStagePrompt(stage) {
         default:
             return "Continue from the current Team stage and preserve staged workflow semantics.";
     }
+}
+function teamWorkerIdentityFromEnv(env = process.env) {
+    const omc = typeof env.OMC_TEAM_WORKER === "string" ? env.OMC_TEAM_WORKER.trim() : "";
+    if (omc)
+        return omc;
+    const omx = typeof env.OMX_TEAM_WORKER === "string" ? env.OMX_TEAM_WORKER.trim() : "";
+    return omx;
+}
+function workerBashBlockReason(command) {
+    if (!command.trim())
+        return null;
+    if (WORKER_BLOCKED_TMUX_PATTERN.test(command)) {
+        return "Team worker cannot run tmux pane/session orchestration commands.";
+    }
+    if (WORKER_BLOCKED_TEAM_CLI_PATTERN.test(command)) {
+        return "Team worker cannot run team orchestration commands. Use only `omc team api ... --json`.";
+    }
+    if (WORKER_BLOCKED_SKILL_PATTERN.test(command)) {
+        return "Team worker cannot invoke orchestration skills (`$team`, `$ultrawork`, `$autopilot`, `$ralph`).";
+    }
+    return null;
 }
 /**
  * Returns the required camelCase keys for a given hook type.
@@ -159,6 +271,11 @@ function getPromptText(input) {
  * Also activates persistent state for modes that require it (ralph, ultrawork)
  */
 async function processKeywordDetector(input) {
+    // Team worker guard: prevent keyword detection inside team workers to avoid
+    // infinite spawning loops (worker detects "team" -> invokes team skill -> spawns more workers)
+    if (process.env.OMC_TEAM_WORKER) {
+        return { continue: true };
+    }
     const promptText = getPromptText(input);
     if (!promptText) {
         return { continue: true };
@@ -292,17 +409,16 @@ async function processKeywordDetector(input) {
             // These are handled by UserPromptSubmit hook for skill invocation
             case "cancel":
             case "autopilot":
-            case "team":
             case "ralplan":
             case "tdd":
                 messages.push(`[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`);
                 break;
             case "codex":
             case "gemini": {
-                messages.push(`[MAGIC KEYWORD: omc-teams]\n` +
-                    `User intent: delegate to ${keywordType} CLI workers via omc-teams.\n` +
+                messages.push(`[MAGIC KEYWORD: team]\n` +
+                    `User intent: delegate to ${keywordType} CLI workers via omc team CLI.\n` +
                     `Agent type: ${keywordType}. Parse N from user message (default 1).\n` +
-                    `Invoke: /omc-teams N:${keywordType} "<task from user message>"`);
+                    `Invoke: omc team start --agent ${keywordType} --count N --task "<task from user message>"`);
                 break;
             }
             default:
@@ -343,7 +459,7 @@ async function processPersistentMode(input) {
     const directory = resolveToWorktreeRoot(input.directory);
     // Lazy-load persistent-mode and todo-continuation modules
     const { checkPersistentModes, createHookOutput, shouldSendIdleNotification, recordIdleNotificationSent } = await import("./persistent-mode/index.js");
-    const { isExplicitCancelCommand } = await import("./todo-continuation/index.js");
+    const { isExplicitCancelCommand, isAuthenticationError } = await import("./todo-continuation/index.js");
     // Extract stop context for abort detection (supports both camelCase and snake_case)
     const stopContext = {
         stop_reason: input.stop_reason,
@@ -362,6 +478,7 @@ async function processPersistentMode(input) {
     const output = createHookOutput(result);
     const teamState = readTeamStagedState(directory, sessionId);
     if (!teamState || teamState.active !== true || isTeamStateTerminal(teamState)) {
+        writeTeamStopBreakerCount(directory, sessionId, 0);
         // No persistent mode and no active team — Claude is truly idle.
         // Send session-idle notification (non-blocking) unless this was a user abort or context limit.
         if (result.mode === "none" && sessionId) {
@@ -390,9 +507,28 @@ async function processPersistentMode(input) {
     }
     // Explicit cancel should suppress team continuation prompts.
     if (isExplicitCancelCommand(stopContext)) {
+        writeTeamStopBreakerCount(directory, sessionId, 0);
         return output;
     }
-    const stage = getTeamStage(teamState);
+    // Auth failures (401/403/expired OAuth) should not inject Team continuation.
+    // Otherwise stop hooks can force a retry loop while credentials are invalid.
+    if (isAuthenticationError(stopContext)) {
+        writeTeamStopBreakerCount(directory, sessionId, 0);
+        return output;
+    }
+    const stage = getTeamStageForEnforcement(teamState);
+    if (!stage) {
+        // Fail-open for missing/corrupt/unknown phase/state values.
+        writeTeamStopBreakerCount(directory, sessionId, 0);
+        return output;
+    }
+    const newBreakerCount = readTeamStopBreakerCount(directory, sessionId) + 1;
+    if (newBreakerCount > TEAM_STOP_BLOCKER_MAX) {
+        // Circuit breaker: never allow infinite stop-hook blocking loops.
+        writeTeamStopBreakerCount(directory, sessionId, 0);
+        return output;
+    }
+    writeTeamStopBreakerCount(directory, sessionId, newBreakerCount);
     const stagePrompt = getTeamStagePrompt(stage);
     const teamName = teamState.team_name || teamState.teamName || "team";
     const currentMessage = output.message ? `${output.message}\n` : "";
@@ -480,7 +616,7 @@ You have an active autopilot session from ${autopilotState.started_at}.
 Original idea: ${autopilotState.originalIdea}
 Current phase: ${autopilotState.phase}
 
-Continue autopilot execution until complete.
+Treat this as prior-session context only. Prioritize the user's newest request, and resume autopilot only if the user explicitly asks to continue it.
 
 </session-restore>
 
@@ -498,7 +634,7 @@ Continue autopilot execution until complete.
 You have an active ultrawork session from ${ultraworkState.started_at}.
 Original task: ${ultraworkState.original_prompt}
 
-Continue working in ultrawork mode until all tasks are complete.
+Treat this as prior-session context only. Prioritize the user's newest request, and resume ultrawork only if the user explicitly asks to continue it.
 
 </session-restore>
 
@@ -533,7 +669,7 @@ You have an active Team staged run for "${teamName}".
 Current stage: ${stage}
 ${getTeamStagePrompt(stage)}
 
-Resume from this stage and continue the staged Team workflow.
+Treat this as prior-session context only. Prioritize the user's newest request, and resume the staged Team workflow only if the user explicitly asks to continue it.
 
 </session-restore>
 
@@ -639,6 +775,35 @@ export const _openclaw = {
  */
 function processPreToolUse(input) {
     const directory = resolveToWorktreeRoot(input.directory);
+    const teamWorkerIdentity = teamWorkerIdentityFromEnv();
+    if (teamWorkerIdentity) {
+        if (input.toolName === "Task") {
+            return {
+                continue: false,
+                reason: "team-worker-task-blocked",
+                message: `Worker ${teamWorkerIdentity} is not allowed to spawn/delegate Task tool calls. Execute directly in worker context.`,
+            };
+        }
+        if (input.toolName === "Skill") {
+            const skillName = getInvokedSkillName(input.toolInput) ?? "unknown";
+            return {
+                continue: false,
+                reason: "team-worker-skill-blocked",
+                message: `Worker ${teamWorkerIdentity} cannot invoke Skill(${skillName}) in team-worker mode.`,
+            };
+        }
+        if (input.toolName === "Bash") {
+            const command = input.toolInput?.command ?? "";
+            const reason = workerBashBlockReason(command);
+            if (reason) {
+                return {
+                    continue: false,
+                    reason: "team-worker-bash-blocked",
+                    message: `${reason}\nCommand blocked: ${command}`,
+                };
+            }
+        }
+    }
     // Check delegation enforcement FIRST
     const enforcementResult = processOrchestratorPreTool({
         toolName: input.toolName || "",
@@ -654,16 +819,54 @@ function processPreToolUse(input) {
             message: enforcementResult.message,
         };
     }
+    const preToolMessages = enforcementResult.message ? [enforcementResult.message] : [];
+    let modifiedToolInput;
     // Force-inherit: strip `model` parameter from Task calls so agents inherit
     // the user's Claude Code model setting instead of OMC per-agent routing (issue #1135)
-    let forceInheritInput;
     if (input.toolName === "Task") {
-        const taskInput = input.toolInput;
-        if (taskInput?.model) {
+        const originalTaskInput = input.toolInput;
+        const nextTaskInput = originalTaskInput ? { ...originalTaskInput } : {};
+        let changed = false;
+        if (nextTaskInput.model) {
             const config = loadConfig();
             if (config.routing?.forceInherit) {
-                const { model: _stripped, ...rest } = taskInput;
-                forceInheritInput = rest;
+                delete nextTaskInput.model;
+                changed = true;
+            }
+        }
+        if (nextTaskInput.run_in_background === true) {
+            const subagentType = typeof nextTaskInput.subagent_type === "string"
+                ? nextTaskInput.subagent_type
+                : undefined;
+            const permissionFallback = getBackgroundTaskPermissionFallback(directory, subagentType);
+            if (permissionFallback.shouldFallback) {
+                const reason = `[BACKGROUND PERMISSIONS] ${subagentType || "This background agent"} may need ${permissionFallback.missingTools.join(", ")} permissions, but background agents cannot request interactive approval. Re-run without \`run_in_background=true\` or pre-approve ${permissionFallback.missingTools.join(", ")} in Claude Code settings.`;
+                return {
+                    continue: false,
+                    reason,
+                    message: reason,
+                };
+            }
+        }
+        if (changed) {
+            modifiedToolInput = nextTaskInput;
+        }
+    }
+    if (input.toolName === "Bash") {
+        const originalBashInput = input.toolInput;
+        const nextBashInput = originalBashInput ? { ...originalBashInput } : {};
+        if (nextBashInput.run_in_background === true) {
+            const command = typeof nextBashInput.command === "string"
+                ? nextBashInput.command
+                : undefined;
+            const permissionFallback = getBackgroundBashPermissionFallback(directory, command);
+            if (permissionFallback.shouldFallback) {
+                const reason = "[BACKGROUND PERMISSIONS] This Bash command is not auto-approved for background execution. Re-run without `run_in_background=true` or pre-approve the command in Claude Code settings.";
+                return {
+                    continue: false,
+                    reason,
+                    message: reason,
+                };
             }
         }
     }
@@ -717,7 +920,8 @@ function processPreToolUse(input) {
     // Warn about pkill -f self-termination risk (issue #210)
     // Matches: pkill -f, pkill -9 -f, pkill --full, etc.
     if (input.toolName === "Bash") {
-        const command = input.toolInput?.command ?? "";
+        const effectiveBashInput = (modifiedToolInput ?? input.toolInput);
+        const command = effectiveBashInput?.command ?? "";
         if (PKILL_F_FLAG_PATTERN.test(command) ||
             PKILL_FULL_FLAG_PATTERN.test(command)) {
             return {
@@ -729,13 +933,14 @@ function processPreToolUse(input) {
                     '  - `kill $(pgrep -f "pattern")` (pgrep does not kill itself)',
                     "Proceeding anyway, but the command may kill this shell session.",
                 ].join("\n"),
+                ...(modifiedToolInput ? { modifiedInput: modifiedToolInput } : {}),
             };
         }
     }
     // Background process guard - prevent forkbomb (issue #302)
     // Block new background tasks if limit is exceeded
     if (input.toolName === "Task" || input.toolName === "Bash") {
-        const toolInput = input.toolInput;
+        const toolInput = (modifiedToolInput ?? input.toolInput);
         if (toolInput?.run_in_background) {
             const config = loadConfig();
             const maxBgTasks = config.permissions?.maxBackgroundTasks ?? 5;
@@ -752,7 +957,7 @@ function processPreToolUse(input) {
     }
     // Track Task tool invocations for HUD background tasks display
     if (input.toolName === "Task") {
-        const toolInput = input.toolInput;
+        const toolInput = (modifiedToolInput ?? input.toolInput);
         if (toolInput?.description) {
             const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             addBackgroundTask(taskId, toolInput.description, toolInput.subagent_type, directory);
@@ -771,13 +976,11 @@ function processPreToolUse(input) {
     if (input.toolName === "Task") {
         const dashboard = getAgentDashboard(directory);
         if (dashboard) {
-            const combined = enforcementResult.message
-                ? `${enforcementResult.message}\n\n${dashboard}`
-                : dashboard;
+            const combined = [...preToolMessages, dashboard].filter(Boolean).join("\n\n");
             return {
                 continue: true,
-                message: combined,
-                ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
+                ...(combined ? { message: combined } : {}),
+                ...(modifiedToolInput ? { modifiedInput: modifiedToolInput } : {}),
             };
         }
     }
@@ -791,8 +994,8 @@ function processPreToolUse(input) {
     }
     return {
         continue: true,
-        ...(enforcementResult.message ? { message: enforcementResult.message } : {}),
-        ...(forceInheritInput ? { modifiedInput: forceInheritInput } : {}),
+        ...(preToolMessages.length > 0 ? { message: preToolMessages.join("\n\n") } : {}),
+        ...(modifiedToolInput ? { modifiedInput: modifiedToolInput } : {}),
     };
 }
 /**

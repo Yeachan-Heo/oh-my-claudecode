@@ -63,6 +63,18 @@ describe('extractNotifyFlag', () => {
     expect(result.notifyEnabled).toBe(true);
   });
 
+  it('treats bare --notify as enabled and strips it', () => {
+    const result = extractNotifyFlag(['--notify', '--print']);
+    expect(result.notifyEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--print']);
+  });
+
+  it('does not consume the next flag after bare --notify', () => {
+    const result = extractNotifyFlag(['--notify', '--discord']);
+    expect(result.notifyEnabled).toBe(true);
+    expect(result.remainingArgs).toEqual(['--discord']);
+  });
+
   it('strips --notify from remainingArgs', () => {
     const result = extractNotifyFlag(['--madmax', '--notify', 'false', '--print']);
     expect(result.remainingArgs).toEqual(['--madmax', '--print']);
@@ -335,9 +347,7 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
   });
 
   it('still launches claude even if tmux mouse config fails', () => {
-    let callCount = 0;
     (execFileSync as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
-      callCount++;
       if (cmd === 'tmux') throw new Error('tmux set-option failed');
       return Buffer.from('');
     });

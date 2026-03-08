@@ -7,7 +7,7 @@ This file provides context for Claude when working on this repository via GitHub
 oh-my-claudecode is a Claude Code plugin that provides multi-agent orchestration capabilities.
 
 ### Key Features
-- **32 specialized agents** with intelligent model routing (Haiku/Sonnet/Opus tiers)
+- **22 specialized agents** with intelligent model routing (Haiku/Sonnet/Opus tiers)
 - **35 slash commands** including /oh-my-claudecode:ultrawork, /oh-my-claudecode:deepinit, /oh-my-claudecode:ralph
 - **Smart delegation** - automatically routes tasks to appropriate specialist agents
 - **Background execution** - runs long-running tasks asynchronously

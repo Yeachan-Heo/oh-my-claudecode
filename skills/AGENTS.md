@@ -3,7 +3,7 @@
 
 # skills
 
-38 skill directories for workflow automation and specialized behaviors.
+37 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -55,6 +55,8 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | File | Skill | Purpose |
 |-----------|-------|---------|
 | `learner/SKILL.md` | learner | Extract reusable skill from session |
+| `ask-codex/SKILL.md` | ask-codex | Ask Codex via `omc ask codex` and capture an artifact |
+| `ask-gemini/SKILL.md` | ask-gemini | Ask Gemini via `omc ask gemini` and capture an artifact |
 | `note/SKILL.md` | note | Save notes for compaction resilience |
 | `cancel/SKILL.md` | cancel | Cancel any active OMC mode |
 | `hud/SKILL.md` | hud | Configure HUD display |

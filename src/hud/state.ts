@@ -69,7 +69,8 @@ export function readHudState(directory?: string): OmcHudState | null {
     try {
       const content = readFileSync(localStateFile, 'utf-8');
       return JSON.parse(content);
-    } catch {
+    } catch (error) {
+      console.error('[HUD] Failed to read local state:', error instanceof Error ? error.message : error);
       // Fall through to legacy check
     }
   }
@@ -81,7 +82,8 @@ export function readHudState(directory?: string): OmcHudState | null {
     try {
       const content = readFileSync(legacyStateFile, 'utf-8');
       return JSON.parse(content);
-    } catch {
+    } catch (error) {
+      console.error('[HUD] Failed to read legacy state:', error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -103,7 +105,8 @@ export function writeHudState(
     atomicWriteJsonSync(localStateFile, state);
 
     return true;
-  } catch {
+  } catch (error) {
+    console.error('[HUD] Failed to write state:', error instanceof Error ? error.message : error);
     return false;
   }
 }
@@ -159,7 +162,8 @@ export function readHudConfig(): HudConfig {
         const config = settings.omcHud as Partial<HudConfig>;
         return mergeWithDefaults(config);
       }
-    } catch {
+    } catch (error) {
+      console.error('[HUD] Failed to read settings.json:', error instanceof Error ? error.message : error);
       // Fall through to legacy config
     }
   }
@@ -171,7 +175,8 @@ export function readHudConfig(): HudConfig {
       const content = readFileSync(configFile, 'utf-8');
       const config = JSON.parse(content) as Partial<HudConfig>;
       return mergeWithDefaults(config);
-    } catch {
+    } catch (error) {
+      console.error('[HUD] Failed to read legacy config:', error instanceof Error ? error.message : error);
       // Fall through to defaults
     }
   }
@@ -205,6 +210,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
     },
     ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
     ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
+    ...(config.wrapMode != null ? { wrapMode: config.wrapMode } : {}),
   };
 }
 
@@ -226,7 +232,8 @@ export function writeHudConfig(config: HudConfig): boolean {
     settings.omcHud = config;
     writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
     return true;
-  } catch {
+  } catch (error) {
+    console.error('[HUD] Failed to write config:', error instanceof Error ? error.message : error);
     return false;
   }
 }

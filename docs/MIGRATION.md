@@ -6,7 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
-- [Unreleased: Team MCP timeoutSeconds Removal](#unreleased-team-mcp-timeoutseconds-removal)
+- [Unreleased: Team MCP Runtime Deprecation (CLI-Only)](#unreleased-team-mcp-runtime-deprecation-cli-only)
 - [v3.5.3 → v3.5.5: Test Fixes & Cleanup](#v353--v355-test-fixes--cleanup)
 - [v3.5.2 → v3.5.3: Skill Consolidation](#v352--v353-skill-consolidation)
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
@@ -15,115 +15,50 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ---
 
-## Unreleased: Team MCP timeoutSeconds Removal
+## Unreleased: Team MCP Runtime Deprecation (CLI-Only)
 
 ### TL;DR
 
-`omc_run_team_start` no longer accepts `timeoutSeconds`. Passing it now returns an API error. Use `omc_run_team_wait` with `timeout_ms` to limit how long you block (workers keep running), and call `omc_run_team_cleanup` only when you explicitly want to stop worker panes.
+`omc_run_team_start/status/wait/cleanup` are now hard-deprecated at runtime. Calls return:
 
-### What `timeoutSeconds` Did Before
-
-In earlier versions, `omc_run_team_start` accepted a `timeoutSeconds` parameter that would automatically kill all worker panes if the team had not completed within that duration. Example of the old pattern:
-
-```js
-// OLD — no longer works
-mcp__team__omc_run_team_start({
-  teamName: "my-team",
-  agentTypes: ["claude", "codex"],
-  tasks: [...],
-  cwd: "/path/to/project",
-  timeoutSeconds: 120   // <-- would silently kill workers after 2 minutes
-})
+```json
+{
+  "code": "deprecated_cli_only",
+  "message": "Legacy team MCP runtime tools are deprecated. Use the omc team CLI instead."
+}
 ```
 
-### Why It Was Removed
+Use CLI commands instead:
 
-`timeoutSeconds` was a footgun: it silently killed worker panes mid-task whenever the wall-clock limit was reached, with no way for the caller to distinguish "timed out and killed" from "completed normally". This caused data loss (workers writing files when killed), confusing error states, and made it impossible to resume or inspect stalled teams. Callers who set a conservative timeout often lost work that was 90% done.
+- `omc team [N:agent-type] "<task>"`
+- `omc team status <team-name>`
+- `omc team shutdown <team-name> [--force]`
+- `omc team api <operation> --input '<json>' --json`
 
-The fix separates concerns cleanly:
-- **Wait timeout** (`omc_run_team_wait timeout_ms`) — limits how long *your call* blocks. Workers keep running.
-- **Explicit cleanup** (`omc_run_team_cleanup`) — kills worker panes only when you decide to cancel.
+### `omc ask` env alias sunset (Phase-1 compatibility)
+
+`OMC_ASK_*` is now canonical for advisor execution. Phase-1 accepts `OMX_ASK_ADVISOR_SCRIPT` and `OMX_ASK_ORIGINAL_TASK` with deprecation warnings. Planned hard sunset for alias removal: **2026-06-30**.
 
 ### How to Migrate
 
-**Step 1** — Remove `timeoutSeconds` from every `omc_run_team_start` call.
+1. Replace MCP runtime tool calls with CLI equivalents.
+2. Update skills/prompts from `/omc-teams ...` to `omc team ...` syntax.
+3. Legacy Team MCP runtime is now opt-in only (not enabled by default). If you enable it manually, treat responses as deprecation-only compatibility output.
 
-**Step 2** — Use `omc_run_team_wait` with `timeout_ms` to bound the blocking call. If it times out, workers are still alive; call `omc_run_team_wait` again to keep waiting:
+### Example mapping
 
-```js
-// NEW — start (no timeoutSeconds)
-const { jobId } = await mcp__team__omc_run_team_start({
-  teamName: "my-team",
-  agentTypes: ["claude", "codex"],
-  tasks: [...],
-  cwd: "/path/to/project",
-})
+```bash
+# Old (deprecated runtime path)
+mcp__team__omc_run_team_start(...)
+mcp__team__omc_run_team_status({ job_id: ... })
+mcp__team__omc_run_team_wait({ job_id: ... })
+mcp__team__omc_run_team_cleanup({ job_id: ... })
 
-// Wait up to 5 minutes (workers keep running if this times out)
-const result = await mcp__team__omc_run_team_wait({
-  job_id: jobId,
-  timeout_ms: 300000,
-})
-
-// If result.status === 'running' the wait timed out; call wait again or inspect progress:
-// await mcp__team__omc_run_team_status({ job_id: jobId })
-// await mcp__team__omc_run_team_wait({ job_id: jobId, timeout_ms: 600000 })
-```
-
-**Step 3** — Call `omc_run_team_cleanup` only when you *intentionally* want to cancel and stop worker panes:
-
-```js
-// Explicit cancel — only when you want to stop the workers
-await mcp__team__omc_run_team_cleanup({ job_id: jobId })
-```
-
-### Common Patterns with `/omc-teams`
-
-**Pattern A — Wait with re-try on timeout (recommended)**
-
-```js
-// Start
-const { jobId } = await mcp__team__omc_run_team_start({ ... })
-
-// Wait loop: keep waiting until terminal state
-let result
-do {
-  result = await mcp__team__omc_run_team_wait({ job_id: jobId, timeout_ms: 300000 })
-} while (result.status === 'running')
-```
-
-**Pattern B — Non-blocking progress check**
-
-```js
-const { jobId } = await mcp__team__omc_run_team_start({ ... })
-
-// Do other work, then check progress
-const status = await mcp__team__omc_run_team_status({ job_id: jobId })
-if (status.status === 'running') {
-  // Not done yet; wait or come back later
-}
-```
-
-**Pattern C — Explicit cancel when you give up**
-
-```js
-const { jobId } = await mcp__team__omc_run_team_start({ ... })
-
-const result = await mcp__team__omc_run_team_wait({ job_id: jobId, timeout_ms: 60000 })
-if (result.status === 'running') {
-  // Decided to cancel — explicitly stop worker panes
-  await mcp__team__omc_run_team_cleanup({ job_id: jobId })
-}
-```
-
-### Breaking Change
-
-Passing `timeoutSeconds` to `omc_run_team_start` now returns an API error immediately:
-
-```
-Error: omc_run_team_start no longer accepts timeoutSeconds. Remove timeoutSeconds
-and use omc_run_team_wait timeout_ms to limit the wait call only (workers keep running
-until completion or explicit omc_run_team_cleanup).
+# New (CLI-first)
+omc team 2:codex "review auth flow"
+omc team status review-auth-flow
+omc team shutdown review-auth-flow --force
+omc team api list-tasks --input '{"team_name":"review-auth-flow"}' --json
 ```
 
 ---
@@ -137,11 +72,13 @@ Maintenance release fixing test suite issues and continuing skill consolidation 
 ### What Changed
 
 **Test Fixes:**
+
 - Delegation-enforcer tests marked as skipped (implementation pending)
 - Analytics expectations corrected for agent attribution
 - All remaining tests now pass cleanly
 
 **Skill Consolidation:**
+
 - Continued cleanup from v3.5.3
 - Removed deprecated `cancel-*` skills (use `/cancel` instead)
 - Final skill count: 37 core skills
@@ -168,19 +105,20 @@ If you were depending on deprecated `cancel-*` skills, update to use the unified
 
 The following skills have been **completely removed** in v3.5.3:
 
-| Removed Skill | Replacement |
-|---------------|-------------|
-| `cancel-autopilot` | `/oh-my-claudecode:cancel` |
-| `cancel-ralph` | `/oh-my-claudecode:cancel` |
-| `cancel-ultrawork` | `/oh-my-claudecode:cancel` |
-| `cancel-ultraqa` | `/oh-my-claudecode:cancel` |
-| `omc-default` | `/oh-my-claudecode:omc-setup --local` |
+| Removed Skill        | Replacement                            |
+| -------------------- | -------------------------------------- |
+| `cancel-autopilot`   | `/oh-my-claudecode:cancel`             |
+| `cancel-ralph`       | `/oh-my-claudecode:cancel`             |
+| `cancel-ultrawork`   | `/oh-my-claudecode:cancel`             |
+| `cancel-ultraqa`     | `/oh-my-claudecode:cancel`             |
+| `omc-default`        | `/oh-my-claudecode:omc-setup --local`  |
 | `omc-default-global` | `/oh-my-claudecode:omc-setup --global` |
-| `planner` | `/oh-my-claudecode:plan` |
+| `planner`            | `/oh-my-claudecode:plan`               |
 
 ### What Changed
 
 **Before v3.5.3:**
+
 ```bash
 /oh-my-claudecode:cancel-ralph      # Cancel ralph specifically
 /oh-my-claudecode:omc-default       # Configure local project
@@ -188,6 +126,7 @@ The following skills have been **completely removed** in v3.5.3:
 ```
 
 **After v3.5.3:**
+
 ```bash
 /oh-my-claudecode:cancel            # Auto-detects and cancels any active mode
 /oh-my-claudecode:omc-setup --local # Configure local project
@@ -197,11 +136,13 @@ The following skills have been **completely removed** in v3.5.3:
 ### New Features
 
 **New skill: `/learn-about-omc`**
+
 - Analyzes your OMC usage patterns
 - Provides personalized recommendations
 - Identifies underutilized features
 
 **Plan skill now supports consensus mode:**
+
 ```bash
 /oh-my-claudecode:plan --consensus "task"  # Iterative planning with Critic review
 /oh-my-claudecode:ralplan "task"           # Alias for plan --consensus
@@ -287,18 +228,22 @@ Use canonical role names across prompts, commands, docs, and scripts. Avoid intr
 Directory structures have been renamed for consistency with the new package name:
 
 #### Local Project Directories
+
 - **Old**: `.omc/`
 - **New**: `.omc/`
 
 #### Global Directories
+
 - **Old**: `~/.omc/`
 - **New**: `~/.omc/`
 
 #### Skills Directory
+
 - **Old**: `~/.claude/skills/omc-learned/`
 - **New**: `~/.claude/skills/omc-learned/`
 
 #### Config Files
+
 - **Old**: `~/.claude/omc/mnemosyne.json`
 - **New**: `~/.claude/omc/learner.json`
 
@@ -306,52 +251,53 @@ Directory structures have been renamed for consistency with the new package name
 
 All environment variables have been renamed from `OMC_*` to `OMC_*`:
 
-| Old | New |
-|-----|-----|
-| OMC_USE_NODE_HOOKS | OMC_USE_NODE_HOOKS |
-| OMC_USE_BASH_HOOKS | OMC_USE_BASH_HOOKS |
-| OMC_PARALLEL_EXECUTION | OMC_PARALLEL_EXECUTION |
-| OMC_LSP_TOOLS | OMC_LSP_TOOLS |
+| Old                      | New                      |
+| ------------------------ | ------------------------ |
+| OMC_USE_NODE_HOOKS       | OMC_USE_NODE_HOOKS       |
+| OMC_USE_BASH_HOOKS       | OMC_USE_BASH_HOOKS       |
+| OMC_PARALLEL_EXECUTION   | OMC_PARALLEL_EXECUTION   |
+| OMC_LSP_TOOLS            | OMC_LSP_TOOLS            |
 | OMC_MAX_BACKGROUND_TASKS | OMC_MAX_BACKGROUND_TASKS |
-| OMC_ROUTING_ENABLED | OMC_ROUTING_ENABLED |
+| OMC_ROUTING_ENABLED      | OMC_ROUTING_ENABLED      |
 | OMC_ROUTING_DEFAULT_TIER | OMC_ROUTING_DEFAULT_TIER |
-| OMC_ESCALATION_ENABLED | OMC_ESCALATION_ENABLED |
-| OMC_DEBUG | OMC_DEBUG |
+| OMC_ESCALATION_ENABLED   | OMC_ESCALATION_ENABLED   |
+| OMC_DEBUG                | OMC_DEBUG                |
 
 ### Command Mapping
 
 All 2.x commands continue to work. Here's what changed:
 
-| 2.x Command | 3.0 Equivalent | Works? |
-|-------------|----------------|--------|
-| `/oh-my-claudecode:ralph "task"` | Say "don't stop until done" OR use `ralph` keyword | ✅ YES (both ways) |
-| `/oh-my-claudecode:ultrawork "task"` | Say "fast" or "parallel" OR use `ulw` keyword | ✅ YES (both ways) |
-| `/oh-my-claudecode:ultrawork-ralph` | Say "ralph ulw:" prefix | ✅ YES (keyword combo) |
-| `/oh-my-claudecode:planner "task"` | Say "plan this" OR use `plan` keyword | ✅ YES (both ways) |
-| `/oh-my-claudecode:plan "description"` | Start planning naturally | ✅ YES |
-| `/oh-my-claudecode:review [path]` | Invoke normally | ✅ YES (unchanged) |
-| `/oh-my-claudecode:deepsearch "query"` | Say "find" or "search" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:analyze "target"` | Say "analyze" or "investigate" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:deepinit [path]` | Invoke normally | ✅ YES (unchanged) |
-| `/oh-my-claudecode:git-master` | Say "git", "commit", "atomic commit" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:frontend-ui-ux` | Say "UI", "styling", "component", "design" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:note "content"` | Say "remember this" or "save this" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:cancel-ralph` | Say "stop", "cancel", or "abort" | ✅ YES (auto-detect) |
-| `/oh-my-claudecode:omc-doctor` | Invoke normally | ✅ YES (unchanged) |
-| All other commands | Work exactly as before | ✅ YES |
+| 2.x Command                            | 3.0 Equivalent                                     | Works?                 |
+| -------------------------------------- | -------------------------------------------------- | ---------------------- |
+| `/oh-my-claudecode:ralph "task"`       | Say "don't stop until done" OR use `ralph` keyword | ✅ YES (both ways)     |
+| `/oh-my-claudecode:ultrawork "task"`   | Say "fast" or "parallel" OR use `ulw` keyword      | ✅ YES (both ways)     |
+| `/oh-my-claudecode:ultrawork-ralph`    | Say "ralph ulw:" prefix                            | ✅ YES (keyword combo) |
+| `/oh-my-claudecode:planner "task"`     | Say "plan this" OR use `plan` keyword              | ✅ YES (both ways)     |
+| `/oh-my-claudecode:plan "description"` | Start planning naturally                           | ✅ YES                 |
+| `/oh-my-claudecode:review [path]`      | Invoke normally                                    | ✅ YES (unchanged)     |
+| `/oh-my-claudecode:deepsearch "query"` | Say "find" or "search"                             | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:analyze "target"`   | Say "analyze" or "investigate"                     | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:deepinit [path]`    | Invoke normally                                    | ✅ YES (unchanged)     |
+| `/oh-my-claudecode:git-master`         | Say "git", "commit", "atomic commit"               | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:frontend-ui-ux`     | Say "UI", "styling", "component", "design"         | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:note "content"`     | Say "remember this" or "save this"                 | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:cancel-ralph`       | Say "stop", "cancel", or "abort"                   | ✅ YES (auto-detect)   |
+| `/oh-my-claudecode:omc-doctor`         | Invoke normally                                    | ✅ YES (unchanged)     |
+| All other commands                     | Work exactly as before                             | ✅ YES                 |
 
 ### Magic Keywords
 
 Include these anywhere in your message to explicitly activate behaviors. Use keywords when you want explicit control (optional):
 
-| Keyword | Effect | Example |
-|---------|--------|---------|
-| `ralph` | Persistence mode - won't stop until done | "ralph: refactor the auth system" |
-| `ralplan` | Iterative planning with consensus | "ralplan: add OAuth support" |
-| `ulw` / `ultrawork` | Maximum parallel execution | "ulw: fix all type errors" |
-| `plan` | Planning interview | "plan: new API design" |
+| Keyword             | Effect                                   | Example                           |
+| ------------------- | ---------------------------------------- | --------------------------------- |
+| `ralph`             | Persistence mode - won't stop until done | "ralph: refactor the auth system" |
+| `ralplan`           | Iterative planning with consensus        | "ralplan: add OAuth support"      |
+| `ulw` / `ultrawork` | Maximum parallel execution               | "ulw: fix all type errors"        |
+| `plan`              | Planning interview                       | "plan: new API design"            |
 
 **ralph includes ultrawork:**
+
 ```
 ralph: migrate the entire database
     ↓
@@ -359,6 +305,7 @@ Persistence (won't stop) + Ultrawork (maximum parallelism) built-in
 ```
 
 **No keywords?** Claude still auto-detects:
+
 ```
 "don't stop until this works"      # Triggers ralph
 "fast, I'm in a hurry"             # Triggers ultrawork
@@ -368,6 +315,7 @@ Persistence (won't stop) + Ultrawork (maximum parallelism) built-in
 ### Natural Cancellation
 
 Say any of these to stop:
+
 - "stop"
 - "cancel"
 - "abort"
@@ -442,6 +390,7 @@ Update your shell configuration files (`.bashrc`, `.zshrc`, etc.):
 #### 6. Update Scripts and Configurations
 
 Search for and update any references to:
+
 - Package name: `oh-my-claudecode` → `oh-my-claudecode`
 - Agent names: Use the mapping table above
 - Commands: Use the new slash commands
@@ -452,6 +401,7 @@ Search for and update any references to:
 In Claude Code, just say "setup omc", "omc setup", or any natural language equivalent.
 
 This:
+
 - Downloads latest CLAUDE.md
 - Configures 32 agents
 - Enables auto-behavior detection
@@ -463,11 +413,13 @@ This:
 After migration, verify your setup:
 
 1. **Check installation**:
+
    ```bash
    npm list -g oh-my-claudecode
    ```
 
 2. **Verify directories exist**:
+
    ```bash
    ls -la .omc/  # In project directory
    ls -la ~/.omc/  # Global directory
@@ -519,6 +471,7 @@ Next time keywords match → Solution auto-injects
 ```
 
 Storage:
+
 - **Project-level**: `.omc/skills/` (version-controlled)
 - **User-level**: `~/.claude/skills/omc-learned/` (portable)
 
@@ -598,14 +551,15 @@ Plan-scoped wisdom capture for learnings, decisions, issues, and problems.
 
 **Location:** `.omc/notepads/{plan-name}/`
 
-| File | Purpose |
-|------|---------|
+| File           | Purpose                            |
+| -------------- | ---------------------------------- |
 | `learnings.md` | Technical discoveries and patterns |
 | `decisions.md` | Architectural and design decisions |
-| `issues.md` | Known issues and workarounds |
-| `problems.md` | Blockers and challenges |
+| `issues.md`    | Known issues and workarounds       |
+| `problems.md`  | Blockers and challenges            |
 
 **API:**
+
 - `initPlanNotepad()` - Initialize notepad for a plan
 - `addLearning()` - Record technical discoveries
 - `addDecision()` - Record architectural choices
@@ -618,13 +572,13 @@ Plan-scoped wisdom capture for learnings, decisions, issues, and problems.
 
 Semantic task categorization that auto-maps to model tier, temperature, and thinking budget.
 
-| Category | Tier | Temperature | Thinking | Use For |
-|----------|------|-------------|----------|---------|
-| `visual-engineering` | HIGH | 0.7 | high | UI/UX, frontend, design systems |
-| `ultrabrain` | HIGH | 0.3 | max | Complex reasoning, architecture, deep debugging |
-| `artistry` | MEDIUM | 0.9 | medium | Creative solutions, brainstorming |
-| `quick` | LOW | 0.1 | low | Simple lookups, basic operations |
-| `writing` | MEDIUM | 0.5 | medium | Documentation, technical writing |
+| Category             | Tier   | Temperature | Thinking | Use For                                         |
+| -------------------- | ------ | ----------- | -------- | ----------------------------------------------- |
+| `visual-engineering` | HIGH   | 0.7         | high     | UI/UX, frontend, design systems                 |
+| `ultrabrain`         | HIGH   | 0.3         | max      | Complex reasoning, architecture, deep debugging |
+| `artistry`           | MEDIUM | 0.9         | medium   | Creative solutions, brainstorming               |
+| `quick`              | LOW    | 0.1         | low      | Simple lookups, basic operations                |
+| `writing`            | MEDIUM | 0.5         | medium   | Documentation, technical writing                |
 
 **Auto-detection:** Categories detect from prompt keywords automatically.
 
@@ -633,6 +587,7 @@ Semantic task categorization that auto-maps to model tier, temperature, and thin
 Project-level type checking via `lsp_diagnostics_directory` tool.
 
 **Strategies:**
+
 - `auto` (default) - Auto-selects best strategy, prefers tsc when tsconfig.json exists
 - `tsc` - Fast, uses TypeScript compiler
 - `lsp` - Fallback, iterates files via Language Server
@@ -656,6 +611,7 @@ All existing configurations, plans, and workflows continue working unchanged.
 ### New Tools Available
 
 Once upgraded, agents automatically gain access to:
+
 - Notepad wisdom APIs (read/write wisdom during execution)
 - Delegation categories (automatic categorization)
 - Directory diagnostics (project-level type checking)
@@ -680,6 +636,7 @@ Execute complex tasks with up to 5 concurrent workers for 3-5x speedup:
 ```
 
 **Key Features:**
+
 - Automatic task decomposition into parallelizable subtasks
 - File ownership coordination to prevent conflicts
 - Parallel execution with intelligent coordination
@@ -696,6 +653,7 @@ N coordinated agents with atomic task claiming:
 ```
 
 **Key Features:**
+
 - Shared task pool with atomic claiming (prevents duplicate work)
 - 5-minute timeout per task with auto-release
 - Scales from 2 to 10 workers
@@ -710,6 +668,7 @@ Chain agents with data passing between stages:
 ```
 
 **Built-in Presets:**
+
 - `review` - explore → architect → critic → executor
 - `implement` - planner → executor → tdd-guide
 - `debug` - explore → architect → build-fixer
@@ -730,6 +689,7 @@ Smart cancellation that auto-detects active mode:
 
 **Deprecation Notice:**
 Individual cancel commands are deprecated but still work:
+
 - `/oh-my-claudecode:cancel-ralph` (deprecated)
 - `/oh-my-claudecode:cancel-ultraqa` (deprecated)
 - `/oh-my-claudecode:cancel-ultrawork` (deprecated)
@@ -742,9 +702,11 @@ Use `/oh-my-claudecode:cancel` instead.
 Opus-powered architectural search for complex codebase exploration:
 
 ```typescript
-Task(subagent_type="oh-my-claudecode:explore-high",
-     model="opus",
-     prompt="Find all authentication-related code patterns...")
+Task(
+  (subagent_type = "oh-my-claudecode:explore-high"),
+  (model = "opus"),
+  (prompt = "Find all authentication-related code patterns..."),
+);
 ```
 
 **Best for:** Architectural analysis, cross-cutting concerns, complex refactoring planning
@@ -754,6 +716,7 @@ Task(subagent_type="oh-my-claudecode:explore-high",
 State files now use standardized paths:
 
 **Standard paths:**
+
 - Local: `.omc/state/{name}.json`
 - Global: `~/.omc/state/{name}.json`
 
@@ -806,6 +769,7 @@ None. All v3.3.x features and commands continue to work in v3.4.0.
 ### New Tools Available
 
 Once upgraded, you automatically gain access to:
+
 - Ultrapilot (parallel autopilot)
 - Swarm coordination
 - Pipeline workflows
@@ -816,23 +780,25 @@ Once upgraded, you automatically gain access to:
 
 #### When to Use Each Mode
 
-| Scenario | Recommended Mode | Why |
-|----------|------------------|-----|
-| Multi-component systems | `ultrapilot` | Parallel workers handle independent components |
-| Many small fixes | `swarm` | Atomic task claiming prevents duplicate work |
-| Sequential dependencies | `pipeline` | Data passes between stages |
-| Single complex task | `autopilot` | Full autonomous execution |
-| Must complete | `ralph` | Persistence guarantee |
+| Scenario                | Recommended Mode | Why                                            |
+| ----------------------- | ---------------- | ---------------------------------------------- |
+| Multi-component systems | `ultrapilot`     | Parallel workers handle independent components |
+| Many small fixes        | `swarm`          | Atomic task claiming prevents duplicate work   |
+| Sequential dependencies | `pipeline`       | Data passes between stages                     |
+| Single complex task     | `autopilot`      | Full autonomous execution                      |
+| Must complete           | `ralph`          | Persistence guarantee                          |
 
 #### Keyword Usage
 
 **Explicit mode control (v3.4.0):**
+
 ```bash
 "ulw: fix all errors"           # ultrawork (explicit)
 "fast: implement feature"       # reads defaultExecutionMode config
 ```
 
 **Natural language (still works):**
+
 ```bash
 "don't stop until done"         # ralph
 "parallel execution"            # reads defaultExecutionMode
@@ -844,16 +810,19 @@ Once upgraded, you automatically gain access to:
 After upgrading, verify new features:
 
 1. **Check installation**:
+
    ```bash
    npm list -g oh-my-claudecode
    ```
 
 2. **Test ultrapilot**:
+
    ```bash
    /oh-my-claudecode:ultrapilot "create a simple React component"
    ```
 
 3. **Test unified cancel**:
+
    ```bash
    /oh-my-claudecode:cancel
    ```
@@ -915,11 +884,13 @@ Expected timeline: Q1 2026
 ### Scenario 1: Quick Implementation Task
 
 **2.x Workflow:**
+
 ```
 /oh-my-claudecode:ultrawork "implement the todo list feature"
 ```
 
 **3.0+ Workflow:**
+
 ```
 "implement the todo list feature quickly"
     ↓
@@ -931,11 +902,13 @@ Claude: "I'm activating ultrawork for maximum parallelism"
 ### Scenario 2: Complex Debugging
 
 **2.x Workflow:**
+
 ```
 /oh-my-claudecode:ralph "debug the memory leak"
 ```
 
 **3.0+ Workflow:**
+
 ```
 "there's a memory leak in the worker process - don't stop until we fix it"
     ↓
@@ -947,11 +920,13 @@ Claude: "I'm activating ralph-loop to ensure completion"
 ### Scenario 3: Strategic Planning
 
 **2.x Workflow:**
+
 ```
 /oh-my-claudecode:planner "design the new authentication system"
 ```
 
 **3.0+ Workflow:**
+
 ```
 "plan the new authentication system"
     ↓
@@ -965,11 +940,13 @@ Interview begins automatically
 ### Scenario 4: Stopping Work
 
 **2.x Workflow:**
+
 ```
 /oh-my-claudecode:cancel-ralph
 ```
 
 **3.0+ Workflow:**
+
 ```
 "stop"
 ```

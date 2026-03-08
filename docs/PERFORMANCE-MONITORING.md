@@ -90,8 +90,8 @@ OMC automatically tracks token usage and costs across all sessions.
 #### CLI Commands
 
 ```bash
-# View current session stats
-omc stats
+# View everything (default dashboard)
+omc
 
 # View daily/weekly/monthly cost reports
 omc cost daily
@@ -101,8 +101,8 @@ omc cost monthly
 # View session history
 omc sessions
 
-# View agent breakdown
-omc agents
+# Agent observability is shown in HUD/replay logs
+# (legacy standalone agent-breakdown command was removed)
 
 # Export data
 omc export cost csv ./costs.csv
@@ -419,7 +419,7 @@ cleanupReplayFiles(process.cwd()); // Keeps last 10 sessions
 **Solutions**:
 1. Use `eco` mode for token-efficient execution: `eco fix all errors`
 2. Check for unnecessary file reads in agent prompts
-3. Review `omc agents` for agent-level breakdown
+3. Review the Agent Observatory in HUD (or replay logs) for agent-level breakdown
 4. Enable cache - check cache efficiency in analytics
 
 ### Slow Agent Execution

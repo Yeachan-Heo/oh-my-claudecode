@@ -42,6 +42,7 @@ export declare function parseZaiResponse(response: ZaiQuotaResponse): RateLimits
  *   - 'network': API call failed (timeout, HTTP error, parse error)
  *   - 'auth': credentials expired and refresh failed
  *   - 'no_credentials': no OAuth credentials available (expected for API key users)
+ *   - 'rate_limited': API returned 429; stale data served if available, with exponential backoff
  */
 export declare function getUsage(): Promise<UsageResult>;
 export {};

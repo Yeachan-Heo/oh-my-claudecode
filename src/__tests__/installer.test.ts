@@ -8,10 +8,14 @@ import {
   HOOKS_DIR,
   isRunningAsPlugin,
   isProjectScopedPlugin,
+  extractOmcVersionFromClaudeMd,
+  syncPersistedSetupVersion,
 } from '../installer/index.js';
+import { getRuntimePackageVersion } from '../lib/version.js';
 import { join, dirname } from 'path';
+import { tmpdir } from 'os';
 import { homedir } from 'os';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 /**
@@ -299,6 +303,65 @@ describe('Installer Constants', () => {
       const __dirname = dirname(fileURLToPath(import.meta.url));
       const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
       expect(VERSION).toBe(pkg.version);
+    });
+
+    it('should stay in sync with runtime package version helper', () => {
+      expect(VERSION).toBe(getRuntimePackageVersion());
+    });
+
+    it('should keep docs/CLAUDE.md version marker in sync with package version', () => {
+      const versionMatch = CLAUDE_MD_CONTENT.match(/<!-- OMC:VERSION:([^\s]*?) -->/);
+      expect(versionMatch?.[1]).toBe(VERSION);
+    });
+  });
+
+
+  describe('extractOmcVersionFromClaudeMd()', () => {
+    it('prefers the OMC version marker', () => {
+      const content = `<!-- OMC:VERSION:4.7.7 -->
+# oh-my-claudecode - Intelligent Multi-Agent Orchestration`;
+      expect(extractOmcVersionFromClaudeMd(content)).toBe('v4.7.7');
+    });
+
+    it('falls back to legacy heading versions', () => {
+      const content = '# oh-my-claudecode v4.6.0 - Intelligent Multi-Agent Orchestration';
+      expect(extractOmcVersionFromClaudeMd(content)).toBe('v4.6.0');
+    });
+  });
+
+  describe('syncPersistedSetupVersion()', () => {
+    it('updates setupVersion for already-configured installs', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'omc-installer-test-'));
+      const configPath = join(tempDir, '.omc-config.json');
+      writeFileSync(configPath, JSON.stringify({ setupCompleted: '2026-03-03T17:59:08+09:00', setupVersion: 'v4.6.0' }, null, 2));
+
+      const changed = syncPersistedSetupVersion({
+        configPath,
+        version: '4.7.7',
+        onlyIfConfigured: true,
+      });
+
+      const updated = JSON.parse(readFileSync(configPath, 'utf-8'));
+      expect(changed).toBe(true);
+      expect(updated.setupVersion).toBe('v4.7.7');
+      expect(updated.setupCompleted).toBe('2026-03-03T17:59:08+09:00');
+    });
+
+    it('does not create setupVersion for fresh installs by default', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'omc-installer-test-'));
+      const configPath = join(tempDir, '.omc-config.json');
+      writeFileSync(configPath, JSON.stringify({ hudEnabled: true }, null, 2));
+
+      const changed = syncPersistedSetupVersion({
+        configPath,
+        version: '4.7.7',
+        onlyIfConfigured: true,
+      });
+
+      const updated = JSON.parse(readFileSync(configPath, 'utf-8'));
+      expect(changed).toBe(false);
+      expect(updated.setupVersion).toBeUndefined();
+      expect(updated.hudEnabled).toBe(true);
     });
   });
 

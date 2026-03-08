@@ -41,6 +41,77 @@ export const CORE_COMMANDS: string[] = [];
 /** Current version */
 export const VERSION = getRuntimePackageVersion();
 
+const OMC_VERSION_MARKER_PATTERN = /<!-- OMC:VERSION:([^\s]+) -->/;
+
+/**
+ * Detects the newest installed OMC version from persistent metadata or
+ * existing CLAUDE.md markers so an older CLI package cannot overwrite a
+ * newer installation during `omc setup`.
+ */
+function isComparableVersion(version: string | null | undefined): version is string {
+  return !!version && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version);
+}
+
+function compareVersions(a: string, b: string): number {
+  const partsA = a.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
+  const partsB = b.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
+  const maxLength = Math.max(partsA.length, partsB.length);
+
+  for (let i = 0; i < maxLength; i++) {
+    const valueA = partsA[i] || 0;
+    const valueB = partsB[i] || 0;
+    if (valueA < valueB) return -1;
+    if (valueA > valueB) return 1;
+  }
+
+  return 0;
+}
+
+function extractOmcVersionMarker(content: string): string | null {
+  const match = content.match(OMC_VERSION_MARKER_PATTERN);
+  return match?.[1] ?? null;
+}
+
+function getNewestInstalledVersionHint(): string | null {
+  const candidates: string[] = [];
+
+  if (existsSync(VERSION_FILE)) {
+    try {
+      const metadata = JSON.parse(readFileSync(VERSION_FILE, 'utf-8')) as { version?: string };
+      if (isComparableVersion(metadata.version)) {
+        candidates.push(metadata.version);
+      }
+    } catch {
+      // Ignore unreadable metadata and fall back to CLAUDE.md markers.
+    }
+  }
+
+  const claudeCandidates = [
+    join(CLAUDE_CONFIG_DIR, 'CLAUDE.md'),
+    join(homedir(), 'CLAUDE.md'),
+  ];
+
+  for (const candidatePath of claudeCandidates) {
+    if (!existsSync(candidatePath)) continue;
+    try {
+      const detectedVersion = extractOmcVersionMarker(readFileSync(candidatePath, 'utf-8'));
+      if (isComparableVersion(detectedVersion)) {
+        candidates.push(detectedVersion);
+      }
+    } catch {
+      // Ignore unreadable CLAUDE.md candidates.
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates.reduce((highest, candidate) =>
+    compareVersions(candidate, highest) > 0 ? candidate : highest
+  );
+}
+
 /**
  * Find a marker that appears at the start of a line (line-anchored).
  * This prevents matching markers inside code blocks.
@@ -336,6 +407,79 @@ function loadClaudeMdContent(): string {
 }
 
 /**
+ * Extract the embedded OMC version from a CLAUDE.md file.
+ *
+ * Primary source of truth is the injected `<!-- OMC:VERSION:x.y.z -->` marker.
+ * Falls back to legacy headings that may include a version string inline.
+ */
+export function extractOmcVersionFromClaudeMd(content: string): string | null {
+  const versionMarkerMatch = content.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+  if (versionMarkerMatch?.[1]) {
+    const markerVersion = versionMarkerMatch[1].trim();
+    return markerVersion.startsWith('v') ? markerVersion : `v${markerVersion}`;
+  }
+
+  const headingMatch = content.match(/^#\s+oh-my-claudecode.*?\b(v?\d+\.\d+\.\d+(?:[-+][^\s]+)?)\b/m);
+  if (headingMatch?.[1]) {
+    const headingVersion = headingMatch[1].trim();
+    return headingVersion.startsWith('v') ? headingVersion : `v${headingVersion}`;
+  }
+
+  return null;
+}
+
+/**
+ * Keep persisted setup metadata in sync with the installed OMC runtime version.
+ *
+ * This intentionally updates only already-configured users by default so
+ * installer/reconciliation flows do not accidentally mark fresh installs as if
+ * the interactive setup wizard had been completed.
+ */
+export function syncPersistedSetupVersion(options?: {
+  configPath?: string;
+  claudeMdPath?: string;
+  version?: string;
+  onlyIfConfigured?: boolean;
+}): boolean {
+  const configPath = options?.configPath ?? join(CLAUDE_CONFIG_DIR, '.omc-config.json');
+  let config: Record<string, unknown> = {};
+
+  if (existsSync(configPath)) {
+    const rawConfig = readFileSync(configPath, 'utf-8').trim();
+    if (rawConfig.length > 0) {
+      config = JSON.parse(rawConfig) as Record<string, unknown>;
+    }
+  }
+
+  const onlyIfConfigured = options?.onlyIfConfigured ?? true;
+  const isConfigured = typeof config.setupCompleted === 'string' || typeof config.setupVersion === 'string';
+  if (onlyIfConfigured && !isConfigured) {
+    return false;
+  }
+
+  let detectedVersion = options?.version?.trim();
+  if (!detectedVersion) {
+    const claudeMdPath = options?.claudeMdPath ?? join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
+    if (existsSync(claudeMdPath)) {
+      detectedVersion = extractOmcVersionFromClaudeMd(readFileSync(claudeMdPath, 'utf-8')) ?? undefined;
+    }
+  }
+
+  const normalizedVersion = (() => {
+    const candidate = (detectedVersion && detectedVersion !== 'unknown') ? detectedVersion : VERSION;
+    return candidate.startsWith('v') ? candidate : `v${candidate}`;
+  })();
+
+  if (config.setupVersion === normalizedVersion) {
+    return false;
+  }
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({ ...config, setupVersion: normalizedVersion }, null, 2));
+  return true;
+}
+
+/**
  * Merge OMC content into existing CLAUDE.md using markers
  * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
  * @param omcContent - New OMC content to inject
@@ -416,6 +560,19 @@ export function install(options: InstallOptions = {}): InstallResult {
   if (!nodeCheck.valid) {
     result.errors.push(`Node.js ${nodeCheck.required}+ is required. Found: ${nodeCheck.current}`);
     result.message = `Installation failed: Node.js ${nodeCheck.required}+ required`;
+    return result;
+  }
+
+  const targetVersion = options.version ?? VERSION;
+  const installedVersionHint = getNewestInstalledVersionHint();
+
+  if (isComparableVersion(targetVersion)
+    && isComparableVersion(installedVersionHint)
+    && compareVersions(targetVersion, installedVersionHint) < 0) {
+    const message = `Skipping install: installed OMC ${installedVersionHint} is newer than CLI package ${targetVersion}. Run "omc update" to update the CLI package, then rerun "omc setup".`;
+    log(message);
+    result.success = true;
+    result.message = message;
     return result;
   }
 
@@ -545,7 +702,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
 
         // Merge OMC content with existing content
-        const mergedContent = mergeClaudeMd(existingContent, omcContent, options.version ?? VERSION);
+        const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
         writeFileSync(claudeMdPath, mergedContent);
 
         if (existingContent) {
@@ -630,15 +787,20 @@ export function install(options: InstallOptions = {}): InstallResult {
         '    try {',
         '      const versions = readdirSync(pluginCacheBase);',
         '      if (versions.length > 0) {',
+        '        const sortedVersions = versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse();',
+        '        const latestInstalledVersion = sortedVersions[0];',
+        '        pluginCacheVersion = latestInstalledVersion;',
+        '        pluginCacheDir = join(pluginCacheBase, latestInstalledVersion);',
+        '        ',
         '        // Filter to only versions with built dist/hud/index.js',
         '        // This prevents picking an unbuilt new version after plugin update',
-        '        const builtVersions = versions.filter(version => {',
+        '        const builtVersions = sortedVersions.filter(version => {',
         '          const pluginPath = join(pluginCacheBase, version, "dist/hud/index.js");',
         '          return existsSync(pluginPath);',
         '        });',
         '        ',
         '        if (builtVersions.length > 0) {',
-        '          const latestVersion = builtVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()[0];',
+        '          const latestVersion = builtVersions[0];',
         '          pluginCacheVersion = latestVersion;',
         '          pluginCacheDir = join(pluginCacheBase, latestVersion);',
         '          const pluginPath = join(pluginCacheDir, "dist/hud/index.js");',
@@ -649,20 +811,29 @@ export function install(options: InstallOptions = {}): InstallResult {
         '    } catch { /* continue */ }',
         '  }',
         '  ',
-        '  // 3. npm package (global or local install)',
+        '  // 3. Marketplace clone (for marketplace installs without a populated cache)',
+        '  const marketplaceHudPath = join(configDir, "plugins", "marketplaces", "omc", "dist/hud/index.js");',
+        '  if (existsSync(marketplaceHudPath)) {',
+        '    try {',
+        '      await import(pathToFileURL(marketplaceHudPath).href);',
+        '      return;',
+        '    } catch { /* continue */ }',
+        '  }',
+        '  ',
+        '  // 4. npm package (global or local install)',
         '  try {',
         '    await import("oh-my-claudecode/dist/hud/index.js");',
         '    return;',
         '  } catch { /* continue */ }',
         '  ',
-        '  // 4. Fallback: provide detailed error message with fix instructions',
+        '  // 5. Fallback: provide detailed error message with fix instructions',
         '  if (pluginCacheDir && existsSync(pluginCacheDir)) {',
-        '    // Plugin exists but dist/ folder is missing - needs build',
+        '    // Plugin exists but HUD could not be loaded',
         '    const distDir = join(pluginCacheDir, "dist");',
         '    if (!existsSync(distDir)) {',
         '      console.log(`[OMC HUD] Plugin installed but not built. Run: cd "${pluginCacheDir}" && npm install && npm run build`);',
         '    } else {',
-        '      console.log(`[OMC HUD] Plugin dist/ exists but HUD not found. Run: cd "${pluginCacheDir}" && npm run build`);',
+        '      console.log(`[OMC HUD] Plugin HUD load failed. Run: cd "${pluginCacheDir}" && npm install && npm run build`);',
         '    }',
         '  } else if (existsSync(pluginCacheBase)) {',
         '    // Plugin cache directory exists but no versions',
@@ -793,7 +964,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     // Save version metadata (skip for project-scoped plugins)
     if (!projectScoped) {
       const versionMetadata = {
-        version: options.version ?? VERSION,
+        version: targetVersion,
         installedAt: new Date().toISOString(),
         installMethod: 'npm' as const,
         lastCheckAt: new Date().toISOString()
@@ -802,6 +973,19 @@ export function install(options: InstallOptions = {}): InstallResult {
       log('Saved version metadata');
     } else {
       log('Skipping version metadata (project-scoped plugin)');
+    }
+
+    try {
+      const setupVersionSynced = syncPersistedSetupVersion({
+        version: options.version ?? VERSION,
+        onlyIfConfigured: true,
+      });
+      if (setupVersionSynced) {
+        log('Updated persisted setupVersion');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`  Warning: Could not refresh setupVersion metadata (non-fatal): ${message}`);
     }
 
     result.success = true;

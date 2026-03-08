@@ -50,7 +50,7 @@ autopilot: build a REST API for managing tasks
 
 ## Team Mode (권장)
 
-**v4.1.7**부터 **Team**이 OMC의 표준 오케스트레이션 방식입니다. **swarm** 및 **ultrapilot** 같은 레거시 엔트리포인트는 계속 지원되지만, 이제 **내부적으로 Team으로 라우팅**됩니다.
+**v4.1.7**부터 **Team**이 OMC의 표준 오케스트레이션 방식입니다. 레거시 `swarm` 키워드/스킬은 제거되었으니 `team`을 직접 사용하세요.
 
 ```bash
 /team 3:executor "fix all TypeScript errors"
@@ -74,13 +74,17 @@ Team은 단계별 파이프라인으로 실행됩니다:
 
 ### tmux CLI 워커 — Codex & Gemini (v4.4.0+)
 
-**v4.4.0에서 Codex/Gemini MCP 서버**(`x`, `g` 프로바이더)가 **제거됩니다**. `/omc-teams`를 사용하여 tmux 분할 창에서 실제 CLI 프로세스를 실행하세요:
+**v4.4.0에서 Codex/Gemini MCP 서버**(`x`, `g` 프로바이더)가 **제거됩니다**. CLI 우선 Team 런타임(`omc team ...`)으로 tmux 분할 창에서 실제 CLI 프로세스를 실행하세요:
 
 ```bash
-/omc-teams 2:codex   "review auth module for security issues"
-/omc-teams 2:gemini  "redesign UI components for accessibility"
-/omc-teams 1:claude  "implement the payment flow"
+omc team 2:codex "review auth module for security issues"
+omc team 2:gemini "redesign UI components for accessibility"
+omc team 1:claude "implement the payment flow"
+omc team status auth-review
+omc team shutdown auth-review
 ```
+
+`/omc-teams`는 레거시 호환 스킬로 유지되며, 현재는 내부적으로 `omc team ...`으로 라우팅됩니다.
 
 하나의 명령으로 Codex + Gemini 작업을 처리하려면 **`/ccg`** 스킬을 사용하세요:
 
@@ -88,12 +92,12 @@ Team은 단계별 파이프라인으로 실행됩니다:
 /ccg Review this PR — architecture (Codex) and UI components (Gemini)
 ```
 
-| 스킬 | 워커 | 최적 용도 |
+| 실행 표면 | 워커 | 최적 용도 |
 |-------|---------|----------|
-| `/omc-teams N:codex` | N개 Codex CLI 창 | 코드 리뷰, 보안 분석, 아키텍처 |
-| `/omc-teams N:gemini` | N개 Gemini CLI 창 | UI/UX 디자인, 문서, 대용량 컨텍스트 |
-| `/omc-teams N:claude` | N개 Claude CLI 창 | tmux에서 Claude CLI를 통한 일반 작업 |
-| `/ccg` | Codex 1개 + Gemini 1개 | 병렬 트라이-모델 오케스트레이션 |
+| `omc team N:codex "..."` | N개 Codex CLI 창 | 코드 리뷰, 보안 분석, 아키텍처 |
+| `omc team N:gemini "..."` | N개 Gemini CLI 창 | UI/UX 디자인, 문서, 대용량 컨텍스트 |
+| `omc team N:claude "..."` | N개 Claude CLI 창 | tmux에서 Claude CLI를 통한 일반 작업 |
+| `/ccg` | ask-codex + ask-gemini | Codex+Gemini 조언을 Claude가 통합 |
 
 워커는 요청 시 생성되고 작업 완료 후 종료됩니다 — 유휴 리소스 낭비 없음. `codex` / `gemini` CLI가 설치되어 있고 활성 tmux 세션이 필요합니다.
 
@@ -146,7 +150,7 @@ Team은 단계별 파이프라인으로 실행됩니다:
 | 모드 | 특징 | 용도 |
 |------|---------|---------|
 | **Team (권장)** | 단계별 파이프라인 | 공유 작업 목록에서 협력하는 Claude 에이전트 |
-| **omc-teams** | tmux CLI 워커 | Codex/Gemini CLI 작업; 요청 시 실행, 완료 후 종료 |
+| **omc team (CLI)** | tmux CLI 워커 | Codex/Gemini CLI 작업; 요청 시 실행, 완료 후 종료 |
 | **ccg** | 트라이-모델 병렬 | Codex(분석) + Gemini(디자인), Claude가 통합 |
 | **Autopilot** | 자율 실행 | 최소한의 설정으로 end-to-end 기능 개발 |
 | **Ultrawork** | 최대 병렬 | Team이 필요 없는 병렬 수정/리팩토링 |
@@ -162,7 +166,7 @@ Team은 단계별 파이프라인으로 실행됩니다:
 
 ### 개발자 경험
 
-- **매직 키워드** - 명시적 제어를 위한 `ralph`, `ulw`, `plan`
+- **매직 키워드** - 명시적 제어를 위한 `ralph`, `ulw`, `team`
 - **HUD 상태바** - 상태바에서 실시간 오케스트레이션 메트릭 확인
 - **스킬 학습** - 세션에서 재사용 가능한 패턴 추출
 - **분석 및 비용 추적** - 모든 세션의 토큰 사용량 이해
@@ -178,7 +182,7 @@ Team은 단계별 파이프라인으로 실행됩니다:
 | 키워드 | 효과 | 예시 |
 |---------|--------|---------|
 | `team` | 표준 Team 오케스트레이션 | `/team 3:executor "fix all TypeScript errors"` |
-| `omc-teams` | tmux CLI 워커 (codex/gemini/claude) | `/omc-teams 2:codex "security review"` |
+| `omc team` | tmux CLI 워커 (codex/gemini/claude) | `omc team 2:codex "security review"` |
 | `ccg` | 트라이-모델 Codex+Gemini 오케스트레이션 | `/ccg review this PR` |
 | `autopilot` | 완전 자율 실행 | `autopilot: build a todo app` |
 | `ralph` | 지속 모드 | `ralph: refactor auth` |
@@ -191,6 +195,7 @@ Team은 단계별 파이프라인으로 실행됩니다:
 
 **참고:**
 - **ralph는 ultrawork를 포함합니다:** ralph 모드를 활성화하면 자동으로 ultrawork의 병렬 실행이 포함됩니다. 키워드를 결합할 필요가 없습니다.
+- `/omc-teams`는 레거시 호환 경로로 남아 있으며 내부적으로 `omc team ...`으로 라우팅됩니다.
 - `swarm N agents` 구문은 에이전트 수 추출을 위해 여전히 인식되지만, v4.1.7+에서 런타임은 Team 기반입니다.
 
 ---

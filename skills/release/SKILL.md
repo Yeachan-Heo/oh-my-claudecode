@@ -25,6 +25,8 @@ Update version in all locations:
 - `src/installer/index.ts` (VERSION constant)
 - `src/__tests__/installer.test.ts` (expected version)
 - `.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json` (both `plugins[0].version` and root `version`)
+- `docs/CLAUDE.md` (`<!-- OMC:VERSION:X.Y.Z -->` marker)
 - `README.md` (version badge and title)
 
 ### 2. Run Tests
@@ -68,6 +70,8 @@ gh release create v<version> --title "v<version> - <title>" --notes "<release no
 | `src/installer/index.ts` | `export const VERSION = 'X.Y.Z'` |
 | `src/__tests__/installer.test.ts` | `expect(VERSION).toBe('X.Y.Z')` |
 | `.claude-plugin/plugin.json` | `"version": "X.Y.Z"` |
+| `.claude-plugin/marketplace.json` | `plugins[0].version` + root `version` |
+| `docs/CLAUDE.md` | `<!-- OMC:VERSION:X.Y.Z -->` |
 | `README.md` | Title + version badge |
 
 ## Semantic Versioning

@@ -58,6 +58,7 @@ function semverCompare(a, b) {
 
 async function main() {
   const home = homedir();
+  let pluginCacheDir = null;
 
   // 1. Try plugin cache first (marketplace: omc, plugin: oh-my-claudecode)
   // Respect CLAUDE_CONFIG_DIR so installs under a custom config dir are found
@@ -67,13 +68,17 @@ async function main() {
     try {
       const versions = readdirSync(pluginCacheBase);
       if (versions.length > 0) {
+        const sortedVersions = versions.sort(semverCompare).reverse();
+        pluginCacheDir = join(pluginCacheBase, sortedVersions[0]);
+
         // Filter to only versions with built dist/hud/index.js
-        const builtVersions = versions.filter(v => {
+        const builtVersions = sortedVersions.filter(v => {
           const hudPath = join(pluginCacheBase, v, "dist/hud/index.js");
           return existsSync(hudPath);
         });
         if (builtVersions.length > 0) {
-          const latestBuilt = builtVersions.sort(semverCompare).reverse()[0];
+          const latestBuilt = builtVersions[0];
+          pluginCacheDir = join(pluginCacheBase, latestBuilt);
           const pluginPath = join(pluginCacheBase, latestBuilt, "dist/hud/index.js");
           await import(pathToFileURL(pluginPath).href);
           return;
@@ -99,8 +104,28 @@ async function main() {
     }
   }
 
-  // 3. Fallback
-  console.log("[OMC] run /omc-setup to install properly");
+  // 3. Marketplace clone (for marketplace installs without a populated cache)
+  const marketplaceHudPath = join(configDir, "plugins", "marketplaces", "omc", "dist/hud/index.js");
+  if (existsSync(marketplaceHudPath)) {
+    try {
+      await import(pathToFileURL(marketplaceHudPath).href);
+      return;
+    } catch { /* continue */ }
+  }
+
+  // 4. Fallback: provide targeted repair guidance
+  if (pluginCacheDir && existsSync(pluginCacheDir)) {
+    const distDir = join(pluginCacheDir, "dist");
+    if (!existsSync(distDir)) {
+      console.log(\`[OMC HUD] Plugin installed but not built. Run: cd "\${pluginCacheDir}" && npm install && npm run build\`);
+    } else {
+      console.log(\`[OMC HUD] Plugin HUD load failed. Run: cd "\${pluginCacheDir}" && npm install && npm run build\`);
+    }
+  } else if (existsSync(pluginCacheBase)) {
+    console.log("[OMC HUD] Plugin cache found but no versions installed. Run: /oh-my-claudecode:omc-setup");
+  } else {
+    console.log("[OMC HUD] Plugin not installed. Run: /oh-my-claudecode:omc-setup");
+  }
 }
 
 main();

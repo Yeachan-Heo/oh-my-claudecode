@@ -244,7 +244,9 @@ When agents are running, the HUD shows detailed information on separate lines:
 
 ## Configuration Location
 
-HUD config is stored at: `~/.claude/.omc/hud-config.json`
+HUD config is stored in `~/.claude/settings.json` under the `omcHud` key (or your custom config directory if `CLAUDE_CONFIG_DIR` is set).
+
+Legacy config location (deprecated): `~/.claude/.omc/hud-config.json`
 
 ## Manual Configuration
 
@@ -256,24 +258,54 @@ You can manually edit the config file. Each option can be set individually - any
   "elements": {
     "omcLabel": true,
     "ralph": true,
+    "autopilot": true,
     "prdStory": true,
     "activeSkills": true,
     "lastSkill": true,
     "contextBar": true,
     "agents": true,
+    "agentsFormat": "multiline",
     "backgroundTasks": true,
     "todos": true,
-    "showCache": true,
-    "showCost": true,
+    "thinking": true,
+    "thinkingFormat": "text",
+    "permissionStatus": false,
+    "apiKeySource": false,
+    "profile": true,
+    "promptTime": true,
+    "sessionHealth": true,
+    "useBars": true,
+    "showCallCounts": true,
+    "safeMode": true,
     "maxOutputLines": 4
   },
   "thresholds": {
     "contextWarning": 70,
+    "contextCompactSuggestion": 80,
     "contextCritical": 85,
     "ralphWarning": 7
+  },
+  "staleTaskThresholdMinutes": 30,
+  "contextLimitWarning": {
+    "threshold": 80,
+    "autoCompact": false
   }
 }
 ```
+
+### safeMode
+
+When `safeMode` is `true` (default), the HUD strips ANSI codes and uses ASCII-only output to prevent terminal rendering corruption during concurrent updates. This is especially important on Windows and when using terminal multiplexers.
+
+### agentsFormat Options
+
+- `count`: agents:2
+- `codes`: agents:Oes (type-coded with model tier casing)
+- `codes-duration`: agents:O(2m)es (codes with duration)
+- `detailed`: agents:[architect(2m),explore,exec]
+- `descriptions`: O:analyzing code | e:searching (codes + what they're doing)
+- `tasks`: [analyzing code, searching...] (just descriptions)
+- `multiline`: Multi-line display with full agent details on separate lines
 
 ## Troubleshooting
 

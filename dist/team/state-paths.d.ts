@@ -7,7 +7,7 @@
  *     config.json
  *     shutdown.json
  *     tasks/
- *       {taskId}.json
+ *       task-{taskId}.json
  *     workers/
  *       {workerName}/
  *         heartbeat.json
@@ -17,8 +17,9 @@
  *         AGENTS.md       ← worker overlay
  *         shutdown-ack.json
  *     mailbox/
- *       {workerName}.jsonl
+ *       {workerName}.json
  */
+export declare function normalizeTaskFileStem(taskId: string): string;
 export declare const TeamPaths: {
     readonly root: (teamName: string) => string;
     readonly config: (teamName: string) => string;
@@ -33,8 +34,23 @@ export declare const TeamPaths: {
     readonly ready: (teamName: string, workerName: string) => string;
     readonly overlay: (teamName: string, workerName: string) => string;
     readonly shutdownAck: (teamName: string, workerName: string) => string;
-    readonly done: (teamName: string, workerName: string) => string;
     readonly mailbox: (teamName: string, workerName: string) => string;
+    readonly mailboxLockDir: (teamName: string, workerName: string) => string;
+    readonly dispatchRequests: (teamName: string) => string;
+    readonly dispatchLockDir: (teamName: string) => string;
+    readonly workerStatus: (teamName: string, workerName: string) => string;
+    readonly workerIdleNotify: (teamName: string) => string;
+    readonly workerPrevNotifyState: (teamName: string, workerName: string) => string;
+    readonly events: (teamName: string) => string;
+    readonly approval: (teamName: string, taskId: string) => string;
+    readonly manifest: (teamName: string) => string;
+    readonly monitorSnapshot: (teamName: string) => string;
+    readonly summarySnapshot: (teamName: string) => string;
+    readonly phaseState: (teamName: string) => string;
+    readonly scalingLock: (teamName: string) => string;
+    readonly workerIdentity: (teamName: string, workerName: string) => string;
+    readonly workerAgentsMd: (teamName: string) => string;
+    readonly shutdownRequest: (teamName: string, workerName: string) => string;
 };
 /**
  * Get absolute path for a team state file.
@@ -48,7 +64,7 @@ export declare function teamStateRoot(cwd: string, teamName: string): string;
  * Canonical task storage path builder.
  *
  * All task files live at:
- *   {cwd}/.omc/state/team/{teamName}/tasks/{taskId}.json
+ *   {cwd}/.omc/state/team/{teamName}/tasks/task-{taskId}.json
  *
  * When taskId is omitted, returns the tasks directory:
  *   {cwd}/.omc/state/team/{teamName}/tasks/

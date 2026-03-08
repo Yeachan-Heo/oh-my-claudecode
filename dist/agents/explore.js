@@ -24,7 +24,8 @@ export const EXPLORE_PROMPT_METADATA = {
         'Quick codebase exploration',
     ],
     avoidWhen: [
-        'External documentation lookup (use document-specialist)',
+        'External documentation, literature, or academic paper lookup (use document-specialist)',
+        'Database/reference/manual lookups outside the current project (use document-specialist)',
         'GitHub/npm package research (use document-specialist)',
         'Complex architectural analysis (use architect)',
         'When you already know the file location',
@@ -32,7 +33,7 @@ export const EXPLORE_PROMPT_METADATA = {
 };
 export const exploreAgent = {
     name: 'explore',
-    description: 'Fast codebase exploration and pattern search. Use for finding files, understanding structure, locating implementations. Searches INTERNAL codebase.',
+    description: 'Fast codebase exploration and pattern search. Use for finding files, understanding structure, locating implementations. Searches INTERNAL codebase only; external docs, literature, papers, and reference databases belong to document-specialist.',
     prompt: loadAgentPrompt('explore'),
     model: 'haiku',
     defaultModel: 'haiku',

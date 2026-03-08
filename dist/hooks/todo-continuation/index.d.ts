@@ -138,6 +138,18 @@ export declare function isContextLimitStop(context?: StopContext): boolean;
  */
 export declare function isRateLimitStop(context?: StopContext): boolean;
 /**
+ * Auth-related stop reasons that should bypass continuation re-enforcement.
+ * Keep exactly 16 entries in sync with script/template variants.
+ */
+export declare const AUTHENTICATION_ERROR_PATTERNS: readonly ["authentication_error", "authentication_failed", "auth_error", "unauthorized", "unauthorised", "401", "403", "forbidden", "invalid_token", "token_invalid", "token_expired", "expired_token", "oauth_expired", "oauth_token_expired", "invalid_grant", "insufficient_scope"];
+/**
+ * Detect if stop was triggered by authentication/authorization failures.
+ * Auth failures should not re-trigger persistent continuation loops.
+ *
+ * Fix for: issue #1308
+ */
+export declare function isAuthenticationError(context?: StopContext): boolean;
+/**
  * Get the Task directory for a session
  *
  * NOTE: This path (~/.claude/tasks/{sessionId}/) is inferred from Claude Code's

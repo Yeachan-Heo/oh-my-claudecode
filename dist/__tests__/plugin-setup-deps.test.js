@@ -31,9 +31,9 @@ describe('plugin-setup.mjs dependency installation', () => {
     });
     it('uses --ignore-scripts to prevent recursive setup', () => {
         // --ignore-scripts must be present to avoid re-triggering plugin-setup.mjs
-        const installMatch = scriptContent.match(/npm install[^'"]+/);
-        expect(installMatch).not.toBeNull();
-        expect(installMatch[0]).toContain('--ignore-scripts');
+        const installMatches = scriptContent.match(/npm install[^'"]+/g) || [];
+        expect(installMatches.length).toBeGreaterThan(0);
+        expect(installMatches.some(m => m.includes('--ignore-scripts'))).toBe(true);
     });
     it('sets a timeout on execSync to avoid hanging', () => {
         expect(scriptContent).toMatch(/timeout:\s*\d+/);

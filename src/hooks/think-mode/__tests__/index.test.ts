@@ -190,8 +190,8 @@ World`);
 
   describe('switcher - getHighVariant', () => {
     describe('Claude models', () => {
-      it('should return high variant for claude-sonnet-4-5', () => {
-        expect(getHighVariant('claude-sonnet-4-5')).toBe('claude-sonnet-4-5-high');
+      it('should return high variant for claude-sonnet-4-6', () => {
+        expect(getHighVariant('claude-sonnet-4-6')).toBe('claude-sonnet-4-6-high');
       });
 
       it('should return high variant for claude-opus-4-6', () => {
@@ -199,15 +199,15 @@ World`);
       });
 
       it('should return high variant for claude-3-5-sonnet', () => {
-        expect(getHighVariant('claude-3-5-sonnet')).toBe('claude-3-5-sonnet-high');
+        expect(getHighVariant('claude-3-5-sonnet')).toBe('claude-sonnet-4-6-high');
       });
 
       it('should return high variant for claude-3-opus', () => {
-        expect(getHighVariant('claude-3-opus')).toBe('claude-3-opus-high');
+        expect(getHighVariant('claude-3-opus')).toBe('claude-opus-4-6-high');
       });
 
       it('should handle version with dot notation', () => {
-        expect(getHighVariant('claude-sonnet-4.5')).toBe('claude-sonnet-4-5-high');
+        expect(getHighVariant('claude-sonnet-4.5')).toBe('claude-sonnet-4-6-high');
       });
     });
 
@@ -245,7 +245,7 @@ World`);
 
     describe('Already high variants', () => {
       it('should return null for already high variant', () => {
-        expect(getHighVariant('claude-sonnet-4-5-high')).toBeNull();
+        expect(getHighVariant('claude-sonnet-4-6-high')).toBeNull();
       });
 
       it('should return null for model ending in -high', () => {
@@ -255,7 +255,7 @@ World`);
 
     describe('Prefixed models', () => {
       it('should preserve prefix in high variant', () => {
-        expect(getHighVariant('vertex_ai/claude-sonnet-4-5')).toBe('vertex_ai/claude-sonnet-4-5-high');
+        expect(getHighVariant('vertex_ai/claude-sonnet-4-5')).toBe('vertex_ai/claude-sonnet-4-6-high');
       });
 
       it('should handle openai/ prefix', () => {
@@ -270,7 +270,7 @@ World`);
 
   describe('switcher - isAlreadyHighVariant', () => {
     it('should return true for high variant models', () => {
-      expect(isAlreadyHighVariant('claude-sonnet-4-5-high')).toBe(true);
+      expect(isAlreadyHighVariant('claude-sonnet-4-6-high')).toBe(true);
     });
 
     it('should return true for any model ending in -high', () => {
@@ -278,12 +278,12 @@ World`);
     });
 
     it('should return false for non-high variant', () => {
-      expect(isAlreadyHighVariant('claude-sonnet-4-5')).toBe(false);
+      expect(isAlreadyHighVariant('claude-sonnet-4-6')).toBe(false);
     });
 
     it('should handle prefixed models', () => {
-      expect(isAlreadyHighVariant('vertex_ai/claude-sonnet-4-5-high')).toBe(true);
-      expect(isAlreadyHighVariant('vertex_ai/claude-sonnet-4-5')).toBe(false);
+      expect(isAlreadyHighVariant('vertex_ai/claude-sonnet-4-6-high')).toBe(true);
+      expect(isAlreadyHighVariant('vertex_ai/claude-sonnet-4-6')).toBe(false);
     });
 
     it('should normalize dot notation', () => {
@@ -294,13 +294,13 @@ World`);
   describe('switcher - getThinkingConfig', () => {
     describe('Anthropic provider', () => {
       it('should return config for Claude models', () => {
-        const config = getThinkingConfig('anthropic', 'claude-sonnet-4-5');
+        const config = getThinkingConfig('anthropic', 'claude-sonnet-4-6');
         expect(config).not.toBeNull();
         expect(config).toHaveProperty('thinking');
       });
 
       it('should return null for already high variant', () => {
-        const config = getThinkingConfig('anthropic', 'claude-sonnet-4-5-high');
+        const config = getThinkingConfig('anthropic', 'claude-sonnet-4-6-high');
         expect(config).toBeNull();
       });
     });
@@ -336,7 +336,7 @@ World`);
 
     describe('GitHub Copilot proxy', () => {
       it('should resolve to anthropic for Claude model', () => {
-        const config = getThinkingConfig('github-copilot', 'claude-sonnet-4-5');
+        const config = getThinkingConfig('github-copilot', 'claude-sonnet-4-6');
         expect(config).not.toBeNull();
         expect(config).toHaveProperty('thinking');
       });
@@ -533,13 +533,13 @@ World`);
           message: {
             model: {
               providerId: 'anthropic',
-              modelId: 'claude-sonnet-4-5',
+              modelId: 'claude-sonnet-4-6',
             },
           },
         };
         const state = hook.processChatParams('test-session', input);
         expect(state.modelSwitched).toBe(true);
-        expect(input.message.model?.modelId).toBe('claude-sonnet-4-5-high');
+        expect(input.message.model?.modelId).toBe('claude-sonnet-4-6-high');
       });
 
       it('should not switch already high variant', () => {
@@ -549,7 +549,7 @@ World`);
           message: {
             model: {
               providerId: 'anthropic',
-              modelId: 'claude-sonnet-4-5-high',
+              modelId: 'claude-sonnet-4-6-high',
             },
           },
         };
@@ -564,7 +564,7 @@ World`);
           message: {
             model: {
               providerId: 'anthropic',
-              modelId: 'claude-sonnet-4-5',
+              modelId: 'claude-sonnet-4-6',
             },
           },
         };
@@ -579,14 +579,14 @@ World`);
           message: {
             model: {
               providerId: 'anthropic',
-              modelId: 'claude-sonnet-4-5',
+              modelId: 'claude-sonnet-4-6',
             },
           },
         };
         hook.processChatParams('test-session', input);
         const state = hook.getState('test-session');
         expect(state?.providerId).toBe('anthropic');
-        expect(state?.modelId).toBe('claude-sonnet-4-5');
+        expect(state?.modelId).toBe('claude-sonnet-4-6');
       });
     });
 

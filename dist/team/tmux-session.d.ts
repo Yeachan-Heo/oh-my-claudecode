@@ -3,10 +3,15 @@
  * Tmux panes run bash in this environment, not cmd.exe.
  */
 export declare function isUnixLikeOnWindows(): boolean;
+export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
 export interface TeamSession {
     sessionName: string;
     leaderPaneId: string;
     workerPaneIds: string[];
+    sessionMode: TeamSessionMode;
+}
+export interface CreateTeamSessionOptions {
+    newWindow?: boolean;
 }
 export interface WorkerPaneConfig {
     teamName: string;
@@ -46,18 +51,21 @@ export declare function listActiveSessions(teamName: string): string[];
  */
 export declare function spawnBridgeInSession(tmuxSession: string, bridgeScriptPath: string, configFilePath: string): void;
 /**
- * Create a tmux session with split-pane topology for a team.
+ * Create a tmux team topology for a team leader/worker layout.
  *
  * Must be run inside an existing tmux session ($TMUX must be set).
- * Creates splits in the CURRENT window so panes appear immediately
- * in the user's view. Returns sessionName in "session:window" form.
+ * By default, creates splits in the CURRENT window so panes appear immediately
+ * in the user's view. When options.newWindow is true, creates a detached
+ * dedicated tmux window first and then splits worker panes there.
+ * Returns sessionName in "session:window" form.
  *
  * Layout: leader pane on the left, worker panes stacked vertically on the right.
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
  */
-export declare function createTeamSession(teamName: string, workerCount: number, cwd: string): Promise<TeamSession>;
+export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;
 /**
  * Spawn a CLI agent in a specific pane.
+
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
  */
 export declare function spawnWorkerInPane(sessionName: string, paneId: string, config: WorkerPaneConfig): Promise<void>;
@@ -108,13 +116,14 @@ export declare function killWorkerPanes(opts: {
     graceMs?: number;
 }): Promise<void>;
 /**
- * Kill the team tmux session or just the worker panes (split-pane mode).
+ * Kill the team tmux session or just the worker panes, depending on how the
+ * team was created.
  *
- * When sessionName contains ':' (split-pane mode, "session:window" form),
- * only the worker panes are killed — the leader pane and the user's session
- * are left intact. leaderPaneId is never killed.
- *
- * When sessionName does not contain ':', the entire session is killed.
+ * - split-pane: kill only worker panes; preserve the leader pane and user window.
+ * - dedicated-window: kill the owned tmux window.
+ * - detached-session: kill the fully owned tmux session.
  */
-export declare function killTeamSession(sessionName: string, workerPaneIds?: string[], leaderPaneId?: string): Promise<void>;
+export declare function killTeamSession(sessionName: string, workerPaneIds?: string[], leaderPaneId?: string, options?: {
+    sessionMode?: TeamSessionMode;
+}): Promise<void>;
 //# sourceMappingURL=tmux-session.d.ts.map

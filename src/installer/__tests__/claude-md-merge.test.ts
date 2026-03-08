@@ -262,4 +262,41 @@ New OMC content v2
       expect(result).toContain('My custom stuff');
     });
   });
+
+  describe('version marker sync', () => {
+    it('injects the provided version marker on fresh install', () => {
+      const result = mergeClaudeMd(null, omcContent, '4.6.7');
+
+      expect(result).toContain('<!-- OMC:VERSION:4.6.7 -->');
+      expect(result).toContain(START_MARKER);
+      expect(result).toContain(END_MARKER);
+    });
+
+    it('replaces stale version marker when updating existing marker block', () => {
+      const existingContent = `${START_MARKER}
+<!-- OMC:VERSION:4.5.0 -->
+Old content
+${END_MARKER}
+
+${USER_CUSTOMIZATIONS}
+my notes`;
+
+      const result = mergeClaudeMd(existingContent, omcContent, '4.6.7');
+
+      expect(result).toContain('<!-- OMC:VERSION:4.6.7 -->');
+      expect(result).not.toContain('<!-- OMC:VERSION:4.5.0 -->');
+      expect((result.match(/<!-- OMC:VERSION:/g) || []).length).toBe(1);
+      expect(result).toContain('my notes');
+    });
+
+    it('strips embedded version marker from omc content before inserting current version', () => {
+      const omcWithVersion = `<!-- OMC:VERSION:4.0.0 -->\n${omcContent}`;
+
+      const result = mergeClaudeMd(null, omcWithVersion, '4.6.7');
+
+      expect(result).toContain('<!-- OMC:VERSION:4.6.7 -->');
+      expect(result).not.toContain('<!-- OMC:VERSION:4.0.0 -->');
+      expect((result.match(/<!-- OMC:VERSION:/g) || []).length).toBe(1);
+    });
+  });
 });

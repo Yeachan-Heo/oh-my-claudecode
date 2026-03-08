@@ -66,7 +66,12 @@ async function writePanesTrackingFileIfPresent(runtime) {
         return;
     const panesPath = join(omcJobsDir, `${jobId}-panes.json`);
     const tempPath = `${panesPath}.tmp`;
-    await writeFile(tempPath, JSON.stringify({ paneIds: [...runtime.workerPaneIds], leaderPaneId: runtime.leaderPaneId }), 'utf-8');
+    await writeFile(tempPath, JSON.stringify({
+        paneIds: [...runtime.workerPaneIds],
+        leaderPaneId: runtime.leaderPaneId,
+        sessionName: runtime.sessionName,
+        ownsWindow: Boolean(runtime.ownsWindow),
+    }), 'utf-8');
     await rename(tempPath, panesPath);
 }
 async function readTask(root, taskId) {
@@ -224,7 +229,7 @@ export async function startTeam(config) {
     const root = stateRoot(cwd, teamName);
     await mkdir(join(root, 'tasks'), { recursive: true });
     await mkdir(join(root, 'mailbox'), { recursive: true });
-    // Write config
+    // Write initial config before tmux topology is created.
     await writeJson(join(root, 'config.json'), config);
     // Create task files
     for (let i = 0; i < tasks.length; i++) {
@@ -255,18 +260,27 @@ export async function startTeam(config) {
     }
     // Create tmux session with ZERO worker panes (leader only).
     // Workers are spawned on-demand by the orchestrator.
-    const session = await createTeamSession(teamName, 0, cwd);
+    const session = await createTeamSession(teamName, 0, cwd, {
+        newWindow: Boolean(config.newWindow),
+    });
     const runtime = {
         teamName,
         sessionName: session.sessionName,
         leaderPaneId: session.leaderPaneId,
-        config,
+        config: {
+            ...config,
+            tmuxSession: session.sessionName,
+            leaderPaneId: session.leaderPaneId,
+            tmuxOwnsWindow: session.sessionMode !== 'split-pane',
+        },
         workerNames,
         workerPaneIds: session.workerPaneIds, // initially empty []
         activeWorkers: new Map(),
         cwd,
         resolvedBinaryPaths,
+        ownsWindow: session.sessionMode !== 'split-pane',
     };
+    await writeJson(join(root, 'config.json'), runtime.config);
     const maxConcurrentWorkers = agentTypes.length;
     for (let i = 0; i < maxConcurrentWorkers; i++) {
         const taskIndex = await nextPendingTaskIndex(runtime);
@@ -683,7 +697,7 @@ export async function assignTask(teamName, taskId, targetWorkerName, paneId, ses
 /**
  * Gracefully shut down all workers and clean up.
  */
-export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_000, workerPaneIds, leaderPaneId) {
+export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_000, workerPaneIds, leaderPaneId, ownsWindow) {
     const root = stateRoot(cwd, teamName);
     // Write shutdown request
     await writeJson(join(root, 'shutdown.json'), {
@@ -717,7 +731,10 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
     }
     // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
     // Kill tmux session (or just worker panes in split-pane mode)
-    await killTeamSession(sessionName, workerPaneIds, leaderPaneId);
+    const sessionMode = (ownsWindow ?? Boolean(configData?.tmuxOwnsWindow))
+        ? (sessionName.includes(':') ? 'dedicated-window' : 'detached-session')
+        : 'split-pane';
+    await killTeamSession(sessionName, workerPaneIds, leaderPaneId, { sessionMode });
     // Clean up state
     try {
         await rm(root, { recursive: true, force: true });
@@ -740,16 +757,16 @@ export async function resumeTeam(teamName, cwd) {
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
-    const sName = `omc-team-${teamName}`;
+    const sName = configData.tmuxSession || `omc-team-${teamName}`;
     try {
-        await execFileAsync('tmux', ['has-session', '-t', sName]);
+        await execFileAsync('tmux', ['has-session', '-t', sName.split(':')[0]]);
     }
     catch {
         return null; // Session not alive
     }
-    // Read saved pane IDs (if we save them — for now derive from session)
+    const paneTarget = sName.includes(':') ? sName : sName.split(':')[0];
     const panesResult = await execFileAsync('tmux', [
-        'list-panes', '-t', sName, '-F', '#{pane_id}'
+        'list-panes', '-t', paneTarget, '-F', '#{pane_id}'
     ]);
     const allPanes = panesResult.stdout.trim().split('\n').filter(Boolean);
     // First pane is leader, rest are workers
@@ -774,12 +791,13 @@ export async function resumeTeam(teamName, cwd) {
     return {
         teamName,
         sessionName: sName,
-        leaderPaneId: allPanes[0] ?? '',
+        leaderPaneId: configData.leaderPaneId ?? allPanes[0] ?? '',
         config: configData,
         workerNames,
         workerPaneIds,
         activeWorkers,
         cwd,
+        ownsWindow: Boolean(configData.tmuxOwnsWindow),
     };
 }
 //# sourceMappingURL=runtime.js.map

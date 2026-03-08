@@ -935,3 +935,279 @@ Offer to send a test notification with the new template.
 ## Related
 
 - `/oh-my-claudecode:configure-openclaw` — Configure OpenClaw gateway integration
+
+---
+
+## Custom Integration (OpenClaw, n8n, CLI, etc.)
+
+Configure custom webhooks and CLI commands for services beyond the native Discord/Telegram/Slack integrations.
+
+### Routing
+
+If the user says "custom integration", "openclaw", "n8n", "webhook", "cli command", or similar → follow this section.
+
+### Migration from OpenClaw
+
+If `~/.claude/omc_config.openclaw.json` exists, detect and offer migration:
+
+**Step 1: Detect Legacy Config**
+```bash
+LEGACY_CONFIG="$HOME/.claude/omc_config.openclaw.json"
+if [ -f "$LEGACY_CONFIG" ]; then
+  echo "LEGACY_FOUND=true"
+  # Check if already migrated
+  if jq -e '.customIntegrations.integrations[] | select(.preset == "openclaw")' "$CONFIG_FILE" >/dev/null 2>&1; then
+    echo "ALREADY_MIGRATED=true"
+  else
+    echo "ALREADY_MIGRATED=false"
+  fi
+else
+  echo "LEGACY_FOUND=false"
+fi
+```
+
+**Step 2: Offer Migration**
+If legacy found and not migrated:
+
+**Question:** "Existing OpenClaw configuration detected. Would you like to migrate it to the new format?"
+
+**Options:**
+1. **Yes, migrate now** - Convert legacy config to custom integration
+2. **No, configure fresh** - Skip migration and start new
+3. **Show me the legacy config first** - Display current OpenClaw settings
+
+If migrate:
+- Read `omc_config.openclaw.json`
+- Transform to custom integration format
+- Save to `.omc-config.json`
+- Backup legacy to `omc_config.openclaw.json.bak`
+- Show success message
+
+### Custom Integration Wizard
+
+**Step 1: Select Integration Type**
+
+**Question:** "Which type of custom integration would you like to configure?"
+
+**Options:**
+1. **OpenClaw Gateway** - Wake external automations and AI agents
+2. **n8n Webhook** - Trigger n8n workflows
+3. **ClawdBot** - Send notifications to ClawdBot
+4. **Generic Webhook** - Custom HTTPS webhook
+5. **Generic CLI Command** - Execute shell command on events
+
+### OpenClaw/n8n/ClawdBot Preset Flow
+
+**Step 2: Gateway URL**
+
+**Question:** "What is your gateway/webhook URL?"
+
+**Validation:**
+- Must be HTTPS (except localhost for development)
+- Must be valid URL format
+
+**Step 3: Authentication (Optional)**
+
+**Question:** "Does your gateway require authentication?"
+
+**Options:**
+1. **Bearer token** - Authorization: Bearer <token>
+2. **Custom header** - Name and value
+3. **No authentication**
+
+If Bearer: ask for token
+If Custom: ask for header name and value
+
+**Step 4: Events**
+
+Use AskUserQuestion with multiSelect:
+
+**Question:** "Which events should trigger this integration?"
+
+**Options (with defaults from preset):**
+- session-start
+- session-end
+- session-stop
+- session-idle
+- ask-user-question
+
+Default for OpenClaw: session-start, session-end, stop
+Default for n8n: session-end, ask-user-question
+
+**Step 5: Test**
+
+**Question:** "Send a test notification to verify the configuration?"
+
+**Options:**
+1. **Yes, test now** - Send test webhook
+2. **No, skip test**
+
+If test:
+```bash
+# For webhook integrations
+curl -X POST \
+  -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+"-H \"$AUTH_HEADER\""} \
+  -d '{"event":"test","instruction":"OMC test notification","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' \
+  "$WEBHOOK_URL"
+```
+
+Show result (HTTP status, any error).
+
+**Step 6: Write Configuration**
+
+Merge into `.omc-config.json`:
+
+```json
+{
+  "notifications": { /* existing native configs */ },
+  "customIntegrations": {
+    "enabled": true,
+    "integrations": [
+      {
+        "id": "my-openclaw",
+        "type": "webhook",
+        "preset": "openclaw",
+        "enabled": true,
+        "config": {
+          "url": "https://my-gateway.example.com/wake",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ..."
+          },
+          "bodyTemplate": "{\\"event\\":\\"{{event}}\\",\\"instruction\\":\\"Session {{sessionId}} {{event}}\\",\\"timestamp\\":\\"{{timestamp}}\\"}",
+          "timeout": 10000
+        },
+        "events": ["session-start", "session-end"]
+      }
+    ]
+  }
+}
+```
+
+### Generic Webhook Flow
+
+**Step 2: URL**
+Ask for webhook URL (HTTPS required).
+
+**Step 3: Method**
+Ask for HTTP method (GET, POST, PUT, PATCH, DELETE). Default: POST.
+
+**Step 4: Headers**
+Ask for headers in "Name: Value" format, one per line. Default: Content-Type: application/json
+
+**Step 5: Body Template**
+Show available template variables and ask for body template (JSON or other format).
+
+Default:
+```json
+{
+  "event": "{{event}}",
+  "sessionId": "{{sessionId}}",
+  "projectName": "{{projectName}}",
+  "timestamp": "{{timestamp}}"
+}
+```
+
+**Step 6: Timeout**
+Ask for timeout in milliseconds (1000-60000). Default: 10000.
+
+**Step 7: Events**
+Multi-select events.
+
+**Step 8: Test and Save**
+Same as preset flow.
+
+### Generic CLI Command Flow
+
+**Step 2: Command**
+
+**Question:** "What command should be executed? (single executable, no arguments)"
+
+**Example:** `curl`, `/usr/local/bin/my-script`, `notify-send`
+
+**Validation:**
+- No spaces
+- No shell metacharacters
+
+**Step 3: Arguments**
+
+**Question:** "Command arguments (use {{variable}} for dynamic values). Enter one per line."
+
+**Example:**
+```
+-X
+POST
+-d
+{"event":"{{event}}","session":"{{sessionId}}"}
+https://my-api.com/notify
+```
+
+Show available template variables reference.
+
+**Step 4: Timeout**
+Ask for timeout (1000-60000ms). Default: 5000.
+
+**Step 5: Events**
+Multi-select events.
+
+**Step 6: Test and Save**
+
+For test, execute command with test values:
+```bash
+$COMMAND "${ARGS[@]//{{event}}/test}"
+```
+
+Show stdout/stderr and exit code.
+
+### Managing Custom Integrations
+
+**List existing:**
+```bash
+jq '.customIntegrations.integrations[] | {id, type, preset, enabled, events}' "$CONFIG_FILE"
+```
+
+**Disable/Enable:**
+```bash
+# Disable
+jq '.customIntegrations.integrations = [.customIntegrations.integrations[] | if .id == "my-integration" then .enabled = false else . end]' "$CONFIG_FILE"
+
+# Enable
+jq '.customIntegrations.integrations = [.customIntegrations.integrations[] | if .id == "my-integration" then .enabled = true else . end]' "$CONFIG_FILE"
+```
+
+**Remove:**
+```bash
+jq '.customIntegrations.integrations = [.customIntegrations.integrations[] | select(.id != "my-integration")]' "$CONFIG_FILE"
+```
+
+### Template Variables Reference
+
+All custom integrations support these template variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{{sessionId}}` | Unique session ID | `sess_abc123` |
+| `{{projectPath}}` | Full project path | `/home/user/my-project` |
+| `{{projectName}}` | Project directory name | `my-project` |
+| `{{timestamp}}` | ISO 8601 timestamp | `2026-03-05T14:30:00Z` |
+| `{{event}}` | Event name | `session-end` |
+| `{{duration}}` | Human-readable duration | `45s` |
+| `{{durationMs}}` | Duration in milliseconds | `45000` |
+| `{{reason}}` | Stop/end reason | `completed` |
+| `{{tmuxSession}}` | tmux session name | `claude:my-project` |
+
+Session-end only:
+- `{{agentsSpawned}}`, `{{agentsCompleted}}`, `{{modesUsed}}`, `{{contextSummary}}`
+
+Ask-user-question only:
+- `{{question}}`
+
+---
+
+## Related
+
+- Template variables: `src/notifications/template-variables.ts`
+- Validation: `src/notifications/validation.ts`
+- Presets: `src/notifications/presets.ts`

@@ -22,10 +22,12 @@ import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledV
 import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
+import { teamCommand } from './commands/team.js';
 import { teleportCommand, teleportListCommand, teleportRemoveCommand } from './commands/teleport.js';
 import { getRuntimePackageVersion } from '../lib/version.js';
 import { launchCommand } from './launch.js';
 import { interopCommand } from './interop.js';
+import { askCommand, ASK_USAGE } from './ask.js';
 import { warnIfWin32 } from './win32-warning.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const version = getRuntimePackageVersion();
@@ -85,6 +87,17 @@ Requirements:
   - Codex CLI recommended (graceful fallback if missing)`)
     .action(() => {
     interopCommand();
+});
+/**
+ * Ask command - Run provider advisor prompt (claude|gemini)
+ */
+program
+    .command('ask [args...]')
+    .description('Run provider advisor prompt and write an ask artifact')
+    .allowUnknownOption()
+    .addHelpText('after', `\n${ASK_USAGE}`)
+    .action(async (args) => {
+    await askCommand(args || []);
 });
 /**
  * Init command - Initialize configuration
@@ -1225,8 +1238,13 @@ Examples:
                 console.log(chalk.yellow(`    - ${c.eventType}: ${c.existingCommand}`));
             });
         }
+        const installed = getInstalledVersion();
+        const reportedVersion = installed?.version ?? version;
         console.log('');
-        console.log(chalk.gray(`Version: ${version}`));
+        console.log(chalk.gray(`Version: ${reportedVersion}`));
+        if (reportedVersion !== version) {
+            console.log(chalk.gray(`CLI package version: ${version}`));
+        }
         console.log(chalk.gray('Start Claude Code and use /oh-my-claudecode:omc-setup for interactive setup.'));
     }
 });
@@ -1275,6 +1293,23 @@ program
     else {
         await hudMain();
     }
+});
+/**
+ * Team command - CLI API for team worker lifecycle operations
+ * Exposes OMC's `omc team api` interface.
+ *
+ * helpOption(false) prevents commander from intercepting --help;
+ * our teamCommand handler provides its own help output.
+ */
+program
+    .command('team')
+    .description('Team CLI API for worker lifecycle operations')
+    .helpOption(false)
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .argument('[args...]', 'team subcommand arguments')
+    .action(async (args) => {
+    await teamCommand(args);
 });
 // Parse arguments
 program.parse();

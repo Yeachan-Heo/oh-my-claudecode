@@ -6794,6 +6794,8 @@ var require_dist = __commonJS({
 // src/mcp/team-server.ts
 var team_server_exports = {};
 __export(team_server_exports, {
+  createDeprecatedCliOnlyEnvelope: () => createDeprecatedCliOnlyEnvelope,
+  createDeprecatedCliOnlyEnvelopeWithArgs: () => createDeprecatedCliOnlyEnvelopeWithArgs,
   handleCleanup: () => handleCleanup,
   handleStatus: () => handleStatus,
   handleWait: () => handleWait
@@ -17846,7 +17848,7 @@ async function paneInCopyMode(paneId, execFileAsync) {
   }
 }
 function shouldAttemptAdaptiveRetry(args) {
-  if (process.env.OMX_TEAM_AUTO_INTERRUPT_RETRY === "0") return false;
+  if (process.env.OMC_TEAM_AUTO_INTERRUPT_RETRY === "0") return false;
   if (args.retriesAttempted >= 1) return false;
   if (args.paneInCopyMode) return false;
   if (!args.paneBusy) return false;
@@ -17959,6 +17961,45 @@ async function killWorkerPanes(opts) {
       await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
     } catch {
     }
+  }
+}
+async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options = {}) {
+  const { execFile: execFile3 } = await import("child_process");
+  const { promisify: promisify2 } = await import("util");
+  const execFileAsync = promisify2(execFile3);
+  const sessionMode = options.sessionMode ?? (sessionName.includes(":") ? "split-pane" : "detached-session");
+  if (sessionMode === "split-pane") {
+    if (!workerPaneIds?.length) return;
+    for (const id of workerPaneIds) {
+      if (id === leaderPaneId) continue;
+      try {
+        await execFileAsync("tmux", ["kill-pane", "-t", id]);
+      } catch {
+      }
+    }
+    return;
+  }
+  if (sessionMode === "dedicated-window") {
+    try {
+      await execFileAsync("tmux", ["kill-window", "-t", sessionName]);
+    } catch {
+    }
+    return;
+  }
+  const sessionTarget = sessionName.split(":")[0] ?? sessionName;
+  if (process.env.OMC_TEAM_ALLOW_KILL_CURRENT_SESSION !== "1" && process.env.TMUX) {
+    try {
+      const current = await tmuxAsync(["display-message", "-p", "#S"]);
+      const currentSessionName = current.stdout.trim();
+      if (currentSessionName && currentSessionName === sessionTarget) {
+        return;
+      }
+    } catch {
+    }
+  }
+  try {
+    await execFileAsync("tmux", ["kill-session", "-t", sessionTarget]);
+  } catch {
   }
 }
 
@@ -18144,6 +18185,88 @@ function clearScopedTeamState(job) {
 // src/mcp/team-server.ts
 var omcTeamJobs = /* @__PURE__ */ new Map();
 var OMC_JOBS_DIR = process.env.OMC_JOBS_DIR || (0, import_path3.join)((0, import_os.homedir)(), ".omc", "team-jobs");
+var DEPRECATION_CODE = "deprecated_cli_only";
+var TEAM_CLI_REPLACEMENT_HINTS = {
+  omc_run_team_start: "omc team start",
+  omc_run_team_status: "omc team status <job_id>",
+  omc_run_team_wait: "omc team wait <job_id>",
+  omc_run_team_cleanup: "omc team cleanup <job_id>"
+};
+function isDeprecatedTeamToolName(name) {
+  return Object.prototype.hasOwnProperty.call(TEAM_CLI_REPLACEMENT_HINTS, name);
+}
+function createDeprecatedCliOnlyEnvelope(toolName) {
+  return createDeprecatedCliOnlyEnvelopeWithArgs(toolName);
+}
+function quoteCliValue(value) {
+  return JSON.stringify(value);
+}
+function buildCliReplacement(toolName, args) {
+  const hasArgsObject = typeof args === "object" && args !== null;
+  if (!hasArgsObject) {
+    return TEAM_CLI_REPLACEMENT_HINTS[toolName];
+  }
+  const parsed = typeof args === "object" && args !== null ? args : {};
+  if (toolName === "omc_run_team_start") {
+    const teamName = typeof parsed.teamName === "string" ? parsed.teamName.trim() : "";
+    const cwd = typeof parsed.cwd === "string" ? parsed.cwd.trim() : "";
+    const newWindow = parsed.newWindow === true;
+    const agentTypes = Array.isArray(parsed.agentTypes) ? parsed.agentTypes.filter((item) => typeof item === "string" && item.trim().length > 0) : [];
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.map(
+      (task) => typeof task === "object" && task !== null && typeof task.description === "string" ? task.description.trim() : ""
+    ).filter(Boolean) : [];
+    const flags = ["omc", "team", "start"];
+    if (teamName) flags.push("--name", quoteCliValue(teamName));
+    if (cwd) flags.push("--cwd", quoteCliValue(cwd));
+    if (newWindow) flags.push("--new-window");
+    if (agentTypes.length > 0) {
+      const uniqueAgentTypes = new Set(agentTypes);
+      if (uniqueAgentTypes.size === 1) {
+        flags.push("--agent", quoteCliValue(agentTypes[0]), "--count", String(agentTypes.length));
+      } else {
+        flags.push("--agent", quoteCliValue(agentTypes.join(",")));
+      }
+    } else {
+      flags.push("--agent", '"claude"');
+    }
+    if (tasks.length > 0) {
+      for (const task of tasks) {
+        flags.push("--task", quoteCliValue(task));
+      }
+    } else {
+      flags.push("--task", '"<task>"');
+    }
+    return flags.join(" ");
+  }
+  const jobId = typeof parsed.job_id === "string" ? parsed.job_id.trim() : "<job_id>";
+  if (toolName === "omc_run_team_status") {
+    return `omc team status --job-id ${quoteCliValue(jobId)}`;
+  }
+  if (toolName === "omc_run_team_wait") {
+    const timeoutMs = typeof parsed.timeout_ms === "number" && Number.isFinite(parsed.timeout_ms) ? ` --timeout-ms ${Math.floor(parsed.timeout_ms)}` : "";
+    return `omc team wait --job-id ${quoteCliValue(jobId)}${timeoutMs}`;
+  }
+  if (toolName === "omc_run_team_cleanup") {
+    const graceMs = typeof parsed.grace_ms === "number" && Number.isFinite(parsed.grace_ms) ? ` --grace-ms ${Math.floor(parsed.grace_ms)}` : "";
+    return `omc team cleanup --job-id ${quoteCliValue(jobId)}${graceMs}`;
+  }
+  return TEAM_CLI_REPLACEMENT_HINTS[toolName];
+}
+function createDeprecatedCliOnlyEnvelopeWithArgs(toolName, args) {
+  const cliReplacement = buildCliReplacement(toolName, args);
+  return {
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        code: DEPRECATION_CODE,
+        tool: toolName,
+        message: "Legacy team MCP runtime tools are deprecated. Use the omc team CLI instead.",
+        cli_replacement: cliReplacement
+      })
+    }],
+    isError: true
+  };
+}
 function persistJob(jobId, job) {
   try {
     if (!(0, import_fs2.existsSync)(OMC_JOBS_DIR)) (0, import_fs2.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
@@ -18196,7 +18319,8 @@ var startSchema = external_exports.object({
     subject: external_exports.string().describe("Brief task title"),
     description: external_exports.string().describe("Full task description")
   })).describe("Tasks to distribute to workers"),
-  cwd: external_exports.string().describe("Working directory (absolute path)")
+  cwd: external_exports.string().describe("Working directory (absolute path)"),
+  newWindow: external_exports.boolean().optional().describe("Spawn workers in a dedicated tmux window instead of splitting the current window")
 });
 var statusSchema = external_exports.object({
   job_id: external_exports.string().describe("Job ID returned by omc_run_team_start")
@@ -18372,7 +18496,16 @@ async function handleCleanup(args) {
   if (!job) return { content: [{ type: "text", text: `Job ${job_id} not found` }] };
   const panes = await loadPaneIds(job_id);
   let paneCleanupMessage = "No pane IDs recorded for this job \u2014 pane cleanup skipped.";
-  if (panes?.paneIds?.length) {
+  if (panes?.sessionName && (panes.ownsWindow === true || !panes.sessionName.includes(":"))) {
+    const sessionMode = panes.ownsWindow === true ? panes.sessionName.includes(":") ? "dedicated-window" : "detached-session" : "detached-session";
+    await killTeamSession(
+      panes.sessionName,
+      panes.paneIds,
+      panes.leaderPaneId,
+      { sessionMode }
+    );
+    paneCleanupMessage = panes.ownsWindow ? "Cleaned up team tmux window." : `Cleaned up ${panes.paneIds.length} worker pane(s).`;
+  } else if (panes?.paneIds?.length) {
     await killWorkerPanes({
       paneIds: panes.paneIds,
       leaderPaneId: panes.leaderPaneId,
@@ -18390,7 +18523,7 @@ async function handleCleanup(args) {
 var TOOLS = [
   {
     name: "omc_run_team_start",
-    description: "Spawn tmux CLI workers (claude/codex/gemini) in the background. Returns jobId immediately. Poll with omc_run_team_status.",
+    description: "[DEPRECATED] CLI-only migration required. This tool no longer executes; use `omc team start`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18408,14 +18541,15 @@ var TOOLS = [
           },
           description: "Tasks to distribute to workers"
         },
-        cwd: { type: "string", description: "Working directory (absolute path)" }
+        cwd: { type: "string", description: "Working directory (absolute path)" },
+        newWindow: { type: "boolean", description: "Spawn workers in a dedicated tmux window instead of splitting the current window" }
       },
       required: ["teamName", "agentTypes", "tasks", "cwd"]
     }
   },
   {
     name: "omc_run_team_status",
-    description: "Non-blocking status check for a background omc_run_team job. Returns status and result when done.",
+    description: "[DEPRECATED] CLI-only migration required. This tool no longer executes; use `omc team status <job_id>`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18426,7 +18560,7 @@ var TOOLS = [
   },
   {
     name: "omc_run_team_wait",
-    description: "Block (poll internally) until a background omc_run_team job reaches a terminal state (completed or failed). Returns the result when done. One call instead of N polling calls. Uses exponential backoff (500ms \u2192 2000ms). Auto-nudges idle teammate panes via tmux send-keys. If this wait call times out, workers are left running \u2014 call omc_run_team_wait again to keep waiting, or omc_run_team_cleanup to stop them explicitly.",
+    description: "[DEPRECATED] CLI-only migration required. This tool no longer executes; use `omc team wait <job_id>`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18441,7 +18575,7 @@ var TOOLS = [
   },
   {
     name: "omc_run_team_cleanup",
-    description: "Explicitly clean up worker panes when you want to stop workers. Kills all worker panes recorded for the job without touching the leader pane or the user session.",
+    description: "[DEPRECATED] CLI-only migration required. This tool no longer executes; use `omc team cleanup <job_id>`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18459,6 +18593,9 @@ var server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  if (isDeprecatedTeamToolName(name)) {
+    return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
+  }
   try {
     if (name === "omc_run_team_start") return await handleStart(args ?? {});
     if (name === "omc_run_team_status") return await handleStatus(args ?? {});
@@ -18482,6 +18619,8 @@ if (process.env.OMC_TEAM_SERVER_DISABLE_AUTOSTART !== "1" && process.env.NODE_EN
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  createDeprecatedCliOnlyEnvelope,
+  createDeprecatedCliOnlyEnvelopeWithArgs,
   handleCleanup,
   handleStatus,
   handleWait

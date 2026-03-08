@@ -268,6 +268,46 @@ export function isRateLimitStop(context?: StopContext): boolean {
 }
 
 /**
+ * Auth-related stop reasons that should bypass continuation re-enforcement.
+ * Keep exactly 16 entries in sync with script/template variants.
+ */
+export const AUTHENTICATION_ERROR_PATTERNS = [
+  'authentication_error',
+  'authentication_failed',
+  'auth_error',
+  'unauthorized',
+  'unauthorised',
+  '401',
+  '403',
+  'forbidden',
+  'invalid_token',
+  'token_invalid',
+  'token_expired',
+  'expired_token',
+  'oauth_expired',
+  'oauth_token_expired',
+  'invalid_grant',
+  'insufficient_scope',
+] as const;
+
+/**
+ * Detect if stop was triggered by authentication/authorization failures.
+ * Auth failures should not re-trigger persistent continuation loops.
+ *
+ * Fix for: issue #1308
+ */
+export function isAuthenticationError(context?: StopContext): boolean {
+  if (!context) return false;
+
+  const reason = (context.stop_reason ?? context.stopReason ?? '').toLowerCase();
+  const endTurnReason = (context.end_turn_reason ?? context.endTurnReason ?? '').toLowerCase();
+
+  return AUTHENTICATION_ERROR_PATTERNS.some((pattern) => (
+    reason.includes(pattern) || endTurnReason.includes(pattern)
+  ));
+}
+
+/**
  * Get possible todo file locations
  */
 function getTodoFilePaths(sessionId?: string, directory?: string): string[] {

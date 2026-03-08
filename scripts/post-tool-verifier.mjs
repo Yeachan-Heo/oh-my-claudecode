@@ -12,6 +12,9 @@ import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
 
+const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
+const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
+
 // Get the directory of this script to resolve the dist module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -208,6 +211,36 @@ function detectBackgroundOperation(output) {
   return bgPatterns.some(pattern => pattern.test(output));
 }
 
+export function summarizeAgentResult(output, maxChars = AGENT_OUTPUT_SUMMARY_LIMIT) {
+  if (!output || typeof output !== 'string') return '';
+
+  const normalized = output
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(' | ');
+
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 20)).trimEnd()} … [truncated]`;
+}
+
+function clipToolOutputForAnalysis(toolName, output) {
+  if (typeof output !== 'string') return { clipped: '', wasTruncated: false };
+
+  const isAgentResultTool = toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate' || toolName === 'TaskOutput';
+  if (!isAgentResultTool || output.length <= AGENT_OUTPUT_ANALYSIS_LIMIT) {
+    return { clipped: output, wasTruncated: false };
+  }
+
+  return {
+    clipped: `${output.slice(0, AGENT_OUTPUT_ANALYSIS_LIMIT)}\n...[agent output truncated by OMC context guard]`,
+    wasTruncated: true,
+  };
+}
+
 /**
  * Process <remember> tags from agent output
  * <remember>content</remember> -> Working Memory
@@ -292,7 +325,8 @@ function getAgentCompletionSummary(directory) {
 }
 
 // Generate contextual message
-function generateMessage(toolName, toolOutput, sessionId, toolCount, directory) {
+function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, options = {}) {
+  const { wasTruncated = false, rawLength = 0 } = options;
   let message = '';
 
   switch (toolName) {
@@ -320,8 +354,24 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory) 
       } else if (toolCount > 5) {
         message = `Multiple tasks delegated (${toolCount} total). Track their completion status.`;
       }
+      if (wasTruncated) {
+        const truncationNote = `Agent result stream clipped for context safety (${rawLength} chars). Synthesize only key outcomes in main session.`;
+        message = message ? `${message} | ${truncationNote}` : truncationNote;
+      }
       if (agentSummary) {
         message = message ? `${message} | ${agentSummary}` : agentSummary;
+      }
+      break;
+    }
+
+    case 'TaskOutput': {
+      const summary = summarizeAgentResult(toolOutput);
+      if (summary) {
+        message = `TaskOutput summary: ${summary}`;
+      }
+      if (wasTruncated) {
+        const truncationNote = `TaskOutput clipped (${rawLength} chars). Continue with concise synthesis and defer full logs to files.`;
+        message = message ? `${message} | ${truncationNote}` : truncationNote;
       }
       break;
     }
@@ -389,6 +439,7 @@ async function main() {
     const toolName = data.tool_name || data.toolName || '';
     const rawResponse = data.tool_response || data.toolOutput || '';
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
+    const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
     const directory = data.cwd || data.directory || process.cwd();
 
@@ -409,11 +460,14 @@ async function main() {
       toolName === 'TaskCreate' ||
       toolName === 'TaskUpdate'
     ) {
-      processRememberTags(toolOutput, directory);
+      processRememberTags(clippedToolOutput, directory);
     }
 
     // Generate contextual message
-    const message = generateMessage(toolName, toolOutput, sessionId, toolCount, directory);
+    const message = generateMessage(toolName, clippedToolOutput, sessionId, toolCount, directory, {
+      wasTruncated,
+      rawLength: toolOutput.length,
+    });
 
     // Build response - use hookSpecificOutput.additionalContext for PostToolUse
     const response = { continue: true };

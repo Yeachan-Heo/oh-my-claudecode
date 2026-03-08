@@ -87,9 +87,11 @@ describe('model-contract', () => {
             expect(args).not.toContain('--full-auto');
             expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
         });
-        it('gemini includes --yolo', () => {
+        it('gemini includes --approval-mode yolo', () => {
             const args = buildLaunchArgs('gemini', { teamName: 't', workerName: 'w', cwd: '/tmp' });
-            expect(args).toContain('--yolo');
+            expect(args).toContain('--approval-mode');
+            expect(args).toContain('yolo');
+            expect(args).not.toContain('-i');
         });
         it('passes model flag when specified', () => {
             const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });
@@ -103,6 +105,24 @@ describe('model-contract', () => {
             expect(env.OMC_TEAM_WORKER).toBe('my-team/worker-1');
             expect(env.OMC_TEAM_NAME).toBe('my-team');
             expect(env.OMC_WORKER_AGENT_TYPE).toBe('codex');
+        });
+        it('propagates allowlisted model selection env vars into worker startup env', () => {
+            const env = getWorkerEnv('my-team', 'worker-1', 'claude', {
+                ANTHROPIC_MODEL: 'claude-opus-4-1',
+                CLAUDE_MODEL: 'claude-sonnet-4-5',
+                ANTHROPIC_BASE_URL: 'https://example-gateway.invalid',
+                CLAUDE_CODE_USE_BEDROCK: '1',
+                OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL: 'gpt-5',
+                OMC_GEMINI_DEFAULT_MODEL: 'gemini-2.5-pro',
+                ANTHROPIC_API_KEY: 'should-not-be-forwarded',
+            });
+            expect(env.ANTHROPIC_MODEL).toBe('claude-opus-4-1');
+            expect(env.CLAUDE_MODEL).toBe('claude-sonnet-4-5');
+            expect(env.ANTHROPIC_BASE_URL).toBe('https://example-gateway.invalid');
+            expect(env.CLAUDE_CODE_USE_BEDROCK).toBe('1');
+            expect(env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL).toBe('gpt-5');
+            expect(env.OMC_GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-pro');
+            expect(env.ANTHROPIC_API_KEY).toBeUndefined();
         });
         it('rejects invalid team names', () => {
             expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
@@ -168,7 +188,7 @@ describe('model-contract', () => {
             expect(isPromptModeAgent('gemini')).toBe(true);
             const c = getContract('gemini');
             expect(c.supportsPromptMode).toBe(true);
-            expect(c.promptModeFlag).toBe('-p');
+            expect(c.promptModeFlag).toBe('-i');
         });
         it('claude does not support prompt mode', () => {
             expect(isPromptModeAgent('claude')).toBe(false);
@@ -181,7 +201,7 @@ describe('model-contract', () => {
         });
         it('getPromptModeArgs returns flag + instruction for gemini', () => {
             const args = getPromptModeArgs('gemini', 'Read inbox');
-            expect(args).toEqual(['-p', 'Read inbox']);
+            expect(args).toEqual(['-i', 'Read inbox']);
         });
         it('getPromptModeArgs returns instruction only (positional) for codex', () => {
             const args = getPromptModeArgs('codex', 'Read inbox');

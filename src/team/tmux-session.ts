@@ -42,10 +42,17 @@ async function tmuxAsync(args: string[]): Promise<{ stdout: string; stderr: stri
   return promisifiedExecFile('tmux', args);
 }
 
+export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
+
 export interface TeamSession {
   sessionName: string;
   leaderPaneId: string;
   workerPaneIds: string[];
+  sessionMode: TeamSessionMode;
+}
+
+export interface CreateTeamSessionOptions {
+  newWindow?: boolean;
 }
 
 export interface WorkerPaneConfig {
@@ -142,10 +149,11 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     });
 
     const shellName = shellNameFromPath(shell) || 'bash';
+    const execArgsCommand = shellName === 'fish' ? 'exec $argv' : 'exec "$@"';
     const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : '';
     const script = shouldSourceRc && rcFile
-      ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; exec "$@"`
-      : 'exec "$@"';
+      ? `[ -f ${shellEscape(rcFile)} ] && . ${shellEscape(rcFile)}; ${execArgsCommand}`
+      : execArgsCommand;
 
     return [
       'env',
@@ -281,12 +289,18 @@ export function spawnBridgeInSession(
   execFileSync('tmux', ['send-keys', '-t', tmuxSession, cmd, 'Enter'], { stdio: 'pipe', timeout: 5000 });
 }
 
+function buildTeamWindowName(teamName: string): string {
+  return (`omc-${sanitizeName(teamName)}`).slice(0, 32) || 'omc-team';
+}
+
 /**
- * Create a tmux session with split-pane topology for a team.
+ * Create a tmux team topology for a team leader/worker layout.
  *
  * Must be run inside an existing tmux session ($TMUX must be set).
- * Creates splits in the CURRENT window so panes appear immediately
- * in the user's view. Returns sessionName in "session:window" form.
+ * By default, creates splits in the CURRENT window so panes appear immediately
+ * in the user's view. When options.newWindow is true, creates a detached
+ * dedicated tmux window first and then splits worker panes there.
+ * Returns sessionName in "session:window" form.
  *
  * Layout: leader pane on the left, worker panes stacked vertically on the right.
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
@@ -294,13 +308,15 @@ export function spawnBridgeInSession(
 export async function createTeamSession(
   teamName: string,
   workerCount: number,
-  cwd: string
+  cwd: string,
+  options: CreateTeamSessionOptions = {},
 ): Promise<TeamSession> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
   const inTmux = Boolean(process.env.TMUX);
+  const useDedicatedWindow = Boolean(options.newWindow && inTmux);
 
   // Prefer the invoking pane from environment to avoid focus races when users
   // switch tmux windows during startup (issue #966).
@@ -308,6 +324,7 @@ export async function createTeamSession(
   const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
   let sessionAndWindow = '';
   let leaderPaneId = envPaneId;
+  let sessionMode: TeamSessionMode = inTmux ? 'split-pane' : 'detached-session';
 
   if (!inTmux) {
     // Backward-compatible fallback: create an isolated detached tmux session
@@ -330,7 +347,7 @@ export async function createTeamSession(
   if (inTmux && envPaneId) {
     try {
       const targetedContextResult = await execFileAsync('tmux', [
-        'display-message', '-p', '-t', envPaneId, '#S:#I'
+        'display-message', '-p', '-t', envPaneId, '#S:#I',
       ]);
       sessionAndWindow = targetedContextResult.stdout.trim();
     } catch {
@@ -342,7 +359,7 @@ export async function createTeamSession(
   if (!sessionAndWindow || !leaderPaneId) {
     // Fallback when TMUX_PANE is unavailable/invalid.
     const contextResult = await tmuxAsync([
-      'display-message', '-p', '#S:#I #{pane_id}'
+      'display-message', '-p', '#S:#I #{pane_id}',
     ]);
     const contextLine = contextResult.stdout.trim();
     const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
@@ -353,30 +370,46 @@ export async function createTeamSession(
     leaderPaneId = contextMatch[2];
   }
 
-  const teamTarget = sessionAndWindow; // "session:window" form
-  // Extract bare session name (before ':') for options that don't accept window targets
-  const resolvedSessionName = teamTarget.split(':')[0];
+  if (useDedicatedWindow) {
+    const targetSession = sessionAndWindow.split(':')[0] ?? sessionAndWindow;
+    const windowName = `omc-${sanitizeName(teamName)}`.slice(0, 32);
+    const newWindowResult = await execFileAsync('tmux', [
+      'new-window', '-d', '-P', '-F', '#S:#I #{pane_id}',
+      '-t', targetSession,
+      '-n', windowName,
+      '-c', cwd,
+    ]);
+    const newWindowLine = newWindowResult.stdout.trim();
+    const newWindowMatch = newWindowLine.match(/^(\S+)\s+(%\d+)$/);
+    if (!newWindowMatch) {
+      throw new Error(`Failed to create team tmux window: "${newWindowLine}"`);
+    }
+    sessionAndWindow = newWindowMatch[1];
+    leaderPaneId = newWindowMatch[2];
+    sessionMode = 'dedicated-window';
+  }
 
+  const teamTarget = sessionAndWindow; // "session:window" form
+  const resolvedSessionName = teamTarget.split(':')[0];
   const workerPaneIds: string[] = [];
 
   if (workerCount <= 0) {
-    // Leader-only topology: no worker panes yet (spawned on demand later).
     try {
       await execFileAsync('tmux', ['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
     } catch { /* ignore */ }
-    try {
-      await execFileAsync('tmux', ['select-pane', '-t', leaderPaneId]);
-    } catch { /* ignore */ }
+    if (sessionMode !== 'dedicated-window') {
+      try {
+        await execFileAsync('tmux', ['select-pane', '-t', leaderPaneId]);
+      } catch { /* ignore */ }
+    }
     await new Promise(r => setTimeout(r, 300));
-    return { sessionName: teamTarget, leaderPaneId, workerPaneIds };
+    return { sessionName: teamTarget, leaderPaneId, workerPaneIds, sessionMode };
   }
 
-  // Create worker panes: first via horizontal split off leader, rest stacked vertically on right
+  // Create worker panes: first via horizontal split off leader, rest stacked vertically on right.
   for (let i = 0; i < workerCount; i++) {
     const splitTarget = i === 0 ? leaderPaneId : workerPaneIds[i - 1];
     const splitType = i === 0 ? '-h' : '-v';
-
-    // -d: don't switch focus to new pane; -P -F: print new pane ID directly
     const splitResult = await tmuxAsync([
       'split-window', splitType, '-t', splitTarget,
       '-d', '-P', '-F', '#{pane_id}',
@@ -388,17 +421,15 @@ export async function createTeamSession(
     }
   }
 
-  // Apply main-vertical layout to balance the panes
   try {
     await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
   } catch {
-    // Layout may not apply if only 1 pane; ignore
+    // Layout may not apply if only 1 pane; ignore.
   }
 
-  // Set leader pane to half the window width
   try {
     const widthResult = await tmuxAsync([
-      'display-message', '-p', '-t', teamTarget, '#{window_width}'
+      'display-message', '-p', '-t', teamTarget, '#{window_width}',
     ]);
     const width = parseInt(widthResult.stdout.trim(), 10);
     if (Number.isFinite(width) && width >= 40) {
@@ -408,22 +439,23 @@ export async function createTeamSession(
     }
   } catch { /* ignore layout sizing errors */ }
 
-  // Enable mouse mode so user can click/scroll panes
   try {
     await execFileAsync('tmux', ['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
   } catch { /* ignore */ }
 
-  // Return focus to leader pane
-  try {
-    await execFileAsync('tmux', ['select-pane', '-t', leaderPaneId]);
-  } catch { /* ignore */ }
+  if (sessionMode !== 'dedicated-window') {
+    try {
+      await execFileAsync('tmux', ['select-pane', '-t', leaderPaneId]);
+    } catch { /* ignore */ }
+  }
   await new Promise(r => setTimeout(r, 300));
 
-  return { sessionName: teamTarget, leaderPaneId, workerPaneIds };
+  return { sessionName: teamTarget, leaderPaneId, workerPaneIds, sessionMode };
 }
 
 /**
  * Spawn a CLI agent in a specific pane.
+
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
  */
 export async function spawnWorkerInPane(
@@ -547,7 +579,7 @@ export function shouldAttemptAdaptiveRetry(args: {
   paneInCopyMode: boolean;
   retriesAttempted: number;
 }): boolean {
-  if (process.env.OMX_TEAM_AUTO_INTERRUPT_RETRY === '0') return false;
+  if (process.env.OMC_TEAM_AUTO_INTERRUPT_RETRY === '0') return false;
   if (args.retriesAttempted >= 1) return false;
   if (args.paneInCopyMode) return false;
   if (!args.paneBusy) return false;
@@ -768,26 +800,28 @@ export async function killWorkerPanes(opts: {
 }
 
 /**
- * Kill the team tmux session or just the worker panes (split-pane mode).
+ * Kill the team tmux session or just the worker panes, depending on how the
+ * team was created.
  *
- * When sessionName contains ':' (split-pane mode, "session:window" form),
- * only the worker panes are killed — the leader pane and the user's session
- * are left intact. leaderPaneId is never killed.
- *
- * When sessionName does not contain ':', the entire session is killed.
+ * - split-pane: kill only worker panes; preserve the leader pane and user window.
+ * - dedicated-window: kill the owned tmux window.
+ * - detached-session: kill the fully owned tmux session.
  */
 export async function killTeamSession(
   sessionName: string,
   workerPaneIds?: string[],
-  leaderPaneId?: string
+  leaderPaneId?: string,
+  options: { sessionMode?: TeamSessionMode } = {},
 ): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
-  if (sessionName.includes(':')) {
-    // Split-pane mode: kill ONLY worker panes, never kill-session
-    if (!workerPaneIds?.length) return;   // no-op guard
+  const sessionMode = options.sessionMode
+    ?? (sessionName.includes(':') ? 'split-pane' : 'detached-session');
+
+  if (sessionMode === 'split-pane') {
+    if (!workerPaneIds?.length) return;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try { await execFileAsync('tmux', ['kill-pane', '-t', id]); }
@@ -795,10 +829,34 @@ export async function killTeamSession(
     }
     return;
   }
-  // Session mode: this session is fully owned by the team
-  try {
-    await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
-  } catch {
-    // Session may already be dead
+
+  if (sessionMode === 'dedicated-window') {
+    try {
+      await execFileAsync('tmux', ['kill-window', '-t', sessionName]);
+    } catch {
+      // Window may already be gone.
+    }
+    return;
   }
+
+  const sessionTarget = sessionName.split(':')[0] ?? sessionName;
+
+  if (process.env.OMC_TEAM_ALLOW_KILL_CURRENT_SESSION !== '1' && process.env.TMUX) {
+    try {
+      const current = await tmuxAsync(['display-message', '-p', '#S']);
+      const currentSessionName = current.stdout.trim();
+      if (currentSessionName && currentSessionName === sessionTarget) {
+        return;
+      }
+    } catch {
+      // If we cannot resolve current session safely, continue with best effort.
+    }
+  }
+
+  try {
+    await execFileAsync('tmux', ['kill-session', '-t', sessionTarget]);
+  } catch {
+    // Session may already be dead.
+  }
+
 }

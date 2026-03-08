@@ -196,6 +196,7 @@ export function renderRateLimitsWithBar(
 export function renderRateLimitsError(result: UsageResult | null): string | null {
   if (!result?.error) return null;
   if (result.error === 'no_credentials') return null;
+  if (result.error === 'rate_limited') return `${DIM}[API 429]${RESET}`;
   if (result.error === 'auth') return `${YELLOW}[API auth]${RESET}`;
   return `${YELLOW}[API err]${RESET}`;
 }

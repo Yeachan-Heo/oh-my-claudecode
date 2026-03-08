@@ -16,6 +16,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
+import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
 import { checkRateLimitStatus, formatRateLimitStatus } from './rate-limit-monitor.js';
 import { isTmuxAvailable, scanForBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, } from './tmux-detector.js';
 // ESM compatibility: __filename is not available in ES modules
@@ -401,7 +402,7 @@ export function startDaemon(config) {
     ensureStateDir(cfg);
     // Fork a new process for the daemon using dynamic import() for ESM compatibility.
     // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
-    const modulePath = __filename.replace(/\.ts$/, '.js');
+    const modulePath = resolveDaemonModulePath(__filename, ['features', 'rate-limit-wait', 'daemon.js']);
     // Write config to a temp file to avoid config injection via template string.
     // This prevents malicious config values from being interpreted as code.
     const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);

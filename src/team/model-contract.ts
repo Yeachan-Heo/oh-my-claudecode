@@ -12,7 +12,7 @@ export interface CliAgentContract {
   parseOutput(rawOutput: string): string;
   /** Whether this agent supports a prompt/headless mode that bypasses TUI input */
   supportsPromptMode?: boolean;
-  /** CLI flag for prompt mode (e.g., '-p' for gemini) */
+  /** CLI flag for prompt mode (e.g., '-i' for gemini) */
   promptModeFlag?: string;
 }
 
@@ -198,9 +198,9 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     binary: 'gemini',
     installInstructions: 'Install Gemini CLI: npm install -g @google/gemini-cli',
     supportsPromptMode: true,
-    promptModeFlag: '-p',
+    promptModeFlag: '-i',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
-      const args = ['--yolo'];
+      const args = ['--approval-mode', 'yolo'];
       if (model) args.push('--model', model);
       return [...args, ...extraFlags];
     },
@@ -300,13 +300,39 @@ export function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunch
     .join(' ');
 }
 
-export function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType): Record<string, string> {
+const WORKER_MODEL_ENV_ALLOWLIST = [
+  'ANTHROPIC_MODEL',
+  'CLAUDE_MODEL',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL',
+  'OMC_CODEX_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
+  'OMC_GEMINI_DEFAULT_MODEL',
+] as const;
+
+export function getWorkerEnv(
+  teamName: string,
+  workerName: string,
+  agentType: CliAgentType,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   validateTeamName(teamName);
-  return {
+  const workerEnv: Record<string, string> = {
     OMC_TEAM_WORKER: `${teamName}/${workerName}`,
     OMC_TEAM_NAME: teamName,
     OMC_WORKER_AGENT_TYPE: agentType,
   };
+
+  for (const key of WORKER_MODEL_ENV_ALLOWLIST) {
+    const value = env[key];
+    if (typeof value === 'string' && value.length > 0) {
+      workerEnv[key] = value;
+    }
+  }
+
+  return workerEnv;
 }
 
 export function parseCliOutput(agentType: CliAgentType, rawOutput: string): string {
@@ -330,7 +356,7 @@ export function getPromptModeArgs(agentType: CliAgentType, instruction: string):
   if (!contract.supportsPromptMode) {
     return [];
   }
-  // If a flag is defined (e.g. gemini's '-p'), prepend it; otherwise the
+  // If a flag is defined (e.g. gemini's '-i'), prepend it; otherwise the
   // instruction is passed as a positional argument (e.g. codex [PROMPT]).
   if (contract.promptModeFlag) {
     return [contract.promptModeFlag, instruction];

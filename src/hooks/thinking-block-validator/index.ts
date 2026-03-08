@@ -26,13 +26,14 @@ import type {
 import {
   CONTENT_PART_TYPES,
   THINKING_PART_TYPES,
-  DEFAULT_THINKING_CONTENT,
   SYNTHETIC_THINKING_ID_PREFIX,
   HOOK_NAME,
 } from "./constants.js";
 
 export * from "./types.js";
 export * from "./constants.js";
+
+const SYNTHETIC_THINKING_CONTENT = "[Synthetic thinking block inserted to preserve message structure]";
 
 function isContentPartType(type: string): boolean {
   return (CONTENT_PART_TYPES as readonly string[]).includes(type);
@@ -134,8 +135,10 @@ export function validateMessage(
     hasContentParts(message.parts) &&
     !startsWithThinkingBlock(message.parts)
   ) {
-    const previousThinking = findPreviousThinkingContent(messages, index);
-    const thinkingContent = previousThinking || DEFAULT_THINKING_CONTENT;
+    // Never carry forward prior-turn assistant thinking into a later message.
+    // Reusing stale reasoning can make the model appear to answer an older task
+    // instead of the user's newest request (issue #1386).
+    const thinkingContent = SYNTHETIC_THINKING_CONTENT;
 
     prependThinkingBlock(message, thinkingContent);
 
@@ -179,10 +182,7 @@ export function createThinkingBlockValidatorHook(): MessagesTransformHook {
         if (msg.info.role !== "assistant") continue;
 
         if (hasContentParts(msg.parts) && !startsWithThinkingBlock(msg.parts)) {
-          const previousThinking = findPreviousThinkingContent(messages, i);
-          const thinkingContent = previousThinking || DEFAULT_THINKING_CONTENT;
-
-          prependThinkingBlock(msg, thinkingContent);
+          prependThinkingBlock(msg, SYNTHETIC_THINKING_CONTENT);
           fixedCount++;
         }
       }

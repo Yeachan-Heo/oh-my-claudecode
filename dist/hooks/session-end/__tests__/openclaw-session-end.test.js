@@ -21,7 +21,8 @@ vi.mock("../../../openclaw/index.js", () => ({
 }));
 import { processSessionEnd } from "../index.js";
 import { wakeOpenClaw } from "../../../openclaw/index.js";
-describe("session-end OpenClaw awaited call (issue #1120)", () => {
+import { notify } from "../../../notifications/index.js";
+describe("session-end OpenClaw behavior (issue #1120)", () => {
     let tmpDir;
     let transcriptPath;
     beforeEach(() => {
@@ -39,7 +40,7 @@ describe("session-end OpenClaw awaited call (issue #1120)", () => {
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
-    it("awaits wakeOpenClaw during session-end when OMC_OPENCLAW=1", async () => {
+    it("does not call wakeOpenClaw directly during session-end when OMC_OPENCLAW=1", async () => {
         process.env.OMC_OPENCLAW = "1";
         await processSessionEnd({
             session_id: "session-claw-1",
@@ -49,9 +50,9 @@ describe("session-end OpenClaw awaited call (issue #1120)", () => {
             hook_event_name: "SessionEnd",
             reason: "clear",
         });
-        // wakeOpenClaw should have been called (and awaited, not fire-and-forget)
-        expect(wakeOpenClaw).toHaveBeenCalledTimes(1);
-        expect(wakeOpenClaw).toHaveBeenCalledWith("session-end", expect.objectContaining({
+        // Session-end dispatches the standard notification and does not directly call OpenClaw.
+        expect(wakeOpenClaw).not.toHaveBeenCalled();
+        expect(notify).toHaveBeenCalledWith("session-end", expect.objectContaining({
             sessionId: "session-claw-1",
             projectPath: tmpDir,
         }));
@@ -68,10 +69,10 @@ describe("session-end OpenClaw awaited call (issue #1120)", () => {
         });
         expect(wakeOpenClaw).not.toHaveBeenCalled();
     });
-    it("does not throw when wakeOpenClaw rejects", async () => {
+    it("does not throw even if wakeOpenClaw mock is configured to reject", async () => {
         process.env.OMC_OPENCLAW = "1";
         vi.mocked(wakeOpenClaw).mockRejectedValueOnce(new Error("gateway down"));
-        // Should not throw — error is caught internally
+        // Should not throw; wakeOpenClaw is not invoked from processSessionEnd.
         await expect(processSessionEnd({
             session_id: "session-claw-3",
             transcript_path: transcriptPath,

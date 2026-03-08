@@ -7,6 +7,7 @@ import path from 'path';
 import os from 'os';
 import { loadProjectMemory, saveProjectMemory, shouldRescan, deleteProjectMemory, getMemoryPath, } from '../storage.js';
 import { SCHEMA_VERSION } from '../constants.js';
+import { getProjectIdentifier } from '../../../lib/worktree-paths.js';
 // Helper to create base memory with all required fields
 const createBaseMemory = (projectRoot, overrides = {}) => ({
     version: SCHEMA_VERSION,
@@ -27,17 +28,31 @@ describe('Project Memory Storage', () => {
     let projectRoot;
     beforeEach(async () => {
         // Create temporary directory
+        delete process.env.OMC_STATE_DIR;
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'project-memory-test-'));
         projectRoot = tempDir;
     });
     afterEach(async () => {
         // Clean up temporary directory
+        delete process.env.OMC_STATE_DIR;
         await fs.rm(tempDir, { recursive: true, force: true });
     });
     describe('getMemoryPath', () => {
         it('should return correct memory file path', () => {
             const memoryPath = getMemoryPath(projectRoot);
             expect(memoryPath).toBe(path.join(projectRoot, '.omc', 'project-memory.json'));
+        });
+        it('should return centralized memory file path when OMC_STATE_DIR is set', async () => {
+            const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'project-memory-state-'));
+            try {
+                process.env.OMC_STATE_DIR = stateDir;
+                const memoryPath = getMemoryPath(projectRoot);
+                expect(memoryPath).toBe(path.join(stateDir, getProjectIdentifier(projectRoot), 'project-memory.json'));
+            }
+            finally {
+                delete process.env.OMC_STATE_DIR;
+                await fs.rm(stateDir, { recursive: true, force: true });
+            }
         });
     });
     describe('saveProjectMemory', () => {
@@ -84,6 +99,28 @@ describe('Project Memory Storage', () => {
             const parsed = JSON.parse(content);
             expect(parsed.version).toBe(SCHEMA_VERSION);
             expect(parsed.projectRoot).toBe(projectRoot);
+        });
+        it('should save to centralized state dir without creating local .omc when OMC_STATE_DIR is set', async () => {
+            const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'project-memory-state-'));
+            try {
+                process.env.OMC_STATE_DIR = stateDir;
+                const memory = createBaseMemory(projectRoot, {
+                    techStack: { languages: [], frameworks: [], packageManager: null, runtime: null },
+                    build: { buildCommand: null, testCommand: null, lintCommand: null, devCommand: null, scripts: {} },
+                    conventions: { namingStyle: null, importStyle: null, testPattern: null, fileOrganization: null },
+                    structure: { isMonorepo: false, workspaces: [], mainDirectories: [], gitBranches: null },
+                    customNotes: [],
+                });
+                await saveProjectMemory(projectRoot, memory);
+                const centralizedPath = path.join(stateDir, getProjectIdentifier(projectRoot), 'project-memory.json');
+                const centralizedContent = await fs.readFile(centralizedPath, 'utf-8');
+                expect(JSON.parse(centralizedContent).projectRoot).toBe(projectRoot);
+                await expect(fs.access(path.join(projectRoot, '.omc', 'project-memory.json'))).rejects.toThrow();
+            }
+            finally {
+                delete process.env.OMC_STATE_DIR;
+                await fs.rm(stateDir, { recursive: true, force: true });
+            }
         });
         it('should overwrite existing memory file', async () => {
             const memory1 = createBaseMemory(projectRoot, {

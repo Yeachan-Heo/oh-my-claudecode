@@ -1,17 +1,18 @@
 /**
  * Project Memory Storage
- * Handles loading and saving project memory to .omc/project-memory.json
+ * Handles loading and saving project memory to the resolved project-memory.json path.
  */
 import fs from 'fs/promises';
 import path from 'path';
-import { MEMORY_FILE, MEMORY_DIR, CACHE_EXPIRY_MS } from './constants.js';
+import { CACHE_EXPIRY_MS } from './constants.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
+import { getWorktreeProjectMemoryPath } from '../../lib/worktree-paths.js';
 import { lockPathFor, withFileLock } from '../../lib/file-lock.js';
 /**
  * Get the path to the project memory file
  */
 export function getMemoryPath(projectRoot) {
-    return path.join(projectRoot, MEMORY_DIR, MEMORY_FILE);
+    return getWorktreeProjectMemoryPath(projectRoot);
 }
 /**
  * Load project memory from disk
@@ -38,8 +39,8 @@ export async function loadProjectMemory(projectRoot) {
  * Creates .omc directory if it doesn't exist
  */
 export async function saveProjectMemory(projectRoot, memory) {
-    const omcDir = path.join(projectRoot, MEMORY_DIR);
     const memoryPath = getMemoryPath(projectRoot);
+    const omcDir = path.dirname(memoryPath);
     try {
         // Ensure .omc directory exists
         await fs.mkdir(omcDir, { recursive: true });

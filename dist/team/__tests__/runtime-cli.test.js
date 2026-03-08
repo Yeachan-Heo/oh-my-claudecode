@@ -67,6 +67,31 @@ describe('runtime-cli watchdog marker helper', () => {
             rmSync(stateRoot, { recursive: true, force: true });
         }
     });
+    it('fails fast when marker failedAt is not parseable', async () => {
+        const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-invalid-failedat-'));
+        try {
+            writeFileSync(join(stateRoot, 'watchdog-failed.json'), JSON.stringify({ failedAt: { nested: true } }), 'utf-8');
+            const result = await checkWatchdogFailedMarker(stateRoot, Date.now());
+            expect(result.failed).toBe(true);
+            expect(result.reason).toContain('Invalid watchdog marker');
+        }
+        finally {
+            rmSync(stateRoot, { recursive: true, force: true });
+        }
+    });
+    it('accepts numeric-string failedAt markers', async () => {
+        const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-numeric-string-'));
+        try {
+            const startTime = Date.now();
+            writeFileSync(join(stateRoot, 'watchdog-failed.json'), JSON.stringify({ failedAt: String(startTime + 5_000) }), 'utf-8');
+            const result = await checkWatchdogFailedMarker(stateRoot, startTime);
+            expect(result.failed).toBe(true);
+            expect(result.reason).toContain('Watchdog marked team failed');
+        }
+        finally {
+            rmSync(stateRoot, { recursive: true, force: true });
+        }
+    });
 });
 describe('runtime-cli result artifact writer', () => {
     it('writes result artifact via tmp+rename with required fields', async () => {
@@ -108,6 +133,22 @@ describe('runtime-cli result artifact writer', () => {
                 workerCount: 1,
             }, '2026-03-02T12:00:00.000Z', undefined, jobsDir);
             expect(existsSync(join(jobsDir, 'undefined-result.json'))).toBe(false);
+            expect(readdirSync(jobsDir)).toEqual([]);
+        }
+        finally {
+            rmSync(jobsDir, { recursive: true, force: true });
+        }
+    });
+    it('no-ops when jobs dir is missing even if job id is provided', async () => {
+        const jobsDir = mkdtempSync(join(tmpdir(), 'runtime-cli-artifact-missing-dir-'));
+        try {
+            await writeResultArtifact({
+                status: 'completed',
+                teamName: 'team-c',
+                taskResults: [{ taskId: '1', status: 'completed', summary: 'ok' }],
+                duration: 0.2,
+                workerCount: 1,
+            }, '2026-03-02T12:00:00.000Z', 'job-999', undefined);
             expect(readdirSync(jobsDir)).toEqual([]);
         }
         finally {

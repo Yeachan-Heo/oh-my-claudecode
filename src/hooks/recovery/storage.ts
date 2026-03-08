@@ -26,6 +26,8 @@ import type {
   StoredTextPart,
 } from './types.js';
 
+const SYNTHETIC_THINKING_CONTENT = '[Synthetic thinking block inserted to preserve message structure]';
+
 /**
  * Generate a unique part ID
  */
@@ -287,39 +289,11 @@ export function findMessagesWithOrphanThinking(sessionID: string): string[] {
 }
 
 /**
- * Find the most recent thinking content from previous assistant messages
- */
-function findLastThinkingContent(
-  sessionID: string,
-  beforeMessageID: string
-): string {
-  const messages = readMessages(sessionID);
-
-  const currentIndex = messages.findIndex((m) => m.id === beforeMessageID);
-  if (currentIndex === -1) return '';
-
-  for (let i = currentIndex - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== 'assistant') continue;
-
-    const parts = readParts(msg.id);
-    for (const part of parts) {
-      if (THINKING_TYPES.has(part.type)) {
-        const thinking = (part as { thinking?: string; text?: string }).thinking;
-        const reasoning = (part as { thinking?: string; text?: string }).text;
-        const content = thinking || reasoning;
-        if (content && content.trim().length > 0) {
-          return content;
-        }
-      }
-    }
-  }
-
-  return '';
-}
-
-/**
- * Prepend a thinking part to a message
+ * Prepend a generic synthetic thinking part to a message.
+ *
+ * Never copy prior assistant thinking into a later message: doing so can leak
+ * stale task context into a newer turn and make the model appear to answer an
+ * old request instead of the latest user input (issue #1386).
  */
 export function prependThinkingPart(
   sessionID: string,
@@ -331,15 +305,13 @@ export function prependThinkingPart(
     mkdirSync(partDir, { recursive: true });
   }
 
-  const previousThinking = findLastThinkingContent(sessionID, messageID);
-
   const partId = `prt_0000000000_thinking`;
   const part = {
     id: partId,
     sessionID,
     messageID,
     type: 'thinking',
-    thinking: previousThinking || '[Continuing from previous reasoning]',
+    thinking: SYNTHETIC_THINKING_CONTENT,
     synthetic: true,
   };
 

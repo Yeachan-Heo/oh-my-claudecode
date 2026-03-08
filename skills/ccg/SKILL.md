@@ -1,44 +1,44 @@
 ---
 name: ccg
-description: Claude-Codex-Gemini tri-model orchestration - fans out backend tasks to Codex and frontend/UI tasks to Gemini in parallel, then Claude synthesizes results
+description: Claude-Codex-Gemini tri-model orchestration via ask-codex + ask-gemini, then Claude synthesizes results
 ---
 
 # CCG - Claude-Codex-Gemini Tri-Model Orchestration
 
-CCG spawns a tmux team with Codex and Gemini CLI workers running in parallel panes, then Claude synthesizes the results. Use this for tasks that benefit from multiple AI perspectives simultaneously.
+CCG routes through `ask-codex` and `ask-gemini` (CLI advisor flow), then Claude synthesizes both outputs into one answer.
+
+Use this when you want parallel external perspectives without launching tmux team workers.
 
 ## When to Use
 
-- Backend/analysis + frontend/UI work that can run truly in parallel
-- Code review from multiple perspectives (architecture + style simultaneously)
-- Research tasks where different models have complementary strengths
-- Any task you want to split across Codex (analytical) and Gemini (design/creative) workers
+- Backend/analysis + frontend/UI work in one request
+- Code review from multiple perspectives (architecture + design/UX)
+- Cross-validation where Codex and Gemini may disagree
+- Fast advisor-style parallel input without team runtime orchestration
 
 ## Requirements
 
 - **Codex CLI**: `npm install -g @openai/codex` (or `@openai/codex`)
 - **Gemini CLI**: `npm install -g @google/gemini-cli`
-- **tmux**: Must be running inside a tmux session
-- If either CLI is unavailable, CCG falls back to Claude-only execution
+- `omc ask` command available
+- If either CLI is unavailable, continue with whichever provider is available and note the limitation
 
 ## How It Works
 
-```
-1. Claude decomposes the request into:
-   - Backend/analytical tasks → Codex worker
-   - Frontend/UI/design tasks → Gemini worker
+```text
+1. Claude decomposes the request into two advisor prompts:
+   - Codex prompt (analysis/architecture/backend)
+   - Gemini prompt (UX/design/docs/alternatives)
 
-2. mcp__team__omc_run_team_start creates a tmux session with 2 workers:
-   omc-team-{name}
-   ├── Leader pane (Claude orchestrates)
-   ├── Worker pane 1: codex CLI (analytical tasks)
-   └── Worker pane 2: gemini CLI (design tasks)
+2. Claude runs:
+   - /oh-my-claudecode:ask-codex "<codex prompt>"
+   - /oh-my-claudecode:ask-gemini "<gemini prompt>"
 
-3. Workers read tasks from inbox files and write done.json on completion
+   (equivalent CLI path: `omc ask codex ...` + `omc ask gemini ...`)
 
-4. mcp__team__omc_run_team_wait blocks until all workers finish
+3. Artifacts are written under `.omc/artifacts/ask/`
 
-5. Claude reads taskResults and synthesizes into final output
+4. Claude synthesizes both outputs into one final response
 ```
 
 ## Execution Protocol
@@ -46,82 +46,65 @@ CCG spawns a tmux team with Codex and Gemini CLI workers running in parallel pan
 When invoked, Claude MUST follow this workflow:
 
 ### 1. Decompose Request
-Split the user's request into:
-- **Codex tasks**: code analysis, architecture review, backend logic, security review, test strategy
-- **Gemini tasks**: UI/UX design, documentation, visual analysis, large-context file review
-- **Synthesis task**: Claude combines results (always done by Claude, not delegated)
+Split the user request into:
 
-Choose a short `teamName` slug (e.g., `ccg-auth-review`).
+- **Codex prompt:** architecture, correctness, backend, risks, test strategy
+- **Gemini prompt:** UX/content clarity, alternatives, edge-case usability, docs polish
+- **Synthesis plan:** how to reconcile conflicts
 
-### 2. Start the team (non-blocking)
+### 2. Invoke ask skills
 
-Call `mcp__team__omc_run_team_start` — spawns workers in the background and returns a `jobId` immediately:
+Use skill routing first:
 
-```
-mcp__team__omc_run_team_start({
-  "teamName": "ccg-{slug}",
-  "agentTypes": ["codex", "gemini"],
-  "tasks": [
-    {"subject": "Codex task: ...", "description": "Full description of analytical work..."},
-    {"subject": "Gemini task: ...", "description": "Full description of design/UI work..."}
-  ],
-  "cwd": "{cwd}"
-})
+```bash
+/oh-my-claudecode:ask-codex <codex prompt>
+/oh-my-claudecode:ask-gemini <gemini prompt>
 ```
 
-Returns: `{ "jobId": "omc-...", "pid": 12345, "message": "Team started in background..." }`
+Equivalent direct CLI:
 
-### 3. Wait for completion
-
-Call `mcp__team__omc_run_team_wait` — blocks internally until done:
-
-```
-mcp__team__omc_run_team_wait({
-  "job_id": "{jobId}",
-  "timeout_ms": 60000
-})
+```bash
+omc ask codex "<codex prompt>"
+omc ask gemini "<gemini prompt>"
 ```
 
-> **Timeout guidance:** `timeout_ms` is optional; the default wait timeout is fine.
-> If wait times out, workers/panes keep running. Call `omc_run_team_wait` again to keep
-> waiting. Use `omc_run_team_cleanup` only for explicit cancel intent.
+### 3. Collect artifacts
 
-Returns when done:
-```json
-{
-  "status": "completed|failed",
-  "result": {
-    "taskResults": [
-      {"taskId": "1", "status": "completed", "summary": "..."},
-      {"taskId": "2", "status": "completed", "summary": "..."}
-    ]
-  }
-}
+Read latest ask artifacts from:
+
+```text
+.omc/artifacts/ask/codex-*.md
+.omc/artifacts/ask/gemini-*.md
 ```
 
-### 4. Synthesize Results
+### 4. Synthesize
 
-Parse `result.taskResults` and synthesize Codex + Gemini outputs into a unified response for the user.
+Return one unified answer with:
 
-## Fallback (CLIs Not Available)
+- Agreed recommendations
+- Conflicting recommendations (explicitly called out)
+- Chosen final direction + rationale
+- Action checklist
 
-CLI availability is checked by the MCP runtime automatically. If a CLI is not installed, the worker exits with `command not found`. In that case, fall back to Claude Task agents:
+## Fallbacks
 
-```
-[CCG] Codex/Gemini CLI not found. Falling back to Claude-only execution.
-```
+If one provider is unavailable:
 
-Use standard Claude Task agents instead:
-- `Task(subagent_type="oh-my-claudecode:executor", model="sonnet", ...)` for analytical tasks
-- `Task(subagent_type="oh-my-claudecode:designer", model="sonnet", ...)` for design tasks
+- Continue with available provider + Claude synthesis
+- Clearly note missing perspective and risk
+
+If both unavailable:
+
+- Fall back to Claude-only answer and state CCG external advisors were unavailable
 
 ## Invocation
 
-```
-/oh-my-claudecode:ccg [task description]
+```bash
+/oh-my-claudecode:ccg <task description>
 ```
 
 Example:
-```
-/oh-my-claudecode:ccg Review this PR - check architecture and code quality (Codex) and UI components (Gemini)
+
+```bash
+/oh-my-claudecode:ccg Review this PR - architecture/security via Codex and UX/readability via Gemini
 ```

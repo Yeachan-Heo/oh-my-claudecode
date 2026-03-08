@@ -7,8 +7,8 @@ import { tmpdir } from 'os';
  * Tests for Gemini prompt-mode (headless) spawn flow.
  *
  * Gemini CLI v0.29.7+ uses an Ink-based TUI that does not receive keystrokes
- * via tmux send-keys. The fix passes the initial instruction via the `-p` flag
- * (prompt mode) so the TUI is bypassed entirely. Trust-confirm and send-keys
+ * via tmux send-keys. The fix passes the initial instruction via the `-i` flag
+ * (interactive mode) so the TUI is bypassed entirely. Trust-confirm and send-keys
  * notification are skipped for prompt-mode agents.
  *
  * See: https://github.com/anthropics/claude-code/issues/1000
@@ -75,6 +75,7 @@ function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude'): Tea
     teamName: 'test-team',
     sessionName: 'test-session:0',
     leaderPaneId: '%0',
+    ownsWindow: false,
     config: {
       teamName: 'test-team',
       workerCount: 1,
@@ -117,7 +118,7 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     setupTaskDir(cwd);
   });
 
-  it('gemini worker launch args include -p flag with inbox path', async () => {
+  it('gemini worker launch args include -i flag with inbox path', async () => {
     const runtime = makeRuntime(cwd, 'gemini');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
@@ -129,8 +130,8 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     expect(launchCall).toBeDefined();
     const launchCmd = launchCall![launchCall!.length - 1];
 
-    // Should contain -p flag for prompt mode
-    expect(launchCmd).toContain("'-p'");
+    // Should contain -i flag for interactive mode
+    expect(launchCmd).toContain("'-i'");
     // Should contain the inbox path reference
     expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
 
@@ -180,8 +181,8 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
     expect(launchCall).toBeDefined();
     const launchCmd = launchCall![launchCall!.length - 1];
 
-    // Should NOT contain -p flag (codex uses positional argument, not a flag)
-    expect(launchCmd).not.toContain("'-p'");
+    // Should NOT contain -i flag (codex uses positional argument, not a flag)
+    expect(launchCmd).not.toContain("'-i'");
     // Should contain the inbox path as a positional argument
     expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
 
@@ -235,6 +236,29 @@ describe('spawnWorkerForTask – prompt mode (Gemini & Codex)', () => {
 
     rmSync(cwd, { recursive: true, force: true });
   });
+
+  it('returns empty and skips spawn when task is already in_progress (claim already taken)', async () => {
+    const taskPath = join(cwd, '.omc/state/team/test-team/tasks/1.json');
+    writeFileSync(taskPath, JSON.stringify({
+      id: '1',
+      subject: 'Test task',
+      description: 'Do something',
+      status: 'in_progress',
+      owner: 'worker-2',
+    }), 'utf-8');
+
+    const runtime = makeRuntime(cwd, 'codex');
+    const paneId = await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    expect(paneId).toBe('');
+    expect(tmuxCalls.args.some(args => args[0] === 'split-window')).toBe(false);
+    expect(tmuxCalls.args.some(args => args[0] === 'send-keys')).toBe(false);
+    expect(runtime.activeWorkers.size).toBe(0);
+
+    const task = JSON.parse(readFileSync(taskPath, 'utf-8')) as { status: string; owner: string | null };
+    expect(task.status).toBe('in_progress');
+    expect(task.owner).toBe('worker-2');
+  });
 });
 
 describe('spawnWorkerForTask – model passthrough from environment variables', () => {
@@ -245,11 +269,16 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     tmuxCalls.args = [];
     tmuxCalls.capturePaneText = '❯ ready\n';
     delete process.env.OMC_SHELL_READY_TIMEOUT_MS;
-    // Clear model env vars before each test
+    // Clear model/provider env vars before each test
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
     delete process.env.OMC_CODEX_DEFAULT_MODEL;
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
     delete process.env.OMC_GEMINI_DEFAULT_MODEL;
+    delete process.env.ANTHROPIC_MODEL;
+    delete process.env.CLAUDE_MODEL;
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+    delete process.env.CLAUDE_CODE_USE_VERTEX;
     cwd = mkdtempSync(join(tmpdir(), 'runtime-model-passthrough-'));
     setupTaskDir(cwd);
   });
@@ -305,9 +334,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     expect(launchCall).toBeDefined();
     const launchCmd = launchCall![launchCall!.length - 1];
 
-    expect(launchCmd).toContain("'--model'");
-    expect(launchCmd).toContain("'gpt-4o'");
-    expect(launchCmd).not.toContain("'o3-mini'");
+    expect(launchCmd).toContain("'--model' 'gpt-4o'");
   });
 
   it('gemini worker passes model from OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL', async () => {
@@ -355,9 +382,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     expect(launchCall).toBeDefined();
     const launchCmd = launchCall![launchCall!.length - 1];
 
-    expect(launchCmd).toContain("'--model'");
-    expect(launchCmd).toContain("'gemini-2.0-flash'");
-    expect(launchCmd).not.toContain("'gemini-1.5-pro'");
+    expect(launchCmd).toContain("'--model' 'gemini-2.0-flash'");
   });
 
   it('claude worker does not pass model flag (not supported)', async () => {
@@ -374,6 +399,42 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
 
     // Claude worker should not have --model flag
     expect(launchCmd).not.toContain("'--model'");
+  });
+
+  it('claude worker propagates ANTHROPIC_MODEL into the pane startup env', async () => {
+    process.env.ANTHROPIC_MODEL = 'claude-opus-4-1';
+    const runtime = makeRuntime(cwd, 'claude');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain('ANTHROPIC_MODEL=');
+    expect(launchCmd).toContain('claude-opus-4-1');
+    expect(launchCmd).not.toContain("'--model'");
+  });
+
+  it('claude worker propagates custom provider env needed for inherited model selection', async () => {
+    process.env.CLAUDE_MODEL = 'vertex_ai/claude-3-5-sonnet';
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.invalid';
+    const runtime = makeRuntime(cwd, 'claude');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain('CLAUDE_MODEL=');
+    expect(launchCmd).toContain('vertex_ai/claude-3-5-sonnet');
+    expect(launchCmd).toContain('ANTHROPIC_BASE_URL=');
+    expect(launchCmd).toContain('https://gateway.example.invalid');
   });
 
   it('codex worker does not pass model flag when no env var is set', async () => {

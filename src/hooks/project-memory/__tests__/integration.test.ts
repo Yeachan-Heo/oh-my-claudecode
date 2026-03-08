@@ -7,17 +7,19 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { registerProjectMemoryContext, clearProjectMemorySession } from '../index.js';
-import { loadProjectMemory } from '../storage.js';
+import { loadProjectMemory, getMemoryPath } from '../storage.js';
 import { learnFromToolOutput } from '../learner.js';
 
 describe('Project Memory Integration', () => {
   let tempDir: string;
 
   beforeEach(async () => {
+    delete process.env.OMC_STATE_DIR;
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'integration-test-'));
   });
 
   afterEach(async () => {
+    delete process.env.OMC_STATE_DIR;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -58,6 +60,33 @@ describe('Project Memory Integration', () => {
       const omcDir = path.join(tempDir, '.omc');
       const omcStat = await fs.stat(omcDir);
       expect(omcStat.isDirectory()).toBe(true);
+    });
+
+    it('should persist to centralized state dir without creating local .omc when OMC_STATE_DIR is set', async () => {
+      const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'integration-state-'));
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+
+        const packageJson = {
+          name: 'test-app',
+          scripts: { build: 'tsc' },
+          devDependencies: { typescript: '^5.0.0' },
+        };
+
+        await fs.writeFile(path.join(tempDir, 'package.json'), JSON.stringify(packageJson, null, 2));
+        await fs.writeFile(path.join(tempDir, 'tsconfig.json'), '{}');
+
+        const registered = await registerProjectMemoryContext('test-session-centralized', tempDir);
+        expect(registered).toBe(true);
+
+        const memoryPath = getMemoryPath(tempDir);
+        const content = await fs.readFile(memoryPath, 'utf-8');
+        expect(JSON.parse(content).projectRoot).toBe(tempDir);
+        await expect(fs.access(path.join(tempDir, '.omc', 'project-memory.json'))).rejects.toThrow();
+      } finally {
+        delete process.env.OMC_STATE_DIR;
+        await fs.rm(stateDir, { recursive: true, force: true });
+      }
     });
 
     it('should not inject duplicate context in same session', async () => {
@@ -177,7 +206,7 @@ describe('Project Memory Integration', () => {
       memory!.lastScanned = Date.now() - 25 * 60 * 60 * 1000;
 
       // Save with old timestamp
-      const memoryPath = path.join(tempDir, '.omc', 'project-memory.json');
+      const memoryPath = getMemoryPath(tempDir);
       await fs.writeFile(memoryPath, JSON.stringify(memory, null, 2));
 
       // Clear session cache to allow re-registration

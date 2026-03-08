@@ -9,7 +9,7 @@ import { join } from 'path';
  *     config.json
  *     shutdown.json
  *     tasks/
- *       {taskId}.json
+ *       task-{taskId}.json
  *     workers/
  *       {workerName}/
  *         heartbeat.json
@@ -19,8 +19,15 @@ import { join } from 'path';
  *         AGENTS.md       ← worker overlay
  *         shutdown-ack.json
  *     mailbox/
- *       {workerName}.jsonl
+ *       {workerName}.json
  */
+export function normalizeTaskFileStem(taskId: string): string {
+  const trimmed = String(taskId).trim().replace(/\.json$/i, '');
+  if (/^task-\d+$/.test(trimmed)) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `task-${trimmed}`;
+  return trimmed;
+}
+
 export const TeamPaths = {
   root: (teamName: string) =>
     `.omc/state/team/${teamName}`,
@@ -35,7 +42,7 @@ export const TeamPaths = {
     `.omc/state/team/${teamName}/tasks`,
 
   taskFile: (teamName: string, taskId: string) =>
-    `.omc/state/team/${teamName}/tasks/${taskId}.json`,
+    `.omc/state/team/${teamName}/tasks/${normalizeTaskFileStem(taskId)}.json`,
 
   workers: (teamName: string) =>
     `.omc/state/team/${teamName}/workers`,
@@ -61,11 +68,56 @@ export const TeamPaths = {
   shutdownAck: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
 
-  done: (teamName: string, workerName: string) =>
-    `.omc/state/team/${teamName}/workers/${workerName}/done.json`,
-
   mailbox: (teamName: string, workerName: string) =>
-    `.omc/state/team/${teamName}/mailbox/${workerName}.jsonl`,
+    `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
+
+  mailboxLockDir: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
+
+  dispatchRequests: (teamName: string) =>
+    `.omc/state/team/${teamName}/dispatch/requests.json`,
+
+  dispatchLockDir: (teamName: string) =>
+    `.omc/state/team/${teamName}/dispatch/.lock`,
+
+  workerStatus: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/status.json`,
+
+  workerIdleNotify: (teamName: string) =>
+    `.omc/state/team/${teamName}/worker-idle-notify.json`,
+
+  workerPrevNotifyState: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/prev-notify-state.json`,
+
+  events: (teamName: string) =>
+    `.omc/state/team/${teamName}/events.jsonl`,
+
+  approval: (teamName: string, taskId: string) =>
+    `.omc/state/team/${teamName}/approvals/${taskId}.json`,
+
+  manifest: (teamName: string) =>
+    `.omc/state/team/${teamName}/manifest.json`,
+
+  monitorSnapshot: (teamName: string) =>
+    `.omc/state/team/${teamName}/monitor-snapshot.json`,
+
+  summarySnapshot: (teamName: string) =>
+    `.omc/state/team/${teamName}/summary-snapshot.json`,
+
+  phaseState: (teamName: string) =>
+    `.omc/state/team/${teamName}/phase-state.json`,
+
+  scalingLock: (teamName: string) =>
+    `.omc/state/team/${teamName}/.scaling-lock`,
+
+  workerIdentity: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/identity.json`,
+
+  workerAgentsMd: (teamName: string) =>
+    `.omc/state/team/${teamName}/worker-agents.md`,
+
+  shutdownRequest: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/shutdown-request.json`,
 } as const;
 
 /**
@@ -86,7 +138,7 @@ export function teamStateRoot(cwd: string, teamName: string): string {
  * Canonical task storage path builder.
  *
  * All task files live at:
- *   {cwd}/.omc/state/team/{teamName}/tasks/{taskId}.json
+ *   {cwd}/.omc/state/team/{teamName}/tasks/task-{taskId}.json
  *
  * When taskId is omitted, returns the tasks directory:
  *   {cwd}/.omc/state/team/{teamName}/tasks/

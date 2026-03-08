@@ -344,8 +344,83 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.continue).toBe(true);
     });
 
+    it("returns continue: true for authentication error stop", () => {
+      const sessionId = "auth-error-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ralph-state.json"),
+        JSON.stringify({
+          active: true,
+          iteration: 1,
+          max_iterations: 50,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+        stop_reason: "oauth_expired",
+      });
+      expect(output.continue).toBe(true);
+    });
+
     it("returns continue: true when no modes are active", () => {
       const output = runScript({ directory: tempDir, sessionId: "no-modes" });
+      expect(output.continue).toBe(true);
+    });
+
+    it("fails open for missing/unknown Team phase in script", () => {
+      const sessionId = "team-phase-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+
+      writeFileSync(
+        join(sessionDir, "team-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+        })
+      );
+      const missingPhaseOutput = runScript({ directory: tempDir, sessionId });
+      expect(missingPhaseOutput.continue).toBe(true);
+
+      writeFileSync(
+        join(sessionDir, "team-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          current_phase: "phase-does-not-exist",
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+        })
+      );
+      const unknownPhaseOutput = runScript({ directory: tempDir, sessionId });
+      expect(unknownPhaseOutput.continue).toBe(true);
+    });
+
+    it("applies Team circuit breaker after max reinforcements in script", () => {
+      const sessionId = "team-breaker-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "team-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          current_phase: "team-exec",
+          reinforcement_count: 20,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
       expect(output.continue).toBe(true);
     });
 
@@ -365,6 +440,109 @@ describe("Stop Hook Blocking Contract", () => {
       );
 
       const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+    });
+  });
+
+  describe("persistent-mode.cjs script blocking contract", () => {
+    let tempDir: string;
+    const scriptPath = join(process.cwd(), "scripts", "persistent-mode.cjs");
+
+    function runScript(input: Record<string, unknown>): Record<string, unknown> {
+      try {
+        const result = execSync(`node "${scriptPath}"`, {
+          encoding: "utf-8",
+          timeout: 5000,
+          input: JSON.stringify(input),
+          env: { ...process.env, NODE_ENV: "test" },
+        });
+        const lines = result.trim().split("\n");
+        return JSON.parse(lines[lines.length - 1]);
+      } catch (error: unknown) {
+        const execError = error as { stdout?: string };
+        if (execError.stdout) {
+          const lines = execError.stdout.trim().split("\n");
+          return JSON.parse(lines[lines.length - 1]);
+        }
+        throw error;
+      }
+    }
+
+    beforeEach(() => {
+      tempDir = mkdtempSync(join(tmpdir(), "stop-hook-cjs-test-"));
+      execSync("git init", { cwd: tempDir });
+    });
+
+    afterEach(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("returns continue: true for authentication error stop", () => {
+      const sessionId = "auth-error-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ralph-state.json"),
+        JSON.stringify({
+          active: true,
+          iteration: 1,
+          max_iterations: 50,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+        stop_reason: "oauth_expired",
+      });
+      expect(output.continue).toBe(true);
+    });
+
+    it("fails open for unknown Team phase in cjs script", () => {
+      const sessionId = "team-phase-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "team-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          current_phase: "totally-unknown",
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+      });
+      expect(output.continue).toBe(true);
+    });
+
+    it("applies Team circuit breaker in cjs script", () => {
+      const sessionId = "team-breaker-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "team-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          current_phase: "team-exec",
+          reinforcement_count: 20,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+      });
       expect(output.continue).toBe(true);
     });
   });

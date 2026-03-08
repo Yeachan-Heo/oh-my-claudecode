@@ -559,4 +559,110 @@ export async function dispatchNotifications(config, event, payload, platformMess
             clearTimeout(timer);
     }
 }
+// ============================================================================
+// CUSTOM INTEGRATION DISPATCH (Added for Notification Refactor)
+// ============================================================================
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { interpolateTemplate } from "./template-engine.js";
+import { getCustomIntegrationsForEvent } from "./config.js";
+const execFileAsync = promisify(execFile);
+/**
+ * Send a webhook notification for a custom integration.
+ */
+export async function sendCustomWebhook(integration, payload) {
+    const config = integration.config;
+    try {
+        // Interpolate template variables
+        const url = interpolateTemplate(config.url, payload);
+        const body = interpolateTemplate(config.bodyTemplate, payload);
+        // Prepare headers
+        const headers = {};
+        for (const [key, value] of Object.entries(config.headers)) {
+            headers[key] = interpolateTemplate(value, payload);
+        }
+        // Use native fetch (Node.js 18+)
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), config.timeout);
+        const response = await fetch(url, {
+            method: config.method,
+            headers,
+            body: config.method !== 'GET' ? body : undefined,
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!response.ok) {
+            return {
+                platform: "webhook",
+                success: false,
+                error: `HTTP ${response.status}: ${response.statusText}`,
+            };
+        }
+        return {
+            platform: "webhook",
+            success: true,
+        };
+    }
+    catch (error) {
+        return {
+            platform: "webhook",
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+/**
+ * Execute a CLI command for a custom integration.
+ * Uses execFile (not shell) for security.
+ */
+export async function sendCustomCli(integration, payload) {
+    const config = integration.config;
+    try {
+        // Interpolate template variables into arguments
+        const args = config.args.map((arg) => interpolateTemplate(arg, payload));
+        // Execute using execFile (array args, no shell injection possible)
+        await execFileAsync(config.command, args, {
+            timeout: config.timeout,
+            killSignal: "SIGTERM",
+        });
+        return {
+            platform: "webhook", // Group with webhooks in results
+            success: true,
+        };
+    }
+    catch (error) {
+        return {
+            platform: "webhook",
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+/**
+ * Dispatch notifications for custom integrations.
+ */
+export async function dispatchCustomIntegrations(event, payload) {
+    const integrations = getCustomIntegrationsForEvent(event);
+    if (integrations.length === 0)
+        return [];
+    const results = [];
+    for (const integration of integrations) {
+        let result;
+        if (integration.type === "webhook") {
+            result = await sendCustomWebhook(integration, payload);
+        }
+        else if (integration.type === "cli") {
+            result = await sendCustomCli(integration, payload);
+        }
+        else {
+            result = {
+                platform: "webhook",
+                success: false,
+                error: `Unknown integration type: ${integration.type}`,
+            };
+        }
+        results.push(result);
+    }
+    return results;
+}
 //# sourceMappingURL=dispatcher.js.map

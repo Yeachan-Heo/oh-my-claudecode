@@ -4,7 +4,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectBashFailure, detectWriteFailure, isNonZeroExitWithOutput } from '../../scripts/post-tool-verifier.mjs';
+import { execSync } from 'child_process';
+import { join } from 'path';
+import process from 'process';
+import { detectBashFailure, detectWriteFailure, isNonZeroExitWithOutput, summarizeAgentResult } from '../../scripts/post-tool-verifier.mjs';
+
+const SCRIPT_PATH = join(process.cwd(), 'scripts', 'post-tool-verifier.mjs');
+
+function runPostToolVerifier(input, env = {}) {
+  const stdout = execSync(`node "${SCRIPT_PATH}"`, {
+    input: JSON.stringify(input),
+    encoding: 'utf-8',
+    timeout: 5000,
+    env: { ...process.env, NODE_ENV: 'test', ...env },
+  });
+  return JSON.parse(stdout.trim());
+}
 
 describe('detectBashFailure', () => {
   describe('Claude Code temp CWD false positives (issue #696)', () => {
@@ -257,5 +272,42 @@ describe('detectWriteFailure', () => {
       expect(detectWriteFailure('failed to write file: permission denied')).toBe(true);
       expect(detectWriteFailure('no such file or directory: /missing/path')).toBe(true);
     });
+  });
+});
+
+describe('agent output summarization / truncation (issue #1373)', () => {
+  it('summarizes multi-line agent output into concise single-line context', () => {
+    const output = [
+      'Completed worker step A',
+      '',
+      'Updated src/foo.ts',
+      'Updated src/bar.ts',
+      'Tests: 12 passed',
+    ].join('\n');
+
+    const summary = summarizeAgentResult(output, 80);
+    expect(summary).toContain('Completed worker step A');
+    expect(summary).toContain('Updated src/foo.ts');
+    expect(summary.length).toBeLessThanOrEqual(80);
+  });
+
+  it('adds truncation guidance for oversized TaskOutput responses', () => {
+    const huge = `ok:${'x'.repeat(5000)}`;
+    const out = runPostToolVerifier(
+      {
+        tool_name: 'TaskOutput',
+        tool_response: huge,
+        session_id: 's-1373',
+        cwd: process.cwd(),
+      },
+      {
+        OMC_AGENT_OUTPUT_ANALYSIS_LIMIT: '300',
+        OMC_AGENT_OUTPUT_SUMMARY_LIMIT: '90',
+      },
+    );
+
+    expect(out.continue).toBe(true);
+    expect(out.hookSpecificOutput?.additionalContext).toContain('TaskOutput summary:');
+    expect(out.hookSpecificOutput?.additionalContext).toContain('TaskOutput clipped');
   });
 });

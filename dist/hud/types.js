@@ -49,6 +49,7 @@ export const DEFAULT_HUD_CONFIG = {
         threshold: 80,
         autoCompact: false,
     },
+    wrapMode: 'truncate',
 };
 export const PRESET_CONFIGS = {
     minimal: {

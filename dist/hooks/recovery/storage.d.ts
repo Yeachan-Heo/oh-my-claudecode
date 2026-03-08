@@ -53,7 +53,11 @@ export declare function findMessagesWithThinkingOnly(sessionID: string): string[
  */
 export declare function findMessagesWithOrphanThinking(sessionID: string): string[];
 /**
- * Prepend a thinking part to a message
+ * Prepend a generic synthetic thinking part to a message.
+ *
+ * Never copy prior assistant thinking into a later message: doing so can leak
+ * stale task context into a newer turn and make the model appear to answer an
+ * old request instead of the latest user input (issue #1386).
  */
 export declare function prependThinkingPart(sessionID: string, messageID: string): boolean;
 /**

@@ -3,6 +3,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isZaiHost, parseZaiResponse, getUsage } from '../../hud/usage-api.js';
+// Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
+vi.mock('../../lib/file-lock.js', () => ({
+    withFileLock: vi.fn((_lockPath, fn) => fn()),
+    lockPathFor: vi.fn((p) => p + '.lock'),
+}));
 // Mock dependencies that touch filesystem / keychain / network
 vi.mock('../../utils/paths.js', () => ({
     getClaudeConfigDir: () => '/tmp/test-claude',

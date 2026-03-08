@@ -156,8 +156,11 @@ async function main(watchMode = false): Promise<void> {
     try {
       omcVersion = getRuntimePackageVersion();
       if (omcVersion === 'unknown') omcVersion = null;
-    } catch {
+    } catch (error) {
       // Ignore version detection errors
+      if (process.env.OMC_DEBUG) {
+        console.error('[HUD] Version detection error:', error instanceof Error ? error.message : error);
+      }
     }
     // Async file read to avoid blocking event loop (Issue #1273)
     try {
@@ -168,8 +171,11 @@ async function main(watchMode = false): Promise<void> {
       if (cached?.latestVersion && omcVersion && compareVersions(omcVersion, cached.latestVersion) < 0) {
         updateAvailable = cached.latestVersion;
       }
-    } catch {
-      // Ignore update cache read errors
+    } catch (error) {
+      // Ignore update cache read errors - expected if file doesn't exist yet
+      if (process.env.OMC_DEBUG) {
+        console.error('[HUD] Update cache read error:', error instanceof Error ? error.message : error);
+      }
     }
 
     // Build render context
@@ -239,8 +245,11 @@ async function main(watchMode = false): Promise<void> {
             threshold: config.contextLimitWarning.threshold,
           }),
         );
-      } catch {
+      } catch (error) {
         // Silent failure — don't break HUD rendering
+        if (process.env.OMC_DEBUG) {
+          console.error('[HUD] Auto-compact trigger write error:', error instanceof Error ? error.message : error);
+        }
       }
     }
 

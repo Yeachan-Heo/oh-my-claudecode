@@ -13,13 +13,14 @@ import type { PluginConfig, ExternalModelsConfig } from '../shared/types.js';
 import { getConfigDir } from '../utils/paths.js';
 import { parseJsonc } from '../utils/jsonc.js';
 import {
-  getDefaultModelHigh,
-  getDefaultModelMedium,
-  getDefaultModelLow,
+  getDefaultTierModels,
+  BUILTIN_EXTERNAL_MODEL_DEFAULTS,
   isNonClaudeProvider,
   isBedrock,
   isVertexAI,
 } from './models.js';
+
+const DEFAULT_TIER_MODELS = getDefaultTierModels();
 
 /**
  * Default configuration.
@@ -34,28 +35,28 @@ import {
  */
 export const DEFAULT_CONFIG: PluginConfig = {
   agents: {
-    omc: { model: getDefaultModelHigh() },
-    explore: { model: getDefaultModelLow() },
-    analyst: { model: getDefaultModelHigh() },
-    planner: { model: getDefaultModelHigh() },
-    architect: { model: getDefaultModelHigh() },
-    debugger: { model: getDefaultModelMedium() },
-    executor: { model: getDefaultModelMedium() },
-    verifier: { model: getDefaultModelMedium() },
-    qualityReviewer: { model: getDefaultModelMedium() },
-    securityReviewer: { model: getDefaultModelMedium() },
-    codeReviewer: { model: getDefaultModelHigh() },
-    deepExecutor: { model: getDefaultModelHigh() },
-    testEngineer: { model: getDefaultModelMedium() },
-    buildFixer: { model: getDefaultModelMedium() },
-    designer: { model: getDefaultModelMedium() },
-    writer: { model: getDefaultModelLow() },
-    qaTester: { model: getDefaultModelMedium() },
-    scientist: { model: getDefaultModelMedium() },
-    gitMaster: { model: getDefaultModelMedium() },
-    codeSimplifier: { model: getDefaultModelHigh() },
-    critic: { model: getDefaultModelHigh() },
-    documentSpecialist: { model: getDefaultModelMedium() },
+    omc: { model: DEFAULT_TIER_MODELS.HIGH },
+    explore: { model: DEFAULT_TIER_MODELS.LOW },
+    analyst: { model: DEFAULT_TIER_MODELS.HIGH },
+    planner: { model: DEFAULT_TIER_MODELS.HIGH },
+    architect: { model: DEFAULT_TIER_MODELS.HIGH },
+    debugger: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    executor: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    verifier: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    qualityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    securityReviewer: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    codeReviewer: { model: DEFAULT_TIER_MODELS.HIGH },
+    deepExecutor: { model: DEFAULT_TIER_MODELS.HIGH },
+    testEngineer: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    buildFixer: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    designer: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    writer: { model: DEFAULT_TIER_MODELS.LOW },
+    qaTester: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    scientist: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    gitMaster: { model: DEFAULT_TIER_MODELS.MEDIUM },
+    codeSimplifier: { model: DEFAULT_TIER_MODELS.HIGH },
+    critic: { model: DEFAULT_TIER_MODELS.HIGH },
+    documentSpecialist: { model: DEFAULT_TIER_MODELS.MEDIUM },
   },
   features: {
     parallelExecution: true,
@@ -87,11 +88,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
     forceInherit: false,
     escalationEnabled: true,
     maxEscalations: 2,
-    tierModels: {
-      LOW: getDefaultModelLow(),
-      MEDIUM: getDefaultModelMedium(),
-      HIGH: getDefaultModelHigh()
-    },
+    tierModels: { ...DEFAULT_TIER_MODELS },
     agentOverrides: {
       architect: { tier: 'HIGH', reason: 'Advisory agent requires deep reasoning' },
       planner: { tier: 'HIGH', reason: 'Strategic planning requires deep reasoning' },
@@ -112,8 +109,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
   // Static defaults only — env var overrides applied in loadEnvConfig()
   externalModels: {
     defaults: {
-      codexModel: 'gpt-5.3-codex',
-      geminiModel: 'gemini-3.1-pro-preview',
+      codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
+      geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
     },
     fallbackPolicy: {
       onModelFailure: 'provider_chain',
@@ -632,12 +629,12 @@ export function generateConfigSchema(): object {
               },
               codexModel: {
                 type: 'string',
-                default: 'gpt-5.3-codex',
+                default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
                 description: 'Default Codex model'
               },
               geminiModel: {
                 type: 'string',
-                default: 'gemini-3.1-pro-preview',
+                default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
                 description: 'Default Gemini model'
               }
             }

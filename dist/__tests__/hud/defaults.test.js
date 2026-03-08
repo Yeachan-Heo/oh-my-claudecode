@@ -17,6 +17,9 @@ describe('HUD Default Configuration', () => {
         it('should use text format for thinking indicator by default', () => {
             expect(DEFAULT_HUD_CONFIG.elements.thinkingFormat).toBe('text');
         });
+        it('should default wrapMode to truncate', () => {
+            expect(DEFAULT_HUD_CONFIG.wrapMode).toBe('truncate');
+        });
     });
     describe('PRESET_CONFIGS', () => {
         const presets = ['minimal', 'focused', 'full', 'opencode', 'dense'];

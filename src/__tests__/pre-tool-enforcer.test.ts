@@ -22,6 +22,16 @@ function writeJson(filePath: string, data: Record<string, unknown>): void {
   writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+function writeTranscriptWithContext(filePath: string, contextWindow: number, inputTokens: number): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const line = JSON.stringify({
+    usage: { context_window: contextWindow, input_tokens: inputTokens },
+    context_window: contextWindow,
+    input_tokens: inputTokens,
+  });
+  writeFileSync(filePath, `${line}\n`, 'utf-8');
+}
+
 describe('pre-tool-enforcer fallback gating (issue #970)', () => {
   let tempDir: string;
 
@@ -240,5 +250,40 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(readOutput.additionalContext).toBe(
       'Read multiple files in parallel when possible for faster analysis.',
     );
+  });
+
+  it('blocks agent-heavy Task preflight when transcript context budget is exhausted', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'High fan-out execution',
+      },
+      cwd: tempDir,
+      transcript_path: transcriptPath,
+      session_id: 'session-1373',
+    });
+
+    expect(output.decision).toBe('block');
+    expect(String(output.reason)).toContain('Preflight context guard');
+    expect(String(output.reason)).toContain('Safe recovery');
+  });
+
+  it('allows non-agent-heavy tools even when transcript context is high', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    writeTranscriptWithContext(transcriptPath, 1000, 900); // 90%
+
+    const output = runPreToolEnforcer({
+      tool_name: 'Read',
+      cwd: tempDir,
+      transcript_path: transcriptPath,
+      session_id: 'session-1373',
+    });
+
+    expect(output.continue).toBe(true);
+    expect(output.decision).toBeUndefined();
   });
 });

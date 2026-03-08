@@ -43,15 +43,20 @@ describe('Tier-0 contract: skill aliases and canonical entrypoints', () => {
 
 describe('Tier-0 contract: keyword routing fidelity', () => {
   it('routes canonical trigger words to their canonical mode types', () => {
+    // Team keyword detection disabled — team is now explicit-only via /team skill
+    // to prevent infinite spawning in team workers
     const cases: Array<{ prompt: string; expected: (typeof TIER0_SKILLS)[number] }> = [
       { prompt: 'autopilot build a dashboard', expected: 'autopilot' },
       { prompt: 'ultrawork fix these lint errors', expected: 'ultrawork' },
       { prompt: 'ralph finish this refactor', expected: 'ralph' },
-      { prompt: 'team 3:executor ship this feature', expected: 'team' },
     ];
 
     for (const { prompt, expected } of cases) {
       expect(getPrimaryKeyword(prompt)?.type).toBe(expected);
     }
+  });
+
+  it('team keyword is explicit-only (no auto-detection)', () => {
+    expect(getPrimaryKeyword('team 3:executor ship this feature')).toBeNull();
   });
 });

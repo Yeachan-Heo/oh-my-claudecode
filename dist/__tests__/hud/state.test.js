@@ -157,6 +157,21 @@ describe('readHudConfig', () => {
             expect(config.thresholds.contextWarning).toBe(80);
             expect(config.thresholds.contextCritical).toBe(DEFAULT_HUD_CONFIG.thresholds.contextCritical);
         });
+        it('merges maxWidth and wrapMode from settings', () => {
+            mockExistsSync.mockImplementation((path) => {
+                const s = String(path);
+                return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
+            });
+            mockReadFileSync.mockReturnValue(JSON.stringify({
+                omcHud: {
+                    maxWidth: 80,
+                    wrapMode: 'wrap',
+                }
+            }));
+            const config = readHudConfig();
+            expect(config.maxWidth).toBe(80);
+            expect(config.wrapMode).toBe('wrap');
+        });
     });
 });
 //# sourceMappingURL=state.test.js.map

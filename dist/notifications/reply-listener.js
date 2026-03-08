@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
+import { resolveDaemonModulePath } from '../utils/daemon-module-path.js';
 import { capturePaneContent, sendToPane, isTmuxAvailable, } from '../features/rate-limit-wait/tmux-detector.js';
 import { lookupByMessageId, loadAllMappings, removeMessagesByPane, pruneStale, } from './session-registry.js';
 import { parseMentionAllowedMentions } from './config.js';
@@ -764,7 +765,7 @@ export function startReplyListener(_config) {
     }
     ensureStateDir();
     // Fork a new process for the daemon
-    const modulePath = __filename.replace(/\.ts$/, '.js');
+    const modulePath = resolveDaemonModulePath(__filename, ['notifications', 'reply-listener.js']);
     const daemonScript = `
     import('${modulePath}').then(({ pollLoop }) => {
       return pollLoop();

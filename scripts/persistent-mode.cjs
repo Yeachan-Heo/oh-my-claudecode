@@ -129,6 +129,29 @@ async function sendStopNotification(modeName, stateData, sessionId, directory) {
  * from causing the stop hook to malfunction in new sessions.
  */
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+const TEAM_TERMINAL_PHASES = new Set([
+  "completed",
+  "complete",
+  "failed",
+  "cancelled",
+  "canceled",
+  "aborted",
+  "terminated",
+  "done",
+]);
+const TEAM_ACTIVE_PHASES = new Set([
+  "team-plan",
+  "team-prd",
+  "team-exec",
+  "team-verify",
+  "team-fix",
+  "planning",
+  "executing",
+  "verify",
+  "verification",
+  "fix",
+  "fixing",
+]);
 
 /**
  * Check if a state is stale based on its timestamps.
@@ -148,6 +171,23 @@ function isStaleState(state) {
 
   const age = Date.now() - mostRecent;
   return age > STALE_STATE_THRESHOLD_MS;
+}
+
+function normalizeTeamPhase(state) {
+  if (!state || typeof state !== "object") return null;
+
+  const rawPhase = state.current_phase ?? state.phase ?? state.stage;
+  if (typeof rawPhase !== "string") return null;
+
+  const phase = rawPhase.trim().toLowerCase();
+  if (!phase || TEAM_TERMINAL_PHASES.has(phase)) return null;
+  return TEAM_ACTIVE_PHASES.has(phase) ? phase : null;
+}
+
+function getSafeReinforcementCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
 }
 
 /**
@@ -408,6 +448,38 @@ function isUserAbort(data) {
   );
 }
 
+const AUTHENTICATION_ERROR_PATTERNS = [
+  "authentication_error",
+  "authentication_failed",
+  "auth_error",
+  "unauthorized",
+  "unauthorised",
+  "401",
+  "403",
+  "forbidden",
+  "invalid_token",
+  "token_invalid",
+  "token_expired",
+  "expired_token",
+  "oauth_expired",
+  "oauth_token_expired",
+  "invalid_grant",
+  "insufficient_scope",
+];
+
+function isAuthenticationError(data) {
+  const reason = (data.stop_reason || data.stopReason || "").toLowerCase();
+  const endTurnReason = (
+    data.end_turn_reason ||
+    data.endTurnReason ||
+    ""
+  ).toLowerCase();
+
+  return AUTHENTICATION_ERROR_PATTERNS.some(
+    (pattern) => reason.includes(pattern) || endTurnReason.includes(pattern),
+  );
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -430,6 +502,12 @@ async function main() {
 
     // Respect user abort (Ctrl+C, cancel)
     if (isUserAbort(data)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Never block auth failures (401/403/expired OAuth): allow re-auth flow.
+    if (isAuthenticationError(data)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -586,10 +664,9 @@ async function main() {
 
     // Priority 6: Team (native Claude Code teams)
     if (team.state?.active && !isStaleState(team.state) && isSessionMatch(team.state, sessionId)) {
-      const phase = team.state.current_phase || "executing";
-      const terminalPhases = ["completed", "complete", "failed", "cancelled"];
-      if (!terminalPhases.includes(phase)) {
-        const newCount = (team.state.reinforcement_count || 0) + 1;
+      const phase = normalizeTeamPhase(team.state);
+      if (phase) {
+        const newCount = getSafeReinforcementCount(team.state.reinforcement_count) + 1;
         if (newCount <= 20) {
           team.state.reinforcement_count = newCount;
           team.state.last_checked_at = new Date().toISOString();
@@ -611,10 +688,9 @@ async function main() {
 
     // Priority 6.5: OMC Teams (tmux CLI workers — independent of native team state)
     if (omcTeams.state?.active && !isStaleState(omcTeams.state) && isSessionMatch(omcTeams.state, sessionId)) {
-      const phase = omcTeams.state.current_phase || "executing";
-      const terminalPhases = ["completed", "complete", "failed", "cancelled"];
-      if (!terminalPhases.includes(phase)) {
-        const newCount = (omcTeams.state.reinforcement_count || 0) + 1;
+      const phase = normalizeTeamPhase(omcTeams.state);
+      if (phase) {
+        const newCount = getSafeReinforcementCount(omcTeams.state.reinforcement_count) + 1;
         if (newCount <= 20) {
           omcTeams.state.reinforcement_count = newCount;
           omcTeams.state.last_checked_at = new Date().toISOString();

@@ -6,6 +6,7 @@
  *
  * Ported from oh-my-opencode's think-mode hook.
  */
+import { CLAUDE_FAMILY_DEFAULTS, CLAUDE_FAMILY_HIGH_VARIANTS, getClaudeHighVariantFromModel, } from '../../config/models.js';
 /**
  * Extract provider prefix from model ID.
  * Custom providers may use prefixes like vertex_ai/, openai/.
@@ -29,14 +30,13 @@ function normalizeModelId(modelId) {
 }
 /**
  * Map of model IDs to their high-reasoning variants.
+ * Claude variants come from centralized family defaults.
  */
 const HIGH_VARIANT_MAP = {
-    // Claude
-    'claude-sonnet-4-5': 'claude-sonnet-4-5-high',
-    'claude-sonnet-4-6': 'claude-sonnet-4-6-high',
-    'claude-opus-4-6': 'claude-opus-4-6-high',
-    'claude-3-5-sonnet': 'claude-3-5-sonnet-high',
-    'claude-3-opus': 'claude-3-opus-high',
+    // Claude canonical families
+    [CLAUDE_FAMILY_DEFAULTS.SONNET]: CLAUDE_FAMILY_HIGH_VARIANTS.SONNET,
+    [CLAUDE_FAMILY_DEFAULTS.OPUS]: CLAUDE_FAMILY_HIGH_VARIANTS.OPUS,
+    [CLAUDE_FAMILY_DEFAULTS.HAIKU]: CLAUDE_FAMILY_HIGH_VARIANTS.HAIKU,
     // GPT-4
     'gpt-4': 'gpt-4-high',
     'gpt-4-turbo': 'gpt-4-turbo-high',
@@ -86,7 +86,7 @@ export const THINKING_CONFIGS = {
  * Models capable of thinking mode by provider.
  */
 const THINKING_CAPABLE_MODELS = {
-    anthropic: ['claude-sonnet-4', 'claude-opus-4', 'claude-3'],
+    anthropic: ['claude'],
     'amazon-bedrock': ['claude', 'anthropic'],
     google: ['gemini-2', 'gemini-3'],
     openai: ['gpt-4', 'gpt-5', 'o1', 'o3'],
@@ -102,11 +102,14 @@ export function getHighVariant(modelId) {
     if (ALREADY_HIGH.has(base) || base.endsWith('-high')) {
         return null;
     }
-    // Look up high variant
+    // Resolve Claude families to canonical high variants.
+    const claudeHighBase = getClaudeHighVariantFromModel(base);
+    if (claudeHighBase)
+        return prefix + claudeHighBase;
+    // Look up exact high variant for non-Claude models
     const highBase = HIGH_VARIANT_MAP[base];
-    if (!highBase) {
+    if (!highBase)
         return null;
-    }
     // Preserve prefix in the high variant
     return prefix + highBase;
 }

@@ -40,4 +40,18 @@ export declare function sendWebhook(config: WebhookNotificationConfig, payload: 
  * Individual failures don't block other platforms.
  */
 export declare function dispatchNotifications(config: NotificationConfig, event: NotificationEvent, payload: NotificationPayload, platformMessages?: Map<NotificationPlatform, string>): Promise<DispatchResult>;
+import type { CustomIntegration } from "./types.js";
+/**
+ * Send a webhook notification for a custom integration.
+ */
+export declare function sendCustomWebhook(integration: CustomIntegration, payload: NotificationPayload): Promise<NotificationResult>;
+/**
+ * Execute a CLI command for a custom integration.
+ * Uses execFile (not shell) for security.
+ */
+export declare function sendCustomCli(integration: CustomIntegration, payload: NotificationPayload): Promise<NotificationResult>;
+/**
+ * Dispatch notifications for custom integrations.
+ */
+export declare function dispatchCustomIntegrations(event: string, payload: NotificationPayload): Promise<NotificationResult[]>;
 //# sourceMappingURL=dispatcher.d.ts.map

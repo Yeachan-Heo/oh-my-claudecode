@@ -25,6 +25,8 @@ import {
 } from "./hook-config.js";
 
 const CONFIG_FILE = join(getClaudeConfigDir(), ".omc-config.json");
+const DEFAULT_TMUX_TAIL_LINES = 15;
+
 
 /**
  * Read raw config from .omc-config.json
@@ -435,6 +437,26 @@ export function getVerbosity(config: NotificationConfig): VerbosityLevel {
 }
 
 /**
+ * Get the effective tmux tail line count.
+ *
+ * Priority: OMC_NOTIFY_TMUX_TAIL_LINES env var > config.tmuxTailLines > 15 default.
+ * Invalid values are ignored (fall back to config or default).
+ */
+export function getTmuxTailLines(config: NotificationConfig): number {
+  const envValue = Number.parseInt(process.env.OMC_NOTIFY_TMUX_TAIL_LINES ?? "", 10);
+  if (Number.isInteger(envValue) && envValue >= 1) {
+    return envValue;
+  }
+
+  const configValue = config.tmuxTailLines;
+  if (typeof configValue === "number" && Number.isInteger(configValue) && configValue >= 1) {
+    return configValue;
+  }
+
+  return DEFAULT_TMUX_TAIL_LINES;
+}
+
+/**
  * Check if an event is allowed by the given verbosity level.
  *
  * Level matrix:
@@ -838,4 +860,146 @@ export function getReplyConfig(): import("./types.js").ReplyConfig | null {
     includePrefix: process.env.OMC_REPLY_INCLUDE_PREFIX !== "false" && (replyRaw?.includePrefix !== false),
     authorizedDiscordUserIds,
   };
+}
+
+// ============================================================================
+// CUSTOM INTEGRATION CONFIG (Added for Notification Refactor)
+// ============================================================================
+
+import type {
+  CustomIntegration,
+  CustomIntegrationsConfig,
+  ExtendedNotificationConfig,
+} from "./types.js";
+import { validateCustomIntegration, checkDuplicateIds } from "./validation.js";
+
+const LEGACY_OPENCLAW_CONFIG = join(getClaudeConfigDir(), "omc_config.openclaw.json");
+
+/**
+ * Detect if legacy OpenClaw configuration exists.
+ */
+export function detectLegacyOpenClawConfig(): boolean {
+  return existsSync(LEGACY_OPENCLAW_CONFIG);
+}
+
+/**
+ * Read and migrate legacy OpenClaw config to new custom integration format.
+ */
+export function migrateLegacyOpenClawConfig(): CustomIntegration | null {
+  if (!existsSync(LEGACY_OPENCLAW_CONFIG)) return null;
+
+  try {
+    const legacy = JSON.parse(readFileSync(LEGACY_OPENCLAW_CONFIG, "utf-8"));
+    
+    // Get first gateway (legacy format supported multiple, we take the first)
+    const gateways = legacy.gateways as Record<string, any> | undefined;
+    if (!gateways || Object.keys(gateways).length === 0) return null;
+    
+    const gateway = Object.values(gateways)[0];
+    const gatewayName = Object.keys(gateways)[0];
+    
+    // Get enabled hooks as events
+    const hooks = legacy.hooks as Record<string, any> | undefined;
+    const events: string[] = [];
+    if (hooks) {
+      for (const [hookName, hookConfig] of Object.entries(hooks)) {
+        if ((hookConfig as any)?.enabled) {
+          // Normalize hook name to event name
+          const eventName = hookName.replace(/([A-Z])/g, '-$1').toLowerCase();
+          events.push(eventName);
+        }
+      }
+    }
+
+    const integration: CustomIntegration = {
+      id: `migrated-${gatewayName}`,
+      type: "webhook",
+      preset: "openclaw",
+      enabled: legacy.enabled !== false,
+      config: {
+        url: gateway.url || "",
+        method: (gateway.method as any) || "POST",
+        headers: gateway.headers || { "Content-Type": "application/json" },
+        bodyTemplate: JSON.stringify({
+          event: "{{event}}",
+          instruction: "Session {{sessionId}} {{event}}",
+          timestamp: "{{timestamp}}",
+          context: {
+            projectPath: "{{projectPath}}",
+            projectName: "{{projectName}}",
+            sessionId: "{{sessionId}}"
+          }
+        }, null, 2),
+        timeout: gateway.timeout || 10000,
+      },
+      events: events as any,
+    };
+
+    return integration;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read custom integrations configuration from .omc-config.json.
+ */
+export function getCustomIntegrationsConfig(): CustomIntegrationsConfig | null {
+  const raw = readRawConfig();
+  if (!raw) return null;
+
+  const customIntegrations = raw.customIntegrations as CustomIntegrationsConfig | undefined;
+  if (!customIntegrations) return null;
+
+  // Validate and filter out invalid integrations
+  const validIntegrations: CustomIntegration[] = [];
+  for (const integration of customIntegrations.integrations || []) {
+    const result = validateCustomIntegration(integration);
+    if (result.valid) {
+      validIntegrations.push(integration);
+    } else {
+      console.warn(
+        `[notifications] Invalid custom integration "${integration.id}": ${result.errors.join(", ")}`
+      );
+    }
+  }
+
+  // Check for duplicate IDs
+  const duplicates = checkDuplicateIds(validIntegrations);
+  if (duplicates.length > 0) {
+    console.warn(
+      `[notifications] Duplicate custom integration IDs found: ${duplicates.join(", ")}`
+    );
+  }
+
+  return {
+    enabled: customIntegrations.enabled !== false,
+    integrations: validIntegrations,
+  };
+}
+
+/**
+ * Get all custom integrations enabled for a specific event.
+ */
+export function getCustomIntegrationsForEvent(
+  event: string
+): CustomIntegration[] {
+  const config = getCustomIntegrationsConfig();
+  if (!config?.enabled) return [];
+
+  return config.integrations.filter(
+    (i) => i.enabled && i.events.includes(event as any)
+  );
+}
+
+/**
+ * Check if custom integrations are enabled (globally or for a specific event).
+ */
+export function hasCustomIntegrationsEnabled(event?: string): boolean {
+  const config = getCustomIntegrationsConfig();
+  if (!config?.enabled) return false;
+  if (!event) return config.integrations.some((i) => i.enabled);
+  return config.integrations.some(
+    (i) => i.enabled && i.events.includes(event as any)
+  );
 }

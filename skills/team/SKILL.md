@@ -439,6 +439,7 @@ When spawning teammates, include this preamble in the prompt to establish the wo
 ```
 You are a TEAM WORKER in team "{team_name}". Your name is "{worker_name}".
 You report to the team lead ("team-lead").
+You are not the leader and must not perform leader orchestration actions.
 
 == WORK PROTOCOL ==
 
@@ -474,10 +475,22 @@ Do NOT mark the task as completed. Leave it in_progress so the lead can reassign
 
 == RULES ==
 - NEVER spawn sub-agents or use the Task tool
+- NEVER run tmux pane/session orchestration commands (for example `tmux split-window`, `tmux new-session`)
+- NEVER run team spawning/orchestration skills or commands (for example `$team`, `$ultrawork`, `$autopilot`, `$ralph`, `omc team ...`, `omx team ...`)
 - ALWAYS use absolute file paths
 - ALWAYS report progress via SendMessage to "team-lead"
 - Use SendMessage with type "message" only -- never "broadcast"
 ```
+
+### Agent-Type Prompt Injection (Worker-Specific Addendum)
+
+When composing teammate prompts, append a short addendum based on worker type:
+
+- `claude_worker`: Emphasize strict TaskList/TaskUpdate/SendMessage loop and no orchestration commands.
+- `codex_worker`: Emphasize CLI API lifecycle (`omc team api ... --json`) and explicit failure ACKs with stderr.
+- `gemini_worker`: Emphasize bounded file ownership and milestone ACKs after each completed sub-step.
+
+This addendum must preserve the core rule: **worker = executor only, never leader/orchestrator**.
 
 ## Communication Patterns
 
@@ -833,6 +846,27 @@ When team is linked to ralph, cancellation follows dependency order:
 - **Force cancel (`--force`):** Clears both `team` and `ralph` state unconditionally via `state_clear`.
 
 If teammates are unresponsive, `TeamDelete` may fail. In that case, the cancel skill should wait briefly and retry, or inform the user to manually clean up `~/.claude/teams/{team_name}/` and `~/.claude/tasks/{team_name}/`.
+
+## Runtime V2 (Event-Driven)
+
+When `OMC_RUNTIME_V2=1` is set, the team runtime uses an event-driven architecture instead of the legacy done.json polling watchdog:
+
+- **No done.json**: Task completion is detected via CLI API lifecycle transitions (claim-task, transition-task-status)
+- **Snapshot-based monitoring**: Each poll cycle takes a point-in-time snapshot of tasks and workers, computes deltas, and emits events
+- **Event log**: All team events are appended to `.omc/state/team/{teamName}/events.jsonl`
+- **Worker status files**: Workers write status to `.omc/state/team/{teamName}/workers/{name}/status.json`
+- **Preserved**: Sentinel gate (blocks premature completion), circuit breaker (dead worker detection), failure sidecars
+
+The v2 runtime is feature-flagged and can be enabled per-session. The legacy v1 runtime remains the default.
+
+## Dynamic Scaling
+
+When `OMC_TEAM_SCALING_ENABLED=1` is set, the team supports mid-session scaling:
+
+- **scale_up**: Add workers to a running team (respects max_workers limit)
+- **scale_down**: Remove idle workers with graceful drain (workers finish current task before removal)
+- File-based scaling lock prevents concurrent scale operations
+- Monotonic worker index counter ensures unique worker names across scale events
 
 ## Configuration
 

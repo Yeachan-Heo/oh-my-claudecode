@@ -45,6 +45,15 @@ describe('persistent-mode rate-limit stop guard (fix #777)', () => {
     'api_rate_limit_exceeded',
   ];
 
+  const authenticationReasons = [
+    'authentication_error',
+    'unauthorized',
+    '401',
+    '403',
+    'token_expired',
+    'oauth_expired',
+  ];
+
   for (const reason of rateLimitReasons) {
     it(`should NOT block stop when stop_reason is "${reason}"`, async () => {
       const sessionId = `session-777-${reason.replace(/[^a-z0-9]/g, '-')}`;
@@ -57,6 +66,25 @@ describe('persistent-mode rate-limit stop guard (fix #777)', () => {
         );
         expect(result.shouldBlock).toBe(false);
         expect(result.mode).toBe('none');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  for (const reason of authenticationReasons) {
+    it(`should NOT block stop when stop_reason is auth-related ("${reason}")`, async () => {
+      const sessionId = `session-1308-${reason.replace(/[^a-z0-9]/g, '-')}`;
+      const tempDir = makeRalphWorktree(sessionId);
+      try {
+        const result = await checkPersistentModes(
+          sessionId,
+          tempDir,
+          { stop_reason: reason }
+        );
+        expect(result.shouldBlock).toBe(false);
+        expect(result.mode).toBe('none');
+        expect(result.message).toMatch(/authentication/i);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

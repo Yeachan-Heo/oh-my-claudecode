@@ -20,6 +20,7 @@ import { writeHeartbeat, deleteHeartbeat } from "./heartbeat.js";
 import { killSession } from "./tmux-session.js";
 import { logAuditEvent } from "./audit-log.js";
 import { getEffectivePermissions, findPermissionViolations, } from "./permissions.js";
+import { getBuiltinExternalDefaultModel } from "../config/models.js";
 import { getTeamStatus } from "./team-status.js";
 import { measureCharCounts, recordTaskUsage } from "./usage-tracker.js";
 /** Simple logger */
@@ -396,7 +397,7 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
         args = [
             "exec",
             "-m",
-            model || "gpt-5.3-codex",
+            model || getBuiltinExternalDefaultModel("codex"),
             "--json",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
@@ -404,7 +405,7 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
     }
     else {
         cmd = "gemini";
-        args = ["--yolo"];
+        args = ["--approval-mode", "yolo"];
         if (model)
             args.push("--model", model);
     }

@@ -62,6 +62,7 @@ export {
   isEventEnabled,
   getEnabledPlatforms,
   getVerbosity,
+  getTmuxTailLines,
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
@@ -101,6 +102,7 @@ import {
   getNotificationConfig,
   isEventEnabled,
   getVerbosity,
+  getTmuxTailLines,
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
@@ -185,7 +187,7 @@ export async function notify(
         const { capturePaneContent } = await import(
           "../features/rate-limit-wait/tmux-detector.js"
         );
-        const tail = capturePaneContent(payload.tmuxPaneId, 15);
+        const tail = capturePaneContent(payload.tmuxPaneId, getTmuxTailLines(config));
         if (tail) {
           payload.tmuxTail = tail;
         }
@@ -264,3 +266,53 @@ export async function notify(
     return null;
   }
 }
+
+// ============================================================================
+// CUSTOM INTEGRATION EXPORTS (Added for Notification Refactor)
+// ============================================================================
+
+export type {
+  CustomIntegration,
+  CustomIntegrationType,
+  WebhookIntegrationConfig,
+  CliIntegrationConfig,
+  CustomIntegrationsConfig,
+  ExtendedNotificationConfig,
+} from "./types.js";
+
+export {
+  sendCustomWebhook,
+  sendCustomCli,
+  dispatchCustomIntegrations,
+} from "./dispatcher.js";
+
+export {
+  getCustomIntegrationsConfig,
+  getCustomIntegrationsForEvent,
+  hasCustomIntegrationsEnabled,
+  detectLegacyOpenClawConfig,
+  migrateLegacyOpenClawConfig,
+} from "./config.js";
+
+export {
+  CUSTOM_INTEGRATION_PRESETS,
+  getPresetList,
+  getPreset,
+  isValidPreset,
+  type PresetConfig,
+  type PresetName,
+} from "./presets.js";
+
+export {
+  TEMPLATE_VARIABLES,
+  getVariablesForEvent,
+  getVariableDocumentation,
+  type TemplateVariableName,
+} from "./template-variables.js";
+
+export {
+  validateCustomIntegration,
+  checkDuplicateIds,
+  sanitizeArgument,
+  type ValidationResult,
+} from "./validation.js";

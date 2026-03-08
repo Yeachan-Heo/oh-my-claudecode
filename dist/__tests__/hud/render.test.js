@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { limitOutputLines } from '../../hud/render.js';
 import { render } from '../../hud/render.js';
 import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from '../../hud/types.js';
+import { stringWidth } from '../../utils/string-width.js';
 // Mock git elements
 vi.mock('../../hud/elements/git.js', () => ({
     renderGitRepo: vi.fn(() => 'repo:my-repo'),
@@ -282,6 +283,102 @@ describe('gitInfoPosition configuration', () => {
             // Either git info is first, or if no git info, header is first
             expect(firstLineIsGitInfo || firstLineIsHeader).toBe(true);
         });
+    });
+});
+describe('maxWidth wrapMode behavior', () => {
+    const createMockContext = () => ({
+        contextPercent: 30,
+        modelName: '',
+        ralph: null,
+        ultrawork: null,
+        prd: null,
+        autopilot: null,
+        activeAgents: [],
+        todos: [],
+        backgroundTasks: [],
+        cwd: '/home/user/project',
+        lastSkill: null,
+        rateLimitsResult: null,
+        customBuckets: null,
+        pendingPermission: null,
+        thinkingState: null,
+        sessionHealth: null,
+        omcVersion: '4.5.4',
+        updateAvailable: null,
+        toolCallCount: 0,
+        agentCallCount: 0,
+        skillCallCount: 0,
+        promptTime: null,
+        apiKeySource: null,
+        profileName: null,
+    });
+    const createWrapConfig = (wrapMode, maxWidth, maxOutputLines = 6) => ({
+        preset: 'focused',
+        elements: {
+            ...DEFAULT_HUD_CONFIG.elements,
+            omcLabel: true,
+            rateLimits: false,
+            ralph: false,
+            autopilot: false,
+            prdStory: false,
+            activeSkills: false,
+            contextBar: true,
+            agents: false,
+            backgroundTasks: false,
+            todos: false,
+            promptTime: false,
+            sessionHealth: false,
+            maxOutputLines,
+        },
+        thresholds: DEFAULT_HUD_CONFIG.thresholds,
+        staleTaskThresholdMinutes: 30,
+        contextLimitWarning: {
+            ...DEFAULT_HUD_CONFIG.contextLimitWarning,
+            threshold: 101,
+        },
+        maxWidth,
+        wrapMode,
+    });
+    it('uses truncate mode by default when wrapMode is not provided', async () => {
+        const context = createMockContext();
+        context.contextPercent = 88; // makes header longer
+        const config = createWrapConfig('truncate', 24);
+        delete config.wrapMode;
+        const result = await render(context, config);
+        const lines = result.split('\n');
+        expect(lines[0]).toMatch(/\.\.\.$/);
+    });
+    it('wraps long HUD lines at separator boundaries in wrap mode', async () => {
+        const context = createMockContext();
+        context.contextPercent = 88;
+        const config = createWrapConfig('wrap', 24);
+        const result = await render(context, config);
+        const lines = result.split('\n');
+        expect(lines.length).toBeGreaterThan(1);
+        expect(lines[0]).toContain('[OMC');
+        lines.forEach(line => {
+            expect(stringWidth(line)).toBeLessThanOrEqual(24);
+        });
+    });
+    it('respects maxOutputLines after wrap expansion', async () => {
+        const context = createMockContext();
+        context.contextPercent = 88;
+        const config = createWrapConfig('wrap', 14, 2);
+        const result = await render(context, config);
+        const lines = result.split('\n');
+        expect(lines).toHaveLength(2);
+        lines.forEach(line => {
+            expect(stringWidth(line)).toBeLessThanOrEqual(14);
+        });
+    });
+    it('keeps truncation indicator within maxWidth when maxOutputLines is hit', async () => {
+        const context = createMockContext();
+        context.contextPercent = 88;
+        const config = createWrapConfig('wrap', 8, 1);
+        const result = await render(context, config);
+        const lines = result.split('\n');
+        expect(lines).toHaveLength(1);
+        expect(stringWidth(lines[0] ?? '')).toBeLessThanOrEqual(8);
     });
 });
 //# sourceMappingURL=render.test.js.map

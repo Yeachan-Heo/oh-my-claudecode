@@ -386,25 +386,27 @@ describe('Agents Element', () => {
     });
 
     it('should render multiple agents with correct tree characters', () => {
+      const now = Date.now();
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 1000)),
           description: 'analyzing code',
         },
         {
-          ...createAgent('oh-my-claudecode:explore', 'haiku'),
+          ...createAgent('oh-my-claudecode:explore', 'haiku', new Date(now)),
           description: 'searching files',
         },
       ];
       const result = renderAgentsMultiLine(agents);
       expect(result.headerPart).toContain('2');
       expect(result.detailLines).toHaveLength(2);
-      // First agent uses ├─
+      // Freshest-first ordering: explore first, architect last
       expect(result.detailLines[0]).toContain('├─');
-      expect(result.detailLines[0]).toContain('A');
-      // Last agent uses └─
+      expect(result.detailLines[0]).toContain('e');
+      expect(result.detailLines[0]).toContain('searching files');
       expect(result.detailLines[1]).toContain('└─');
-      expect(result.detailLines[1]).toContain('e');
+      expect(result.detailLines[1]).toContain('A');
+      expect(result.detailLines[1]).toContain('analyzing code');
     });
 
     it('should limit to maxLines and show overflow indicator', () => {

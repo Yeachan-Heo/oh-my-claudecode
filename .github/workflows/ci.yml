@@ -5,6 +5,7 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -112,3 +113,60 @@ jobs:
           fi
           
           echo "✅ All versions match: $PKG_VERSION"
+
+  npm-pack-test:
+    name: npm pack + install test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: npm pack test
+        run: |
+          echo "📦 Creating tarball..."
+          npm pack
+          
+          TARBALL=$(ls -t oh-my-claude-sisyphus-*.tgz | head -1)
+          echo "📦 Tarball: $TARBALL"
+          
+          echo "📦 Testing global install from tarball..."
+          npm install -g ./$TARBALL
+          
+          echo "🔍 Checking omc command..."
+          which omc
+          
+          echo "🔍 Testing omc --version..."
+          omc --version
+          
+          VERSION_OUTPUT=$(omc --version 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "❌ omc --version failed!"
+            echo "$VERSION_OUTPUT"
+            exit 1
+          fi
+          
+          echo "✅ omc --version: $VERSION_OUTPUT"
+          
+          echo "🔍 Testing omc --help..."
+          omc --help
+          
+          HELP_OUTPUT=$(omc --help 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "❌ omc --help failed!"
+            echo "$HELP_OUTPUT"
+            exit 1
+          fi
+          
+          echo "✅ npm pack + install test passed!"

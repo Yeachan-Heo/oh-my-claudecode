@@ -35,10 +35,15 @@ export function extractNotifyFlag(args: string[]): { notifyEnabled: boolean; rem
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === NOTIFY_FLAG && i + 1 < args.length) {
-      const val = args[i + 1].toLowerCase();
-      notifyEnabled = val !== 'false' && val !== '0';
-      i++; // skip value
+    if (arg === NOTIFY_FLAG) {
+      const next = args[i + 1];
+      if (next !== undefined) {
+        const lowered = next.toLowerCase();
+        if (lowered === 'true' || lowered === 'false' || lowered === '1' || lowered === '0') {
+          notifyEnabled = lowered !== 'false' && lowered !== '0';
+          i++; // skip explicit value token
+        }
+      }
     } else if (arg.startsWith(`${NOTIFY_FLAG}=`)) {
       const val = arg.slice(NOTIFY_FLAG.length + 1).toLowerCase();
       notifyEnabled = val !== 'false' && val !== '0';

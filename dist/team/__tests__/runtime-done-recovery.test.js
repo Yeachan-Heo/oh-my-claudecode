@@ -42,6 +42,7 @@ describe('watchdog done.json parsing recovery', () => {
             teamName,
             sessionName: 'omc-team-test',
             leaderPaneId: '%0',
+            ownsWindow: false,
             config: {
                 teamName,
                 workerCount: 1,

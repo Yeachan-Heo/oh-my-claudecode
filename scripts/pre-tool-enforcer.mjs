@@ -6,8 +6,10 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'fs';
+import { dirname, join, resolve } from 'path';
+import { execSync } from 'child_process';
+import { homedir } from 'os';
 import { pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
 
@@ -22,6 +24,103 @@ const MODE_STATE_FILES = [
   'team-state.json',
   'omc-teams-state.json',
 ];
+const AGENT_HEAVY_TOOLS = new Set(['Task', 'TaskCreate', 'TaskUpdate']);
+const PREFLIGHT_CONTEXT_THRESHOLD = parseInt(process.env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD || '72', 10);
+
+/**
+ * Resolve transcript path in worktree environments.
+ * Mirrors logic used by context safety/guard hooks.
+ */
+function resolveTranscriptPath(transcriptPath, cwd) {
+  if (!transcriptPath) return transcriptPath;
+  try {
+    if (existsSync(transcriptPath)) return transcriptPath;
+  } catch { /* fallthrough */ }
+
+  const worktreePattern = /--claude-worktrees-[^/\\]+/;
+  if (worktreePattern.test(transcriptPath)) {
+    const resolvedPath = transcriptPath.replace(worktreePattern, '');
+    try {
+      if (existsSync(resolvedPath)) return resolvedPath;
+    } catch { /* fallthrough */ }
+  }
+
+  const effectiveCwd = cwd || process.cwd();
+  try {
+    const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
+    const mainRepoRoot = dirname(absoluteCommonDir);
+
+    const worktreeTop = execSync('git rev-parse --show-toplevel', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (mainRepoRoot !== worktreeTop) {
+      const lastSep = transcriptPath.lastIndexOf('/');
+      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+      if (sessionFile) {
+        const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+        const projectsDir = join(configDir, 'projects');
+        if (existsSync(projectsDir)) {
+          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+          try {
+            if (existsSync(resolvedPath)) return resolvedPath;
+          } catch { /* fallthrough */ }
+        }
+      }
+    }
+  } catch { /* best-effort fallback */ }
+
+  return transcriptPath;
+}
+
+function estimateContextPercent(transcriptPath) {
+  if (!transcriptPath) return 0;
+
+  let fd = -1;
+  try {
+    const stat = statSync(transcriptPath);
+    if (stat.size === 0) return 0;
+
+    fd = openSync(transcriptPath, 'r');
+    const readSize = Math.min(4096, stat.size);
+    const buf = Buffer.alloc(readSize);
+    readSync(fd, buf, 0, readSize, stat.size - readSize);
+    closeSync(fd);
+    fd = -1;
+
+    const tail = buf.toString('utf-8');
+    const windowMatch = tail.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
+    const inputMatch = tail.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
+
+    if (!windowMatch || !inputMatch) return 0;
+
+    const lastWindow = parseInt(windowMatch[windowMatch.length - 1].match(/(\d+)/)[1], 10);
+    const lastInput = parseInt(inputMatch[inputMatch.length - 1].match(/(\d+)/)[1], 10);
+
+    if (lastWindow === 0) return 0;
+    return Math.round((lastInput / lastWindow) * 100);
+  } catch {
+    return 0;
+  } finally {
+    if (fd !== -1) try { closeSync(fd); } catch { /* ignore */ }
+  }
+}
+
+function buildPreflightRecoveryAdvice(contextPercent) {
+  return `[OMC] Preflight context guard: ${contextPercent}% used ` +
+    `(threshold: ${PREFLIGHT_CONTEXT_THRESHOLD}%). Avoid spawning additional agent-heavy tasks ` +
+    `until context is reduced. Safe recovery: (1) pause new Task fan-out, (2) run /compact now, ` +
+    `(3) if compact fails, open a fresh session and continue from .omc/state + .omc/notepad.md.`;
+}
 
 // Simple JSON field extraction
 function extractJsonField(input, field, defaultValue = '') {
@@ -286,6 +385,20 @@ async function main() {
     }
 
     const todoStatus = getTodoStatus(directory);
+
+    if (AGENT_HEAVY_TOOLS.has(toolName)) {
+      const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
+      const transcriptPath = resolveTranscriptPath(rawTranscriptPath, directory);
+      const contextPercent = estimateContextPercent(transcriptPath);
+
+      if (contextPercent >= PREFLIGHT_CONTEXT_THRESHOLD) {
+        console.log(JSON.stringify({
+          decision: 'block',
+          reason: buildPreflightRecoveryAdvice(contextPercent),
+        }));
+        return;
+      }
+    }
 
     let message;
     if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
