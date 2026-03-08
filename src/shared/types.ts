@@ -12,8 +12,8 @@ export interface AgentConfig {
   tools?: string[];
   /** Tools explicitly disallowed for this agent */
   disallowedTools?: string[];
-  model?: ModelType;
-  defaultModel?: ModelType;
+  model?: string;
+  defaultModel?: string;
 }
 
 export interface PluginConfig {

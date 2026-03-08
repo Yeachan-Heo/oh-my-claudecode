@@ -8,8 +8,9 @@
  * 4. omcSystemPrompt for the main orchestrator
  */
 
-import type { AgentConfig, ModelType } from '../shared/types.js';
+import type { AgentConfig, PluginConfig } from '../shared/types.js';
 import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
+import { loadConfig } from '../config/loader.js';
 
 // Re-export base agents from individual files (rebranded names)
 export { architectAgent } from './architect.js';
@@ -145,6 +146,32 @@ export const codeSimplifierAgent: AgentConfig = {
  */
 export const tddGuideAgentAlias = testEngineerAgent;
 
+const AGENT_CONFIG_KEY_MAP = {
+  explore: 'explore',
+  analyst: 'analyst',
+  planner: 'planner',
+  architect: 'architect',
+  debugger: 'debugger',
+  executor: 'executor',
+  verifier: 'verifier',
+  'security-reviewer': 'securityReviewer',
+  'code-reviewer': 'codeReviewer',
+  'test-engineer': 'testEngineer',
+  designer: 'designer',
+  writer: 'writer',
+  'qa-tester': 'qaTester',
+  scientist: 'scientist',
+  'git-master': 'gitMaster',
+  'code-simplifier': 'codeSimplifier',
+  critic: 'critic',
+  'document-specialist': 'documentSpecialist',
+} as const satisfies Partial<Record<string, keyof NonNullable<PluginConfig['agents']>>>;
+
+function getConfiguredAgentModel(name: string, config: PluginConfig): string | undefined {
+  const key = AGENT_CONFIG_KEY_MAP[name as keyof typeof AGENT_CONFIG_KEY_MAP];
+  return key ? config.agents?.[key]?.model : undefined;
+}
+
 // ============================================================
 // AGENT REGISTRY
 // ============================================================
@@ -169,13 +196,14 @@ export const tddGuideAgentAlias = testEngineerAgent;
  */
 export function getAgentDefinitions(options?: {
   overrides?: Partial<Record<string, Partial<AgentConfig>>>;
+  config?: PluginConfig;
 }): Record<string, {
   description: string;
   prompt: string;
   tools?: string[];
   disallowedTools?: string[];
-  model?: ModelType;
-  defaultModel?: ModelType;
+  model?: string;
+  defaultModel?: string;
 }> {
   const agents: Record<string, AgentConfig> = {
     // ============================================================
@@ -217,18 +245,23 @@ export function getAgentDefinitions(options?: {
     'document-specialist': documentSpecialistAgent
   };
 
-  const result: Record<string, { description: string; prompt: string; tools?: string[]; disallowedTools?: string[]; model?: ModelType; defaultModel?: ModelType }> = {};
+  const resolvedConfig = options?.config ?? loadConfig();
+  const result: Record<string, { description: string; prompt: string; tools?: string[]; disallowedTools?: string[]; model?: string; defaultModel?: string }> = {};
 
-  for (const [name, config] of Object.entries(agents)) {
+  for (const [name, agentConfig] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
-    const disallowedTools = config.disallowedTools ?? parseDisallowedTools(name);
+    const configuredModel = getConfiguredAgentModel(name, resolvedConfig);
+    const disallowedTools = agentConfig.disallowedTools ?? parseDisallowedTools(name);
+    const resolvedModel = override?.model ?? configuredModel ?? agentConfig.model;
+    const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
+
     result[name] = {
-      description: override?.description ?? config.description,
-      prompt: override?.prompt ?? config.prompt,
-      tools: override?.tools ?? config.tools,
+      description: override?.description ?? agentConfig.description,
+      prompt: override?.prompt ?? agentConfig.prompt,
+      tools: override?.tools ?? agentConfig.tools,
       disallowedTools,
-      model: (override?.model ?? config.model) as ModelType | undefined,
-      defaultModel: (override?.defaultModel ?? config.defaultModel) as ModelType | undefined
+      model: resolvedModel,
+      defaultModel: resolvedDefaultModel,
     };
   }
 
