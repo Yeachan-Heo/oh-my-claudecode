@@ -16,7 +16,7 @@ describe('delegation-enforcer', () => {
   let originalDebugEnv: string | undefined;
   // Save/restore env vars that trigger non-Claude provider detection (issue #1201)
   // so existing tests run in a standard Claude environment
-  const providerEnvKeys = ['ANTHROPIC_BASE_URL', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_ROUTING_FORCE_INHERIT', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL'];
+  const providerEnvKeys = ['ANTHROPIC_BASE_URL', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_ROUTING_FORCE_INHERIT', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'OMC_MODEL_HIGH', 'OMC_MODEL_MEDIUM', 'OMC_MODEL_LOW'];
   const savedProviderEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -68,7 +68,7 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
 
       expect(result.injected).toBe(true);
-      expect(result.modifiedInput.model).toBe('claude-sonnet-4-6'); // executor defaults to claude-sonnet-4-6
+      expect(result.modifiedInput.model).toBe('sonnet'); // executor defaults to claude-sonnet-4-6
       expect(result.originalInput.model).toBeUndefined();
     });
 
@@ -82,7 +82,7 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
 
       expect(result.injected).toBe(true);
-      expect(result.modifiedInput.model).toBe('claude-sonnet-4-6'); // debugger defaults to claude-sonnet-4-6
+      expect(result.modifiedInput.model).toBe('sonnet'); // debugger defaults to claude-sonnet-4-6
     });
 
     it('rewrites deprecated aliases to canonical agent names before injecting model', () => {
@@ -96,7 +96,7 @@ describe('delegation-enforcer', () => {
 
       expect(result.injected).toBe(true);
       expect(result.modifiedInput.subagent_type).toBe('oh-my-claudecode:debugger');
-      expect(result.modifiedInput.model).toBe('claude-sonnet-4-6');
+      expect(result.modifiedInput.model).toBe('sonnet');
     });
 
     it('throws error for unknown agent type', () => {
@@ -144,14 +144,14 @@ describe('delegation-enforcer', () => {
 
     it('works with all agents', () => {
       const testCases = [
-        { agent: 'architect', expectedModel: 'claude-opus-4-6' },
-        { agent: 'executor', expectedModel: 'claude-sonnet-4-6' },
-        { agent: 'explore', expectedModel: 'claude-haiku-4-5' },
-        { agent: 'designer', expectedModel: 'claude-sonnet-4-6' },
-        { agent: 'debugger', expectedModel: 'claude-sonnet-4-6' },
-        { agent: 'verifier', expectedModel: 'claude-sonnet-4-6' },
-        { agent: 'code-reviewer', expectedModel: 'claude-opus-4-6' },
-        { agent: 'test-engineer', expectedModel: 'claude-sonnet-4-6' }
+        { agent: 'architect', expectedModel: 'opus' },
+        { agent: 'executor', expectedModel: 'sonnet' },
+        { agent: 'explore', expectedModel: 'haiku' },
+        { agent: 'designer', expectedModel: 'sonnet' },
+        { agent: 'debugger', expectedModel: 'sonnet' },
+        { agent: 'verifier', expectedModel: 'sonnet' },
+        { agent: 'code-reviewer', expectedModel: 'opus' },
+        { agent: 'test-engineer', expectedModel: 'sonnet' }
       ];
 
       for (const testCase of testCases) {
@@ -244,7 +244,7 @@ describe('delegation-enforcer', () => {
 
       const result = processPreToolUse('Agent', toolInput);
 
-      expect(result.modifiedInput).toHaveProperty('model', 'claude-sonnet-4-6');
+      expect(result.modifiedInput).toHaveProperty('model', 'sonnet');
     });
 
     it('does not modify input when model already specified', () => {
@@ -282,16 +282,16 @@ describe('delegation-enforcer', () => {
 
   describe('getModelForAgent', () => {
     it('returns correct model for agent with prefix', () => {
-      expect(getModelForAgent('oh-my-claudecode:executor')).toBe('claude-sonnet-4-6');
-      expect(getModelForAgent('oh-my-claudecode:debugger')).toBe('claude-sonnet-4-6');
-      expect(getModelForAgent('oh-my-claudecode:architect')).toBe('claude-opus-4-6');
+      expect(getModelForAgent('oh-my-claudecode:executor')).toBe('sonnet');
+      expect(getModelForAgent('oh-my-claudecode:debugger')).toBe('sonnet');
+      expect(getModelForAgent('oh-my-claudecode:architect')).toBe('opus');
     });
 
     it('returns correct model for agent without prefix', () => {
-      expect(getModelForAgent('executor')).toBe('claude-sonnet-4-6');
-      expect(getModelForAgent('debugger')).toBe('claude-sonnet-4-6');
-      expect(getModelForAgent('architect')).toBe('claude-opus-4-6');
-      expect(getModelForAgent('build-fixer')).toBe('claude-sonnet-4-6');
+      expect(getModelForAgent('executor')).toBe('sonnet');
+      expect(getModelForAgent('debugger')).toBe('sonnet');
+      expect(getModelForAgent('architect')).toBe('opus');
+      expect(getModelForAgent('build-fixer')).toBe('sonnet');
     });
 
     it('throws error for unknown agent', () => {
@@ -348,13 +348,14 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
 
       expect(result.injected).toBe(true);
-      expect(result.model).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
-      expect(result.modifiedInput.model).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+      // Even with Bedrock env vars, enforceModel normalizes to CC aliases
+      expect(result.model).toBe('sonnet');
+      expect(result.modifiedInput.model).toBe('sonnet');
     });
 
-    it('getModelForAgent returns env-resolved model IDs', () => {
+    it('getModelForAgent returns normalized CC aliases even with Bedrock env vars', () => {
       process.env.CLAUDE_CODE_BEDROCK_OPUS_MODEL = 'us.anthropic.claude-opus-4-6-v1:0';
-      expect(getModelForAgent('architect')).toBe('us.anthropic.claude-opus-4-6-v1:0');
+      expect(getModelForAgent('architect')).toBe('opus');
     });
   });
 
@@ -412,8 +413,8 @@ describe('delegation-enforcer', () => {
         subagent_type: 'executor'
       };
       const result = enforceModel(input);
-      expect(result.model).toBe('claude-sonnet-4-6');
-      expect(result.modifiedInput.model).toBe('claude-sonnet-4-6');
+      expect(result.model).toBe('sonnet');
+      expect(result.modifiedInput.model).toBe('sonnet');
     });
 
     it('explicit model param takes priority over alias', () => {

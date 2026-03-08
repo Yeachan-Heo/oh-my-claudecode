@@ -962,6 +962,27 @@ Please continue working on these tasks.
 `);
   }
 
+  // Bedrock/Vertex/proxy override: tell the LLM not to pass model on Task calls.
+  // This prevents the LLM from following the static CLAUDE.md instruction
+  // "Pass model on Task calls: haiku, sonnet, opus" which produces invalid
+  // model IDs on non-standard providers. (issues #1135, #1201)
+  try {
+    const sessionConfig = loadConfig();
+    if (sessionConfig.routing?.forceInherit) {
+      messages.push(`<system-reminder>
+
+[MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
+
+This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
+Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
+The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
+
+</system-reminder>`);
+    }
+  } catch {
+    // Non-blocking: config load failure must never break session start
+  }
+
   if (messages.length > 0) {
     return {
       continue: true,
@@ -1077,24 +1098,37 @@ function processPreToolUse(input: HookInput): HookOutput {
   const preToolMessages = enforcementResult.message ? [enforcementResult.message] : [];
   let modifiedToolInput: Record<string, unknown> | undefined;
 
-  // Force-inherit: strip `model` parameter from Task calls so agents inherit
-  // the user's Claude Code model setting instead of OMC per-agent routing (issue #1135)
+  // Force-inherit: deny Task calls that carry a `model` parameter when
+  // forceInherit is enabled (Bedrock, Vertex, CC Switch, etc.).
+  // Claude Code's hook protocol does not support modifiedInput, so we cannot
+  // silently strip the model. Instead, deny the call so Claude retries without
+  // the model param, letting agents inherit the parent session's model.
+  // (issues #1135, #1201)
   if (input.toolName === "Task") {
     const originalTaskInput = input.toolInput as Record<string, unknown> | undefined;
-    const nextTaskInput = originalTaskInput ? { ...originalTaskInput } : {};
-    let changed = false;
+    const taskModel = originalTaskInput?.model;
 
-    if (nextTaskInput.model) {
+    if (taskModel) {
       const config = loadConfig();
       if (config.routing?.forceInherit) {
-        delete nextTaskInput.model;
-        changed = true;
+        // Use permissionDecision:"deny" — the only PreToolUse mechanism
+        // Claude Code supports for blocking a specific tool call with
+        // feedback. modifiedInput is NOT supported by the hook protocol.
+        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on Task calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${taskModel}" is not valid for this provider.`;
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: denyReason,
+          },
+        } as HookOutput & { hookSpecificOutput: Record<string, unknown> };
       }
     }
 
-    if (nextTaskInput.run_in_background === true) {
-      const subagentType = typeof nextTaskInput.subagent_type === "string"
-        ? nextTaskInput.subagent_type
+    if (originalTaskInput?.run_in_background === true) {
+      const subagentType = typeof originalTaskInput.subagent_type === "string"
+        ? originalTaskInput.subagent_type
         : undefined;
       const permissionFallback = getBackgroundTaskPermissionFallback(directory, subagentType);
 
@@ -1106,10 +1140,6 @@ function processPreToolUse(input: HookInput): HookOutput {
           message: reason,
         };
       }
-    }
-
-    if (changed) {
-      modifiedToolInput = nextTaskInput;
     }
   }
 

@@ -16,6 +16,7 @@
 import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
+import { resolveClaudeFamily } from '../config/models.js';
 
 /**
  * Agent input structure from Claude Agent SDK
@@ -126,10 +127,23 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
     };
   }
 
+  // Normalize model to Claude Code's supported aliases (sonnet/opus/haiku).
+  // The config may resolve to full model IDs like 'claude-sonnet-4-6' or
+  // Bedrock IDs like 'us.anthropic.claude-sonnet-4-6-v1:0', but Claude Code's
+  // subagent system only accepts 'sonnet', 'opus', 'haiku', or 'inherit'.
+  // Passing full IDs causes 400 errors on Bedrock/Vertex. (issue #1201)
+  const FAMILY_TO_ALIAS: Record<string, string> = {
+    SONNET: 'sonnet',
+    OPUS: 'opus',
+    HAIKU: 'haiku',
+  };
+  const family = resolveClaudeFamily(resolvedModel);
+  const normalizedModel = family ? (FAMILY_TO_ALIAS[family] ?? resolvedModel) : resolvedModel;
+
   const modifiedInput: AgentInput = {
     ...agentInput,
     subagent_type: canonicalSubagentType,
-    model: resolvedModel,
+    model: normalizedModel,
   };
 
   let warning: string | undefined;
@@ -137,14 +151,17 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
     const aliasNote = resolvedModel !== agentDef.model && aliasSourceModel
       ? ` (aliased from ${aliasSourceModel})`
       : '';
-    warning = `[OMC] Auto-injecting model: ${resolvedModel} for ${agentType}${aliasNote}`;
+    const normalizedNote = normalizedModel !== resolvedModel
+      ? ` (normalized from ${resolvedModel})`
+      : '';
+    warning = `[OMC] Auto-injecting model: ${normalizedModel} for ${agentType}${aliasNote}${normalizedNote}`;
   }
 
   return {
     originalInput: agentInput,
     modifiedInput,
     injected: true,
-    model: resolvedModel,
+    model: normalizedModel,
     warning,
   };
 }
@@ -208,5 +225,12 @@ export function getModelForAgent(agentType: string): string {
     throw new Error(`No default model defined for agent: ${normalizedType}`);
   }
 
-  return agentDef.model;
+  // Normalize to CC-supported aliases (sonnet/opus/haiku)
+  const FAMILY_TO_ALIAS: Record<string, string> = {
+    SONNET: 'sonnet',
+    OPUS: 'opus',
+    HAIKU: 'haiku',
+  };
+  const family = resolveClaudeFamily(agentDef.model);
+  return family ? (FAMILY_TO_ALIAS[family] ?? agentDef.model) : agentDef.model;
 }
