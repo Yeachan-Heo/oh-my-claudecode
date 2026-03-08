@@ -97,7 +97,9 @@ export class LspClient {
             try {
                 this.process.kill('SIGKILL');
             }
-            catch { }
+            catch {
+                // Ignore errors during kill
+            }
             this.process = null;
             this.initialized = false;
         }
@@ -524,7 +526,9 @@ class LspClientManager {
                 try {
                     client.forceKill();
                 }
-                catch { }
+                catch {
+                    // Ignore errors during cleanup
+                }
             }
             this.clients.clear();
             this.lastUsed.clear();

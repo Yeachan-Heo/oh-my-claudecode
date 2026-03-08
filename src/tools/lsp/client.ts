@@ -204,7 +204,11 @@ export class LspClient {
    */
   forceKill(): void {
     if (this.process) {
-      try { this.process.kill('SIGKILL'); } catch {}
+      try {
+        this.process.kill('SIGKILL');
+      } catch {
+        // Ignore errors during kill
+      }
       this.process = null;
       this.initialized = false;
     }
@@ -672,7 +676,11 @@ class LspClientManager {
   private registerCleanupHandlers(): void {
     const forceKillAll = () => {
       for (const client of this.clients.values()) {
-        try { client.forceKill(); } catch {}
+        try {
+          client.forceKill();
+        } catch {
+          // Ignore errors during cleanup
+        }
       }
       this.clients.clear();
       this.lastUsed.clear();
