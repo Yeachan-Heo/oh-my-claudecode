@@ -14,10 +14,11 @@
  * 5. ccg: Claude-Codex-Gemini tri-model orchestration
  * 6. ralplan: Iterative planning with consensus
  * 7. deep interview: Socratic interview workflow
- * 8. tdd: Test-driven development
- * 9. ultrathink: Extended reasoning
- * 10. deepsearch: Codebase search (restricted patterns)
- * 11. analyze: Analysis mode (restricted patterns)
+ * 8. ai-slop-cleaner: Cleanup/deslop anti-slop workflow
+ * 9. tdd: Test-driven development
+ * 10. ultrathink: Extended reasoning
+ * 11. deepsearch: Codebase search (restricted patterns)
+ * 12. analyze: Analysis mode (restricted patterns)
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
@@ -80,6 +81,15 @@ function extractPrompt(input) {
 }
 
 // Sanitize text to prevent false positives from code blocks, XML tags, URLs, and file paths
+const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-]?slop)\b/i;
+const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
+const ANTI_SLOP_SMELL_PATTERN = /\b(slop|duplicate(?:d|s)?|duplication|dead\s+code|unused\s+code|over[\s-]?abstract(?:ion|ed)?|wrapper\s+layers?|boundary\s+violations?|needless\s+abstractions?|unnecessary\s+abstractions?|ai[\s-]?generated|generated\s+code|tech\s+debt)\b/i;
+
+function isAntiSlopCleanupRequest(text) {
+  return ANTI_SLOP_EXPLICIT_PATTERN.test(text) ||
+    (ANTI_SLOP_ACTION_PATTERN.test(text) && ANTI_SLOP_SMELL_PATTERN.test(text));
+}
+
 function sanitizeForKeywordDetection(text) {
   return text
     // 1. Strip XML-style tag blocks: <tag-name ...>...</tag-name> (multi-line, greedy on tag name)
@@ -278,7 +288,7 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
   const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
-    'ccg','ralplan','deep-interview','tdd','ultrathink','deepsearch','analyze'];
+    'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -383,6 +393,11 @@ async function main() {
     // Deep interview keywords
     if (/\b(deep[\s-]interview|ouroboros)\b/i.test(cleanPrompt)) {
       matches.push({ name: 'deep-interview', args: '' });
+    }
+
+    // AI slop cleanup keywords
+    if (isAntiSlopCleanupRequest(cleanPrompt)) {
+      matches.push({ name: 'ai-slop-cleaner', args: '' });
     }
 
     // TDD keywords

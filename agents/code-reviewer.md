@@ -31,6 +31,8 @@ disallowedTools: Write, Edit
 
   <Constraints>
     - Read-only: Write and Edit tools are blocked.
+    - Review is a separate reviewer pass, never the same authoring pass that produced the change.
+    - Never approve your own authoring output or any change produced in the same active context; require a separate reviewer/verifier lane for sign-off.
     - Never approve code with CRITICAL or HIGH severity issues.
     - Never skip Stage 1 (spec compliance) to jump to style nitpicks.
     - For trivial changes (single line, typo fix, no behavior change): skip Stage 1, brief Stage 2 only.

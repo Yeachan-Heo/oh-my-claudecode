@@ -11,7 +11,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team](#cli-commands-askteam)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (28 Total)](#agents-28-total)
-- [Skills (33 Total)](#skills-33-total)
+- [Skills (34 Total)](#skills-34-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -319,13 +319,14 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (33 Total)
+## Skills (34 Total)
 
-Includes **32 canonical skills + 1 deprecated alias** (`psm`).
+Includes **33 canonical skills + 1 deprecated alias** (`psm`).
 
 | Skill                     | Description                                                      | Manual Command                              |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
 | `ask-codex`               | Ask Codex via `omc ask codex` and store an ask artifact          | `/oh-my-claudecode:ask-codex`               |
+| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass | `/oh-my-claudecode:ai-slop-cleaner`         |
 | `ask-gemini`              | Ask Gemini via `omc ask gemini` and store an ask artifact        | `/oh-my-claudecode:ask-gemini`              |
 | `autopilot`               | Full autonomous execution from idea to working code              | `/oh-my-claudecode:autopilot`               |
 | `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
@@ -369,6 +370,7 @@ All installed skills are available as slash commands with the prefix `/oh-my-cla
 
 | Command                                     | Description                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/oh-my-claudecode:ai-slop-cleaner <target>`  | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                       |
 | `/oh-my-claudecode:autopilot <task>`        | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:ultrawork <task>`        | Maximum performance mode with parallel agents                                                 |
 | `/oh-my-claudecode:team <N>:<agent> <task>` | Coordinated native team workflow                                                              |
@@ -505,6 +507,7 @@ Use these trigger phrases in natural language prompts to activate enhanced modes
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `ultrawork`, `ulw`                                      | Activates parallel agent orchestration                                                        |
 | `autopilot`, `build me`, `I want a`                     | Full autonomous execution                                                                     |
+| `deslop`, `anti-slop`, cleanup/refactor + slop smells         | Anti-slop cleanup workflow (`ai-slop-cleaner`)                                               |
 | `ralph`, `don't stop`, `must complete`                  | Persistence until verified complete                                                           |
 | `ccg`, `claude-codex-gemini`                            | Claude-Codex-Gemini orchestration                                                             |
 | `ralplan`                                               | Iterative planning consensus with structured deliberation (`--deliberate` for high-risk mode) |

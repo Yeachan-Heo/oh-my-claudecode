@@ -3,7 +3,7 @@
 
 # skills
 
-32 skill directories for workflow automation and specialized behaviors.
+33 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -44,6 +44,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 
 | File | Skill | Purpose |
 |-----------|-------|---------|
+| `ai-slop-cleaner/SKILL.md` | ai-slop-cleaner | Regression-safe cleanup workflow for AI-generated code slop |
 | `learner/SKILL.md` | learner | Extract reusable skill from session |
 | `ask-codex/SKILL.md` | ask-codex | Ask Codex via `omc ask codex` and capture an artifact |
 | `ask-gemini/SKILL.md` | ask-gemini | Ask Gemini via `omc ask gemini` and capture an artifact |
@@ -163,6 +164,7 @@ None - pure markdown files.
 | Category | Skills | Trigger Keywords |
 |----------|--------|------------------|
 | Execution | autopilot, ultrawork, ralph, team, ultraqa | "autopilot", "ulw", "ralph", "team" |
+| Cleanup | ai-slop-cleaner | "deslop", "anti-slop", cleanup/refactor + slop smells |
 | Planning | omc-plan, ralplan, deep-interview, ralph-init | "plan this", "interview me", "ouroboros" |
 | Exploration | deepinit, sciomc, external-context | "deepinit", "research" |
 | Utility | learner, note, cancel, hud, omc-doctor, omc-setup, omc-help, mcp-setup | "stop", "cancel" |
