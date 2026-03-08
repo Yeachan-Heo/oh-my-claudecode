@@ -170,7 +170,7 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 
 ### Developer Experience
 
-- **Magic keywords** - `ralph`, `ulw`, `team` for explicit control
+- **Magic keywords** - `ralph`, `ulw`, `ralplan`; Team stays explicit via `/team`
 - **HUD statusline** - Real-time orchestration metrics in your status bar
 - **Skill learning** - Extract reusable patterns from your sessions
 - **Analytics & cost tracking** - Understand token usage across all sessions
@@ -181,12 +181,10 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 
 ## Magic Keywords
 
-Optional shortcuts for power users. Natural language works fine without them.
+Optional shortcuts for power users. Natural language works fine without them. Team mode is explicit: use `/team ...` or `omc team ...` rather than a keyword trigger.
 
 | Keyword                | Effect                                 | Example                                        |
 | ---------------------- | -------------------------------------- | ---------------------------------------------- |
-| `team`                 | Canonical Team orchestration           | `/team 3:executor "fix all TypeScript errors"` |
-| `omc team`             | tmux CLI workers (codex/gemini/claude) | `omc team 2:codex "security review"`           |
 | `ccg`                  | ask-codex + ask-gemini synthesis       | `/ccg review this PR`                          |
 | `autopilot`            | Full autonomous execution              | `autopilot: build a todo app`                  |
 | `ralph`                | Persistence mode                       | `ralph: refactor auth`                         |
