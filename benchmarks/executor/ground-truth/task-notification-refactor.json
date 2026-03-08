@@ -1,0 +1,57 @@
+{
+  "fixtureId": "task-notification-refactor",
+  "fixturePath": "fixtures/tasks/task-notification-refactor.md",
+  "domain": "task",
+  "expectedVerdict": "complex",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "IMPL-NR-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must define a NotificationChannel interface with a send method for the strategy pattern",
+      "keywords": ["NotificationChannel", "interface", "send", "strategy", "pattern"],
+      "explanation": "The core abstraction is a NotificationChannel interface with a send(notification) method. This enables the strategy pattern for channel routing."
+    },
+    {
+      "id": "IMPL-NR-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must implement EmailChannel, SmsChannel, and PushChannel classes",
+      "keywords": ["EmailChannel", "SmsChannel", "PushChannel", "class", "implement"],
+      "explanation": "Three concrete channel implementations are required. Each should handle its own sending logic, error handling, and status tracking."
+    },
+    {
+      "id": "IMPL-NR-3",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must maintain backward compatibility — existing callers without channels param default to email",
+      "keywords": ["backward", "compatibility", "default", "email", "existing"],
+      "explanation": "Existing code calls sendNotification without a channels parameter. The refactored version must default to email channel to avoid breaking existing callers."
+    },
+    {
+      "id": "IMPL-NR-4",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Should route notifications based on user preferences — lookup preferences per user",
+      "keywords": ["user", "preferences", "route", "channel", "lookup"],
+      "explanation": "The NotificationService should look up user preferences to determine which channels to use. Users with SMS enabled should receive SMS notifications, etc."
+    },
+    {
+      "id": "IMPL-NR-5",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Each channel should independently track status and handle errors — one channel failure shouldn't block others",
+      "keywords": ["independent", "status", "error", "failure", "block", "channel"],
+      "explanation": "If email sending fails, SMS and push should still be attempted. Each channel independently records its status (sent/failed) in the database."
+    },
+    {
+      "id": "IMPL-NR-6",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "API route should accept optional channels override parameter",
+      "keywords": ["API", "route", "channels", "override", "parameter", "optional"],
+      "explanation": "The POST /notifications endpoint should accept an optional channels array to override user preferences for specific notifications."
+    }
+  ]
+}

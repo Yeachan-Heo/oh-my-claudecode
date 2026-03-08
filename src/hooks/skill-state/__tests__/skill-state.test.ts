@@ -58,8 +58,12 @@ describe('skill-state', () => {
 
     it('returns medium for review/planning skills', () => {
       expect(getSkillProtection('plan')).toBe('medium');
-      expect(getSkillProtection('ralplan')).toBe('medium');
+      expect(getSkillProtection('review')).toBe('medium');
       expect(getSkillProtection('external-context')).toBe('medium');
+    });
+
+    it('returns none for ralplan because persistent-mode enforces it directly', () => {
+      expect(getSkillProtection('ralplan')).toBe('none');
     });
 
     it('returns heavy for long-running skills', () => {
@@ -144,11 +148,11 @@ describe('skill-state', () => {
 
     it('overwrites existing state when new skill is invoked', () => {
       writeSkillActiveState(tempDir, 'plan', 'session-1');
-      const state2 = writeSkillActiveState(tempDir, 'ralplan', 'session-1');
-      expect(state2!.skill_name).toBe('ralplan');
+      const state2 = writeSkillActiveState(tempDir, 'external-context', 'session-1');
+      expect(state2!.skill_name).toBe('external-context');
 
       const readBack = readSkillActiveState(tempDir, 'session-1');
-      expect(readBack!.skill_name).toBe('ralplan');
+      expect(readBack!.skill_name).toBe('external-context');
     });
   });
 
@@ -343,9 +347,9 @@ describe('skill-state', () => {
     });
 
     it('includes skill name in blocking message', () => {
-      writeSkillActiveState(tempDir, 'ralplan', 'session-1');
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
       const result = checkSkillActiveState(tempDir, 'session-1');
-      expect(result.message).toContain('ralplan');
+      expect(result.message).toContain('plan');
       expect(result.message).toContain('SKILL ACTIVE');
     });
 
