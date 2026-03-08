@@ -229,9 +229,9 @@ Hành vi tag:
 - Slack: hỗ trợ `<@MEMBER_ID>`, `<!channel>`, `<!here>`, `<!everyone>`, `<!subteam^GROUP_ID>`
 - callbacks kiểu `file` bỏ qua các tùy chọn tag
 
-### OpenClaw — Bộ Điều Phối Webhook Có Cấu Trúc
+### Tích hợp OpenClaw
 
-OpenClaw là một bộ điều phối webhook có cấu trúc, chuyển tiếp các sự kiện phiên Claude Code đến các endpoint HTTPS bên ngoài. Sử dụng nó để điều khiển workflow n8n, tác tử AI hoặc bất kỳ tự động hóa webhook tùy chỉnh nào.
+[OpenClaw](https://openclaw.ai/) là nền tảng trợ lý AI cá nhân chạy cục bộ và kết nối với các ứng dụng nhắn tin như WhatsApp, Telegram và Discord. oh-my-claudecode có thể chuyển tiếp các sự kiện phiên Claude Code đến gateway OpenClaw, cho phép phản hồi tự động và quy trình làm việc thông qua tác nhân OpenClaw của bạn.
 
 **Thiết lập nhanh (khuyến nghị):**
 

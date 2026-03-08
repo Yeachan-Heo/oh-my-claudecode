@@ -191,9 +191,9 @@ Comportamento dei tag:
 - Discord: supporta `@here`, `@everyone`, ID utente numerici e `role:<id>`
 - I callback di tipo `file` ignorano le opzioni dei tag
 
-### OpenClaw — Dispatcher di webhook strutturato
+### Integrazione OpenClaw
 
-OpenClaw è un dispatcher di webhook strutturato che inoltra gli eventi delle sessioni Claude Code a endpoint HTTPS esterni. Usalo per guidare workflow n8n, agenti IA o qualsiasi automazione webhook personalizzata.
+[OpenClaw](https://openclaw.ai/) è una piattaforma di assistente IA personale che funziona localmente e si connette ad app di messaggistica come WhatsApp, Telegram e Discord. oh-my-claudecode può inoltrare gli eventi di sessione di Claude Code a un gateway OpenClaw, abilitando risposte automatizzate e workflow tramite il tuo agente OpenClaw.
 
 **Configurazione rapida (consigliato):**
 

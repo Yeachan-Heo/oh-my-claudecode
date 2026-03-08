@@ -231,9 +231,9 @@ omc config-stop-callback discord --clear-tags
 - Slack：支持 `<@MEMBER_ID>`、`<!channel>`、`<!here>`、`<!everyone>`、`<!subteam^GROUP_ID>`
 - `file` 回调会忽略标签选项
 
-### OpenClaw — 结构化 Webhook 调度器
+### OpenClaw 集成
 
-OpenClaw 是一个结构化的 Webhook 调度器，将 Claude Code 会话事件转发到外部 HTTPS 端点。用它来驱动 n8n 工作流、AI 代理或任何自定义 Webhook 自动化。
+[OpenClaw](https://openclaw.ai/) 是一个在本地运行并连接到 WhatsApp、Telegram 和 Discord 等消息应用程序的个人 AI 助手平台。oh-my-claudecode 可以将 Claude Code 会话事件转发到 OpenClaw 网关，通过您的 OpenClaw 代理实现自动化响应和工作流程。
 
 **快速设置（推荐）：**
 

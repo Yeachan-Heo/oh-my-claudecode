@@ -231,9 +231,9 @@ omc config-stop-callback discord --clear-tags
 - Slack: `<@MEMBER_ID>`、`<!channel>`、`<!here>`、`<!everyone>`、`<!subteam^GROUP_ID>` をサポート
 - `file` コールバックはタグオプションを無視
 
-### OpenClaw — 構造化 Webhook ディスパッチャー
+### OpenClaw 連携
 
-OpenClaw は、Claude Code セッションイベントを外部 HTTPS エンドポイントに転送する構造化 Webhook ディスパッチャーです。n8n ワークフロー、AI エージェント、カスタム Webhook 自動化の駆動に使用します。
+[OpenClaw](https://openclaw.ai/) は、ローカルで動作し WhatsApp、Telegram、Discord などのメッセージングアプリに接続するパーソナル AI アシスタントプラットフォームです。oh-my-claudecode は Claude Code セッションイベントを OpenClaw ゲートウェイに転送し、OpenClaw エージェントを通じた自動応答とワークフローを実現します。
 
 **クイックセットアップ（推奨）:**
 

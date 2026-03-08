@@ -191,9 +191,9 @@ Etiket davranışı:
 - Discord: `@here`, `@everyone`, sayısal kullanıcı kimlikleri ve `role:<id>` desteklenir
 - `file` callback'leri etiket seçeneklerini yok sayar
 
-### OpenClaw — Yapılandırılmış Webhook Dağıtıcısı
+### OpenClaw Entegrasyonu
 
-OpenClaw, Claude Code oturum olaylarını harici HTTPS uç noktalarına ileten yapılandırılmış bir webhook dağıtıcısıdır. n8n iş akışlarını, yapay zeka ajanlarını veya herhangi bir özel webhook otomasyonunu çalıştırmak için kullanın.
+[OpenClaw](https://openclaw.ai/), yerel olarak çalışan ve WhatsApp, Telegram ve Discord gibi mesajlaşma uygulamalarına bağlanan kişisel bir yapay zeka asistanı platformudur. oh-my-claudecode, Claude Code oturum olaylarını bir OpenClaw ağ geçidine ileterek OpenClaw ajanınız aracılığıyla otomatik yanıtlar ve iş akışları sağlar.
 
 **Hızlı kurulum (önerilen):**
 

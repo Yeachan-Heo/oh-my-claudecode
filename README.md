@@ -266,9 +266,9 @@ Tag behavior:
 - Slack: supports `<@MEMBER_ID>`, `<!channel>`, `<!here>`, `<!everyone>`, `<!subteam^GROUP_ID>`
 - `file` callbacks ignore tag options
 
-### OpenClaw — Structured Webhook Dispatcher
+### OpenClaw Integration
 
-OpenClaw is a structured webhook dispatcher that forwards Claude Code session events to external HTTPS endpoints. Use it to drive n8n workflows, AI agents, or any custom webhook automation.
+[OpenClaw](https://openclaw.ai/) is a personal AI assistant platform that runs locally and connects to messaging apps like WhatsApp, Telegram, and Discord. oh-my-claudecode can forward Claude Code session events to an OpenClaw gateway, enabling automated responses and workflows via your OpenClaw agent.
 
 **Quick setup (recommended):**
 
