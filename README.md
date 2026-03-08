@@ -316,7 +316,7 @@ OpenClaw is a structured webhook dispatcher that forwards Claude Code session ev
 | `pre-tool-use` | Before tool invocation (high frequency) | `{{toolName}}`, `{{sessionId}}` |
 | `post-tool-use` | After tool invocation (high frequency) | `{{toolName}}`, `{{sessionId}}` |
 
-> **Note:** `session-end` is defined in types but not currently dispatched by bridge.ts ([#1456](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1456)).
+> **Note:** `session-end` is defined in types but not currently dispatched by bridge.ts ([#1456](https://github.com/ohprettyhak/oh-my-claudecode/issues/1456)).
 
 **Reply channel environment variables:**
 

@@ -279,7 +279,7 @@ OpenClaw là một bộ điều phối webhook có cấu trúc, chuyển tiếp 
 | `pre-tool-use` | Trước khi gọi công cụ (tần suất cao) | `{{toolName}}`, `{{sessionId}}` |
 | `post-tool-use` | Sau khi gọi công cụ (tần suất cao) | `{{toolName}}`, `{{sessionId}}` |
 
-> **Lưu ý:** `session-end` được định nghĩa trong types nhưng hiện chưa được dispatch bởi bridge.ts ([#1456](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1456)).
+> **Lưu ý:** `session-end` được định nghĩa trong types nhưng hiện chưa được dispatch bởi bridge.ts ([#1456](https://github.com/ohprettyhak/oh-my-claudecode/issues/1456)).
 
 **Biến môi trường kênh phản hồi:**
 
