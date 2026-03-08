@@ -140,6 +140,15 @@ describe('model-contract', () => {
         CLAUDE_MODEL: 'claude-sonnet-4-5',
         ANTHROPIC_BASE_URL: 'https://example-gateway.invalid',
         CLAUDE_CODE_USE_BEDROCK: '1',
+        CLAUDE_CODE_BEDROCK_OPUS_MODEL: 'us.anthropic.claude-opus-4-6-v1:0',
+        CLAUDE_CODE_BEDROCK_SONNET_MODEL: 'us.anthropic.claude-sonnet-4-6-v1:0',
+        CLAUDE_CODE_BEDROCK_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-v1:0',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-6-custom',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6-custom',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5-custom',
+        OMC_MODEL_HIGH: 'claude-opus-4-6-override',
+        OMC_MODEL_MEDIUM: 'claude-sonnet-4-6-override',
+        OMC_MODEL_LOW: 'claude-haiku-4-5-override',
         OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL: 'gpt-5',
         OMC_GEMINI_DEFAULT_MODEL: 'gemini-2.5-pro',
         ANTHROPIC_API_KEY: 'should-not-be-forwarded',
@@ -149,6 +158,15 @@ describe('model-contract', () => {
       expect(env.CLAUDE_MODEL).toBe('claude-sonnet-4-5');
       expect(env.ANTHROPIC_BASE_URL).toBe('https://example-gateway.invalid');
       expect(env.CLAUDE_CODE_USE_BEDROCK).toBe('1');
+      expect(env.CLAUDE_CODE_BEDROCK_OPUS_MODEL).toBe('us.anthropic.claude-opus-4-6-v1:0');
+      expect(env.CLAUDE_CODE_BEDROCK_SONNET_MODEL).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
+      expect(env.CLAUDE_CODE_BEDROCK_HAIKU_MODEL).toBe('us.anthropic.claude-haiku-4-5-v1:0');
+      expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('claude-opus-4-6-custom');
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-sonnet-4-6-custom');
+      expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('claude-haiku-4-5-custom');
+      expect(env.OMC_MODEL_HIGH).toBe('claude-opus-4-6-override');
+      expect(env.OMC_MODEL_MEDIUM).toBe('claude-sonnet-4-6-override');
+      expect(env.OMC_MODEL_LOW).toBe('claude-haiku-4-5-override');
       expect(env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL).toBe('gpt-5');
       expect(env.OMC_GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-pro');
       expect(env.ANTHROPIC_API_KEY).toBeUndefined();

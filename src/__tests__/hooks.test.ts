@@ -1584,3 +1584,51 @@ describe('Mutual Exclusion - UltraQA and Ralph', () => {
     });
   });
 });
+
+// ===========================================================================
+// Skill-Active State Clearing on Skill Completion
+// ===========================================================================
+
+describe('Skill-active state lifecycle', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `hooks-skill-clear-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    execSync('git init', { cwd: testDir, stdio: 'pipe' });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('clearSkillActiveState removes active skill state', async () => {
+    const { writeSkillActiveState, readSkillActiveState, clearSkillActiveState } = await import('../hooks/skill-state/index.js');
+
+    const sessionId = 'test-skill-clear-session';
+    writeSkillActiveState(testDir, 'code-review', sessionId);
+
+    // Verify state exists
+    const stateBefore = readSkillActiveState(testDir, sessionId);
+    expect(stateBefore).not.toBeNull();
+    expect(stateBefore?.active).toBe(true);
+    expect(stateBefore?.skill_name).toBe('code-review');
+
+    // Clear the state (as bridge.ts processPostToolUse does on Skill completion)
+    const cleared = clearSkillActiveState(testDir, sessionId);
+    expect(cleared).toBe(true);
+
+    // Verify state is cleared
+    const stateAfter = readSkillActiveState(testDir, sessionId);
+    expect(stateAfter).toBeNull();
+  });
+
+  it('clearSkillActiveState is safe to call when no state exists', async () => {
+    const { clearSkillActiveState, readSkillActiveState } = await import('../hooks/skill-state/index.js');
+
+    // Should not throw even when no state file exists
+    clearSkillActiveState(testDir, 'no-such-session');
+    const state = readSkillActiveState(testDir, 'no-such-session');
+    expect(state).toBeNull();
+  });
+});

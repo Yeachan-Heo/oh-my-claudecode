@@ -1,0 +1,49 @@
+{
+  "fixtureId": "bug-redis-intermittent",
+  "fixturePath": "fixtures/bugs/bug-redis-intermittent.md",
+  "domain": "bug",
+  "expectedVerdict": "root-cause",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "BUG-REDIS-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Health check does not verify Redis connectivity — pods marked ready before Redis connection is established",
+      "keywords": ["health", "check", "readiness", "probe", "Redis", "connection", "ready"],
+      "explanation": "The /health endpoint returns { status: 'ok' } unconditionally without checking Redis connectivity. During rolling restarts, new pods are marked ready and receive traffic before their Redis connection is established. The readinessProbe should verify Redis is connected (redis.status === 'ready') before returning 200."
+    },
+    {
+      "id": "BUG-REDIS-2",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Redis client created as module-level singleton — connection attempt starts at import time, not at server ready",
+      "keywords": ["singleton", "module", "import", "connection", "startup", "initialize"],
+      "explanation": "The Redis client is created at module import time (const redis = new Redis(...)). During pod startup, the module is imported and connection begins immediately. If the Redis connection takes longer than the readiness probe initialDelaySeconds (5s), the pod starts serving before Redis is connected."
+    },
+    {
+      "id": "BUG-REDIS-3",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Auth middleware returns 500 on Redis errors instead of graceful degradation — cascading failures during reconnection window",
+      "keywords": ["auth", "middleware", "500", "error", "graceful", "degrad", "cascade"],
+      "explanation": "When Redis is reconnecting, every authenticated request hits the catch block and returns 500. For 200 concurrent users, this means every request fails during the ~5 minute reconnection window. The middleware should implement graceful degradation (e.g., allow requests through with a short-lived in-memory cache, or return 503 with Retry-After header)."
+    },
+    {
+      "id": "BUG-REDIS-4",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "No connection ready event handling — requests are processed before Redis emits 'connect' event",
+      "keywords": ["connect", "ready", "event", "wait", "before", "serving"],
+      "explanation": "The server should wait for the Redis 'ready' event before accepting traffic. Currently there's a 'connect' event handler that logs, but the application doesn't block incoming requests until Redis is actually ready. The readiness probe should gate on redis.status === 'ready'."
+    },
+    {
+      "id": "BUG-REDIS-5",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "retryStrategy uses linear backoff (times * 50) — should use exponential backoff with cap",
+      "keywords": ["retry", "strategy", "backoff", "exponential", "linear"],
+      "explanation": "The retryStrategy uses linear backoff (times * 50ms, max 2000ms). This means reconnection attempts are very frequent early on (50ms, 100ms, 150ms...). Exponential backoff (e.g., Math.min(100 * 2^times, 30000)) would reduce load on a struggling Redis instance and give it time to recover."
+    }
+  ]
+}

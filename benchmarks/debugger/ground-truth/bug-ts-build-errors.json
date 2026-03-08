@@ -1,0 +1,41 @@
+{
+  "fixtureId": "bug-ts-build-errors",
+  "fixturePath": "fixtures/bugs/bug-ts-build-errors.md",
+  "domain": "bug",
+  "expectedVerdict": "root-cause",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "BUG-TS-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Error 1: NotificationEvent lacks recipientEmail/subject — needs discriminated union or type narrowing via switch",
+      "keywords": ["NotificationEvent", "EmailEvent", "discriminated", "union", "narrow", "type"],
+      "explanation": "handleNotification receives NotificationEvent which has type: 'email' | 'sms' | 'push' but no channel-specific fields. The switch on event.type narrows the type union tag but TypeScript can't narrow NotificationEvent to EmailEvent because they're separate interfaces. Fix: make NotificationEvent a discriminated union (NotificationEvent = EmailEvent | SmsEvent | PushEvent) so the switch narrows correctly."
+    },
+    {
+      "id": "BUG-TS-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Error 2: user.preferences is optional — accessing .notifications without null check causes TS2532",
+      "keywords": ["preferences", "optional", "undefined", "null check", "optional chaining", "TS2532"],
+      "explanation": "The User interface declares preferences as optional (preferences?: UserPreferences). Accessing user.preferences.notifications without checking if preferences is defined triggers TS2532. Fix: add optional chaining (user.preferences?.notifications?.email) or a guard (if (!user.preferences) return [])."
+    },
+    {
+      "id": "BUG-TS-3",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Error 3: NotificationRecord requires retryCount but object literal omits it — add retryCount: 0",
+      "keywords": ["retryCount", "missing", "property", "NotificationRecord", "default", "0"],
+      "explanation": "The NotificationRecord interface requires retryCount: number, but the object literal in the POST handler doesn't include it. Fix: add retryCount: 0 to the object literal, or make retryCount optional in the interface with a default (retryCount?: number)."
+    },
+    {
+      "id": "BUG-TS-4",
+      "severity": "MINOR",
+      "category": "finding",
+      "summary": "All three errors stem from the same PR adding notification types — indicates missing type-level design review",
+      "keywords": ["PR", "notification", "type", "design", "review"],
+      "explanation": "PR #847 added new notification types but didn't update the handler or related code. This suggests the type changes weren't accompanied by a compile check before merge. A pre-merge CI step running tsc --noEmit would have caught all three errors."
+    }
+  ]
+}

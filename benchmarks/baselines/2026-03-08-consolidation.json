@@ -1,0 +1,39 @@
+{
+  "timestamp": "2026-03-08T00:00:00.000Z",
+  "model": "claude-opus-4-6",
+  "description": "Initial baseline from agent consolidation — pre-merge prompt comparison. Scores are from the Python benchmark run during the consolidation PR.",
+  "agents": [
+    {
+      "agent": "harsh-critic",
+      "compositeScore": 0,
+      "truePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "fixtureCount": 0,
+      "note": "Placeholder — run bench:prompts:save to populate with actual API results"
+    },
+    {
+      "agent": "code-reviewer",
+      "compositeScore": 0,
+      "truePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "fixtureCount": 0,
+      "note": "Placeholder — run bench:prompts:save to populate with actual API results"
+    },
+    {
+      "agent": "debugger",
+      "compositeScore": 0,
+      "truePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "fixtureCount": 0,
+      "note": "Placeholder — run bench:prompts:save to populate with actual API results"
+    },
+    {
+      "agent": "executor",
+      "compositeScore": 0,
+      "truePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "fixtureCount": 0,
+      "note": "Placeholder — run bench:prompts:save to populate with actual API results"
+    }
+  ]
+}

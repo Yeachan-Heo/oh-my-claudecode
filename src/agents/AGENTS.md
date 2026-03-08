@@ -3,15 +3,14 @@
 
 # agents
 
-28 specialized AI agent definitions with 3-tier model routing for optimal cost and performance.
+18 specialized AI agent definitions with 3-tier model routing for optimal cost and performance.
 
 ## Purpose
 
 This directory defines all agents available in oh-my-claudecode:
 
-- **12 base agents** with default model assignments
-- **4 specialized agents** (security-reviewer, build-fixer, test-engineer, code-reviewer)
-- **12 tiered variants** (LOW/MEDIUM/HIGH) for smart routing
+- **18 base agents** with default model assignments
+- **Tiered variants** (LOW/MEDIUM/HIGH) for smart routing
 - Prompts loaded dynamically from `/agents/*.md` files
 - Tools assigned based on agent specialization
 
@@ -43,7 +42,7 @@ This directory defines all agents available in oh-my-claudecode:
 The main registry is in `definitions.ts`:
 
 ```typescript
-// Get all 28 agents
+// Get all 18 agents
 const agents = getAgentDefinitions();
 
 // Each agent has:
@@ -83,7 +82,7 @@ const agents = getAgentDefinitions();
 | ML/hypothesis | `scientist-high` | opus | Read, Glob, Grep, Bash, python_repl |
 | Security audit | `security-reviewer` | opus | Read, Grep, Glob, Bash |
 | Quick security scan | `security-reviewer-low` | haiku | Read, Grep, Glob, Bash |
-| Build errors | `build-fixer` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
+| Build errors | `debugger` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
 | TDD workflow | `test-engineer` | sonnet | Read, Grep, Glob, Edit, Write, Bash |
 | Test suggestions | `test-engineer` (model=haiku) | haiku | Read, Grep, Glob, Bash |
 | Code review | `code-reviewer` | opus | Read, Grep, Glob, Bash |
@@ -239,9 +238,8 @@ None - pure TypeScript definitions.
 | Planning | planner, analyst, critic | Strategic planning |
 | Testing | qa-tester | Interactive testing |
 | Security | security-reviewer, security-reviewer-low | Security audits |
-| Build | build-fixer | Compilation errors |
 | TDD | test-engineer | Test-driven development |
-| Review | code-reviewer | Code quality |
+| Review | code-reviewer | Code quality + style + performance |
 | Data | scientist, scientist-high | Data analysis |
 
 <!-- MANUAL:

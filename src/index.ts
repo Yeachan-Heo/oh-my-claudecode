@@ -294,9 +294,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   }
 
   // Get agent definitions
-  const agents = getAgentDefinitions({
-    enableHarshCritic: config.features?.harshCritic === true,
-  });
+  const agents = getAgentDefinitions({ config });
 
   // Build MCP servers configuration
   const externalMcpServers = getDefaultMcpServers({

@@ -671,7 +671,7 @@ Chain agents with data passing between stages:
 
 - `review` - explore → architect → critic → executor
 - `implement` - planner → executor → tdd-guide
-- `debug` - explore → architect → build-fixer
+- `debug` - explore → architect → debugger
 - `research` - parallel(document-specialist, explore) → architect → writer
 - `refactor` - explore → architect-medium → executor-high → qa-tester
 - `security` - explore → security-reviewer → executor → security-reviewer-low

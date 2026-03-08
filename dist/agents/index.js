@@ -20,15 +20,12 @@ export { plannerAgent, PLANNER_PROMPT_METADATA } from './planner.js';
 export { qaTesterAgent, QA_TESTER_PROMPT_METADATA } from './qa-tester.js';
 export { scientistAgent, SCIENTIST_PROMPT_METADATA } from './scientist.js';
 export { documentSpecialistAgent, DOCUMENT_SPECIALIST_PROMPT_METADATA } from './document-specialist.js';
-export { harshCriticAgent, HARSH_CRITIC_PROMPT_METADATA } from './harsh-critic.js';
 // Reformed agents (Build/Analysis Lane)
-export { deepExecutorAgent, debuggerAgent, verifierAgent } from './definitions.js';
-// Reformed agents (Review Lane)
-export { qualityReviewerAgent } from './definitions.js';
+export { debuggerAgent, verifierAgent } from './definitions.js';
 // Reformed agents (Domain Specialists)
 export { testEngineerAgent } from './definitions.js';
-// Specialized agents (Security, Build, Code Review, Git, Code Simplifier)
-export { securityReviewerAgent, buildFixerAgent, codeReviewerAgent, gitMasterAgent, codeSimplifierAgent } from './definitions.js';
+// Specialized agents (Security, Code Review, Git, Code Simplifier)
+export { securityReviewerAgent, codeReviewerAgent, gitMasterAgent, codeSimplifierAgent } from './definitions.js';
 // Core exports (getAgentDefinitions and omcSystemPrompt)
 export { getAgentDefinitions, omcSystemPrompt } from './definitions.js';
 //# sourceMappingURL=index.js.map

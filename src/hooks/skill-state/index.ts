@@ -90,7 +90,8 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
 
   // === Medium protection (review/planning, 5 reinforcements) ===
   plan: 'medium',
-  ralplan: 'medium',
+  ralplan: 'none',  // Has first-class checkRalplan() enforcement; no skill-active needed
+  'deep-interview': 'heavy',
   review: 'medium',
   'external-context': 'medium',
   sciomc: 'medium',

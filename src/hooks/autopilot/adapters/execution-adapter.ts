@@ -49,8 +49,8 @@ Use the Team orchestrator to execute tasks in parallel:
 Match agent types to task complexity:
 - Simple tasks (single file, config): \`executor\` with \`model="haiku"\`
 - Standard implementation: \`executor\` with \`model="sonnet"\`
-- Complex work (architecture, refactoring): \`deep-executor\` with \`model="opus"\`
-- Build issues: \`build-fixer\` with \`model="sonnet"\`
+- Complex work (architecture, refactoring): \`executor\` with \`model="opus"\`
+- Build issues: \`debugger\` with \`model="sonnet"\`
 - Test creation: \`test-engineer\` with \`model="sonnet"\`
 - UI work: \`designer\` with \`model="sonnet"\`
 
@@ -97,7 +97,7 @@ Task(subagent_type="oh-my-claudecode:executor", model="haiku", prompt="...")
 Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
 
 // For complex work (architecture, debugging, refactoring)
-Task(subagent_type="oh-my-claudecode:deep-executor", model="opus", prompt="...")
+Task(subagent_type="oh-my-claudecode:executor", model="opus", prompt="...")
 \`\`\`
 
 ### Progress Tracking

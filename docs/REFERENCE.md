@@ -279,7 +279,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | **Pre-Planning** | -                       | -                     | `analyst`           |
 | **Testing**      | -                       | `qa-tester`           | -                   |
 | **Security**     | `security-reviewer-low` | -                     | `security-reviewer` |
-| **Build**        | -                       | `build-fixer`         | -                   |
+| **Build**        | -                       | `debugger`            | -                   |
 | **TDD**          | -                       | `test-engineer`       | -                   |
 | **Code Review**  | -                       | -                     | `code-reviewer`     |
 | **Data Science** | -                       | `scientist`           | `scientist-high`    |
@@ -307,8 +307,8 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | Test CLI interactively       | `qa-tester`                   | sonnet |
 | Security review              | `security-reviewer`           | opus   |
 | Quick security scan          | `security-reviewer-low`       | haiku  |
-| Fix build errors             | `build-fixer`                 | sonnet |
-| Simple build fix             | `build-fixer` (model=haiku)   | haiku  |
+| Fix build errors             | `debugger`                    | sonnet |
+| Simple build fix             | `debugger` (model=haiku)      | haiku  |
 | TDD workflow                 | `test-engineer`               | sonnet |
 | Quick test suggestions       | `test-engineer` (model=haiku) | haiku  |
 | Code review                  | `code-reviewer`               | opus   |
@@ -365,7 +365,7 @@ Includes **32 canonical skills + 1 deprecated alias** (`psm`).
 
 ## Slash Commands
 
-All skills are available as slash commands with the prefix `/oh-my-claudecode:`.
+All installed skills are available as slash commands with the prefix `/oh-my-claudecode:`. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands.
 
 | Command                                     | Description                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -379,9 +379,7 @@ All skills are available as slash commands with the prefix `/oh-my-claudecode:`.
 | `/oh-my-claudecode:ralplan <description>`   | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
 | `/oh-my-claudecode:deep-interview <idea>`   | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`         | Index codebase with hierarchical AGENTS.md files                                              |
-| `/oh-my-claudecode:analyze <target>`        | Deep analysis and investigation                                                               |
 | `/oh-my-claudecode:sciomc <topic>`          | Parallel research orchestration                                                               |
-| `/oh-my-claudecode:tdd <feature>`           | TDD workflow enforcement                                                                      |
 | `/oh-my-claudecode:learner`                 | Extract reusable skill from session                                                           |
 | `/oh-my-claudecode:note <content>`          | Save notes to notepad.md                                                                      |
 | `/oh-my-claudecode:cancel`                  | Unified cancellation                                                                          |
@@ -508,7 +506,7 @@ Use these trigger phrases in natural language prompts to activate enhanced modes
 | `ultrawork`, `ulw`                                      | Activates parallel agent orchestration                                                        |
 | `autopilot`, `build me`, `I want a`                     | Full autonomous execution                                                                     |
 | `ralph`, `don't stop`, `must complete`                  | Persistence until verified complete                                                           |
-| `team`, `coordinated team`                              | Team pipeline orchestration                                                                   |
+| `ccg`, `claude-codex-gemini`                            | Claude-Codex-Gemini orchestration                                                             |
 | `ralplan`                                               | Iterative planning consensus with structured deliberation (`--deliberate` for high-risk mode) |
 | `deep interview`, `ouroboros`                           | Deep Socratic interview with mathematical clarity gating                                      |
 | `deepsearch`, `search the codebase`, `find in codebase` | Codebase-focused search mode                                                                  |

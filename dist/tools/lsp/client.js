@@ -89,6 +89,22 @@ export class LspClient {
         });
     }
     /**
+     * Synchronously kill the LSP server process.
+     * Used in process exit handlers where async operations are not possible.
+     */
+    forceKill() {
+        if (this.process) {
+            try {
+                this.process.kill('SIGKILL');
+            }
+            catch {
+                // Ignore errors during kill
+            }
+            this.process = null;
+            this.initialized = false;
+        }
+    }
+    /**
      * Disconnect from the LSP server
      */
     async disconnect() {
@@ -497,6 +513,36 @@ class LspClientManager {
     idleTimer = null;
     constructor() {
         this.startIdleCheck();
+        this.registerCleanupHandlers();
+    }
+    /**
+     * Register process exit/signal handlers to kill all spawned LSP server processes.
+     * Prevents orphaned language server processes (e.g. kotlin-language-server)
+     * when the MCP bridge process exits or a claude session ends.
+     */
+    registerCleanupHandlers() {
+        const forceKillAll = () => {
+            for (const client of this.clients.values()) {
+                try {
+                    client.forceKill();
+                }
+                catch {
+                    // Ignore errors during cleanup
+                }
+            }
+            this.clients.clear();
+            this.lastUsed.clear();
+            this.inFlightCount.clear();
+        };
+        // 'exit' handler must be synchronous — forceKill() is sync
+        process.on('exit', forceKillAll);
+        // For signals, force-kill all LSP servers then exit
+        for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+            process.on(sig, () => {
+                forceKillAll();
+                process.exit(0);
+            });
+        }
     }
     /**
      * Get or create a client for a file

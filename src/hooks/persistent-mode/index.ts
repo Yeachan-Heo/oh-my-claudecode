@@ -673,6 +673,7 @@ async function checkTeamPipeline(
     };
   }
 
+
   // Session isolation: readTeamPipelineState already checks session_id match
   // and returns null on mismatch (team-pipeline/state.ts:81)
 
@@ -694,7 +695,9 @@ async function checkTeamPipeline(
     ?? (teamState as unknown as Record<string, unknown>).stage;
 
   if (typeof rawPhase !== 'string') {
-    return null;
+    // Fail-open but still claim mode='team' so bridge.ts defers to this result
+    // instead of running its own team enforcement (which could falsely block).
+    return { shouldBlock: false, message: '', mode: 'team' };
   }
   const phase = rawPhase.trim().toLowerCase();
 
@@ -712,7 +715,8 @@ async function checkTeamPipeline(
   // Missing, malformed, or unknown phases do not block (safety principle).
   const KNOWN_ACTIVE_PHASES = new Set(['team-plan', 'team-prd', 'team-exec', 'team-verify', 'team-fix']);
   if (!KNOWN_ACTIVE_PHASES.has(phase)) {
-    return null;
+    // Still claim mode='team' so bridge.ts defers
+    return { shouldBlock: false, message: '', mode: 'team' };
   }
 
   // Status-level terminal check (bridge.ts format uses `status` field)
@@ -807,12 +811,23 @@ async function checkRalplan(
     return null;
   }
 
+  // Terminal phase detection — allow stop when ralplan has completed
+  const currentPhase = (state as unknown as Record<string, unknown>).current_phase;
+  if (typeof currentPhase === 'string') {
+    const terminal = ['complete', 'completed', 'failed', 'cancelled', 'done'];
+    if (terminal.includes(currentPhase.toLowerCase())) {
+      writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
+      return { shouldBlock: false, message: '', mode: 'ralplan' };
+    }
+  }
+
+
   // Cancel-in-progress bypass
   if (cancelInProgress) {
     return {
       shouldBlock: false,
       message: '',
-      mode: 'none'
+      mode: 'ralplan'
     };
   }
 
@@ -823,7 +838,7 @@ async function checkRalplan(
     return {
       shouldBlock: false,
       message: `[RALPLAN CIRCUIT BREAKER] Stop enforcement exceeded ${RALPLAN_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
-      mode: 'none'
+      mode: 'ralplan'
     };
   }
   writeStopBreaker(workingDir, 'ralplan', breakerCount, sessionId);

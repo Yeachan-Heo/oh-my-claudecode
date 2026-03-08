@@ -1,222 +1,160 @@
-/**
- * Tests for usage-api file lock (thundering herd prevention).
- *
- * When multiple sessions share the same cache file, only one session
- * should fetch from the API at a time. Others should return stale cache.
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 
-// Use vi.hoisted() so mock fns are available in vi.mock() factories
-const {
-  mockWithFileLock,
-  mockLockPathFor,
-  mockExistsSync,
-  mockReadFileSync,
-  mockWriteFileSync,
-  mockMkdirSync,
-  mockHttpsRequest,
-} = vi.hoisted(() => ({
-  mockWithFileLock: vi.fn(),
-  mockLockPathFor: vi.fn((p: string) => p + '.lock'),
-  mockExistsSync: vi.fn().mockReturnValue(false),
-  mockReadFileSync: vi.fn().mockReturnValue('{}'),
-  mockWriteFileSync: vi.fn(),
-  mockMkdirSync: vi.fn(),
-  mockHttpsRequest: vi.fn(),
-}));
+const CLAUDE_CONFIG_DIR = '/tmp/test-claude';
+const CACHE_PATH = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode/.usage-cache.json`;
+const LOCK_PATH = `${CACHE_PATH}.lock`;
+const CACHE_DIR = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode`;
 
-vi.mock('../../lib/file-lock.js', () => ({
-  withFileLock: mockWithFileLock,
-  lockPathFor: mockLockPathFor,
-}));
+function createFsMock(initialFiles: Record<string, string>) {
+  const files = new Map(Object.entries(initialFiles));
+  const directories = new Set<string>([CLAUDE_CONFIG_DIR]);
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+  const existsSync = vi.fn((path: string) => files.has(String(path)) || directories.has(String(path)));
+  const readFileSync = vi.fn((path: string) => {
+    const content = files.get(String(path));
+    if (content == null) throw new Error(`ENOENT: ${path}`);
+    return content;
+  });
+  const writeFileSync = vi.fn((path: string, content: string) => {
+    files.set(String(path), String(content));
+  });
+  const mkdirSync = vi.fn((path: string) => {
+    directories.add(String(path));
+  });
+  const unlinkSync = vi.fn((path: string) => {
+    files.delete(String(path));
+  });
+  const openSync = vi.fn((path: string) => {
+    const normalized = String(path);
+    if (files.has(normalized)) {
+      const err = new Error(`EEXIST: ${normalized}`) as NodeJS.ErrnoException;
+      err.code = 'EEXIST';
+      throw err;
+    }
+    files.set(normalized, '');
+    return 1;
+  });
+  const statSync = vi.fn((path: string) => {
+    if (!files.has(String(path))) throw new Error(`ENOENT: ${path}`);
+    return { mtimeMs: Date.now() };
+  });
+
   return {
-    ...actual,
-    existsSync: (...args: unknown[]) => mockExistsSync(...args),
-    readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-    writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
-    mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
-    renameSync: vi.fn(),
-    unlinkSync: vi.fn(),
-    lstatSync: vi.fn(),
+    files,
+    fsModule: {
+      existsSync,
+      readFileSync,
+      writeFileSync,
+      mkdirSync,
+      unlinkSync,
+      openSync,
+      statSync,
+      writeSync: vi.fn(),
+      closeSync: vi.fn(),
+      renameSync: vi.fn(),
+      constants: {
+        O_CREAT: 0x40,
+        O_EXCL: 0x80,
+        O_WRONLY: 0x1,
+      },
+    },
   };
-});
+}
 
-vi.mock('../../utils/paths.js', () => ({
-  getClaudeConfigDir: () => '/tmp/test-claude',
-}));
-
-vi.mock('child_process', () => ({
-  execSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
-}));
-
-vi.mock('https', () => ({
-  default: {
-    request: (...args: unknown[]) => mockHttpsRequest(...args),
-  },
-}));
-
-vi.mock('../../utils/ssrf-guard.js', () => ({
-  validateAnthropicBaseUrl: () => ({ allowed: true }),
-}));
-
-import { getUsage } from '../../hud/usage-api.js';
-
-describe('getUsage with file lock (thundering herd prevention)', () => {
+describe('getUsage lock behavior', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
-    delete process.env.ANTHROPIC_BASE_URL;
-    delete process.env.ANTHROPIC_AUTH_TOKEN;
-    // Default: withFileLock executes the callback (lock acquired successfully)
-    mockWithFileLock.mockImplementation((_path: string, fn: () => unknown) => fn());
+    process.env = { ...originalEnv };
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
-  });
-
-  it('does not attempt lock when cache is valid', async () => {
-    // Set up valid cache
-    const validCache = JSON.stringify({
-      timestamp: Date.now(),
-      data: { fiveHourPercent: 50, weeklyPercent: 30 },
-      source: 'anthropic',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(validCache);
-
-    const result = await getUsage();
-    // Should return cached data without acquiring lock
-    expect(mockWithFileLock).not.toHaveBeenCalled();
-    expect(result.rateLimits).not.toBeNull();
+    vi.unmock('../../utils/paths.js');
+    vi.unmock('../../utils/ssrf-guard.js');
+    vi.unmock('fs');
+    vi.unmock('child_process');
+    vi.unmock('https');
   });
 
   it('acquires lock before API call when cache is expired', async () => {
-    // Set up expired cache
     const expiredCache = JSON.stringify({
-      timestamp: Date.now() - 60_000, // 60 seconds ago (TTL is 30s)
-      data: { fiveHourPercent: 50, weeklyPercent: 30 },
-      source: 'anthropic',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(expiredCache);
-
-    await getUsage();
-
-    // Should have attempted to acquire lock via withFileLock
-    expect(mockWithFileLock).toHaveBeenCalled();
-  });
-
-  it('returns stale cache without error when lock not acquired and stale data exists', async () => {
-    // Set up expired cache with data
-    const staleCache = JSON.stringify({
-      timestamp: Date.now() - 60_000,
-      data: { fiveHourPercent: 42, weeklyPercent: 20 },
-      source: 'anthropic',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(staleCache);
-
-    // withFileLock throws when lock acquisition fails
-    mockWithFileLock.mockRejectedValue(new Error('Failed to acquire file lock'));
-
-    const result = await getUsage();
-
-    // Should return stale data WITHOUT error
-    expect(result.rateLimits).not.toBeNull();
-    expect(result.rateLimits!.fiveHourPercent).toBe(42);
-    expect(result.error).toBeUndefined();
-  });
-
-  it('returns error when lock not acquired and no stale data', async () => {
-    // No cache at all
-    mockExistsSync.mockReturnValue(false);
-    mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
-
-    // Lock acquisition fails
-    mockWithFileLock.mockRejectedValue(new Error('Failed to acquire file lock'));
-
-    const result = await getUsage();
-
-    // No stale data → should return error
-    expect(result.rateLimits).toBeNull();
-    expect(result.error).toBeDefined();
-  });
-
-  it('withFileLock guarantees lock release via its finally block', async () => {
-    // Expired cache
-    const expiredCache = JSON.stringify({
-      timestamp: Date.now() - 60_000,
-      data: null,
-      source: 'anthropic',
-      error: true,
-      errorReason: 'no_credentials',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(expiredCache);
-
-    await getUsage();
-
-    // withFileLock was called (it internally handles acquire/release)
-    expect(mockWithFileLock).toHaveBeenCalledTimes(1);
-    // Verify the lock path is derived from cache path
-    expect(mockLockPathFor).toHaveBeenCalled();
-  });
-
-  it('passes staleLockMs option of API_TIMEOUT + 5s', async () => {
-    // Expired cache
-    const expiredCache = JSON.stringify({
-      timestamp: Date.now() - 60_000,
-      data: null,
-      source: 'anthropic',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(expiredCache);
-
-    await getUsage();
-
-    // Verify lock options include staleLockMs = 15000 (10s timeout + 5s)
-    if (mockWithFileLock.mock.calls.length > 0) {
-      const opts = mockWithFileLock.mock.calls[0][2];
-      expect(opts?.staleLockMs).toBe(15000);
-    }
-  });
-
-  it('handles API errors gracefully while holding lock', async () => {
-    // Set up z.ai env to trigger API path
-    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
-    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
-
-    // Expired cache
-    const expiredCache = JSON.stringify({
-      timestamp: Date.now() - 60_000,
-      data: null,
+      timestamp: Date.now() - 91_000,
       source: 'zai',
-    });
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(expiredCache);
-
-    // withFileLock executes callback; API call inside will fail
-    mockWithFileLock.mockImplementation((_path: string, fn: () => unknown) => fn());
-
-    // Mock https.request to simulate error
-    mockHttpsRequest.mockImplementation((_opts: unknown, _cb: unknown) => {
-      return {
-        on: (event: string, cb: (err?: Error) => void) => {
-          if (event === 'error') setTimeout(() => cb(new Error('network')), 0);
-          return { on: vi.fn().mockReturnThis(), end: vi.fn() };
-        },
-        end: vi.fn(),
-      };
+      data: {
+        fiveHourPercent: 12,
+        fiveHourResetsAt: null,
+      },
     });
 
-    // Should not throw — errors handled inside withFileLock callback
-    const result = await getUsage();
-    expect(result).toBeDefined();
+    const { files, fsModule } = createFsMock({ [CACHE_PATH]: expiredCache });
+    let requestSawLock = false;
+
+    vi.doMock('../../utils/paths.js', () => ({
+      getClaudeConfigDir: () => CLAUDE_CONFIG_DIR,
+    }));
+    vi.doMock('../../utils/ssrf-guard.js', () => ({
+      validateAnthropicBaseUrl: () => ({ allowed: true }),
+    }));
+    vi.doMock('child_process', () => ({
+      execSync: vi.fn(),
+    }));
+    vi.doMock('fs', () => fsModule);
+    vi.doMock('https', () => ({
+      default: {
+        request: vi.fn((options: Record<string, unknown>, callback: (res: EventEmitter & { statusCode?: number }) => void) => {
+          requestSawLock = files.has(LOCK_PATH);
+
+          const req = new EventEmitter() as EventEmitter & {
+            destroy: () => void;
+            end: () => void;
+          };
+          req.destroy = vi.fn();
+          req.end = () => {
+            setTimeout(() => {
+              const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+              res.statusCode = 200;
+              callback(res);
+              res.emit('data', JSON.stringify({
+                data: {
+                  limits: [
+                    { type: 'TOKENS_LIMIT', percentage: 67, nextResetTime: Date.now() + 3_600_000 },
+                  ],
+                },
+              }));
+              res.emit('end');
+            }, 10);
+          };
+          return req;
+        }),
+      },
+    }));
+
+    const { getUsage } = await import('../../hud/usage-api.js');
+    const httpsModule = await import('https') as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+
+    const [first, second] = await Promise.all([getUsage(), getUsage()]);
+
+    expect(requestSawLock).toBe(true);
+    expect(fsModule.openSync.mock.invocationCallOrder[0]).toBeLessThan(
+      httpsModule.default.request.mock.invocationCallOrder[0],
+    );
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({
+      rateLimits: {
+        fiveHourPercent: 67,
+        fiveHourResetsAt: expect.any(Date),
+        monthlyPercent: undefined,
+        monthlyResetsAt: undefined,
+      },
+    });
+    expect(second).toEqual(first);
+    expect(files.has(LOCK_PATH)).toBe(false);
+    expect(files.get(CACHE_PATH)).toContain('"source": "zai"');
   });
 });

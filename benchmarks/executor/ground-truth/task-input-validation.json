@@ -1,0 +1,57 @@
+{
+  "fixtureId": "task-input-validation",
+  "fixturePath": "fixtures/tasks/task-input-validation.md",
+  "domain": "task",
+  "expectedVerdict": "scoped",
+  "isCleanBaseline": false,
+  "findings": [
+    {
+      "id": "IMPL-IV-1",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must validate name as required string with 1-200 character length constraint",
+      "keywords": ["name", "required", "string", "length", "200", "validate"],
+      "explanation": "The name field must be validated as a required string with length between 1 and 200 characters."
+    },
+    {
+      "id": "IMPL-IV-2",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must validate price as required non-negative number with max 2 decimal places",
+      "keywords": ["price", "number", "non-negative", "decimal", "places", "validate"],
+      "explanation": "Price must be >= 0 and have at most 2 decimal places. This prevents values like -5 or 19.999."
+    },
+    {
+      "id": "IMPL-IV-3",
+      "severity": "CRITICAL",
+      "category": "finding",
+      "summary": "Must validate SKU against pattern ^[A-Z]{2,4}-\\d{4,8}$ — alphanumeric prefix with numeric suffix",
+      "keywords": ["SKU", "pattern", "regex", "validate", "format"],
+      "explanation": "SKU must match the specific pattern: 2-4 uppercase letters, a dash, then 4-8 digits."
+    },
+    {
+      "id": "IMPL-IV-4",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Must validate category against enum — only electronics, clothing, food, or other allowed",
+      "keywords": ["category", "enum", "valid", "electronics", "clothing", "food"],
+      "explanation": "Category must be one of the predefined values from the Product type."
+    },
+    {
+      "id": "IMPL-IV-5",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Must return 400 status with descriptive error messages — not 500",
+      "keywords": ["400", "error", "message", "descriptive", "status", "validation"],
+      "explanation": "Validation failures should return HTTP 400 with clear error messages indicating which field failed and why."
+    },
+    {
+      "id": "IMPL-IV-6",
+      "severity": "MAJOR",
+      "category": "finding",
+      "summary": "Must not modify the Product interface or existing GET route — validation is additive only",
+      "keywords": ["modify", "Product", "interface", "GET", "route", "existing"],
+      "explanation": "The task explicitly states not to modify the Product interface or existing GET route. Validation should be added as middleware or inline in the POST handler."
+    }
+  ]
+}

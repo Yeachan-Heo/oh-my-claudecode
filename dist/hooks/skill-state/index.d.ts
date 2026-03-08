@@ -4,9 +4,9 @@
  * Tracks when a skill is actively executing so the persistent-mode Stop hook
  * can prevent premature session termination.
  *
- * Skills like code-review, plan, tdd, analyze, build-fix, security-review,
- * external-context, deepinit etc. don't write mode state files (ralph-state.json,
- * etc.), so the Stop hook previously had no way to know they were running.
+ * Skills like plan, external-context, deepinit etc. don't write mode state
+ * files (ralph-state.json, etc.), so the Stop hook previously had no way to
+ * know they were running.
  *
  * This module provides:
  * 1. A protection level registry for all skills (none/light/medium/heavy)

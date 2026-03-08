@@ -521,4 +521,138 @@ describe('ralplan standalone stop enforcement', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('allows stop when ralplan current_phase is complete', async () => {
+    const sessionId = 'session-ralplan-terminal-complete';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, { current_phase: 'complete' });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows stop when ralplan current_phase is failed', async () => {
+    const sessionId = 'session-ralplan-terminal-failed';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, { current_phase: 'failed' });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows stop when ralplan current_phase is cancelled', async () => {
+    const sessionId = 'session-ralplan-terminal-cancelled';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, { current_phase: 'cancelled' });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns mode=ralplan on circuit breaker path', async () => {
+    const sessionId = 'session-ralplan-breaker-mode';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId);
+      writeStopBreaker(tempDir, sessionId, 'ralplan', 30);
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows stop on cancel-in-progress', async () => {
+    const sessionId = 'session-ralplan-cancel-mode';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId);
+
+      // Write cancel signal — caught at top-level checkPersistentModes
+      const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(
+        join(stateDir, 'cancel-signal-state.json'),
+        JSON.stringify({
+          requested_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 30000).toISOString(),
+        })
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ===========================================================================
+// Team Pipeline Fail-Open Tests
+// ===========================================================================
+
+describe('team pipeline fail-open behavior', () => {
+  it('returns mode=team with shouldBlock=false for unknown phase', async () => {
+    const sessionId = 'session-team-unknown-phase';
+    const tempDir = makeTempProject();
+
+    try {
+      writeTeamPipelineState(tempDir, sessionId, { phase: 'unknown-phase' });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('team');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns mode=team with shouldBlock=false for missing phase', async () => {
+    const sessionId = 'session-team-no-phase';
+    const tempDir = makeTempProject();
+
+    try {
+      // Write state with no phase field
+      const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(
+        join(stateDir, 'team-state.json'),
+        JSON.stringify({
+          schema_version: 1,
+          mode: 'team',
+          active: true,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+        }, null, 2)
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('team');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

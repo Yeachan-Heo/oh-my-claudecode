@@ -29,7 +29,7 @@ Uncertain about requirements or have a vague idea?
 
 Want autonomous execution?
 ├── YES: Is task parallelizable into 3+ independent components?
-│   ├── YES: team N:deep-executor (parallel autonomous with file ownership)
+│   ├── YES: team N:executor (parallel autonomous with file ownership)
 │   └── NO: autopilot (sequential with ralph phases)
 └── NO: Want parallel execution with manual oversight?
     ├── YES: Do you want cost optimization?
@@ -48,7 +48,7 @@ Have many similar independent tasks (e.g., "fix 47 errors")?
 | User Request | Best Mode | Why |
 |--------------|-----------|-----|
 | "Build me a REST API" | autopilot | Single coherent deliverable |
-| "Build frontend, backend, and database" | team 3:deep-executor | Clear component boundaries |
+| "Build frontend, backend, and database" | team 3:executor | Clear component boundaries |
 | "Fix all 47 TypeScript errors" | team 5:executor | Many independent similar tasks |
 | "Refactor auth module thoroughly" | ralph | Need persistence + verification |
 | "Quick parallel execution" | ultrawork | Manual oversight preferred |

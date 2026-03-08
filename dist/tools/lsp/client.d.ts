@@ -101,6 +101,11 @@ export declare class LspClient {
      */
     connect(): Promise<void>;
     /**
+     * Synchronously kill the LSP server process.
+     * Used in process exit handlers where async operations are not possible.
+     */
+    forceKill(): void;
+    /**
      * Disconnect from the LSP server
      */
     disconnect(): Promise<void>;
@@ -207,6 +212,12 @@ declare class LspClientManager {
     private inFlightCount;
     private idleTimer;
     constructor();
+    /**
+     * Register process exit/signal handlers to kill all spawned LSP server processes.
+     * Prevents orphaned language server processes (e.g. kotlin-language-server)
+     * when the MCP bridge process exits or a claude session ends.
+     */
+    private registerCleanupHandlers;
     /**
      * Get or create a client for a file
      */
