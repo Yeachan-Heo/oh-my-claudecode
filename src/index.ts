@@ -294,7 +294,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   }
 
   // Get agent definitions
-  const agents = getAgentDefinitions();
+  const agents = getAgentDefinitions({ config });
 
   // Build MCP servers configuration
   const externalMcpServers = getDefaultMcpServers({
