@@ -278,6 +278,10 @@ export function checkConfigIssues(): ConflictReport['configIssues'] {
       'stopHookCallbacks',
       'notifications',
       'autoUpgradePrompt',
+      'team',
+      'nodeBinary',
+      'hudEnabled',
+      'notificationProfiles',
     ]);
 
     for (const field of Object.keys(config)) {
