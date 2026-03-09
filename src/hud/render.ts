@@ -242,9 +242,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   if (enabledElements.rateLimits && context.rateLimitsResult) {
     if (context.rateLimitsResult.rateLimits) {
       // Data available (possibly stale from 429) → always show data
+      const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars
-        ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits)
-        : renderRateLimits(context.rateLimitsResult.rateLimits);
+        ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits, undefined, stale)
+        : renderRateLimits(context.rateLimitsResult.rateLimits, stale);
       if (limits) elements.push(limits);
     } else {
       // No data → show error indicator

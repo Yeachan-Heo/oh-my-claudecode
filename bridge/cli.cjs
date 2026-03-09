@@ -6893,6 +6893,24 @@ function findLineAnchoredMarker(content, marker, fromEnd = false) {
     return match ? match.index : -1;
   }
 }
+function escapeRegex2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function createLineAnchoredMarkerRegex(marker, flags = "gm") {
+  return new RegExp(`^${escapeRegex2(marker)}$`, flags);
+}
+function stripGeneratedUserCustomizationHeaders(content) {
+  return content.replace(
+    /^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm,
+    ""
+  );
+}
+function trimClaudeUserContent(content) {
+  if (content.trim().length === 0) {
+    return "";
+  }
+  return content.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/(?:\r?\n[ \t]*)+$/, "").replace(/(?:\r?\n){3,}/g, "\n\n");
+}
 function isHudEnabledInConfig() {
   const configPath = (0, import_path36.join)(CLAUDE_CONFIG_DIR, ".omc-config.json");
   if (!(0, import_fs28.existsSync)(configPath)) {
@@ -7058,6 +7076,12 @@ function mergeClaudeMd(existingContent, omcContent, version3) {
   const START_MARKER = "<!-- OMC:START -->";
   const END_MARKER = "<!-- OMC:END -->";
   const USER_CUSTOMIZATIONS = "<!-- User customizations -->";
+  const OMC_BLOCK_PATTERN = new RegExp(
+    `^${escapeRegex2(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex2(END_MARKER)}(?:\\r?\\n)?`,
+    "gm"
+  );
+  const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
+  const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
   let cleanOmcContent = omcContent;
   const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
   const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
@@ -7073,16 +7097,10 @@ ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
 `;
   }
-  const startIndex = findLineAnchoredMarker(existingContent, START_MARKER);
-  const endIndex = findLineAnchoredMarker(existingContent, END_MARKER, true);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const beforeMarker = existingContent.substring(0, startIndex);
-    const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
-    return `${beforeMarker}${START_MARKER}
-${versionMarker}${cleanOmcContent}
-${END_MARKER}${afterMarker}`;
-  }
-  if (startIndex !== -1 !== (endIndex !== -1) || startIndex !== -1 && endIndex !== -1 && endIndex < startIndex) {
+  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, "");
+  const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
+  const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
+  if (hasResidualStartMarker || hasResidualEndMarker) {
     return `${START_MARKER}
 ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
@@ -7090,12 +7108,21 @@ ${END_MARKER}
 <!-- User customizations (recovered from corrupted markers) -->
 ${existingContent}`;
   }
+  const preservedUserContent = trimClaudeUserContent(
+    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
+  );
+  if (!preservedUserContent) {
+    return `${START_MARKER}
+${versionMarker}${cleanOmcContent}
+${END_MARKER}
+`;
+  }
   return `${START_MARKER}
 ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
 
 ${USER_CUSTOMIZATIONS}
-${existingContent}`;
+${preservedUserContent}`;
 }
 function install(options = {}) {
   const result = {

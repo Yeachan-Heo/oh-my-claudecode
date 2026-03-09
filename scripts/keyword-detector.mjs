@@ -16,9 +16,11 @@
  * 7. deep interview: Socratic interview workflow
  * 8. ai-slop-cleaner: Cleanup/deslop anti-slop workflow
  * 9. tdd: Test-driven development
- * 10. ultrathink: Extended reasoning
- * 11. deepsearch: Codebase search (restricted patterns)
- * 12. analyze: Analysis mode (restricted patterns)
+ * 10. code review: Comprehensive review mode
+ * 11. security review: Security-focused review mode
+ * 12. ultrathink: Extended reasoning
+ * 13. deepsearch: Codebase search (restricted patterns)
+ * 14. analyze: Analysis mode (restricted patterns)
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
@@ -57,6 +59,22 @@ const TDD_MESSAGE = `<tdd-mode>
 [TDD MODE ACTIVATED]
 Write or update tests first when practical, confirm they fail for the right reason, then implement the minimal fix and re-run verification.
 </tdd-mode>
+
+---
+`;
+
+const CODE_REVIEW_MESSAGE = `<code-review-mode>
+[CODE REVIEW MODE ACTIVATED]
+Perform a comprehensive code review of the relevant changes or target area. Focus on correctness, maintainability, edge cases, regressions, and test adequacy before recommending changes.
+</code-review-mode>
+
+---
+`;
+
+const SECURITY_REVIEW_MESSAGE = `<security-review-mode>
+[SECURITY REVIEW MODE ACTIVATED]
+Perform a focused security review of the relevant changes or target area. Check trust boundaries, auth/authz, data exposure, input validation, command/file access, secrets handling, and escalation risks before recommending changes.
+</security-review-mode>
 
 ---
 `;
@@ -288,7 +306,7 @@ function resolveConflicts(matches) {
 
   // Sort by priority order
   const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
-    'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','ultrathink','deepsearch','analyze'];
+    'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','code-review','security-review','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -407,6 +425,16 @@ async function main() {
       matches.push({ name: 'tdd', args: '' });
     }
 
+    // Code review keywords
+    if (/\b(code\s+review|review\s+code)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'code-review', args: '' });
+    }
+
+    // Security review keywords
+    if (/\b(security\s+review|review\s+security)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'security-review', args: '' });
+    }
+
     // Ultrathink keywords
     if (/\b(ultrathink|think hard|think deeply)\b/i.test(cleanPrompt)) {
       matches.push({ name: 'ultrathink', args: '' });
@@ -486,6 +514,8 @@ async function main() {
       ['ultrathink', ULTRATHINK_MESSAGE],
       ['analyze', ANALYZE_MESSAGE],
       ['tdd', TDD_MESSAGE],
+      ['code-review', CODE_REVIEW_MESSAGE],
+      ['security-review', SECURITY_REVIEW_MESSAGE],
     ]) {
       const index = resolved.findIndex(m => m.name === keywordName);
       if (index !== -1) {

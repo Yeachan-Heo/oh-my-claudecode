@@ -69,18 +69,38 @@ if [ ! -f "$TARGET_PATH" ]; then
 else
   # Merge: preserve user content outside OMC markers
   if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
-    # Has markers: replace OMC section, keep user content
-    # Use awk instead of sed for cross-platform compatibility (GNU/BSD)
-    BEFORE_OMC=$(awk '/<!-- OMC:START -->/{exit} {print}' "$TARGET_PATH")
-    AFTER_OMC=$(awk 'p; /<!-- OMC:END -->/{p=1}' "$TARGET_PATH")
-    {
-      [ -n "$BEFORE_OMC" ] && printf '%s\n' "$BEFORE_OMC"
-      echo '<!-- OMC:START -->'
-      cat "$TEMP_OMC"
-      echo '<!-- OMC:END -->'
-      [ -n "$AFTER_OMC" ] && printf '%s\n' "$AFTER_OMC"
-    } > "${TARGET_PATH}.tmp"
+    # Has markers: remove ALL complete OMC blocks, preserve only real user text
+    # Use perl -0 for a global multiline regex replace (portable across GNU/BSD environments)
+    perl -0pe 's/^<!-- OMC:START -->\R[\s\S]*?^<!-- OMC:END -->(?:\R)?//msg; s/^<!-- User customizations(?: \([^)]+\))? -->\R?//mg; s/\A(?:[ \t]*\R)+//; s/(?:\R[ \t]*)+\z//;' \
+      "$TARGET_PATH" > "${TARGET_PATH}.preserved"
+
+    if grep -Eq '^<!-- OMC:(START|END) -->$' "${TARGET_PATH}.preserved"; then
+      # Corrupted/unmatched markers remain: preserve the whole original file for manual recovery
+      OLD_CONTENT=$(cat "$TARGET_PATH")
+      {
+        echo '<!-- OMC:START -->'
+        cat "$TEMP_OMC"
+        echo '<!-- OMC:END -->'
+        echo ""
+        echo "<!-- User customizations (recovered from corrupted markers) -->"
+        printf '%s\n' "$OLD_CONTENT"
+      } > "${TARGET_PATH}.tmp"
+    else
+      PRESERVED_CONTENT=$(cat "${TARGET_PATH}.preserved")
+      {
+        echo '<!-- OMC:START -->'
+        cat "$TEMP_OMC"
+        echo '<!-- OMC:END -->'
+        if printf '%s' "$PRESERVED_CONTENT" | grep -q '[^[:space:]]'; then
+          echo ""
+          echo "<!-- User customizations -->"
+          printf '%s\n' "$PRESERVED_CONTENT"
+        fi
+      } > "${TARGET_PATH}.tmp"
+    fi
+
     mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
+    rm -f "${TARGET_PATH}.preserved"
     echo "Updated OMC section (user customizations preserved)"
   else
     # No markers: wrap new content in markers, append old content as user section

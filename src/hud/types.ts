@@ -191,6 +191,8 @@ export interface UsageResult {
   rateLimits: RateLimits | null;
   /** Error reason when API call fails (undefined on success or no credentials) */
   error?: UsageErrorReason;
+  /** True when serving cached data that may be outdated (429 or lock contention) */
+  stale?: boolean;
 }
 
 // ============================================================================
@@ -444,6 +446,8 @@ export interface HudConfig {
   thresholds: HudThresholds;
   staleTaskThresholdMinutes: number; // Default 30
   contextLimitWarning: ContextLimitWarningConfig;
+  /** Built-in usage API polling interval / success-cache TTL in milliseconds. */
+  usageApiPollIntervalMs: number;
   /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
   rateLimitsProvider?: RateLimitsProviderConfig;
   /** Optional maximum width (columns) for statusline output. */
@@ -451,6 +455,8 @@ export interface HudConfig {
   /** Controls maxWidth behavior: truncate with ellipsis (default) or wrap at " | " HUD element boundaries. */
   wrapMode?: 'truncate' | 'wrap';
 }
+
+export const DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1000;
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
   preset: 'focused',
@@ -498,6 +504,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     threshold: 80,
     autoCompact: false,
   },
+  usageApiPollIntervalMs: DEFAULT_HUD_USAGE_POLL_INTERVAL_MS,
   wrapMode: 'truncate',
 };
 

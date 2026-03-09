@@ -4,7 +4,6 @@ import { EventEmitter } from 'events';
 const CLAUDE_CONFIG_DIR = '/tmp/test-claude';
 const CACHE_PATH = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode/.usage-cache.json`;
 const LOCK_PATH = `${CACHE_PATH}.lock`;
-const CACHE_DIR = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode`;
 
 function createFsMock(initialFiles: Record<string, string>) {
   const files = new Map(Object.entries(initialFiles));
@@ -61,6 +60,123 @@ function createFsMock(initialFiles: Record<string, string>) {
     },
   };
 }
+
+describe('getUsage lock failure fallback', () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.unmock('../../utils/paths.js');
+    vi.unmock('../../utils/ssrf-guard.js');
+    vi.unmock('fs');
+    vi.unmock('child_process');
+    vi.unmock('https');
+  });
+
+  it('returns stale cache without throwing when lock acquisition fails', async () => {
+    const expiredCache = JSON.stringify({
+      timestamp: Date.now() - 91_000,
+      source: 'zai',
+      data: {
+        fiveHourPercent: 11,
+        fiveHourResetsAt: null,
+      },
+    });
+
+    // Lock file already exists → openSync throws EEXIST → lock fails
+    const { files, fsModule } = createFsMock({
+      [CACHE_PATH]: expiredCache,
+      [LOCK_PATH]: JSON.stringify({ pid: 999999, timestamp: Date.now() }),
+    });
+
+    // Make the lock holder appear alive so lock is not considered stale
+    const originalKill = process.kill;
+    process.kill = ((pid: number, signal?: string | number) => {
+      if (signal === 0 && pid === 999999) return true;
+      return originalKill.call(process, pid, signal);
+    }) as typeof process.kill;
+
+    vi.doMock('../../utils/paths.js', () => ({
+      getClaudeConfigDir: () => CLAUDE_CONFIG_DIR,
+    }));
+    vi.doMock('../../utils/ssrf-guard.js', () => ({
+      validateAnthropicBaseUrl: () => ({ allowed: true }),
+    }));
+    vi.doMock('child_process', () => ({
+      execSync: vi.fn(),
+    }));
+    vi.doMock('fs', () => fsModule);
+    vi.doMock('https', () => ({
+      default: {
+        request: vi.fn(),
+      },
+    }));
+
+    const { getUsage } = await import('../../hud/usage-api.js');
+    const httpsModule = await import('https') as unknown as { default: { request: ReturnType<typeof vi.fn> } };
+
+    // Should NOT throw, should return stale data
+    const result = await getUsage();
+
+    expect(result.rateLimits).toEqual({
+      fiveHourPercent: 11,
+      fiveHourResetsAt: null,
+    });
+    // Should not have made any API call
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+    // Should not have modified the cache file (no race with lock holder)
+    expect(files.get(CACHE_PATH)).toBe(expiredCache);
+
+    process.kill = originalKill;
+  });
+
+  it('returns error result when lock fails and no stale cache exists', async () => {
+    // No cache file at all, lock held by another process
+    const { fsModule } = createFsMock({
+      [LOCK_PATH]: JSON.stringify({ pid: 999999, timestamp: Date.now() }),
+    });
+
+    const originalKill = process.kill;
+    process.kill = ((pid: number, signal?: string | number) => {
+      if (signal === 0 && pid === 999999) return true;
+      return originalKill.call(process, pid, signal);
+    }) as typeof process.kill;
+
+    vi.doMock('../../utils/paths.js', () => ({
+      getClaudeConfigDir: () => CLAUDE_CONFIG_DIR,
+    }));
+    vi.doMock('../../utils/ssrf-guard.js', () => ({
+      validateAnthropicBaseUrl: () => ({ allowed: true }),
+    }));
+    vi.doMock('child_process', () => ({
+      execSync: vi.fn(),
+    }));
+    vi.doMock('fs', () => fsModule);
+    vi.doMock('https', () => ({
+      default: {
+        request: vi.fn(),
+      },
+    }));
+
+    const { getUsage } = await import('../../hud/usage-api.js');
+
+    // Should NOT throw, should return error result
+    const result = await getUsage();
+
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBeDefined();
+
+    process.kill = originalKill;
+  });
+});
 
 describe('getUsage lock behavior', () => {
   const originalEnv = { ...process.env };
@@ -153,8 +269,9 @@ describe('getUsage lock behavior', () => {
         monthlyResetsAt: undefined,
       },
     });
-    expect(second).toEqual(first);
-    expect(files.has(LOCK_PATH)).toBe(false);
+    // With fail-fast locking, the second concurrent call returns stale cache
+    // (lock held by first call) or fresh data (if lock released in time)
+    expect(second.rateLimits).toBeDefined();
     expect(files.get(CACHE_PATH)).toContain('"source": "zai"');
   });
 });

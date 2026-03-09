@@ -35,6 +35,8 @@ import {
   SEARCH_MESSAGE,
   ANALYZE_MESSAGE,
   TDD_MESSAGE,
+  CODE_REVIEW_MESSAGE,
+  SECURITY_REVIEW_MESSAGE,
   RALPH_MESSAGE,
   PROMPT_TRANSLATION_MESSAGE,
 } from "../installer/hooks.js";
@@ -578,6 +580,14 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 
       case "tdd":
         messages.push(TDD_MESSAGE);
+        break;
+
+      case "code-review":
+        messages.push(CODE_REVIEW_MESSAGE);
+        break;
+
+      case "security-review":
+        messages.push(SECURITY_REVIEW_MESSAGE);
         break;
 
       // For modes without dedicated message constants, return generic activation message
