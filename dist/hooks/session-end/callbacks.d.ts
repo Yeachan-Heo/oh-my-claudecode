@@ -9,6 +9,9 @@ import type { SessionMetrics } from './index.js';
  * Format session summary for notifications
  */
 export declare function formatSessionSummary(metrics: SessionMetrics, format?: 'markdown' | 'json'): string;
+export interface TriggerStopCallbacksOptions {
+    skipPlatforms?: Array<'file' | 'telegram' | 'discord'>;
+}
 /**
  * Interpolate path placeholders
  */
@@ -22,5 +25,5 @@ export declare function interpolatePath(pathTemplate: string, sessionId: string)
 export declare function triggerStopCallbacks(metrics: SessionMetrics, _input: {
     session_id: string;
     cwd: string;
-}): Promise<void>;
+}, options?: TriggerStopCallbacksOptions): Promise<void>;
 //# sourceMappingURL=callbacks.d.ts.map

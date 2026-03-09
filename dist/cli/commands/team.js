@@ -12,7 +12,7 @@ const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
 const TEAM_HELP = `
-Usage: omc team [N:agent-type[:role]] "<task description>"
+Usage: omc team [N:agent-type[:role]] [--new-window] "<task description>"
        omc team status <team-name>
        omc team shutdown <team-name> [--force]
        omc team api <operation> [--input <json>] [--json]
@@ -23,6 +23,7 @@ Examples:
   omc team 2:codex:architect "design auth system"
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
+  omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
@@ -121,11 +122,15 @@ export function parseTeamArgs(tokens) {
     let workerCount = 3;
     let agentTypes = [];
     let json = false;
-    // Extract --json flag before parsing positional args
+    let newWindow = false;
+    // Extract supported flags before parsing positional args
     const filteredArgs = [];
     for (const arg of args) {
         if (arg === '--json') {
             json = true;
+        }
+        else if (arg === '--new-window') {
+            newWindow = true;
         }
         else {
             filteredArgs.push(arg);
@@ -196,7 +201,7 @@ export function parseTeamArgs(tokens) {
         throw new Error('Usage: omc team [N:agent-type] "<task description>"');
     }
     const teamName = slugifyTask(task);
-    return { workerCount, agentTypes, role, task, teamName, json };
+    return { workerCount, agentTypes, role, task, teamName, json, newWindow };
 }
 function sampleValueForField(field) {
     switch (field) {
@@ -345,6 +350,7 @@ async function handleTeamStart(parsed, cwd) {
             agentTypes: parsed.agentTypes,
             tasks,
             cwd,
+            newWindow: parsed.newWindow,
             ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
         });
         const uniqueTypes = [...new Set(parsed.agentTypes)].join(',');
@@ -377,6 +383,7 @@ async function handleTeamStart(parsed, cwd) {
         agentTypes: parsed.agentTypes,
         tasks,
         cwd,
+        newWindow: parsed.newWindow,
     });
     const uniqueTypesV1 = [...new Set(parsed.agentTypes)].join(',');
     if (parsed.json) {

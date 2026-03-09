@@ -1,11 +1,11 @@
 ---
 name: ccg
-description: Claude-Codex-Gemini tri-model orchestration via ask-codex + ask-gemini, then Claude synthesizes results
+description: Claude-Codex-Gemini tri-model orchestration via /ask codex + /ask gemini, then Claude synthesizes results
 ---
 
 # CCG - Claude-Codex-Gemini Tri-Model Orchestration
 
-CCG routes through `ask-codex` and `ask-gemini` (CLI advisor flow), then Claude synthesizes both outputs into one answer.
+CCG routes through the canonical `/ask` skill (`/ask codex` + `/ask gemini`), then Claude synthesizes both outputs into one answer.
 
 Use this when you want parallel external perspectives without launching tmux team workers.
 
@@ -31,8 +31,8 @@ Use this when you want parallel external perspectives without launching tmux tea
    - Gemini prompt (UX/design/docs/alternatives)
 
 2. Claude runs:
-   - /oh-my-claudecode:ask-codex "<codex prompt>"
-   - /oh-my-claudecode:ask-gemini "<gemini prompt>"
+   - /oh-my-claudecode:ask codex "<codex prompt>"
+   - /oh-my-claudecode:ask gemini "<gemini prompt>"
 
    (equivalent CLI path: `omc ask codex ...` + `omc ask gemini ...`)
 
@@ -57,8 +57,8 @@ Split the user request into:
 Use skill routing first:
 
 ```bash
-/oh-my-claudecode:ask-codex <codex prompt>
-/oh-my-claudecode:ask-gemini <gemini prompt>
+/oh-my-claudecode:ask codex <codex prompt>
+/oh-my-claudecode:ask gemini <gemini prompt>
 ```
 
 Equivalent direct CLI:

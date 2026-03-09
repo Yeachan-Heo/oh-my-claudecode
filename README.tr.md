@@ -191,6 +191,66 @@ Etiket davranışı:
 - Discord: `@here`, `@everyone`, sayısal kullanıcı kimlikleri ve `role:<id>` desteklenir
 - `file` callback'leri etiket seçeneklerini yok sayar
 
+### OpenClaw Entegrasyonu
+
+Claude Code oturum olaylarını bir [OpenClaw](https://openclaw.ai/) ağ geçidine ileterek OpenClaw ajanınız aracılığıyla otomatik yanıtlar ve iş akışları oluşturun.
+
+**Hızlı kurulum (önerilen):**
+
+```bash
+/oh-my-claudecode:configure-notifications
+# → İstendiğinde "openclaw" yazın → "OpenClaw Gateway" seçin
+```
+
+**Manuel kurulum:** `~/.claude/omc_config.openclaw.json` dosyasını oluşturun:
+
+```json
+{
+  "enabled": true,
+  "gateways": {
+    "my-gateway": {
+      "url": "https://your-gateway.example.com/wake",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+      "method": "POST",
+      "timeout": 10000
+    }
+  },
+  "hooks": {
+    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
+    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+  }
+}
+```
+
+**Ortam değişkenleri:**
+
+| Değişken | Açıklama |
+|----------|----------|
+| `OMC_OPENCLAW=1` | OpenClaw'ı etkinleştir |
+| `OMC_OPENCLAW_DEBUG=1` | Hata ayıklama günlüklemesini etkinleştir |
+| `OMC_OPENCLAW_CONFIG=/path/to/config.json` | Yapılandırma dosyası yolunu değiştir |
+
+**Desteklenen hook olayları (bridge.ts'de 6 aktif):**
+
+| Olay | Tetikleyici | Ana şablon değişkenleri |
+|------|------------|------------------------|
+| `session-start` | Oturum başladığında | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop` | Claude yanıtı tamamlandığında | `{{sessionId}}`, `{{projectName}}` |
+| `keyword-detector` | Her prompt gönderiminde | `{{prompt}}`, `{{sessionId}}` |
+| `ask-user-question` | Claude kullanıcı girişi istediğinde | `{{question}}`, `{{sessionId}}` |
+| `pre-tool-use` | Araç çağrısından önce (yüksek sıklık) | `{{toolName}}`, `{{sessionId}}` |
+| `post-tool-use` | Araç çağrısından sonra (yüksek sıklık) | `{{toolName}}`, `{{sessionId}}` |
+
+**Yanıt kanalı ortam değişkenleri:**
+
+| Değişken | Açıklama |
+|----------|----------|
+| `OPENCLAW_REPLY_CHANNEL` | Yanıt kanalı (ör. `discord`) |
+| `OPENCLAW_REPLY_TARGET` | Kanal ID'si |
+| `OPENCLAW_REPLY_THREAD` | Thread ID'si |
+
+OpenClaw yüklerini ClawdBot aracılığıyla Discord'a ileten bir referans gateway için `scripts/openclaw-gateway-demo.mjs` dosyasına bakın.
+
 ---
 
 ## Dokümantasyon

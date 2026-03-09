@@ -176,14 +176,14 @@ Your old commands still work! But now you don't need them.
 The project was rebranded to better reflect its purpose and improve discoverability.
 
 - **Project/brand name**: `oh-my-claudecode` (GitHub repo, plugin name, commands)
-- **npm package name**: `oh-my-claudecode` (unchanged)
+- **npm package name**: `oh-my-claude-sisyphus` (unchanged)
 
-> **Why the difference?** The npm package name `oh-my-claudecode` was kept for backward compatibility with existing installations. The project, GitHub repository, plugin, and all commands use `oh-my-claudecode`.
+> **Why the difference?** The npm package name `oh-my-claude-sisyphus` was kept for backward compatibility with existing installations. The project, GitHub repository, plugin, and all commands use `oh-my-claudecode`.
 
 #### NPM Install Command (unchanged)
 
 ```bash
-npm install -g oh-my-claudecode
+npm i -g oh-my-claude-sisyphus@latest
 ```
 
 ### What Changed

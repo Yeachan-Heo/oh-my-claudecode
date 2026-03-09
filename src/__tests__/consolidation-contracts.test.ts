@@ -45,7 +45,6 @@ describe('Consolidation contracts', () => {
 
       expect(names).toContain('omc-plan');
       expect(names).toContain('omc-doctor');
-      expect(names).toContain('omc-help');
       expect(names).not.toContain('plan');
       expect(names).not.toContain('doctor');
       expect(names).not.toContain('help');

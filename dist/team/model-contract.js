@@ -203,7 +203,10 @@ export function isCliAvailable(agentType) {
             const result = spawnSync(comspec, ['/d', '/s', '/c', `"${resolvedBinary}" --version`], { timeout: 5000 });
             return result.status === 0;
         }
-        const result = spawnSync(resolvedBinary, ['--version'], { timeout: 5000 });
+        const result = spawnSync(resolvedBinary, ['--version'], {
+            timeout: 5000,
+            shell: process.platform === 'win32',
+        });
         return result.status === 0;
     }
     catch {

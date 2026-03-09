@@ -226,6 +226,16 @@ describe('Installer Constants', () => {
             expect(CLAUDE_MD_CONTENT).toMatch(/<\w+>/); // Contains opening tags
             expect(CLAUDE_MD_CONTENT).toMatch(/<\/\w+>/); // Contains closing tags
         });
+        it('should document separate writer and reviewer passes', () => {
+            expect(AGENT_DEFINITIONS['writer.md']).toContain('do not self-review, self-approve');
+            expect(AGENT_DEFINITIONS['writer.md']).toContain('separate reviewer/verifier pass');
+            expect(AGENT_DEFINITIONS['code-reviewer.md']).toContain('Review is a separate reviewer pass');
+            expect(AGENT_DEFINITIONS['code-reviewer.md']).toContain('Never approve your own authoring output');
+            expect(AGENT_DEFINITIONS['verifier.md']).toContain('Verification is a separate reviewer pass');
+            expect(AGENT_DEFINITIONS['verifier.md']).toContain('Never self-approve or bless work produced in the same active context');
+            expect(CLAUDE_MD_CONTENT).toContain('Keep authoring and review as separate passes');
+            expect(CLAUDE_MD_CONTENT).toContain('Never self-approve in the same active context');
+        });
     });
     describe('VERSION', () => {
         it('should be properly formatted', () => {

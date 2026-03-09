@@ -6,10 +6,10 @@ describe('Builtin Skills', () => {
         clearSkillsCache();
     });
     describe('createBuiltinSkills()', () => {
-        it('should return correct number of skills (33 including aliases)', () => {
+        it('should return correct number of skills (28 including aliases)', () => {
             const skills = createBuiltinSkills();
-            // 33 entries: 32 canonical skills + 1 deprecated alias (psm)
-            expect(skills).toHaveLength(33);
+            // 28 entries: 27 canonical skills + 1 deprecated alias (psm)
+            expect(skills).toHaveLength(28);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -52,36 +52,31 @@ describe('Builtin Skills', () => {
         it('should have valid skill names', () => {
             const skills = createBuiltinSkills();
             const expectedSkills = [
-                'ask-codex',
-                'ask-gemini',
+                'ask',
+                'ai-slop-cleaner',
                 'autopilot',
                 'cancel',
                 'ccg',
                 'configure-notifications',
-                'configure-openclaw',
                 'deep-interview',
                 'deepinit',
                 'omc-doctor',
                 'external-context',
-                'omc-help',
                 'hud',
-                'learn-about-omc',
                 'learner',
                 'mcp-setup',
-                'note',
                 'omc-setup',
                 'omc-teams',
                 'omc-plan',
                 'project-session-manager',
                 'psm',
                 'ralph',
-                'ralph-init',
                 'ralplan',
                 'release',
                 'sciomc',
+                'setup',
                 'skill',
                 'team',
-                'trace',
                 'ultraqa',
                 'ultrawork',
                 'writer-memory',
@@ -103,6 +98,24 @@ describe('Builtin Skills', () => {
             expect(skill).toBeDefined();
             expect(skill?.name).toBe('autopilot');
         });
+        it('should retrieve the ai-slop-cleaner skill by name', () => {
+            const skill = getBuiltinSkill('ai-slop-cleaner');
+            expect(skill).toBeDefined();
+            expect(skill?.name).toBe('ai-slop-cleaner');
+        });
+        it('should expose review mode guidance for ai-slop-cleaner', () => {
+            const skill = getBuiltinSkill('ai-slop-cleaner');
+            expect(skill).toBeDefined();
+            expect(skill?.template).toContain('Review Mode (`--review`)');
+            expect(skill?.template).toContain('writer/reviewer separation');
+        });
+        it('should include the ai-slop-cleaner review workflow', () => {
+            const skill = getBuiltinSkill('ai-slop-cleaner');
+            expect(skill).toBeDefined();
+            expect(skill?.template).toContain('--review');
+            expect(skill?.template).toContain('Writer pass');
+            expect(skill?.template).toContain('Reviewer pass');
+        });
         it('should be case-insensitive', () => {
             const skillLower = getBuiltinSkill('autopilot');
             const skillUpper = getBuiltinSkill('AUTOPILOT');
@@ -121,9 +134,9 @@ describe('Builtin Skills', () => {
     describe('listBuiltinSkillNames()', () => {
         it('should return canonical skill names by default', () => {
             const names = listBuiltinSkillNames();
-            expect(names).toHaveLength(32);
-            expect(names).toContain('ask-codex');
-            expect(names).toContain('ask-gemini');
+            expect(names).toHaveLength(27);
+            expect(names).toContain('ai-slop-cleaner');
+            expect(names).toContain('ask');
             expect(names).toContain('autopilot');
             expect(names).toContain('cancel');
             expect(names).toContain('ccg');
@@ -134,10 +147,9 @@ describe('Builtin Skills', () => {
             expect(names).toContain('deepinit');
             expect(names).toContain('release');
             expect(names).toContain('omc-doctor');
-            expect(names).toContain('omc-help');
             expect(names).toContain('hud');
-            expect(names).toContain('note');
             expect(names).toContain('omc-setup');
+            expect(names).toContain('setup');
             expect(names).not.toContain('swarm'); // removed in #1131
             expect(names).not.toContain('psm');
         });
@@ -150,7 +162,8 @@ describe('Builtin Skills', () => {
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
             // swarm alias removed in #1131, psm still exists
-            expect(names).toHaveLength(33);
+            expect(names).toHaveLength(28);
+            expect(names).toContain('ai-slop-cleaner');
             expect(names).not.toContain('swarm');
             expect(names).toContain('psm');
         });

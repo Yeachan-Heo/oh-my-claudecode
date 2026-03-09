@@ -6,6 +6,8 @@
 
 import type { AutopilotStateForHud } from './elements/autopilot.js';
 import type { ApiKeySource } from './elements/api-key-source.js';
+import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
+import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
 
 // Re-export for convenience
 export type { AutopilotStateForHud, ApiKeySource };
@@ -191,6 +193,8 @@ export interface UsageResult {
   rateLimits: RateLimits | null;
   /** Error reason when API call fails (undefined on success or no credentials) */
   error?: UsageErrorReason;
+  /** True when serving cached data that may be outdated (429 or lock contention) */
+  stale?: boolean;
 }
 
 // ============================================================================
@@ -292,6 +296,9 @@ export interface HudRenderContext {
 
   /** Working directory */
   cwd: string;
+
+  /** Mission-board snapshot (opt-in) */
+  missionBoard?: MissionBoardState | null;
 
   /** Last activated skill from transcript */
   lastSkill: SkillInvocation | null;
@@ -408,6 +415,7 @@ export interface HudElementConfig {
   thinkingFormat: ThinkingFormat;  // Thinking indicator format
   apiKeySource: boolean;       // Show API key source (project/global/env)
   profile: boolean;            // Show active profile name (from CLAUDE_CONFIG_DIR)
+  missionBoard?: boolean;      // Show opt-in mission board above existing HUD detail lines
   promptTime: boolean;        // Show last prompt submission time (HH:MM:SS)
   sessionHealth: boolean;     // Show session health/duration
   showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
@@ -444,6 +452,10 @@ export interface HudConfig {
   thresholds: HudThresholds;
   staleTaskThresholdMinutes: number; // Default 30
   contextLimitWarning: ContextLimitWarningConfig;
+  /** Mission-board collection/rendering settings. */
+  missionBoard?: MissionBoardConfig;
+  /** Built-in usage API polling interval / success-cache TTL in milliseconds. */
+  usageApiPollIntervalMs: number;
   /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
   rateLimitsProvider?: RateLimitsProviderConfig;
   /** Optional maximum width (columns) for statusline output. */
@@ -451,6 +463,8 @@ export interface HudConfig {
   /** Controls maxWidth behavior: truncate with ellipsis (default) or wrap at " | " HUD element boundaries. */
   wrapMode?: 'truncate' | 'wrap';
 }
+
+export const DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1000;
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
   preset: 'focused',
@@ -480,6 +494,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     thinkingFormat: 'text',   // Text format for backward compatibility
     apiKeySource: false, // Disabled by default
     profile: true,  // Show profile name when CLAUDE_CONFIG_DIR is set
+    missionBoard: false,  // Opt-in mission board for whole-run progress tracking
     promptTime: true,  // Show last prompt time by default
     sessionHealth: true,
     useBars: false,  // Disabled by default for backwards compatibility
@@ -498,6 +513,8 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     threshold: 80,
     autoCompact: false,
   },
+  missionBoard: DEFAULT_MISSION_BOARD_CONFIG,
+  usageApiPollIntervalMs: DEFAULT_HUD_USAGE_POLL_INTERVAL_MS,
   wrapMode: 'truncate',
 };
 
@@ -528,6 +545,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinkingFormat: 'text',
     apiKeySource: false,
     profile: true,
+    missionBoard: false,
     promptTime: false,
     sessionHealth: false,
     useBars: false,
@@ -561,6 +579,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinkingFormat: 'text',
     apiKeySource: false,
     profile: true,
+    missionBoard: false,
     promptTime: true,
     sessionHealth: true,
     useBars: true,
@@ -594,6 +613,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinkingFormat: 'text',
     apiKeySource: true,
     profile: true,
+    missionBoard: false,
     promptTime: true,
     sessionHealth: true,
     useBars: true,
@@ -627,6 +647,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinkingFormat: 'text',
     apiKeySource: false,
     profile: true,
+    missionBoard: false,
     promptTime: true,
     sessionHealth: true,
     useBars: false,
@@ -660,6 +681,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinkingFormat: 'text',
     apiKeySource: true,
     profile: true,
+    missionBoard: false,
     promptTime: true,
     sessionHealth: true,
     useBars: true,

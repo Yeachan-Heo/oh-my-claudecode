@@ -231,6 +231,66 @@ omc config-stop-callback discord --clear-tags
 - Slack: `<@MEMBER_ID>`、`<!channel>`、`<!here>`、`<!everyone>`、`<!subteam^GROUP_ID>` をサポート
 - `file` コールバックはタグオプションを無視
 
+### OpenClaw 連携
+
+Claude Code セッションイベントを [OpenClaw](https://openclaw.ai/) ゲートウェイに転送し、OpenClaw エージェントを通じた自動応答とワークフローを実現します。
+
+**クイックセットアップ（推奨）:**
+
+```bash
+/oh-my-claudecode:configure-notifications
+# → プロンプトで "openclaw" と入力 → "OpenClaw Gateway" を選択
+```
+
+**手動セットアップ:** `~/.claude/omc_config.openclaw.json` を作成します：
+
+```json
+{
+  "enabled": true,
+  "gateways": {
+    "my-gateway": {
+      "url": "https://your-gateway.example.com/wake",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+      "method": "POST",
+      "timeout": 10000
+    }
+  },
+  "hooks": {
+    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
+    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+  }
+}
+```
+
+**環境変数:**
+
+| 変数 | 説明 |
+|------|------|
+| `OMC_OPENCLAW=1` | OpenClaw を有効化 |
+| `OMC_OPENCLAW_DEBUG=1` | デバッグログを有効化 |
+| `OMC_OPENCLAW_CONFIG=/path/to/config.json` | 設定ファイルパスを変更 |
+
+**サポートされるフックイベント（bridge.ts で 6 つがアクティブ）:**
+
+| イベント | トリガー | 主要テンプレート変数 |
+|---------|---------|-------------------|
+| `session-start` | セッション開始時 | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop` | Claude のレスポンス完了時 | `{{sessionId}}`, `{{projectName}}` |
+| `keyword-detector` | プロンプト送信ごと | `{{prompt}}`, `{{sessionId}}` |
+| `ask-user-question` | Claude がユーザー入力を要求した時 | `{{question}}`, `{{sessionId}}` |
+| `pre-tool-use` | ツール呼び出し前（高頻度） | `{{toolName}}`, `{{sessionId}}` |
+| `post-tool-use` | ツール呼び出し後（高頻度） | `{{toolName}}`, `{{sessionId}}` |
+
+**Reply Channel 環境変数:**
+
+| 変数 | 説明 |
+|------|------|
+| `OPENCLAW_REPLY_CHANNEL` | 応答チャンネル（例: `discord`） |
+| `OPENCLAW_REPLY_TARGET` | チャンネル ID |
+| `OPENCLAW_REPLY_THREAD` | スレッド ID |
+
+OpenClaw ペイロードを ClawdBot 経由で Discord にリレーするリファレンスゲートウェイについては `scripts/openclaw-gateway-demo.mjs` を参照してください。
+
 ---
 
 ## ドキュメント

@@ -2,11 +2,36 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { triggerStopCallbacks } from './callbacks.js';
+import { getOMCConfig } from '../../features/auto-update.js';
+import { buildConfigFromEnv, getEnabledPlatforms, getNotificationConfig } from '../../notifications/config.js';
 import { notify } from '../../notifications/index.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
 import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
+function hasExplicitNotificationConfig(profileName) {
+    const config = getOMCConfig();
+    if (profileName) {
+        const profile = config.notificationProfiles?.[profileName];
+        if (profile && typeof profile.enabled === 'boolean') {
+            return true;
+        }
+    }
+    if (config.notifications && typeof config.notifications.enabled === 'boolean') {
+        return true;
+    }
+    return buildConfigFromEnv() !== null;
+}
+function getLegacyPlatformsCoveredByNotifications(enabledPlatforms) {
+    const overlappingPlatforms = [];
+    if (enabledPlatforms.includes('telegram')) {
+        overlappingPlatforms.push('telegram');
+    }
+    if (enabledPlatforms.includes('discord')) {
+        overlappingPlatforms.push('discord');
+    }
+    return overlappingPlatforms;
+}
 /**
  * Read agent tracking to get spawn/completion counts
  */
@@ -376,27 +401,43 @@ export async function processSessionEnd(input) {
     catch {
         // Ignore cleanup errors
     }
-    // Trigger stop hook callbacks (#395)
+    const profileName = process.env.OMC_NOTIFY_PROFILE;
+    const notificationConfig = getNotificationConfig(profileName);
+    const shouldUseNewNotificationSystem = Boolean(notificationConfig && hasExplicitNotificationConfig(profileName));
+    const enabledNotificationPlatforms = shouldUseNewNotificationSystem && notificationConfig
+        ? getEnabledPlatforms(notificationConfig, 'session-end')
+        : [];
+    // Trigger stop hook callbacks (#395). When an explicit session-end notification
+    // config already covers Discord/Telegram, skip the overlapping legacy callback
+    // path so session-end is only dispatched once per platform.
     await triggerStopCallbacks(metrics, {
         session_id: input.session_id,
         cwd: input.cwd,
+    }, {
+        skipPlatforms: shouldUseNewNotificationSystem
+            ? getLegacyPlatformsCoveredByNotifications(enabledNotificationPlatforms)
+            : [],
     });
-    // Trigger new notification system (in addition to legacy callbacks)
-    try {
-        await notify('session-end', {
-            sessionId: input.session_id,
-            projectPath: input.cwd,
-            durationMs: metrics.duration_ms,
-            agentsSpawned: metrics.agents_spawned,
-            agentsCompleted: metrics.agents_completed,
-            modesUsed: metrics.modes_used,
-            reason: metrics.reason,
-            timestamp: metrics.ended_at,
-            profileName: process.env.OMC_NOTIFY_PROFILE,
-        });
-    }
-    catch {
-        // Notification failures should never block session end
+    // Trigger the new notification system when session-end notifications come
+    // from an explicit notifications/profile/env config. Legacy stopHookCallbacks
+    // are already handled above and must not be dispatched twice.
+    if (shouldUseNewNotificationSystem) {
+        try {
+            await notify('session-end', {
+                sessionId: input.session_id,
+                projectPath: input.cwd,
+                durationMs: metrics.duration_ms,
+                agentsSpawned: metrics.agents_spawned,
+                agentsCompleted: metrics.agents_completed,
+                modesUsed: metrics.modes_used,
+                reason: metrics.reason,
+                timestamp: metrics.ended_at,
+                profileName,
+            });
+        }
+        catch {
+            // Notification failures should never block session end
+        }
     }
     // Clean up reply session registry and stop daemon if no active sessions remain
     try {

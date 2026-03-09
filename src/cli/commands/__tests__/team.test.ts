@@ -233,11 +233,12 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.role).toBe('architect');
   });
 
-  it('supports --json flag with comma-separated specs', () => {
-    const parsed = parseTeamArgs(['1:codex,1:gemini', '--json', 'compare']);
+  it('supports --json and --new-window flags with comma-separated specs', () => {
+    const parsed = parseTeamArgs(['1:codex,1:gemini', '--new-window', '--json', 'compare']);
     expect(parsed.workerCount).toBe(2);
     expect(parsed.agentTypes).toEqual(['codex', 'gemini']);
     expect(parsed.json).toBe(true);
+    expect(parsed.newWindow).toBe(true);
     expect(parsed.task).toBe('compare');
   });
 

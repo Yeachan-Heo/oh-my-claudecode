@@ -60,6 +60,8 @@ const KNOWN_FIELDS = new Set([
     'agent_id', 'agent_name', 'agent_type', 'parent_session_id',
     // Common extra fields from Claude Code
     'input', 'output', 'result', 'error', 'status',
+    // Session-end fields
+    'reason',
 ]);
 // --- Fast-path detection ---
 /** Typical camelCase keys that indicate already-normalized input */

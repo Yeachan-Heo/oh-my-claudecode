@@ -26,7 +26,23 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 - Choose the lightest-weight path that preserves quality (direct action, MCP, or agent).
 - Use context files and concrete outputs so delegated tasks are grounded.
 - Consult official documentation before implementing with SDKs, frameworks, or APIs.
+- For cleanup or refactor work, write a cleanup plan before modifying code.
+- Prefer deletion over addition when the same behavior can be preserved.
+- Reuse existing utilities and patterns before introducing new ones.
+- Do not add new dependencies unless the user explicitly requests or approves them.
+- Keep diffs small, reversible, and easy to review.
 </operating_principles>
+
+<working_agreements>
+## Working agreements
+- Write a cleanup plan before modifying code.
+- Prefer deletion over addition.
+- Reuse existing utilities and patterns first.
+- No new dependencies without an explicit request.
+- Keep diffs small and reversible.
+- Run lint, typecheck, tests, and static analysis after changes.
+- Final reports must include changed files, simplifications made, and remaining risks.
+</working_agreements>
 
 ---
 
@@ -154,6 +170,7 @@ Do not ask for confirmation — just read the skill file and follow its instruct
 | "ecomode", "eco", "budget" | `$ecomode` | Read `~/.agents/skills/ecomode/SKILL.md`, enable token-efficient mode |
 | "cancel", "stop", "abort" | `$cancel` | Read `~/.agents/skills/cancel/SKILL.md`, cancel active modes |
 | "tdd", "test first" | keyword mode | Inject TDD-mode guidance and favor test-first execution with `test-engineer` when appropriate |
+| "cleanup", "deslop", "anti-slop" | `$ai-slop-cleaner` | Read `~/.agents/skills/ai-slop-cleaner/SKILL.md`, plan and clean AI-generated slop with separate writer/reviewer passes |
 | "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `~/.agents/skills/web-clone/SKILL.md`, start website cloning pipeline |
 
 Detection rules:
@@ -185,6 +202,7 @@ Workflow Skills:
 - `plan`: Strategic planning with optional RALPLAN-DR consensus mode
 - `deep-interview`: Socratic deep interview with Ouroboros-inspired mathematical ambiguity gating before execution
 - `ralplan`: Iterative consensus planning with RALPLAN-DR structured deliberation (planner + architect + critic); supports `--deliberate` for high-risk work
+- `ai-slop-cleaner`: Regression-safe cleanup workflow for duplicate code, dead code, needless abstractions, and boundary violations; supports `--review` for reviewer-only passes
 
 Agent Shortcuts:
 - `analyze` -> debugger: Investigation and root-cause analysis
@@ -211,6 +229,9 @@ Common agent workflows for typical scenarios:
 
 Feature Development:
   analyst -> planner -> executor -> test-engineer -> code-reviewer -> verifier
+
+Anti-Slop Cleanup:
+  planner -> test-engineer -> executor -> code-reviewer -> verifier
 
 Bug Investigation:
   explore + debugger + executor + test-engineer + verifier
@@ -283,6 +304,14 @@ Parallelization:
 - Run dependent tasks sequentially.
 - Use background execution for installs, builds, and tests.
 - Prefer Team mode as the primary parallel execution surface. Use ad hoc parallelism only when Team overhead is disproportionate to the task.
+
+Anti-slop workflow:
+- For cleanup/refactor/deslop requests, write a cleanup plan before editing code.
+- Lock behavior with regression tests first when practical.
+- Execute cleanup in small passes: dead code, duplication, naming/error handling, then tests.
+- Use separate writer/reviewer passes for cleanup work: implementation first, independent review second.
+- Never let the same pass both author and approve high-impact cleanup without an explicit independent review step.
+- Minimum quality gates for meaningful cleanup are lint -> typecheck -> unit/integration tests -> static/security scan when available.
 
 Visual iteration gate:
 - For visual tasks (reference image(s) + generated screenshot), run `$visual-verdict` every iteration before the next edit.
@@ -360,3 +389,17 @@ Recommended mode fields:
 ## Setup
 
 Run `omx setup` to install all components. Run `omx doctor` to verify installation.
+
+---
+
+## Review guidelines
+
+- Flag breaking changes to public API or CLI interfaces as P0.
+- Verify error handling on all async operations (missing try/catch, unhandled rejections).
+- Check for hardcoded secrets, tokens, or credentials — flag as P0.
+- Ensure new dependencies are justified and not duplicating existing functionality.
+- TypeScript: verify proper type annotations, no unsafe `any` without justification.
+- Test coverage: flag new logic paths that lack corresponding tests.
+- Configuration changes must be backward-compatible or include migration notes.
+- MCP tool definitions must validate inputs and handle timeouts gracefully.
+- Agent orchestration changes: verify state machine transitions are complete and recoverable.

@@ -9,6 +9,7 @@ const PROVIDER_BINARIES = {
   codex: 'codex',
   gemini: 'gemini',
 };
+const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
 /**
  * Build CLI args for a given provider.
@@ -91,9 +92,20 @@ function ensureBinary(provider, binary) {
     stdio: 'ignore',
     encoding: 'utf8',
     env: buildProviderEnv(provider),
+    shell: SHOULD_USE_WINDOWS_SHELL,
   });
 
-  if (probe.error && probe.error.code === 'ENOENT') {
+  const isMissingOnWindowsShell = SHOULD_USE_WINDOWS_SHELL
+    && probe.status !== 0
+    && (() => {
+      const whereResult = spawnSync('where', [binary], {
+        encoding: 'utf8',
+        env: buildProviderEnv(provider),
+      });
+      return whereResult.status !== 0 || !whereResult.stdout?.trim();
+    })();
+
+  if ((probe.error && probe.error.code === 'ENOENT') || isMissingOnWindowsShell) {
     const verify = `${binary} --version`;
     console.error(`[ask-${binary}] Missing required local CLI binary: ${binary}`);
     console.error(`[ask-${binary}] Install/configure ${binary} CLI, then verify with: ${verify}`);
@@ -202,6 +214,7 @@ async function main() {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
+    shell: SHOULD_USE_WINDOWS_SHELL,
   });
 
   const stdout = run.stdout || '';

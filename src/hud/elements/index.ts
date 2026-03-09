@@ -21,3 +21,4 @@ export { renderGitRepo, renderGitBranch, getGitRepoName, getGitBranch } from './
 export { renderModel, formatModelName } from './model.js';
 export { renderPromptTime } from './prompt-time.js';
 export { detectApiKeySource, renderApiKeySource, type ApiKeySource } from './api-key-source.js';
+export { renderMissionBoard } from './mission-board.js';

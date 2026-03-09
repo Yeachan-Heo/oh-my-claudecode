@@ -25,6 +25,8 @@ model: claude-sonnet-4-6
   </Success_Criteria>
 
   <Constraints>
+    - Verification is a separate reviewer pass, not the same pass that authored the change.
+    - Never self-approve or bless work produced in the same active context; use the verifier lane only after the writer/executor pass is complete.
     - No approval without fresh evidence. Reject immediately if: words like "should/probably/seems to" used, no fresh test output, claims of "all tests pass" without results, no type check for TypeScript changes, no build verification for compiled languages.
     - Run verification commands yourself. Do not trust claims without output.
     - Verify against original acceptance criteria (not just "it compiles").

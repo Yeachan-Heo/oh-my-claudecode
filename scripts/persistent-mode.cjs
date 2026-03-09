@@ -14,6 +14,7 @@ const {
   writeFileSync,
   readdirSync,
   mkdirSync,
+  unlinkSync,
 } = require("fs");
 const { join, dirname, resolve, normalize } = require("path");
 const { homedir } = require("os");
@@ -129,6 +130,12 @@ async function sendStopNotification(modeName, stateData, sessionId, directory) {
  * from causing the stop hook to malfunction in new sessions.
  */
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// Stop breaker constants for first-class mode enforcement
+const TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
+const TEAM_PIPELINE_STOP_BLOCKER_TTL_MS = 5 * 60 * 1000; // 5 min
+const RALPLAN_STOP_BLOCKER_MAX = 30;
+const RALPLAN_STOP_BLOCKER_TTL_MS = 45 * 60 * 1000; // 45 min
 const TEAM_TERMINAL_PHASES = new Set([
   "completed",
   "complete",
@@ -188,6 +195,46 @@ function getSafeReinforcementCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.floor(value)
     : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Stop Breaker helpers (shared by team pipeline and ralplan)
+// ---------------------------------------------------------------------------
+
+function readStopBreaker(stateDir, name, sessionId, ttlMs) {
+  const dir = sessionId
+    ? join(stateDir, "sessions", sessionId)
+    : stateDir;
+  const breakerPath = join(dir, `${name}-stop-breaker.json`);
+
+  try {
+    if (!existsSync(breakerPath)) return 0;
+    const raw = JSON.parse(readFileSync(breakerPath, "utf-8"));
+    if (ttlMs && raw.updated_at) {
+      const updatedAt = new Date(raw.updated_at).getTime();
+      if (Number.isFinite(updatedAt) && Date.now() - updatedAt > ttlMs) {
+        unlinkSync(breakerPath);
+        return 0;
+      }
+    }
+    return typeof raw.count === "number" ? raw.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStopBreaker(stateDir, name, count, sessionId) {
+  const dir = sessionId
+    ? join(stateDir, "sessions", sessionId)
+    : stateDir;
+
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const breakerPath = join(dir, `${name}-stop-breaker.json`);
+    writeJsonFile(breakerPath, { count, updated_at: new Date().toISOString() });
+  } catch {
+    // Fail-open
+  }
 }
 
 /**
@@ -520,6 +567,7 @@ async function main() {
     const ultraqa = readStateFileWithSession(stateDir, "ultraqa-state.json", sessionId);
     const pipeline = readStateFileWithSession(stateDir, "pipeline-state.json", sessionId);
     const team = readStateFileWithSession(stateDir, "team-state.json", sessionId);
+    const ralplan = readStateFileWithSession(stateDir, "ralplan-state.json", sessionId);
     const omcTeams = readStateFileWithSession(stateDir, "omc-teams-state.json", sessionId);
 
     // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
@@ -532,7 +580,9 @@ async function main() {
     const totalIncomplete = taskCount + todoCount;
 
     // Check if cancel is in progress - if so, allow stop immediately
-    if (isSessionCancelInProgress(stateDir, sessionId)) {
+    // Cache the result to pass to sub-checks (avoids TOCTOU re-reads, issue #1058)
+    const cancelInProgress = isSessionCancelInProgress(stateDir, sessionId);
+    if (cancelInProgress) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -580,6 +630,102 @@ async function main() {
               reason: `[AUTOPILOT - Phase: ${phase}] Autopilot not complete. Continue working. When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
             }),
           );
+          return;
+        }
+      }
+    }
+
+    // Priority 2.5: Team Pipeline (standalone team mode — first-class enforcement)
+    // When team runs WITHOUT ralph, this provides stop-hook blocking.
+    // When team runs WITH ralph, checkRalphLoop (Priority 1) handles it.
+    let teamPipelineHandled = false;
+    if (team.state && isSessionMatch(team.state, sessionId)) {
+      if (!team.state.active) {
+        // Inactive — reset breaker, allow stop, mark as handled
+        writeStopBreaker(stateDir, "team-pipeline", 0, sessionId);
+        teamPipelineHandled = true;
+      } else if (!isStaleState(team.state)) {
+        teamPipelineHandled = true;
+
+        // Cancel-in-progress bypass (TOCTOU defense, issue #1058)
+        if (!cancelInProgress) {
+          // Read phase: canonical field priority matching bridge code
+          const rawPhase = team.state.phase
+            ?? team.state.current_phase
+            ?? team.state.currentStage
+            ?? team.state.current_stage
+            ?? team.state.stage;
+
+          if (typeof rawPhase !== "string") {
+            // No valid phase — fail-open (don't block)
+          } else {
+            const phase = rawPhase.trim().toLowerCase();
+
+            if (TEAM_TERMINAL_PHASES.has(phase) || phase === "cancel") {
+              // Terminal — reset breaker, allow stop
+              writeStopBreaker(stateDir, "team-pipeline", 0, sessionId);
+            } else if (!TEAM_ACTIVE_PHASES.has(phase)) {
+              // Unknown phase — fail-open (don't block)
+            } else {
+              // Status-level terminal check
+              const rawStatus = team.state.status;
+              const status = typeof rawStatus === "string" ? rawStatus.trim().toLowerCase() : null;
+              if (status && TEAM_TERMINAL_PHASES.has(status)) {
+                writeStopBreaker(stateDir, "team-pipeline", 0, sessionId);
+              } else if (team.state.cancel?.requested) {
+                // Cancel requested — allow stop
+                writeStopBreaker(stateDir, "team-pipeline", 0, sessionId);
+              } else {
+                // Active phase — block with circuit breaker
+                const breakerCount = readStopBreaker(stateDir, "team-pipeline", sessionId, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS) + 1;
+                if (breakerCount > TEAM_PIPELINE_STOP_BLOCKER_MAX) {
+                  writeStopBreaker(stateDir, "team-pipeline", 0, sessionId);
+                  // Circuit breaker tripped — allow stop
+                } else {
+                  writeStopBreaker(stateDir, "team-pipeline", breakerCount, sessionId);
+                  sendStopNotification("team", team.state, sessionId, directory).catch(() => {});
+
+                  console.log(JSON.stringify({
+                    decision: "block",
+                    reason: `[TEAM PIPELINE - PHASE: ${phase.toUpperCase()} | REINFORCEMENT ${breakerCount}/${TEAM_PIPELINE_STOP_BLOCKER_MAX}] The team pipeline is active in phase "${phase}". Continue working on the team workflow. Do not stop until the pipeline reaches a terminal state (complete/failed/cancelled). When done, run /oh-my-claudecode:cancel to cleanly exit.`,
+                  }));
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Priority 2.6: Ralplan (standalone consensus planning — first-class enforcement)
+    if (ralplan.state?.active && !isStaleState(ralplan.state) && isSessionMatch(ralplan.state, sessionId)) {
+      // Terminal phase detection
+      const currentPhase = ralplan.state.current_phase;
+      let ralplanTerminal = false;
+      if (typeof currentPhase === "string") {
+        const terminal = ["complete", "completed", "failed", "cancelled", "canceled", "done"];
+        if (terminal.includes(currentPhase.toLowerCase())) {
+          writeStopBreaker(stateDir, "ralplan", 0, sessionId);
+          ralplanTerminal = true;
+        }
+      }
+
+      if (!ralplanTerminal && !cancelInProgress) {
+        // Circuit breaker
+        const breakerCount = readStopBreaker(stateDir, "ralplan", sessionId, RALPLAN_STOP_BLOCKER_TTL_MS) + 1;
+        if (breakerCount > RALPLAN_STOP_BLOCKER_MAX) {
+          writeStopBreaker(stateDir, "ralplan", 0, sessionId);
+          // Circuit breaker tripped — allow stop
+        } else {
+          writeStopBreaker(stateDir, "ralplan", breakerCount, sessionId);
+
+          sendStopNotification("ralplan", ralplan.state, sessionId, directory).catch(() => {});
+
+          console.log(JSON.stringify({
+            decision: "block",
+            reason: `[RALPLAN - CONSENSUS PLANNING | REINFORCEMENT ${breakerCount}/${RALPLAN_STOP_BLOCKER_MAX}] The ralplan consensus workflow is active. Continue the Planner/Architect/Critic loop. Do not stop until consensus is reached or the workflow completes. When done, run /oh-my-claudecode:cancel to cleanly exit.`,
+          }));
           return;
         }
       }
@@ -662,8 +808,8 @@ async function main() {
       }
     }
 
-    // Priority 6: Team (native Claude Code teams)
-    if (team.state?.active && !isStaleState(team.state) && isSessionMatch(team.state, sessionId)) {
+    // Priority 6: Team (native Claude Code teams) — fallback for cases not handled by Priority 2.5
+    if (!teamPipelineHandled && team.state?.active && !isStaleState(team.state) && isSessionMatch(team.state, sessionId)) {
       const phase = normalizeTeamPhase(team.state);
       if (phase) {
         const newCount = getSafeReinforcementCount(team.state.reinforcement_count) + 1;
@@ -777,6 +923,43 @@ async function main() {
 
       console.log(JSON.stringify({ decision: "block", reason }));
       return;
+    }
+
+    // Priority 9: Skill Active State (issue #1033)
+    // Skills like code-review, plan, ralplan, tdd, etc. write skill-active-state.json
+    // when invoked via the Skill tool. This prevents premature stops mid-skill.
+    {
+      const skillState = readStateFileWithSession(stateDir, "skill-active-state.json", sessionId);
+      if (skillState.state?.active) {
+        // Staleness check (per-skill TTL)
+        const sLastChecked = skillState.state.last_checked_at ? new Date(skillState.state.last_checked_at).getTime() : 0;
+        const sStartedAt = skillState.state.started_at ? new Date(skillState.state.started_at).getTime() : 0;
+        const sMostRecent = Math.max(sLastChecked, sStartedAt);
+        const sTtl = skillState.state.stale_ttl_ms || 5 * 60 * 1000;
+        const sAge = sMostRecent > 0 ? Date.now() - sMostRecent : Infinity;
+        const isStale = sMostRecent === 0 || sAge > sTtl;
+
+        if (!isStale && isSessionMatch(skillState.state, sessionId)) {
+          const count = skillState.state.reinforcement_count || 0;
+          const maxReinforcements = skillState.state.max_reinforcements || 3;
+
+          if (count < maxReinforcements) {
+            skillState.state.reinforcement_count = count + 1;
+            skillState.state.last_checked_at = new Date().toISOString();
+            writeJsonFile(skillState.path, skillState.state);
+
+            const skillName = skillState.state.skill_name || "unknown";
+            console.log(JSON.stringify({
+              decision: "block",
+              reason: `[SKILL ACTIVE: ${skillName}] The "${skillName}" skill is still executing (reinforcement ${count + 1}/${maxReinforcements}). Continue working on the skill's instructions. Do not stop until the skill completes its workflow.`,
+            }));
+            return;
+          } else {
+            // Reinforcement limit reached - clear state and allow stop
+            try { if (skillState.path && existsSync(skillState.path)) unlinkSync(skillState.path); } catch {}
+          }
+        }
+      }
     }
 
     // No blocking needed — Claude is truly idle.

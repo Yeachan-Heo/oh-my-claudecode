@@ -236,6 +236,66 @@ omc config-stop-callback discord --clear-tags
 - Slack: `<@MEMBER_ID>`, `<!channel>`, `<!here>`, `<!everyone>`, `<!subteam^GROUP_ID>` 지원
 - `file` 콜백은 태그 옵션을 무시합니다
 
+### OpenClaw 연동
+
+Claude Code 세션 이벤트를 [OpenClaw](https://openclaw.ai/) 게이트웨이로 전달하여 OpenClaw 에이전트를 통한 자동화된 응답 및 워크플로우를 구성할 수 있습니다.
+
+**빠른 설정 (권장):**
+
+```bash
+/oh-my-claudecode:configure-notifications
+# → 프롬프트에서 "openclaw" 입력 → "OpenClaw Gateway" 선택
+```
+
+**수동 설정:** `~/.claude/omc_config.openclaw.json` 파일을 생성합니다:
+
+```json
+{
+  "enabled": true,
+  "gateways": {
+    "my-gateway": {
+      "url": "https://your-gateway.example.com/wake",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+      "method": "POST",
+      "timeout": 10000
+    }
+  },
+  "hooks": {
+    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
+    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+  }
+}
+```
+
+**환경 변수:**
+
+| 변수 | 설명 |
+|------|------|
+| `OMC_OPENCLAW=1` | OpenClaw 활성화 |
+| `OMC_OPENCLAW_DEBUG=1` | 디버그 로그 활성화 |
+| `OMC_OPENCLAW_CONFIG=/path/to/config.json` | 설정 파일 경로 변경 |
+
+**지원되는 훅 이벤트 (bridge.ts에서 6개 활성):**
+
+| 이벤트 | 트리거 시점 | 주요 템플릿 변수 |
+|--------|------------|-----------------|
+| `session-start` | 세션 시작 시 | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop` | Claude 응답 완료 시 | `{{sessionId}}`, `{{projectName}}` |
+| `keyword-detector` | 프롬프트 제출마다 | `{{prompt}}`, `{{sessionId}}` |
+| `ask-user-question` | Claude가 사용자 입력 요청 시 | `{{question}}`, `{{sessionId}}` |
+| `pre-tool-use` | 툴 호출 전 (빈도 높음) | `{{toolName}}`, `{{sessionId}}` |
+| `post-tool-use` | 툴 호출 후 (빈도 높음) | `{{toolName}}`, `{{sessionId}}` |
+
+**Reply Channel 환경 변수:**
+
+| 변수 | 설명 |
+|------|------|
+| `OPENCLAW_REPLY_CHANNEL` | 응답 채널 (예: `discord`) |
+| `OPENCLAW_REPLY_TARGET` | 채널 ID |
+| `OPENCLAW_REPLY_THREAD` | 스레드 ID |
+
+OpenClaw 페이로드를 ClawdBot을 통해 Discord에 전달하는 레퍼런스 게이트웨이는 `scripts/openclaw-gateway-demo.mjs`를 참고하세요.
+
 ---
 
 ## 문서

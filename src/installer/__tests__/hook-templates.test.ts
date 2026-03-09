@@ -53,12 +53,31 @@ describe('keyword-detector packaged artifacts', () => {
       ['tdd implement password validation', '[TDD MODE ACTIVATED]'],
       ['deep-analyze the test failure', 'ANALYSIS MODE'],
       ['deep interview me about requirements', 'oh-my-claudecode:deep-interview'],
+      ['deslop this module with duplicate dead code', 'oh-my-claudecode:ai-slop-cleaner'],
     ] as const) {
       const templateResult = JSON.stringify(runKeywordHook(templatePath, prompt));
       const pluginResult = JSON.stringify(runKeywordHook(pluginPath, prompt));
       expect(templateResult).toContain(expected);
       expect(pluginResult).toContain(expected);
     }
+  });
+
+  it('only triggers ai-slop-cleaner for anti-slop cleanup/refactor prompts', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+
+    const positivePrompt = 'cleanup this ai slop: remove dead code and duplicate wrappers';
+    const negativePrompt = 'refactor auth to support SSO';
+
+    const templatePositive = JSON.stringify(runKeywordHook(templatePath, positivePrompt));
+    const pluginPositive = JSON.stringify(runKeywordHook(pluginPath, positivePrompt));
+    const templateNegative = runKeywordHook(templatePath, negativePrompt);
+    const pluginNegative = runKeywordHook(pluginPath, negativePrompt);
+
+    expect(templatePositive).toContain('oh-my-claudecode:ai-slop-cleaner');
+    expect(pluginPositive).toContain('oh-my-claudecode:ai-slop-cleaner');
+    expect(templateNegative).toEqual({ continue: true, suppressOutput: true });
+    expect(pluginNegative).toEqual({ continue: true, suppressOutput: true });
   });
 
   it('does not auto-trigger team mode from keyword-detector artifacts', () => {

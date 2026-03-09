@@ -11,13 +11,16 @@
  * 3. autopilot: Full autonomous execution
  * 4. team: Explicit-only via /team (not auto-triggered)
  * 5. ultrawork/ulw: Maximum parallel execution
- * 5. ccg: Claude-Codex-Gemini tri-model orchestration
- * 6. ralplan: Iterative planning with consensus
- * 7. deep interview: Socratic interview workflow
- * 8. tdd: Test-driven development
- * 9. ultrathink: Extended reasoning
- * 10. deepsearch: Codebase search (restricted patterns)
- * 11. analyze: Analysis mode (restricted patterns)
+ * 6. ccg: Claude-Codex-Gemini tri-model orchestration
+ * 7. ralplan: Iterative planning with consensus
+ * 8. deep interview: Socratic interview workflow
+ * 9. ai-slop-cleaner: Cleanup/deslop anti-slop workflow
+ * 10. tdd: Test-driven development
+ * 11. code review: Comprehensive review mode
+ * 12. security review: Security-focused review mode
+ * 13. ultrathink: Extended reasoning
+ * 14. deepsearch: Codebase search (restricted patterns)
+ * 15. analyze: Analysis mode (restricted patterns)
  */
 
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
@@ -66,6 +69,22 @@ Write or update tests first when practical, confirm they fail for the right reas
 ---
 `;
 
+const CODE_REVIEW_MESSAGE = `<code-review-mode>
+[CODE REVIEW MODE ACTIVATED]
+Perform a comprehensive code review of the relevant changes or target area. Focus on correctness, maintainability, edge cases, regressions, and test adequacy before recommending changes.
+</code-review-mode>
+
+---
+`;
+
+const SECURITY_REVIEW_MESSAGE = `<security-review-mode>
+[SECURITY REVIEW MODE ACTIVATED]
+Perform a focused security review of the relevant changes or target area. Check trust boundaries, auth/authz, data exposure, input validation, command/file access, secrets handling, and escalation risks before recommending changes.
+</security-review-mode>
+
+---
+`;
+
 // Extract prompt from various JSON structures
 function extractPrompt(input) {
   try {
@@ -86,6 +105,15 @@ function extractPrompt(input) {
 }
 
 // Sanitize text to prevent false positives from code blocks, XML tags, URLs, and file paths
+const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-]?slop)\b/i;
+const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
+const ANTI_SLOP_SMELL_PATTERN = /\b(slop|duplicate(?:d|s)?|duplication|dead\s+code|unused\s+code|over[\s-]?abstract(?:ion|ed)?|wrapper\s+layers?|boundary\s+violations?|needless\s+abstractions?|unnecessary\s+abstractions?|ai[\s-]?generated|generated\s+code|tech\s+debt)\b/i;
+
+function isAntiSlopCleanupRequest(text) {
+  return ANTI_SLOP_EXPLICIT_PATTERN.test(text) ||
+    (ANTI_SLOP_ACTION_PATTERN.test(text) && ANTI_SLOP_SMELL_PATTERN.test(text));
+}
+
 function sanitizeForKeywordDetection(text) {
   return text
     // 1. Strip XML-style tag blocks: <tag-name ...>...</tag-name> (multi-line, greedy on tag name)
@@ -246,8 +274,8 @@ function resolveConflicts(matches) {
   // Team keyword detection removed — team is now explicit-only via /team skill.
 
   // Sort by priority order
-const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
-    'ccg','ralplan','deep-interview','tdd','ultrathink','deepsearch','analyze'];
+  const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
+    'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','code-review','security-review','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
   return resolved;
@@ -370,11 +398,26 @@ async function main() {
       matches.push({ name: 'deep-interview', args: '' });
     }
 
+    // AI slop cleanup keywords
+    if (isAntiSlopCleanupRequest(cleanPrompt)) {
+      matches.push({ name: 'ai-slop-cleaner', args: '' });
+    }
+
     // TDD keywords
     if (/\b(tdd)\b/i.test(cleanPrompt) ||
         /\btest\s+first\b/i.test(cleanPrompt) ||
         /\bred\s+green\b/i.test(cleanPrompt)) {
       matches.push({ name: 'tdd', args: '' });
+    }
+
+    // Code review keywords
+    if (/\b(code\s+review|review\s+code)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'code-review', args: '' });
+    }
+
+    // Security review keywords
+    if (/\b(security\s+review|review\s+security)\b/i.test(cleanPrompt)) {
+      matches.push({ name: 'security-review', args: '' });
     }
 
     // Ultrathink keywords
@@ -439,6 +482,8 @@ async function main() {
       ['ultrathink', ULTRATHINK_MESSAGE],
       ['analyze', ANALYZE_MESSAGE],
       ['tdd', TDD_MESSAGE],
+      ['code-review', CODE_REVIEW_MESSAGE],
+      ['security-review', SECURITY_REVIEW_MESSAGE],
     ]) {
       const index = resolved.findIndex(m => m.name === keywordName);
       if (index !== -1) {

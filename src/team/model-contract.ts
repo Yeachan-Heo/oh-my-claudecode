@@ -256,7 +256,10 @@ export function isCliAvailable(agentType: CliAgentType): boolean {
       return result.status === 0;
     }
 
-    const result = spawnSync(resolvedBinary, ['--version'], { timeout: 5000 });
+    const result = spawnSync(resolvedBinary, ['--version'], {
+      timeout: 5000,
+      shell: process.platform === 'win32',
+    });
     return result.status === 0;
   } catch {
     return false;

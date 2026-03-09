@@ -14,6 +14,7 @@ export interface ParsedTeamArgs {
     task: string;
     teamName: string;
     json: boolean;
+    newWindow: boolean;
 }
 /** @internal Exported for testing */
 export declare function parseTeamArgs(tokens: string[]): ParsedTeamArgs;

@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import { EventEmitter } from 'events';
 import { isZaiHost, parseZaiResponse, getUsage } from '../../hud/usage-api.js';
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
 vi.mock('../../lib/file-lock.js', () => ({
@@ -251,6 +252,147 @@ describe('getUsage routing', () => {
             error: undefined,
         });
         expect(httpsModule.default.request).not.toHaveBeenCalled();
+        vi.useRealTimers();
+    });
+    it('respects configured usageApiPollIntervalMs for successful cache reuse', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+        const mockedExistsSync = vi.mocked(fs.existsSync);
+        const mockedReadFileSync = vi.mocked(fs.readFileSync);
+        mockedExistsSync.mockImplementation((path) => {
+            const file = String(path);
+            return file.endsWith('settings.json') || file.endsWith('.usage-cache.json');
+        });
+        mockedReadFileSync.mockImplementation((path) => {
+            const file = String(path);
+            if (file.endsWith('settings.json')) {
+                return JSON.stringify({
+                    omcHud: {
+                        usageApiPollIntervalMs: 180_000,
+                    },
+                });
+            }
+            if (file.endsWith('.usage-cache.json')) {
+                return JSON.stringify({
+                    timestamp: Date.now() - 120_000,
+                    source: 'anthropic',
+                    data: {
+                        fiveHourPercent: 42,
+                        weeklyPercent: 17,
+                        fiveHourResetsAt: null,
+                        weeklyResetsAt: null,
+                    },
+                });
+            }
+            return '{}';
+        });
+        const result = await getUsage();
+        expect(result).toEqual({
+            rateLimits: {
+                fiveHourPercent: 42,
+                weeklyPercent: 17,
+                fiveHourResetsAt: null,
+                weeklyResetsAt: null,
+            },
+            error: undefined,
+        });
+        expect(httpsModule.default.request).not.toHaveBeenCalled();
+        vi.useRealTimers();
+    });
+    it('returns rate_limited and persists exponential backoff metadata even without stale data', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+        process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+        process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+        const mockedExistsSync = vi.mocked(fs.existsSync);
+        const mockedReadFileSync = vi.mocked(fs.readFileSync);
+        const mockedWriteFileSync = vi.mocked(fs.writeFileSync);
+        mockedExistsSync.mockImplementation((path) => String(path).endsWith('settings.json'));
+        mockedReadFileSync.mockImplementation((path) => {
+            const file = String(path);
+            if (file.endsWith('settings.json')) {
+                return JSON.stringify({
+                    omcHud: {
+                        usageApiPollIntervalMs: 60_000,
+                    },
+                });
+            }
+            return '{}';
+        });
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 429;
+                callback(res);
+                res.emit('end');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result).toEqual({
+            rateLimits: null,
+            error: 'rate_limited',
+        });
+        expect(mockedWriteFileSync).toHaveBeenCalled();
+        const writtenCache = JSON.parse(String(mockedWriteFileSync.mock.calls.at(-1)?.[1] ?? '{}'));
+        expect(writtenCache.rateLimited).toBe(true);
+        expect(writtenCache.rateLimitedCount).toBe(1);
+        expect(writtenCache.error).toBe(false);
+        expect(writtenCache.errorReason).toBe('rate_limited');
+        expect(writtenCache.rateLimitedUntil - writtenCache.timestamp).toBe(60_000);
+        vi.useRealTimers();
+    });
+    it('increases 429 backoff exponentially up to the configured ceiling', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+        process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+        process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+        const mockedExistsSync = vi.mocked(fs.existsSync);
+        const mockedReadFileSync = vi.mocked(fs.readFileSync);
+        const mockedWriteFileSync = vi.mocked(fs.writeFileSync);
+        mockedExistsSync.mockImplementation((path) => {
+            const file = String(path);
+            return file.endsWith('settings.json') || file.endsWith('.usage-cache.json');
+        });
+        mockedReadFileSync.mockImplementation((path) => {
+            const file = String(path);
+            if (file.endsWith('settings.json')) {
+                return JSON.stringify({
+                    omcHud: {
+                        usageApiPollIntervalMs: 60_000,
+                    },
+                });
+            }
+            if (file.endsWith('.usage-cache.json')) {
+                return JSON.stringify({
+                    timestamp: Date.now() - 300_000,
+                    rateLimitedUntil: Date.now() - 1,
+                    rateLimited: true,
+                    rateLimitedCount: 4,
+                    source: 'zai',
+                    data: null,
+                });
+            }
+            return '{}';
+        });
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 429;
+                callback(res);
+                res.emit('end');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result.error).toBe('rate_limited');
+        const writtenCache = JSON.parse(String(mockedWriteFileSync.mock.calls.at(-1)?.[1] ?? '{}'));
+        expect(writtenCache.rateLimitedCount).toBe(5);
+        expect(writtenCache.rateLimitedUntil - writtenCache.timestamp).toBe(300_000);
         vi.useRealTimers();
     });
 });

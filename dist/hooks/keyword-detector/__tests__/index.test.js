@@ -261,6 +261,30 @@ World`);
                 expect(tddMatch).toBeUndefined();
             });
         });
+        describe('code-review keyword', () => {
+            it('should detect code review phrase', () => {
+                const result = detectKeywordsWithType('please do a code review');
+                const match = result.find((r) => r.type === 'code-review');
+                expect(match).toBeDefined();
+            });
+            it('should detect review code phrase', () => {
+                const result = detectKeywordsWithType('review code for this change');
+                const match = result.find((r) => r.type === 'code-review');
+                expect(match).toBeDefined();
+            });
+        });
+        describe('security-review keyword', () => {
+            it('should detect security review phrase', () => {
+                const result = detectKeywordsWithType('run a security review');
+                const match = result.find((r) => r.type === 'security-review');
+                expect(match).toBeDefined();
+            });
+            it('should detect review security phrase', () => {
+                const result = detectKeywordsWithType('review security for this change');
+                const match = result.find((r) => r.type === 'security-review');
+                expect(match).toBeDefined();
+            });
+        });
         describe('ultrathink keyword', () => {
             it('should detect ultrathink keyword', () => {
                 const result = detectKeywordsWithType('ultrathink about this problem');
@@ -599,6 +623,14 @@ World`);
                 const result = getPrimaryKeyword('ultrawork and ultrathink');
                 expect(result?.type).toBe('ultrawork');
             });
+            it('should return code-review over ultrathink', () => {
+                const result = getPrimaryKeyword('code review and ultrathink');
+                expect(result?.type).toBe('code-review');
+            });
+            it('should return security-review over ultrathink', () => {
+                const result = getPrimaryKeyword('security review and ultrathink');
+                expect(result?.type).toBe('security-review');
+            });
             it('should return ultrathink over deepsearch', () => {
                 const result = getPrimaryKeyword('ultrathink and search the codebase');
                 expect(result?.type).toBe('ultrathink');
@@ -731,6 +763,10 @@ World`);
             const result = getAllKeywords('ralph tdd fix');
             expect(result).toContain('ralph');
             expect(result).toContain('tdd');
+        });
+        it('should include code-review and security-review in priority order', () => {
+            const result = getAllKeywords('security review code review ultrathink');
+            expect(result).toEqual(['code-review', 'security-review', 'ultrathink']);
         });
         // Team keyword detection disabled — team is now explicit-only via /team skill
         // to prevent infinite spawning when Claude workers receive prompts containing "team".

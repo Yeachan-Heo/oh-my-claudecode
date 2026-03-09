@@ -185,26 +185,27 @@ async function sendDiscord(config, message) {
  * Executes all enabled callbacks in parallel with a timeout.
  * Failures in individual callbacks don't block session end.
  */
-export async function triggerStopCallbacks(metrics, _input) {
+export async function triggerStopCallbacks(metrics, _input, options = {}) {
     const config = getOMCConfig();
     const callbacks = config.stopHookCallbacks;
+    const skipPlatforms = new Set(options.skipPlatforms ?? []);
     if (!callbacks) {
         return; // No callbacks configured
     }
     // Execute all enabled callbacks (non-blocking)
     const promises = [];
-    if (callbacks.file?.enabled && callbacks.file.path) {
+    if (!skipPlatforms.has('file') && callbacks.file?.enabled && callbacks.file.path) {
         const format = callbacks.file.format || 'markdown';
         const summary = formatSessionSummary(metrics, format);
         promises.push(writeToFile(callbacks.file, summary, metrics.session_id));
     }
-    if (callbacks.telegram?.enabled) {
+    if (!skipPlatforms.has('telegram') && callbacks.telegram?.enabled) {
         const summary = formatSessionSummary(metrics, 'markdown');
         const tags = normalizeTelegramTagList(callbacks.telegram.tagList);
         const message = prefixMessageWithTags(summary, tags);
         promises.push(sendTelegram(callbacks.telegram, message));
     }
-    if (callbacks.discord?.enabled) {
+    if (!skipPlatforms.has('discord') && callbacks.discord?.enabled) {
         const summary = formatSessionSummary(metrics, 'markdown');
         const tags = normalizeDiscordTagList(callbacks.discord.tagList);
         const message = prefixMessageWithTags(summary, tags);

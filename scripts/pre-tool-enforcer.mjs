@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { execSync } from 'child_process';
 import { homedir } from 'os';
@@ -315,6 +315,85 @@ function generateMessage(toolName, todoStatus, modeActive = false) {
   return '';
 }
 
+// ---------------------------------------------------------------------------
+// Skill Active State (issue #1033)
+// Writes skill-active-state.json so the persistent-mode Stop hook can prevent
+// premature session termination while a skill is executing.
+// ---------------------------------------------------------------------------
+
+const SKILL_PROTECTION_CONFIGS = {
+  none:   { maxReinforcements: 0,  staleTtlMs: 0 },
+  light:  { maxReinforcements: 3,  staleTtlMs: 5 * 60 * 1000 },
+  medium: { maxReinforcements: 5,  staleTtlMs: 15 * 60 * 1000 },
+  heavy:  { maxReinforcements: 10, staleTtlMs: 30 * 60 * 1000 },
+};
+
+const SKILL_PROTECTION_MAP = {
+  autopilot: 'none', ralph: 'none', ultrawork: 'none', team: 'none',
+  'omc-teams': 'none', ultraqa: 'none', cancel: 'none',
+  trace: 'none', hud: 'none', 'omc-doctor': 'none', 'omc-help': 'none',
+  'learn-about-omc': 'none', note: 'none',
+  tdd: 'light', 'build-fix': 'light', analyze: 'light', skill: 'light',
+  'configure-notifications': 'light',
+  'code-review': 'medium', 'security-review': 'medium', plan: 'medium',
+  ralplan: 'medium', review: 'medium', 'external-context': 'medium',
+  sciomc: 'medium', learner: 'medium', 'omc-setup': 'medium',
+  'mcp-setup': 'medium', 'project-session-manager': 'medium',
+  'writer-memory': 'medium', 'ralph-init': 'medium', ccg: 'medium',
+  deepinit: 'heavy',
+};
+
+function getSkillProtectionLevel(skillName) {
+  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+  return SKILL_PROTECTION_MAP[normalized] || 'light';
+}
+
+function extractSkillName(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || null;
+  if (typeof rawSkill !== 'string' || !rawSkill.trim()) return null;
+  const normalized = rawSkill.trim();
+  return normalized.includes(':') ? normalized.split(':').at(-1).toLowerCase() : normalized.toLowerCase();
+}
+
+function writeSkillActiveState(directory, skillName, sessionId) {
+  const protection = getSkillProtectionLevel(skillName);
+  if (protection === 'none') return;
+
+  const config = SKILL_PROTECTION_CONFIGS[protection];
+  const now = new Date().toISOString();
+  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+
+  const state = {
+    active: true,
+    skill_name: normalized,
+    session_id: sessionId || undefined,
+    started_at: now,
+    last_checked_at: now,
+    reinforcement_count: 0,
+    max_reinforcements: config.maxReinforcements,
+    stale_ttl_ms: config.staleTtlMs,
+  };
+
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const targetDir = safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId)
+    : stateDir;
+  const targetPath = join(targetDir, 'skill-active-state.json');
+
+  try {
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    const tmpPath = targetPath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    renameSync(tmpPath, targetPath);
+  } catch {
+    // Best-effort; don't fail the hook
+  }
+}
+
 // Record Skill/Task invocations to flow trace (best-effort)
 async function recordToolInvocation(data, directory) {
   try {
@@ -350,6 +429,19 @@ async function main() {
     let data = {};
     try { data = JSON.parse(input); } catch {}
     recordToolInvocation(data, directory);
+
+    // Activate skill state when Skill tool is invoked (issue #1033)
+    // Writes skill-active-state.json so the persistent-mode Stop hook can
+    // prevent premature session termination while a skill is executing.
+    if (toolName === 'Skill') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      const skillName = extractSkillName(toolInput);
+      if (skillName) {
+        const sid = typeof data.session_id === 'string' ? data.session_id
+          : typeof data.sessionId === 'string' ? data.sessionId : '';
+        writeSkillActiveState(directory, skillName, sid);
+      }
+    }
 
     const sessionId =
       typeof data.session_id === 'string'

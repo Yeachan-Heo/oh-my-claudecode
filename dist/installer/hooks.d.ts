@@ -47,6 +47,16 @@ export declare const SEARCH_MESSAGE = "<search-mode>\nMAXIMIZE SEARCH EFFORT. La
  */
 export declare const ANALYZE_MESSAGE = "<analyze-mode>\nANALYSIS MODE. Gather context before diving deep:\n\nCONTEXT GATHERING (parallel):\n- 1-2 explore agents (codebase patterns, implementations)\n- 1-2 document-specialist agents (if external library involved)\n- Direct tools: Grep, Glob, LSP for targeted searches\n\nIF COMPLEX (architecture, multi-system, debugging after 2+ failures):\n- Consult architect agent for strategic guidance\n\nSYNTHESIZE findings before proceeding.\n</analyze-mode>\n\n---\n\n";
 /**
+ * Code review mode message
+ * Replaces skills/code-review/SKILL.md after skill deletion
+ */
+export declare const CODE_REVIEW_MESSAGE = "<code-review-mode>\n[CODE REVIEW MODE ACTIVATED]\nPerform a comprehensive code review of the relevant changes or target area. Focus on correctness, maintainability, edge cases, regressions, and test adequacy before recommending changes.\n</code-review-mode>\n\n---\n\n";
+/**
+ * Security review mode message
+ * Replaces skills/security-review/SKILL.md after skill deletion
+ */
+export declare const SECURITY_REVIEW_MESSAGE = "<security-review-mode>\n[SECURITY REVIEW MODE ACTIVATED]\nPerform a focused security review of the relevant changes or target area. Check trust boundaries, auth/authz, data exposure, input validation, command/file access, secrets handling, and escalation risks before recommending changes.\n</security-review-mode>\n\n---\n\n";
+/**
  * TDD mode message
  * Replaces skills/tdd/SKILL.md after skill deletion
  */

@@ -198,6 +198,7 @@ describe('gitInfoPosition configuration', () => {
         thresholds: DEFAULT_HUD_CONFIG.thresholds,
         staleTaskThresholdMinutes: 30,
         contextLimitWarning: DEFAULT_HUD_CONFIG.contextLimitWarning,
+        usageApiPollIntervalMs: DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
     });
     beforeEach(() => {
         vi.clearAllMocks();
@@ -356,6 +357,7 @@ describe('maxWidth wrapMode behavior', () => {
             ...DEFAULT_HUD_CONFIG.contextLimitWarning,
             threshold: 101,
         },
+        usageApiPollIntervalMs: DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
         maxWidth,
         wrapMode,
     });

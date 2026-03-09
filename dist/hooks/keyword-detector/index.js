@@ -20,6 +20,8 @@ const KEYWORD_PATTERNS = {
     team: /(?!x)x/, // never-match placeholder (type system requires the key)
     ralplan: /\b(ralplan)\b/i,
     tdd: /\b(tdd)\b|\btest\s+first\b/i,
+    'code-review': /\b(code\s+review|review\s+code)\b/i,
+    'security-review': /\b(security\s+review|review\s+security)\b/i,
     ultrathink: /\b(ultrathink)\b/i,
     deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b/i,
     analyze: /\b(deep[\s-]?analyze|deepanalyze)\b/i,
@@ -33,7 +35,7 @@ const KEYWORD_PATTERNS = {
  */
 const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
-    'ccg', 'ralplan', 'tdd',
+    'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
     'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini'
 ];
 /**

@@ -11,7 +11,7 @@
  * API: api.anthropic.com/api/oauth/usage
  * Response: { five_hour: { utilization }, seven_day: { utilization } }
  */
-import type { RateLimits, UsageResult } from './types.js';
+import { type RateLimits, type UsageResult } from './types.js';
 interface ZaiQuotaResponse {
     data?: {
         limits?: Array<{

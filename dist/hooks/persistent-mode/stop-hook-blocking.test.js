@@ -428,6 +428,11 @@ describe("Stop Hook Blocking Contract", () => {
                 last_checked_at: new Date().toISOString(),
                 started_at: new Date().toISOString(),
             }));
+            // Priority 2.5 uses a separate stop-breaker file for circuit breaking
+            writeFileSync(join(sessionDir, "team-pipeline-stop-breaker.json"), JSON.stringify({
+                count: 21, // exceeds TEAM_PIPELINE_STOP_BLOCKER_MAX (20)
+                updated_at: new Date().toISOString(),
+            }));
             const output = runScript({
                 directory: tempDir,
                 sessionId,

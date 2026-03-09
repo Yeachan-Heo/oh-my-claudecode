@@ -11,7 +11,10 @@ export interface CliInfo {
 
 export function detectCli(binary: string): CliInfo {
   try {
-    const versionResult = spawnSync(binary, ['--version'], { timeout: 5000 });
+    const versionResult = spawnSync(binary, ['--version'], {
+      timeout: 5000,
+      shell: process.platform === 'win32',
+    });
     if (versionResult.status === 0) {
       const finder = process.platform === 'win32' ? 'where' : 'which';
       const pathResult = spawnSync(finder, [binary], { timeout: 5000 });

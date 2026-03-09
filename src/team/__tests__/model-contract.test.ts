@@ -4,7 +4,6 @@ import {
   getContract,
   buildLaunchArgs,
   buildWorkerArgv,
-  buildWorkerCommand,
   getWorkerEnv,
   parseCliOutput,
   isPromptModeAgent,
@@ -24,6 +23,14 @@ vi.mock('child_process', async (importOriginal) => {
     spawnSync: vi.fn(actual.spawnSync),
   };
 });
+
+function setProcessPlatform(platform: NodeJS.Platform): () => void {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  return () => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  };
+}
 
 describe('model-contract', () => {
   describe('backward-compat API shims', () => {
@@ -215,6 +222,7 @@ describe('model-contract', () => {
   describe('isCliAvailable', () => {
     it('checks version without shell:true for standard binaries', () => {
       const mockSpawnSync = vi.mocked(spawnSync);
+      clearResolvedPathCache();
       mockSpawnSync
         .mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any)
         .mockReturnValueOnce({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any);
@@ -222,14 +230,16 @@ describe('model-contract', () => {
       isCliAvailable('codex');
 
       expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'which', ['codex'], { timeout: 5000, encoding: 'utf8' });
-      expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'codex', ['--version'], { timeout: 5000 });
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'codex', ['--version'], { timeout: 5000, shell: false });
+      clearResolvedPathCache();
       mockSpawnSync.mockRestore();
     });
 
     it('uses COMSPEC for .cmd binaries on win32', () => {
       const mockSpawnSync = vi.mocked(spawnSync);
-      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      const restorePlatform = setProcessPlatform('win32');
       vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+      clearResolvedPathCache();
 
       mockSpawnSync
         .mockReturnValueOnce({ status: 0, stdout: 'C:\\Tools\\codex.cmd\n', stderr: '', pid: 0, output: [], signal: null } as any)
@@ -244,8 +254,28 @@ describe('model-contract', () => {
         ['/d', '/s', '/c', '"C:\\Tools\\codex.cmd" --version'],
         { timeout: 5000 }
       );
+      restorePlatform();
+      clearResolvedPathCache();
       mockSpawnSync.mockRestore();
       vi.unstubAllEnvs();
+    });
+
+    it('uses shell:true for unresolved binaries on win32', () => {
+      const mockSpawnSync = vi.mocked(spawnSync);
+      const restorePlatform = setProcessPlatform('win32');
+      clearResolvedPathCache();
+
+      mockSpawnSync
+        .mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any)
+        .mockReturnValueOnce({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any);
+
+      isCliAvailable('gemini');
+
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['gemini'], { timeout: 5000, encoding: 'utf8' });
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'gemini', ['--version'], { timeout: 5000, shell: true });
+      restorePlatform();
+      clearResolvedPathCache();
+      mockSpawnSync.mockRestore();
     });
   });
 

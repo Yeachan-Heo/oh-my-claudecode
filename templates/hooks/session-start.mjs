@@ -200,7 +200,7 @@ async function main() {
     for (let i = 1; i <= 4; i++) {
       const candidate = join(__dirname, ...Array(i).fill('..'), 'package.json');
       const pkg = readJsonFile(candidate);
-      if (pkg?.name === 'oh-my-claudecode' && pkg?.version) {
+      if ((pkg?.name === 'oh-my-claude-sisyphus' || pkg?.name === 'oh-my-claudecode') && pkg?.version) {
         currentVersion = pkg.version;
         break;
       }

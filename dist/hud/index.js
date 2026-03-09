@@ -13,6 +13,7 @@ import { getUsage } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { detectApiKeySource } from "./elements/api-key-source.js";
+import { refreshMissionBoardState } from "./mission-board.js";
 import { sanitizeOutput } from "./sanitize.js";
 import { getRuntimePackageVersion } from "../lib/version.js";
 import { compareVersions } from "../features/auto-update.js";
@@ -149,6 +150,10 @@ async function main(watchMode = false) {
                 console.error('[HUD] Update cache read error:', error instanceof Error ? error.message : error);
             }
         }
+        const missionBoardEnabled = config.missionBoard?.enabled ?? config.elements.missionBoard ?? false;
+        const missionBoard = missionBoardEnabled
+            ? await refreshMissionBoardState(cwd, config.missionBoard)
+            : null;
         // Build render context
         const context = {
             contextPercent: getContextPercent(stdin),
@@ -161,6 +166,7 @@ async function main(watchMode = false) {
             todos: transcriptData.todos,
             backgroundTasks: getRunningTasks(hudState),
             cwd,
+            missionBoard,
             lastSkill: transcriptData.lastActivatedSkill || null,
             rateLimitsResult,
             customBuckets,

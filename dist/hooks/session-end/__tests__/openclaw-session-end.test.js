@@ -8,6 +8,14 @@ vi.mock("../callbacks.js", () => ({
 vi.mock("../../../notifications/index.js", () => ({
     notify: vi.fn(async () => undefined),
 }));
+vi.mock("../../../features/auto-update.js", () => ({
+    getOMCConfig: vi.fn(() => ({})),
+}));
+vi.mock("../../../notifications/config.js", () => ({
+    buildConfigFromEnv: vi.fn(() => null),
+    getEnabledPlatforms: vi.fn(() => []),
+    getNotificationConfig: vi.fn(() => null),
+}));
 vi.mock("../../../tools/python-repl/bridge-manager.js", () => ({
     cleanupBridgeSessions: vi.fn(async () => ({
         requestedSessions: 0,
@@ -19,10 +27,10 @@ vi.mock("../../../tools/python-repl/bridge-manager.js", () => ({
 vi.mock("../../../openclaw/index.js", () => ({
     wakeOpenClaw: vi.fn().mockResolvedValue({ gateway: "test", success: true }),
 }));
+import { _openclaw, processHook } from "../../bridge.js";
 import { processSessionEnd } from "../index.js";
 import { wakeOpenClaw } from "../../../openclaw/index.js";
-import { notify } from "../../../notifications/index.js";
-describe("session-end OpenClaw behavior (issue #1120)", () => {
+describe("session-end OpenClaw behavior (issue #1456)", () => {
     let tmpDir;
     let transcriptPath;
     beforeEach(() => {
@@ -40,9 +48,10 @@ describe("session-end OpenClaw behavior (issue #1120)", () => {
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
-    it("does not call wakeOpenClaw directly during session-end when OMC_OPENCLAW=1", async () => {
+    it("wakes OpenClaw from the bridge during session-end when OMC_OPENCLAW=1", async () => {
         process.env.OMC_OPENCLAW = "1";
-        await processSessionEnd({
+        const wakeSpy = vi.spyOn(_openclaw, "wake");
+        await processHook("session-end", {
             session_id: "session-claw-1",
             transcript_path: transcriptPath,
             cwd: tmpDir,
@@ -50,15 +59,20 @@ describe("session-end OpenClaw behavior (issue #1120)", () => {
             hook_event_name: "SessionEnd",
             reason: "clear",
         });
-        // Session-end dispatches the standard notification and does not directly call OpenClaw.
-        expect(wakeOpenClaw).not.toHaveBeenCalled();
-        expect(notify).toHaveBeenCalledWith("session-end", expect.objectContaining({
+        expect(wakeSpy).toHaveBeenCalledWith("session-end", expect.objectContaining({
             sessionId: "session-claw-1",
             projectPath: tmpDir,
+            reason: "clear",
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(wakeOpenClaw).toHaveBeenCalledWith("session-end", expect.objectContaining({
+            sessionId: "session-claw-1",
+            projectPath: tmpDir,
+            reason: "clear",
         }));
     });
-    it("does not call wakeOpenClaw when OMC_OPENCLAW is not set", async () => {
-        delete process.env.OMC_OPENCLAW;
+    it("does not call wakeOpenClaw directly when processSessionEnd is invoked without the bridge", async () => {
+        process.env.OMC_OPENCLAW = "1";
         await processSessionEnd({
             session_id: "session-claw-2",
             transcript_path: transcriptPath,
@@ -69,12 +83,24 @@ describe("session-end OpenClaw behavior (issue #1120)", () => {
         });
         expect(wakeOpenClaw).not.toHaveBeenCalled();
     });
+    it("does not call wakeOpenClaw when OMC_OPENCLAW is not set", async () => {
+        delete process.env.OMC_OPENCLAW;
+        await processHook("session-end", {
+            session_id: "session-claw-3",
+            transcript_path: transcriptPath,
+            cwd: tmpDir,
+            permission_mode: "default",
+            hook_event_name: "SessionEnd",
+            reason: "clear",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(wakeOpenClaw).not.toHaveBeenCalled();
+    });
     it("does not throw even if wakeOpenClaw mock is configured to reject", async () => {
         process.env.OMC_OPENCLAW = "1";
         vi.mocked(wakeOpenClaw).mockRejectedValueOnce(new Error("gateway down"));
-        // Should not throw; wakeOpenClaw is not invoked from processSessionEnd.
-        await expect(processSessionEnd({
-            session_id: "session-claw-3",
+        await expect(processHook("session-end", {
+            session_id: "session-claw-4",
             transcript_path: transcriptPath,
             cwd: tmpDir,
             permission_mode: "default",

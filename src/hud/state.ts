@@ -12,6 +12,7 @@ import { validateWorkingDirectory, getOmcRoot } from '../lib/worktree-paths.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import type { OmcHudState, BackgroundTask, HudConfig } from './types.js';
 import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from './types.js';
+import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
 import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale } from './background-cleanup.js';
 
 // ============================================================================
@@ -191,6 +192,17 @@ export function readHudConfig(): HudConfig {
 function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
   const preset = config.preset ?? DEFAULT_HUD_CONFIG.preset;
   const presetElements = PRESET_CONFIGS[preset] ?? {};
+  const missionBoardEnabled =
+    config.missionBoard?.enabled
+    ?? config.elements?.missionBoard
+    ?? DEFAULT_HUD_CONFIG.missionBoard?.enabled
+    ?? false;
+  const missionBoard = {
+    ...DEFAULT_MISSION_BOARD_CONFIG,
+    ...DEFAULT_HUD_CONFIG.missionBoard,
+    ...config.missionBoard,
+    enabled: missionBoardEnabled,
+  };
 
   return {
     preset,
@@ -208,6 +220,8 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
       ...DEFAULT_HUD_CONFIG.contextLimitWarning,
       ...config.contextLimitWarning,
     },
+    missionBoard,
+    usageApiPollIntervalMs: config.usageApiPollIntervalMs ?? DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
     ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
     ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
     ...(config.wrapMode != null ? { wrapMode: config.wrapMode } : {}),

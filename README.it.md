@@ -191,6 +191,66 @@ Comportamento dei tag:
 - Discord: supporta `@here`, `@everyone`, ID utente numerici e `role:<id>`
 - I callback di tipo `file` ignorano le opzioni dei tag
 
+### Integrazione OpenClaw
+
+Inoltra gli eventi di sessione di Claude Code a un gateway [OpenClaw](https://openclaw.ai/) per abilitare risposte automatizzate e workflow tramite il tuo agente OpenClaw.
+
+**Configurazione rapida (consigliato):**
+
+```bash
+/oh-my-claudecode:configure-notifications
+# → Digita "openclaw" quando richiesto → scegli "OpenClaw Gateway"
+```
+
+**Configurazione manuale:** crea `~/.claude/omc_config.openclaw.json`:
+
+```json
+{
+  "enabled": true,
+  "gateways": {
+    "my-gateway": {
+      "url": "https://your-gateway.example.com/wake",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+      "method": "POST",
+      "timeout": 10000
+    }
+  },
+  "hooks": {
+    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
+    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+  }
+}
+```
+
+**Variabili d'ambiente:**
+
+| Variabile | Descrizione |
+|-----------|-------------|
+| `OMC_OPENCLAW=1` | Abilita OpenClaw |
+| `OMC_OPENCLAW_DEBUG=1` | Abilita il logging di debug |
+| `OMC_OPENCLAW_CONFIG=/path/to/config.json` | Percorso alternativo del file di configurazione |
+
+**Eventi hook supportati (6 attivi in bridge.ts):**
+
+| Evento | Trigger | Variabili template principali |
+|--------|---------|-------------------------------|
+| `session-start` | La sessione inizia | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop` | La risposta di Claude è completata | `{{sessionId}}`, `{{projectName}}` |
+| `keyword-detector` | A ogni invio di prompt | `{{prompt}}`, `{{sessionId}}` |
+| `ask-user-question` | Claude richiede input dall'utente | `{{question}}`, `{{sessionId}}` |
+| `pre-tool-use` | Prima dell'invocazione dello strumento (alta frequenza) | `{{toolName}}`, `{{sessionId}}` |
+| `post-tool-use` | Dopo l'invocazione dello strumento (alta frequenza) | `{{toolName}}`, `{{sessionId}}` |
+
+**Variabili d'ambiente del canale di risposta:**
+
+| Variabile | Descrizione |
+|-----------|-------------|
+| `OPENCLAW_REPLY_CHANNEL` | Canale di risposta (es. `discord`) |
+| `OPENCLAW_REPLY_TARGET` | ID del canale |
+| `OPENCLAW_REPLY_THREAD` | ID del thread |
+
+Vedi `scripts/openclaw-gateway-demo.mjs` per un gateway di riferimento che inoltra i payload OpenClaw a Discord tramite ClawdBot.
+
 ---
 
 ## Documentazione

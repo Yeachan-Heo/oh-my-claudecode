@@ -11,7 +11,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team](#cli-commands-askteam)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (28 Total)](#agents-28-total)
-- [Skills (33 Total)](#skills-33-total)
+- [Skills (34 Total)](#skills-34-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -319,19 +319,20 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (33 Total)
+## Skills (34 Total)
 
-Includes **32 canonical skills + 1 deprecated alias** (`psm`).
+Includes **33 canonical skills + 1 deprecated alias** (`psm`).
 
 | Skill                     | Description                                                      | Manual Command                              |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
 | `ask-codex`               | Ask Codex via `omc ask codex` and store an ask artifact          | `/oh-my-claudecode:ask-codex`               |
+| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass | `/oh-my-claudecode:ai-slop-cleaner`         |
 | `ask-gemini`              | Ask Gemini via `omc ask gemini` and store an ask artifact        | `/oh-my-claudecode:ask-gemini`              |
 | `autopilot`               | Full autonomous execution from idea to working code              | `/oh-my-claudecode:autopilot`               |
 | `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
 | `ccg`                     | Tri-model workflow via `ask-codex` + `ask-gemini`, then Claude synthesis | `/oh-my-claudecode:ccg`                     |
 | `configure-notifications` | Configure notifications (Discord/Telegram/Slack/OpenClaw)        | `/oh-my-claudecode:configure-notifications` |
-| `configure-openclaw`      | Configure OpenClaw notification bridge                           | `/oh-my-claudecode:configure-openclaw`      |
+| `configure-openclaw`      | Configure OpenClaw gateway (deprecated, use configure-notifications) | `/oh-my-claudecode:configure-openclaw`      |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/oh-my-claudecode:deep-interview`          |
 | `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/oh-my-claudecode:deepinit`                |
 | `external-context`        | Parallel document-specialist research                            | `/oh-my-claudecode:external-context`        |
@@ -351,6 +352,7 @@ Includes **32 canonical skills + 1 deprecated alias** (`psm`).
 | `ralph-init`              | Initialize PRD for structured ralph execution                    | `/oh-my-claudecode:ralph-init`              |
 | `ralplan`                 | Consensus planning alias for `/omc-plan --consensus`             | `/oh-my-claudecode:ralplan`                 |
 | `release`                 | Automated release workflow                                       | `/oh-my-claudecode:release`                 |
+| `setup`                   | Unified setup entrypoint for install, diagnostics, and MCP configuration | `/oh-my-claudecode:setup`              |
 | `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
 | `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
@@ -369,6 +371,7 @@ All installed skills are available as slash commands with the prefix `/oh-my-cla
 
 | Command                                     | Description                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/oh-my-claudecode:ai-slop-cleaner <target>`  | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                       |
 | `/oh-my-claudecode:autopilot <task>`        | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:ultrawork <task>`        | Maximum performance mode with parallel agents                                                 |
 | `/oh-my-claudecode:team <N>:<agent> <task>` | Coordinated native team workflow                                                              |
@@ -383,6 +386,7 @@ All installed skills are available as slash commands with the prefix `/oh-my-cla
 | `/oh-my-claudecode:learner`                 | Extract reusable skill from session                                                           |
 | `/oh-my-claudecode:note <content>`          | Save notes to notepad.md                                                                      |
 | `/oh-my-claudecode:cancel`                  | Unified cancellation                                                                          |
+| `/oh-my-claudecode:setup`                   | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                              |
 | `/oh-my-claudecode:omc-setup`               | One-time setup wizard                                                                         |
 | `/oh-my-claudecode:omc-doctor`              | Diagnose and fix installation issues                                                          |
 | `/oh-my-claudecode:omc-help`                | Show OMC usage guide                                                                          |
@@ -505,6 +509,7 @@ Use these trigger phrases in natural language prompts to activate enhanced modes
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `ultrawork`, `ulw`                                      | Activates parallel agent orchestration                                                        |
 | `autopilot`, `build me`, `I want a`                     | Full autonomous execution                                                                     |
+| `deslop`, `anti-slop`, cleanup/refactor + slop smells         | Anti-slop cleanup workflow (`ai-slop-cleaner`)                                               |
 | `ralph`, `don't stop`, `must complete`                  | Persistence until verified complete                                                           |
 | `ccg`, `claude-codex-gemini`                            | Claude-Codex-Gemini orchestration                                                             |
 | `ralplan`                                               | Iterative planning consensus with structured deliberation (`--deliberate` for high-risk mode) |

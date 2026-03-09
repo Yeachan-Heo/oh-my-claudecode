@@ -81,6 +81,26 @@ describe('processHook - Routing Matrix', () => {
             expect(result.message).toBeDefined();
             expect(typeof result.message).toBe('string');
         });
+        it('should route code review keyword to the review mode message', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'code review this change',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('[CODE REVIEW MODE ACTIVATED]');
+        });
+        it('should route security review keyword to the security mode message', async () => {
+            const input = {
+                sessionId: 'test-session',
+                prompt: 'security review this change',
+                directory: '/tmp/test-routing',
+            };
+            const result = await processHook('keyword-detector', input);
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('[SECURITY REVIEW MODE ACTIVATED]');
+        });
         it('should handle keyword-detector with no keyword prompt', async () => {
             const input = {
                 sessionId: 'test-session',

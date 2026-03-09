@@ -52,23 +52,25 @@ function formatResetTime(date) {
  *
  * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h)
  */
-export function renderRateLimits(limits) {
+export function renderRateLimits(limits, stale) {
     if (!limits)
         return null;
+    const staleMarker = stale ? `${DIM}*${RESET}` : '';
+    const resetPrefix = stale ? '~' : '';
     const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
     const fiveHourColor = getColor(fiveHour);
     const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
     const fiveHourPart = fiveHourReset
-        ? `5h:${fiveHourColor}${fiveHour}%${RESET}${DIM}(${fiveHourReset})${RESET}`
-        : `5h:${fiveHourColor}${fiveHour}%${RESET}`;
+        ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+        : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
     const parts = [fiveHourPart];
     if (limits.weeklyPercent != null) {
         const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
         const weeklyColor = getColor(weekly);
         const weeklyReset = formatResetTime(limits.weeklyResetsAt);
         const weeklyPart = weeklyReset
-            ? `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}${DIM}(${weeklyReset})${RESET}`
-            : `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}`;
+            ? `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
+            : `${DIM}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}`;
         parts.push(weeklyPart);
     }
     if (limits.monthlyPercent != null) {
@@ -76,8 +78,8 @@ export function renderRateLimits(limits) {
         const monthlyColor = getColor(monthly);
         const monthlyReset = formatResetTime(limits.monthlyResetsAt);
         const monthlyPart = monthlyReset
-            ? `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}${DIM}(${monthlyReset})${RESET}`
-            : `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}`;
+            ? `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
+            : `${DIM}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}`;
         parts.push(monthlyPart);
     }
     return parts.join(' ');
@@ -87,7 +89,7 @@ export function renderRateLimits(limits) {
  *
  * Format: 45%/12% or 45%/12%/8% (with monthly)
  */
-export function renderRateLimitsCompact(limits) {
+export function renderRateLimitsCompact(limits, stale) {
     if (!limits)
         return null;
     const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
@@ -103,16 +105,19 @@ export function renderRateLimitsCompact(limits) {
         const monthlyColor = getColor(monthly);
         parts.push(`${monthlyColor}${monthly}%${RESET}`);
     }
-    return parts.join('/');
+    const result = parts.join('/');
+    return stale ? `${result}${DIM}*${RESET}` : result;
 }
 /**
  * Render rate limits with visual progress bars.
  *
  * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
  */
-export function renderRateLimitsWithBar(limits, barWidth = 8) {
+export function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
     if (!limits)
         return null;
+    const staleMarker = stale ? `${DIM}*${RESET}` : '';
+    const resetPrefix = stale ? '~' : '';
     const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
     const fiveHourColor = getColor(fiveHour);
     const fiveHourFilled = Math.round((fiveHour / 100) * barWidth);
@@ -120,8 +125,8 @@ export function renderRateLimitsWithBar(limits, barWidth = 8) {
     const fiveHourBar = `${fiveHourColor}${'█'.repeat(fiveHourFilled)}${DIM}${'░'.repeat(fiveHourEmpty)}${RESET}`;
     const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
     const fiveHourPart = fiveHourReset
-        ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${DIM}(${fiveHourReset})${RESET}`
-        : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}`;
+        ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+        : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
     const parts = [fiveHourPart];
     if (limits.weeklyPercent != null) {
         const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
@@ -131,8 +136,8 @@ export function renderRateLimitsWithBar(limits, barWidth = 8) {
         const weeklyBar = `${weeklyColor}${'█'.repeat(weeklyFilled)}${DIM}${'░'.repeat(weeklyEmpty)}${RESET}`;
         const weeklyReset = formatResetTime(limits.weeklyResetsAt);
         const weeklyPart = weeklyReset
-            ? `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${DIM}(${weeklyReset})${RESET}`
-            : `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}`;
+            ? `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
+            : `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}`;
         parts.push(weeklyPart);
     }
     if (limits.monthlyPercent != null) {
@@ -143,8 +148,8 @@ export function renderRateLimitsWithBar(limits, barWidth = 8) {
         const monthlyBar = `${monthlyColor}${'█'.repeat(monthlyFilled)}${DIM}${'░'.repeat(monthlyEmpty)}${RESET}`;
         const monthlyReset = formatResetTime(limits.monthlyResetsAt);
         const monthlyPart = monthlyReset
-            ? `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${DIM}(${monthlyReset})${RESET}`
-            : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}`;
+            ? `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
+            : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}`;
         parts.push(monthlyPart);
     }
     return parts.join(' ');

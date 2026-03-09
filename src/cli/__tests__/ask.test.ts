@@ -78,6 +78,27 @@ function runAdvisorScript(
   };
 }
 
+function runAdvisorScriptWithPrelude(
+  preludePath: string,
+  args: string[],
+  cwd: string,
+  envOverrides: Record<string, string> = {},
+  options: RunOptions = {},
+): CliRunResult {
+  const result = spawnSync(process.execPath, ['--import', preludePath, ADVISOR_SCRIPT, ...args], {
+    cwd,
+    encoding: 'utf-8',
+    env: buildChildEnv(envOverrides, options),
+  });
+
+  return {
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error?.message,
+  };
+}
+
 function runWrapperScript(
   wrapperPath: string,
   args: string[],
@@ -133,6 +154,58 @@ function writeFakeProviderBinary(dir: string, provider: 'claude' | 'gemini'): st
   );
   chmodSync(binPath, 0o755);
   return binDir;
+}
+
+function writeSpawnSyncCapturePrelude(dir: string): string {
+  const preludePath = join(dir, 'spawn-sync-capture-prelude.mjs');
+  writeFileSync(
+    preludePath,
+    [
+      "import childProcess from 'node:child_process';",
+      "import { writeFileSync } from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      '',
+      "Object.defineProperty(process, 'platform', { value: 'win32' });",
+      'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
+      "const mode = process.env.SPAWN_CAPTURE_MODE || 'success';",
+      'const calls = [];',
+      'childProcess.spawnSync = (command, args = [], options = {}) => {',
+      '  calls.push({',
+      '    command,',
+      '    args,',
+      '    options: {',
+      "      shell: options.shell ?? false,",
+      "      encoding: options.encoding ?? null,",
+      "      stdio: options.stdio ?? null,",
+      '    },',
+      '  });',
+      "  if (mode === 'missing' && command === 'where') {",
+      "    return { status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
+      '  }',
+      "  if (mode === 'missing' && (command === 'codex' || command === 'gemini') && Array.isArray(args) && args[0] === '--version') {",
+      "    return { status: 1, stdout: '', stderr: \"'\" + command + \"' is not recognized\", pid: 0, output: [], signal: null };",
+      '  }',
+      "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
+      '  return {',
+      '    status: 0,',
+      "    stdout: isVersionProbe ? 'fake 1.0.0\\n' : 'FAKE_PROVIDER_OK',",
+      "    stderr: '',",
+      '    pid: 0,',
+      '    output: [],',
+      '    signal: null,',
+      '  };',
+      '};',
+      'syncBuiltinESMExports();',
+      'process.on(\'exit\', () => {',
+      '  if (capturePath) {',
+      "    writeFileSync(capturePath, JSON.stringify(calls), 'utf8');",
+      '  }',
+      '});',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  return preludePath;
 }
 
 
@@ -412,6 +485,85 @@ describe('run-provider-advisor script contract', () => {
       expect(artifact).toContain('CODEX_OK');
       expect(artifact).not.toContain('RUST_LEAK');
       expect(artifact).not.toContain('trace');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('uses shell:true for Windows codex binary probe and execution', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-win32-shell-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', 'windows cmd support'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        command: 'codex',
+        args: ['--version'],
+        options: { shell: true, encoding: 'utf8', stdio: 'ignore' },
+      });
+      expect(calls[1]).toMatchObject({
+        command: 'codex',
+        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', 'windows cmd support'],
+        options: { shell: true, encoding: 'utf8', stdio: null },
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('shows install guidance when a Windows codex binary is missing under shell:true', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-win32-missing-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', 'windows missing binary'],
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          SPAWN_CAPTURE_MODE: 'missing',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('Missing required local CLI binary: codex');
+      expect(result.stderr).toContain('codex --version');
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        command: 'codex',
+        args: ['--version'],
+        options: { shell: true, encoding: 'utf8', stdio: 'ignore' },
+      });
+      expect(calls[1]).toMatchObject({
+        command: 'where',
+        args: ['codex'],
+      });
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

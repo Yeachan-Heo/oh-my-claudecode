@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, } from 
 import { join } from "path";
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { recordAgentStart, recordAgentStop } from './session-replay.js';
+import { recordMissionAgentStart, recordMissionAgentStop } from '../../hud/mission-board.js';
 export const COST_LIMIT_USD = 1.0;
 export const DEADLOCK_CHECK_THRESHOLD = 3;
 // ============================================================================
@@ -432,6 +433,17 @@ export function processSubagentStart(input) {
             recordAgentStart(input.cwd, input.session_id, input.agent_id, input.agent_type, input.prompt, parentMode, input.model);
         }
         catch { /* best-effort */ }
+        try {
+            recordMissionAgentStart(input.cwd, {
+                sessionId: input.session_id,
+                agentId: input.agent_id,
+                agentType: input.agent_type,
+                parentMode,
+                taskDescription: input.prompt,
+                at: agentInfo.started_at,
+            });
+        }
+        catch { /* best-effort */ }
         // Check for stale agents
         const staleAgents = getStaleAgents(state);
         return {
@@ -501,6 +513,16 @@ export function processSubagentStop(input) {
             const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
             const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
             recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+        }
+        catch { /* best-effort */ }
+        try {
+            recordMissionAgentStop(input.cwd, {
+                sessionId: input.session_id,
+                agentId: input.agent_id,
+                success: succeeded,
+                outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
+                at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
+            });
         }
         catch { /* best-effort */ }
         const runningCount = state.agents.filter((a) => a.status === "running").length;

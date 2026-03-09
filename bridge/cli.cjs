@@ -34,9 +34,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/commander/lib/error.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/error.js
 var require_error = __commonJS({
-  "node_modules/commander/lib/error.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/error.js"(exports2) {
     var CommanderError2 = class extends Error {
       /**
        * Constructs the CommanderError class
@@ -69,9 +69,9 @@ var require_error = __commonJS({
   }
 });
 
-// node_modules/commander/lib/argument.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/argument.js
 var require_argument = __commonJS({
-  "node_modules/commander/lib/argument.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/argument.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Argument2 = class {
       /**
@@ -196,9 +196,9 @@ var require_argument = __commonJS({
   }
 });
 
-// node_modules/commander/lib/help.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/help.js
 var require_help = __commonJS({
-  "node_modules/commander/lib/help.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/help.js"(exports2) {
     var { humanReadableArgName } = require_argument();
     var Help2 = class {
       constructor() {
@@ -610,9 +610,9 @@ var require_help = __commonJS({
   }
 });
 
-// node_modules/commander/lib/option.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/option.js
 var require_option = __commonJS({
-  "node_modules/commander/lib/option.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/option.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Option2 = class {
       /**
@@ -882,9 +882,9 @@ var require_option = __commonJS({
   }
 });
 
-// node_modules/commander/lib/suggestSimilar.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS({
-  "node_modules/commander/lib/suggestSimilar.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js"(exports2) {
     var maxDistance = 3;
     function editDistance(a, b) {
       if (Math.abs(a.length - b.length) > maxDistance)
@@ -962,9 +962,9 @@ var require_suggestSimilar = __commonJS({
   }
 });
 
-// node_modules/commander/lib/command.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/command.js
 var require_command = __commonJS({
-  "node_modules/commander/lib/command.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/lib/command.js"(exports2) {
     var EventEmitter = require("node:events").EventEmitter;
     var childProcess = require("node:child_process");
     var path20 = require("node:path");
@@ -3005,9 +3005,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
   }
 });
 
-// node_modules/commander/index.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/index.js
 var require_commander = __commonJS({
-  "node_modules/commander/index.js"(exports2) {
+  "../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/index.js"(exports2) {
     var { Argument: Argument2 } = require_argument();
     var { Command: Command2 } = require_command();
     var { CommanderError: CommanderError2, InvalidArgumentError: InvalidArgumentError2 } = require_error();
@@ -6447,7 +6447,7 @@ function loadTemplate(filename) {
 function isWindows() {
   return process.platform === "win32";
 }
-var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
+var import_path33, import_fs25, import_url6, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
 var init_hooks = __esm({
   "src/installer/hooks.ts"() {
     "use strict";
@@ -6589,6 +6589,22 @@ IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
 
 SYNTHESIZE findings before proceeding.
 </analyze-mode>
+
+---
+
+`;
+    CODE_REVIEW_MESSAGE = `<code-review-mode>
+[CODE REVIEW MODE ACTIVATED]
+Perform a comprehensive code review of the relevant changes or target area. Focus on correctness, maintainability, edge cases, regressions, and test adequacy before recommending changes.
+</code-review-mode>
+
+---
+
+`;
+    SECURITY_REVIEW_MESSAGE = `<security-review-mode>
+[SECURITY REVIEW MODE ACTIVATED]
+Perform a focused security review of the relevant changes or target area. Check trust boundaries, auth/authz, data exposure, input validation, command/file access, secrets handling, and escalation risks before recommending changes.
+</security-review-mode>
 
 ---
 
@@ -6773,9 +6789,9 @@ function resolveNodeBinary() {
   const nvmBase = (0, import_path35.join)(home, ".nvm", "versions", "node");
   if ((0, import_fs27.existsSync)(nvmBase)) {
     try {
-      const latest = pickLatestVersion((0, import_fs27.readdirSync)(nvmBase));
-      if (latest) {
-        const nodePath = (0, import_path35.join)(nvmBase, latest, "bin", "node");
+      const latest2 = pickLatestVersion((0, import_fs27.readdirSync)(nvmBase));
+      if (latest2) {
+        const nodePath = (0, import_path35.join)(nvmBase, latest2, "bin", "node");
         if ((0, import_fs27.existsSync)(nodePath)) return nodePath;
       }
     } catch {
@@ -6789,9 +6805,9 @@ function resolveNodeBinary() {
   for (const fnmBase of fnmBases) {
     if ((0, import_fs27.existsSync)(fnmBase)) {
       try {
-        const latest = pickLatestVersion((0, import_fs27.readdirSync)(fnmBase));
-        if (latest) {
-          const nodePath = (0, import_path35.join)(fnmBase, latest, "installation", "bin", "node");
+        const latest2 = pickLatestVersion((0, import_fs27.readdirSync)(fnmBase));
+        if (latest2) {
+          const nodePath = (0, import_path35.join)(fnmBase, latest2, "installation", "bin", "node");
           if ((0, import_fs27.existsSync)(nodePath)) return nodePath;
         }
       } catch {
@@ -6892,6 +6908,24 @@ function findLineAnchoredMarker(content, marker, fromEnd = false) {
     const match = regex.exec(content);
     return match ? match.index : -1;
   }
+}
+function escapeRegex2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function createLineAnchoredMarkerRegex(marker, flags = "gm") {
+  return new RegExp(`^${escapeRegex2(marker)}$`, flags);
+}
+function stripGeneratedUserCustomizationHeaders(content) {
+  return content.replace(
+    /^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm,
+    ""
+  );
+}
+function trimClaudeUserContent(content) {
+  if (content.trim().length === 0) {
+    return "";
+  }
+  return content.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/(?:\r?\n[ \t]*)+$/, "").replace(/(?:\r?\n){3,}/g, "\n\n");
 }
 function isHudEnabledInConfig() {
   const configPath = (0, import_path36.join)(CLAUDE_CONFIG_DIR, ".omc-config.json");
@@ -7058,6 +7092,12 @@ function mergeClaudeMd(existingContent, omcContent, version3) {
   const START_MARKER = "<!-- OMC:START -->";
   const END_MARKER = "<!-- OMC:END -->";
   const USER_CUSTOMIZATIONS = "<!-- User customizations -->";
+  const OMC_BLOCK_PATTERN = new RegExp(
+    `^${escapeRegex2(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex2(END_MARKER)}(?:\\r?\\n)?`,
+    "gm"
+  );
+  const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
+  const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
   let cleanOmcContent = omcContent;
   const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
   const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
@@ -7073,16 +7113,10 @@ ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
 `;
   }
-  const startIndex = findLineAnchoredMarker(existingContent, START_MARKER);
-  const endIndex = findLineAnchoredMarker(existingContent, END_MARKER, true);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const beforeMarker = existingContent.substring(0, startIndex);
-    const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
-    return `${beforeMarker}${START_MARKER}
-${versionMarker}${cleanOmcContent}
-${END_MARKER}${afterMarker}`;
-  }
-  if (startIndex !== -1 !== (endIndex !== -1) || startIndex !== -1 && endIndex !== -1 && endIndex < startIndex) {
+  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, "");
+  const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
+  const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
+  if (hasResidualStartMarker || hasResidualEndMarker) {
     return `${START_MARKER}
 ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
@@ -7090,12 +7124,21 @@ ${END_MARKER}
 <!-- User customizations (recovered from corrupted markers) -->
 ${existingContent}`;
   }
+  const preservedUserContent = trimClaudeUserContent(
+    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
+  );
+  if (!preservedUserContent) {
+    return `${START_MARKER}
+${versionMarker}${cleanOmcContent}
+${END_MARKER}
+`;
+  }
   return `${START_MARKER}
 ${versionMarker}${cleanOmcContent}
 ${END_MARKER}
 
 ${USER_CUSTOMIZATIONS}
-${existingContent}`;
+${preservedUserContent}`;
 }
 function install(options = {}) {
   const result = {
@@ -9770,11 +9813,475 @@ var init_todo_continuation = __esm({
   }
 });
 
+// src/utils/string-width.ts
+function isCJKCharacter(codePoint) {
+  return (
+    // CJK Unified Ideographs (Chinese characters)
+    codePoint >= 19968 && codePoint <= 40959 || // CJK Unified Ideographs Extension A
+    codePoint >= 13312 && codePoint <= 19903 || // CJK Unified Ideographs Extension B-F (rare characters)
+    codePoint >= 131072 && codePoint <= 191471 || // CJK Compatibility Ideographs
+    codePoint >= 63744 && codePoint <= 64255 || // Hangul Syllables (Korean)
+    codePoint >= 44032 && codePoint <= 55215 || // Hangul Jamo (Korean components)
+    codePoint >= 4352 && codePoint <= 4607 || // Hangul Compatibility Jamo
+    codePoint >= 12592 && codePoint <= 12687 || // Hangul Jamo Extended-A
+    codePoint >= 43360 && codePoint <= 43391 || // Hangul Jamo Extended-B
+    codePoint >= 55216 && codePoint <= 55295 || // Hiragana (Japanese)
+    codePoint >= 12352 && codePoint <= 12447 || // Katakana (Japanese)
+    codePoint >= 12448 && codePoint <= 12543 || // Katakana Phonetic Extensions
+    codePoint >= 12784 && codePoint <= 12799 || // Full-width ASCII variants
+    codePoint >= 65281 && codePoint <= 65376 || // Full-width punctuation and symbols
+    codePoint >= 65504 && codePoint <= 65510 || // CJK Symbols and Punctuation
+    codePoint >= 12288 && codePoint <= 12351 || // Enclosed CJK Letters and Months
+    codePoint >= 12800 && codePoint <= 13055 || // CJK Compatibility
+    codePoint >= 13056 && codePoint <= 13311 || // CJK Compatibility Forms
+    codePoint >= 65072 && codePoint <= 65103
+  );
+}
+function isZeroWidth(codePoint) {
+  return (
+    // Zero-width characters
+    codePoint === 8203 || // Zero Width Space
+    codePoint === 8204 || // Zero Width Non-Joiner
+    codePoint === 8205 || // Zero Width Joiner
+    codePoint === 65279 || // Byte Order Mark / Zero Width No-Break Space
+    // Combining diacritical marks (they modify previous character)
+    codePoint >= 768 && codePoint <= 879 || // Combining Diacritical Marks Extended
+    codePoint >= 6832 && codePoint <= 6911 || // Combining Diacritical Marks Supplement
+    codePoint >= 7616 && codePoint <= 7679 || // Combining Diacritical Marks for Symbols
+    codePoint >= 8400 && codePoint <= 8447 || // Combining Half Marks
+    codePoint >= 65056 && codePoint <= 65071
+  );
+}
+function getCharWidth(char) {
+  const codePoint = char.codePointAt(0);
+  if (codePoint === void 0) return 0;
+  if (isZeroWidth(codePoint)) return 0;
+  if (isCJKCharacter(codePoint)) return 2;
+  return 1;
+}
+function stringWidth(str) {
+  if (!str) return 0;
+  const stripped = stripAnsi(str);
+  let width = 0;
+  for (const char of stripped) {
+    width += getCharWidth(char);
+  }
+  return width;
+}
+function stripAnsi(str) {
+  return str.replace(
+    /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/g,
+    ""
+  );
+}
+function truncateToWidth(str, maxWidth, suffix = "...") {
+  if (!str || maxWidth <= 0) return "";
+  const strWidth = stringWidth(str);
+  if (strWidth <= maxWidth) return str;
+  const suffixWidth = stringWidth(suffix);
+  const targetWidth = maxWidth - suffixWidth;
+  if (targetWidth <= 0) {
+    return truncateToWidthNoSuffix(suffix, maxWidth);
+  }
+  return truncateToWidthNoSuffix(str, targetWidth) + suffix;
+}
+function truncateToWidthNoSuffix(str, maxWidth) {
+  let width = 0;
+  let result = "";
+  for (const char of str) {
+    const charWidth = getCharWidth(char);
+    if (width + charWidth > maxWidth) break;
+    result += char;
+    width += charWidth;
+  }
+  return result;
+}
+var init_string_width = __esm({
+  "src/utils/string-width.ts"() {
+    "use strict";
+  }
+});
+
+// src/hud/mission-board.ts
+var mission_board_exports = {};
+__export(mission_board_exports, {
+  DEFAULT_MISSION_BOARD_CONFIG: () => DEFAULT_MISSION_BOARD_CONFIG,
+  readMissionBoardState: () => readMissionBoardState,
+  recordMissionAgentStart: () => recordMissionAgentStart,
+  recordMissionAgentStop: () => recordMissionAgentStop,
+  refreshMissionBoardState: () => refreshMissionBoardState,
+  renderMissionBoard: () => renderMissionBoard
+});
+function resolveConfig(config2) {
+  return {
+    ...DEFAULT_CONFIG3,
+    ...config2,
+    enabled: config2?.enabled ?? DEFAULT_CONFIG3.enabled
+  };
+}
+function stateFilePath(directory) {
+  return (0, import_node_path2.join)(getOmcRoot(directory), "state", "mission-state.json");
+}
+function readJsonSafe(path20) {
+  if (!(0, import_node_fs.existsSync)(path20)) return null;
+  try {
+    return JSON.parse((0, import_node_fs.readFileSync)(path20, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function readJsonLinesSafe(path20) {
+  if (!(0, import_node_fs.existsSync)(path20)) return [];
+  try {
+    return (0, import_node_fs.readFileSync)(path20, "utf-8").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
+function writeState(directory, state) {
+  const stateDir = (0, import_node_path2.join)(getOmcRoot(directory), "state");
+  if (!(0, import_node_fs.existsSync)(stateDir)) {
+    (0, import_node_fs.mkdirSync)(stateDir, { recursive: true });
+  }
+  atomicWriteJsonSync(stateFilePath(directory), state);
+  return state;
+}
+function parseTime(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function compactText(value, width = 64) {
+  const trimmed = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!trimmed) return null;
+  return truncateToWidth(trimmed, width);
+}
+function formatTime(value) {
+  const date3 = new Date(value);
+  if (Number.isNaN(date3.getTime())) return "--:--";
+  return date3.toISOString().slice(11, 16);
+}
+function latest(...values) {
+  return values.filter((value) => Boolean(value)).sort((left, right) => parseTime(right) - parseTime(left))[0];
+}
+function shortAgentType(agentType) {
+  return agentType.replace(/^oh-my-claudecode:/, "").trim() || "agent";
+}
+function sessionAgentName(agentType, agentId) {
+  return `${shortAgentType(agentType)}:${agentId.slice(0, 7)}`;
+}
+function summarizeTask(task) {
+  if (!task) return null;
+  return compactText(task.result || task.summary || task.error || task.subject || task.description, 56);
+}
+function deriveSessionStatus(mission) {
+  if (mission.taskCounts.inProgress > 0) return "running";
+  if (mission.taskCounts.blocked > 0 || mission.taskCounts.failed > 0) return "blocked";
+  if (mission.taskCounts.completed === mission.taskCounts.total && mission.taskCounts.total > 0) return "done";
+  return "waiting";
+}
+function ensureSessionMission(state, input) {
+  const missionId = `session:${input.sessionId}:${input.parentMode || "session"}`;
+  let mission = state.missions.find((entry) => entry.id === missionId && entry.source === "session");
+  if (!mission) {
+    mission = {
+      id: missionId,
+      source: "session",
+      name: input.parentMode || "session",
+      objective: compactText(input.taskDescription, 72) || "Session mission",
+      createdAt: input.at || (/* @__PURE__ */ new Date()).toISOString(),
+      updatedAt: input.at || (/* @__PURE__ */ new Date()).toISOString(),
+      status: "running",
+      workerCount: 0,
+      taskCounts: { total: 0, pending: 0, blocked: 0, inProgress: 0, completed: 0, failed: 0 },
+      agents: [],
+      timeline: []
+    };
+    state.missions.push(mission);
+  }
+  return mission;
+}
+function recalcSessionMission(mission) {
+  mission.workerCount = mission.agents.length;
+  mission.taskCounts = {
+    total: mission.agents.length,
+    pending: mission.agents.filter((agent) => agent.status === "waiting").length,
+    blocked: mission.agents.filter((agent) => agent.status === "blocked").length,
+    inProgress: mission.agents.filter((agent) => agent.status === "running").length,
+    completed: mission.agents.filter((agent) => agent.status === "done").length,
+    failed: 0
+  };
+  mission.status = deriveSessionStatus(mission);
+}
+function readMissionBoardState(directory) {
+  return readJsonSafe(stateFilePath(directory));
+}
+function recordMissionAgentStart(directory, input) {
+  const now = input.at || (/* @__PURE__ */ new Date()).toISOString();
+  const state = readMissionBoardState(directory) || { updatedAt: now, missions: [] };
+  const mission = ensureSessionMission(state, input);
+  const agentName = sessionAgentName(input.agentType, input.agentId);
+  const agent = mission.agents.find((entry) => entry.ownership === input.agentId) || {
+    name: agentName,
+    role: shortAgentType(input.agentType),
+    ownership: input.agentId,
+    status: "running",
+    currentStep: null,
+    latestUpdate: null,
+    completedSummary: null,
+    updatedAt: now
+  };
+  agent.status = "running";
+  agent.currentStep = compactText(input.taskDescription, 56);
+  agent.latestUpdate = compactText(input.taskDescription, 64);
+  agent.completedSummary = null;
+  agent.updatedAt = now;
+  if (!mission.agents.includes(agent)) {
+    mission.agents.push(agent);
+  }
+  mission.updatedAt = now;
+  mission.timeline.push({
+    id: `session-start:${input.agentId}:${now}`,
+    at: now,
+    kind: "update",
+    agent: agent.name,
+    detail: compactText(input.taskDescription || `started ${agent.name}`, 72) || `started ${agent.name}`,
+    sourceKey: `session-start:${input.agentId}`
+  });
+  mission.timeline = mission.timeline.slice(-DEFAULT_CONFIG3.maxTimelineEvents);
+  recalcSessionMission(mission);
+  state.updatedAt = now;
+  return writeState(directory, state);
+}
+function recordMissionAgentStop(directory, input) {
+  const now = input.at || (/* @__PURE__ */ new Date()).toISOString();
+  const state = readMissionBoardState(directory) || { updatedAt: now, missions: [] };
+  const mission = state.missions.filter((entry) => entry.source === "session" && entry.id.startsWith(`session:${input.sessionId}:`)).sort((left, right) => parseTime(right.updatedAt) - parseTime(left.updatedAt))[0];
+  if (!mission) {
+    return state;
+  }
+  const agent = mission.agents.find((entry) => entry.ownership === input.agentId) || mission.agents[0];
+  if (!agent) {
+    return state;
+  }
+  agent.status = input.success ? "done" : "blocked";
+  agent.currentStep = null;
+  agent.latestUpdate = compactText(input.outputSummary, 64) || (input.success ? "completed" : "blocked");
+  agent.completedSummary = input.success ? compactText(input.outputSummary, 64) : null;
+  agent.updatedAt = now;
+  mission.updatedAt = now;
+  mission.timeline.push({
+    id: `session-stop:${input.agentId}:${now}`,
+    at: now,
+    kind: input.success ? "completion" : "failure",
+    agent: agent.name,
+    detail: compactText(input.outputSummary || (input.success ? "completed" : "blocked"), 72) || (input.success ? "completed" : "blocked"),
+    sourceKey: `session-stop:${input.agentId}`
+  });
+  recalcSessionMission(mission);
+  state.updatedAt = now;
+  return writeState(directory, state);
+}
+function deriveTeamStatus(taskCounts, agents) {
+  if (taskCounts.inProgress > 0 || agents.some((agent) => agent.status === "running")) {
+    return "running";
+  }
+  if (taskCounts.blocked > 0 || taskCounts.failed > 0 || agents.some((agent) => agent.status === "blocked")) {
+    return "blocked";
+  }
+  if (taskCounts.total > 0 && taskCounts.completed === taskCounts.total) {
+    return "done";
+  }
+  return "waiting";
+}
+function deriveWorkerStatus(workerStatus, task) {
+  if (workerStatus?.state === "blocked" || workerStatus?.state === "failed" || task?.status === "blocked" || task?.status === "failed") return "blocked";
+  if (workerStatus?.state === "working" || task?.status === "in_progress") return "running";
+  if (workerStatus?.state === "done" || task?.status === "completed") return "done";
+  return "waiting";
+}
+function collectTeamMission(teamRoot, teamName, config2) {
+  const teamConfig = readJsonSafe((0, import_node_path2.join)(teamRoot, "config.json"));
+  if (!teamConfig) return null;
+  const workers = Array.isArray(teamConfig.workers) ? teamConfig.workers : [];
+  const tasksDir = (0, import_node_path2.join)(teamRoot, "tasks");
+  const tasks = (0, import_node_fs.existsSync)(tasksDir) ? (0, import_node_fs.readdirSync)(tasksDir).filter((entry) => /^(?:task-)?\d+\.json$/i.test(entry)).map((entry) => readJsonSafe((0, import_node_path2.join)(tasksDir, entry))).filter((task) => Boolean(task?.id)) : [];
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const taskCounts = {
+    total: tasks.length,
+    pending: tasks.filter((task) => task.status === "pending").length,
+    blocked: tasks.filter((task) => task.status === "blocked").length,
+    inProgress: tasks.filter((task) => task.status === "in_progress").length,
+    completed: tasks.filter((task) => task.status === "completed").length,
+    failed: tasks.filter((task) => task.status === "failed").length
+  };
+  const timeline = [];
+  for (const event of readJsonLinesSafe((0, import_node_path2.join)(teamRoot, "events.jsonl"))) {
+    if (!event.created_at || !event.type) continue;
+    if (event.type === "task_completed" || event.type === "task_failed") {
+      timeline.push({
+        id: `event:${event.event_id || `${event.type}:${event.created_at}`}`,
+        at: event.created_at,
+        kind: event.type === "task_completed" ? "completion" : "failure",
+        agent: event.worker || "leader-fixed",
+        detail: compactText(`${event.type === "task_completed" ? "completed" : "failed"} task ${event.task_id ?? "?"}`, 72) || event.type,
+        sourceKey: `event:${event.event_id || event.type}`
+      });
+    } else if (event.type === "team_leader_nudge" || event.type === "worker_idle" || event.type === "worker_stopped") {
+      timeline.push({
+        id: `event:${event.event_id || `${event.type}:${event.created_at}`}`,
+        at: event.created_at,
+        kind: "update",
+        agent: event.worker || "leader-fixed",
+        detail: compactText(event.reason || event.type.replace(/_/g, " "), 72) || event.type,
+        sourceKey: `event:${event.event_id || event.type}`
+      });
+    }
+  }
+  for (const worker of workers) {
+    const workerName2 = worker.name?.trim();
+    if (!workerName2) continue;
+    const mailbox = readJsonSafe((0, import_node_path2.join)(teamRoot, "mailbox", `${workerName2}.json`));
+    for (const message of mailbox?.messages ?? []) {
+      if (!message.created_at || !message.body) continue;
+      timeline.push({
+        id: `handoff:${message.message_id || `${workerName2}:${message.created_at}`}`,
+        at: message.created_at,
+        kind: "handoff",
+        agent: workerName2,
+        detail: compactText(message.body, 72) || "handoff",
+        sourceKey: `handoff:${message.message_id || workerName2}`
+      });
+    }
+  }
+  timeline.sort((left, right) => parseTime(left.at) - parseTime(right.at));
+  const agents = workers.slice(0, config2.maxAgentsPerMission).map((worker) => {
+    const workerName2 = worker.name?.trim() || "worker";
+    const workerStatus = readJsonSafe((0, import_node_path2.join)(teamRoot, "workers", workerName2, "status.json"));
+    const heartbeat = readJsonSafe((0, import_node_path2.join)(teamRoot, "workers", workerName2, "heartbeat.json"));
+    const ownedTasks = tasks.filter((task) => task.owner === workerName2);
+    const currentTask = (workerStatus?.current_task_id ? taskById.get(workerStatus.current_task_id) : void 0) || ownedTasks.find((task) => task.status === "in_progress") || ownedTasks.find((task) => task.status === "blocked") || (worker.assigned_tasks || []).map((taskId) => taskById.get(taskId)).find(Boolean) || void 0;
+    const completedTask = [...ownedTasks].filter((task) => task.status === "completed" || task.status === "failed").sort((left, right) => parseTime(right.completed_at) - parseTime(left.completed_at))[0];
+    const latestTimeline = [...timeline].reverse().find((entry) => entry.agent === workerName2);
+    const ownership = Array.from(new Set([
+      ...worker.assigned_tasks || [],
+      ...ownedTasks.map((task) => task.id || "")
+    ].filter(Boolean))).map((taskId) => `#${taskId}`).join(",");
+    return {
+      name: workerName2,
+      role: worker.role,
+      ownership: ownership || void 0,
+      status: deriveWorkerStatus(workerStatus ?? null, currentTask),
+      currentStep: compactText(
+        workerStatus?.reason || (currentTask?.id && currentTask.subject ? `#${currentTask.id} ${currentTask.subject}` : currentTask?.subject) || currentTask?.description,
+        56
+      ),
+      latestUpdate: compactText(workerStatus?.reason || latestTimeline?.detail || summarizeTask(currentTask), 64),
+      completedSummary: summarizeTask(completedTask),
+      updatedAt: latest(workerStatus?.updated_at, heartbeat?.last_turn_at, latestTimeline?.at, completedTask?.completed_at)
+    };
+  });
+  const createdAt = teamConfig.created_at || latest(...timeline.map((entry) => entry.at)) || (/* @__PURE__ */ new Date()).toISOString();
+  const updatedAt = latest(createdAt, ...timeline.map((entry) => entry.at), ...agents.map((agent) => agent.updatedAt)) || createdAt;
+  return {
+    id: `team:${teamName}`,
+    source: "team",
+    teamName,
+    name: teamName,
+    objective: compactText(teamConfig.task, 72) || teamName,
+    createdAt,
+    updatedAt,
+    status: deriveTeamStatus(taskCounts, agents),
+    workerCount: teamConfig.worker_count || workers.length,
+    taskCounts,
+    agents,
+    timeline: timeline.slice(-config2.maxTimelineEvents)
+  };
+}
+function mergeMissions(previous, teamMissions, config2) {
+  const previousMissions = previous?.missions || [];
+  const sessionMissions = previousMissions.filter((mission) => mission.source === "session");
+  const currentIds = new Set(teamMissions.map((mission) => mission.id));
+  const cutoff = Date.now() - config2.persistCompletedForMinutes * 6e4;
+  const preservedTeams = previousMissions.filter((mission) => mission.source === "team" && !currentIds.has(mission.id) && mission.status === "done" && parseTime(mission.updatedAt) >= cutoff);
+  return [...teamMissions, ...sessionMissions, ...preservedTeams].sort((left, right) => {
+    const statusDelta = STATUS_ORDER[left.status] - STATUS_ORDER[right.status];
+    if (statusDelta !== 0) return statusDelta;
+    return parseTime(right.updatedAt) - parseTime(left.updatedAt);
+  }).slice(0, config2.maxMissions);
+}
+function refreshMissionBoardState(directory, rawConfig = DEFAULT_CONFIG3) {
+  const config2 = resolveConfig(rawConfig);
+  const previous = readMissionBoardState(directory);
+  const teamsRoot = (0, import_node_path2.join)(getOmcRoot(directory), "state", "team");
+  const teamMissions = (0, import_node_fs.existsSync)(teamsRoot) ? (0, import_node_fs.readdirSync)(teamsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => collectTeamMission((0, import_node_path2.join)(teamsRoot, entry.name), entry.name, config2)).filter((mission) => Boolean(mission)) : [];
+  const state = {
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    missions: mergeMissions(previous, teamMissions, config2)
+  };
+  return writeState(directory, state);
+}
+function renderMissionBoard(state, rawConfig = DEFAULT_CONFIG3) {
+  if (!state || !Array.isArray(state.missions) || state.missions.length === 0) return [];
+  const config2 = resolveConfig(rawConfig);
+  const lines = [];
+  for (const mission of state.missions.slice(0, config2.maxMissions)) {
+    const summary = [
+      `${mission.taskCounts.completed}/${mission.taskCounts.total} done`,
+      ...mission.taskCounts.inProgress > 0 ? [`${mission.taskCounts.inProgress} active`] : [],
+      ...mission.taskCounts.blocked > 0 ? [`${mission.taskCounts.blocked} blocked`] : [],
+      ...mission.taskCounts.pending > 0 ? [`${mission.taskCounts.pending} waiting`] : [],
+      ...mission.taskCounts.failed > 0 ? [`${mission.taskCounts.failed} failed`] : []
+    ].join(" \xB7 ");
+    lines.push(`MISSION ${mission.name} [${mission.status}] \xB7 ${summary} \xB7 ${mission.objective}`);
+    for (const agent of mission.agents.slice(0, config2.maxAgentsPerMission)) {
+      const badge = agent.status === "running" ? "run" : agent.status === "blocked" ? "blk" : agent.status === "done" ? "done" : "wait";
+      const detail = agent.status === "done" ? agent.completedSummary || agent.latestUpdate || agent.currentStep || "done" : agent.latestUpdate || agent.currentStep || "no update";
+      lines.push(`  [${badge}] ${agent.name}${agent.role ? ` (${agent.role})` : ""}${agent.ownership ? ` \xB7 own:${agent.ownership}` : ""} \xB7 ${detail}`);
+    }
+    if (mission.timeline.length > 0) {
+      const timeline = mission.timeline.slice(-config2.maxTimelineEvents).map((entry) => {
+        const label = entry.kind === "completion" ? "done" : entry.kind === "failure" ? "fail" : entry.kind;
+        return `${formatTime(entry.at)} ${label} ${entry.agent}: ${entry.detail}`;
+      }).join(" | ");
+      lines.push(`  timeline: ${timeline}`);
+    }
+  }
+  return lines;
+}
+var import_node_fs, import_node_path2, DEFAULT_CONFIG3, STATUS_ORDER, DEFAULT_MISSION_BOARD_CONFIG;
+var init_mission_board = __esm({
+  "src/hud/mission-board.ts"() {
+    "use strict";
+    import_node_fs = require("node:fs");
+    import_node_path2 = require("node:path");
+    init_atomic_write();
+    init_worktree_paths();
+    init_string_width();
+    DEFAULT_CONFIG3 = {
+      enabled: false,
+      maxMissions: 2,
+      maxAgentsPerMission: 3,
+      maxTimelineEvents: 3,
+      persistCompletedForMinutes: 20
+    };
+    STATUS_ORDER = {
+      running: 0,
+      blocked: 1,
+      waiting: 2,
+      done: 3
+    };
+    DEFAULT_MISSION_BOARD_CONFIG = DEFAULT_CONFIG3;
+  }
+});
+
 // src/hud/types.ts
-var DEFAULT_HUD_CONFIG, PRESET_CONFIGS;
+var DEFAULT_HUD_USAGE_POLL_INTERVAL_MS, DEFAULT_HUD_CONFIG, PRESET_CONFIGS;
 var init_types2 = __esm({
   "src/hud/types.ts"() {
     "use strict";
+    init_mission_board();
+    DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1e3;
     DEFAULT_HUD_CONFIG = {
       preset: "focused",
       elements: {
@@ -9816,6 +10323,8 @@ var init_types2 = __esm({
         // Disabled by default
         profile: true,
         // Show profile name when CLAUDE_CONFIG_DIR is set
+        missionBoard: false,
+        // Opt-in mission board for whole-run progress tracking
         promptTime: true,
         // Show last prompt time by default
         sessionHealth: true,
@@ -9838,6 +10347,8 @@ var init_types2 = __esm({
         threshold: 80,
         autoCompact: false
       },
+      missionBoard: DEFAULT_MISSION_BOARD_CONFIG,
+      usageApiPollIntervalMs: DEFAULT_HUD_USAGE_POLL_INTERVAL_MS,
       wrapMode: "truncate"
     };
     PRESET_CONFIGS = {
@@ -9867,6 +10378,7 @@ var init_types2 = __esm({
         thinkingFormat: "text",
         apiKeySource: false,
         profile: true,
+        missionBoard: false,
         promptTime: false,
         sessionHealth: false,
         useBars: false,
@@ -9900,6 +10412,7 @@ var init_types2 = __esm({
         thinkingFormat: "text",
         apiKeySource: false,
         profile: true,
+        missionBoard: false,
         promptTime: true,
         sessionHealth: true,
         useBars: true,
@@ -9933,6 +10446,7 @@ var init_types2 = __esm({
         thinkingFormat: "text",
         apiKeySource: true,
         profile: true,
+        missionBoard: false,
         promptTime: true,
         sessionHealth: true,
         useBars: true,
@@ -9966,6 +10480,7 @@ var init_types2 = __esm({
         thinkingFormat: "text",
         apiKeySource: false,
         profile: true,
+        missionBoard: false,
         promptTime: true,
         sessionHealth: true,
         useBars: false,
@@ -9999,6 +10514,7 @@ var init_types2 = __esm({
         thinkingFormat: "text",
         apiKeySource: true,
         profile: true,
+        missionBoard: false,
         promptTime: true,
         sessionHealth: true,
         useBars: true,
@@ -10168,6 +10684,13 @@ function readHudConfig() {
 function mergeWithDefaults(config2) {
   const preset = config2.preset ?? DEFAULT_HUD_CONFIG.preset;
   const presetElements = PRESET_CONFIGS[preset] ?? {};
+  const missionBoardEnabled = config2.missionBoard?.enabled ?? config2.elements?.missionBoard ?? DEFAULT_HUD_CONFIG.missionBoard?.enabled ?? false;
+  const missionBoard = {
+    ...DEFAULT_MISSION_BOARD_CONFIG,
+    ...DEFAULT_HUD_CONFIG.missionBoard,
+    ...config2.missionBoard,
+    enabled: missionBoardEnabled
+  };
   return {
     preset,
     elements: {
@@ -10187,6 +10710,8 @@ function mergeWithDefaults(config2) {
       ...DEFAULT_HUD_CONFIG.contextLimitWarning,
       ...config2.contextLimitWarning
     },
+    missionBoard,
+    usageApiPollIntervalMs: config2.usageApiPollIntervalMs ?? DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
     ...config2.rateLimitsProvider ? { rateLimitsProvider: config2.rateLimitsProvider } : {},
     ...config2.maxWidth != null ? { maxWidth: config2.maxWidth } : {},
     ...config2.wrapMode != null ? { wrapMode: config2.wrapMode } : {}
@@ -10209,6 +10734,7 @@ var init_state2 = __esm({
     init_worktree_paths();
     init_atomic_write();
     init_types2();
+    init_mission_board();
     init_background_cleanup();
   }
 });
@@ -10672,6 +11198,17 @@ function processSubagentStart(input) {
       recordAgentStart(input.cwd, input.session_id, input.agent_id, input.agent_type, input.prompt, parentMode, input.model);
     } catch {
     }
+    try {
+      recordMissionAgentStart(input.cwd, {
+        sessionId: input.session_id,
+        agentId: input.agent_id,
+        agentType: input.agent_type,
+        parentMode,
+        taskDescription: input.prompt,
+        at: agentInfo.started_at
+      });
+    } catch {
+    }
     const staleAgents = getStaleAgents(state);
     return {
       continue: true,
@@ -10731,6 +11268,16 @@ function processSubagentStop(input) {
       const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : void 0;
       const agentType = trackedAgent?.agent_type || input.agent_type || "unknown";
       recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+    } catch {
+    }
+    try {
+      recordMissionAgentStop(input.cwd, {
+        sessionId: input.session_id,
+        agentId: input.agent_id,
+        success: succeeded,
+        outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
+        at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : (/* @__PURE__ */ new Date()).toISOString()
+      });
     } catch {
     }
     const runningCount = state.agents.filter(
@@ -11137,6 +11684,7 @@ var init_subagent_tracker = __esm({
     import_path45 = require("path");
     init_worktree_paths();
     init_session_replay();
+    init_mission_board();
     COST_LIMIT_USD = 1;
     DEADLOCK_CHECK_THRESHOLD = 3;
     STATE_FILE = "subagent-tracking.json";
@@ -11430,11 +11978,11 @@ var init_prompt_helpers = __esm({
 });
 
 // src/hooks/autopilot/types.ts
-var DEFAULT_CONFIG3;
+var DEFAULT_CONFIG4;
 var init_types3 = __esm({
   "src/hooks/autopilot/types.ts"() {
     "use strict";
-    DEFAULT_CONFIG3 = {
+    DEFAULT_CONFIG4 = {
       maxIterations: 10,
       maxExpansionIterations: 2,
       maxArchitectIterations: 5,
@@ -11546,7 +12094,7 @@ function initAutopilot(directory, idea, sessionId, config2) {
     console.error(canStart.message);
     return null;
   }
-  const mergedConfig = { ...DEFAULT_CONFIG3, ...config2 };
+  const mergedConfig = { ...DEFAULT_CONFIG4, ...config2 };
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const state = {
     active: true,
@@ -13647,7 +14195,7 @@ var init_enforcement = __esm({
 var autopilot_exports = {};
 __export(autopilot_exports, {
   ALL_ADAPTERS: () => ALL_ADAPTERS,
-  DEFAULT_CONFIG: () => DEFAULT_CONFIG3,
+  DEFAULT_CONFIG: () => DEFAULT_CONFIG4,
   DEFAULT_PIPELINE_CONFIG: () => DEFAULT_PIPELINE_CONFIG,
   DEPRECATED_MODE_ALIASES: () => DEPRECATED_MODE_ALIASES,
   EXECUTION_COMPLETION_SIGNAL: () => EXECUTION_COMPLETION_SIGNAL,
@@ -17716,7 +18264,7 @@ function shouldSkipEntry(name, isDir, ignorePatterns) {
     if (SKIP_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
       return true;
     }
-    const ext = (0, import_node_path2.extname)(name);
+    const ext = (0, import_node_path3.extname)(name);
     if (!SOURCE_EXTENSIONS.has(ext) && !IMPORTANT_FILES.has(name)) {
       return true;
     }
@@ -17730,14 +18278,14 @@ function buildTree(dir, depth, maxDepth, fileCount, maxFiles, ignorePatterns) {
   if (depth > maxDepth || fileCount.value >= maxFiles) return [];
   let entries;
   try {
-    entries = (0, import_node_fs.readdirSync)(dir);
+    entries = (0, import_node_fs2.readdirSync)(dir);
   } catch {
     return [];
   }
   const withMeta = entries.map((name) => {
     let isDir = false;
     try {
-      isDir = (0, import_node_fs.statSync)((0, import_node_path2.join)(dir, name)).isDirectory();
+      isDir = (0, import_node_fs2.statSync)((0, import_node_path3.join)(dir, name)).isDirectory();
     } catch {
     }
     return { name, isDir };
@@ -17753,7 +18301,7 @@ function buildTree(dir, depth, maxDepth, fileCount, maxFiles, ignorePatterns) {
     if (shouldSkipEntry(name, isDir, ignorePatterns)) continue;
     if (isDir) {
       const children = buildTree(
-        (0, import_node_path2.join)(dir, name),
+        (0, import_node_path3.join)(dir, name),
         depth + 1,
         maxDepth,
         fileCount,
@@ -17781,10 +18329,10 @@ function renderTree(nodes, prefix, lines) {
   }
 }
 function extractPackageMetadata(directory) {
-  const pkgPath = (0, import_node_path2.join)(directory, "package.json");
-  if (!(0, import_node_fs.existsSync)(pkgPath)) return "";
+  const pkgPath = (0, import_node_path3.join)(directory, "package.json");
+  if (!(0, import_node_fs2.existsSync)(pkgPath)) return "";
   try {
-    const pkg = JSON.parse((0, import_node_fs.readFileSync)(pkgPath, "utf-8"));
+    const pkg = JSON.parse((0, import_node_fs2.readFileSync)(pkgPath, "utf-8"));
     const lines = [];
     if (pkg.name) lines.push(`Package: ${pkg.name}`);
     if (pkg.description) lines.push(`Description: ${pkg.description}`);
@@ -17804,7 +18352,7 @@ function generateCodebaseMap(directory, options = {}) {
     ignorePatterns = [],
     includeMetadata = true
   } = options;
-  if (!(0, import_node_fs.existsSync)(directory)) {
+  if (!(0, import_node_fs2.existsSync)(directory)) {
     return { map: "", totalFiles: 0, truncated: false };
   }
   const fileCount = { value: 0 };
@@ -17828,12 +18376,12 @@ function generateCodebaseMap(directory, options = {}) {
     truncated
   };
 }
-var import_node_fs, import_node_path2, SKIP_DIRS, SOURCE_EXTENSIONS, SKIP_FILE_SUFFIXES, IMPORTANT_FILES;
+var import_node_fs2, import_node_path3, SKIP_DIRS, SOURCE_EXTENSIONS, SKIP_FILE_SUFFIXES, IMPORTANT_FILES;
 var init_codebase_map = __esm({
   "src/hooks/codebase-map.ts"() {
     "use strict";
-    import_node_fs = require("node:fs");
-    import_node_path2 = require("node:path");
+    import_node_fs2 = require("node:fs");
+    import_node_path3 = require("node:path");
     SKIP_DIRS = /* @__PURE__ */ new Set([
       "node_modules",
       ".git",
@@ -19175,25 +19723,26 @@ async function sendDiscord2(config2, message) {
     console.error("[stop-callback] Discord send failed:", error2 instanceof Error ? error2.message : "Unknown error");
   }
 }
-async function triggerStopCallbacks(metrics, _input) {
+async function triggerStopCallbacks(metrics, _input, options = {}) {
   const config2 = getOMCConfig();
   const callbacks = config2.stopHookCallbacks;
+  const skipPlatforms = new Set(options.skipPlatforms ?? []);
   if (!callbacks) {
     return;
   }
   const promises = [];
-  if (callbacks.file?.enabled && callbacks.file.path) {
+  if (!skipPlatforms.has("file") && callbacks.file?.enabled && callbacks.file.path) {
     const format = callbacks.file.format || "markdown";
     const summary = formatSessionSummary(metrics, format);
     promises.push(writeToFile(callbacks.file, summary, metrics.session_id));
   }
-  if (callbacks.telegram?.enabled) {
+  if (!skipPlatforms.has("telegram") && callbacks.telegram?.enabled) {
     const summary = formatSessionSummary(metrics, "markdown");
     const tags = normalizeTelegramTagList(callbacks.telegram.tagList);
     const message = prefixMessageWithTags(summary, tags);
     promises.push(sendTelegram2(callbacks.telegram, message));
   }
-  if (callbacks.discord?.enabled) {
+  if (!skipPlatforms.has("discord") && callbacks.discord?.enabled) {
     const summary = formatSessionSummary(metrics, "markdown");
     const tags = normalizeDiscordTagList(callbacks.discord.tagList);
     const message = prefixMessageWithTags(summary, tags);
@@ -19234,6 +19783,29 @@ __export(session_end_exports, {
   processSessionEnd: () => processSessionEnd,
   recordSessionMetrics: () => recordSessionMetrics
 });
+function hasExplicitNotificationConfig(profileName) {
+  const config2 = getOMCConfig();
+  if (profileName) {
+    const profile = config2.notificationProfiles?.[profileName];
+    if (profile && typeof profile.enabled === "boolean") {
+      return true;
+    }
+  }
+  if (config2.notifications && typeof config2.notifications.enabled === "boolean") {
+    return true;
+  }
+  return buildConfigFromEnv() !== null;
+}
+function getLegacyPlatformsCoveredByNotifications(enabledPlatforms) {
+  const overlappingPlatforms = [];
+  if (enabledPlatforms.includes("telegram")) {
+    overlappingPlatforms.push("telegram");
+  }
+  if (enabledPlatforms.includes("discord")) {
+    overlappingPlatforms.push("discord");
+  }
+  return overlappingPlatforms;
+}
 function getAgentCounts(directory) {
   const trackingPath = path14.join(getOmcRoot(directory), "state", "subagent-tracking.json");
   if (!fs11.existsSync(trackingPath)) {
@@ -19498,23 +20070,33 @@ async function processSessionEnd(input) {
     }
   } catch {
   }
+  const profileName = process.env.OMC_NOTIFY_PROFILE;
+  const notificationConfig = getNotificationConfig(profileName);
+  const shouldUseNewNotificationSystem = Boolean(
+    notificationConfig && hasExplicitNotificationConfig(profileName)
+  );
+  const enabledNotificationPlatforms = shouldUseNewNotificationSystem && notificationConfig ? getEnabledPlatforms(notificationConfig, "session-end") : [];
   await triggerStopCallbacks(metrics, {
     session_id: input.session_id,
     cwd: input.cwd
+  }, {
+    skipPlatforms: shouldUseNewNotificationSystem ? getLegacyPlatformsCoveredByNotifications(enabledNotificationPlatforms) : []
   });
-  try {
-    await notify("session-end", {
-      sessionId: input.session_id,
-      projectPath: input.cwd,
-      durationMs: metrics.duration_ms,
-      agentsSpawned: metrics.agents_spawned,
-      agentsCompleted: metrics.agents_completed,
-      modesUsed: metrics.modes_used,
-      reason: metrics.reason,
-      timestamp: metrics.ended_at,
-      profileName: process.env.OMC_NOTIFY_PROFILE
-    });
-  } catch {
+  if (shouldUseNewNotificationSystem) {
+    try {
+      await notify("session-end", {
+        sessionId: input.session_id,
+        projectPath: input.cwd,
+        durationMs: metrics.duration_ms,
+        agentsSpawned: metrics.agents_spawned,
+        agentsCompleted: metrics.agents_completed,
+        modesUsed: metrics.modes_used,
+        reason: metrics.reason,
+        timestamp: metrics.ended_at,
+        profileName
+      });
+    } catch {
+    }
   }
   try {
     const { removeSession: removeSession2, loadAllMappings: loadAllMappings2 } = await Promise.resolve().then(() => (init_session_registry(), session_registry_exports));
@@ -19539,6 +20121,8 @@ var init_session_end = __esm({
     path14 = __toESM(require("path"), 1);
     readline = __toESM(require("readline"), 1);
     init_callbacks();
+    init_auto_update();
+    init_config();
     init_notifications();
     init_bridge_manager();
     init_worktree_paths();
@@ -20684,7 +21268,7 @@ function readCache() {
     return null;
   }
 }
-function writeCache(data, error2 = false, source, rateLimited = false, rateLimitedCount = 0, errorReason) {
+function writeCache(opts) {
   try {
     const cachePath = getCachePath();
     const cacheDir = (0, import_path82.dirname)(cachePath);
@@ -20693,35 +21277,74 @@ function writeCache(data, error2 = false, source, rateLimited = false, rateLimit
     }
     const cache = {
       timestamp: Date.now(),
-      data,
-      error: error2,
-      errorReason,
-      source,
-      rateLimited: rateLimited || void 0,
-      rateLimitedCount: rateLimitedCount > 0 ? rateLimitedCount : void 0
+      data: opts.data,
+      error: opts.error,
+      errorReason: opts.errorReason,
+      source: opts.source,
+      rateLimited: opts.rateLimited || void 0,
+      rateLimitedCount: opts.rateLimitedCount && opts.rateLimitedCount > 0 ? opts.rateLimitedCount : void 0,
+      rateLimitedUntil: opts.rateLimitedUntil,
+      lastSuccessAt: opts.lastSuccessAt
     };
     (0, import_fs72.writeFileSync)(cachePath, JSON.stringify(cache, null, 2));
   } catch {
   }
 }
-function isCacheValid(cache) {
-  if (cache.rateLimited) {
-    const count = cache.rateLimitedCount || 1;
-    const backoffMs = Math.min(
-      CACHE_TTL_RATE_LIMITED_MS * Math.pow(2, count - 1),
-      MAX_RATE_LIMITED_BACKOFF_MS
-    );
-    return Date.now() - cache.timestamp < backoffMs;
+function sanitizePollIntervalMs(value) {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_HUD_USAGE_POLL_INTERVAL_MS;
   }
-  const ttl = cache.error ? CACHE_TTL_FAILURE_MS : CACHE_TTL_SUCCESS_MS;
+  return Math.max(1e3, Math.floor(value));
+}
+function getUsagePollIntervalMs() {
+  try {
+    return sanitizePollIntervalMs(readHudConfig().usageApiPollIntervalMs);
+  } catch {
+    return DEFAULT_HUD_USAGE_POLL_INTERVAL_MS;
+  }
+}
+function getRateLimitedBackoffMs(pollIntervalMs, count) {
+  const normalizedPollIntervalMs = sanitizePollIntervalMs(pollIntervalMs);
+  return Math.min(
+    normalizedPollIntervalMs * Math.pow(2, Math.max(0, count - 1)),
+    Math.max(MAX_RATE_LIMITED_BACKOFF_MS, normalizedPollIntervalMs)
+  );
+}
+function isCacheValid(cache, pollIntervalMs) {
+  if (cache.rateLimited) {
+    if (cache.rateLimitedUntil != null) {
+      return Date.now() < cache.rateLimitedUntil;
+    }
+    const count = cache.rateLimitedCount || 1;
+    return Date.now() - cache.timestamp < getRateLimitedBackoffMs(pollIntervalMs, count);
+  }
+  const ttl = cache.error ? CACHE_TTL_FAILURE_MS : sanitizePollIntervalMs(pollIntervalMs);
   return Date.now() - cache.timestamp < ttl;
 }
 function getCachedUsageResult(cache) {
   if (cache.rateLimited) {
-    return { rateLimits: cache.data, error: "rate_limited" };
+    if (cache.lastSuccessAt && Date.now() - cache.lastSuccessAt > MAX_STALE_DATA_MS) {
+      return { rateLimits: null, error: "rate_limited" };
+    }
+    return { rateLimits: cache.data, error: "rate_limited", stale: cache.data ? true : void 0 };
   }
   const cachedError = cache.error && !cache.data ? cache.errorReason || "network" : void 0;
   return { rateLimits: cache.data, error: cachedError };
+}
+function createRateLimitedCacheEntry(source, data, pollIntervalMs, previousCount, lastSuccessAt) {
+  const timestamp = Date.now();
+  const rateLimitedCount = previousCount + 1;
+  return {
+    timestamp,
+    data,
+    error: false,
+    errorReason: "rate_limited",
+    source,
+    rateLimited: true,
+    rateLimitedCount,
+    rateLimitedUntil: timestamp + getRateLimitedBackoffMs(pollIntervalMs, rateLimitedCount),
+    lastSuccessAt
+  };
 }
 function getKeychainServiceName() {
   const configDir = process.env.CLAUDE_CONFIG_DIR;
@@ -21057,74 +21680,111 @@ async function getUsage() {
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const currentSource = isZai && authToken ? "zai" : "anthropic";
+  const pollIntervalMs = getUsagePollIntervalMs();
   const initialCache = readCache();
-  if (initialCache && isCacheValid(initialCache) && initialCache.source === currentSource) {
+  if (initialCache && isCacheValid(initialCache, pollIntervalMs) && initialCache.source === currentSource) {
     return getCachedUsageResult(initialCache);
   }
-  return withFileLock(lockPathFor(getCachePath()), async () => {
-    const cache = readCache();
-    if (cache && isCacheValid(cache) && cache.source === currentSource) {
-      return getCachedUsageResult(cache);
-    }
-    if (isZai && authToken) {
-      const result = await fetchUsageFromZai();
-      if (result.rateLimited) {
-        const prevCount = cache?.rateLimitedCount || 0;
-        const newCount = prevCount + 1;
-        writeCache(cache?.data || null, !cache?.data, "zai", true, newCount, "rate_limited");
-        if (cache?.data) {
-          return { rateLimits: cache.data, error: "rate_limited" };
+  try {
+    return await withFileLock(lockPathFor(getCachePath()), async () => {
+      const cache = readCache();
+      if (cache && isCacheValid(cache, pollIntervalMs) && cache.source === currentSource) {
+        return getCachedUsageResult(cache);
+      }
+      if (isZai && authToken) {
+        const result = await fetchUsageFromZai();
+        const cachedZai = cache?.source === "zai" ? cache : null;
+        if (result.rateLimited) {
+          const prevLastSuccess = cachedZai?.lastSuccessAt;
+          const rateLimitedCache = createRateLimitedCacheEntry("zai", cachedZai?.data || null, pollIntervalMs, cachedZai?.rateLimitedCount || 0, prevLastSuccess);
+          writeCache({
+            data: rateLimitedCache.data,
+            error: rateLimitedCache.error,
+            source: rateLimitedCache.source,
+            rateLimited: true,
+            rateLimitedCount: rateLimitedCache.rateLimitedCount,
+            rateLimitedUntil: rateLimitedCache.rateLimitedUntil,
+            errorReason: "rate_limited",
+            lastSuccessAt: rateLimitedCache.lastSuccessAt
+          });
+          if (rateLimitedCache.data) {
+            if (prevLastSuccess && Date.now() - prevLastSuccess > MAX_STALE_DATA_MS) {
+              return { rateLimits: null, error: "rate_limited" };
+            }
+            return { rateLimits: rateLimitedCache.data, error: "rate_limited", stale: true };
+          }
+          return { rateLimits: null, error: "rate_limited" };
         }
-        return { rateLimits: null, error: "rate_limited" };
+        if (!result.data) {
+          writeCache({ data: null, error: true, source: "zai", errorReason: "network" });
+          return { rateLimits: null, error: "network" };
+        }
+        const usage = parseZaiResponse(result.data);
+        writeCache({ data: usage, error: !usage, source: "zai", lastSuccessAt: Date.now() });
+        return { rateLimits: usage };
       }
-      if (!result.data) {
-        writeCache(null, true, "zai", false, 0, "network");
-        return { rateLimits: null, error: "network" };
-      }
-      const usage = parseZaiResponse(result.data);
-      writeCache(usage, !usage, "zai");
-      return { rateLimits: usage };
-    }
-    let creds = getCredentials();
-    if (creds) {
-      if (!validateCredentials(creds)) {
-        if (creds.refreshToken) {
-          const refreshed = await refreshAccessToken(creds.refreshToken);
-          if (refreshed) {
-            creds = { ...creds, ...refreshed };
-            writeBackCredentials(creds);
+      let creds = getCredentials();
+      if (creds) {
+        const cachedAnthropic = cache?.source === "anthropic" ? cache : null;
+        if (!validateCredentials(creds)) {
+          if (creds.refreshToken) {
+            const refreshed = await refreshAccessToken(creds.refreshToken);
+            if (refreshed) {
+              creds = { ...creds, ...refreshed };
+              writeBackCredentials(creds);
+            } else {
+              writeCache({ data: null, error: true, source: "anthropic", errorReason: "auth" });
+              return { rateLimits: null, error: "auth" };
+            }
           } else {
-            writeCache(null, true, "anthropic", false, 0, "auth");
+            writeCache({ data: null, error: true, source: "anthropic", errorReason: "auth" });
             return { rateLimits: null, error: "auth" };
           }
-        } else {
-          writeCache(null, true, "anthropic", false, 0, "auth");
-          return { rateLimits: null, error: "auth" };
         }
-      }
-      const result = await fetchUsageFromApi(creds.accessToken);
-      if (result.rateLimited) {
-        const prevCount = cache?.rateLimitedCount || 0;
-        const newCount = prevCount + 1;
-        writeCache(cache?.data || null, !cache?.data, "anthropic", true, newCount, "rate_limited");
-        if (cache?.data) {
-          return { rateLimits: cache.data, error: "rate_limited" };
+        const result = await fetchUsageFromApi(creds.accessToken);
+        if (result.rateLimited) {
+          const prevLastSuccess = cachedAnthropic?.lastSuccessAt;
+          const rateLimitedCache = createRateLimitedCacheEntry("anthropic", cachedAnthropic?.data || null, pollIntervalMs, cachedAnthropic?.rateLimitedCount || 0, prevLastSuccess);
+          writeCache({
+            data: rateLimitedCache.data,
+            error: rateLimitedCache.error,
+            source: rateLimitedCache.source,
+            rateLimited: true,
+            rateLimitedCount: rateLimitedCache.rateLimitedCount,
+            rateLimitedUntil: rateLimitedCache.rateLimitedUntil,
+            errorReason: "rate_limited",
+            lastSuccessAt: rateLimitedCache.lastSuccessAt
+          });
+          if (rateLimitedCache.data) {
+            if (prevLastSuccess && Date.now() - prevLastSuccess > MAX_STALE_DATA_MS) {
+              return { rateLimits: null, error: "rate_limited" };
+            }
+            return { rateLimits: rateLimitedCache.data, error: "rate_limited", stale: true };
+          }
+          return { rateLimits: null, error: "rate_limited" };
         }
-        return { rateLimits: null, error: "rate_limited" };
+        if (!result.data) {
+          writeCache({ data: null, error: true, source: "anthropic", errorReason: "network" });
+          return { rateLimits: null, error: "network" };
+        }
+        const usage = parseUsageResponse(result.data);
+        writeCache({ data: usage, error: !usage, source: "anthropic", lastSuccessAt: Date.now() });
+        return { rateLimits: usage };
       }
-      if (!result.data) {
-        writeCache(null, true, "anthropic", false, 0, "network");
-        return { rateLimits: null, error: "network" };
+      writeCache({ data: null, error: true, source: "anthropic", errorReason: "no_credentials" });
+      return { rateLimits: null, error: "no_credentials" };
+    }, USAGE_CACHE_LOCK_OPTS);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Failed to acquire file lock")) {
+      if (initialCache?.data) {
+        return { rateLimits: initialCache.data, stale: true };
       }
-      const usage = parseUsageResponse(result.data);
-      writeCache(usage, !usage, "anthropic");
-      return { rateLimits: usage };
+      return { rateLimits: null, error: "network" };
     }
-    writeCache(null, true, "anthropic", false, 0, "no_credentials");
-    return { rateLimits: null, error: "no_credentials" };
-  }, USAGE_CACHE_LOCK_OPTS);
+    return { rateLimits: null, error: "network" };
+  }
 }
-var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_SUCCESS_MS, CACHE_TTL_FAILURE_MS, CACHE_TTL_RATE_LIMITED_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
+var import_fs72, import_path82, import_child_process22, import_crypto12, import_https3, CACHE_TTL_FAILURE_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
@@ -21135,14 +21795,15 @@ var init_usage_api = __esm({
     import_crypto12 = require("crypto");
     import_https3 = __toESM(require("https"), 1);
     init_ssrf_guard();
+    init_types2();
+    init_state2();
     init_file_lock();
-    CACHE_TTL_SUCCESS_MS = 90 * 1e3;
     CACHE_TTL_FAILURE_MS = 15 * 1e3;
-    CACHE_TTL_RATE_LIMITED_MS = 120 * 1e3;
-    MAX_RATE_LIMITED_BACKOFF_MS = 600 * 1e3;
+    MAX_RATE_LIMITED_BACKOFF_MS = 5 * 60 * 1e3;
     API_TIMEOUT_MS2 = 1e4;
+    MAX_STALE_DATA_MS = 15 * 60 * 1e3;
     TOKEN_REFRESH_URL_HOSTNAME = "platform.claude.com";
-    USAGE_CACHE_LOCK_OPTS = { timeoutMs: API_TIMEOUT_MS2 + 2e3 };
+    USAGE_CACHE_LOCK_OPTS = { staleLockMs: API_TIMEOUT_MS2 + 5e3 };
     TOKEN_REFRESH_URL_PATH = "/v1/oauth/token";
     DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
   }
@@ -22843,7 +23504,7 @@ var init_worker_bootstrap = __esm({
 });
 
 // src/team/monitor.ts
-async function readJsonSafe2(filePath) {
+async function readJsonSafe3(filePath) {
   try {
     if (!(0, import_fs78.existsSync)(filePath)) return null;
     const raw = await (0, import_promises11.readFile)(filePath, "utf-8");
@@ -22861,14 +23522,14 @@ async function writeAtomic2(filePath, data) {
   await rename3(tmpPath, filePath);
 }
 async function readTeamConfig(teamName, cwd2) {
-  return readJsonSafe2(absPath(cwd2, TeamPaths.config(teamName)));
+  return readJsonSafe3(absPath(cwd2, TeamPaths.config(teamName)));
 }
 async function readWorkerStatus(teamName, workerName2, cwd2) {
-  const data = await readJsonSafe2(absPath(cwd2, TeamPaths.workerStatus(teamName, workerName2)));
+  const data = await readJsonSafe3(absPath(cwd2, TeamPaths.workerStatus(teamName, workerName2)));
   return data ?? { state: "unknown", updated_at: "" };
 }
 async function readWorkerHeartbeat(teamName, workerName2, cwd2) {
-  return readJsonSafe2(absPath(cwd2, TeamPaths.heartbeat(teamName, workerName2)));
+  return readJsonSafe3(absPath(cwd2, TeamPaths.heartbeat(teamName, workerName2)));
 }
 async function readMonitorSnapshot(teamName, cwd2) {
   const p = absPath(cwd2, TeamPaths.monitorSnapshot(teamName));
@@ -22910,7 +23571,7 @@ async function writeShutdownRequest(teamName, workerName2, fromWorker, cwd2) {
   await writeAtomic2(absPath(cwd2, TeamPaths.shutdownRequest(teamName, workerName2)), JSON.stringify(data, null, 2));
 }
 async function readShutdownAck(teamName, workerName2, cwd2, requestedAfter) {
-  const ack = await readJsonSafe2(
+  const ack = await readJsonSafe3(
     absPath(cwd2, TeamPaths.shutdownAck(teamName, workerName2))
   );
   if (!ack) return null;
@@ -22930,7 +23591,7 @@ async function listTasksFromFiles(teamName, cwd2) {
   for (const entry of entries) {
     const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
     if (!match) continue;
-    const task = await readJsonSafe2(absPath(cwd2, `${TeamPaths.tasks(teamName)}/${entry}`));
+    const task = await readJsonSafe3(absPath(cwd2, `${TeamPaths.tasks(teamName)}/${entry}`));
     if (task) tasks.push(task);
   }
   return tasks.sort((a, b) => Number(a.id) - Number(b.id));
@@ -23948,7 +24609,7 @@ async function writeJson(filePath, data) {
   await (0, import_promises14.mkdir)((0, import_path96.join)(filePath, ".."), { recursive: true });
   await (0, import_promises14.writeFile)(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
-async function readJsonSafe3(filePath) {
+async function readJsonSafe4(filePath) {
   const isDoneSignalPath = filePath.endsWith("done.json");
   const maxAttempts = isDoneSignalPath ? 4 : 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -24002,7 +24663,7 @@ async function writePanesTrackingFileIfPresent(runtime) {
   await (0, import_promises14.rename)(tempPath, panesPath);
 }
 async function readTask(root2, taskId) {
-  return readJsonSafe3(taskPath(root2, taskId));
+  return readJsonSafe4(taskPath(root2, taskId));
 }
 async function writeTask(root2, task) {
   await writeJson(taskPath(root2, task.id), task);
@@ -24211,7 +24872,7 @@ async function monitorTeam(teamName, cwd2, workerPaneIds) {
     const { readdir: readdir7 } = await import("fs/promises");
     const taskFiles = await readdir7((0, import_path96.join)(root2, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
-      const task = await readJsonSafe3((0, import_path96.join)(root2, "tasks", f));
+      const task = await readJsonSafe4((0, import_path96.join)(root2, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
       else if (task?.status === "in_progress") taskCounts.inProgress++;
       else if (task?.status === "completed") taskCounts.completed++;
@@ -24228,7 +24889,7 @@ async function monitorTeam(teamName, cwd2, workerPaneIds) {
     const paneId = workerPaneIds[i];
     const alive = await isWorkerAlive(paneId);
     const heartbeatPath = (0, import_path96.join)(root2, "workers", wName, "heartbeat.json");
-    const heartbeat = await readJsonSafe3(heartbeatPath);
+    const heartbeat = await readJsonSafe4(heartbeatPath);
     let stalled = false;
     if (heartbeat?.updatedAt) {
       const age = Date.now() - new Date(heartbeat.updatedAt).getTime();
@@ -24283,7 +24944,7 @@ function watchdogCliWorkers(runtime, intervalMs) {
       const [doneSignals, aliveResults] = await Promise.all([
         Promise.all(workers.map(([wName]) => {
           const donePath = (0, import_path96.join)(root2, "workers", wName, "done.json");
-          return readJsonSafe3(donePath);
+          return readJsonSafe4(donePath);
         })),
         Promise.all(workers.map(([, active]) => isWorkerAlive(active.paneId)))
       ]);
@@ -24326,7 +24987,7 @@ function watchdogCliWorkers(runtime, intervalMs) {
           continue;
         }
         const heartbeatPath = (0, import_path96.join)(root2, "workers", wName, "heartbeat.json");
-        const heartbeat = await readJsonSafe3(heartbeatPath);
+        const heartbeat = await readJsonSafe4(heartbeatPath);
         const isStalled = heartbeat?.updatedAt ? Date.now() - new Date(heartbeat.updatedAt).getTime() > 6e4 : false;
         if (isStalled) {
           const count = (unresponsiveCounts.get(wName) ?? 0) + 1;
@@ -24508,7 +25169,7 @@ async function assignTask(teamName, taskId, targetWorkerName, paneId, sessionNam
   let previousTaskState = null;
   let lockedTask = null;
   await withTaskLock(teamName, taskId, async () => {
-    const t = await readJsonSafe3(taskFilePath2);
+    const t = await readJsonSafe4(taskFilePath2);
     lockedTask = t;
     previousTaskState = t ? {
       status: t.status,
@@ -24551,7 +25212,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
     requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
     teamName
   });
-  const configData = await readJsonSafe3((0, import_path96.join)(root2, "config.json"));
+  const configData = await readJsonSafe4((0, import_path96.join)(root2, "config.json"));
   const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
@@ -24580,7 +25241,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
 }
 async function resumeTeam(teamName, cwd2) {
   const root2 = stateRoot(cwd2, teamName);
-  const configData = await readJsonSafe3((0, import_path96.join)(root2, "config.json"));
+  const configData = await readJsonSafe4((0, import_path96.join)(root2, "config.json"));
   if (!configData) return null;
   const { execFile: execFile6 } = await import("child_process");
   const { promisify: promisify7 } = await import("util");
@@ -25350,95 +26011,6 @@ var init_colors = __esm({
   }
 });
 
-// src/utils/string-width.ts
-function isCJKCharacter(codePoint) {
-  return (
-    // CJK Unified Ideographs (Chinese characters)
-    codePoint >= 19968 && codePoint <= 40959 || // CJK Unified Ideographs Extension A
-    codePoint >= 13312 && codePoint <= 19903 || // CJK Unified Ideographs Extension B-F (rare characters)
-    codePoint >= 131072 && codePoint <= 191471 || // CJK Compatibility Ideographs
-    codePoint >= 63744 && codePoint <= 64255 || // Hangul Syllables (Korean)
-    codePoint >= 44032 && codePoint <= 55215 || // Hangul Jamo (Korean components)
-    codePoint >= 4352 && codePoint <= 4607 || // Hangul Compatibility Jamo
-    codePoint >= 12592 && codePoint <= 12687 || // Hangul Jamo Extended-A
-    codePoint >= 43360 && codePoint <= 43391 || // Hangul Jamo Extended-B
-    codePoint >= 55216 && codePoint <= 55295 || // Hiragana (Japanese)
-    codePoint >= 12352 && codePoint <= 12447 || // Katakana (Japanese)
-    codePoint >= 12448 && codePoint <= 12543 || // Katakana Phonetic Extensions
-    codePoint >= 12784 && codePoint <= 12799 || // Full-width ASCII variants
-    codePoint >= 65281 && codePoint <= 65376 || // Full-width punctuation and symbols
-    codePoint >= 65504 && codePoint <= 65510 || // CJK Symbols and Punctuation
-    codePoint >= 12288 && codePoint <= 12351 || // Enclosed CJK Letters and Months
-    codePoint >= 12800 && codePoint <= 13055 || // CJK Compatibility
-    codePoint >= 13056 && codePoint <= 13311 || // CJK Compatibility Forms
-    codePoint >= 65072 && codePoint <= 65103
-  );
-}
-function isZeroWidth(codePoint) {
-  return (
-    // Zero-width characters
-    codePoint === 8203 || // Zero Width Space
-    codePoint === 8204 || // Zero Width Non-Joiner
-    codePoint === 8205 || // Zero Width Joiner
-    codePoint === 65279 || // Byte Order Mark / Zero Width No-Break Space
-    // Combining diacritical marks (they modify previous character)
-    codePoint >= 768 && codePoint <= 879 || // Combining Diacritical Marks Extended
-    codePoint >= 6832 && codePoint <= 6911 || // Combining Diacritical Marks Supplement
-    codePoint >= 7616 && codePoint <= 7679 || // Combining Diacritical Marks for Symbols
-    codePoint >= 8400 && codePoint <= 8447 || // Combining Half Marks
-    codePoint >= 65056 && codePoint <= 65071
-  );
-}
-function getCharWidth(char) {
-  const codePoint = char.codePointAt(0);
-  if (codePoint === void 0) return 0;
-  if (isZeroWidth(codePoint)) return 0;
-  if (isCJKCharacter(codePoint)) return 2;
-  return 1;
-}
-function stringWidth(str) {
-  if (!str) return 0;
-  const stripped = stripAnsi(str);
-  let width = 0;
-  for (const char of stripped) {
-    width += getCharWidth(char);
-  }
-  return width;
-}
-function stripAnsi(str) {
-  return str.replace(
-    /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/g,
-    ""
-  );
-}
-function truncateToWidth(str, maxWidth, suffix = "...") {
-  if (!str || maxWidth <= 0) return "";
-  const strWidth = stringWidth(str);
-  if (strWidth <= maxWidth) return str;
-  const suffixWidth = stringWidth(suffix);
-  const targetWidth = maxWidth - suffixWidth;
-  if (targetWidth <= 0) {
-    return truncateToWidthNoSuffix(suffix, maxWidth);
-  }
-  return truncateToWidthNoSuffix(str, targetWidth) + suffix;
-}
-function truncateToWidthNoSuffix(str, maxWidth) {
-  let width = 0;
-  let result = "";
-  for (const char of str) {
-    const charWidth = getCharWidth(char);
-    if (width + charWidth > maxWidth) break;
-    result += char;
-    width += charWidth;
-  }
-  return result;
-}
-var init_string_width = __esm({
-  "src/utils/string-width.ts"() {
-    "use strict";
-  }
-});
-
 // src/hud/elements/ralph.ts
 function renderRalph(state, thresholds) {
   if (!state?.active) {
@@ -26058,38 +26630,42 @@ function formatResetTime(date3) {
   const remainingMinutes = diffMinutes % 60;
   return `${diffHours}h${remainingMinutes}m`;
 }
-function renderRateLimits(limits) {
+function renderRateLimits(limits, stale) {
   if (!limits) return null;
+  const staleMarker = stale ? `${DIM4}*${RESET}` : "";
+  const resetPrefix = stale ? "~" : "";
   const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
   const fiveHourColor = getColor(fiveHour);
   const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
-  const fiveHourPart = fiveHourReset ? `5h:${fiveHourColor}${fiveHour}%${RESET}${DIM4}(${fiveHourReset})${RESET}` : `5h:${fiveHourColor}${fiveHour}%${RESET}`;
+  const fiveHourPart = fiveHourReset ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
   const parts = [fiveHourPart];
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
     const weeklyColor = getColor(weekly);
     const weeklyReset = formatResetTime(limits.weeklyResetsAt);
-    const weeklyPart = weeklyReset ? `${DIM4}wk:${RESET}${weeklyColor}${weekly}%${RESET}${DIM4}(${weeklyReset})${RESET}` : `${DIM4}wk:${RESET}${weeklyColor}${weekly}%${RESET}`;
+    const weeklyPart = weeklyReset ? `${DIM4}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${weeklyReset})${RESET}` : `${DIM4}wk:${RESET}${weeklyColor}${weekly}%${RESET}${staleMarker}`;
     parts.push(weeklyPart);
   }
   if (limits.monthlyPercent != null) {
     const monthly = Math.min(100, Math.max(0, Math.round(limits.monthlyPercent)));
     const monthlyColor = getColor(monthly);
     const monthlyReset = formatResetTime(limits.monthlyResetsAt);
-    const monthlyPart = monthlyReset ? `${DIM4}mo:${RESET}${monthlyColor}${monthly}%${RESET}${DIM4}(${monthlyReset})${RESET}` : `${DIM4}mo:${RESET}${monthlyColor}${monthly}%${RESET}`;
+    const monthlyPart = monthlyReset ? `${DIM4}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${monthlyReset})${RESET}` : `${DIM4}mo:${RESET}${monthlyColor}${monthly}%${RESET}${staleMarker}`;
     parts.push(monthlyPart);
   }
   return parts.join(" ");
 }
-function renderRateLimitsWithBar(limits, barWidth = 8) {
+function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
   if (!limits) return null;
+  const staleMarker = stale ? `${DIM4}*${RESET}` : "";
+  const resetPrefix = stale ? "~" : "";
   const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
   const fiveHourColor = getColor(fiveHour);
   const fiveHourFilled = Math.round(fiveHour / 100 * barWidth);
   const fiveHourEmpty = barWidth - fiveHourFilled;
   const fiveHourBar = `${fiveHourColor}${"\u2588".repeat(fiveHourFilled)}${DIM4}${"\u2591".repeat(fiveHourEmpty)}${RESET}`;
   const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
-  const fiveHourPart = fiveHourReset ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${DIM4}(${fiveHourReset})${RESET}` : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}`;
+  const fiveHourPart = fiveHourReset ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
   const parts = [fiveHourPart];
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
@@ -26098,7 +26674,7 @@ function renderRateLimitsWithBar(limits, barWidth = 8) {
     const weeklyEmpty = barWidth - weeklyFilled;
     const weeklyBar = `${weeklyColor}${"\u2588".repeat(weeklyFilled)}${DIM4}${"\u2591".repeat(weeklyEmpty)}${RESET}`;
     const weeklyReset = formatResetTime(limits.weeklyResetsAt);
-    const weeklyPart = weeklyReset ? `${DIM4}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${DIM4}(${weeklyReset})${RESET}` : `${DIM4}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}`;
+    const weeklyPart = weeklyReset ? `${DIM4}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${weeklyReset})${RESET}` : `${DIM4}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}`;
     parts.push(weeklyPart);
   }
   if (limits.monthlyPercent != null) {
@@ -26108,7 +26684,7 @@ function renderRateLimitsWithBar(limits, barWidth = 8) {
     const monthlyEmpty = barWidth - monthlyFilled;
     const monthlyBar = `${monthlyColor}${"\u2588".repeat(monthlyFilled)}${DIM4}${"\u2591".repeat(monthlyEmpty)}${RESET}`;
     const monthlyReset = formatResetTime(limits.monthlyResetsAt);
-    const monthlyPart = monthlyReset ? `${DIM4}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${DIM4}(${monthlyReset})${RESET}` : `${DIM4}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}`;
+    const monthlyPart = monthlyReset ? `${DIM4}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${monthlyReset})${RESET}` : `${DIM4}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}`;
     parts.push(monthlyPart);
   }
   return parts.join(" ");
@@ -26324,19 +26900,19 @@ function renderCwd(cwd2, format = "relative") {
       displayPath = cwd2;
       break;
     case "folder":
-      displayPath = (0, import_node_path7.basename)(cwd2);
+      displayPath = (0, import_node_path8.basename)(cwd2);
       break;
     default:
       displayPath = cwd2;
   }
   return `${dim(displayPath)}`;
 }
-var import_node_os5, import_node_path7;
+var import_node_os5, import_node_path8;
 var init_cwd = __esm({
   "src/hud/elements/cwd.ts"() {
     "use strict";
     import_node_os5 = require("node:os");
-    import_node_path7 = require("node:path");
+    import_node_path8 = require("node:path");
     init_colors();
   }
 });
@@ -26637,7 +27213,8 @@ async function render(context, config2) {
   }
   if (enabledElements.rateLimits && context.rateLimitsResult) {
     if (context.rateLimitsResult.rateLimits) {
-      const limits = enabledElements.useBars ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits) : renderRateLimits(context.rateLimitsResult.rateLimits);
+      const stale = context.rateLimitsResult.stale;
+      const limits = enabledElements.useBars ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits, void 0, stale) : renderRateLimits(context.rateLimitsResult.rateLimits, stale);
       if (limits) elements.push(limits);
     } else {
       const errorIndicator = renderRateLimitsError(context.rateLimitsResult);
@@ -26746,6 +27323,9 @@ async function render(context, config2) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
   }
+  if (context.missionBoard && (config2.missionBoard?.enabled ?? config2.elements.missionBoard ?? false)) {
+    detailLines.unshift(...renderMissionBoard(context.missionBoard, config2.missionBoard));
+  }
   const widthAdjustedLines = applyMaxWidthByMode(
     [...outputLines, ...detailLines],
     config2.maxWidth,
@@ -26781,6 +27361,7 @@ var init_render = __esm({
     init_api_key_source();
     init_call_counts();
     init_context_warning();
+    init_mission_board();
     ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/;
     PLAIN_SEPARATOR = " | ";
     DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
@@ -26898,6 +27479,8 @@ async function main2(watchMode = false) {
         console.error("[HUD] Update cache read error:", error2 instanceof Error ? error2.message : error2);
       }
     }
+    const missionBoardEnabled = config2.missionBoard?.enabled ?? config2.elements.missionBoard ?? false;
+    const missionBoard = missionBoardEnabled ? await refreshMissionBoardState(cwd2, config2.missionBoard) : null;
     const context = {
       contextPercent: getContextPercent(stdin),
       modelName: getModelName(stdin),
@@ -26909,6 +27492,7 @@ async function main2(watchMode = false) {
       todos: transcriptData.todos,
       backgroundTasks: getRunningTasks(hudState),
       cwd: cwd2,
+      missionBoard,
       lastSkill: transcriptData.lastActivatedSkill || null,
       rateLimitsResult,
       customBuckets,
@@ -26990,6 +27574,7 @@ var init_hud = __esm({
     init_custom_rate_provider();
     init_render();
     init_api_key_source();
+    init_mission_board();
     init_sanitize();
     init_version();
     init_auto_update();
@@ -27003,7 +27588,7 @@ var init_hud = __esm({
   }
 });
 
-// node_modules/commander/esm.mjs
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
 var {
   program,
@@ -27020,7 +27605,7 @@ var {
   Help
 } = import_index.default;
 
-// node_modules/chalk/source/vendor/ansi-styles/index.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
 var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
@@ -27206,7 +27791,7 @@ function assembleStyles() {
 var ansiStyles = assembleStyles();
 var ansi_styles_default = ansiStyles;
 
-// node_modules/chalk/source/vendor/supports-color/index.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/chalk/source/vendor/supports-color/index.js
 var import_node_process = __toESM(require("node:process"), 1);
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_tty = __toESM(require("node:tty"), 1);
@@ -27338,7 +27923,7 @@ var supportsColor = {
 };
 var supports_color_default = supportsColor;
 
-// node_modules/chalk/source/utilities.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/chalk/source/utilities.js
 function stringReplaceAll(string3, substring, replacer) {
   let index = string3.indexOf(substring);
   if (index === -1) {
@@ -27368,7 +27953,7 @@ function stringEncaseCRLFWithFirstIndex(string3, prefix, postfix, index) {
   return returnValue;
 }
 
-// node_modules/chalk/source/index.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/chalk/source/index.js
 var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
 var GENERATOR = /* @__PURE__ */ Symbol("GENERATOR");
 var STYLER = /* @__PURE__ */ Symbol("STYLER");
@@ -28213,7 +28798,7 @@ function toSdkMcpFormat(servers) {
   return result;
 }
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var import_path4 = require("path");
 var import_url2 = require("url");
 var import_events = require("events");
@@ -47832,7 +48417,7 @@ function createSdkMcpServer(options) {
   };
 }
 
-// node_modules/zod/v3/external.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -47944,7 +48529,7 @@ __export(external_exports, {
   void: () => voidType2
 });
 
-// node_modules/zod/v3/helpers/util.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/helpers/util.js
 var util2;
 (function(util3) {
   util3.assertEqual = (_) => {
@@ -48078,7 +48663,7 @@ var getParsedType3 = (data) => {
   }
 };
 
-// node_modules/zod/v3/ZodError.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/ZodError.js
 var ZodIssueCode2 = util2.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -48196,7 +48781,7 @@ ZodError3.create = (issues) => {
   return error2;
 };
 
-// node_modules/zod/v3/locales/en.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/locales/en.js
 var errorMap2 = (issue2, _ctx) => {
   let message;
   switch (issue2.code) {
@@ -48299,7 +48884,7 @@ var errorMap2 = (issue2, _ctx) => {
 };
 var en_default3 = errorMap2;
 
-// node_modules/zod/v3/errors.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/errors.js
 var overrideErrorMap2 = en_default3;
 function setErrorMap(map) {
   overrideErrorMap2 = map;
@@ -48308,7 +48893,7 @@ function getErrorMap2() {
   return overrideErrorMap2;
 }
 
-// node_modules/zod/v3/helpers/parseUtil.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue2 = (params) => {
   const { data, path: path20, errorMaps, issueData } = params;
   const fullPath = [...path20, ...issueData.path || []];
@@ -48418,14 +49003,14 @@ var isDirty2 = (x) => x.status === "dirty";
 var isValid2 = (x) => x.status === "valid";
 var isAsync2 = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// node_modules/zod/v3/helpers/errorUtil.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil2;
 (function(errorUtil3) {
   errorUtil3.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil3.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil2 || (errorUtil2 = {}));
 
-// node_modules/zod/v3/types.js
+// ../oh-my-claudecode.omx-worktrees/launch-feat-refactor-skills/node_modules/zod/v3/types.js
 var ParseInputLazyPath2 = class {
   constructor(parent, value, path20, key) {
     this._cachedPath = [];
@@ -59193,6 +59778,8 @@ var KEYWORD_PATTERNS = {
   // never-match placeholder (type system requires the key)
   ralplan: /\b(ralplan)\b/i,
   tdd: /\b(tdd)\b|\btest\s+first\b/i,
+  "code-review": /\b(code\s+review|review\s+code)\b/i,
+  "security-review": /\b(security\s+review|review\s+security)\b/i,
   ultrathink: /\b(ultrathink)\b/i,
   deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b/i,
   analyze: /\b(deep[\s-]?analyze|deepanalyze)\b/i,
@@ -59210,6 +59797,8 @@ var KEYWORD_PRIORITY = [
   "ccg",
   "ralplan",
   "tdd",
+  "code-review",
+  "security-review",
   "ultrathink",
   "deepsearch",
   "analyze",
@@ -59949,7 +60538,9 @@ var KNOWN_FIELDS = /* @__PURE__ */ new Set([
   "output",
   "result",
   "error",
-  "status"
+  "status",
+  // Session-end fields
+  "reason"
 ]);
 var CAMEL_CASE_MARKERS = /* @__PURE__ */ new Set(["sessionId", "toolName", "directory"]);
 function hasSnakeCaseKeys(obj) {
@@ -60439,6 +61030,12 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
       case "tdd":
         messages.push(TDD_MESSAGE);
         break;
+      case "code-review":
+        messages.push(CODE_REVIEW_MESSAGE);
+        break;
+      case "security-review":
+        messages.push(SECURITY_REVIEW_MESSAGE);
+        break;
       // For modes without dedicated message constants, return generic activation message
       // These are handled by UserPromptSubmit hook for skill invocation
       case "cancel":
@@ -60728,6 +61325,21 @@ Please continue working on these tasks.
 
 `);
   }
+  try {
+    const sessionConfig = loadConfig();
+    if (sessionConfig.routing?.forceInherit) {
+      messages.push(`<system-reminder>
+
+[MODEL ROUTING OVERRIDE \u2014 NON-STANDARD PROVIDER DETECTED]
+
+This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
+Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
+The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
+
+</system-reminder>`);
+    }
+  } catch {
+  }
   if (messages.length > 0) {
     return {
       continue: true,
@@ -60813,17 +61425,23 @@ Command blocked: ${command}`
   let modifiedToolInput;
   if (input.toolName === "Task") {
     const originalTaskInput = input.toolInput;
-    const nextTaskInput = originalTaskInput ? { ...originalTaskInput } : {};
-    let changed = false;
-    if (nextTaskInput.model) {
+    const taskModel = originalTaskInput?.model;
+    if (taskModel) {
       const config2 = loadConfig();
       if (config2.routing?.forceInherit) {
-        delete nextTaskInput.model;
-        changed = true;
+        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on Task calls \u2014 remove \`model\` and retry so agents inherit the parent session's model. The model "${taskModel}" is not valid for this provider.`;
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: denyReason
+          }
+        };
       }
     }
-    if (nextTaskInput.run_in_background === true) {
-      const subagentType = typeof nextTaskInput.subagent_type === "string" ? nextTaskInput.subagent_type : void 0;
+    if (originalTaskInput?.run_in_background === true) {
+      const subagentType = typeof originalTaskInput.subagent_type === "string" ? originalTaskInput.subagent_type : void 0;
       const permissionFallback = getBackgroundTaskPermissionFallback(directory, subagentType);
       if (permissionFallback.shouldFallback) {
         const reason = `[BACKGROUND PERMISSIONS] ${subagentType || "This background agent"} may need ${permissionFallback.missingTools.join(", ")} permissions, but background agents cannot request interactive approval. Re-run without \`run_in_background=true\` or pre-approve ${permissionFallback.missingTools.join(", ")} in Claude Code settings.`;
@@ -60833,9 +61451,6 @@ Command blocked: ${command}`
           message: reason
         };
       }
-    }
-    if (changed) {
-      modifiedToolInput = nextTaskInput;
     }
   }
   if (input.toolName === "Bash") {
@@ -61116,7 +61731,13 @@ async function processHook(hookType, rawInput) {
           hook_event_name: "SessionEnd",
           reason: rawSE.reason ?? "other"
         };
-        return await handleSessionEnd2(sessionEndInput);
+        const result = await handleSessionEnd2(sessionEndInput);
+        _openclaw.wake("session-end", {
+          sessionId: sessionEndInput.session_id,
+          projectPath: sessionEndInput.cwd,
+          reason: sessionEndInput.reason
+        });
+        return result;
       }
       case "subagent-start": {
         if (!validateHookInput(input, requiredKeysForHook("subagent-start"), "subagent-start")) {
@@ -61476,17 +62097,17 @@ var DEBUG_FILE = path15.join((0, import_os15.tmpdir)(), "comment-checker-debug.l
 var fs13 = __toESM(require("fs"), 1);
 
 // src/hooks/recovery/constants.ts
-var import_node_path3 = require("node:path");
+var import_node_path4 = require("node:path");
 var import_node_os3 = require("node:os");
 init_paths();
 function getClaudeCodeStorageDir() {
-  return (0, import_node_path3.join)(getDataDir(), "claude-code", "storage");
+  return (0, import_node_path4.join)(getDataDir(), "claude-code", "storage");
 }
 var CLAUDE_CODE_STORAGE = getClaudeCodeStorageDir();
-var MESSAGE_STORAGE = (0, import_node_path3.join)(CLAUDE_CODE_STORAGE, "message");
-var PART_STORAGE = (0, import_node_path3.join)(CLAUDE_CODE_STORAGE, "part");
+var MESSAGE_STORAGE = (0, import_node_path4.join)(CLAUDE_CODE_STORAGE, "message");
+var PART_STORAGE = (0, import_node_path4.join)(CLAUDE_CODE_STORAGE, "part");
 var DEBUG3 = process.env.RECOVERY_DEBUG === "1" || process.env.CONTEXT_LIMIT_RECOVERY_DEBUG === "1" || process.env.SESSION_RECOVERY_DEBUG === "1";
-var DEBUG_FILE2 = (0, import_node_path3.join)((0, import_node_os3.tmpdir)(), "recovery-debug.log");
+var DEBUG_FILE2 = (0, import_node_path4.join)((0, import_node_os3.tmpdir)(), "recovery-debug.log");
 
 // src/hooks/preemptive-compaction/index.ts
 var fs14 = __toESM(require("fs"), 1);
@@ -61508,10 +62129,10 @@ var DEFAULT_TASK_TTL_MS = 30 * 60 * 1e3;
 var BACKGROUND_TASKS_DIR = (0, import_path71.join)(getClaudeConfigDir(), ".omc", "background-tasks");
 
 // src/hooks/directory-readme-injector/constants.ts
-var import_node_path4 = require("node:path");
+var import_node_path5 = require("node:path");
 var import_node_os4 = require("node:os");
-var OMC_STORAGE_DIR2 = (0, import_node_path4.join)((0, import_node_os4.homedir)(), ".omc");
-var README_INJECTOR_STORAGE = (0, import_node_path4.join)(
+var OMC_STORAGE_DIR2 = (0, import_node_path5.join)((0, import_node_os4.homedir)(), ".omc");
+var README_INJECTOR_STORAGE = (0, import_node_path5.join)(
   OMC_STORAGE_DIR2,
   "directory-readme"
 );
@@ -62046,7 +62667,7 @@ var import_child_process23 = require("child_process");
 init_daemon_module_path();
 init_tmux_detector();
 var __filename4 = (0, import_url13.fileURLToPath)(importMetaUrl);
-var DEFAULT_CONFIG5 = {
+var DEFAULT_CONFIG6 = {
   pollIntervalMs: 60 * 1e3,
   // 1 minute
   paneLinesToCapture: 15,
@@ -62109,7 +62730,7 @@ function createMinimalDaemonEnv2() {
   return env2;
 }
 function getConfig(config2) {
-  return { ...DEFAULT_CONFIG5, ...config2 };
+  return { ...DEFAULT_CONFIG6, ...config2 };
 }
 function ensureStateDir6(config2) {
   const stateDir = (0, import_path83.dirname)(config2.stateFilePath);
@@ -63041,15 +63662,15 @@ async function doctorConflictsCommand(options) {
 }
 
 // src/team/api-interop.ts
-var import_node_fs3 = require("node:fs");
-var import_node_path6 = require("node:path");
+var import_node_fs4 = require("node:fs");
+var import_node_path7 = require("node:path");
 init_contracts();
 
 // src/team/team-ops.ts
 var import_node_crypto = require("node:crypto");
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 var import_promises7 = require("node:fs/promises");
-var import_node_path5 = require("node:path");
+var import_node_path6 = require("node:path");
 init_state_paths();
 init_contracts();
 
@@ -63224,11 +63845,11 @@ function normalizeTaskId(taskId) {
 }
 function canonicalTaskFilePath(teamName, taskId, cwd2) {
   const normalizedTaskId = normalizeTaskId(taskId);
-  return (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `task-${normalizedTaskId}.json`);
+  return (0, import_node_path6.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `task-${normalizedTaskId}.json`);
 }
 function legacyTaskFilePath(teamName, taskId, cwd2) {
   const normalizedTaskId = normalizeTaskId(taskId);
-  return (0, import_node_path5.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `${normalizedTaskId}.json`);
+  return (0, import_node_path6.join)(absPath(cwd2, TeamPaths.tasks(teamName)), `${normalizedTaskId}.json`);
 }
 function taskFileCandidates(teamName, taskId, cwd2) {
   const canonical = canonicalTaskFilePath(teamName, taskId, cwd2);
@@ -63237,14 +63858,14 @@ function taskFileCandidates(teamName, taskId, cwd2) {
 }
 async function writeAtomic(path20, data) {
   const tmp = `${path20}.${process.pid}.tmp`;
-  await (0, import_promises7.mkdir)((0, import_node_path5.dirname)(path20), { recursive: true });
+  await (0, import_promises7.mkdir)((0, import_node_path6.dirname)(path20), { recursive: true });
   await (0, import_promises7.writeFile)(tmp, data, "utf8");
   const { rename: rename3 } = await import("node:fs/promises");
   await rename3(tmp, path20);
 }
-async function readJsonSafe(path20) {
+async function readJsonSafe2(path20) {
   try {
-    if (!(0, import_node_fs2.existsSync)(path20)) return null;
+    if (!(0, import_node_fs3.existsSync)(path20)) return null;
     const raw = await (0, import_promises7.readFile)(path20, "utf8");
     return JSON.parse(raw);
   } catch {
@@ -63294,7 +63915,7 @@ async function withLock(lockDir, fn) {
   }
 }
 async function withTaskClaimLock(teamName, taskId, cwd2, fn) {
-  const lockDir = (0, import_node_path5.join)(teamDir2(teamName, cwd2), "tasks", `.lock-${taskId}`);
+  const lockDir = (0, import_node_path6.join)(teamDir2(teamName, cwd2), "tasks", `.lock-${taskId}`);
   return withLock(lockDir, fn);
 }
 async function withMailboxLock(teamName, workerName2, cwd2, fn) {
@@ -63335,11 +63956,11 @@ async function teamReadConfig(teamName, cwd2) {
     };
   }
   const configPath = absPath(cwd2, TeamPaths.config(teamName));
-  return readJsonSafe(configPath);
+  return readJsonSafe2(configPath);
 }
 async function teamReadManifest(teamName, cwd2) {
   const manifestPath = absPath(cwd2, TeamPaths.manifest(teamName));
-  return readJsonSafe(manifestPath);
+  return readJsonSafe2(manifestPath);
 }
 async function teamCleanup(teamName, cwd2) {
   await (0, import_promises7.rm)(teamDir2(teamName, cwd2), { recursive: true, force: true });
@@ -63350,7 +63971,7 @@ async function teamWriteWorkerIdentity(teamName, workerName2, identity, cwd2) {
 }
 async function teamReadWorkerHeartbeat(teamName, workerName2, cwd2) {
   const p = absPath(cwd2, TeamPaths.heartbeat(teamName, workerName2));
-  return readJsonSafe(p);
+  return readJsonSafe2(p);
 }
 async function teamUpdateWorkerHeartbeat(teamName, workerName2, heartbeat, cwd2) {
   const p = absPath(cwd2, TeamPaths.heartbeat(teamName, workerName2));
@@ -63359,7 +63980,7 @@ async function teamUpdateWorkerHeartbeat(teamName, workerName2, heartbeat, cwd2)
 async function teamReadWorkerStatus(teamName, workerName2, cwd2) {
   const unknownStatus = { state: "unknown", updated_at: "1970-01-01T00:00:00.000Z" };
   const p = absPath(cwd2, TeamPaths.workerStatus(teamName, workerName2));
-  const status = await readJsonSafe(p);
+  const status = await readJsonSafe2(p);
   return status ?? unknownStatus;
 }
 async function teamWriteWorkerInbox(teamName, workerName2, prompt, cwd2) {
@@ -63380,14 +64001,14 @@ async function teamCreateTask(teamName, task, cwd2) {
   };
   const taskPath2 = absPath(cwd2, TeamPaths.tasks(teamName));
   await (0, import_promises7.mkdir)(taskPath2, { recursive: true });
-  await writeAtomic((0, import_node_path5.join)(taskPath2, `task-${nextId}.json`), JSON.stringify(created, null, 2));
+  await writeAtomic((0, import_node_path6.join)(taskPath2, `task-${nextId}.json`), JSON.stringify(created, null, 2));
   cfg.next_task_id = Number(nextId) + 1;
   await writeAtomic(absPath(cwd2, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
   return created;
 }
 async function teamReadTask(teamName, taskId, cwd2) {
   for (const candidate of taskFileCandidates(teamName, taskId, cwd2)) {
-    const task = await readJsonSafe(candidate);
+    const task = await readJsonSafe2(candidate);
     if (!task || !isTeamTask(task)) continue;
     return normalizeTask(task);
   }
@@ -63479,7 +64100,7 @@ function normalizeLegacyMailboxMessage(raw) {
 }
 async function readLegacyMailboxJsonl(teamName, workerName2, cwd2) {
   const legacyPath = absPath(cwd2, TeamPaths.mailbox(teamName, workerName2).replace(/\.json$/i, ".jsonl"));
-  if (!(0, import_node_fs2.existsSync)(legacyPath)) return { worker: workerName2, messages: [] };
+  if (!(0, import_node_fs3.existsSync)(legacyPath)) return { worker: workerName2, messages: [] };
   try {
     const raw = await (0, import_promises7.readFile)(legacyPath, "utf8");
     const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -63503,7 +64124,7 @@ async function readLegacyMailboxJsonl(teamName, workerName2, cwd2) {
 }
 async function readMailbox(teamName, workerName2, cwd2) {
   const p = absPath(cwd2, TeamPaths.mailbox(teamName, workerName2));
-  const mailbox = await readJsonSafe(p);
+  const mailbox = await readJsonSafe2(p);
   if (mailbox && Array.isArray(mailbox.messages)) {
     return { worker: workerName2, messages: mailbox.messages };
   }
@@ -63576,14 +64197,14 @@ async function teamAppendEvent(teamName, event, cwd2) {
     ...event
   };
   const p = absPath(cwd2, TeamPaths.events(teamName));
-  await (0, import_promises7.mkdir)((0, import_node_path5.dirname)(p), { recursive: true });
+  await (0, import_promises7.mkdir)((0, import_node_path6.dirname)(p), { recursive: true });
   await (0, import_promises7.appendFile)(p, `${JSON.stringify(full)}
 `, "utf8");
   return full;
 }
 async function teamReadTaskApproval(teamName, taskId, cwd2) {
   const p = absPath(cwd2, TeamPaths.approval(teamName, taskId));
-  return readJsonSafe(p);
+  return readJsonSafe2(p);
 }
 async function teamWriteTaskApproval(teamName, approval, cwd2) {
   const p = absPath(cwd2, TeamPaths.approval(teamName, approval.task_id));
@@ -63653,7 +64274,7 @@ async function teamWriteShutdownRequest(teamName, workerName2, requestedBy, cwd2
 }
 async function teamReadShutdownAck(teamName, workerName2, cwd2, minUpdatedAt) {
   const ackPath = absPath(cwd2, TeamPaths.shutdownAck(teamName, workerName2));
-  const parsed = await readJsonSafe(ackPath);
+  const parsed = await readJsonSafe2(ackPath);
   if (!parsed || parsed.status !== "accept" && parsed.status !== "reject") return null;
   if (typeof minUpdatedAt === "string" && minUpdatedAt.trim() !== "") {
     const minTs = Date.parse(minUpdatedAt);
@@ -63664,7 +64285,7 @@ async function teamReadShutdownAck(teamName, workerName2, cwd2, minUpdatedAt) {
 }
 async function teamReadMonitorSnapshot(teamName, cwd2) {
   const p = absPath(cwd2, TeamPaths.monitorSnapshot(teamName));
-  return readJsonSafe(p);
+  return readJsonSafe2(p);
 }
 async function teamWriteMonitorSnapshot(teamName, snapshot, cwd2) {
   const p = absPath(cwd2, TeamPaths.monitorSnapshot(teamName));
@@ -63730,8 +64351,8 @@ function parseValidatedTaskIdArray(value, fieldName) {
 }
 function teamStateExists(teamName, candidateCwd) {
   if (!TEAM_NAME_SAFE_PATTERN.test(teamName)) return false;
-  const teamRoot = (0, import_node_path6.join)(candidateCwd, ".omc", "state", "team", teamName);
-  return (0, import_node_fs3.existsSync)((0, import_node_path6.join)(teamRoot, "config.json")) || (0, import_node_fs3.existsSync)((0, import_node_path6.join)(teamRoot, "tasks")) || (0, import_node_fs3.existsSync)(teamRoot);
+  const teamRoot = (0, import_node_path7.join)(candidateCwd, ".omc", "state", "team", teamName);
+  return (0, import_node_fs4.existsSync)((0, import_node_path7.join)(teamRoot, "config.json")) || (0, import_node_fs4.existsSync)((0, import_node_path7.join)(teamRoot, "tasks")) || (0, import_node_fs4.existsSync)(teamRoot);
 }
 function parseTeamWorkerEnv(raw) {
   if (typeof raw !== "string" || raw.trim() === "") return null;
@@ -63747,23 +64368,23 @@ function readTeamStateRootFromEnv(env2 = process.env) {
   return candidate || null;
 }
 function readTeamStateRootFromFile(path20) {
-  if (!(0, import_node_fs3.existsSync)(path20)) return null;
+  if (!(0, import_node_fs4.existsSync)(path20)) return null;
   try {
-    const parsed = JSON.parse((0, import_node_fs3.readFileSync)(path20, "utf8"));
+    const parsed = JSON.parse((0, import_node_fs4.readFileSync)(path20, "utf8"));
     return typeof parsed.team_state_root === "string" && parsed.team_state_root.trim() !== "" ? parsed.team_state_root.trim() : null;
   } catch {
     return null;
   }
 }
 function stateRootToWorkingDirectory(stateRoot2) {
-  const absolute = (0, import_node_path6.resolve)(stateRoot2);
+  const absolute = (0, import_node_path7.resolve)(stateRoot2);
   const normalized = absolute.replaceAll("\\", "/");
   for (const marker of ["/.omc/state/team/", "/.omx/state/team/"]) {
     const idx = normalized.lastIndexOf(marker);
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return (0, import_node_path6.dirname)((0, import_node_path6.dirname)((0, import_node_path6.dirname)((0, import_node_path6.dirname)(absolute))));
+      return (0, import_node_path7.dirname)((0, import_node_path7.dirname)((0, import_node_path7.dirname)((0, import_node_path7.dirname)(absolute))));
     }
   }
   for (const marker of ["/.omc/state", "/.omx/state"]) {
@@ -63771,21 +64392,21 @@ function stateRootToWorkingDirectory(stateRoot2) {
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return (0, import_node_path6.dirname)((0, import_node_path6.dirname)(absolute));
+      return (0, import_node_path7.dirname)((0, import_node_path7.dirname)(absolute));
     }
   }
-  return (0, import_node_path6.dirname)((0, import_node_path6.dirname)(absolute));
+  return (0, import_node_path7.dirname)((0, import_node_path7.dirname)(absolute));
 }
 function resolveTeamWorkingDirectoryFromMetadata(teamName, candidateCwd, workerContext) {
-  const teamRoot = (0, import_node_path6.join)(candidateCwd, ".omc", "state", "team", teamName);
-  if (!(0, import_node_fs3.existsSync)(teamRoot)) return null;
+  const teamRoot = (0, import_node_path7.join)(candidateCwd, ".omc", "state", "team", teamName);
+  if (!(0, import_node_fs4.existsSync)(teamRoot)) return null;
   if (workerContext?.teamName === teamName) {
-    const workerRoot = readTeamStateRootFromFile((0, import_node_path6.join)(teamRoot, "workers", workerContext.workerName, "identity.json"));
+    const workerRoot = readTeamStateRootFromFile((0, import_node_path7.join)(teamRoot, "workers", workerContext.workerName, "identity.json"));
     if (workerRoot) return stateRootToWorkingDirectory(workerRoot);
   }
-  const fromManifest = readTeamStateRootFromFile((0, import_node_path6.join)(teamRoot, "manifest.v2.json"));
+  const fromManifest = readTeamStateRootFromFile((0, import_node_path7.join)(teamRoot, "manifest.v2.json"));
   if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
-  const fromConfig = readTeamStateRootFromFile((0, import_node_path6.join)(teamRoot, "config.json"));
+  const fromConfig = readTeamStateRootFromFile((0, import_node_path7.join)(teamRoot, "config.json"));
   if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
   return null;
 }
@@ -63808,7 +64429,7 @@ function resolveTeamWorkingDirectory(teamName, preferredCwd) {
       if (teamStateExists(normalizedTeamName, cursor)) {
         return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor, workerContext) ?? cursor;
       }
-      const parent = (0, import_node_path6.dirname)(cursor);
+      const parent = (0, import_node_path7.dirname)(cursor);
       if (!parent || parent === cursor) break;
       cursor = parent;
     }
@@ -64339,7 +64960,7 @@ var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
 var MIN_WORKER_COUNT = 1;
 var MAX_WORKER_COUNT = 20;
 var TEAM_HELP = `
-Usage: omc team [N:agent-type[:role]] "<task description>"
+Usage: omc team [N:agent-type[:role]] [--new-window] "<task description>"
        omc team status <team-name>
        omc team shutdown <team-name> [--force]
        omc team api <operation> [--input <json>] [--json]
@@ -64350,6 +64971,7 @@ Examples:
   omc team 2:codex:architect "design auth system"
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
+  omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
@@ -64443,10 +65065,13 @@ function parseTeamArgs(tokens) {
   let workerCount = 3;
   let agentTypes = [];
   let json = false;
+  let newWindow = false;
   const filteredArgs = [];
   for (const arg of args) {
     if (arg === "--json") {
       json = true;
+    } else if (arg === "--new-window") {
+      newWindow = true;
     } else {
       filteredArgs.push(arg);
     }
@@ -64510,7 +65135,7 @@ function parseTeamArgs(tokens) {
     throw new Error('Usage: omc team [N:agent-type] "<task description>"');
   }
   const teamName = slugifyTask(task);
-  return { workerCount, agentTypes, role, task, teamName, json };
+  return { workerCount, agentTypes, role, task, teamName, json, newWindow };
 }
 function sampleValueForField(field) {
   switch (field) {
@@ -64677,6 +65302,7 @@ async function handleTeamStart(parsed, cwd2) {
       agentTypes: parsed.agentTypes,
       tasks,
       cwd: cwd2,
+      newWindow: parsed.newWindow,
       ...rolePrompt ? { roleName: parsed.role, rolePrompt } : {}
     });
     const uniqueTypes = [...new Set(parsed.agentTypes)].join(",");
@@ -64707,7 +65333,8 @@ async function handleTeamStart(parsed, cwd2) {
     workerCount: parsed.workerCount,
     agentTypes: parsed.agentTypes,
     tasks,
-    cwd: cwd2
+    cwd: cwd2,
+    newWindow: parsed.newWindow
   });
   const uniqueTypesV1 = [...new Set(parsed.agentTypes)].join(",");
   if (parsed.json) {
@@ -67563,6 +68190,22 @@ program2.command("hud").description("Run the OMC HUD statusline renderer").optio
   } else {
     await hudMain();
   }
+});
+program2.command("mission-board").description("Render the opt-in mission board snapshot for the current workspace").option("--json", "Print raw mission-board JSON").action(async (options) => {
+  const { refreshMissionBoardState: refreshMissionBoardState2, renderMissionBoard: renderMissionBoard2 } = await Promise.resolve().then(() => (init_mission_board(), mission_board_exports));
+  const state = refreshMissionBoardState2(process.cwd());
+  if (options.json) {
+    console.log(JSON.stringify(state, null, 2));
+    return;
+  }
+  const lines = renderMissionBoard2(state, {
+    enabled: true,
+    maxMissions: 5,
+    maxAgentsPerMission: 8,
+    maxTimelineEvents: 8,
+    persistCompletedForMinutes: 20
+  });
+  console.log(lines.length > 0 ? lines.join("\n") : "(no active missions)");
 });
 program2.command("team").description("Team CLI API for worker lifecycle operations").helpOption(false).allowUnknownOption(true).allowExcessArguments(true).argument("[args...]", "team subcommand arguments").action(async (args) => {
   await teamCommand(args);

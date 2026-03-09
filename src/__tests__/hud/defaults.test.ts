@@ -23,6 +23,11 @@ describe('HUD Default Configuration', () => {
       expect(DEFAULT_HUD_CONFIG.elements.thinkingFormat).toBe('text');
     });
 
+    it('should keep mission board disabled by default', () => {
+      expect(DEFAULT_HUD_CONFIG.elements.missionBoard).toBe(false);
+      expect(DEFAULT_HUD_CONFIG.missionBoard?.enabled).toBe(false);
+    });
+
     it('should default wrapMode to truncate', () => {
       expect(DEFAULT_HUD_CONFIG.wrapMode).toBe('truncate');
     });

@@ -5,6 +5,7 @@
  */
 import type { AutopilotStateForHud } from './elements/autopilot.js';
 import type { ApiKeySource } from './elements/api-key-source.js';
+import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
 export type { AutopilotStateForHud, ApiKeySource };
 export interface BackgroundTask {
     id: string;
@@ -145,6 +146,8 @@ export interface UsageResult {
     rateLimits: RateLimits | null;
     /** Error reason when API call fails (undefined on success or no credentials) */
     error?: UsageErrorReason;
+    /** True when serving cached data that may be outdated (429 or lock contention) */
+    stale?: boolean;
 }
 /**
  * Custom rate limit provider configuration.
@@ -224,6 +227,8 @@ export interface HudRenderContext {
     backgroundTasks: BackgroundTask[];
     /** Working directory */
     cwd: string;
+    /** Mission-board snapshot (opt-in) */
+    missionBoard?: MissionBoardState | null;
     /** Last activated skill from transcript */
     lastSkill: SkillInvocation | null;
     /** Rate limits result from built-in Anthropic/z.ai providers (includes error state) */
@@ -315,6 +320,7 @@ export interface HudElementConfig {
     thinkingFormat: ThinkingFormat;
     apiKeySource: boolean;
     profile: boolean;
+    missionBoard?: boolean;
     promptTime: boolean;
     sessionHealth: boolean;
     showSessionDuration?: boolean;
@@ -347,6 +353,10 @@ export interface HudConfig {
     thresholds: HudThresholds;
     staleTaskThresholdMinutes: number;
     contextLimitWarning: ContextLimitWarningConfig;
+    /** Mission-board collection/rendering settings. */
+    missionBoard?: MissionBoardConfig;
+    /** Built-in usage API polling interval / success-cache TTL in milliseconds. */
+    usageApiPollIntervalMs: number;
     /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
     rateLimitsProvider?: RateLimitsProviderConfig;
     /** Optional maximum width (columns) for statusline output. */
@@ -354,6 +364,7 @@ export interface HudConfig {
     /** Controls maxWidth behavior: truncate with ellipsis (default) or wrap at " | " HUD element boundaries. */
     wrapMode?: 'truncate' | 'wrap';
 }
+export declare const DEFAULT_HUD_USAGE_POLL_INTERVAL_MS: number;
 export declare const DEFAULT_HUD_CONFIG: HudConfig;
 export declare const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>>;
 //# sourceMappingURL=types.d.ts.map

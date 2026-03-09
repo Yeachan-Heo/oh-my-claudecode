@@ -231,6 +231,66 @@ omc config-stop-callback discord --clear-tags
 - Slack：支持 `<@MEMBER_ID>`、`<!channel>`、`<!here>`、`<!everyone>`、`<!subteam^GROUP_ID>`
 - `file` 回调会忽略标签选项
 
+### OpenClaw 集成
+
+将 Claude Code 会话事件转发到 [OpenClaw](https://openclaw.ai/) 网关，通过您的 OpenClaw 代理实现自动化响应和工作流程。
+
+**快速设置（推荐）：**
+
+```bash
+/oh-my-claudecode:configure-notifications
+# → 提示时输入 "openclaw" → 选择 "OpenClaw Gateway"
+```
+
+**手动设置：** 创建 `~/.claude/omc_config.openclaw.json`：
+
+```json
+{
+  "enabled": true,
+  "gateways": {
+    "my-gateway": {
+      "url": "https://your-gateway.example.com/wake",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+      "method": "POST",
+      "timeout": 10000
+    }
+  },
+  "hooks": {
+    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
+    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+  }
+}
+```
+
+**环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `OMC_OPENCLAW=1` | 启用 OpenClaw |
+| `OMC_OPENCLAW_DEBUG=1` | 启用调试日志 |
+| `OMC_OPENCLAW_CONFIG=/path/to/config.json` | 覆盖配置文件路径 |
+
+**支持的钩子事件（bridge.ts 中 6 个活跃）：**
+
+| 事件 | 触发时机 | 主要模板变量 |
+|------|---------|-------------|
+| `session-start` | 会话开始时 | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop` | Claude 响应完成时 | `{{sessionId}}`, `{{projectName}}` |
+| `keyword-detector` | 每次提交提示词时 | `{{prompt}}`, `{{sessionId}}` |
+| `ask-user-question` | Claude 请求用户输入时 | `{{question}}`, `{{sessionId}}` |
+| `pre-tool-use` | 工具调用前（高频） | `{{toolName}}`, `{{sessionId}}` |
+| `post-tool-use` | 工具调用后（高频） | `{{toolName}}`, `{{sessionId}}` |
+
+**回复通道环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `OPENCLAW_REPLY_CHANNEL` | 回复通道（例如 `discord`） |
+| `OPENCLAW_REPLY_TARGET` | 频道 ID |
+| `OPENCLAW_REPLY_THREAD` | 线程 ID |
+
+参见 `scripts/openclaw-gateway-demo.mjs`，这是一个通过 ClawdBot 将 OpenClaw 有效载荷转发到 Discord 的参考网关。
+
 ---
 
 ## 文档

@@ -42,9 +42,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Build release note preamble
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md > release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          body_path: release-notes.md
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}

@@ -140,6 +140,32 @@ function findLineAnchoredMarker(content: string, marker: string, fromEnd: boolea
   }
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createLineAnchoredMarkerRegex(marker: string, flags: string = 'gm'): RegExp {
+  return new RegExp(`^${escapeRegex(marker)}$`, flags);
+}
+
+function stripGeneratedUserCustomizationHeaders(content: string): string {
+  return content.replace(
+    /^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm,
+    ''
+  );
+}
+
+function trimClaudeUserContent(content: string): string {
+  if (content.trim().length === 0) {
+    return '';
+  }
+
+  return content
+    .replace(/^(?:[ \t]*\r?\n)+/, '')
+    .replace(/(?:\r?\n[ \t]*)+$/, '')
+    .replace(/(?:\r?\n){3,}/g, '\n\n');
+}
+
 /** Installation result */
 export interface InstallResult {
   success: boolean;
@@ -489,6 +515,12 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
   const START_MARKER = '<!-- OMC:START -->';
   const END_MARKER = '<!-- OMC:END -->';
   const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
+  const OMC_BLOCK_PATTERN = new RegExp(
+    `^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`,
+    'gm'
+  );
+  const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
+  const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
 
   // Idempotency guard: strip markers from omcContent if already present
   // This handles the case where docs/CLAUDE.md ships with markers
@@ -511,27 +543,26 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
 
-  // Case 2: Existing content has both markers - replace content between markers
-  // Use line-anchored search to avoid matching markers inside code blocks
-  const startIndex = findLineAnchoredMarker(existingContent, START_MARKER);
-  const endIndex = findLineAnchoredMarker(existingContent, END_MARKER, true);
+  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
+  const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
+  const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
 
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    // Extract content before START_MARKER and after END_MARKER
-    const beforeMarker = existingContent.substring(0, startIndex);
-    const afterMarker = existingContent.substring(endIndex + END_MARKER.length);
-
-    return `${beforeMarker}${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}${afterMarker}`;
-  }
-
-  // Case 3: Corrupted markers (exactly one present, or both present but in wrong order)
-  if ((startIndex !== -1) !== (endIndex !== -1) || (startIndex !== -1 && endIndex !== -1 && endIndex < startIndex)) {
+  // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
+  if (hasResidualStartMarker || hasResidualEndMarker) {
     // Handle corrupted state - backup will be created by caller
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
   }
 
-  // Case 4: No markers - wrap omcContent in markers, preserve existing after user customizations header
-  return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
+  const preservedUserContent = trimClaudeUserContent(
+    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
+  );
+
+  if (!preservedUserContent) {
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
+  }
+
+  // Case 3: Preserve only user-authored content that lives outside OMC markers
+  return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${preservedUserContent}`;
 }
 
 /**
