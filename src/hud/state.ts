@@ -208,6 +208,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
       ...DEFAULT_HUD_CONFIG.contextLimitWarning,
       ...config.contextLimitWarning,
     },
+    usageApiPollIntervalMs: config.usageApiPollIntervalMs ?? DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
     ...(config.rateLimitsProvider ? { rateLimitsProvider: config.rateLimitsProvider } : {}),
     ...(config.maxWidth != null ? { maxWidth: config.maxWidth } : {}),
     ...(config.wrapMode != null ? { wrapMode: config.wrapMode } : {}),

@@ -444,6 +444,8 @@ export interface HudConfig {
   thresholds: HudThresholds;
   staleTaskThresholdMinutes: number; // Default 30
   contextLimitWarning: ContextLimitWarningConfig;
+  /** Built-in usage API polling interval / success-cache TTL in milliseconds. */
+  usageApiPollIntervalMs: number;
   /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
   rateLimitsProvider?: RateLimitsProviderConfig;
   /** Optional maximum width (columns) for statusline output. */
@@ -451,6 +453,8 @@ export interface HudConfig {
   /** Controls maxWidth behavior: truncate with ellipsis (default) or wrap at " | " HUD element boundaries. */
   wrapMode?: 'truncate' | 'wrap';
 }
+
+export const DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1000;
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
   preset: 'focused',
@@ -498,6 +502,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     threshold: 80,
     autoCompact: false,
   },
+  usageApiPollIntervalMs: DEFAULT_HUD_USAGE_POLL_INTERVAL_MS,
   wrapMode: 'truncate',
 };
 

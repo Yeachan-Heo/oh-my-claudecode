@@ -203,5 +203,22 @@ describe('readHudConfig', () => {
       expect(config.maxWidth).toBe(80);
       expect(config.wrapMode).toBe('wrap');
     });
+
+    it('merges usageApiPollIntervalMs from settings', () => {
+      mockExistsSync.mockImplementation((path) => {
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
+      });
+      mockReadFileSync.mockReturnValue(JSON.stringify({
+        omcHud: {
+          usageApiPollIntervalMs: 180_000,
+        }
+      }));
+
+      const config = readHudConfig();
+
+      expect(config.usageApiPollIntervalMs).toBe(180_000);
+      expect(config.maxWidth).toBe(DEFAULT_HUD_CONFIG.maxWidth);
+    });
   });
 });
