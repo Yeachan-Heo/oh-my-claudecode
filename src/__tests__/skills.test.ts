@@ -132,6 +132,22 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('Reviewer pass');
     });
 
+    it('should require explicit tmux prerequisite checks for omc-teams', () => {
+      const skill = getBuiltinSkill('omc-teams');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('command -v tmux >/dev/null 2>&1');
+      expect(skill?.template).toContain('Do **not** say tmux is missing');
+      expect(skill?.template).toContain('tmux capture-pane -pt <pane-id> -S -20');
+    });
+
+    it('should document allowed omc-teams agent types and native team fallback', () => {
+      const skill = getBuiltinSkill('omc-teams');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**');
+      expect(skill?.template).toContain('unsupported type such as `expert`');
+      expect(skill?.template).toContain('/oh-my-claudecode:team');
+    });
+
     it('should be case-insensitive', () => {
       const skillLower = getBuiltinSkill('autopilot');
       const skillUpper = getBuiltinSkill('AUTOPILOT');

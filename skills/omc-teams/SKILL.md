@@ -34,20 +34,43 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 
 ## Requirements
 
-- **tmux** must be running (`$TMUX` set in the current shell)
+- **tmux binary** must be installed and discoverable (`command -v tmux`)
+- **Active tmux session** required to launch worker panes (`$TMUX` set, or start/attach tmux first)
 - **claude** CLI: `npm install -g @anthropic-ai/claude-code`
 - **codex** CLI: `npm install -g @openai/codex`
 - **gemini** CLI: `npm install -g @google/gemini-cli`
 
 ## Workflow
 
-### Phase 1: Parse input
+### Phase 0: Verify prerequisites
+
+Check tmux explicitly before claiming it is missing:
+
+```bash
+command -v tmux >/dev/null 2>&1
+```
+
+- If this fails, report that **tmux is not installed** and stop.
+- If `tmux` exists but `$TMUX` is empty, report that the user is **not currently inside an active tmux session**. Do **not** say tmux is missing; tell them to start or attach tmux, then rerun.
+- If you need to confirm the active session, use:
+
+```bash
+tmux display-message -p '#S'
+```
+
+### Phase 1: Parse + validate input
 
 Extract:
 
 - `N` — worker count (1–10)
 - `agent-type` — `claude|codex|gemini`
 - `task` — task description
+
+Validate before decomposing or running anything:
+
+- Reject unsupported agent types up front. `/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**.
+- If the user asks for an unsupported type such as `expert`, explain that `/omc-teams` launches external CLI workers only.
+- For native Claude Code team agents/roles, direct them to **`/oh-my-claudecode:team`** instead.
 
 ### Phase 2: Decompose task
 
@@ -68,6 +91,15 @@ omc team <N>:<claude|codex|gemini> "<task>"
 ```
 
 Team name defaults to a slug from the task text (example: `review-auth-flow`).
+
+After launch, verify the command actually executed instead of assuming Enter fired. Check pane output and confirm the command or worker bootstrap text appears in pane history:
+
+```bash
+tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_current_command}'
+tmux capture-pane -pt <pane-id> -S -20
+```
+
+Do not claim the team started successfully unless pane output shows the command was submitted.
 
 ### Phase 4: Monitor + lifecycle API
 
@@ -111,6 +143,7 @@ If encountered, switch to `omc team ...` CLI commands.
 | Error                        | Cause                               | Fix                                                                                 |
 | ---------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
 | `not inside tmux`            | Shell not running inside tmux       | Start tmux and rerun                                                                |
+| `Unsupported agent type`     | Requested agent is not claude/codex/gemini | Use `claude`, `codex`, or `gemini`; for native Claude Code agents use `/oh-my-claudecode:team` |
 | `codex: command not found`   | Codex CLI not installed             | `npm install -g @openai/codex`                                                      |
 | `gemini: command not found`  | Gemini CLI not installed            | `npm install -g @google/gemini-cli`                                                 |
 | `Team <name> is not running` | stale or missing runtime state      | `omc team status <team-name>` then `omc team shutdown <team-name> --force` if stale |
