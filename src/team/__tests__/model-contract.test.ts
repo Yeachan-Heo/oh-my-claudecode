@@ -131,6 +131,21 @@ describe('model-contract', () => {
       expect(args).toContain('--model');
       expect(args).toContain('gpt-4');
     });
+    it('normalizes full Claude model ID to alias for claude agent (issue #1415)', () => {
+      const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'claude-sonnet-4-6' });
+      expect(args).toContain('--model');
+      expect(args).toContain('sonnet');
+      expect(args).not.toContain('claude-sonnet-4-6');
+    });
+    it('normalizes Bedrock model ID to alias for claude agent (issue #1415)', () => {
+      const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'us.anthropic.claude-opus-4-6-v1:0' });
+      expect(args).toContain('--model');
+      expect(args).toContain('opus');
+    });
+    it('does not normalize non-Claude models for codex/gemini agents', () => {
+      const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4o' });
+      expect(args).toContain('gpt-4o');
+    });
   });
 
   describe('getWorkerEnv', () => {

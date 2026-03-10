@@ -18,6 +18,19 @@ import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveClaudeFamily } from '../config/models.js';
 
+/** Map Claude model family to CC-supported alias */
+const FAMILY_TO_ALIAS: Record<string, string> = {
+  SONNET: 'sonnet',
+  OPUS: 'opus',
+  HAIKU: 'haiku',
+};
+
+/** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku) if possible */
+export function normalizeToCcAlias(model: string): string {
+  const family = resolveClaudeFamily(model);
+  return family ? (FAMILY_TO_ALIAS[family] ?? model) : model;
+}
+
 /**
  * Agent input structure from Claude Agent SDK
  */
@@ -80,13 +93,16 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
     };
   }
 
-  // If model is already specified, return as-is (but canonicalize alias names)
+  // If model is already specified, normalize it to CC-supported aliases
+  // before passing through. Full IDs like 'claude-sonnet-4-6' cause 400
+  // errors on Bedrock/Vertex. (issue #1415)
   if (agentInput.model) {
+    const normalizedModel = normalizeToCcAlias(agentInput.model);
     return {
       originalInput: agentInput,
-      modifiedInput: { ...agentInput, subagent_type: canonicalSubagentType },
+      modifiedInput: { ...agentInput, subagent_type: canonicalSubagentType, model: normalizedModel },
       injected: false,
-      model: agentInput.model,
+      model: normalizedModel,
     };
   }
 
@@ -128,17 +144,8 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   }
 
   // Normalize model to Claude Code's supported aliases (sonnet/opus/haiku).
-  // The config may resolve to full model IDs like 'claude-sonnet-4-6' or
-  // Bedrock IDs like 'us.anthropic.claude-sonnet-4-6-v1:0', but Claude Code's
-  // subagent system only accepts 'sonnet', 'opus', 'haiku', or 'inherit'.
-  // Passing full IDs causes 400 errors on Bedrock/Vertex. (issue #1201)
-  const FAMILY_TO_ALIAS: Record<string, string> = {
-    SONNET: 'sonnet',
-    OPUS: 'opus',
-    HAIKU: 'haiku',
-  };
-  const family = resolveClaudeFamily(resolvedModel);
-  const normalizedModel = family ? (FAMILY_TO_ALIAS[family] ?? resolvedModel) : resolvedModel;
+  // Full IDs cause 400 errors on Bedrock/Vertex. (issue #1201, #1415)
+  const normalizedModel = normalizeToCcAlias(resolvedModel);
 
   const modifiedInput: AgentInput = {
     ...agentInput,
@@ -226,11 +233,5 @@ export function getModelForAgent(agentType: string): string {
   }
 
   // Normalize to CC-supported aliases (sonnet/opus/haiku)
-  const FAMILY_TO_ALIAS: Record<string, string> = {
-    SONNET: 'sonnet',
-    OPUS: 'opus',
-    HAIKU: 'haiku',
-  };
-  const family = resolveClaudeFamily(agentDef.model);
-  return family ? (FAMILY_TO_ALIAS[family] ?? agentDef.model) : agentDef.model;
+  return normalizeToCcAlias(agentDef.model);
 }
