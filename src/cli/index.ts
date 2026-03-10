@@ -1422,8 +1422,10 @@ program
     const { main: hudMain } = await import('../hud/index.js');
     if (options.watch) {
       const intervalMs = parseInt(options.interval, 10);
+      let skipInit = false;
       while (true) {
-        await hudMain(true);
+        await hudMain(true, skipInit);
+        skipInit = true;
         await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
       }
     } else {

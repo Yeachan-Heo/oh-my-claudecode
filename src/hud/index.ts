@@ -69,10 +69,12 @@ async function calculateSessionHealth(
  * Main HUD entry point
  * @param watchMode - true when called from the --watch polling loop (stdin is TTY)
  */
-async function main(watchMode = false): Promise<void> {
+async function main(watchMode = false, skipInit = false): Promise<void> {
   try {
     // Initialize HUD state (cleanup stale/orphaned tasks)
-    await initializeHUDState();
+    if (!skipInit) {
+      await initializeHUDState();
+    }
 
     // Read stdin from Claude Code
     let stdin = await readStdin();
