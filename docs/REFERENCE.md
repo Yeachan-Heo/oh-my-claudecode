@@ -748,7 +748,7 @@ To manually update, re-run the plugin install command or use Claude Code's built
 Use Claude Code's plugin management:
 
 ```
-/plugin uninstall claude-hud
+/plugin uninstall oh-my-claudecode@oh-my-claudecode
 ```
 
 Or manually remove the installed files:
