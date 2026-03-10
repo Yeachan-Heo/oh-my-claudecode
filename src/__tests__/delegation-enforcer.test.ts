@@ -43,7 +43,7 @@ describe('delegation-enforcer', () => {
   });
 
   describe('enforceModel', () => {
-    it('preserves explicitly specified model', () => {
+    it('preserves explicitly specified model (already an alias)', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
@@ -55,7 +55,34 @@ describe('delegation-enforcer', () => {
 
       expect(result.injected).toBe(false);
       expect(result.modifiedInput.model).toBe('haiku');
-      expect(result.modifiedInput).toEqual(input);
+    });
+
+    it('normalizes explicit full model ID to CC alias (issue #1415)', () => {
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'oh-my-claudecode:executor',
+        model: 'claude-sonnet-4-6'
+      };
+
+      const result = enforceModel(input);
+
+      expect(result.injected).toBe(false);
+      expect(result.modifiedInput.model).toBe('sonnet');
+    });
+
+    it('normalizes explicit Bedrock model ID to CC alias (issue #1415)', () => {
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'oh-my-claudecode:executor',
+        model: 'us.anthropic.claude-sonnet-4-6-v1:0'
+      };
+
+      const result = enforceModel(input);
+
+      expect(result.injected).toBe(false);
+      expect(result.modifiedInput.model).toBe('sonnet');
     });
 
     it('injects model from agent definition when not specified', () => {

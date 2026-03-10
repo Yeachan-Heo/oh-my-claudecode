@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process';
 import { isAbsolute, normalize, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
+import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
 
@@ -155,7 +156,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     installInstructions: 'Install Claude CLI: https://claude.ai/download',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--dangerously-skip-permissions'];
-      if (model) args.push('--model', model);
+      if (model) args.push('--model', normalizeToCcAlias(model));
       return [...args, ...extraFlags];
     },
     parseOutput(rawOutput: string): string {
