@@ -562,8 +562,8 @@ stopomc
 | Platform    | Install Method              | Hook Type      |
 | ----------- | --------------------------- | -------------- |
 | **Windows** | WSL2 recommended (see note) | Node.js (.mjs) |
-| **macOS**   | curl or npm                 | Bash (.sh)     |
-| **Linux**   | curl or npm                 | Bash (.sh)     |
+| **macOS**   | Claude Code Plugin          | Bash (.sh)     |
+| **Linux**   | Claude Code Plugin          | Bash (.sh)     |
 
 > **Note**: Bash hooks are fully portable across macOS and Linux (no GNU-specific dependencies).
 
@@ -745,11 +745,13 @@ To manually update, re-run the plugin install command or use Claude Code's built
 
 ### Uninstall
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/scripts/uninstall.sh | bash
+Use Claude Code's plugin management:
+
+```
+/plugin uninstall claude-hud
 ```
 
-Or manually:
+Or manually remove the installed files:
 
 ```bash
 rm ~/.claude/agents/{architect,document-specialist,explore,designer,writer,vision,critic,analyst,executor,qa-tester}.md

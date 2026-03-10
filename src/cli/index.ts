@@ -7,26 +7,19 @@
  *
  * Commands:
  * - run: Start an interactive session
- * - init: Initialize configuration in current directory
  * - config: Show or edit configuration
  * - setup: Sync all OMC components (hooks, agents, skills)
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
   loadConfig,
   getConfigPaths,
-  generateConfigSchema
 } from '../config/loader.js';
-import {
-  getDefaultModelHigh,
-  getDefaultModelMedium,
-  getDefaultModelLow,
-} from '../config/models.js';
 import { createOmcSession } from '../index.js';
 import {
   checkForUpdates,
@@ -149,182 +142,6 @@ program
   .addHelpText('after', `\n${ASK_USAGE}`)
   .action(async (args: string[]) => {
     await askCommand(args || []);
-  });
-
-/**
- * Init command - Initialize configuration
- */
-program
-  .command('init')
-  .description('Initialize OMC configuration in the current directory')
-  .option('-g, --global', 'Initialize global user configuration')
-  .option('-f, --force', 'Overwrite existing configuration')
-  .addHelpText('after', `
-Examples:
-  $ omc init                     Initialize in current directory
-  $ omc init --global            Initialize global configuration
-  $ omc init --force             Overwrite existing config`)
-  .action(async (options) => {
-    console.log(chalk.yellow('⚠️  DEPRECATED: The init command is deprecated.'));
-    console.log(chalk.gray('Configuration is now managed automatically. Use /oh-my-claudecode:omc-setup instead.\n'));
-
-    const paths = getConfigPaths();
-    const targetPath = options.global ? paths.user : paths.project;
-    const targetDir = dirname(targetPath);
-
-    console.log(chalk.blue('Oh-My-ClaudeCode Configuration Setup\n'));
-
-    // Check if config already exists
-    if (existsSync(targetPath) && !options.force) {
-      console.log(chalk.yellow(`Configuration already exists at ${targetPath}`));
-      console.log(chalk.gray('Use --force to overwrite'));
-      return;
-    }
-
-    // Create directory if needed
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-      console.log(chalk.green(`Created directory: ${targetDir}`));
-    }
-
-    // Resolve current default model IDs (respects OMC_MODEL_* env vars)
-    const modelHigh = getDefaultModelHigh();
-    const modelMedium = getDefaultModelMedium();
-    const modelLow = getDefaultModelLow();
-
-    // Generate config content
-    const configContent = `// Oh-My-ClaudeCode Configuration
-// See: https://github.com/Yeachan-Heo/oh-my-claudecode for documentation
-//
-// Model IDs can be overridden via environment variables:
-//   OMC_MODEL_HIGH   (opus-class)
-//   OMC_MODEL_MEDIUM (sonnet-class)
-//   OMC_MODEL_LOW    (haiku-class)
-{
-  "$schema": "./omc-schema.json",
-
-  // Agent model configurations
-  "agents": {
-    "omc": {
-      // Main orchestrator - uses the most capable model
-      "model": "${modelHigh}"
-    },
-    "explore": {
-      // Fast pattern matching - uses fastest model
-      "model": "${modelLow}"
-    },
-    "analyst": {
-      // Requirements analysis and acceptance criteria
-      "model": "${modelHigh}"
-    },
-    "planner": {
-      // Strategic task sequencing and execution plans
-      "model": "${modelHigh}"
-    },
-    "architect": {
-      // System design, boundaries, interfaces
-      "model": "${modelHigh}"
-    },
-    "debugger": {
-      // Root-cause analysis, regression isolation
-      "model": "${modelMedium}"
-    },
-    "executor": {
-      // Code implementation, refactoring
-      "model": "${modelMedium}"
-    },
-    "verifier": {
-      // Completion evidence, claim validation
-      "model": "${modelMedium}"
-    },
-    "critic": {
-      // Plan/design critical challenge
-      "model": "${modelHigh}"
-    },
-    "writer": {
-      // Docs, migration notes, user guidance
-      "model": "${modelLow}"
-    }
-  },
-
-  // Feature toggles
-  "features": {
-    "parallelExecution": true,
-    "lspTools": true,
-    "astTools": true,
-    "continuationEnforcement": true,
-    "autoContextInjection": true
-  },
-
-  // MCP server integrations
-  "mcpServers": {
-    "exa": {
-      "enabled": true
-      // Set EXA_API_KEY environment variable for API key
-    },
-    "context7": {
-      "enabled": true
-    }
-  },
-
-  // Permission settings
-  "permissions": {
-    "allowBash": true,
-    "allowEdit": true,
-    "allowWrite": true,
-    "maxBackgroundTasks": 5
-  },
-
-  // Magic keyword triggers (customize if desired)
-  "magicKeywords": {
-    "ultrawork": ["ultrawork", "ulw", "uw"],
-    "search": ["search", "find", "locate"],
-    "analyze": ["analyze", "investigate", "examine"]
-  }
-}
-`;
-
-    writeFileSync(targetPath, configContent);
-    console.log(chalk.green(`Created configuration: ${targetPath}`));
-
-    // Also create the JSON schema for editor support
-    const schemaPath = join(targetDir, 'omc-schema.json');
-    writeFileSync(schemaPath, JSON.stringify(generateConfigSchema(), null, 2));
-    console.log(chalk.green(`Created JSON schema: ${schemaPath}`));
-
-    console.log(chalk.blue('\nSetup complete!'));
-    console.log(chalk.gray('Edit the configuration file to customize your setup.'));
-
-    // Create AGENTS.md template if it doesn't exist
-    const agentsMdPath = join(process.cwd(), 'AGENTS.md');
-    if (!existsSync(agentsMdPath) && !options.global) {
-      const agentsMdContent = `# Project Agents Configuration
-
-This file provides context and instructions to AI agents working on this project.
-
-## Project Overview
-
-<!-- Describe your project here -->
-
-## Architecture
-
-<!-- Describe the architecture and key components -->
-
-## Conventions
-
-<!-- List coding conventions, naming patterns, etc. -->
-
-## Important Files
-
-<!-- List key files agents should know about -->
-
-## Common Tasks
-
-<!-- Describe common development tasks and how to perform them -->
-`;
-      writeFileSync(agentsMdPath, agentsMdContent);
-      console.log(chalk.green(`Created AGENTS.md template`));
-    }
   });
 
 /**
