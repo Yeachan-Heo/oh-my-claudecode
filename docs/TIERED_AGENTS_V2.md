@@ -199,8 +199,9 @@ Output escalation recommendation:
 | document-specialist | Sonnet | Same | Comprehensive research |
 
 **Shared Constraints**:
-- ALWAYS cite sources with URLs
-- Prefer official docs
+- Check repo docs first when the question is project-specific
+- ALWAYS cite sources with URLs (or stable curated-doc IDs when a URL is unavailable)
+- Prefer Context Hub / `chub` (or another curated docs backend already configured) for external API/framework correctness when available, then official docs
 - Note version compatibility
 - Flag outdated information
 

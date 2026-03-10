@@ -7,41 +7,64 @@
  * Ported from oh-my-opencode's document specialist agent.
  */
 
-import type { AgentConfig, AgentPromptMetadata } from './types.js';
-import { loadAgentPrompt } from './utils.js';
+import type { AgentConfig, AgentPromptMetadata } from "./types.js";
+import { loadAgentPrompt } from "./utils.js";
 
 export const DOCUMENT_SPECIALIST_PROMPT_METADATA: AgentPromptMetadata = {
-  category: 'exploration',
-  cost: 'CHEAP',
-  promptAlias: 'document-specialist',
+  category: "exploration",
+  cost: "CHEAP",
+  promptAlias: "document-specialist",
   triggers: [
-    { domain: 'External documentation', trigger: 'API references, official docs' },
-    { domain: 'OSS implementations', trigger: 'GitHub examples, package source' },
-    { domain: 'Best practices', trigger: 'Community patterns, recommendations' },
-    { domain: 'Literature and reference research', trigger: 'Academic papers, manuals, reference databases' },
+    {
+      domain: "Project documentation",
+      trigger: "README, docs/, migration guides, local references",
+    },
+    {
+      domain: "External documentation",
+      trigger: "API references, official docs",
+    },
+    {
+      domain: "API/framework correctness",
+      trigger:
+        "Context Hub / chub first when available; curated backend fallback otherwise",
+    },
+    {
+      domain: "OSS implementations",
+      trigger: "GitHub examples, package source",
+    },
+    {
+      domain: "Best practices",
+      trigger: "Community patterns, recommendations",
+    },
+    {
+      domain: "Literature and reference research",
+      trigger: "Academic papers, manuals, reference databases",
+    },
   ],
   useWhen: [
-    'Looking up official documentation',
-    'Finding GitHub examples',
-    'Researching npm/pip packages',
-    'Stack Overflow solutions',
-    'External API references',
-    'Searching external literature or academic papers',
-    'Looking up manuals, databases, or reference material outside the current project',
+    "Checking README/docs/local reference files before broader research",
+    "Looking up official documentation",
+    "Using Context Hub / chub (or another curated docs backend) for external API/framework correctness when available",
+    "Finding GitHub examples",
+    "Researching npm/pip packages",
+    "Stack Overflow solutions",
+    "External API references",
+    "Searching external literature or academic papers",
+    "Looking up manuals, databases, or reference material outside the current project",
   ],
   avoidWhen: [
-    'Internal codebase search (use explore)',
-    'Current project files (use explore)',
-    'When you already have the information',
+    "Internal codebase implementation search (use explore)",
+    "Current project source files when the task is code discovery rather than documentation lookup (use explore)",
+    "When you already have the information",
   ],
 };
 
-
 export const documentSpecialistAgent: AgentConfig = {
-  name: 'document-specialist',
-  description: 'Document Specialist for documentation research and external reference finding. Use for official docs, GitHub examples, OSS implementations, API references, external literature, academic papers, and reference/database lookups. Searches EXTERNAL resources, not internal codebase.',
-  prompt: loadAgentPrompt('document-specialist'),
-  model: 'sonnet',
-  defaultModel: 'sonnet',
-  metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
+  name: "document-specialist",
+  description:
+    "Document Specialist for documentation research and reference finding. Use for local repo docs, official docs, Context Hub / chub or other curated docs backends for API/framework correctness, GitHub examples, OSS implementations, external literature, academic papers, and reference/database lookups. Avoid internal implementation search; use explore for code discovery.",
+  prompt: loadAgentPrompt("document-specialist"),
+  model: "sonnet",
+  defaultModel: "sonnet",
+  metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA,
 };

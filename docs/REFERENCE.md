@@ -299,7 +299,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | UI component                 | `designer`                    | sonnet |
 | Complex UI system            | `designer-high`               | opus   |
 | Write docs/comments          | `writer`                      | haiku  |
-| Research docs/APIs           | `document-specialist`         | sonnet |
+| Research docs/APIs           | `document-specialist` (repo docs first; optional Context Hub / `chub`) | sonnet |
 | Analyze images/diagrams      | `vision`                      | sonnet |
 | Strategic planning           | `planner`                     | opus   |
 | Review/critique plan         | `critic`                      | opus   |
