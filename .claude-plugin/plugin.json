@@ -1,12 +1,12 @@
 {
-  "name": "oh-my-claudecode",
+  "name": "oh-my-openagent",
   "version": "4.7.9",
   "description": "Multi-agent orchestration system for Claude Code",
   "author": {
-    "name": "oh-my-claudecode contributors"
+    "name": "oh-my-openagent contributors"
   },
-  "repository": "https://github.com/Yeachan-Heo/oh-my-claudecode",
-  "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode",
+  "repository": "https://github.com/Yeachan-Heo/oh-my-openagent",
+  "homepage": "https://github.com/Yeachan-Heo/oh-my-openagent",
   "license": "MIT",
   "keywords": [
     "claude-code",

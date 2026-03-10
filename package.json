@@ -1,7 +1,7 @@
 {
-  "name": "oh-my-claude-sisyphus",
+  "name": "oh-my-openagent",
   "version": "4.7.9",
-  "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
+  "description": "Multi-agent orchestration system for Claude Code",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,9 +12,9 @@
     }
   },
   "bin": {
-    "oh-my-claudecode": "bridge/cli.cjs",
-    "omc": "bridge/cli.cjs",
-    "omc-cli": "bridge/cli.cjs"
+    "oh-my-openagent": "bridge/cli.cjs",
+    "oma": "bridge/cli.cjs",
+    "oma-cli": "bridge/cli.cjs"
   },
   "files": [
     "dist",
@@ -99,11 +99,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Yeachan-Heo/oh-my-claudecode.git"
+    "url": "git+https://github.com/Yeachan-Heo/oh-my-openagent.git"
   },
-  "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode#readme",
+  "homepage": "https://github.com/Yeachan-Heo/oh-my-openagent#readme",
   "bugs": {
-    "url": "https://github.com/Yeachan-Heo/oh-my-claudecode/issues"
+    "url": "https://github.com/Yeachan-Heo/oh-my-openagent/issues"
   },
   "author": "Yeachan Heo",
   "license": "MIT",
@@ -114,8 +114,8 @@
     "agent",
     "multi-agent",
     "orchestration",
-    "omc",
-    "claudecode",
+    "openagent",
+    "oma",
     "anthropic",
     "llm"
   ],
