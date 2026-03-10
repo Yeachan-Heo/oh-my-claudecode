@@ -11,6 +11,10 @@ nul
 NUL
 .omx/
 .env
+
+# Local root-level script output
+/done.json
+/farewell.txt
 benchmarks/harsh-critic/results/
 benchmarks/harsh-critic/scoring/*.js
 benchmarks/harsh-critic/scoring/*.d.ts
