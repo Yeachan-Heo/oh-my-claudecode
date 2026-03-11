@@ -126,6 +126,14 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
       expect(chmodLine).toContain("==='win32'");
     });
 
+    it('hud SKILL.md keeps Unix statusLine guidance portable while preserving Windows-safe paths', () => {
+      const content = readFileSync(join(REPO_ROOT, 'skills', 'hud', 'SKILL.md'), 'utf-8');
+      expect(content).toContain('"command": "node $HOME/.claude/hud/omc-hud.mjs"');
+      expect(content).toContain('"command": "node C:/Users/username/.claude/hud/omc-hud.mjs"');
+      expect(content).not.toContain('"command": "node /home/username/.claude/hud/omc-hud.mjs"');
+      expect(content).not.toContain('The command must use an absolute path, not `~`');
+    });
+
     it("omc-setup version-detect script uses v==='' not !v", () => {
       const setupDir = join(REPO_ROOT, 'skills', 'omc-setup');
       const files = [
