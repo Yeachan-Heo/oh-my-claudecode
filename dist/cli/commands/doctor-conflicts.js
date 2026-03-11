@@ -223,7 +223,12 @@ export function checkConfigIssues() {
     }
     try {
         const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-        // Known top-level fields from PluginConfig type
+        // Known top-level fields from the current config surfaces:
+        // - PluginConfig (src/shared/types.ts)
+        // - OMCConfig (src/features/auto-update.ts)
+        // - direct .omc-config.json readers/writers (notifications, auto-invoke,
+        //   delegation enforcement, omc-setup team config)
+        // - preserved legacy compatibility keys that still appear in user configs
         const knownFields = new Set([
             // PluginConfig fields
             'agents',
@@ -245,7 +250,16 @@ export function checkConfigIssues() {
             'setupVersion',
             'stopHookCallbacks',
             'notifications',
+            'notificationProfiles',
+            'hudEnabled',
             'autoUpgradePrompt',
+            'nodeBinary',
+            // Direct config readers / writers outside OMCConfig
+            'customIntegrations',
+            'delegationEnforcementLevel',
+            'enforcementLevel',
+            'autoInvoke',
+            'team',
         ]);
         for (const field of Object.keys(config)) {
             if (!knownFields.has(field)) {

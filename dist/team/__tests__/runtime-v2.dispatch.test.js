@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 import { tmpdir } from 'os';
@@ -81,10 +81,11 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(requests[0]?.status).toBe('notified');
         expect(requests[0]?.inbox_correlation_key).toBe('startup:worker-1:1');
         expect(requests[0]?.trigger_message).toContain('.omc/state/team/dispatch-team/workers/worker-1/inbox.md');
+        expect(requests[0]?.trigger_message).toContain('start work now');
         const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
         const inbox = await readFile(inboxPath, 'utf-8');
         expect(inbox).toContain('Dispatch test');
-        expect(mocks.sendToWorker).toHaveBeenCalledWith('dispatch-session', '%2', expect.stringContaining('.omc/state/team/dispatch-team/workers/worker-1/inbox.md'));
+        expect(mocks.sendToWorker).toHaveBeenCalledWith('dispatch-session', '%2', expect.stringContaining('concrete progress'));
         expect(mocks.spawnWorkerInPane).toHaveBeenCalledWith('dispatch-session', '%2', expect.objectContaining({
             envVars: expect.objectContaining({
                 OMC_TEAM_WORKER: 'dispatch-team/worker-1',
@@ -139,6 +140,98 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(requests).toHaveLength(1);
         expect(requests[0]?.status).toBe('failed');
         expect(requests[0]?.last_reason).toBe('worker_notify_failed');
+    });
+    it('requires Claude startup evidence beyond the initial notify and retries once before failing', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-missing-'));
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify Claude startup evidence gate' }],
+            cwd,
+        });
+        expect(runtime.config.workers[0]?.pane_id).toBe('%2');
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(2);
+        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.status).toBe('notified');
+    });
+    it('does not treat ACK-only mailbox replies as Claude startup evidence', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-ack-'));
+        mocks.sendToWorker.mockImplementation(async () => {
+            const mailboxDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'mailbox');
+            await mkdir(mailboxDir, { recursive: true });
+            await writeFile(join(mailboxDir, 'leader-fixed.json'), JSON.stringify({
+                worker: 'leader-fixed',
+                messages: [{
+                        message_id: 'msg-1',
+                        from_worker: 'worker-1',
+                        to_worker: 'leader-fixed',
+                        body: 'ACK: worker-1 initialized',
+                        created_at: new Date().toISOString(),
+                    }],
+            }, null, 2), 'utf-8');
+            return true;
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify Claude mailbox ack evidence' }],
+            cwd,
+        });
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(2);
+    });
+    it('accepts Claude startup once the worker claims the task', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-claim-'));
+        mocks.sendToWorker.mockImplementation(async () => {
+            const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
+            const taskPath = join(taskDir, 'task-1.json');
+            const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
+            await writeFile(taskPath, JSON.stringify({
+                ...existing,
+                status: 'in_progress',
+                owner: 'worker-1',
+            }, null, 2), 'utf-8');
+            return true;
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify Claude claim evidence' }],
+            cwd,
+        });
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+    });
+    it('accepts Claude startup once worker status shows task progress', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-status-'));
+        mocks.sendToWorker.mockImplementation(async () => {
+            const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+            await mkdir(workerDir, { recursive: true });
+            await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+                state: 'working',
+                current_task_id: '1',
+                updated_at: new Date().toISOString(),
+            }, null, 2), 'utf-8');
+            return true;
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify Claude status evidence' }],
+            cwd,
+        });
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
     });
 });
 //# sourceMappingURL=runtime-v2.dispatch.test.js.map

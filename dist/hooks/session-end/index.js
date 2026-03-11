@@ -217,6 +217,75 @@ export function cleanupTransientState(directory) {
         }
     };
     removeTmpFiles(omcDir);
+    // Remove transient state files that accumulate across sessions
+    const stateDir = path.join(omcDir, 'state');
+    if (fs.existsSync(stateDir)) {
+        const transientPatterns = [
+            /^agent-replay-.*\.jsonl$/,
+            /^last-tool-error\.json$/,
+            /^hud-state\.json$/,
+            /^hud-stdin-cache\.json$/,
+            /^idle-notif-cooldown\.json$/,
+            /^.*-stop-breaker\.json$/,
+        ];
+        try {
+            const stateFiles = fs.readdirSync(stateDir);
+            for (const file of stateFiles) {
+                if (transientPatterns.some(p => p.test(file))) {
+                    try {
+                        fs.unlinkSync(path.join(stateDir, file));
+                        filesRemoved++;
+                    }
+                    catch (_error) {
+                        // Ignore removal errors
+                    }
+                }
+            }
+        }
+        catch (_error) {
+            // Ignore errors
+        }
+        // Clean up cancel signal files and empty session directories
+        const sessionsDir = path.join(stateDir, 'sessions');
+        if (fs.existsSync(sessionsDir)) {
+            try {
+                const sessionDirs = fs.readdirSync(sessionsDir);
+                for (const sid of sessionDirs) {
+                    const sessionDir = path.join(sessionsDir, sid);
+                    try {
+                        const stat = fs.statSync(sessionDir);
+                        if (!stat.isDirectory())
+                            continue;
+                        const sessionFiles = fs.readdirSync(sessionDir);
+                        for (const file of sessionFiles) {
+                            if (/^cancel-signal/.test(file) || /stop-breaker/.test(file)) {
+                                try {
+                                    fs.unlinkSync(path.join(sessionDir, file));
+                                    filesRemoved++;
+                                }
+                                catch (_error) { /* ignore */ }
+                            }
+                        }
+                        // Remove empty session directories
+                        const remaining = fs.readdirSync(sessionDir);
+                        if (remaining.length === 0) {
+                            try {
+                                fs.rmdirSync(sessionDir);
+                                filesRemoved++;
+                            }
+                            catch (_error) { /* ignore */ }
+                        }
+                    }
+                    catch (_error) {
+                        // Ignore per-session errors
+                    }
+                }
+            }
+            catch (_error) {
+                // Ignore errors
+            }
+        }
+    }
     return filesRemoved;
 }
 /**

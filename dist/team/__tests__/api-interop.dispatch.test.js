@@ -90,5 +90,36 @@ describe('team api dispatch-aware messaging', () => {
         expect(typeof requests[0]?.notified_at).toBe('string');
         expect(typeof requests[0]?.delivered_at).toBe('string');
     });
+    it('uses OMC_TEAM_STATE_ROOT placeholder in mailbox triggers for worktree-backed workers', async () => {
+        const configPath = join(cwd, '.omc', 'state', 'team', teamName, 'config.json');
+        await writeFile(configPath, JSON.stringify({
+            name: teamName,
+            task: 'dispatch',
+            agent_type: 'executor',
+            worker_count: 1,
+            max_workers: 20,
+            tmux_session: 'dispatch-session',
+            workers: [{
+                    name: 'worker-1',
+                    index: 1,
+                    role: 'executor',
+                    assigned_tasks: [],
+                    worktree_path: join(cwd, '.omc', 'worktrees', teamName, 'worker-1'),
+                }],
+            created_at: '2026-03-06T00:00:00.000Z',
+            next_task_id: 2,
+        }, null, 2));
+        const sendResult = await executeTeamApiOperation('send-message', {
+            team_name: teamName,
+            from_worker: 'leader-fixed',
+            to_worker: 'worker-1',
+            body: 'Please continue',
+        }, cwd);
+        expect(sendResult.ok).toBe(true);
+        const requests = await listDispatchRequests(teamName, cwd, { kind: 'mailbox', to_worker: 'worker-1' });
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.trigger_message).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/mailbox/worker-1.json');
+        expect(requests[0]?.trigger_message).toContain('report progress');
+    });
 });
 //# sourceMappingURL=api-interop.dispatch.test.js.map

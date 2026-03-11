@@ -395,5 +395,41 @@ describe('getUsage routing', () => {
         expect(writtenCache.rateLimitedUntil - writtenCache.timestamp).toBe(300_000);
         vi.useRealTimers();
     });
+    it('reuses transient network failure cache to avoid immediate retry hammering without stale data', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));
+        process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+        process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+        const mockedExistsSync = vi.mocked(fs.existsSync);
+        const mockedReadFileSync = vi.mocked(fs.readFileSync);
+        mockedExistsSync.mockImplementation((path) => {
+            const file = String(path);
+            return file.endsWith('settings.json') || file.endsWith('.usage-cache.json');
+        });
+        mockedReadFileSync.mockImplementation((path) => {
+            const file = String(path);
+            if (file.endsWith('settings.json')) {
+                return JSON.stringify({
+                    omcHud: {
+                        usageApiPollIntervalMs: 60_000,
+                    },
+                });
+            }
+            if (file.endsWith('.usage-cache.json')) {
+                return JSON.stringify({
+                    timestamp: Date.now() - 90_000,
+                    source: 'zai',
+                    data: null,
+                    error: true,
+                    errorReason: 'network',
+                });
+            }
+            return '{}';
+        });
+        const result = await getUsage();
+        expect(result).toEqual({ rateLimits: null, error: 'network' });
+        expect(httpsModule.default.request).not.toHaveBeenCalled();
+        vi.useRealTimers();
+    });
 });
 //# sourceMappingURL=usage-api.test.js.map

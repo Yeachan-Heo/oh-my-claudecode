@@ -5,6 +5,7 @@
  *
  * Adapted from oh-my-opencode's builtin-skills feature.
  */
+import type { SkillPipelineMetadata } from '../../utils/skill-pipeline.js';
 /**
  * Configuration for MCP server integration with a skill
  */
@@ -49,6 +50,8 @@ export interface BuiltinSkill {
     subtask?: boolean;
     /** Hint for arguments (optional) */
     argumentHint?: string;
+    /** Optional skill-to-skill pipeline metadata */
+    pipeline?: SkillPipelineMetadata;
     /** MCP server configuration (optional) */
     mcpConfig?: SkillMcpConfig;
 }

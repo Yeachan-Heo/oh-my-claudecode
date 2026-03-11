@@ -183,7 +183,7 @@ const waitSchema = z.object({
     timeout_ms: z.number().optional().describe('Maximum wait time in ms (default: 300000, max: 3600000)'),
     nudge_delay_ms: z.number().optional().describe('Milliseconds a pane must be idle before nudging (default: 30000)'),
     nudge_max_count: z.number().optional().describe('Maximum nudges per pane (default: 3)'),
-    nudge_message: z.string().optional().describe('Message sent as nudge (default: "Continue working on your assigned task.")'),
+    nudge_message: z.string().optional().describe('Message sent as nudge (default: "Continue working on your assigned task and report concrete progress (not ACK-only).")'),
 });
 const cleanupSchema = z.object({
     job_id: z.string().describe('Job ID returned by omc_run_team_start'),
@@ -426,7 +426,7 @@ const TOOLS = [
                 timeout_ms: { type: 'number', description: 'Maximum wait time in ms (default: 300000, max: 3600000)' },
                 nudge_delay_ms: { type: 'number', description: 'Milliseconds a pane must be idle before nudging (default: 30000)' },
                 nudge_max_count: { type: 'number', description: 'Maximum nudges per pane (default: 3)' },
-                nudge_message: { type: 'string', description: 'Message sent as nudge (default: "Continue working on your assigned task.")' },
+                nudge_message: { type: 'string', description: 'Message sent as nudge (default: "Continue working on your assigned task and report concrete progress (not ACK-only).")' },
             },
             required: ['job_id'],
         },

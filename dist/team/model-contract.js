@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process';
 import { isAbsolute, normalize, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
+import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 const resolvedPathCache = new Map();
 const UNTRUSTED_PATH_PATTERNS = [
     /^\/tmp(\/|$)/,
@@ -102,7 +103,7 @@ const CONTRACTS = {
         buildLaunchArgs(model, extraFlags = []) {
             const args = ['--dangerously-skip-permissions'];
             if (model)
-                args.push('--model', model);
+                args.push('--model', normalizeToCcAlias(model));
             return [...args, ...extraFlags];
         },
         parseOutput(rawOutput) {

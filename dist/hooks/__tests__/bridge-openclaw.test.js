@@ -98,7 +98,7 @@ describe("bridge-level regression tests", () => {
         const msg = result.message || "";
         expect(msg).not.toContain("[PROMPT TRANSLATION]");
     });
-    it("pre-tool-use calls _openclaw.wake for AskUserQuestion", async () => {
+    it("pre-tool-use emits only the dedicated ask-user-question OpenClaw signal", async () => {
         process.env.OMC_OPENCLAW = "1";
         process.env.OMC_NOTIFY = "0"; // suppress real notifications
         const wakeSpy = vi.spyOn(_openclaw, "wake");
@@ -111,13 +111,24 @@ describe("bridge-level regression tests", () => {
             directory: "/tmp/test",
         };
         await processHook("pre-tool-use", input);
-        // Verify _openclaw.wake was called with ask-user-question event
-        const askCall = wakeSpy.mock.calls.find((call) => call[0] === "ask-user-question");
-        expect(askCall).toBeDefined();
-        expect(askCall[1]).toMatchObject({
+        expect(wakeSpy).toHaveBeenCalledWith("ask-user-question", expect.objectContaining({
             sessionId: "test-session",
             question: "What should I do next?",
+        }));
+        expect(wakeSpy.mock.calls.some((call) => call[0] === "pre-tool-use")).toBe(false);
+        wakeSpy.mockRestore();
+    });
+    it("post-tool-use skips generic OpenClaw emission for AskUserQuestion", async () => {
+        process.env.OMC_OPENCLAW = "1";
+        const wakeSpy = vi.spyOn(_openclaw, "wake");
+        await processHook("post-tool-use", {
+            sessionId: "test-session",
+            toolName: "AskUserQuestion",
+            toolInput: { questions: [{ question: "Need approval?" }] },
+            toolOutput: '{"answers":{"0":"yes"}}',
+            directory: "/tmp/test",
         });
+        expect(wakeSpy).not.toHaveBeenCalled();
         wakeSpy.mockRestore();
     });
 });

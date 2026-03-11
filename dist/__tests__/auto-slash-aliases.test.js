@@ -88,5 +88,30 @@ Project psm body`);
         expect(result.replacementText).toContain('Deprecated Alias');
         expect(result.replacementText).toContain('/project-session-manager');
     });
+    it('renders skill pipeline guidance for slash-loaded skills with handoff metadata', async () => {
+        mkdirSync(join(tempConfigDir, 'skills', 'deep-interview'), { recursive: true });
+        writeFileSync(join(tempConfigDir, 'skills', 'deep-interview', 'SKILL.md'), `---
+name: deep-interview
+description: Deep interview
+pipeline: [deep-interview, omc-plan, autopilot]
+next-skill: omc-plan
+next-skill-args: --consensus --direct
+handoff: .omc/specs/deep-interview-{slug}.md
+---
+
+Deep interview body`);
+        const { executeSlashCommand } = await loadExecutor();
+        const result = executeSlashCommand({
+            command: 'deep-interview',
+            args: 'improve onboarding',
+            raw: '/deep-interview improve onboarding',
+        });
+        expect(result.success).toBe(true);
+        expect(result.replacementText).toContain('## Skill Pipeline');
+        expect(result.replacementText).toContain('Pipeline: `deep-interview → omc-plan → autopilot`');
+        expect(result.replacementText).toContain('Next skill arguments: `--consensus --direct`');
+        expect(result.replacementText).toContain('Skill("oh-my-claudecode:omc-plan")');
+        expect(result.replacementText).toContain('`.omc/specs/deep-interview-{slug}.md`');
+    });
 });
 //# sourceMappingURL=auto-slash-aliases.test.js.map

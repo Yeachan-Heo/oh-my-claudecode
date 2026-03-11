@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { detectNoPrdFlag, stripNoPrdFlag, createRalphLoopHook, readRalphState, findPrdPath, initPrd, readPrd, writePrd, } from '../hooks/ralph/index.js';
-import { getArchitectVerificationPrompt, startVerification, } from '../hooks/ralph/verifier.js';
+import { detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, createRalphLoopHook, readRalphState, findPrdPath, initPrd, readPrd, writePrd, } from '../hooks/ralph/index.js';
+import { getArchitectVerificationPrompt, startVerification, detectArchitectApproval, detectArchitectRejection, } from '../hooks/ralph/verifier.js';
 describe('Ralph PRD-Mandatory', () => {
     let testDir;
     beforeEach(() => {
@@ -67,6 +67,25 @@ describe('Ralph PRD-Mandatory', () => {
         });
         it('should handle empty string', () => {
             expect(stripNoPrdFlag('')).toBe('');
+        });
+    });
+    describe('detectCriticModeFlag', () => {
+        it('detects --critic=critic', () => {
+            expect(detectCriticModeFlag('ralph --critic=critic fix this')).toBe('critic');
+        });
+        it('detects --critic codex', () => {
+            expect(detectCriticModeFlag('ralph --critic codex fix this')).toBe('codex');
+        });
+        it('returns null for invalid critic mode', () => {
+            expect(detectCriticModeFlag('ralph --critic=gemini fix this')).toBeNull();
+        });
+    });
+    describe('stripCriticModeFlag', () => {
+        it('removes --critic=critic', () => {
+            expect(stripCriticModeFlag('ralph --critic=critic fix this')).toBe('ralph fix this');
+        });
+        it('removes --critic codex', () => {
+            expect(stripCriticModeFlag('ralph --critic codex fix this')).toBe('ralph fix this');
         });
     });
     // ==========================================================================
@@ -245,6 +264,32 @@ describe('Ralph PRD-Mandatory', () => {
             const prompt = getArchitectVerificationPrompt(state);
             expect(prompt).toContain('Missing error handling in auth module');
         });
+        it('should support critic verification prompts', () => {
+            const prompt = getArchitectVerificationPrompt({
+                ...baseVerificationState,
+                critic_mode: 'critic',
+            });
+            expect(prompt).toContain('[CRITIC VERIFICATION REQUIRED');
+            expect(prompt).toContain('Task(subagent_type="critic"');
+            expect(prompt).toContain('<ralph-approved critic="critic">VERIFIED_COMPLETE</ralph-approved>');
+        });
+        it('should support codex verification prompts', () => {
+            const prompt = getArchitectVerificationPrompt({
+                ...baseVerificationState,
+                critic_mode: 'codex',
+            });
+            expect(prompt).toContain('[CODEX CRITIC VERIFICATION REQUIRED');
+            expect(prompt).toContain('omc ask codex --agent-prompt critic');
+            expect(prompt).toContain('<ralph-approved critic="codex">VERIFIED_COMPLETE</ralph-approved>');
+        });
+        it('detects generic Ralph approval markers', () => {
+            expect(detectArchitectApproval('<ralph-approved critic="codex">VERIFIED_COMPLETE</ralph-approved>')).toBe(true);
+        });
+        it('detects codex-style rejection language', () => {
+            const result = detectArchitectRejection('Codex reviewer found issues: Missing tests.');
+            expect(result.rejected).toBe(true);
+            expect(result.feedback).toContain('Missing tests');
+        });
     });
     // ==========================================================================
     // Integration: PRD + Verification
@@ -297,6 +342,12 @@ describe('Ralph PRD-Mandatory', () => {
             expect(prompt).toContain('Implement caching');
             expect(prompt).toContain('US-001');
             expect(prompt).toContain('Verify EACH acceptance criterion');
+        });
+        it('stores selected critic mode in Ralph state', () => {
+            const hook = createRalphLoopHook(testDir);
+            hook.startLoop(undefined, 'Implement caching', { criticMode: 'codex' });
+            const state = readRalphState(testDir);
+            expect(state?.critic_mode).toBe('codex');
         });
         it('scaffold PRD creates valid structure that getPrdStatus can read', () => {
             // Auto-generate scaffold

@@ -8,8 +8,10 @@
  */
 export { getOpenClawConfig, resolveGateway, resetOpenClawConfigCache } from "./config.js";
 export { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGateway, shellEscapeArg } from "./dispatcher.js";
+export { buildOpenClawSignal } from "./signal.js";
 import { getOpenClawConfig, resolveGateway } from "./config.js";
 import { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGateway } from "./dispatcher.js";
+import { buildOpenClawSignal } from "./signal.js";
 import { basename } from "path";
 import { getCurrentTmuxSession } from "../notifications/tmux.js";
 /** Whether debug logging is enabled */
@@ -95,6 +97,7 @@ export async function wakeOpenClaw(event, context) {
             ...(replyTarget && { replyTarget }),
             ...(replyThread && { replyThread }),
         };
+        const signal = buildOpenClawSignal(event, enrichedContext);
         // Build template variables from whitelisted context fields
         const variables = {
             sessionId: context.sessionId,
@@ -112,31 +115,42 @@ export async function wakeOpenClaw(event, context) {
             replyChannel,
             replyTarget,
             replyThread,
+            signalKind: signal.kind,
+            signalName: signal.name,
+            signalPhase: signal.phase,
+            signalRouteKey: signal.routeKey,
+            signalPriority: signal.priority,
+            signalSummary: signal.summary,
+            prUrl: signal.prUrl,
+            testRunner: signal.testRunner,
+            command: signal.command,
         };
         // Add interpolated instruction to variables for command gateway {{instruction}} placeholder
         const interpolatedInstruction = interpolateInstruction(instruction, variables);
+        const payload = {
+            event,
+            instruction: interpolatedInstruction,
+            timestamp: now,
+            sessionId: context.sessionId,
+            projectPath: context.projectPath,
+            projectName: context.projectPath ? basename(context.projectPath) : undefined,
+            tmuxSession,
+            tmuxTail,
+            ...(replyChannel && { channel: replyChannel }),
+            ...(replyTarget && { to: replyTarget }),
+            ...(replyThread && { threadId: replyThread }),
+            signal,
+            context: buildWhitelistedContext(enrichedContext),
+        };
         variables.instruction = interpolatedInstruction;
+        variables.payloadJson = JSON.stringify(payload);
         let result;
         if (isCommandGateway(gateway)) {
             // Command gateway: execute shell command with shell-escaped variables
-            result = await wakeCommandGateway(gatewayName, gateway, variables);
+            result = await wakeCommandGateway(gatewayName, gateway, variables, payload);
         }
         else {
             // HTTP gateway: send JSON payload
-            const payload = {
-                event,
-                instruction: interpolatedInstruction,
-                timestamp: now,
-                sessionId: context.sessionId,
-                projectPath: context.projectPath,
-                projectName: context.projectPath ? basename(context.projectPath) : undefined,
-                tmuxSession,
-                tmuxTail,
-                ...(replyChannel && { channel: replyChannel }),
-                ...(replyTarget && { to: replyTarget }),
-                ...(replyThread && { threadId: replyThread }),
-                context: buildWhitelistedContext(enrichedContext),
-            };
             result = await wakeGateway(gatewayName, gateway, payload);
         }
         if (DEBUG) {

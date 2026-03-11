@@ -4,7 +4,8 @@ import { existsSync } from 'fs';
 import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, isWorkerAlive, killTeamSession, waitForPaneReady, } from './tmux-session.js';
-import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, } from './worker-bootstrap.js';
+import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
+import { cleanupTeamWorktrees } from './git-worktree.js';
 import { withTaskLock, writeTaskFailure, DEFAULT_MAX_TASK_RETRIES, } from './task-file-ops.js';
 function workerName(index) {
     return `worker-${index + 1}`;
@@ -572,7 +573,7 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
     // flag so tmux send-keys never needs to interact with the TUI input widget.
     if (usePromptMode) {
-        const promptArgs = getPromptModeArgs(agentType, `Read and execute your task from: ${relInboxPath}`);
+        const promptArgs = getPromptModeArgs(agentType, generateTriggerMessage(runtime.teamName, workerNameValue));
         launchArgs.push(...promptArgs);
     }
     const paneConfig = {
@@ -616,7 +617,7 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
             }
             await new Promise(r => setTimeout(r, 800));
         }
-        const notified = await notifyPaneWithRetry(runtime.sessionName, paneId, `Read and execute your task from: ${relInboxPath}`);
+        const notified = await notifyPaneWithRetry(runtime.sessionName, paneId, generateTriggerMessage(runtime.teamName, workerNameValue));
         if (!notified) {
             await killWorkerPane(runtime, workerNameValue, paneId);
             await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
@@ -736,6 +737,12 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
         : 'split-pane';
     await killTeamSession(sessionName, workerPaneIds, leaderPaneId, { sessionMode });
     // Clean up state
+    try {
+        cleanupTeamWorktrees(teamName, cwd);
+    }
+    catch {
+        // best-effort: worktree cleanup is dormant in current runtime paths
+    }
     try {
         await rm(root, { recursive: true, force: true });
     }

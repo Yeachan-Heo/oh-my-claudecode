@@ -231,6 +231,48 @@ describe("wakeOpenClaw", () => {
         // The instruction variable should be the interpolated result
         expect(variables.instruction).toContain("myproject");
     });
+    it("adds a normalized test signal to the HTTP payload", async () => {
+        vi.mocked(resolveGateway).mockReturnValue({
+            gatewayName: "my-gateway",
+            gateway: { url: "https://example.com/wake", method: "POST" },
+            instruction: "test",
+        });
+        await wakeOpenClaw("post-tool-use", {
+            sessionId: "sid-1",
+            projectPath: "/home/user/myproject",
+            toolName: "Bash",
+            toolInput: { command: "pnpm test" },
+            toolOutput: "FAIL src/openclaw/signal.test.ts\nTest failed",
+        });
+        const payload = vi.mocked(wakeGateway).mock.calls[0][2];
+        expect(payload.signal).toMatchObject({
+            kind: "test",
+            phase: "failed",
+            routeKey: "test.failed",
+            priority: "high",
+            testRunner: "package-test",
+        });
+    });
+    it("passes payloadJson and signalRouteKey to command gateways for PR creation", async () => {
+        const commandGateway = { type: "command", command: "notify {{signalRouteKey}} {{payloadJson}}" };
+        vi.mocked(resolveGateway).mockReturnValue({
+            gatewayName: "cmd-gw",
+            gateway: commandGateway,
+            instruction: "Create PR",
+        });
+        vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
+        await wakeOpenClaw("post-tool-use", {
+            sessionId: "sid-1",
+            projectPath: "/home/user/myproject",
+            toolName: "Bash",
+            toolInput: { command: "gh pr create --base dev --fill" },
+            toolOutput: "https://github.com/example/repo/pull/1500",
+        });
+        const variables = vi.mocked(wakeCommandGateway).mock.calls[0][2];
+        expect(variables.signalRouteKey).toBe("pull-request.created");
+        expect(variables.payloadJson).toContain('"routeKey":"pull-request.created"');
+        expect(variables.payloadJson).toContain('"prUrl":"https://github.com/example/repo/pull/1500"');
+    });
 });
 describe("reply channel context", () => {
     beforeEach(() => {

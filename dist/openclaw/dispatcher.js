@@ -39,6 +39,10 @@ function validateGatewayUrl(url) {
  * - {{question}} - question text (ask-user-question event)
  * - {{timestamp}} - ISO timestamp
  * - {{event}} - hook event name
+ * - {{signalKind}} / {{signalName}} / {{signalPhase}} / {{signalRouteKey}}
+ * - {{signalPriority}} / {{signalSummary}}
+ * - {{testRunner}} / {{prUrl}} / {{command}}
+ * - {{payloadJson}} - full normalized payload JSON for native command gateways
  *
  * Unresolved variables are left as-is (not replaced with empty string).
  */
@@ -108,7 +112,7 @@ export async function wakeGateway(gatewayName, gatewayConfig, payload) {
  * The command template supports {{variable}} placeholders. All variable
  * values are shell-escaped before interpolation to prevent injection.
  */
-export async function wakeCommandGateway(gatewayName, gatewayConfig, variables) {
+export async function wakeCommandGateway(gatewayName, gatewayConfig, variables, payload) {
     try {
         const { execFile } = await import("child_process");
         const { promisify } = await import("util");
@@ -121,9 +125,16 @@ export async function wakeCommandGateway(gatewayName, gatewayConfig, variables) 
             return shellEscapeArg(value);
         });
         const timeout = gatewayConfig.timeout ?? DEFAULT_TIMEOUT_MS;
+        const payloadJson = payload ? JSON.stringify(payload) : variables.payloadJson;
         await execFileAsync("sh", ["-c", command], {
             timeout,
-            env: { ...process.env },
+            env: {
+                ...process.env,
+                ...(payloadJson ? { OPENCLAW_PAYLOAD_JSON: payloadJson } : {}),
+                ...(variables.signalRouteKey ? { OPENCLAW_SIGNAL_ROUTE_KEY: variables.signalRouteKey } : {}),
+                ...(variables.signalPhase ? { OPENCLAW_SIGNAL_PHASE: variables.signalPhase } : {}),
+                ...(variables.signalKind ? { OPENCLAW_SIGNAL_KIND: variables.signalKind } : {}),
+            },
         });
         return { gateway: gatewayName, success: true };
     }

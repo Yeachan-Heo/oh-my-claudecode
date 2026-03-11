@@ -9,6 +9,7 @@ import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { readReplayEvents, getReplaySummary, } from '../hooks/subagent-tracker/session-replay.js';
 import { validateWorkingDirectory, } from '../lib/worktree-paths.js';
+import { sessionSearchTool } from './session-history-tools.js';
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -408,5 +409,5 @@ export const traceSummaryTool = {
 /**
  * All trace tools for registration
  */
-export const traceTools = [traceTimelineTool, traceSummaryTool];
+export const traceTools = [traceTimelineTool, traceSummaryTool, sessionSearchTool];
 //# sourceMappingURL=trace-tools.js.map

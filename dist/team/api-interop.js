@@ -227,6 +227,10 @@ export function buildLegacyTeamDeprecationHint(legacyName, originalArgs, env = p
 }
 const QUEUED_FOR_HOOK_DISPATCH_REASON = 'queued_for_hook_dispatch';
 const LEADER_PANE_MISSING_MAILBOX_PERSISTED_REASON = 'leader_pane_missing_mailbox_persisted';
+const WORKTREE_TRIGGER_STATE_ROOT = '$OMC_TEAM_STATE_ROOT';
+function resolveInstructionStateRoot(worktreePath) {
+    return worktreePath ? WORKTREE_TRIGGER_STATE_ROOT : undefined;
+}
 function queuedForHookDispatch() {
     return {
         ok: true,
@@ -269,6 +273,7 @@ function findWorkerDispatchTarget(teamName, toWorker, cwd) {
         return {
             paneId: recipient?.pane_id,
             workerIndex: recipient?.index,
+            instructionStateRoot: resolveInstructionStateRoot(recipient?.worktree_path),
         };
     });
 }
@@ -334,7 +339,7 @@ export async function executeTeamApiOperation(operation, args, fallbackCwd) {
                     toWorkerIndex: target.workerIndex,
                     toPaneId: target.paneId,
                     body,
-                    triggerMessage: generateMailboxTriggerMessage(teamName, toWorker),
+                    triggerMessage: generateMailboxTriggerMessage(teamName, toWorker, 1, target.instructionStateRoot),
                     cwd,
                     notify: ({ workerName }, triggerMessage) => notifyMailboxTarget(teamName, workerName, triggerMessage, cwd),
                     deps: {
@@ -361,14 +366,19 @@ export async function executeTeamApiOperation(operation, args, fallbackCwd) {
                 const config = await teamReadConfig(teamName, cwd);
                 const recipients = (config?.workers ?? [])
                     .filter((worker) => worker.name !== fromWorker)
-                    .map((worker) => ({ workerName: worker.name, workerIndex: worker.index, paneId: worker.pane_id }));
+                    .map((worker) => ({
+                    workerName: worker.name,
+                    workerIndex: worker.index,
+                    paneId: worker.pane_id,
+                    instructionStateRoot: resolveInstructionStateRoot(worker.worktree_path),
+                }));
                 await queueBroadcastMailboxMessage({
                     teamName,
                     fromWorker,
                     recipients,
                     body,
                     cwd,
-                    triggerFor: (workerName) => generateMailboxTriggerMessage(teamName, workerName),
+                    triggerFor: (workerName) => generateMailboxTriggerMessage(teamName, workerName, 1, recipients.find((recipient) => recipient.workerName === workerName)?.instructionStateRoot),
                     notify: ({ workerName }, triggerMessage) => notifyMailboxTarget(teamName, workerName, triggerMessage, cwd),
                     deps: {
                         sendDirectMessage,

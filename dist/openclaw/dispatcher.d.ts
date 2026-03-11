@@ -19,6 +19,10 @@ import type { OpenClawCommandGatewayConfig, OpenClawGatewayConfig, OpenClawHttpG
  * - {{question}} - question text (ask-user-question event)
  * - {{timestamp}} - ISO timestamp
  * - {{event}} - hook event name
+ * - {{signalKind}} / {{signalName}} / {{signalPhase}} / {{signalRouteKey}}
+ * - {{signalPriority}} / {{signalSummary}}
+ * - {{testRunner}} / {{prUrl}} / {{command}}
+ * - {{payloadJson}} - full normalized payload JSON for native command gateways
  *
  * Unresolved variables are left as-is (not replaced with empty string).
  */
@@ -43,5 +47,5 @@ export declare function wakeGateway(gatewayName: string, gatewayConfig: OpenClaw
  * The command template supports {{variable}} placeholders. All variable
  * values are shell-escaped before interpolation to prevent injection.
  */
-export declare function wakeCommandGateway(gatewayName: string, gatewayConfig: OpenClawCommandGatewayConfig, variables: Record<string, string | undefined>): Promise<OpenClawResult>;
+export declare function wakeCommandGateway(gatewayName: string, gatewayConfig: OpenClawCommandGatewayConfig, variables: Record<string, string | undefined>, payload?: OpenClawPayload): Promise<OpenClawResult>;
 //# sourceMappingURL=dispatcher.d.ts.map

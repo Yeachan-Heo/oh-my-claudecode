@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { cleanupTeamWorktrees } from '../team/git-worktree.js';
 import { validateTeamName } from '../team/team-name.js';
 function readResultArtifact(omcJobsDir, jobId) {
     const artifactPath = join(omcJobsDir, `${jobId}-result.json`);
@@ -87,15 +88,23 @@ export function clearScopedTeamState(job) {
         return `team state cleanup skipped (invalid teamName): ${error instanceof Error ? error.message : String(error)}`;
     }
     const stateDir = join(job.cwd, '.omc', 'state', 'team', job.teamName);
+    let worktreeMessage = 'worktree cleanup skipped.';
     try {
-        if (!existsSync(stateDir)) {
-            return `team state dir not found at ${stateDir}.`;
-        }
-        rmSync(stateDir, { recursive: true, force: true });
-        return `team state dir removed at ${stateDir}.`;
+        cleanupTeamWorktrees(job.teamName, job.cwd);
+        worktreeMessage = `worktree cleanup attempted for ${job.teamName}.`;
     }
     catch (error) {
-        return `team state cleanup failed at ${stateDir}: ${error instanceof Error ? error.message : String(error)}`;
+        worktreeMessage = `worktree cleanup skipped: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    try {
+        if (!existsSync(stateDir)) {
+            return `${worktreeMessage} team state dir not found at ${stateDir}.`;
+        }
+        rmSync(stateDir, { recursive: true, force: true });
+        return `${worktreeMessage} team state dir removed at ${stateDir}.`;
+    }
+    catch (error) {
+        return `${worktreeMessage} team state cleanup failed at ${stateDir}: ${error instanceof Error ? error.message : String(error)}`;
     }
 }
 //# sourceMappingURL=team-job-convergence.js.map

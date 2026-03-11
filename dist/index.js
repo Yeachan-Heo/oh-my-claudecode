@@ -37,6 +37,7 @@ export * from './hooks/index.js';
 export { BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH, PLANNER_PLANS_DIR, PLAN_EXTENSION, getBoulderFilePath, readBoulderState, writeBoulderState, appendSessionId, clearBoulderState, findPlannerPlans, getPlanProgress, getPlanName, createBoulderState, getPlanSummaries, hasBoulder, getActivePlanPath, 
 // Context Injector
 ContextCollector, contextCollector, injectPendingContext, injectContextIntoText, createContextInjectorHook } from './features/index.js';
+export { searchSessionHistory, parseSinceSpec } from './features/index.js';
 // Agent module exports (modular agent system)
 export { isGptModel, isClaudeModel, getDefaultModelForCategory, 
 // Utilities

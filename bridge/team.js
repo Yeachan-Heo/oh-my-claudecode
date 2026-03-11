@@ -113,6 +113,27 @@ function atomicWriteJson(filePath, data, mode = 384) {
 function ensureDirWithMode(dirPath, mode = 448) {
   if (!existsSync3(dirPath)) mkdirSync(dirPath, { recursive: true, mode });
 }
+function safeRealpath(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = dirname2(p);
+    const name = basename(p);
+    try {
+      return resolve(realpathSync(parent), name);
+    } catch {
+      return resolve(p);
+    }
+  }
+}
+function validateResolvedPath(resolvedPath, expectedBase) {
+  const absResolved = safeRealpath(resolvedPath);
+  const absBase = safeRealpath(expectedBase);
+  const rel = relative(absBase, absResolved);
+  if (rel.startsWith("..") || resolve(absBase, rel) !== absResolved) {
+    throw new Error(`Path traversal detected: "${resolvedPath}" escapes base "${expectedBase}"`);
+  }
+}
 var init_fs_utils = __esm({
   "src/team/fs-utils.ts"() {
     "use strict";
@@ -840,9 +861,9 @@ function spawnBridgeInSession(tmuxSession, bridgeScriptPath, configFilePath) {
   execFileSync("tmux", ["send-keys", "-t", tmuxSession, cmd, "Enter"], { stdio: "pipe", timeout: 5e3 });
 }
 async function createTeamSession(teamName, workerCount, cwd, options = {}) {
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   const inTmux = Boolean(process.env.TMUX);
   const useDedicatedWindow = Boolean(options.newWindow && inTmux);
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
@@ -996,9 +1017,9 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
   return { sessionName: teamTarget, leaderPaneId, workerPaneIds, sessionMode };
 }
 async function spawnWorkerInPane(sessionName2, paneId, config) {
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
   await execFileAsync("tmux", [
@@ -1091,9 +1112,9 @@ async function sendToWorker(_sessionName, paneId, message) {
     message = message.slice(0, 200);
   }
   try {
-    const { execFile: execFile2 } = await import("child_process");
+    const { execFile: execFile3 } = await import("child_process");
     const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile2);
+    const execFileAsync = promisify2(execFile3);
     const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
     const sendKey = async (key) => {
       await execFileAsync("tmux", ["send-keys", "-t", paneId, key]);
@@ -1173,9 +1194,9 @@ async function sendToWorker(_sessionName, paneId, message) {
 async function injectToLeaderPane(sessionName2, leaderPaneId, message) {
   const prefixed = `[OMC_TMUX_INJECT] ${message}`.slice(0, 200);
   try {
-    const { execFile: execFile2 } = await import("child_process");
+    const { execFile: execFile3 } = await import("child_process");
     const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile2);
+    const execFileAsync = promisify2(execFile3);
     if (await paneInCopyMode(leaderPaneId, execFileAsync)) {
       return false;
     }
@@ -1190,9 +1211,9 @@ async function injectToLeaderPane(sessionName2, leaderPaneId, message) {
 }
 async function isWorkerAlive(paneId) {
   try {
-    const { execFile: execFile2 } = await import("child_process");
+    const { execFile: execFile3 } = await import("child_process");
     const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile2);
+    const execFileAsync = promisify2(execFile3);
     const result = await tmuxAsync([
       "display-message",
       "-t",
@@ -1214,9 +1235,9 @@ async function killWorkerPanes(opts) {
     await sleep(graceMs);
   } catch {
   }
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   for (const paneId of paneIds) {
     if (paneId === leaderPaneId) continue;
     try {
@@ -1226,9 +1247,9 @@ async function killWorkerPanes(opts) {
   }
 }
 async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, options = {}) {
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   const sessionMode = options.sessionMode ?? (sessionName2.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
     if (!workerPaneIds?.length) return;
@@ -1281,6 +1302,59 @@ var init_tmux_session = __esm({
 import { readFileSync } from "fs";
 import { join as join6, dirname as dirname4, basename as basename3, resolve as resolve2, relative as relative2, isAbsolute as isAbsolute2 } from "path";
 import { fileURLToPath } from "url";
+function getPackageDir() {
+  if (typeof __dirname !== "undefined" && __dirname) {
+    const currentDirName = basename3(__dirname);
+    const parentDirName = basename3(dirname4(__dirname));
+    if (currentDirName === "bridge") {
+      return join6(__dirname, "..");
+    }
+    if (currentDirName === "agents" && (parentDirName === "src" || parentDirName === "dist")) {
+      return join6(__dirname, "..", "..");
+    }
+  }
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname2 = dirname4(__filename);
+    return join6(__dirname2, "..", "..");
+  } catch {
+  }
+  return process.cwd();
+}
+function stripFrontmatter(content) {
+  const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
+  return match ? match[1].trim() : content.trim();
+}
+function loadAgentPrompt(agentName) {
+  if (!/^[a-z0-9-]+$/i.test(agentName)) {
+    throw new Error(`Invalid agent name: contains disallowed characters`);
+  }
+  try {
+    if (typeof __AGENT_PROMPTS__ !== "undefined" && __AGENT_PROMPTS__ !== null) {
+      const prompt = __AGENT_PROMPTS__[agentName];
+      if (prompt) return prompt;
+    }
+  } catch {
+  }
+  try {
+    const agentsDir = join6(getPackageDir(), "agents");
+    const agentPath = join6(agentsDir, `${agentName}.md`);
+    const resolvedPath = resolve2(agentPath);
+    const resolvedAgentsDir = resolve2(agentsDir);
+    const rel = relative2(resolvedAgentsDir, resolvedPath);
+    if (rel.startsWith("..") || isAbsolute2(rel)) {
+      throw new Error(`Invalid agent name: path traversal detected`);
+    }
+    const content = readFileSync(agentPath, "utf-8");
+    return stripFrontmatter(content);
+  } catch (error) {
+    const message = error instanceof Error && error.message.includes("Invalid agent name") ? error.message : "Agent prompt file not found";
+    console.warn(`[loadAgentPrompt] ${message}`);
+    return `Agent: ${agentName}
+
+Prompt unavailable.`;
+  }
+}
 var init_utils = __esm({
   "src/agents/utils.ts"() {
     "use strict";
@@ -1291,7 +1365,7 @@ var init_utils = __esm({
 import { readdirSync } from "fs";
 import { join as join7, dirname as dirname5, basename as basename4 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-function getPackageDir() {
+function getPackageDir2() {
   if (typeof __dirname !== "undefined" && __dirname) {
     const currentDirName = basename4(__dirname);
     const parentDirName = basename4(dirname5(__dirname));
@@ -1320,7 +1394,7 @@ function getValidAgentRoles() {
   } catch {
   }
   try {
-    const agentsDir = join7(getPackageDir(), "agents");
+    const agentsDir = join7(getPackageDir2(), "agents");
     const files = readdirSync(agentsDir);
     _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => basename4(f, ".md")).sort();
   } catch (err) {
@@ -1352,6 +1426,834 @@ var init_prompt_helpers = __esm({
     init_utils();
     _cachedRoles = null;
     VALID_AGENT_ROLES = getValidAgentRoles();
+  }
+});
+
+// src/utils/config-dir.ts
+var init_config_dir = __esm({
+  "src/utils/config-dir.ts"() {
+    "use strict";
+  }
+});
+
+// src/utils/paths.ts
+import { join as join8 } from "path";
+import { existsSync as existsSync5, readFileSync as readFileSync2, readdirSync as readdirSync2, statSync, unlinkSync, rmSync } from "fs";
+import { homedir } from "os";
+var STALE_THRESHOLD_MS;
+var init_paths = __esm({
+  "src/utils/paths.ts"() {
+    "use strict";
+    init_config_dir();
+    STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// src/utils/jsonc.ts
+var init_jsonc = __esm({
+  "src/utils/jsonc.ts"() {
+    "use strict";
+  }
+});
+
+// src/utils/ssrf-guard.ts
+var init_ssrf_guard = __esm({
+  "src/utils/ssrf-guard.ts"() {
+    "use strict";
+  }
+});
+
+// src/config/models.ts
+function resolveTierModelFromEnv(tier) {
+  for (const key of TIER_ENV_KEYS[tier]) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return void 0;
+}
+function getDefaultModelHigh() {
+  return resolveTierModelFromEnv("HIGH") || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
+}
+function getDefaultModelMedium() {
+  return resolveTierModelFromEnv("MEDIUM") || BUILTIN_TIER_MODEL_DEFAULTS.MEDIUM;
+}
+function getDefaultModelLow() {
+  return resolveTierModelFromEnv("LOW") || BUILTIN_TIER_MODEL_DEFAULTS.LOW;
+}
+function getDefaultTierModels() {
+  return {
+    LOW: getDefaultModelLow(),
+    MEDIUM: getDefaultModelMedium(),
+    HIGH: getDefaultModelHigh()
+  };
+}
+function resolveClaudeFamily(modelId) {
+  const lower = modelId.toLowerCase();
+  if (!lower.includes("claude")) return null;
+  if (lower.includes("sonnet")) return "SONNET";
+  if (lower.includes("opus")) return "OPUS";
+  if (lower.includes("haiku")) return "HAIKU";
+  return null;
+}
+var TIER_ENV_KEYS, CLAUDE_FAMILY_DEFAULTS, BUILTIN_TIER_MODEL_DEFAULTS, CLAUDE_FAMILY_HIGH_VARIANTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS;
+var init_models = __esm({
+  "src/config/models.ts"() {
+    "use strict";
+    init_ssrf_guard();
+    TIER_ENV_KEYS = {
+      LOW: [
+        "OMC_MODEL_LOW",
+        "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      ],
+      MEDIUM: [
+        "OMC_MODEL_MEDIUM",
+        "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL"
+      ],
+      HIGH: [
+        "OMC_MODEL_HIGH",
+        "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL"
+      ]
+    };
+    CLAUDE_FAMILY_DEFAULTS = {
+      HAIKU: "claude-haiku-4-5",
+      SONNET: "claude-sonnet-4-6",
+      OPUS: "claude-opus-4-6"
+    };
+    BUILTIN_TIER_MODEL_DEFAULTS = {
+      LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
+      MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
+      HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS
+    };
+    CLAUDE_FAMILY_HIGH_VARIANTS = {
+      HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
+      SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
+      OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
+    };
+    BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
+      codexModel: "gpt-5.3-codex",
+      geminiModel: "gemini-3.1-pro-preview"
+    };
+  }
+});
+
+// src/config/loader.ts
+import { readFileSync as readFileSync3, existsSync as existsSync6 } from "fs";
+import { join as join9, dirname as dirname6 } from "path";
+function buildDefaultConfig() {
+  const defaultTierModels = getDefaultTierModels();
+  return {
+    agents: {
+      omc: { model: defaultTierModels.HIGH },
+      explore: { model: defaultTierModels.LOW },
+      analyst: { model: defaultTierModels.HIGH },
+      planner: { model: defaultTierModels.HIGH },
+      architect: { model: defaultTierModels.HIGH },
+      debugger: { model: defaultTierModels.MEDIUM },
+      executor: { model: defaultTierModels.MEDIUM },
+      verifier: { model: defaultTierModels.MEDIUM },
+      securityReviewer: { model: defaultTierModels.MEDIUM },
+      codeReviewer: { model: defaultTierModels.HIGH },
+      testEngineer: { model: defaultTierModels.MEDIUM },
+      designer: { model: defaultTierModels.MEDIUM },
+      writer: { model: defaultTierModels.LOW },
+      qaTester: { model: defaultTierModels.MEDIUM },
+      scientist: { model: defaultTierModels.MEDIUM },
+      gitMaster: { model: defaultTierModels.MEDIUM },
+      codeSimplifier: { model: defaultTierModels.HIGH },
+      critic: { model: defaultTierModels.HIGH },
+      documentSpecialist: { model: defaultTierModels.MEDIUM }
+    },
+    features: {
+      parallelExecution: true,
+      lspTools: true,
+      // Real LSP integration with language servers
+      astTools: true,
+      // Real AST tools using ast-grep
+      continuationEnforcement: true,
+      autoContextInjection: true
+    },
+    mcpServers: {
+      exa: { enabled: true },
+      context7: { enabled: true }
+    },
+    permissions: {
+      allowBash: true,
+      allowEdit: true,
+      allowWrite: true,
+      maxBackgroundTasks: 5
+    },
+    magicKeywords: {
+      ultrawork: ["ultrawork", "ulw", "uw"],
+      search: ["search", "find", "locate"],
+      analyze: ["analyze", "investigate", "examine"],
+      ultrathink: ["ultrathink", "think", "reason", "ponder"]
+    },
+    // Intelligent model routing configuration
+    routing: {
+      enabled: true,
+      defaultTier: "MEDIUM",
+      forceInherit: false,
+      escalationEnabled: true,
+      maxEscalations: 2,
+      tierModels: { ...defaultTierModels },
+      agentOverrides: {
+        architect: { tier: "HIGH", reason: "Advisory agent requires deep reasoning" },
+        planner: { tier: "HIGH", reason: "Strategic planning requires deep reasoning" },
+        critic: { tier: "HIGH", reason: "Critical review requires deep reasoning" },
+        analyst: { tier: "HIGH", reason: "Pre-planning analysis requires deep reasoning" },
+        explore: { tier: "LOW", reason: "Exploration is search-focused" },
+        "writer": { tier: "LOW", reason: "Documentation is straightforward" }
+      },
+      escalationKeywords: [
+        "critical",
+        "production",
+        "urgent",
+        "security",
+        "breaking",
+        "architecture",
+        "refactor",
+        "redesign",
+        "root cause"
+      ],
+      simplificationKeywords: [
+        "find",
+        "list",
+        "show",
+        "where",
+        "search",
+        "locate",
+        "grep"
+      ]
+    },
+    // External models configuration (Codex, Gemini)
+    // Static defaults only — env var overrides applied in loadEnvConfig()
+    externalModels: {
+      defaults: {
+        codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
+        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+      },
+      fallbackPolicy: {
+        onModelFailure: "provider_chain",
+        allowCrossProvider: false,
+        crossProviderOrder: ["codex", "gemini"]
+      }
+    },
+    // Delegation routing configuration (opt-in feature for external model routing)
+    delegationRouting: {
+      enabled: false,
+      defaultProvider: "claude",
+      roles: {}
+    },
+    startupCodebaseMap: {
+      enabled: true,
+      maxFiles: 200,
+      maxDepth: 4
+    },
+    taskSizeDetection: {
+      enabled: true,
+      smallWordLimit: 50,
+      largeWordLimit: 200,
+      suppressHeavyModesForSmallTasks: true
+    }
+  };
+}
+var DEFAULT_CONFIG;
+var init_loader = __esm({
+  "src/config/loader.ts"() {
+    "use strict";
+    init_paths();
+    init_jsonc();
+    init_models();
+    DEFAULT_CONFIG = buildDefaultConfig();
+  }
+});
+
+// src/agents/architect.ts
+var ARCHITECT_PROMPT_METADATA, architectAgent;
+var init_architect = __esm({
+  "src/agents/architect.ts"() {
+    "use strict";
+    init_utils();
+    ARCHITECT_PROMPT_METADATA = {
+      category: "advisor",
+      cost: "EXPENSIVE",
+      promptAlias: "architect",
+      triggers: [
+        { domain: "Architecture decisions", trigger: "Multi-system tradeoffs, unfamiliar patterns" },
+        { domain: "Self-review", trigger: "After completing significant implementation" },
+        { domain: "Hard debugging", trigger: "After 2+ failed fix attempts" }
+      ],
+      useWhen: [
+        "Complex architecture design",
+        "After completing significant work",
+        "2+ failed fix attempts",
+        "Unfamiliar code patterns",
+        "Security/performance concerns",
+        "Multi-system tradeoffs"
+      ],
+      avoidWhen: [
+        "Simple file operations (use direct tools)",
+        "First attempt at any fix (try yourself first)",
+        "Questions answerable from code you've read",
+        "Trivial decisions (variable names, formatting)",
+        "Things you can infer from existing code patterns"
+      ]
+    };
+    architectAgent = {
+      name: "architect",
+      description: "Read-only consultation agent. High-IQ reasoning specialist for debugging hard problems and high-difficulty architecture design.",
+      prompt: loadAgentPrompt("architect"),
+      model: "opus",
+      defaultModel: "opus",
+      metadata: ARCHITECT_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/designer.ts
+var FRONTEND_ENGINEER_PROMPT_METADATA, designerAgent;
+var init_designer = __esm({
+  "src/agents/designer.ts"() {
+    "use strict";
+    init_utils();
+    FRONTEND_ENGINEER_PROMPT_METADATA = {
+      category: "specialist",
+      cost: "CHEAP",
+      promptAlias: "designer",
+      triggers: [
+        {
+          domain: "UI/UX",
+          trigger: "Visual changes, styling, components, accessibility"
+        },
+        {
+          domain: "Design",
+          trigger: "Layout, animations, responsive design"
+        }
+      ],
+      useWhen: [
+        "Visual styling or layout changes",
+        "Component design or refactoring",
+        "Animation implementation",
+        "Accessibility improvements",
+        "Responsive design work"
+      ],
+      avoidWhen: [
+        "Pure logic changes in frontend files",
+        "Backend/API work",
+        "Non-visual refactoring"
+      ]
+    };
+    designerAgent = {
+      name: "designer",
+      description: `Designer-turned-developer who crafts stunning UI/UX even without design mockups. Use for VISUAL changes only (styling, layout, animation). Pure logic changes in frontend files should be handled directly.`,
+      prompt: loadAgentPrompt("designer"),
+      model: "sonnet",
+      defaultModel: "sonnet",
+      metadata: FRONTEND_ENGINEER_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/writer.ts
+var DOCUMENT_WRITER_PROMPT_METADATA, writerAgent;
+var init_writer = __esm({
+  "src/agents/writer.ts"() {
+    "use strict";
+    init_utils();
+    DOCUMENT_WRITER_PROMPT_METADATA = {
+      category: "specialist",
+      cost: "FREE",
+      promptAlias: "writer",
+      triggers: [
+        {
+          domain: "Documentation",
+          trigger: "README, API docs, guides, comments"
+        }
+      ],
+      useWhen: [
+        "Creating or updating README files",
+        "Writing API documentation",
+        "Creating user guides or tutorials",
+        "Adding code comments or JSDoc",
+        "Architecture documentation"
+      ],
+      avoidWhen: [
+        "Code implementation tasks",
+        "Bug fixes",
+        "Non-documentation tasks"
+      ]
+    };
+    writerAgent = {
+      name: "writer",
+      description: `Technical writer who crafts clear, comprehensive documentation. Specializes in README files, API docs, architecture docs, and user guides.`,
+      prompt: loadAgentPrompt("writer"),
+      model: "haiku",
+      defaultModel: "haiku",
+      metadata: DOCUMENT_WRITER_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/critic.ts
+var CRITIC_PROMPT_METADATA, criticAgent;
+var init_critic = __esm({
+  "src/agents/critic.ts"() {
+    "use strict";
+    init_utils();
+    CRITIC_PROMPT_METADATA = {
+      category: "reviewer",
+      cost: "EXPENSIVE",
+      promptAlias: "critic",
+      triggers: [
+        {
+          domain: "Plan Review",
+          trigger: "Evaluating work plans before execution"
+        }
+      ],
+      useWhen: [
+        "After planner creates a work plan",
+        "Before executing a complex plan",
+        "When plan quality validation is needed",
+        "To catch gaps before implementation"
+      ],
+      avoidWhen: [
+        "Simple, straightforward tasks",
+        "When no plan exists to review",
+        "During implementation phase"
+      ]
+    };
+    criticAgent = {
+      name: "critic",
+      description: `Expert reviewer for evaluating work plans against rigorous clarity, verifiability, and completeness standards. Use after planner creates a work plan to validate it before execution.`,
+      prompt: loadAgentPrompt("critic"),
+      model: "opus",
+      defaultModel: "opus",
+      metadata: CRITIC_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/analyst.ts
+var ANALYST_PROMPT_METADATA, analystAgent;
+var init_analyst = __esm({
+  "src/agents/analyst.ts"() {
+    "use strict";
+    init_utils();
+    ANALYST_PROMPT_METADATA = {
+      category: "planner",
+      cost: "EXPENSIVE",
+      promptAlias: "analyst",
+      triggers: [
+        {
+          domain: "Pre-Planning",
+          trigger: "Hidden requirements, edge cases, risk analysis"
+        }
+      ],
+      useWhen: [
+        "Before creating a work plan",
+        "When requirements seem incomplete",
+        "To identify hidden assumptions",
+        "Risk analysis before implementation",
+        "Scope validation"
+      ],
+      avoidWhen: [
+        "Simple, well-defined tasks",
+        "During implementation phase",
+        "When plan already reviewed"
+      ]
+    };
+    analystAgent = {
+      name: "analyst",
+      description: `Pre-planning consultant that analyzes requests before implementation to identify hidden requirements, edge cases, and potential risks. Use before creating a work plan.`,
+      prompt: loadAgentPrompt("analyst"),
+      model: "opus",
+      defaultModel: "opus",
+      metadata: ANALYST_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/executor.ts
+var EXECUTOR_PROMPT_METADATA, executorAgent;
+var init_executor = __esm({
+  "src/agents/executor.ts"() {
+    "use strict";
+    init_utils();
+    EXECUTOR_PROMPT_METADATA = {
+      category: "specialist",
+      cost: "CHEAP",
+      promptAlias: "Junior",
+      triggers: [
+        { domain: "Direct implementation", trigger: "Single-file changes, focused tasks" },
+        { domain: "Bug fixes", trigger: "Clear, scoped fixes" },
+        { domain: "Small features", trigger: "Well-defined, isolated work" }
+      ],
+      useWhen: [
+        "Direct, focused implementation tasks",
+        "Single-file or few-file changes",
+        "When delegation overhead isn't worth it",
+        "Clear, well-scoped work items"
+      ],
+      avoidWhen: [
+        "Multi-file refactoring (use orchestrator)",
+        "Tasks requiring research (use explore/document-specialist first)",
+        "Complex decisions (consult architect)"
+      ]
+    };
+    executorAgent = {
+      name: "executor",
+      description: "Focused task executor. Execute tasks directly. NEVER delegate or spawn other agents. Same discipline as OMC, no delegation.",
+      prompt: loadAgentPrompt("executor"),
+      model: "sonnet",
+      defaultModel: "sonnet",
+      metadata: EXECUTOR_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/planner.ts
+var PLANNER_PROMPT_METADATA, plannerAgent;
+var init_planner = __esm({
+  "src/agents/planner.ts"() {
+    "use strict";
+    init_utils();
+    PLANNER_PROMPT_METADATA = {
+      category: "planner",
+      cost: "EXPENSIVE",
+      promptAlias: "planner",
+      triggers: [
+        {
+          domain: "Strategic Planning",
+          trigger: "Comprehensive work plans, interview-style consultation"
+        }
+      ],
+      useWhen: [
+        "Complex features requiring planning",
+        "When requirements need clarification through interview",
+        "Creating comprehensive work plans",
+        "Before large implementation efforts"
+      ],
+      avoidWhen: [
+        "Simple, straightforward tasks",
+        "When implementation should just start",
+        "When a plan already exists"
+      ]
+    };
+    plannerAgent = {
+      name: "planner",
+      description: `Strategic planning consultant. Interviews users to understand requirements, then creates comprehensive work plans. NEVER implements - only plans.`,
+      prompt: loadAgentPrompt("planner"),
+      model: "opus",
+      defaultModel: "opus",
+      metadata: PLANNER_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/qa-tester.ts
+var QA_TESTER_PROMPT_METADATA, qaTesterAgent;
+var init_qa_tester = __esm({
+  "src/agents/qa-tester.ts"() {
+    "use strict";
+    init_utils();
+    QA_TESTER_PROMPT_METADATA = {
+      category: "specialist",
+      cost: "CHEAP",
+      promptAlias: "QATester",
+      triggers: [
+        { domain: "CLI testing", trigger: "Testing command-line applications" },
+        { domain: "Service testing", trigger: "Starting and testing background services" },
+        { domain: "Integration testing", trigger: "End-to-end CLI workflow verification" },
+        { domain: "Interactive testing", trigger: "Testing applications requiring user input" }
+      ],
+      useWhen: [
+        "Testing CLI applications that need interactive input",
+        "Starting background services and verifying their behavior",
+        "Running end-to-end tests on command-line tools",
+        "Testing applications that produce streaming output",
+        "Verifying service startup and shutdown behavior"
+      ],
+      avoidWhen: [
+        "Unit testing (use standard test runners)",
+        "API testing without CLI interface (use curl/httpie directly)",
+        "Static code analysis (use architect or explore)"
+      ]
+    };
+    qaTesterAgent = {
+      name: "qa-tester",
+      description: "Interactive CLI testing specialist using tmux. Tests CLI applications, background services, and interactive tools. Manages test sessions, sends commands, verifies output, and ensures cleanup.",
+      prompt: loadAgentPrompt("qa-tester"),
+      model: "sonnet",
+      defaultModel: "sonnet",
+      metadata: QA_TESTER_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/scientist.ts
+var SCIENTIST_PROMPT_METADATA, scientistAgent;
+var init_scientist = __esm({
+  "src/agents/scientist.ts"() {
+    "use strict";
+    init_utils();
+    SCIENTIST_PROMPT_METADATA = {
+      category: "specialist",
+      cost: "CHEAP",
+      promptAlias: "scientist",
+      triggers: [
+        { domain: "Data analysis", trigger: "Analyzing datasets and computing statistics" },
+        { domain: "Research execution", trigger: "Running data experiments and generating findings" },
+        { domain: "Python data work", trigger: "Using pandas, numpy, scipy for data tasks" },
+        { domain: "EDA", trigger: "Exploratory data analysis on files" },
+        { domain: "Hypothesis testing", trigger: "Statistical tests with confidence intervals and effect sizes" },
+        { domain: "Research stages", trigger: "Multi-stage analysis with structured markers" }
+      ],
+      useWhen: [
+        "Analyzing CSV, JSON, Parquet, or other data files",
+        "Computing descriptive statistics or aggregations",
+        "Performing exploratory data analysis (EDA)",
+        "Generating data-driven findings and insights",
+        "Simple ML tasks like clustering or regression",
+        "Data transformations and feature engineering",
+        "Generating data analysis reports with visualizations",
+        "Hypothesis testing with statistical evidence markers",
+        "Research stages with [STAGE:*] markers for orchestration"
+      ],
+      avoidWhen: [
+        "Researching external documentation or APIs (use document-specialist)",
+        "Implementing production code features (use executor)",
+        "Architecture or system design questions (use architect)",
+        "No data files to analyze - just theoretical questions",
+        "Web scraping or external data fetching (use document-specialist)"
+      ]
+    };
+    scientistAgent = {
+      name: "scientist",
+      description: "Data analysis and research execution specialist. Executes Python code for EDA, statistical analysis, and generating data-driven findings. Works with CSV, JSON, Parquet files using pandas, numpy, scipy.",
+      prompt: loadAgentPrompt("scientist"),
+      model: "sonnet",
+      defaultModel: "sonnet",
+      metadata: SCIENTIST_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/explore.ts
+var EXPLORE_PROMPT_METADATA, exploreAgent;
+var init_explore = __esm({
+  "src/agents/explore.ts"() {
+    "use strict";
+    init_utils();
+    EXPLORE_PROMPT_METADATA = {
+      category: "exploration",
+      cost: "CHEAP",
+      promptAlias: "Explore",
+      triggers: [
+        { domain: "Internal codebase search", trigger: "Finding implementations, patterns, files" },
+        { domain: "Project structure", trigger: "Understanding code organization" },
+        { domain: "Code discovery", trigger: "Locating specific code by pattern" }
+      ],
+      useWhen: [
+        "Finding files by pattern or name",
+        "Searching for implementations in current project",
+        "Understanding project structure",
+        "Locating code by content or pattern",
+        "Quick codebase exploration"
+      ],
+      avoidWhen: [
+        "External documentation, literature, or academic paper lookup (use document-specialist)",
+        "Database/reference/manual lookups outside the current project (use document-specialist)",
+        "GitHub/npm package research (use document-specialist)",
+        "Complex architectural analysis (use architect)",
+        "When you already know the file location"
+      ]
+    };
+    exploreAgent = {
+      name: "explore",
+      description: "Fast codebase exploration and pattern search. Use for finding files, understanding structure, locating implementations. Searches INTERNAL codebase only; external docs, literature, papers, and reference databases belong to document-specialist.",
+      prompt: loadAgentPrompt("explore"),
+      model: "haiku",
+      defaultModel: "haiku",
+      metadata: EXPLORE_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/document-specialist.ts
+var DOCUMENT_SPECIALIST_PROMPT_METADATA, documentSpecialistAgent;
+var init_document_specialist = __esm({
+  "src/agents/document-specialist.ts"() {
+    "use strict";
+    init_utils();
+    DOCUMENT_SPECIALIST_PROMPT_METADATA = {
+      category: "exploration",
+      cost: "CHEAP",
+      promptAlias: "document-specialist",
+      triggers: [
+        {
+          domain: "Project documentation",
+          trigger: "README, docs/, migration guides, local references"
+        },
+        {
+          domain: "External documentation",
+          trigger: "API references, official docs"
+        },
+        {
+          domain: "API/framework correctness",
+          trigger: "Context Hub / chub first when available; curated backend fallback otherwise"
+        },
+        {
+          domain: "OSS implementations",
+          trigger: "GitHub examples, package source"
+        },
+        {
+          domain: "Best practices",
+          trigger: "Community patterns, recommendations"
+        },
+        {
+          domain: "Literature and reference research",
+          trigger: "Academic papers, manuals, reference databases"
+        }
+      ],
+      useWhen: [
+        "Checking README/docs/local reference files before broader research",
+        "Looking up official documentation",
+        "Using Context Hub / chub (or another curated docs backend) for external API/framework correctness when available",
+        "Finding GitHub examples",
+        "Researching npm/pip packages",
+        "Stack Overflow solutions",
+        "External API references",
+        "Searching external literature or academic papers",
+        "Looking up manuals, databases, or reference material outside the current project"
+      ],
+      avoidWhen: [
+        "Internal codebase implementation search (use explore)",
+        "Current project source files when the task is code discovery rather than documentation lookup (use explore)",
+        "When you already have the information"
+      ]
+    };
+    documentSpecialistAgent = {
+      name: "document-specialist",
+      description: "Document Specialist for documentation research and reference finding. Use for local repo docs, official docs, Context Hub / chub or other curated docs backends for API/framework correctness, GitHub examples, OSS implementations, external literature, academic papers, and reference/database lookups. Avoid internal implementation search; use explore for code discovery.",
+      prompt: loadAgentPrompt("document-specialist"),
+      model: "sonnet",
+      defaultModel: "sonnet",
+      metadata: DOCUMENT_SPECIALIST_PROMPT_METADATA
+    };
+  }
+});
+
+// src/agents/definitions.ts
+var debuggerAgent, verifierAgent, testEngineerAgent, securityReviewerAgent, codeReviewerAgent, gitMasterAgent, codeSimplifierAgent;
+var init_definitions = __esm({
+  "src/agents/definitions.ts"() {
+    "use strict";
+    init_utils();
+    init_loader();
+    init_architect();
+    init_designer();
+    init_writer();
+    init_critic();
+    init_analyst();
+    init_executor();
+    init_planner();
+    init_qa_tester();
+    init_scientist();
+    init_explore();
+    init_document_specialist();
+    init_architect();
+    init_designer();
+    init_writer();
+    init_critic();
+    init_analyst();
+    init_executor();
+    init_planner();
+    init_qa_tester();
+    init_scientist();
+    init_explore();
+    init_document_specialist();
+    debuggerAgent = {
+      name: "debugger",
+      description: "Root-cause analysis, regression isolation, failure diagnosis (Sonnet).",
+      prompt: loadAgentPrompt("debugger"),
+      model: "sonnet",
+      defaultModel: "sonnet"
+    };
+    verifierAgent = {
+      name: "verifier",
+      description: "Completion evidence, claim validation, test adequacy (Sonnet).",
+      prompt: loadAgentPrompt("verifier"),
+      model: "sonnet",
+      defaultModel: "sonnet"
+    };
+    testEngineerAgent = {
+      name: "test-engineer",
+      description: "Test strategy, coverage, flaky test hardening (Sonnet).",
+      prompt: loadAgentPrompt("test-engineer"),
+      model: "sonnet",
+      defaultModel: "sonnet"
+    };
+    securityReviewerAgent = {
+      name: "security-reviewer",
+      description: "Security vulnerability detection specialist (Sonnet). Use for security audits and OWASP detection.",
+      prompt: loadAgentPrompt("security-reviewer"),
+      model: "sonnet",
+      defaultModel: "sonnet"
+    };
+    codeReviewerAgent = {
+      name: "code-reviewer",
+      description: "Expert code review specialist (Opus). Use for comprehensive code quality review.",
+      prompt: loadAgentPrompt("code-reviewer"),
+      model: "opus",
+      defaultModel: "opus"
+    };
+    gitMasterAgent = {
+      name: "git-master",
+      description: "Git expert for atomic commits, rebasing, and history management with style detection",
+      prompt: loadAgentPrompt("git-master"),
+      model: "sonnet",
+      defaultModel: "sonnet"
+    };
+    codeSimplifierAgent = {
+      name: "code-simplifier",
+      description: "Simplifies and refines code for clarity, consistency, and maintainability (Opus).",
+      prompt: loadAgentPrompt("code-simplifier"),
+      model: "opus",
+      defaultModel: "opus"
+    };
+  }
+});
+
+// src/features/delegation-routing/types.ts
+var init_types = __esm({
+  "src/features/delegation-routing/types.ts"() {
+    "use strict";
+  }
+});
+
+// src/features/delegation-enforcer.ts
+function normalizeToCcAlias(model) {
+  const family = resolveClaudeFamily(model);
+  return family ? FAMILY_TO_ALIAS[family] ?? model : model;
+}
+var FAMILY_TO_ALIAS;
+var init_delegation_enforcer = __esm({
+  "src/features/delegation-enforcer.ts"() {
+    "use strict";
+    init_definitions();
+    init_types();
+    init_loader();
+    init_models();
+    FAMILY_TO_ALIAS = {
+      SONNET: "sonnet",
+      OPUS: "opus",
+      HAIKU: "haiku"
+    };
   }
 });
 
@@ -1491,6 +2393,7 @@ var init_model_contract = __esm({
   "src/team/model-contract.ts"() {
     "use strict";
     init_team_name();
+    init_delegation_enforcer();
     resolvedPathCache = /* @__PURE__ */ new Map();
     UNTRUSTED_PATH_PATTERNS = [
       /^\/tmp(\/|$)/,
@@ -1504,7 +2407,7 @@ var init_model_contract = __esm({
         installInstructions: "Install Claude CLI: https://claude.ai/download",
         buildLaunchArgs(model, extraFlags = []) {
           const args = ["--dangerously-skip-permissions"];
-          if (model) args.push("--model", model);
+          if (model) args.push("--model", normalizeToCcAlias(model));
           return [...args, ...extraFlags];
         },
         parseOutput(rawOutput) {
@@ -1581,13 +2484,24 @@ var init_model_contract = __esm({
 
 // src/team/worker-bootstrap.ts
 import { mkdir as mkdir3, writeFile as writeFile3, appendFile as appendFile2 } from "fs/promises";
-import { join as join8, dirname as dirname6 } from "path";
-function generateTriggerMessage(teamName, workerName) {
-  return `Read and follow the instructions in .omc/state/team/${teamName}/workers/${workerName}/inbox.md`;
+import { join as join10, dirname as dirname7 } from "path";
+function buildInstructionPath(...parts) {
+  return join10(...parts).replaceAll("\\", "/");
 }
-function generateMailboxTriggerMessage(teamName, workerName, count = 1) {
+function generateTriggerMessage(teamName, workerName, teamStateRoot3 = ".omc/state") {
+  const inboxPath = buildInstructionPath(teamStateRoot3, "team", teamName, "workers", workerName, "inbox.md");
+  if (teamStateRoot3 !== ".omc/state") {
+    return `Read ${inboxPath}, work now, report progress.`;
+  }
+  return `Read ${inboxPath}, start work now, then report concrete progress (not ACK-only).`;
+}
+function generateMailboxTriggerMessage(teamName, workerName, count = 1, teamStateRoot3 = ".omc/state") {
   const normalizedCount = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
-  return `You have ${normalizedCount} new message(s). Check .omc/state/team/${teamName}/mailbox/${workerName}.json`;
+  const mailboxPath = buildInstructionPath(teamStateRoot3, "team", teamName, "mailbox", `${workerName}.json`);
+  if (teamStateRoot3 !== ".omc/state") {
+    return `${normalizedCount} new msg(s): check ${mailboxPath}, act and report progress.`;
+  }
+  return `You have ${normalizedCount} new message(s). Check ${mailboxPath}, act now, and reply with concrete progress (not ACK-only).`;
 }
 function agentTypeGuidance(agentType) {
   switch (agentType) {
@@ -1723,23 +2637,23 @@ ${bootstrapInstructions}
 ` : ""}`;
 }
 async function composeInitialInbox(teamName, workerName, content, cwd) {
-  const inboxPath = join8(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
-  await mkdir3(dirname6(inboxPath), { recursive: true });
+  const inboxPath = join10(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
+  await mkdir3(dirname7(inboxPath), { recursive: true });
   await writeFile3(inboxPath, content, "utf-8");
 }
 async function ensureWorkerStateDir(teamName, workerName, cwd) {
-  const workerDir = join8(cwd, `.omc/state/team/${teamName}/workers/${workerName}`);
+  const workerDir = join10(cwd, `.omc/state/team/${teamName}/workers/${workerName}`);
   await mkdir3(workerDir, { recursive: true });
-  const mailboxDir = join8(cwd, `.omc/state/team/${teamName}/mailbox`);
+  const mailboxDir = join10(cwd, `.omc/state/team/${teamName}/mailbox`);
   await mkdir3(mailboxDir, { recursive: true });
-  const tasksDir = join8(cwd, `.omc/state/team/${teamName}/tasks`);
+  const tasksDir = join10(cwd, `.omc/state/team/${teamName}/tasks`);
   await mkdir3(tasksDir, { recursive: true });
 }
 async function writeWorkerOverlay(params) {
   const { teamName, workerName, cwd } = params;
   const overlay = generateWorkerOverlay(params);
-  const overlayPath = join8(cwd, `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`);
-  await mkdir3(dirname6(overlayPath), { recursive: true });
+  const overlayPath = join10(cwd, `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`);
+  await mkdir3(dirname7(overlayPath), { recursive: true });
   await writeFile3(overlayPath, overlay, "utf-8");
   return overlayPath;
 }
@@ -1751,13 +2665,78 @@ var init_worker_bootstrap = __esm({
   }
 });
 
+// src/team/git-worktree.ts
+import { existsSync as existsSync8, readFileSync as readFileSync5 } from "node:fs";
+import { join as join12 } from "node:path";
+import { execFileSync as execFileSync2 } from "node:child_process";
+function getWorktreePath(repoRoot, teamName, workerName) {
+  return join12(repoRoot, ".omc", "worktrees", sanitizeName(teamName), sanitizeName(workerName));
+}
+function getBranchName(teamName, workerName) {
+  return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
+}
+function getMetadataPath(repoRoot, teamName) {
+  return join12(repoRoot, ".omc", "state", "team-bridge", sanitizeName(teamName), "worktrees.json");
+}
+function readMetadata(repoRoot, teamName) {
+  const metaPath = getMetadataPath(repoRoot, teamName);
+  if (!existsSync8(metaPath)) return [];
+  try {
+    return JSON.parse(readFileSync5(metaPath, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+function writeMetadata(repoRoot, teamName, entries) {
+  const metaPath = getMetadataPath(repoRoot, teamName);
+  validateResolvedPath(metaPath, repoRoot);
+  const dir = join12(repoRoot, ".omc", "state", "team-bridge", sanitizeName(teamName));
+  ensureDirWithMode(dir);
+  atomicWriteJson(metaPath, entries);
+}
+function removeWorkerWorktree(teamName, workerName, repoRoot) {
+  const wtPath = getWorktreePath(repoRoot, teamName, workerName);
+  const branch = getBranchName(teamName, workerName);
+  try {
+    execFileSync2("git", ["worktree", "remove", "--force", wtPath], { cwd: repoRoot, stdio: "pipe" });
+  } catch {
+  }
+  try {
+    execFileSync2("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+  } catch {
+  }
+  try {
+    execFileSync2("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
+  } catch {
+  }
+  const existing = readMetadata(repoRoot, teamName);
+  const updated = existing.filter((e) => e.workerName !== workerName);
+  writeMetadata(repoRoot, teamName, updated);
+}
+function cleanupTeamWorktrees(teamName, repoRoot) {
+  const entries = readMetadata(repoRoot, teamName);
+  for (const entry of entries) {
+    try {
+      removeWorkerWorktree(teamName, entry.workerName, repoRoot);
+    } catch {
+    }
+  }
+}
+var init_git_worktree = __esm({
+  "src/team/git-worktree.ts"() {
+    "use strict";
+    init_fs_utils();
+    init_tmux_session();
+  }
+});
+
 // src/team/monitor.ts
-import { existsSync as existsSync9 } from "fs";
+import { existsSync as existsSync11 } from "fs";
 import { readFile as readFile5, mkdir as mkdir5 } from "fs/promises";
-import { dirname as dirname8 } from "path";
+import { dirname as dirname9 } from "path";
 async function readJsonSafe3(filePath) {
   try {
-    if (!existsSync9(filePath)) return null;
+    if (!existsSync11(filePath)) return null;
     const raw = await readFile5(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
@@ -1766,7 +2745,7 @@ async function readJsonSafe3(filePath) {
 }
 async function writeAtomic2(filePath, data) {
   const { writeFile: writeFile6 } = await import("fs/promises");
-  await mkdir5(dirname8(filePath), { recursive: true });
+  await mkdir5(dirname9(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
   await writeFile6(tmpPath, data, "utf-8");
   const { rename: rename2 } = await import("fs/promises");
@@ -1784,7 +2763,7 @@ async function readWorkerHeartbeat(teamName, workerName, cwd) {
 }
 async function readMonitorSnapshot(teamName, cwd) {
   const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
-  if (!existsSync9(p)) return null;
+  if (!existsSync11(p)) return null;
   try {
     const raw = await readFile5(p, "utf-8");
     const parsed = JSON.parse(raw);
@@ -1835,7 +2814,7 @@ async function readShutdownAck(teamName, workerName, cwd, requestedAfter) {
 }
 async function listTasksFromFiles(teamName, cwd) {
   const tasksDir = absPath(cwd, TeamPaths.tasks(teamName));
-  if (!existsSync9(tasksDir)) return [];
+  if (!existsSync11(tasksDir)) return [];
   const { readdir: readdir5 } = await import("fs/promises");
   const entries = await readdir5(tasksDir);
   const tasks = [];
@@ -1870,9 +2849,9 @@ var init_monitor = __esm({
 
 // src/team/events.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { dirname as dirname9 } from "path";
+import { dirname as dirname10 } from "path";
 import { mkdir as mkdir6, readFile as readFile6, appendFile as appendFile3 } from "fs/promises";
-import { existsSync as existsSync10 } from "fs";
+import { existsSync as existsSync12 } from "fs";
 async function appendTeamEvent(teamName, event, cwd) {
   const full = {
     event_id: randomUUID4(),
@@ -1881,7 +2860,7 @@ async function appendTeamEvent(teamName, event, cwd) {
     ...event
   };
   const p = absPath(cwd, TeamPaths.events(teamName));
-  await mkdir6(dirname9(p), { recursive: true });
+  await mkdir6(dirname10(p), { recursive: true });
   await appendFile3(p, `${JSON.stringify(full)}
 `, "utf8");
   return full;
@@ -1994,9 +2973,10 @@ __export(runtime_v2_exports, {
   startTeamV2: () => startTeamV2,
   writeWatchdogFailedMarker: () => writeWatchdogFailedMarker
 });
-import { join as join13, resolve as resolve3 } from "path";
-import { existsSync as existsSync11 } from "fs";
-import { mkdir as mkdir7, readdir as readdir3, writeFile as writeFile5 } from "fs/promises";
+import { execFile as execFile2 } from "child_process";
+import { join as join15, resolve as resolve3 } from "path";
+import { existsSync as existsSync13 } from "fs";
+import { mkdir as mkdir7, readdir as readdir3, readFile as readFile7, writeFile as writeFile5 } from "fs/promises";
 import { performance } from "perf_hooks";
 function isRuntimeV2Enabled(env = process.env) {
   const raw = env.OMC_RUNTIME_V2;
@@ -2015,6 +2995,33 @@ async function isWorkerPaneAlive(paneId) {
   } catch {
     return false;
   }
+}
+async function captureWorkerPane(paneId) {
+  if (!paneId) return "";
+  return await new Promise((resolve4) => {
+    execFile2("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"], (err, stdout) => {
+      if (err) resolve4("");
+      else resolve4(stdout ?? "");
+    });
+  });
+}
+function isFreshTimestamp(value, maxAgeMs = MONITOR_SIGNAL_STALE_MS) {
+  if (!value) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return Date.now() - parsed <= maxAgeMs;
+}
+function findOutstandingWorkerTask(worker, taskById, inProgressByOwner) {
+  if (typeof worker.assigned_tasks === "object") {
+    for (const taskId of worker.assigned_tasks) {
+      const task = taskById.get(taskId);
+      if (task && (task.status === "pending" || task.status === "in_progress")) {
+        return task;
+      }
+    }
+  }
+  const owned = inProgressByOwner.get(worker.name) ?? [];
+  return owned[0] ?? null;
 }
 function buildV2TaskInstruction(teamName, workerName, task, taskId) {
   return [
@@ -2056,10 +3063,41 @@ async function notifyPaneWithRetry(sessionName2, paneId, message, maxAttempts = 
   }
   return false;
 }
+function hasWorkerStatusProgress(status, taskId) {
+  if (status.current_task_id === taskId) return true;
+  return ["working", "blocked", "done", "failed"].includes(status.state);
+}
+async function hasWorkerTaskClaimEvidence(teamName, workerName, cwd, taskId) {
+  try {
+    const raw = await readFile7(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), "utf-8");
+    const task = JSON.parse(raw);
+    return task.owner === workerName && ["in_progress", "completed", "failed"].includes(task.status);
+  } catch {
+    return false;
+  }
+}
+async function hasClaudeStartupEvidence(teamName, workerName, taskId, cwd) {
+  const [hasClaimEvidence, status] = await Promise.all([
+    hasWorkerTaskClaimEvidence(teamName, workerName, cwd, taskId),
+    readWorkerStatus(teamName, workerName, cwd)
+  ]);
+  return hasClaimEvidence || hasWorkerStatusProgress(status, taskId);
+}
+async function waitForClaudeStartupEvidence(teamName, workerName, taskId, cwd, attempts = 3, delayMs = 250) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (await hasClaudeStartupEvidence(teamName, workerName, taskId, cwd)) {
+      return true;
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
+    }
+  }
+  return false;
+}
 async function spawnV2Worker(opts) {
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   const splitTarget = opts.existingWorkerPaneIds.length === 0 ? opts.leaderPaneId : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
   const splitType = opts.existingWorkerPaneIds.length === 0 ? "-h" : "-v";
   const splitResult = await execFileAsync("tmux", [
@@ -2115,7 +3153,7 @@ async function spawnV2Worker(opts) {
   if (usePromptMode) {
     const promptArgs = getPromptModeArgs(
       opts.agentType,
-      `Read and execute your task from: ${relInboxPath}`
+      inboxTriggerMessage
     );
     launchArgs.push(...promptArgs);
   }
@@ -2182,6 +3220,37 @@ async function spawnV2Worker(opts) {
       startupFailureReason: dispatchOutcome.reason
     };
   }
+  if (opts.agentType === "claude") {
+    const settled = await waitForClaudeStartupEvidence(
+      opts.teamName,
+      opts.workerName,
+      opts.taskId,
+      opts.cwd
+    );
+    if (!settled) {
+      const renotified = await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
+      if (!renotified.ok) {
+        return {
+          paneId,
+          startupAssigned: false,
+          startupFailureReason: `${renotified.reason}:startup_evidence_missing`
+        };
+      }
+      const settledAfterRetry = await waitForClaudeStartupEvidence(
+        opts.teamName,
+        opts.workerName,
+        opts.taskId,
+        opts.cwd
+      );
+      if (!settledAfterRetry) {
+        return {
+          paneId,
+          startupAssigned: false,
+          startupFailureReason: "claude_startup_evidence_missing"
+        };
+      }
+    }
+  }
   return {
     paneId,
     startupAssigned: true
@@ -2198,11 +3267,11 @@ async function startTeamV2(config) {
   }
   await mkdir7(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
   await mkdir7(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-  await mkdir7(join13(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
+  await mkdir7(join15(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
   for (let i = 0; i < config.tasks.length; i++) {
     const taskId = String(i + 1);
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    await mkdir7(join13(taskFilePath, ".."), { recursive: true });
+    await mkdir7(join15(taskFilePath, ".."), { recursive: true });
     await writeFile5(taskFilePath, JSON.stringify({
       id: taskId,
       subject: config.tasks[i].subject,
@@ -2326,7 +3395,7 @@ async function writeWatchdogFailedMarker(teamName, cwd, reason) {
     writtenBy: "runtime-v2"
   };
   const root = absPath(cwd, TeamPaths.root(sanitizeTeamName(teamName)));
-  const markerPath = join13(root, "watchdog-failed.json");
+  const markerPath = join15(root, "watchdog-failed.json");
   await mkdir7(root, { recursive: true });
   await writeFile6(markerPath, JSON.stringify(marker, null, 2), "utf-8");
 }
@@ -2394,16 +3463,19 @@ async function monitorTeamV2(teamName, cwd) {
   const workerSignals = await Promise.all(
     config.workers.map(async (worker) => {
       const alive = await isWorkerPaneAlive(worker.pane_id);
-      const [status, heartbeat] = await Promise.all([
+      const [status, heartbeat, paneCapture] = await Promise.all([
         readWorkerStatus(sanitized, worker.name, cwd),
-        readWorkerHeartbeat(sanitized, worker.name, cwd)
+        readWorkerHeartbeat(sanitized, worker.name, cwd),
+        alive ? captureWorkerPane(worker.pane_id) : Promise.resolve("")
       ]);
-      return { worker, alive, status, heartbeat };
+      return { worker, alive, status, heartbeat, paneCapture };
     })
   );
   const workerScanMs = performance.now() - workerScanStartMs;
-  for (const { worker: w, alive, status, heartbeat } of workerSignals) {
+  for (const { worker: w, alive, status, heartbeat, paneCapture } of workerSignals) {
     const currentTask = status.current_task_id ? taskById.get(status.current_task_id) ?? null : null;
+    const outstandingTask = currentTask ?? findOutstandingWorkerTask(w, taskById, inProgressByOwner);
+    const expectedTaskId = status.current_task_id ?? outstandingTask?.id ?? w.assigned_tasks[0] ?? "";
     const previousTurns = previousSnapshot ? previousSnapshot.workerTurnCountByName[w.name] ?? 0 : null;
     const previousTaskId = previousSnapshot?.workerTaskIdByName[w.name] ?? "";
     const currentTaskId = status.current_task_id ?? "";
@@ -2423,9 +3495,27 @@ async function monitorTeamV2(teamName, cwd) {
         recommendations.push(`Reassign task-${t.id} from dead ${w.name}`);
       }
     }
-    if (alive && turnsWithoutProgress > 5) {
+    const paneSuggestsIdle = alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
+    const statusFresh = isFreshTimestamp(status.updated_at);
+    const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
+    const hasWorkStartEvidence = expectedTaskId !== "" && hasWorkerStatusProgress(status, expectedTaskId);
+    let stallReason = null;
+    if (paneSuggestsIdle && expectedTaskId !== "" && !hasWorkStartEvidence) {
+      stallReason = "no_work_start_evidence";
+    } else if (paneSuggestsIdle && expectedTaskId !== "" && (!statusFresh || !heartbeatFresh)) {
+      stallReason = "stale_or_missing_worker_reports";
+    } else if (paneSuggestsIdle && turnsWithoutProgress > 5) {
+      stallReason = "no_meaningful_turn_progress";
+    }
+    if (stallReason) {
       nonReportingWorkers.push(w.name);
-      recommendations.push(`Send reminder to non-reporting ${w.name}`);
+      if (stallReason === "no_work_start_evidence") {
+        recommendations.push(`Investigate ${w.name}: assigned work but no work-start evidence; pane is idle at prompt`);
+      } else if (stallReason === "stale_or_missing_worker_reports") {
+        recommendations.push(`Investigate ${w.name}: pane is idle while status/heartbeat are stale or missing`);
+      } else {
+        recommendations.push(`Investigate ${w.name}: no meaningful turn progress and pane is idle at prompt`);
+      }
     }
   }
   const taskCounts = {
@@ -2622,6 +3712,12 @@ Then exit your session.
     }, cwd).catch(() => {
     });
   }
+  try {
+    cleanupTeamWorktrees(sanitized, cwd);
+  } catch (err) {
+    process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}
+`);
+  }
   await cleanupTeamState(sanitized, cwd);
 }
 async function resumeTeamV2(teamName, cwd) {
@@ -2629,9 +3725,9 @@ async function resumeTeamV2(teamName, cwd) {
   const config = await readTeamConfig(sanitized, cwd);
   if (!config) return null;
   try {
-    const { execFile: execFile2 } = await import("child_process");
+    const { execFile: execFile3 } = await import("child_process");
     const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile2);
+    const execFileAsync = promisify2(execFile3);
     const sessionName2 = config.tmux_session || `omc-team-${sanitized}`;
     await execFileAsync("tmux", ["has-session", "-t", sessionName2.split(":")[0]]);
     return {
@@ -2647,8 +3743,8 @@ async function resumeTeamV2(teamName, cwd) {
   }
 }
 async function findActiveTeamsV2(cwd) {
-  const root = join13(cwd, ".omc", "state", "team");
-  if (!existsSync11(root)) return [];
+  const root = join15(cwd, ".omc", "state", "team");
+  if (!existsSync13(root)) return [];
   const entries = await readdir3(root, { withFileTypes: true });
   const active = [];
   for (const e of entries) {
@@ -2661,7 +3757,7 @@ async function findActiveTeamsV2(cwd) {
   }
   return active;
 }
-var CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
+var MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
 var init_runtime_v2 = __esm({
   "src/team/runtime-v2.ts"() {
     "use strict";
@@ -2674,6 +3770,8 @@ var init_runtime_v2 = __esm({
     init_tmux_session();
     init_worker_bootstrap();
     init_mcp_comm();
+    init_git_worktree();
+    MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
     CircuitBreakerV2 = class {
       constructor(teamName, cwd, threshold = CIRCUIT_BREAKER_THRESHOLD) {
@@ -2704,16 +3802,16 @@ var init_runtime_v2 = __esm({
 
 // src/cli/team.ts
 import { spawn } from "child_process";
-import { existsSync as existsSync12, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
-import { readFile as readFile7, readdir as readdir4, rm as rm5 } from "fs/promises";
+import { existsSync as existsSync14, mkdirSync as mkdirSync2, readFileSync as readFileSync7, writeFileSync as writeFileSync2 } from "fs";
+import { readFile as readFile8, readdir as readdir4, rm as rm5 } from "fs/promises";
 import { homedir as homedir2 } from "os";
-import { dirname as dirname10, join as join14 } from "path";
+import { dirname as dirname11, join as join16 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/team/api-interop.ts
 init_contracts();
-import { existsSync as existsSync5, readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname7, join as join9, resolve as resolvePath } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync4 } from "node:fs";
+import { dirname as dirname8, join as join11, resolve as resolvePath } from "node:path";
 
 // src/team/team-ops.ts
 init_state_paths();
@@ -3400,8 +4498,8 @@ function parseValidatedTaskIdArray(value, fieldName) {
 }
 function teamStateExists(teamName, candidateCwd) {
   if (!TEAM_NAME_SAFE_PATTERN.test(teamName)) return false;
-  const teamRoot = join9(candidateCwd, ".omc", "state", "team", teamName);
-  return existsSync5(join9(teamRoot, "config.json")) || existsSync5(join9(teamRoot, "tasks")) || existsSync5(teamRoot);
+  const teamRoot = join11(candidateCwd, ".omc", "state", "team", teamName);
+  return existsSync7(join11(teamRoot, "config.json")) || existsSync7(join11(teamRoot, "tasks")) || existsSync7(teamRoot);
 }
 function parseTeamWorkerEnv(raw) {
   if (typeof raw !== "string" || raw.trim() === "") return null;
@@ -3417,9 +4515,9 @@ function readTeamStateRootFromEnv(env = process.env) {
   return candidate || null;
 }
 function readTeamStateRootFromFile(path) {
-  if (!existsSync5(path)) return null;
+  if (!existsSync7(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    const parsed = JSON.parse(readFileSync4(path, "utf8"));
     return typeof parsed.team_state_root === "string" && parsed.team_state_root.trim() !== "" ? parsed.team_state_root.trim() : null;
   } catch {
     return null;
@@ -3433,7 +4531,7 @@ function stateRootToWorkingDirectory(stateRoot2) {
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return dirname7(dirname7(dirname7(dirname7(absolute))));
+      return dirname8(dirname8(dirname8(dirname8(absolute))));
     }
   }
   for (const marker of ["/.omc/state", "/.omx/state"]) {
@@ -3441,21 +4539,21 @@ function stateRootToWorkingDirectory(stateRoot2) {
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return dirname7(dirname7(absolute));
+      return dirname8(dirname8(absolute));
     }
   }
-  return dirname7(dirname7(absolute));
+  return dirname8(dirname8(absolute));
 }
 function resolveTeamWorkingDirectoryFromMetadata(teamName, candidateCwd, workerContext) {
-  const teamRoot = join9(candidateCwd, ".omc", "state", "team", teamName);
-  if (!existsSync5(teamRoot)) return null;
+  const teamRoot = join11(candidateCwd, ".omc", "state", "team", teamName);
+  if (!existsSync7(teamRoot)) return null;
   if (workerContext?.teamName === teamName) {
-    const workerRoot = readTeamStateRootFromFile(join9(teamRoot, "workers", workerContext.workerName, "identity.json"));
+    const workerRoot = readTeamStateRootFromFile(join11(teamRoot, "workers", workerContext.workerName, "identity.json"));
     if (workerRoot) return stateRootToWorkingDirectory(workerRoot);
   }
-  const fromManifest = readTeamStateRootFromFile(join9(teamRoot, "manifest.v2.json"));
+  const fromManifest = readTeamStateRootFromFile(join11(teamRoot, "manifest.v2.json"));
   if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
-  const fromConfig = readTeamStateRootFromFile(join9(teamRoot, "config.json"));
+  const fromConfig = readTeamStateRootFromFile(join11(teamRoot, "config.json"));
   if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
   return null;
 }
@@ -3478,7 +4576,7 @@ function resolveTeamWorkingDirectory(teamName, preferredCwd) {
       if (teamStateExists(normalizedTeamName, cursor)) {
         return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor, workerContext) ?? cursor;
       }
-      const parent = dirname7(cursor);
+      const parent = dirname8(cursor);
       if (!parent || parent === cursor) break;
       cursor = parent;
     }
@@ -3496,6 +4594,10 @@ function resolveTeamApiOperation(name) {
 }
 var QUEUED_FOR_HOOK_DISPATCH_REASON = "queued_for_hook_dispatch";
 var LEADER_PANE_MISSING_MAILBOX_PERSISTED_REASON = "leader_pane_missing_mailbox_persisted";
+var WORKTREE_TRIGGER_STATE_ROOT = "$OMC_TEAM_STATE_ROOT";
+function resolveInstructionStateRoot(worktreePath) {
+  return worktreePath ? WORKTREE_TRIGGER_STATE_ROOT : void 0;
+}
 function queuedForHookDispatch() {
   return {
     ok: true,
@@ -3530,7 +4632,8 @@ function findWorkerDispatchTarget(teamName, toWorker, cwd) {
     const recipient = config?.workers.find((worker) => worker.name === toWorker);
     return {
       paneId: recipient?.pane_id,
-      workerIndex: recipient?.index
+      workerIndex: recipient?.index,
+      instructionStateRoot: resolveInstructionStateRoot(recipient?.worktree_path)
     };
   });
 }
@@ -3614,7 +4717,7 @@ async function executeTeamApiOperation(operation, args, fallbackCwd) {
           toWorkerIndex: target.workerIndex,
           toPaneId: target.paneId,
           body,
-          triggerMessage: generateMailboxTriggerMessage(teamName, toWorker),
+          triggerMessage: generateMailboxTriggerMessage(teamName, toWorker, 1, target.instructionStateRoot),
           cwd,
           notify: ({ workerName }, triggerMessage) => notifyMailboxTarget(teamName, workerName, triggerMessage, cwd),
           deps: {
@@ -3639,14 +4742,24 @@ async function executeTeamApiOperation(operation, args, fallbackCwd) {
         }
         let messages = [];
         const config = await teamReadConfig(teamName, cwd);
-        const recipients = (config?.workers ?? []).filter((worker) => worker.name !== fromWorker).map((worker) => ({ workerName: worker.name, workerIndex: worker.index, paneId: worker.pane_id }));
+        const recipients = (config?.workers ?? []).filter((worker) => worker.name !== fromWorker).map((worker) => ({
+          workerName: worker.name,
+          workerIndex: worker.index,
+          paneId: worker.pane_id,
+          instructionStateRoot: resolveInstructionStateRoot(worker.worktree_path)
+        }));
         await queueBroadcastMailboxMessage({
           teamName,
           fromWorker,
           recipients,
           body,
           cwd,
-          triggerFor: (workerName) => generateMailboxTriggerMessage(teamName, workerName),
+          triggerFor: (workerName) => generateMailboxTriggerMessage(
+            teamName,
+            workerName,
+            1,
+            recipients.find((recipient) => recipient.workerName === workerName)?.instructionStateRoot
+          ),
           notify: ({ workerName }, triggerMessage) => notifyMailboxTarget(teamName, workerName, triggerMessage, cwd),
           deps: {
             sendDirectMessage: teamSendMessage,
@@ -4005,6 +5118,7 @@ async function executeTeamApiOperation(operation, args, fallbackCwd) {
 }
 
 // src/cli/team.ts
+init_git_worktree();
 init_tmux_session();
 init_team_name();
 
@@ -4013,32 +5127,26 @@ init_model_contract();
 init_team_name();
 init_tmux_session();
 init_worker_bootstrap();
+init_git_worktree();
 import { mkdir as mkdir4, writeFile as writeFile4, readFile as readFile4, rm as rm3, rename } from "fs/promises";
-import { join as join12 } from "path";
-import { existsSync as existsSync8 } from "fs";
+import { join as join14 } from "path";
+import { existsSync as existsSync10 } from "fs";
 
 // src/team/task-file-ops.ts
-import { readFileSync as readFileSync4, readdirSync as readdirSync3, existsSync as existsSync7, openSync as openSync2, closeSync as closeSync2, unlinkSync as unlinkSync2, writeSync as writeSync2, statSync as statSync2, constants as fsConstants } from "fs";
-import { join as join11 } from "path";
-
-// src/utils/paths.ts
-import { join as join10 } from "path";
-import { existsSync as existsSync6, readFileSync as readFileSync3, readdirSync as readdirSync2, statSync, unlinkSync, rmSync } from "fs";
-import { homedir } from "os";
-var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
-
-// src/team/task-file-ops.ts
+init_paths();
 init_tmux_session();
 init_fs_utils();
 init_state_paths();
+import { readFileSync as readFileSync6, readdirSync as readdirSync3, existsSync as existsSync9, openSync as openSync2, closeSync as closeSync2, unlinkSync as unlinkSync2, writeSync as writeSync2, statSync as statSync2, constants as fsConstants } from "fs";
+import { join as join13 } from "path";
 
 // src/team/runtime.ts
 function stateRoot(cwd, teamName) {
   validateTeamName(teamName);
-  return join12(cwd, `.omc/state/team/${teamName}`);
+  return join14(cwd, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-  await mkdir4(join12(filePath, ".."), { recursive: true });
+  await mkdir4(join14(filePath, ".."), { recursive: true });
   await writeFile4(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 async function readJsonSafe2(filePath) {
@@ -4068,7 +5176,7 @@ async function readJsonSafe2(filePath) {
   return null;
 }
 function taskPath(root, taskId) {
-  return join12(root, "tasks", `${taskId}.json`);
+  return join14(root, "tasks", `${taskId}.json`);
 }
 async function readTask(root, taskId) {
   return readJsonSafe2(taskPath(root, taskId));
@@ -4081,9 +5189,9 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
   const taskCounts = { pending: 0, inProgress: 0, completed: 0, failed: 0 };
   try {
     const { readdir: readdir5 } = await import("fs/promises");
-    const taskFiles = await readdir5(join12(root, "tasks"));
+    const taskFiles = await readdir5(join14(root, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
-      const task = await readJsonSafe2(join12(root, "tasks", f));
+      const task = await readJsonSafe2(join14(root, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
       else if (task?.status === "in_progress") taskCounts.inProgress++;
       else if (task?.status === "completed") taskCounts.completed++;
@@ -4099,7 +5207,7 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
     const wName = `worker-${i + 1}`;
     const paneId = workerPaneIds[i];
     const alive = await isWorkerAlive(paneId);
-    const heartbeatPath = join12(root, "workers", wName, "heartbeat.json");
+    const heartbeatPath = join14(root, "workers", wName, "heartbeat.json");
     const heartbeat = await readJsonSafe2(heartbeatPath);
     let stalled = false;
     if (heartbeat?.updatedAt) {
@@ -4141,11 +5249,11 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
 }
 async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, workerPaneIds, leaderPaneId, ownsWindow) {
   const root = stateRoot(cwd, teamName);
-  await writeJson(join12(root, "shutdown.json"), {
+  await writeJson(join14(root, "shutdown.json"), {
     requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
     teamName
   });
-  const configData = await readJsonSafe2(join12(root, "config.json"));
+  const configData = await readJsonSafe2(join14(root, "config.json"));
   const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
@@ -4155,8 +5263,8 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
     const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
     while (Date.now() < deadline && expectedAcks.length > 0) {
       for (const wName of [...expectedAcks]) {
-        const ackPath = join12(root, "workers", wName, "shutdown-ack.json");
-        if (existsSync8(ackPath)) {
+        const ackPath = join14(root, "workers", wName, "shutdown-ack.json");
+        if (existsSync10(ackPath)) {
           expectedAcks.splice(expectedAcks.indexOf(wName), 1);
         }
       }
@@ -4168,17 +5276,21 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
   const sessionMode = ownsWindow ?? Boolean(configData?.tmuxOwnsWindow) ? sessionName2.includes(":") ? "dedicated-window" : "detached-session" : "split-pane";
   await killTeamSession(sessionName2, workerPaneIds, leaderPaneId, { sessionMode });
   try {
+    cleanupTeamWorktrees(teamName, cwd);
+  } catch {
+  }
+  try {
     await rm3(root, { recursive: true, force: true });
   } catch {
   }
 }
 async function resumeTeam(teamName, cwd) {
   const root = stateRoot(cwd, teamName);
-  const configData = await readJsonSafe2(join12(root, "config.json"));
+  const configData = await readJsonSafe2(join14(root, "config.json"));
   if (!configData) return null;
-  const { execFile: execFile2 } = await import("child_process");
+  const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile2);
+  const execFileAsync = promisify2(execFile3);
   const sName = configData.tmuxSession || `omc-team-${teamName}`;
   try {
     await execFileAsync("tmux", ["has-session", "-t", sName.split(":")[0]]);
@@ -4262,31 +5374,31 @@ function assertTeamSpawnAllowed(env = process.env) {
   );
 }
 function resolveJobsDir(env = process.env) {
-  return env.OMC_JOBS_DIR || join14(homedir2(), ".omc", "team-jobs");
+  return env.OMC_JOBS_DIR || join16(homedir2(), ".omc", "team-jobs");
 }
 function resolveRuntimeCliPath(env = process.env) {
   if (env.OMC_RUNTIME_CLI_PATH) {
     return env.OMC_RUNTIME_CLI_PATH;
   }
-  const moduleDir = dirname10(fileURLToPath3(import.meta.url));
-  return join14(moduleDir, "../../bridge/runtime-cli.cjs");
+  const moduleDir = dirname11(fileURLToPath3(import.meta.url));
+  return join16(moduleDir, "../../bridge/runtime-cli.cjs");
 }
 function ensureJobsDir(jobsDir) {
-  if (!existsSync12(jobsDir)) {
+  if (!existsSync14(jobsDir)) {
     mkdirSync2(jobsDir, { recursive: true });
   }
 }
 function jobPath(jobsDir, jobId) {
-  return join14(jobsDir, `${jobId}.json`);
+  return join16(jobsDir, `${jobId}.json`);
 }
 function resultArtifactPath(jobsDir, jobId) {
-  return join14(jobsDir, `${jobId}-result.json`);
+  return join16(jobsDir, `${jobId}-result.json`);
 }
 function panesArtifactPath(jobsDir, jobId) {
-  return join14(jobsDir, `${jobId}-panes.json`);
+  return join16(jobsDir, `${jobId}-panes.json`);
 }
 function teamStateRoot2(cwd, teamName) {
-  return join14(cwd, ".omc", "state", "team", teamName);
+  return join16(cwd, ".omc", "state", "team", teamName);
 }
 function validateJobId(jobId) {
   if (!JOB_ID_PATTERN.test(jobId)) {
@@ -4302,7 +5414,7 @@ function parseJsonSafe(content) {
 }
 function readJobFromDisk(jobId, jobsDir) {
   try {
-    const content = readFileSync5(jobPath(jobsDir, jobId), "utf-8");
+    const content = readFileSync7(jobPath(jobsDir, jobId), "utf-8");
     return parseJsonSafe(content);
   } catch {
     return null;
@@ -4339,7 +5451,7 @@ function generateJobId(now = Date.now()) {
 }
 function convergeWithResultArtifact(jobId, job, jobsDir) {
   try {
-    const artifactRaw = readFileSync5(resultArtifactPath(jobsDir, jobId), "utf-8");
+    const artifactRaw = readFileSync7(resultArtifactPath(jobsDir, jobId), "utf-8");
     const artifactParsed = parseJsonSafe(artifactRaw);
     if (artifactParsed?.status === "completed" || artifactParsed?.status === "failed") {
       return {
@@ -4483,7 +5595,7 @@ async function cleanupTeamJob(jobId, graceMs = 1e4) {
   if (!job) {
     throw new Error(`No job found: ${jobId}`);
   }
-  const paneArtifact = await readFile7(panesArtifactPath(jobsDir, jobId), "utf-8").then((content) => parseJsonSafe(content)).catch(() => null);
+  const paneArtifact = await readFile8(panesArtifactPath(jobsDir, jobId), "utf-8").then((content) => parseJsonSafe(content)).catch(() => null);
   if (paneArtifact?.sessionName && (paneArtifact.ownsWindow === true || !paneArtifact.sessionName.includes(":"))) {
     const sessionMode = paneArtifact.ownsWindow === true ? paneArtifact.sessionName.includes(":") ? "dedicated-window" : "detached-session" : "detached-session";
     await killTeamSession(
@@ -4505,6 +5617,10 @@ async function cleanupTeamJob(jobId, graceMs = 1e4) {
     recursive: true,
     force: true
   }).catch(() => void 0);
+  try {
+    cleanupTeamWorktrees(job.teamName, job.cwd);
+  } catch {
+  }
   writeJobToDisk(jobId, {
     ...job,
     cleanedUpAt: (/* @__PURE__ */ new Date()).toISOString()

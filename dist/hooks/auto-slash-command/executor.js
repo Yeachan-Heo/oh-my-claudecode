@@ -10,6 +10,7 @@ import { join, basename } from 'path';
 import { getClaudeConfigDir } from '../../utils/paths.js';
 import { resolveLiveData } from './live-data.js';
 import { parseFrontmatter, parseFrontmatterAliases, stripOptionalQuotes } from '../../utils/frontmatter.js';
+import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../utils/skill-pipeline.js';
 /** Claude config directory */
 const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 /**
@@ -119,6 +120,7 @@ export function discoverAllCommands() {
                         const argumentHint = getFrontmatterString(fm, 'argument-hint');
                         const model = getFrontmatterString(fm, 'model');
                         const agent = getFrontmatterString(fm, 'agent');
+                        const pipeline = parseSkillPipelineMetadata(fm);
                         for (const commandName of commandNames) {
                             const isAlias = commandName !== canonicalName;
                             const metadata = {
@@ -127,6 +129,7 @@ export function discoverAllCommands() {
                                 argumentHint,
                                 model,
                                 agent,
+                                pipeline: isAlias ? undefined : pipeline,
                                 aliases: isAlias ? undefined : aliases,
                                 aliasOf: isAlias ? canonicalName : undefined,
                                 deprecatedAlias: isAlias || undefined,
@@ -203,7 +206,12 @@ function formatCommandTemplate(cmd, args) {
     // Resolve arguments in content, then execute any live-data commands
     const resolvedContent = resolveArguments(cmd.content || '', args);
     const injectedContent = resolveLiveData(resolvedContent);
-    sections.push(injectedContent.trim());
+    const pipelineGuidance = cmd.scope === 'skill'
+        ? renderSkillPipelineGuidance(cmd.metadata.name, cmd.metadata.pipeline)
+        : '';
+    sections.push([injectedContent.trim(), pipelineGuidance]
+        .filter((section) => section.trim().length > 0)
+        .join('\n\n'));
     if (args && !cmd.content?.includes('$ARGUMENTS')) {
         sections.push('\n\n---\n');
         sections.push('## User Request\n');

@@ -1,3 +1,66 @@
+# oh-my-claudecode v4.7.10: Bedrock Model Routing, Team Runtime Hardening & Session History Search
+
+## Release Notes
+
+Release focused on Bedrock model routing fixes, team runtime hardening ported from OMX, session history search capabilities, and various reliability improvements across the CLI, HUD, and agent delegation systems.
+
+### Highlights
+
+- **Bedrock Model Routing Fix** — Normalizes explicit model IDs in all code paths, preventing `claude-sonnet-4-6` style IDs from leaking to the API and causing 400 errors. (#1415, #1548)
+- **Team Runtime Hardening** — Ports startup hardening from OMX requiring real work-start evidence before settling startup; stops treating ACK-only leader-mailbox replies as sufficient. (#1540, #1547)
+- **Session History Search** — New `omc session search` command to search through prior local session history with filters and full-text search. (#1545, #1546)
+- **Lazy Agent Loading** — Reduces startup memory by loading agent prompts on-demand rather than eagerly. (#1495, #1497)
+
+### Features
+
+- **feat(session): add session history search** — Full-text search across session history with filters for mode, date range, and status. (#1545, #1546)
+- **feat(ralph): add critic selection for verification** — Allows selecting critic agent for verification workflows. (#1496, #1498)
+- **feat(openclaw): normalize native clawhip signals** — Standardizes signal handling between OpenClaw and Claude Code. (#1500, #1503)
+- **feat(doc-specialist): add first-pass context hub guidance** — Improves documentation specialist with context hub awareness. (#1519)
+- **feat: add skill pipeline handoff metadata** — Metadata support for skill-to-skill handoffs. (#1520)
+
+### Bug Fixes
+
+- **fix(routing): normalize explicit model IDs in all code paths** — Fixes Bedrock routing where full model IDs leaked through; extracts `normalizeToCcAlias()` helper and applies it to `enforceModel()` and `buildLaunchArgs()`. (#1415, #1548)
+- **fix(team): require real startup evidence** — Stops treating ACK-only leader-mailbox replies as sufficient startup evidence; requires task claim ownership or worker status progress. (#1540, #1547)
+- **fix(team): resolve worktree mailbox trigger paths** — Fixes worktree path resolution for mailbox triggers. (#1535, #1539)
+- **fix(team): finish runtime hardening port** — Completes OMX runtime hardening backport for team stability. (#1535, #1537)
+- **fix(hud): avoid repeated watch mode initialization** — Prevents duplicate watch initialization that could cause high CPU usage. (#1543, #1544)
+- **fix(hud): reduce transient usage API retry hammering** — Reduces aggressive retry behavior on API failures. (#1513)
+- **fix(hud): preserve stale usage limits on API failures** — Maintains last-known limits when API is unavailable. (#1507, #1508)
+- **fix(hooks): add missing continue: false to persistent-mode.cjs Stop hook** — Ensures stop hook properly blocks. (#1517)
+- **fix(skill): harden omc-teams tmux and agent validation** — Strengthens validation for team tmux sessions. (#1491, #1492)
+- **fix(delegation): skip legacy agent sync when plugin agents exist** — Prevents unnecessary sync operations. (#1499, #1501)
+- **fix(doctor): accept supported omc config keys** — Expands doctor to recognize all valid configuration keys. (#1502, #1504)
+- **fix(team): clean up stale transient files on session end** — Removes orphaned transient files after sessions. (#1510, #1511)
+
+### Refactor & Documentation
+
+- **refactor: lazy agent loading** — Loads agent prompts on-demand to reduce startup memory footprint. (#1495, #1497)
+- **docs: fix outdated install references in REFERENCE.md** — Removes stale analytics references. (#1533, #1536)
+- **docs: remove stale analytics references** — Cleans up documentation. (#1538)
+- **revert: undo unauthorized rebrand PRs 1527-1529** — Reverts unauthorized naming changes. (#1532)
+- **chore: remove stale root development artifacts** — Cleans up repository root. (#1526)
+
+### Stats
+
+- **20+ PRs merged** | **15+ bug fixes** | **5+ new features**
+
+### Install / Update
+
+```bash
+npm install -g oh-my-claude-sisyphus@4.7.9
+```
+
+Or reinstall the plugin:
+```bash
+claude /install-plugin oh-my-claudecode
+```
+
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.7.8...v4.7.9
+
+---
+
 # oh-my-claudecode v4.7.8: Stop-Hook Hardening & CLI Reliability Fixes
 
 ## Release Notes
@@ -232,7 +295,7 @@ Major release featuring a completely redesigned team orchestration runtime, rest
 ### Install / Update
 
 ```bash
-npm install -g oh-my-claude-sisyphus@4.7.0
+npm install -g oh-my-claude-sisyphus@4.7.9
 ```
 
 Or reinstall the plugin:
@@ -240,7 +303,7 @@ Or reinstall the plugin:
 claude /install-plugin oh-my-claudecode
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.6.7...v4.7.0
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.6.7...v4.7.9
 
 ---
 

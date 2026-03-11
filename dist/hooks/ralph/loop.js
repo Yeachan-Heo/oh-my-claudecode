@@ -49,7 +49,9 @@ export function isUltraQAActive(directory, sessionId) {
         return false;
     }
 }
+export const RALPH_CRITIC_MODES = ['architect', 'critic', 'codex'];
 const DEFAULT_MAX_ITERATIONS = 10;
+const DEFAULT_RALPH_CRITIC_MODE = 'architect';
 /**
  * Read Ralph Loop state from disk
  */
@@ -120,6 +122,34 @@ export function stripNoPrdFlag(prompt) {
         .trim();
 }
 /**
+ * Normalize a Ralph critic mode flag value.
+ */
+export function normalizeRalphCriticMode(value) {
+    if (!value) {
+        return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    return RALPH_CRITIC_MODES.includes(normalized)
+        ? normalized
+        : null;
+}
+/**
+ * Detect --critic=<mode> flag (case-insensitive).
+ */
+export function detectCriticModeFlag(prompt) {
+    const match = prompt.match(/--critic(?:=|\s+)([^\s]+)/i);
+    return normalizeRalphCriticMode(match?.[1]);
+}
+/**
+ * Strip --critic=<mode> flag from prompt text and trim whitespace.
+ */
+export function stripCriticModeFlag(prompt) {
+    return prompt
+        .replace(/--critic(?:=|\s+)([^\s]+)/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+/**
  * Create a Ralph Loop hook instance
  */
 export function createRalphLoopHook(directory) {
@@ -140,6 +170,7 @@ export function createRalphLoopHook(directory) {
             session_id: sessionId,
             project_path: directory,
             linked_ultrawork: enableUltrawork,
+            critic_mode: options?.criticMode ?? detectCriticModeFlag(prompt) ?? DEFAULT_RALPH_CRITIC_MODE,
         };
         const ralphSuccess = writeRalphState(directory, state, sessionId);
         // Auto-activate ultrawork (linked to ralph) by default

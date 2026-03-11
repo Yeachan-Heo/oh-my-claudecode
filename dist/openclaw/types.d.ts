@@ -49,6 +49,35 @@ export interface OpenClawConfig {
     /** Hook-event to gateway+instruction mappings */
     hooks: Partial<Record<OpenClawHookEvent, OpenClawHookMapping>>;
 }
+/** Normalized signal kinds for downstream routing */
+export type OpenClawSignalKind = "session" | "tool" | "test" | "pull-request" | "question" | "keyword";
+/** Supported lifecycle phases for normalized signals */
+export type OpenClawSignalPhase = "started" | "finished" | "failed" | "idle" | "detected" | "requested";
+/** Relative priority for downstream routing */
+export type OpenClawSignalPriority = "high" | "low";
+/** Canonical normalized signal routed alongside the raw hook event */
+export interface OpenClawSignal {
+    /** Routing family */
+    kind: OpenClawSignalKind;
+    /** Stable logical signal name */
+    name: string;
+    /** Lifecycle phase */
+    phase: OpenClawSignalPhase;
+    /** Canonical route key for native/HTTP consumers */
+    routeKey: string;
+    /** High-priority signals are lifecycle/test/PR/question events */
+    priority: OpenClawSignalPriority;
+    /** Tool name when relevant */
+    toolName?: string;
+    /** Safe command string when routing depends on the invoked Bash command */
+    command?: string;
+    /** Normalized test runner when the signal represents a test command */
+    testRunner?: string;
+    /** PR URL extracted from gh pr create output */
+    prUrl?: string;
+    /** Short summary for routing/debugging */
+    summary?: string;
+}
 /** Payload sent to an OpenClaw gateway */
 export interface OpenClawPayload {
     /** The hook event that triggered this call */
@@ -73,6 +102,8 @@ export interface OpenClawPayload {
     to?: string;
     /** Reply thread ID from OPENCLAW_REPLY_THREAD env var */
     threadId?: string;
+    /** Normalized routing signal derived from the raw hook event */
+    signal: OpenClawSignal;
     /** Context data from the hook (whitelisted fields only) */
     context: OpenClawContext;
 }
@@ -87,6 +118,10 @@ export interface OpenClawContext {
     projectPath?: string;
     tmuxSession?: string;
     toolName?: string;
+    /** Internal-only raw tool input used to derive normalized signals; never forwarded in payload.context */
+    toolInput?: unknown;
+    /** Internal-only raw tool output used to derive normalized signals; never forwarded in payload.context */
+    toolOutput?: unknown;
     prompt?: string;
     contextSummary?: string;
     reason?: string;

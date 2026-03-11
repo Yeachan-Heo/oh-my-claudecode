@@ -22,7 +22,8 @@ import { DEFAULT_HUD_USAGE_POLL_INTERVAL_MS, } from './types.js';
 import { readHudConfig } from './state.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
 // Cache configuration
-const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for failures
+const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for non-transient failures
+const CACHE_TTL_TRANSIENT_NETWORK_MS = 2 * 60 * 1000; // 2 minutes to avoid hammering transient API failures
 const MAX_RATE_LIMITED_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes max for sustained 429s
 const API_TIMEOUT_MS = 10000;
 const MAX_STALE_DATA_MS = 15 * 60 * 1000; // 15 minutes — discard stale data after this
@@ -135,6 +136,9 @@ function getRateLimitedBackoffMs(pollIntervalMs, count) {
     const normalizedPollIntervalMs = sanitizePollIntervalMs(pollIntervalMs);
     return Math.min(normalizedPollIntervalMs * Math.pow(2, Math.max(0, count - 1)), Math.max(MAX_RATE_LIMITED_BACKOFF_MS, normalizedPollIntervalMs));
 }
+function getTransientNetworkBackoffMs(pollIntervalMs) {
+    return Math.max(CACHE_TTL_TRANSIENT_NETWORK_MS, sanitizePollIntervalMs(pollIntervalMs));
+}
 function isCacheValid(cache, pollIntervalMs) {
     if (cache.rateLimited) {
         if (cache.rateLimitedUntil != null) {
@@ -143,21 +147,37 @@ function isCacheValid(cache, pollIntervalMs) {
         const count = cache.rateLimitedCount || 1;
         return Date.now() - cache.timestamp < getRateLimitedBackoffMs(pollIntervalMs, count);
     }
-    const ttl = cache.error ? CACHE_TTL_FAILURE_MS : sanitizePollIntervalMs(pollIntervalMs);
+    const ttl = cache.error
+        ? cache.errorReason === 'network'
+            ? getTransientNetworkBackoffMs(pollIntervalMs)
+            : CACHE_TTL_FAILURE_MS
+        : sanitizePollIntervalMs(pollIntervalMs);
     return Date.now() - cache.timestamp < ttl;
+}
+function hasUsableStaleData(cache) {
+    if (!cache?.data) {
+        return false;
+    }
+    if (cache.lastSuccessAt && Date.now() - cache.lastSuccessAt > MAX_STALE_DATA_MS) {
+        return false;
+    }
+    return true;
 }
 function getCachedUsageResult(cache) {
     if (cache.rateLimited) {
-        // Discard stale data if lastSuccessAt is older than MAX_STALE_DATA_MS
-        if (cache.lastSuccessAt && Date.now() - cache.lastSuccessAt > MAX_STALE_DATA_MS) {
+        if (!hasUsableStaleData(cache) && cache.data) {
             return { rateLimits: null, error: 'rate_limited' };
         }
         return { rateLimits: cache.data, error: 'rate_limited', stale: cache.data ? true : undefined };
     }
-    const cachedError = cache.error && !cache.data
-        ? (cache.errorReason || 'network')
-        : undefined;
-    return { rateLimits: cache.data, error: cachedError };
+    if (cache.error) {
+        const errorReason = cache.errorReason || 'network';
+        if (hasUsableStaleData(cache)) {
+            return { rateLimits: cache.data, error: errorReason, stale: true };
+        }
+        return { rateLimits: null, error: errorReason };
+    }
+    return { rateLimits: cache.data };
 }
 function createRateLimitedCacheEntry(source, data, pollIntervalMs, previousCount, lastSuccessAt) {
     const timestamp = Date.now();
@@ -626,7 +646,17 @@ export async function getUsage() {
                     return { rateLimits: null, error: 'rate_limited' };
                 }
                 if (!result.data) {
-                    writeCache({ data: null, error: true, source: 'zai', errorReason: 'network' });
+                    const fallbackData = hasUsableStaleData(cachedZai) ? cachedZai.data : null;
+                    writeCache({
+                        data: fallbackData,
+                        error: true,
+                        source: 'zai',
+                        errorReason: 'network',
+                        lastSuccessAt: cachedZai?.lastSuccessAt,
+                    });
+                    if (fallbackData) {
+                        return { rateLimits: fallbackData, error: 'network', stale: true };
+                    }
                     return { rateLimits: null, error: 'network' };
                 }
                 const usage = parseZaiResponse(result.data);
@@ -677,7 +707,17 @@ export async function getUsage() {
                     return { rateLimits: null, error: 'rate_limited' };
                 }
                 if (!result.data) {
-                    writeCache({ data: null, error: true, source: 'anthropic', errorReason: 'network' });
+                    const fallbackData = hasUsableStaleData(cachedAnthropic) ? cachedAnthropic.data : null;
+                    writeCache({
+                        data: fallbackData,
+                        error: true,
+                        source: 'anthropic',
+                        errorReason: 'network',
+                        lastSuccessAt: cachedAnthropic?.lastSuccessAt,
+                    });
+                    if (fallbackData) {
+                        return { rateLimits: fallbackData, error: 'network', stale: true };
+                    }
                     return { rateLimits: null, error: 'network' };
                 }
                 const usage = parseUsageResponse(result.data);

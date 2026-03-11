@@ -103,6 +103,32 @@ describe('Builtin Skills', () => {
             expect(skill).toBeDefined();
             expect(skill?.name).toBe('ai-slop-cleaner');
         });
+        it('should expose pipeline metadata for deep-interview handoff into omc-plan', () => {
+            const skill = getBuiltinSkill('deep-interview');
+            expect(skill?.pipeline).toEqual({
+                steps: ['deep-interview', 'omc-plan', 'autopilot'],
+                nextSkill: 'omc-plan',
+                nextSkillArgs: '--consensus --direct',
+                handoff: '.omc/specs/deep-interview-{slug}.md',
+            });
+            expect(skill?.template).toContain('## Skill Pipeline');
+            expect(skill?.template).toContain('Pipeline: `deep-interview → omc-plan → autopilot`');
+            expect(skill?.template).toContain('Skill("oh-my-claudecode:omc-plan")');
+            expect(skill?.template).toContain('`--consensus --direct`');
+            expect(skill?.template).toContain('`.omc/specs/deep-interview-{slug}.md`');
+        });
+        it('should expose pipeline metadata for omc-plan handoff into autopilot', () => {
+            const skill = getBuiltinSkill('omc-plan');
+            expect(skill?.pipeline).toEqual({
+                steps: ['deep-interview', 'omc-plan', 'autopilot'],
+                nextSkill: 'autopilot',
+                handoff: '.omc/plans/ralplan-*.md',
+            });
+            expect(skill?.template).toContain('## Skill Pipeline');
+            expect(skill?.template).toContain('Next skill: `autopilot`');
+            expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
+            expect(skill?.template).toContain('`.omc/plans/ralplan-*.md`');
+        });
         it('should expose review mode guidance for ai-slop-cleaner', () => {
             const skill = getBuiltinSkill('ai-slop-cleaner');
             expect(skill).toBeDefined();
@@ -115,6 +141,20 @@ describe('Builtin Skills', () => {
             expect(skill?.template).toContain('--review');
             expect(skill?.template).toContain('Writer pass');
             expect(skill?.template).toContain('Reviewer pass');
+        });
+        it('should require explicit tmux prerequisite checks for omc-teams', () => {
+            const skill = getBuiltinSkill('omc-teams');
+            expect(skill).toBeDefined();
+            expect(skill?.template).toContain('command -v tmux >/dev/null 2>&1');
+            expect(skill?.template).toContain('Do **not** say tmux is missing');
+            expect(skill?.template).toContain('tmux capture-pane -pt <pane-id> -S -20');
+        });
+        it('should document allowed omc-teams agent types and native team fallback', () => {
+            const skill = getBuiltinSkill('omc-teams');
+            expect(skill).toBeDefined();
+            expect(skill?.template).toContain('/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**');
+            expect(skill?.template).toContain('unsupported type such as `expert`');
+            expect(skill?.template).toContain('/oh-my-claudecode:team');
         });
         it('should be case-insensitive', () => {
             const skillLower = getBuiltinSkill('autopilot');

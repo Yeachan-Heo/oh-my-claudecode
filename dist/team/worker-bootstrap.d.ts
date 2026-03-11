@@ -11,8 +11,8 @@ export interface WorkerBootstrapParams {
     bootstrapInstructions?: string;
     cwd: string;
 }
-export declare function generateTriggerMessage(teamName: string, workerName: string): string;
-export declare function generateMailboxTriggerMessage(teamName: string, workerName: string, count?: number): string;
+export declare function generateTriggerMessage(teamName: string, workerName: string, teamStateRoot?: string): string;
+export declare function generateMailboxTriggerMessage(teamName: string, workerName: string, count?: number, teamStateRoot?: string): string;
 /**
  * Generate the worker overlay markdown.
  * This is injected as AGENTS.md content for the worker agent.

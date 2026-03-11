@@ -26,7 +26,7 @@ vi.mock('../features/builtin-skills/skills.js', () => ({
     },
 }));
 // Import after mock setup
-import { checkHookConflicts, checkClaudeMdStatus, checkLegacySkills, runConflictCheck } from '../cli/commands/doctor-conflicts.js';
+import { checkHookConflicts, checkClaudeMdStatus, checkConfigIssues, checkLegacySkills, runConflictCheck, } from '../cli/commands/doctor-conflicts.js';
 describe('doctor-conflicts: hook ownership classification', () => {
     let cwdSpy;
     beforeEach(() => {
@@ -366,6 +366,67 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
         const report = runConflictCheck();
         expect(report.legacySkills).toHaveLength(1);
         expect(report.hasConflicts).toBe(true);
+    });
+});
+describe('doctor-conflicts: config known fields (issue #1499)', () => {
+    let cwdSpy;
+    beforeEach(() => {
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+        mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+        mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
+        cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(TEST_PROJECT_DIR);
+    });
+    afterEach(() => {
+        cwdSpy.mockRestore();
+        for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
+            }
+        }
+    });
+    it('does not flag legitimate config keys from current writers and readers', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({
+            silentAutoUpdate: false,
+            notificationProfiles: {
+                work: {
+                    enabled: true,
+                    discord: {
+                        enabled: true,
+                        webhookUrl: 'https://discord.example.test/webhook',
+                    },
+                },
+            },
+            hudEnabled: true,
+            nodeBinary: '/opt/homebrew/bin/node',
+            delegationEnforcementLevel: 'strict',
+            autoInvoke: {
+                enabled: true,
+                confidenceThreshold: 85,
+            },
+            customIntegrations: {
+                enabled: true,
+                integrations: [],
+            },
+            team: {
+                maxAgents: 20,
+                defaultAgentType: 'executor',
+            },
+        }, null, 2));
+        expect(checkConfigIssues().unknownFields).toEqual([]);
+        expect(runConflictCheck().hasConflicts).toBe(false);
+    });
+    it('still reports genuinely unknown config keys', () => {
+        writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({
+            silentAutoUpdate: false,
+            totallyMadeUpKey: true,
+            anotherUnknown: { nested: true },
+        }, null, 2));
+        expect(checkConfigIssues().unknownFields).toEqual(['totallyMadeUpKey', 'anotherUnknown']);
+        expect(runConflictCheck().hasConflicts).toBe(true);
     });
 });
 //# sourceMappingURL=doctor-conflicts.test.js.map

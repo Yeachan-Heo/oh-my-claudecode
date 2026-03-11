@@ -22,6 +22,7 @@ import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledV
 import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
+import { sessionSearchCommand } from './commands/session-search.js';
 import { teamCommand } from './commands/team.js';
 import { teleportCommand, teleportListCommand, teleportRemoveCommand } from './commands/teleport.js';
 import { getRuntimePackageVersion } from '../lib/version.js';
@@ -1157,6 +1158,40 @@ teleportCmd
         process.exit(exitCode);
 });
 /**
+ * Session command - Search prior local session history
+ */
+const sessionCmd = program
+    .command('session')
+    .alias('sessions')
+    .description('Inspect prior local session history')
+    .addHelpText('after', `
+Examples:
+  $ omc session search "team leader stale"
+  $ omc session search notify-hook --since 7d
+  $ omc session search provider-routing --project all --json`);
+sessionCmd
+    .command('search <query>')
+    .description('Search prior local session transcripts and OMC session artifacts')
+    .option('-l, --limit <number>', 'Maximum number of matches to return', '10')
+    .option('-s, --session <id>', 'Restrict search to a specific session id')
+    .option('--since <duration|date>', 'Only include matches since a duration (e.g. 7d, 24h) or absolute date')
+    .option('--project <scope>', 'Project scope. Defaults to current project. Use "all" to search all local projects')
+    .option('--json', 'Output results as JSON')
+    .option('--case-sensitive', 'Match query case-sensitively')
+    .option('--context <chars>', 'Approximate snippet context on each side of a match', '120')
+    .action(async (query, options) => {
+    await sessionSearchCommand(query, {
+        limit: parseInt(options.limit, 10),
+        session: options.session,
+        since: options.since,
+        project: options.project,
+        json: options.json,
+        caseSensitive: options.caseSensitive,
+        context: parseInt(options.context, 10),
+        workingDirectory: process.cwd(),
+    });
+});
+/**
  * Doctor command - Diagnostic tools
  */
 const doctorCmd = program
@@ -1291,8 +1326,10 @@ program
     const { main: hudMain } = await import('../hud/index.js');
     if (options.watch) {
         const intervalMs = parseInt(options.interval, 10);
+        let skipInit = false;
         while (true) {
-            await hudMain(true);
+            await hudMain(true, skipInit);
+            skipInit = true;
             await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
     }

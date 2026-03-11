@@ -21,4 +21,9 @@ export declare function parseFrontmatter(content: string): {
  * Supports inline YAML list: `aliases: [foo, bar]` or single value.
  */
 export declare function parseFrontmatterAliases(rawAliases: string | undefined): string[];
+/**
+ * Parse a generic frontmatter list field into an array of strings.
+ * Supports inline YAML list syntax: `[foo, bar]` or a single scalar value.
+ */
+export declare function parseFrontmatterList(rawValue: string | undefined): string[];
 //# sourceMappingURL=frontmatter.d.ts.map

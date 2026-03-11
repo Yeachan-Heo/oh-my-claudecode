@@ -76,4 +76,6 @@ STANDARD_CHECKS } from './verification/index.js';
 export { 
 // Functions
 decomposeTask, analyzeTask, identifyComponents, generateSubtasks, assignFileOwnership, identifySharedFiles } from './task-decomposer/index.js';
+// Session History Search - local transcript/session artifact search
+export { searchSessionHistory, parseSinceSpec, } from './session-history-search/index.js';
 //# sourceMappingURL=index.js.map

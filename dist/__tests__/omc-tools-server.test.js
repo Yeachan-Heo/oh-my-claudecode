@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { omcToolsServer, omcToolNames, getOmcToolNames } from '../mcp/omc-tools-server.js';
 const interopEnabled = process.env.OMC_INTEROP_TOOLS_ENABLED === '1';
-const totalTools = interopEnabled ? 48 : 40;
-const withoutLsp = interopEnabled ? 36 : 28;
-const withoutAst = interopEnabled ? 46 : 38;
-const withoutPython = interopEnabled ? 47 : 39;
-const withoutSkills = interopEnabled ? 45 : 37;
+const totalTools = interopEnabled ? 49 : 41;
+const withoutLsp = interopEnabled ? 37 : 29;
+const withoutAst = interopEnabled ? 47 : 39;
+const withoutPython = interopEnabled ? 48 : 40;
+const withoutSkills = interopEnabled ? 46 : 38;
 describe('omc-tools-server', () => {
     describe('omcToolNames', () => {
         it('should export expected tools total', () => {
@@ -21,6 +21,9 @@ describe('omc-tools-server', () => {
         });
         it('should have python_repl tool', () => {
             expect(omcToolNames).toContain('mcp__t__python_repl');
+        });
+        it('should have session_search tool', () => {
+            expect(omcToolNames).toContain('mcp__t__session_search');
         });
         it('should use correct MCP naming format', () => {
             omcToolNames.forEach(name => {

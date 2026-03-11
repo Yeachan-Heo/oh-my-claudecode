@@ -1,12 +1,23 @@
 import { mkdir, writeFile, appendFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { sanitizePromptContent } from '../agents/prompt-helpers.js';
-export function generateTriggerMessage(teamName, workerName) {
-    return `Read and follow the instructions in .omc/state/team/${teamName}/workers/${workerName}/inbox.md`;
+function buildInstructionPath(...parts) {
+    return join(...parts).replaceAll('\\', '/');
 }
-export function generateMailboxTriggerMessage(teamName, workerName, count = 1) {
+export function generateTriggerMessage(teamName, workerName, teamStateRoot = '.omc/state') {
+    const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
+    if (teamStateRoot !== '.omc/state') {
+        return `Read ${inboxPath}, work now, report progress.`;
+    }
+    return `Read ${inboxPath}, start work now, then report concrete progress (not ACK-only).`;
+}
+export function generateMailboxTriggerMessage(teamName, workerName, count = 1, teamStateRoot = '.omc/state') {
     const normalizedCount = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
-    return `You have ${normalizedCount} new message(s). Check .omc/state/team/${teamName}/mailbox/${workerName}.json`;
+    const mailboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'mailbox', `${workerName}.json`);
+    if (teamStateRoot !== '.omc/state') {
+        return `${normalizedCount} new msg(s): check ${mailboxPath}, act and report progress.`;
+    }
+    return `You have ${normalizedCount} new message(s). Check ${mailboxPath}, act now, and reply with concrete progress (not ACK-only).`;
 }
 function agentTypeGuidance(agentType) {
     switch (agentType) {

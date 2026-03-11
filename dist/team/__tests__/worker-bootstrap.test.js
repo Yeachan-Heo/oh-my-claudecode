@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateWorkerOverlay, getWorkerEnv } from '../worker-bootstrap.js';
+import { generateMailboxTriggerMessage, generateTriggerMessage, generateWorkerOverlay, getWorkerEnv } from '../worker-bootstrap.js';
 describe('worker-bootstrap', () => {
     const baseParams = {
         teamName: 'test-team',
@@ -11,6 +11,26 @@ describe('worker-bootstrap', () => {
         cwd: '/tmp',
     };
     describe('generateWorkerOverlay', () => {
+        it('uses urgent trigger wording that requires immediate work and concrete progress', () => {
+            expect(generateTriggerMessage('test-team', 'worker-1')).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+            expect(generateTriggerMessage('test-team', 'worker-1')).toContain('start work now');
+            expect(generateTriggerMessage('test-team', 'worker-1')).toContain('concrete progress');
+            expect(generateTriggerMessage('test-team', 'worker-1')).toContain('ACK-only');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2)).toContain('.omc/state/team/test-team/mailbox/worker-1.json');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2)).toContain('act now');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2)).toContain('concrete progress');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2)).toContain('ACK-only');
+        });
+        it('supports state-root placeholders for worktree-backed trigger paths', () => {
+            expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
+                .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/workers/worker-1/inbox.md');
+            expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
+                .toContain('work now');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
+                .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/mailbox/worker-1.json');
+            expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
+                .toContain('report progress');
+        });
         it('includes sentinel file write instruction first', () => {
             const overlay = generateWorkerOverlay(baseParams);
             const sentinelIdx = overlay.indexOf('.ready');

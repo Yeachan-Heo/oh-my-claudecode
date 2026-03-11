@@ -13,7 +13,7 @@ readRalphState, writeRalphState, clearRalphState, clearLinkedUltraworkState, inc
 // Loop control
 createRalphLoopHook, isUltraQAActive, 
 // PRD flag helpers
-detectNoPrdFlag, stripNoPrdFlag, 
+detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, normalizeRalphCriticMode, 
 // Team coordination
 getTeamPhaseDirective, 
 // PRD integration

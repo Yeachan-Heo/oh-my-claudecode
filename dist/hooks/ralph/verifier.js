@@ -15,6 +15,40 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from '
 import { join } from 'path';
 import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
 const DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
+const DEFAULT_RALPH_CRITIC_MODE = 'architect';
+function getCriticMode(mode) {
+    return mode ?? DEFAULT_RALPH_CRITIC_MODE;
+}
+function getCriticLabel(mode) {
+    switch (getCriticMode(mode)) {
+        case 'critic':
+            return 'Critic';
+        case 'codex':
+            return 'Codex critic';
+        default:
+            return 'Architect';
+    }
+}
+function getVerificationAgentStep(mode) {
+    switch (getCriticMode(mode)) {
+        case 'critic':
+            return `1. **Spawn Critic Agent** for verification:
+   \`\`\`
+   Task(subagent_type="critic", prompt="Critically review this task completion claim...")
+   \`\`\``;
+        case 'codex':
+            return `1. **Run an external Codex critic review**:
+   \`\`\`
+   omc ask codex --agent-prompt critic "<verification prompt covering the task, completion claim, and acceptance criteria>"
+   \`\`\`
+   Use the Codex output as the reviewer verdict before deciding pass/fix.`;
+        default:
+            return `1. **Spawn Architect Agent** for verification:
+   \`\`\`
+   Task(subagent_type="architect", prompt="Verify this task completion claim...")
+   \`\`\``;
+    }
+}
 /**
  * Get verification state file path
  * When sessionId is provided, uses session-scoped path.
@@ -88,14 +122,15 @@ export function clearVerificationState(directory, sessionId) {
 /**
  * Start verification process
  */
-export function startVerification(directory, completionClaim, originalTask, sessionId) {
+export function startVerification(directory, completionClaim, originalTask, criticMode, sessionId) {
     const state = {
         pending: true,
         completion_claim: completionClaim,
         verification_attempts: 0,
         max_verification_attempts: DEFAULT_MAX_VERIFICATION_ATTEMPTS,
         requested_at: new Date().toISOString(),
-        original_task: originalTask
+        original_task: originalTask,
+        critic_mode: getCriticMode(criticMode)
     };
     writeVerificationState(directory, state, sessionId);
     return state;
@@ -130,6 +165,8 @@ export function recordArchitectFeedback(directory, approved, feedback, sessionId
  * When a currentStory is provided, includes its specific acceptance criteria for targeted verification.
  */
 export function getArchitectVerificationPrompt(state, currentStory) {
+    const criticLabel = getCriticLabel(state.critic_mode);
+    const approvalTag = `<ralph-approved critic="${getCriticMode(state.critic_mode)}">VERIFIED_COMPLETE</ralph-approved>`;
     const storySection = currentStory ? `
 **Current Story: ${currentStory.id} - ${currentStory.title}**
 ${currentStory.description}
@@ -141,9 +178,9 @@ IMPORTANT: Verify EACH acceptance criterion above is met. Do not verify based on
 ` : '';
     return `<ralph-verification>
 
-[ARCHITECT VERIFICATION REQUIRED - Attempt ${state.verification_attempts + 1}/${state.max_verification_attempts}]
+[${criticLabel.toUpperCase()} VERIFICATION REQUIRED - Attempt ${state.verification_attempts + 1}/${state.max_verification_attempts}]
 
-The agent claims the task is complete. Before accepting, YOU MUST verify with Architect.
+The agent claims the task is complete. Before accepting, YOU MUST verify with ${criticLabel}.
 
 **Original Task:**
 ${state.original_task}
@@ -151,16 +188,13 @@ ${state.original_task}
 **Completion Claim:**
 ${state.completion_claim}
 
-${state.architect_feedback ? `**Previous Architect Feedback (rejected):**\n${state.architect_feedback}\n` : ''}
+${state.architect_feedback ? `**Previous ${criticLabel} Feedback (rejected):**\n${state.architect_feedback}\n` : ''}
 ${storySection}
 ## MANDATORY VERIFICATION STEPS
 
-1. **Spawn Architect Agent** for verification:
-   \`\`\`
-   Task(subagent_type="architect", prompt="Verify this task completion claim...")
-   \`\`\`
+${getVerificationAgentStep(state.critic_mode)}
 
-2. **Architect must check:**${currentStory ? `
+2. **${criticLabel} must check:**${currentStory ? `
    - Verify EACH acceptance criterion listed above is met with fresh evidence
    - Run the relevant tests/builds to confirm criteria pass` : `
    - Are ALL requirements from the original task met?
@@ -169,8 +203,8 @@ ${storySection}
    - Does the code compile/run without errors?
    - Are tests passing (if applicable)?
 
-3. **Based on Architect's response:**
-   - If APPROVED: Output \`<architect-approved>VERIFIED_COMPLETE</architect-approved>\`, then run \`/oh-my-claudecode:cancel\` to cleanly exit
+3. **Based on ${criticLabel}'s response:**
+   - If APPROVED: Output \`${approvalTag}\`, then run \`/oh-my-claudecode:cancel\` to cleanly exit
    - If REJECTED: Continue working on the identified issues
 
 </ralph-verification>
@@ -183,13 +217,14 @@ ${storySection}
  * Generate continuation prompt after architect rejection
  */
 export function getArchitectRejectionContinuationPrompt(state) {
+    const criticLabel = getCriticLabel(state.critic_mode);
     return `<ralph-continuation-after-rejection>
 
-[ARCHITECT REJECTED - Continue Working]
+[${criticLabel.toUpperCase()} REJECTED - Continue Working]
 
-Architect found issues with your completion claim. You must address them.
+${criticLabel} found issues with your completion claim. You must address them.
 
-**Architect Feedback:**
+**${criticLabel} Feedback:**
 ${state.architect_feedback}
 
 **Original Task:**
@@ -197,10 +232,10 @@ ${state.original_task}
 
 ## INSTRUCTIONS
 
-1. Address ALL issues identified by Architect
+1. Address ALL issues identified by ${criticLabel}
 2. Do NOT claim completion again until issues are fixed
-3. When truly done, another Architect verification will be triggered
-4. After Architect approves, run \`/oh-my-claudecode:cancel\` to cleanly exit
+3. When truly done, another ${criticLabel} verification will be triggered
+4. After ${criticLabel} approves, run \`/oh-my-claudecode:cancel\` to cleanly exit
 
 Continue working now.
 
@@ -214,7 +249,7 @@ Continue working now.
  * Check if text contains architect approval
  */
 export function detectArchitectApproval(text) {
-    return /<architect-approved>.*?VERIFIED_COMPLETE.*?<\/architect-approved>/is.test(text);
+    return /<(?:architect-approved|ralph-approved)(?:\s+[^>]*)?>.*?VERIFIED_COMPLETE.*?<\/(?:architect-approved|ralph-approved)>/is.test(text);
 }
 /**
  * Check if text contains architect rejection indicators
@@ -222,7 +257,7 @@ export function detectArchitectApproval(text) {
 export function detectArchitectRejection(text) {
     // Look for explicit rejection patterns
     const rejectionPatterns = [
-        /architect.*?(rejected|found issues|not complete|incomplete)/i,
+        /(architect|critic|codex|reviewer).*?(rejected|found issues|not complete|incomplete)/i,
         /issues? (found|identified|detected)/i,
         /not yet complete/i,
         /missing.*?(implementation|feature|test)/i,
@@ -232,7 +267,7 @@ export function detectArchitectRejection(text) {
     for (const pattern of rejectionPatterns) {
         if (pattern.test(text)) {
             // Extract feedback (rough heuristic)
-            const feedbackMatch = text.match(/(?:architect|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
+            const feedbackMatch = text.match(/(?:architect|critic|codex|reviewer|feedback|issue|problem|error|bug)[:\s]+([^.]+\.)/i);
             return {
                 rejected: true,
                 feedback: feedbackMatch ? feedbackMatch[1] : 'Architect found issues with the implementation.'

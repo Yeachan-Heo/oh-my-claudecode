@@ -12,6 +12,13 @@ const basePayload = {
     event: "session-start",
     instruction: "Session started",
     timestamp: "2026-02-25T00:00:00.000Z",
+    signal: {
+        kind: "session",
+        name: "session",
+        phase: "started",
+        routeKey: "session.started",
+        priority: "high",
+    },
     context: {},
 };
 describe("interpolateInstruction", () => {
@@ -313,6 +320,25 @@ describe("wakeCommandGateway", () => {
         await wakeCommandGateway("gw", config, {});
         expect(capturedCmd).toBe("sh");
         expect(capturedArgs[0]).toBe("-c");
+    });
+    it("exposes normalized payload and signal env vars to command gateways", async () => {
+        let capturedOpts = {};
+        execFileMock.mockImplementation((_cmd, _args, opts, cb) => {
+            capturedOpts = opts;
+            cb(null, { stdout: "", stderr: "" });
+        });
+        const config = { type: "command", command: "echo hello" };
+        await wakeCommandGateway("test", config, {
+            payloadJson: JSON.stringify(basePayload),
+            signalRouteKey: "session.started",
+            signalPhase: "started",
+            signalKind: "session",
+        }, basePayload);
+        const env = capturedOpts.env;
+        expect(env.OPENCLAW_PAYLOAD_JSON).toContain('"routeKey":"session.started"');
+        expect(env.OPENCLAW_SIGNAL_ROUTE_KEY).toBe("session.started");
+        expect(env.OPENCLAW_SIGNAL_PHASE).toBe("started");
+        expect(env.OPENCLAW_SIGNAL_KIND).toBe("session");
     });
     it("uses the default timeout of 10000ms when config.timeout is not specified", async () => {
         let capturedOpts = {};

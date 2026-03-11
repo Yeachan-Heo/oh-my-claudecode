@@ -15,7 +15,7 @@ import { paneLooksReady, paneHasActiveTask, sendToWorker } from './tmux-session.
 export const DEFAULT_NUDGE_CONFIG = {
     delayMs: 30_000,
     maxCount: 3,
-    message: 'Continue working on your assigned task.',
+    message: 'Continue working on your assigned task and report concrete progress (not ACK-only).',
 };
 // ---------------------------------------------------------------------------
 // Pane capture + idle detection
