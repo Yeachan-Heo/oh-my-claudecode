@@ -195,18 +195,25 @@ export interface TeamLeader {
   role: string;
 }
 
-/** Team-level policy configuration */
-export interface TeamPolicy {
+/** Team transport/runtime policy configuration */
+export interface TeamTransportPolicy {
   display_mode: 'split_pane' | 'auto';
   worker_launch_mode: 'interactive' | 'prompt';
   dispatch_mode: 'hook_preferred_with_fallback' | 'transport_direct';
   dispatch_ack_timeout_ms: number;
+}
+
+/** Team governance controls independent from transport/runtime policy */
+export interface TeamGovernance {
   delegation_only: boolean;
   plan_approval_required: boolean;
   nested_teams_allowed: boolean;
   one_team_per_leader_session: boolean;
   cleanup_requires_all_workers_inactive: boolean;
 }
+
+/** Legacy alias kept for backwards compatibility when reading old manifests */
+export type TeamPolicy = TeamTransportPolicy & Partial<TeamGovernance>;
 
 /** Permissions snapshot captured at team creation */
 export interface PermissionsSnapshot {
@@ -221,7 +228,8 @@ export interface TeamManifestV2 {
   name: string;
   task: string;
   leader: TeamLeader;
-  policy: TeamPolicy;
+  policy: TeamTransportPolicy;
+  governance: TeamGovernance;
   permissions_snapshot: PermissionsSnapshot;
   tmux_session: string;
   worker_count: number;
@@ -260,6 +268,8 @@ export interface TeamConfig {
   task: string;
   agent_type: string;
   worker_launch_mode: 'interactive' | 'prompt';
+  policy?: TeamTransportPolicy;
+  governance?: TeamGovernance;
   worker_count: number;
   max_workers: number;
   workers: WorkerInfo[];

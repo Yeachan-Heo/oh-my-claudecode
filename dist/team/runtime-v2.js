@@ -23,6 +23,7 @@ import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnapshot, writeMonitorSnapshot, writeShutdownRequest, readShutdownAck, writeWorkerInbox, listTasksFromFiles, saveTeamConfig, cleanupTeamState, } from './monitor.js';
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
+import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, } from './model-contract.js';
@@ -406,6 +407,8 @@ export async function startTeamV2(config) {
         task: config.tasks.map(t => t.subject).join('; '),
         agent_type: agentTypes[0] || 'claude',
         worker_launch_mode: 'interactive',
+        policy: DEFAULT_TEAM_TRANSPORT_POLICY,
+        governance: DEFAULT_TEAM_GOVERNANCE,
         worker_count: config.workerCount,
         max_workers: 20,
         workers: workersInfo,
@@ -422,6 +425,38 @@ export async function startTeamV2(config) {
         ...(ownsWindow ? { workspace_mode: 'single' } : {}),
     };
     await saveTeamConfig(teamConfig, leaderCwd);
+    const permissionsSnapshot = {
+        approval_mode: process.env.OMC_APPROVAL_MODE || 'default',
+        sandbox_mode: process.env.OMC_SANDBOX_MODE || 'default',
+        network_access: process.env.OMC_NETWORK_ACCESS === '1',
+    };
+    const teamManifest = {
+        schema_version: 2,
+        name: sanitized,
+        task: teamConfig.task,
+        leader: {
+            session_id: sessionName,
+            worker_id: 'leader-fixed',
+            role: 'leader',
+        },
+        policy: DEFAULT_TEAM_TRANSPORT_POLICY,
+        governance: DEFAULT_TEAM_GOVERNANCE,
+        permissions_snapshot: permissionsSnapshot,
+        tmux_session: sessionName,
+        worker_count: teamConfig.worker_count,
+        workers: workersInfo,
+        next_task_id: teamConfig.next_task_id,
+        created_at: teamConfig.created_at,
+        leader_cwd: leaderCwd,
+        team_state_root: teamConfig.team_state_root,
+        workspace_mode: teamConfig.workspace_mode,
+        leader_pane_id: leaderPaneId,
+        hud_pane_id: null,
+        resize_hook_name: null,
+        resize_hook_target: null,
+        next_worker_index: teamConfig.next_worker_index,
+    };
+    await writeFile(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), 'utf-8');
     // Spawn workers for initial tasks (up to workerCount concurrent)
     const maxConcurrent = Math.min(agentTypes.length, config.tasks.length);
     for (let i = 0; i < maxConcurrent; i++) {
@@ -760,6 +795,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     // 1. Shutdown gate check
     if (!force) {
         const allTasks = await listTasksFromFiles(sanitized, cwd);
+        const governance = getConfigGovernance(config);
         const gate = {
             total: allTasks.length,
             pending: allTasks.filter((t) => t.status === 'pending').length,
@@ -777,7 +813,14 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         }, cwd).catch(() => { });
         if (!gate.allowed) {
             const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
-            if (ralph && !hasActiveWork) {
+            if (!governance.cleanup_requires_all_workers_inactive) {
+                await appendTeamEvent(sanitized, {
+                    type: 'team_leader_nudge',
+                    worker: 'leader-fixed',
+                    reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
+                }, cwd).catch(() => { });
+            }
+            else if (ralph && !hasActiveWork) {
                 // Ralph policy: bypass on failure-only scenarios
                 await appendTeamEvent(sanitized, {
                     type: 'team_leader_nudge',

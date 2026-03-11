@@ -38,12 +38,31 @@ function getTeamWorkerIdentityFromEnv(env = process.env) {
     const omx = typeof env.OMX_TEAM_WORKER === 'string' ? env.OMX_TEAM_WORKER.trim() : '';
     return omx || null;
 }
-function assertTeamSpawnAllowed(env = process.env) {
+async function assertTeamSpawnAllowed(cwd, env = process.env) {
     const workerIdentity = getTeamWorkerIdentityFromEnv(env);
-    if (!workerIdentity)
+    const { teamReadManifest } = await import('../team/team-ops.js');
+    const { findActiveTeamsV2 } = await import('../team/runtime-v2.js');
+    const { DEFAULT_TEAM_GOVERNANCE, normalizeTeamGovernance } = await import('../team/governance.js');
+    if (workerIdentity) {
+        const [parentTeamName] = workerIdentity.split('/');
+        const parentManifest = parentTeamName ? await teamReadManifest(parentTeamName, cwd) : null;
+        const governance = normalizeTeamGovernance(parentManifest?.governance, parentManifest?.policy);
+        if (!governance.nested_teams_allowed) {
+            throw new Error(`Worker context (${workerIdentity}) cannot start nested teams because nested_teams_allowed is false.`);
+        }
+        if (!governance.delegation_only) {
+            throw new Error(`Worker context (${workerIdentity}) cannot start nested teams because delegation_only is false.`);
+        }
         return;
-    throw new Error(`Worker context (${workerIdentity}) cannot start/spawn new teams. ` +
-        `Use only "omc team api ..." operations from worker sessions.`);
+    }
+    const activeTeams = await findActiveTeamsV2(cwd);
+    for (const activeTeam of activeTeams) {
+        const manifest = await teamReadManifest(activeTeam, cwd);
+        const governance = normalizeTeamGovernance(manifest?.governance, manifest?.policy);
+        if (governance.one_team_per_leader_session ?? DEFAULT_TEAM_GOVERNANCE.one_team_per_leader_session) {
+            throw new Error(`Leader session already owns active team "${activeTeam}" and one_team_per_leader_session is enabled.`);
+        }
+    }
 }
 function resolveJobsDir(env = process.env) {
     return env.OMC_JOBS_DIR || join(homedir(), '.omc', 'team-jobs');
@@ -220,7 +239,7 @@ async function readTaskFiles(cwd, teamName) {
     return loaded.filter((v) => v !== null);
 }
 export async function startTeamJob(input) {
-    assertTeamSpawnAllowed();
+    await assertTeamSpawnAllowed(input.cwd);
     validateTeamName(input.teamName);
     if (!Array.isArray(input.agentTypes) || input.agentTypes.length === 0) {
         throw new Error('agentTypes must be a non-empty array');

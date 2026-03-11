@@ -16,6 +16,7 @@ export interface ParsedTeamArgs {
     json: boolean;
     newWindow: boolean;
 }
+export declare function assertTeamSpawnAllowed(cwd: string, env?: NodeJS.ProcessEnv): Promise<void>;
 /** @internal Exported for testing */
 export declare function parseTeamArgs(tokens: string[]): ParsedTeamArgs;
 /**

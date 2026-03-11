@@ -28,6 +28,7 @@ import type {
   TeamSummaryPerformance,
 } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
+import { normalizeTeamManifest } from './governance.js';
 
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
@@ -61,7 +62,8 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
 }
 
 export async function readTeamManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null> {
-  return readJsonSafe<TeamManifestV2>(absPath(cwd, TeamPaths.manifest(teamName)));
+  const manifest = await readJsonSafe<TeamManifestV2>(absPath(cwd, TeamPaths.manifest(teamName)));
+  return manifest ? normalizeTeamManifest(manifest) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +337,29 @@ export async function getTeamSummary(
 
 export async function saveTeamConfig(config: TeamConfig, cwd: string): Promise<void> {
   await writeAtomic(absPath(cwd, TeamPaths.config(config.name)), JSON.stringify(config, null, 2));
+  const manifestPath = absPath(cwd, TeamPaths.manifest(config.name));
+  const existingManifest = await readJsonSafe<TeamManifestV2>(manifestPath);
+  if (existingManifest) {
+    const nextManifest = normalizeTeamManifest({
+      ...existingManifest,
+      workers: config.workers,
+      worker_count: config.worker_count,
+      tmux_session: config.tmux_session,
+      next_task_id: config.next_task_id,
+      created_at: config.created_at,
+      leader_cwd: config.leader_cwd,
+      team_state_root: config.team_state_root,
+      workspace_mode: config.workspace_mode,
+      leader_pane_id: config.leader_pane_id,
+      hud_pane_id: config.hud_pane_id,
+      resize_hook_name: config.resize_hook_name,
+      resize_hook_target: config.resize_hook_target,
+      next_worker_index: config.next_worker_index,
+      policy: config.policy ?? existingManifest.policy,
+      governance: config.governance ?? existingManifest.governance,
+    });
+    await writeAtomic(manifestPath, JSON.stringify(nextManifest, null, 2));
+  }
 }
 
 // ---------------------------------------------------------------------------

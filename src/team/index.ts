@@ -297,6 +297,8 @@ export type {
   TeamTaskV2,
   TeamTaskClaim,
   TeamLeader,
+  TeamTransportPolicy,
+  TeamGovernance,
   TeamPolicy,
   PermissionsSnapshot,
   TeamManifestV2,
@@ -323,3 +325,12 @@ export type {
   WorkerStatus as TeamWorkerStatus,
   WorkerHeartbeat as TeamWorkerHeartbeat,
 } from './types.js';
+
+export {
+  DEFAULT_TEAM_TRANSPORT_POLICY,
+  DEFAULT_TEAM_GOVERNANCE,
+  normalizeTeamTransportPolicy,
+  normalizeTeamGovernance,
+  normalizeTeamManifest,
+  getConfigGovernance,
+} from './governance.js';

@@ -13,6 +13,8 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { TeamPaths, absPath } from './state-paths.js';
+import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamGovernance } from './governance.js';
 import { isTerminalTeamTaskStatus, canTransitionTeamTaskStatus, } from './contracts.js';
 import { claimTask as claimTaskImpl, transitionTaskStatus as transitionTaskStatusImpl, releaseTaskClaim as releaseTaskClaimImpl, listTasks as listTasksImpl, } from './state/tasks.js';
 // ---------------------------------------------------------------------------
@@ -138,6 +140,8 @@ export async function teamReadConfig(teamName, cwd) {
             name: manifest.name,
             task: manifest.task,
             agent_type: 'claude',
+            policy: manifest.policy,
+            governance: manifest.governance,
             worker_launch_mode: manifest.policy.worker_launch_mode,
             worker_count: manifest.worker_count,
             max_workers: 20,
@@ -160,7 +164,8 @@ export async function teamReadConfig(teamName, cwd) {
 }
 export async function teamReadManifest(teamName, cwd) {
     const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
-    return readJsonSafe(manifestPath);
+    const manifest = await readJsonSafe(manifestPath);
+    return manifest ? normalizeTeamManifest(manifest) : null;
 }
 export async function teamCleanup(teamName, cwd) {
     await rm(teamDir(teamName, cwd), { recursive: true, force: true });
@@ -246,6 +251,17 @@ export async function teamUpdateTask(teamName, taskId, updates, cwd) {
     return merged;
 }
 export async function teamClaimTask(teamName, taskId, workerName, expectedVersion, cwd) {
+    const manifest = await teamReadManifest(teamName, cwd);
+    const governance = normalizeTeamGovernance(manifest?.governance, manifest?.policy);
+    if (governance.plan_approval_required) {
+        const task = await teamReadTask(teamName, taskId, cwd);
+        if (task?.requires_code_change) {
+            const approval = await teamReadTaskApproval(teamName, taskId, cwd);
+            if (!approval || approval.status !== 'approved') {
+                return { ok: false, error: 'blocked_dependency', dependencies: ['approval-required'] };
+            }
+        }
+    }
     return claimTaskImpl(taskId, workerName, expectedVersion, {
         teamName,
         cwd,
