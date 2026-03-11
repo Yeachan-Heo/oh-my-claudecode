@@ -295,17 +295,30 @@ describe('cancel-integration', () => {
       const sessionId = 'team-cancel-test';
       const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
       mkdirSync(sessionDir, { recursive: true });
+      const runtimeTeamDir = join(TEST_DIR, '.omc', 'state', 'team', 'demo-team');
+      mkdirSync(runtimeTeamDir, { recursive: true });
 
       // Create team state at session path
       writeFileSync(
         join(sessionDir, 'team-state.json'),
-        JSON.stringify({ active: true, phase: 'team-exec', _meta: { sessionId } })
+        JSON.stringify({ active: true, phase: 'team-exec', team_name: 'demo-team', _meta: { sessionId } })
       );
 
       // Create ghost legacy team state with matching session
       writeFileSync(
         join(TEST_DIR, '.omc', 'state', 'team-state.json'),
-        JSON.stringify({ active: true, phase: 'team-exec', _meta: { sessionId } })
+        JSON.stringify({ active: true, phase: 'team-exec', team_name: 'demo-team', _meta: { sessionId } })
+      );
+
+      writeFileSync(
+        join(TEST_DIR, '.omc', 'state', 'mission-state.json'),
+        JSON.stringify({
+          updatedAt: new Date().toISOString(),
+          missions: [
+            { id: 'team:demo-team', source: 'team', teamName: 'demo-team', name: 'demo-team' },
+            { id: 'session:keep', source: 'session', name: 'keep-session' },
+          ],
+        })
       );
 
       const result = await stateClearTool.handler({
@@ -317,9 +330,17 @@ describe('cancel-integration', () => {
       // Both files should be cleaned
       expect(existsSync(join(sessionDir, 'team-state.json'))).toBe(false);
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team-state.json'))).toBe(false);
+      expect(existsSync(runtimeTeamDir)).toBe(false);
+
+      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
+      expect(missionState.missions).toEqual([
+        { id: 'session:keep', source: 'session', name: 'keep-session' },
+      ]);
 
       expect(result.content[0].text).toContain('Successfully cleared');
       expect(result.content[0].text).toContain('ghost legacy file also removed');
+      expect(result.content[0].text).toContain('removed 1 team runtime root');
+      expect(result.content[0].text).toContain('pruned 1 HUD mission entry');
     });
 
     it('should clear team state at session path while preserving unrelated legacy', async () => {
@@ -351,6 +372,37 @@ describe('cancel-integration', () => {
 
       // Legacy file should be preserved (different session)
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team-state.json'))).toBe(true);
+    });
+
+    it('should remove all team runtime roots on broad team clear', async () => {
+      mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'alpha-team'), { recursive: true });
+      mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'beta-team'), { recursive: true });
+      writeFileSync(
+        join(TEST_DIR, '.omc', 'state', 'mission-state.json'),
+        JSON.stringify({
+          updatedAt: new Date().toISOString(),
+          missions: [
+            { id: 'team:alpha-team', source: 'team', teamName: 'alpha-team', name: 'alpha-team' },
+            { id: 'team:beta-team', source: 'team', teamName: 'beta-team', name: 'beta-team' },
+            { id: 'session:keep', source: 'session', name: 'keep-session' },
+          ],
+        })
+      );
+
+      const result = await stateClearTool.handler({
+        mode: 'team',
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team'))).toBe(false);
+
+      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
+      expect(missionState.missions).toEqual([
+        { id: 'session:keep', source: 'session', name: 'keep-session' },
+      ]);
+
+      expect(result.content[0].text).toContain('Team runtime roots removed: 1');
+      expect(result.content[0].text).toContain('HUD mission entries pruned: 2');
     });
   });
 });

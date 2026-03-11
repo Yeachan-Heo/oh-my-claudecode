@@ -71,14 +71,17 @@ function findOrphanProcesses(filterTeam) {
       const output = execSync('ps aux', { encoding: 'utf-8', timeout: 10000 });
 
       for (const line of output.split('\n')) {
-        // Match claude agent processes with team context
-        if ((line.includes('claude') || line.includes('node')) &&
-            (line.includes('--team-name') || line.includes('team_name'))) {
-
-          // Restrict team name match to valid slug characters
-          const match = line.match(/--team-name[=\s]+([\w][\w-]{0,63})/i) || line.match(/team_name[=:]\s*"?([\w][\w-]{0,63})"?/i);
-          if (match) {
-            const procTeam = match[1];
+        // Match claude/codex/gemini agent processes with team context
+        if ((line.includes('claude') || line.includes('codex') || line.includes('gemini') || line.includes('node'))) {
+          // Restrict team name match to valid slug characters.
+          // Support both native TeamDelete-style args and tmux worker env assignments.
+          const match =
+            line.match(/--team-name[=\s]+([\w][\w-]{0,63})/i)
+            || line.match(/team_name[=:]\s*"?([\w][\w-]{0,63})"?/i)
+            || line.match(/OM[CX]_TEAM_NAME=(['"]?)([\w][\w-]{0,63})\1/i)
+            || line.match(/OM[CX]_TEAM_WORKER=(['"]?)([\w][\w-]{0,63})\/worker-\d+\1/i);
+          const procTeam = match?.[2] || match?.[1];
+          if (procTeam) {
             if (filterTeam && procTeam !== filterTeam) continue;
 
             const parts = line.trim().split(/\s+/);
