@@ -51,6 +51,7 @@ export function buildDefaultConfig(): PluginConfig {
       writer: { model: defaultTierModels.LOW },
       qaTester: { model: defaultTierModels.MEDIUM },
       scientist: { model: defaultTierModels.MEDIUM },
+      tracer: { model: defaultTierModels.MEDIUM },
       gitMaster: { model: defaultTierModels.MEDIUM },
       codeSimplifier: { model: defaultTierModels.HIGH },
       critic: { model: defaultTierModels.HIGH },
@@ -565,6 +566,10 @@ export function generateConfigSchema(): object {
             properties: { model: { type: 'string' } }
           },
           scientist: {
+            type: 'object',
+            properties: { model: { type: 'string' } }
+          },
+          tracer: {
             type: 'object',
             properties: { model: { type: 'string' } }
           },

@@ -42,12 +42,13 @@ describe('Agent Registry Validation', () => {
   test('agent count matches documentation', () => {
     const agentsDir = path.join(__dirname, '../../agents');
     const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
-    expect(promptFiles.length).toBe(18);
+    expect(promptFiles.length).toBe(19);
   });
 
-  test('agent count is always 18 (no conditional agents)', () => {
+  test('agent count is always 19 (no conditional agents)', () => {
     const agents = getAgentDefinitions();
-    expect(Object.keys(agents).length).toBe(18);
+    expect(Object.keys(agents).length).toBe(19);
+    expect(Object.keys(agents)).toContain('tracer');
     // Consolidated agents should not be in registry
     expect(Object.keys(agents)).not.toContain('harsh-critic');
     expect(Object.keys(agents)).not.toContain('quality-reviewer');
@@ -86,6 +87,7 @@ describe('Agent Registry Validation', () => {
     expect(agents.architect?.model).toBe('us.anthropic.claude-opus-4-6-v1:0');
     expect(agents.executor?.model).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
     expect(agents.explore?.model).toBe('us.anthropic.claude-haiku-4-5-v1:0');
+    expect(agents.tracer?.model).toBe('us.anthropic.claude-sonnet-4-6-v1:0');
   });
 
   test('no hardcoded prompts in base agent .ts files', () => {

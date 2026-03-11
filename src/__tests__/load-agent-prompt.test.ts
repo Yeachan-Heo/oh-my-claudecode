@@ -27,6 +27,17 @@ describe('loadAgentPrompt', () => {
       expect(prompt).toBeTruthy();
       expect(prompt.length).toBeGreaterThan(100);
     });
+
+    test('loads tracer with evidence-driven tracing contract', () => {
+      const prompt = loadAgentPrompt('tracer');
+      expect(prompt).toBeTruthy();
+      expect(prompt.length).toBeGreaterThan(100);
+      expect(prompt).toMatch(/observation/i);
+      expect(prompt).toMatch(/hypotheses?|hypothesis table/i);
+      expect(prompt).toMatch(/evidence for/i);
+      expect(prompt).toMatch(/evidence against|gaps/i);
+      expect(prompt).toMatch(/next probe/i);
+    });
   });
 
   describe('security: path traversal prevention', () => {

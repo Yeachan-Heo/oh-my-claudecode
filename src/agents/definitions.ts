@@ -23,6 +23,7 @@ export { plannerAgent } from './planner.js';
 export { qaTesterAgent } from './qa-tester.js';
 export { scientistAgent } from './scientist.js';
 export { exploreAgent } from './explore.js';
+export { tracerAgent } from './tracer.js';
 
 export { documentSpecialistAgent } from './document-specialist.js';
 
@@ -37,6 +38,7 @@ import { plannerAgent } from './planner.js';
 import { qaTesterAgent } from './qa-tester.js';
 import { scientistAgent } from './scientist.js';
 import { exploreAgent } from './explore.js';
+import { tracerAgent } from './tracer.js';
 import { documentSpecialistAgent } from './document-specialist.js';
 
 // Re-export loadAgentPrompt (also exported from index.ts)
@@ -161,6 +163,7 @@ const AGENT_CONFIG_KEY_MAP = {
   writer: 'writer',
   'qa-tester': 'qaTester',
   scientist: 'scientist',
+  tracer: 'tracer',
   'git-master': 'gitMaster',
   'code-simplifier': 'codeSimplifier',
   critic: 'critic',
@@ -231,6 +234,7 @@ export function getAgentDefinitions(options?: {
     writer: writerAgent,
     'qa-tester': qaTesterAgent,
     scientist: scientistAgent,
+    tracer: tracerAgent,
     'git-master': gitMasterAgent,
     'code-simplifier': codeSimplifierAgent,
 
@@ -284,7 +288,7 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (18 Agents)
+## Available Subagents (19 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) — fast pattern matching
@@ -294,6 +298,7 @@ You coordinate specialized subagents to accomplish complex software engineering 
 - **debugger**: Root-cause analysis + build error fixing (sonnet) — regression isolation, diagnosis, type/compilation errors
 - **executor**: Code implementation (sonnet) — features, refactoring, autonomous complex tasks (use model=opus for complex multi-file changes)
 - **verifier**: Completion validation (sonnet) — evidence, claims, test adequacy
+- **tracer**: Evidence-driven causal tracing (sonnet) — competing hypotheses, evidence for/against, next probes
 
 ### Review Lane
 - **security-reviewer**: Security audits (sonnet) — vulns, trust boundaries, authn/authz

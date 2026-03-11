@@ -272,7 +272,7 @@ Optional compatibility enablement (manual only):
 - **Deterministic parse-failure handling**: malformed result artifacts are treated as terminal `failed`.
 - **Cleanup scope**: shutdown/cleanup only clears `.omc/state/team/{teamName}` for the target team (never sibling teams).
 
-## Agents (28 Total)
+## Agents (29 Total)
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
@@ -291,6 +291,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | **Critique**     | -                       | -                     | `critic`            |
 | **Pre-Planning** | -                       | -                     | `analyst`           |
 | **Testing**      | -                       | `qa-tester`           | -                   |
+| **Tracing**      | -                       | `tracer`              | -                   |
 | **Security**     | `security-reviewer-low` | -                     | `security-reviewer` |
 | **Build**        | -                       | `debugger`            | -                   |
 | **TDD**          | -                       | `test-engineer`       | -                   |
@@ -318,6 +319,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | Review/critique plan         | `critic`                      | opus   |
 | Pre-planning analysis        | `analyst`                     | opus   |
 | Test CLI interactively       | `qa-tester`                   | sonnet |
+| Evidence-driven causal tracing | `tracer`                    | sonnet |
 | Security review              | `security-reviewer`           | opus   |
 | Quick security scan          | `security-reviewer-low`       | haiku  |
 | Fix build errors             | `debugger`                    | sonnet |
@@ -370,7 +372,7 @@ Includes **33 canonical skills + 1 deprecated alias** (`psm`).
 | `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
 | `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
-| `trace`                   | Show orchestration trace timeline                                | `/oh-my-claudecode:trace`                   |
+| `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/oh-my-claudecode:trace`                   |
 | `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |
 | `ultrawork`               | Maximum parallel throughput mode                                 | `/oh-my-claudecode:ultrawork`               |
 | `writer-memory`           | Agentic memory system for writing projects                       | `/oh-my-claudecode:writer-memory`           |
@@ -407,7 +409,7 @@ All installed skills are available as slash commands with the prefix `/oh-my-cla
 | `/oh-my-claudecode:hud`                     | Configure HUD statusline                                                                      |
 | `/oh-my-claudecode:release`                 | Automated release workflow                                                                    |
 | `/oh-my-claudecode:mcp-setup`               | Configure MCP servers                                                                         |
-| `/oh-my-claudecode:trace`                   | Show orchestration trace timeline                                                             |
+| `/oh-my-claudecode:trace`                   | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode        |
 | `/oh-my-claudecode:psm <arguments>`         | Deprecated alias for project session manager                                                  |
 
 ### Skill Pipeline Metadata (Preview)

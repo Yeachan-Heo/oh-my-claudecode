@@ -34,6 +34,7 @@ export interface PluginConfig {
     writer?: { model?: string };
     qaTester?: { model?: string };
     scientist?: { model?: string };
+    tracer?: { model?: string };
     gitMaster?: { model?: string };
     codeSimplifier?: { model?: string };
     critic?: { model?: string };

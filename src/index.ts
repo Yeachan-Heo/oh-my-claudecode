@@ -146,6 +146,8 @@ export {
   exploreAgent,
   EXPLORE_PROMPT_METADATA,
   DOCUMENT_SPECIALIST_PROMPT_METADATA,
+  tracerAgent,
+  TRACER_PROMPT_METADATA,
   executorAgent,
   EXECUTOR_PROMPT_METADATA,
   designerAgent,
