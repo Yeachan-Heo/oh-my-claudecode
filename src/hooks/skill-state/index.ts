@@ -108,15 +108,34 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
 };
 
 // ---------------------------------------------------------------------------
+// OMC skill prefix
+// ---------------------------------------------------------------------------
+
+const OMC_PREFIX = 'oh-my-claudecode:';
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
  * Get the protection level for a skill.
- * Unknown skills default to 'light' for safety.
+ *
+ * Only OMC-owned skills (prefixed with 'oh-my-claudecode:') are eligible for
+ * stop-hook protection. External plugin skills (e.g., Anthropic's
+ * example-skills, document-skills, superpowers, data, etc.) are not managed
+ * by OMC and always return 'none'.
+ *
+ * Unknown OMC skills still default to 'light' for safety.
  */
 export function getSkillProtection(skillName: string): SkillProtectionLevel {
-  const normalized = skillName.toLowerCase().replace(/^oh-my-claudecode:/, '');
+  const lower = skillName.toLowerCase();
+
+  // Non-OMC skills should not be managed by OMC's stop protection
+  if (!lower.startsWith(OMC_PREFIX)) {
+    return 'none';
+  }
+
+  const normalized = lower.replace(new RegExp(`^${OMC_PREFIX}`), '');
   return SKILL_PROTECTION[normalized] ?? 'light';
 }
 
@@ -160,7 +179,7 @@ export function writeSkillActiveState(
 
   const config = PROTECTION_CONFIGS[protection];
   const now = new Date().toISOString();
-  const normalized = skillName.toLowerCase().replace(/^oh-my-claudecode:/, '');
+  const normalized = skillName.toLowerCase().replace(new RegExp(`^${OMC_PREFIX}`), '');
 
   const state: SkillActiveState = {
     active: true,
