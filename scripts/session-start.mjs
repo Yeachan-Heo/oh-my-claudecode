@@ -176,7 +176,7 @@ async function checkNpmUpdate(currentVersion) {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const response = await fetch('https://registry.npmjs.org/oh-my-claudecode/latest', {
+    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
