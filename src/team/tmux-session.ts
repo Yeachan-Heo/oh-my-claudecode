@@ -180,15 +180,16 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     // Fish doesn't support combined -lc; use separate -l -c flags
     const shellFlags = isFish ? ['-l', '-c'] : ['-lc'];
 
+    // envAssignments are already shell-escaped (KEY='value'), so they must
+    // NOT go through shellEscape again — that would wrap them in a second
+    // layer of quotes, causing `env` to receive literal quote characters
+    // in the values (e.g. ANTHROPIC_MODEL="'us.anthropic...'" instead of
+    // ANTHROPIC_MODEL="us.anthropic..."). Issue #1415.
     return [
-      'env',
+      shellEscape('env'),
       ...envAssignments,
-      shell,
-      ...shellFlags,
-      script,
-      '--',
-      ...launchWords,
-    ].map(shellEscape).join(' ');
+      ...[shell, ...shellFlags, script, '--', ...launchWords].map(shellEscape),
+    ].join(' ');
   }
 
   const envString = Object.entries(config.envVars)
