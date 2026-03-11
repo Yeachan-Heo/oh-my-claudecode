@@ -52,6 +52,7 @@ describe('skill-state', () => {
 
     it('returns light only for explicitly protected simple utility skills', () => {
       expect(getSkillProtection('skill')).toBe('light');
+      expect(getSkillProtection('configure-notifications')).toBe('light');
       expect(getSkillProtection('build-fix')).toBe('none');
       expect(getSkillProtection('analyze')).toBe('none');
     });
@@ -132,6 +133,14 @@ describe('skill-state', () => {
     it('returns null for skills with none protection', () => {
       const state = writeSkillActiveState(tempDir, 'ralph', 'session-1');
       expect(state).toBeNull();
+    });
+
+    it('does not write state for unknown/custom skills', () => {
+      const state = writeSkillActiveState(tempDir, 'phase-resume', 'session-1');
+
+      expect(state).toBeNull();
+      expect(readSkillActiveState(tempDir, 'session-1')).toBeNull();
+      expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', 'session-1'))).toBe(false);
     });
 
     it('creates state file on disk', () => {

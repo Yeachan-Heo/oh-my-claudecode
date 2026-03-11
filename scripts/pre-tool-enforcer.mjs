@@ -345,7 +345,7 @@ const SKILL_PROTECTION_MAP = {
 
 function getSkillProtectionLevel(skillName) {
   const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
-  return SKILL_PROTECTION_MAP[normalized] || 'light';
+  return SKILL_PROTECTION_MAP[normalized] || 'none';
 }
 
 function extractSkillName(toolInput) {

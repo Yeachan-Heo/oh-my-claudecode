@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -285,5 +285,23 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
 
     expect(output.continue).toBe(true);
     expect(output.decision).toBeUndefined();
+  });
+
+  it('does not write skill-active-state for unknown custom skills', () => {
+    const sessionId = 'session-1581';
+
+    const output = runPreToolEnforcer({
+      tool_name: 'Skill',
+      toolInput: {
+        skill: 'phase-resume',
+      },
+      cwd: tempDir,
+      session_id: sessionId,
+    });
+
+    expect(output).toEqual({ continue: true, suppressOutput: true });
+    expect(
+      existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json')),
+    ).toBe(false);
   });
 });
