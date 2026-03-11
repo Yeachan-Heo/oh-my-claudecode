@@ -19,6 +19,36 @@ afterEach(() => {
 });
 
 describe('HUD marketplace resolution', () => {
+  it('omc-hud.mjs converts absolute HUD paths to file URLs before dynamic imports', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-wrapper-'));
+    tempDirs.push(configDir);
+
+    const fakeHome = join(configDir, 'home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+      },
+      stdio: 'pipe',
+    });
+
+    const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+    expect(existsSync(hudScriptPath)).toBe(true);
+
+    const content = readFileSync(hudScriptPath, 'utf-8');
+    expect(content).toContain('import { pathToFileURL } from "node:url"');
+    expect(content).toContain('await import(pathToFileURL(pluginPath).href);');
+    expect(content).toContain('await import(pathToFileURL(devPath).href);');
+    expect(content).toContain('await import(pathToFileURL(marketplaceHudPath).href);');
+    expect(content).not.toContain('await import(pluginPath);');
+    expect(content).not.toContain('await import(devPath);');
+    expect(content).not.toContain('await import(marketplaceHudPath);');
+  });
+
   it('omc-hud.mjs loads a marketplace install when plugin cache is unavailable', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-marketplace-'));
     tempDirs.push(configDir);
