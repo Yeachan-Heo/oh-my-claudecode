@@ -536,29 +536,43 @@ function paneHasTrustPrompt(captured: string): boolean {
   return hasQuestion && hasChoices;
 }
 
+function paneIsBootstrapping(captured: string): boolean {
+  const lines = captured
+    .split('\n')
+    .map((line) => line.replace(/\r/g, '').trim())
+    .filter((line) => line.length > 0);
+  return lines.some((line) =>
+    /\b(loading|initializing|starting up)\b/i.test(line)
+    || /\bmodel:\s*loading\b/i.test(line)
+    || /\bconnecting\s+to\b/i.test(line),
+  );
+}
+
 export function paneHasActiveTask(captured: string): boolean {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
   const tail = lines.slice(-40);
+  if (tail.some(l => /\b\d+\s+background terminal running\b/i.test(l))) return true;
   if (tail.some(l => /esc to interrupt/i.test(l))) return true;
   if (tail.some(l => /\bbackground terminal running\b/i.test(l))) return true;
+  if (tail.some(l => /^[·✻]\s+[A-Za-z][A-Za-z0-9''-]*(?:\s+[A-Za-z][A-Za-z0-9''-]*){0,3}(?:…|\.{3})$/u.test(l))) return true;
   return false;
 }
 
 export function paneLooksReady(captured: string): boolean {
-  const lines = captured
+  const content = captured.trimEnd();
+  if (content === '') return false;
+  const lines = content
     .split('\n')
-    .map(line => line.replace(/\r/g, '').trim())
-    .filter(line => line.length > 0);
+    .map(line => line.replace(/\r/g, '').trimEnd())
+    .filter(line => line.trim() !== '');
   if (lines.length === 0) return false;
+  if (paneIsBootstrapping(content)) return false;
 
-  const tail = lines.slice(-20);
-  const hasPrompt = tail.some(line => /^\s*[›>❯]\s*/u.test(line));
-  if (hasPrompt) return true;
-
-  const hasCodexHint = tail.some(
-    line => /\bgpt-[\w.-]+\b/i.test(line) || /\b\d+% left\b/i.test(line)
-  );
-  return hasCodexHint;
+  const lastLine = lines[lines.length - 1]!;
+  if (/^\s*[›>❯]\s*/u.test(lastLine)) return true;
+  const hasCodexPromptLine = lines.some((line) => /^\s*›\s*/u.test(line));
+  const hasClaudePromptLine = lines.some((line) => /^\s*❯\s*/u.test(line));
+  return hasCodexPromptLine || hasClaudePromptLine;
 }
 
 export interface WaitForPaneReadyOptions {

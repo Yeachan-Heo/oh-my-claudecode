@@ -106,9 +106,20 @@ describe('idle detection helpers', () => {
     expect(paneLooksReady('Working on task...')).toBe(false);
   });
 
+  it('paneLooksReady treats bootstrapping panes as not ready even with model hints', () => {
+    expect(paneLooksReady('model: loading\ngpt-5.3-codex high · 80% left')).toBe(false);
+    expect(paneLooksReady('connecting to model...\n❯ ')).toBe(false);
+  });
+
   it('paneHasActiveTask detects active task indicators', () => {
     expect(paneHasActiveTask(ACTIVE_PANE_CONTENT)).toBe(true);
     expect(paneHasActiveTask(IDLE_PANE_CONTENT)).toBe(false);
+  });
+
+  it('paneHasActiveTask detects background-count and assistant bullet activity markers', () => {
+    expect(paneHasActiveTask('2 background terminal running')).toBe(true);
+    expect(paneHasActiveTask('✻ Thinking…')).toBe(true);
+    expect(paneHasActiveTask('· Planning next step...')).toBe(true);
   });
 });
 

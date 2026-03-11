@@ -113,4 +113,21 @@ describe('monitorTeamV2 pane-based stall inference', () => {
 
     expect(snapshot?.nonReportingWorkers).toEqual([]);
   });
+
+  it('does not flag a worker when pane evidence shows startup bootstrapping instead of idle readiness', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-bootstrap-'));
+    await writeConfigAndTask('pending');
+    mocks.execFile.mockImplementation((_cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+      if (args[0] === 'capture-pane') {
+        cb(null, 'model: loading\ngpt-5.3-codex high · 80% left\n', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    const snapshot = await monitorTeamV2('demo-team', cwd);
+
+    expect(snapshot?.nonReportingWorkers).toEqual([]);
+  });
 });
