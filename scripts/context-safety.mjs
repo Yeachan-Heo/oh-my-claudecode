@@ -87,7 +87,11 @@ const THRESHOLD = parseInt(process.env.OMC_CONTEXT_SAFETY_THRESHOLD || '55', 10)
 // Blocking TeamCreate at high context caused silent fallback to regular subagents,
 // defeating the team orchestration pipeline. TeamCreate is lightweight infrastructure
 // setup, not expensive model inference, so context pressure is not a concern.
-const BLOCKED_TOOLS = new Set(['ExitPlanMode']);
+// ExitPlanMode was removed from BLOCKED_TOOLS in issue #1597.
+// Blocking ExitPlanMode at high context prevented long-running skills (deep-interview)
+// from ever exiting plan mode. ExitPlanMode is a lightweight state transition,
+// not expensive model inference, so context pressure is not a concern.
+const BLOCKED_TOOLS = new Set([]);
 
 /**
  * Estimate context usage percentage from the transcript file.
