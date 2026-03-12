@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
@@ -620,6 +620,37 @@ describe("Stop Hook Blocking Contract", () => {
         sessionId,
       });
       expect(output.continue).toBe(true);
+    });
+
+    it("deactivates ultrawork state when max reinforcements reached", () => {
+      const sessionId = "ulw-max-reinforce-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const statePath = join(sessionDir, "ultrawork-state.json");
+      writeFileSync(
+        statePath,
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          reinforcement_count: 51,
+          max_reinforcements: 50,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          project_path: tempDir,
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+      });
+      // Should allow stop
+      expect(output.continue).toBe(true);
+
+      // State should be deactivated
+      const updatedState = JSON.parse(readFileSync(statePath, "utf-8"));
+      expect(updatedState.active).toBe(false);
+      expect(updatedState.deactivated_reason).toBe("max_reinforcements_reached");
     });
 
     it("applies Team circuit breaker in cjs script", () => {

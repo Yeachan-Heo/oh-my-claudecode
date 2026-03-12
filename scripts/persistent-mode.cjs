@@ -932,7 +932,14 @@ async function main() {
       const maxReinforcements = ultrawork.state.max_reinforcements || 50;
 
       if (newCount > maxReinforcements) {
-        // Max reinforcements reached - allow stop
+        // Max reinforcements reached - deactivate state before allowing stop
+        // Without this, state stays active: true and HUD keeps showing ultrawork
+        try {
+          ultrawork.state.active = false;
+          ultrawork.state.deactivated_reason = 'max_reinforcements_reached';
+          ultrawork.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(ultrawork.path, ultrawork.state);
+        } catch { /* best-effort cleanup */ }
         console.log(JSON.stringify({ continue: true, suppressOutput: true }));
         return;
       }
@@ -949,8 +956,11 @@ async function main() {
       if (totalIncomplete > 0) {
         const itemType = taskCount > 0 ? "Tasks" : "todos";
         reason += ` ${totalIncomplete} incomplete ${itemType} remain. Continue working.`;
+      } else if (newCount >= 5) {
+        // Strong directive: LLM must call cancel NOW
+        reason += ` No incomplete tasks detected. You MUST invoke /oh-my-claudecode:cancel immediately to exit ultrawork mode and clean up state files. Call state_clear(mode="ultrawork") if the cancel skill is unavailable.`;
       } else if (newCount >= 3) {
-        // Only suggest cancel after minimum iterations (guard against no-tasks-created scenario)
+        // Suggest cancel after minimum iterations
         reason += ` If all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force. Otherwise, continue working.`;
       } else {
         // Early iterations with no tasks yet - just tell LLM to continue

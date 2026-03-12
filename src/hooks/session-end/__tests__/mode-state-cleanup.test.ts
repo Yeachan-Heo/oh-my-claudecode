@@ -178,4 +178,40 @@ describe('processSessionEnd mode state cleanup (issue #1427)', () => {
     expect(fs.existsSync(sessionStatePath)).toBe(false);
     expect(fs.existsSync(legacyStatePath)).toBe(false);
   });
+
+  it('cleans up mission-state.json entries for the ending session', async () => {
+    const endingSessionId = 'pid-mission-ending';
+    const otherSessionId = 'pid-mission-other';
+    const stateDir = path.join(tmpDir, '.omc', 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const missionStatePath = path.join(stateDir, 'mission-state.json');
+    fs.writeFileSync(
+      missionStatePath,
+      JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        missions: [
+          { id: `ultrawork-${endingSessionId}`, source: 'session', label: 'ending session mission' },
+          { id: `ultrawork-${otherSessionId}`, source: 'session', label: 'other session mission' },
+          { id: 'team-pipeline-abc', source: 'team', label: 'team mission' },
+        ],
+      }),
+      'utf-8',
+    );
+
+    await processSessionEnd({
+      session_id: endingSessionId,
+      transcript_path: transcriptPath,
+      cwd: tmpDir,
+      permission_mode: 'default',
+      hook_event_name: 'SessionEnd',
+      reason: 'clear',
+    });
+
+    const updated = JSON.parse(fs.readFileSync(missionStatePath, 'utf-8'));
+    expect(updated.missions).toHaveLength(2);
+    expect(updated.missions.some((m: Record<string, unknown>) => m.id === `ultrawork-${otherSessionId}`)).toBe(true);
+    expect(updated.missions.some((m: Record<string, unknown>) => m.source === 'team')).toBe(true);
+    expect(updated.missions.some((m: Record<string, unknown>) => (m.id as string).includes(endingSessionId))).toBe(false);
+  });
 });

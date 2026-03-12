@@ -500,6 +500,59 @@ export function cleanupModeStates(directory: string, sessionId?: string): { file
 }
 
 /**
+ * Clean up mission-state.json entries belonging to this session.
+ * Without this, the HUD keeps showing stale mode/mission info after session end.
+ *
+ * When sessionId is provided, only removes missions whose source is 'session'
+ * and whose id contains the sessionId. When sessionId is omitted, removes all
+ * session-sourced missions.
+ */
+export function cleanupMissionState(directory: string, sessionId?: string): number {
+  const missionStatePath = path.join(getOmcRoot(directory), 'state', 'mission-state.json');
+
+  if (!fs.existsSync(missionStatePath)) {
+    return 0;
+  }
+
+  try {
+    const content = fs.readFileSync(missionStatePath, 'utf-8');
+    const parsed = JSON.parse(content) as {
+      updatedAt?: string;
+      missions?: Array<Record<string, unknown>>;
+    };
+
+    if (!Array.isArray(parsed.missions)) {
+      return 0;
+    }
+
+    const before = parsed.missions.length;
+    parsed.missions = parsed.missions.filter((mission) => {
+      // Keep non-session missions (e.g., team missions handled by state_clear)
+      if (mission.source !== 'session') return true;
+
+      // If sessionId provided, only remove missions for this session
+      if (sessionId) {
+        const missionId = typeof mission.id === 'string' ? mission.id : '';
+        return !missionId.includes(sessionId);
+      }
+
+      // No sessionId: remove all session-sourced missions
+      return false;
+    });
+
+    const removed = before - parsed.missions.length;
+    if (removed > 0) {
+      parsed.updatedAt = new Date().toISOString();
+      fs.writeFileSync(missionStatePath, JSON.stringify(parsed, null, 2));
+    }
+
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Export session summary to .omc/sessions/
  */
 export function exportSessionSummary(directory: string, metrics: SessionMetrics): void {
@@ -547,6 +600,10 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   // This ensures the stop hook won't malfunction in subsequent sessions
   // Pass session_id to only clean up this session's states
   cleanupModeStates(directory, input.session_id);
+
+  // Clean up mission-state.json entries belonging to this session
+  // Without this, the HUD keeps showing stale mode/mission info
+  cleanupMissionState(directory, input.session_id);
 
   // Clean up Python REPL bridge sessions used in this transcript (#641).
   // Best-effort only: session end should not fail because cleanup fails.
