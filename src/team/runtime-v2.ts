@@ -19,21 +19,17 @@
 import { execFile } from 'child_process';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { mkdir, rm, readdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 import {
   readTeamConfig,
-  readTeamManifest,
   readWorkerStatus,
   readWorkerHeartbeat,
   readMonitorSnapshot,
   writeMonitorSnapshot,
-  readTeamPhaseState,
-  writeTeamPhaseState,
   writeShutdownRequest,
   readShutdownAck,
-  writeWorkerIdentity,
   writeWorkerInbox,
   listTasksFromFiles,
   saveTeamConfig,
@@ -50,12 +46,9 @@ import type {
   TeamConfig,
   TeamManifestV2,
   TeamTask,
-  TeamMonitorSnapshotState,
-  TeamPhaseState,
   WorkerInfo,
   WorkerStatus,
   WorkerHeartbeat,
-  ShutdownAck,
 } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';

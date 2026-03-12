@@ -88,13 +88,6 @@ interface DoneSignal {
   completedAt: string;
 }
 
-interface TeamPanesFile {
-  paneIds: string[];
-  leaderPaneId: string;
-  sessionName: string;
-  ownsWindow: boolean;
-}
-
 interface TeamTaskRecord {
   id: string;
   subject: string;
@@ -716,7 +709,6 @@ export async function spawnWorkerForTask(
   // for interactive agents it is sent via tmux send-keys after startup.
   const instruction = buildInitialTaskInstruction(runtime.teamName, workerNameValue, task, taskId);
   await composeInitialInbox(runtime.teamName, workerNameValue, instruction, runtime.cwd);
-  const relInboxPath = `.omc/state/team/${runtime.teamName}/workers/${workerNameValue}/inbox.md`;
 
   const envVars = getModelWorkerEnv(runtime.teamName, workerNameValue, agentType);
   const resolvedBinaryPath = runtime.resolvedBinaryPaths?.[agentType] ?? resolveValidatedBinaryPath(agentType);

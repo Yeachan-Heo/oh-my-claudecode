@@ -361,7 +361,7 @@ async function runProcess(cmd: string, args: string[], timeoutMs: number): Promi
   return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
-async function defaultInjector(request: DispatchRequest, config: TeamConfig, cwd: string): Promise<InjectionResult> {
+async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cwd: string): Promise<InjectionResult> {
   const target = defaultInjectTarget(request, config);
   if (!target) return { ok: false, reason: 'missing_tmux_target' };
 

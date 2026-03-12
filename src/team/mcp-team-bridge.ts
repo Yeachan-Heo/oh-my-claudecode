@@ -79,48 +79,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Allowlist of environment variables safe to pass to child processes.
- * This prevents leaking sensitive variables like ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.
- */
-const ENV_ALLOWLIST = [
-  // Core system paths
-  'PATH', 'HOME', 'USERPROFILE',
-  // User identification
-  'USER', 'USERNAME', 'LOGNAME',
-  // Locale settings
-  'LANG', 'LC_ALL', 'LC_CTYPE',
-  // Terminal/tmux
-  'TERM', 'TMUX', 'TMUX_PANE',
-  // Temp directories
-  'TMPDIR', 'TMP', 'TEMP',
-  // XDG directories (Linux)
-  'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
-  // Shell
-  'SHELL',
-  // Node.js
-  'NODE_ENV',
-  // Proxy settings
-  'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy',
-  // Windows system
-  'SystemRoot', 'SYSTEMROOT', 'windir', 'COMSPEC',
-] as const;
-
-/**
- * Create a minimal environment for child processes.
- * Only includes allowlisted variables to prevent credential leakage.
- */
-function createMinimalEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of ENV_ALLOWLIST) {
-    if (process.env[key] !== undefined) {
-      env[key] = process.env[key];
-    }
-  }
-  return env;
-}
-
-
-/**
  * Capture a snapshot of tracked/modified/untracked files in the working directory.
  * Uses `git status --porcelain` + `git ls-files --others --exclude-standard`.
  * Returns a Set of relative file paths that currently exist or are modified.

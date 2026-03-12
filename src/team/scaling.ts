@@ -112,7 +112,6 @@ export async function scaleUp(
     }
 
     const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state`;
-    const sessionName = config.tmux_session ?? `omc-team-${sanitized}`;
 
     // Resolve the monotonic worker index counter
     let nextIndex = config.next_worker_index ?? (currentCount + 1);

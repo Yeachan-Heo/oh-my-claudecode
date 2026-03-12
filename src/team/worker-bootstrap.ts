@@ -88,7 +88,6 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
   const heartbeatPath = `.omc/state/team/${teamName}/workers/${workerName}/heartbeat.json`;
   const inboxPath = `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`;
   const statusPath = `.omc/state/team/${teamName}/workers/${workerName}/status.json`;
-  const taskDir = `.omc/state/team/${teamName}/tasks`;
 
   const taskList = sanitizedTasks.length > 0
     ? sanitizedTasks.map(t => `- **Task ${t.id}**: ${t.subject}\n  Description: ${t.description}\n  Status: pending`).join('\n')

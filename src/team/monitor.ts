@@ -14,7 +14,6 @@ import { readFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath } from './state-paths.js';
-import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import type {
   TeamConfig,
   TeamManifestV2,

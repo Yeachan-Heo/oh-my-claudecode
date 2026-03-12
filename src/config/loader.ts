@@ -16,8 +16,6 @@ import {
   getDefaultTierModels,
   BUILTIN_EXTERNAL_MODEL_DEFAULTS,
   isNonClaudeProvider,
-  isBedrock,
-  isVertexAI,
 } from './models.js';
 
 /**

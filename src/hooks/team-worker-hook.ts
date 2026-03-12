@@ -15,8 +15,7 @@
 
 import { readFile, writeFile, mkdir, appendFile, rename, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join, resolve as resolvePath } from 'path';
-import { TeamPaths, absPath } from '../team/state-paths.js';
+import { join } from 'path';
 
 // ── Env helpers ────────────────────────────────────────────────────────────
 

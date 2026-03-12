@@ -11,15 +11,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { TeamPaths, absPath } from './state-paths.js';
 import { normalizeTeamManifest } from './governance.js';
 import { normalizeTeamGovernance } from './governance.js';
 import {
-  TEAM_NAME_SAFE_PATTERN,
-  TASK_ID_SAFE_PATTERN,
   isTerminalTeamTaskStatus,
   canTransitionTeamTaskStatus,
 } from './contracts.js';
@@ -52,7 +50,6 @@ import {
   transitionTaskStatus as transitionTaskStatusImpl,
   releaseTaskClaim as releaseTaskClaimImpl,
   listTasks as listTasksImpl,
-  computeTaskReadiness as computeTaskReadinessImpl,
 } from './state/tasks.js';
 
 // Re-export types for consumers
@@ -84,10 +81,6 @@ export type {
 
 function teamDir(teamName: string, cwd: string): string {
   return absPath(cwd, TeamPaths.root(teamName));
-}
-
-function workerDir(teamName: string, workerName: string, cwd: string): string {
-  return absPath(cwd, TeamPaths.workerDir(teamName, workerName));
 }
 
 function normalizeTaskId(taskId: string): string {
