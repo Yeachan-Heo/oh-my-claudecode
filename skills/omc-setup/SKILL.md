@@ -153,7 +153,7 @@ Execute phases sequentially. For each phase, read the corresponding file and fol
 
 1. **Phase 1 - Install CLAUDE.md**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/01-install-claude-md.md` and follow its instructions.
 
-2. **Phase 2 - Environment Configuration**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/02-configure.md` and follow its instructions.
+2. **Phase 2 - Environment Configuration**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/02-configure.md` and follow its instructions. Phase 2 must delegate HUD/statusLine setup to the `hud` skill; do not generate or patch `statusLine` paths inline here.
 
 3. **Phase 3 - Integration Setup**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/03-integrations.md` and follow its instructions.
 

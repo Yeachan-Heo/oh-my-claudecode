@@ -6,9 +6,11 @@
 
 **Note**: If resuming and `lastCompletedStep >= 3`, skip to Step 2.2.
 
-The HUD shows real-time status in Claude Code's status bar. Invoke the hud skill to set up and configure:
+The HUD shows real-time status in Claude Code's status bar. Delegate all HUD/statusLine setup to the `hud` skill:
 
 Use the Skill tool to invoke: `hud` with args: `setup`
+
+Do not generate, normalize, or patch `statusLine` paths inline in this phase. This is especially important on Windows, where backslash path handling must stay inside the `hud` skill.
 
 This will:
 1. Install the HUD wrapper script to `~/.claude/hud/omc-hud.mjs`

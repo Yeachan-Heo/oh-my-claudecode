@@ -145,6 +145,15 @@ describe('HUD Windows Compatibility', () => {
             // Should use node for cross-platform path resolution
             expect(content).toContain("node -e");
         });
+        it('hud skill should normalize statusLine command paths to forward slashes', () => {
+            const hudPath = join(packageRoot, 'skills', 'hud', 'SKILL.md');
+            const content = readFileSync(hudPath, 'utf-8');
+            expect(content).toContain(".split(require('path').sep).join('/')");
+            expect(content).toContain('The command path MUST use forward slashes on all platforms');
+            expect(content).toContain('On Windows the path uses forward slashes (not backslashes):');
+            expect(content).toContain('"command": "node C:/Users/username/.claude/hud/omc-hud.mjs"');
+            expect(content).not.toContain('"command": "node C:\\Users\\username\\.claude\\hud\\omc-hud.mjs"');
+        });
         it('usage-api should use path.join with separate segments', () => {
             const usageApiPath = join(packageRoot, 'src', 'hud', 'usage-api.ts');
             const content = readFileSync(usageApiPath, 'utf-8');
