@@ -22473,7 +22473,7 @@ function patchHooksJsonForWindows(pluginRoot) {
   try {
     const content = (0, import_fs57.readFileSync)(hooksJsonPath, "utf-8");
     const data = JSON.parse(content);
-    const pattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "(\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[^"]+)"(.*)$/;
+    const pattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
     let patched = false;
     for (const groups of Object.values(data.hooks ?? {})) {
       for (const group of groups) {
@@ -22481,7 +22481,7 @@ function patchHooksJsonForWindows(pluginRoot) {
           if (typeof hook.command === "string") {
             const m = hook.command.match(pattern);
             if (m) {
-              hook.command = `node "${m[1]}"${m[2]}`;
+              hook.command = `node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m[1]}${m[2]}`;
               patched = true;
             }
           }

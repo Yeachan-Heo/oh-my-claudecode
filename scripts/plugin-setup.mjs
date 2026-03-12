@@ -176,12 +176,13 @@ try {
 // Patch hooks.json to use the absolute node binary path so hooks work on all
 // platforms: Windows (no `sh`), nvm/fnm users (node not on PATH in hooks), etc.
 //
-// The source hooks.json uses `node run.cjs` as a portable template; this step
-// substitutes the real process.execPath so Claude Code always invokes the same
-// Node binary that ran this setup script.
+// The source hooks.json uses shell-expanded `$CLAUDE_PLUGIN_ROOT` path segments
+// so bash preserves spaces in Windows profile paths; this step only substitutes
+// the real process.execPath so Claude Code always invokes the same Node binary
+// that ran this setup script.
 //
 // Two patterns are handled:
-//  1. New format  – node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" ... (all platforms)
+//  1. New format  – node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ... (all platforms)
 //  2. Old format  – sh  "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" ... (Windows
 //     backward-compat: migrates old installs to the new run.cjs chain)
 //
@@ -192,13 +193,9 @@ try {
     const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
     let patched = false;
 
-    // Pattern 1 (new): node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" <rest>
-    const runCjsPattern =
-      /^node ("\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/run\.cjs".*)$/;
-
     // Pattern 2 (old, Windows backward-compat): sh find-node.sh <target> [args]
     const findNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "(\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[^"]+)"(.*)$/;
+      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
 
     for (const groups of Object.values(data.hooks ?? {})) {
       for (const group of groups) {
@@ -206,9 +203,8 @@ try {
           if (typeof hook.command !== 'string') continue;
 
           // New run.cjs format — replace bare `node` with absolute path (all platforms)
-          const m1 = hook.command.match(runCjsPattern);
-          if (m1) {
-            hook.command = `"${nodeBin}" ${m1[1]}`;
+          if (hook.command.startsWith('node ') && hook.command.includes('/scripts/run.cjs')) {
+            hook.command = hook.command.replace(/^node\b/, `"${nodeBin}"`);
             patched = true;
             continue;
           }
@@ -217,7 +213,7 @@ try {
           if (process.platform === 'win32') {
             const m2 = hook.command.match(findNodePattern);
             if (m2) {
-              hook.command = `"${nodeBin}" "\${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" "${m2[1]}"${m2[2]}`;
+              hook.command = `"${nodeBin}" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m2[1]}${m2[2]}`;
               patched = true;
             }
           }

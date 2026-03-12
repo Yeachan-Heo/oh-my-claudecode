@@ -2,7 +2,8 @@
  * Tests for patchHooksJsonForWindows (issue #899)
  *
  * Verifies that the Windows hook-patching logic correctly rewrites
- * sh+find-node.sh commands to direct `node` invocations so that
+ * sh+find-node.sh commands to the run.cjs wrapper with shell-expanded
+ * CLAUDE_PLUGIN_ROOT segments so that
  * Claude Code UI bug #17088 (false "hook error" labels on MSYS2/Git Bash)
  * is avoided.
  */
@@ -36,7 +37,7 @@ describe('patchHooksJsonForWindows', () => {
     afterEach(() => {
         rmSync(pluginRoot, { recursive: true, force: true });
     });
-    it('replaces sh+find-node.sh with direct node for a simple script', () => {
+    it('replaces sh+find-node.sh with the run.cjs wrapper for a simple script', () => {
         const original = makeHooksJson([
             'sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs"',
         ]);
@@ -44,7 +45,7 @@ describe('patchHooksJsonForWindows', () => {
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
         const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs"');
+        expect(cmd).toBe('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs');
     });
     it('preserves trailing arguments (e.g. subagent-tracker start)', () => {
         const original = makeHooksJson([
@@ -54,11 +55,11 @@ describe('patchHooksJsonForWindows', () => {
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
         const cmd = patched.hooks.UserPromptSubmit[0].hooks[0].command;
-        expect(cmd).toBe('node "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-tracker.mjs" start');
+        expect(cmd).toBe('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/subagent-tracker.mjs start');
     });
     it('is idempotent — already-patched commands are not double-modified', () => {
         const already = makeHooksJson([
-            'node "${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs"',
+            'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs',
         ]);
         const json = JSON.stringify(already, null, 2);
         writeFileSync(hooksJsonPath, json);
@@ -96,8 +97,8 @@ describe('patchHooksJsonForWindows', () => {
         writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2));
         patchHooksJsonForWindows(pluginRoot);
         const patched = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-        expect(patched.hooks.UserPromptSubmit[0].hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs"');
-        expect(patched.hooks.SessionStart[0].hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs"');
+        expect(patched.hooks.UserPromptSubmit[0].hooks[0].command).toBe('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs');
+        expect(patched.hooks.SessionStart[0].hooks[0].command).toBe('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs');
     });
     it('is a no-op when hooks.json does not exist', () => {
         // Should not throw

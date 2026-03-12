@@ -95,7 +95,7 @@ export function setEnvironmentVariables() {
  * form:
  *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
  * to:
- *   node "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
+ *   node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
  *
  * The file is only written when at least one command was actually changed, so
  * the function is safe to call on every init (idempotent after first patch).
@@ -108,7 +108,7 @@ export function patchHooksJsonForWindows(pluginRoot) {
         const content = readFileSync(hooksJsonPath, 'utf-8');
         const data = JSON.parse(content);
         // Matches: sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [optional args]
-        const pattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "(\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[^"]+)"(.*)$/;
+        const pattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
         let patched = false;
         for (const groups of Object.values(data.hooks ?? {})) {
             for (const group of groups) {
@@ -116,7 +116,7 @@ export function patchHooksJsonForWindows(pluginRoot) {
                     if (typeof hook.command === 'string') {
                         const m = hook.command.match(pattern);
                         if (m) {
-                            hook.command = `node "${m[1]}"${m[2]}`;
+                            hook.command = `node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m[1]}${m[2]}`;
                             patched = true;
                         }
                     }
