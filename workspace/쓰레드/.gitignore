@@ -1,5 +1,10 @@
 .env
-data/
+data/*
+!data/eval/
+!data/taxonomy.json
+data/eval/*
+!data/eval/eval_set_v1.json
+!data/eval/accuracy_report.json
 __pycache__/
 *.pyc
 .venv/

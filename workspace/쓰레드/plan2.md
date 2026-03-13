@@ -731,19 +731,28 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
 10. 장애 주입 테스트 7개 시나리오 (P0-7)
 
 **완료 기준**:
-- [ ] 5채널 × 20포스트 자율 수집 성공 (에이전트가 단독 실행)
-- [ ] 태그 taxonomy 적용 (primary + secondary)
-- [ ] dedup 원장 + per-channel frontier 동작
-- [ ] checkpoint/resume/handoff 전체 동작
-- [ ] 헬스 게이트: 시작 시 + 매 10포스트 재검증
-- [ ] 장애 주입 7개 시나리오 모두 통과
-- [ ] 필드 유효성 검증: validity rate ≥ 90%
-- [ ] 셀렉터 매니페스트: fallback_rate < 20%
-- [ ] 런 텔레메트리 로그 생성
-- [ ] 채널 소진 시 graceful 처리 (collected < target 허용)
-- [ ] 컨텍스트 예산 초과 시 auto-handoff 동작
+- [x] 5채널 × 20포스트 자율 수집 성공 (13채널 227포스트 수집됨)
+- [x] 태그 taxonomy 적용 (primary + secondary) — v1.0 동결 완료
+- [x] dedup 원장 + per-channel frontier 동작
+- [x] checkpoint/resume/handoff 전체 동작
+- [x] 헬스 게이트: 시작 시(CDP+gspread, Chrome 자동실행) + 매 10포스트 재검증
+- [ ] 장애 주입 7개 시나리오 모두 통과 (→ GAP #16, 후속)
+- [x] 필드 유효성 검증: validity rate = 1.0 (≥ 0.9 충족)
+- [x] 셀렉터 매니페스트: tier2(aria-label) 100% (fallback 0%)
+- [x] 런 텔레메트리 로그 생성 (data/telemetry/)
+- [x] 채널 소진 시 graceful 처리 (exhausted 태그)
+- [x] 컨텍스트 예산 초과 시 auto-handoff 동작 (exit 4)
 
 **의존성**: 없음 (첫 단계)
+
+#### P0-infra. 패키지 관리 + 타입 안전성 (2026-03-13 추가)
+
+- **package.json**: v1.1.0, `npm run validate/pipeline/research/needs` 스크립트 등록
+- **TypeScript 전환 완료**: strict mode, `scripts/types.ts`에 interface/enum 기반 타입
+- **tsconfig.json**: ES2022, Node16, allowJs=true, checkJs=false (collect-posts.js 제외)
+- **실행**: tsx (TypeScript Execute) — `npx tsx scripts/*.ts`
+- **collect-posts.js**: JS 유지 (1539줄, strict 검사 제외)
+- **CI/CD**: `npm run validate` = `node -c collect-posts.js && tsc --noEmit`
 
 ---
 
@@ -783,7 +792,43 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
 
 **목표**: purchase signal precision ≥ 0.8, needs category accuracy ≥ 0.7
 
-#### P1-3a. 의존성 게이트
+**달성 결과** (2026-03-13):
+| Metric | Result | Target | Status |
+|--------|--------|--------|--------|
+| Tag accuracy | 86.7% (26/30) | ≥70% | PASS |
+| Signal precision | 100.0% (0 FP) | ≥80% | PASS |
+| Needs accuracy | 90.0% (9/10) | ≥70% | PASS |
+
+#### P1-3a. Eval 세트 동결 정책
+
+**eval_set_v1.json은 동결 상태 — `build-eval-set.ts` 재실행 금지.**
+
+**동결 이유**:
+- `build-eval-set.ts`의 포스트 선택이 분류기 출력(`tags.primary`)에 의존
+- 분류기 개선 → affiliate/non-affiliate 풀 변경 → 같은 seed라도 다른 30개 선택됨
+- gold label(수동 라벨링)이 무효화됨 → 개발 중 3회 재작성 경험
+
+**안전장치**:
+- `build-eval-set.ts`에 재빌드 방지 로직: `labeling_status=complete`이면 `--force` 없이 거부
+- `eval_set_v1.json`은 git에 커밋하여 진정한 불변성 보장
+
+**분류기 개선 워크플로** (eval 재빌드 없이):
+```
+normalize-posts.ts 수정 → npm run normalize
+    ↓
+npx tsx scripts/update-eval-tags.ts   # auto_tags만 갱신 (포스트 불변)
+    ↓
+npx tsx scripts/apply-gold-labels.ts  # gold label 재적용
+    ↓
+npx tsx scripts/eval-accuracy.ts      # 정확도 측정
+```
+
+**v2 eval 세트 계획** (P2 이후):
+- 현재 30개는 통계적 신뢰도가 낮음 (1개 오분류 = 3.3% 변동)
+- gold purchase_signal이 1개뿐 → signal recall 측정 무의미
+- 데이터 확보 후 100개로 확대 → `eval_set_v2.json`으로 별도 생성 + 새로 라벨링
+
+#### P1-3b. 의존성 게이트
 
 **taxonomy + schema 동결 → eval 세트 생성 순서 강제**
 
@@ -794,10 +839,12 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
     ↓
 [P1-3] eval 세트 생성 (taxonomy+schema 버전과 함께 저장)
     ↓
-[P1-1, P1-2] 에이전트 테스트 → eval 세트로 정확도 측정
+[P1-3a] eval 세트 동결 (gold label 완료 후)
+    ↓
+[P1-1, P1-2] 에이전트 개선 → update-eval-tags.ts로 정확도 측정
 ```
 
-- taxonomy 또는 schema가 변경되면 → eval 세트 재생성 필수
+- taxonomy 또는 schema가 변경되면 → eval 세트 v2 생성 필수 (v1은 동결 유지)
 - eval 세트 파일에 taxonomy_version + schema_version 메타데이터 포함
 
 **작업**:
@@ -832,16 +879,33 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
 ```
 
 **완료 기준**:
-- [ ] 100개 포스트 입력 → 니즈 브리핑 출력 성공 (에이전트 자율 실행)
-- [ ] 문제 카테고리 5개 이상 분류
-- [ ] 구매신호 레벨(L1~L5) 분류 동작
-- [ ] 트렌드 방향(rising/steady/declining) 판단 동작
-- [ ] citation rate ≥ 80% (브리핑 주장의 원본 포스트 참조율)
-- [ ] evidence ≥ 2/claim (각 주장당 근거 포스트)
-- [ ] 30개 eval 세트 기준: signal precision ≥ 0.8, needs accuracy ≥ 0.7
-- [ ] 의존성 게이트: taxonomy+schema 버전 고정 후 eval 실행
-- [ ] 모델 예산: opus × 1(리서처) + opus × 1(니즈탐지) per cycle
+- [x] 100개 포스트 입력 → 니즈 브리핑 출력 성공 (227개 포스트 → 브리핑 생성)
+- [x] 문제 카테고리 5개 이상 분류 (6개: 시간절약/외모건강/돈절약/불편해소/자기표현/성과향상)
+- [x] 구매신호 레벨(L1~L5) 분류 동작 (11건 감지: L5:2, L4:1, L3:4, L1:4)
+- [x] 트렌드 방향(rising/steady/declining) 판단 동작
+- [ ] citation rate ≥ 80% (→ LLM 강화 시 측정)
+- [ ] evidence ≥ 2/claim (→ LLM 강화 시 측정)
+- [x] 30개 eval 세트 기준: tag accuracy 86.7%, signal precision 100%, needs accuracy 90.0% — **ALL TARGETS MET**
+- [x] eval 세트 동결 + 재빌드 방지 안전장치 (`--force` 없이 거부)
+- [x] 의존성 게이트: taxonomy v1.0 + schema v1.0 동결 후 eval 실행
+- [ ] 모델 예산: opus × 1(리서처) + opus × 1(니즈탐지) per cycle (→ LLM 강화 시)
 - [ ] 시훈이 브리핑 보고 "쓸만하다" 판단
+
+**잔여 4개 misclassification** (규칙 기반 한계, LLM 강화 대상):
+- E-007: complaint→purchase_signal (보험 탐색인데 불만 키워드 동시)
+- E-011, E-026: complaint→general (타로 조언에 부정 키워드)
+- E-022: purchase_signal→general (shop_ovor 사업 이야기)
+
+**구현된 스크립트** (E단계, TypeScript 전환 완료 2026-03-13):
+- `scripts/types.ts` — 공유 타입 정의 (interface/enum 기반)
+- `scripts/normalize-posts.ts` — raw(hook_*) → canonical 변환 + multi-tag 분류 (E-2)
+- `scripts/researcher.ts` — 키워드/구매신호/트렌드 추출 + LLM 프롬프트 (E-4)
+- `scripts/needs-detector.ts` — 니즈 카테고리 분류 + 구매연결성 (E-5)
+- `scripts/build-eval-set.ts` — 30개 eval 세트 선별 + 재빌드 방지 (E-3)
+- `scripts/apply-gold-labels.ts` — gold label 적용 (30개 수동 라벨링) (E-7)
+- `scripts/update-eval-tags.ts` — auto_tags 갱신 (eval 재빌드 없이) (E-8)
+- `scripts/eval-accuracy.ts` — 정확도 측정 리포트 (tag/signal/needs) (E-9)
+- `scripts/run-pipeline.ts` — 오케스트레이터: normalize→research→needs→brief (E-6)
 
 **의존성**: Phase 0 완료
 
@@ -996,11 +1060,12 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
 - [ ] 컨텍스트 예산 초과 시 auto-handoff + budget_exhausted terminal state
 
 **P1: 리서치 + 니즈탐지**
-- [ ] 100개 포스트 → 니즈 브리핑 출력 (문제 5개+, L1-L5, 트렌드)
-- [ ] citation rate ≥ 80% + evidence ≥ 2/claim
-- [ ] 30개 eval 세트: signal precision ≥ 0.8, needs accuracy ≥ 0.7 (primary label)
-- [ ] 의존성 게이트: taxonomy+schema 버전 고정 후 eval 실행
-- [ ] 모델 예산: opus × 1(리서처) + opus × 1(니즈탐지) per cycle
+- [x] 100개 포스트 → 니즈 브리핑 출력 (227개 → 6카테고리, L1-L5, 트렌드)
+- [ ] citation rate ≥ 80% + evidence ≥ 2/claim (→ LLM 강화 시)
+- [x] 30개 eval 세트: tag 86.7%, signal 100%, needs 90.0% — **ALL TARGETS MET**
+- [x] eval 세트 동결 + 재빌드 방지 + git 커밋 (v2는 100개로 확대 예정)
+- [x] 의존성 게이트: taxonomy+schema 버전 고정 후 eval 실행
+- [ ] 모델 예산: opus × 1(리서처) + opus × 1(니즈탐지) per cycle (→ LLM 강화 시)
 
 **P2~P4: 상품매칭 → 콘텐츠 → 자동화**
 - [ ] P2: 니즈→상품→포지셔닝 파이프라인 동작 (상품사전 50개+)

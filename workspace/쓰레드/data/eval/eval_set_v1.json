@@ -1,0 +1,1143 @@
+{
+  "meta": {
+    "version": "v1",
+    "created_at": "2026-03-13T07:11:07.093Z",
+    "taxonomy_version": "1.0",
+    "schema_version": "1.0",
+    "total_posts": 30,
+    "source": "data/canonical/posts.json",
+    "selection_strategy": "channel-balanced + type-balanced + engagement-diverse",
+    "seed": 42,
+    "labeling_status": "complete",
+    "channels_represented": [
+      "bubu.insight",
+      "compton250222",
+      "doenjang_7777",
+      "home_style_us",
+      "janqoo_home",
+      "maxi_more__",
+      "nangongjus2",
+      "orion_on82",
+      "raon.box",
+      "shop_ovor",
+      "tarot__moist",
+      "teri.hous",
+      "yuja_trip_eat"
+    ]
+  },
+  "posts": [
+    {
+      "eval_id": "E-001",
+      "post_id": "DNaT4bfSYao",
+      "channel_id": "bubu.insight",
+      "text": "스하리1000명프로젝트\nDH 부부 추천 전시🩵🤍\n어린이와 함께보면 더 좋은 전시! 어른끼리 봐도 동심으로 돌아간 기분도 들고 다양한 체험을 할 수 있어서 좋아!",
+      "timestamp": "2025-08-16T09:36:48.000Z",
+      "permalink": "https://www.threads.net/@bubu.insight/post/DNaT4bfSYao",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 306,
+        "like_count": 12,
+        "reply_count": 3,
+        "repost_count": 6
+      },
+      "comments": [
+        {
+          "text": "국립현대미술관: 마음 봄🩵",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "interest",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "interest",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": "자기표현",
+        "confidence": "high",
+        "notes": "전시 추천 콘텐츠 (스하리프로젝트)"
+      }
+    },
+    {
+      "eval_id": "E-002",
+      "post_id": "DVzX4ZgE3mu",
+      "channel_id": "compton250222",
+      "text": "✱ 이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n고기고 소갈비살, 1kg, 1개\ntoss.im/_m/jE…\n역대최저가: 29,900원‼️ 🔻62%\n각종 특가 핫딜정보는‼️\n◻️실시간 공유방:\nopen.kakao.com/o/gkj…",
+      "timestamp": "2026-03-12T23:23:55.000Z",
+      "permalink": "https://www.threads.net/@compton250222/post/DVzX4ZgE3mu",
+      "thread_type": "단독형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "본문"
+      },
+      "metrics": {
+        "view_count": 53,
+        "like_count": 0,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "토스쇼핑 쉐어링크 수수료 명시"
+      }
+    },
+    {
+      "eval_id": "E-003",
+      "post_id": "DVVdybLE1Ds",
+      "channel_id": "doenjang_7777",
+      "text": "광고\n양배추 계란찜\n앞으로 설거지 안 해도 된다고 생각하니까 너무 설렌다🤤",
+      "timestamp": "2026-03-01T08:38:19.000Z",
+      "permalink": "https://www.threads.net/@doenjang_7777/post/DVVdybLE1Ds",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": "https://link.coupang.com/a/dVoF4w",
+        "domain": "link.coupang.com",
+        "location": "답글"
+      },
+      "metrics": {
+        "view_count": 2500,
+        "like_count": 11,
+        "reply_count": 1,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "[광고] 이거 하려면 지금 이거 꼭 필요해 \n💕💕💕💕💕💕💕💕💕💕💕💕💕💕\n가장 인기 있는 무항상제 대란 꿀템✨\n여기서 샀어⬇️⬇️⬇️\nlink.coupang.com/a/dVo…\n이 포스팅은 쿠팡 파트너스 활동의 일환으로,일정액의 수수료를 제공받습니다.",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "\"광고\" 명시, 양배추 계란찜 제품"
+      }
+    },
+    {
+      "eval_id": "E-004",
+      "post_id": "DVfzZ3dlF1H",
+      "channel_id": "home_style_us",
+      "text": "레시피 공유\n와 이 아이디어 낸 사람 상줘야한다.\n미쳤다. \n울 동네 눈도 한번 안왔는데\n다이소에서 오리 메이커 사고\n활용 못한 사람 이렇게라도 쓰자.",
+      "timestamp": "2026-03-05T08:59:36.000Z",
+      "permalink": "https://www.threads.net/@home_style_us/post/DVfzZ3dlF1H",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 4500,
+        "like_count": 10,
+        "reply_count": 8,
+        "repost_count": 3
+      },
+      "comments": [
+        {
+          "text": "담엔 카레에 고양이모양도 해볼려고",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "interest",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "interest",
+        "secondary_tags": [
+          "review"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": "시간절약",
+        "confidence": "high",
+        "notes": "다이소 오리 메이커 활용 레시피 공유"
+      }
+    },
+    {
+      "eval_id": "E-005",
+      "post_id": "DVtFn52j1Th",
+      "channel_id": "janqoo_home",
+      "text": "와 다이어트 너무 신난다 재밌다 맛있다\n하하하 ㅠ",
+      "timestamp": "2026-03-10T12:48:56.000Z",
+      "permalink": "https://www.threads.net/@janqoo_home/post/DVtFn52j1Th",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 1300,
+        "like_count": 50,
+        "reply_count": 77,
+        "repost_count": 2
+      },
+      "comments": [
+        {
+          "text": "업보빔",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "interest",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "interest",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": "외모건강",
+        "confidence": "medium",
+        "notes": "다이어트 긍정 경험 공유"
+      }
+    },
+    {
+      "eval_id": "E-006",
+      "post_id": "DVKQwfSk8iD",
+      "channel_id": "maxi_more__",
+      "text": "인증된 계정\n자세한 정보는 인스타로 〰️\ninstagram.com/p/DU4…\nInstagram logo",
+      "timestamp": "2026-02-25T00:12:48.000Z",
+      "permalink": "https://www.threads.net/@maxi_more__/post/DVKQwfSk8iD",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 1000,
+        "like_count": 6,
+        "reply_count": 0,
+        "repost_count": 4
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "인증된 계정, 인스타 링크 유도"
+      }
+    },
+    {
+      "eval_id": "E-007",
+      "post_id": "DVf4DBREqa_",
+      "channel_id": "nangongjus2",
+      "text": "임신 29주차고\n태아보험 + 태어났을때 연결되는 보험 잘 아는 스친이 있을까?\n엄마한테 넣었는데\n엄마 + 매니저 둘다 제대로 모르는 상태에서 넣어서 \n완전 엉망으로 넣어놨어 ... 짜증난다 진짜 ㅠ \n일반인이 보험에 대해 뭘 알아 \n믿고 넣었는데... \n매니저라는 분은 따지니까 연락도 안오고 내가 전화하니까 \n염치가 없어서 연락못드렸다고 죄송하다네 ㅋㅋㅋ\n가족.지인한테 보험넣는거 아닌것같아\n엄마한테 알아보고 물어보니 \n짜증내고 난리네 해지하라고 ..ㅋㅋ ;; \n말한마디를 못하겠네 보험은 보험이고 엄마는 엄마지\n에휴 ..\n정말 필요한것 위주로 설계받고싶어 \n기존보험은 해지할 계획이야",
+      "timestamp": "2026-03-05T09:40:11.000Z",
+      "permalink": "https://www.threads.net/@nangongjus2/post/DVf4DBREqa_",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 5800,
+        "like_count": 26,
+        "reply_count": 62,
+        "repost_count": 2
+      },
+      "comments": [
+        {
+          "text": "하... 해지했으면 큰일날뻔 했네\n이것 도 모르고 해지하고 다시 가입하자 하더라고 매니저도 ... ㅋㅋㅋ",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "complaint",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "purchase_signal",
+        "secondary_tags": [
+          "complaint"
+        ],
+        "purchase_signal_level": "L2",
+        "needs_category": "불편해소",
+        "confidence": "high",
+        "notes": "태아보험 탐색 질문, 불만도 있으나 주 의도는 정보 탐색"
+      }
+    },
+    {
+      "eval_id": "E-008",
+      "post_id": "DV0AgDKESDR",
+      "channel_id": "orion_on82",
+      "text": "속보🇺🇸🇮🇷 도널드 트럼프 미국 대통령\n“이란에서 오늘 저 정신 나간 쓰레기들에게 무슨 일이 벌어지는지 지켜보라\"\n\"그들은 47년 동안 전 세계에서 무고한 사람들을 죽여왔고, 이제 나는 미합중국 제47대 대통령으로서 그들을 처단할 것이다.\"",
+      "timestamp": "2026-03-13T05:18:51.000Z",
+      "permalink": "https://www.threads.net/@orion_on82/post/DV0AgDKESDR",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 18,
+        "like_count": 0,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "뉴스/시사 속보 (트럼프-이란)"
+      }
+    },
+    {
+      "eval_id": "E-009",
+      "post_id": "DU8IocTk5OQ",
+      "channel_id": "raon.box",
+      "text": "인증된 계정\n진작 살걸 후회하는 삶의 질 상승템 3가지 \n1️ 물 없이 쓱, 흰 운동화 새것처럼\n→ 현관에 두면 아침 준비 속도 달라져요.\n2️ 쓰고 쓱 지워지는 볼펜\n→ 수정테이프 없이 깔끔, 다이어리 필수템.\n3️ 버릴 뻔한 어그 살리는 클리너\n→ 스웨이드까지 관리돼서 2년은 더 신어요\n✏️댓글에 \"링크\" 남겨주시면 제품정보 바로 보내드릴께요.\n✨프로필 링크에서 제품번호\n  1. 운동화 클리너 393번\n  2. 볼펜 지우개 377번\n  3. 어그, 스웨이드 클리너 325번\n#생활꿀템 #인생꿀팁 #생활용품추천",
+      "timestamp": "2026-02-19T12:32:29.000Z",
+      "permalink": "https://www.threads.net/@raon.box/post/DU8IocTk5OQ",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 15,
+        "like_count": 0,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": [
+          "complaint"
+        ]
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "review"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": "외모건강",
+        "confidence": "high",
+        "notes": "인증된 계정, 삶의질 상승템 3가지 추천"
+      }
+    },
+    {
+      "eval_id": "E-010",
+      "post_id": "DOLHYunD2nR",
+      "channel_id": "shop_ovor",
+      "text": "유리컵\n역시 내 취향은 매트….🌫️🤍",
+      "timestamp": "2025-09-04T08:30:24.000Z",
+      "permalink": "https://www.threads.net/@shop_ovor/post/DOLHYunD2nR",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 12000,
+        "like_count": 100,
+        "reply_count": 8,
+        "repost_count": 4
+      },
+      "comments": [
+        {
+          "text": "어멋,, 아이스컵이라 여름에만 잘 어울리겠다 생각했는데,.. 선선함과도 꽤 잘 어울리는 것 같기두❤️",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "shop_ovor 유리컵 취향 표현, 짧은 텍스트로 상업 의도 불명확"
+      }
+    },
+    {
+      "eval_id": "E-011",
+      "post_id": "DJ8J2YySPdm",
+      "channel_id": "tarot__moist",
+      "text": "재회\n▶️ 재회하고 싶은데 상대방 마음을 모르겠을때\n상대방의 마음을 모를 때 재회를 고민하는 건 정말 조심스럽고 감정적으로도 힘들지🥲\n이럴 때는 다음과 같은 단계로 마음을 정리후 어떻게 행동할지 생각해볼 수 있어\n✅상대방의 현재 태도 분석하기\n다음 질문에 스스로 답해봐 \n최근 연락을 시도했을 때 반응이 어땠어?\n👉상대는 SNS 등에서 간접적으로라도 관심을 보이는거 같아?\n👉마지막 이별 당시 감정은 어떤 톤이었어?\n(차갑게, 아프게, 애매하게 등)\n→이 질문들을 통해 상대가 완전히 마음을 닫았는지, 여지를 남겼는지를 판단할 수 있어!!\n✅연락을 해도 괜찮은 상황인지 파악하기\n다시 연락을 해도 되는 타이밍인지 다음 조건을 체크해봐 \n👉시간이 어느 정도 지나 감정이 가라앉았는가?\n👉상대가 현재 연애 중이 아닌가?\n👉과거에 너무 집착하거나 감정을 쏟은 적이 없었는가?\n→ 위 조건이 맞으면 ‘자연스럽고 가볍게’ 연락해볼 수 있어\n✅첫 연락 시 자연스럽게 다가가는 방법\n댓글",
+      "timestamp": "2025-05-22T02:57:45.000Z",
+      "permalink": "https://www.threads.net/@tarot__moist/post/DJ8J2YySPdm",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 746,
+        "like_count": 7,
+        "reply_count": 1,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "상대방의 마음을 확인하기 위해 너무 감정적인 표현는 밑에 처럼 시작해봐\n“갑자기 네 생각이 났어. 잘 지내지?”\n“예전에 너랑 갔던 OO 지나가다 생각나더라. 요즘 어때?”\n→ 가볍게 일상 톤으로 접근해서, 상대가 반응을 보이도록 유도해봐.감정은 상대의 반응을 보고 천천히 꺼내는 게 좋아\n✅상대방의 반응 해석하기\n👉답장이 빠르고 질문을 되돌려 준다면 → 여전히 관심이 있음\n👉답장은 하지만 짧고 건조하다면 → 아직 마음의 벽이 있음\n👉아예 무시한다면 → 지금은 때가 아닐 가능성이 큼\n✅당신의 감정도 점검하기\n재회를 원한다는 감정은 진심에서 비롯된 건지 아니면 외로움이나 미련 때문인지\n→ ⭐️감정의 출처를 정확히 아는 게 중요해요. 그래야 나중에 후회하지 않아.\n원한다면 타로 카드를 통해 지금이 재회에 적절한 시기인지, 상대가 어떤 감정을 갖고 있는지 보는 것도 도와줄 수 있어 \n카카오링크 타고 들어와☺️🍀",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "complaint",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "타로 재회 조언 콘텐츠, 상업 의도 약함"
+      }
+    },
+    {
+      "eval_id": "E-012",
+      "post_id": "DVFoec4Er_l",
+      "channel_id": "teri.hous",
+      "text": "스타벅스 러떼사러 왔는게\n줄이 겁나 길게 서있는데 뭐해??",
+      "timestamp": "2026-02-23T05:03:51.000Z",
+      "permalink": "https://www.threads.net/@teri.hous/post/DVFoec4Er_l",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 4800,
+        "like_count": 7,
+        "reply_count": 8,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "그렇데!!",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "일상 잡담 (스타벅스 줄)"
+      }
+    },
+    {
+      "eval_id": "E-013",
+      "post_id": "DVDdtKukmnQ",
+      "channel_id": "yuja_trip_eat",
+      "text": "사진클래스 하려고하니\n요즘 아이디어가 솟구친다.\n그 어디에서도 들을 수 없는\n쉬운 방법을 알려줘야지.",
+      "timestamp": "2026-02-22T08:51:16.000Z",
+      "permalink": "https://www.threads.net/@yuja_trip_eat/post/DVDdtKukmnQ",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 518,
+        "like_count": 7,
+        "reply_count": 1,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "사진클래스 자기 기획, 추천이 아닌 자기 계획"
+      }
+    },
+    {
+      "eval_id": "E-014",
+      "post_id": "DO5rxzDk9NL",
+      "channel_id": "maxi_more__",
+      "text": "인증된 계정\n무인양품\n무인양품 가면 꼭 사올 것\n= 이 사진 들고가면 됨\n9.4천\n2천\n2.3천",
+      "timestamp": "2025-09-22T10:33:28.000Z",
+      "permalink": "https://www.threads.net/@maxi_more__/post/DO5rxzDk9NL",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 970000,
+        "like_count": 9,
+        "reply_count": 154,
+        "repost_count": 2
+      },
+      "comments": [
+        {
+          "text": "인증된 계정\n무인양품 꿀템들 모음집\nm.blog.naver.com/lyn…\nblog.naver.com\n무인양품은 개미지옥 . . 살 거 딱 정해줌.",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "interest"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "인증된 계정, 무인양품 추천 리스트"
+      }
+    },
+    {
+      "eval_id": "E-015",
+      "post_id": "DVzv3jCEX8l",
+      "channel_id": "orion_on82",
+      "text": "아 나.. 이 아저씨 ㅋㅋ 미쳤나봐 ㅋㅋ \n김치전 과자를 냈어 ㅋㅋ\n이거 김치전 그 꼬다리, 바삭한 부분 있지? ㅜㅜ\n그맛이 남….\n한국인 저격….. 아저씨 고마워.",
+      "timestamp": "2026-03-13T02:53:31.000Z",
+      "permalink": "https://www.threads.net/@orion_on82/post/DVzv3jCEX8l",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": "https://link.coupang.com/a/d3ngkx",
+        "domain": "link.coupang.com",
+        "location": "답글"
+      },
+      "metrics": {
+        "view_count": 11000,
+        "like_count": 219,
+        "reply_count": 19,
+        "repost_count": 3
+      },
+      "comments": [
+        {
+          "text": "쿠팡파트너스 활동으로 수수료를 제공받아요. 한국입맛 스치니들의 구매 가격에 영향이 전혀 없짱맛🩷\n👇외국에 사는 가족, 친구들 보내줘ㅋㅋ 가격 좋잖아👇\nlink.coupang.com/a/d3n…",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "interest"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "답글에 link.coupang.com, 김치전 과자 흥분형 어필리에이트"
+      }
+    },
+    {
+      "eval_id": "E-016",
+      "post_id": "DU-jrIFkvSu",
+      "channel_id": "teri.hous",
+      "text": "레이디두아 메이크업 실장님이 \n지금까지 올라온 사라킴 립정보 다 틀렸다고\n직접 올려주셨더라 ㅋㅋㅋㅋㅋ\n이번 작품은 진짜 장면이나 상황마다 \n신혜선님 메이크업이 엄청 한몫했다고 봄",
+      "timestamp": "2026-02-20T11:07:13.000Z",
+      "permalink": "https://www.threads.net/@teri.hous/post/DU-jrIFkvSu",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": "https://link.coupang.com/a/dPFAIL",
+        "domain": "link.coupang.com",
+        "location": "답글"
+      },
+      "metrics": {
+        "view_count": 3500,
+        "like_count": 5,
+        "reply_count": 3,
+        "repost_count": 1
+      },
+      "comments": [
+        {
+          "text": "(광고) 지금까지 올라온 정보 다 틀렸다고 함 ㅋㅋ\n첫번째, 맥 립스틱\n➡️\nlink.coupang.com/a/dPF…\n➡️\nlink.coupang.com/a/dPF…\n✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨ \n쿠팡파트너스 활동의 일환으로, 수수료를 제공받습니다.",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "interest"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": "외모건강",
+        "confidence": "high",
+        "notes": "답글에 link.coupang.com, 메이크업 정보형 어필리에이트"
+      }
+    },
+    {
+      "eval_id": "E-017",
+      "post_id": "DVTm7m5kkzf",
+      "channel_id": "teri.hous",
+      "text": "와 나 아는 언니가 살이 쏙 빠져왔길래\n위고비했냐고 했더니 아니랰ㅋㅋㅋ\n위거비 맞을 돈 없대ㅠㅠㅋㅋㅋㅋ\n이거 3일정도 마시고\n장 싹 비우고 변비도 고치고 \n유해균 리셋해주는거 했다고 해서 따라 삼ㅋㅋㅋㅋㅋㅋㅋㅋㅋ",
+      "timestamp": "2026-02-28T15:19:44.000Z",
+      "permalink": "https://www.threads.net/@teri.hous/post/DVTm7m5kkzf",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": "https://link.coupang.com/a/dUYu4f",
+        "domain": "link.coupang.com",
+        "location": "답글"
+      },
+      "metrics": {
+        "view_count": 895,
+        "like_count": 11,
+        "reply_count": 1,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "(광고) 가장 효과 좋았던건 푸룬맛이래…^^ㅎ\n한 달 3천명이 사면 나만 몰랐던 건 가봐??\n유산균도 들어가 있는데, 같이 섭취하면 더 좋대!\n➡️\nlink.coupang.com/a/dUY…\n➡️\nlink.coupang.com/a/dUY…\n✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨\n쿠팡파트너스 활동의 일환으로, 수수료를 제공받습니다.",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "review"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": "외모건강",
+        "confidence": "high",
+        "notes": "답글에 link.coupang.com, 다이어트 체험형 어필리에이트 (위고비 비교)"
+      }
+    },
+    {
+      "eval_id": "E-018",
+      "post_id": "DVSa8UaEocb",
+      "channel_id": "teri.hous",
+      "text": "레시피\n무친!! 내가 아는 다이어트 레시피 중에 최고임… 🥹\n에그마요 말고 이거 먹어봐ㅠㅠ\n삶은 계란 + 양파 + 무가당 요거트 \n+ 비밀재료⭐️만 섞으면 끝\n(댓글에 이어서)",
+      "timestamp": "2026-02-28T04:15:44.000Z",
+      "permalink": "https://www.threads.net/@teri.hous/post/DVSa8UaEocb",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": "https://link.coupang.com/a/dUAPbV",
+        "domain": "link.coupang.com",
+        "location": "답글"
+      },
+      "metrics": {
+        "view_count": 183,
+        "like_count": 3,
+        "reply_count": 1,
+        "repost_count": 2
+      },
+      "comments": [
+        {
+          "text": "다이어트\n(광고) 레시피!!\n삶은 계란 + 양파 + 무가당 요거트 \n+ 비밀재료⭐️만 섞으면 끝\n(비밀재료) 이거 너무 맛있어서 한통 다 비우고\n또 바로 시켰자나ㅋㅋㅋㅋㅋ \n➡️\nlink.coupang.com/a/dUA…\n➡️\nlink.coupang.com/a/dUA…\n덮밥에 올려먹어두 너무 맛있구\n요즘 계란 후라이해서 이거 올리구 \n아보카도 올려먹는게 유행이더라☺️\n✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨\n쿠팡파트너스 활동의 일환으로, 수수료를 제공받습니다.",
+          "has_affiliate_link": true
+        }
+      ],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [
+          "interest"
+        ],
+        "purchase_signal_level": null,
+        "needs_category": "외모건강",
+        "confidence": "high",
+        "notes": "답글에 link.coupang.com, 레시피형 어필리에이트"
+      }
+    },
+    {
+      "eval_id": "E-019",
+      "post_id": "DU7fjaPEgxV",
+      "channel_id": "nangongjus2",
+      "text": "쿠팡파트너스 활동으로 수수료를 제공받습니다\nlink.coupang.com/a/dOT…\n미친 마더케이 젖병세제 6천원대 !!!!\n베이비페어 에서도 만원이였음 ;.\ncoupang.com\n마더케이 디아 젖병 유아 주방세제 무향, 500ml, 1개 - 유아 주방세제 | 쿠팡",
+      "timestamp": "2026-02-19T06:33:29.000Z",
+      "permalink": "https://www.threads.net/@nangongjus2/post/DU7fjaPEgxV",
+      "thread_type": "단독형",
+      "link": {
+        "url": "https://link.coupang.com/a/dOT0pp",
+        "domain": "link.coupang.com",
+        "location": "본문"
+      },
+      "metrics": {
+        "view_count": 63,
+        "like_count": 0,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "쿠팡파트너스 수수료 명시 + link.coupang.com"
+      }
+    },
+    {
+      "eval_id": "E-020",
+      "post_id": "DVzb9qmk3dH",
+      "channel_id": "compton250222",
+      "text": "[광고]\n✅️청정원 코울슬로 드레싱, 315g, 3개\n지금‼️역대최저가 6,960원‼️\n(평균가 대비: 🔻2,692원, 🔻28%)\n구매링크▶️:\nlink.coupang.com/a/d3i…\n◻️실시간 공유방:\nopen.kakao.com/o/gkj…",
+      "timestamp": "2026-03-12T23:59:35.000Z",
+      "permalink": "https://www.threads.net/@compton250222/post/DVzb9qmk3dH",
+      "thread_type": "단독형",
+      "link": {
+        "url": "https://link.coupang.com/a/d3ieZ7",
+        "domain": "link.coupang.com",
+        "location": "본문"
+      },
+      "metrics": {
+        "view_count": 35,
+        "like_count": 0,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "affiliate",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "affiliate",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "[광고] 명시, 역대최저가 드레싱, 쿠팡 링크"
+      }
+    },
+    {
+      "eval_id": "E-021",
+      "post_id": "DUkdF2Yj3vG",
+      "channel_id": "janqoo_home",
+      "text": "거래처에서 설선물로 LA갈비 받았는데 ㅎ\n이게맞아...? 🧐\n이렇게 마블링 단 1도 없는 고기는 난생처음이야\n판매처 전화하니까\n얼어서 지방이 안보이는거라고 구우면 녹으면서 맛있어진대\n진짜야..? ㅋㅋㅋㅋㅋ\n고기 전문가 스치니들 있니 ㅎ\n2.8천\n2천",
+      "timestamp": "2026-02-10T07:49:26.000Z",
+      "permalink": "https://www.threads.net/@janqoo_home/post/DUkdF2Yj3vG",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 1392000,
+        "like_count": 2,
+        "reply_count": 2,
+        "repost_count": 76
+      },
+      "comments": [
+        {
+          "text": "내가 알고 있는 갈비 비쥬얼 이건댕,, ㅎ",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "complaint",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "complaint",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": "돈절약",
+        "confidence": "high",
+        "notes": "LA갈비 마블링 없음 불만, 판매처 클레임"
+      }
+    },
+    {
+      "eval_id": "E-022",
+      "post_id": "DPi522ND571",
+      "channel_id": "shop_ovor",
+      "text": "주방템\n사업은 잘 되니… 결혼은 언제 하니…\n명절 되면 빠지지 않는 질문들🕳️💬\n그래도 올해는 베스트셀러들 덕분에 어깨폈다",
+      "timestamp": "2025-10-08T10:45:21.000Z",
+      "permalink": "https://www.threads.net/@shop_ovor/post/DPi522ND571",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 21000,
+        "like_count": 150,
+        "reply_count": 16,
+        "repost_count": 6
+      },
+      "comments": [
+        {
+          "text": "😭 너무 고마워엉ㅠ 자랑하고 싶은데 이제야 파워 단 게 뭐가 자랑인가 싶기도 하고,,,, 그래두 이렇게 축하받으니까 좋다🥹♥️\n모던스티치도 곧 파워 달거야!!! 내가 제품 받아보니까 알겠어. 너무 좋다는 걸💭🤍 나 그리구ㅠㅠㅠ같이 보내준 하트스티치 장바구니 담았다가 다음에 또 시켜야지하고 뺐었는데 어찌안거야ㅠㅠ진짜 마음에 들어♥️\n조만간 우리 제품들이랑 같이 촬영해서 후기도 쓰고 스친이들한테도 자랑해야지💗 고마워!!!!",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "purchase_signal",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "shop_ovor 자기 사업 근황 + 명절 질문 이야기"
+      }
+    },
+    {
+      "eval_id": "E-023",
+      "post_id": "DVJUqnOD21K",
+      "channel_id": "janqoo_home",
+      "text": "거짓말 아니고 진짜 곧 4000명이었거든???\n3960명 이었는데 다 어디로 간거야...\n남편한테 4천명이라고\n이미 허니콤보에 떡볶이 얻어먹구 왔단말야 😞",
+      "timestamp": "2026-02-24T15:27:43.000Z",
+      "permalink": "https://www.threads.net/@janqoo_home/post/DVJUqnOD21K",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 8700,
+        "like_count": 130,
+        "reply_count": 71,
+        "repost_count": 9
+      },
+      "comments": [
+        {
+          "text": "돌아와 애드라",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "팔로워 감소 이야기, 일상 잡담"
+      }
+    },
+    {
+      "eval_id": "E-024",
+      "post_id": "DVDEV1FDwuw",
+      "channel_id": "janqoo_home",
+      "text": "‘돼지갈비’ 5kg로 돌아온 la갈비녀 2일차\n점심 : 갈비파스타",
+      "timestamp": "2026-02-22T05:09:38.000Z",
+      "permalink": "https://www.threads.net/@janqoo_home/post/DVDEV1FDwuw",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 4500,
+        "like_count": 206,
+        "reply_count": 78,
+        "repost_count": 2
+      },
+      "comments": [
+        {
+          "text": "남편급여 후기 : 드디어 나온 양식에 행복해함",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "돼지갈비 파스타 일상 음식 일기"
+      }
+    },
+    {
+      "eval_id": "E-025",
+      "post_id": "DVgOIdkku8D",
+      "channel_id": "janqoo_home",
+      "text": "남편 핸드폰 몰래 봤는데 이게 뭐야...?\n스치니들도 남편 핸드폰 몰래 봐봐\n나 지금 너무 충격이야..\n스포일러",
+      "timestamp": "2026-03-05T12:53:09.000Z",
+      "permalink": "https://www.threads.net/@janqoo_home/post/DVgOIdkku8D",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 2600,
+        "like_count": 62,
+        "reply_count": 96,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "나 그정도는 아니야;;;;;\n스포일러",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "남편 핸드폰 이야기, 일상 잡담"
+      }
+    },
+    {
+      "eval_id": "E-026",
+      "post_id": "DJ22J2wShO4",
+      "channel_id": "tarot__moist",
+      "text": "재회\n간절할때 오히려 재회가 더 안되는 이유\n더 간절할 때 오히려 재회가 안 되는 이유는 심리적·에너지적 관점에서 아래와 같은 요소들이 작용하기 때문이야\n1.에너지 흐름의 역설: 집착은 흐름을 막는다\n👉간절함이 지나치면 집착으로 변해.\n👉집착은 상대에게 압박감과 부담을 주고,\n에너지적으로는 ‘나는 이 사람이 없이는 불완전하다’는 결핍의 진동을 계속 내보내게 돼.\n👉상대방이 이를 무의식적으로 감지해서 더 멀어지게 돼.\n(특히 공감력이 높은 사람일수록 이 감정 에너지를 피하려고 해.)\n2. 균형이 깨진 상태에서는 인연이 유지되기 어렵다\n👉재회는 두 사람의 에너지 균형이 맞아야 가능해.\n👉한쪽이 간절하면 할수록, 다른 한쪽은 도망가고 싶어지는 역반응이 생겨.\n👉간절함은 주는 사랑처럼 보이지만, 사실은 상대를 내 뜻대로 움직이고 싶은 바람이 깔려 있어.\n3. 우주의 타이밍은 개인의 조급함과 다르다\n👉우주는 균형, 성찰, 성장이 먼저 이루어져야 기회를 다시 줘.",
+      "timestamp": "2025-05-20T01:29:26.000Z",
+      "permalink": "https://www.threads.net/@tarot__moist/post/DJ22J2wShO4",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 1200,
+        "like_count": 7,
+        "reply_count": 2,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "👉간절한 마음에 휘둘리면 객관성을 잃고,\n재회의 진정한 의미(상처 치유, 관계 성숙, 서로의 성장 등)를 무시하게 돼.\n👉이럴 때 우주는 “아직 때가 아니다”라고 신호를 주는 거야.\n4. 간절함은 자신의 가치를 줄이게 만든다\n👉너무 간절하면 내가 스스로를 낮추고,\n“나는 이 사람 없이는 아무것도 아니야”라는 신념을 갖게 돼.\n👉그 에너지는 상대에게 ‘넌 날 떠나도 되는 사람’이라는 잘못된 힘의 분배를 주게 돼.\n👉그 결과, 상대는 나를 더이상 소중히 여기지 않을 수 있어.\n5. 내면의 불안이 상대를 밀어낸다\n👉“안 돌아오면 어떡하지?”라는 두려움이 강할수록,\n그 두려움은 현실을 만드는 시나리오가 돼.\n👉간절함이 사랑이 아니라 불안, 외로움, 후회, 자책이라면,\n그 감정들이 재회의 장애물로 작용하게 돼.\n✅진짜 재회를 원한다면, 간절함보다는\n자기 회복,내면의 안정,객관적 거리두기가 먼저야.",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "complaint",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "타로 재회 조언 콘텐츠, 심리 분석 게시물"
+      }
+    },
+    {
+      "eval_id": "E-027",
+      "post_id": "DJGziCHyDc0",
+      "channel_id": "tarot__moist",
+      "text": "관상\n얼마전에  찐친이 소개를 받았는데 \n원래 소개를 안 받는친구라\n신기해서 잘생겼오? 자기눈엔 잘생겼다길래 사진 보여준다고해서 보여줬는데 \n그냥 보자마자 내가 \n뭔가 응급실간호사할거같은 느낌 그냥 아무생각없이 말했는데..ㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋ\n직업두 말하기전이었는데 \n친구가 어떻게 알았냐면서 ㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋ\n응급구조사이신데 소름돋는다고 ㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋ\n처음보는 사람들 그냥 감만 보고 ;; 다 잘맞춤 ㅋㅋㅋ성격까지.. 나는 그냥 촉인데.. 보이는건 없다구🥹",
+      "timestamp": "2025-05-01T09:42:59.000Z",
+      "permalink": "https://www.threads.net/@tarot__moist/post/DJGziCHyDc0",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 596,
+        "like_count": 1,
+        "reply_count": 0,
+        "repost_count": 0
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "관상/소개팅 일상 이야기"
+      }
+    },
+    {
+      "eval_id": "E-028",
+      "post_id": "DVLtTsaksTZ",
+      "channel_id": "yuja_trip_eat",
+      "text": "휴대폰중독\n너무 피곤해서 10시에 잘꺼라고 나와 약속했는데\n내손에 또 핸드폰이…\n애들보고 뭐라할꺼 아니다 ㅠ",
+      "timestamp": "2026-02-25T13:41:31.000Z",
+      "permalink": "https://www.threads.net/@yuja_trip_eat/post/DVLtTsaksTZ",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 439,
+        "like_count": 13,
+        "reply_count": 8,
+        "repost_count": 1
+      },
+      "comments": [
+        {
+          "text": "이제 진짜 자야지…",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "high",
+        "notes": "휴대폰 중독 일상 반성"
+      }
+    },
+    {
+      "eval_id": "E-029",
+      "post_id": "DVBXC1lEi7I",
+      "channel_id": "yuja_trip_eat",
+      "text": "blog.naver.com/dream…\nblog.naver.com\n오롯이클래스, 블로그 글쓰기 배우기 (온라인 집짓기)",
+      "timestamp": "2026-02-21T13:14:35.000Z",
+      "permalink": "https://www.threads.net/@yuja_trip_eat/post/DVBXC1lEi7I",
+      "thread_type": "쓰레드형",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 252,
+        "like_count": 4,
+        "reply_count": 1,
+        "repost_count": 0
+      },
+      "comments": [
+        {
+          "text": "아직 아가들이 어려서 어렵겠구나. 쓰니보니 협찬도 받고있고 이미 잘 하고 있는걸! 배울게 없겠어~~😄",
+          "has_affiliate_link": false
+        }
+      ],
+      "auto_tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "general",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": null,
+        "confidence": "medium",
+        "notes": "블로그 글쓰기 클래스 링크 공유, 자기홍보 가능성 있으나 명확하지 않음"
+      }
+    },
+    {
+      "eval_id": "E-030",
+      "post_id": "DNsn_ThXn76",
+      "channel_id": "bubu.insight",
+      "text": "스하리1000명프로젝트\nDH 부부 추천 향💎\n이 향을 맡으면 기분이 좋아져!!",
+      "timestamp": "2025-08-23T12:18:50.000Z",
+      "permalink": "https://www.threads.net/@bubu.insight/post/DNsn_ThXn76",
+      "thread_type": "비광고",
+      "link": {
+        "url": null,
+        "domain": null,
+        "location": "없음"
+      },
+      "metrics": {
+        "view_count": 120,
+        "like_count": 4,
+        "reply_count": 1,
+        "repost_count": 3
+      },
+      "comments": [],
+      "auto_tags": {
+        "primary": "interest",
+        "secondary": []
+      },
+      "gold_label": {
+        "primary_tag": "interest",
+        "secondary_tags": [],
+        "purchase_signal_level": null,
+        "needs_category": "자기표현",
+        "confidence": "high",
+        "notes": "향 추천 콘텐츠 (스하리프로젝트)"
+      }
+    }
+  ]
+}

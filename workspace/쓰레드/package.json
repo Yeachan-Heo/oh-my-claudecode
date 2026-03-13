@@ -1,9 +1,24 @@
 {
   "name": "threads-watch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Threads channel data collector",
+  "description": "Threads channel data collector + P1 research pipeline",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "validate": "node -c scripts/collect-posts.js && tsc --noEmit && echo '✓ All checks passed'",
+    "normalize": "tsx scripts/normalize-posts.ts",
+    "research": "tsx scripts/researcher.ts",
+    "needs": "tsx scripts/needs-detector.ts",
+    "pipeline": "tsx scripts/run-pipeline.ts --brief",
+    "pipeline:prompt": "tsx scripts/run-pipeline.ts --brief --prompt",
+    "eval:build": "tsx scripts/build-eval-set.ts --seed 42",
+    "collect": "node scripts/collect-posts.js"
+  },
   "dependencies": {
     "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

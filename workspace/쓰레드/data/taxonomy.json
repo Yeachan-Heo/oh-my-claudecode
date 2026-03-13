@@ -1,0 +1,112 @@
+{
+  "version": "1.0",
+  "description": "Threads 포스트 태그 분류 단일 진실 소스 (Single Source of Truth)",
+  "created_at": "2026-03-13",
+  "frozen": true,
+  "frozen_at": "2026-03-13",
+  "tags": {
+    "affiliate": {
+      "desc": "제휴링크 포함 광고 포스트",
+      "precedence": 1,
+      "examples": [
+        "쿠팡 링크",
+        "할인코드",
+        "쿠팡파트너스 활동의 일환으로 수수료를 제공받습니다",
+        "link.coupang.com",
+        "coupa.ng"
+      ],
+      "detection_hints": [
+        "제휴링크 URL 존재 (coupang.com, coupa.ng, musinsa.com, smartstore.naver.com, ali.ski)",
+        "쿠팡파트너스/수수료 관련 텍스트",
+        "할인코드/공구 표현"
+      ]
+    },
+    "purchase_signal": {
+      "desc": "구매 고민/질문/추천 요청",
+      "precedence": 2,
+      "examples": [
+        "이거 살까 말까",
+        "추천해줘",
+        "어디서 사?",
+        "뭐가 좋아?",
+        "이거 괜찮아?"
+      ],
+      "detection_hints": [
+        "구매 의사 표현",
+        "추천 요청 질문",
+        "가격/가성비 비교 질문",
+        "구매처 문의"
+      ]
+    },
+    "review": {
+      "desc": "사용 후기/비교",
+      "precedence": 3,
+      "examples": [
+        "써봤는데",
+        "3개 비교",
+        "솔직 후기",
+        "한 달 써본 결과",
+        "장단점 정리"
+      ],
+      "detection_hints": [
+        "직접 사용 경험 서술",
+        "제품 비교 내용",
+        "장단점 언급",
+        "기간 명시 사용 후기"
+      ]
+    },
+    "complaint": {
+      "desc": "불만/문제 상황",
+      "precedence": 4,
+      "examples": [
+        "이거 왜 이래",
+        "별로였음",
+        "환불 받음",
+        "후회된다",
+        "절대 사지 마"
+      ],
+      "detection_hints": [
+        "부정적 감정 표현",
+        "제품/서비스 불만",
+        "환불/교환 언급",
+        "비추천 의사"
+      ]
+    },
+    "interest": {
+      "desc": "관심/욕구 표현",
+      "precedence": 5,
+      "examples": [
+        "좋아보인다",
+        "갖고 싶다",
+        "이거 뭐야 예쁘다",
+        "신기하네",
+        "탐난다"
+      ],
+      "detection_hints": [
+        "긍정적 관심 표현",
+        "소유 욕구",
+        "호기심/탐색 의사",
+        "감탄/놀라움"
+      ]
+    },
+    "general": {
+      "desc": "기타/분류 불가",
+      "precedence": 6,
+      "examples": [],
+      "detection_hints": [
+        "위 5개 태그에 해당하지 않는 경우",
+        "일상 대화",
+        "뉴스 공유",
+        "밈/유머"
+      ]
+    }
+  },
+  "rules": {
+    "primary": "가장 높은 precedence(낮은 숫자) 태그가 primary. 하나만 선택.",
+    "secondary": "해당되는 나머지 태그 모두 secondary 배열에 포함. 순서는 precedence 순.",
+    "classifier": "sonnet -- 포스트 텍스트를 읽고 문맥 기반으로 분류. 키워드 매칭이 아닌 의미 이해.",
+    "affiliate_detection": "affiliate 태그는 텍스트 분류 전에 URL/키워드 기반으로 먼저 판정. 제휴링크가 있으면 무조건 affiliate가 primary 또는 secondary에 포함.",
+    "ambiguous_case": "애매한 경우 보수적으로 분류 (낮은 precedence = general 쪽으로). eval 세트에서 보정.",
+    "multi_tag_example": "쿠팡 링크가 있는 후기 포스트 -> primary: affiliate(1), secondary: [review(3)]"
+  }
+}
