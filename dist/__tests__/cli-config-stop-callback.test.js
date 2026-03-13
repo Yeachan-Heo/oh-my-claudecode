@@ -26,78 +26,8 @@ function runCli(args, homeDir) {
 function readConfig(configPath) {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
 }
-describe('omc config-stop-callback tag options', () => {
-    it('updates telegram tagList options and preserves existing config fields', () => {
-        const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
-        const configPath = join(homeDir, '.claude', '.omc-config.json');
-        mkdirSync(join(homeDir, '.claude'), { recursive: true });
-        writeFileSync(configPath, JSON.stringify({
-            silentAutoUpdate: false,
-            taskTool: 'task',
-            stopHookCallbacks: {
-                telegram: {
-                    enabled: true,
-                    botToken: '123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678',
-                    chatId: '12345',
-                    tagList: ['@old'],
-                },
-            },
-        }, null, 2));
-        const replace = runCli(['config-stop-callback', 'telegram', '--tag-list', '@alice,bob'], homeDir);
-        expect(replace.status).toBe(0);
-        let config = readConfig(configPath);
-        expect(config.taskTool).toBe('task');
-        expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'bob']);
-        const add = runCli(['config-stop-callback', 'telegram', '--add-tag', 'charlie'], homeDir);
-        expect(add.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'bob', 'charlie']);
-        const remove = runCli(['config-stop-callback', 'telegram', '--remove-tag', 'bob'], homeDir);
-        expect(remove.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.telegram?.tagList).toEqual(['@alice', 'charlie']);
-        const show = runCli(['config-stop-callback', 'telegram', '--show'], homeDir);
-        expect(show.status).toBe(0);
-        expect(show.stdout).toContain('"tagList": [');
-        expect(show.stdout).toContain('"@alice"');
-    });
-    it('applies and clears discord tags and ignores tag options for file callback', () => {
-        const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
-        const configPath = join(homeDir, '.claude', '.omc-config.json');
-        mkdirSync(join(homeDir, '.claude'), { recursive: true });
-        writeFileSync(configPath, JSON.stringify({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                discord: {
-                    enabled: true,
-                    webhookUrl: 'https://discord.com/api/webhooks/test',
-                    tagList: ['@here'],
-                },
-                file: {
-                    enabled: true,
-                    path: '/tmp/session.md',
-                    format: 'markdown',
-                },
-            },
-        }, null, 2));
-        const add = runCli(['config-stop-callback', 'discord', '--add-tag', 'role:123'], homeDir);
-        expect(add.status).toBe(0);
-        let config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.discord?.tagList).toEqual(['@here', 'role:123']);
-        const clear = runCli(['config-stop-callback', 'discord', '--clear-tags'], homeDir);
-        expect(clear.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.discord?.tagList).toEqual([]);
-        const file = runCli(['config-stop-callback', 'file', '--tag-list', '@ignored'], homeDir);
-        expect(file.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.file).toEqual({
-            enabled: true,
-            path: '/tmp/session.md',
-            format: 'markdown',
-        });
-    });
-    it('configures slack stop-callback with webhook and tags', () => {
+describe('omc config-stop-callback', () => {
+    it('configures file callback and ignores unsupported types', () => {
         const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
         const configPath = join(homeDir, '.claude', '.omc-config.json');
         mkdirSync(join(homeDir, '.claude'), { recursive: true });
@@ -105,28 +35,36 @@ describe('omc config-stop-callback tag options', () => {
             silentAutoUpdate: false,
             stopHookCallbacks: {},
         }, null, 2));
-        // Enable slack with webhook and tags
-        const enable = runCli(['config-stop-callback', 'slack', '--enable', '--webhook', 'https://hooks.slack.com/services/T00/B00/xxx', '--tag-list', '<!here>,<@U1234567890>'], homeDir);
+        // Enable file callback
+        const enable = runCli(['config-stop-callback', 'file', '--enable', '--path', '/tmp/session.md'], homeDir);
         expect(enable.status).toBe(0);
-        let config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.slack?.enabled).toBe(true);
-        expect(config.stopHookCallbacks?.slack?.webhookUrl).toBe('https://hooks.slack.com/services/T00/B00/xxx');
-        expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<!here>', '<@U1234567890>']);
-        // Add a tag
-        const add = runCli(['config-stop-callback', 'slack', '--add-tag', '<!channel>'], homeDir);
-        expect(add.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<!here>', '<@U1234567890>', '<!channel>']);
-        // Remove a tag
-        const remove = runCli(['config-stop-callback', 'slack', '--remove-tag', '<!here>'], homeDir);
-        expect(remove.status).toBe(0);
-        config = readConfig(configPath);
-        expect(config.stopHookCallbacks?.slack?.tagList).toEqual(['<@U1234567890>', '<!channel>']);
+        const config = readConfig(configPath);
+        expect(config.stopHookCallbacks?.file?.enabled).toBe(true);
+        expect(config.stopHookCallbacks?.file?.path).toBe('/tmp/session.md');
         // Show config
-        const show = runCli(['config-stop-callback', 'slack', '--show'], homeDir);
+        const show = runCli(['config-stop-callback', 'file', '--show'], homeDir);
         expect(show.status).toBe(0);
-        expect(show.stdout).toContain('"webhookUrl"');
-        expect(show.stdout).toContain('"tagList"');
+        expect(show.stdout).toContain('"path"');
+        // Disable
+        const disable = runCli(['config-stop-callback', 'file', '--disable'], homeDir);
+        expect(disable.status).toBe(0);
+        const updated = readConfig(configPath);
+        expect(updated.stopHookCallbacks?.file?.enabled).toBe(false);
+    });
+    it('rejects unsupported callback types', () => {
+        const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+        const configPath = join(homeDir, '.claude', '.omc-config.json');
+        mkdirSync(join(homeDir, '.claude'), { recursive: true });
+        writeFileSync(configPath, JSON.stringify({
+            silentAutoUpdate: false,
+            stopHookCallbacks: {},
+        }, null, 2));
+        // Telegram should be rejected
+        const telegram = runCli(['config-stop-callback', 'telegram', '--enable'], homeDir);
+        expect(telegram.status).not.toBe(0);
+        // Discord should be rejected
+        const discord = runCli(['config-stop-callback', 'discord', '--enable'], homeDir);
+        expect(discord.status).not.toBe(0);
     });
 });
 //# sourceMappingURL=cli-config-stop-callback.test.js.map

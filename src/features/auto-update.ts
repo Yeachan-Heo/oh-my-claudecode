@@ -17,7 +17,7 @@ import { TaskTool } from '../hooks/beads-context/types.js';
 import { install as installOmc, HOOKS_DIR, isProjectScopedPlugin, isRunningAsPlugin } from '../installer/index.js';
 import { getConfigDir } from '../utils/config-dir.js';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
-import type { NotificationConfig } from '../notifications/types.js';
+
 
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
@@ -85,48 +85,13 @@ export interface StopCallbackFileConfig {
 }
 
 /**
- * Stop hook callback configuration for Telegram
- */
-export interface StopCallbackTelegramConfig {
-  enabled: boolean;
-  /** Telegram bot token */
-  botToken?: string;
-  /** Chat ID to send messages to */
-  chatId?: string;
-  /** Optional tags/usernames to prefix in notifications */
-  tagList?: string[];
-}
-
-/**
- * Stop hook callback configuration for Discord
- */
-export interface StopCallbackDiscordConfig {
-  enabled: boolean;
-  /** Discord webhook URL */
-  webhookUrl?: string;
-  /** Optional tags/user IDs/roles to prefix in notifications */
-  tagList?: string[];
-}
-
-/**
- * Stop hook callback configuration for Slack
- */
-export interface StopCallbackSlackConfig {
-  enabled: boolean;
-  /** Slack incoming webhook URL */
-  webhookUrl?: string;
-  /** Optional tags/mentions to include in notifications */
-  tagList?: string[];
-}
-
-/**
  * Stop hook callbacks configuration
+ *
+ * External notification integrations (Telegram, Discord, Slack) have been
+ * removed for security hardening. Only file logging is supported.
  */
 export interface StopHookCallbacksConfig {
   file?: StopCallbackFileConfig;
-  telegram?: StopCallbackTelegramConfig;
-  discord?: StopCallbackDiscordConfig;
-  slack?: StopCallbackSlackConfig;
 }
 
 /**
@@ -152,12 +117,8 @@ export interface OMCConfig {
   setupCompleted?: string;
   /** Version of setup wizard that was completed */
   setupVersion?: string;
-  /** Stop hook callback configuration (legacy, use notifications instead) */
+  /** Stop hook callback configuration */
   stopHookCallbacks?: StopHookCallbacksConfig;
-  /** Multi-platform lifecycle notification configuration */
-  notifications?: NotificationConfig;
-  /** Named notification profiles (keyed by profile name) */
-  notificationProfiles?: Record<string, NotificationConfig>;
   /** Whether HUD statusline is enabled (default: true). Set to false to skip HUD installation. */
   hudEnabled?: boolean;
   /** Whether to prompt for upgrade at session start when a new version is available (default: true).
@@ -189,8 +150,6 @@ export function getOMCConfig(): OMCConfig {
       setupCompleted: config.setupCompleted,
       setupVersion: config.setupVersion,
       stopHookCallbacks: config.stopHookCallbacks,
-      notifications: config.notifications,
-      notificationProfiles: config.notificationProfiles,
       hudEnabled: config.hudEnabled,
       autoUpgradePrompt: config.autoUpgradePrompt,
     };

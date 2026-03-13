@@ -61,27 +61,6 @@ export interface HookOutput {
  */
 export type HookType = "keyword-detector" | "stop-continuation" | "ralph" | "persistent-mode" | "session-start" | "session-end" | "pre-tool-use" | "post-tool-use" | "autopilot" | "subagent-start" | "subagent-stop" | "pre-compact" | "setup-init" | "setup-maintenance" | "permission-request" | "code-simplifier";
 /**
- * Fire-and-forget notification for AskUserQuestion (issue #597).
- * Extracted for testability; the dynamic import makes direct assertion
- * on the notify() call timing-sensitive, so tests spy on this wrapper instead.
- */
-export declare function dispatchAskUserQuestionNotification(sessionId: string, directory: string, toolInput: unknown): void;
-/** @internal Object wrapper so tests can spy on the dispatch call. */
-export declare const _notify: {
-    askUserQuestion: typeof dispatchAskUserQuestionNotification;
-};
-/**
- * @internal Object wrapper for OpenClaw gateway dispatch.
- * Mirrors the _notify pattern for testability (tests spy on _openclaw.wake
- * instead of mocking dynamic imports).
- *
- * Fire-and-forget: the lazy import + double .catch() ensures OpenClaw
- * never blocks hooks or surfaces errors.
- */
-export declare const _openclaw: {
-    wake: (event: import("../openclaw/types.js").OpenClawHookEvent, context: import("../openclaw/types.js").OpenClawContext) => void;
-};
-/**
  * Reset the skip hooks cache (for testing only)
  */
 export declare function resetSkipHooksCache(): void;

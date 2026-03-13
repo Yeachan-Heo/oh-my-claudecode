@@ -506,15 +506,6 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     messages.push(PROMPT_TRANSLATION_MESSAGE);
   }
 
-  // Wake OpenClaw gateway for keyword-detector (non-blocking, fires for all prompts)
-  if (input.sessionId) {
-    _openclaw.wake("keyword-detector", {
-      sessionId: input.sessionId,
-      projectPath: directory,
-      prompt: cleanedText,
-    });
-  }
-
   if (keywords.length === 0) {
     if (messages.length > 0) {
       return { continue: true, message: messages.join('\n\n---\n\n') };
@@ -704,28 +695,7 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
     if (result.mode === "none" && sessionId) {
       const isAbort = stopContext.user_requested === true || stopContext.userRequested === true;
       const isContextLimit = stopContext.stop_reason === "context_limit" || stopContext.stopReason === "context_limit";
-      if (!isAbort && !isContextLimit) {
-        // Always wake OpenClaw on stop — cooldown only applies to user-facing notifications
-        _openclaw.wake("stop", { sessionId, projectPath: directory });
-
-        // Per-session cooldown: prevent notification spam when the session idles repeatedly.
-        // Uses session-scoped state so one session does not suppress another.
-        const stateDir = join(getOmcRoot(directory), "state");
-        if (shouldSendIdleNotification(stateDir, sessionId)) {
-          recordIdleNotificationSent(stateDir, sessionId);
-          import("../notifications/index.js").then(({ notify }) =>
-            notify("session-idle", {
-              sessionId,
-              projectPath: directory,
-              profileName: process.env.OMC_NOTIFY_PROFILE,
-            }).catch(() => {})
-          ).catch(() => {});
-        }
-      }
-
-      // IMPORTANT: Do NOT clean up reply-listener/session-registry on Stop hooks.
-      // Stop can fire for normal "idle" turns while the session is still active.
-      // Reply cleanup is handled in the true SessionEnd hook only.
+      // No-op: notification and openclaw integrations removed
     }
     return output;
   }
@@ -800,40 +770,6 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
 
   // Trigger silent auto-update check (non-blocking, checks config internally)
   initSilentAutoUpdate();
-
-  // Send session-start notification (non-blocking, swallows errors)
-  if (sessionId) {
-    import("../notifications/index.js").then(({ notify }) =>
-      notify("session-start", {
-        sessionId,
-        projectPath: directory,
-        profileName: process.env.OMC_NOTIFY_PROFILE,
-      }).catch(() => {})
-    ).catch(() => {});
-    // Wake OpenClaw gateway for session-start (non-blocking)
-    _openclaw.wake("session-start", { sessionId, projectPath: directory });
-  }
-
-  // Start reply listener daemon if configured (non-blocking, swallows errors)
-  if (sessionId) {
-    Promise.all([
-      import("../notifications/reply-listener.js"),
-      import("../notifications/config.js"),
-    ]).then(
-      ([
-        { startReplyListener },
-        { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig },
-      ]) => {
-      const replyConfig = getReplyConfig();
-      if (!replyConfig) return;
-      const notifConfig = getNotificationConfig();
-      const platformConfig = getReplyListenerPlatformConfig(notifConfig);
-      startReplyListener({
-        ...replyConfig,
-        ...platformConfig,
-      });
-    }).catch(() => {});
-  }
 
   const messages: string[] = [];
 
@@ -1003,51 +939,6 @@ The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does N
   return { continue: true };
 }
 
-/**
- * Fire-and-forget notification for AskUserQuestion (issue #597).
- * Extracted for testability; the dynamic import makes direct assertion
- * on the notify() call timing-sensitive, so tests spy on this wrapper instead.
- */
-export function dispatchAskUserQuestionNotification(
-  sessionId: string,
-  directory: string,
-  toolInput: unknown,
-): void {
-  const input = toolInput as { questions?: Array<{ question?: string }> } | undefined;
-  const questions = input?.questions || [];
-  const questionText = questions.map(q => q.question || "").filter(Boolean).join("; ") || "User input requested";
-
-  import("../notifications/index.js").then(({ notify }) =>
-    notify("ask-user-question", {
-      sessionId,
-      projectPath: directory,
-      question: questionText,
-      profileName: process.env.OMC_NOTIFY_PROFILE,
-    }).catch(() => {})
-  ).catch(() => {});
-}
-
-/** @internal Object wrapper so tests can spy on the dispatch call. */
-export const _notify = {
-  askUserQuestion: dispatchAskUserQuestionNotification,
-};
-
-/**
- * @internal Object wrapper for OpenClaw gateway dispatch.
- * Mirrors the _notify pattern for testability (tests spy on _openclaw.wake
- * instead of mocking dynamic imports).
- *
- * Fire-and-forget: the lazy import + double .catch() ensures OpenClaw
- * never blocks hooks or surfaces errors.
- */
-export const _openclaw = {
-  wake: (event: import("../openclaw/types.js").OpenClawHookEvent, context: import("../openclaw/types.js").OpenClawContext) => {
-    if (process.env.OMC_OPENCLAW !== "1") return;
-    import("../openclaw/index.js").then(({ wakeOpenClaw }) =>
-      wakeOpenClaw(event, context).catch(() => {})
-    ).catch(() => {});
-  },
-};
 
 /**
  * Process pre-tool-use hook
@@ -1174,21 +1065,6 @@ function processPreToolUse(input: HookInput): HookOutput {
     }
   }
 
-  // Notify when AskUserQuestion is about to execute (issue #597)
-  // Fire-and-forget: notify users that input is needed BEFORE the tool blocks
-  if (input.toolName === "AskUserQuestion" && input.sessionId) {
-    _notify.askUserQuestion(input.sessionId, directory, input.toolInput);
-    // Wake OpenClaw gateway for ask-user-question (non-blocking)
-    _openclaw.wake("ask-user-question", {
-      sessionId: input.sessionId,
-      projectPath: directory,
-      question: (() => {
-        const ti = input.toolInput as { questions?: Array<{ question?: string }> } | undefined;
-        return ti?.questions?.map(q => q.question || "").filter(Boolean).join("; ") || "";
-      })(),
-    });
-  }
-
   // Activate skill state when Skill tool is invoked (issue #1033)
   // This writes skill-active-state.json so the Stop hook can prevent premature
   // session termination while a skill is executing.
@@ -1204,28 +1080,6 @@ function processPreToolUse(input: HookInput): HookOutput {
         // Skill-state write is best-effort; don't fail the hook on error.
       }
     }
-  }
-
-  // Notify when a new agent is spawned via Task tool (issue #761)
-  // Fire-and-forget: verbosity filtering is handled inside notify()
-  if (input.toolName === "Task" && input.sessionId) {
-    const taskInput = input.toolInput as {
-      subagent_type?: string;
-      description?: string;
-    } | undefined;
-    const agentType = taskInput?.subagent_type;
-    const agentName = agentType?.includes(":")
-      ? agentType.split(":").pop()
-      : agentType;
-    import("../notifications/index.js").then(({ notify }) =>
-      notify("agent-call", {
-        sessionId: input.sessionId!,
-        projectPath: directory,
-        agentName,
-        agentType,
-        profileName: process.env.OMC_NOTIFY_PROFILE,
-      }).catch(() => {})
-    ).catch(() => {});
   }
 
   // Warn about pkill -f self-termination risk (issue #210)
@@ -1327,15 +1181,6 @@ function processPreToolUse(input: HookInput): HookOutput {
         ...(modifiedToolInput ? { modifiedInput: modifiedToolInput } : {}),
       };
     }
-  }
-
-  // Wake OpenClaw gateway for pre-tool-use (non-blocking, fires only for allowed tools)
-  if (input.sessionId) {
-    _openclaw.wake("pre-tool-use", {
-      sessionId: input.sessionId,
-      projectPath: directory,
-      toolName: input.toolName,
-    });
   }
 
   return {
@@ -1440,15 +1285,6 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
     if (dashboard) {
       messages.push(dashboard);
     }
-  }
-
-  // Wake OpenClaw gateway for post-tool-use (non-blocking, fires for all tools)
-  if (input.sessionId) {
-    _openclaw.wake("post-tool-use", {
-      sessionId: input.sessionId,
-      projectPath: directory,
-      toolName: input.toolName,
-    });
   }
 
   if (messages.length > 0) {
@@ -1582,13 +1418,7 @@ export async function processHook(
           hook_event_name: "SessionEnd",
           reason: (rawSE.reason as SessionEndInput["reason"]) ?? "other",
         };
-        const result = await handleSessionEnd(sessionEndInput);
-        _openclaw.wake("session-end", {
-          sessionId: sessionEndInput.session_id,
-          projectPath: sessionEndInput.cwd,
-          reason: sessionEndInput.reason,
-        });
-        return result;
+        return await handleSessionEnd(sessionEndInput);
       }
 
       case "subagent-start": {

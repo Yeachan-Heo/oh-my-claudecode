@@ -2,7 +2,8 @@
  * Stop Hook Callbacks
  *
  * Provides configurable callback handlers for session end events.
- * Supports file logging, Telegram, and Discord notifications.
+ * Supports file logging only. External notification integrations
+ * (Telegram, Discord, Slack) have been removed for security hardening.
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
@@ -12,8 +13,6 @@ import type { SessionMetrics } from './index.js';
 import {
   getOMCConfig,
   type StopCallbackFileConfig,
-  type StopCallbackTelegramConfig,
-  type StopCallbackDiscordConfig,
 } from '../../features/auto-update.js';
 
 /**
@@ -42,52 +41,7 @@ export function formatSessionSummary(metrics: SessionMetrics, format: 'markdown'
 }
 
 export interface TriggerStopCallbacksOptions {
-  skipPlatforms?: Array<'file' | 'telegram' | 'discord'>;
-}
-
-function normalizeDiscordTagList(tagList?: string[]): string[] {
-  if (!tagList || tagList.length === 0) {
-    return [];
-  }
-
-  return tagList
-    .map((tag) => tag.trim())
-    .filter((tag) => tag.length > 0)
-    .map((tag) => {
-      if (tag === '@here' || tag === '@everyone') {
-        return tag;
-      }
-
-      const roleMatch = tag.match(/^role:(\d+)$/);
-      if (roleMatch) {
-        return `<@&${roleMatch[1]}>`;
-      }
-
-      if (/^\d+$/.test(tag)) {
-        return `<@${tag}>`;
-      }
-
-      return tag;
-    });
-}
-
-function normalizeTelegramTagList(tagList?: string[]): string[] {
-  if (!tagList || tagList.length === 0) {
-    return [];
-  }
-
-  return tagList
-    .map((tag) => tag.trim())
-    .filter((tag) => tag.length > 0)
-    .map((tag) => tag.startsWith('@') ? tag : `@${tag}`);
-}
-
-function prefixMessageWithTags(message: string, tags: string[]): string {
-  if (tags.length === 0) {
-    return message;
-  }
-
-  return `${tags.join(' ')}\n${message}`;
+  skipPlatforms?: Array<'file'>;
 }
 
 /**
@@ -133,99 +87,6 @@ async function writeToFile(
 }
 
 /**
- * Telegram callback - send notification via Telegram bot
- */
-async function sendTelegram(
-  config: StopCallbackTelegramConfig,
-  message: string
-): Promise<void> {
-  if (!config.botToken || !config.chatId) {
-    console.error('[stop-callback] Telegram: missing botToken or chatId');
-    return;
-  }
-
-  // Validate bot token format (digits:alphanumeric)
-  if (!/^[0-9]+:[A-Za-z0-9_-]+$/.test(config.botToken)) {
-    console.error('[stop-callback] Telegram: invalid bot token format');
-    return;
-  }
-
-  try {
-    const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: config.chatId,
-        text: message,
-        parse_mode: 'Markdown',
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Telegram API error: ${response.status} - ${response.statusText}`);
-    }
-
-    console.log('[stop-callback] Telegram notification sent');
-  } catch (error) {
-    // Don't log full error details which might contain the bot token
-    console.error('[stop-callback] Telegram send failed:', error instanceof Error ? error.message : 'Unknown error');
-    // Don't throw - callback failures shouldn't block session end
-  }
-}
-
-/**
- * Discord callback - send notification via Discord webhook
- */
-async function sendDiscord(
-  config: StopCallbackDiscordConfig,
-  message: string
-): Promise<void> {
-  if (!config.webhookUrl) {
-    console.error('[stop-callback] Discord: missing webhookUrl');
-    return;
-  }
-
-  // Validate Discord webhook URL
-  try {
-    const url = new URL(config.webhookUrl);
-    const allowedHosts = ['discord.com', 'discordapp.com'];
-    if (!allowedHosts.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
-      console.error('[stop-callback] Discord: webhook URL must be from discord.com or discordapp.com');
-      return;
-    }
-    if (url.protocol !== 'https:') {
-      console.error('[stop-callback] Discord: webhook URL must use HTTPS');
-      return;
-    }
-  } catch {
-    console.error('[stop-callback] Discord: invalid webhook URL');
-    return;
-  }
-
-  try {
-    const response = await fetch(config.webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content: message,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Discord webhook error: ${response.status} - ${response.statusText}`);
-    }
-
-    console.log('[stop-callback] Discord notification sent');
-  } catch (error) {
-    console.error('[stop-callback] Discord send failed:', error instanceof Error ? error.message : 'Unknown error');
-    // Don't throw - callback failures shouldn't block session end
-  }
-}
-
-/**
  * Main callback trigger - called from session-end hook
  *
  * Executes all enabled callbacks in parallel with a timeout.
@@ -251,20 +112,6 @@ export async function triggerStopCallbacks(
     const format = callbacks.file.format || 'markdown';
     const summary = formatSessionSummary(metrics, format);
     promises.push(writeToFile(callbacks.file, summary, metrics.session_id));
-  }
-
-  if (!skipPlatforms.has('telegram') && callbacks.telegram?.enabled) {
-    const summary = formatSessionSummary(metrics, 'markdown');
-    const tags = normalizeTelegramTagList(callbacks.telegram.tagList);
-    const message = prefixMessageWithTags(summary, tags);
-    promises.push(sendTelegram(callbacks.telegram, message));
-  }
-
-  if (!skipPlatforms.has('discord') && callbacks.discord?.enabled) {
-    const summary = formatSessionSummary(metrics, 'markdown');
-    const tags = normalizeDiscordTagList(callbacks.discord.tagList);
-    const message = prefixMessageWithTags(summary, tags);
-    promises.push(sendDiscord(callbacks.discord, message));
   }
 
   if (promises.length === 0) {

@@ -1,14 +1,74 @@
+# oh-my-claudecode (Hardened Fork)
+
+> **This is a security-hardened fork by [rhizo-co](https://github.com/rhizo-co).** The OpenClaw gateway and notification integrations (Discord, Telegram, Slack Socket Mode, webhooks) have been removed to eliminate outbound data channels flagged in security audit.
+
+---
+
+## Install (One-Liner)
+
+Run this to install the hardened fork and configure Claude Code to use it:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/rhizo-co/oh-my-claudecode/main/install-fork.sh)
+```
+
+Or copy-paste the script manually:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+FORK_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode-rhizo"
+
+# Clone or update
+if [ -d "$FORK_DIR" ]; then
+  cd "$FORK_DIR" && git pull --ff-only
+else
+  git clone https://github.com/rhizo-co/oh-my-claudecode.git "$FORK_DIR"
+  cd "$FORK_DIR"
+fi
+
+# Build
+pnpm install && pnpm build
+
+# Patch installed_plugins.json to point to the fork
+PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
+if [ -f "$PLUGINS_FILE" ]; then
+  python3 -c "
+import json, pathlib
+p = pathlib.Path('$PLUGINS_FILE')
+d = json.loads(p.read_text())
+entries = d.get('plugins', {}).get('oh-my-claudecode@omc', [])
+for e in entries:
+    e['installPath'] = '$FORK_DIR'
+    e['version'] = 'rhizo-hardened'
+p.write_text(json.dumps(d, indent=2))
+print('Patched', len(entries), 'plugin entries')
+"
+else
+  echo "Warning: $PLUGINS_FILE not found. Install oh-my-claudecode from marketplace first, then re-run this script."
+fi
+
+echo "Done. Restart Claude Code to use the hardened fork."
+```
+
+To update later, just re-run the same command.
+
+---
+
+## What was removed
+
+| Component | Risk | Status |
+|-----------|------|--------|
+| `src/openclaw/` — HTTP/CLI gateway for outbound data | Outbound data exfiltration channel | **Removed** |
+| `src/notifications/` — Discord, Telegram, Slack Socket Mode, webhooks | Prompt injection via inbound messages; data leakage via outbound notifications | **Removed** |
+
+---
+
+## Original README
+
 English | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
-# oh-my-claudecode
-
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
-
-> **For Codex users:** Check out [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) — the same orchestration experience for OpenAI Codex CLI.
 
 **Multi-agent orchestration for Claude Code. Zero learning curve.**
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { formatSessionSummary, interpolatePath, triggerStopCallbacks } from '../callbacks.js';
 // Mock auto-update module
 vi.mock('../../../features/auto-update.js', () => ({
@@ -102,11 +102,6 @@ describe('triggerStopCallbacks', () => {
     const testInput = { session_id: 'test-session-123', cwd: '/tmp/test' };
     beforeEach(() => {
         vi.resetAllMocks();
-        // Reset global fetch mock
-        vi.stubGlobal('fetch', vi.fn());
-    });
-    afterEach(() => {
-        vi.unstubAllGlobals();
     });
     it('does nothing when no callbacks configured', async () => {
         mockGetConfig.mockReturnValue({
@@ -170,128 +165,6 @@ describe('triggerStopCallbacks', () => {
         await triggerStopCallbacks(metrics, testInput);
         expect(mockWriteFileSync).not.toHaveBeenCalled();
     });
-    it('sends Telegram notification when enabled', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve('OK'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                telegram: {
-                    enabled: true,
-                    botToken: '123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678',
-                    chatId: '12345',
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        expect(mockFetch).toHaveBeenCalledWith('https://api.telegram.org/bot123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678/sendMessage', expect.objectContaining({
-            method: 'POST',
-            body: expect.stringContaining('"chat_id":"12345"'),
-        }));
-    });
-    it('prefixes Telegram messages with normalized tags from tagList', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve('OK'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                telegram: {
-                    enabled: true,
-                    botToken: '123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678',
-                    chatId: '12345',
-                    tagList: ['@alice', 'bob', '  ', '', 'charlie'],
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        const request = mockFetch.mock.calls[0]?.[1];
-        const payload = JSON.parse(request.body);
-        expect(payload.text.startsWith('@alice @bob @charlie\n# Session Ended')).toBe(true);
-    });
-    it('skips Telegram when missing credentials', async () => {
-        const mockFetch = vi.fn();
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                telegram: {
-                    enabled: true,
-                    // Missing botToken and chatId
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        expect(mockFetch).not.toHaveBeenCalled();
-    });
-    it('sends Discord notification when enabled', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve('OK'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                discord: {
-                    enabled: true,
-                    webhookUrl: 'https://discord.com/api/webhooks/test',
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        expect(mockFetch).toHaveBeenCalledWith('https://discord.com/api/webhooks/test', expect.objectContaining({
-            method: 'POST',
-            body: expect.stringContaining('test-session-123'),
-        }));
-    });
-    it('prefixes Discord messages with normalized tags from tagList', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve('OK'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                discord: {
-                    enabled: true,
-                    webhookUrl: 'https://discord.com/api/webhooks/test',
-                    tagList: ['@here', '@everyone', 'role:123', '456', 'dev-team', '  ', ''],
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        const request = mockFetch.mock.calls[0]?.[1];
-        const payload = JSON.parse(request.body);
-        expect(payload.content.startsWith('@here @everyone <@&123> <@456> dev-team\n# Session Ended')).toBe(true);
-    });
-    it('skips Discord when missing webhook URL', async () => {
-        const mockFetch = vi.fn();
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                discord: {
-                    enabled: true,
-                    // Missing webhookUrl
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        expect(mockFetch).not.toHaveBeenCalled();
-    });
     it('handles file write errors gracefully', async () => {
         mockMkdirSync.mockImplementation(() => {
             throw new Error('Permission denied');
@@ -308,74 +181,6 @@ describe('triggerStopCallbacks', () => {
         const metrics = createTestMetrics();
         // Should not throw
         await expect(triggerStopCallbacks(metrics, testInput)).resolves.not.toThrow();
-    });
-    it('handles Telegram API errors gracefully', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: false,
-            status: 401,
-            text: () => Promise.resolve('Unauthorized'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                telegram: {
-                    enabled: true,
-                    botToken: '123456789:BADtokenABCdefGHIjklMNO012345678',
-                    chatId: '12345',
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        // Should not throw
-        await expect(triggerStopCallbacks(metrics, testInput)).resolves.not.toThrow();
-    });
-    it('handles network errors gracefully', async () => {
-        const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                discord: {
-                    enabled: true,
-                    webhookUrl: 'https://discord.com/api/webhooks/test',
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        // Should not throw
-        await expect(triggerStopCallbacks(metrics, testInput)).resolves.not.toThrow();
-    });
-    it('executes multiple callbacks in parallel', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve('OK'),
-        });
-        vi.stubGlobal('fetch', mockFetch);
-        mockGetConfig.mockReturnValue({
-            silentAutoUpdate: false,
-            stopHookCallbacks: {
-                file: {
-                    enabled: true,
-                    path: '/tmp/test.md',
-                },
-                telegram: {
-                    enabled: true,
-                    botToken: '123456789:ABCdefGHIjklMNOpqrSTUvwxyz012345678',
-                    chatId: '12345',
-                },
-                discord: {
-                    enabled: true,
-                    webhookUrl: 'https://discord.com/api/webhooks/test',
-                },
-            },
-        });
-        const metrics = createTestMetrics();
-        await triggerStopCallbacks(metrics, testInput);
-        // File callback
-        expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-        // Telegram + Discord = 2 fetch calls
-        expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 });
 //# sourceMappingURL=callbacks.test.js.map
