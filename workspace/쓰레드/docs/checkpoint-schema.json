@@ -1,0 +1,416 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://threads-watch/schemas/checkpoint/v1.0",
+  "title": "Threads Watch Checkpoint Schema",
+  "description": "plan2.md P0-1: 에이전트 상태머신의 checkpoint 구조. 기존 SKILL.md checkpoint + collect-posts.js checkpoint를 통합하고, plan2.md 요구사항(상태머신, frontier, budget, overlap-resume, telemetry)을 추가.",
+  "version": "1.0",
+  "type": "object",
+  "required": ["version", "run_id", "state", "channels", "budget", "timestamp", "status"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "checkpoint 스키마 버전"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_\\d{8}_\\d{4}$",
+      "description": "수집 실행 ID (예: run_20260313_0900). 기존 collect-posts.js getRunId() 형식 유지."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "health_check",
+        "discover",
+        "collect",
+        "classify",
+        "next_channel",
+        "handoff",
+        "completed"
+      ],
+      "description": "현재 상태머신 상태. plan2.md P0-1 상태 전이 다이어그램 참조: [시작] -> health_check -> discover -> collect -> classify -> next_channel? -> handoff/completed"
+    },
+    "state_machine": {
+      "type": "object",
+      "description": "상태머신 전이 규칙 (참조용, 런타임에서 사용)",
+      "properties": {
+        "transitions": {
+          "type": "object",
+          "description": "각 상태에서 가능한 다음 상태",
+          "properties": {
+            "health_check": {
+              "type": "object",
+              "properties": {
+                "pass": { "const": "discover" },
+                "fail": { "const": "handoff" }
+              }
+            },
+            "discover": {
+              "type": "object",
+              "properties": {
+                "channels_found": { "const": "collect" },
+                "no_channels": { "const": "handoff" },
+                "error": { "const": "handoff" }
+              }
+            },
+            "collect": {
+              "type": "object",
+              "properties": {
+                "channel_done": { "const": "classify" },
+                "blocked": { "const": "handoff" },
+                "budget_exceeded": { "const": "handoff" },
+                "error": { "const": "handoff" }
+              }
+            },
+            "classify": {
+              "type": "object",
+              "properties": {
+                "done": { "const": "next_channel" }
+              }
+            },
+            "next_channel": {
+              "type": "object",
+              "properties": {
+                "has_more": { "const": "collect" },
+                "all_done": { "const": "completed" },
+                "budget_exceeded": { "const": "handoff" }
+              }
+            },
+            "handoff": {
+              "type": "object",
+              "description": "터미널 상태. handoff.md 작성 후 세션 종료."
+            },
+            "completed": {
+              "type": "object",
+              "description": "터미널 상태. 모든 채널 수집 완료."
+            }
+          }
+        }
+      }
+    },
+    "channels": {
+      "type": "object",
+      "description": "채널 관리. 기존 SKILL.md checkpoint 구조를 확장.",
+      "required": ["completed", "queue"],
+      "properties": {
+        "completed": {
+          "type": "array",
+          "description": "수집 완료된 채널. 기존 channels_completed 확장.",
+          "items": {
+            "type": "object",
+            "required": ["channel_id", "threads_collected", "frontier"],
+            "properties": {
+              "channel_id": {
+                "type": "string",
+                "description": "채널 ID"
+              },
+              "threads_collected": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "수집된 쓰레드 단위 수"
+              },
+              "frontier": {
+                "type": "object",
+                "description": "plan2.md P0-1: per-channel frontier. 재개 시 이어서 수집하기 위한 마지막 포스트 정보.",
+                "required": ["last_post_id", "last_timestamp"],
+                "properties": {
+                  "last_post_id": {
+                    "type": "string",
+                    "description": "마지막으로 수집한 포스트 ID"
+                  },
+                  "last_timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "마지막 포스트의 timestamp"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "status": {
+                "type": "string",
+                "enum": ["completed", "exhausted", "skipped", "blocked"],
+                "description": "채널 수집 결과 상태. P0-6 채널소진 처리."
+              },
+              "session": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "수집 세션 번호"
+              },
+              "track": {
+                "type": "string",
+                "enum": ["marketer", "consumer"],
+                "description": "P0-3: 듀얼 트랙. 마케터 트랙 or 소비자 트랙."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "queue": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "수집 대기 채널 큐. 기존 channels_queue."
+        },
+        "discovered": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "발견되었으나 아직 큐에 넣지 않은 채널. 기존 channels_discovered."
+        },
+        "current": {
+          "type": ["string", "null"],
+          "description": "현재 수집 중인 채널. null이면 수집 중이 아님."
+        },
+        "current_progress": {
+          "type": "object",
+          "description": "현재 채널의 수집 진행 상태",
+          "properties": {
+            "post_ids": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "피드에서 수집한 포스트 ID 목록"
+            },
+            "completed_hooks": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "처리 완료된 훅 포스트 ID"
+            },
+            "known_reply_ids": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "답글로 확인된 포스트 ID (skip 대상)"
+            },
+            "thread_units_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "현재까지 조합된 쓰레드 단위 수"
+            }
+          },
+          "additionalProperties": false
+        },
+        "blocked": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "차단된 채널 목록"
+        },
+        "exhausted": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "P0-6: 소진된 채널 목록 (포스트 부족)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "description": "P0-4: 컨텍스트 예산 자가 모니터. 임계치 초과 시 auto-handoff.",
+      "required": ["browser_ops", "channels_completed_count"],
+      "properties": {
+        "browser_ops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "navigate + snapshot 합산 호출 수. 기존 browser_ops_this_session."
+        },
+        "browser_ops_limit": {
+          "type": "integer",
+          "default": 150,
+          "description": "browser_ops 임계치"
+        },
+        "channels_completed_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "이번 세션에서 완료한 채널 수"
+        },
+        "channels_limit": {
+          "type": "integer",
+          "default": 3,
+          "description": "세션당 채널 수 임계치"
+        },
+        "model_calls": {
+          "type": "object",
+          "description": "모델별 호출 수 추적",
+          "properties": {
+            "haiku": { "type": "integer", "minimum": 0, "default": 0 },
+            "sonnet": { "type": "integer", "minimum": 0, "default": 0 },
+            "opus": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "dedup": {
+      "type": "object",
+      "description": "P0-3: 영속 dedup 원장 참조",
+      "properties": {
+        "seen_posts_file": {
+          "type": "string",
+          "default": "data/seen_posts.json",
+          "description": "seen_posts.json 경로"
+        },
+        "total_seen": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "전체 누적 seen 포스트 수"
+        }
+      },
+      "additionalProperties": false
+    },
+    "overlap_resume": {
+      "type": "object",
+      "description": "P0-1: overlap-resume 설정. 재개 시 마지막 20개 포스트 오버랩 -> 중복제거.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "overlap_count": {
+          "type": "integer",
+          "default": 20,
+          "description": "재개 시 오버랩할 포스트 수"
+        },
+        "current_channel_tail": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 20,
+          "description": "현재 채널의 마지막 N개 포스트 ID (resume 시 중복 제거용)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "P0-5a: 런 텔레메트리 인라인 스냅샷. 전체 텔레메트리는 data/telemetry/{date}_run.json에 별도 저장.",
+      "properties": {
+        "stages_completed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["health_check", "discover", "collect", "classify", "next_channel"]
+          },
+          "description": "완료된 상태 목록"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "에러 유형 (login_expiry, blocked, selector_drift, cdp_disconnect, gspread_fail 등)"
+              },
+              "recovered": {
+                "type": "boolean",
+                "description": "복구 성공 여부"
+              },
+              "at_post": {
+                "type": ["integer", "null"],
+                "description": "에러 발생 시점 (포스트 번호)"
+              },
+              "message": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "selector_stats": {
+          "type": "object",
+          "description": "P0-5a: 셀렉터 매니페스트 tier별 성공률",
+          "properties": {
+            "tier1_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "data-testid 성공률"
+            },
+            "tier2_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "aria-label 성공률"
+            },
+            "tier3_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "CSS nth-child 성공률"
+            }
+          },
+          "additionalProperties": false
+        },
+        "validity_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "P0-5: 유효 레코드 / 전체 레코드. >= 0.9 필수."
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "description": "수집 목표",
+      "properties": {
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "목표 채널 수"
+        },
+        "posts_per_channel": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "채널당 목표 포스트 수"
+        }
+      },
+      "additionalProperties": false
+    },
+    "totals": {
+      "type": "object",
+      "description": "누적 수치",
+      "properties": {
+        "threads_collected": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "전체 수집 쓰레드 단위 수. 기존 total_threads_collected."
+        },
+        "sheets_rows": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sheets에 기록된 행 수. 기존 total_sheets_rows."
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "현재 세션 번호 (핸드오프 시 +1)"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "checkpoint 마지막 저장 시각"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused_context_limit",
+        "paused_blocked",
+        "paused_session_expired",
+        "budget_exhausted",
+        "completed",
+        "error"
+      ],
+      "description": "전체 수집 상태. 기존 SKILL.md status 확장. budget_exhausted는 P0-4 terminal state."
+    },
+    "handoff_reason": {
+      "type": ["string", "null"],
+      "description": "핸드오프 사유 (paused/budget_exhausted 상태에서만 사용)"
+    }
+  },
+  "additionalProperties": false
+}

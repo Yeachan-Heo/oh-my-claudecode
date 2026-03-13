@@ -1,0 +1,9 @@
+{
+  "name": "threads-watch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Threads channel data collector",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

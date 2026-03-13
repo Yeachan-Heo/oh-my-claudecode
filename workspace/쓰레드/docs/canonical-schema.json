@@ -1,0 +1,338 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://threads-watch/schemas/canonical-post/v1.0",
+  "title": "Threads Canonical Post Schema",
+  "description": "plan2.md P0-5: threads-watch CLI 출력 -> 리서처 입력을 연결하는 표준 스키마. 기존 collect-posts.js thread_unit 구조와 호환되면서 plan2.md 요구 필드를 추가.",
+  "version": "1.0",
+  "type": "object",
+  "required": ["post_id", "timestamp", "text", "channel_id"],
+  "properties": {
+    "post_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "minLength": 1,
+      "description": "포스트 고유 ID (Threads URL의 post slug). 비공, 영문숫자+_- 만 허용."
+    },
+    "channel_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.]+$",
+      "description": "채널 고유 ID (Threads URL slug). 비공."
+    },
+    "author": {
+      "type": "string",
+      "description": "작성자 표시명. channel_id와 다를 수 있음 (표시명 vs URL slug)."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "포스트 본문 전체 텍스트. 비공, 길이 > 0. 기존 hook_text에 대응."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "포스트 작성 시각. ISO 8601 형식 필수 (예: 2026-03-07T02:54:06.000Z). 기존 hook_date에 대응."
+    },
+    "permalink": {
+      "type": "string",
+      "format": "uri",
+      "description": "포스트 영구 URL. 기존 hook_post_url에 대응."
+    },
+    "metrics": {
+      "type": "object",
+      "description": "포스트 수치 지표",
+      "properties": {
+        "view_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "조회수. 정수 >= 0 또는 null (정당하게 숨겨진 경우만). -1 금지. 기존 hook_view_count에 대응."
+        },
+        "like_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "좋아요 수. 기존 hook_like_count에 대응."
+        },
+        "reply_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "답글 수. 기존 hook_reply_count에 대응."
+        },
+        "repost_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "리포스트 수. 기존 hook_repost_count에 대응."
+        }
+      },
+      "additionalProperties": false
+    },
+    "media": {
+      "type": "object",
+      "description": "미디어 정보",
+      "properties": {
+        "has_image": {
+          "type": "boolean",
+          "default": false,
+          "description": "이미지/영상 포함 여부. 기존 hook_has_image에 대응."
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxItems": 10,
+          "description": "이미지/영상 URL 배열. 기존 hook_media_urls에 대응."
+        }
+      },
+      "additionalProperties": false
+    },
+    "comments": {
+      "type": "array",
+      "description": "셀프답글/댓글 배열. plan2.md P0-5 신규 필드.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "comment_id": {
+            "type": "string",
+            "description": "답글 post ID. 기존 reply_post_id에 대응."
+          },
+          "author": {
+            "type": "string",
+            "description": "답글 작성자"
+          },
+          "text": {
+            "type": "string",
+            "description": "답글 텍스트. 기존 reply_text에 대응."
+          },
+          "has_affiliate_link": {
+            "type": "boolean",
+            "default": false,
+            "description": "제휴링크 포함 여부"
+          },
+          "link_url": {
+            "type": ["string", "null"],
+            "description": "제휴링크 URL. 기존 link_url에 대응."
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "view_count": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "like_count": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              }
+            },
+            "additionalProperties": false,
+            "description": "답글의 조회수/좋아요. 기존 reply_view_count, reply_like_count에 대응."
+          },
+          "media_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "description": "답글 미디어 URL. 기존 reply_media_urls에 대응."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tags": {
+      "type": "object",
+      "description": "taxonomy.json 기반 태그 분류 결과. P0-2 연동.",
+      "properties": {
+        "primary": {
+          "type": "string",
+          "enum": ["affiliate", "purchase_signal", "review", "complaint", "interest", "general"],
+          "description": "가장 높은 precedence(낮은 숫자) 태그. taxonomy.json rules.primary 참조."
+        },
+        "secondary": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["affiliate", "purchase_signal", "review", "complaint", "interest", "general"]
+          },
+          "description": "나머지 해당 태그. taxonomy.json rules.secondary 참조."
+        }
+      },
+      "required": ["primary", "secondary"],
+      "additionalProperties": false
+    },
+    "thread_type": {
+      "type": "string",
+      "enum": ["쓰레드형", "단독형", "비광고"],
+      "description": "쓰레드 유형. 기존 thread_type 필드 그대로."
+    },
+    "conversion_rate": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "답글조회수 / 본문조회수 * 100 (%). 쓰레드형만. 기존 conversion_rate에 대응."
+    },
+    "link": {
+      "type": "object",
+      "description": "제휴링크 정보",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "제휴링크 URL. 기존 link_url에 대응."
+        },
+        "domain": {
+          "type": "string",
+          "description": "링크 도메인. 기존 link_domain에 대응."
+        },
+        "location": {
+          "type": "string",
+          "enum": ["본문", "답글", "both", "없음"],
+          "description": "링크 위치. 기존 link_location에 대응."
+        }
+      },
+      "additionalProperties": false
+    },
+    "channel_meta": {
+      "type": "object",
+      "description": "채널 메타데이터",
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "follower_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "category": {
+          "type": "string",
+          "description": "채널 카테고리 (패션/뷰티/생활/식품/전자기기/육아/반려동물/운동건강/기타). SKILL.md Step 5 기존 분류 체계."
+        }
+      },
+      "additionalProperties": false
+    },
+    "crawl_meta": {
+      "type": "object",
+      "description": "수집 메타데이터. plan2.md P0-5 + P0-5a 신규 필드.",
+      "required": ["crawl_at"],
+      "properties": {
+        "crawl_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "수집 시각 (ISO 8601)"
+        },
+        "run_id": {
+          "type": "string",
+          "description": "수집 실행 ID"
+        },
+        "selector_tier": {
+          "type": "string",
+          "enum": ["data-testid", "aria-label", "css-nth-child", "fallback"],
+          "description": "이 포스트 추출에 사용된 셀렉터 tier. P0-5a 셀렉터 매니페스트."
+        },
+        "login_status": {
+          "type": "boolean",
+          "description": "수집 시 로그인 상태"
+        },
+        "block_detected": {
+          "type": "boolean",
+          "default": false,
+          "description": "차단 감지 여부"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+
+  "definitions": {
+    "validation_rules": {
+      "description": "P0-5 필드 유효성 검증 규칙 요약 (코드 구현 시 참조)",
+      "rules": [
+        {
+          "field": "post_id",
+          "rule": "비공 + 정규식 ^[A-Za-z0-9_-]+$",
+          "on_fail": "레코드 reject -> data/quarantine/"
+        },
+        {
+          "field": "timestamp",
+          "rule": "ISO 8601 파싱 가능 (Date.parse() 또는 datetime.fromisoformat())",
+          "on_fail": "레코드 reject -> data/quarantine/"
+        },
+        {
+          "field": "text",
+          "rule": "비공 + 길이 > 0",
+          "on_fail": "레코드 reject -> data/quarantine/"
+        },
+        {
+          "field": "channel_id",
+          "rule": "비공",
+          "on_fail": "레코드 reject -> data/quarantine/"
+        },
+        {
+          "field": "metrics.view_count",
+          "rule": "정수 >= 0 또는 null. -1 금지.",
+          "on_fail": "경고 로그. null로 치환하되 레코드 유지."
+        },
+        {
+          "field": "metrics.like_count",
+          "rule": "정수 >= 0",
+          "on_fail": "0으로 치환"
+        },
+        {
+          "field": "metrics.reply_count",
+          "rule": "정수 >= 0",
+          "on_fail": "0으로 치환"
+        },
+        {
+          "field": "metrics.repost_count",
+          "rule": "정수 >= 0",
+          "on_fail": "0으로 치환"
+        },
+        {
+          "field": "tags.primary",
+          "rule": "taxonomy.json의 tags 키 중 하나",
+          "on_fail": "general로 기본값"
+        }
+      ],
+      "validity_rate": {
+        "formula": "유효 레코드 / 전체 레코드",
+        "threshold": 0.9,
+        "on_below": "수집 중단 + 셀렉터 점검"
+      },
+      "quarantine": {
+        "path": "data/quarantine/{date}_{post_id}.json",
+        "description": "reject된 레코드를 원본 그대로 저장 + 실패 사유 기록"
+      }
+    },
+    "compatibility_mapping": {
+      "description": "기존 collect-posts.js thread_unit 필드 -> canonical schema 매핑",
+      "mappings": [
+        { "old": "hook_post_id", "new": "post_id" },
+        { "old": "hook_date", "new": "timestamp" },
+        { "old": "hook_text", "new": "text" },
+        { "old": "hook_post_url", "new": "permalink" },
+        { "old": "channel_id", "new": "channel_id" },
+        { "old": "hook_view_count", "new": "metrics.view_count" },
+        { "old": "hook_like_count", "new": "metrics.like_count" },
+        { "old": "hook_reply_count", "new": "metrics.reply_count" },
+        { "old": "hook_repost_count", "new": "metrics.repost_count" },
+        { "old": "hook_has_image", "new": "media.has_image" },
+        { "old": "hook_media_urls", "new": "media.urls" },
+        { "old": "reply_post_id", "new": "comments[0].comment_id" },
+        { "old": "reply_text", "new": "comments[0].text" },
+        { "old": "reply_view_count", "new": "comments[0].metrics.view_count" },
+        { "old": "reply_like_count", "new": "comments[0].metrics.like_count" },
+        { "old": "reply_media_urls", "new": "comments[0].media_urls" },
+        { "old": "link_url", "new": "link.url" },
+        { "old": "link_domain", "new": "link.domain" },
+        { "old": "link_location", "new": "link.location" },
+        { "old": "thread_type", "new": "thread_type" },
+        { "old": "conversion_rate", "new": "conversion_rate" },
+        { "old": "display_name", "new": "channel_meta.display_name" },
+        { "old": "follower_count", "new": "channel_meta.follower_count" },
+        { "old": "category", "new": "channel_meta.category" }
+      ]
+    }
+  }
+}
