@@ -44,8 +44,13 @@ function isComparableVersion(version) {
     return !!version && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version);
 }
 function compareVersions(a, b) {
-    const partsA = a.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
-    const partsB = b.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
+    const cleanA = a.replace(/^v/, '');
+    const cleanB = b.replace(/^v/, '');
+    // Split version from pre-release suffix
+    const [versionA, preA] = cleanA.split('-', 2);
+    const [versionB, preB] = cleanB.split('-', 2);
+    const partsA = versionA.split('.').map(part => parseInt(part, 10) || 0);
+    const partsB = versionB.split('.').map(part => parseInt(part, 10) || 0);
     const maxLength = Math.max(partsA.length, partsB.length);
     for (let i = 0; i < maxLength; i++) {
         const valueA = partsA[i] || 0;
@@ -55,6 +60,11 @@ function compareVersions(a, b) {
         if (valueA > valueB)
             return 1;
     }
+    // Same version numbers: pre-release < release (4.8.0-beta < 4.8.0)
+    if (preA && !preB)
+        return -1;
+    if (!preA && preB)
+        return 1;
     return 0;
 }
 function extractOmcVersionMarker(content) {
@@ -371,8 +381,7 @@ function loadAgentDefinitions() {
     const agentsDir = join(getPackageDir(), 'agents');
     const definitions = {};
     if (!existsSync(agentsDir)) {
-        console.error(`FATAL: agents directory not found: ${agentsDir}`);
-        process.exit(1);
+        throw new Error(`Agents directory not found: ${agentsDir}`);
     }
     for (const file of readdirSync(agentsDir)) {
         if (file.endsWith('.md')) {

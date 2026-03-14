@@ -72,7 +72,15 @@ export interface StaleBridgeCleanupResult {
 function getBridgeScriptPath(): string {
   // Check for OMC_BRIDGE_SCRIPT environment variable first (set by MCP server context)
   if (process.env.OMC_BRIDGE_SCRIPT) {
-    return process.env.OMC_BRIDGE_SCRIPT;
+    const override = path.resolve(process.env.OMC_BRIDGE_SCRIPT);
+    const overrideBasename = path.basename(override);
+    if (overrideBasename !== 'gyoshu_bridge.py') {
+      throw new Error(`OMC_BRIDGE_SCRIPT must point to gyoshu_bridge.py, got: ${overrideBasename}`);
+    }
+    if (!fs.existsSync(override)) {
+      throw new Error(`OMC_BRIDGE_SCRIPT file not found: ${override}`);
+    }
+    return override;
   }
 
   let moduleDir: string;
@@ -141,6 +149,7 @@ async function ensurePythonEnvironment(projectRoot: string): Promise<PythonEnvIn
   // Fallback: try system python3
   try {
     await execFileAsync('python3', ['--version']);
+    // type is 'venv' because PythonEnvInfo only supports 'venv'; this is a system fallback
     return { pythonPath: 'python3', type: 'venv' };
   } catch {
     // python3 not available
@@ -716,6 +725,9 @@ export async function cleanupStaleBridges(): Promise<StaleBridgeCleanupResult> {
     }
 
     const sessionDir = path.join(runtimeDir, entry.name);
+    // Paths are constructed directly here instead of using getBridgeMetaPath/etc
+    // because entry.name is the short hash from the directory listing, not the
+    // original sessionId that the path helpers expect.
     const metaPath = path.join(sessionDir, 'bridge_meta.json');
     const socketPath = path.join(sessionDir, 'bridge.sock');
     const portPath = path.join(sessionDir, 'bridge.port');

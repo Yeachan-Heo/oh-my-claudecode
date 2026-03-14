@@ -43,7 +43,13 @@ vi.mock('child_process', async (importOriginal) => {
   const parseTmuxShellCmd = (cmd: string): string[] | null => {
     const match = cmd.match(/^tmux\s+(.+)$/);
     if (!match) return null;
-    return match[1].match(/"([^"]*)"/g)?.map((s) => s.slice(1, -1)) ?? [];
+    // Support both single-quoted (H1 fix) and double-quoted args
+    const args = match[1].match(/'([^']*(?:\\.[^']*)*)'|"([^"]*)"/g);
+    if (!args) return null;
+    return args.map((s) => {
+      if (s.startsWith("'")) return s.slice(1, -1).replace(/'\\''/g, "'");
+      return s.slice(1, -1);
+    });
   };
 
   const execFileMock = vi.fn((_cmd: string, args: string[], cb: ExecFileCallback) => {

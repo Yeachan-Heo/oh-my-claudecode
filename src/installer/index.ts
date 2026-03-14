@@ -54,8 +54,15 @@ function isComparableVersion(version: string | null | undefined): version is str
 }
 
 function compareVersions(a: string, b: string): number {
-  const partsA = a.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
-  const partsB = b.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
+  const cleanA = a.replace(/^v/, '');
+  const cleanB = b.replace(/^v/, '');
+
+  // Split version from pre-release suffix
+  const [versionA, preA] = cleanA.split('-', 2);
+  const [versionB, preB] = cleanB.split('-', 2);
+
+  const partsA = versionA.split('.').map(part => parseInt(part, 10) || 0);
+  const partsB = versionB.split('.').map(part => parseInt(part, 10) || 0);
   const maxLength = Math.max(partsA.length, partsB.length);
 
   for (let i = 0; i < maxLength; i++) {
@@ -64,6 +71,10 @@ function compareVersions(a: string, b: string): number {
     if (valueA < valueB) return -1;
     if (valueA > valueB) return 1;
   }
+
+  // Same version numbers: pre-release < release (4.8.0-beta < 4.8.0)
+  if (preA && !preB) return -1;
+  if (!preA && preB) return 1;
 
   return 0;
 }
@@ -441,8 +452,7 @@ function loadAgentDefinitions(): Record<string, string> {
   const definitions: Record<string, string> = {};
 
   if (!existsSync(agentsDir)) {
-    console.error(`FATAL: agents directory not found: ${agentsDir}`);
-    process.exit(1);
+    throw new Error(`Agents directory not found: ${agentsDir}`);
   }
 
   for (const file of readdirSync(agentsDir)) {

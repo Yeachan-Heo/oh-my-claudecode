@@ -36,7 +36,9 @@ export function isUnixLikeOnWindows(): boolean {
  */
 async function tmuxAsync(args: string[]): Promise<{ stdout: string; stderr: string }> {
   if (args.some(a => a.includes('#{'))) {
-    const escaped = args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+    // MSYS2/Git Bash strips curly braces from execFile arguments.
+    // Use shell execution with proper single-quote escaping.
+    const escaped = args.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
     return promisifiedExec(`tmux ${escaped}`);
   }
   return promisifiedExecFile('tmux', args);
@@ -66,11 +68,21 @@ export interface WorkerPaneConfig {
   cwd: string;
 }
 
+/** Shells known to support the `-lc 'exec "$@"'` invocation pattern. */
+const SUPPORTED_POSIX_SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'ksh']);
+
 export function getDefaultShell(): string {
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     return process.env.COMSPEC || 'cmd.exe';
   }
-  return process.env.SHELL || '/bin/bash';
+  const shell = process.env.SHELL || '/bin/bash';
+  // Validate that the shell supports our launch script syntax.
+  // Unsupported shells (tcsh, csh, etc.) fall back to /bin/sh.
+  const name = basename(shell.replace(/\\/g, '/')).replace(/\.(exe|cmd|bat)$/i, '');
+  if (!SUPPORTED_POSIX_SHELLS.has(name)) {
+    return '/bin/sh';
+  }
+  return shell;
 }
 
 function escapeForCmdSet(value: string): string {
@@ -118,13 +130,10 @@ function getLaunchWords(config: WorkerPaneConfig): string[] {
     return [config.launchBinary, ...(config.launchArgs ?? [])];
   }
   if (config.launchCmd) {
-    if (config.launchCmd.trim().length === 0) {
-      throw new Error('Invalid launchCmd: value cannot be empty');
-    }
-    if (/[;&|`$()<>\n\r\t\0"\\]/.test(config.launchCmd)) {
-      throw new Error('Invalid launchCmd: contains dangerous shell metacharacters');
-    }
-    return [config.launchCmd];
+    throw new Error(
+      'launchCmd is deprecated and has been removed for security reasons. ' +
+      'Use launchBinary + launchArgs instead.'
+    );
   }
   throw new Error('Missing worker launch command. Provide launchBinary or launchCmd.');
 }
@@ -192,31 +201,8 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
     ].join(' ');
   }
 
-  const envString = Object.entries(config.envVars)
-    .map(([k, v]) => {
-      assertSafeEnvKey(k);
-      return `${k}=${shellEscape(v)}`;
-    })
-    .join(' ');
-
-  const shellName = shellNameFromPath(shell) || 'bash';
-  const isFish = shellName === 'fish';
-
-  let rcFile = '';
-  if (process.env.HOME) {
-    rcFile = isFish
-      ? `${process.env.HOME}/.config/fish/config.fish`
-      : `${process.env.HOME}/.${shellName}rc`;
-  }
-
-  let sourceCmd = '';
-  if (shouldSourceRc && rcFile) {
-    sourceCmd = isFish
-      ? `test -f "${rcFile}"; and source "${rcFile}"; `
-      : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
-  }
-
-  return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
+  // launchCmd path removed — launchBinary is now required
+  throw new Error('Missing launchBinary in worker config. launchCmd has been removed.');
 }
 
 /** Validate tmux is available. Throws with install instructions if not. */
@@ -298,10 +284,11 @@ export function isSessionAlive(teamName: string, workerName: string): boolean {
 export function listActiveSessions(teamName: string): string[] {
   const prefix = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-`;
   try {
-    // Use shell execution to prevent MSYS2 from stripping #{} in format strings
-    const fmtArgs = ['list-sessions', '-F', '#{session_name}'];
-    const shellCmd = 'tmux ' + fmtArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
-    const output = execSync(shellCmd, {
+    // Use shell execution for format strings containing #{} to prevent
+    // MSYS2/Git Bash from stripping curly braces in execFileSync args.
+    // All arguments here are hardcoded constants, not user input.
+    // eslint-disable-next-line security/detect-child-process -- safe: no user input
+    const output = execSync("tmux list-sessions -F '#{session_name}'", {
       encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
     }) as string;
     return output.trim().split('\n')
@@ -328,9 +315,6 @@ export function spawnBridgeInSession(
   execFileSync('tmux', ['send-keys', '-t', tmuxSession, cmd, 'Enter'], { stdio: 'pipe', timeout: 5000 });
 }
 
-function buildTeamWindowName(teamName: string): string {
-  return (`omc-${sanitizeName(teamName)}`).slice(0, 32) || 'omc-team';
-}
 
 /**
  * Create a tmux team topology for a team leader/worker layout.
@@ -615,7 +599,6 @@ function paneTailContainsLiteralLine(captured: string, text: string): boolean {
 
 async function paneInCopyMode(
   paneId: string,
-  execFileAsync: (cmd: string, args: string[]) => Promise<{ stdout: string }>
 ): Promise<boolean> {
   try {
     const result = await tmuxAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
@@ -656,8 +639,8 @@ export async function sendToWorker(
   message: string
 ): Promise<boolean> {
   if (message.length > 200) {
-    console.warn(`[tmux-session] sendToWorker: message truncated to 200 chars`);
-    message = message.slice(0, 200);
+    console.warn(`[tmux-session] sendToWorker: message rejected (${message.length} chars exceeds 200 char limit)`);
+    return false;
   }
   try {
     const { execFile } = await import('child_process');
@@ -670,7 +653,7 @@ export async function sendToWorker(
     };
 
     // Guard: copy-mode captures keys; skip injection entirely.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
@@ -715,13 +698,13 @@ export async function sendToWorker(
     }
 
     // Safety gate: copy-mode can turn on while we retry; never send fallback control keys when active.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
     // Adaptive fallback: for busy panes, retry once without interrupting active turns.
     const finalCapture = await capturePaneAsync(paneId, execFileAsync as never);
-    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId, execFileAsync as never);
+    const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId);
     if (shouldAttemptAdaptiveRetry({
       paneBusy,
       latestCapture: finalCapture,
@@ -729,12 +712,12 @@ export async function sendToWorker(
       paneInCopyMode: paneModeBeforeAdaptiveRetry,
       retriesAttempted: 0,
     })) {
-      if (await paneInCopyMode(paneId, execFileAsync as never)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await sendKey('C-u');
       await sleep(80);
-      if (await paneInCopyMode(paneId, execFileAsync as never)) {
+      if (await paneInCopyMode(paneId)) {
         return false;
       }
       await execFileAsync('tmux', ['send-keys', '-t', paneId, '-l', '--', message]);
@@ -751,7 +734,7 @@ export async function sendToWorker(
     }
 
     // Before fallback control keys, re-check copy-mode to avoid mutating scrollback UI state.
-    if (await paneInCopyMode(paneId, execFileAsync as never)) {
+    if (await paneInCopyMode(paneId)) {
       return false;
     }
 
@@ -786,7 +769,7 @@ export async function injectToLeaderPane(
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
-    if (await paneInCopyMode(leaderPaneId, execFileAsync as never)) {
+    if (await paneInCopyMode(leaderPaneId)) {
       return false;
     }
     const captured = await capturePaneAsync(leaderPaneId, execFileAsync as never);
@@ -805,9 +788,6 @@ export async function injectToLeaderPane(
  */
 export async function isWorkerAlive(paneId: string): Promise<boolean> {
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
     const result = await tmuxAsync([
       'display-message', '-t', paneId, '-p', '#{pane_dead}'
     ]);

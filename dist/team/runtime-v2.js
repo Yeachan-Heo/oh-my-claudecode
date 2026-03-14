@@ -19,18 +19,20 @@ import { execFile } from 'child_process';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { promisify } from 'util';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnapshot, writeMonitorSnapshot, writeShutdownRequest, readShutdownAck, writeWorkerInbox, listTasksFromFiles, saveTeamConfig, cleanupTeamState, } from './monitor.js';
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
 import { inferPhase } from './phase-controller.js';
-import { validateTeamName } from './team-name.js';
+import { validateTeamName, sanitizeTeamName } from './team-name.js';
 import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, } from './model-contract.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForPaneReady, paneHasActiveTask, paneLooksReady, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
+import { withTaskLock } from './task-file-ops.js';
 // ---------------------------------------------------------------------------
 // Feature flag
 // ---------------------------------------------------------------------------
@@ -42,12 +44,6 @@ export function isRuntimeV2Enabled(env = process.env) {
     return !['0', 'false', 'no', 'off'].includes(normalized);
 }
 const MONITOR_SIGNAL_STALE_MS = 30_000;
-// ---------------------------------------------------------------------------
-// Helper: sanitize team name
-// ---------------------------------------------------------------------------
-function sanitizeTeamName(name) {
-    return name.replace(/[^a-z0-9-]/g, '').slice(0, 30);
-}
 // ---------------------------------------------------------------------------
 // Helper: check worker liveness via tmux pane
 // ---------------------------------------------------------------------------
@@ -184,8 +180,6 @@ async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd, a
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
 async function spawnV2Worker(opts) {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
     // Split new pane off the last existing pane (or leader if first worker)
     const splitTarget = opts.existingWorkerPaneIds.length === 0
@@ -466,7 +460,7 @@ export async function startTeamV2(config) {
     };
     await writeFile(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), 'utf-8');
     // Spawn workers for initial tasks (up to workerCount concurrent)
-    const maxConcurrent = Math.min(agentTypes.length, config.tasks.length);
+    const maxConcurrent = Math.min(config.workerCount ?? agentTypes.length, agentTypes.length, config.tasks.length);
     for (let i = 0; i < maxConcurrent; i++) {
         const wName = workerNames[i];
         const taskId = String(i + 1);
@@ -525,7 +519,6 @@ export async function startTeamV2(config) {
 // ---------------------------------------------------------------------------
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 export async function writeWatchdogFailedMarker(teamName, cwd, reason) {
-    const { writeFile } = await import('fs/promises');
     const marker = {
         failedAt: Date.now(),
         reason,
@@ -594,18 +587,22 @@ export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
             retryCount: 0,
             lastFailedAt: new Date().toISOString(),
         };
-        const { writeFile } = await import('fs/promises');
         await mkdir(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
         await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2), 'utf-8');
-        // Reset task to pending (clear owner and claim)
+        // Reset task to pending (clear owner and claim) under a task lock
         const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
         try {
-            const raw = await import('fs/promises').then(fs => fs.readFile(taskPath, 'utf-8'));
-            const taskData = JSON.parse(raw);
-            taskData.status = 'pending';
-            taskData.owner = undefined;
-            taskData.claim = undefined;
-            await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+            await withTaskLock(sanitized, task.id, async () => {
+                const raw = await readFile(taskPath, 'utf-8');
+                const taskData = JSON.parse(raw);
+                // Only requeue if still in_progress (guard against concurrent completion)
+                if (taskData.status === 'in_progress' && taskData.owner === task.owner) {
+                    taskData.status = 'pending';
+                    taskData.owner = undefined;
+                    taskData.claim = undefined;
+                    await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+                }
+            }, { cwd });
             requeued.push(task.id);
         }
         catch {
@@ -948,8 +945,6 @@ export async function resumeTeamV2(teamName, cwd) {
         return null;
     // Verify tmux session is alive
     try {
-        const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
         const execFileAsync = promisify(execFile);
         const sessionName = config.tmux_session || `omc-team-${sanitized}`;
         await execFileAsync('tmux', ['has-session', '-t', sessionName.split(':')[0]]);

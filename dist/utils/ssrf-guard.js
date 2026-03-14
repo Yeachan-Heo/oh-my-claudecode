@@ -63,6 +63,20 @@ export function validateUrlForSSRF(urlString) {
             reason: `Hostname '${hostname}' looks like a hex-encoded IP address`,
         };
     }
+    // Block pure decimal IP notation (e.g., 2130706433 = 127.0.0.1)
+    if (/^\d+$/.test(hostname) && hostname.length > 3) {
+        return {
+            allowed: false,
+            reason: `Hostname '${hostname}' looks like a decimal-encoded IP address`,
+        };
+    }
+    // Block octal IP notation (segments starting with 0, e.g., 0177.0.0.1 = 127.0.0.1)
+    if (/^0\d+\./.test(hostname)) {
+        return {
+            allowed: false,
+            reason: `Hostname '${hostname}' looks like an octal-encoded IP address`,
+        };
+    }
     // Block URLs with credentials (user:pass@host)
     if (parsed.username || parsed.password) {
         return { allowed: false, reason: 'URLs with embedded credentials are not allowed' };

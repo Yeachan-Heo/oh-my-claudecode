@@ -271,7 +271,7 @@ async function applyDeadPaneTransition(
       return { action: 'skipped' } as DeadPaneTransition;
     }
 
-    const failure = await writeTaskFailure(
+    const failure = writeTaskFailure(
       runtime.teamName,
       taskId,
       `Worker pane died before done.json was written (${workerNameValue})`,
@@ -406,10 +406,10 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
     });
   }
 
-  // Set up worker state dirs and overlays for all potential workers up front
-  // (overlays are cheap; workers are spawned on-demand later)
+  // Set up worker state dirs and overlays for all potential workers up front.
+  // Workers are generic executors — count matches agentTypes.length, not tasks.length.
   const workerNames: string[] = [];
-  for (let i = 0; i < tasks.length; i++) {
+  for (let i = 0; i < agentTypes.length; i++) {
     const wName = workerName(i);
     workerNames.push(wName);
     const agentType = agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude';
@@ -669,7 +669,11 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
     }
   };
 
-  const intervalId = setInterval(() => { tick(); }, intervalMs);
+  const intervalId = setInterval(() => {
+    tick().catch(err => {
+      console.error('[watchdog] Unhandled error in tick:', err);
+    });
+  }, intervalMs);
 
   return () => clearInterval(intervalId);
 }
@@ -716,7 +720,6 @@ export async function spawnWorkerForTask(
   // for interactive agents it is sent via tmux send-keys after startup.
   const instruction = buildInitialTaskInstruction(runtime.teamName, workerNameValue, task, taskId);
   await composeInitialInbox(runtime.teamName, workerNameValue, instruction, runtime.cwd);
-  const relInboxPath = `.omc/state/team/${runtime.teamName}/workers/${workerNameValue}/inbox.md`;
 
   const envVars = getModelWorkerEnv(runtime.teamName, workerNameValue, agentType);
   const resolvedBinaryPath = runtime.resolvedBinaryPaths?.[agentType] ?? resolveValidatedBinaryPath(agentType);

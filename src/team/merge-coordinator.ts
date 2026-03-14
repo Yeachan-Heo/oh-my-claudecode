@@ -41,31 +41,62 @@ export function checkMergeConflicts(
   validateBranchName(workerBranch);
   validateBranchName(baseBranch);
 
-  // Find merge base
-  const mergeBase = execFileSync(
-    'git', ['merge-base', baseBranch, workerBranch],
-    { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
+  // Attempt a trial merge using --no-commit --no-ff to detect real conflicts.
+  // This is safer than the deprecated 3-arg merge-tree which cannot detect
+  // content-level conflicts reliably.
+  try {
+    // Save current HEAD to restore after trial merge
+    const origHead = execFileSync(
+      'git', ['rev-parse', 'HEAD'],
+      { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
 
-  // Check for overlapping changes by comparing what changed in each branch
-  const baseDiff = execFileSync(
-    'git', ['diff', '--name-only', mergeBase, baseBranch],
-    { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
-  const workerDiff = execFileSync(
-    'git', ['diff', '--name-only', mergeBase, workerBranch],
-    { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
+    // Ensure we're on the base branch
+    execFileSync(
+      'git', ['checkout', baseBranch],
+      { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
 
-  if (!baseDiff || !workerDiff) {
-    return []; // No changes in one or both branches
+    try {
+      // Attempt a trial merge (no commit)
+      execFileSync(
+        'git', ['merge', '--no-commit', '--no-ff', workerBranch],
+        { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      // Merge succeeded cleanly — abort to undo
+      try {
+        execFileSync('git', ['merge', '--abort'], { cwd: repoRoot, stdio: 'pipe' });
+      } catch {
+        // --abort may fail if merge already completed; reset instead
+        execFileSync('git', ['reset', '--hard', origHead], { cwd: repoRoot, stdio: 'pipe' });
+      }
+      return [];
+    } catch (mergeError: unknown) {
+      // Merge failed — extract conflicting file names
+      const conflictFiles: string[] = [];
+      try {
+        const statusOutput = execFileSync(
+          'git', ['diff', '--name-only', '--diff-filter=U'],
+          { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        for (const line of statusOutput.trim().split('\n')) {
+          if (line.trim()) conflictFiles.push(line.trim());
+        }
+      } catch {
+        // Could not list conflicts
+      }
+      // Always abort the trial merge
+      try {
+        execFileSync('git', ['merge', '--abort'], { cwd: repoRoot, stdio: 'pipe' });
+      } catch {
+        execFileSync('git', ['reset', '--hard', origHead], { cwd: repoRoot, stdio: 'pipe' });
+      }
+      return conflictFiles.length > 0 ? conflictFiles : ['(conflict detected)'];
+    }
+  } catch {
+    // git operations failed — cannot determine conflicts
+    return [];
   }
-
-  const baseFiles = new Set(baseDiff.split('\n').filter(f => f));
-  const workerFiles = workerDiff.split('\n').filter(f => f);
-
-  // Files changed in both branches are potential conflicts
-  return workerFiles.filter(f => baseFiles.has(f));
 }
 
 /**

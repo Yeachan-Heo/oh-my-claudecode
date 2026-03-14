@@ -85,6 +85,7 @@ export interface CodeAction {
  * LSP Client class
  */
 export declare class LspClient {
+    private static readonly MAX_BUFFER_SIZE;
     private process;
     private requestId;
     private pendingRequests;

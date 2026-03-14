@@ -23,18 +23,47 @@ function validateBranchName(branch) {
 export function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
     validateBranchName(workerBranch);
     validateBranchName(baseBranch);
-    // Find merge base
-    const mergeBase = execFileSync('git', ['merge-base', baseBranch, workerBranch], { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    // Check for overlapping changes by comparing what changed in each branch
-    const baseDiff = execFileSync('git', ['diff', '--name-only', mergeBase, baseBranch], { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    const workerDiff = execFileSync('git', ['diff', '--name-only', mergeBase, workerBranch], { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    if (!baseDiff || !workerDiff) {
-        return []; // No changes in one or both branches
+    // Use git merge-tree to detect actual content conflicts (not just overlapping files)
+    try {
+        const mergeBase = execFileSync('git', ['merge-base', baseBranch, workerBranch], { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        const result = execFileSync('git', ['merge-tree', mergeBase, baseBranch, workerBranch], { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        // Parse merge-tree output: conflicts are indicated by lines starting with "<<"
+        const conflictFiles = [];
+        const lines = result.split('\n');
+        for (const line of lines) {
+            // merge-tree outputs conflict markers; look for "+<< " or changed/added entries with mode conflicts
+            const match = line.match(/^<<.*$/);
+            if (match) {
+                // Extract filename from surrounding context — look for "our" / "their" file lines
+                continue;
+            }
+            // Conflict sections contain lines like: "  our    100644 <hash> <path>"
+            // A simpler approach: if merge-tree output contains "<<<<<<", there are conflicts
+        }
+        // If merge-tree output contains conflict markers, extract file paths
+        // The 3-way merge-tree outputs the merged content with conflict markers inline
+        if (result.includes('<<<<<<<')) {
+            // Extract file paths from the merge-tree "changed in both" sections
+            const fileMatches = result.match(/^@@.*@@\s*(.+)$/gm);
+            if (fileMatches) {
+                for (const m of fileMatches) {
+                    const path = m.replace(/^@@.*@@\s*/, '').trim();
+                    if (path)
+                        conflictFiles.push(path);
+                }
+            }
+            // If we detected conflict markers but couldn't parse filenames, report generic conflict
+            if (conflictFiles.length === 0) {
+                return ['<unable to determine specific files>'];
+            }
+            return conflictFiles;
+        }
+        return []; // No conflict markers = clean merge
     }
-    const baseFiles = new Set(baseDiff.split('\n').filter(f => f));
-    const workerFiles = workerDiff.split('\n').filter(f => f);
-    // Files changed in both branches are potential conflicts
-    return workerFiles.filter(f => baseFiles.has(f));
+    catch {
+        // If merge-tree fails, fall back to the actual merge check via mergeWorkerBranch
+        return [];
+    }
 }
 /**
  * Merge a worker's branch back to the base branch.

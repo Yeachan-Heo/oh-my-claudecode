@@ -167,7 +167,6 @@ export async function scaleUp(
         envVars: extraEnv,
         launchArgs: [],
         launchBinary: 'claude',
-        launchCmd: '',
         cwd: leaderCwd,
       });
 
@@ -217,6 +216,11 @@ export async function scaleUp(
         team_state_root: teamStateRoot,
       };
 
+      // Track immediately after pane creation so rollback can clean up
+      // if any subsequent operation throws.
+      addedWorkers.push(workerInfo);
+      config.workers.push(workerInfo);
+
       await teamWriteWorkerIdentity(sanitized, workerName, workerInfo, leaderCwd);
 
       // Wait for worker readiness
@@ -229,9 +233,6 @@ export async function scaleUp(
           // Non-fatal: worker may still become ready
         }
       }
-
-      addedWorkers.push(workerInfo);
-      config.workers.push(workerInfo);
       config.worker_count = config.workers.length;
       config.next_worker_index = nextIndex;
       await saveTeamConfig(config, leaderCwd);

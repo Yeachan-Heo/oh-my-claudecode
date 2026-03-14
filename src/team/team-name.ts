@@ -8,3 +8,8 @@ export function validateTeamName(teamName: string): string {
   }
   return teamName;
 }
+
+/** Sanitize a team name to only lowercase alphanumeric + hyphens, max 30 chars. */
+export function sanitizeTeamName(name: string): string {
+  return name.replace(/[^a-z0-9-]/g, '').slice(0, 30);
+}

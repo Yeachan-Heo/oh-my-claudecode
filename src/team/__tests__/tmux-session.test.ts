@@ -89,93 +89,30 @@ describe('getDefaultShell', () => {
 });
 
 describe('buildWorkerStartCommand', () => {
-  it('builds a POSIX startup command with rc sourcing', () => {
+  it('throws when deprecated launchCmd is used (security: C2)', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('SHELL', '/bin/zsh');
     vi.stubEnv('HOME', '/home/tester');
 
-    const cmd = buildWorkerStartCommand({
+    expect(() => buildWorkerStartCommand({
       teamName: 't',
       workerName: 'w',
       envVars: { A: '1' },
       launchCmd: 'node app.js',
       cwd: '/tmp'
-    });
-
-    expect(cmd).toContain("env A='1' /bin/zsh -c");
-    expect(cmd).toContain('[ -f "/home/tester/.zshrc" ] && source "/home/tester/.zshrc";');
+    })).toThrow('launchCmd is deprecated');
   });
 
-  it('skips rc sourcing when OMC_TEAM_NO_RC=1', () => {
+  it('throws when neither launchBinary nor launchCmd is provided', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('SHELL', '/bin/zsh');
-    vi.stubEnv('HOME', '/home/tester');
-    vi.stubEnv('OMC_TEAM_NO_RC', '1');
 
-    const cmd = buildWorkerStartCommand({
-      teamName: 't',
-      workerName: 'w',
-      envVars: { A: '1' },
-      launchCmd: 'node app.js',
-      cwd: '/tmp'
-    });
-
-    expect(cmd).toContain("env A='1' /bin/zsh -c");
-    expect(cmd).not.toContain('source "/home/tester/.zshrc"');
-  });
-
-  it('builds a Windows startup command without POSIX constructs', () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
-
-    const cmd = buildWorkerStartCommand({
-      teamName: 't',
-      workerName: 'w',
-      envVars: { A: '1' },
-      launchCmd: 'node app.js',
-      cwd: 'C:\\repo'
-    });
-
-    expect(cmd).toContain('C:\\Windows\\System32\\cmd.exe /d /s /c');
-    expect(cmd).toContain(' /c "set "A=1" && node app.js"');
-    expect(cmd).not.toContain('env ');
-    expect(cmd).not.toContain('[ -f ');
-    expect(cmd).not.toContain('source ');
-  });
-
-  it('builds a POSIX command on win32 when MSYSTEM is set (MSYS2)', () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    vi.stubEnv('MSYSTEM', 'MINGW64');
-    vi.stubEnv('SHELL', '/usr/bin/bash');
-    vi.stubEnv('HOME', '/home/tester');
-
-    const cmd = buildWorkerStartCommand({
-      teamName: 't',
-      workerName: 'w',
-      envVars: { A: '1' },
-      launchCmd: 'node app.js',
-      cwd: '/c/repo'
-    });
-
-    expect(cmd).toContain("env A='1' /usr/bin/bash -c");
-    expect(cmd).not.toContain('cmd.exe');
-    expect(cmd).not.toContain('/d /s /c');
-  });
-
-  it('uses basename-style shell name extraction for windows-style shell path', () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    vi.stubEnv('SHELL', 'C:\\Program Files\\Git\\bin\\bash.exe');
-    vi.stubEnv('HOME', '/home/tester');
-
-    const cmd = buildWorkerStartCommand({
+    expect(() => buildWorkerStartCommand({
       teamName: 't',
       workerName: 'w',
       envVars: {},
-      launchCmd: 'node app.js',
       cwd: '/tmp'
-    });
-
-    expect(cmd).toContain('/home/tester/.bashrc');
+    })).toThrow('Missing worker launch command');
   });
 
   it('accepts absolute Windows launchBinary paths with spaces', () => {

@@ -3,7 +3,7 @@
  * Provides unified process management across Windows, macOS, and Linux.
  */
 
-import { execSync, execFile } from 'child_process';
+import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fsPromises from 'fs/promises';
 
@@ -34,7 +34,7 @@ async function killProcessTreeWindows(pid: number, force: boolean): Promise<bool
     if (force) {
       args.unshift('/F');
     }
-    execSync(`taskkill ${args.join(' ')}`, {
+    execFileSync('taskkill.exe', args, {
       stdio: 'ignore',
       timeout: 5000,
       windowsHide: true

@@ -87,7 +87,7 @@ function findOrphanProcesses(filterTeam) {
             const parts = line.trim().split(/\s+/);
             const pid = parseInt(parts[1], 10);
             if (pid && pid !== process.pid && pid !== process.ppid) {
-              orphans.push({ pid, team: procTeam, cmd: line.trim().substring(0, 200) });
+              orphans.push({ pid, team: procTeam, cmd: '(redacted)' });
             }
           }
         }

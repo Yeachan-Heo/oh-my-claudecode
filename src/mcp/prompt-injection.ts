@@ -47,7 +47,14 @@ export function validateContextFilePaths(
     if (!allowExternal) {
       // Traversal check: resolved absolute path must remain within baseDir
       const abs = resolve(baseDir, p);
-      if (!abs.startsWith(resolvedBase + '/') && abs !== resolvedBase) {
+      // Normalize case on case-insensitive platforms to prevent bypass
+      const normalizedAbs = process.platform === 'win32' || process.platform === 'darwin'
+        ? abs.toLowerCase()
+        : abs;
+      const normalizedBase = process.platform === 'win32' || process.platform === 'darwin'
+        ? resolvedBase.toLowerCase()
+        : resolvedBase;
+      if (!normalizedAbs.startsWith(normalizedBase + '/') && normalizedAbs !== normalizedBase) {
         errors.push(`E_CONTEXT_FILE_TRAVERSAL: Path escapes baseDir: ${p}`);
         continue;
       }

@@ -135,7 +135,7 @@ async function applyDeadPaneTransition(runtime, workerNameValue, taskId) {
         if (task.status !== 'in_progress' || task.owner !== workerNameValue) {
             return { action: 'skipped' };
         }
-        const failure = await writeTaskFailure(runtime.teamName, taskId, `Worker pane died before done.json was written (${workerNameValue})`, { cwd: runtime.cwd });
+        const failure = writeTaskFailure(runtime.teamName, taskId, `Worker pane died before done.json was written (${workerNameValue})`, { cwd: runtime.cwd });
         const retryCount = failure.retryCount;
         if (retryCount >= DEFAULT_MAX_TASK_RETRIES) {
             task.status = 'failed';
@@ -245,10 +245,10 @@ export async function startTeam(config) {
             createdAt: new Date().toISOString(),
         });
     }
-    // Set up worker state dirs and overlays for all potential workers up front
-    // (overlays are cheap; workers are spawned on-demand later)
+    // Set up worker state dirs and overlays for all potential workers up front.
+    // Workers are generic executors — count matches agentTypes.length, not tasks.length.
     const workerNames = [];
-    for (let i = 0; i < tasks.length; i++) {
+    for (let i = 0; i < agentTypes.length; i++) {
         const wName = workerName(i);
         workerNames.push(wName);
         const agentType = agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude';
@@ -502,7 +502,11 @@ export function watchdogCliWorkers(runtime, intervalMs) {
             tickInFlight = false;
         }
     };
-    const intervalId = setInterval(() => { tick(); }, intervalMs);
+    const intervalId = setInterval(() => {
+        tick().catch(err => {
+            console.error('[watchdog] Unhandled error in tick:', err);
+        });
+    }, intervalMs);
     return () => clearInterval(intervalId);
 }
 /**

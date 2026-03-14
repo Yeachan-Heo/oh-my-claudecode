@@ -269,11 +269,7 @@ function formatGeneralError(error, sessionId, action) {
     lines.push('');
     lines.push(`Type: ${error.name}`);
     lines.push(`Message: ${error.message}`);
-    if (error.stack) {
-        lines.push('');
-        lines.push('Stack trace:');
-        lines.push(error.stack);
-    }
+    // Stack traces intentionally omitted to avoid leaking internal paths
     return lines.join('\n');
 }
 // =============================================================================

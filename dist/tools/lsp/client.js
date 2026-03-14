@@ -27,6 +27,7 @@ function fileUri(filePath) {
  * LSP Client class
  */
 export class LspClient {
+    static MAX_BUFFER_SIZE = 50 * 1024 * 1024; // 50MB
     process = null;
     requestId = 0;
     pendingRequests = new Map();
@@ -53,12 +54,13 @@ export class LspClient {
                 `Install with: ${this.serverConfig.installHint}`);
         }
         return new Promise((resolve, reject) => {
+            // Only use shell for Windows .cmd/.bat scripts — not all commands
+            const needsShell = process.platform === 'win32' &&
+                /\.(cmd|bat)$/i.test(this.serverConfig.command);
             this.process = spawn(this.serverConfig.command, this.serverConfig.args, {
                 cwd: this.workspaceRoot,
                 stdio: ['pipe', 'pipe', 'pipe'],
-                // On Windows, npm-installed binaries are .cmd scripts that require
-                // shell execution. Without this, spawn() fails with ENOENT. (#569)
-                shell: process.platform === 'win32'
+                shell: needsShell
             });
             this.process.stdout?.on('data', (data) => {
                 this.handleData(data);
@@ -111,18 +113,27 @@ export class LspClient {
         if (!this.process)
             return;
         try {
-            await this.request('shutdown', null);
+            // Short timeout for graceful shutdown — don't block forever
+            await Promise.race([
+                this.request('shutdown', null, 3000),
+                new Promise(resolve => setTimeout(resolve, 3000))
+            ]);
             this.notify('exit', null);
         }
         catch {
             // Ignore errors during shutdown
         }
-        this.process.kill();
-        this.process = null;
-        this.initialized = false;
-        this.rejectPendingRequests(new Error('Client disconnected'));
-        this.openDocuments.clear();
-        this.diagnostics.clear();
+        finally {
+            // Always kill the process regardless of shutdown success
+            if (this.process) {
+                this.process.kill();
+                this.process = null;
+            }
+            this.initialized = false;
+            this.rejectPendingRequests(new Error('Client disconnected'));
+            this.openDocuments.clear();
+            this.diagnostics.clear();
+        }
     }
     /**
      * Reject all pending requests with the given error.
@@ -140,6 +151,13 @@ export class LspClient {
      */
     handleData(data) {
         this.buffer = Buffer.concat([this.buffer, data]);
+        // Prevent unbounded buffer growth from misbehaving LSP server
+        if (this.buffer.length > LspClient.MAX_BUFFER_SIZE) {
+            console.error('[LSP] Response buffer exceeded 50MB limit, resetting');
+            this.buffer = Buffer.alloc(0);
+            this.rejectPendingRequests(new Error('LSP response buffer overflow'));
+            return;
+        }
         while (true) {
             // Look for Content-Length header
             const headerEnd = this.buffer.indexOf('\r\n\r\n');
@@ -536,12 +554,10 @@ class LspClientManager {
         };
         // 'exit' handler must be synchronous — forceKill() is sync
         process.on('exit', forceKillAll);
-        // For signals, force-kill all LSP servers then exit
+        // For signals, force-kill LSP servers but do NOT call process.exit()
+        // to allow other signal handlers (e.g., Python bridge cleanup) to run
         for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
-            process.on(sig, () => {
-                forceKillAll();
-                process.exit(0);
-            });
+            process.on(sig, forceKillAll);
         }
     }
     /**

@@ -29,7 +29,9 @@ export function isUnixLikeOnWindows() {
  */
 async function tmuxAsync(args) {
     if (args.some(a => a.includes('#{'))) {
-        const escaped = args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+        // MSYS2/Git Bash strips curly braces from execFile arguments.
+        // Use shell execution with proper single-quote escaping.
+        const escaped = args.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
         return promisifiedExec(`tmux ${escaped}`);
     }
     return promisifiedExecFile('tmux', args);
@@ -79,13 +81,8 @@ function getLaunchWords(config) {
         return [config.launchBinary, ...(config.launchArgs ?? [])];
     }
     if (config.launchCmd) {
-        if (config.launchCmd.trim().length === 0) {
-            throw new Error('Invalid launchCmd: value cannot be empty');
-        }
-        if (/[;&|`$()<>\n\r\t\0"\\]/.test(config.launchCmd)) {
-            throw new Error('Invalid launchCmd: contains dangerous shell metacharacters');
-        }
-        return [config.launchCmd];
+        throw new Error('launchCmd is deprecated and has been removed for security reasons. ' +
+            'Use launchBinary + launchArgs instead.');
     }
     throw new Error('Missing worker launch command. Provide launchBinary or launchCmd.');
 }
@@ -145,27 +142,8 @@ export function buildWorkerStartCommand(config) {
             ...[shell, ...shellFlags, script, '--', ...launchWords].map(shellEscape),
         ].join(' ');
     }
-    const envString = Object.entries(config.envVars)
-        .map(([k, v]) => {
-        assertSafeEnvKey(k);
-        return `${k}=${shellEscape(v)}`;
-    })
-        .join(' ');
-    const shellName = shellNameFromPath(shell) || 'bash';
-    const isFish = shellName === 'fish';
-    let rcFile = '';
-    if (process.env.HOME) {
-        rcFile = isFish
-            ? `${process.env.HOME}/.config/fish/config.fish`
-            : `${process.env.HOME}/.${shellName}rc`;
-    }
-    let sourceCmd = '';
-    if (shouldSourceRc && rcFile) {
-        sourceCmd = isFish
-            ? `test -f "${rcFile}"; and source "${rcFile}"; `
-            : `[ -f "${rcFile}" ] && source "${rcFile}"; `;
-    }
-    return `env ${envString} ${shell} -c "${sourceCmd}exec ${launchWords[0]}"`;
+    // launchCmd path removed — launchBinary is now required
+    throw new Error('Missing launchBinary in worker config. launchCmd has been removed.');
 }
 /** Validate tmux is available. Throws with install instructions if not. */
 export function validateTmux() {
@@ -239,10 +217,7 @@ export function isSessionAlive(teamName, workerName) {
 export function listActiveSessions(teamName) {
     const prefix = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-`;
     try {
-        // Use shell execution to prevent MSYS2 from stripping #{} in format strings
-        const fmtArgs = ['list-sessions', '-F', '#{session_name}'];
-        const shellCmd = 'tmux ' + fmtArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
-        const output = execSync(shellCmd, {
+        const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
             encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
         });
         return output.trim().split('\n')
@@ -514,7 +489,7 @@ export async function waitForPaneReady(paneId, opts = {}) {
 function paneTailContainsLiteralLine(captured, text) {
     return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
-async function paneInCopyMode(paneId, execFileAsync) {
+async function paneInCopyMode(paneId) {
     try {
         const result = await tmuxAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
         return result.stdout.trim() === '1';
@@ -551,8 +526,8 @@ export function shouldAttemptAdaptiveRetry(args) {
  */
 export async function sendToWorker(_sessionName, paneId, message) {
     if (message.length > 200) {
-        console.warn(`[tmux-session] sendToWorker: message truncated to 200 chars`);
-        message = message.slice(0, 200);
+        console.warn(`[tmux-session] sendToWorker: message rejected (${message.length} chars exceeds 200 char limit)`);
+        return false;
     }
     try {
         const { execFile } = await import('child_process');
@@ -563,7 +538,7 @@ export async function sendToWorker(_sessionName, paneId, message) {
             await execFileAsync('tmux', ['send-keys', '-t', paneId, key]);
         };
         // Guard: copy-mode captures keys; skip injection entirely.
-        if (await paneInCopyMode(paneId, execFileAsync)) {
+        if (await paneInCopyMode(paneId)) {
             return false;
         }
         // Check for trust prompt and auto-dismiss before sending our text
@@ -602,12 +577,12 @@ export async function sendToWorker(_sessionName, paneId, message) {
             await sleep(140);
         }
         // Safety gate: copy-mode can turn on while we retry; never send fallback control keys when active.
-        if (await paneInCopyMode(paneId, execFileAsync)) {
+        if (await paneInCopyMode(paneId)) {
             return false;
         }
         // Adaptive fallback: for busy panes, retry once without interrupting active turns.
         const finalCapture = await capturePaneAsync(paneId, execFileAsync);
-        const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId, execFileAsync);
+        const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId);
         if (shouldAttemptAdaptiveRetry({
             paneBusy,
             latestCapture: finalCapture,
@@ -615,12 +590,12 @@ export async function sendToWorker(_sessionName, paneId, message) {
             paneInCopyMode: paneModeBeforeAdaptiveRetry,
             retriesAttempted: 0,
         })) {
-            if (await paneInCopyMode(paneId, execFileAsync)) {
+            if (await paneInCopyMode(paneId)) {
                 return false;
             }
             await sendKey('C-u');
             await sleep(80);
-            if (await paneInCopyMode(paneId, execFileAsync)) {
+            if (await paneInCopyMode(paneId)) {
                 return false;
             }
             await execFileAsync('tmux', ['send-keys', '-t', paneId, '-l', '--', message]);
@@ -636,7 +611,7 @@ export async function sendToWorker(_sessionName, paneId, message) {
             }
         }
         // Before fallback control keys, re-check copy-mode to avoid mutating scrollback UI state.
-        if (await paneInCopyMode(paneId, execFileAsync)) {
+        if (await paneInCopyMode(paneId)) {
             return false;
         }
         // Fail-open: one last nudge, then continue regardless.
@@ -664,7 +639,7 @@ export async function injectToLeaderPane(sessionName, leaderPaneId, message) {
         const { execFile } = await import('child_process');
         const { promisify } = await import('util');
         const execFileAsync = promisify(execFile);
-        if (await paneInCopyMode(leaderPaneId, execFileAsync)) {
+        if (await paneInCopyMode(leaderPaneId)) {
             return false;
         }
         const captured = await capturePaneAsync(leaderPaneId, execFileAsync);

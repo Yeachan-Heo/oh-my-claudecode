@@ -109,9 +109,12 @@ export async function sendTmuxTrigger(
   payload?: string
 ): Promise<boolean> {
   const message = payload ? `${triggerType}:${payload}` : triggerType;
-  const truncated = message.length > 200 ? message.slice(0, 200) : message;
+  if (message.length > 200) {
+    console.warn(`[tmux-comm] sendTmuxTrigger: message rejected (${message.length} chars exceeds 200 char limit)`);
+    return false;
+  }
   try {
-    return await sendToWorker('', paneId, truncated);
+    return await sendToWorker('', paneId, message);
   } catch {
     return false;
   }

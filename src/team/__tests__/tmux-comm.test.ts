@@ -20,10 +20,11 @@ describe('sendTmuxTrigger', () => {
     expect(result).toBe(false);
   });
 
-  it('truncates messages over 200 chars', async () => {
-    vi.mocked(sendToWorker).mockResolvedValueOnce(true);
+  it('rejects messages over 200 chars (security: no silent truncation)', async () => {
+    vi.mocked(sendToWorker).mockClear();
     const longMsg = 'a'.repeat(300);
-    await sendTmuxTrigger('%1', longMsg);
-    expect(sendToWorker).toHaveBeenCalledWith('', '%1', 'a'.repeat(200));
+    const result = await sendTmuxTrigger('%1', longMsg);
+    expect(result).toBe(false);
+    expect(sendToWorker).not.toHaveBeenCalled();
   });
 });

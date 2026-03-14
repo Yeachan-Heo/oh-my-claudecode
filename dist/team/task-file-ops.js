@@ -400,7 +400,7 @@ export function listTaskIds(teamName, opts) {
         try {
             return readdirSync(dir)
                 .filter(f => f.endsWith('.json') && !f.includes('.tmp.') && !f.includes('.failure.') && !f.endsWith('.lock'))
-                .map(f => f.replace('.json', ''));
+                .map(f => f.replace(/\.json$/, ''));
         }
         catch {
             return [];

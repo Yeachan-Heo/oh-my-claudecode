@@ -28,6 +28,7 @@ import { readStdin } from './lib/stdin.mjs';
 const THRESHOLD = parseInt(process.env.OMC_CONTEXT_GUARD_THRESHOLD || '75', 10);
 const CRITICAL_THRESHOLD = 95;
 const MAX_BLOCKS = 2;
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 
 /**
  * Detect if stop was triggered by context-limit related reasons.
@@ -172,7 +173,7 @@ function estimateContextPercent(transcriptPath) {
  * Prevents infinite block loops by capping at MAX_BLOCKS.
  */
 function getBlockCount(sessionId) {
-  if (!sessionId) return 0;
+  if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return 0;
   const guardFile = join(tmpdir(), `omc-context-guard-${sessionId}.json`);
   try {
     if (existsSync(guardFile)) {
@@ -184,7 +185,7 @@ function getBlockCount(sessionId) {
 }
 
 function incrementBlockCount(sessionId) {
-  if (!sessionId) return;
+  if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return;
   const guardFile = join(tmpdir(), `omc-context-guard-${sessionId}.json`);
   try {
     let count = 0;
