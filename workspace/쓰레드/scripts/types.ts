@@ -93,6 +93,7 @@ export interface TrendEntry {
   recent_count: number;
   old_count: number;
   trend: string;
+  sample_post_ids?: string[];
 }
 
 export interface ResearchBrief {

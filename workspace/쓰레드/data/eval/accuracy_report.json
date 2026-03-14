@@ -1,15 +1,15 @@
 {
-  "date": "2026-03-13T07:11:15.701Z",
+  "date": "2026-03-14T01:58:01.604Z",
   "eval_set_version": "v1",
   "sample_size": 30,
-  "tag_accuracy": 0.8667,
+  "tag_accuracy": 1,
   "signal_precision": 1,
   "signal_recall": 0,
   "signal_f1": 0,
   "needs_accuracy": 0.9,
   "targets_met": true,
   "errors": {
-    "tag": 4,
+    "tag": 0,
     "signal_fp": 0,
     "signal_fn": 1,
     "needs": 1

@@ -38,6 +38,7 @@ interface ResearchData {
   posts_analyzed: number;
   purchase_signals: unknown[];
   purchase_signals_non_affiliate?: unknown[];
+  top_keywords_consumer?: Array<{ keyword: string; count: number }>;
   emerging_topics?: Array<{ keyword: string }>;
   declining_topics?: Array<{ keyword: string }>;
   engagement_summary: { views: { avg: number }; likes: { avg: number } };
@@ -105,6 +106,13 @@ function generateBrief(today: string): void {
     for (const s of nonAffSignals.slice(0, 5)) {
       lines.push(`- "${s.text.slice(0, 80)}" (${s.signal_level}) [${s.post_id}]`);
     }
+  }
+
+  if (research.top_keywords_consumer && research.top_keywords_consumer.length > 0) {
+    lines.push('\n■ 소비자 키워드 TOP 10 (비광고 포스트)');
+    lines.push('─'.repeat(40));
+    const consumerKws = research.top_keywords_consumer.slice(0, 10);
+    lines.push(consumerKws.map(k => `${k.keyword}(${k.count})`).join(', '));
   }
 
   lines.push('\n■ 트렌드');

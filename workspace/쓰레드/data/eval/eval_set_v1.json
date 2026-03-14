@@ -272,8 +272,10 @@
         }
       ],
       "auto_tags": {
-        "primary": "complaint",
-        "secondary": []
+        "primary": "purchase_signal",
+        "secondary": [
+          "complaint"
+        ]
       },
       "gold_label": {
         "primary_tag": "purchase_signal",
@@ -420,7 +422,7 @@
         }
       ],
       "auto_tags": {
-        "primary": "complaint",
+        "primary": "general",
         "secondary": []
       },
       "gold_label": {
@@ -833,7 +835,7 @@
         }
       ],
       "auto_tags": {
-        "primary": "purchase_signal",
+        "primary": "general",
         "secondary": []
       },
       "gold_label": {
@@ -985,7 +987,7 @@
         }
       ],
       "auto_tags": {
-        "primary": "complaint",
+        "primary": "general",
         "secondary": []
       },
       "gold_label": {

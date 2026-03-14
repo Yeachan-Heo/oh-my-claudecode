@@ -138,9 +138,37 @@ function groupIntoNeeds(posts: CanonicalPost[], signals: SignalEntry[]): Record<
 
     needsGroups[category].posts.push(post);
     if (post.text) {
-      const firstSentence = post.text.split(/[.\n!?]/)[0].trim().slice(0, 100);
-      if (firstSentence.length > 10) {
-        needsGroups[category].expressions.push(firstSentence);
+      // 채널명/프로젝트명/광고 보일러플레이트 패턴 필터: 의미있는 첫 문장 찾기
+      const CHANNEL_PATTERN = /^(스하리|DH부부|프로젝트)|\d+명프로젝트|^(주방템|재회|이별|mbti)$/i;
+      const AD_BOILERPLATE = /쿠팡파트너스|수수료를|제공받습니다|활동으로|일정액의|포스팅은/;
+      const URL_PATTERN = /https?:\/\/|link\.|\.com|\.kr/i;
+      const EMPTY_PATTERN = /^[\s\p{Emoji}\p{Emoji_Presentation}]*$/u;
+      const lines = post.text.split(/[\n]/);
+      let expression = '';
+      for (const line of lines) {
+        const trimmed = line.trim().slice(0, 100);
+        if (trimmed.length <= 10) continue;
+        if (CHANNEL_PATTERN.test(trimmed)) continue;
+        if (AD_BOILERPLATE.test(trimmed)) continue;
+        if (URL_PATTERN.test(trimmed)) continue;
+        if (EMPTY_PATTERN.test(trimmed)) continue;
+        expression = trimmed;
+        break;
+      }
+      // fallback: 첫 문장 분리 (줄 기반 실패 시)
+      if (!expression) {
+        const firstSentence = post.text.split(/[.\n!?]/)[0].trim().slice(0, 100);
+        if (
+          firstSentence.length > 10 &&
+          !CHANNEL_PATTERN.test(firstSentence) &&
+          !AD_BOILERPLATE.test(firstSentence) &&
+          !URL_PATTERN.test(firstSentence)
+        ) {
+          expression = firstSentence;
+        }
+      }
+      if (expression) {
+        needsGroups[category].expressions.push(expression);
       }
     }
     if (signal) {

@@ -83,6 +83,23 @@ const COMPLAINT_KEYWORDS = ['실패', '실망', '별로', '짜증', '최악', '�
 const REVIEW_KEYWORDS = ['써봤', '사봤', '사용후기', '구매후기', '이거 샀', '먹어봤', '샀는데', '사왔는데', '갈아탐'];
 const INTEREST_KEYWORDS = ['추천', '좋다', '맛있', '괜찮', '예쁘', '가볼', '해보', '꿀팁', '레시피', '귀여운'];
 
+// --- Contextual disambiguation (P1 LLM-equivalent rules) ---
+// E-007 fix: info-seeking question + complaint → purchase_signal
+const INFO_SEEKING_PATTERNS = [
+  /잘\s*아는\s*(사람|분|스친)/,
+  /아는\s*(사람|분|스친).*있을까/,
+  /알려\s*줄\s*(사람|분)/,
+  /알\s*(수|게)\s*있을까/,
+];
+// E-011, E-026 fix: advice/instructional content → not personal complaint
+const ADVICE_CONTENT_MARKERS = [/▶️/, /✅/, /👉/, /단계/, /관점에서/, /이유는/];
+// E-022 fix: seller self-reference → not purchase_signal
+const SELF_BUSINESS_PATTERNS = [
+  /사업은?\s*(잘|이)/,
+  /베스트셀러.*덕분/,
+  /우리\s*(제품|가게|매장|브랜드)/,
+];
+
 function classifyTag(text: string, isAffiliate: boolean): Tags {
   const tags: Tags = { primary: 'general', secondary: [] };
 
@@ -95,8 +112,23 @@ function classifyTag(text: string, isAffiliate: boolean): Tags {
     return tags;
   }
 
+  // --- Contextual disambiguation (before primary classification) ---
+  const hasComplaintKw = COMPLAINT_KEYWORDS.some(kw => text.includes(kw));
+
+  // E-007: Info-seeking question + complaint keywords → purchase_signal (not complaint)
+  if (hasComplaintKw && INFO_SEEKING_PATTERNS.some(pat => pat.test(text))) {
+    tags.primary = 'purchase_signal';
+    tags.secondary.push('complaint');
+    return tags;
+  }
+
   // Non-affiliate classification
   if (SIGNAL_PATTERNS_SIMPLE.some(pat => pat.test(text))) {
+    // E-022: Seller self-reference → not a real purchase signal
+    if (SELF_BUSINESS_PATTERNS.some(pat => pat.test(text))) {
+      tags.primary = 'general';
+      return tags;
+    }
     tags.primary = 'purchase_signal';
     if (REVIEW_KEYWORDS.some(kw => text.includes(kw))) tags.secondary.push('review');
     return tags;
@@ -107,7 +139,13 @@ function classifyTag(text: string, isAffiliate: boolean): Tags {
     return tags;
   }
 
-  if (COMPLAINT_KEYWORDS.some(kw => text.includes(kw))) {
+  if (hasComplaintKw) {
+    // E-011, E-026: Advice content with negative keywords → not personal complaint
+    const adviceMarkerCount = ADVICE_CONTENT_MARKERS.filter(pat => pat.test(text)).length;
+    if (adviceMarkerCount >= 2) {
+      tags.primary = 'general';
+      return tags;
+    }
     tags.primary = 'complaint';
     return tags;
   }

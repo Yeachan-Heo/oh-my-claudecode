@@ -60,12 +60,19 @@ const STOP_WORDS = new Set([
   '합니다', '합니당', '했어요', '했다', '해요', '하는', '하면', '해서',
   '있어', '없어', '했는데', '이미', '제일', '나는', '내가',
   '인증된', '계정', '활동의', '일환으로', '수수료를', '제공받습니다',
+  // 광고 보일러플레이트
+  '포스팅은', '활동으로', '일정액의', '제공받습니다', '수수료를',
+  '제품번호', '제품정보는', '남겨주시면', '보내드릴께요', '연결됩니다', '누르면',
+  // 채널명/프로젝트명 노이즈
+  '스하리', '명프로젝트', '프로젝트', '부부', '다들', '이렇게', '있는',
   'ㅋㅋ', 'ㅎㅎ', 'ㅠㅠ', 'ㅜㅜ',
 ]);
 const URL_STOP = new Set([
   'com', 'www', 'http', 'https', 'link', 'net', 'org', 'coupang', 'coupa',
   'instagram', 'threads', 'naver', 'blog', 'smartstore',
   'open', 'kakao', 'kakaocdn', 'cdninstagram', 'scontent',
+  // URL 해시/짧은 ID 조각
+  'gkj', 'bit', 'ly', 'tinyurl', 'url',
 ]);
 
 interface KeywordResult {
@@ -103,6 +110,11 @@ function extractKeywords(posts: CanonicalPost[]): KeywordResult[] {
       count,
       post_ids: postIndex[keyword].slice(0, 5),
     }));
+}
+
+function extractKeywordsConsumer(posts: CanonicalPost[]): KeywordResult[] {
+  const nonAffiliate = posts.filter(p => p.tags?.primary !== 'affiliate');
+  return extractKeywords(nonAffiliate);
 }
 
 // --- Purchase signal detection ---
@@ -217,15 +229,17 @@ function detectTrends(posts: CanonicalPost[]): { emerging: TrendEntry[]; declini
   const recent = sorted.slice(0, mid);
   const older = sorted.slice(mid);
 
-  const countKeywords = (arr: CanonicalPost[]): Record<string, number> => {
-    const freq: Record<string, number> = {};
+  const countKeywords = (arr: CanonicalPost[]): Record<string, { count: number; post_ids: string[] }> => {
+    const freq: Record<string, { count: number; post_ids: string[] }> = {};
     for (const p of arr) {
       const tokens = (p.text || '').match(/[가-힣]{2,}/g) || [];
       const seen = new Set<string>();
       for (const t of tokens) {
         if (!STOP_WORDS.has(t) && !seen.has(t)) {
           seen.add(t);
-          freq[t] = (freq[t] || 0) + 1;
+          if (!freq[t]) freq[t] = { count: 0, post_ids: [] };
+          freq[t].count++;
+          if (freq[t].post_ids.length < 5) freq[t].post_ids.push(p.post_id);
         }
       }
     }
@@ -238,21 +252,23 @@ function detectTrends(posts: CanonicalPost[]): { emerging: TrendEntry[]; declini
   const emerging: TrendEntry[] = [];
   const declining: TrendEntry[] = [];
 
-  for (const [kw, count] of Object.entries(recentFreq)) {
-    if (count < 2) continue;
-    const oldCount = olderFreq[kw] || 0;
-    if (oldCount === 0 && count >= 3) {
-      emerging.push({ keyword: kw, recent_count: count, old_count: 0, trend: 'new' });
-    } else if (count > oldCount * 2 && count >= 3) {
-      emerging.push({ keyword: kw, recent_count: count, old_count: oldCount, trend: 'rising' });
+  for (const [kw, entry] of Object.entries(recentFreq)) {
+    if (entry.count < 2) continue;
+    const oldEntry = olderFreq[kw];
+    const oldCount = oldEntry?.count || 0;
+    if (oldCount === 0 && entry.count >= 3) {
+      emerging.push({ keyword: kw, recent_count: entry.count, old_count: 0, trend: 'new', sample_post_ids: entry.post_ids });
+    } else if (entry.count > oldCount * 2 && entry.count >= 3) {
+      emerging.push({ keyword: kw, recent_count: entry.count, old_count: oldCount, trend: 'rising', sample_post_ids: entry.post_ids });
     }
   }
 
-  for (const [kw, count] of Object.entries(olderFreq)) {
-    if (count < 3) continue;
-    const recentCount = recentFreq[kw] || 0;
-    if (recentCount < count * 0.3) {
-      declining.push({ keyword: kw, recent_count: recentCount, old_count: count, trend: 'declining' });
+  for (const [kw, entry] of Object.entries(olderFreq)) {
+    if (entry.count < 3) continue;
+    const recentEntry = recentFreq[kw];
+    const recentCount = recentEntry?.count || 0;
+    if (recentCount < entry.count * 0.3) {
+      declining.push({ keyword: kw, recent_count: recentCount, old_count: entry.count, trend: 'declining', sample_post_ids: entry.post_ids });
     }
   }
 
@@ -308,6 +324,74 @@ ${JSON.stringify(summaries, null, 0)}
 - 최대 1000 토큰으로 응답`;
 }
 
+// --- Citation rate + evidence measurement (P1 task 3) ---
+interface CitationMetrics {
+  total_claims: number;
+  cited_claims: number;
+  citation_rate: number;
+  avg_evidence_per_claim: number;
+  target_met: { citation_rate: boolean; evidence: boolean };
+}
+
+function measureCitations(
+  keywords: KeywordResult[],
+  signals: DetectedSignal[],
+  nonAffSignals: DetectedSignal[],
+  trends: { emerging: TrendEntry[]; declining: TrendEntry[] },
+): CitationMetrics {
+  let totalClaims = 0;
+  let citedClaims = 0;
+  let totalEvidence = 0;
+
+  // Keywords: each is a claim with sample_post_ids
+  for (const k of keywords) {
+    totalClaims++;
+    if (k.post_ids.length > 0) { citedClaims++; totalEvidence += k.post_ids.length; }
+  }
+  // Purchase signals: each is a claim with 1 post_id
+  for (const s of signals) {
+    totalClaims++;
+    citedClaims++; // always has post_id
+    totalEvidence += 1;
+  }
+  // Non-affiliate signals
+  for (const s of nonAffSignals) {
+    totalClaims++;
+    citedClaims++;
+    totalEvidence += 1;
+  }
+  // Emerging topics
+  for (const t of trends.emerging) {
+    totalClaims++;
+    if (t.sample_post_ids && t.sample_post_ids.length > 0) {
+      citedClaims++;
+      totalEvidence += t.sample_post_ids.length;
+    }
+  }
+  // Declining topics
+  for (const t of trends.declining) {
+    totalClaims++;
+    if (t.sample_post_ids && t.sample_post_ids.length > 0) {
+      citedClaims++;
+      totalEvidence += t.sample_post_ids.length;
+    }
+  }
+
+  const citationRate = totalClaims > 0 ? +(citedClaims / totalClaims).toFixed(4) : 0;
+  const avgEvidence = citedClaims > 0 ? +(totalEvidence / citedClaims).toFixed(1) : 0;
+
+  return {
+    total_claims: totalClaims,
+    cited_claims: citedClaims,
+    citation_rate: citationRate,
+    avg_evidence_per_claim: avgEvidence,
+    target_met: {
+      citation_rate: citationRate >= 0.8,
+      evidence: avgEvidence >= 2,
+    },
+  };
+}
+
 // --- Main ---
 function main(): void {
   const args = process.argv.slice(2);
@@ -338,6 +422,7 @@ function main(): void {
   // Non-affiliate posts for deeper signal analysis
   const nonAffiliate = posts.filter(p => p.tags?.primary !== 'affiliate');
   const nonAffSignals = detectPurchaseSignals(nonAffiliate);
+  const consumerKeywords = extractKeywordsConsumer(posts);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -350,6 +435,11 @@ function main(): void {
       count: k.count,
       signal_level: null as string | null,
       trend: null as string | null,
+      sample_post_ids: k.post_ids,
+    })),
+    top_keywords_consumer: consumerKeywords.map(k => ({
+      keyword: k.keyword,
+      count: k.count,
       sample_post_ids: k.post_ids,
     })),
     purchase_signals: signals.map(s => ({
@@ -378,6 +468,7 @@ function main(): void {
       generated_at: new Date().toISOString(),
       previous_learnings: !!learnings,
     },
+    citation_metrics: measureCitations(keywords, signals, nonAffSignals, trends),
   };
 
   // Write brief
@@ -409,6 +500,13 @@ function main(): void {
   console.log(`Emerging: ${trends.emerging.slice(0, 5).map(t => t.keyword).join(', ') || 'none'}`);
   console.log(`Declining: ${trends.declining.slice(0, 5).map(t => t.keyword).join(', ') || 'none'}`);
   console.log(`Engagement: avg views=${engagement.views.avg}, avg likes=${engagement.likes.avg}`);
+
+  // Citation metrics
+  const cm = brief.citation_metrics;
+  console.log(`\n--- Citation Metrics ---`);
+  console.log(`  Claims: ${cm.cited_claims}/${cm.total_claims} cited (${(cm.citation_rate * 100).toFixed(1)}%)`);
+  console.log(`  Avg evidence/claim: ${cm.avg_evidence_per_claim}`);
+  console.log(`  Target met: citation_rate≥80%=${cm.target_met.citation_rate}, evidence≥2=${cm.target_met.evidence}`);
 }
 
 main();
