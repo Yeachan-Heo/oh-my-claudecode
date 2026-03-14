@@ -330,6 +330,29 @@ export function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// --- Validation ---
+
+export function validateProductDict(data: unknown): asserts data is { products: ProductEntry[] } {
+  if (!data || typeof data !== 'object') throw new Error('Product dict: expected object');
+  const d = data as Record<string, unknown>;
+  if (!Array.isArray(d.products)) throw new Error('Product dict: missing or invalid "products" array');
+}
+
+// --- Learnings loader ---
+
+export function loadLearnings(filePath: string): LearningEntry[] {
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const learnings = data.learnings || data || [];
+    if (Array.isArray(learnings)) return learnings;
+    console.warn(`Learnings: expected array, got ${typeof learnings}`);
+    return [];
+  } catch {
+    console.warn(`Learnings not loaded from ${filePath} (optional)`);
+    return [];
+  }
+}
+
 // --- Main ---
 
 function main(): void {
@@ -352,21 +375,19 @@ function main(): void {
   // Load product dictionary
   let productDict: { version?: string; products: ProductEntry[] };
   try {
-    productDict = JSON.parse(fs.readFileSync(PRODUCT_DICT_PATH, 'utf8'));
-  } catch {
-    console.error(`Product dictionary not found: ${PRODUCT_DICT_PATH}`);
+    const rawDict = JSON.parse(fs.readFileSync(PRODUCT_DICT_PATH, 'utf8'));
+    validateProductDict(rawDict);
+    productDict = rawDict;
+  } catch (err) {
+    console.error(`Product dictionary error: ${(err as Error).message}`);
     console.error(`Create data/product_dict/products_v1.json first.`);
     process.exit(1);
   }
 
   // Load optional learnings
-  let learnings: LearningEntry[] = [];
-  try {
-    const learningsData = JSON.parse(fs.readFileSync(LEARNINGS_PATH, 'utf8'));
-    learnings = learningsData.learnings || learningsData || [];
+  const learnings = loadLearnings(LEARNINGS_PATH);
+  if (learnings.length > 0) {
     console.log(`Learnings loaded: ${learnings.length} entries`);
-  } catch {
-    // learnings is optional
   }
 
   const products: ProductEntry[] = productDict.products || [];

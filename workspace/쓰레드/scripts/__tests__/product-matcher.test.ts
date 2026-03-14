@@ -1,4 +1,5 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
+import fs from 'fs';
 import {
   clamp,
   round1,
@@ -6,6 +7,8 @@ import {
   assessCompetition,
   countKeywordMatches,
   scoreThreadsFitness,
+  loadLearnings,
+  validateProductDict,
 } from '../product-matcher.js';
 import type { NeedItem, ProductEntry } from '../types.js';
 
@@ -241,5 +244,43 @@ describe('scoreThreadsFitness', () => {
     expect(() =>
       scoreThreadsFitness(makeProduct(), makeNeed({ signal_strength: null }), 0, [])
     ).not.toThrow();
+  });
+});
+
+// --- loadLearnings ---
+describe('loadLearnings', () => {
+  test('returns empty array and warns for missing file', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadLearnings('/nonexistent/path.json');
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Learnings'));
+    warnSpy.mockRestore();
+  });
+
+  test('returns empty array and warns for invalid JSON', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tmpPath = '/tmp/test-invalid-learnings.json';
+    fs.writeFileSync(tmpPath, 'not json', 'utf8');
+    const result = loadLearnings(tmpPath);
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+    fs.unlinkSync(tmpPath);
+  });
+});
+
+// --- validateProductDict ---
+describe('validateProductDict', () => {
+  test('accepts valid product dict', () => {
+    const valid = { products: [{ product_id: 'x', name: 'y', category: 'z', needs_categories: ['불편해소'], keywords: ['k'], affiliate_platform: 'coupang_partners', price_range: '10000', description: 'd' }] };
+    expect(() => validateProductDict(valid)).not.toThrow();
+  });
+
+  test('throws for missing products array', () => {
+    expect(() => validateProductDict({})).toThrow(/products/);
+  });
+
+  test('throws for non-array products', () => {
+    expect(() => validateProductDict({ products: 'bad' })).toThrow(/products/);
   });
 });

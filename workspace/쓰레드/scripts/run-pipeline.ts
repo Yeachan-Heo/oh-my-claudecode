@@ -103,8 +103,10 @@ function generateBrief(today: string): void {
 
   let products: ProductsData | null = null;
   let positioning: PositioningData | null = null;
-  try { products = JSON.parse(fs.readFileSync(productsPath, 'utf8')); } catch { /* P2 data optional */ }
-  try { positioning = JSON.parse(fs.readFileSync(positioningPath, 'utf8')); } catch { /* P2 data optional */ }
+  try { products = JSON.parse(fs.readFileSync(productsPath, 'utf8')); }
+  catch { console.warn(`Products data not available: ${productsPath}`); }
+  try { positioning = JSON.parse(fs.readFileSync(positioningPath, 'utf8')); }
+  catch { console.warn(`Positioning data not available: ${positioningPath}`); }
 
   const lines: string[] = [];
   const hasP2 = products && positioning;

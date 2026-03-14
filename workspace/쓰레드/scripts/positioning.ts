@@ -187,7 +187,11 @@ function buildPositioningCard(
   needCategory: NeedsCategory,
   problem: string,
 ): PositioningCard {
-  const formats = CATEGORY_FORMATS[needCategory];
+  let formats = CATEGORY_FORMATS[needCategory];
+  if (!formats) {
+    console.warn(`Unknown needCategory: ${needCategory}, using 문제공감형 default`);
+    formats = ['문제공감형', '솔직후기형', '비교형'];
+  }
 
   const positions: PositionVariant[] = formats.map(fmt =>
     buildVariant(fmt, product, needCategory, problem)
