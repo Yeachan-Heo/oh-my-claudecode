@@ -42,31 +42,31 @@ const FORMAT_DEFS: Record<PositionFormat, FormatDef> = {
   },
   '솔직후기형': {
     desc: '개인 경험 중심 솔직한 후기',
-    angle_template: '광고 아니고, 돈 주고 써본 기준',
+    angle_template: '{product} 써봤는데 솔직하게 말하면',
     tone_desc: '비격식 1인칭, 구어체, 장단점 모두',
     cta_style: '댓글에서 자연스럽게',
   },
   '비교형': {
     desc: '여러 개 써봤는데 하나만 남김',
-    angle_template: '3개 써봤는데 1개만 남김',
+    angle_template: '{product} 포함 3개 써봤는데 1개만 남김',
     tone_desc: '구체적 비교, 결론 먼저, 이유 나중',
     cta_style: '프로필 링크 유도',
   },
   '입문추천형': {
     desc: '처음 시작하는 사람 대상',
-    angle_template: '이쪽 처음이면 이거부터',
+    angle_template: '{category} 처음이면 이거부터',
     tone_desc: '친절하고 명확, 진입장벽 낮춤',
     cta_style: '댓글에서 자연스럽게',
   },
   '실수방지형': {
     desc: '살 뻔했다가 확인하고 결정',
-    angle_template: '이거 사기 전에 이것만 확인해',
+    angle_template: '{product} 사기 전에 이것만 확인해',
     tone_desc: '경고 → 기준 제시 → 추천',
     cta_style: 'DM 유도',
   },
   '비추천형': {
     desc: '솔직하게 별로였던 것 → 대안',
-    angle_template: '솔직히 이건 별로였고, 대신 이게 나았음',
+    angle_template: '이 카테고리 3개 써봤는데 {product}만 남김',
     tone_desc: '냉정하고 솔직, 대안 제시로 마무리',
     cta_style: '댓글에서 자연스럽게',
   },
@@ -152,9 +152,8 @@ export function buildVariant(
   const def = FORMAT_DEFS[format];
 
   const angle = def.angle_template
-    .replace('{카테고리}', product.name)
-    .replace('{N}', '3')
-    .replace('{M}', '2');
+    .replace('{product}', product.name)
+    .replace('{category}', needCategory);
 
   const hook = generateHook({
     format,

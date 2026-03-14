@@ -302,3 +302,14 @@ export interface RawPostFile {
   };
   thread_units: RawThreadUnit[];
 }
+
+// --- P2: Learning feedback ---
+
+export interface LearningEntry {
+  product_id: string;
+  naturalness_delta?: number;
+  clarity_delta?: number;
+  ad_smell_delta?: number;
+  repeatability_delta?: number;
+  story_potential_delta?: number;
+}

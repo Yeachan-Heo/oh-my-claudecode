@@ -20,6 +20,7 @@ import type {
   ProductMatchOutput,
   ThreadsScore,
   AffiliatePlatform,
+  LearningEntry,
 } from './types.js';
 
 const BRIEFS_DIR = path.join(__dirname, '..', 'data', 'briefs');
@@ -190,7 +191,7 @@ function matchProductsForNeed(
 ): ProductMatch[] {
   // 1. needs_categories가 need.category를 포함하는 상품 필터
   const candidates = products.filter(p =>
-    p.needs_categories.includes(need.category as NeedsCategory)
+    p.needs_categories.includes(need.category)
   );
 
   if (candidates.length === 0) return [];
@@ -206,7 +207,7 @@ function matchProductsForNeed(
     return {
       product_id: product.product_id,
       name: product.name,
-      affiliate_platform: product.affiliate_platform as AffiliatePlatform,
+      affiliate_platform: product.affiliate_platform,
       price_range: product.price_range,
       threads_score,
       competition,
@@ -310,15 +311,6 @@ ${JSON.stringify(topMatches, null, 0)}
 }
 
 // --- Utility ---
-
-interface LearningEntry {
-  product_id: string;
-  naturalness_delta?: number;
-  clarity_delta?: number;
-  ad_smell_delta?: number;
-  repeatability_delta?: number;
-  story_potential_delta?: number;
-}
 
 export function parsePriceMin(priceRange: string): number | null {
   if (!priceRange) return null;
