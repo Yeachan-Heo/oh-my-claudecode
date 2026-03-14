@@ -74,7 +74,7 @@ const FORMAT_DEFS: Record<PositionFormat, FormatDef> = {
 
 // --- 카테고리별 포맷 우선순위 ---
 
-const CATEGORY_FORMATS: Record<NeedsCategory, PositionFormat[]> = {
+export const CATEGORY_FORMATS: Record<NeedsCategory, PositionFormat[]> = {
   '불편해소': ['문제공감형', '솔직후기형', '실수방지형'],
   '시간절약': ['솔직후기형', '비교형', '입문추천형'],
   '돈절약':   ['비교형', '실수방지형', '솔직후기형'],
@@ -92,7 +92,7 @@ interface HookContext {
   problem: string;
 }
 
-function generateHook(ctx: HookContext): string {
+export function generateHook(ctx: HookContext): string {
   const { format, productName, needCategory, problem } = ctx;
 
   // 짧은 카테고리 라벨 (제품의 핵심 카테고리 키워드)
@@ -139,11 +139,11 @@ function generateHook(ctx: HookContext): string {
 
 // --- 기본 avoid 리스트 ---
 
-const BASE_AVOID = ['최고의 제품', '꼭 사세요', '놓치면 후회', '협찬', '광고'];
+export const BASE_AVOID = ['최고의 제품', '꼭 사세요', '놓치면 후회', '협찬', '광고'];
 
 // --- 포지셔닝 변형 생성 ---
 
-function buildVariant(
+export function buildVariant(
   format: PositionFormat,
   product: ProductMatch,
   needCategory: NeedsCategory,
@@ -343,4 +343,8 @@ function main(): void {
   console.log(`\n총 ${cards.length}개 카드 생성 (니즈 ${matchOutput.matches.length}개 × 상위 3제품 × 3포맷)`);
 }
 
-main();
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('positioning.ts') ||
+  process.argv[1].endsWith('positioning.js')
+);
+if (isMainModule) main();

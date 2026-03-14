@@ -32,7 +32,7 @@ const LEARNINGS_PATH = path.join(__dirname, '..', 'data', 'learnings', 'latest.j
  * 상품을 5개 기준으로 채점 (rule-based, 1-5 scale).
  * 가중평균: naturalness:0.25, clarity:0.2, ad_smell:0.25, repeatability:0.15, story_potential:0.15
  */
-function scoreThreadsFitness(
+export function scoreThreadsFitness(
   product: ProductEntry,
   need: NeedItem,
   keywordMatchCount: number,
@@ -127,19 +127,19 @@ function scoreThreadsFitness(
 
 // --- 경쟁도 산정 ---
 // 같은 니즈를 타겟하는 상품 수 기반
-function assessCompetition(matchCount: number): '상' | '중' | '하' {
+export function assessCompetition(matchCount: number): '상' | '중' | '하' {
   if (matchCount >= 6) return '상';
   if (matchCount >= 3) return '중';
   return '하';
 }
 
 // --- 키워드 매칭 점수 ---
-function countKeywordMatches(product: ProductEntry, need: NeedItem): number {
-  const expressions = need.representative_expressions.map(e => e.toLowerCase());
+export function countKeywordMatches(product: ProductEntry, expressions: string[]): number {
+  const lowerExprs = expressions.map(e => e.toLowerCase());
   let count = 0;
   for (const kw of product.keywords) {
     const kwLower = kw.toLowerCase();
-    for (const expr of expressions) {
+    for (const expr of lowerExprs) {
       if (expr.includes(kwLower) || kwLower.includes(expr.slice(0, 4))) {
         count++;
         break;
@@ -199,7 +199,7 @@ function matchProductsForNeed(
 
   // 2. 각 상품 채점
   const scored = candidates.map(product => {
-    const keywordMatchCount = countKeywordMatches(product, need);
+    const keywordMatchCount = countKeywordMatches(product, need.representative_expressions);
     const threads_score = scoreThreadsFitness(product, need, keywordMatchCount, learnings);
     const why = buildWhyString(product, need, keywordMatchCount, threads_score);
 
@@ -320,7 +320,7 @@ interface LearningEntry {
   story_potential_delta?: number;
 }
 
-function parsePriceMin(priceRange: string): number | null {
+export function parsePriceMin(priceRange: string): number | null {
   if (!priceRange) return null;
   // 형식: "15000-29000", "30000", "under 20000", "20,000원"
   const cleaned = priceRange.replace(/[,원]/g, '').replace(/under\s*/i, '');
@@ -329,11 +329,11 @@ function parsePriceMin(priceRange: string): number | null {
   return parseInt(nums[0]);
 }
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function round1(n: number): number {
+export function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
@@ -451,4 +451,9 @@ function main(): void {
   console.log(`\n총 매칭: ${totalMatched}건 (${needs.length}개 니즈)`);
 }
 
-main();
+// Only run when executed directly (not imported)
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('product-matcher.ts') ||
+  process.argv[1].endsWith('product-matcher.js')
+);
+if (isMainModule) main();

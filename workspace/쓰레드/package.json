@@ -14,6 +14,8 @@
     "pipeline": "tsx scripts/run-pipeline.ts --brief",
     "pipeline:p1": "tsx scripts/run-pipeline.ts --brief --needs-only",
     "pipeline:prompt": "tsx scripts/run-pipeline.ts --brief --prompt",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "eval:build": "tsx scripts/build-eval-set.ts --seed 42",
     "collect": "node scripts/collect-posts.js"
   },
@@ -21,7 +23,9 @@
     "playwright": "^1.58.2"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }
