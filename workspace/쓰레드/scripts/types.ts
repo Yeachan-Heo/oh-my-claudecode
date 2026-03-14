@@ -210,6 +210,7 @@ export interface ProductEntry {
   affiliate_platform: AffiliatePlatform;
   price_range: string;
   description: string;
+  affiliate_link?: string;
 }
 
 export interface ProductMatch {

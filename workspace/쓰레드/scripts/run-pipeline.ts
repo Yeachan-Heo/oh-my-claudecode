@@ -85,6 +85,11 @@ interface PositioningData {
   }>;
 }
 
+export function formatProductLine(name: string, total: number, priceRange: string, link?: string): string {
+  const base = `${name} — 적합도 ${total.toFixed(1)}/5, ${priceRange}원`;
+  return link ? `${base}\n   링크: ${link}` : base;
+}
+
 function generateBrief(today: string): void {
   const researchPath = path.join(BRIEFS_DIR, `${today}_research.json`);
   const needsPath = path.join(BRIEFS_DIR, `${today}_needs.json`);
@@ -173,7 +178,7 @@ function generateBrief(today: string): void {
         if (rank > 3) break;
         const card = positioning?.positioning_cards.find(c => c.product_id === prod.product_id);
         const hook = card?.positions[0]?.hook || '';
-        lines.push(`${rank}. ${prod.name} — 적합도 ${prod.threads_score.total.toFixed(1)}/5, ${prod.price_range}원`);
+        lines.push(`${rank}. ${formatProductLine(prod.name, prod.threads_score.total, prod.price_range)}`);
         if (hook) lines.push(`   → "${hook}"`);
         lines.push(`   이유: ${prod.why}`);
       }
@@ -292,4 +297,8 @@ function main(): void {
   }
 }
 
-main();
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('run-pipeline.ts') ||
+  process.argv[1].endsWith('run-pipeline.js')
+);
+if (isMainModule) main();

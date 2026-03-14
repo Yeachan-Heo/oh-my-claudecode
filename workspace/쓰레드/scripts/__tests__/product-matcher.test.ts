@@ -9,6 +9,7 @@ import {
   scoreThreadsFitness,
   loadLearnings,
   validateProductDict,
+  validateLearnings,
 } from '../product-matcher.js';
 import type { NeedItem, ProductEntry } from '../types.js';
 
@@ -282,5 +283,44 @@ describe('validateProductDict', () => {
 
   test('throws for non-array products', () => {
     expect(() => validateProductDict({ products: 'bad' })).toThrow(/products/);
+  });
+});
+
+// --- validateLearnings ---
+describe('validateLearnings', () => {
+  test('accepts valid learnings array', () => {
+    const valid = [{ product_id: 'x', naturalness_delta: 0.5 }];
+    expect(validateLearnings(valid)).toEqual(valid);
+  });
+
+  test('returns empty for non-array', () => {
+    expect(validateLearnings('bad')).toEqual([]);
+  });
+
+  test('filters entries without product_id', () => {
+    const input = [{ product_id: 'x' }, { no_id: true }];
+    expect(validateLearnings(input)).toHaveLength(1);
+  });
+
+  test('clamps delta values to [-2, 2]', () => {
+    const input = [{ product_id: 'x', naturalness_delta: 10, clarity_delta: -5 }];
+    const result = validateLearnings(input);
+    expect(result[0].naturalness_delta).toBe(2);
+    expect(result[0].clarity_delta).toBe(-2);
+  });
+});
+
+// --- formatProductLine (from run-pipeline) ---
+import { formatProductLine } from '../run-pipeline.js';
+
+describe('formatProductLine', () => {
+  test('shows link when provided', () => {
+    const line = formatProductLine('테스트', 3.5, '10000', 'https://link.coupang.com/xxx');
+    expect(line).toContain('링크: https://link.coupang.com/xxx');
+  });
+
+  test('omits link when not provided', () => {
+    const line = formatProductLine('테스트', 3.5, '10000');
+    expect(line).not.toContain('링크');
   });
 });

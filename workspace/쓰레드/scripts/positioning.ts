@@ -95,46 +95,57 @@ interface HookContext {
 export function generateHook(ctx: HookContext): string {
   const { format, productName, needCategory, problem } = ctx;
 
-  // 짧은 카테고리 라벨 (제품의 핵심 카테고리 키워드)
   const catLabel = needCategory;
-  // 제품명에서 핵심 키워드 추출 (첫 2-3 어절)
   const productShort = productName.split(' ').slice(0, 2).join(' ');
 
-  // deterministic: use product_id hash instead of Math.random for reproducibility
-  const hash = productName.charCodeAt(0) + productName.length;
-  const pick = hash % 2 === 0;
-
-  switch (format) {
-    case '문제공감형':
-      return pick
-        ? `${problem} 나만 그런 줄 알았는데`
-        : `이거 때문에 스트레스받다가 하나 찾았음`;
-
-    case '솔직후기형':
-      return pick
-        ? `${productShort} 한 달 써보고 솔직하게 말함`
-        : `광고 아니고 내 돈 주고 산 ${productShort} 후기`;
-
-    case '비교형':
-      return pick
-        ? `${productShort} 류 3개 다 써봤는데 1개만 남김`
-        : `${productShort} vs 비슷한 거 결론부터 말하면`;
-
-    case '입문추천형':
-      return pick
-        ? `${catLabel} 쪽 처음이면 이거 하나만 사봐`
-        : `주변에서 ${productShort} 추천 요청 올 때마다 이거 알려줌`;
-
-    case '실수방지형':
-      return pick
-        ? `${productShort} 사기 전에 이것만은 확인해`
-        : `이거 모르고 샀다가 돈 버릴 뻔했음`;
-
-    case '비추천형':
-      return pick
-        ? `솔직히 ${productShort} 종류 별로였던 것도 있음`
-        : `이 카테고리 3개 써봤는데 2개는 돈 버렸음`;
+  // 개선된 해시: 더 넓은 분포
+  let hash = 0;
+  for (let i = 0; i < productName.length; i++) {
+    hash = ((hash << 5) - hash + productName.charCodeAt(i)) | 0;
   }
+  hash = Math.abs(hash);
+
+  const templates: Record<PositionFormat, string[]> = {
+    '문제공감형': [
+      `${problem} 나만 그런 줄 알았는데`,
+      `이거 때문에 스트레스받다가 하나 찾았음`,
+      `${problem} 해결하려고 별짓 다 했는데`,
+      `솔직히 ${problem} 이제 좀 지침`,
+    ],
+    '솔직후기형': [
+      `${productShort} 한 달 써보고 솔직하게 말함`,
+      `광고 아니고 내 돈 주고 산 ${productShort} 후기`,
+      `${productShort} 2주 차 중간 점검`,
+      `3개월 째 ${productShort} 쓰는 사람으로서`,
+    ],
+    '비교형': [
+      `${productShort} 류 3개 다 써봤는데 1개만 남김`,
+      `${productShort} vs 비슷한 거 결론부터 말하면`,
+      `이 카테고리 다 써봤는데 돈 아까운 거 알려줌`,
+      `${productShort} 말고 다른 거 쓰다가 돌아옴`,
+    ],
+    '입문추천형': [
+      `${catLabel} 쪽 처음이면 이거 하나만 사봐`,
+      `주변에서 ${productShort} 추천 요청 올 때마다 이거 알려줌`,
+      `${catLabel} 입문용으로 이거 하나면 됨`,
+      `처음 시작하는 사람한테 매번 같은 거 추천함`,
+    ],
+    '실수방지형': [
+      `${productShort} 사기 전에 이것만은 확인해`,
+      `이거 모르고 샀다가 돈 버릴 뻔했음`,
+      `${productShort} 살 때 흔한 실수 3가지`,
+      `이거 먼저 봤으면 다른 거 안 샀을 듯`,
+    ],
+    '비추천형': [
+      `솔직히 ${productShort} 종류 별로였던 것도 있음`,
+      `이 카테고리 3개 써봤는데 2개는 돈 버렸음`,
+      `다른 사람들 추천은 추천이고 내 경험은 좀 달랐음`,
+      `${productShort} 류 중에 이건 진짜 별로`,
+    ],
+  };
+
+  const variants = templates[format];
+  return variants[hash % variants.length];
 }
 
 // --- 기본 avoid 리스트 ---

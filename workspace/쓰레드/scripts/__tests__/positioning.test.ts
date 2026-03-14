@@ -30,21 +30,19 @@ describe('generateHook', () => {
     expect(hook1).toBe(hook2);
   });
 
-  test('문제공감형 includes problem context', () => {
+  test('문제공감형 includes empathy pattern', () => {
     const hook = generateHook({ ...baseCtx, format: '문제공감형' });
-    // Should reference the problem or be empathy-based
-    expect(hook).toMatch(/나만|스트레스|찾았음/);
+    expect(hook).toMatch(/나만|스트레스|찾았음|별짓|지침/);
   });
 
   test('솔직후기형 includes product reference', () => {
     const hook = generateHook({ ...baseCtx, format: '솔직후기형' });
-    // Should reference product name (short form) or "써본"/"후기"
-    expect(hook).toMatch(/후기|써보고|돈 주고/);
+    expect(hook).toMatch(/후기|써보고|돈 주고|점검|째/);
   });
 
   test('비교형 includes comparison language', () => {
     const hook = generateHook({ ...baseCtx, format: '비교형' });
-    expect(hook).toMatch(/써봤는데|vs|남김|결론/);
+    expect(hook).toMatch(/써봤는데|vs|남김|결론|아까운|돌아옴/);
   });
 
   test('handles short product name gracefully', () => {
@@ -56,6 +54,15 @@ describe('generateHook', () => {
     });
     expect(hook).toBeTruthy();
     expect(hook.length).toBeGreaterThan(5);
+  });
+
+  test('generates at least 3 unique hooks per format across different products', () => {
+    const products = ['수면앱', '마그네슘 영양제', '허리 지지대', '타이머 앱 프리미엄', '무선 이어폰 프로', '소음 차단 귀마개'];
+    const format: PositionFormat = '솔직후기형';
+    const hooks = new Set(products.map(p =>
+      generateHook({ format, productName: p, needCategory: '불편해소', problem: 'test' })
+    ));
+    expect(hooks.size).toBeGreaterThanOrEqual(3);
   });
 });
 

@@ -338,15 +338,33 @@ export function validateProductDict(data: unknown): asserts data is { products: 
   if (!Array.isArray(d.products)) throw new Error('Product dict: missing or invalid "products" array');
 }
 
+// --- Learnings validation ---
+
+export function validateLearnings(data: unknown): LearningEntry[] {
+  if (!Array.isArray(data)) return [];
+  const deltaKeys = ['naturalness_delta', 'clarity_delta', 'ad_smell_delta', 'repeatability_delta', 'story_potential_delta'] as const;
+  return data
+    .filter((entry): entry is Record<string, unknown> =>
+      entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).product_id === 'string'
+    )
+    .map(entry => {
+      const result: LearningEntry = { product_id: entry.product_id as string };
+      for (const key of deltaKeys) {
+        const val = Number(entry[key]) || 0;
+        if (val !== 0) {
+          result[key] = clamp(val, -2, 2);
+        }
+      }
+      return result;
+    });
+}
+
 // --- Learnings loader ---
 
 export function loadLearnings(filePath: string): LearningEntry[] {
   try {
     const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const learnings = data.learnings || data || [];
-    if (Array.isArray(learnings)) return learnings;
-    console.warn(`Learnings: expected array, got ${typeof learnings}`);
-    return [];
+    return validateLearnings(data.learnings || data);
   } catch {
     console.warn(`Learnings not loaded from ${filePath} (optional)`);
     return [];
