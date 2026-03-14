@@ -16,6 +16,7 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import type { ResearchBrief, NeedsMap, ProductMatchOutput, PositioningOutput } from './types.js';
 
 const SCRIPTS_DIR = __dirname;
 const BRIEFS_DIR = path.join(__dirname, '..', 'data', 'briefs');
@@ -35,56 +36,6 @@ function run(cmd: string, label: string): boolean {
   }
 }
 
-interface ResearchData {
-  posts_analyzed: number;
-  purchase_signals: unknown[];
-  purchase_signals_non_affiliate?: unknown[];
-  top_keywords_consumer?: Array<{ keyword: string; count: number }>;
-  emerging_topics?: Array<{ keyword: string }>;
-  declining_topics?: Array<{ keyword: string }>;
-  engagement_summary: { views: { avg: number }; likes: { avg: number } };
-  meta: { taxonomy_version: string; schema_version: string };
-}
-
-interface NeedsData {
-  needs_map: Array<{
-    category: string;
-    problem: string;
-    post_count: number;
-    signal_strength: string | null;
-    representative_expressions: string[];
-  }>;
-}
-
-interface ProductsData {
-  matches: Array<{
-    need_id: string;
-    need_category: string;
-    need_problem: string;
-    products: Array<{
-      product_id: string;
-      name: string;
-      threads_score: { total: number };
-      price_range: string;
-      why: string;
-    }>;
-  }>;
-}
-
-interface PositioningData {
-  positioning_cards: Array<{
-    product_id: string;
-    product_name: string;
-    need_id: string;
-    positions: Array<{
-      format: string;
-      angle: string;
-      hook: string;
-      cta_style: string;
-    }>;
-  }>;
-}
-
 export function formatProductLine(name: string, total: number, priceRange: string, link?: string): string {
   const base = `${name} — 적합도 ${total.toFixed(1)}/5, ${priceRange}원`;
   return link ? `${base}\n   링크: ${link}` : base;
@@ -96,8 +47,8 @@ function generateBrief(today: string): void {
   const productsPath = path.join(BRIEFS_DIR, `${today}_products.json`);
   const positioningPath = path.join(BRIEFS_DIR, `${today}_positioning.json`);
 
-  let research: ResearchData;
-  let needs: NeedsData;
+  let research: ResearchBrief;
+  let needs: NeedsMap;
   try {
     research = JSON.parse(fs.readFileSync(researchPath, 'utf8'));
     needs = JSON.parse(fs.readFileSync(needsPath, 'utf8'));
@@ -110,8 +61,8 @@ function generateBrief(today: string): void {
   const productsLLMPath = path.join(BRIEFS_DIR, `${today}_products_llm.json`);
   const positioningLLMPath = path.join(BRIEFS_DIR, `${today}_positioning_llm.json`);
 
-  let products: ProductsData | null = null;
-  let positioning: PositioningData | null = null;
+  let products: ProductMatchOutput | null = null;
+  let positioning: PositioningOutput | null = null;
 
   try { products = JSON.parse(fs.readFileSync(productsLLMPath, 'utf8')); console.log('Using LLM-enhanced products'); }
   catch {
@@ -164,10 +115,11 @@ function generateBrief(today: string): void {
     }
   }
 
-  if (research.top_keywords_consumer && research.top_keywords_consumer.length > 0) {
+  const topKeywordsConsumer = (research as unknown as Record<string, unknown>).top_keywords_consumer as Array<{ keyword: string; count: number }> | undefined;
+  if (topKeywordsConsumer && topKeywordsConsumer.length > 0) {
     lines.push('\n■ 소비자 키워드 TOP 10 (비광고 포스트)');
     lines.push('─'.repeat(40));
-    const consumerKws = research.top_keywords_consumer.slice(0, 10);
+    const consumerKws = topKeywordsConsumer.slice(0, 10);
     lines.push(consumerKws.map(k => `${k.keyword}(${k.count})`).join(', '));
   }
 
@@ -215,8 +167,10 @@ function generateBrief(today: string): void {
   lines.push(`- 니즈 카테고리: ${needs.needs_map.length}개`);
   if (products) lines.push(`- 매칭 상품: ${products.matches.reduce((sum, m) => sum + m.products.length, 0)}개`);
   if (positioning) lines.push(`- 포지셔닝 카드: ${positioning.positioning_cards.length}개`);
-  lines.push(`- 참여도: 평균 조회 ${research.engagement_summary.views.avg}, 좋아요 ${research.engagement_summary.likes.avg}`);
-  lines.push(`- taxonomy: v${research.meta.taxonomy_version}, schema: v${research.meta.schema_version}`);
+  const engSummary = research.engagement_summary as { views?: { avg: number }; likes?: { avg: number } } | undefined;
+  lines.push(`- 참여도: 평균 조회 ${engSummary?.views?.avg ?? 'N/A'}, 좋아요 ${engSummary?.likes?.avg ?? 'N/A'}`);
+  const researchMeta = (research as unknown as Record<string, unknown>).meta as { taxonomy_version?: string; schema_version?: string } | undefined;
+  lines.push(`- taxonomy: v${researchMeta?.taxonomy_version ?? 'N/A'}, schema: v${researchMeta?.schema_version ?? 'N/A'}`);
 
   const briefText = lines.join('\n');
 
