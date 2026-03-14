@@ -314,3 +314,56 @@ export interface LearningEntry {
   repeatability_delta?: number;
   story_potential_delta?: number;
 }
+
+// --- P3: Content Generation ---
+
+export interface ContentDraft {
+  product_id: string;
+  product_name: string;
+  need_id: string;
+  format: PositionFormat;
+  hook: string;            // 대표 훅 (positions[0].hook)
+  bodies: string[];        // 3개 본문 변형
+  hooks: string[];         // 5개 훅 변형
+  self_comments: string[]; // 2개 자기 댓글
+}
+
+export interface ContentDraftOutput {
+  date: string;
+  drafts: ContentDraft[];
+  meta: {
+    positioning_version: string;
+    drafts_generated: number;
+    generated_at: string;
+  };
+}
+
+// --- P3: Performance Analysis ---
+
+export type TimeSlot = '새벽' | '오전' | '오후' | '밤';
+
+export interface PerformanceMetrics {
+  avg_views: number | null;
+  avg_likes: number;
+  avg_replies: number;
+  post_count: number;
+}
+
+export interface AnalysisReport {
+  date: string;
+  format_performance: Record<string, PerformanceMetrics>;
+  time_performance: Record<TimeSlot, PerformanceMetrics>;
+  top_performing_posts: Array<{
+    post_id: string;
+    channel_id: string;
+    views: number | null;
+    likes: number;
+    tag: string;
+  }>;
+  learning_deltas: LearningEntry[];
+  meta: {
+    posts_analyzed: number;
+    date_range: { from: string; to: string };
+    generated_at: string;
+  };
+}
