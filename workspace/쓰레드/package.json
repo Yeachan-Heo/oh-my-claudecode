@@ -11,6 +11,8 @@
     "needs": "tsx scripts/needs-detector.ts",
     "products": "tsx scripts/product-matcher.ts",
     "positioning": "tsx scripts/positioning.ts",
+    "content": "tsx scripts/content-generator.ts",
+    "analyze": "tsx scripts/performance-analyzer.ts",
     "pipeline": "tsx scripts/run-pipeline.ts --brief",
     "pipeline:p1": "tsx scripts/run-pipeline.ts --brief --needs-only",
     "pipeline:prompt": "tsx scripts/run-pipeline.ts --brief --prompt",

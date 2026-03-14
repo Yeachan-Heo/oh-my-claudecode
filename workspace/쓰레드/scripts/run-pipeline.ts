@@ -1,14 +1,16 @@
 #!/usr/bin/env tsx
 /**
- * run-pipeline.ts — P2 오케스트레이터
+ * run-pipeline.ts — P3 오케스트레이터
  *
  * 전체 분석 파이프라인을 순차 실행:
  *   normalize → researcher → needs-detector → product-matcher → positioning
+ *   → content-generator → performance-analyzer
  *
  * Usage:
- *   tsx scripts/run-pipeline.ts                  # 전체 파이프라인 (P2: 상품+포지셔닝 포함)
+ *   tsx scripts/run-pipeline.ts                  # 전체 파이프라인 (P3: 콘텐츠+분석 포함)
  *   tsx scripts/run-pipeline.ts --research-only  # normalize + researcher만
  *   tsx scripts/run-pipeline.ts --needs-only     # normalize + researcher + needs만 (P1)
+ *   tsx scripts/run-pipeline.ts --content-only   # Steps 1-6 (콘텐츠 생성까지)
  *   tsx scripts/run-pipeline.ts --prompt         # LLM 프롬프트도 생성
  *   tsx scripts/run-pipeline.ts --brief          # 사람 읽기용 브리핑 출력
  */
@@ -16,7 +18,7 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import type { ResearchBrief, NeedsMap, ProductMatchOutput, PositioningOutput } from './types.js';
+import type { ResearchBrief, NeedsMap, ProductMatchOutput, PositioningOutput, ContentDraftOutput } from './types.js';
 
 const SCRIPTS_DIR = __dirname;
 const BRIEFS_DIR = path.join(__dirname, '..', 'data', 'briefs');
@@ -160,6 +162,22 @@ function generateBrief(today: string): void {
     }
   }
 
+  // P3: 콘텐츠 초안 미리보기
+  const contentDraftsPath = path.join(BRIEFS_DIR, `${today}_content_drafts.json`);
+  let contentDrafts: ContentDraftOutput | null = null;
+  try { contentDrafts = JSON.parse(fs.readFileSync(contentDraftsPath, 'utf8')); }
+  catch { /* 콘텐츠 초안 미생성 시 무시 */ }
+
+  if (contentDrafts && contentDrafts.drafts.length > 0) {
+    lines.push('\n■ 콘텐츠 초안 미리보기');
+    lines.push('─'.repeat(40));
+    for (const draft of contentDrafts.drafts.slice(0, 3)) {
+      lines.push(`[${draft.product_name}] ${draft.format}`);
+      lines.push(`  훅: "${draft.hook}"`);
+      lines.push(`  초안: "${draft.bodies[0].split('\n')[0]}..."`);
+    }
+  }
+
   lines.push('\n■ 메타');
   lines.push('─'.repeat(40));
   lines.push(`- 분석 포스트: ${research.posts_analyzed}개`);
@@ -187,6 +205,7 @@ function main(): void {
   const args = process.argv.slice(2);
   const researchOnly = args.includes('--research-only');
   const needsOnly = args.includes('--needs-only');
+  const contentOnly = args.includes('--content-only');
   const withPrompt = args.includes('--prompt');
   const withBrief = args.includes('--brief');
 
@@ -242,6 +261,26 @@ function main(): void {
   );
   if (!ok5) { process.exit(1); }
 
+  // Step 6: Content Generator (P3)
+  const ok6 = run(
+    `npx tsx ${path.join(SCRIPTS_DIR, 'content-generator.ts')}${promptFlag}`,
+    'Step 6: content-generator (positioning → content drafts)'
+  );
+  if (!ok6) { process.exit(1); }
+
+  if (contentOnly) {
+    console.log('\n--content-only: stopping after content generator.');
+    if (withBrief) generateBrief(today);
+    process.exit(0);
+  }
+
+  // Step 7: Performance Analyzer (P3)
+  const ok7 = run(
+    `npx tsx ${path.join(SCRIPTS_DIR, 'performance-analyzer.ts')}`,
+    'Step 7: performance-analyzer (posts → analysis + learning)'
+  );
+  if (!ok7) { process.exit(1); }
+
   if (withBrief) {
     generateBrief(today);
   }
@@ -253,12 +292,15 @@ function main(): void {
   console.log(`  Needs:     data/briefs/${today}_needs.json`);
   console.log(`  Products:  data/briefs/${today}_products.json`);
   console.log(`  Positions: data/briefs/${today}_positioning.json`);
+  console.log(`  Content:   data/briefs/${today}_content_drafts.json`);
+  console.log(`  Analysis:  data/briefs/${today}_analysis_report.json`);
   if (withBrief) console.log(`  Brief:     data/briefs/${today}_brief.md`);
   if (withPrompt) {
     console.log(`  Prompts:   data/briefs/${today}_researcher_prompt.txt`);
     console.log(`             data/briefs/${today}_needs_prompt.txt`);
     console.log(`             data/briefs/${today}_products_prompt.txt`);
     console.log(`             data/briefs/${today}_positioning_prompt.txt`);
+    console.log(`             data/briefs/${today}_content_prompt.txt`);
   }
 }
 
