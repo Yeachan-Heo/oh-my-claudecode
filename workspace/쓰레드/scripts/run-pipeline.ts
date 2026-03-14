@@ -106,12 +106,23 @@ function generateBrief(today: string): void {
     return;
   }
 
+  // *_llm.json 우선 로드, 없으면 일반 파일 fallback
+  const productsLLMPath = path.join(BRIEFS_DIR, `${today}_products_llm.json`);
+  const positioningLLMPath = path.join(BRIEFS_DIR, `${today}_positioning_llm.json`);
+
   let products: ProductsData | null = null;
   let positioning: PositioningData | null = null;
-  try { products = JSON.parse(fs.readFileSync(productsPath, 'utf8')); }
-  catch { console.warn(`Products data not available: ${productsPath}`); }
-  try { positioning = JSON.parse(fs.readFileSync(positioningPath, 'utf8')); }
-  catch { console.warn(`Positioning data not available: ${positioningPath}`); }
+
+  try { products = JSON.parse(fs.readFileSync(productsLLMPath, 'utf8')); console.log('Using LLM-enhanced products'); }
+  catch {
+    try { products = JSON.parse(fs.readFileSync(productsPath, 'utf8')); }
+    catch { console.warn(`Products data not available: ${productsPath}`); }
+  }
+  try { positioning = JSON.parse(fs.readFileSync(positioningLLMPath, 'utf8')); console.log('Using LLM-enhanced positioning'); }
+  catch {
+    try { positioning = JSON.parse(fs.readFileSync(positioningPath, 'utf8')); }
+    catch { console.warn(`Positioning data not available: ${positioningPath}`); }
+  }
 
   const lines: string[] = [];
   const hasP2 = products && positioning;
