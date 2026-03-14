@@ -129,6 +129,18 @@ describe('countKeywordMatches', () => {
     const product = makeProduct(['수면']);
     expect(countKeywordMatches(product, [])).toBe(0);
   });
+
+  test('does not false-positive on short expr prefix', () => {
+    const product = makeProduct(['영양']);
+    const expressions = ['수면이 안 와서 힘들다'];
+    expect(countKeywordMatches(product, expressions)).toBe(0);
+  });
+
+  test('matches keyword contained in expression', () => {
+    const product = makeProduct(['수면']);
+    const expressions = ['수면이 안 와서 힘들다'];
+    expect(countKeywordMatches(product, expressions)).toBe(1);
+  });
 });
 
 // --- scoreThreadsFitness ---

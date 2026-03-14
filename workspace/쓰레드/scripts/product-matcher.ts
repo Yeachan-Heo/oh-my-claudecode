@@ -139,9 +139,10 @@ export function countKeywordMatches(product: ProductEntry, expressions: string[]
   const lowerExprs = expressions.map(e => e.toLowerCase());
   let count = 0;
   for (const kw of product.keywords) {
+    if (kw.length < 2) continue; // 1글자 키워드 무시
     const kwLower = kw.toLowerCase();
     for (const expr of lowerExprs) {
-      if (expr.includes(kwLower) || kwLower.includes(expr.slice(0, 4))) {
+      if (expr.includes(kwLower)) {
         count++;
         break;
       }
