@@ -188,6 +188,87 @@ export interface EvalSet {
   posts: EvalPost[];
 }
 
+// --- P2: Product matching ---
+
+export type AffiliatePlatform = 'coupang_partners' | 'naver_smartstore' | 'ali_express' | 'other';
+
+export interface ThreadsScore {
+  naturalness: number;   // 1-5: Threads 소개 자연스러움
+  clarity: number;       // 1-5: 문제 해결 명확성
+  ad_smell: number;      // 1-5: 광고 냄새 안 남 (높을수록 자연스러움)
+  repeatability: number; // 1-5: 반복 노출 가능성
+  story_potential: number; // 1-5: 후기/스토리 가능성
+  total: number;         // 가중평균
+}
+
+export interface ProductEntry {
+  product_id: string;
+  name: string;
+  category: string;
+  needs_categories: NeedsCategory[];
+  keywords: string[];
+  affiliate_platform: AffiliatePlatform;
+  price_range: string;
+  description: string;
+}
+
+export interface ProductMatch {
+  product_id: string;
+  name: string;
+  affiliate_platform: AffiliatePlatform;
+  price_range: string;
+  threads_score: ThreadsScore;
+  competition: '상' | '중' | '하';
+  priority: number;
+  why: string;
+}
+
+export interface ProductMatchOutput {
+  date: string;
+  matches: Array<{
+    need_id: string;
+    need_category: NeedsCategory;
+    need_problem: string;
+    products: ProductMatch[];
+  }>;
+  meta: {
+    product_dict_version: string;
+    needs_input_count: number;
+    products_matched: number;
+    generated_at: string;
+  };
+}
+
+// --- P2: Positioning ---
+
+export type PositionFormat = '문제공감형' | '솔직후기형' | '비교형' | '입문추천형' | '실수방지형' | '비추천형';
+
+export interface PositionVariant {
+  format: PositionFormat;
+  angle: string;
+  tone: string;
+  hook: string;
+  avoid: string[];
+  cta_style: string;
+}
+
+export interface PositioningCard {
+  product_id: string;
+  product_name: string;
+  need_id: string;
+  positions: PositionVariant[];
+}
+
+export interface PositioningOutput {
+  date: string;
+  positioning_cards: PositioningCard[];
+  meta: {
+    products_input: number;
+    cards_generated: number;
+    generated_at: string;
+  };
+}
+
 // --- Raw data (from collect-posts.js) ---
 
 export interface RawThreadUnit {

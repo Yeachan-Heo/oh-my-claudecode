@@ -1,13 +1,14 @@
 #!/usr/bin/env tsx
 /**
- * run-pipeline.ts — P1 오케스트레이터
+ * run-pipeline.ts — P2 오케스트레이터
  *
  * 전체 분석 파이프라인을 순차 실행:
- *   normalize → researcher → needs-detector
+ *   normalize → researcher → needs-detector → product-matcher → positioning
  *
  * Usage:
- *   tsx scripts/run-pipeline.ts                  # 전체 파이프라인
+ *   tsx scripts/run-pipeline.ts                  # 전체 파이프라인 (P2: 상품+포지셔닝 포함)
  *   tsx scripts/run-pipeline.ts --research-only  # normalize + researcher만
+ *   tsx scripts/run-pipeline.ts --needs-only     # normalize + researcher + needs만 (P1)
  *   tsx scripts/run-pipeline.ts --prompt         # LLM 프롬프트도 생성
  *   tsx scripts/run-pipeline.ts --brief          # 사람 읽기용 브리핑 출력
  */
@@ -55,9 +56,40 @@ interface NeedsData {
   }>;
 }
 
+interface ProductsData {
+  matches: Array<{
+    need_id: string;
+    need_category: string;
+    need_problem: string;
+    products: Array<{
+      product_id: string;
+      name: string;
+      threads_score: { total: number };
+      price_range: string;
+      why: string;
+    }>;
+  }>;
+}
+
+interface PositioningData {
+  positioning_cards: Array<{
+    product_id: string;
+    product_name: string;
+    need_id: string;
+    positions: Array<{
+      format: string;
+      angle: string;
+      hook: string;
+      cta_style: string;
+    }>;
+  }>;
+}
+
 function generateBrief(today: string): void {
   const researchPath = path.join(BRIEFS_DIR, `${today}_research.json`);
   const needsPath = path.join(BRIEFS_DIR, `${today}_needs.json`);
+  const productsPath = path.join(BRIEFS_DIR, `${today}_products.json`);
+  const positioningPath = path.join(BRIEFS_DIR, `${today}_positioning.json`);
 
   let research: ResearchData;
   let needs: NeedsData;
@@ -69,8 +101,14 @@ function generateBrief(today: string): void {
     return;
   }
 
+  let products: ProductsData | null = null;
+  let positioning: PositioningData | null = null;
+  try { products = JSON.parse(fs.readFileSync(productsPath, 'utf8')); } catch { /* P2 data optional */ }
+  try { positioning = JSON.parse(fs.readFileSync(positioningPath, 'utf8')); } catch { /* P2 data optional */ }
+
   const lines: string[] = [];
-  lines.push(`[${today} 니즈 브리핑]\n`);
+  const hasP2 = products && positioning;
+  lines.push(`[${today} ${hasP2 ? 'Threads 마케팅 브리핑' : '니즈 브리핑'}]\n`);
 
   lines.push('■ 오늘 뜨는 문제 TOP 5');
   lines.push('─'.repeat(40));
@@ -122,11 +160,43 @@ function generateBrief(today: string): void {
   if (emerging.length) lines.push(`  뜨는: ${emerging.map(t => t.keyword).join(', ')}`);
   if (declining.length) lines.push(`  지는: ${declining.map(t => t.keyword).join(', ')}`);
 
+  // P2: 추천 상품 + 포지셔닝
+  if (products && products.matches.length > 0) {
+    lines.push('\n■ 추천 상품 TOP 3');
+    lines.push('─'.repeat(40));
+    let rank = 0;
+    for (const match of products.matches) {
+      for (const prod of match.products.slice(0, 1)) {
+        rank++;
+        if (rank > 3) break;
+        const card = positioning?.positioning_cards.find(c => c.product_id === prod.product_id);
+        const hook = card?.positions[0]?.hook || '';
+        lines.push(`${rank}. ${prod.name} — 적합도 ${prod.threads_score.total.toFixed(1)}/5, ${prod.price_range}원`);
+        if (hook) lines.push(`   → "${hook}"`);
+        lines.push(`   이유: ${prod.why}`);
+      }
+      if (rank >= 3) break;
+    }
+  }
+
+  if (positioning && positioning.positioning_cards.length > 0) {
+    lines.push('\n■ 포지셔닝 카드 미리보기');
+    lines.push('─'.repeat(40));
+    for (const card of positioning.positioning_cards.slice(0, 3)) {
+      lines.push(`[${card.product_name}]`);
+      for (const pos of card.positions.slice(0, 2)) {
+        lines.push(`  ${pos.format}: "${pos.hook}"`);
+      }
+    }
+  }
+
   lines.push('\n■ 메타');
   lines.push('─'.repeat(40));
   lines.push(`- 분석 포스트: ${research.posts_analyzed}개`);
   lines.push(`- 구매신호: ${research.purchase_signals.length}건 (비광고: ${nonAffSignals.length}건)`);
   lines.push(`- 니즈 카테고리: ${needs.needs_map.length}개`);
+  if (products) lines.push(`- 매칭 상품: ${products.matches.reduce((sum, m) => sum + m.products.length, 0)}개`);
+  if (positioning) lines.push(`- 포지셔닝 카드: ${positioning.positioning_cards.length}개`);
   lines.push(`- 참여도: 평균 조회 ${research.engagement_summary.views.avg}, 좋아요 ${research.engagement_summary.likes.avg}`);
   lines.push(`- taxonomy: v${research.meta.taxonomy_version}, schema: v${research.meta.schema_version}`);
 
@@ -144,6 +214,7 @@ function generateBrief(today: string): void {
 function main(): void {
   const args = process.argv.slice(2);
   const researchOnly = args.includes('--research-only');
+  const needsOnly = args.includes('--needs-only');
   const withPrompt = args.includes('--prompt');
   const withBrief = args.includes('--brief');
 
@@ -179,6 +250,26 @@ function main(): void {
   );
   if (!ok3) { process.exit(1); }
 
+  if (needsOnly) {
+    console.log('\n--needs-only: stopping after needs detector (P1 pipeline).');
+    if (withBrief) generateBrief(today);
+    process.exit(0);
+  }
+
+  // Step 4: Product matcher (P2)
+  const ok4 = run(
+    `npx tsx ${path.join(SCRIPTS_DIR, 'product-matcher.ts')}${promptFlag}`,
+    'Step 4: product-matcher (needs → product matches)'
+  );
+  if (!ok4) { process.exit(1); }
+
+  // Step 5: Positioning (P2)
+  const ok5 = run(
+    `npx tsx ${path.join(SCRIPTS_DIR, 'positioning.ts')}${promptFlag}`,
+    'Step 5: positioning (products → selling angles)'
+  );
+  if (!ok5) { process.exit(1); }
+
   if (withBrief) {
     generateBrief(today);
   }
@@ -188,10 +279,14 @@ function main(): void {
   console.log(`  Canonical: data/canonical/posts.json`);
   console.log(`  Research:  data/briefs/${today}_research.json`);
   console.log(`  Needs:     data/briefs/${today}_needs.json`);
+  console.log(`  Products:  data/briefs/${today}_products.json`);
+  console.log(`  Positions: data/briefs/${today}_positioning.json`);
   if (withBrief) console.log(`  Brief:     data/briefs/${today}_brief.md`);
   if (withPrompt) {
     console.log(`  Prompts:   data/briefs/${today}_researcher_prompt.txt`);
     console.log(`             data/briefs/${today}_needs_prompt.txt`);
+    console.log(`             data/briefs/${today}_products_prompt.txt`);
+    console.log(`             data/briefs/${today}_positioning_prompt.txt`);
   }
 }
 

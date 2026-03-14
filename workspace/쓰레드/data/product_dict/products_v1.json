@@ -1,0 +1,507 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-03-14",
+  "total_products": 50,
+  "products": [
+    {
+      "product_id": "magnesium_supplement_001",
+      "name": "마그네슘 글리시네이트 고함량",
+      "category": "건강식품",
+      "needs_categories": ["불편해소", "성과향상"],
+      "keywords": ["마그네슘", "수면개선", "근육경련", "다리떨림", "스트레스", "마그네슘 효능"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~28000",
+      "description": "수면 질 개선과 근육 이완에 도움을 주는 고함량 마그네슘 보충제"
+    },
+    {
+      "product_id": "probiotics_daily_001",
+      "name": "장건강 유산균 프로바이오틱스",
+      "category": "건강식품",
+      "needs_categories": ["불편해소", "외모건강"],
+      "keywords": ["유산균", "장건강", "변비해소", "프로바이오틱스", "소화불량", "배불음"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~35000",
+      "description": "100억 마리 유산균으로 장 건강을 개선하고 소화를 돕는 데일리 프로바이오틱스"
+    },
+    {
+      "product_id": "vitamin_d3_001",
+      "name": "비타민D3 + K2 조합 보충제",
+      "category": "건강식품",
+      "needs_categories": ["성과향상", "외모건강"],
+      "keywords": ["비타민D", "비타민D3", "면역력", "뼈건강", "칼슘흡수", "햇빛부족"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~22000",
+      "description": "실내 생활로 부족하기 쉬운 비타민D와 뼈 건강을 위한 K2를 함께 섭취하는 보충제"
+    },
+    {
+      "product_id": "collagen_powder_001",
+      "name": "저분자 콜라겐 펩타이드 분말",
+      "category": "건강식품",
+      "needs_categories": ["외모건강"],
+      "keywords": ["콜라겐", "피부탄력", "주름개선", "저분자콜라겐", "피부보충제", "피부영양"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "20000~40000",
+      "description": "흡수율 높은 저분자 콜라겐 펩타이드로 피부 탄력과 관절 건강을 동시에 케어"
+    },
+    {
+      "product_id": "eye_drop_dry_001",
+      "name": "인공눈물 히알루론산 안약",
+      "category": "건강식품",
+      "needs_categories": ["불편해소"],
+      "keywords": ["인공눈물", "안구건조증", "눈충혈", "건조한눈", "컴퓨터눈피로", "히알루론산안약"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~15000",
+      "description": "장시간 화면 사용으로 건조해진 눈을 빠르게 촉촉하게 해주는 인공눈물"
+    },
+    {
+      "product_id": "protein_powder_whey_001",
+      "name": "WPI 분리유청단백질 파우더",
+      "category": "건강식품",
+      "needs_categories": ["성과향상", "외모건강"],
+      "keywords": ["프로틴", "단백질파우더", "헬스보충제", "유청단백질", "WPI", "근성장"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "35000~65000",
+      "description": "운동 효과를 극대화하는 고순도 WPI 분리유청 단백질, 초코·바닐라·딸기 맛"
+    },
+    {
+      "product_id": "retinol_serum_001",
+      "name": "레티놀 안티에이징 세럼",
+      "category": "뷰티",
+      "needs_categories": ["외모건강"],
+      "keywords": ["레티놀", "주름세럼", "안티에이징", "피부재생", "노화방지크림", "레티놀세럼"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~45000",
+      "description": "피부 재생을 촉진하고 잔주름을 개선하는 레티놀 고농도 세럼"
+    },
+    {
+      "product_id": "sunscreen_daily_001",
+      "name": "논코메도제닉 데일리 선크림 SPF50+",
+      "category": "뷰티",
+      "needs_categories": ["외모건강", "불편해소"],
+      "keywords": ["선크림", "자외선차단", "SPF50", "논코메도제닉", "가벼운선크림", "데일리선크림"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~25000",
+      "description": "끈적임 없이 가볍게 발리는 SPF50+ 선크림, 모공 막힘 없는 논코메도제닉 포뮬러"
+    },
+    {
+      "product_id": "hair_treatment_001",
+      "name": "케라틴 손상모 트리트먼트",
+      "category": "뷰티",
+      "needs_categories": ["외모건강", "불편해소"],
+      "keywords": ["트리트먼트", "손상모", "케라틴", "머리카락영양", "탈색후관리", "헤어팩"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "10000~22000",
+      "description": "탈색·펌 후 손상된 모발을 빠르게 복구하는 케라틴 집중 트리트먼트"
+    },
+    {
+      "product_id": "cushion_foundation_001",
+      "name": "세미매트 쿠션 파운데이션",
+      "category": "뷰티",
+      "needs_categories": ["외모건강", "자기표현"],
+      "keywords": ["쿠션", "파운데이션", "세미매트", "지속력좋은쿠션", "화장오래가는", "커버력"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~30000",
+      "description": "촉촉하게 밀착되면서 번들거리지 않는 세미매트 쿠션, 여름철 지속력 우수"
+    },
+    {
+      "product_id": "lip_balm_tinted_001",
+      "name": "촉촉 틴티드 립밤",
+      "category": "뷰티",
+      "needs_categories": ["외모건강", "자기표현"],
+      "keywords": ["립밤", "틴트립밤", "입술보습", "촉촉립밤", "자연스러운립", "민낯립"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "5000~12000",
+      "description": "입술에 자연스러운 컬러와 보습을 동시에 주는 틴티드 립밤"
+    },
+    {
+      "product_id": "robot_vacuum_001",
+      "name": "로봇청소기 자동 충전·복귀",
+      "category": "생활용품",
+      "needs_categories": ["시간절약", "불편해소"],
+      "keywords": ["로봇청소기", "자동청소", "시간절약청소", "로봇진공청소기", "청소편리", "집안일줄이기"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "89000~250000",
+      "description": "자동 충전·복귀 기능으로 청소 걱정을 덜어주는 스마트 로봇청소기"
+    },
+    {
+      "product_id": "air_purifier_small_001",
+      "name": "소형 공기청정기 헤파필터",
+      "category": "생활용품",
+      "needs_categories": ["불편해소", "외모건강"],
+      "keywords": ["공기청정기", "미세먼지", "헤파필터", "소형공기청정기", "실내공기", "알레르기"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "45000~120000",
+      "description": "방 한 칸에 딱 맞는 소형 공기청정기, H13 헤파필터로 초미세먼지·꽃가루 제거"
+    },
+    {
+      "product_id": "portable_fan_usb_001",
+      "name": "USB 탁상 무소음 선풍기",
+      "category": "생활용품",
+      "needs_categories": ["불편해소", "시간절약"],
+      "keywords": ["탁상선풍기", "USB선풍기", "무소음선풍기", "사무실선풍기", "여름용품", "소형선풍기"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~28000",
+      "description": "사무실·책상에서 조용하게 사용하는 USB 탁상 무소음 선풍기"
+    },
+    {
+      "product_id": "laundry_strip_001",
+      "name": "세탁 시트 스트립 친환경",
+      "category": "생활용품",
+      "needs_categories": ["돈절약", "시간절약"],
+      "keywords": ["세탁시트", "세탁스트립", "친환경세제", "무게없는세제", "여행세탁", "미니멀세탁"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~20000",
+      "description": "낱장으로 쏙 넣는 친환경 세탁 시트, 부피 없고 세탁기·손빨래 모두 사용 가능"
+    },
+    {
+      "product_id": "storage_vacuum_bag_001",
+      "name": "압축 진공 이불 보관 파우치",
+      "category": "생활용품",
+      "needs_categories": ["시간절약", "불편해소"],
+      "keywords": ["압축팩", "진공압축백", "이불보관", "옷압축", "계절이불", "수납정리"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~18000",
+      "description": "부피 큰 이불·겨울옷을 진공 압축으로 1/3 크기로 줄여 보관하는 파우치"
+    },
+    {
+      "product_id": "air_fryer_mini_001",
+      "name": "미니 에어프라이어 2L",
+      "category": "주방용품",
+      "needs_categories": ["시간절약", "외모건강"],
+      "keywords": ["에어프라이어", "미니에어프라이어", "1인가구에어프라이어", "기름없이굽기", "간편요리", "다이어트요리"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "35000~65000",
+      "description": "1-2인 가구에 딱 맞는 2L 미니 에어프라이어, 기름 없이 바삭하게"
+    },
+    {
+      "product_id": "blender_personal_001",
+      "name": "개인용 무선 블렌더 쉐이커",
+      "category": "주방용품",
+      "needs_categories": ["시간절약", "외모건강"],
+      "keywords": ["블렌더", "개인블렌더", "스무디블렌더", "무선블렌더", "단백질쉐이크", "과일갈기"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "22000~45000",
+      "description": "출근 전 30초 만에 스무디 완성, 텀블러 겸용 무선 개인 블렌더"
+    },
+    {
+      "product_id": "meal_prep_container_001",
+      "name": "밀프렙 유리 반찬통 세트",
+      "category": "주방용품",
+      "needs_categories": ["시간절약", "돈절약"],
+      "keywords": ["밀프렙", "유리반찬통", "식단관리", "도시락용기", "냉동보관", "meal prep"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~35000",
+      "description": "주말 밀프렙으로 한 주 식비 절약, 전자레인지 사용 가능한 유리 반찬통 세트"
+    },
+    {
+      "product_id": "electric_kettle_fast_001",
+      "name": "1분 속성 전기 주전자",
+      "category": "주방용품",
+      "needs_categories": ["시간절약"],
+      "keywords": ["전기주전자", "속성보온주전자", "빠른보온", "커피물끓이기", "1분주전자", "온도조절주전자"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "25000~55000",
+      "description": "1분 만에 끓는 빠른 전기 주전자, 온도 조절 기능으로 녹차·커피 맞춤 온도"
+    },
+    {
+      "product_id": "diet_meal_replacement_001",
+      "name": "고단백 식사 대용 쉐이크",
+      "category": "다이어트",
+      "needs_categories": ["돈절약", "시간절약", "외모건강"],
+      "keywords": ["다이어트쉐이크", "식사대용", "단백질쉐이크", "체중감량", "포만감", "식단조절"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "20000~45000",
+      "description": "한 끼를 건강하게 대체하는 고단백 저칼로리 식사 대용 쉐이크"
+    },
+    {
+      "product_id": "intermittent_fasting_app_001",
+      "name": "저당 곤약 젤리 간식",
+      "category": "다이어트",
+      "needs_categories": ["불편해소", "외모건강"],
+      "keywords": ["곤약젤리", "저당간식", "다이어트간식", "폭식방지", "야식대체", "칼로리낮은간식"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~16000",
+      "description": "야식 욕구를 저칼로리로 해결하는 곤약 젤리, 당 걱정 없는 간식"
+    },
+    {
+      "product_id": "garcinia_supplement_001",
+      "name": "가르시니아 HCA 다이어트 보조제",
+      "category": "다이어트",
+      "needs_categories": ["외모건강", "불편해소"],
+      "keywords": ["가르시니아", "다이어트보조제", "지방분해", "식욕억제", "HCA", "체지방감소"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~30000",
+      "description": "지방 합성 억제와 식욕 조절을 돕는 가르시니아 HCA 고함량 보조제"
+    },
+    {
+      "product_id": "waist_trainer_001",
+      "name": "발열 복대 코어 압박 허리트레이너",
+      "category": "다이어트",
+      "needs_categories": ["외모건강", "성과향상"],
+      "keywords": ["복대", "허리트레이너", "코어운동", "발열복대", "뱃살관리", "허리슬리밍"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~28000",
+      "description": "운동 중 코어를 지지하고 발열 효과로 뱃살 관리를 돕는 압박 허리 트레이너"
+    },
+    {
+      "product_id": "resistance_band_set_001",
+      "name": "루프 저항 밴드 5단계 세트",
+      "category": "운동",
+      "needs_categories": ["성과향상", "돈절약"],
+      "keywords": ["저항밴드", "운동밴드", "탄성밴드", "홈트밴드", "힙업밴드", "근력운동"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~18000",
+      "description": "헬스장 없이 집에서 전신 운동 가능한 5단계 저항 밴드 세트"
+    },
+    {
+      "product_id": "yoga_mat_thick_001",
+      "name": "6mm 고밀도 TPE 요가매트",
+      "category": "운동",
+      "needs_categories": ["성과향상", "불편해소"],
+      "keywords": ["요가매트", "TPE매트", "홈트매트", "두꺼운요가매트", "필라테스매트", "미끄럼방지"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~40000",
+      "description": "무릎 보호에 탁월한 6mm 고밀도 TPE 요가매트, 미끄럼 방지로 안전한 홈트"
+    },
+    {
+      "product_id": "massage_gun_mini_001",
+      "name": "미니 퍼커션 마사지건",
+      "category": "운동",
+      "needs_categories": ["불편해소", "성과향상"],
+      "keywords": ["마사지건", "근육이완", "퍼커션마사지", "운동후회복", "휴대용마사지", "근막이완"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "28000~65000",
+      "description": "운동 후 근육 회복을 빠르게 돕는 휴대용 미니 퍼커션 마사지건"
+    },
+    {
+      "product_id": "jump_rope_smart_001",
+      "name": "줄 없는 스마트 줄넘기",
+      "category": "운동",
+      "needs_categories": ["성과향상", "시간절약"],
+      "keywords": ["줄넘기", "에어줄넘기", "스마트줄넘기", "실내줄넘기", "유산소운동", "칼로리소모"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~25000",
+      "description": "좁은 공간에서도 유산소 운동이 가능한 줄 없는 스마트 줄넘기, 횟수 자동 카운트"
+    },
+    {
+      "product_id": "foam_roller_001",
+      "name": "근막 이완 폼롤러",
+      "category": "운동",
+      "needs_categories": ["불편해소", "성과향상"],
+      "keywords": ["폼롤러", "근막이완", "스트레칭", "허리통증완화", "운동회복", "근육이완"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~28000",
+      "description": "뭉친 근육과 근막을 효과적으로 이완시키는 울퉁불퉁 그리드 폼롤러"
+    },
+    {
+      "product_id": "led_mood_lamp_001",
+      "name": "무드등 LED 수면 조명",
+      "category": "인테리어",
+      "needs_categories": ["불편해소", "자기표현"],
+      "keywords": ["무드등", "수면등", "LED조명", "인테리어조명", "취침등", "감성조명"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~35000",
+      "description": "공간 분위기를 바꿔주는 색상 변환 LED 무드등, 수면 유도 타이머 기능 포함"
+    },
+    {
+      "product_id": "aromatherapy_diffuser_001",
+      "name": "초음파 아로마 디퓨저",
+      "category": "인테리어",
+      "needs_categories": ["불편해소", "자기표현"],
+      "keywords": ["디퓨저", "아로마디퓨저", "향기디퓨저", "수면향", "집향기", "초음파가습"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~35000",
+      "description": "은은한 향과 습도를 동시에 조절하는 초음파 아로마 디퓨저"
+    },
+    {
+      "product_id": "wall_shelf_floating_001",
+      "name": "원목 플로팅 선반 벽걸이",
+      "category": "인테리어",
+      "needs_categories": ["자기표현", "불편해소"],
+      "keywords": ["플로팅선반", "벽선반", "원목선반", "인테리어선반", "소품진열", "수납선반"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~45000",
+      "description": "드릴 없이 설치 가능한 원목 플로팅 선반, 소품·책 진열로 방 분위기 업그레이드"
+    },
+    {
+      "product_id": "photo_print_service_001",
+      "name": "인화 폴라로이드 스티커 사진",
+      "category": "인테리어",
+      "needs_categories": ["자기표현"],
+      "keywords": ["폴라로이드", "사진인화", "스티커사진", "포토월", "추억사진", "룸데코"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "5000~15000",
+      "description": "스마트폰 사진을 폴라로이드 스티커로 인화, 포토월 꾸미기에 딱"
+    },
+    {
+      "product_id": "wireless_earbuds_budget_001",
+      "name": "무선 이어폰 블루투스 5.3",
+      "category": "디지털",
+      "needs_categories": ["시간절약", "성과향상", "자기표현"],
+      "keywords": ["무선이어폰", "블루투스이어폰", "TWS이어폰", "저렴한무선이어폰", "노이즈캔슬링", "운동이어폰"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~55000",
+      "description": "가성비 좋은 블루투스 5.3 무선 이어폰, 노이즈 캔슬링·IPX5 방수"
+    },
+    {
+      "product_id": "cable_organizer_001",
+      "name": "케이블 정리 클립 매니저",
+      "category": "디지털",
+      "needs_categories": ["불편해소", "시간절약"],
+      "keywords": ["케이블정리", "선정리", "케이블클립", "책상정리", "선꼬임방지", "케이블홀더"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "5000~12000",
+      "description": "엉킨 케이블을 깔끔하게 정리해주는 케이블 클립, 책상 정리 필수템"
+    },
+    {
+      "product_id": "portable_charger_20000_001",
+      "name": "20000mAh 고속 보조배터리",
+      "category": "디지털",
+      "needs_categories": ["불편해소", "시간절약"],
+      "keywords": ["보조배터리", "파워뱅크", "고속충전보조배터리", "여행배터리", "20000mAh", "PD충전"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "25000~55000",
+      "description": "스마트폰 4-5회 충전 가능한 20000mAh 대용량 PD 고속 보조배터리"
+    },
+    {
+      "product_id": "monitor_stand_adjustable_001",
+      "name": "높이 조절 모니터 받침대",
+      "category": "디지털",
+      "needs_categories": ["불편해소", "성과향상"],
+      "keywords": ["모니터받침대", "높이조절모니터", "목디스크예방", "거북목교정", "홈오피스", "모니터스탠드"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "22000~55000",
+      "description": "거북목·목 디스크 예방을 위한 높이 조절 모니터 받침대, 수납공간 포함"
+    },
+    {
+      "product_id": "organic_baby_food_001",
+      "name": "유기농 이유식 퓨레 파우치",
+      "category": "유아",
+      "needs_categories": ["시간절약", "불편해소"],
+      "keywords": ["이유식", "유기농이유식", "파우치이유식", "간편이유식", "아기간식", "유아식"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~30000",
+      "description": "신선한 유기농 재료로 만든 이유식 퓨레 파우치, 바쁜 부모를 위한 건강한 간편식"
+    },
+    {
+      "product_id": "baby_bottle_silicone_001",
+      "name": "실리콘 젖병 자연수유형",
+      "category": "유아",
+      "needs_categories": ["불편해소"],
+      "keywords": ["젖병", "실리콘젖병", "자연수유젖병", "유두혼동방지", "신생아젖병", "BPA프리"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~30000",
+      "description": "모유수유와 병행 가능한 자연수유형 실리콘 젖병, 유두 혼동 방지 설계"
+    },
+    {
+      "product_id": "instant_coffee_mix_001",
+      "name": "달달한 드립백 원두커피",
+      "category": "식품",
+      "needs_categories": ["돈절약", "시간절약"],
+      "keywords": ["드립백커피", "원두커피", "집에서카페맛", "커피믹스", "아침커피", "가성비커피"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~20000",
+      "description": "카페 드립커피를 집에서 즐기는 간편 드립백 원두커피, 1봉에 카페 원가의 1/5"
+    },
+    {
+      "product_id": "protein_bar_snack_001",
+      "name": "고단백 그래놀라 바 12개입",
+      "category": "식품",
+      "needs_categories": ["성과향상", "시간절약"],
+      "keywords": ["단백질바", "그래놀라바", "운동간식", "고단백간식", "에너지바", "끼니대용간식"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~25000",
+      "description": "운동 전후 또는 바쁜 아침 간편하게 섭취하는 고단백 그래놀라 바"
+    },
+    {
+      "product_id": "planner_weekly_001",
+      "name": "6개월 주간 플래너 노트",
+      "category": "문구",
+      "needs_categories": ["성과향상", "시간절약"],
+      "keywords": ["플래너", "주간플래너", "다이어리", "목표관리", "시간관리", "스터디플래너"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~18000",
+      "description": "하루를 구조화하고 목표를 달성할 수 있도록 설계된 6개월 주간 플래너"
+    },
+    {
+      "product_id": "sticky_note_pastel_001",
+      "name": "파스텔 포인트 색 플래그 포스트잇",
+      "category": "문구",
+      "needs_categories": ["자기표현", "성과향상"],
+      "keywords": ["포스트잇", "플래그스티커", "공부포스트잇", "색깔포스트잇", "책표시", "학습용포스트잇"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "3000~8000",
+      "description": "공부·업무 중 중요한 내용을 파스텔 컬러 플래그 포스트잇으로 표시"
+    },
+    {
+      "product_id": "fountain_pen_budget_001",
+      "name": "입문용 만년필 세트",
+      "category": "문구",
+      "needs_categories": ["자기표현", "성과향상"],
+      "keywords": ["만년필", "입문만년필", "가성비만년필", "글씨연습", "필기감", "필사만년필"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~20000",
+      "description": "필사·필기 취미를 시작하는 입문자를 위한 가성비 만년필 + 잉크 세트"
+    },
+    {
+      "product_id": "reed_diffuser_001",
+      "name": "우드스틱 룸 스프레이 향수",
+      "category": "향수/향",
+      "needs_categories": ["자기표현", "불편해소"],
+      "keywords": ["룸스프레이", "디퓨저스틱", "방향제", "집향기", "공간향수", "인테리어향"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~28000",
+      "description": "공간에 개성을 더해주는 우드스틱 룸 디퓨저, 4-6주 지속되는 은은한 향"
+    },
+    {
+      "product_id": "perfume_sample_set_001",
+      "name": "명품향수 샘플 키트 5종",
+      "category": "향수/향",
+      "needs_categories": ["자기표현", "돈절약"],
+      "keywords": ["향수샘플", "향수키트", "명품향수", "시향샘플", "향수추천", "향수입문"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~30000",
+      "description": "고가 명품 향수를 부담 없이 시향하는 5종 샘플 키트, 나만의 향수 찾기"
+    },
+    {
+      "product_id": "linen_shirt_001",
+      "name": "린넨 오버핏 여름 셔츠",
+      "category": "의류",
+      "needs_categories": ["자기표현", "불편해소"],
+      "keywords": ["린넨셔츠", "오버핏셔츠", "여름셔츠", "통기성셔츠", "캐주얼셔츠", "반팔셔츠"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "18000~40000",
+      "description": "통기성 좋은 린넨 소재의 오버핏 여름 셔츠, 캐주얼부터 반캐주얼까지 활용"
+    },
+    {
+      "product_id": "compression_socks_001",
+      "name": "압박 기능성 통근 양말",
+      "category": "의류",
+      "needs_categories": ["불편해소", "성과향상"],
+      "keywords": ["압박양말", "기능성양말", "부종완화양말", "다리붓기", "장시간서있기", "종아리압박"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "8000~18000",
+      "description": "장시간 서있거나 앉아 있어 다리가 붓는 분들을 위한 압박 기능성 통근 양말"
+    },
+    {
+      "product_id": "crossbody_bag_mini_001",
+      "name": "미니 크로스백 폰백",
+      "category": "의류",
+      "needs_categories": ["자기표현", "시간절약"],
+      "keywords": ["크로스백", "폰백", "미니가방", "데일리백", "산책가방", "경량가방"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "15000~35000",
+      "description": "폰·지갑·이어폰만 쏙 들어가는 미니 크로스백, 산책·가벼운 외출에 딱"
+    },
+    {
+      "product_id": "teeth_whitening_strip_001",
+      "name": "치아 미백 화이트닝 스트립",
+      "category": "뷰티",
+      "needs_categories": ["외모건강", "돈절약"],
+      "keywords": ["치아미백", "화이트닝", "미백스트립", "치아관리", "셀프미백", "누런치아"],
+      "affiliate_platform": "coupang_partners",
+      "price_range": "12000~28000",
+      "description": "치과 미백 시술 비용의 1/10 가격으로 셀프 치아 미백이 가능한 화이트닝 스트립"
+    }
+  ]
+}
