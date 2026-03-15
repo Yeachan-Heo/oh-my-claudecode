@@ -572,22 +572,94 @@ data/
 - **순차 세션**: 동시 실행 없음. 크래시 → checkpoint에서 재실행. lease/lock 불필요.
 - **멱등성**: 각 단계는 같은 입력에 같은 결과. 재실행 안전.
 
-#### P0-1a. MCP↔CLI 브릿지
+#### P0-1a. 전자동 크롤링 파이프라인 (MCP→CLI 전환)
 
-| 단계 | 도구 | 이유 |
-|------|------|------|
-| 로그인, 채널 탐색 | MCP `threads-playwright` | 대화형 판단 필요 (팝업, 채널 선정) |
-| 포스트 대량 수집 | CLI `node scripts/collect-posts.js` | 컨텍스트 절약, 안티봇, 자동 체크포인트 |
-| 태그 분류 | Claude (sonnet) | 문맥 이해 기반 분류 |
+> **설계 결정 (2026-03-15)**: 기존 MCP 하이브리드 → **전자동 Playwright CLI** 전환.
+> MCP 방식은 채널당 ~50회 브라우저 호출로 컨텍스트 소모가 심해 세션 2~3채널이 한계.
+> CLI 방식은 백그라운드 실행으로 20채널 한번에 가능.
 
-- 전환 시점: checkpoint의 `state` 필드로 관리 (`login` → `discover` → `collect` → `classify`)
-- MCP 실패 시: 에이전트가 CLI fallback 또는 사용자 보고 후 대기
+**전자동 vs 하이브리드 비교:**
+
+| | 전자동 CLI (채택) | MCP 하이브리드 (기존) |
+|---|---|---|
+| 실행 방식 | `npm run crawl` → 사람 개입 없이 완료 | Claude가 MCP로 단계별 진행 |
+| 로그인 | 스크립트 자동 입력 + 팝업 처리 | Claude가 스냅샷 보고 판단 |
+| 채널 발굴 | 키워드 검색 → 팔로워 체크 → 자동 선별 | Claude가 검색 결과 보고 판단 |
+| CAPTCHA/2FA | 스크립트 중단 → 사용자 수동 처리 후 재시작 | Claude가 감지 → 사용자 보고 → 대기 |
+| 컨텍스트 소모 | 거의 없음 (백그라운드) | MCP 호출마다 소모 |
+| 판단력 | 하드코딩 규칙 (팔로워≥200, 광고≥3건) | Claude 문맥 판단 |
+| 에러 대응 | 코드에 정의된 케이스만 | Claude 유연 대응 |
+
+**아키텍처: 전자동 베이스 + 판단 필요시 Claude 개입**
+
+```
+npm run crawl
+  ├─ [자동] S-0: Chrome 실행 + 로그인 (scripts/login-threads.ts)
+  ├─ [자동] S-2: 채널 발굴 (scripts/discover-channels.ts)
+  ├─ [자동] S-1: 채널별 포스트 수집 (scripts/collect-posts.js — 기존)
+  ├─ [자동] S-5: 정규화 + 태그 분류 (scripts/normalize-posts.ts — 기존)
+  └─ [자동] checkpoint + handoff (차단/예산 초과 시)
+
+  ※ CAPTCHA, 2FA, 애매한 채널 → JSON으로 남기고 후속 Claude 검토
+```
+
+| 단계 | 스크립트 | 역할 |
+|------|----------|------|
+| S-0 로그인 | `scripts/login-threads.ts` | CDP 연결 → 로그인 상태 판별 → 자동 로그인 → 팝업 처리 |
+| S-2 채널 발굴 | `scripts/discover-channels.ts` | 키워드 검색 → 프로필 방문 → 팔로워/광고 체크 → 채널 목록 생성 |
+| S-1 포스트 수집 | `scripts/collect-posts.js` (기존) | 채널별 포스트 상세 수집 (조회수, 댓글, 제휴링크) |
+| 오케스트레이터 | `scripts/orchestrate-crawl.ts` | 로그인→발굴→채널별수집→checkpoint 전체 흐름 관리 |
+
+**S-0 로그인 자동화 (`scripts/login-threads.ts`):**
+1. CDP 포트 연결 확인 (http://127.0.0.1:9223)
+2. 미연결 → Chrome 자동 실행 (`powershell.exe Start-Process`)
+3. `https://www.threads.net` 접속
+4. 로그인 상태 판별:
+   - 피드 보임 → 로그인됨 → 리턴
+   - "Continue as..." → 클릭 → 리턴
+   - 로그인 필요 → 자격증명 파일 읽기 → 이메일/비밀번호 입력 → 제출
+5. 팝업 처리: "Save login?" / "Notifications?" → "Not now" 클릭
+6. CAPTCHA/2FA → `{ status: "needs_human", reason: "captcha" }` 리턴 → **스크립트 중단**
+
+**S-2 채널 발굴 자동화 (`scripts/discover-channels.ts`):**
+1. 검색 키워드 순회: "쿠팡파트너스", "핫딜", "추천템", "오늘의특가", "공구"
+2. 검색 결과 → 프로필 탭 → 채널 리스트 수집
+3. 각 채널 프로필 방문 → 메타데이터 수집:
+   - `channel_id`, `display_name`, `follower_count`, `bio`
+4. 선정 필터 (자동):
+   - 팔로워 ≥ 200
+   - 최근 포스트 3개 중 광고 의심 ≥ 1건
+   - 공개 프로필
+   - 활동중 (최근 7일 내 포스트)
+5. 기존 checkpoint의 완료/차단 채널 제외
+6. 애매한 채널 → `data/channel_review_queue.json`에 저장 → 후속 Claude 검토
+7. 출력: `data/discovered_channels.json` (선정된 채널 목록 + 메타데이터)
+
+**오케스트레이터 (`scripts/orchestrate-crawl.ts`):**
+```bash
+npm run crawl                        # 전체: 로그인→발굴→수집
+npm run crawl -- --resume            # checkpoint에서 재개
+npm run crawl -- --channels 5        # 채널 5개만
+npm run crawl -- --posts 20          # 채널당 20포스트
+npm run crawl -- --skip-discover     # 발굴 건너뛰고 기존 채널 목록 사용
+```
+
+실행 흐름:
+1. 헬스체크 (CDP + Chrome)
+2. `login-threads.ts` → 로그인 확인/수행
+3. `discover-channels.ts` → 채널 목록 생성 (또는 기존 목록 사용)
+4. 채널별 루프:
+   - `collect-posts.js --global --channel <id> --posts N`
+   - 수집 완료 → checkpoint 업데이트
+   - 차단 감지 → 차단 대응 (2시간 대기 / 채널 스킵)
+   - 예산 체크 (시간 기반: 연속 4시간 초과 → 중단)
+5. 전체 완료 또는 중단 → checkpoint 저장 + (미완료 시) handoff.md 작성
 
 #### P0-1b. 헬스 게이트
 
 **시작 시 (필수)**:
 1. CDP 연결 확인: `curl -s http://127.0.0.1:9223/json/version`
-2. MCP 연결 확인: `browser_navigate` 테스트
+2. Chrome 미실행 → 자동 실행 (최대 3회 재시도)
 3. gspread 인증 확인: `.venv/bin/python -c "import gspread; gc = gspread.oauth(); gc.open_by_key('...')"`
 4. 하나라도 실패 → 진단 메시지 출력 + **중단**
 
@@ -719,29 +791,39 @@ threads-watch CLI 출력 → 리서처 입력을 연결하는 표준 스키마.
 | 셀렉터 드리프트 | DOM 구조 변경 | fallback tier 작동 + validity rate 체크 |
 
 **작업**:
-1. threads-watch 크롤링 코드/스킬 검증 (S-0 로그인, S-1 크롤러, S-2 채널발굴)
-2. 에이전트 상태머신 + checkpoint 구현 (P0-1)
-3. MCP↔CLI 브릿지 + 헬스 게이트 (P0-1a, P0-1b)
-4. 태그 taxonomy 파일 생성 (P0-2)
-5. 듀얼 트랙 채널 발굴 + dedup 원장 (P0-3)
-6. 컨텍스트 예산 자가 모니터 (P0-4)
-7. 캐노니컬 스키마 + 필드 검증 (P0-5)
-8. 셀렉터 매니페스트 + 텔레메트리 (P0-5a)
-9. 5채널 × 20포스트 자율 테스트 수집 (P0-6)
-10. 장애 주입 테스트 7개 시나리오 (P0-7)
+1. 전자동 로그인 스크립트 구현 (`scripts/login-threads.ts`) — S-0
+2. 전자동 채널 발굴 스크립트 구현 (`scripts/discover-channels.ts`) — S-2
+3. 크롤링 오케스트레이터 구현 (`scripts/orchestrate-crawl.ts`) — 전체 흐름
+4. 에이전트 상태머신 + checkpoint 구현 (P0-1)
+5. 헬스 게이트 (P0-1b)
+6. 태그 taxonomy 파일 생성 (P0-2)
+7. 듀얼 트랙 채널 발굴 + dedup 원장 (P0-3)
+8. 컨텍스트 예산 자가 모니터 (P0-4)
+9. 캐노니컬 스키마 + 필드 검증 (P0-5)
+10. 셀렉터 매니페스트 + 텔레메트리 (P0-5a)
+11. 5채널 × 20포스트 전자동 테스트 수집 (P0-6)
+12. 장애 주입 테스트 7개 시나리오 (P0-7)
 
 **완료 기준**:
-- [x] 5채널 × 20포스트 자율 수집 성공 (13채널 227포스트 수집됨)
+
+*인프라 (완료됨 — Claude MCP 수동 수집 기반)*:
 - [x] 태그 taxonomy 적용 (primary + secondary) — v1.0 동결 완료
 - [x] dedup 원장 + per-channel frontier 동작
 - [x] checkpoint/resume/handoff 전체 동작
-- [x] 헬스 게이트: 시작 시(CDP+gspread, Chrome 자동실행) + 매 10포스트 재검증
-- [ ] 장애 주입 7개 시나리오 모두 통과 (→ GAP #16, 후속)
 - [x] 필드 유효성 검증: validity rate = 1.0 (≥ 0.9 충족)
 - [x] 셀렉터 매니페스트: tier2(aria-label) 100% (fallback 0%)
 - [x] 런 텔레메트리 로그 생성 (data/telemetry/)
 - [x] 채널 소진 시 graceful 처리 (exhausted 태그)
 - [x] 컨텍스트 예산 초과 시 auto-handoff 동작 (exit 4)
+
+*전자동 크롤링 (미완료 — CLI 스크립트 구현 필요)*:
+- [ ] `login-threads.ts`: CDP 연결 → 로그인 판별 → 자동 로그인 → CAPTCHA 시 중단
+- [ ] `discover-channels.ts`: 키워드 검색 → 프로필 방문 → 팔로워/광고 필터 → 채널 목록 생성
+- [ ] `orchestrate-crawl.ts`: 로그인→발굴→채널별수집→checkpoint 전체 흐름
+- [ ] `npm run crawl` 한 줄로 전자동 수집 동작
+- [ ] 5채널 × 20포스트 전자동 수집 성공 (사람 개입 없이)
+- [ ] 헬스 게이트: 시작 시(CDP+Chrome 자동실행) + 매 10포스트 재검증
+- [ ] 장애 주입 7개 시나리오 모두 통과 (→ GAP #16, 후속)
 
 **의존성**: 없음 (첫 단계)
 
@@ -1032,9 +1114,9 @@ npx tsx scripts/eval-accuracy.ts      # 정확도 측정
 
 | plan.md 항목 | plan2.md 재활용 | 변경사항 |
 |-------------|----------------|----------|
-| S-0 로그인/세션 | [1] 수집 에이전트 | 그대로 사용 |
-| S-1 크롤러 | [1] 수집 에이전트 | 태그 분류 추가 (광고 외 일반 포스트) |
-| S-2 채널 발굴 | [1] 수집 에이전트 | 소비자 채널도 대상에 추가 |
+| S-0 로그인/세션 | `scripts/login-threads.ts` | MCP 수동 → 전자동 CLI 전환 |
+| S-1 크롤러 | `scripts/collect-posts.js` (기존) + `scripts/orchestrate-crawl.ts` | 태그 분류 추가 + 오케스트레이터 통합 |
+| S-2 채널 발굴 | `scripts/discover-channels.ts` | MCP 수동 → 전자동 CLI 전환, 소비자 채널도 대상 |
 | S-3 정규화 | [2] 리서처 | LLM 기반으로 대체 (정규식→LLM) |
 | S-4 라벨셋 검증 | 삭제 | 학술적 검증 불필요, 성과 기반 피드백으로 대체 |
 | S-5 테스트/컴플 | [1] 수집 에이전트 | 안티봇+ToS 부분만 유지 |
@@ -1048,16 +1130,25 @@ npx tsx scripts/eval-accuracy.ts      # 정확도 측정
 
 ## 완료 기준 (전체)
 
-**P0: 크롤링 인프라 + 에이전트 자율실행**
-- [ ] 5채널 × 20포스트 자율 수집 (에이전트 단독 실행, 채널 소진 시 graceful 처리)
-- [ ] 태그 taxonomy 적용 (primary + secondary) + 버전 고정
-- [ ] dedup 원장 + per-channel frontier + overlap-resume 동작
-- [ ] checkpoint/resume/handoff + 원자적 쓰기 전체 동작
-- [ ] 헬스 게이트: 시작 시(CDP+MCP+gspread) + 매 10포스트 재검증
+**P0: 크롤링 인프라 + 전자동 수집**
+
+*인프라 (완료됨)*:
+- [x] 태그 taxonomy 적용 (primary + secondary) — v1.0 동결 완료
+- [x] dedup 원장 + per-channel frontier + overlap-resume 동작
+- [x] checkpoint/resume/handoff + 원자적 쓰기 전체 동작
+- [x] 필드 유효성 검증: validity rate = 1.0 (≥ 0.9 충족)
+- [x] 셀렉터 매니페스트: tier2(aria-label) 100% (fallback 0%)
+- [x] 런 텔레메트리 로그 생성 (data/telemetry/)
+- [x] 채널 소진 시 graceful 처리 (exhausted 태그)
+- [x] 컨텍스트 예산 초과 시 auto-handoff 동작 (exit 4)
+
+*전자동 크롤링 (미완료)*:
+- [ ] `login-threads.ts`: 자동 로그인 + CAPTCHA 시 중단
+- [ ] `discover-channels.ts`: 키워드 검색 → 채널 자동 선별
+- [ ] `orchestrate-crawl.ts`: 로그인→발굴→수집 전체 오케스트레이션
+- [ ] `npm run crawl`로 5채널 × 20포스트 전자동 수집 성공
+- [ ] 헬스 게이트: 시작 시(CDP+Chrome 자동실행) + 매 10포스트 재검증
 - [ ] 장애 주입 7개 시나리오 모두 통과
-- [ ] 필드 유효성 검증: validity rate ≥ 90% + quarantine 동작
-- [ ] 셀렉터 매니페스트: fallback_rate < 20% + 런 텔레메트리 로그
-- [ ] 컨텍스트 예산 초과 시 auto-handoff + budget_exhausted terminal state
 
 **P1: 리서치 + 니즈탐지**
 - [x] 100개 포스트 → 니즈 브리핑 출력 (227개 → 6카테고리, L1-L5, 트렌드)
@@ -1067,10 +1158,20 @@ npx tsx scripts/eval-accuracy.ts      # 정확도 측정
 - [x] 의존성 게이트: taxonomy+schema 버전 고정 후 eval 실행
 - [ ] 모델 예산: opus × 1(리서처) + opus × 1(니즈탐지) per cycle (→ LLM 강화 시)
 
-**P2~P4: 상품매칭 → 콘텐츠 → 자동화**
-- [ ] P2: 니즈→상품→포지셔닝 파이프라인 동작 (상품사전 50개+)
-- [ ] P3: 포스트 초안 자동 생성 + 성과 학습 리포트 + 피드백 루프
-- [ ] P4: 수집 cron 자동화 + 에이전트는 분석부터 시작
+**P2: 상품매칭 + 포지셔닝 (완료됨)**
+- [x] 니즈→상품→포지셔닝 파이프라인 동작 (상품사전 50개)
+- [x] Threads 적합도 점수(1~5) 산출 (40 tests)
+- [x] 상품별 포지셔닝 6포맷 + 훅 4변형 (16 tests)
+- [x] LLM 출력 스키마 검증 (5 tests)
+
+**P3: 콘텐츠 생성 + 성과분석 (완료됨)**
+- [x] 포지셔닝 카드 → 포스트 초안 (본문 3 + 훅 5 + 댓글 2) — 18 drafts (22 tests)
+- [x] 포맷별 engagement 분석 (227 posts analyzed)
+- [x] 시간대별 성과 패턴 (4 buckets)
+- [x] 학습 피드백 자동 계산 → learnings.json (15 tests)
+
+**P4: 수집 자동화 (미시작)**
+- [ ] 수집 cron 자동화 + 에이전트는 분석부터 시작
 
 **전체 시스템**
 - [ ] "브리핑 줘" 한마디로 수집→분석→추천→콘텐츠 전체 파이프라인 동작

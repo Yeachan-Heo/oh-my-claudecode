@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:build": "tsx scripts/build-eval-set.ts --seed 42",
-    "collect": "node scripts/collect-posts.js"
+    "collect": "node scripts/collect-posts.js",
+    "crawl": "tsx scripts/orchestrate-crawl.ts"
   },
   "dependencies": {
     "playwright": "^1.58.2"

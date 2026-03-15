@@ -367,3 +367,58 @@ export interface AnalysisReport {
     generated_at: string;
   };
 }
+
+// --- Crawl orchestration types (S-0~S-2) ---
+
+export interface LoginResult {
+  status: 'logged_in' | 'needs_human' | 'error';
+  reason?: 'captcha' | '2fa' | 'wrong_password' | 'unknown';
+  screenshot?: string;
+}
+
+export interface DiscoveredChannel {
+  channel_id: string;
+  display_name: string;
+  follower_count: number;
+  bio: string;
+  recent_ad_count: number;
+  source_keyword: string;
+  discovered_at: string;
+}
+
+export interface DiscoveryResult {
+  channels: DiscoveredChannel[];
+  review_queue: DiscoveredChannel[];
+  stats: { searched: number; passed: number; filtered: number };
+}
+
+export interface CrawlOptions {
+  resume?: boolean;
+  channels?: number;
+  postsPerChannel?: number;
+  skipDiscover?: boolean;
+}
+
+export interface ChannelCompletion {
+  channel_id: string;
+  threads_collected: number;
+  session: number;
+}
+
+export interface CrawlCheckpoint {
+  run_id: string;
+  target_channels: number;
+  target_posts_per_channel: number;
+  channels_completed: ChannelCompletion[];
+  channels_queue: string[];
+  channels_discovered: string[];
+  current_channel: string | null;
+  current_channel_posts: string[];
+  total_threads_collected: number;
+  total_sheets_rows: number;
+  session_count: number;
+  browser_ops_this_session: number;
+  blocked_channels: string[];
+  timestamp: string;
+  status: 'running' | 'paused_context_limit' | 'paused_blocked' | 'budget_exhausted' | 'completed' | 'needs_human';
+}
