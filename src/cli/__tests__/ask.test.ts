@@ -12,8 +12,6 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 const CLI_ENTRY = join(REPO_ROOT, 'src', 'cli', 'index.ts');
 const TSX_LOADER = join(REPO_ROOT, 'node_modules', 'tsx', 'dist', 'loader.mjs');
 const ADVISOR_SCRIPT = join(REPO_ROOT, 'scripts', 'run-provider-advisor.js');
-const ASK_CODEX_WRAPPER = join(REPO_ROOT, 'scripts', 'ask-codex.sh');
-const ASK_GEMINI_WRAPPER = join(REPO_ROOT, 'scripts', 'ask-gemini.sh');
 
 interface CliRunResult {
   status: number | null;
@@ -86,27 +84,6 @@ function runAdvisorScriptWithPrelude(
   options: RunOptions = {},
 ): CliRunResult {
   const result = spawnSync(process.execPath, ['--import', preludePath, ADVISOR_SCRIPT, ...args], {
-    cwd,
-    encoding: 'utf-8',
-    env: buildChildEnv(envOverrides, options),
-  });
-
-  return {
-    status: result.status,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-    error: result.error?.message,
-  };
-}
-
-function runWrapperScript(
-  wrapperPath: string,
-  args: string[],
-  cwd: string,
-  envOverrides: Record<string, string> = {},
-  options: RunOptions = {},
-): CliRunResult {
-  const result = spawnSync(wrapperPath, args, {
     cwd,
     encoding: 'utf-8',
     env: buildChildEnv(envOverrides, options),
@@ -230,19 +207,6 @@ exit 9
     'utf8',
   );
   chmodSync(binPath, 0o755);
-  return binDir;
-}
-
-function writeFakeOmcBinary(dir: string): string {
-  const binDir = join(dir, 'bin');
-  mkdirSync(binDir, { recursive: true });
-  const omcPath = join(binDir, 'omc');
-  writeFileSync(
-    omcPath,
-    '#!/bin/sh\necho "PATH_OMC_SHOULD_NOT_BE_CALLED" 1>&2\nexit 79\n',
-    'utf8',
-  );
-  chmodSync(omcPath, 0o755);
   return binDir;
 }
 
@@ -577,142 +541,5 @@ describe('resolveAskAdvisorScriptPath', () => {
       .toBe('/tmp/pkg-root/scripts/custom.js');
     expect(resolveAskAdvisorScriptPath(packageRoot, { OMC_ASK_ADVISOR_SCRIPT: '/opt/custom.js' } as NodeJS.ProcessEnv))
       .toBe('/opt/custom.js');
-  });
-});
-
-describe('ask wrapper scripts contract', () => {
-  it('ask-codex wrapper dispatches provider, forwards prompt, and ignores PATH omc shadow', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-codex-'));
-    try {
-      const stubPath = writeAdvisorStub(wd);
-      const fakePathBin = writeFakeOmcBinary(wd);
-      const result = runWrapperScript(
-        ASK_CODEX_WRAPPER,
-        ['--print', 'wrapper prompt'],
-        wd,
-        {
-          OMC_ASK_ADVISOR_SCRIPT: stubPath,
-          ASK_WRAPPER_TOKEN: 'wrapper-token',
-          PATH: `${fakePathBin}:${process.env.PATH || ''}`,
-        },
-      );
-
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-      expect(result.stderr).not.toContain('PATH_OMC_SHOULD_NOT_BE_CALLED');
-
-      const payload = JSON.parse(result.stdout);
-      expect(payload).toEqual({
-        provider: 'codex',
-        prompt: 'wrapper prompt',
-        originalTask: 'wrapper prompt',
-        passthrough: 'wrapper-token',
-      });
-    } finally {
-      rmSync(wd, { recursive: true, force: true });
-    }
-  });
-
-  it('ask-codex wrapper still works inside a Claude Code session', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-codex-nested-'));
-    try {
-      const stubPath = writeAdvisorStub(wd);
-      const result = runWrapperScript(
-        ASK_CODEX_WRAPPER,
-        ['--prompt', 'nested codex prompt'],
-        wd,
-        {
-          OMC_ASK_ADVISOR_SCRIPT: stubPath,
-          CLAUDECODE: '1',
-        },
-        { preserveClaudeSessionEnv: true },
-      );
-
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-      expect(result.stderr).not.toContain('Nested launches are not supported');
-
-      const payload = JSON.parse(result.stdout);
-      expect(payload).toEqual({
-        provider: 'codex',
-        prompt: 'nested codex prompt',
-        originalTask: 'nested codex prompt',
-        passthrough: null,
-      });
-    } finally {
-      rmSync(wd, { recursive: true, force: true });
-    }
-  });
-
-  it('ask-gemini wrapper still works inside a Claude Code session', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-gemini-nested-'));
-    try {
-      const stubPath = writeAdvisorStub(wd);
-      const result = runWrapperScript(
-        ASK_GEMINI_WRAPPER,
-        ['--prompt', 'nested gemini prompt'],
-        wd,
-        {
-          OMC_ASK_ADVISOR_SCRIPT: stubPath,
-          CLAUDECODE: '1',
-        },
-        { preserveClaudeSessionEnv: true },
-      );
-
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-      expect(result.stderr).not.toContain('Nested launches are not supported');
-
-      const payload = JSON.parse(result.stdout);
-      expect(payload.provider).toBe('gemini');
-      expect(payload.prompt).toBe('nested gemini prompt');
-      expect(payload.originalTask).toBe('nested gemini prompt');
-    } finally {
-      rmSync(wd, { recursive: true, force: true });
-    }
-  });
-
-  it('ask-gemini wrapper dispatches provider and forwards positional prompt text', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-gemini-'));
-    try {
-      const stubPath = writeAdvisorStub(wd);
-      const result = runWrapperScript(
-        ASK_GEMINI_WRAPPER,
-        ['ship', 'this', 'feature'],
-        wd,
-        { OMC_ASK_ADVISOR_SCRIPT: stubPath },
-      );
-
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-
-      const payload = JSON.parse(result.stdout);
-      expect(payload.provider).toBe('gemini');
-      expect(payload.prompt).toBe('ship this feature');
-      expect(payload.originalTask).toBe('ship this feature');
-    } finally {
-      rmSync(wd, { recursive: true, force: true });
-    }
-  });
-
-  it('wrapper propagates non-zero advisor exit code', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-wrapper-exit-'));
-    try {
-      const stubPath = writeAdvisorStub(wd);
-      const result = runWrapperScript(
-        ASK_CODEX_WRAPPER,
-        ['--prompt', 'should fail'],
-        wd,
-        {
-          OMC_ASK_ADVISOR_SCRIPT: stubPath,
-          ASK_STUB_EXIT_CODE: '23',
-        },
-      );
-
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(23);
-    } finally {
-      rmSync(wd, { recursive: true, force: true });
-    }
   });
 });
