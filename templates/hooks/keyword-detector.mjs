@@ -85,6 +85,17 @@ Perform a focused security review of the relevant changes or target area. Check 
 ---
 `;
 
+const SEARCH_MESSAGE = `<search-mode>
+MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:
+- explore agents (codebase patterns, file structures)
+- document-specialist agents (remote repos, official docs, GitHub examples)
+Plus direct tools: Grep, Glob
+NEVER stop at first result - be exhaustive.
+</search-mode>
+
+---
+`;
+
 // Extract prompt from various JSON structures
 function extractPrompt(input) {
   try {
@@ -480,6 +491,7 @@ async function main() {
     const additionalContextParts = [];
     for (const [keywordName, message] of [
       ['ultrathink', ULTRATHINK_MESSAGE],
+      ['deepsearch', SEARCH_MESSAGE],
       ['analyze', ANALYZE_MESSAGE],
       ['tdd', TDD_MESSAGE],
       ['code-review', CODE_REVIEW_MESSAGE],
