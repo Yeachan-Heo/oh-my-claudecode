@@ -127,15 +127,42 @@ function sanitizeForKeywordDetection(text) {
 
 // Create state file for a mode
 function activateState(directory, prompt, stateName, sessionId) {
-  const state = {
-    active: true,
-    started_at: new Date().toISOString(),
-    original_prompt: prompt,
-    session_id: sessionId || undefined,
-    project_path: directory,
-    reinforcement_count: 0,
-    last_checked_at: new Date().toISOString()
-  };
+  let state;
+
+  if (stateName === 'ralph') {
+    // Ralph needs specific fields for proper loop tracking
+    state = {
+      active: true,
+      iteration: 1,
+      max_iterations: 100,
+      started_at: new Date().toISOString(),
+      prompt: prompt,
+      session_id: sessionId || undefined,
+      project_path: directory,
+      linked_ultrawork: true,
+      last_checked_at: new Date().toISOString()
+    };
+  } else if (stateName === 'ralplan') {
+    // Ralplan needs active + session_id for stop-hook enforcement
+    state = {
+      active: true,
+      started_at: new Date().toISOString(),
+      session_id: sessionId || undefined,
+      project_path: directory,
+      last_checked_at: new Date().toISOString()
+    };
+  } else {
+    // Generic state for ultrawork, autopilot, etc.
+    state = {
+      active: true,
+      started_at: new Date().toISOString(),
+      original_prompt: prompt,
+      session_id: sessionId || undefined,
+      project_path: directory,
+      reinforcement_count: 0,
+      last_checked_at: new Date().toISOString()
+    };
+  }
 
   // Write to session-scoped path if sessionId available
   if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
@@ -144,10 +171,10 @@ function activateState(directory, prompt, stateName, sessionId) {
       try { mkdirSync(sessionDir, { recursive: true }); } catch {}
     }
     try { writeFileSync(join(sessionDir, `${stateName}-state.json`), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
-    return; // Session-only write, skip legacy
+    return;
   }
 
-  // Fallback: write to legacy local .omc/state directory (no valid sessionId)
+  // Fallback: write to legacy local .omc/state directory
   const localDir = join(directory, '.omc', 'state');
   if (!existsSync(localDir)) {
     try { mkdirSync(localDir, { recursive: true }); } catch {}
@@ -485,13 +512,13 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork', 'swarm'], sessionId);
+      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork', 'swarm', 'ralplan'], sessionId);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }
 
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
-    const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'ultrawork'].includes(m.name));
+    const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
       activateState(directory, prompt, mode.name, sessionId);
     }
