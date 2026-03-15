@@ -245,7 +245,8 @@ function collectPosts(channelId: string, postsCount: number): CollectResult {
     });
 
     // stdout에서 수집된 포스트 수 추출
-    const match = stdout.match(/수집 완료:\s*(\d+)/);
+    // collect-posts.js 출력: "쓰레드 단위: N개" 또는 "수집 완료: N"
+    const match = stdout.match(/쓰레드 단위:\s*(\d+)개/) || stdout.match(/수집 완료:\s*(\d+)/);
     const collected = match ? parseInt(match[1], 10) : 0;
 
     return { exitCode: EXIT_SUCCESS, threadsCollected: collected, stdout };
@@ -257,7 +258,7 @@ function collectPosts(channelId: string, postsCount: number): CollectResult {
 
     // stdout/stderr에서 수집된 포스트 수 추출 시도
     const combined = stdout + stderr;
-    const match = combined.match(/수집 완료:\s*(\d+)/);
+    const match = combined.match(/쓰레드 단위:\s*(\d+)개/) || combined.match(/수집 완료:\s*(\d+)/);
     const collected = match ? parseInt(match[1], 10) : 0;
 
     if (exitCode === EXIT_BLOCKED) {
@@ -364,7 +365,9 @@ async function main(): Promise<void> {
     log('채널 발굴 건너뛰기 (--skip-discover)');
     try {
       const raw = fs.readFileSync(DISCOVERED_CHANNELS_PATH, 'utf8');
-      const channels = JSON.parse(raw) as DiscoveredChannel[];
+      const parsed = JSON.parse(raw);
+      // Handle both formats: flat array or { channels: [...] }
+      const channels: DiscoveredChannel[] = Array.isArray(parsed) ? parsed : (parsed.channels ?? []);
       channelIds = channels.map((c) => c.channel_id).slice(0, targetChannels);
       log(`discovered_channels.json에서 ${channelIds.length}개 채널 로드`);
     } catch {

@@ -25,12 +25,36 @@ const SEEN_POSTS_PATH = path.join(DATA_DIR, 'seen_posts.json');
 const CHECKPOINT_PATH = path.join(DATA_DIR, 'threads-watch-checkpoint.json');
 
 const DEFAULT_KEYWORDS = [
+  // --- Tier 1: 제휴마케팅 직접 ---
   '쿠팡파트너스',
-  '핫딜',
-  '추천템',
-  '오늘의특가',
-  '공구',
+  '제휴마케팅',
+  '파트너스수익',
+  '링크수익',
   '쿠팡추천',
+
+  // --- Tier 2: 쇼핑 행동/핫딜 ---
+  '핫딜',
+  '최저가',
+  '가성비템',
+  '오늘만특가',
+  '오늘의특가',
+  '할인코드',
+  '타임세일',
+  '역대최저가',
+  '추천템',
+  '공구',
+
+  // --- Tier 3: 니즈/카테고리 기반 ---
+  '육아템추천',
+  '자취필수템',
+  '홈카페추천',
+  '청소꿀팁',
+  '다이어트식품',
+  '여름준비템',
+  '뷰티추천',
+  '건강식품추천',
+  '주방용품추천',
+  '생활용품추천',
 ];
 
 const TIMING = {
@@ -40,7 +64,7 @@ const TIMING = {
   pageLoad:        { min: 3000, max: 6000 },
 };
 
-const MAX_DURATION_MS = 30 * 60 * 1000; // 30분
+const MAX_DURATION_MS = 60 * 60 * 1000; // 60분
 
 // ─── Affiliate detection patterns ────────────────────────
 
@@ -139,11 +163,16 @@ function loadExcludedChannels(checkpoint?: CrawlCheckpoint): Set<string> {
   const excluded = new Set<string>();
 
   // 1. Checkpoint: completed + blocked channels
+  // Handle both new format (channels_completed) and old format (channels.completed)
   if (checkpoint) {
-    for (const cc of checkpoint.channels_completed) {
-      excluded.add(cc.channel_id);
+    const completed = checkpoint.channels_completed
+      ?? (checkpoint as any).channels?.completed
+      ?? [];
+    for (const cc of completed) {
+      if (cc.channel_id) excluded.add(cc.channel_id);
     }
-    for (const bc of checkpoint.blocked_channels) {
+    const blocked = checkpoint.blocked_channels ?? [];
+    for (const bc of blocked) {
       excluded.add(bc);
     }
   }
@@ -322,6 +351,12 @@ interface RecentPostScan {
 
 async function scanRecentPosts(page: Page, channelId: string): Promise<RecentPostScan> {
   try {
+    // Scroll to load more posts (need ~20)
+    for (let i = 0; i < 7; i++) {
+      await page.keyboard.press('End');
+      await humanDelay({ min: 800, max: 1500 });
+    }
+
     // We should already be on the profile page
     const result = await page.evaluate(() => {
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -377,8 +412,8 @@ async function scanRecentPosts(page: Page, channelId: string): Promise<RecentPos
         }
       }
 
-      // Limit to first 3 posts
-      const limitedTexts = postTexts.slice(0, 3);
+      // Limit to first 20 posts
+      const limitedTexts = postTexts.slice(0, 20);
 
       return {
         postTexts: limitedTexts,
@@ -416,8 +451,8 @@ async function searchAndExtractProfiles(page: Page, keyword: string): Promise<st
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await humanDelay(TIMING.pageLoad);
 
-    // Scroll a bit to load more results
-    for (let i = 0; i < 3; i++) {
+    // Scroll more to load more results (was 3, now 10)
+    for (let i = 0; i < 10; i++) {
       await page.keyboard.press('End');
       await humanDelay({ min: 1500, max: 3000 });
     }
@@ -532,14 +567,15 @@ export async function discoverChannels(
       };
 
       // Filter logic
-      const hasEnoughFollowers = profile.follower_count >= 200;
+      const hasEnoughFollowers = profile.follower_count >= 100;
       const hasAdPosts = scan.adCount >= 1;
       const isActive = scan.hasRecentPost;
+      const adRatio = scan.totalScanned > 0 ? scan.adCount / scan.totalScanned : 0;
 
-      // Ambiguous: followers 100~199 or uncertain ad detection
+      // Ambiguous: followers 50~99 or uncertain ad detection
       const isAmbiguous = (
-        (profile.follower_count >= 100 && profile.follower_count < 200) ||
-        (scan.totalScanned > 0 && scan.adCount === 0 && profile.follower_count >= 200)
+        (profile.follower_count >= 50 && profile.follower_count < 100) ||
+        (scan.totalScanned > 0 && scan.adCount === 0 && profile.follower_count >= 100)
       );
 
       if (hasEnoughFollowers && hasAdPosts && isActive) {
@@ -547,17 +583,17 @@ export async function discoverChannels(
         channels.push(discovered);
         excluded.add(channelId);
         passed++;
-        log(`  ${channelId}: 선정 (팔로워 ${profile.follower_count}, 광고 ${scan.adCount}건)`);
+        log(`  ${channelId}: 선정 (팔로워 ${profile.follower_count}, 광고 ${scan.adCount}/${scan.totalScanned}, 비율 ${(adRatio * 100).toFixed(0)}%)`);
       } else if (isAmbiguous && isActive) {
         // Ambiguous — add to review queue
         reviewQueue.push(discovered);
         excluded.add(channelId);
-        log(`  ${channelId}: 리뷰큐 (팔로워 ${profile.follower_count}, 광고 ${scan.adCount}건)`);
+        log(`  ${channelId}: 리뷰큐 (팔로워 ${profile.follower_count}, 광고 ${scan.adCount}/${scan.totalScanned})`);
       } else {
         filtered++;
         const reasons: string[] = [];
-        if (!hasEnoughFollowers) reasons.push(`팔로워 ${profile.follower_count}<200`);
-        if (!hasAdPosts) reasons.push(`광고 ${scan.adCount}건`);
+        if (!hasEnoughFollowers) reasons.push(`팔로워 ${profile.follower_count}<100`);
+        if (!hasAdPosts) reasons.push(`광고 ${scan.adCount}/${scan.totalScanned}`);
         if (!isActive) reasons.push('비활성');
         log(`  ${channelId}: 필터링 (${reasons.join(', ')})`);
       }
