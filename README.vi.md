@@ -167,6 +167,31 @@ Nhiều chiến lược cho nhiều tình huống — từ điều phối dựa 
 - **Học kỹ năng** - Trích xuất các mẫu tái sử dụng từ các phiên làm việc
 - **Phân tích & theo dõi chi phí** - Hiểu mức sử dụng token trên mọi phiên
 
+### Kỹ năng Tùy chỉnh
+
+Học một lần, tái sử dụng mãi mãi. OMC trích xuất kiến thức gỡ lỗi thực chiến thành các tệp kỹ năng di động, tự động tiêm vào khi phù hợp.
+
+| | Phạm vi Dự án | Phạm vi Người dùng |
+|---|---|---|
+| **Đường dẫn** | `.omc/skills/` | `~/.omc/skills/` |
+| **Chia sẻ với** | Nhóm (quản lý phiên bản) | Tất cả dự án của bạn |
+| **Ưu tiên** | Cao (ghi đè phạm vi người dùng) | Thấp (dự phòng) |
+
+```yaml
+# .omc/skills/fix-proxy-crash.md
+---
+name: Fix Proxy Crash
+description: aiohttp proxy crashes on ClientDisconnectedError
+triggers: ["proxy", "aiohttp", "disconnected"]
+source: extracted
+---
+Bọc handler tại server.py:42 trong try/except ClientDisconnectedError...
+```
+
+**Quản lý kỹ năng:** `/skill list | add | remove | edit | search`
+**Tự động học:** `/learner` trích xuất các mẫu tái sử dụng với tiêu chuẩn chất lượng nghiêm ngặt
+**Tự động tiêm:** Các kỹ năng phù hợp được tải vào ngữ cảnh tự động — không cần gọi thủ công
+
 [Danh sách tính năng đầy đủ →](docs/REFERENCE.md)
 
 ---

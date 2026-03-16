@@ -186,6 +186,31 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 - **Skill learning** - Extract reusable patterns from your sessions
 - **Analytics & cost tracking** - Understand token usage across all sessions
 
+### Custom Skills
+
+Learn once, reuse forever. OMC extracts hard-won debugging knowledge into portable skill files that auto-inject when relevant.
+
+| | Project Scope | User Scope |
+|---|---|---|
+| **Path** | `.omc/skills/` | `~/.omc/skills/` |
+| **Shared with** | Team (version-controlled) | All your projects |
+| **Priority** | Higher (overrides user) | Lower (fallback) |
+
+```yaml
+# .omc/skills/fix-proxy-crash.md
+---
+name: Fix Proxy Crash
+description: aiohttp proxy crashes on ClientDisconnectedError
+triggers: ["proxy", "aiohttp", "disconnected"]
+source: extracted
+---
+Wrap handler at server.py:42 in try/except ClientDisconnectedError...
+```
+
+**Manage skills:** `/skill list | add | remove | edit | search`
+**Auto-learn:** `/learner` extracts reusable patterns with strict quality gates
+**Auto-inject:** Matching skills load into context automatically — no manual recall needed
+
 [Full feature list →](docs/REFERENCE.md)
 
 ---
