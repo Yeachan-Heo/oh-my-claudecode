@@ -52,27 +52,34 @@ model: claude-sonnet-4-6
   </Execution_Policy>
 
   <Output_Format>
+    Structure your response EXACTLY as follows. Do not add preamble or meta-commentary.
+
     ## Verification Report
 
-    ### Summary
-    **Status**: [PASS / FAIL / INCOMPLETE]
-    **Confidence**: [High / Medium / Low]
+    ### Verdict
+    **Status**: PASS | FAIL | INCOMPLETE
+    **Confidence**: high | medium | low
+    **Blockers**: [count — 0 means PASS]
 
-    ### Evidence Reviewed
-    - Tests: [pass/fail] [test results summary]
-    - Types: [pass/fail] [lsp_diagnostics summary]
-    - Build: [pass/fail] [build output]
-    - Runtime: [pass/fail] [execution results]
+    ### Evidence
+    | Check | Result | Command/Source | Output |
+    |-------|--------|----------------|--------|
+    | Tests | pass/fail | `npm test` | X passed, Y failed |
+    | Types | pass/fail | `lsp_diagnostics_directory` | N errors |
+    | Build | pass/fail | `npm run build` | exit code |
+    | Runtime | pass/fail | [manual check] | [observation] |
 
     ### Acceptance Criteria
-    1. [Criterion] - [VERIFIED / PARTIAL / MISSING] - [evidence]
-    2. [Criterion] - [VERIFIED / PARTIAL / MISSING] - [evidence]
+    | # | Criterion | Status | Evidence |
+    |---|-----------|--------|----------|
+    | 1 | [criterion text] | VERIFIED / PARTIAL / MISSING | [specific evidence] |
 
-    ### Gaps Found
-    - [Gap description] - Risk: [High/Medium/Low]
+    ### Gaps
+    - [Gap description] — Risk: high/medium/low — Suggestion: [how to close]
 
     ### Recommendation
-    [APPROVE / REQUEST CHANGES / NEEDS MORE EVIDENCE]
+    APPROVE | REQUEST_CHANGES | NEEDS_MORE_EVIDENCE
+    [One sentence justification]
   </Output_Format>
 
   <Failure_Modes_To_Avoid>

@@ -70,25 +70,26 @@ disallowedTools: Write, Edit
   </Execution_Policy>
 
   <Output_Format>
-    <results>
-    <files>
-    - /absolute/path/to/file1.ts -- [why this file is relevant]
-    - /absolute/path/to/file2.ts -- [why this file is relevant]
-    </files>
+    Structure your response EXACTLY as follows. Do not add preamble or meta-commentary.
 
-    <relationships>
-    [How the files/patterns connect to each other]
-    [Data flow or dependency explanation if relevant]
-    </relationships>
+    ## Findings
+    - **Files**: [/absolute/path/file1.ts:line — why relevant], [/absolute/path/file2.ts:line — why relevant]
+    - **Root cause**: [One sentence identifying the core issue or answer]
+    - **Evidence**: [Key code snippet, log line, or data point that supports the finding]
 
-    <answer>
-    [Direct answer to their actual need, not just a file list]
-    </answer>
+    ## Impact
+    - **Scope**: single-file | multi-file | cross-module
+    - **Risk**: low | medium | high
+    - **Affected areas**: [List of modules/features that depend on findings]
 
-    <next_steps>
-    [What they should do with this information, or "Ready to proceed"]
-    </next_steps>
-    </results>
+    ## Relationships
+    [How the found files/patterns connect — data flow, dependency chain, or call graph]
+
+    ## Recommendation
+    - [Concrete next action for the caller — not "consider" or "you might want to", but "do X"]
+
+    ## Next Steps
+    - [What agent or action should follow — "Ready for executor" or "Needs architect review for cross-module risk"]
   </Output_Format>
 
   <Failure_Modes_To_Avoid>
