@@ -131,6 +131,31 @@ Plusieurs stratégies pour différents cas d'utilisation — de l'orchestration 
 - **Apprentissage de compétences** — Extraction de patterns réutilisables depuis vos sessions
 - **Analytique et suivi des coûts** — Compréhension de l'utilisation des tokens sur toutes les sessions
 
+### Compétences Personnalisées
+
+Apprenez une fois, réutilisez à jamais. OMC extrait les connaissances durement acquises lors du débogage en fichiers de compétences portables qui s'injectent automatiquement quand pertinent.
+
+| | Portée Projet | Portée Utilisateur |
+|---|---|---|
+| **Chemin** | `.omc/skills/` | `~/.omc/skills/` |
+| **Partagé avec** | Équipe (versionné) | Tous vos projets |
+| **Priorité** | Haute (écrase la portée utilisateur) | Basse (repli) |
+
+```yaml
+# .omc/skills/fix-proxy-crash.md
+---
+name: Fix Proxy Crash
+description: aiohttp proxy crashes on ClientDisconnectedError
+triggers: ["proxy", "aiohttp", "disconnected"]
+source: extracted
+---
+Enveloppez le handler à server.py:42 dans try/except ClientDisconnectedError...
+```
+
+**Gestion des compétences :** `/skill list | add | remove | edit | search`
+**Auto-apprentissage :** `/learner` extrait des patterns réutilisables avec des critères de qualité stricts
+**Auto-injection :** Les compétences correspondantes se chargent automatiquement dans le contexte — aucun rappel manuel nécessaire
+
 [Liste complète des fonctionnalités →](docs/REFERENCE.md)
 
 ---

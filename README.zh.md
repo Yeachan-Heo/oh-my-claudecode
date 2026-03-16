@@ -167,6 +167,31 @@ Team 按阶段化流水线运行：
 - **技能学习** - 从会话中提取可复用模式
 - **分析与成本追踪** - 了解所有会话的 token 使用情况
 
+### 自定义技能
+
+一次学习，永久复用。OMC 将调试过程中获得的实战知识提取为可移植的技能文件，并在相关场景中自动注入。
+
+| | 项目作用域 | 用户作用域 |
+|---|---|---|
+| **路径** | `.omc/skills/` | `~/.omc/skills/` |
+| **共享范围** | 团队（受版本控制） | 所有项目通用 |
+| **优先级** | 高（覆盖用户作用域） | 低（回退） |
+
+```yaml
+# .omc/skills/fix-proxy-crash.md
+---
+name: Fix Proxy Crash
+description: aiohttp proxy crashes on ClientDisconnectedError
+triggers: ["proxy", "aiohttp", "disconnected"]
+source: extracted
+---
+在 server.py:42 的处理程序外包裹 try/except ClientDisconnectedError...
+```
+
+**技能管理：** `/skill list | add | remove | edit | search`
+**自动学习：** `/learner` 以严格的质量标准提取可复用模式
+**自动注入：** 匹配的技能自动加载到上下文中 — 无需手动调用
+
 [完整功能列表 →](docs/REFERENCE.md)
 
 ---
