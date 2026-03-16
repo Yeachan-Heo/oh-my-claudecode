@@ -47,6 +47,7 @@ function makeContext(overrides: Partial<HudRenderContext> = {}): HudRenderContex
     promptTime: null,
     apiKeySource: null,
     profileName: null,
+    sessionSummary: null,
     ...overrides,
   };
 }

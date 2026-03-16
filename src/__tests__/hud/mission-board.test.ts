@@ -107,6 +107,7 @@ describe('mission board renderer', () => {
       promptTime: null,
       apiKeySource: null,
       profileName: null,
+    sessionSummary: null,
     };
 
     const config: HudConfig = {

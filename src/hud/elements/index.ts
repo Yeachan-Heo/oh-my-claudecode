@@ -22,3 +22,4 @@ export { renderModel, formatModelName } from './model.js';
 export { renderPromptTime } from './prompt-time.js';
 export { detectApiKeySource, renderApiKeySource, type ApiKeySource } from './api-key-source.js';
 export { renderMissionBoard } from './mission-board.js';
+export { renderSessionSummary, type SessionSummaryState } from './session-summary.js';
