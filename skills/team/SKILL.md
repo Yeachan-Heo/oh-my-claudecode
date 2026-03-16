@@ -2,6 +2,7 @@
 name: team
 description: N coordinated agents on shared task list using Claude Code native teams
 aliases: []
+level: 4
 ---
 
 # Team Skill

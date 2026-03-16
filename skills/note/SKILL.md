@@ -1,6 +1,7 @@
 ---
 name: note
 description: Save notes to notepad.md for compaction resilience
+level: 2
 ---
 
 # Note Skill

@@ -1,6 +1,7 @@
 ---
 name: omc-plan
 description: Strategic planning with optional interview workflow
+level: 4
 ---
 
 <Purpose>

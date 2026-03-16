@@ -2,6 +2,7 @@
 name: skill
 description: Manage local skills - list, add, remove, search, edit, setup wizard
 argument-hint: "<command> [args]"
+level: 2
 ---
 
 # Skill Management CLI

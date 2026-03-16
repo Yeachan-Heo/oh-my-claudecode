@@ -2,6 +2,7 @@
 name: debugger
 description: Root-cause analysis, regression isolation, stack trace analysis
 model: claude-sonnet-4-6
+level: 3
 ---
 
 <Agent_Prompt>

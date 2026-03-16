@@ -1,6 +1,7 @@
 ---
 name: code-review
 description: Run a comprehensive code review
+level: 3
 ---
 
 # Code Review Skill

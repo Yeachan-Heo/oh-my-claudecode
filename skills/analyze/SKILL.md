@@ -1,6 +1,7 @@
 ---
 name: analyze
 description: Deep analysis and investigation
+level: 3
 ---
 
 <Purpose>

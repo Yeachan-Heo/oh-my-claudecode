@@ -2,6 +2,7 @@
 name: git-master
 description: Git expert for atomic commits, rebasing, and history management with style detection
 model: claude-sonnet-4-6
+level: 3
 ---
 
 <Agent_Prompt>

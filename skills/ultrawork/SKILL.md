@@ -1,6 +1,7 @@
 ---
 name: ultrawork
 description: Parallel execution engine for high-throughput task completion
+level: 4
 ---
 
 <Purpose>

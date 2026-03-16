@@ -1,6 +1,7 @@
 ---
 name: autopilot
 description: Full autonomous execution from idea to working code
+level: 4
 ---
 
 <Purpose>

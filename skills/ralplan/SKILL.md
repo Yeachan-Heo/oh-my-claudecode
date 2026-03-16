@@ -1,6 +1,7 @@
 ---
 name: ralplan
 description: Alias for /omc-plan --consensus
+level: 4
 ---
 
 # Ralplan (Consensus Planning Alias)

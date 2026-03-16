@@ -1,6 +1,7 @@
 ---
 name: omc-security-review
 description: Run a comprehensive security review on code
+level: 3
 ---
 
 # Security Review Skill

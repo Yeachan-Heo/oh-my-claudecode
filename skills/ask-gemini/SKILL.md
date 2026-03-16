@@ -1,6 +1,7 @@
 ---
 name: ask-gemini
 description: Ask Gemini via local CLI and capture a reusable artifact
+level: 5
 ---
 
 # Ask Gemini

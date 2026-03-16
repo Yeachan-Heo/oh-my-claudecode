@@ -1,6 +1,7 @@
 ---
 name: learn-about-omc
 description: Learn about your OMC usage patterns and get personalized recommendations
+level: 1
 ---
 
 # Learn About OMC

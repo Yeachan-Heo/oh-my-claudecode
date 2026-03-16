@@ -1,6 +1,7 @@
 ---
 name: omc-setup
 description: Setup and configure oh-my-claudecode (the ONLY command you need to learn)
+level: 2
 ---
 
 # OMC Setup

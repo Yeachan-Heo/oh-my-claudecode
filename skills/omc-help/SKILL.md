@@ -1,6 +1,7 @@
 ---
 name: omc-help
 description: Guide on using oh-my-claudecode plugin
+level: 1
 ---
 
 # How OMC Works

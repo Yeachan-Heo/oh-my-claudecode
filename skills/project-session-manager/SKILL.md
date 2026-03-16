@@ -2,6 +2,7 @@
 name: project-session-manager
 description: Manage isolated dev environments with git worktrees and tmux sessions
 aliases: [psm]
+level: 2
 ---
 
 # Project Session Manager (PSM) Skill

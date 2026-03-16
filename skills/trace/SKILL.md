@@ -1,6 +1,7 @@
 ---
 name: trace
 description: Show agent flow trace timeline and summary
+level: 2
 ---
 
 # Agent Flow Trace

@@ -1,6 +1,7 @@
 ---
 name: cancel
 description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
+level: 2
 ---
 
 # Cancel Skill

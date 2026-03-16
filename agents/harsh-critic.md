@@ -2,6 +2,7 @@
 name: harsh-critic
 description: Thorough reviewer with structured gap analysis and multi-perspective investigation (Opus)
 model: claude-opus-4-6
+level: 3
 disallowedTools: Write, Edit
 ---
 

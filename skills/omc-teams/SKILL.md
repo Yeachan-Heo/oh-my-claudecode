@@ -2,6 +2,7 @@
 name: omc-teams
 description: Spawn claude, codex, or gemini CLI workers in tmux panes for parallel task execution
 aliases: []
+level: 4
 ---
 
 # OMC Teams Skill

@@ -2,6 +2,7 @@
 name: writer-memory
 description: Agentic memory system for writers - track characters, relationships, scenes, and themes
 argument-hint: "init|char|rel|scene|query|validate|synopsis|status|export [args]"
+level: 7
 ---
 
 # Writer Memory - Agentic Memory System for Writers

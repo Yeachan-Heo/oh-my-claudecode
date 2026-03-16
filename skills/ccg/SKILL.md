@@ -1,6 +1,7 @@
 ---
 name: ccg
 description: Claude-Codex-Gemini tri-model orchestration via ask-codex + ask-gemini, then Claude synthesizes results
+level: 5
 ---
 
 # CCG - Claude-Codex-Gemini Tri-Model Orchestration

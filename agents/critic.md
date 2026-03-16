@@ -2,6 +2,7 @@
 name: critic
 description: Work plan review expert and critic (Opus)
 model: claude-opus-4-6
+level: 3
 disallowedTools: Write, Edit
 ---
 

@@ -2,6 +2,7 @@
 name: deep-interview
 description: Socratic deep interview with mathematical ambiguity gating before autonomous execution
 argument-hint: "<idea or vague description>"
+level: 3
 ---
 
 <Purpose>

@@ -1,6 +1,7 @@
 ---
 name: ralph-init
 description: Initialize a PRD (Product Requirements Document) for structured ralph-loop execution
+level: 2
 ---
 
 # Ralph Init

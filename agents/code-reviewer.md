@@ -2,6 +2,7 @@
 name: code-reviewer
 description: Expert code review specialist with severity-rated feedback
 model: claude-opus-4-6
+level: 3
 disallowedTools: Write, Edit
 ---
 

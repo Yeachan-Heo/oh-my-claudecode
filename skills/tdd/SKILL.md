@@ -1,6 +1,7 @@
 ---
 name: tdd
 description: Test-Driven Development enforcement skill - write tests first, always
+level: 3
 ---
 
 # TDD Mode

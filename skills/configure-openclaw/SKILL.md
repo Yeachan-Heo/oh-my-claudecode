@@ -6,6 +6,7 @@ triggers:
   - "setup openclaw"
   - "openclaw gateway"
   - "openclaw setup"
+level: 2
 ---
 
 # Configure OpenClaw (DEPRECATED)

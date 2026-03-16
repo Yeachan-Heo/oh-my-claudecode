@@ -1,6 +1,7 @@
 ---
 name: ask-codex
 description: Ask Codex via local CLI and capture a reusable artifact
+level: 5
 ---
 
 # Ask Codex

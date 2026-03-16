@@ -1,6 +1,7 @@
 ---
 name: build-fix
 description: Fix build and TypeScript errors with minimal changes
+level: 3
 ---
 
 # Build Fix Skill
