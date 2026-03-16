@@ -131,6 +131,31 @@ Farklı kullanım senaryoları için birden fazla strateji — Team destekli ork
 - **Beceri öğrenimi** — Oturumlarınızdan yeniden kullanılabilir kalıplar çıkarın
 - **Analitik ve maliyet takibi** — Tüm oturumlardaki token kullanımını anlayın
 
+### Özel Beceriler
+
+Bir kez öğrenin, sonsuza kadar yeniden kullanın. OMC, hata ayıklama sürecinde kazanılan değerli bilgiyi taşınabilir beceri dosyalarına çıkarır ve ilgili durumlarda otomatik olarak enjekte eder.
+
+| | Proje Kapsamı | Kullanıcı Kapsamı |
+|---|---|---|
+| **Yol** | `.omc/skills/` | `~/.omc/skills/` |
+| **Paylaşım** | Takım (sürüm kontrollü) | Tüm projeleriniz |
+| **Öncelik** | Yüksek (kullanıcı kapsamını geçersiz kılar) | Düşük (yedek) |
+
+```yaml
+# .omc/skills/fix-proxy-crash.md
+---
+name: Fix Proxy Crash
+description: aiohttp proxy crashes on ClientDisconnectedError
+triggers: ["proxy", "aiohttp", "disconnected"]
+source: extracted
+---
+server.py:42'deki handler'ı try/except ClientDisconnectedError ile sarın...
+```
+
+**Beceri yönetimi:** `/skill list | add | remove | edit | search`
+**Otomatik öğrenme:** `/learner` katı kalite standartlarıyla yeniden kullanılabilir kalıplar çıkarır
+**Otomatik enjeksiyon:** Eşleşen beceriler otomatik olarak bağlama yüklenir — manuel çağrı gerekmez
+
 [Tam özellik listesi →](docs/REFERENCE.md)
 
 ---
