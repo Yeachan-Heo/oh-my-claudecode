@@ -56,8 +56,8 @@ function extractSessionIdFromPath(transcriptPath: string): string | null {
 /**
  * Read cached session summary from state directory.
  */
-function readSessionSummary(stateDir: string): SessionSummaryState | null {
-  const statePath = join(stateDir, 'session-summary.json');
+function readSessionSummary(stateDir: string, sessionId: string): SessionSummaryState | null {
+  const statePath = join(stateDir, `session-summary-${sessionId}.json`);
   if (!existsSync(statePath)) return null;
   try {
     return JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -70,7 +70,7 @@ function readSessionSummary(stateDir: string): SessionSummaryState | null {
  * Spawn the session-summary script in the background to generate/update summary.
  * Fire-and-forget: does not block HUD rendering.
  */
-function spawnSessionSummaryScript(transcriptPath: string, stateDir: string): void {
+function spawnSessionSummaryScript(transcriptPath: string, stateDir: string, sessionId: string): void {
   // Resolve the script path relative to this file's location
   // In compiled output: dist/hud/index.js -> ../../scripts/session-summary.mjs
   const thisDir = dirname(fileURLToPath(import.meta.url));
@@ -84,7 +84,7 @@ function spawnSessionSummaryScript(transcriptPath: string, stateDir: string): vo
   }
 
   try {
-    const child = spawn('node', [scriptPath, transcriptPath, stateDir], {
+    const child = spawn('node', [scriptPath, transcriptPath, stateDir, sessionId], {
       stdio: 'ignore',
       detached: true,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'session-summary' },
@@ -231,13 +231,19 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     // Session summary: read cached state and trigger background regeneration if needed
     let sessionSummary: SessionSummaryState | null = null;
     const sessionSummaryEnabled = config.elements.sessionSummary ?? false;
-    if (sessionSummaryEnabled && resolvedTranscriptPath) {
+    if (sessionSummaryEnabled && resolvedTranscriptPath && currentSessionId) {
       const omcStateDir = join(getOmcRoot(cwd), 'state');
-      sessionSummary = readSessionSummary(omcStateDir);
+      sessionSummary = readSessionSummary(omcStateDir, currentSessionId);
 
-      // Spawn background script to generate/update summary
-      // The script itself handles turn counting and cache freshness checks
-      spawnSessionSummaryScript(resolvedTranscriptPath, omcStateDir);
+      // Debounce: only spawn script if cache is absent or older than 60 seconds.
+      // This prevents spawning a child process on every HUD poll (every ~1s).
+      // The child script still checks turn-count freshness internally.
+      const shouldSpawn = !sessionSummary?.generatedAt
+        || (Date.now() - new Date(sessionSummary.generatedAt).getTime() > 60_000);
+
+      if (shouldSpawn) {
+        spawnSessionSummaryScript(resolvedTranscriptPath, omcStateDir, currentSessionId);
+      }
     }
 
     const missionBoardEnabled = config.missionBoard?.enabled ?? config.elements.missionBoard ?? false;

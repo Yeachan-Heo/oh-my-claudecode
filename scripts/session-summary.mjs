@@ -6,7 +6,7 @@
  * Claude Code session using `claude -p`.
  *
  * Usage:
- *   node session-summary.mjs <transcript_path> <state_dir> [--verbose]
+ *   node session-summary.mjs <transcript_path> <state_dir> <session_id> [--verbose]
  *
  * The script:
  * 1. Counts user message turns from the transcript JSONL
@@ -23,7 +23,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createInterface } from 'readline';
 
 const TURN_THRESHOLD = 10;
@@ -110,10 +110,10 @@ async function extractConversationContext(transcriptPath, maxMessages = 20) {
 }
 
 /**
- * Read cached summary state.
+ * Read cached summary state (scoped by sessionId).
  */
-function readSummaryState(stateDir) {
-  const statePath = join(stateDir, 'session-summary.json');
+function readSummaryState(stateDir, sessionId) {
+  const statePath = join(stateDir, `session-summary-${sessionId}.json`);
   if (!existsSync(statePath)) return null;
   try {
     return JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -123,11 +123,11 @@ function readSummaryState(stateDir) {
 }
 
 /**
- * Write summary state to disk.
+ * Write summary state to disk (scoped by sessionId).
  */
-function writeSummaryState(stateDir, state) {
+function writeSummaryState(stateDir, sessionId, state) {
   mkdirSync(stateDir, { recursive: true });
-  const statePath = join(stateDir, 'session-summary.json');
+  const statePath = join(stateDir, `session-summary-${sessionId}.json`);
   writeFileSync(statePath, JSON.stringify(state, null, 2));
 }
 
@@ -150,15 +150,12 @@ ${conversationContext}
 Label:`;
 
   try {
-    const result = execSync(
-      `claude -p ${JSON.stringify(prompt)}`,
-      {
-        encoding: 'utf-8',
-        timeout: 30_000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'session-summary' },
-      }
-    );
+    const result = execFileSync('claude', ['-p', prompt], {
+      encoding: 'utf-8',
+      timeout: 30_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'session-summary' },
+    });
     const summary = result.trim().slice(0, 19); // Enforce <20 chars
     return summary || null;
   } catch (error) {
@@ -170,14 +167,16 @@ Label:`;
 async function main() {
   const transcriptPath = process.argv[2];
   const stateDir = process.argv[3];
+  const sessionId = process.argv[4];
 
-  if (!transcriptPath || !stateDir) {
-    console.error('Usage: session-summary.mjs <transcript_path> <state_dir> [--verbose]');
+  if (!transcriptPath || !stateDir || !sessionId) {
+    console.error('Usage: session-summary.mjs <transcript_path> <state_dir> <session_id> [--verbose]');
     process.exit(1);
   }
 
   log('transcript:', transcriptPath);
   log('stateDir:', stateDir);
+  log('sessionId:', sessionId);
 
   // 1. Count user turns
   const turnCount = await countUserTurns(transcriptPath);
@@ -188,8 +187,8 @@ async function main() {
     process.exit(2);
   }
 
-  // 2. Check cached state
-  const cached = readSummaryState(stateDir);
+  // 2. Check cached state (scoped by sessionId)
+  const cached = readSummaryState(stateDir, sessionId);
   log('cached state:', cached);
 
   if (cached?.summary && cached?.turnCount != null) {
@@ -218,8 +217,8 @@ async function main() {
 
   log('generated summary:', summary);
 
-  // 5. Write state
-  writeSummaryState(stateDir, {
+  // 5. Write state (scoped by sessionId)
+  writeSummaryState(stateDir, sessionId, {
     summary,
     turnCount,
     generatedAt: new Date().toISOString(),

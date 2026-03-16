@@ -608,7 +608,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showTokens: false,
     useBars: true,
     showCallCounts: true,
-    sessionSummary: true,
+    sessionSummary: false, // Opt-in: sends transcript to claude -p
     maxOutputLines: 4,
     safeMode: true,
   },
@@ -644,7 +644,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showTokens: false,
     useBars: true,
     showCallCounts: true,
-    sessionSummary: true,
+    sessionSummary: false, // Opt-in: sends transcript to claude -p
     maxOutputLines: 12,
     safeMode: true,
   },
@@ -716,7 +716,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showTokens: false,
     useBars: true,
     showCallCounts: true,
-    sessionSummary: true,
+    sessionSummary: false, // Opt-in: sends transcript to claude -p
     maxOutputLines: 6,
     safeMode: true,
   },
