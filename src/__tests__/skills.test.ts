@@ -129,6 +129,36 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('trace_timeline');
       expect(skill?.template).toContain('trace_summary');
     });
+    it('should retrieve the deep-dive skill with pipeline metadata and 3-point injection', () => {
+      const skill = getBuiltinSkill('deep-dive');
+      expect(skill).toBeDefined();
+      expect(skill?.name).toBe('deep-dive');
+      expect(skill?.pipeline).toEqual({
+        steps: ['deep-dive', 'omc-plan', 'autopilot'],
+        nextSkill: 'omc-plan',
+        nextSkillArgs: '--consensus --direct',
+        handoff: '.omc/specs/deep-dive-{slug}.md',
+      });
+      // Verify 3-point injection mechanism
+      expect(skill?.template).toContain('3-Point Injection');
+      expect(skill?.template).toContain('initial_idea enrichment');
+      expect(skill?.template).toContain('codebase_context replacement');
+      expect(skill?.template).toContain('initial question queue injection');
+      // Verify per-lane critical unknowns (B3 fix)
+      expect(skill?.template).toContain('Per-Lane Critical Unknowns');
+      // Verify pipeline handoff is fully wired (B1 fix)
+      expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
+      expect(skill?.template).toContain('consensus plan as Phase 0+1 output');
+      // Verify untrusted data guard (NB1 fix)
+      expect(skill?.template).toContain('trace-context');
+      expect(skill?.template).toContain('untrusted data');
+      // Verify state schema compatibility (B2 fix)
+      expect(skill?.template).toContain('interview_id');
+      expect(skill?.template).toContain('challenge_modes_used');
+      expect(skill?.template).toContain('ontology_snapshots');
+    });
+
+
 
     it('should expose pipeline metadata for deep-interview handoff into omc-plan', () => {
       const skill = getBuiltinSkill('deep-interview');
