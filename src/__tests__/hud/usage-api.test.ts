@@ -2,8 +2,10 @@
  * Tests for z.ai host validation, response parsing, and getUsage routing.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
+import * as childProcess from 'child_process';
+import * as os from 'os';
 import { EventEmitter } from 'events';
 import { isZaiHost, parseZaiResponse, getUsage } from '../../hud/usage-api.js';
 
@@ -196,10 +198,22 @@ describe('parseZaiResponse', () => {
 
 describe('getUsage routing', () => {
   const originalEnv = { ...process.env };
+  const originalPlatform = process.platform;
   let httpsModule: { default: { request: ReturnType<typeof vi.fn> } };
+
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
     // Reset env
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
@@ -217,6 +231,133 @@ describe('getUsage routing', () => {
     expect(result.error).toBe('no_credentials');
     // No network call should be made without credentials
     expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('prefers the username-scoped keychain entry when the legacy service-only entry is expired', async () => {
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execSyncMock = vi.mocked(childProcess.execSync);
+    const username = os.userInfo().username;
+
+    execSyncMock.mockImplementation((command) => {
+      const cmd = String(command);
+      if (cmd.includes(`-a "${username}"`)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'fresh-token',
+            refreshToken: 'fresh-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+      if (cmd.includes('find-generic-password -s "Claude Code-credentials" -w')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'stale-token',
+            refreshToken: 'stale-refresh',
+            expiresAt: oneHourAgo,
+          },
+        });
+      }
+      throw new Error(`unexpected keychain lookup: ${cmd}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 25 },
+          seven_day: { utilization: 50 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 25,
+        weeklyPercent: 50,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    expect(execSyncMock).toHaveBeenCalledWith(
+      `/usr/bin/security find-generic-password -s "Claude Code-credentials" -a "${username}" -w 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 2000 }
+    );
+    expect(execSyncMock).not.toHaveBeenCalledWith(
+      '/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+      { encoding: 'utf-8', timeout: 2000 }
+    );
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-token');
+  });
+
+  it('falls back to the legacy service-only keychain entry when the username-scoped entry is expired', async () => {
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const execSyncMock = vi.mocked(childProcess.execSync);
+    const username = os.userInfo().username;
+
+    execSyncMock.mockImplementation((command) => {
+      const cmd = String(command);
+      if (cmd.includes(`-a "${username}"`)) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'expired-user-token',
+            refreshToken: 'expired-user-refresh',
+            expiresAt: oneHourAgo,
+          },
+        });
+      }
+      if (cmd.includes('find-generic-password -s "Claude Code-credentials" -w')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'fresh-legacy-token',
+            refreshToken: 'fresh-legacy-refresh',
+            expiresAt: oneHourFromNow,
+          },
+        });
+      }
+      throw new Error(`unexpected keychain lookup: ${cmd}`);
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 10 },
+          seven_day: { utilization: 20 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 10,
+        weeklyPercent: 20,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    expect(execSyncMock).toHaveBeenCalledTimes(2);
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-legacy-token');
   });
 
   it('routes to z.ai when ANTHROPIC_BASE_URL is z.ai host', async () => {
