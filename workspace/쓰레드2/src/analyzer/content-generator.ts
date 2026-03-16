@@ -167,7 +167,7 @@ async function generatePositioning(
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250715',
     systemPrompt,
     userMessage,
     maxTokens: 2048,
@@ -253,7 +253,7 @@ Return JSON with hook, bodies (3 variations), hooks (5 variations), and self_com
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250715',
     systemPrompt,
     userMessage,
     maxTokens: 4096,

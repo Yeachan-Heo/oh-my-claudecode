@@ -241,7 +241,7 @@ async function matchFromDictionary(needs: DetectedNeed[]): Promise<ProductMatch[
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250715',
     systemPrompt,
     userMessage,
     maxTokens: 4096,

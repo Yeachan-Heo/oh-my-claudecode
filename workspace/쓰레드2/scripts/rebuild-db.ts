@@ -6,6 +6,11 @@ import { sql } from 'drizzle-orm';
 import * as schema from '../src/db/schema.js';
 
 async function main() {
+  if (!process.argv.includes('--force')) {
+    console.error('⚠️ 기존 데이터가 전부 삭제됩니다. --force 플래그를 추가하세요.');
+    process.exit(1);
+  }
+
   console.log('[rebuild] Creating fresh PGlite database...');
   const dataDir = path.join(__dirname, '..', 'data', 'pglite');
   const client = new PGlite(dataDir);

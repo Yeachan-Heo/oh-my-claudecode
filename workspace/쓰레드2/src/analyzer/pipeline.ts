@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { threadPosts, products } from '../db/schema.js';
@@ -9,6 +11,7 @@ import { detectNeeds } from './needs-detector.js';
 import { matchProducts } from './product-matcher.js';
 import { generateContent } from './content-generator.js';
 import { sendAlert, sendErrorAlert } from '../utils/telegram.js';
+import { pipelineLog } from '../utils/logger.js';
 
 export interface PipelineResult {
   postsAnalyzed: number;
@@ -69,6 +72,29 @@ function toCanonicalPost(row: typeof threadPosts.$inferSelect): CanonicalPost {
   };
 }
 
+async function backupPglite(): Promise<void> {
+  const dataDir = path.resolve('data');
+  const src = path.join(dataDir, 'pglite');
+  if (!fs.existsSync(src)) return;
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  const dest = path.join(dataDir, `pglite.backup.${stamp}`);
+
+  fs.cpSync(src, dest, { recursive: true });
+  console.log(`[pipeline] DB backed up to ${dest}`);
+
+  // Keep at most 2 backups (delete oldest when 3+)
+  const entries = fs.readdirSync(dataDir)
+    .filter((f) => f.startsWith('pglite.backup.'))
+    .sort();
+  if (entries.length >= 3) {
+    const oldest = path.join(dataDir, entries[0]);
+    fs.rmSync(oldest, { recursive: true, force: true });
+    console.log(`[pipeline] Removed old backup: ${entries[0]}`);
+  }
+}
+
 export async function runAnalysisPipeline(options?: {
   postLimit?: number;
   skipContentGeneration?: boolean;
@@ -77,7 +103,15 @@ export async function runAnalysisPipeline(options?: {
   const errors: string[] = [];
   const emptyClassification = { classified: 0, ruleMatched: 0, llmClassified: 0 };
 
+  // Auto-backup before pipeline
+  try {
+    await backupPglite();
+  } catch (err) {
+    console.error(`[pipeline] Backup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   console.log('[pipeline] Starting analysis pipeline...');
+  pipelineLog('pipeline-start', { limit });
   await sendAlert('🚀 분석 파이프라인 시작').catch(() => {});
 
   // Step 0: Topic Classification — classify unclassified posts first
@@ -88,10 +122,12 @@ export async function runAnalysisPipeline(options?: {
       `[pipeline] Step 0 — Topic classification: ${classificationResult.classified} classified ` +
       `(rule: ${classificationResult.ruleMatched}, llm: ${classificationResult.llmClassified})`,
     );
+    pipelineLog('topic-classify', classificationResult);
   } catch (err) {
     const msg = `Topic classification failed: ${err instanceof Error ? err.message : String(err)}`;
     errors.push(msg);
     console.error(`[pipeline] ${msg}`);
+    pipelineLog('topic-classify-error', { error: msg });
     // Non-fatal: continue with uncategorized posts
   }
 
@@ -100,6 +136,7 @@ export async function runAnalysisPipeline(options?: {
 
   if (rows.length === 0) {
     console.log('[pipeline] No posts found in DB');
+    pipelineLog('pipeline-end', { reason: 'no-posts' });
     return {
       postsAnalyzed: 0,
       topicClassification: classificationResult,
@@ -113,6 +150,7 @@ export async function runAnalysisPipeline(options?: {
 
   const posts = rows.map(toCanonicalPost);
   console.log(`[pipeline] Fetched ${posts.length} posts`);
+  pipelineLog('fetch-posts', { count: posts.length });
 
   // Group posts by topic_category
   const categoryGroups = new Map<string, CanonicalPost[]>();
@@ -124,6 +162,7 @@ export async function runAnalysisPipeline(options?: {
   }
 
   console.log(`[pipeline] Grouped into ${categoryGroups.size} categories: ${[...categoryGroups.keys()].join(', ')}`);
+  pipelineLog('group-categories', { count: categoryGroups.size, categories: [...categoryGroups.keys()] });
 
   // Step 2: Research — run per category group
   const allDetectedNeeds: Awaited<ReturnType<typeof detectNeeds>> = [];
@@ -136,10 +175,12 @@ export async function runAnalysisPipeline(options?: {
     try {
       brief = await analyzeWithResearcher(groupPosts);
       console.log(`[pipeline] [${category}] Research complete: ${brief.purchase_signals.length} signals found`);
+      pipelineLog('research', { category, signals: brief.purchase_signals.length });
     } catch (err) {
       const msg = `Research failed for category "${category}": ${err instanceof Error ? err.message : String(err)}`;
       errors.push(msg);
       console.error(`[pipeline] ${msg}`);
+      pipelineLog('research-error', { category, error: msg });
       await sendErrorAlert(msg, `pipeline > research > ${category}`).catch(() => {});
       continue; // skip this category, proceed to next
     }
@@ -148,11 +189,13 @@ export async function runAnalysisPipeline(options?: {
     try {
       const groupNeeds = await detectNeeds(brief);
       console.log(`[pipeline] [${category}] Needs detected: ${groupNeeds.length}`);
+      pipelineLog('needs-detect', { category, count: groupNeeds.length });
       allDetectedNeeds.push(...groupNeeds);
     } catch (err) {
       const msg = `Needs detection failed for category "${category}": ${err instanceof Error ? err.message : String(err)}`;
       errors.push(msg);
       console.error(`[pipeline] ${msg}`);
+      pipelineLog('needs-detect-error', { category, error: msg });
       await sendErrorAlert(msg, `pipeline > needs-detection > ${category}`).catch(() => {});
       continue;
     }
@@ -177,10 +220,12 @@ export async function runAnalysisPipeline(options?: {
   try {
     matches = await matchProducts(allDetectedNeeds);
     console.log(`[pipeline] Products matched: ${matches.length}`);
+    pipelineLog('product-match', { matched: matches.length, needsCount: allDetectedNeeds.length });
   } catch (err) {
     const msg = `Product matching failed: ${err instanceof Error ? err.message : String(err)}`;
     errors.push(msg);
     console.error(`[pipeline] ${msg}`);
+    pipelineLog('product-match-error', { error: msg });
     await sendErrorAlert(msg, 'pipeline > product-matching').catch(() => {});
     return {
       postsAnalyzed: posts.length,
@@ -243,6 +288,7 @@ export async function runAnalysisPipeline(options?: {
   }
 
   console.log(`[pipeline] Content generated: ${contentsGenerated}`);
+  pipelineLog('content-generate', { generated: contentsGenerated });
 
   const result: PipelineResult = {
     postsAnalyzed: posts.length,
@@ -255,6 +301,7 @@ export async function runAnalysisPipeline(options?: {
   };
 
   console.log('[pipeline] Pipeline complete:', result);
+  pipelineLog('pipeline-end', { ...result });
 
   // 파이프라인 완료 알림
   const errSummary = result.errors.length > 0 ? `\n⚠️ 에러: ${result.errors.length}건` : '';

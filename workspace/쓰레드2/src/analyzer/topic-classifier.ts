@@ -139,7 +139,7 @@ async function classifyByLLM(posts: PostForClassification[]): Promise<Map<string
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-20250514', // Haiku-class cost; using available model
+    model: 'claude-sonnet-4-6-20250715', // Haiku-class cost; using available model
     systemPrompt,
     userMessage,
     maxTokens: 4096,

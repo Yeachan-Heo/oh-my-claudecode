@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 export interface LLMCallOptions {
-  model: 'claude-sonnet-4-20250514' | 'claude-opus-4-20250514';
+  model: 'claude-sonnet-4-6-20250715' | 'claude-sonnet-4-20250514' | 'claude-opus-4-20250514';
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
