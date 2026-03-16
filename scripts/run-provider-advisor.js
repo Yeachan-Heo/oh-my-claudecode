@@ -17,13 +17,16 @@ const PROVIDER_BINARIES = {
  * - gemini: `gemini -p <prompt> --yolo`
  */
 function buildProviderArgs(provider, prompt) {
+  // On Windows with shell: true, cmd.exe re-splits args on spaces,
+  // breaking multi-word prompts. Wrap in quotes to preserve as single arg.
+  const q = process.platform === 'win32' ? `"${prompt}"` : prompt;
   if (provider === 'codex') {
-    return ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt];
+    return ['exec', '--dangerously-bypass-approvals-and-sandbox', q];
   }
   if (provider === 'gemini') {
-    return ['-p', prompt, '--yolo'];
+    return ['-p', q, '--yolo'];
   }
-  return ['-p', prompt];
+  return ['-p', q];
 }
 
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
