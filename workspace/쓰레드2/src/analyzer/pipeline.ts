@@ -2,7 +2,8 @@ import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { threadPosts, products } from '../db/schema.js';
-import type { CanonicalPost, CrawlMeta } from '../types.js';
+import type { CanonicalPost, CrawlMeta, TopicCategory } from '../types.js';
+import { classifyTopics } from './topic-classifier.js';
 import { analyzeWithResearcher } from './researcher.js';
 import { detectNeeds } from './needs-detector.js';
 import { matchProducts } from './product-matcher.js';
@@ -11,6 +12,8 @@ import { sendAlert, sendErrorAlert } from '../utils/telegram.js';
 
 export interface PipelineResult {
   postsAnalyzed: number;
+  topicClassification: { classified: number; ruleMatched: number; llmClassified: number };
+  categoryGroups: number;
   needsDetected: number;
   productsMatched: number;
   contentsGenerated: number;
@@ -59,6 +62,10 @@ function toCanonicalPost(row: typeof threadPosts.$inferSelect): CanonicalPost {
       login_status: row.login_status ?? undefined,
       block_detected: row.block_detected ?? undefined,
     },
+
+    // Phase 2: topic classification
+    topic_tags: row.topic_tags ?? undefined,
+    topic_category: row.topic_category ?? undefined,
   };
 }
 
@@ -68,51 +75,107 @@ export async function runAnalysisPipeline(options?: {
 }): Promise<PipelineResult> {
   const limit = options?.postLimit ?? 100;
   const errors: string[] = [];
+  const emptyClassification = { classified: 0, ruleMatched: 0, llmClassified: 0 };
 
   console.log('[pipeline] Starting analysis pipeline...');
   await sendAlert('🚀 분석 파이프라인 시작').catch(() => {});
 
-  // Step 1: Fetch posts from DB
+  // Step 0: Topic Classification — classify unclassified posts first
+  let classificationResult = emptyClassification;
+  try {
+    classificationResult = await classifyTopics(limit);
+    console.log(
+      `[pipeline] Step 0 — Topic classification: ${classificationResult.classified} classified ` +
+      `(rule: ${classificationResult.ruleMatched}, llm: ${classificationResult.llmClassified})`,
+    );
+  } catch (err) {
+    const msg = `Topic classification failed: ${err instanceof Error ? err.message : String(err)}`;
+    errors.push(msg);
+    console.error(`[pipeline] ${msg}`);
+    // Non-fatal: continue with uncategorized posts
+  }
+
+  // Step 1: Fetch posts from DB and group by TopicCategory
   const rows = await db.select().from(threadPosts).limit(limit);
 
   if (rows.length === 0) {
     console.log('[pipeline] No posts found in DB');
-    return { postsAnalyzed: 0, needsDetected: 0, productsMatched: 0, contentsGenerated: 0, errors: [] };
+    return {
+      postsAnalyzed: 0,
+      topicClassification: classificationResult,
+      categoryGroups: 0,
+      needsDetected: 0,
+      productsMatched: 0,
+      contentsGenerated: 0,
+      errors: [],
+    };
   }
 
   const posts = rows.map(toCanonicalPost);
   console.log(`[pipeline] Fetched ${posts.length} posts`);
 
-  // Step 2: Research
-  let brief;
-  try {
-    brief = await analyzeWithResearcher(posts);
-    console.log(`[pipeline] Research complete: ${brief.purchase_signals.length} signals found`);
-  } catch (err) {
-    const msg = `Research step failed: ${err instanceof Error ? err.message : String(err)}`;
-    errors.push(msg);
-    console.error(`[pipeline] ${msg}`);
-    await sendErrorAlert(msg, 'pipeline > research').catch(() => {});
-    return { postsAnalyzed: posts.length, needsDetected: 0, productsMatched: 0, contentsGenerated: 0, errors };
+  // Group posts by topic_category
+  const categoryGroups = new Map<string, CanonicalPost[]>();
+  for (const post of posts) {
+    const category = post.topic_category ?? '기타';
+    const group = categoryGroups.get(category) ?? [];
+    group.push(post);
+    categoryGroups.set(category, group);
   }
 
-  // Step 3: Needs detection
-  let detectedNeeds;
-  try {
-    detectedNeeds = await detectNeeds(brief);
-    console.log(`[pipeline] Needs detected: ${detectedNeeds.length}`);
-  } catch (err) {
-    const msg = `Needs detection failed: ${err instanceof Error ? err.message : String(err)}`;
-    errors.push(msg);
-    console.error(`[pipeline] ${msg}`);
-    await sendErrorAlert(msg, 'pipeline > needs-detection').catch(() => {});
-    return { postsAnalyzed: posts.length, needsDetected: 0, productsMatched: 0, contentsGenerated: 0, errors };
+  console.log(`[pipeline] Grouped into ${categoryGroups.size} categories: ${[...categoryGroups.keys()].join(', ')}`);
+
+  // Step 2: Research — run per category group
+  const allDetectedNeeds: Awaited<ReturnType<typeof detectNeeds>> = [];
+
+  for (const [category, groupPosts] of categoryGroups) {
+    console.log(`[pipeline] Analyzing category "${category}" (${groupPosts.length} posts)`);
+
+    // Step 2a: Research per group
+    let brief;
+    try {
+      brief = await analyzeWithResearcher(groupPosts);
+      console.log(`[pipeline] [${category}] Research complete: ${brief.purchase_signals.length} signals found`);
+    } catch (err) {
+      const msg = `Research failed for category "${category}": ${err instanceof Error ? err.message : String(err)}`;
+      errors.push(msg);
+      console.error(`[pipeline] ${msg}`);
+      await sendErrorAlert(msg, `pipeline > research > ${category}`).catch(() => {});
+      continue; // skip this category, proceed to next
+    }
+
+    // Step 2b: Needs detection per group
+    try {
+      const groupNeeds = await detectNeeds(brief);
+      console.log(`[pipeline] [${category}] Needs detected: ${groupNeeds.length}`);
+      allDetectedNeeds.push(...groupNeeds);
+    } catch (err) {
+      const msg = `Needs detection failed for category "${category}": ${err instanceof Error ? err.message : String(err)}`;
+      errors.push(msg);
+      console.error(`[pipeline] ${msg}`);
+      await sendErrorAlert(msg, `pipeline > needs-detection > ${category}`).catch(() => {});
+      continue;
+    }
   }
 
-  // Step 4: Product matching
+  if (allDetectedNeeds.length === 0 && errors.length > 0) {
+    return {
+      postsAnalyzed: posts.length,
+      topicClassification: classificationResult,
+      categoryGroups: categoryGroups.size,
+      needsDetected: 0,
+      productsMatched: 0,
+      contentsGenerated: 0,
+      errors,
+    };
+  }
+
+  console.log(`[pipeline] Total needs detected across all categories: ${allDetectedNeeds.length}`);
+
+  // Step 3: Product matching (across all needs)
   let matches;
   try {
-    matches = await matchProducts(detectedNeeds);
+    matches = await matchProducts(allDetectedNeeds);
     console.log(`[pipeline] Products matched: ${matches.length}`);
   } catch (err) {
     const msg = `Product matching failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -121,7 +184,9 @@ export async function runAnalysisPipeline(options?: {
     await sendErrorAlert(msg, 'pipeline > product-matching').catch(() => {});
     return {
       postsAnalyzed: posts.length,
-      needsDetected: detectedNeeds.length,
+      topicClassification: classificationResult,
+      categoryGroups: categoryGroups.size,
+      needsDetected: allDetectedNeeds.length,
       productsMatched: 0,
       contentsGenerated: 0,
       errors,
@@ -131,18 +196,20 @@ export async function runAnalysisPipeline(options?: {
   if (options?.skipContentGeneration) {
     return {
       postsAnalyzed: posts.length,
-      needsDetected: detectedNeeds.length,
+      topicClassification: classificationResult,
+      categoryGroups: categoryGroups.size,
+      needsDetected: allDetectedNeeds.length,
       productsMatched: matches.length,
       contentsGenerated: 0,
       errors,
     };
   }
 
-  // Step 5: Content generation
+  // Step 4: Content generation
   let contentsGenerated = 0;
   for (const match of matches) {
     try {
-      const need = detectedNeeds.find((n) => n.need_id === match.need_id);
+      const need = allDetectedNeeds.find((n) => n.need_id === match.need_id);
       if (!need) {
         errors.push(`Need ${match.need_id} not found for product ${match.product_id}`);
         continue;
@@ -179,7 +246,9 @@ export async function runAnalysisPipeline(options?: {
 
   const result: PipelineResult = {
     postsAnalyzed: posts.length,
-    needsDetected: detectedNeeds.length,
+    topicClassification: classificationResult,
+    categoryGroups: categoryGroups.size,
+    needsDetected: allDetectedNeeds.length,
     productsMatched: matches.length,
     contentsGenerated,
     errors,
@@ -191,6 +260,8 @@ export async function runAnalysisPipeline(options?: {
   const errSummary = result.errors.length > 0 ? `\n⚠️ 에러: ${result.errors.length}건` : '';
   await sendAlert(
     `✅ 분석 파이프라인 완료\n\n` +
+    `🏷️ 분류: ${result.topicClassification.classified}개 (규칙: ${result.topicClassification.ruleMatched}, LLM: ${result.topicClassification.llmClassified})\n` +
+    `📂 카테고리: ${result.categoryGroups}개 그룹\n` +
     `📝 포스트: ${result.postsAnalyzed}개\n` +
     `🔍 니즈: ${result.needsDetected}개\n` +
     `🛒 매칭: ${result.productsMatched}개\n` +

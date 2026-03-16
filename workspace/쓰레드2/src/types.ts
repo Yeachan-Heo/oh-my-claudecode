@@ -117,6 +117,12 @@ export interface ResearchBrief {
   channel_breakdown?: Record<string, unknown>;
 }
 
+// --- Topic classification ---
+
+export type TopicCategory =
+  | '건강' | '뷰티' | '다이어트' | '운동' | '생활' | '주방'
+  | '디지털' | '육아' | '인테리어' | '패션' | '식품' | '문구' | '향수' | '기타';
+
 // --- Needs detection ---
 
 export type NeedsCategory = '불편해소' | '시간절약' | '돈절약' | '성과향상' | '외모건강' | '자기표현';
