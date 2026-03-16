@@ -17,7 +17,7 @@ import { callLLM, loadAgentPrompt, parseJSON } from './llm.js';
 import type { DetectedNeed } from './needs-detector.js';
 import { sendProductRequest } from '../utils/telegram.js';
 import type { NeedInfo, CoupangProduct } from '../utils/telegram.js';
-import { CDP_URL, checkCDP } from '../utils/browser.js';
+import { CDP_URL, connectBrowser } from '../utils/browser.js';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -38,124 +38,162 @@ interface CoupangSearchResult {
   rating?: string;
 }
 
+// ─── Anti-bot Utilities ─────────────────────────────────
+
+function randInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function humanDelay(min: number, max: number): Promise<void> {
+  await new Promise(r => setTimeout(r, randInt(min, max)));
+}
+
+/** 사람처럼 페이지를 스크롤하며 읽는 동작 */
+async function humanScroll(page: Page): Promise<void> {
+  const scrolls = randInt(2, 4);
+  for (let i = 0; i < scrolls; i++) {
+    await page.mouse.wheel(0, randInt(200, 500));
+    await humanDelay(800, 2000);
+  }
+}
+
+// ─── Coupang Session Manager ────────────────────────────
+
+/** 브라우저 세션을 유지하며 여러 검색을 처리하는 클래스 */
+class CoupangSession {
+  private browser: Browser | null = null;
+  private page: Page | null = null;
+
+  async connect(): Promise<boolean> {
+    try {
+      this.browser = await connectBrowser();
+      const context = this.browser.contexts()[0] ?? await this.browser.newContext();
+      this.page = context.pages()[0] || await context.newPage();
+      return true;
+    } catch (err) {
+      console.error(`[product-matcher] CDP 연결 실패: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try { await this.browser?.close(); } catch { /* CDP disconnect 무시 */ }
+    this.browser = null;
+    this.page = null;
+  }
+
+  isConnected(): boolean {
+    return this.page !== null;
+  }
+
+  /**
+   * 같은 탭에서 검색어를 입력하고 결과를 수집한다.
+   * 사람처럼: 검색창 클릭 → 기존 텍스트 지우기 → 키워드 입력 → Enter → 결과 로드 대기 → 스크롤하며 읽기 → 파싱
+   */
+  async search(keyword: string, maxProducts = 5): Promise<CoupangSearchResult[]> {
+    if (!this.page) return [];
+
+    try {
+      // 쿠팡 검색 페이지로 이동 (첫 검색이거나 에러 복구 시)
+      const currentUrl = this.page.url();
+      if (!currentUrl.includes('coupang.com')) {
+        await this.page.goto('https://www.coupang.com', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+        await humanDelay(2000, 4000);
+      }
+
+      // 검색창에 키워드 입력 (사람처럼)
+      const searchInput = await this.page.$('input.search-input, input[name="q"], input#headerSearchKeyword');
+      if (searchInput) {
+        await searchInput.click();
+        await humanDelay(300, 800);
+        await searchInput.fill('');
+        await humanDelay(200, 500);
+        // 타이핑 속도를 사람처럼 (글자당 50~150ms)
+        for (const char of keyword) {
+          await this.page.keyboard.type(char, { delay: randInt(50, 150) });
+        }
+        await humanDelay(500, 1000);
+        await this.page.keyboard.press('Enter');
+      } else {
+        // 검색창을 못 찾으면 URL로 직접 이동
+        const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user`;
+        await this.page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+      }
+
+      // 검색 결과 로딩 대기
+      await this.page.waitForSelector('.search-product, #productList, [class*="product"]', { timeout: 10_000 }).catch(() => {});
+      await humanDelay(2000, 4000);
+
+      // 사람처럼 스크롤하며 결과 읽기
+      await humanScroll(this.page);
+
+      // 제품 파싱
+      const results = await this.page.evaluate((max: number) => {
+        const items: Array<{ name: string; price: string; url: string; rating?: string }> = [];
+
+        const productCards = document.querySelectorAll('.search-product li.search-product-wrap, ul#productList li');
+        for (const card of productCards) {
+          if (items.length >= max) break;
+          const nameEl = card.querySelector('.name, .product-name, [class*="name"]');
+          const priceEl = card.querySelector('.price-value, .base-price, [class*="price"]');
+          const linkEl = card.querySelector('a[href*="/products/"], a[href*="/vp/"]') as HTMLAnchorElement | null;
+          const ratingEl = card.querySelector('.rating, [class*="rating"]');
+
+          const name = nameEl?.textContent?.trim();
+          const price = priceEl?.textContent?.trim();
+          const href = linkEl?.getAttribute('href');
+
+          if (name && href) {
+            const fullUrl = href.startsWith('http') ? href : `https://www.coupang.com${href}`;
+            items.push({
+              name,
+              price: price ?? '가격 미표시',
+              url: fullUrl.split('?')[0],
+              rating: ratingEl?.textContent?.trim(),
+            });
+          }
+        }
+
+        // Fallback: a 태그 기반 추출
+        if (items.length === 0) {
+          const allLinks = document.querySelectorAll('a[href*="/products/"], a[href*="/vp/"]');
+          for (const link of allLinks) {
+            if (items.length >= max) break;
+            const href = (link as HTMLAnchorElement).getAttribute('href');
+            const text = link.textContent?.trim();
+            if (href && text && text.length > 5 && text.length < 200) {
+              const fullUrl = href.startsWith('http') ? href : `https://www.coupang.com${href}`;
+              items.push({
+                name: text.slice(0, 100),
+                price: '가격 미표시',
+                url: fullUrl.split('?')[0],
+              });
+            }
+          }
+        }
+
+        return items;
+      }, maxProducts);
+
+      return results;
+    } catch (err) {
+      console.error(`[product-matcher] 쿠팡 검색 실패 (keyword="${keyword}"): ${(err as Error).message}`);
+      return [];
+    }
+  }
+}
+
 // ─── Coupang Search ─────────────────────────────────────
 
 /**
  * NeedItem에서 쿠팡 검색 키워드를 추출한다.
- * problem + product_categories를 조합하여 최적의 검색어를 만든다.
  */
 function extractSearchKeyword(need: DetectedNeed): string {
-  // product_categories가 있으면 첫 번째 카테고리를 검색어로 사용
   if (need.product_categories.length > 0) {
     const primaryCategory = need.product_categories[0];
-    // 카테고리가 충분히 구체적이면 그대로 사용
-    if (primaryCategory.length >= 3) {
-      return primaryCategory;
-    }
+    if (primaryCategory.length >= 3) return primaryCategory;
   }
-
-  // problem에서 핵심 키워드 추출: 제품/솔루션 관련 명사를 추출
-  const problem = need.problem;
-  // product_categories가 있으면 첫 번째 + problem 핵심어 조합
-  if (need.product_categories.length > 0) {
-    return need.product_categories[0];
-  }
-
-  // fallback: problem 전체를 검색어로 (쿠팡이 알아서 파싱)
-  // 너무 길면 앞 30자만 사용
-  return problem.length > 30 ? problem.slice(0, 30) : problem;
-}
-
-/**
- * 쿠팡 웹 검색 결과 페이지를 Playwright CDP로 파싱하여 상위 제품을 추출한다.
- *
- * @param keyword - 검색 키워드
- * @param maxProducts - 추출할 최대 제품 수 (기본 5)
- * @returns 추출된 제품 배열 (빈 배열이면 검색 실패)
- */
-async function searchCoupang(keyword: string, maxProducts = 5): Promise<CoupangSearchResult[]> {
-  // CDP 가용 여부 확인 — 미실행 시 빈 배열 반환 (fallback 유도)
-  const cdpAvailable = await checkCDP();
-  if (!cdpAvailable) {
-    console.warn('[product-matcher] CDP 미연결 — 쿠팡 검색 건너뜀');
-    return [];
-  }
-
-  let browser: Browser | null = null;
-  let page: Page | null = null;
-
-  try {
-    browser = await chromium.connectOverCDP(CDP_URL);
-    const context = browser.contexts()[0] ?? await browser.newContext();
-    page = await context.newPage();
-
-    const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user`;
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-
-    // 검색 결과 로딩 대기
-    await page.waitForSelector('.search-product, #productList, [class*="product"]', { timeout: 10_000 }).catch(() => {
-      // 셀렉터 실패해도 계속 진행 — 아래에서 빈 배열 반환됨
-    });
-
-    // 쿠팡 검색 결과 파싱 — 여러 셀렉터 전략 시도
-    const results = await page.evaluate((max: number) => {
-      const items: Array<{ name: string; price: string; url: string; rating?: string }> = [];
-
-      // Strategy 1: .search-product li (일반 검색 결과)
-      const productCards = document.querySelectorAll('.search-product li.search-product-wrap, ul#productList li');
-
-      for (const card of productCards) {
-        if (items.length >= max) break;
-
-        const nameEl = card.querySelector('.name, .product-name, [class*="name"]');
-        const priceEl = card.querySelector('.price-value, .base-price, [class*="price"]');
-        const linkEl = card.querySelector('a[href*="/products/"], a[href*="/vp/"]') as HTMLAnchorElement | null;
-        const ratingEl = card.querySelector('.rating, [class*="rating"]');
-
-        const name = nameEl?.textContent?.trim();
-        const price = priceEl?.textContent?.trim();
-        const href = linkEl?.getAttribute('href');
-
-        if (name && href) {
-          const fullUrl = href.startsWith('http') ? href : `https://www.coupang.com${href}`;
-          items.push({
-            name,
-            price: price ?? '가격 미표시',
-            url: fullUrl.split('?')[0], // 쿼리 파라미터 제거
-            rating: ratingEl?.textContent?.trim(),
-          });
-        }
-      }
-
-      // Strategy 2: Fallback — a 태그 기반 추출
-      if (items.length === 0) {
-        const allLinks = document.querySelectorAll('a[href*="/products/"], a[href*="/vp/"]');
-        for (const link of allLinks) {
-          if (items.length >= max) break;
-          const href = (link as HTMLAnchorElement).getAttribute('href');
-          const text = link.textContent?.trim();
-          if (href && text && text.length > 5 && text.length < 200) {
-            const fullUrl = href.startsWith('http') ? href : `https://www.coupang.com${href}`;
-            items.push({
-              name: text.slice(0, 100), // 이름 너무 길면 자르기
-              price: '가격 미표시',
-              url: fullUrl.split('?')[0],
-            });
-          }
-        }
-      }
-
-      return items;
-    }, maxProducts);
-
-    return results;
-  } catch (err) {
-    console.error(`[product-matcher] 쿠팡 검색 실패 (keyword="${keyword}"): ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  } finally {
-    try { await page?.close(); } catch { /* ignore */ }
-    try { await browser?.close(); } catch { /* CDP disconnect 무시 */ }
-  }
+  return need.problem.length > 30 ? need.problem.slice(0, 30) : need.problem;
 }
 
 // ─── Fallback: DB 사전 기반 매칭 ────────────────────────
@@ -269,23 +307,73 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
   const allMatches: ProductMatch[] = [];
   const fallbackNeeds: DetectedNeed[] = [];
 
-  // Step 1: 각 니즈별로 쿠팡 실시간 검색 시도
-  for (const need of needs) {
-    const keyword = extractSearchKeyword(need);
-    console.log(`[product-matcher] 쿠팡 검색: "${keyword}" (need=${need.need_id})`);
+  // Step 1: 쿠팡 세션 열기 (한 번만 연결, 같은 탭에서 검색어만 변경)
+  const session = new CoupangSession();
+  const connected = await session.connect();
 
-    const coupangResults = await searchCoupang(keyword, 5);
+  if (!connected) {
+    console.warn('[product-matcher] CDP 연결 불가 — 전체 DB fallback');
+    return matchFromDictionary(needs);
+  }
+
+  // Step 2: 각 니즈별로 쿠팡 검색 (같은 탭, 사람처럼)
+  // 패턴: 검색 → 스크롤하며 읽기 → 수집 → 15~30초 대기 → 3개마다 60~120초 긴 휴식
+  for (let i = 0; i < needs.length; i++) {
+    const need = needs[i];
+    const keyword = extractSearchKeyword(need);
+    console.log(`[product-matcher] 쿠팡 검색 ${i + 1}/${needs.length}: "${keyword}" (need=${need.need_id})`);
+
+    const coupangResults = await session.search(keyword, 5);
+
+    // 안티봇 딜레이: 검색 완료 후 다음 검색 전 대기
+    if (i < needs.length - 1) {
+      // 3개마다 긴 휴식 (60~120초) — 사람이 다른 일 하다가 돌아온 패턴
+      if ((i + 1) % 3 === 0) {
+        const longBreak = randInt(60_000, 120_000);
+        console.log(`[product-matcher] 긴 휴식: ${(longBreak / 1000).toFixed(0)}초 (${i + 1}/${needs.length} 완료)`);
+        await new Promise(r => setTimeout(r, longBreak));
+      } else {
+        // 일반 딜레이 (15~30초) — 결과를 읽고 생각하는 시간
+        const delay = randInt(15_000, 30_000);
+        console.log(`[product-matcher] 대기: ${(delay / 1000).toFixed(1)}초`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
 
     if (coupangResults.length > 0) {
-      // 검색 성공: 쿠팡 결과를 ProductMatch로 변환
-      const needMatches: ProductMatch[] = coupangResults.slice(0, 5).map((result, idx) => ({
-        need_id: need.need_id,
-        product_id: `coupang-${Date.now()}-${idx}`, // 임시 ID (쿠팡 URL이 실제 식별자)
-        match_score: 80 - idx * 5, // 순위 기반 점수 (80, 75, 70, ...)
-        match_why: `쿠팡 검색 "${keyword}" 상위 ${idx + 1}위 결과`,
-        competition: '중' as const,
-        priority: idx + 1,
-      }));
+      // 검색 성공: 쿠팡 결과를 DB에 저장 후 ProductMatch로 변환
+      const needMatches: ProductMatch[] = [];
+      for (let idx = 0; idx < Math.min(coupangResults.length, 5); idx++) {
+        const result = coupangResults[idx];
+        const productId = `coupang-${Date.now()}-${idx}`;
+
+        // 쿠팡 검색 결과를 products 테이블에 삽입 (content-generator가 조회할 수 있도록)
+        try {
+          await db.insert(products).values({
+            product_id: productId,
+            name: result.name.slice(0, 200),
+            category: need.category,
+            needs_categories: [need.category],
+            keywords: need.product_categories,
+            affiliate_platform: 'coupang_partners',
+            price_range: result.price ?? '가격 미표시',
+            description: `쿠팡 검색 "${keyword}" 결과${result.rating ? ` (평점: ${result.rating})` : ''}`,
+            affiliate_link: result.url,
+            is_active: true,
+          }).onConflictDoNothing();
+        } catch (insertErr) {
+          console.warn(`[product-matcher] 쿠팡 제품 DB 삽입 실패: ${(insertErr as Error).message}`);
+        }
+
+        needMatches.push({
+          need_id: need.need_id,
+          product_id: productId,
+          match_score: 80 - idx * 5,
+          match_why: `쿠팡 검색 "${keyword}" 상위 ${idx + 1}위 결과`,
+          competition: '중' as const,
+          priority: idx + 1,
+        });
+      }
 
       allMatches.push(...needMatches);
 
@@ -373,6 +461,9 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
     }
   }
 
-  console.log(`[product-matcher] 최종 매칭: ${allMatches.length}개 (쿠팡 검색: ${allMatches.length - (fallbackNeeds.length > 0 ? 0 : 0)}, fallback 포함)`);
+  // Step 4: 쿠팡 세션 정리
+  await session.disconnect();
+
+  console.log(`[product-matcher] 최종 매칭: ${allMatches.length}개 (fallback: ${fallbackNeeds.length}개)`);
   return allMatches;
 }
