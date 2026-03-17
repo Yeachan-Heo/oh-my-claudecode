@@ -280,6 +280,23 @@ async function main(): Promise<void> {
     // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
     const config = readHudConfig();
 
+    // Auto-detect terminal width if maxWidth not explicitly configured.
+    // When stdout is piped (as with Claude Code's statusline hook), process.stdout.columns
+    // is undefined. We fall back to process.stderr.columns (often still a TTY) and then
+    // process.env.COLUMNS (exported by most shells). When a width is detected, wrapMode
+    // defaults to 'wrap' so content is preserved across lines instead of being cut with '...'.
+    if (!config.maxWidth) {
+      const cols =
+        parseInt(process.env.COLUMNS ?? '0', 10) ||
+        (process.stderr as NodeJS.WriteStream).columns ||
+        (process.stdout as NodeJS.WriteStream).columns ||
+        0;
+      if (cols > 0) {
+        config.maxWidth = cols;
+        if (!config.wrapMode) config.wrapMode = 'wrap';
+      }
+    }
+
     // Parse transcript for agents and todos
     const transcriptData = await parseTranscript(stdin.transcript_path, {
       staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
