@@ -1117,6 +1117,22 @@ export async function checkPersistentModes(
   const todoResult = await checkIncompleteTodos(sessionId, workingDir, stopContext);
   const hasIncompleteTodos = todoResult.count > 0;
 
+  // Check if there are active sub-agents running.
+  // If so, the orchestrator is waiting for them to finish, which is a valid idle state.
+  // We should not block the stop event in this case.
+  try {
+    const { getActiveAgentCount } = await import('../subagent-tracker/index.js');
+    if (getActiveAgentCount(workingDir) > 0) {
+      return {
+        shouldBlock: false,
+        message: '',
+        mode: 'none'
+      };
+    }
+  } catch {
+    // If subagent-tracker module is unavailable, skip gracefully
+  }
+
   // Priority 1: Ralph (explicit loop mode)
   const ralphResult = await checkRalphLoop(sessionId, workingDir, cancelInProgress);
   if (ralphResult) {
