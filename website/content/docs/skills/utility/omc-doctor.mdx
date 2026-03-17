@@ -1,0 +1,69 @@
+---
+title: OMC Doctor
+description: oh-my-claudecode 설치 문제를 진단하고 자동 수정하는 스킬
+---
+
+## 개요
+
+OMC Doctor는 oh-my-claudecode의 설치 상태를 진단하고 발견된 문제를 자동으로 수정하는 스킬입니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:omc-doctor
+```
+
+## 진단 항목
+
+| 검사 | 상태 | 설명 |
+|------|------|------|
+| 플러그인 버전 | OK / WARN / CRITICAL | 설치 여부, 최신 버전 여부 |
+| 레거시 훅 (settings.json) | OK / CRITICAL | 중복 실행을 유발하는 레거시 훅 |
+| 레거시 스크립트 (~/.claude/hooks/) | OK / WARN | 혼란을 유발하는 레거시 스크립트 |
+| CLAUDE.md | OK / WARN / CRITICAL | OMC 설정 마커 존재 여부 |
+| 플러그인 캐시 | OK / WARN | 여러 캐시 버전 존재 여부 |
+| 레거시 에이전트/명령/스킬 | OK / WARN | curl 설치 잔여물 |
+
+## 진단 보고서
+
+```
+## OMC Doctor Report
+
+### Summary
+[HEALTHY / ISSUES FOUND]
+
+### Checks
+| Check              | Status   | Details |
+|--------------------|----------|---------|
+| Plugin Version     | OK       | 4.8.0   |
+| Legacy Hooks       | CRITICAL | ...     |
+| CLAUDE.md          | OK       | ...     |
+```
+
+## 자동 수정
+
+문제가 발견되면 자동 수정을 제안합니다.
+
+| 문제 | 수정 |
+|------|------|
+| 레거시 훅 | settings.json에서 `hooks` 섹션 제거 |
+| 레거시 스크립트 | `~/.claude/hooks/*.sh` 삭제 |
+| 오래된 플러그인 | 플러그인 캐시 정리 |
+| 캐시 중복 | 최신 버전만 보존 |
+| CLAUDE.md 누락/오래됨 | 최신 CLAUDE.md 다운로드 |
+| 레거시 설치물 | 백업 후 제거 |
+
+수정 후 Claude Code 재시작이 필요합니다.
+
+## 관련 스킬
+
+- [omc-setup](/docs/skills/utility/omc-setup) - 전체 OMC 설정
+- [setup](/docs/skills/utility/setup) - 통합 설정 진입점
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:omc-doctor` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |

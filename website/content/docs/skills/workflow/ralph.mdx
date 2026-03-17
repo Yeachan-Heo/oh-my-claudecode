@@ -1,0 +1,117 @@
+---
+title: Ralph
+description: PRD 기반 지속 루프로 모든 사용자 스토리가 검증될 때까지 반복 실행
+---
+
+## 개요
+
+Ralph는 PRD(Product Requirements Document) 기반 지속 루프입니다. 모든 사용자 스토리의 수락 기준이 충족되고 리뷰어가 검증할 때까지 작업을 계속합니다. Ultrawork의 병렬 실행 위에 세션 지속성, 자동 재시도, 구조화된 스토리 추적, 필수 검증을 추가합니다.
+
+작업이 부분적으로만 구현되고 "완료"로 선언되는 걸 방지하기 위해 만들어졌습니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ralph "fix all TypeScript errors across the project"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+ralph refactor the authentication module
+don't stop until all tests pass
+must complete the migration
+```
+
+## 옵션/플래그
+
+| 플래그 | 설명 |
+|--------|------|
+| `--no-prd` | PRD 생성 건너뛰기 (단순 작업용) |
+| `--critic=architect` | 완료 리뷰어로 architect 사용 (기본값) |
+| `--critic=critic` | 완료 리뷰어로 critic 사용 |
+| `--critic=codex` | 완료 리뷰어로 Codex CLI 사용 |
+
+## 실행 단계
+
+### 1. PRD 설정
+
+첫 반복에서 `prd.json`을 생성하거나 기존 파일을 읽습니다.
+자동 생성된 스캐폴드의 일반적 수락 기준을 작업에 맞는 구체적 기준으로 교체합니다.
+
+```json
+{
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Add flag detection helpers",
+      "acceptanceCriteria": [
+        "detectNoPrdFlag('ralph --no-prd fix') returns true",
+        "TypeScript compiles with no errors (npm run build)"
+      ],
+      "passes": false
+    }
+  ]
+}
+```
+
+### 2. 스토리별 구현
+
+가장 높은 우선순위의 미완료 스토리를 선택하고 구현합니다.
+
+- 단순 작업: LOW 티어 (Haiku)
+- 표준 작업: MEDIUM 티어 (Sonnet)
+- 복잡한 작업: HIGH 티어 (Opus)
+- 독립 작업은 동시에 실행합니다
+
+### 3. 스토리별 검증
+
+각 수락 기준에 대해 새로운 증거로 검증합니다.
+모든 기준이 충족되면 `passes: true`로 표시합니다.
+
+### 4. PRD 완료 확인
+
+모든 스토리가 완료되면 리뷰어 검증으로 진행합니다.
+미완료 스토리가 있으면 다음 스토리를 선택합니다.
+
+### 5. 리뷰어 검증
+
+변경 범위에 따라 검증 티어가 결정됩니다.
+
+- 5개 미만 파일, 100줄 미만: STANDARD (Sonnet)
+- 20개 이상 파일 또는 보안/아키텍처 변경: THOROUGH (Opus)
+
+### 6. 완료
+
+승인되면 `/oh-my-claudecode:cancel`로 상태를 정리합니다.
+거부되면 문제를 수정하고 재검증합니다.
+
+## 예시
+
+```bash
+# 기본 사용
+ralph fix all failing tests in the auth module
+
+# PRD 없이 단순 작업
+ralph --no-prd fix the typo in README.md
+
+# Codex 리뷰어 사용
+ralph --critic=codex implement the user profile page
+```
+
+## 관련 스킬
+
+- [ultrawork](/docs/skills/workflow/ultrawork) - ralph 안의 병렬 실행 엔진
+- [autopilot](/docs/skills/workflow/autopilot) - ralph를 포함하는 전체 자율 파이프라인
+- [cancel](/docs/skills/utility/cancel) - ralph 실행 취소
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ralph` |
+| 매직 키워드 | `ralph`, `don't stop`, `must complete` |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/ralph-state.json` |
+| PRD 파일 | `.omc/prd.json` |
+| 진행 기록 | `.omc/progress.txt` |

@@ -1,0 +1,100 @@
+---
+title: Notepad
+description: 컨텍스트 컴팩션에서 살아남는 메모 시스템
+---
+
+## 개요
+
+Notepad은 컨텍스트 윈도우 컴팩션에서 살아남는 지속적 메모 시스템입니다. 긴 세션에서 대화 초반의 중요한 정보가 컨텍스트에서 밀려나도, Notepad에 저장된 내용은 컴팩션 후에도 복원됩니다.
+
+## 저장 경로
+
+```
+.omc/notepad.md
+```
+
+## 도구 목록
+
+### notepad_read
+
+현재 노트패드의 전체 내용을 읽습니다.
+
+```
+notepad_read()
+```
+
+### notepad_write_priority
+
+가장 높은 우선순위로 메모를 저장합니다. 컴팩션 시 가장 먼저 복원됩니다.
+
+```
+notepad_write_priority(content="이 프로젝트는 TypeScript strict 모드를 사용합니다")
+```
+
+아키텍처 결정, 핵심 제약 조건, 절대 잊으면 안 되는 정보에 사용합니다.
+
+### notepad_write_working
+
+작업 중인 컨텍스트를 저장합니다. 일반적인 메모용입니다.
+
+```
+notepad_write_working(content="현재 auth 모듈 리팩토링 중, 3/5 파일 완료")
+```
+
+진행 상황, 다음 단계, 작업 중 발견한 정보에 사용합니다.
+
+### notepad_write_manual
+
+수동으로 특정 위치에 메모를 저장합니다.
+
+```
+notepad_write_manual(content="버그: session.ts:45에서 sessionId undefined 발생")
+```
+
+### notepad_prune
+
+오래되거나 불필요한 메모를 정리합니다.
+
+```
+notepad_prune()
+```
+
+### notepad_stats
+
+노트패드의 통계를 반환합니다 (항목 수, 크기 등).
+
+```
+notepad_stats()
+```
+
+## 사용 패턴
+
+### 중요한 결정 기록
+
+```
+notepad_write_priority(content="DB 마이그레이션: PostgreSQL → MySQL 금지. 기존 쿼리 호환성 문제")
+```
+
+### 작업 진행 상황 기록
+
+```
+notepad_write_working(content="TODO: 1. auth 모듈 수정 ✓ 2. 테스트 추가 3. 문서 업데이트")
+```
+
+### 세션 재개 시 컨텍스트 복원
+
+```
+notepad_read()
+→ "현재 auth 리팩토링 중. src/auth/login.ts 수정 완료. 다음: src/auth/session.ts"
+```
+
+## 컴팩션 동작
+
+Claude Code가 컨텍스트를 컴팩트할 때:
+
+1. 노트패드 내용이 컴팩션 결과에 포함됩니다
+2. 우선순위 메모가 먼저 복원됩니다
+3. 작업 메모가 다음으로 복원됩니다
+4. 정리된 메모는 제외됩니다
+
+긴 세션에서도 핵심 컨텍스트가 유지됩니다.

@@ -1,0 +1,135 @@
+---
+title: 라이프사이클 이벤트
+description: Claude Code의 10개 라이프사이클 이벤트와 각 이벤트에 연결된 훅을 설명합니다.
+---
+
+## 라이프사이클 이벤트란?
+
+Claude Code는 세션 동안 여러 이벤트를 발생시킵니다.
+OMC는 이 이벤트에 훅을 연결하여 동작을 확장합니다.
+
+아래는 Claude Code가 지원하는 10개 라이프사이클 이벤트와
+각 이벤트에서 실행되는 OMC 훅입니다.
+
+## UserPromptSubmit
+
+사용자가 프롬프트를 제출했을 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `keyword-detector.mjs` | 매직 키워드를 감지하고 해당 스킬 호출 | 5s |
+| `skill-injector.mjs` | 스킬 프롬프트 주입 | 3s |
+
+이 이벤트는 모든 사용자 입력(`matcher: "*"`)에서 실행됩니다.
+키워드 감지기가 "ultrawork", "ralph", "autopilot" 등의 키워드를 발견하면
+해당 스킬 호출 지시를 `additionalContext`로 주입합니다.
+
+## SessionStart
+
+새 세션이 시작될 때 발생합니다.
+
+| 스크립트 | matcher | 역할 | timeout |
+|---------|---------|------|---------|
+| `session-start.mjs` | `*` | 세션 초기화, 상태 복원 | 5s |
+| `project-memory-session.mjs` | `*` | 프로젝트 메모리 로드 | 5s |
+| `setup-init.mjs` | `init` | 초기 설정 마법사 | 30s |
+| `setup-maintenance.mjs` | `maintenance` | 유지보수 작업 | 60s |
+
+`init`과 `maintenance` matcher는 특수한 경우에만 실행됩니다.
+일반 세션 시작에서는 `*` matcher의 2개 스크립트만 실행됩니다.
+
+## PreToolUse
+
+Claude가 도구를 사용하기 직전에 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `pre-tool-enforcer.mjs` | 도구 사용 전 규칙 검증 | 3s |
+
+모든 도구 호출(`matcher: "*"`)에서 실행되며,
+에이전트 권한 제한(예: 읽기 전용 에이전트의 Write/Edit 차단) 등을 강제합니다.
+
+## PermissionRequest
+
+Bash 도구 실행 시 권한 요청이 발생했을 때 실행됩니다.
+
+| 스크립트 | matcher | 역할 | timeout |
+|---------|---------|------|---------|
+| `permission-handler.mjs` | `Bash` | Bash 명령 권한 처리 | 5s |
+
+Bash 도구에 대한 권한 요청만 처리합니다.
+
+## PostToolUse
+
+도구 사용이 완료된 후 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `post-tool-verifier.mjs` | 도구 사용 결과 검증 및 추가 컨텍스트 주입 | 3s |
+| `project-memory-posttool.mjs` | 프로젝트 메모리 업데이트 | 3s |
+
+Read, Write, Edit, Bash 등 도구 결과에 따라 추가 가이드를 주입합니다.
+예를 들어 파일을 읽은 후 "병렬 읽기를 활용하세요" 같은 힌트를 줍니다.
+
+## PostToolUseFailure
+
+도구 사용이 실패했을 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `post-tool-use-failure.mjs` | 실패한 도구 사용에 대한 복구 가이드 | 3s |
+
+## SubagentStart
+
+서브에이전트가 스폰될 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `subagent-tracker.mjs start` | 서브에이전트 시작 추적, 프롬프트 주입 | 3s |
+
+서브에이전트의 이름, 시작 시간, 세션 정보를 기록합니다.
+
+## SubagentStop
+
+서브에이전트가 완료될 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `subagent-tracker.mjs stop` | 서브에이전트 완료 추적 | 5s |
+| `verify-deliverables.mjs` | 서브에이전트 산출물 검증 | 5s |
+
+## PreCompact
+
+컨텍스트 컴팩션 직전에 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `pre-compact.mjs` | 컴팩션 전 상태 보존 | 10s |
+| `project-memory-precompact.mjs` | 프로젝트 메모리 보존 | 5s |
+
+컨텍스트 윈도우가 가득 차서 컴팩션이 실행되기 전에
+중요한 상태와 메모리를 보존합니다.
+
+## Stop
+
+Claude의 응답이 끝났을 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `context-guard-stop.mjs` | 컨텍스트 사용량 모니터링 | 5s |
+| `persistent-mode.cjs` | 활성 모드(ralph, ultrawork 등) 상태 유지 | 10s |
+| `code-simplifier.mjs` | 수정된 파일 자동 단순화 (opt-in) | 5s |
+
+persistent-mode는 활성 실행 모드가 있을 때 "The boulder never stops" 같은
+강화 메시지를 주입하여 작업 계속을 유도합니다.
+
+## SessionEnd
+
+세션이 종료될 때 발생합니다.
+
+| 스크립트 | 역할 | timeout |
+|---------|------|---------|
+| `session-end.mjs` | 세션 요약 저장, 콜백 알림 전송 | 10s |
+
+세션 동안의 에이전트 활동, 토큰 사용량 등을 `.omc/sessions/`에 저장하고,
+설정된 경우 Discord/Telegram/Slack으로 완료 알림을 전송합니다.

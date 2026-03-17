@@ -1,0 +1,102 @@
+---
+title: 컨텍스트 관리 훅
+description: 메모리, 프로젝트 상태, 컴팩션을 관리하는 OMC 훅을 설명합니다.
+---
+
+## 컨텍스트 관리가 필요한 이유
+
+Claude Code의 컨텍스트 윈도우는 유한합니다.
+긴 세션에서는 컴팩션(compaction)이 발생하여 이전 대화 내용이 요약됩니다.
+OMC의 컨텍스트 관리 훅은 컴팩션을 대비하고, 중요한 정보를 보존하며,
+프로젝트 수준의 메모리를 유지합니다.
+
+## notepad
+
+컴팩션에 내성을 가진 메모리 시스템입니다.
+
+- **저장 경로**: `.omc/notepad.md`
+- **MCP 도구**: `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`
+- **동작**: 중요한 정보를 notepad에 기록하면 컴팩션 후에도 유지됨
+
+notepad는 세 가지 우선순위를 지원합니다.
+
+| 우선순위 | 도구 | 설명 |
+|---------|------|------|
+| Priority | `notepad_write_priority` | 절대 잃으면 안 되는 정보 |
+| Working | `notepad_write_working` | 현재 작업 진행 상황 |
+| Manual | `notepad_write_manual` | 수동으로 기록하는 메모 |
+
+`notepad_prune`으로 오래된 항목을 정리하고, `notepad_stats`로 상태를 확인할 수 있습니다.
+
+## project-memory
+
+프로젝트 수준의 영구 메모리를 관리합니다.
+
+- **저장 경로**: `.omc/project-memory.json`
+- **MCP 도구**: `project_memory_read`, `project_memory_write`, `project_memory_add_note`, `project_memory_add_directive`
+- **관련 훅**:
+  - `project-memory-session.mjs` (SessionStart): 세션 시작 시 프로젝트 메모리 로드
+  - `project-memory-posttool.mjs` (PostToolUse): 도구 사용 후 메모리 업데이트
+  - `project-memory-precompact.mjs` (PreCompact): 컴팩션 전 메모리 보존
+
+project-memory에는 두 가지 유형의 데이터를 저장합니다.
+
+- **Notes**: 프로젝트에 대한 학습된 사실 (아키텍처 패턴, 버그 기록 등)
+- **Directives**: 프로젝트 수행 시 따라야 할 지시 사항
+
+## rules-injector
+
+YAML frontmatter를 파싱하여 동적 규칙을 주입합니다.
+
+- **동작**: 프로젝트의 CLAUDE.md, AGENTS.md 등에서 규칙을 읽어 컨텍스트에 주입
+- **활용**: 프로젝트별 관습, 코딩 스타일, 금지 패턴 등을 자동 적용
+
+## directory-readme-injector
+
+디렉토리의 README 파일을 컨텍스트에 주입합니다.
+
+- **동작**: 작업 중인 디렉토리의 README.md, AGENTS.md 등을 읽어 컨텍스트에 추가
+- **활용**: 디렉토리별 가이드라인과 문서를 자동 참조
+
+## pre-compact
+
+컴팩션 직전에 중요한 상태를 보존합니다.
+
+- **이벤트**: PreCompact
+- **동작**: 현재 작업 상태, 진행 중인 TODO, 중요 컨텍스트를 요약/보존
+- **목적**: 컴팩션 후에도 작업을 이어갈 수 있도록 핵심 정보 유지
+
+## preemptive-compaction
+
+컨텍스트 사용량을 모니터링하여 한도 초과를 예방합니다.
+
+- **동작**: 컨텍스트 사용량이 임계치에 도달하면 경고하고 선제적 조치 제안
+- **활용**: 대규모 파일 읽기, 긴 세션에서 컨텍스트 오버플로우 방지
+
+## beads-context
+
+세션 간 컨텍스트를 이어줍니다.
+
+- **동작**: 이전 세션의 핵심 정보를 새 세션에 전달
+- **활용**: 멀티 세션 작업에서 컨텍스트 유실 방지
+
+## 컨텍스트 보존 전략
+
+OMC의 컨텍스트 관리 훅들은 아래 전략으로 협력합니다.
+
+```
+세션 시작
+  → project-memory 로드
+  → rules-injector 규칙 주입
+  → directory-readme-injector README 주입
+    → [작업 진행]
+    → notepad에 중요 정보 기록
+    → project-memory 업데이트
+      → [컨텍스트 한도 근접]
+      → preemptive-compaction 경고
+        → [컴팩션 발생]
+        → pre-compact 상태 보존
+        → project-memory 보존
+          → [컴팩션 후]
+          → notepad/project-memory로 복원
+```

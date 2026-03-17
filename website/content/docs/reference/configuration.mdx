@@ -1,0 +1,281 @@
+---
+title: config.jsonc 레퍼런스
+description: OMC 설정 파일(config.jsonc)의 모든 옵션, 기본값, 사용 예시
+---
+
+## 설정 파일 위치
+
+| 범위 | 경로 |
+|------|------|
+| 사용자(글로벌) | `~/.config/claude-omc/config.jsonc` |
+| 프로젝트 | `.claude/omc.jsonc` |
+
+설정은 `기본값 → 사용자 설정 → 프로젝트 설정 → 환경 변수` 순서로 병합됩니다.
+뒤에 오는 설정이 앞의 설정을 덮어씁니다.
+
+## agents
+
+에이전트별 모델을 지정합니다.
+
+```jsonc
+{
+  "agents": {
+    "omc": { "model": "opus" },        // 메인 오케스트레이터
+    "explore": { "model": "haiku" },    // 코드베이스 탐색
+    "analyst": { "model": "opus" },     // 요구사항 분석
+    "planner": { "model": "opus" },     // 작업 계획
+    "architect": { "model": "opus" },   // 시스템 설계
+    "debugger": { "model": "sonnet" },  // 디버깅
+    "executor": { "model": "sonnet" },  // 코드 구현
+    "verifier": { "model": "sonnet" },  // 검증
+    "securityReviewer": { "model": "sonnet" }, // 보안 검토
+    "codeReviewer": { "model": "opus" },       // 코드 리뷰
+    "testEngineer": { "model": "sonnet" },     // 테스트 전략
+    "designer": { "model": "sonnet" },  // UI/UX 설계
+    "writer": { "model": "haiku" },     // 문서 작성
+    "qaTester": { "model": "sonnet" },  // QA 테스트
+    "scientist": { "model": "sonnet" }, // 데이터 분석
+    "tracer": { "model": "sonnet" },    // 인과 추적
+    "gitMaster": { "model": "sonnet" }, // Git 작업
+    "codeSimplifier": { "model": "opus" },     // 코드 단순화
+    "critic": { "model": "opus" },      // 계획 검토
+    "documentSpecialist": { "model": "sonnet" } // 문서 조회
+  }
+}
+```
+
+<Callout type="info">
+에이전트 이름 중 하이픈(-)이 있으면 config에서 camelCase로 변환됩니다.
+예: `security-reviewer` → `securityReviewer`, `code-reviewer` → `codeReviewer`
+</Callout>
+
+## features
+
+기능 토글입니다.
+
+```jsonc
+{
+  "features": {
+    "parallelExecution": true,        // 병렬 에이전트 실행
+    "lspTools": true,                 // LSP 도구 통합
+    "astTools": true,                 // AST 도구 (ast-grep)
+    "continuationEnforcement": true,  // 작업 완료 강제
+    "autoContextInjection": true      // 자동 컨텍스트 주입
+  }
+}
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `parallelExecution` | `true` | 여러 에이전트를 동시에 실행 |
+| `lspTools` | `true` | Language Server Protocol 도구 활성화 |
+| `astTools` | `true` | ast-grep 기반 AST 도구 활성화 |
+| `continuationEnforcement` | `true` | 미완료 작업이 있으면 계속 진행 |
+| `autoContextInjection` | `true` | CLAUDE.md/AGENTS.md 자동 주입 |
+
+## magicKeywords
+
+매직 키워드 트리거를 바꿀 수 있습니다.
+
+```jsonc
+{
+  "magicKeywords": {
+    "ultrawork": ["ultrawork", "ulw", "uw"],
+    "search": ["search", "find", "locate"],
+    "analyze": ["analyze", "investigate", "examine"],
+    "ultrathink": ["ultrathink", "think", "reason", "ponder"]
+  }
+}
+```
+
+각 카테고리에 문자열 배열을 지정합니다. 사용자 입력에 이 문자열이 포함되면 해당 모드가 활성화됩니다.
+
+<Callout type="warn">
+`magicKeywords`로 바꿀 수 있는 건 위 4개 카테고리뿐입니다. `autopilot`, `ralph`, `ccg` 같은 키워드는 keyword-detector 훅에 하드코딩되어 있어서 config로 못 바꿉니다.
+</Callout>
+
+## routing
+
+모델 라우팅 설정입니다.
+
+```jsonc
+{
+  "routing": {
+    "enabled": true,           // 지능형 모델 라우팅 활성화
+    "defaultTier": "MEDIUM",   // 기본 티어 (LOW | MEDIUM | HIGH)
+    "forceInherit": false,     // 부모 모델 상속 강제
+    "escalationEnabled": true, // 에스컬레이션 허용
+    "maxEscalations": 2        // 최대 에스컬레이션 횟수
+  }
+}
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `enabled` | `true` | 모델 라우팅 활성화 여부 |
+| `defaultTier` | `"MEDIUM"` | 규칙이 없을 때 적용되는 기본 티어 |
+| `forceInherit` | `false` | `true`면 모든 에이전트가 부모 모델을 상속 |
+| `escalationEnabled` | `true` | 작업 복잡도에 따른 자동 업그레이드 허용 |
+| `maxEscalations` | `2` | 최대 에스컬레이션 횟수 |
+
+<Callout type="info">
+`forceInherit`는 CC Switch, 커스텀 `ANTHROPIC_BASE_URL`, AWS Bedrock, Google Vertex AI를 쓸 때 자동으로 `true`가 됩니다. Claude 전용 모델 이름(sonnet, opus, haiku)을 이 플랫폼에 전달하면 에러가 나기 때문입니다.
+</Callout>
+
+## permissions
+
+권한 설정입니다.
+
+```jsonc
+{
+  "permissions": {
+    "allowBash": true,          // Bash 명령 실행 허용
+    "allowEdit": true,          // 파일 편집 허용
+    "allowWrite": true,         // 파일 생성 허용
+    "maxBackgroundTasks": 5     // 최대 백그라운드 작업 수 (1~50)
+  }
+}
+```
+
+## mcpServers
+
+MCP 서버 설정입니다.
+
+```jsonc
+{
+  "mcpServers": {
+    "exa": {
+      "enabled": true,
+      "apiKey": "your-exa-api-key"  // 또는 EXA_API_KEY 환경 변수
+    },
+    "context7": {
+      "enabled": true
+    }
+  }
+}
+```
+
+## externalModels
+
+외부 모델 프로바이더 설정입니다.
+
+```jsonc
+{
+  "externalModels": {
+    "defaults": {
+      "codexModel": "o4-mini",         // 기본 Codex 모델
+      "geminiModel": "gemini-2.5-pro"  // 기본 Gemini 모델
+    },
+    "fallbackPolicy": {
+      "onModelFailure": "provider_chain",  // provider_chain | cross_provider | claude_only
+      "allowCrossProvider": false,
+      "crossProviderOrder": ["codex", "gemini"]
+    }
+  }
+}
+```
+
+## delegationRouting
+
+외부 모델로의 위임 라우팅 설정입니다 (opt-in 기능).
+
+```jsonc
+{
+  "delegationRouting": {
+    "enabled": false,              // 기본 비활성화
+    "defaultProvider": "claude",   // claude | codex | gemini
+    "roles": {
+      "executor": {
+        "provider": "codex",
+        "tool": "Task"
+      }
+    }
+  }
+}
+```
+
+## startupCodebaseMap
+
+세션 시작 시 코드베이스 맵 생성 설정입니다.
+
+```jsonc
+{
+  "startupCodebaseMap": {
+    "enabled": true,
+    "maxFiles": 200,
+    "maxDepth": 4
+  }
+}
+```
+
+## taskSizeDetection
+
+작업 크기 자동 감지 설정입니다.
+
+```jsonc
+{
+  "taskSizeDetection": {
+    "enabled": true,
+    "smallWordLimit": 50,                    // 이 단어 수 이하면 소형 작업
+    "largeWordLimit": 200,                   // 이 단어 수 이상이면 대형 작업
+    "suppressHeavyModesForSmallTasks": true  // 소형 작업에 무거운 모드 억제
+  }
+}
+```
+
+## 전체 기본 설정
+
+아래는 OMC의 전체 기본 설정값입니다.
+
+```jsonc
+{
+  "agents": {
+    "omc": { "model": "opus" },
+    "explore": { "model": "haiku" },
+    "analyst": { "model": "opus" },
+    "planner": { "model": "opus" },
+    "architect": { "model": "opus" },
+    "debugger": { "model": "sonnet" },
+    "executor": { "model": "sonnet" },
+    "verifier": { "model": "sonnet" },
+    "securityReviewer": { "model": "sonnet" },
+    "codeReviewer": { "model": "opus" },
+    "testEngineer": { "model": "sonnet" },
+    "designer": { "model": "sonnet" },
+    "writer": { "model": "haiku" },
+    "qaTester": { "model": "sonnet" },
+    "scientist": { "model": "sonnet" },
+    "tracer": { "model": "sonnet" },
+    "gitMaster": { "model": "sonnet" },
+    "codeSimplifier": { "model": "opus" },
+    "critic": { "model": "opus" },
+    "documentSpecialist": { "model": "sonnet" }
+  },
+  "features": {
+    "parallelExecution": true,
+    "lspTools": true,
+    "astTools": true,
+    "continuationEnforcement": true,
+    "autoContextInjection": true
+  },
+  "magicKeywords": {
+    "ultrawork": ["ultrawork", "ulw", "uw"],
+    "search": ["search", "find", "locate"],
+    "analyze": ["analyze", "investigate", "examine"],
+    "ultrathink": ["ultrathink", "think", "reason", "ponder"]
+  },
+  "routing": {
+    "enabled": true,
+    "defaultTier": "MEDIUM",
+    "forceInherit": false,
+    "escalationEnabled": true,
+    "maxEscalations": 2
+  },
+  "permissions": {
+    "allowBash": true,
+    "allowEdit": true,
+    "allowWrite": true,
+    "maxBackgroundTasks": 5
+  }
+}
+```

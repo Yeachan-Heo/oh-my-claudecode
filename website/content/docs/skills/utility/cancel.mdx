@@ -1,0 +1,81 @@
+---
+title: Cancel
+description: 모든 활성 OMC 모드를 감지하고 취소하는 통합 취소 스킬
+---
+
+## 개요
+
+Cancel은 현재 활성 중인 OMC 모드를 자동으로 감지하고 취소하는 통합 취소 스킬입니다. 의존성 순서를 고려해서 연결된 모드를 올바른 순서로 정리합니다.
+
+모든 OMC 모드의 표준 종료 방법이고, 작업 완료 후 상태 정리에도 씁니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:cancel
+/oh-my-claudecode:cancel --force
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+cancelomc
+stopomc
+```
+
+## 자동 감지 순서
+
+Cancel은 다음 순서로 활성 모드를 감지하고 취소합니다.
+
+1. Autopilot (연결된 ralph/ultraqa 포함)
+2. Ralph (연결된 ultrawork 포함)
+3. Ultrawork (단독)
+4. UltraQA (단독)
+5. Ultrapilot (단독)
+6. Pipeline (단독)
+7. Team (Claude Code 네이티브)
+8. OMC Teams (tmux CLI 워커)
+9. Plan Consensus (단독)
+
+## Force 모드
+
+`--force` 또는 `--all`을 쓰면 모든 세션과 레거시 아티팩트를 완전히 삭제합니다.
+
+```bash
+/oh-my-claudecode:cancel --force
+```
+
+워크스페이스를 완전히 초기화해야 할 때 씁니다.
+
+## 모드별 취소 동작
+
+### Autopilot
+현재 Phase를 저장하고 비활성화합니다. 연결된 ralph와 ultraqa도 정리합니다. 재개가 가능합니다.
+
+### Ralph
+지속 모드를 비활성화합니다. 연결된 ultrawork가 있으면 함께 정리합니다.
+
+### Team
+각 팀원에게 shutdown_request를 전송하고 응답을 대기합니다. 응답 후 TeamDelete로 정리합니다. 연결된 ralph가 있으면 함께 정리합니다.
+
+## 보존되는 상태
+
+| 모드 | 상태 보존 | 재개 명령 |
+|------|-----------|-----------|
+| Autopilot | O (Phase, 파일, 스펙, 계획) | `/oh-my-claudecode:autopilot` |
+| Ralph | X | - |
+| Ultrawork | X | - |
+| Team | X | - |
+| Plan Consensus | O (계획 파일 경로) | - |
+
+## 관련 스킬
+
+모든 워크플로우 스킬은 cancel로 종료할 수 있습니다.
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:cancel` |
+| 매직 키워드 | `cancelomc`, `stopomc` |
+| 카테고리 | Utility |

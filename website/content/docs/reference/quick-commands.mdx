@@ -1,0 +1,120 @@
+---
+title: Quick Commands
+description: 에이전트를 직접 호출하는 Quick Command 단축 명령어 레퍼런스
+---
+
+## Quick Commands란?
+
+Quick Commands는 특정 에이전트를 바로 호출하는 단축 키워드입니다.
+스킬과 달리 별도의 파이프라인 없이 해당 에이전트를 즉시 실행합니다.
+
+<Callout type="info">
+Quick Commands는 독립적인 슬래시 명령이 아니라 프롬프트 트리거 동작입니다. 자연어 프롬프트에 키워드를 포함하면 해당 에이전트가 호출됩니다.
+</Callout>
+
+## 전체 목록
+
+| Quick Command | 호출 에이전트 | 설명 |
+|--------------|-------------|------|
+| `analyze` | `debugger` | 근본 원인 분석, 버그 조사 |
+| `tdd` | `test-engineer` | TDD 워크플로우 (Red-Green-Refactor) |
+| `build-fix` | `debugger` | 빌드 에러, 타입 에러 수정 |
+| `code-review` | `code-reviewer` | 종합 코드 리뷰 |
+| `security-review` | `security-reviewer` | 보안 취약점 검토 |
+| `review` | `omc-plan --review` | 기존 계획 검토/비평 |
+
+## 사용 예시
+
+### analyze
+
+```bash
+# 테스트 실패 원인 분석
+analyze why the auth tests are failing
+
+# 성능 문제 조사
+analyze the slow response time on /api/users
+```
+
+`debugger` 에이전트가 코드를 분석하고 근본 원인을 파악합니다.
+
+### tdd
+
+```bash
+# TDD로 기능 구현
+tdd: implement password validation
+
+# 테스트 우선 개발
+test first: add email format validation
+```
+
+`test-engineer` 에이전트가 Red-Green-Refactor 사이클을 따라 작업합니다.
+1. 실패하는 테스트 작성 (Red)
+2. 테스트를 통과하는 코드 구현 (Green)
+3. 코드 정리 (Refactor)
+
+### build-fix
+
+```bash
+# 빌드 에러 수정
+build-fix
+
+# 타입 에러 수정
+fix build errors in the auth module
+```
+
+`debugger` 에이전트가 컴파일/빌드 에러를 분석하고 수정합니다.
+
+### code-review
+
+```bash
+# 코드 리뷰 요청
+code-review the recent changes
+
+# 특정 파일 리뷰
+review code in src/auth/
+```
+
+`code-reviewer` 에이전트(opus)가 아래 관점에서 리뷰합니다.
+- 로직 결함
+- 유지보수성
+- 안티패턴
+- 성능
+- API 계약
+- 하위 호환성
+
+### security-review
+
+```bash
+# 보안 리뷰
+security-review the payment module
+
+# 보안 감사
+security review on authentication flow
+```
+
+`security-reviewer` 에이전트가 아래 관점에서 검토합니다.
+- 취약점 탐지
+- 신뢰 경계
+- 인증/인가 로직
+- OWASP 체크리스트
+
+### review
+
+```bash
+# 계획 검토
+review the current plan
+
+# 설계 비평
+review plan for the migration
+```
+
+`/omc-plan --review`를 실행해서 기존 계획의 문제점을 분석합니다.
+
+## Quick Commands vs 스킬
+
+| 항목 | Quick Commands | 스킬 |
+|------|---------------|------|
+| 호출 방식 | 프롬프트 키워드 | `/oh-my-claudecode:이름` |
+| 파이프라인 | 없음 (단일 에이전트 직접 호출) | 있음 (여러 단계) |
+| 커스터마이징 | 불가 | 가능 (SKILL.md) |
+| 예시 | `analyze`, `tdd` | `autopilot`, `ralph` |

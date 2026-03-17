@@ -1,0 +1,86 @@
+---
+title: OMC Setup
+description: oh-my-claudecode를 설정하고 구성하는 유일하게 알아야 할 명령
+---
+
+## 개요
+
+OMC Setup은 oh-my-claudecode의 설정과 구성을 담당하는 스킬입니다. 처음 설치 후 한 번만 실행하면 나머지는 자동으로 동작합니다. 업데이트 후에도 이 명령으로 최신 설정을 적용합니다.
+
+**이것이 유일하게 알아야 할 명령입니다.**
+
+## 사용법
+
+```bash
+/oh-my-claudecode:omc-setup              # 초기 설정 또는 업데이트
+/oh-my-claudecode:omc-setup --local      # 현재 프로젝트만 설정
+/oh-my-claudecode:omc-setup --global     # 전역 설정
+/oh-my-claudecode:omc-setup --force      # 전체 설정 위저드 재실행
+/oh-my-claudecode:omc-setup --help       # 도움말
+```
+
+## 설정 범위
+
+### 프로젝트 범위 (`--local`, 권장)
+
+`./.claude/CLAUDE.md`에 설정을 생성합니다. 현재 프로젝트에만 적용되며 다른 프로젝트에 영향을 주지 않습니다.
+
+### 전역 범위 (`--global`)
+
+`~/.claude/CLAUDE.md`에 설정을 생성합니다. 모든 Claude Code 세션에 적용됩니다.
+
+프로젝트 설정이 전역 설정보다 우선합니다.
+
+## 설정 단계
+
+전체 설정은 4개 Phase로 진행됩니다.
+
+### Phase 1 - CLAUDE.md 설치
+
+최신 CLAUDE.md를 다운로드하고 설치합니다. 기존 파일이 있으면 백업합니다.
+
+### Phase 2 - 환경 구성
+
+HUD 상태 라인을 설정합니다. HUD 스킬에 위임하여 처리합니다.
+
+### Phase 3 - 통합 설정
+
+MCP 서버 등 추가 통합을 설정합니다.
+
+### Phase 4 - 완료
+
+설정 완료 메시지와 다음 단계를 안내합니다.
+
+## 이미 설정된 경우
+
+이미 설정이 완료된 상태에서 실행하면 세 가지 옵션이 나옵니다.
+
+1. **CLAUDE.md만 업데이트**: 최신 CLAUDE.md 다운로드 (빠름)
+2. **전체 설정 재실행**: 위저드를 처음부터 실행
+3. **취소**: 변경 없이 종료
+
+## 업데이트 방법
+
+플러그인 업데이트 후:
+
+```bash
+/oh-my-claudecode:omc-setup          # CLAUDE.md만 업데이트 옵션 제공
+/oh-my-claudecode:omc-setup --local  # 프로젝트 설정만 업데이트
+/oh-my-claudecode:omc-setup --force  # 전체 위저드 재실행
+```
+
+## 관련 스킬
+
+- [setup](/docs/skills/utility/setup) - 통합 설정 진입점
+- [omc-doctor](/docs/skills/utility/omc-doctor) - 설치 문제 진단
+- [mcp-setup](/docs/skills/utility/mcp-setup) - MCP 서버 설정
+- [hud](/docs/skills/utility/hud) - HUD 상태 라인 설정
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:omc-setup` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |
+| 설정 기록 | `~/.claude/.omc-config.json` |

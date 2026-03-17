@@ -1,0 +1,114 @@
+---
+title: 핵심 훅
+description: 실행 모드, 오케스트레이션, 지속성 등 OMC의 핵심 훅들을 설명합니다.
+---
+
+## 실행 모드 훅
+
+OMC의 핵심 실행 모드를 관리하는 훅들입니다.
+이 훅들은 상태 파일(`.omc/state/{mode}-state.json`)로
+모드를 활성화/비활성화하고 유지합니다.
+
+### autopilot
+
+아이디어에서 작동 코드까지 완전 자율로 실행합니다.
+
+- **활성화**: "autopilot", "build me", "I want a" 등의 키워드
+- **동작**: 계획 수립 → 구현 → 테스트 → 검증의 전체 사이클을 자동 실행
+- **상태 파일**: `.omc/state/autopilot-state.json`
+
+### ralph
+
+검증 완료까지 지속적으로 실행하는 끈기 모드입니다.
+
+- **활성화**: "ralph", "don't stop", "must complete" 키워드
+- **동작**: 모든 작업이 완료되고 검증될 때까지 멈추지 않음
+- **특징**: ultrawork를 자동 포함. team과 연결 가능(`team ralph`)
+- **상태 파일**: `.omc/state/ralph-state.json`
+- **강화 메시지**: "The boulder never stops" -- Stop 훅에서 작업 계속을 유도
+
+### ultrawork
+
+최대 병렬 처리로 여러 에이전트를 동시에 실행합니다.
+
+- **활성화**: "ultrawork", "ulw" 키워드
+- **동작**: 독립적인 작업을 여러 에이전트에 병렬 위임
+- **상태 파일**: `.omc/state/ultrawork-state.json`
+
+### ultraqa
+
+목표가 달성될 때까지 QA 사이클을 반복합니다.
+
+- **활성화**: autopilot 내에서 자동 실행
+- **동작**: 테스트 → 검증 → 수정 → 반복
+- **연관 스킬**: `/oh-my-claudecode:ultraqa`
+
+## 오케스트레이션 훅
+
+### keyword-detector
+
+사용자 프롬프트에서 매직 키워드를 감지하고 해당 스킬을 호출합니다.
+
+- **이벤트**: UserPromptSubmit
+- **동작**: 프롬프트를 정제(코드 블록, URL, 파일 경로 제거)한 후 키워드 매칭
+- **충돌 해결**: cancel이 가장 우선, 그 다음 ralph > autopilot > ultrawork 순
+- **안전 장치**: 팀 워커 내부에서는 비활성화 (무한 스폰 방지)
+
+상세한 키워드 목록은 [매직 키워드](/docs/hooks/magic-keywords) 페이지를 참고하세요.
+
+### omc-orchestrator
+
+오케스트레이터 행동과 위임 규칙을 강제합니다.
+
+- **동작**: 작업 유형에 따라 적절한 에이전트에 위임하도록 지시
+- **규칙**: 멀티 파일 변경, 리팩토링, 디버깅 등은 전문 에이전트에 위임
+
+### persistent-mode
+
+활성 실행 모드를 세션 간에 유지합니다.
+
+- **이벤트**: Stop
+- **동작**: 활성 모드(ralph, ultrawork, autopilot 등)가 있을 때 강화 메시지 주입
+- **메시지**: 미완료 작업이 있으면 계속 작업하도록 유도
+- **취소**: `/oh-my-claudecode:cancel`로 모드 해제
+
+## 복구 훅
+
+### recovery
+
+편집 에러, 세션 복구, 컨텍스트 윈도우 복구를 처리합니다.
+
+- **동작**: 도구 실행 실패 시 복구 전략 제안
+- **범위**: Edit 실패, 세션 비정상 종료, 컨텍스트 한도 초과
+
+## 모드 상태 관리
+
+실행 모드 훅들은 `.omc/state/` 디렉토리에 상태 파일을 관리합니다.
+
+```json
+{
+  "active": true,
+  "started_at": "2025-01-15T10:30:00Z",
+  "original_prompt": "ultrawork implement auth",
+  "session_id": "abc123",
+  "project_path": "/path/to/project",
+  "reinforcement_count": 0,
+  "last_checked_at": "2025-01-15T10:30:00Z"
+}
+```
+
+세션 ID가 있으면 `.omc/state/sessions/{sessionId}/`에 세션 범위로 저장됩니다.
+
+### 모드 취소
+
+```
+cancelomc
+```
+
+또는
+
+```
+/oh-my-claudecode:cancel
+```
+
+cancel은 ralph, autopilot, ultrawork 등 모든 활성 모드의 상태 파일을 제거합니다.

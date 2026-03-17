@@ -1,0 +1,102 @@
+---
+title: HUD
+description: OMC 상태를 실시간으로 표시하는 HUD(Heads-Up Display) 설정 스킬
+---
+
+## 개요
+
+HUD는 Claude Code의 상태 라인에 OMC 실시간 상태를 표시하는 Heads-Up Display를 설정하고 관리하는 스킬입니다. 활성 모드, 컨텍스트 사용량, 에이전트 상태, TODO 진행 상황 등을 한눈에 볼 수 있습니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:hud              # 현재 상태 표시 (필요 시 자동 설정)
+/oh-my-claudecode:hud setup        # HUD 상태 라인 설치/수리
+/oh-my-claudecode:hud minimal      # 최소 디스플레이
+/oh-my-claudecode:hud focused      # 포커스 디스플레이 (기본값)
+/oh-my-claudecode:hud full         # 전체 디스플레이
+/oh-my-claudecode:hud status       # 상세 상태
+```
+
+## 프리셋
+
+### Minimal
+
+핵심 정보만 표시합니다.
+
+```
+[OMC] ralph | ultrawork | todos:2/5
+```
+
+### Focused (기본값)
+
+관련 요소를 모두 표시합니다.
+
+```
+[OMC] branch:main | ralph:3/10 | US-002 | ultrawork | ctx:67% | agents:2 | todos:2/5
+```
+
+### Full
+
+에이전트 상세 정보를 포함한 멀티라인 디스플레입니다.
+
+```
+[OMC] repo:omc branch:main | ralph:3/10 | US-002 | ctx:[████░░]67% | agents:3 | todos:2/5
+├─ O architect    2m   analyzing architecture patterns...
+├─ e explore     45s   searching for test files
+└─ s executor     1m   implementing validation logic
+```
+
+## 디스플레이 요소
+
+| 요소 | 설명 |
+|------|------|
+| `[OMC]` | 모드 식별자 |
+| `repo:name` | Git 저장소 이름 |
+| `branch:name` | Git 브랜치 이름 |
+| `ralph:3/10` | Ralph 반복 횟수/최대 |
+| `US-002` | 현재 PRD 스토리 ID |
+| `ctx:67%` | 컨텍스트 윈도우 사용량 |
+| `agents:2` | 실행 중인 서브에이전트 수 |
+| `todos:2/5` | TODO 완료 상태 |
+
+## 색상 코드
+
+- **초록**: 정상/건강
+- **노랑**: 경고 (컨텍스트 > 70%, ralph > 7)
+- **빨강**: 위험 (컨텍스트 > 85%, ralph 최대)
+
+## 설정
+
+`~/.claude/settings.json`의 `omcHud` 키에서 설정합니다.
+
+```json
+{
+  "omcHud": {
+    "preset": "focused",
+    "elements": {
+      "omcLabel": true,
+      "contextBar": true,
+      "agents": true,
+      "todos": true,
+      "ralph": true,
+      "showTokens": false
+    }
+  }
+}
+```
+
+사용 가능한 프리셋: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode`
+
+## 관련 스킬
+
+- [omc-setup](/docs/skills/utility/omc-setup) - 전체 OMC 설정 (HUD 포함)
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:hud` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |
+| 설정 위치 | `~/.claude/settings.json` (`omcHud` 키) |

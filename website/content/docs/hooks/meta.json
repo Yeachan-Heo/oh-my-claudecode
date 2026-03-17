@@ -1,0 +1,4 @@
+{
+  "title": "Hooks",
+  "pages": ["index", "lifecycle-events", "core-hooks", "context-hooks", "magic-keywords"]
+}

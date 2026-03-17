@@ -1,0 +1,390 @@
+---
+title: Getting Started
+description: Oh My ClaudeCode(OMC) 설치부터 첫 세션까지 빠르게 시작하기
+---
+
+## 시작하기
+
+Oh My ClaudeCode(OMC)를 처음 쓴다면, 아래 순서대로 따라가면 됩니다.
+
+1. [설치](#설치-방법) - OMC 플러그인 설치와 초기 설정
+2. [첫 세션](#첫-세션-실행하기) - autopilot으로 첫 작업 실행해보기
+3. [설정](#설정-파일) - 프로젝트별 설정과 에이전트 모델 커스터마이징
+
+### 이 문서에서 다루는 내용
+
+- OMC 플러그인 설치 방법
+- 첫 autopilot 세션 실행과 동작 흐름
+- 사용자/프로젝트별 설정 파일 구성
+
+### 사전 요구사항
+
+- [Claude Code](https://docs.anthropic.com/claude-code)가 설치되어 있어야 합니다
+- Claude Max/Pro 구독 또는 Anthropic API 키가 필요합니다
+
+---
+
+## 설치 방법
+
+OMC는 Claude Code Plugin 방식으로만 설치할 수 있습니다.
+npm이나 bun을 통한 직접 설치는 안 됩니다.
+
+<Steps>
+
+### 마켓플레이스 추가
+
+Claude Code에서 아래 명령을 실행합니다.
+
+```bash
+/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
+```
+
+### 플러그인 설치
+
+마켓플레이스를 추가한 후 플러그인을 설치합니다.
+
+```bash
+/plugin install oh-my-claudecode
+```
+
+이 명령이 훅(hook) 설정까지 자동으로 처리해줍니다.
+
+### 초기 설정 실행
+
+설치 후 Claude Code에서 아래 중 하나를 입력합니다.
+
+```bash
+# 방법 1: 자연어로 실행
+setup omc
+
+# 방법 2: 스킬 명령으로 실행
+/oh-my-claudecode:omc-setup
+```
+
+</Steps>
+
+### 사전 요구사항
+
+| 항목 | 요구사항 |
+|------|----------|
+| Claude Code | 설치 필수 |
+| 인증 | Claude Max/Pro 구독 또는 `ANTHROPIC_API_KEY` 환경 변수 |
+
+### 설정 범위 선택
+
+#### 프로젝트별 설정 (권장)
+
+현재 프로젝트에만 OMC를 적용합니다.
+
+```bash
+/oh-my-claudecode:omc-setup --local
+```
+
+- `./.claude/CLAUDE.md`에 설정이 저장됩니다
+- 다른 프로젝트에는 영향 없습니다
+- 기존 글로벌 `CLAUDE.md`는 그대로 보존됩니다
+
+#### 글로벌 설정
+
+모든 Claude Code 세션에 OMC를 적용합니다.
+
+```bash
+/oh-my-claudecode:omc-setup
+```
+
+- `~/.claude/CLAUDE.md`에 설정이 저장됩니다
+- 모든 프로젝트에 적용됩니다
+
+<Callout type="warn">
+글로벌 설정은 기존 `~/.claude/CLAUDE.md` 파일을 덮어씁니다. 기존 설정이 있다면 프로젝트별 설정(`--local`)을 쓰세요.
+</Callout>
+
+### 설치 확인
+
+설치가 잘 됐는지 확인하려면 진단 도구를 실행합니다.
+
+```bash
+/oh-my-claudecode:omc-doctor
+```
+
+아래 항목을 점검해줍니다.
+
+- 의존성 설치 상태
+- 설정 파일 오류
+- 훅 설치 상태
+- 에이전트 가용성
+- 스킬 등록 상태
+
+### 플랫폼 지원
+
+| 플랫폼 | 설치 방법 | 훅 타입 |
+|---------|-----------|---------|
+| macOS | Claude Code Plugin | Bash (.sh) |
+| Linux | Claude Code Plugin | Bash (.sh) |
+| Windows | WSL2 권장 | Node.js (.mjs) |
+
+<Callout type="info">
+Windows 네이티브 지원은 실험적입니다. OMC는 tmux가 필요한데, 네이티브 Windows에서는 tmux를 못 씁니다. WSL2를 쓰세요.
+</Callout>
+
+### 업데이트
+
+OMC는 24시간마다 자동으로 업데이트를 확인합니다.
+수동으로 업데이트하려면 플러그인 설치 명령을 다시 실행하면 됩니다.
+
+<Callout type="warn">
+플러그인 업데이트 후에는 `/oh-my-claudecode:omc-setup`을 다시 실행해서 최신 설정을 적용해야 합니다.
+</Callout>
+
+### 삭제
+
+```bash
+/plugin uninstall oh-my-claudecode@oh-my-claudecode
+```
+
+---
+
+## 첫 세션 실행하기
+
+OMC 설치가 끝났으면 바로 첫 작업을 돌려봅시다.
+Claude Code를 열고 아래처럼 입력합니다.
+
+```bash
+autopilot build me a hello world app
+```
+
+이 한 문장이면 OMC가 전체 개발 파이프라인을 자동으로 실행합니다.
+
+### 무엇이 일어나는가
+
+`autopilot`이라는 매직 키워드를 감지하면 OMC는 5단계 파이프라인을 시작합니다.
+
+<Steps>
+
+### Expansion (확장)
+
+`analyst`와 `architect` 에이전트가 아이디어를 분석합니다.
+요구사항을 정리하고 기술 스펙을 만듭니다.
+
+### Planning (계획)
+
+`planner` 에이전트가 실행 계획을 세웁니다.
+`critic` 에이전트가 계획을 검토하고 빈틈을 지적합니다.
+
+### Execution (실행)
+
+`executor` 에이전트가 코드를 작성합니다.
+필요하면 여러 에이전트가 병렬로 작업합니다.
+
+### QA (품질 검증)
+
+빌드가 되는지, 테스트가 통과하는지 검증합니다.
+실패하면 자동으로 수정하고 다시 검증합니다.
+
+### Validation (최종 검증)
+
+기능, 보안, 코드 품질을 각각 전문 에이전트가 최종 리뷰합니다.
+모두 승인되면 작업 완료입니다.
+
+</Steps>
+
+### HUD 상태 표시
+
+작업이 진행되는 동안 Claude Code의 상태줄(HUD)에서 현재 상태를 확인할 수 있습니다.
+
+```
+[OMC] autopilot:execution | agents:3 | todos:2/5 | ctx:45%
+```
+
+| 항목 | 의미 |
+|------|------|
+| `autopilot:execution` | 현재 autopilot의 실행 단계 |
+| `agents:3` | 현재 활성 에이전트 수 |
+| `todos:2/5` | 완료된 작업 / 전체 작업 수 |
+| `ctx:45%` | 컨텍스트 윈도우 사용률 |
+
+HUD 설정을 바꾸려면 아래 명령을 실행합니다.
+
+```bash
+/oh-my-claudecode:hud setup
+```
+
+### 더 간단하게 시작하기
+
+autopilot이 너무 크게 느껴지면 단일 작업부터 시작해보세요.
+
+```bash
+# 코드 분석
+analyze why this test is failing
+
+# 파일 탐색
+deepsearch for files that handle authentication
+
+# 단순 구현
+ultrawork add a health check endpoint
+```
+
+이 키워드들은 전체 파이프라인 대신 적절한 에이전트 하나를 바로 호출합니다.
+
+### 다음 단계
+
+<Cards>
+  <Card title="설정 커스터마이징" href="#설정-파일">
+    에이전트 모델과 기능을 프로젝트에 맞게 조정하기
+  </Card>
+  <Card title="주요 개념 이해하기" href="/docs/concepts">
+    에이전트, 스킬, 훅의 관계를 이해하기
+  </Card>
+</Cards>
+
+---
+
+## 설정 파일
+
+OMC는 두 가지 레벨의 설정 파일을 지원합니다.
+
+| 범위 | 파일 경로 | 용도 |
+|------|-----------|------|
+| 사용자(글로벌) | `~/.config/claude-omc/config.jsonc` | 모든 프로젝트에 적용 |
+| 프로젝트 | `.claude/omc.jsonc` | 현재 프로젝트에만 적용 |
+
+<Callout type="warn">
+설정 파일 포맷은 JSONC(주석을 지원하는 JSON)입니다. TypeScript 설정 파일(omc.config.ts)이 아닙니다.
+</Callout>
+
+### 설정 우선순위
+
+여러 소스의 설정이 있을 때 아래 순서로 병합됩니다. 아래로 갈수록 우선순위가 높습니다.
+
+```
+기본값 → 사용자 설정 (~/.config/claude-omc/config.jsonc)
+       → 프로젝트 설정 (.claude/omc.jsonc)
+       → 환경 변수
+```
+
+### 기본 설정 구조
+
+```jsonc
+{
+  // 에이전트별 모델 설정
+  "agents": {
+    "explore": { "model": "haiku" },
+    "executor": { "model": "sonnet" },
+    "architect": { "model": "opus" }
+  },
+
+  // 기능 토글
+  "features": {
+    "parallelExecution": true,
+    "lspTools": true,
+    "astTools": true
+  },
+
+  // 매직 키워드 커스터마이징
+  "magicKeywords": {
+    "ultrawork": ["ultrawork", "ulw", "uw"],
+    "search": ["search", "find", "locate"],
+    "analyze": ["analyze", "investigate", "examine"],
+    "ultrathink": ["ultrathink", "think", "reason"]
+  }
+}
+```
+
+### 에이전트 모델 오버라이드
+
+각 에이전트가 사용하는 AI 모델을 바꿀 수 있습니다.
+
+```jsonc
+{
+  "agents": {
+    // 탐색 에이전트를 더 강한 모델로 업그레이드
+    "explore": { "model": "sonnet" },
+
+    // 실행 에이전트를 opus로 업그레이드 (복잡한 프로젝트)
+    "executor": { "model": "opus" },
+
+    // 비용 절약: 문서 작성에 haiku 사용
+    "writer": { "model": "haiku" }
+  }
+}
+```
+
+#### 기본 모델 매핑
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| `explore` | haiku | 코드베이스 탐색 |
+| `writer` | haiku | 문서 작성 |
+| `executor` | sonnet | 코드 구현 |
+| `debugger` | sonnet | 디버깅 |
+| `designer` | sonnet | UI/UX 설계 |
+| `verifier` | sonnet | 검증 |
+| `architect` | opus | 시스템 설계 |
+| `planner` | opus | 전략 계획 |
+| `critic` | opus | 계획 검토 |
+| `codeReviewer` | opus | 코드 리뷰 |
+
+### 매직 키워드 커스터마이징
+
+`config.jsonc`의 `magicKeywords` 섹션에서 4가지 카테고리의 키워드를 바꿀 수 있습니다.
+
+```jsonc
+{
+  "magicKeywords": {
+    // 병렬 실행 모드 트리거
+    "ultrawork": ["ultrawork", "ulw", "parallel"],
+
+    // 코드베이스 검색 모드 트리거
+    "search": ["search", "find", "locate", "grep"],
+
+    // 분석 모드 트리거
+    "analyze": ["analyze", "debug", "investigate"],
+
+    // 깊은 추론 모드 트리거
+    "ultrathink": ["ultrathink", "think", "reason"]
+  }
+}
+```
+
+<Callout type="info">
+`config.jsonc`의 `magicKeywords`는 4개 카테고리(ultrawork, search, analyze, ultrathink)만 바꿀 수 있습니다. `autopilot`, `ralph`, `ccg` 같은 키워드는 keyword-detector 훅에 하드코딩되어 있어서 설정 파일로는 못 바꿉니다.
+</Callout>
+
+### 모델 라우팅 설정
+
+OMC는 작업 복잡도에 따라 자동으로 모델 티어를 선택합니다.
+
+```jsonc
+{
+  "routing": {
+    "enabled": true,
+    "defaultTier": "MEDIUM",
+    // 모든 에이전트가 부모 모델을 상속하도록 강제
+    // (CC Switch, Bedrock, Vertex AI 사용 시 자동 활성화)
+    "forceInherit": false
+  }
+}
+```
+
+| 티어 | 모델 | 용도 |
+|------|------|------|
+| LOW | haiku | 빠른 조회, 단순 작업 |
+| MEDIUM | sonnet | 표준 구현, 일반 작업 |
+| HIGH | opus | 아키텍처, 깊은 분석 |
+
+### CLAUDE.md 설정
+
+OMC의 기본 동작은 `CLAUDE.md` 파일로도 설정됩니다.
+`/oh-my-claudecode:omc-setup`을 실행하면 이 파일이 자동 생성됩니다.
+
+| 범위 | 파일 | 설명 |
+|------|------|------|
+| 글로벌 | `~/.claude/CLAUDE.md` | 모든 프로젝트 공통 설정 |
+| 프로젝트 | `.claude/CLAUDE.md` | 프로젝트별 컨텍스트 |
+
+### 설정을 다시 해야 하는 경우
+
+- 처음 설치한 후
+- OMC 업데이트 후 (최신 설정 반영을 위해)
+- 다른 머신에서 사용할 때
+- 새 프로젝트를 시작할 때 (`--local` 옵션 사용)

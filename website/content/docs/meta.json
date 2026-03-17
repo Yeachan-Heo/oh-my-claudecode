@@ -1,0 +1,14 @@
+{
+  "title": "OMC Docs",
+  "pages": [
+    "index",
+    "getting-started",
+    "concepts",
+    "guides",
+    "agents",
+    "skills",
+    "tools",
+    "hooks",
+    "reference"
+  ]
+}

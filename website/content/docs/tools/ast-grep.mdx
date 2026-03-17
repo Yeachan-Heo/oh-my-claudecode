@@ -1,0 +1,93 @@
+---
+title: AST Grep
+description: AST 기반 구조적 코드 검색 및 치환 도구
+---
+
+## 개요
+
+AST Grep 도구는 [@ast-grep/napi](https://ast-grep.github.io/)를 사용하여 코드의 구조적 패턴을 검색하고 치환합니다. 정규식이 아닌 AST(Abstract Syntax Tree) 기반으로 동작하므로, 코드 구조를 정확하게 매칭합니다.
+
+## 도구 목록
+
+### ast_grep_search
+
+AST 패턴으로 코드를 검색합니다.
+
+```
+ast_grep_search(
+  pattern="console.log($$$ARGS)",
+  lang="typescript"
+)
+```
+
+#### 메타 변수
+
+| 메타 변수 | 설명 | 예시 |
+|-----------|------|------|
+| `$VAR` | 단일 AST 노드 매칭 | `$VAR.map($FUNC)` |
+| `$$$` | 여러 AST 노드 매칭 | `console.log($$$ARGS)` |
+
+#### 예시
+
+```
+# 모든 console.log 찾기
+ast_grep_search(pattern="console.log($$$)", lang="typescript")
+
+# 특정 패턴의 함수 호출 찾기
+ast_grep_search(pattern="fetch($URL, { method: 'POST', $$$REST })", lang="typescript")
+
+# React useState 사용 찾기
+ast_grep_search(pattern="const [$STATE, $SETTER] = useState($INIT)", lang="tsx")
+
+# try-catch 블록 찾기
+ast_grep_search(pattern="try { $$$ } catch($ERR) { $$$ }", lang="typescript")
+```
+
+### ast_grep_replace
+
+AST 패턴으로 코드를 구조적으로 치환합니다.
+
+```
+ast_grep_replace(
+  pattern="console.log($$$ARGS)",
+  replacement="logger.info($$$ARGS)",
+  lang="typescript",
+  dryRun=true
+)
+```
+
+**항상 `dryRun=true`로 먼저 실행하여 변경 사항을 확인하세요.**
+
+#### 예시
+
+```
+# console.log를 logger.info로 변환
+ast_grep_replace(
+  pattern="console.log($$$ARGS)",
+  replacement="logger.info($$$ARGS)",
+  lang="typescript",
+  dryRun=true
+)
+
+# 동기 함수를 async로 변환
+ast_grep_replace(
+  pattern="function $NAME($$$PARAMS) { $$$BODY }",
+  replacement="async function $NAME($$$PARAMS) { $$$BODY }",
+  lang="typescript",
+  dryRun=true
+)
+```
+
+## 정규식과의 차이점
+
+| 항목 | 정규식 (Grep) | AST Grep |
+|------|--------------|----------|
+| 매칭 대상 | 텍스트 패턴 | 코드 구조 |
+| 공백/줄바꿈 | 민감 | 무관 |
+| 주석 처리 | 매칭됨 | 건너뜀 |
+| 리팩토링 | 위험 | 구조 보존 |
+| 사용 사례 | 텍스트 검색 | 코드 변환 |
+
+## 지원 언어
+
+TypeScript, JavaScript, TSX, JSX, Python, Go, Rust, Java, C, C++, C#, Ruby, Swift, Kotlin 등 주요 프로그래밍 언어를 지원합니다.

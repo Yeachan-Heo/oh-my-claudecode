@@ -1,0 +1,70 @@
+---
+title: CCG
+description: Claude-Codex-Gemini 트라이모델 오케스트레이션으로 다각도 관점 수집
+---
+
+## 개요
+
+CCG(Claude-Codex-Gemini)는 Codex와 Gemini에게 동시에 질문한 뒤, Claude가 두 응답을 종합해서 하나의 통합 답변을 만드는 트라이모델 오케스트레이션입니다.
+
+tmux 팀 워커를 실행하지 않고 `/ask` 스킬로 가볍게 외부 관점을 수집합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ccg "Review this PR - architecture/security via Codex and UX/readability via Gemini"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+ccg review the authentication flow
+claude-codex-gemini analyze this API design
+```
+
+## 작동 방식
+
+1. **요청 분해**: Claude가 요청을 두 개의 어드바이저 프롬프트로 분해
+   - Codex 프롬프트: 아키텍처, 정확성, 백엔드, 리스크, 테스트 전략
+   - Gemini 프롬프트: UX/콘텐츠 명확성, 대안, 엣지케이스, 문서 정리
+2. **병렬 질문**: `/ask codex`와 `/ask gemini`을 동시 실행
+3. **아티팩트 수집**: `.omc/artifacts/ask/`에서 결과 읽기
+4. **종합**: Claude가 두 출력을 하나의 통합 답변으로 합성
+
+## 종합 결과 형식
+
+- 합의된 권고사항
+- 상충하는 권고사항 (명시적 표시)
+- 선택된 최종 방향 + 근거
+- 실행 체크리스트
+
+## 쓰면 좋은 경우
+
+- 백엔드/분석 + 프론트엔드/UI 작업이 하나의 요청에 있을 때
+- 아키텍처 + 디자인/UX 관점의 코드 리뷰
+- Codex와 Gemini가 다른 의견을 낼 수 있는 교차 검증
+- 팀 런타임 오케스트레이션 없이 빠른 어드바이저 입력이 필요할 때
+
+## 폴백
+
+- 한 프로바이더를 못 쓰면 쓸 수 있는 프로바이더 + Claude 종합으로 진행
+- 두 프로바이더 다 못 쓰면 Claude 단독 답변으로 폴백
+
+## 요구사항
+
+- **Codex CLI**: `npm install -g @openai/codex`
+- **Gemini CLI**: `npm install -g @google/gemini-cli`
+
+## 관련 스킬
+
+- [ask](/docs/skills/utility/ask) - 개별 프로바이더에게 질문
+- [omc-teams](/docs/skills/workflow/omc-teams) - 팀 워커로 더 무거운 병렬 작업
+- [team](/docs/skills/workflow/team) - Claude 네이티브 팀 오케스트레이션
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ccg` |
+| 매직 키워드 | `ccg`, `claude-codex-gemini` |
+| 카테고리 | Workflow |

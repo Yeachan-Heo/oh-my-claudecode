@@ -1,0 +1,76 @@
+---
+title: Skill
+description: 로컬 스킬을 관리하는 CLI - 목록, 추가, 제거, 검색, 편집, 동기화
+---
+
+## 개요
+
+Skill은 oh-my-claudecode 스킬을 관리하는 메타 스킬입니다. 사용자 레벨과 프로젝트 레벨의 로컬 스킬을 목록 조회, 추가, 제거, 검색, 편집, 동기화할 수 있습니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:skill list
+/oh-my-claudecode:skill add [name]
+/oh-my-claudecode:skill remove <name>
+/oh-my-claudecode:skill edit <name>
+/oh-my-claudecode:skill search <query>
+/oh-my-claudecode:skill info <name>
+/oh-my-claudecode:skill sync
+/oh-my-claudecode:skill setup
+/oh-my-claudecode:skill scan
+```
+
+## 서브커맨드
+
+### list
+
+사용자 스킬(`~/.claude/skills/omc-learned/`)과 프로젝트 스킬(`.omc/skills/`)을 범위별로 정리해서 표시합니다.
+
+### add
+
+인터랙티브 위저드로 새 스킬을 생성합니다. 이름, 설명, 트리거 키워드, 범위(사용자/프로젝트)를 입력받아 SKILL.md 템플릿을 만듭니다.
+
+### remove
+
+이름으로 스킬을 찾아 확인 후 삭제합니다. 확인 없이 삭제하지 않습니다.
+
+### edit
+
+기존 스킬의 설명, 트리거, 인자 힌트, 내용을 인터랙티브하게 수정합니다.
+
+### search
+
+이름, 설명, 트리거, 전체 마크다운 내용에서 쿼리를 검색합니다. 이름/트리거 매칭이 내용 매칭보다 우선합니다.
+
+### info
+
+스킬의 상세 정보와 전체 내용을 표시합니다.
+
+### sync
+
+사용자와 프로젝트 범위 간 스킬을 비교하고 복사할 수 있습니다. 덮어쓰기 전에 항상 확인합니다.
+
+### setup
+
+전체 설정 위저드를 실행합니다. 디렉토리 확인, 스킬 스캔, 새 스킬 추가, 대화 패턴 스캔, 스킬 임포트를 제공합니다.
+
+## 스킬 저장 위치
+
+| 범위 | 경로 | 용도 |
+|------|------|------|
+| 사용자 | `~/.claude/skills/omc-learned/` | 모든 프로젝트에서 사용 |
+| 프로젝트 | `.omc/skills/` | 해당 저장소에서만 사용 (버전 관리됨) |
+
+## 관련 스킬
+
+- [learner](/docs/skills/utility/learner) - 현재 대화에서 스킬 추출
+- [deepinit](/docs/skills/workflow/deepinit) - AGENTS.md 코드베이스 문서 생성
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:skill` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |

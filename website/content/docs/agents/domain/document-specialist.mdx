@@ -1,0 +1,63 @@
+---
+title: Document Specialist
+description: 외부 문서, API 레퍼런스, SDK 문서를 조회하고 합성하는 에이전트.
+---
+
+## 개요
+
+Document Specialist는 가장 신뢰할 수 있는 문서 소스에서 정보를 찾아 합성하는 에이전트입니다.
+로컬 리포 문서, 큐레이팅된 문서 백엔드(Context Hub/Context7), 공식 외부 문서 순으로 탐색합니다.
+
+프로젝트 문서 조회, 외부 문서 조회, API/프레임워크 레퍼런스 연구,
+패키지 평가, 버전 호환성 확인, 학술 논문/문헌/레퍼런스 데이터베이스 조사도 합니다.
+
+오래되거나 잘못된 API 문서를 기반으로 구현하면 진단하기 어려운 버그가 생깁니다.
+
+읽기 전용(read-only) 에이전트입니다.
+
+## 언제 쓰는가
+
+- SDK나 프레임워크의 올바른 사용법을 확인할 때
+- 외부 API의 파라미터와 동작을 조사할 때
+- 패키지 버전 호환성을 확인할 때
+- 학술 논문이나 표준 문서를 조사할 때
+
+## 사용 예시
+
+```
+"Node.js에서 fetch의 timeout 구현 방법을 찾아줘"
+"이 라이브러리의 최신 API 변경사항을 확인해줘"
+"OpenAI SDK의 스트리밍 응답 처리 방법을 조사해줘"
+```
+
+## 조회 우선순위
+
+1. **로컬 리포 문서**: README, `docs/`, 마이그레이션 가이드 -- 프로젝트 관련 질문일 때 먼저 확인합니다
+2. **Context Hub / 큐레이팅된 백엔드**: `chub` 또는 Context7 MCP 도구로 공식 SDK/API 문서를 조회합니다
+3. **공식 외부 문서**: WebSearch/WebFetch로 공식 문서를 검색합니다 -- `chub`이 없거나 커버리지가 부족할 때
+4. **보조 소스**: 블로그, Stack Overflow -- 공식 문서가 없을 때만 사용합니다
+
+## 출력 기준
+
+모든 답변에는 검증 가능한 출처가 포함됩니다.
+- 가능하면 소스 URL을 제공합니다
+- URL이 없는 큐레이팅된 백엔드 응답은 라이브러리/문서 ID를 명시합니다
+- 2년 이상 된 정보나 deprecated 문서는 명시적으로 플래그합니다
+- 버전 호환성 이슈를 명시적으로 표시합니다
+- 해당되는 경우 코드 예제를 포함합니다
+
+## 다른 에이전트와의 조합
+
+- **explore**: 내부 코드베이스 탐색은 explore 몫입니다. 외부 문서 조회는 document-specialist가 맡습니다
+- **executor**: 올바른 API 사용법을 확인한 후 executor가 구현합니다
+- **planner**: 외부 API/SDK에 의존하는 계획을 세울 때 document-specialist에 자문합니다
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 모델 | sonnet |
+| 서브에이전트 타입 | `oh-my-claudecode:document-specialist` |
+| 레인 | Domain |
+| 읽기 전용 | Yes (Write, Edit 차단) |
+| 이전 이름 | `dependency-expert`, `researcher` (모두 deprecated) |

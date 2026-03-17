@@ -1,0 +1,121 @@
+---
+title: Deep Interview
+description: 수학적 모호성 게이팅을 사용한 소크라테스식 심층 인터뷰
+---
+
+## 개요
+
+Deep Interview는 Ouroboros에서 영감을 받은 소크라테스식 질문법과 수학적 모호성 점수를 결합한 스킬입니다. 모호한 아이디어를 명확한 스펙으로 변환하기 위해 숨겨진 가정을 드러내는 타겟 질문을 하고, 가중 차원에서 명확도를 측정하며, 모호성이 임계값(기본 20%) 이하로 떨어질 때까지 진행을 거부합니다.
+
+3단계 파이프라인의 첫 번째 단계로 설계됐다: **deep-interview → ralplan → autopilot**
+
+## 사용법
+
+```bash
+/oh-my-claudecode:deep-interview "vague idea or description"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+deep interview me about this project idea
+ouroboros help me clarify what I want
+I have a vague idea about a task management tool
+```
+
+## 모호성 점수
+
+인터뷰 중 4개 차원에서 명확도를 측정합니다.
+
+| 차원 | Greenfield 가중치 | Brownfield 가중치 |
+|------|-------------------|-------------------|
+| 목표 명확도 | 40% | 35% |
+| 제약 명확도 | 30% | 25% |
+| 성공 기준 명확도 | 30% | 25% |
+| 컨텍스트 명확도 | - | 15% |
+
+Brownfield(기존 코드 수정)는 기존 시스템 이해도를 추가로 측정합니다.
+
+### 점수 해석
+
+| 범위 | 의미 |
+|------|------|
+| 0-10% | 완전히 명확, 즉시 진행 |
+| 10-20% | 충분히 명확 (기본 임계값) |
+| 20-40% | 일부 갭, 인터뷰 계속 |
+| 40-60% | 상당한 갭, 약한 차원에 집중 |
+| 60-80% | 매우 불명확, 리프레이밍 필요 |
+| 80-100% | 거의 알려진 바 없음 |
+
+## 챌린지 에이전트
+
+특정 라운드에서 질문 관점이 전환됩니다.
+
+| 모드 | 활성화 | 목적 |
+|------|--------|------|
+| Contrarian | 4라운드+ | "반대가 사실이라면?" 핵심 가정 도전 |
+| Simplifier | 6라운드+ | "가장 단순한 버전은?" 복잡성 제거 |
+| Ontologist | 8라운드+ (모호성 > 30%) | "이것이 정말 무엇인가?" 본질 찾기 |
+
+각 모드는 한 번만 쓰입니다.
+
+## 실행 단계
+
+### Phase 1: 초기화
+
+- 사용자 아이디어 파싱
+- Brownfield vs Greenfield 감지 (explore 에이전트)
+- 상태 초기화
+
+### Phase 2: 인터뷰 루프
+
+- 가장 약한 차원을 타겟으로 질문 생성
+- 한 번에 하나의 질문만
+- 답변 후 모호성 점수 계산 및 표시
+- 코드베이스 사실은 explore 에이전트로 먼저 파악
+
+### Phase 3: 챌린지 에이전트
+
+라운드 4, 6, 8에서 관점 전환
+
+### Phase 4: 스펙 결정화
+
+모호성 임계값 도달 시 스펙 파일 생성: `.omc/specs/deep-interview-{slug}.md`
+
+### Phase 5: 실행 브릿지
+
+실행 옵션 제시:
+
+1. **Ralplan → Autopilot** (권장): 합의 정제 후 자율 실행
+2. **Autopilot** (빠름): 합의 정제 없이 직접 자율 실행
+3. **Ralph**: 지속 루프 실행
+4. **Team**: N개 병렬 에이전트 실행
+5. **추가 인터뷰**: 명확도 향상을 위해 인터뷰 계속
+
+## 3단계 파이프라인
+
+```
+deep-interview → ralplan → autopilot
+  모호성 ≤ 20%    합의 계획    실행
+```
+
+각 단계가 다른 품질 게이트를 제공합니다.
+
+1. **Deep Interview**: 명확성 게이트 (사용자가 원하는 걸 아는가?)
+2. **Ralplan**: 실현 가능성 게이트 (접근 방식이 건전한가?)
+3. **Autopilot**: 정확성 게이트 (코드가 동작하는가?)
+
+## 관련 스킬
+
+- [ralplan](/docs/skills/workflow/ralplan) - 합의 기반 계획 (2단계)
+- [autopilot](/docs/skills/workflow/autopilot) - 자율 실행 (3단계)
+- [plan](/docs/skills/workflow/plan) - 전략 계획 수립
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:deep-interview` |
+| 매직 키워드 | `deep interview`, `ouroboros`, `socratic` |
+| 카테고리 | Workflow |
+| 스펙 경로 | `.omc/specs/deep-interview-{slug}.md` |

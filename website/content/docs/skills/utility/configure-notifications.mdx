@@ -1,0 +1,100 @@
+---
+title: Configure Notifications
+description: Telegram, Discord, Slack 알림 통합을 설정하는 인터랙티브 위저드
+---
+
+## 개요
+
+Configure Notifications는 세션 종료, 입력 대기, 백그라운드 작업 완료 시 알림을 받을 수 있도록 Telegram, Discord, Slack 통합을 설정하는 인터랙티브 위저드입니다.
+
+자연어로 대화하며 단계별로 안내합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:configure-notifications
+/oh-my-claudecode:configure-notifications telegram
+/oh-my-claudecode:configure-notifications discord
+/oh-my-claudecode:configure-notifications slack
+```
+
+## 지원 플랫폼
+
+### Telegram
+
+1. @BotFather에서 봇 생성
+2. 봇 토큰과 채팅 ID 입력
+3. 메시지 형식 선택 (Markdown/HTML)
+4. 이벤트 선택
+5. 테스트 알림 전송
+
+환경 변수로도 설정 가능:
+```bash
+export OMC_TELEGRAM_BOT_TOKEN="123456789:ABCdefGHI..."
+export OMC_TELEGRAM_CHAT_ID="123456789"
+```
+
+### Discord
+
+두 가지 방법 지원:
+- **Webhook** (권장): 채널 설정에서 웹훅 URL 생성
+- **Bot API**: 봇 토큰 + 채널 ID
+
+멘션 설정: 사용자 ID, 역할 ID, 또는 멘션 없음 선택
+
+환경 변수:
+```bash
+export OMC_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+export OMC_DISCORD_MENTION="<@1465264645320474637>"
+```
+
+### Slack
+
+1. Slack 앱 생성 → Incoming Webhooks 활성화
+2. 웹훅 URL 입력
+3. 멘션 설정 (사용자, @channel, @here)
+4. 채널 오버라이드 (선택)
+
+환경 변수:
+```bash
+export OMC_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+export OMC_SLACK_MENTION="<@U1234567890>"
+```
+
+## 알림 이벤트
+
+| 이벤트 | 설명 |
+|--------|------|
+| session-end | Claude 세션 종료 시 (권장) |
+| ask-user-question | Claude가 입력 대기 중 |
+| session-start | 새 세션 시작 시 |
+| session-continuing | 지속 모드가 세션을 유지 중 |
+
+## 플랫폼 활성화
+
+설정 후에도 세션별로 플래그를 켜야 알림이 전송됩니다.
+
+```bash
+omc --telegram              # Telegram만 활성화
+omc --telegram --discord     # Telegram + Discord
+omc --telegram --slack       # Telegram + Slack
+```
+
+플래그 없이 `omc`만 실행하면 알림이 전송되지 않습니다.
+
+## 설정 파일
+
+설정은 `~/.claude/.omc-config.json`에 저장됩니다.
+
+## 관련 스킬
+
+- [omc-setup](/docs/skills/utility/omc-setup) - 전체 OMC 설정
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:configure-notifications` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |
+| 설정 파일 | `~/.claude/.omc-config.json` |

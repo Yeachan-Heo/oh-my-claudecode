@@ -1,0 +1,71 @@
+---
+title: Pipeline
+description: 순차 에이전트 체이닝으로 단계별 작업을 연결 실행
+---
+
+## 개요
+
+Pipeline은 에이전트를 순차적으로 체이닝해서 한 에이전트의 출력이 다음 에이전트의 입력이 되는 순차 실행 스킬입니다.
+
+병렬 실행이 필요 없고 단계 간 의존성이 있는 워크플로우에 맞습니다.
+
+## 사용법
+
+스킬의 frontmatter에서 파이프라인을 선언할 수 있습니다.
+
+```yaml
+pipeline: [deep-interview, omc-plan, autopilot]
+next-skill: omc-plan
+next-skill-args: --consensus --direct
+handoff: .omc/specs/deep-interview-{slug}.md
+```
+
+## 작동 방식
+
+Pipeline은 스킬 간의 핸드오프 계약을 정의합니다.
+
+1. 현재 스킬이 실행을 완료합니다
+2. 핸드오프 아티팩트를 지정된 경로에 저장합니다
+3. 다음 스킬을 지정된 인자와 함께 호출합니다
+4. 다음 스킬이 핸드오프 아티팩트를 입력으로 받아 실행합니다
+
+## 파이프라인 메타데이터
+
+| 필드 | 설명 |
+|------|------|
+| `pipeline` | 파이프라인을 구성하는 스킬 순서 |
+| `next-skill` | 다음에 호출할 스킬 이름 |
+| `next-skill-args` | 다음 스킬에 전달할 인자 |
+| `handoff` | 핸드오프 아티팩트 경로 패턴 |
+
+## 내장 파이프라인 예시
+
+### 3단계 품질 파이프라인
+
+```
+deep-interview → omc-plan → autopilot
+```
+
+1. Deep Interview가 모호성 ≤ 20% 스펙을 생성
+2. Plan이 합의 계획을 수립
+3. Autopilot이 Phase 2부터 실행
+
+### Cancel 파이프라인
+
+Pipeline 실행 중 `/oh-my-claudecode:cancel`로 취소할 수 있습니다.
+상태 파일 `.omc/state/pipeline-state.json`이 정리됩니다.
+
+## 관련 스킬
+
+- [deep-interview](/docs/skills/workflow/deep-interview) - 파이프라인의 시작점 역할
+- [autopilot](/docs/skills/workflow/autopilot) - 파이프라인의 실행 단계
+- [cancel](/docs/skills/utility/cancel) - 파이프라인 취소
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | 스킬 frontmatter의 `pipeline` 필드로 선언 |
+| 매직 키워드 | - |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/pipeline-state.json` |
