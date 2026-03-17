@@ -25,7 +25,7 @@ vi.mock('../tmux-utils.js', () => ({
   wrapWithLoginShell: wrapWithLoginShellMock,
 }));
 
-import { initAutoresearchMission, parseInitArgs, checkTmuxAvailable, spawnAutoresearchTmux } from '../autoresearch-guided.js';
+import { guidedAutoresearchSetup, initAutoresearchMission, parseInitArgs, checkTmuxAvailable, spawnAutoresearchTmux } from '../autoresearch-guided.js';
 
 async function initRepo(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), 'omc-autoresearch-guided-test-'));
@@ -312,5 +312,52 @@ describe('spawnAutoresearchTmux', () => {
 
     expect(() => spawnAutoresearchTmux('/repo/missions/demo', 'demo')).toThrow(/did not stay available after launch/);
     expect(logSpy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('guidedAutoresearchSetup', () => {
+  it('loops on low-confidence inference until clarification produces a launch-ready handoff', async () => {
+    const questionMock = vi.fn()
+      .mockResolvedValueOnce('Improve search onboarding')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('Use the vitest onboarding smoke test as evaluator');
+    const closeMock = vi.fn();
+    const createPromptInterface = vi.fn(() => ({ question: questionMock, close: closeMock }));
+    const runSetupSession = vi.fn()
+      .mockReturnValueOnce({
+        missionText: 'Improve search onboarding',
+        evaluatorCommand: 'npm run test:onboarding',
+        evaluatorSource: 'inferred',
+        confidence: 0.4,
+        slug: 'search-onboarding',
+        readyToLaunch: false,
+        clarificationQuestion: 'Which script or command should prove the goal?',
+      })
+      .mockReturnValueOnce({
+        missionText: 'Improve search onboarding',
+        evaluatorCommand: 'npm run test:onboarding',
+        evaluatorSource: 'inferred',
+        confidence: 0.92,
+        slug: 'search-onboarding',
+        readyToLaunch: true,
+      });
+
+    const isTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+    try {
+      const repo = await initRepo();
+      const result = await guidedAutoresearchSetup(repo, {
+        createPromptInterface: createPromptInterface as never,
+        runSetupSession,
+      });
+
+      expect(result.slug).toBe('search-onboarding');
+      expect(runSetupSession).toHaveBeenCalledTimes(2);
+      expect(closeMock).toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: isTty, configurable: true });
+    }
   });
 });

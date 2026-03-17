@@ -34,9 +34,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/error.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/error.js
 var require_error = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/error.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/error.js"(exports2) {
     var CommanderError2 = class extends Error {
       /**
        * Constructs the CommanderError class
@@ -69,9 +69,9 @@ var require_error = __commonJS({
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/argument.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/argument.js
 var require_argument = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/argument.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/argument.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Argument2 = class {
       /**
@@ -196,9 +196,9 @@ var require_argument = __commonJS({
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/help.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/help.js
 var require_help = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/help.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/help.js"(exports2) {
     var { humanReadableArgName } = require_argument();
     var Help2 = class {
       constructor() {
@@ -610,9 +610,9 @@ var require_help = __commonJS({
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/option.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/option.js
 var require_option = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/option.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/option.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Option2 = class {
       /**
@@ -882,9 +882,9 @@ var require_option = __commonJS({
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/suggestSimilar.js"(exports2) {
     var maxDistance = 3;
     function editDistance(a, b) {
       if (Math.abs(a.length - b.length) > maxDistance)
@@ -962,9 +962,9 @@ var require_suggestSimilar = __commonJS({
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/command.js
+// ../launch-feat-refactor-skills/node_modules/commander/lib/command.js
 var require_command = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/lib/command.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/lib/command.js"(exports2) {
     var EventEmitter = require("node:events").EventEmitter;
     var childProcess = require("node:child_process");
     var path20 = require("node:path");
@@ -3005,9 +3005,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/index.js
+// ../launch-feat-refactor-skills/node_modules/commander/index.js
 var require_commander = __commonJS({
-  "../../../../../../launch-feat-refactor-skills/node_modules/commander/index.js"(exports2) {
+  "../launch-feat-refactor-skills/node_modules/commander/index.js"(exports2) {
     var { Argument: Argument2 } = require_argument();
     var { Command: Command2 } = require_command();
     var { CommanderError: CommanderError2, InvalidArgumentError: InvalidArgumentError2 } = require_error();
@@ -28558,26 +28558,26 @@ var init_leader_nudge_guidance = __esm({
 // src/hud/stdin.ts
 function getStdinCachePath() {
   const root2 = getWorktreeRoot() || process.cwd();
-  return (0, import_path107.join)(root2, ".omc", "state", "hud-stdin-cache.json");
+  return (0, import_path108.join)(root2, ".omc", "state", "hud-stdin-cache.json");
 }
 function writeStdinCache(stdin) {
   try {
     const root2 = getWorktreeRoot() || process.cwd();
-    const cacheDir = (0, import_path107.join)(root2, ".omc", "state");
-    if (!(0, import_fs94.existsSync)(cacheDir)) {
-      (0, import_fs94.mkdirSync)(cacheDir, { recursive: true });
+    const cacheDir = (0, import_path108.join)(root2, ".omc", "state");
+    if (!(0, import_fs95.existsSync)(cacheDir)) {
+      (0, import_fs95.mkdirSync)(cacheDir, { recursive: true });
     }
-    (0, import_fs94.writeFileSync)(getStdinCachePath(), JSON.stringify(stdin));
+    (0, import_fs95.writeFileSync)(getStdinCachePath(), JSON.stringify(stdin));
   } catch {
   }
 }
 function readStdinCache() {
   try {
     const cachePath = getStdinCachePath();
-    if (!(0, import_fs94.existsSync)(cachePath)) {
+    if (!(0, import_fs95.existsSync)(cachePath)) {
       return null;
     }
-    return JSON.parse((0, import_fs94.readFileSync)(cachePath, "utf-8"));
+    return JSON.parse((0, import_fs95.readFileSync)(cachePath, "utf-8"));
   } catch {
     return null;
   }
@@ -28620,12 +28620,12 @@ function getContextPercent(stdin) {
 function getModelName(stdin) {
   return stdin.model?.id ?? stdin.model?.display_name ?? "Unknown";
 }
-var import_fs94, import_path107;
+var import_fs95, import_path108;
 var init_stdin = __esm({
   "src/hud/stdin.ts"() {
     "use strict";
-    import_fs94 = require("fs");
-    import_path107 = require("path");
+    import_fs95 = require("fs");
+    import_path108 = require("path");
     init_worktree_paths();
   }
 });
@@ -28641,7 +28641,7 @@ async function parseTranscript(transcriptPath, options) {
     agentCallCount: 0,
     skillCallCount: 0
   };
-  if (!transcriptPath || !(0, import_fs95.existsSync)(transcriptPath)) {
+  if (!transcriptPath || !(0, import_fs96.existsSync)(transcriptPath)) {
     return result;
   }
   const agentMap = /* @__PURE__ */ new Map();
@@ -28655,7 +28655,7 @@ async function parseTranscript(transcriptPath, options) {
   let sessionTotalsReliable = false;
   const observedSessionIds = /* @__PURE__ */ new Set();
   try {
-    const stat2 = (0, import_fs95.statSync)(transcriptPath);
+    const stat2 = (0, import_fs96.statSync)(transcriptPath);
     const fileSize = stat2.size;
     if (fileSize > MAX_TAIL_BYTES) {
       const lines = readTailLines(transcriptPath, fileSize, MAX_TAIL_BYTES);
@@ -28677,7 +28677,7 @@ async function parseTranscript(transcriptPath, options) {
         }
       }
     } else {
-      const fileStream = (0, import_fs95.createReadStream)(transcriptPath);
+      const fileStream = (0, import_fs96.createReadStream)(transcriptPath);
       const rl = (0, import_readline3.createInterface)({
         input: fileStream,
         crlfDelay: Infinity
@@ -28747,12 +28747,12 @@ async function parseTranscript(transcriptPath, options) {
 function readTailLines(filePath, fileSize, maxBytes) {
   const startOffset = Math.max(0, fileSize - maxBytes);
   const bytesToRead = fileSize - startOffset;
-  const fd = (0, import_fs95.openSync)(filePath, "r");
+  const fd = (0, import_fs96.openSync)(filePath, "r");
   const buffer = Buffer.alloc(bytesToRead);
   try {
-    (0, import_fs95.readSync)(fd, buffer, 0, bytesToRead, startOffset);
+    (0, import_fs96.readSync)(fd, buffer, 0, bytesToRead, startOffset);
   } finally {
-    (0, import_fs95.closeSync)(fd);
+    (0, import_fs96.closeSync)(fd);
   }
   const content = buffer.toString("utf8");
   const lines = content.split("\n");
@@ -28781,7 +28781,7 @@ function extractTargetSummary(input, toolName) {
   if (toolName.includes("Edit") || toolName.includes("Write")) {
     const filePath = inp.file_path;
     if (filePath) {
-      return (0, import_path108.basename)(filePath) || filePath;
+      return (0, import_path109.basename)(filePath) || filePath;
     }
   }
   if (toolName.includes("Bash")) {
@@ -28942,13 +28942,13 @@ function extractLastRequestTokenUsage(usage) {
 function getNumericUsageValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-var import_fs95, import_readline3, import_path108, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, THINKING_PART_TYPES2, THINKING_RECENCY_MS;
+var import_fs96, import_readline3, import_path109, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, THINKING_PART_TYPES2, THINKING_RECENCY_MS;
 var init_transcript = __esm({
   "src/hud/transcript.ts"() {
     "use strict";
-    import_fs95 = require("fs");
+    import_fs96 = require("fs");
     import_readline3 = require("readline");
-    import_path108 = require("path");
+    import_path109 = require("path");
     MAX_TAIL_BYTES = 512 * 1024;
     MAX_AGENT_MAP_SIZE = 100;
     PERMISSION_TOOLS = [
@@ -28969,7 +28969,7 @@ var init_transcript = __esm({
 // src/hud/omc-state.ts
 function isStateFileStale(filePath) {
   try {
-    const stat2 = (0, import_fs96.statSync)(filePath);
+    const stat2 = (0, import_fs97.statSync)(filePath);
     const age = Date.now() - stat2.mtimeMs;
     return age > MAX_STATE_AGE_MS2;
   } catch {
@@ -28980,16 +28980,16 @@ function resolveStatePath2(directory, filename) {
   let bestPath = null;
   let bestMtime = 0;
   const omcRoot = getOmcRoot(directory);
-  const sessionsDir = (0, import_path109.join)(omcRoot, "state", "sessions");
-  if ((0, import_fs96.existsSync)(sessionsDir)) {
+  const sessionsDir = (0, import_path110.join)(omcRoot, "state", "sessions");
+  if ((0, import_fs97.existsSync)(sessionsDir)) {
     try {
-      const entries = (0, import_fs96.readdirSync)(sessionsDir, { withFileTypes: true });
+      const entries = (0, import_fs97.readdirSync)(sessionsDir, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        const sessionFile = (0, import_path109.join)(sessionsDir, entry.name, filename);
-        if ((0, import_fs96.existsSync)(sessionFile)) {
+        const sessionFile = (0, import_path110.join)(sessionsDir, entry.name, filename);
+        if ((0, import_fs97.existsSync)(sessionFile)) {
           try {
-            const mtime = (0, import_fs96.statSync)(sessionFile).mtimeMs;
+            const mtime = (0, import_fs97.statSync)(sessionFile).mtimeMs;
             if (mtime > bestMtime) {
               bestMtime = mtime;
               bestPath = sessionFile;
@@ -29001,10 +29001,10 @@ function resolveStatePath2(directory, filename) {
     } catch {
     }
   }
-  const newPath = (0, import_path109.join)(omcRoot, "state", filename);
-  if ((0, import_fs96.existsSync)(newPath)) {
+  const newPath = (0, import_path110.join)(omcRoot, "state", filename);
+  if ((0, import_fs97.existsSync)(newPath)) {
     try {
-      const mtime = (0, import_fs96.statSync)(newPath).mtimeMs;
+      const mtime = (0, import_fs97.statSync)(newPath).mtimeMs;
       if (mtime > bestMtime) {
         bestMtime = mtime;
         bestPath = newPath;
@@ -29013,10 +29013,10 @@ function resolveStatePath2(directory, filename) {
       if (!bestPath) bestPath = newPath;
     }
   }
-  const legacyPath = (0, import_path109.join)(omcRoot, filename);
-  if ((0, import_fs96.existsSync)(legacyPath)) {
+  const legacyPath = (0, import_path110.join)(omcRoot, filename);
+  if ((0, import_fs97.existsSync)(legacyPath)) {
     try {
-      const mtime = (0, import_fs96.statSync)(legacyPath).mtimeMs;
+      const mtime = (0, import_fs97.statSync)(legacyPath).mtimeMs;
       if (mtime > bestMtime) {
         bestPath = legacyPath;
       }
@@ -29035,7 +29035,7 @@ function readRalphStateForHud(directory) {
     return null;
   }
   try {
-    const content = (0, import_fs96.readFileSync)(stateFile, "utf-8");
+    const content = (0, import_fs97.readFileSync)(stateFile, "utf-8");
     const state = JSON.parse(content);
     if (!state.active) {
       return null;
@@ -29057,7 +29057,7 @@ function readUltraworkStateForHud(directory) {
     return null;
   }
   try {
-    const content = (0, import_fs96.readFileSync)(localFile, "utf-8");
+    const content = (0, import_fs97.readFileSync)(localFile, "utf-8");
     const state = JSON.parse(content);
     if (!state.active) {
       return null;
@@ -29071,15 +29071,15 @@ function readUltraworkStateForHud(directory) {
   }
 }
 function readPrdStateForHud(directory) {
-  let prdPath = (0, import_path109.join)(directory, "prd.json");
-  if (!(0, import_fs96.existsSync)(prdPath)) {
-    prdPath = (0, import_path109.join)(getOmcRoot(directory), "prd.json");
-    if (!(0, import_fs96.existsSync)(prdPath)) {
+  let prdPath = (0, import_path110.join)(directory, "prd.json");
+  if (!(0, import_fs97.existsSync)(prdPath)) {
+    prdPath = (0, import_path110.join)(getOmcRoot(directory), "prd.json");
+    if (!(0, import_fs97.existsSync)(prdPath)) {
       return null;
     }
   }
   try {
-    const content = (0, import_fs96.readFileSync)(prdPath, "utf-8");
+    const content = (0, import_fs97.readFileSync)(prdPath, "utf-8");
     const prd = JSON.parse(content);
     if (!prd.userStories || !Array.isArray(prd.userStories)) {
       return null;
@@ -29106,7 +29106,7 @@ function readAutopilotStateForHud(directory) {
     return null;
   }
   try {
-    const content = (0, import_fs96.readFileSync)(stateFile, "utf-8");
+    const content = (0, import_fs97.readFileSync)(stateFile, "utf-8");
     const state = JSON.parse(content);
     if (!state.active) {
       return null;
@@ -29124,12 +29124,12 @@ function readAutopilotStateForHud(directory) {
     return null;
   }
 }
-var import_fs96, import_path109, MAX_STATE_AGE_MS2;
+var import_fs97, import_path110, MAX_STATE_AGE_MS2;
 var init_omc_state = __esm({
   "src/hud/omc-state.ts"() {
     "use strict";
-    import_fs96 = require("fs");
-    import_path109 = require("path");
+    import_fs97 = require("fs");
+    import_path110 = require("path");
     init_worktree_paths();
     MAX_STATE_AGE_MS2 = 2 * 60 * 60 * 1e3;
   }
@@ -29137,7 +29137,7 @@ var init_omc_state = __esm({
 
 // src/hud/custom-rate-provider.ts
 function getCachePath2() {
-  return (0, import_path110.join)(
+  return (0, import_path111.join)(
     getClaudeConfigDir(),
     "plugins",
     "oh-my-claudecode",
@@ -29147,8 +29147,8 @@ function getCachePath2() {
 function readCache2() {
   try {
     const p = getCachePath2();
-    if (!(0, import_fs97.existsSync)(p)) return null;
-    return JSON.parse((0, import_fs97.readFileSync)(p, "utf-8"));
+    if (!(0, import_fs98.existsSync)(p)) return null;
+    return JSON.parse((0, import_fs98.readFileSync)(p, "utf-8"));
   } catch {
     return null;
   }
@@ -29156,10 +29156,10 @@ function readCache2() {
 function writeCache2(buckets) {
   try {
     const p = getCachePath2();
-    const dir = (0, import_path110.dirname)(p);
-    if (!(0, import_fs97.existsSync)(dir)) (0, import_fs97.mkdirSync)(dir, { recursive: true });
+    const dir = (0, import_path111.dirname)(p);
+    if (!(0, import_fs98.existsSync)(dir)) (0, import_fs98.mkdirSync)(dir, { recursive: true });
     const cache = { timestamp: Date.now(), buckets };
-    (0, import_fs97.writeFileSync)(p, JSON.stringify(cache, null, 2));
+    (0, import_fs98.writeFileSync)(p, JSON.stringify(cache, null, 2));
   } catch {
   }
 }
@@ -29169,7 +29169,7 @@ function isCacheValid2(cache) {
 function spawnWithTimeout(cmd, timeoutMs) {
   return new Promise((resolve15, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
-    const child = (0, import_child_process40.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = (0, import_child_process41.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -29257,13 +29257,13 @@ async function executeCustomProvider(config2) {
     return { buckets: [], stale: false, error: "command failed" };
   }
 }
-var import_child_process40, import_fs97, import_path110, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
+var import_child_process41, import_fs98, import_path111, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
 var init_custom_rate_provider = __esm({
   "src/hud/custom-rate-provider.ts"() {
     "use strict";
-    import_child_process40 = require("child_process");
-    import_fs97 = require("fs");
-    import_path110 = require("path");
+    import_child_process41 = require("child_process");
+    import_fs98 = require("fs");
+    import_path111 = require("path");
     init_paths();
     CACHE_TTL_MS2 = 3e4;
     DEFAULT_TIMEOUT_MS2 = 800;
@@ -30331,8 +30331,8 @@ var init_model = __esm({
 // src/hud/elements/api-key-source.ts
 function settingsFileHasApiKey(filePath) {
   try {
-    if (!(0, import_fs98.existsSync)(filePath)) return false;
-    const content = (0, import_fs98.readFileSync)(filePath, "utf-8");
+    if (!(0, import_fs99.existsSync)(filePath)) return false;
+    const content = (0, import_fs99.readFileSync)(filePath, "utf-8");
     const settings = JSON.parse(content);
     const env2 = settings?.env;
     if (typeof env2 !== "object" || env2 === null) return false;
@@ -30343,10 +30343,10 @@ function settingsFileHasApiKey(filePath) {
 }
 function detectApiKeySource(cwd2) {
   if (cwd2) {
-    const projectSettings = (0, import_path111.join)(cwd2, ".claude", "settings.local.json");
+    const projectSettings = (0, import_path112.join)(cwd2, ".claude", "settings.local.json");
     if (settingsFileHasApiKey(projectSettings)) return "project";
   }
-  const globalSettings = (0, import_path111.join)(getClaudeConfigDir(), "settings.json");
+  const globalSettings = (0, import_path112.join)(getClaudeConfigDir(), "settings.json");
   if (settingsFileHasApiKey(globalSettings)) return "global";
   if (process.env.ANTHROPIC_API_KEY) return "env";
   return null;
@@ -30355,12 +30355,12 @@ function renderApiKeySource(source) {
   if (!source) return null;
   return `${dim("key:")}${cyan(source)}`;
 }
-var import_fs98, import_path111;
+var import_fs99, import_path112;
 var init_api_key_source = __esm({
   "src/hud/elements/api-key-source.ts"() {
     "use strict";
-    import_fs98 = require("fs");
-    import_path111 = require("path");
+    import_fs99 = require("fs");
+    import_path112 = require("path");
     init_colors();
     init_paths();
   }
@@ -30747,25 +30747,25 @@ function extractSessionIdFromPath(transcriptPath) {
   return match ? match[1] : null;
 }
 function readSessionSummary(stateDir, sessionId) {
-  const statePath = (0, import_path112.join)(stateDir, `session-summary-${sessionId}.json`);
-  if (!(0, import_fs99.existsSync)(statePath)) return null;
+  const statePath = (0, import_path113.join)(stateDir, `session-summary-${sessionId}.json`);
+  if (!(0, import_fs100.existsSync)(statePath)) return null;
   try {
-    return JSON.parse((0, import_fs99.readFileSync)(statePath, "utf-8"));
+    return JSON.parse((0, import_fs100.readFileSync)(statePath, "utf-8"));
   } catch {
     return null;
   }
 }
 function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
-  const thisDir = (0, import_path112.dirname)((0, import_url15.fileURLToPath)(importMetaUrl));
-  const scriptPath = (0, import_path112.join)(thisDir, "..", "..", "scripts", "session-summary.mjs");
-  if (!(0, import_fs99.existsSync)(scriptPath)) {
+  const thisDir = (0, import_path113.dirname)((0, import_url15.fileURLToPath)(importMetaUrl));
+  const scriptPath = (0, import_path113.join)(thisDir, "..", "..", "scripts", "session-summary.mjs");
+  if (!(0, import_fs100.existsSync)(scriptPath)) {
     if (process.env.OMC_DEBUG) {
       console.error("[HUD] session-summary script not found:", scriptPath);
     }
     return;
   }
   try {
-    const child = (0, import_child_process41.spawn)("node", [scriptPath, transcriptPath, stateDir, sessionId], {
+    const child = (0, import_child_process42.spawn)("node", [scriptPath, transcriptPath, stateDir, sessionId], {
       stdio: "ignore",
       detached: true,
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "session-summary" }
@@ -30843,7 +30843,7 @@ async function main2(watchMode = false, skipInit = false) {
       }
     }
     try {
-      const updateCacheFile = (0, import_path112.join)((0, import_os26.homedir)(), ".omc", "update-check.json");
+      const updateCacheFile = (0, import_path113.join)((0, import_os26.homedir)(), ".omc", "update-check.json");
       await (0, import_promises20.access)(updateCacheFile);
       const content = await (0, import_promises20.readFile)(updateCacheFile, "utf-8");
       const cached2 = JSON.parse(content);
@@ -30858,7 +30858,7 @@ async function main2(watchMode = false, skipInit = false) {
     let sessionSummary = null;
     const sessionSummaryEnabled = config2.elements.sessionSummary ?? false;
     if (sessionSummaryEnabled && resolvedTranscriptPath && currentSessionId) {
-      const omcStateDir = (0, import_path112.join)(getOmcRoot(cwd2), "state");
+      const omcStateDir = (0, import_path113.join)(getOmcRoot(cwd2), "state");
       sessionSummary = readSessionSummary(omcStateDir, currentSessionId);
       const shouldSpawn = !sessionSummary?.generatedAt || Date.now() - new Date(sessionSummary.generatedAt).getTime() > 6e4;
       if (shouldSpawn) {
@@ -30897,7 +30897,7 @@ async function main2(watchMode = false, skipInit = false) {
       skillCallCount: transcriptData.skillCallCount,
       promptTime: hudState?.lastPromptTimestamp ? new Date(hudState.lastPromptTimestamp) : null,
       apiKeySource: config2.elements.apiKeySource ? detectApiKeySource(cwd2) : null,
-      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path112.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
+      profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path113.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary
     };
     if (process.env.OMC_DEBUG) {
@@ -30912,10 +30912,10 @@ async function main2(watchMode = false, skipInit = false) {
     }
     if (config2.contextLimitWarning.autoCompact && context.contextPercent >= config2.contextLimitWarning.threshold) {
       try {
-        const omcStateDir = (0, import_path112.join)(getOmcRoot(cwd2), "state");
-        (0, import_fs99.mkdirSync)(omcStateDir, { recursive: true });
-        const triggerFile = (0, import_path112.join)(omcStateDir, "compact-requested.json");
-        (0, import_fs99.writeFileSync)(
+        const omcStateDir = (0, import_path113.join)(getOmcRoot(cwd2), "state");
+        (0, import_fs100.mkdirSync)(omcStateDir, { recursive: true });
+        const triggerFile = (0, import_path113.join)(omcStateDir, "compact-requested.json");
+        (0, import_fs100.writeFileSync)(
           triggerFile,
           JSON.stringify({
             requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -30951,7 +30951,7 @@ async function main2(watchMode = false, skipInit = false) {
     }
   }
 }
-var import_fs99, import_promises20, import_path112, import_os26, import_child_process41, import_url15;
+var import_fs100, import_promises20, import_path113, import_os26, import_child_process42, import_url15;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -30968,18 +30968,18 @@ var init_hud = __esm({
     init_version();
     init_auto_update();
     init_worktree_paths();
-    import_fs99 = require("fs");
+    import_fs100 = require("fs");
     import_promises20 = require("fs/promises");
-    import_path112 = require("path");
+    import_path113 = require("path");
     import_os26 = require("os");
-    import_child_process41 = require("child_process");
+    import_child_process42 = require("child_process");
     import_url15 = require("url");
     init_worktree_paths();
     main2();
   }
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/commander/esm.mjs
+// ../launch-feat-refactor-skills/node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
 var {
   program,
@@ -30996,7 +30996,7 @@ var {
   Help
 } = import_index.default;
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/chalk/source/vendor/ansi-styles/index.js
+// ../launch-feat-refactor-skills/node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
 var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
@@ -31182,7 +31182,7 @@ function assembleStyles() {
 var ansiStyles = assembleStyles();
 var ansi_styles_default = ansiStyles;
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/chalk/source/vendor/supports-color/index.js
+// ../launch-feat-refactor-skills/node_modules/chalk/source/vendor/supports-color/index.js
 var import_node_process = __toESM(require("node:process"), 1);
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_tty = __toESM(require("node:tty"), 1);
@@ -31314,7 +31314,7 @@ var supportsColor = {
 };
 var supports_color_default = supportsColor;
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/chalk/source/utilities.js
+// ../launch-feat-refactor-skills/node_modules/chalk/source/utilities.js
 function stringReplaceAll(string3, substring, replacer) {
   let index = string3.indexOf(substring);
   if (index === -1) {
@@ -31344,7 +31344,7 @@ function stringEncaseCRLFWithFirstIndex(string3, prefix, postfix, index) {
   return returnValue;
 }
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/chalk/source/index.js
+// ../launch-feat-refactor-skills/node_modules/chalk/source/index.js
 var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
 var GENERATOR = /* @__PURE__ */ Symbol("GENERATOR");
 var STYLER = /* @__PURE__ */ Symbol("STYLER");
@@ -31492,8 +31492,8 @@ var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
 var source_default = chalk;
 
 // src/cli/index.ts
-var import_fs100 = require("fs");
-var import_path113 = require("path");
+var import_fs101 = require("fs");
+var import_path114 = require("path");
 var import_url16 = require("url");
 init_loader();
 
@@ -31553,7 +31553,7 @@ function toSdkMcpFormat(servers) {
   return result;
 }
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../launch-feat-refactor-skills/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var import_path4 = require("path");
 var import_url2 = require("url");
 var import_events = require("events");
@@ -51172,7 +51172,7 @@ function createSdkMcpServer(options) {
   };
 }
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/external.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -51284,7 +51284,7 @@ __export(external_exports, {
   void: () => voidType2
 });
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/helpers/util.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/util.js
 var util2;
 (function(util3) {
   util3.assertEqual = (_) => {
@@ -51418,7 +51418,7 @@ var getParsedType3 = (data) => {
   }
 };
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/ZodError.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/ZodError.js
 var ZodIssueCode2 = util2.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -51536,7 +51536,7 @@ ZodError3.create = (issues) => {
   return error2;
 };
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/locales/en.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/locales/en.js
 var errorMap2 = (issue2, _ctx) => {
   let message;
   switch (issue2.code) {
@@ -51639,7 +51639,7 @@ var errorMap2 = (issue2, _ctx) => {
 };
 var en_default3 = errorMap2;
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/errors.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/errors.js
 var overrideErrorMap2 = en_default3;
 function setErrorMap(map) {
   overrideErrorMap2 = map;
@@ -51648,7 +51648,7 @@ function getErrorMap2() {
   return overrideErrorMap2;
 }
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/helpers/parseUtil.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue2 = (params) => {
   const { data, path: path20, errorMaps, issueData } = params;
   const fullPath = [...path20, ...issueData.path || []];
@@ -51758,14 +51758,14 @@ var isDirty2 = (x) => x.status === "dirty";
 var isValid2 = (x) => x.status === "valid";
 var isAsync2 = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/helpers/errorUtil.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil2;
 (function(errorUtil3) {
   errorUtil3.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil3.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil2 || (errorUtil2 = {}));
 
-// ../../../../../../launch-feat-refactor-skills/node_modules/zod/v3/types.js
+// ../launch-feat-refactor-skills/node_modules/zod/v3/types.js
 var ParseInputLazyPath2 = class {
   constructor(parent, value, path20, key) {
     this._cachedPath = [];
@@ -71198,8 +71198,8 @@ function warnIfWin32() {
 }
 
 // src/cli/autoresearch.ts
-var import_child_process39 = require("child_process");
-var import_fs93 = require("fs");
+var import_child_process40 = require("child_process");
+var import_fs94 = require("fs");
 
 // src/autoresearch/contracts.ts
 var import_child_process36 = require("child_process");
@@ -72403,18 +72403,40 @@ async function finalizeAutoresearchRunState(projectRoot, runId, updates) {
 }
 
 // src/cli/autoresearch-guided.ts
-var import_promises18 = require("readline/promises");
-var import_child_process38 = require("child_process");
-var import_fs92 = require("fs");
-var import_promises19 = require("fs/promises");
-var import_path106 = require("path");
-function buildMissionContent(topic) {
-  return `# Mission
+var import_child_process39 = require("child_process");
+var import_fs93 = require("fs");
+var import_promises18 = require("fs/promises");
+var import_path107 = require("path");
+var import_promises19 = require("readline/promises");
 
-${topic}
-`;
+// src/autoresearch/setup-contract.ts
+var AUTORESEARCH_SETUP_CONFIDENCE_THRESHOLD = 0.8;
+function contractError2(message) {
+  return new Error(message);
 }
-function buildSandboxContent(evaluatorCommand, keepPolicy) {
+function normalizeConfidence(raw) {
+  if (typeof raw !== "number" || Number.isNaN(raw) || !Number.isFinite(raw)) {
+    throw contractError2("setup handoff confidence must be a finite number between 0 and 1.");
+  }
+  if (raw < 0 || raw > 1) {
+    throw contractError2("setup handoff confidence must be between 0 and 1.");
+  }
+  return raw;
+}
+function parseKeepPolicy2(raw) {
+  if (raw === void 0 || raw === null || raw === "") {
+    return void 0;
+  }
+  if (typeof raw !== "string") {
+    throw contractError2("setup handoff keepPolicy must be a string when provided.");
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "score_improvement" || normalized === "pass_only") {
+    return normalized;
+  }
+  throw contractError2("setup handoff keepPolicy must be one of: score_improvement, pass_only.");
+}
+function buildSetupSandboxContent(evaluatorCommand, keepPolicy) {
   const safeCommand = evaluatorCommand.replace(/[\r\n]/g, " ").trim();
   const keepPolicyLine = keepPolicy ? `
   keep_policy: ${keepPolicy}` : "";
@@ -72425,22 +72447,214 @@ evaluator:
 ---
 `;
 }
+function validateAutoresearchSetupHandoff(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw contractError2("setup handoff must be a JSON object.");
+  }
+  const candidate = raw;
+  const missionText = typeof candidate.missionText === "string" ? candidate.missionText.trim() : "";
+  const evaluatorCommand = typeof candidate.evaluatorCommand === "string" ? candidate.evaluatorCommand.trim() : "";
+  const evaluatorSource = candidate.evaluatorSource;
+  const confidence = normalizeConfidence(candidate.confidence);
+  const keepPolicy = parseKeepPolicy2(candidate.keepPolicy);
+  const slugInput = typeof candidate.slug === "string" ? candidate.slug.trim() : missionText;
+  const slug = slugifyMissionName(slugInput);
+  const readyToLaunch = candidate.readyToLaunch;
+  const clarificationQuestion = typeof candidate.clarificationQuestion === "string" ? candidate.clarificationQuestion.trim() : void 0;
+  const repoSignals = Array.isArray(candidate.repoSignals) ? candidate.repoSignals.filter((value) => typeof value === "string" && value.trim().length > 0) : void 0;
+  if (!missionText) {
+    throw contractError2("setup handoff missionText is required.");
+  }
+  if (!evaluatorCommand) {
+    throw contractError2("setup handoff evaluatorCommand is required.");
+  }
+  if (evaluatorSource !== "user" && evaluatorSource !== "inferred") {
+    throw contractError2('setup handoff evaluatorSource must be "user" or "inferred".');
+  }
+  if (typeof readyToLaunch !== "boolean") {
+    throw contractError2("setup handoff readyToLaunch must be boolean.");
+  }
+  parseSandboxContract(buildSetupSandboxContent(evaluatorCommand, keepPolicy));
+  if (evaluatorSource === "inferred" && confidence < AUTORESEARCH_SETUP_CONFIDENCE_THRESHOLD && readyToLaunch) {
+    throw contractError2("low-confidence inferred evaluators cannot be marked readyToLaunch.");
+  }
+  if (!readyToLaunch && !clarificationQuestion) {
+    throw contractError2("setup handoff must include clarificationQuestion when launch is blocked.");
+  }
+  return {
+    missionText,
+    evaluatorCommand,
+    evaluatorSource,
+    confidence,
+    ...keepPolicy ? { keepPolicy } : {},
+    slug,
+    readyToLaunch,
+    ...clarificationQuestion ? { clarificationQuestion } : {},
+    ...repoSignals && repoSignals.length > 0 ? { repoSignals } : {}
+  };
+}
+function parseAutoresearchSetupHandoffJson(raw) {
+  const trimmed = raw.trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonPayload = fencedMatch?.[1]?.trim() ?? trimmed;
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonPayload);
+  } catch {
+    throw contractError2("setup handoff must be valid JSON.");
+  }
+  return validateAutoresearchSetupHandoff(parsed);
+}
+
+// src/cli/autoresearch-setup-session.ts
+var import_child_process38 = require("child_process");
+var import_fs92 = require("fs");
+var import_path106 = require("path");
+var AUTORESEARCH_SETUP_ENTRYPOINT = "autoresearch-setup";
+function safeReadFile(filePath) {
+  try {
+    return (0, import_fs92.readFileSync)(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+function collectPackageJsonSignals(repoRoot) {
+  const packageJsonPath = (0, import_path106.join)(repoRoot, "package.json");
+  if (!(0, import_fs92.existsSync)(packageJsonPath)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse((0, import_fs92.readFileSync)(packageJsonPath, "utf-8"));
+    const scriptEntries = Object.entries(parsed.scripts ?? {}).slice(0, 8).map(([name, command]) => `package.json script ${name}: ${command}`);
+    return scriptEntries;
+  } catch {
+    return ["package.json present"];
+  }
+}
+function collectFilePresenceSignals(repoRoot) {
+  const candidates = [
+    "Makefile",
+    "Justfile",
+    "pytest.ini",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "package.json",
+    "vitest.config.ts",
+    "jest.config.js"
+  ];
+  return candidates.filter((candidate) => (0, import_fs92.existsSync)((0, import_path106.join)(repoRoot, candidate))).map((candidate) => `repo file: ${candidate}`);
+}
+function collectMissionExampleSignals(repoRoot) {
+  const missionsRoot = (0, import_path106.join)(repoRoot, "missions");
+  if (!(0, import_fs92.existsSync)(missionsRoot)) {
+    return [];
+  }
+  const missionDirs = (0, import_fs92.readdirSync)(missionsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).slice(0, 5).map((entry) => entry.name);
+  const signals = missionDirs.map((dir) => `existing mission example: missions/${dir}`);
+  for (const dir of missionDirs) {
+    const sandbox = safeReadFile((0, import_path106.join)(missionsRoot, dir, "sandbox.md"));
+    const commandMatch = sandbox?.match(/command:\s*(.+)/);
+    if (commandMatch?.[1]) {
+      signals.push(`existing mission evaluator: ${commandMatch[1].trim()}`);
+    }
+  }
+  return signals;
+}
+function collectAutoresearchRepoSignals(repoRoot) {
+  const lines = [
+    ...collectPackageJsonSignals(repoRoot),
+    ...collectFilePresenceSignals(repoRoot),
+    ...collectMissionExampleSignals(repoRoot)
+  ];
+  return {
+    lines: lines.length > 0 ? lines : ["No strong repo signals detected."]
+  };
+}
+function buildAutoresearchSetupPrompt(input) {
+  const repoSignals = input.repoSignals ?? collectAutoresearchRepoSignals(input.repoRoot);
+  const clarificationLines = (input.clarificationAnswers ?? []).map((answer, index) => `Clarification ${index + 1}: ${answer}`);
+  return [
+    "You are a short-lived Claude Code setup assistant for OMC autoresearch.",
+    "Your job is to prepare a launch handoff for a detached autoresearch runtime.",
+    "Stay domain-generic. Prefer repository evidence and explicit user input over assumptions.",
+    "If the evaluator is explicit and valid, keep using it.",
+    "If the evaluator is inferred with low confidence or conflicting evidence, DO NOT launch; ask one clarification question.",
+    "Output JSON only with these fields:",
+    "{",
+    '  "missionText": string,',
+    '  "evaluatorCommand": string,',
+    '  "evaluatorSource": "user" | "inferred",',
+    '  "confidence": number,',
+    '  "keepPolicy": "score_improvement" | "pass_only" | null,',
+    '  "slug": string,',
+    '  "readyToLaunch": boolean,',
+    '  "clarificationQuestion": string | null,',
+    '  "repoSignals": string[]',
+    "}",
+    "",
+    `Repo root: ${input.repoRoot}`,
+    `Mission request: ${input.missionText}`,
+    `Explicit evaluator: ${input.explicitEvaluatorCommand ?? "(none provided)"}`,
+    "",
+    "Repository signals:",
+    ...repoSignals.lines.map((line) => `- ${line}`),
+    "",
+    clarificationLines.length > 0 ? "Clarifications so far:" : "Clarifications so far: none",
+    ...clarificationLines.map((line) => `- ${line}`),
+    "",
+    "Rules:",
+    "- Confidence must be between 0 and 1.",
+    "- Low-confidence inferred evaluators must set readyToLaunch=false.",
+    "- When readyToLaunch=false, clarificationQuestion must be a single concise question.",
+    "- Prefer evaluators already implied by repo scripts/tests/build tooling."
+  ].join("\n");
+}
+function runAutoresearchSetupSession(input) {
+  const prompt = buildAutoresearchSetupPrompt(input);
+  const result = (0, import_child_process38.spawnSync)("claude", ["-p", prompt], {
+    cwd: input.repoRoot,
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      CLAUDE_CODE_ENTRYPOINT: AUTORESEARCH_SETUP_ENTRYPOINT
+    }
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`claude_autoresearch_setup_failed:${result.status ?? "unknown"}`);
+  }
+  return parseAutoresearchSetupHandoffJson(result.stdout || "");
+}
+
+// src/cli/autoresearch-guided.ts
+function buildMissionContent(topic) {
+  return `# Mission
+
+${topic}
+`;
+}
+function buildSandboxContent(evaluatorCommand, keepPolicy) {
+  return buildSetupSandboxContent(evaluatorCommand, keepPolicy);
+}
 async function initAutoresearchMission(opts) {
-  const missionsRoot = (0, import_path106.join)(opts.repoRoot, "missions");
-  const missionDir = (0, import_path106.join)(missionsRoot, opts.slug);
-  const rel = (0, import_path106.relative)(missionsRoot, missionDir);
-  if (!rel || rel === ".." || rel.startsWith(`..${import_path106.sep}`)) {
+  const missionsRoot = (0, import_path107.join)(opts.repoRoot, "missions");
+  const missionDir = (0, import_path107.join)(missionsRoot, opts.slug);
+  const rel = (0, import_path107.relative)(missionsRoot, missionDir);
+  if (!rel || rel === ".." || rel.startsWith(`..${import_path107.sep}`)) {
     throw new Error("Invalid slug: resolves outside missions/ directory.");
   }
-  if ((0, import_fs92.existsSync)(missionDir)) {
+  if ((0, import_fs93.existsSync)(missionDir)) {
     throw new Error(`Mission directory already exists: ${missionDir}`);
   }
-  await (0, import_promises19.mkdir)(missionDir, { recursive: true });
+  await (0, import_promises18.mkdir)(missionDir, { recursive: true });
   const missionContent = buildMissionContent(opts.topic);
   const sandboxContent = buildSandboxContent(opts.evaluatorCommand, opts.keepPolicy);
   parseSandboxContract(sandboxContent);
-  await (0, import_promises19.writeFile)((0, import_path106.join)(missionDir, "mission.md"), missionContent, "utf-8");
-  await (0, import_promises19.writeFile)((0, import_path106.join)(missionDir, "sandbox.md"), sandboxContent, "utf-8");
+  await (0, import_promises18.writeFile)((0, import_path107.join)(missionDir, "mission.md"), missionContent, "utf-8");
+  await (0, import_promises18.writeFile)((0, import_path107.join)(missionDir, "sandbox.md"), sandboxContent, "utf-8");
   return { missionDir, slug: opts.slug };
 }
 function parseInitArgs(args) {
@@ -72482,39 +72696,64 @@ function parseInitArgs(args) {
   }
   return result;
 }
-async function guidedAutoresearchSetup(repoRoot) {
+async function askQuestion(rl, prompt) {
+  return (await rl.question(prompt)).trim();
+}
+async function guidedAutoresearchSetup(repoRoot, deps = {}) {
   if (!process.stdin.isTTY) {
     throw new Error("Guided setup requires an interactive terminal. Use --mission, --sandbox, --keep-policy, and --slug flags for non-interactive use.");
   }
-  const rl = (0, import_promises18.createInterface)({ input: process.stdin, output: process.stdout });
+  const makeInterface = deps.createPromptInterface ?? import_promises19.createInterface;
+  const runSetupSession = deps.runSetupSession ?? runAutoresearchSetupSession;
+  const rl = makeInterface({ input: process.stdin, output: process.stdout });
   try {
-    const topic = await rl.question("Research mission (what should autoresearch improve or prove?)\n> ");
-    if (!topic.trim()) {
+    const topic = await askQuestion(rl, "What should autoresearch improve or prove for this repo?\n> ");
+    if (!topic) {
       throw new Error("Research mission is required.");
     }
-    const evaluatorCommand = await rl.question("\nSandbox/evaluator command (must print {pass: boolean, score?: number} JSON)\n> ");
-    if (!evaluatorCommand.trim()) {
-      throw new Error("Sandbox/evaluator command is required.");
-    }
-    const keepPolicyInput = await rl.question("\nKeep policy [Enter for runtime default / score_improvement / pass_only]\n> ");
-    const normalizedKeepPolicyInput = keepPolicyInput.trim().toLowerCase();
-    let keepPolicy;
-    if (normalizedKeepPolicyInput) {
-      if (normalizedKeepPolicyInput !== "score_improvement" && normalizedKeepPolicyInput !== "pass_only") {
-        throw new Error("--keep-policy must be one of: score_improvement, pass_only");
+    const explicitEvaluator = await askQuestion(
+      rl,
+      "\nOptional evaluator command (leave blank and OMC will infer one if confidence is high)\n> "
+    );
+    const clarificationAnswers = [];
+    let handoff = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      handoff = runSetupSession({
+        repoRoot,
+        missionText: topic,
+        ...explicitEvaluator ? { explicitEvaluatorCommand: explicitEvaluator } : {},
+        clarificationAnswers
+      });
+      if (handoff.readyToLaunch) {
+        break;
       }
-      keepPolicy = normalizedKeepPolicyInput;
-    }
-    const suggestedSlug = slugifyMissionName(topic);
-    const slugInput = await rl.question(`
-Mission slug (default: ${suggestedSlug})
+      const question = handoff.clarificationQuestion ?? "I need one more detail before launch. What should the evaluator command verify?";
+      const answer = await askQuestion(rl, `
+${question}
 > `);
-    const slug = slugInput.trim() ? slugifyMissionName(slugInput.trim()) : suggestedSlug;
+      if (!answer) {
+        throw new Error("Autoresearch setup requires clarification before launch.");
+      }
+      clarificationAnswers.push(answer);
+    }
+    if (!handoff || !handoff.readyToLaunch) {
+      throw new Error(
+        `Autoresearch setup could not infer a launch-ready evaluator with confidence >= ${AUTORESEARCH_SETUP_CONFIDENCE_THRESHOLD}.`
+      );
+    }
+    process.stdout.write(
+      `
+Setup summary
+- mission: ${handoff.missionText}
+- evaluator: ${handoff.evaluatorCommand}
+- confidence: ${handoff.confidence}
+`
+    );
     return initAutoresearchMission({
-      topic: topic.trim(),
-      evaluatorCommand: evaluatorCommand.trim(),
-      keepPolicy,
-      slug,
+      topic: handoff.missionText,
+      evaluatorCommand: handoff.evaluatorCommand,
+      keepPolicy: handoff.keepPolicy,
+      slug: handoff.slug || slugifyMissionName(handoff.missionText),
       repoRoot
     });
   } finally {
@@ -72525,7 +72764,7 @@ function checkTmuxAvailable() {
   return isTmuxAvailable2();
 }
 function resolveMissionRepoRoot(missionDir) {
-  return (0, import_child_process38.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
+  return (0, import_child_process39.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
     cwd: missionDir,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -72533,7 +72772,7 @@ function resolveMissionRepoRoot(missionDir) {
 }
 function assertTmuxSessionAvailable(sessionName2) {
   try {
-    (0, import_child_process38.execFileSync)("tmux", ["has-session", "-t", sessionName2], { stdio: "ignore" });
+    (0, import_child_process39.execFileSync)("tmux", ["has-session", "-t", sessionName2], { stdio: "ignore" });
   } catch {
     throw new Error(
       `tmux session "${sessionName2}" did not stay available after launch. Check the mission command, login-shell environment, and tmux logs, then try again.`
@@ -72546,7 +72785,7 @@ function spawnAutoresearchTmux(missionDir, slug) {
   }
   const sessionName2 = `omc-autoresearch-${slug}`;
   try {
-    (0, import_child_process38.execFileSync)("tmux", ["has-session", "-t", sessionName2], { stdio: "ignore" });
+    (0, import_child_process39.execFileSync)("tmux", ["has-session", "-t", sessionName2], { stdio: "ignore" });
     throw new Error(
       `tmux session "${sessionName2}" already exists.
   Attach: tmux attach -t ${sessionName2}
@@ -72559,10 +72798,10 @@ function spawnAutoresearchTmux(missionDir, slug) {
     }
   }
   const repoRoot = resolveMissionRepoRoot(missionDir);
-  const omcPath = (0, import_path106.resolve)((0, import_path106.join)(__dirname, "..", "..", "bin", "omc.js"));
+  const omcPath = (0, import_path107.resolve)((0, import_path107.join)(__dirname, "..", "..", "bin", "omc.js"));
   const command = buildTmuxShellCommand(process.execPath, [omcPath, "autoresearch", missionDir]);
   const wrappedCommand = wrapWithLoginShell(command);
-  (0, import_child_process38.execFileSync)("tmux", ["new-session", "-d", "-s", sessionName2, "-c", repoRoot, wrappedCommand], { stdio: "ignore" });
+  (0, import_child_process39.execFileSync)("tmux", ["new-session", "-d", "-s", sessionName2, "-c", repoRoot, wrappedCommand], { stdio: "ignore" });
   assertTmuxSessionAvailable(sessionName2);
   console.log("\nAutoresearch launched in background tmux session.");
   console.log(`  Session:  ${sessionName2}`);
@@ -72575,15 +72814,15 @@ var CLAUDE_BYPASS_FLAG2 = "--dangerously-skip-permissions";
 var AUTORESEARCH_HELP = `omc autoresearch - Launch OMC autoresearch with thin-supervisor parity semantics
 
 Usage:
-  omc autoresearch                                                (research interview + background launch)
+  omc autoresearch                                                (Claude setup + background launch)
   omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
   omc autoresearch init [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
   omc autoresearch <mission-dir> [claude-args...]
   omc autoresearch --resume <run-id> [claude-args...]
 
 Arguments:
-  (no args)        Interactive research interview: collects mission text, sandbox command,
-                   optional keep policy, and slug, then spawns autoresearch in a background tmux session.
+  (no args)        Short-lived Claude-backed setup: discusses the mission, validates or infers
+                   an evaluator with confidence gating, then spawns autoresearch in a background tmux session.
   --mission/       Explicit bypass path. --mission is raw mission text and --sandbox is the raw
   --sandbox        evaluator/sandbox command. Both flags are required together; --keep-policy and
                    --slug remain optional. Partial bypass is invalid.
@@ -72620,9 +72859,9 @@ function normalizeAutoresearchClaudeArgs(claudeArgs) {
   return normalized;
 }
 function runAutoresearchTurn(worktreePath, instructionsFile, claudeArgs) {
-  const prompt = (0, import_fs93.readFileSync)(instructionsFile, "utf-8");
+  const prompt = (0, import_fs94.readFileSync)(instructionsFile, "utf-8");
   const launchArgs = ["--print", ...normalizeAutoresearchClaudeArgs(claudeArgs), "-p", prompt];
-  const result = (0, import_child_process39.spawnSync)("claude", launchArgs, {
+  const result = (0, import_child_process40.spawnSync)("claude", launchArgs, {
     cwd: worktreePath,
     stdio: ["pipe", "inherit", "inherit"],
     encoding: "utf-8",
@@ -72738,7 +72977,7 @@ ${AUTORESEARCH_HELP}`
   };
 }
 function resolveRepoRoot(cwd2) {
-  return (0, import_child_process39.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
+  return (0, import_child_process40.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
     cwd: cwd2,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -72790,7 +73029,7 @@ async function runAutoresearchLoop(claudeArgs, runtime, missionDir) {
     while (true) {
       runAutoresearchTurn(runtime.worktreePath, runtime.instructionsFile, claudeArgs);
       const contract = await loadAutoresearchMissionContract(missionDir);
-      const manifest = await loadAutoresearchRunManifest(runtime.repoRoot, JSON.parse((0, import_child_process39.execFileSync)("cat", [runtime.manifestFile], { encoding: "utf-8" })).run_id);
+      const manifest = await loadAutoresearchRunManifest(runtime.repoRoot, JSON.parse((0, import_child_process40.execFileSync)("cat", [runtime.manifestFile], { encoding: "utf-8" })).run_id);
       const decision = await processAutoresearchCandidate(contract, manifest, runtime.repoRoot);
       if (decision === "abort" || decision === "error") {
         return;
@@ -72873,7 +73112,7 @@ ${AUTORESEARCH_HELP}`
   await assertModeStartAllowed("autoresearch", contract.repoRoot);
   const runTag = buildAutoresearchRunTag();
   const plan = planWorktree(contract.repoRoot, contract.missionSlug, runTag);
-  (0, import_child_process39.execFileSync)("git", ["worktree", "add", "-b", plan.branchName, plan.worktreePath, "HEAD"], {
+  (0, import_child_process40.execFileSync)("git", ["worktree", "add", "-b", plan.branchName, plan.worktreePath, "HEAD"], {
     cwd: contract.repoRoot,
     stdio: "ignore"
   });
@@ -72883,7 +73122,7 @@ ${AUTORESEARCH_HELP}`
 }
 
 // src/cli/index.ts
-var __dirname3 = (0, import_path113.dirname)((0, import_url16.fileURLToPath)(importMetaUrl));
+var __dirname3 = (0, import_path114.dirname)((0, import_url16.fileURLToPath)(importMetaUrl));
 var version2 = getRuntimePackageVersion();
 var program2 = new Command();
 warnIfWin32();
@@ -72939,8 +73178,8 @@ Examples:
     console.log(`  User:    ${paths.user}`);
     console.log(`  Project: ${paths.project}`);
     console.log(source_default.blue("\nFile status:"));
-    console.log(`  User:    ${(0, import_fs100.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
-    console.log(`  Project: ${(0, import_fs100.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  User:    ${(0, import_fs101.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  Project: ${(0, import_fs101.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
     return;
   }
   const config2 = loadConfig();
@@ -73109,7 +73348,7 @@ Examples:
     }
     config3.notificationProfiles[profileName] = profile;
     try {
-      (0, import_fs100.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
+      (0, import_fs101.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${profileName}" \u2014 ${type} configured`));
       console.log(JSON.stringify(profile[type], null, 2));
     } catch (error2) {
@@ -73222,7 +73461,7 @@ Examples:
     }
   }
   try {
-    (0, import_fs100.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+    (0, import_fs101.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
     console.log(source_default.green(`\u2713 Stop callback '${type}' configured`));
     console.log(JSON.stringify(config2.stopHookCallbacks[type], null, 2));
   } catch (error2) {
@@ -73284,7 +73523,7 @@ Active profile (OMC_NOTIFY_PROFILE): ${activeProfile}`));
       delete config2.notificationProfiles;
     }
     try {
-      (0, import_fs100.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+      (0, import_fs101.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${name}" deleted`));
     } catch (error2) {
       console.error(source_default.red("Failed to write configuration:"), error2);

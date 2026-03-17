@@ -7,15 +7,15 @@ const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
 export const AUTORESEARCH_HELP = `omc autoresearch - Launch OMC autoresearch with thin-supervisor parity semantics
 
 Usage:
-  omc autoresearch                                                (research interview + background launch)
+  omc autoresearch                                                (Claude setup + background launch)
   omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
   omc autoresearch init [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
   omc autoresearch <mission-dir> [claude-args...]
   omc autoresearch --resume <run-id> [claude-args...]
 
 Arguments:
-  (no args)        Interactive research interview: collects mission text, sandbox command,
-                   optional keep policy, and slug, then spawns autoresearch in a background tmux session.
+  (no args)        Short-lived Claude-backed setup: discusses the mission, validates or infers
+                   an evaluator with confidence gating, then spawns autoresearch in a background tmux session.
   --mission/       Explicit bypass path. --mission is raw mission text and --sandbox is the raw
   --sandbox        evaluator/sandbox command. Both flags are required together; --keep-policy and
                    --slug remain optional. Partial bypass is invalid.

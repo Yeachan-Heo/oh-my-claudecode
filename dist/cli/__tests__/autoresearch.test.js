@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeAutoresearchClaudeArgs, parseAutoresearchArgs, AUTORESEARCH_HELP } from '../autoresearch.js';
+import { execFileSync } from 'node:child_process';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+const { guidedAutoresearchSetupMock, spawnAutoresearchTmuxMock } = vi.hoisted(() => ({
+    guidedAutoresearchSetupMock: vi.fn(),
+    spawnAutoresearchTmuxMock: vi.fn(),
+}));
+vi.mock('node:child_process', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        execFileSync: vi.fn(),
+    };
+});
+vi.mock('../autoresearch-guided.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        guidedAutoresearchSetup: guidedAutoresearchSetupMock,
+        spawnAutoresearchTmux: spawnAutoresearchTmuxMock,
+    };
+});
+import { autoresearchCommand, normalizeAutoresearchClaudeArgs, parseAutoresearchArgs, AUTORESEARCH_HELP } from '../autoresearch.js';
 describe('normalizeAutoresearchClaudeArgs', () => {
     it('adds permission bypass by default for autoresearch workers', () => {
         expect(normalizeAutoresearchClaudeArgs(['--model', 'opus'])).toEqual(['--model', 'opus', '--dangerously-skip-permissions']);
@@ -66,7 +86,7 @@ describe('parseAutoresearchArgs', () => {
     it('parses --help', () => {
         const parsed = parseAutoresearchArgs(['--help']);
         expect(parsed.missionDir).toBe('--help');
-        expect(AUTORESEARCH_HELP).toContain('research interview + background launch');
+        expect(AUTORESEARCH_HELP).toContain('Claude setup + background launch');
         expect(AUTORESEARCH_HELP).toMatch(/Partial bypass is invalid/);
     });
     it('parses init subcommand', () => {
@@ -81,6 +101,29 @@ describe('parseAutoresearchArgs', () => {
     });
     it('rejects flags before mission-dir', () => {
         expect(() => parseAutoresearchArgs(['--unknown-flag'])).toThrow(/mission-dir must be the first positional argument/);
+    });
+});
+describe('autoresearchCommand', () => {
+    beforeEach(() => {
+        guidedAutoresearchSetupMock.mockReset();
+        spawnAutoresearchTmuxMock.mockReset();
+        vi.mocked(execFileSync).mockReset();
+    });
+    it('routes no-arg mode through guided setup then detached tmux handoff', async () => {
+        vi.mocked(execFileSync).mockReturnValue('/repo\n');
+        guidedAutoresearchSetupMock.mockResolvedValue({
+            missionDir: '/repo/missions/demo',
+            slug: 'demo',
+        });
+        const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/repo');
+        try {
+            await autoresearchCommand([]);
+        }
+        finally {
+            cwdSpy.mockRestore();
+        }
+        expect(guidedAutoresearchSetupMock).toHaveBeenCalledWith('/repo');
+        expect(spawnAutoresearchTmuxMock).toHaveBeenCalledWith('/repo/missions/demo', 'demo');
     });
 });
 //# sourceMappingURL=autoresearch.test.js.map
