@@ -76,9 +76,9 @@ export function isPlanningComplete(artifacts: PlanningArtifacts): boolean {
  *   omc ralph "do the work"
  */
 const TEAM_LAUNCH_RE =
-  /\bomc\s+team\s+(?:(\d+):(\w+)\s+)?"([^"]+)"((?:\s+--[\w-]+)*)/g;
+  /\bomc\s+team\s+(?:(\d+):(\w+)\s+)?"([^"]+)"((?:\s+--[\w-]+)*)/;
 const RALPH_LAUNCH_RE =
-  /\bomc\s+ralph\s+"([^"]+)"((?:\s+--[\w-]+)*)/g;
+  /\bomc\s+ralph\s+"([^"]+)"((?:\s+--[\w-]+)*)/;
 
 function parseFlags(flagStr: string): { linkedRalph: boolean } {
   return {
@@ -107,7 +107,6 @@ export function readApprovedExecutionLaunchHint(
   }
 
   if (mode === 'team') {
-    TEAM_LAUNCH_RE.lastIndex = 0;
     const match = TEAM_LAUNCH_RE.exec(content);
     if (!match) return null;
 
@@ -126,7 +125,6 @@ export function readApprovedExecutionLaunchHint(
   }
 
   if (mode === 'ralph') {
-    RALPH_LAUNCH_RE.lastIndex = 0;
     const match = RALPH_LAUNCH_RE.exec(content);
     if (!match) return null;
 
