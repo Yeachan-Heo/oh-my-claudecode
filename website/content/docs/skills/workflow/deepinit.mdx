@@ -1,0 +1,76 @@
+---
+title: Deepinit
+description: 코드베이스 전체에 계층적 AGENTS.md 문서를 자동 생성
+---
+
+## 개요
+
+Deepinit은 코드베이스 전체에 계층적 AGENTS.md 문서를 생성합니다. AGENTS.md는 AI가 읽을 수 있는 문서로, 각 디렉토리의 내용, 컴포넌트 관계, 작업 시 주의사항을 기술합니다.
+
+에이전트가 코드베이스를 더 잘 이해하고 정확하게 작업하도록 돕는 게 목표입니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:deepinit
+/oh-my-claudecode:deepinit [path]
+```
+
+## 계층적 태깅
+
+모든 AGENTS.md(루트 제외)에는 부모 참조 태그가 포함됩니다.
+
+```
+/AGENTS.md                        (루트, 부모 없음)
+├── src/AGENTS.md                 <!-- Parent: ../AGENTS.md -->
+│   ├── src/components/AGENTS.md  <!-- Parent: ../AGENTS.md -->
+│   └── src/utils/AGENTS.md       <!-- Parent: ../AGENTS.md -->
+└── docs/AGENTS.md                <!-- Parent: ../AGENTS.md -->
+```
+
+## AGENTS.md 구조
+
+각 파일에 포함되는 섹션:
+
+- **Purpose**: 디렉토리의 역할 설명
+- **Key Files**: 주요 파일 목록과 설명
+- **Subdirectories**: 하위 디렉토리 목록
+- **For AI Agents**: 작업 지침, 테스트 요구사항, 코드 패턴
+- **Dependencies**: 내부/외부 의존성
+
+## 실행 워크플로우
+
+1. **디렉토리 구조 매핑**: explore 에이전트가 전체 구조 파악
+2. **작업 계획 생성**: 깊이 레벨별로 정리
+3. **레벨별 생성**: 부모 → 자식 순서로 생성 (부모 참조 유효성 보장)
+4. **기존 파일 업데이트**: 이미 존재하면 비교 후 병합 (수동 섹션 보존)
+5. **계층 검증**: 부모 참조, 고아 파일, 완전성 확인
+
+## 병렬화 규칙
+
+- 같은 레벨의 디렉토리: 병렬 처리
+- 다른 레벨: 순차 처리 (부모 먼저)
+- 큰 디렉토리: 전용 에이전트 할당
+- 작은 디렉토리: 하나의 에이전트에서 여러 개 처리
+
+## 업데이트 모드
+
+기존 AGENTS.md가 있는 코드베이스에서 실행하면:
+
+1. 기존 내용 읽기 및 파싱
+2. 현재 디렉토리 상태 분석
+3. 기존과 현재의 차이 비교
+4. 자동 생성 섹션 업데이트, `<!-- MANUAL -->` 이하 수동 섹션 보존
+
+## 관련 스킬
+
+- [learner](/docs/skills/utility/learner) - 세션에서 스킬 추출
+- [skill](/docs/skills/utility/skill) - 로컬 스킬 관리
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:deepinit` |
+| 매직 키워드 | - |
+| 카테고리 | Workflow |

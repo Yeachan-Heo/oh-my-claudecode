@@ -1,0 +1,109 @@
+---
+title: Project Session Manager
+description: git worktree와 tmux로 격리된 개발 환경을 관리하는 세션 매니저
+---
+
+## 개요
+
+Project Session Manager(PSM)는 git worktree와 tmux 세션을 사용하여 격리된 개발 환경을 자동화합니다. PR 리뷰, 이슈 수정, 기능 개발을 독립적으로 병렬 진행할 수 있습니다.
+
+빠른 worktree 생성만 필요하면 `omc teleport` 명령도 사용할 수 있습니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:project-session-manager review <ref>
+/oh-my-claudecode:project-session-manager fix <ref>
+/oh-my-claudecode:project-session-manager feature <project> <name>
+/oh-my-claudecode:project-session-manager list
+/oh-my-claudecode:project-session-manager attach <session>
+/oh-my-claudecode:project-session-manager kill <session>
+/oh-my-claudecode:project-session-manager cleanup
+/oh-my-claudecode:project-session-manager status
+```
+
+별칭 `psm`도 사용할 수 있습니다.
+
+```bash
+/psm review omc#123
+/psm fix omc#42
+/psm feature omc add-webhooks
+```
+
+## 프로젝트 참조 형식
+
+| 형식 | 예시 |
+|------|------|
+| 별칭 | `omc#123` |
+| 전체 | `owner/repo#123` |
+| URL | `https://github.com/owner/repo/pull/123` |
+| 현재 저장소 | `#123` |
+
+## 주요 명령
+
+### review
+
+PR 리뷰 세션을 생성합니다. PR 브랜치를 체크아웃하고, worktree를 만들고, tmux 세션을 시작하고, Claude Code를 실행합니다.
+
+### fix
+
+이슈 수정 세션을 생성합니다. 이슈 정보를 가져와 fix 브랜치를 만듭니다.
+
+### feature
+
+기능 개발 세션을 생성합니다. feature 브랜치를 만들고 worktree를 설정합니다.
+
+### cleanup
+
+머지된 PR이나 닫힌 이슈의 세션을 자동으로 정리합니다.
+
+## Teleport 명령
+
+PSM보다 가벼운 worktree 생성 도구입니다. tmux 세션 관리 없이 worktree만 생성합니다.
+
+```bash
+omc teleport #123           # 이슈/PR용 worktree 생성
+omc teleport my-feature     # 기능용 worktree 생성
+omc teleport list           # worktree 목록
+omc teleport remove <name>  # worktree 제거
+```
+
+## 프로바이더
+
+| 프로바이더 | CLI | 참조 형식 |
+|-----------|-----|-----------|
+| GitHub (기본) | `gh` | `owner/repo#123`, 별칭, URL |
+| Jira | `jira` | `PROJ-123`, 별칭 |
+
+## 설정
+
+`~/.psm/projects.json`에서 프로젝트 별칭을 설정합니다.
+
+```json
+{
+  "aliases": {
+    "omc": {
+      "repo": "Yeachan-Heo/oh-my-claudecode",
+      "local": "~/Workspace/oh-my-claudecode",
+      "default_base": "main"
+    }
+  }
+}
+```
+
+## 요구사항
+
+- `git` (worktree 지원 v2.5+)
+- `jq`
+- `tmux` (선택, 권장)
+- `gh` (GitHub용) 또는 `jira` (Jira용)
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:project-session-manager` |
+| 별칭 | `/oh-my-claudecode:psm` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |
+| 설정 | `~/.psm/projects.json` |

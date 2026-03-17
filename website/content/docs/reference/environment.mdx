@@ -1,0 +1,128 @@
+---
+title: 환경 변수
+description: OMC의 동작을 제어하는 환경 변수 전체 목록과 사용법
+---
+
+## 핵심 환경 변수
+
+### DISABLE_OMC
+
+OMC의 모든 훅을 비활성화합니다.
+
+```bash
+export DISABLE_OMC=1
+```
+
+값이 설정되어 있으면 (어떤 값이든) OMC가 완전히 비활성화됩니다.
+Claude Code는 OMC 없이 기본 동작으로 실행됩니다.
+
+### OMC_SKIP_HOOKS
+
+특정 훅만 건너뜁니다. 쉼표로 구분합니다.
+
+```bash
+export OMC_SKIP_HOOKS="keyword-detector,persistent-mode"
+```
+
+전체 비활성화(`DISABLE_OMC`) 없이 특정 훅만 끄고 싶을 때 씁니다.
+
+## 상태 관리
+
+### OMC_STATE_DIR
+
+상태 파일을 중앙 집중식으로 관리합니다.
+
+```bash
+export OMC_STATE_DIR="$HOME/.claude/omc"
+```
+
+| 항목 | 기본값 | 설정 후 |
+|------|--------|--------|
+| 상태 저장 위치 | `{worktree}/.omc/` | `$OMC_STATE_DIR/{project-id}/` |
+| 워크트리 삭제 시 | 상태 함께 삭제 | 상태 보존 |
+
+프로젝트 식별자는 Git remote URL의 해시값을 사용합니다.
+같은 리포지토리의 서로 다른 워크트리에서도 상태를 공유합니다.
+
+## 기능 제어
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `OMC_PARALLEL_EXECUTION` | `true` | 병렬 에이전트 실행 허용 |
+| `OMC_LSP_TOOLS` | `true` | LSP 도구 활성화 |
+| `OMC_MAX_BACKGROUND_TASKS` | `5` | 최대 백그라운드 작업 수 |
+| `OMC_LSP_TIMEOUT_MS` | `15000` | LSP 요청 타임아웃 (밀리초) |
+
+## 모델 라우팅
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `OMC_ROUTING_ENABLED` | `true` | 지능형 모델 라우팅 활성화 |
+| `OMC_ROUTING_DEFAULT_TIER` | `MEDIUM` | 기본 모델 티어 (LOW/MEDIUM/HIGH) |
+| `OMC_ROUTING_FORCE_INHERIT` | `false` | 부모 모델 상속 강제 |
+| `OMC_ESCALATION_ENABLED` | `true` | 에스컬레이션 허용 |
+
+### 모델 별칭 오버라이드
+
+```bash
+export OMC_MODEL_ALIAS_HAIKU="custom-haiku-model"
+export OMC_MODEL_ALIAS_SONNET="custom-sonnet-model"
+export OMC_MODEL_ALIAS_OPUS="custom-opus-model"
+```
+
+비표준 프로바이더를 쓸 때 모델 이름을 매핑합니다.
+
+## 외부 모델
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `OMC_CODEX_DEFAULT_MODEL` | (프로바이더 기본값) | Codex CLI 기본 모델 |
+| `OMC_GEMINI_DEFAULT_MODEL` | (프로바이더 기본값) | Gemini CLI 기본 모델 |
+| `OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER` | - | 기본 외부 프로바이더 (codex/gemini) |
+| `OMC_EXTERNAL_MODELS_FALLBACK_POLICY` | `provider_chain` | 모델 실패 시 폴백 정책 |
+
+## 위임 라우팅
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `OMC_DELEGATION_ROUTING_ENABLED` | `false` | 외부 프로바이더로의 위임 라우팅 활성화 |
+| `OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER` | `claude` | 기본 위임 프로바이더 |
+
+## MCP 서버
+
+| 변수 | 설명 |
+|------|------|
+| `EXA_API_KEY` | Exa MCP 서버 API 키 |
+
+## 고급 설정
+
+| 변수 | 설명 |
+|------|------|
+| `OMC_BRIDGE_SCRIPT` | Python 브릿지 스크립트 경로 (자동 감지) |
+| `OMC_USE_NODE_HOOKS` | `1`로 설정하면 macOS/Linux에서 Node.js 훅 사용 |
+
+## 사용 예시
+
+### 비용 절약 모드
+
+```bash
+# 라우팅 비활성화, 모든 에이전트가 부모 모델 상속
+export OMC_ROUTING_FORCE_INHERIT=true
+```
+
+### 디버깅 모드
+
+```bash
+# 특정 훅만 비활성화해서 문제 격리
+export OMC_SKIP_HOOKS="persistent-mode,keyword-detector"
+```
+
+### 대규모 프로젝트
+
+```bash
+# LSP 타임아웃 늘리기
+export OMC_LSP_TIMEOUT_MS=30000
+
+# 더 많은 백그라운드 작업 허용
+export OMC_MAX_BACKGROUND_TASKS=10
+```

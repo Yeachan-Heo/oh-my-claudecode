@@ -1,0 +1,117 @@
+---
+title: State
+description: 실행 모드의 상태를 관리하는 MCP 도구 그룹
+---
+
+## 개요
+
+State 도구는 OMC 실행 모드(autopilot, ralph, ultrawork 등)의 상태를 관리합니다. 각 모드는 상태 파일에 현재 진행 상황, 활성 여부, 설정을 기록합니다.
+
+## 저장 경로
+
+```
+.omc/state/
+├── sessions/{sessionId}/     # 세션별 상태
+│   ├── autopilot-state.json
+│   ├── ralph-state.json
+│   └── ultrawork-state.json
+├── autopilot-state.json      # 레거시 호환
+├── ralph-state.json
+└── ultrawork-state.json
+```
+
+세션 ID가 제공되면 세션 범위 경로를 사용하고, 없으면 레거시 경로를 폴백으로 사용합니다.
+
+## 도구 목록
+
+### state_read
+
+지정한 모드의 상태를 읽습니다.
+
+```
+state_read(mode="ralph")
+state_read(mode="ralph", session_id="abc123")
+```
+
+상태 파일이 없으면 빈 응답을 반환합니다.
+
+### state_write
+
+지정한 모드의 상태를 저장합니다.
+
+```
+state_write(mode="ralph", state={
+  active: true,
+  current_phase: "execution",
+  iteration: 3,
+  max_iterations: 10
+})
+```
+
+### state_clear
+
+지정한 모드의 상태 파일을 삭제합니다.
+
+```
+state_clear(mode="ralph")
+state_clear(mode="ralph", session_id="abc123")
+```
+
+세션 ID 없이 호출하면 레거시 파일을 정리합니다.
+
+### state_list_active
+
+현재 활성 중인 모든 세션을 나열합니다.
+
+```
+state_list_active()
+```
+
+`.omc/state/sessions/` 하위의 모든 세션 ID와 해당 모드를 반환합니다.
+
+### state_get_status
+
+특정 세션의 상태 요약을 반환합니다.
+
+```
+state_get_status(session_id="abc123")
+```
+
+활성 모드 이름, 의존 모드 존재 여부를 포함합니다.
+
+## 환경 변수
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `OMC_STATE_DIR` | (미설정) | 중앙 집중식 상태 디렉토리. 설정 시 worktree 삭제에도 상태 보존 |
+
+`OMC_STATE_DIR`을 설정하면 상태가 `$OMC_STATE_DIR/{project-id}/`에 저장됩니다.
+
+```bash
+export OMC_STATE_DIR="$HOME/.claude/omc"
+```
+
+## 사용 패턴
+
+### 모드 활성화
+
+```
+state_write(mode="autopilot", state={
+  active: true,
+  current_phase: "expansion",
+  started_at: "2024-01-15T09:00:00Z"
+})
+```
+
+### 모드 비활성화
+
+```
+state_clear(mode="autopilot")
+```
+
+### 활성 모드 확인
+
+```
+state_list_active()
+→ [{session_id: "abc123", mode: "ralph", active: true}]
+```

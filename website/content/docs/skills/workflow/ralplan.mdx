@@ -1,0 +1,95 @@
+---
+title: Ralplan
+description: Planner-Architect-Critic 합의 프로세스를 통한 반복 계획 수립
+---
+
+## 개요
+
+Ralplan은 `/oh-my-claudecode:omc-plan --consensus`의 단축 별칭입니다. Planner, Architect, Critic 에이전트가 합의에 도달할 때까지 반복적으로 계획을 검토하고 개선하는 RALPLAN-DR 구조적 숙의를 수행합니다.
+
+모호한 실행 요청에 대한 사전 게이트 역할도 합니다. `ralph add authentication`처럼 구체적이지 않은 프롬프트는 ralplan으로 리디렉트되어 계획을 먼저 세웁니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ralplan "task description"
+/oh-my-claudecode:ralplan --interactive "task description"
+/oh-my-claudecode:ralplan --deliberate "high-risk migration"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+ralplan this feature
+```
+
+## 옵션/플래그
+
+| 플래그 | 설명 |
+|--------|------|
+| `--interactive` | 핵심 결정 지점에서 사용자 프롬프트 활성화 |
+| `--deliberate` | 고위험 작업용 심층 숙의 (사전 사망 분석 + 확장 테스트 계획) |
+| `--architect codex` | Architect 단계에서 Codex CLI 사용 |
+| `--critic codex` | Critic 단계에서 Codex CLI 사용 |
+
+## 합의 워크플로우
+
+1. **Planner**가 초기 계획 + RALPLAN-DR 요약 작성
+   - 원칙 (3-5개), 의사결정 동인 (상위 3개), 실행 가능한 옵션 (2개 이상)
+   - `--deliberate`: 사전 사망 분석 (3개 시나리오) + 확장 테스트 계획 추가
+2. **Architect**가 아키텍처 건전성 검토 (순차 실행, 반론 포함)
+3. **Critic**이 품질 기준 평가 (Architect 완료 후 실행)
+4. 거부 시 수정 → Architect → Critic 반복 (최대 5회)
+5. 승인 시 ADR 포함한 최종 계획 출력
+
+## 사전 실행 게이트
+
+실행 모드(ralph, autopilot, team, ultrawork)에 모호한 프롬프트가 들어오면 ralplan으로 리디렉트됩니다.
+
+### 게이트를 통과하는 프롬프트
+
+구체적인 신호가 하나라도 있으면 게이트를 통과합니다.
+
+| 신호 | 예시 |
+|------|------|
+| 파일 경로 | `ralph fix src/hooks/bridge.ts` |
+| 이슈/PR 번호 | `ralph implement #42` |
+| camelCase 심볼 | `ralph fix processKeywordDetector` |
+| 번호 매긴 단계 | `ralph do: 1. Add X 2. Test Y` |
+| 에러 참조 | `ralph fix TypeError in auth` |
+
+### 게이트를 우회하는 방법
+
+```bash
+force: ralph refactor the auth module
+! autopilot optimize everything
+```
+
+## 예시
+
+```bash
+# 기본 합의 계획
+ralplan redesign the database schema
+
+# 인터랙티브 모드
+ralplan --interactive migrate from REST to GraphQL
+
+# 고위험 작업
+ralplan --deliberate rewrite the authentication system
+```
+
+## 관련 스킬
+
+- [plan](/docs/skills/workflow/plan) - 전체 계획 스킬 (ralplan은 consensus 모드의 별칭)
+- [autopilot](/docs/skills/workflow/autopilot) - 합의 계획 후 자율 실행
+- [team](/docs/skills/workflow/team) - 합의 계획 후 팀 실행 (권장)
+- [deep-interview](/docs/skills/workflow/deep-interview) - 계획 전 심층 인터뷰
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ralplan` |
+| 매직 키워드 | `ralplan` |
+| 카테고리 | Workflow |
+| 출력 경로 | `.omc/plans/ralplan-*.md` |

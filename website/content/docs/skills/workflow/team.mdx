@@ -1,0 +1,91 @@
+---
+title: Team
+description: N개의 Claude 에이전트를 조율하여 공유 작업 목록에서 협업하는 팀 오케스트레이션
+---
+
+## 개요
+
+Team은 N개의 Claude Code 네이티브 에이전트를 생성해서 공유 작업 목록에서 협업하게 하는 조율 스킬입니다. 팀 관리, 에이전트 간 메시지, 작업 의존성이 내장되어 있고 외부 의존성은 필요 없습니다.
+
+5단계 파이프라인(team-plan, team-prd, team-exec, team-verify, team-fix)으로 작업을 진행합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:team N:agent-type "task description"
+/oh-my-claudecode:team "task description"
+/oh-my-claudecode:team ralph "task description"
+```
+
+### 파라미터
+
+- **N**: 팀원 에이전트 수 (1-20). 생략하면 작업 분해에 따라 자동 결정
+- **agent-type**: team-exec 단계에서 쓸 에이전트 유형 (executor, debugger, designer, codex, gemini 등). 생략하면 단계별 자동 라우팅
+- **task**: 분해하고 분배할 고수준 작업 설명
+- **ralph**: 지정하면 Ralph의 지속 루프로 팀 파이프라인을 감싸서 실패 시 재시도와 architect 검증 수행
+
+## 예시
+
+```bash
+# 5명의 executor로 TypeScript 에러 수정
+/team 5:executor "fix all TypeScript errors across the project"
+
+# 3명의 debugger로 빌드 에러 수정
+/team 3:debugger "fix build errors in src/"
+
+# 자동 크기 결정, 자동 라우팅
+/team "refactor the auth module with security review"
+
+# Ralph 지속 루프와 함께
+/team ralph "build a complete REST API for user management"
+
+# Codex CLI 워커 사용
+/team 3:codex "review all API endpoints for security"
+```
+
+## 파이프라인 단계
+
+### team-plan
+
+explore와 planner 에이전트가 작업을 분석하고 실행 계획을 수립합니다.
+
+### team-prd
+
+analyst가 요구사항을 분석하고 수락 기준을 정의합니다.
+
+### team-exec
+
+팀원들이 병렬로 작업을 실행합니다. 단계별 에이전트 라우팅이 적용됩니다.
+
+### team-verify
+
+verifier와 필요한 리뷰어가 결과를 검증합니다.
+
+### team-fix
+
+검증에서 발견된 문제를 수정합니다. 결함 유형에 따라 executor, build-fixer, debugger가 쓰입니다.
+수정 루프는 최대 시도 횟수로 제한됩니다.
+
+## Team + Ralph
+
+`team ralph`은 팀 파이프라인을 Ralph의 지속 루프로 감쌉니다.
+
+- 팀이 실패하면 Ralph가 재시도합니다
+- 완료 시 architect 검증을 수행합니다
+- 어느 한쪽을 취소하면 다른 쪽도 함께 취소됩니다
+
+## 관련 스킬
+
+- [omc-teams](/docs/skills/workflow/omc-teams) - 외부 CLI 워커 (codex/gemini) 실행
+- [ralph](/docs/skills/workflow/ralph) - 단일 에이전트 지속 루프
+- [ultrawork](/docs/skills/workflow/ultrawork) - 단순 병렬 실행
+- [ralplan](/docs/skills/workflow/ralplan) - 합의 계획 후 team 실행 권장
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:team` |
+| 매직 키워드 | `team` |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/team-state.json` |

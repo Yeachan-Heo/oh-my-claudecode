@@ -1,0 +1,78 @@
+---
+title: UltraQA
+description: 목표가 달성될 때까지 테스트, 검증, 수정을 반복하는 QA 사이클링 워크플로우
+---
+
+## 개요
+
+UltraQA는 자율 QA 사이클링 워크플로우입니다. 목표(테스트 통과, 빌드 성공, 린트 통과 등)가 달성될 때까지 qa-tester 실행, architect 진단, executor 수정을 반복합니다.
+
+최대 5회 사이클을 돌고, 같은 실패가 3번 반복되면 근본 문제로 판단해서 조기 중단합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ultraqa --tests
+/oh-my-claudecode:ultraqa --build
+/oh-my-claudecode:ultraqa --lint
+/oh-my-claudecode:ultraqa --typecheck
+/oh-my-claudecode:ultraqa --custom "all endpoints return 200"
+/oh-my-claudecode:ultraqa --interactive
+```
+
+## 목표 타입
+
+| 플래그 | 목표 | 확인 내용 |
+|--------|------|-----------|
+| `--tests` | 테스트 | 모든 테스트 스위트 통과 |
+| `--build` | 빌드 | 빌드 성공 (exit 0) |
+| `--lint` | 린트 | 린트 에러 없음 |
+| `--typecheck` | 타입체크 | TypeScript 에러 없음 |
+| `--custom "pattern"` | 커스텀 | 출력에서 특정 패턴 확인 |
+| `--interactive` | 인터랙티브 | qa-tester로 CLI/서비스 테스트 |
+
+## 사이클 워크플로우
+
+각 사이클은 다음 단계를 거칩니다.
+
+1. **QA 실행**: 목표 타입에 따라 검증 실행
+2. **결과 확인**: 통과하면 성공 메시지와 함께 종료
+3. **Architect 진단**: 실패 시 opus 모델로 근본 원인 분석
+4. **수정 적용**: executor가 architect의 권고에 따라 수정
+5. **반복**: 1단계로 돌아감
+
+## 종료 조건
+
+| 조건 | 동작 |
+|------|------|
+| 목표 달성 | `ULTRAQA COMPLETE: Goal met after N cycles` |
+| 5회 도달 | `ULTRAQA STOPPED: Max cycles. Diagnosis: ...` |
+| 같은 실패 3회 | `ULTRAQA STOPPED: Same failure detected 3 times` |
+| 환경 에러 | `ULTRAQA ERROR: [issue description]` |
+
+## 진행 상황 출력
+
+```
+[ULTRAQA Cycle 1/5] Running tests...
+[ULTRAQA Cycle 1/5] FAILED - 3 tests failing
+[ULTRAQA Cycle 1/5] Architect diagnosing...
+[ULTRAQA Cycle 1/5] Fixing: auth.test.ts - missing mock
+[ULTRAQA Cycle 2/5] Running tests...
+[ULTRAQA Cycle 2/5] PASSED - All 47 tests pass
+[ULTRAQA COMPLETE] Goal met after 2 cycles
+```
+
+## 관련 스킬
+
+- [autopilot](/docs/skills/workflow/autopilot) - Phase 3에서 UltraQA를 사용
+- [ralph](/docs/skills/workflow/ralph) - 더 넓은 범위의 지속 루프
+- [cancel](/docs/skills/utility/cancel) - UltraQA 실행 취소
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ultraqa` |
+| 매직 키워드 | - |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/ultraqa-state.json` |

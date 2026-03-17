@@ -1,0 +1,760 @@
+---
+title: 가이드
+description: OMC를 실전에서 활용하는 방법을 단계별로 안내
+---
+
+## 실전 가이드
+
+OMC의 기본 개념을 이해했다면, 이제 실전에서 써봅시다.
+
+### 학습 경로 추천
+
+#### 입문자
+
+1. [첫 autopilot 세션](#autopilot이란) - 간단한 프로젝트로 autopilot 체험
+2. [커스텀 스킬 만들기](#커스텀-스킬이란) - 나만의 스킬 등록
+3. [베스트 프랙티스](#모델-비용-최적화) - 효율적 사용 패턴
+
+#### 중급자
+
+1. [팀 오케스트레이션](#팀-모드란) - 여러 에이전트 동시 활용
+2. [계획 워크플로우](#계획이-왜-필요한가) - 체계적 계획 수립
+3. [OMC로 디버깅하기](#omc-디버깅-도구) - 복잡한 버그 추적
+
+---
+
+## autopilot이란?
+
+autopilot은 아이디어 하나를 입력하면 완성된 코드까지 자동으로 만들어주는 OMC의 대표 워크플로우입니다.
+5단계 파이프라인을 순서대로 실행합니다.
+
+### 실행하기
+
+빈 디렉토리에서 Claude Code를 열고 아래처럼 입력합니다.
+
+```bash
+autopilot build me a todo CLI app
+```
+
+### 5단계 파이프라인
+
+<Steps>
+
+### Expansion (확장)
+
+`analyst`와 `architect` 에이전트가 "todo CLI app"이라는 아이디어를 구체화합니다.
+
+- 기능 요구사항 정리 (추가, 삭제, 목록 조회, 완료 표시)
+- 기술 스펙 생성 (Node.js CLI, JSON 파일 저장 등)
+- 산출물: `.omc/autopilot/spec.md`
+
+### Planning (계획)
+
+`planner` 에이전트가 구현 계획을 세웁니다.
+
+- 작업 분해 (파일 구조, 각 기능 구현 순서)
+- `critic` 에이전트가 계획을 검토하고 빈틈을 지적
+- 산출물: `.omc/plans/autopilot-impl.md`
+
+### Execution (실행)
+
+`executor` 에이전트가 계획에 따라 코드를 작성합니다.
+
+- 필요하면 여러 executor가 병렬로 작업
+- `ralph` + `ultrawork` 모드로 동작해서 완료까지 지속
+
+### QA (품질 검증)
+
+ultraqa가 품질을 검증합니다.
+
+- 빌드 성공 여부 확인
+- 테스트 통과 여부 확인
+- 실패 시 자동 수정 후 재검증 (최대 5회)
+
+### Validation (최종 검증)
+
+세 가지 관점에서 전문 에이전트가 최종 리뷰합니다.
+
+| 검증 유형 | 검증 내용 |
+|-----------|----------|
+| Functional | 기능이 스펙대로 동작하는지 |
+| Security | 보안 취약점이 없는지 |
+| Quality | 코드 품질이 충분한지 |
+
+모두 `APPROVED`를 받으면 작업 완료입니다.
+`REJECTED`나 `NEEDS_FIX`가 나오면 수정 후 재검증합니다 (최대 3라운드).
+
+</Steps>
+
+### 진행 상황 모니터링
+
+#### HUD 상태줄
+
+```
+[OMC] autopilot:planning | agents:2 | todos:1/4 | ctx:32%
+```
+
+#### 상태 파일 확인
+
+autopilot의 현재 상태는 아래 파일에서 확인할 수 있습니다.
+
+```bash
+# 상태 파일
+.omc/state/autopilot-state.json
+
+# 스펙 문서
+.omc/autopilot/spec.md
+
+# 실행 계획
+.omc/plans/autopilot-impl.md
+```
+
+### autopilot 설정 옵션
+
+autopilot 동작을 세밀하게 조정할 수 있습니다.
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `maxIterations` | 10 | 최대 반복 횟수 |
+| `maxQaCycles` | 5 | QA 재시도 횟수 |
+| `maxValidationRounds` | 3 | 최종 검증 라운드 수 |
+| `parallelExecutors` | 5 | 병렬 실행 에이전트 수 |
+| `pauseAfterExpansion` | false | Expansion 후 일시 정지 |
+| `pauseAfterPlanning` | false | Planning 후 일시 정지 |
+| `skipQa` | false | QA 단계 건너뛰기 |
+| `skipValidation` | false | Validation 단계 건너뛰기 |
+
+### 취소하기
+
+autopilot 실행 중에 중단하려면 아래 중 하나를 입력합니다.
+
+```bash
+cancelomc
+# 또는
+/oh-my-claudecode:cancel
+```
+
+취소해도 그때까지의 진행 상황은 보존되므로 나중에 재개할 수 있습니다.
+
+---
+
+## 팀 모드란?
+
+팀 모드는 여러 Claude 에이전트를 동시에 실행해서 하나의 목표를 달성하는 협업 시스템입니다.
+단일 에이전트로 처리하기 어려운 대규모 작업에 적합합니다.
+
+### 기본 사용법
+
+```bash
+# 3개의 executor 에이전트로 작업 분배
+/oh-my-claudecode:team 3:executor "풀스택 todo 앱 구현"
+
+# CLI 명령으로도 실행 가능
+omc team 2:executor "API 엔드포인트 구현"
+```
+
+형식: `N:에이전트타입 "작업 설명"`
+
+- `N`: 에이전트 수 (2~5개 권장)
+- `에이전트타입`: 사용할 에이전트 (executor, codex, gemini 등)
+
+### 팀 파이프라인
+
+팀 모드는 5단계 파이프라인으로 동작합니다.
+
+<Steps>
+
+### team-plan (계획)
+
+`explore`와 `planner` 에이전트가 작업을 분석하고 계획을 세웁니다.
+필요하면 `analyst`나 `architect`도 참여합니다.
+
+### team-prd (요구사항 정의)
+
+`analyst` 에이전트가 요구사항을 구체화합니다.
+`critic`이 요구사항의 빈틈을 검토합니다.
+
+### team-exec (실행)
+
+`executor` 에이전트들이 병렬로 코드를 구현합니다.
+`designer`, `writer`, `test-engineer` 같은 전문 에이전트도 필요에 따라 투입됩니다.
+
+### team-verify (검증)
+
+`verifier`와 리뷰어 에이전트가 결과를 검증합니다.
+
+### team-fix (수정)
+
+검증에서 발견된 문제를 수정합니다.
+`executor`, `debugger` 등이 문제 유형에 따라 투입됩니다.
+문제가 해결될 때까지 반복합니다 (최대 횟수 제한 있음).
+
+</Steps>
+
+### 팀 상태 관리
+
+```bash
+# 팀 상태 확인
+omc team status <team-name>
+
+# 팀 강제 종료
+omc team shutdown <team-name> --force
+```
+
+### team ralph
+
+`team ralph`는 팀 모드와 ralph 모드를 결합한 것입니다.
+팀 파이프라인을 반복 실행하면서, verifier가 모든 작업 완료를 확인할 때까지 멈추지 않습니다.
+
+```bash
+# 팀 + ralph 결합
+team ralph 3:executor "인증 시스템 전체 구현"
+```
+
+한쪽을 취소하면 다른 쪽도 함께 취소됩니다.
+
+### 에이전트 타입별 활용
+
+| 에이전트 타입 | 활용 사례 |
+|-------------|----------|
+| `executor` | 기능 구현, 리팩토링 |
+| `codex` | OpenAI Codex를 통한 구현 |
+| `gemini` | Google Gemini를 통한 구현 |
+
+### 팀 모드 vs autopilot
+
+| 항목 | autopilot | team |
+|------|-----------|------|
+| 자동화 수준 | 완전 자동 (5단계) | 반자동 (지시 필요) |
+| 에이전트 수 | 자동 결정 | 사용자가 지정 |
+| 계획 수립 | 자동 포함 | 별도 단계로 포함 |
+| 적합한 경우 | 처음부터 끝까지 자동 실행 | 특정 단계만 병렬 처리 |
+
+### 주의사항
+
+<Callout type="warn">
+팀 모드는 여러 에이전트를 동시에 실행하므로 토큰 비용이 높습니다. 단순한 작업에는 단일 에이전트가 더 효율적입니다.
+</Callout>
+
+---
+
+## 계획이 왜 필요한가
+
+복잡한 작업을 바로 실행하면 방향을 잃기 쉽습니다.
+OMC는 단계적 계획 수립을 지원해서 방향을 잡고 작업을 진행할 수 있습니다.
+
+### 계획 워크플로우 선택
+
+| 워크플로우 | 적합한 상황 | 소요 비용 |
+|-----------|------------|----------|
+| `/plan` | 빠른 계획이 필요할 때 | 낮음 |
+| `/ralplan` | 여러 관점의 합의가 필요할 때 | 중간 |
+| `autopilot` | 계획부터 실행까지 자동으로 할 때 | 높음 |
+
+### /plan (기본 계획)
+
+가장 단순한 계획 수립 방법입니다.
+
+```bash
+/oh-my-claudecode:omc-plan "인증 시스템 리팩토링"
+```
+
+`planner` 에이전트가 작업을 분석하고 실행 계획을 생성합니다.
+
+#### 옵션
+
+```bash
+# 합의 기반 계획 (ralplan과 동일)
+/oh-my-claudecode:omc-plan --consensus "인증 시스템 리팩토링"
+
+# 기존 계획 검토
+/oh-my-claudecode:omc-plan --review "현재 계획의 문제점 분석"
+```
+
+### /ralplan (합의 기반 계획)
+
+Planner, Architect, Critic 세 에이전트가 합의에 도달할 때까지 반복하는 계획 수립 프로세스입니다.
+
+```bash
+ralplan this feature
+# 또는
+/oh-my-claudecode:ralplan "결제 시스템 설계"
+```
+
+#### 합의 프로세스
+
+```
+Planner (계획 수립)
+    ↓
+Architect (기술 검토)
+    ↓
+Critic (빈틈 분석)
+    ↓
+합의 도달? → No → 다시 Planner로
+    ↓ Yes
+최종 계획 확정
+```
+
+#### 고위험 모드 (--deliberate)
+
+중요한 프로젝트에서는 `--deliberate` 옵션으로 더 철저한 심의를 할 수 있습니다.
+
+```bash
+/oh-my-claudecode:ralplan --deliberate "프로덕션 데이터베이스 마이그레이션"
+```
+
+기본 모드와의 차이:
+
+| 항목 | 기본 모드 | --deliberate |
+|------|----------|-------------|
+| 사전 분석 | 없음 | Pre-mortem 분석 포함 |
+| 테스트 계획 | 기본 | 단위/통합/E2E/관측성 테스트 |
+| 반복 횟수 | 짧은 심의 | 확장된 심의 |
+
+### 계획에서 실행까지
+
+계획을 세운 후 실행으로 이어가는 방법입니다.
+
+#### 방법 1: 수동 실행
+
+```bash
+# 1. 계획 수립
+ralplan "API 리팩토링"
+
+# 2. 계획 검토 후 수동 실행
+ultrawork implement the plan in .omc/plans/
+```
+
+#### 방법 2: autopilot (자동 전환)
+
+autopilot은 계획 수립(Planning 단계) 후 자동으로 실행(Execution 단계)으로 넘어갑니다.
+
+```bash
+autopilot refactor the authentication system
+```
+
+#### 방법 3: 스킬 파이프라인
+
+스킬들은 다음 스킬로의 전환(handoff)을 지원합니다.
+
+```
+deep-interview → omc-plan → autopilot
+```
+
+deep-interview에서 요구사항을 명확히 한 후, omc-plan으로 계획을 세우고, autopilot으로 실행하는 순서입니다.
+
+### 계획 파일 위치
+
+| 파일 | 용도 |
+|------|------|
+| `.omc/plans/autopilot-impl.md` | autopilot 실행 계획 |
+| `.omc/autopilot/spec.md` | autopilot 요구사항 스펙 |
+| `.omc/plans/*.md` | 기타 계획 파일 |
+
+<Callout type="info">
+계획 파일은 읽기 전용으로 취급합니다. 에이전트가 계획 파일을 직접 수정하지 않도록 주의하세요.
+</Callout>
+
+---
+
+## 커스텀 스킬이란?
+
+OMC 내장 스킬 외에도 자기만의 스킬을 만들어 등록할 수 있습니다.
+반복하는 작업 패턴을 스킬로 만들어두면 한 번의 명령으로 실행할 수 있습니다.
+
+### 스킬 구조
+
+스킬은 `SKILL.md` 파일 하나로 정의됩니다.
+
+```
+~/.claude/skills/
+└── my-skill/
+    └── SKILL.md
+```
+
+#### SKILL.md 작성법
+
+```markdown
+---
+name: my-skill
+description: 나만의 커스텀 스킬 설명
+trigger: "my-skill"
+---
+
+# My Skill
+
+## 이 스킬이 하는 일
+
+여기에 스킬의 동작을 자세히 설명합니다.
+Claude는 이 프롬프트를 읽고 지시에 따라 동작합니다.
+
+## 실행 단계
+
+1. 첫 번째 단계
+2. 두 번째 단계
+3. 세 번째 단계
+
+## 규칙
+
+- 반드시 지켜야 할 규칙들
+- 하지 말아야 할 것들
+```
+
+#### Frontmatter 필드
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `name` | 필수 | 스킬 이름 (슬래시 명령에 사용) |
+| `description` | 필수 | 스킬에 대한 짧은 설명 |
+| `trigger` | 선택 | 매직 키워드 트리거 |
+
+#### 파이프라인 메타데이터 (고급)
+
+스킬 간 전환을 정의할 수 있습니다.
+
+```yaml
+---
+name: my-interview
+pipeline: [my-interview, omc-plan, autopilot]
+next-skill: omc-plan
+next-skill-args: --consensus --direct
+handoff: .omc/specs/my-interview-{slug}.md
+---
+```
+
+| 필드 | 설명 |
+|------|------|
+| `pipeline` | 스킬 실행 순서 |
+| `next-skill` | 다음에 호출할 스킬 |
+| `next-skill-args` | 다음 스킬에 전달할 인수 |
+| `handoff` | 다음 스킬에 전달할 산출물 경로 |
+
+### 스킬 관리 명령
+
+`/oh-my-claudecode:skill` 명령으로 스킬을 관리합니다.
+
+```bash
+# 설치된 스킬 목록
+/oh-my-claudecode:skill list
+
+# 새 스킬 추가
+/oh-my-claudecode:skill add
+
+# 스킬 제거
+/oh-my-claudecode:skill remove my-skill
+
+# 스킬 검색
+/oh-my-claudecode:skill search "deploy"
+
+# 스킬 편집
+/oh-my-claudecode:skill edit my-skill
+```
+
+### learner로 스킬 자동 추출
+
+현재 세션에서 반복한 작업 패턴을 자동으로 스킬로 추출할 수 있습니다.
+
+```bash
+/oh-my-claudecode:learner
+```
+
+learner가 현재 대화에서 재사용 가능한 패턴을 발견하면 SKILL.md를 생성해줍니다.
+
+### 스킬 저장 위치
+
+| 위치 | 범위 |
+|------|------|
+| `~/.claude/skills/` | 모든 프로젝트에서 사용 가능 |
+| `.claude/skills/` | 현재 프로젝트에서만 사용 |
+
+### 스킬 작성 팁
+
+1. 실행 단계를 구체적으로 나열하세요
+2. 하지 말아야 할 것을 분명히 적으세요
+3. 입력과 출력 예시를 포함하면 정확도가 높아집니다
+4. 특정 에이전트를 써야 한다면 명시하세요
+
+```markdown
+## 실행 방법
+
+1. `explore` 에이전트로 관련 파일을 찾습니다
+2. `executor` 에이전트로 변경을 구현합니다
+3. `verifier` 에이전트로 결과를 검증합니다
+```
+
+---
+
+## OMC 디버깅 도구
+
+OMC는 디버깅용 전문 에이전트를 여러 개 제공합니다.
+
+| 에이전트 | 역할 | 모델 |
+|----------|------|------|
+| `debugger` | 근본 원인 분석, 빌드 에러 수정 | sonnet |
+| `tracer` | 증거 기반 인과 추적 | sonnet |
+| `architect` | 시스템 수준 설계 분석 | opus |
+| `qa-tester` | tmux를 통한 런타임 검증 | sonnet |
+
+### 빠른 디버깅
+
+간단한 에러는 매직 키워드로 바로 분석합니다.
+
+```bash
+analyze why this test is failing
+```
+
+`analyze` 키워드가 `debugger` 에이전트를 바로 호출합니다.
+
+### /trace 스킬: 증거 기반 추적
+
+복잡한 버그는 `/trace` 스킬을 씁니다.
+여러 tracer 에이전트가 병렬로 가설을 세우고 증거를 수집합니다.
+
+```bash
+/oh-my-claudecode:trace
+```
+
+#### trace 워크플로우
+
+```
+문제 관찰
+    ↓
+가설 1 ──→ tracer A (증거 수집)
+가설 2 ──→ tracer B (증거 수집)
+가설 3 ──→ tracer C (증거 수집)
+    ↓
+증거 종합 → 근본 원인 특정
+    ↓
+수정 및 검증
+```
+
+각 tracer는 독립적으로 가설을 검증하면서 증거를 찾습니다.
+찬성 증거와 반대 증거를 모두 수집한 후, 가장 유력한 원인을 특정합니다.
+
+### Architect + QA-Tester 루프
+
+CLI 앱이나 서비스의 버그를 디버깅할 때 쓸 만한 패턴입니다.
+
+<Steps>
+
+### architect가 문제를 진단
+
+architect 에이전트가 코드를 분석하고 근본 원인을 파악합니다.
+구체적인 테스트 계획(실행할 명령과 예상 결과)을 출력합니다.
+
+### qa-tester가 검증
+
+qa-tester 에이전트가 tmux에서 테스트 계획을 실행합니다.
+실제 출력을 캡처합니다.
+
+### 결과 비교
+
+예상 결과와 실제 결과를 비교합니다.
+불일치하면 architect에게 다시 분석을 요청합니다.
+
+### 반복
+
+문제가 해결될 때까지 반복합니다.
+
+</Steps>
+
+### 검증 우선순위
+
+디버깅 후 수정을 검증할 때는 비용이 낮은 방법부터 씁니다.
+
+| 우선순위 | 검증 방법 | 비용 | 사용 시점 |
+|---------|----------|------|----------|
+| 1 | 기존 테스트 실행 | 낮음 | 테스트 스위트가 있을 때 |
+| 2 | 직접 명령 실행 (curl 등) | 낮음 | 간단한 동작 확인 |
+| 3 | qa-tester (tmux) | 높음 | 인터랙티브 검증이 필요할 때 |
+
+<Callout type="info">
+qa-tester는 tmux 세션에서 실제 서비스를 실행하므로 토큰 비용이 높습니다. 프로젝트에 테스트가 있다면 테스트를 먼저 돌리세요.
+</Callout>
+
+### 빌드 에러 수정
+
+빌드 에러나 타입 에러는 `debugger` 에이전트가 담당합니다.
+
+```bash
+# 매직 키워드로 호출
+analyze fix the build errors
+
+# Quick Command로 호출
+build-fix
+```
+
+`debugger` 에이전트가 하는 일:
+
+1. 에러 메시지 분석
+2. 근본 원인 파악
+3. 수정 적용
+4. 빌드 재실행으로 검증
+
+### 디버깅 조합 예시
+
+#### 테스트 실패
+
+```bash
+# 1. 실패 원인 분석
+analyze why test_auth.py is failing
+
+# 2. 필요하면 증거 수집
+/oh-my-claudecode:trace
+
+# 3. 수정 후 검증
+tdd: fix the failing test
+```
+
+#### 프로덕션 이슈
+
+```bash
+# 1. 깊은 분석
+deep-analyze the memory leak in the worker process
+
+# 2. 증거 기반 추적
+/oh-my-claudecode:trace
+
+# 3. 수정 및 리뷰
+ralph: fix the memory leak and add regression tests
+```
+
+---
+
+## 모델 비용 최적화
+
+OMC는 세 가지 모델 티어를 씁니다. 티어만 잘 골라도 비용이 줄어듭니다.
+
+### haiku 우선 원칙
+
+모든 작업을 기본적으로 가장 가벼운 모델(haiku)로 시작하고, 필요할 때만 상위 모델로 올립니다.
+
+| 작업 유형 | 추천 모델 | 이유 |
+|-----------|----------|------|
+| 파일 찾기, 코드 조회 | haiku | 검색은 단순 작업 |
+| 문서 작성 | haiku | 구조화된 텍스트 생성 |
+| 일반 코드 구현 | sonnet | 비용 대비 품질이 적당 |
+| 디버깅 | sonnet | 코드 이해 필요 |
+| 아키텍처 설계 | opus | 깊은 추론 필요 |
+| 보안 리뷰 | opus | 빈틈없는 분석 필요 |
+
+### 비용이 높은 작업
+
+- `team` 모드: 여러 에이전트 동시 실행
+- `ralph` 모드: 완료까지 반복 실행
+- `autopilot`: 5단계 전체 파이프라인
+- `qa-tester`: tmux 세션 기반 검증
+
+<Callout type="warn">
+단순한 작업에 autopilot이나 team 모드를 쓰면 비용만 낭비됩니다. 작업 규모에 맞는 도구를 고르세요.
+</Callout>
+
+### 에이전트 조합 패턴
+
+#### 표준 개발 흐름
+
+```
+explore → planner → executor → verifier
+```
+
+가장 기본적인 흐름입니다. 탐색, 계획, 구현, 검증을 순서대로 수행합니다.
+
+#### 깊은 분석 후 구현
+
+```
+analyst → architect → planner → critic → executor → verifier
+```
+
+복잡한 프로젝트에서 요구사항을 충분히 분석한 후 구현합니다.
+
+#### 디버깅 루프
+
+```
+debugger → architect → qa-tester → (반복)
+```
+
+근본 원인 분석, 시스템 수준 검토, 런타임 검증을 반복합니다.
+
+#### 코드 리뷰 파이프라인
+
+```
+code-reviewer → security-reviewer → executor (수정)
+```
+
+코드 품질과 보안을 검토한 후 발견된 문제를 수정합니다.
+
+### 검증 전략
+
+#### 검증은 항상 증거 기반
+
+완료를 선언하기 전에 반드시 실제 명령 출력을 확인합니다.
+
+| 검증 유형 | 방법 |
+|-----------|------|
+| BUILD | 빌드 명령 실행, 성공 확인 |
+| TEST | 테스트 실행, 전체 통과 확인 |
+| LINT | 린터 실행, 에러 없음 확인 |
+| FUNCTIONALITY | 기능이 의도대로 동작하는지 확인 |
+
+#### 검증 비용 최적화
+
+1. 기존 테스트 실행 (가장 저렴) - 프로젝트에 테스트가 있으면 먼저 실행
+2. 직접 명령 (저렴) - curl, CLI 명령으로 간단히 확인
+3. qa-tester (비쌈) - 위 방법으로 안 될 때만 사용
+
+### 안티패턴
+
+#### qa-tester 남용
+
+프로젝트에 테스트 스위트가 있는데 qa-tester로 검증하는 건 낭비입니다.
+
+```bash
+# 나쁜 예: 테스트가 있는데 qa-tester 사용
+qa-tester로 로그인 기능 검증해줘
+
+# 좋은 예: 기존 테스트 실행
+npm test -- --grep "login"
+```
+
+#### 검증 없는 완료 선언
+
+에이전트가 "완료했습니다"라고 말하면 바로 넘어가지 마세요.
+항상 빌드/테스트 결과를 확인하세요.
+
+#### 단순 작업에 무거운 모드 사용
+
+```bash
+# 나쁜 예: 파일 하나 수정에 autopilot
+autopilot fix the typo in README.md
+
+# 좋은 예: 직접 수정 요청
+README.md의 오타를 수정해줘
+```
+
+#### 모든 작업에 opus 사용
+
+```jsonc
+// 나쁜 예: 모든 에이전트를 opus로 설정
+{
+  "agents": {
+    "explore": { "model": "opus" },
+    "writer": { "model": "opus" },
+    "executor": { "model": "opus" }
+  }
+}
+
+// 좋은 예: 기본 모델 유지, 필요한 곳만 변경
+{
+  "agents": {
+    "executor": { "model": "opus" }  // 복잡한 프로젝트에서만
+  }
+}
+```
+
+### 일반 팁
+
+1. 작게 시작하세요 — 단일 에이전트로 시작하고, 필요할 때 team이나 autopilot으로 확장
+2. 계획을 세우세요 — 복잡한 작업은 `/plan`이나 `ralplan`으로 먼저 계획
+3. 노트패드를 활용하세요 — 중요한 정보는 `/note`로 저장해서 컨텍스트 압축에 대비
+4. 상태를 확인하세요 — HUD나 상태 파일로 현재 진행 상황을 모니터링
+5. 취소할 줄 알아야 합니다 — `cancelomc`로 불필요한 작업을 빠르게 중단

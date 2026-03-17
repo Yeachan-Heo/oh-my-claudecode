@@ -1,0 +1,53 @@
+---
+title: Ask
+description: Claude, Codex, Gemini에 질문하고 결과를 아티팩트로 저장
+---
+
+## 개요
+
+Ask는 로컬에 설치된 Claude, Codex, Gemini CLI로 프롬프트를 전달하고 결과를 아티팩트 파일로 저장하는 어드바이저 스킬입니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ask <claude|codex|gemini> <question or task>
+```
+
+## 예시
+
+```bash
+/oh-my-claudecode:ask codex "review this patch from a security perspective"
+/oh-my-claudecode:ask gemini "suggest UX improvements for this flow"
+/oh-my-claudecode:ask claude "draft an implementation plan for issue #123"
+```
+
+## 요구사항
+
+선택한 CLI가 설치되고 인증되어 있어야 합니다.
+
+```bash
+claude --version
+codex --version
+gemini --version
+```
+
+## 아티팩트
+
+결과는 다음 경로에 저장됩니다.
+
+```
+.omc/artifacts/ask/<provider>-<slug>-<timestamp>.md
+```
+
+## 관련 스킬
+
+- [ccg](/docs/skills/workflow/ccg) - Codex + Gemini 동시 질문 후 Claude가 종합
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ask` |
+| 단축 스킬 | `ask-codex`, `ask-gemini` |
+| 카테고리 | Utility |
+| 아티팩트 경로 | `.omc/artifacts/ask/` |

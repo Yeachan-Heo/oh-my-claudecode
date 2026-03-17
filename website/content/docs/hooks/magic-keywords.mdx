@@ -1,0 +1,134 @@
+---
+title: 매직 키워드
+description: 자연어 프롬프트로 OMC의 실행 모드와 스킬을 활성화하는 매직 키워드 시스템입니다.
+---
+
+## 매직 키워드란?
+
+매직 키워드는 사용자의 자연어 프롬프트에서 특정 단어나 패턴을 감지하여
+자동으로 OMC의 스킬이나 실행 모드를 활성화하는 시스템입니다.
+
+별도의 슬래시 커맨드 없이, 프롬프트에 키워드를 포함하면 해당 기능이 자동으로 활성화됩니다.
+
+## keyword-detector 동작 방식
+
+`keyword-detector.mjs`는 UserPromptSubmit 이벤트에서 실행됩니다.
+
+1. 사용자 프롬프트를 받아 정제(sanitize) 처리
+2. 코드 블록, XML 태그, URL, 파일 경로를 제거하여 오탐 방지
+3. 정제된 텍스트에서 키워드 패턴 매칭
+4. 충돌 해결 후 해당 스킬 호출 지시를 주입
+
+### 안전 장치
+
+- **정제 처리**: 코드 블록 안의 키워드, URL 내 단어, 파일 경로는 무시
+- **팀 워커 보호**: `OMC_TEAM_WORKER` 환경 변수가 설정되면 비활성화 (무한 스폰 방지)
+- **비활성화**: `DISABLE_OMC=1` 또는 `OMC_SKIP_HOOKS=keyword-detector`
+
+## 키워드 목록
+
+### 실행 모드 키워드
+
+스킬을 호출하고 상태 파일을 생성하는 키워드입니다.
+
+| 키워드 | 스킬 | 설명 |
+|--------|------|------|
+| `cancelomc`, `stopomc` | cancel | 모든 활성 모드 취소 |
+| `ralph`, `don't stop`, `must complete` | ralph | 검증 완료까지 지속 실행 |
+| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end` | autopilot | 완전 자율 실행 |
+| `ultrawork`, `ulw`, `uw` | ultrawork | 최대 병렬 실행 |
+| `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini 삼중 모델 오케스트레이션 |
+| `ralplan` | ralplan | 합의 기반 반복 계획 |
+| `deep interview`, `ouroboros` | deep-interview | 소크라테스식 심층 인터뷰 |
+
+### AI Slop 정리 키워드
+
+명시적 패턴과 조합 패턴 두 가지를 지원합니다.
+
+**명시적 패턴** (단독으로 활성화):
+- `ai-slop`, `anti-slop`, `deslop`, `de-slop`
+
+**조합 패턴** (액션 + 스멜 조합 시 활성화):
+
+| 액션 키워드 | 스멜 키워드 |
+|------------|------------|
+| `cleanup`, `refactor`, `simplify`, `dedupe`, `prune` | `slop`, `duplicate`, `dead code`, `unused code`, `over-abstraction`, `wrapper layers`, `needless abstractions`, `ai-generated`, `tech debt` |
+
+예: "cleanup the duplicate code" → ai-slop-cleaner 스킬 활성화
+
+### 에이전트 바로가기 키워드
+
+슬래시 커맨드 대신 자연어로 에이전트를 활성화합니다.
+
+| 키워드 | 효과 | 동작 |
+|--------|------|------|
+| `tdd`, `test first`, `red green` | TDD 모드 | 테스트 우선 작성 강제 |
+| `code review`, `review code` | 코드 리뷰 모드 | 종합 코드 리뷰 실행 |
+| `security review`, `review security` | 보안 리뷰 모드 | 보안 중심 리뷰 실행 |
+
+이 키워드들은 스킬을 호출하는 대신 인라인 모드 메시지를 주입합니다.
+
+### 추론 강화 키워드
+
+| 키워드 | 효과 |
+|--------|------|
+| `ultrathink`, `think hard`, `think deeply` | 확장 추론 모드 활성화 |
+| `deepsearch`, `search the codebase`, `find in codebase` | 코드베이스 중심 검색 모드 |
+| `deep-analyze`, `deepanalyze` | 심층 분석 모드 |
+
+## 우선순위와 충돌 해결
+
+여러 키워드가 동시에 감지되면 아래 우선순위로 해결됩니다.
+
+```
+cancel (최우선, 단독 실행)
+  → ralph
+    → autopilot
+      → ultrawork
+        → ccg
+          → ralplan
+            → deep-interview
+              → ai-slop-cleaner
+                → tdd
+                  → code-review
+                    → security-review
+                      → ultrathink
+                        → deepsearch
+                          → analyze
+```
+
+`cancel`은 배타적입니다 -- 다른 모든 매칭을 무시하고 취소만 실행합니다.
+그 외 키워드는 복수 매칭이 가능하며, 우선순위 순으로 처리됩니다.
+
+## 사용 예시
+
+```bash
+# Claude Code에서:
+
+# 자율 실행
+autopilot: OAuth로 사용자 인증을 구현해줘
+
+# 병렬 실행
+ultrawork 이 모듈의 테스트를 모두 작성해줘
+
+# 지속 실행
+ralph 이 인증 모듈을 리팩토링해줘
+
+# TDD
+tdd로 비밀번호 검증 함수를 구현해줘
+
+# 코드 리뷰
+최근 변경사항을 code review 해줘
+
+# 취소
+stopomc
+```
+
+## Team 키워드
+
+team은 자동 감지 대상이 아닙니다.
+무한 스폰 방지를 위해 `/team` 슬래시 커맨드로만 명시적으로 호출해야 합니다.
+
+```
+/oh-my-claudecode:team 3:executor "풀스택 todo 앱을 만들어줘"
+```

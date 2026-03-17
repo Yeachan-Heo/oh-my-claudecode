@@ -1,0 +1,93 @@
+---
+title: SciOMC
+description: 병렬 scientist 에이전트를 사용한 연구 오케스트레이션
+---
+
+## 개요
+
+SciOMC는 연구 목표를 독립적인 단계로 분해하고, 병렬 scientist 에이전트를 실행해서 분석을 수행하는 연구 오케스트레이션 스킬입니다.
+
+분해 → 실행 → 검증 → 종합의 4단계 워크플로우를 따르고, AUTO 모드에서는 완전 자율 실행이 가능합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:sciomc <goal>
+/oh-my-claudecode:sciomc AUTO: <goal>
+/oh-my-claudecode:sciomc status
+/oh-my-claudecode:sciomc resume
+/oh-my-claudecode:sciomc list
+/oh-my-claudecode:sciomc report <session-id>
+```
+
+## 예시
+
+```bash
+# 표준 연구 (사용자 체크포인트 포함)
+/oh-my-claudecode:sciomc What are the performance characteristics of different sorting algorithms?
+
+# 완전 자율 실행
+/oh-my-claudecode:sciomc AUTO: Analyze authentication patterns in this codebase
+
+# 에러 핸들링 분석
+/oh-my-claudecode:sciomc How does the error handling work across the API layer?
+```
+
+## 연구 프로토콜
+
+### 1. 단계 분해
+
+연구 목표를 3-7개의 독립적인 단계로 분해합니다. 각 단계에 복잡도 티어(LOW/MEDIUM/HIGH)를 할당합니다.
+
+### 2. 병렬 실행
+
+독립 단계를 scientist 에이전트로 동시 실행합니다.
+
+| 복잡도 | 모델 | 용도 |
+|--------|------|------|
+| LOW | Haiku | 파일 열거, 패턴 카운팅, 단순 조회 |
+| MEDIUM | Sonnet | 코드 분석, 패턴 탐지, 문서 리뷰 |
+| HIGH | Opus | 아키텍처 분석, 교차 관심사, 가설 검증 |
+
+최대 20개의 동시 scientist 에이전트를 지원합니다.
+
+### 3. 교차 검증
+
+모든 단계 완료 후 발견 사항의 일관성을 검증합니다.
+모순, 누락된 연결, 커버리지 갭, 증거 품질을 확인합니다.
+
+### 4. 종합 보고서
+
+최종 보고서를 `.omc/research/{session-id}/report.md`에 생성합니다.
+
+## AUTO 모드
+
+`AUTO:` 접두사를 붙이면 사용자 개입 없이 완전 자율 실행됩니다.
+
+- 최대 10회 반복
+- 각 단계 완료 후 상태 저장
+- `/oh-my-claudecode:cancel`로 취소 가능
+
+## 세션 관리
+
+| 명령 | 동작 |
+|------|------|
+| `status` | 현재 세션 진행 상황 표시 |
+| `resume` | 중단된 세션 재개 |
+| `list` | 모든 세션 목록 |
+| `report <id>` | 보고서 생성/재생성 |
+| `cancel` | 현재 세션 취소 (상태 보존) |
+
+## 관련 스킬
+
+- [external-context](/docs/skills/workflow/external-context) - 외부 문서 조회
+- [trace](/docs/skills/utility/trace) - 증거 기반 인과 추적
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:sciomc` |
+| 매직 키워드 | - |
+| 카테고리 | Workflow |
+| 세션 경로 | `.omc/research/{session-id}/` |

@@ -1,0 +1,66 @@
+---
+title: 변경 이력
+description: Oh My ClaudeCode의 버전별 변경 사항
+---
+
+## 변경 이력
+
+Oh My ClaudeCode의 주요 변경 사항을 버전별로 정리합니다.
+
+### v4.8.0 (현재)
+
+**에이전트 시스템**
+- 19개 전문 에이전트 (Build/Analysis, Review, Domain, Coordination 4개 레인)
+- 에이전트 티어 시스템: LOW (haiku), MEDIUM (sonnet), HIGH (opus)
+- 위임 카테고리: visual-engineering, ultrabrain, artistry, quick, writing
+
+**스킬 시스템**
+- 34개 스킬 (33개 정식 + 1개 deprecated 별칭)
+- 스킬 파이프라인 메타데이터 (preview)
+- learner 스킬로 세션에서 스킬 자동 추출
+
+**훅 시스템**
+- 10개 라이프사이클 이벤트
+- keyword-detector로 매직 키워드 자동 감지
+- persistent-mode로 ralph/ultrawork 지속
+- code-simplifier 훅 (opt-in)
+
+**설정 시스템**
+- `config.jsonc` 설정 파일 (JSONC 포맷)
+- 사용자/프로젝트 2레벨 설정
+- 환경 변수로 모든 설정 오버라이드 가능
+- `forceInherit` 자동 감지 (CC Switch, Bedrock, Vertex AI)
+
+**상태 관리**
+- Notepad: 컨텍스트 압축에서 살아남는 메모
+- Project Memory: 세션 간 프로젝트 지식 유지
+- Plan Notepad: 계획별 학습 캡처
+- `OMC_STATE_DIR`로 중앙 집중식 상태 관리
+
+**팀 오케스트레이션**
+- `omc team` CLI 명령
+- 5단계 파이프라인: plan → prd → exec → verify → fix
+- team ralph: 팀 + 반복 검증 결합
+
+**autopilot**
+- 5단계 자율 실행: expansion → planning → execution → qa → validation
+- 3-type validation: functional, security, quality
+- 취소/재개 지원
+
+**외부 모델 통합**
+- Codex/Gemini CLI 워커 지원
+- CCG (Claude-Codex-Gemini) 3-모델 오케스트레이션
+- 위임 라우팅 (opt-in)
+
+**코드 인텔리전스**
+- LSP 도구 12개 (hover, goto definition, find references, diagnostics 등)
+- AST 도구 2개 (ast-grep search/replace)
+- Directory-level diagnostics
+
+**플랫폼 지원**
+- macOS, Linux: Bash 훅
+- Windows: WSL2 권장, Node.js 훅 (실험적)
+
+<Callout type="info">
+전체 변경 이력은 프로젝트의 [CHANGELOG.md](https://github.com/Yeachan-Heo/oh-my-claudecode) 파일에서 확인할 수 있습니다.
+</Callout>

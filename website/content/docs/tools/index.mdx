@@ -1,0 +1,60 @@
+---
+title: Tools
+description: OMC가 제공하는 MCP 도구들을 카테고리별로 소개합니다.
+---
+
+## MCP 도구란?
+
+OMC는 Claude Code 에이전트에게 MCP(Model Context Protocol) 도구를 줍니다. 에이전트가 상태 관리, 메모 저장, 코드 분석, 데이터 처리에 씁니다.
+
+사용자가 직접 호출하는 [스킬](/docs/skills)과 달리, 도구는 에이전트가 작업 중에 내부적으로 사용합니다.
+
+## 도구 카테고리
+
+### [State](/docs/tools/state)
+
+실행 모드의 상태를 관리하는 도구들입니다.
+
+`state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
+
+Autopilot, Ralph, Ultrawork 등의 실행 모드가 현재 상태를 저장하고 읽는 데 사용합니다.
+
+### [Notepad](/docs/tools/notepad)
+
+컨텍스트 컴팩션에서 살아남는 메모 시스템입니다.
+
+`notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`, `notepad_prune`, `notepad_stats`
+
+긴 세션에서 중요한 정보가 컨텍스트 윈도우에서 밀려나도 유지됩니다.
+
+### [Project Memory](/docs/tools/project-memory)
+
+프로젝트별 장기 메모리를 관리합니다.
+
+`project_memory_read`, `project_memory_write`, `project_memory_add_note`, `project_memory_add_directive`
+
+프로젝트 구조, 규칙, 학습 내용을 세션 간에 유지합니다.
+
+### [LSP](/docs/tools/lsp)
+
+Language Server Protocol을 통한 코드 인텔리전스 도구입니다.
+
+`lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`, `lsp_rename` 등 12개 도구
+
+타입 정보, 정의 이동, 참조 찾기, 에러 진단, 심볼 검색 등을 할 수 있습니다.
+
+### [AST Grep](/docs/tools/ast-grep)
+
+AST 기반 구조적 코드 검색 및 치환 도구입니다.
+
+`ast_grep_search`, `ast_grep_replace`
+
+정규식이 아닌 코드 구조 패턴으로 검색하고 치환합니다.
+
+### [Python REPL](/docs/tools/python-repl)
+
+지속적 Python REPL로 데이터 분석을 수행합니다.
+
+`python_repl`
+
+세션 간 상태가 유지되는 Python 환경입니다.

@@ -1,0 +1,130 @@
+---
+title: Autopilot
+description: 아이디어에서 동작하는 코드까지 자율 실행하는 풀 파이프라인 스킬
+---
+
+## 개요
+
+Autopilot은 간단한 아이디어 설명만으로 요구사항 분석, 기술 설계, 계획, 병렬 구현, QA 사이클링, 검증까지 전체 개발 라이프사이클을 자율로 처리합니다.
+
+2-3줄 설명에서 동작하는 코드를 만드는 게 목표입니다. 내부에서 ralph, ultrawork, ultraqa를 쓰고, 각 단계가 끝나면 다음 단계로 넘어갑니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:autopilot "REST API for a bookstore with CRUD operations using TypeScript"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+autopilot build me a CLI tool that tracks daily habits
+build me a todo app with React and PostgreSQL
+I want a chat application with WebSocket support
+```
+
+## 실행 단계
+
+Autopilot은 6개 Phase로 구성됩니다.
+
+### Phase 0 - Expansion (확장)
+
+사용자의 아이디어를 상세한 스펙으로 확장합니다.
+
+- Analyst (Opus)가 요구사항을 추출합니다
+- Architect (Opus)가 기술 사양을 작성합니다
+- 출력: `.omc/autopilot/spec.md`
+
+ralplan 합의 계획이 이미 있으면 Phase 0과 1을 건너뜁니다.
+deep-interview 스펙이 있으면 Phase 0 출력으로 씁니다.
+
+### Phase 1 - Planning (계획)
+
+스펙에서 구현 계획을 생성합니다.
+
+- Architect (Opus)가 계획을 작성합니다
+- Critic (Opus)가 계획을 검증합니다
+- 출력: `.omc/plans/autopilot-impl.md`
+
+### Phase 2 - Execution (실행)
+
+Ralph + Ultrawork로 계획을 구현합니다.
+
+- 단순 작업: Executor (Haiku)
+- 표준 작업: Executor (Sonnet)
+- 복잡한 작업: Executor (Opus)
+- 독립 작업은 병렬로 실행합니다
+
+### Phase 3 - QA (품질 보증)
+
+UltraQA 모드로 모든 테스트가 통과할 때까지 반복합니다.
+
+- 빌드, 린트, 테스트, 실패 수정
+- 최대 5회 반복
+- 같은 에러가 3번 반복되면 근본 문제로 판단하고 중단합니다
+
+### Phase 4 - Validation (검증)
+
+병렬 리뷰를 수행합니다.
+
+- Architect: 기능 완전성 검증
+- Security-reviewer: 보안 취약점 검사
+- Code-reviewer: 코드 품질 리뷰
+- 모든 리뷰어가 승인해야 합니다
+
+### Phase 5 - Cleanup (정리)
+
+완료되면 모든 상태 파일을 삭제합니다.
+
+## 예시
+
+```bash
+# 구체적인 도메인과 기술 스택 지정
+autopilot A REST API for a bookstore inventory with CRUD operations using TypeScript
+
+# 명확한 기능 설명
+build me a CLI tool that tracks daily habits with streak counting
+
+# 3-Stage 파이프라인 (최고 품질)
+/oh-my-claudecode:deep-interview "vague idea"
+  → /oh-my-claudecode:ralplan --direct
+    → /oh-my-claudecode:autopilot
+```
+
+## 옵션
+
+`.claude/settings.json`에서 설정할 수 있습니다.
+
+```json
+{
+  "omc": {
+    "autopilot": {
+      "maxIterations": 10,
+      "maxQaCycles": 5,
+      "maxValidationRounds": 3,
+      "pauseAfterExpansion": false,
+      "skipQa": false,
+      "skipValidation": false
+    }
+  }
+}
+```
+
+## 관련 스킬
+
+- [ralph](/docs/skills/workflow/ralph) - autopilot 안에서 실행 루프 담당
+- [ultrawork](/docs/skills/workflow/ultrawork) - autopilot 안에서 병렬 실행 담당
+- [ultraqa](/docs/skills/workflow/ultraqa) - autopilot의 Phase 3 QA 사이클링
+- [deep-interview](/docs/skills/workflow/deep-interview) - 모호한 아이디어를 명확히 하는 사전 인터뷰
+- [ralplan](/docs/skills/workflow/ralplan) - 합의 기반 계획 수립
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:autopilot` |
+| 매직 키워드 | `autopilot`, `build me`, `I want a` |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/autopilot-state.json` |
+| 취소 | `/oh-my-claudecode:cancel` |
+| 재개 | 같은 명령으로 다시 실행 |

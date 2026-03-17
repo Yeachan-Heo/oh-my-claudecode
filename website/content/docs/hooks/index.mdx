@@ -1,0 +1,111 @@
+---
+title: 훅 시스템 개요
+description: OMC 훅 시스템의 동작 원리와 전체 구조를 설명합니다.
+---
+
+## 훅이란?
+
+훅(Hook)은 Claude Code의 라이프사이클 이벤트에 반응하여 자동으로 실행되는 스크립트입니다.
+oh-my-claudecode는 31개의 훅으로 Claude Code의 기본 동작을 확장합니다.
+
+사용자가 프롬프트를 제출하거나, 도구가 실행되거나, 세션이 시작/종료될 때
+훅이 자동으로 실행되어 추가 컨텍스트를 주입하거나, 모드를 활성화하거나, 상태를 관리합니다.
+
+## 동작 원리
+
+훅은 `hooks.json` 파일에 정의되며, 각 훅은 아래 구조를 따릅니다.
+
+```json
+{
+  "이벤트이름": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node scripts/hook-script.mjs",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+- **이벤트이름**: 훅이 반응하는 라이프사이클 이벤트
+- **matcher**: 훅을 실행할 조건 (`*`는 모든 경우)
+- **command**: 실행할 Node.js 스크립트
+- **timeout**: 최대 실행 시간 (초)
+
+훅의 출력은 `<system-reminder>` 태그로 Claude에 주입됩니다.
+`hookSpecificOutput.additionalContext`를 통해 추가 컨텍스트를 전달합니다.
+
+## 훅 카테고리
+
+OMC의 훅은 크게 4가지 카테고리로 나뉩니다.
+
+### 실행 모드 훅
+
+자율 실행, 병렬 처리, 지속성 등 실행 모드를 관리합니다.
+
+| 훅 | 설명 |
+|----|------|
+| autopilot | 아이디어부터 작동 코드까지 완전 자율 실행 |
+| ralph | 검증 완료까지 지속적 실행 |
+| ultrawork | 최대 병렬 에이전트 실행 |
+| ultraqa | 목표 달성까지 QA 사이클 반복 |
+| persistent-mode | 세션 간 모드 상태 유지 |
+
+### 핵심 훅
+
+오케스트레이션, 키워드 감지, 복구 등 핵심 기능을 담당합니다.
+
+| 훅 | 설명 |
+|----|------|
+| keyword-detector | 매직 키워드 감지 (ultrawork, ralph 등) |
+| omc-orchestrator | 오케스트레이터 행동과 위임 강제 |
+| recovery | 편집 에러, 세션, 컨텍스트 윈도우 복구 |
+
+### 컨텍스트 관리 훅
+
+메모리, 프로젝트 상태, 컴팩션 등을 관리합니다.
+
+| 훅 | 설명 |
+|----|------|
+| notepad | 컴팩션 내성 메모리 시스템 |
+| project-memory | 프로젝트 메모리 관리 |
+| pre-compact | 컴팩션 전 처리 |
+| preemptive-compaction | 컨텍스트 사용량 모니터링 |
+
+### 품질/검증 훅
+
+코드 품질, 권한 관리, 서브에이전트 추적 등을 담당합니다.
+
+| 훅 | 설명 |
+|----|------|
+| permission-handler | 권한 요청과 검증 |
+| subagent-tracker | 서브에이전트 스폰/완료 추적 |
+| code-simplifier | Stop 시 최근 수정 파일 자동 단순화 (opt-in) |
+
+## 훅 비활성화
+
+### 전체 비활성화
+
+```bash
+export DISABLE_OMC=1
+```
+
+### 선택적 비활성화
+
+```bash
+export OMC_SKIP_HOOKS="keyword-detector,notepad"
+```
+
+쉼표로 구분하여 특정 훅만 건너뛸 수 있습니다.
+
+## 상세 페이지
+
+- [라이프사이클 이벤트](/docs/hooks/lifecycle-events) -- 10개 이벤트와 훅 매핑
+- [핵심 훅](/docs/hooks/core-hooks) -- 실행 모드와 오케스트레이션 훅
+- [컨텍스트 관리 훅](/docs/hooks/context-hooks) -- 메모리와 컴팩션 훅
+- [매직 키워드](/docs/hooks/magic-keywords) -- 자연어로 모드를 활성화하는 시스템

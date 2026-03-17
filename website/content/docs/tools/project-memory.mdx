@@ -1,0 +1,98 @@
+---
+title: Project Memory
+description: 프로젝트별 장기 메모리를 관리하는 MCP 도구 그룹
+---
+
+## 개요
+
+Project Memory는 프로젝트별 장기 메모리를 관리하는 도구입니다. 프로젝트 구조, 규칙, 학습 내용, 지시사항을 세션 간에 유지하여 에이전트가 프로젝트 컨텍스트를 빠르게 파악할 수 있게 합니다.
+
+## 저장 경로
+
+```
+.omc/project-memory.json
+```
+
+## 도구 목록
+
+### project_memory_read
+
+프로젝트 메모리의 전체 내용을 읽습니다.
+
+```
+project_memory_read()
+```
+
+프로젝트에 대한 모든 저장된 노트와 지시사항을 반환합니다.
+
+### project_memory_write
+
+프로젝트 메모리를 전체적으로 덮어씁니다.
+
+```
+project_memory_write(content={
+  notes: ["TypeScript strict 모드 사용", "테스트는 vitest"],
+  directives: ["모든 함수에 JSDoc 필수"]
+})
+```
+
+주의: 기존 내용을 완전히 대체합니다. 부분 업데이트는 `add_note`나 `add_directive`를 사용하세요.
+
+### project_memory_add_note
+
+프로젝트에 대한 노트를 추가합니다.
+
+```
+project_memory_add_note(note="src/utils/는 순수 함수만 포함해야 함")
+```
+
+프로젝트 구조, 패턴, 학습 내용 등을 기록합니다.
+
+### project_memory_add_directive
+
+에이전트가 따라야 할 지시사항을 추가합니다.
+
+```
+project_memory_add_directive(directive="console.log 대신 structured logging 사용")
+```
+
+코딩 규칙, 금지 사항, 필수 사항 등을 기록합니다.
+
+## 노트 vs 지시사항
+
+| 구분 | 노트 (Notes) | 지시사항 (Directives) |
+|------|-------------|----------------------|
+| 성격 | 정보, 관찰, 학습 | 규칙, 제약, 필수 사항 |
+| 예시 | "이 프로젝트는 monorepo 구조" | "테스트 없이 PR 금지" |
+| 에이전트 동작 | 참고하여 판단 | 반드시 따라야 함 |
+
+## Notepad과의 차이점
+
+| 항목 | Notepad | Project Memory |
+|------|---------|----------------|
+| 범위 | 현재 세션 | 프로젝트 전체 (세션 간 유지) |
+| 용도 | 작업 중 메모 | 프로젝트 규칙, 구조, 학습 |
+| 파일 | `.omc/notepad.md` | `.omc/project-memory.json` |
+| 컴팩션 | 컴팩션 시 복원 | 항상 사용 가능 |
+
+## 사용 패턴
+
+### 프로젝트 규칙 등록
+
+```
+project_memory_add_directive("이 저장소는 conventional commits 사용")
+project_memory_add_directive("src/generated/ 파일은 수동 편집 금지")
+```
+
+### 코드베이스 구조 기록
+
+```
+project_memory_add_note("API 계층: src/api/ → src/services/ → src/repositories/")
+project_memory_add_note("인증: JWT + passport.js, src/auth/에 구현됨")
+```
+
+### 학습 내용 기록
+
+```
+project_memory_add_note("tsconfig의 paths 설정이 jest.config와 동기화 필요")
+```

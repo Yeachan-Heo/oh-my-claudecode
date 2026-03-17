@@ -1,0 +1,83 @@
+---
+title: Security Reviewer
+description: OWASP Top 10 기반 보안 취약점 탐지와 우선순위 평가 에이전트.
+---
+
+## 개요
+
+Security Reviewer는 보안 취약점을 프로덕션에 도달하기 전에 식별하고 우선순위를 매기는 에이전트입니다.
+OWASP Top 10 분석, 시크릿 탐지, 입력 검증 리뷰, 인증/인가 검사, 의존성 보안 감사를 합니다.
+
+보안 이슈는 악용되기 전까지 보이지 않습니다.
+리뷰에서 취약점을 놓치는 비용은 철저한 검사 비용보다 몇 배 높습니다.
+모든 발견사항은 `severity x exploitability x blast radius` 기준으로 우선순위가 매겨집니다.
+
+읽기 전용(read-only) 에이전트입니다.
+
+## 언제 쓰는가
+
+- 새 API 엔드포인트가 추가될 때
+- 인증/인가 코드가 변경될 때
+- 사용자 입력 처리 로직이 변경될 때
+- 데이터베이스 쿼리가 추가/변경될 때
+- 의존성이 업데이트될 때
+- 결제 관련 코드가 변경될 때
+
+## 사용 예시
+
+```
+"이 PR의 보안 취약점을 검토해줘"
+"인증 모듈을 보안 리뷰해줘"
+"security review"  # 매직 키워드로 자동 활성화
+```
+
+## 검토 프로세스
+
+1. **범위 식별**: 검토 대상 파일/컴포넌트와 언어/프레임워크를 파악합니다
+2. **시크릿 스캔**: api_key, password, secret, token 패턴으로 하드코딩된 시크릿을 검색합니다
+3. **의존성 감사**: `npm audit`, `pip-audit`, `cargo audit` 등 언어별 도구를 실행합니다
+4. **OWASP Top 10 검사**: 각 카테고리별 해당 패턴을 확인합니다
+5. **우선순위 매기기**: severity x exploitability x blast radius로 정렬합니다
+6. **보안 코드 예제 제공**: 취약한 코드와 안전한 코드를 같은 언어로 대비합니다
+
+## OWASP Top 10 체크리스트
+
+| 코드 | 카테고리 | 확인 사항 |
+|------|---------|----------|
+| A01 | Broken Access Control | 모든 라우트에 인가 적용, CORS 설정 |
+| A02 | Cryptographic Failures | 강력한 알고리즘(AES-256, RSA-2048+), 키 관리 |
+| A03 | Injection | 파라미터화된 쿼리, 입력 살균, 출력 이스케이프 |
+| A04 | Insecure Design | 위협 모델링, 보안 설계 패턴 |
+| A05 | Security Misconfiguration | 기본값 변경, 디버그 비활성화, 보안 헤더 |
+| A06 | Vulnerable Components | 의존성 감사, CRITICAL/HIGH CVE 없음 |
+| A07 | Auth Failures | 강력한 패스워드 해싱(bcrypt/argon2), JWT 검증 |
+| A08 | Integrity Failures | 서명된 업데이트, CI/CD 파이프라인 검증 |
+| A09 | Logging Failures | 보안 이벤트 로깅, 모니터링 |
+| A10 | SSRF | URL 검증, 아웃바운드 요청 허용 목록 |
+
+## 심각도 정의
+
+| 등급 | 설명 | 대응 시간 |
+|------|------|----------|
+| CRITICAL | 악용 가능한 취약점, 심각한 영향 (데이터 유출, RCE) | 24시간 이내 |
+| HIGH | 특정 조건 필요하지만 심각한 영향 | 1주 이내 |
+| MEDIUM | 제한된 영향 또는 어려운 악용 | 1개월 이내 |
+| LOW | 모범 사례 위반 또는 경미한 보안 우려 | 백로그 |
+
+노출된 시크릿은 발견 즉시 (1시간 이내) 로테이션해야 합니다.
+
+## 다른 에이전트와의 조합
+
+- **code-reviewer**: 코드 품질과 로직 리뷰는 code-reviewer 몫입니다. 보안 전문 검토는 security-reviewer가 맡습니다
+- **executor**: 취약점 수정 구현은 executor에 넘깁니다
+- **architect**: 보안 아키텍처 수준의 설계 검토가 필요할 때
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 모델 | opus |
+| 서브에이전트 타입 | `oh-my-claudecode:security-reviewer` |
+| 레인 | Review |
+| 읽기 전용 | Yes (Write, Edit 차단) |
+| 티어 변형 | `security-reviewer-low` (haiku) |

@@ -1,0 +1,46 @@
+---
+title: Setup
+description: 설치, 진단, MCP 설정을 하나의 진입점으로 통합하는 설정 스킬
+---
+
+## 개요
+
+Setup은 OMC의 설정 관련 스킬들을 하나의 진입점으로 통합하는 스킬입니다. 인자에 따라 적절한 하위 스킬로 라우팅합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:setup              # 전체 설정 위저드 (→ omc-setup)
+/oh-my-claudecode:setup doctor       # 설치 진단 (→ omc-doctor)
+/oh-my-claudecode:setup mcp          # MCP 서버 설정 (→ mcp-setup)
+/oh-my-claudecode:setup wizard       # 명시적 위저드 경로 (→ omc-setup)
+/oh-my-claudecode:setup --local      # 로컬 프로젝트 설정 (→ omc-setup --local)
+/oh-my-claudecode:setup --global     # 전역 설정 (→ omc-setup --global)
+```
+
+## 라우팅 규칙
+
+| 인자 | 라우팅 대상 |
+|------|-------------|
+| 없음, `wizard`, `local`, `global`, `--force` | `/oh-my-claudecode:omc-setup` |
+| `doctor` | `/oh-my-claudecode:omc-doctor` |
+| `mcp` | `/oh-my-claudecode:mcp-setup` |
+
+## 호환성
+
+`omc-setup`, `omc-doctor`, `mcp-setup`은 여전히 개별적으로 호출할 수 있습니다.
+새 문서에서는 `/oh-my-claudecode:setup`을 권장합니다.
+
+## 관련 스킬
+
+- [omc-setup](/docs/skills/utility/omc-setup) - 전체 OMC 설정 위저드
+- [omc-doctor](/docs/skills/utility/omc-doctor) - 설치 문제 진단
+- [mcp-setup](/docs/skills/utility/mcp-setup) - MCP 서버 설정
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:setup` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |

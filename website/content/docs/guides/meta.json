@@ -1,0 +1,12 @@
+{
+  "title": "Guides",
+  "pages": [
+    "index",
+    "[Autopilot](/docs/guides#autopilot이란)",
+    "[팀 오케스트레이션](/docs/guides#팀-모드란)",
+    "[계획 워크플로우](/docs/guides#계획이-왜-필요한가)",
+    "[커스텀 스킬](/docs/guides#커스텀-스킬이란)",
+    "[디버깅](/docs/guides#omc-디버깅-도구)",
+    "[베스트 프랙티스](/docs/guides#베스트-프랙티스)"
+  ]
+}

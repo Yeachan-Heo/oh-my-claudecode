@@ -1,0 +1,602 @@
+---
+title: 주요 개념
+description: OMC를 구성하는 에이전트, 스킬, 훅, 상태 관리 시스템의 관계
+---
+
+## OMC의 구성 요소
+
+OMC는 네 가지 시스템으로 돌아갑니다.
+
+<Mermaid chart={`
+graph TD
+    A["사용자 입력"] --> B["훅 (Hooks)\n이벤트 감지"]
+    B --> C["스킬 (Skills)\n행동 주입"]
+    C --> D["에이전트 (Agents)\n전문 작업 수행"]
+    D --> E["상태 (State)\n진행 상황 추적"]
+`} />
+
+### 각 개념 요약
+
+#### 에이전트 (Agents)
+
+19개의 전문 에이전트가 역할별로 작업을 수행합니다.
+각 에이전트는 적합한 AI 모델(haiku, sonnet, opus)로 동작합니다.
+
+예: `explore`(탐색), `executor`(구현), `architect`(설계), `verifier`(검증)
+
+#### 스킬 (Skills)
+
+34개의 스킬이 에이전트의 행동 방식을 조합하고 확장합니다.
+슬래시 명령(`/oh-my-claudecode:스킬이름`)이나 매직 키워드로 활성화합니다.
+
+예: `autopilot`(자율 실행), `ralph`(완료까지 반복), `team`(병렬 협업)
+
+#### 훅 (Hooks)
+
+Claude Code의 라이프사이클 이벤트에 반응해서 스킬과 에이전트를 활성화합니다.
+사용자가 프롬프트를 입력하거나, 도구를 사용하거나, 세션이 시작/종료될 때 동작합니다.
+
+#### 상태 관리 (State)
+
+작업 진행 상황, 메모, 프로젝트 지식을 `.omc/` 디렉토리에 저장합니다.
+컨텍스트 윈도우가 초기화(compaction)되더라도 중요한 정보가 유지됩니다.
+
+---
+
+## 에이전트란?
+
+에이전트는 특정 역할에 특화된 AI 작업자입니다.
+OMC는 19개의 에이전트를 4개 레인(lane)으로 분류합니다.
+
+각 에이전트는 `oh-my-claudecode:에이전트이름` 형식으로 호출됩니다.
+
+### Build/Analysis 레인
+
+개발 흐름 전체를 맡습니다. 탐색부터 검증까지.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| `explore` | haiku | 코드베이스 탐색, 파일/패턴 찾기 |
+| `analyst` | opus | 요구사항 분석, 숨겨진 제약 조건 발견 |
+| `planner` | opus | 작업 순서 결정, 실행 계획 수립 |
+| `architect` | opus | 시스템 설계, 인터페이스 정의, 트레이드오프 분석 |
+| `debugger` | sonnet | 근본 원인 분석, 빌드 에러 수정 |
+| `executor` | sonnet | 코드 구현, 리팩토링 |
+| `verifier` | sonnet | 완료 검증, 테스트 적절성 확인 |
+| `tracer` | sonnet | 증거 기반 인과 추적, 가설 경쟁 |
+
+### Review 레인
+
+코드를 넘기기 전에 거치는 관문입니다. 품질과 보안을 잡아냅니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| `security-reviewer` | sonnet | 보안 취약점, 신뢰 경계, 인증/인가 검토 |
+| `code-reviewer` | opus | 종합 코드 리뷰, API 계약, 하위 호환성 |
+
+### Domain 레인
+
+특정 분야 전문가들입니다. 필요할 때 불려옵니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| `test-engineer` | sonnet | 테스트 전략, 커버리지, 불안정 테스트 보강 |
+| `designer` | sonnet | UI/UX 아키텍처, 인터랙션 설계 |
+| `writer` | haiku | 문서 작성, 마이그레이션 노트 |
+| `qa-tester` | sonnet | tmux를 통한 CLI/서비스 런타임 검증 |
+| `scientist` | sonnet | 데이터 분석, 통계 연구 |
+| `git-master` | sonnet | Git 작업, 커밋, 리베이스, 히스토리 관리 |
+| `document-specialist` | sonnet | 외부 문서/API/SDK 레퍼런스 조회 |
+| `code-simplifier` | opus | 코드 명확성, 단순화, 유지보수성 개선 |
+
+### Coordination 레인
+
+다른 에이전트가 만든 계획에 딴지를 겁니다. 빈틈을 못 찾으면 통과.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| `critic` | opus | 계획/설계의 빈틈 분석, 다각도 검토 |
+
+### 모델 라우팅
+
+OMC는 세 가지 모델 티어를 씁니다.
+
+| 티어 | 모델 | 특성 | 비용 |
+|------|------|------|------|
+| LOW | haiku | 빠르고 저렴 | 낮음 |
+| MEDIUM | sonnet | 성능과 비용 사이 중간 | 중간 |
+| HIGH | opus | 최고 수준 추론 | 높음 |
+
+에이전트에 따라 기본 티어가 다릅니다.
+
+- haiku: 빠른 조회나 단순 작업 (explore, writer)
+- sonnet: 코드 구현, 디버깅, 테스트 (executor, debugger, test-engineer)
+- opus: 아키텍처, 전략적 분석, 리뷰 (architect, planner, critic, code-reviewer)
+
+### 위임 규칙
+
+OMC 오케스트레이터는 작업 유형에 따라 적절한 에이전트에 위임합니다.
+
+#### 에이전트에 위임하는 경우
+
+- 여러 파일을 변경해야 할 때
+- 리팩토링이 필요할 때
+- 디버깅이나 근본 원인 분석이 필요할 때
+- 코드 리뷰나 보안 검토가 필요할 때
+- 계획 수립이나 연구가 필요할 때
+
+#### 직접 처리하는 경우
+
+- 간단한 파일 조회
+- 단순한 질문 응답
+- 한 줄짜리 명령 실행
+
+### 에이전트 워크플로우 예시
+
+일반적인 작업 흐름은 아래와 같습니다.
+
+<Mermaid chart={`
+graph LR
+    A["explore\n탐색"] --> B["analyst\n요구사항 분석"]
+    B --> C["planner\n계획 수립"]
+    C --> D["critic\n계획 검토"]
+    D --> E["executor\n구현"]
+    E --> F["verifier\n검증"]
+`} />
+
+#### 에이전트 역할 구분
+
+| 에이전트 | 하는 일 | 하지 않는 일 |
+|----------|---------|-------------|
+| `architect` | 코드 분석, 디버깅, 검증 | 요구사항 정리, 계획 수립 |
+| `analyst` | 요구사항 빈틈 발견 | 코드 분석, 계획 수립 |
+| `planner` | 작업 계획 생성 | 요구사항 분석, 계획 검토 |
+| `critic` | 계획 품질 검토 | 요구사항 분석, 코드 분석 |
+
+### 에이전트 선택 가이드
+
+| 작업 유형 | 추천 에이전트 | 모델 |
+|-----------|-------------|------|
+| 빠른 코드 조회 | `explore` | haiku |
+| 기능 구현 | `executor` | sonnet |
+| 복잡한 리팩토링 | `executor` (model=opus) | opus |
+| 단순 버그 수정 | `debugger` | sonnet |
+| 복잡한 디버깅 | `architect` | opus |
+| UI 컴포넌트 | `designer` | sonnet |
+| 문서 작성 | `writer` | haiku |
+| 테스트 전략 | `test-engineer` | sonnet |
+| 보안 리뷰 | `security-reviewer` | sonnet |
+| 코드 리뷰 | `code-reviewer` | opus |
+| 데이터 분석 | `scientist` | sonnet |
+
+---
+
+## 스킬이란?
+
+스킬은 에이전트의 행동 방식을 정의하는 행동 주입(behavior injection) 시스템입니다.
+에이전트를 교체하는 게 아니라, 기존 에이전트에 추가 능력을 부여합니다.
+
+스킬은 세 가지 레이어로 나뉩니다.
+
+<Mermaid chart={`
+graph TD
+    G["Guarantee 레이어 (선택)\nralph: 검증될 때까지 멈추지 않는다"]
+    E["Enhancement 레이어 (0개 이상)\nultrawork (병렬) | git-master (커밋)"]
+    X["Execution 레이어 (기본)\ndefault (빌드) | orchestrate (조율)"]
+    G --> E --> X
+`} />
+
+스킬은 합성할 수 있습니다.
+
+```
+작업: "ultrawork: API를 리팩토링하고 커밋도 해줘"
+활성 스킬: ultrawork + default + git-master
+```
+
+### 스킬 호출 방법
+
+#### 슬래시 명령
+
+```bash
+/oh-my-claudecode:autopilot todo 앱 만들어줘
+/oh-my-claudecode:ralph 인증 모듈 리팩토링
+/oh-my-claudecode:team 3:executor "풀스택 앱 구현"
+```
+
+#### 매직 키워드
+
+자연어에 키워드를 포함하면 해당 스킬이 자동으로 활성화됩니다.
+
+```bash
+autopilot build me a todo app          # autopilot 스킬 활성화
+ralph: refactor the auth module        # ralph 스킬 활성화
+ultrawork implement OAuth              # ultrawork 스킬 활성화
+```
+
+### 주요 워크플로우 스킬
+
+#### autopilot
+
+아이디어에서 완성된 코드까지 5단계 자율 실행 파이프라인입니다.
+
+```bash
+autopilot build me a REST API with authentication
+```
+
+트리거 키워드: `autopilot`, `build me`, `I want a`
+
+#### ralph
+
+작업이 검증될 때까지 멈추지 않는 반복 루프입니다.
+verifier가 완료를 확인할 때까지 계속 작업합니다.
+
+```bash
+ralph: refactor the authentication module
+```
+
+트리거 키워드: `ralph`, `don't stop`, `must complete`
+
+#### ultrawork
+
+최대 병렬성으로 여러 에이전트를 동시에 실행합니다.
+
+```bash
+ultrawork implement user authentication with OAuth
+```
+
+트리거 키워드: `ultrawork`, `ulw`
+
+#### team
+
+N개의 Claude 에이전트를 동시에 조율합니다.
+5단계 파이프라인으로 동작합니다: plan → prd → exec → verify → fix
+
+```bash
+/oh-my-claudecode:team 3:executor "풀스택 todo 앱 구현"
+```
+
+#### ccg (Claude-Codex-Gemini)
+
+Codex와 Gemini에 동시에 질문하고, Claude가 결과를 종합합니다.
+
+```bash
+ccg: review this authentication implementation
+```
+
+트리거 키워드: `ccg`, `claude-codex-gemini`
+
+#### ralplan
+
+Planner, Architect, Critic이 합의에 도달할 때까지 반복하는 계획 수립 프로세스입니다.
+
+```bash
+ralplan this feature
+```
+
+트리거 키워드: `ralplan`
+
+### 유틸리티 스킬
+
+| 스킬 | 설명 | 명령 |
+|------|------|------|
+| `cancel` | 실행 중인 모드 취소 | `/oh-my-claudecode:cancel` |
+| `note` | 노트패드에 메모 저장 | `/oh-my-claudecode:note` |
+| `hud` | 상태줄 설정 | `/oh-my-claudecode:hud` |
+| `omc-setup` | 초기 설정 마법사 | `/oh-my-claudecode:omc-setup` |
+| `omc-doctor` | 설치 진단 | `/oh-my-claudecode:omc-doctor` |
+| `learner` | 세션에서 재사용 가능한 스킬 추출 | `/oh-my-claudecode:learner` |
+| `skill` | 로컬 스킬 관리 (list/add/remove) | `/oh-my-claudecode:skill` |
+| `trace` | 증거 기반 인과 추적 | `/oh-my-claudecode:trace` |
+| `release` | 자동화된 릴리스 워크플로우 | `/oh-my-claudecode:release` |
+| `deepinit` | 계층적 AGENTS.md 생성 | `/oh-my-claudecode:deepinit` |
+| `deep-interview` | 소크라테스식 딥 인터뷰 | `/oh-my-claudecode:deep-interview` |
+| `sciomc` | 병렬 과학자 에이전트 오케스트레이션 | `/oh-my-claudecode:sciomc` |
+| `external-context` | 병렬 문서 전문가 리서치 | `/oh-my-claudecode:external-context` |
+| `ai-slop-cleaner` | AI 표현 정리 워크플로우 | `/oh-my-claudecode:ai-slop-cleaner` |
+| `writer-memory` | 글쓰기 프로젝트용 메모리 시스템 | `/oh-my-claudecode:writer-memory` |
+
+### 매직 키워드 전체 목록
+
+| 키워드 | 효과 |
+|--------|------|
+| `ultrawork`, `ulw` | 병렬 에이전트 오케스트레이션 |
+| `autopilot`, `build me`, `I want a` | 자율 실행 파이프라인 |
+| `ralph`, `don't stop`, `must complete` | 검증 완료까지 반복 |
+| `ccg`, `claude-codex-gemini` | 3-모델 오케스트레이션 |
+| `ralplan` | 합의 기반 계획 수립 |
+| `deep interview`, `ouroboros` | 소크라테스식 딥 인터뷰 |
+| `deepsearch`, `search the codebase` | 코드베이스 검색 모드 |
+| `deepanalyze`, `deep-analyze` | 깊은 분석 모드 |
+| `ultrathink` | 깊은 추론 모드 |
+| `tdd`, `test first`, `red green` | TDD 워크플로우 |
+| `deslop`, `anti-slop` | AI 표현 정리 |
+| `cancelomc`, `stopomc` | 실행 모드 취소 |
+
+### config.jsonc vs keyword-detector
+
+키워드는 두 곳에서 처리됩니다.
+
+| 소스 | 역할 | 커스터마이징 |
+|------|------|------------|
+| `config.jsonc` `magicKeywords` | 4개 카테고리 (ultrawork, search, analyze, ultrathink) | 가능 |
+| `keyword-detector` 훅 | 11개 이상 트리거 (autopilot, ralph, ccg 등) | 불가능 |
+
+`config.jsonc`에서 바꿀 수 있는 키워드는 제한적입니다.
+`autopilot`, `ralph`, `ccg` 같은 주요 트리거는 훅에 하드코딩되어 있습니다.
+
+---
+
+## 훅이란?
+
+훅(Hook)은 Claude Code의 라이프사이클 이벤트에 반응하는 코드입니다.
+사용자가 프롬프트를 입력하거나, 도구를 사용하거나, 세션이 시작/종료될 때 자동으로 실행됩니다.
+
+OMC는 이 훅 시스템으로 에이전트 위임, 키워드 감지, 상태 유지 등을 구현합니다.
+
+### 라이프사이클 이벤트
+
+Claude Code는 10가지 라이프사이클 이벤트를 제공하고, OMC는 여기에 훅을 등록합니다.
+
+| 이벤트 | 발생 시점 | OMC 활용 |
+|--------|----------|---------|
+| `UserPromptSubmit` | 사용자가 프롬프트를 제출할 때 | 매직 키워드 감지, 스킬 주입 |
+| `SessionStart` | 세션이 시작될 때 | 초기 설정, 프로젝트 메모리 로드 |
+| `PreToolUse` | 도구 사용 전 | 권한 검증, 병렬 실행 힌트 |
+| `PermissionRequest` | 권한 요청 시 | Bash 명령 권한 처리 |
+| `PostToolUse` | 도구 사용 후 | 도구 결과 검증, 프로젝트 메모리 업데이트 |
+| `PostToolUseFailure` | 도구 사용 실패 후 | 에러 복구 처리 |
+| `SubagentStart` | 서브에이전트 시작 시 | 에이전트 추적 |
+| `SubagentStop` | 서브에이전트 종료 시 | 에이전트 추적, 결과물 검증 |
+| `PreCompact` | 컨텍스트 압축 전 | 중요 정보 보존, 프로젝트 메모리 저장 |
+| `Stop` | Claude가 멈출 때 | 지속 모드 유지, 코드 단순화 |
+| `SessionEnd` | 세션 종료 시 | 세션 데이터 정리 |
+
+### system-reminder 주입
+
+훅은 `<system-reminder>` 태그로 Claude에게 추가 컨텍스트를 주입합니다.
+
+```xml
+<system-reminder>
+hook success: Success
+</system-reminder>
+```
+
+주입되는 패턴에 따라 의미가 다릅니다.
+
+| 패턴 | 의미 |
+|------|------|
+| `hook success: Success` | 훅이 정상 실행됨, 계속 진행 |
+| `hook additional context: ...` | 추가 컨텍스트 정보, 참고할 것 |
+| `[MAGIC KEYWORD: ...]` | 매직 키워드 감지됨, 해당 스킬 실행 |
+| `The boulder never stops` | ralph/ultrawork 모드 활성 상태 |
+
+### 주요 훅 설명
+
+#### keyword-detector
+
+`UserPromptSubmit` 이벤트에서 동작합니다.
+사용자 입력에서 매직 키워드를 감지하고 해당 스킬을 활성화합니다.
+
+<Mermaid chart={`
+graph LR
+    A["사용자\nautopilot build me a todo app"] --> B["keyword-detector\nautopilot 키워드 감지"]
+    B --> C["autopilot\n스킬 활성화"]
+`} />
+
+#### persistent-mode
+
+`Stop` 이벤트에서 동작합니다.
+ralph나 ultrawork 같은 지속 모드가 활성화되어 있으면 Claude가 멈추지 않게 합니다.
+
+#### pre-compact
+
+`PreCompact` 이벤트에서 동작합니다.
+컨텍스트 윈도우가 압축되기 전에 중요한 정보를 노트패드에 저장합니다.
+
+#### subagent-tracker
+
+`SubagentStart`와 `SubagentStop` 이벤트에서 동작합니다.
+현재 실행 중인 에이전트를 추적하고, 종료 시 결과물을 검증합니다.
+
+#### context-guard-stop
+
+`Stop` 이벤트에서 동작합니다.
+컨텍스트 사용량을 모니터링하고, 한계에 가까워지면 경고합니다.
+
+#### code-simplifier
+
+`Stop` 이벤트에서 동작합니다. 기본적으로 꺼져 있습니다.
+활성화하면 Claude가 멈출 때 수정된 파일을 자동으로 단순화합니다.
+
+활성화 방법:
+
+```json
+{
+  "codeSimplifier": {
+    "enabled": true,
+    "extensions": [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"],
+    "maxFiles": 10
+  }
+}
+```
+
+### 훅 비활성화
+
+#### 전체 비활성화
+
+```bash
+export DISABLE_OMC=1
+```
+
+#### 특정 훅 건너뛰기
+
+```bash
+export OMC_SKIP_HOOKS="keyword-detector,persistent-mode"
+```
+
+쉼표로 구분해서 여러 훅을 동시에 건너뛸 수 있습니다.
+
+### 훅 등록 구조
+
+OMC의 훅은 `hooks.json` 파일에 선언적으로 정의됩니다.
+각 훅은 Node.js 스크립트로 구현되어 있고, 타임아웃이 설정되어 있습니다.
+
+```json
+{
+  "UserPromptSubmit": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node scripts/keyword-detector.mjs",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `matcher`: 훅이 반응할 패턴 (`*`는 모든 입력에 반응)
+- `timeout`: 초 단위 타임아웃
+- `type`: 항상 `"command"` (외부 명령 실행)
+
+---
+
+## 상태 관리 개요
+
+OMC는 작업 진행 상황과 프로젝트 지식을 `.omc/` 디렉토리에 저장합니다.
+컨텍스트 압축(compaction)이 발생해도 이 상태 시스템이 중요한 정보를 유지해줍니다.
+
+### 디렉토리 구조
+
+```
+.omc/
+├── state/                    # 모드별 상태 파일
+│   ├── autopilot-state.json  # autopilot 진행 상황
+│   ├── ralph-state.json      # ralph 루프 상태
+│   ├── team/                 # 팀 작업 상태
+│   └── sessions/             # 세션별 상태
+│       └── {sessionId}/
+├── notepad.md                # 컴팩션 방지 메모
+├── project-memory.json       # 프로젝트 지식 저장소
+├── plans/                    # 실행 계획
+├── notepads/                 # 계획별 지식 캡처
+│   └── {plan-name}/
+│       ├── learnings.md
+│       ├── decisions.md
+│       ├── issues.md
+│       └── problems.md
+├── autopilot/                # autopilot 산출물
+│   └── spec.md
+├── research/                 # 리서치 결과
+└── logs/                     # 실행 로그
+```
+
+### Notepad
+
+**파일**: `.omc/notepad.md`
+
+노트패드는 컨텍스트 압축에서 살아남는 메모장입니다.
+Claude의 컨텍스트 윈도우가 초기화되더라도 노트패드에 적어둔 내용은 유지됩니다.
+
+#### 사용 방법
+
+```bash
+# 스킬로 메모 저장
+/oh-my-claudecode:note "API 엔드포인트는 /api/v2를 사용할 것"
+```
+
+#### MCP 도구
+
+| 도구 | 설명 |
+|------|------|
+| `notepad_read` | 노트패드 내용 읽기 |
+| `notepad_write_priority` | 우선순위 높은 메모 저장 (영구 보존) |
+| `notepad_write_working` | 작업 중 메모 저장 |
+| `notepad_write_manual` | 수동 메모 저장 |
+| `notepad_prune` | 오래된 메모 정리 |
+| `notepad_stats` | 노트패드 통계 조회 |
+
+#### 작동 원리
+
+1. `PreCompact` 이벤트 발생 시 중요 정보를 노트패드에 저장
+2. 컨텍스트 압축 후 노트패드 내용이 다시 주입됨
+3. 에이전트는 노트패드로 이전 컨텍스트를 복구
+
+### Project Memory
+
+**파일**: `.omc/project-memory.json`
+
+프로젝트 메모리는 프로젝트 수준의 지식을 저장하는 영구 저장소입니다.
+세션이 바뀌어도 프로젝트에 대한 지식이 유지됩니다.
+
+#### MCP 도구
+
+| 도구 | 설명 |
+|------|------|
+| `project_memory_read` | 프로젝트 메모리 읽기 |
+| `project_memory_write` | 프로젝트 메모리 전체 쓰기 |
+| `project_memory_add_note` | 메모 추가 |
+| `project_memory_add_directive` | 지시사항 추가 |
+
+#### 라이프사이클 통합
+
+- `SessionStart`: 프로젝트 메모리를 로드해서 컨텍스트에 주입
+- `PostToolUse`: 도구 사용 결과에서 프로젝트 지식을 추출해 저장
+- `PreCompact`: 컨텍스트 압축 전에 프로젝트 메모리를 저장
+
+### 세션 스코프
+
+**경로**: `.omc/state/sessions/{sessionId}/`
+
+세션별로 격리된 상태를 저장합니다.
+같은 프로젝트에서 여러 세션이 동시에 실행되어도 상태가 충돌하지 않습니다.
+
+### Plan Notepad (계획별 지식 캡처)
+
+**경로**: `.omc/notepads/{plan-name}/`
+
+각 실행 계획에 대한 학습 내용을 별도로 저장합니다.
+
+| 파일 | 내용 |
+|------|------|
+| `learnings.md` | 발견한 패턴, 성공한 접근법 |
+| `decisions.md` | 아키텍처 결정과 근거 |
+| `issues.md` | 문제점과 차단 요소 |
+| `problems.md` | 기술 부채와 주의사항 |
+
+모든 항목은 자동으로 타임스탬프가 기록됩니다.
+
+### 중앙 집중식 상태 관리
+
+기본적으로 상태는 프로젝트 내 `.omc/` 디렉토리에 저장됩니다.
+워크트리가 삭제되면 상태도 함께 사라집니다.
+
+워크트리 삭제에도 상태를 보존하려면 `OMC_STATE_DIR` 환경 변수를 설정하면 됩니다.
+
+```bash
+# ~/.bashrc 또는 ~/.zshrc에 추가
+export OMC_STATE_DIR="$HOME/.claude/omc"
+```
+
+이렇게 하면 상태가 `~/.claude/omc/{project-identifier}/`에 저장됩니다.
+프로젝트 식별자는 Git remote URL의 해시값을 사용하므로, 같은 리포지토리의 다른 워크트리에서도 상태를 공유할 수 있습니다.
+
+### 영구 기억 (remember 태그)
+
+특별히 중요한 정보는 `<remember>` 태그로 저장할 수 있습니다.
+
+```xml
+<!-- 7일간 유지 -->
+<remember>API 엔드포인트가 /v2로 변경됨</remember>
+
+<!-- 영구 보존 -->
+<remember priority>프로덕션 DB는 절대 직접 접근 금지</remember>
+```
+
+| 태그 | 보존 기간 |
+|------|----------|
+| `<remember>` | 7일 |
+| `<remember priority>` | 영구 |

@@ -1,0 +1,84 @@
+---
+title: Writer Memory
+description: 캐릭터, 관계, 장면, 테마를 추적하는 작가를 위한 에이전틱 메모리 시스템
+---
+
+## 개요
+
+Writer Memory는 창작 작가를 위한 지속적 메모리 시스템입니다. 캐릭터의 감정 궤도, 태도, 대사 톤, 관계 역학, 장면 구조, 테마를 Claude 세션 간에 유지합니다.
+
+한국어 스토리텔링 워크플로우를 우선으로 지원하며, 모든 데이터는 `.writer-memory/memory.json`에 저장되어 Git 협업이 가능합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:writer-memory init <project-name>
+/oh-my-claudecode:writer-memory char add <name>
+/oh-my-claudecode:writer-memory char <name>
+/oh-my-claudecode:writer-memory rel add <char1> <char2> <type>
+/oh-my-claudecode:writer-memory scene add <title>
+/oh-my-claudecode:writer-memory query <question>
+/oh-my-claudecode:writer-memory validate <character> <dialogue>
+/oh-my-claudecode:writer-memory synopsis
+/oh-my-claudecode:writer-memory export
+```
+
+## 메모리 유형
+
+### 캐릭터 메모리
+
+| 필드 | 한국어 | 설명 |
+|------|--------|------|
+| `arc` | 감정궤도 | 감정 여정 (예: "체념 → 욕망자각 → 선택") |
+| `attitude` | 태도 | 현재 성향 |
+| `tone` | 대사톤 | 대화 스타일 (예: "담백", "직설적") |
+| `speechLevel` | 말투 레벨 | 반말, 존댓말, 해체, 혼합 |
+| `keywords` | 핵심 단어 | 캐릭터가 자주 쓰는 말 |
+| `taboo` | 금기어 | 캐릭터가 절대 쓰지 않는 말 |
+
+### 관계 메모리
+
+캐릭터 간 역학과 시간에 따른 변화를 추적합니다.
+유형(로맨틱, 가족, 우정 등), 상태, 파워 다이나믹, 이벤트 타임라인을 기록합니다.
+
+### 장면 메모리
+
+장면의 감정적 아키텍처를 추적합니다. 컷 구성, 내레이션 톤, 감정 태그, 전후 변화를 기록합니다.
+
+### 테마 메모리
+
+스토리에 관통하는 깊은 의미를 포착합니다. 테마 표현 방식, 관련 장면, 작가 의도를 기록합니다.
+
+## 캐릭터 검증
+
+대사가 캐릭터의 설정된 목소리와 일치하는지 확인합니다.
+
+```bash
+/writer-memory validate 새랑 "사랑해, 해랑아."
+```
+
+말투 레벨, 톤 매칭, 금기어 위반, 감정 범위를 검사하고 PASS/WARN/FAIL 판정을 내립니다.
+
+## 시놉시스 생성
+
+감정 중심의 시놉시스를 5가지 필수 요소로 생성합니다.
+
+1. 주인공 태도 요약
+2. 관계 핵심 구도
+3. 정서적 테마
+4. 장르 vs 실제감정 대비
+5. 엔딩 정서 잔상
+
+## 관련 스킬
+
+- [learner](/docs/skills/utility/learner) - 세션에서 패턴 추출
+- [skill](/docs/skills/utility/skill) - 로컬 스킬 관리
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:writer-memory` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |
+| 데이터 경로 | `.writer-memory/memory.json` |

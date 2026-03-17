@@ -1,0 +1,78 @@
+---
+title: Ultrawork
+description: 독립적인 작업을 동시에 실행하는 병렬 실행 엔진
+---
+
+## 개요
+
+Ultrawork는 여러 에이전트를 동시에 돌려서 독립적인 작업을 병렬로 처리하는 실행 엔진입니다. 단독 모드가 아닌 컴포넌트로 설계되어, 병렬 실행과 스마트 모델 라우팅을 제공하지만 지속성이나 검증 루프는 없습니다.
+
+Ralph와 Autopilot이 내부에서 Ultrawork를 씁니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:ultrawork "implement user authentication with OAuth"
+```
+
+매직 키워드로도 활성화됩니다.
+
+```
+ultrawork implement the API endpoints
+ulw add validation to all forms
+```
+
+## 실행 방식
+
+### 작업 분류
+
+독립적인 작업과 의존성이 있는 작업을 구분합니다.
+
+### 모델 라우팅
+
+작업 복잡도에 따라 적절한 모델 티어를 선택합니다.
+
+| 복잡도 | 모델 | 용도 |
+|--------|------|------|
+| 단순 조회/정의 | Haiku | 타입 export 추가, 누락된 import 수정 |
+| 표준 구현 | Sonnet | API 엔드포인트 구현, 테스트 작성 |
+| 복잡한 분석/리팩토링 | Opus | OAuth 흐름 구현, 아키텍처 리팩토링 |
+
+### 병렬 실행
+
+독립 작업은 동시에 실행합니다.
+
+```
+Task 1 (Haiku): 타입 export 추가        ─┐
+Task 2 (Sonnet): API 엔드포인트 구현     ─┤── 동시 실행
+Task 3 (Sonnet): 인증 미들웨어 테스트    ─┘
+```
+
+의존성이 있는 작업은 선행 작업 완료 후 실행합니다.
+빌드, 설치, 테스트 같은 장시간 작업은 백그라운드에서 실행합니다.
+
+## 다른 모드와의 관계
+
+```
+autopilot (자율 실행)
+ └── ralph (지속 루프)
+      └── ultrawork (병렬 실행) ← 이 스킬
+```
+
+- **ultrawork만 단독 사용**: 병렬 실행만 필요하고 지속성/검증은 필요 없을 때
+- **ralph 사용 권장**: 지속성과 검증이 필요할 때 (ralph가 ultrawork를 포함)
+- **autopilot 사용 권장**: 전체 라이프사이클이 필요할 때
+
+## 관련 스킬
+
+- [ralph](/docs/skills/workflow/ralph) - ultrawork 위에 지속성과 검증을 추가
+- [autopilot](/docs/skills/workflow/autopilot) - ralph를 포함하는 전체 자율 파이프라인
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:ultrawork` |
+| 매직 키워드 | `ultrawork`, `ulw` |
+| 카테고리 | Workflow |
+| 상태 파일 | `.omc/state/ultrawork-state.json` |

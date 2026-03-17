@@ -1,0 +1,81 @@
+---
+title: Scientist
+description: Python을 사용한 데이터/통계 분석과 연구 실행을 담당하는 에이전트.
+---
+
+## 개요
+
+Scientist는 Python으로 데이터 분석과 연구 작업을 실행하고,
+증거 기반 발견을 보고하는 에이전트입니다.
+데이터 로딩/탐색, 통계 분석, 가설 검정, 시각화, 보고서 생성까지 합니다.
+
+통계적 엄밀성 없는 데이터 분석은 오해의 소지가 있는 결론을 만듭니다.
+신뢰 구간 없는 발견은 추측이고, 맥락 없는 시각화는 오도하며,
+한계를 인정하지 않는 결론은 위험합니다.
+
+읽기 전용(read-only) 에이전트로, Write/Edit 도구가 차단되어 있습니다.
+분석 결과와 보고서는 python_repl로 생성합니다.
+
+## 언제 쓰는가
+
+- 데이터셋을 탐색하고 통계적 패턴을 분석할 때
+- 가설을 검정하고 결과를 보고할 때
+- 시각화를 생성하고 보고서를 작성할 때
+- 성능 벤치마크 데이터를 분석할 때
+
+## 사용 예시
+
+```
+"이 CSV 데이터를 분석해줘"
+"가격과 매출의 상관관계를 분석해줘"
+"이 A/B 테스트 결과를 통계적으로 검증해줘"
+```
+
+## 분석 프로세스
+
+1. **SETUP**: Python/패키지 확인, 작업 디렉토리(`.omc/scientist/`) 생성, 데이터 파일 식별, 목표([OBJECTIVE])를 명시합니다
+2. **EXPLORE**: 데이터 로드, shape/types/결측값 검사, `.head()`, `.describe()`로 데이터 특성([DATA])을 출력합니다
+3. **ANALYZE**: 통계 분석을 실행합니다. 각 인사이트에 발견([FINDING])과 통계([STAT:*])를 출력합니다. 가설 주도 분석
+4. **SYNTHESIZE**: 발견을 요약하고, 한계([LIMITATION])를 표시하고, 보고서를 생성하고, 정리합니다
+
+## 출력 마커
+
+Scientist는 정해진 마커를 씁니다.
+
+| 마커 | 용도 |
+|------|------|
+| `[OBJECTIVE]` | 분석 목표 |
+| `[DATA]` | 데이터 특성 |
+| `[FINDING]` | 발견사항 |
+| `[STAT:ci]` | 신뢰 구간 |
+| `[STAT:effect_size]` | 효과 크기 |
+| `[STAT:p_value]` | p값 |
+| `[STAT:n]` | 표본 크기 |
+| `[LIMITATION]` | 한계/주의사항 |
+
+모든 `[FINDING]`은 10줄 이내에 최소 하나의 `[STAT:*]` 증거를 포함해야 합니다.
+
+## 기술적 제약
+
+- 모든 Python 코드는 `python_repl`로 실행합니다 (Bash heredoc 금지)
+- 패키지 설치 금지 -- stdlib 대체 사용 또는 사용자에게 안내합니다
+- DataFrame 전체 출력 금지 -- `.head()`, `.describe()`, 집계 결과를 사용합니다
+- matplotlib Agg 백엔드 사용, `plt.savefig()` 필수 (`plt.show()` 금지)
+
+## 다른 에이전트와의 조합
+
+- **tracer**: 데이터 기반 추적 분석이 필요할 때 tracer와 조합합니다
+- **document-specialist**: 외부 연구 자료 조회는 document-specialist에 맡깁니다
+- **architect**: 분석 결과를 바탕으로 아키텍처 결정이 필요할 때
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 모델 | sonnet |
+| 서브에이전트 타입 | `oh-my-claudecode:scientist` |
+| 레인 | Domain |
+| 읽기 전용 | Yes (Write, Edit 차단) |
+| 티어 변형 | `scientist-high` (opus) |
+| 출력 경로 | `.omc/scientist/reports/`, `.omc/scientist/figures/` |
+| 스킬 연동 | `/oh-my-claudecode:sciomc` |

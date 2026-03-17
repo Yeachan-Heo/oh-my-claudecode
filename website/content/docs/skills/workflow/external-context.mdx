@@ -1,0 +1,72 @@
+---
+title: External Context
+description: 병렬 document-specialist 에이전트로 외부 문서 및 레퍼런스 조회
+---
+
+## 개요
+
+External Context는 외부 문서, 레퍼런스, 컨텍스트를 가져오는 스킬입니다. 쿼리를 2-5개의 독립 검색 패싯으로 분해하고, 병렬 document-specialist 에이전트를 생성해서 동시에 조사합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:external-context <topic or question>
+```
+
+## 예시
+
+```bash
+/oh-my-claudecode:external-context What are the best practices for JWT token rotation in Node.js?
+/oh-my-claudecode:external-context Compare Prisma vs Drizzle ORM for PostgreSQL
+/oh-my-claudecode:external-context Latest React Server Components patterns and conventions
+```
+
+## 프로토콜
+
+### 1. 패싯 분해
+
+쿼리를 2-5개의 독립 검색 패싯으로 분해합니다.
+
+```
+Query: "JWT token rotation best practices in Node.js"
+
+Facet 1: JWT rotation 공식 문서 및 RFC
+Facet 2: Node.js JWT 라이브러리 비교 (jsonwebtoken, jose)
+Facet 3: 프로덕션 환경 JWT 갱신 패턴
+```
+
+### 2. 병렬 에이전트 호출
+
+각 패싯에 대해 document-specialist (Sonnet) 에이전트를 동시에 실행합니다. WebSearch와 WebFetch로 공식 문서와 예제를 찾습니다.
+
+최대 5개의 병렬 에이전트를 지원합니다.
+
+### 3. 종합 출력
+
+발견 사항을 종합해서 소스 인용과 함께 제공합니다.
+
+```markdown
+## Key Findings
+1. **Finding** - Source: [title](url)
+2. **Finding** - Source: [title](url)
+
+## Detailed Results
+...
+
+## Sources
+- [Source 1](url)
+- [Source 2](url)
+```
+
+## 관련 스킬
+
+- [sciomc](/docs/skills/workflow/sciomc) - 더 심층적인 병렬 연구 오케스트레이션
+- [ask](/docs/skills/utility/ask) - 단일 프로바이더에게 질문
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:external-context` |
+| 매직 키워드 | - |
+| 카테고리 | Workflow |

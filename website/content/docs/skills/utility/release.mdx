@@ -1,0 +1,80 @@
+---
+title: Release
+description: oh-my-claudecode의 버전 범프, 테스트, 배포를 자동화하는 릴리스 워크플로우
+---
+
+## 개요
+
+Release는 oh-my-claudecode의 릴리스 프로세스를 자동화하는 스킬입니다. 버전 범프, 테스트 실행, 커밋, 태그, npm 배포, GitHub 릴리스 생성까지 전체 과정을 순차로 처리합니다.
+
+## 사용법
+
+```bash
+/oh-my-claudecode:release <version>
+/oh-my-claudecode:release patch
+/oh-my-claudecode:release minor
+/oh-my-claudecode:release major
+```
+
+## 릴리스 체크리스트
+
+순서대로 실행됩니다.
+
+### 1. 버전 범프
+
+다음 파일들의 버전을 업데이트합니다.
+
+| 파일 | 필드 |
+|------|------|
+| `package.json` | `"version": "X.Y.Z"` |
+| `src/installer/index.ts` | `VERSION` 상수 |
+| `.claude-plugin/plugin.json` | `"version"` |
+| `.claude-plugin/marketplace.json` | `plugins[0].version` + 루트 `version` |
+| `docs/CLAUDE.md` | `<!-- OMC:VERSION:X.Y.Z -->` |
+| `README.md` | 버전 배지 + 타이틀 |
+
+### 2. 테스트 실행
+
+```bash
+npm run test:run
+```
+
+### 3. 커밋 및 태그
+
+```bash
+git add -A
+git commit -m "chore: Bump version to <version>"
+git tag v<version>
+git push origin main
+git push origin v<version>
+```
+
+### 4. npm 배포
+
+```bash
+npm publish --access public
+```
+
+### 5. GitHub 릴리스
+
+```bash
+gh release create v<version> --title "v<version> - <title>" --notes "<notes>"
+```
+
+## 시맨틱 버저닝
+
+- **patch** (X.Y.Z+1): 버그 수정, 사소한 개선
+- **minor** (X.Y+1.0): 새 기능, 하위 호환
+- **major** (X+1.0.0): 호환성 깨지는 변경
+
+## 관련 스킬
+
+- [omc-setup](/docs/skills/utility/omc-setup) - 업데이트 후 설정 적용
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 호출 | `/oh-my-claudecode:release` |
+| 매직 키워드 | - |
+| 카테고리 | Utility |

@@ -1,0 +1,130 @@
+---
+title: 에이전트 카탈로그
+description: OMC의 20개 전문 에이전트를 4개 레인으로 분류한 전체 목록.
+---
+
+## 에이전트 시스템
+
+oh-my-claudecode에는 20개의 전문 에이전트가 있습니다.
+각 에이전트는 역할이 정해져 있고, `oh-my-claudecode:에이전트이름` 형식으로 호출합니다.
+
+오케스트레이터가 작업 성격에 따라 자동으로 적절한 에이전트에 위임하고,
+사용자가 직접 지정할 수도 있습니다.
+
+## 4개 레인 구조
+
+에이전트들은 역할에 따라 4개 레인으로 나뉩니다.
+
+### Build & Analysis
+
+코드 탐색부터 구현, 검증까지 개발 흐름 전반을 다룹니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| [`explore`](/docs/agents/build-analysis/explore) | haiku | 코드베이스 탐색, 파일/심볼 검색 |
+| [`analyst`](/docs/agents/build-analysis/analyst) | opus | 요구사항 분석, 수락 기준 정의 |
+| [`planner`](/docs/agents/build-analysis/planner) | opus | 작업 순서 결정, 실행 계획 수립 |
+| [`architect`](/docs/agents/build-analysis/architect) | opus | 시스템 설계, 경계, 인터페이스 정의 |
+| [`debugger`](/docs/agents/build-analysis/debugger) | sonnet | 근본 원인 분석, 빌드 에러 수정 |
+| [`executor`](/docs/agents/build-analysis/executor) | sonnet | 코드 구현, 리팩토링 |
+| [`verifier`](/docs/agents/build-analysis/verifier) | sonnet | 완료 증거 수집, 주장 검증 |
+| [`tracer`](/docs/agents/build-analysis/tracer) | sonnet | 증거 기반 인과 추적, 가설 경쟁 |
+
+### Review
+
+코드 품질과 보안을 검토합니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| [`security-reviewer`](/docs/agents/review/security-reviewer) | opus | OWASP Top 10, 인증/인가 취약점 검토 |
+| [`code-reviewer`](/docs/agents/review/code-reviewer) | opus | 로직 결함, API 계약, 하위 호환성 검토 |
+
+### Domain
+
+분야별 전문 작업을 맡습니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| [`test-engineer`](/docs/agents/domain/test-engineer) | sonnet | 테스트 전략, 커버리지, TDD |
+| [`designer`](/docs/agents/domain/designer) | sonnet | UI/UX 아키텍처, 인터랙션 설계 |
+| [`writer`](/docs/agents/domain/writer) | haiku | 기술 문서, README, API 문서 |
+| [`qa-tester`](/docs/agents/domain/qa-tester) | sonnet | tmux를 통한 CLI/서비스 런타임 검증 |
+| [`scientist`](/docs/agents/domain/scientist) | sonnet | 데이터/통계 분석, 연구 실행 |
+| [`git-master`](/docs/agents/domain/git-master) | sonnet | 원자적 커밋, 리베이스, 히스토리 관리 |
+| [`document-specialist`](/docs/agents/domain/document-specialist) | sonnet | 외부 문서/레퍼런스 조회 |
+| [`code-simplifier`](/docs/agents/domain/code-simplifier) | opus | 코드 명확성, 일관성 개선 |
+| [`vision`](/docs/agents/domain/vision) | sonnet | 이미지/다이어그램 분석 |
+
+### Coordination
+
+계획과 설계에 비판적 검토를 겁니다.
+
+| 에이전트 | 기본 모델 | 역할 |
+|----------|-----------|------|
+| [`critic`](/docs/agents/coordination/critic) | opus | 계획/설계 비판적 검토, 다각도 분석 |
+
+## 모델 티어
+
+각 에이전트에는 기본 모델 티어가 지정되어 있지만, 호출 시 `model` 파라미터로 바꿀 수 있습니다.
+
+| 티어 | 모델 | 특성 | 대표 에이전트 |
+|------|------|------|--------------|
+| LOW | haiku | 빠르고 저렴. 단순 조회에 적합 | explore, writer |
+| MEDIUM | sonnet | 균형 잡힌 성능. 구현/디버깅에 적합 | executor, debugger, test-engineer |
+| HIGH | opus | 최고 수준 추론. 설계/분석에 적합 | architect, planner, critic, code-reviewer |
+
+일부 에이전트는 티어별 변형(variant)을 지원합니다.
+예를 들어 `explore`는 기본 haiku지만, `explore-high`로 opus 티어를 쓸 수 있습니다.
+
+## 에이전트 선택 가이드
+
+| 작업 유형 | 추천 에이전트 | 모델 |
+|-----------|-------------|------|
+| 빠른 코드 조회 | `explore` | haiku |
+| 파일/패턴 찾기 | `explore` | haiku |
+| 기능 구현 | `executor` | sonnet |
+| 복잡한 리팩토링 | `executor` (model=opus) | opus |
+| 단순 버그 수정 | `debugger` | sonnet |
+| 복잡한 디버깅 | `architect` | opus |
+| UI 컴포넌트 | `designer` | sonnet |
+| 문서 작성 | `writer` | haiku |
+| SDK/API 문서 조회 | `document-specialist` | sonnet |
+| 테스트 전략 | `test-engineer` | sonnet |
+| 보안 리뷰 | `security-reviewer` | opus |
+| 코드 리뷰 | `code-reviewer` | opus |
+| 데이터 분석 | `scientist` | sonnet |
+| 이미지 분석 | `vision` | sonnet |
+| 전략 계획 | `planner` | opus |
+| 계획 검토 | `critic` | opus |
+
+## 에이전트 워크플로우
+
+일반적인 작업에서 에이전트들은 아래 순서로 협력합니다.
+
+```
+explore (탐색)
+  → analyst (요구사항 분석)
+    → planner (계획 수립)
+      → critic (계획 검토)
+        → executor (구현)
+          → verifier (검증)
+```
+
+각 에이전트의 상세 설명은 해당 레인의 하위 페이지에서 볼 수 있습니다.
+
+## Deprecated 에이전트 별칭
+
+이전 버전 호환을 위해 아래 별칭이 남아 있습니다.
+
+| 별칭 | 실제 에이전트 |
+|------|-------------|
+| `api-reviewer` | code-reviewer |
+| `performance-reviewer` | code-reviewer |
+| `quality-reviewer` | code-reviewer |
+| `quality-strategist` | code-reviewer |
+| `dependency-expert` | document-specialist |
+| `researcher` | document-specialist |
+| `tdd-guide` | test-engineer |
+| `deep-executor` | executor |
+| `build-fixer` | debugger |
+| `harsh-critic` | critic |

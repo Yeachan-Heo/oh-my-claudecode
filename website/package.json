@@ -1,0 +1,32 @@
+{
+  "name": "omc-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "@types/mdx": "^2.0.0",
+    "fumadocs-core": "^16.6.0",
+    "fumadocs-mdx": "^14.2.0",
+    "fumadocs-ui": "^16.6.0",
+    "mermaid": "^11.13.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.7.0"
+  }
+}

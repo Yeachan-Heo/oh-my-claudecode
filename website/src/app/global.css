@@ -1,0 +1,16 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/style.css';
+
+/* Hero title styling */
+.hero-title {
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+/* Subtle grid background for the hero */
+.hero-grid {
+  background-image:
+    linear-gradient(var(--color-fd-foreground) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-fd-foreground) 1px, transparent 1px);
+  background-size: 60px 60px;
+}

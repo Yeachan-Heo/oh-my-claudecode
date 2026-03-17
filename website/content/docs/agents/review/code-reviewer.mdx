@@ -1,0 +1,97 @@
+---
+title: Code Reviewer
+description: 심각도 기반 피드백으로 코드 품질과 보안을 검토하는 에이전트.
+---
+
+## 개요
+
+Code Reviewer는 스펙 준수 확인, 보안 검사, 코드 품질 평가, 로직 정확성, 에러 처리 완전성,
+안티패턴 탐지, SOLID 원칙 준수, 성능 리뷰까지 커버하는 코드 리뷰 에이전트입니다.
+
+핵심 원칙은 "스펙 준수를 먼저 확인한 후에 코드 품질을 검토"하는 것입니다.
+스타일 지적으로 SQL 인젝션을 놓치는 것은 실패입니다.
+모든 이슈에는 CRITICAL/HIGH/MEDIUM/LOW 심각도와 구체적인 수정 제안이 포함됩니다.
+
+읽기 전용(read-only) 에이전트이며, 리뷰는 작성자와 분리된 별도 패스에서 진행됩니다.
+
+## 언제 쓰는가
+
+- PR이나 코드 변경을 전체적으로 리뷰할 때
+- 코드 품질과 로직 정확성을 검증할 때
+- API 계약과 하위 호환성을 확인할 때
+- 릴리스 준비 상태를 평가할 때
+
+## 사용 예시
+
+```
+"이 PR을 코드 리뷰해줘"
+"최근 변경사항의 품질을 검토해줘"
+"code review"  # 매직 키워드로 자동 활성화
+```
+
+## 2단계 리뷰 프로세스
+
+### Stage 1: 스펙 준수 (반드시 먼저)
+
+- 구현이 모든 요구사항을 커버하는가?
+- 올바른 문제를 해결하는가?
+- 빠진 것은? 추가된 것은?
+- 요청자가 이것을 자신의 요청으로 인식하겠는가?
+
+### Stage 2: 코드 품질 (Stage 1 통과 후에만)
+
+- 수정된 모든 파일에 lsp_diagnostics 실행
+- ast_grep_search로 문제 패턴 탐지 (console.log, 빈 catch, 하드코딩된 시크릿)
+- 로직 정확성: 루프 경계, null 처리, 타입 불일치, 제어/데이터 흐름
+- 에러 처리: 에러 전파, 리소스 정리
+- 안티패턴: God Object, 매직 넘버, 복사-붙여넣기, shotgun surgery
+- SOLID 원칙: SRP, OCP, LSP, ISP, DIP
+- 유지보수성: 가독성, 복잡도(cyclomatic < 10), 테스트 가능성
+
+## 추가 리뷰 모드
+
+Code Reviewer는 요청에 따라 추가 모드를 켤 수 있습니다.
+
+### API 계약 리뷰
+
+- Breaking changes: 제거된 필드, 변경된 타입, 이름 변경된 엔드포인트
+- 버전 전략: 비호환 변경에 대한 버전 범프 여부
+- 에러 시맨틱: 일관된 에러 코드, 내부 정보 유출 방지
+- 하위 호환성: 기존 호출자가 변경 없이 계속 동작 가능한가
+
+### 성능 리뷰
+
+- 알고리즘 복잡도 (O(n^2) 루프, N+1 쿼리)
+- 메모리 누수, 과도한 할당
+- 캐싱 기회와 무효화 정확성
+
+### 품질 전략
+
+- 테스트 커버리지 적절성 (unit, integration, e2e)
+- 릴리스 준비 상태: 차단 결함, 미테스트 경로
+- 리스크 티어: SAFE / MONITOR / HOLD
+
+## 승인 기준
+
+| 판정 | 조건 |
+|------|------|
+| APPROVE | CRITICAL/HIGH 이슈 없음, 사소한 개선만 필요 |
+| REQUEST CHANGES | CRITICAL 또는 HIGH 이슈 존재 |
+| COMMENT | LOW/MEDIUM 이슈만, 차단 우려 없음 |
+
+## 다른 에이전트와의 조합
+
+- **security-reviewer**: 보안 전문 심층 감사가 필요할 때
+- **test-engineer**: 테스트 작성은 test-engineer 몫입니다
+- **executor**: 수정 구현은 executor에 넘깁니다
+- **architect**: 아키텍처 수준 설계 리뷰가 필요할 때
+
+## 레퍼런스
+
+| 항목 | 값 |
+|------|-----|
+| 모델 | opus |
+| 서브에이전트 타입 | `oh-my-claudecode:code-reviewer` |
+| 레인 | Review |
+| 읽기 전용 | Yes (Write, Edit 차단) |
+| 이전 이름 | `api-reviewer`, `performance-reviewer`, `quality-reviewer`, `quality-strategist` (모두 deprecated) |

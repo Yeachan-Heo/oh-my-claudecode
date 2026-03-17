@@ -1,0 +1,89 @@
+---
+title: Python REPL
+description: 지속적 Python REPL 환경으로 데이터 분석 및 계산을 수행
+---
+
+## 개요
+
+Python REPL은 세션 간 상태가 유지되는 Python 실행 환경입니다. 데이터 분석, 통계 계산, 시각화, 프로토타이핑 등에 씁니다.
+
+## 도구
+
+### python_repl
+
+Python 코드를 실행하고 결과를 반환합니다.
+
+```
+python_repl(code="import json; data = json.loads('{\"key\": \"value\"}'); print(data)")
+```
+
+## 특징
+
+### 상태 유지
+
+한 번 정의한 변수, 함수, 임포트는 이후 호출에서도 사용할 수 있습니다.
+
+```python
+# 첫 번째 호출
+python_repl(code="import pandas as pd; df = pd.read_csv('data.csv')")
+
+# 두 번째 호출 (df가 유지됨)
+python_repl(code="print(df.describe())")
+```
+
+### 데이터 분석
+
+```python
+python_repl(code="""
+import json
+with open('.omc/research/session-1/state.json') as f:
+    state = json.load(f)
+print(f"Stages: {len(state['stages'])}")
+print(f"Status: {state['status']}")
+""")
+```
+
+### 계산 및 변환
+
+```python
+python_repl(code="""
+# 토큰 비용 계산
+input_tokens = 150000
+output_tokens = 50000
+cost = (input_tokens * 0.003 + output_tokens * 0.015) / 1000
+print(f"Estimated cost: ${cost:.4f}")
+""")
+```
+
+### 파일 처리
+
+```python
+python_repl(code="""
+import os
+import json
+
+# 프로젝트 파일 통계
+extensions = {}
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        ext = os.path.splitext(f)[1]
+        extensions[ext] = extensions.get(ext, 0) + 1
+
+for ext, count in sorted(extensions.items(), key=lambda x: -x[1]):
+    print(f"{ext}: {count} files")
+""")
+```
+
+## 사용 사례
+
+| 사용 사례 | 설명 |
+|-----------|------|
+| 데이터 분석 | CSV, JSON 파일 분석, 통계 계산 |
+| 프로토타이핑 | 알고리즘 검증, 로직 테스트 |
+| 파일 처리 | 파일 변환, 배치 처리 |
+| 시각화 | matplotlib, plotly로 차트 생성 |
+| 계산 | 수학 계산, 비용 추정 |
+
+## scientist 에이전트와의 연계
+
+[scientist](/docs/concepts#에이전트란) 에이전트가 데이터 분석 시 python_repl을 사용합니다. [SciOMC](/docs/skills/workflow/sciomc) 연구 워크플로우에서 통계 분석과 시각화에 활용됩니다.
