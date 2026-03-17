@@ -679,9 +679,6 @@ export async function spawnWorkerForTask(
   const taskId = String(taskIndex + 1);
   const task = runtime.config.tasks[taskIndex];
   if (!task) return '';
-  const marked = await markTaskInProgress(root, taskId, workerNameValue, runtime.teamName, runtime.cwd);
-  if (!marked) return '';
-
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
@@ -697,6 +694,13 @@ export async function spawnWorkerForTask(
   ]);
   const paneId = splitResult.stdout.split('\n')[0]?.trim();
   if (!paneId) return '';
+
+  const marked = await markTaskInProgress(root, taskId, workerNameValue, runtime.teamName, runtime.cwd);
+  if (!marked) {
+    // Pane created but couldn't mark task — kill orphaned pane
+    try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); } catch { /* ignore */ }
+    return '';
+  }
 
   const workerIndex = parseWorkerIndex(workerNameValue);
   const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length]
@@ -990,7 +994,7 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
 
   const paneTarget = sName.includes(':') ? sName : sName.split(':')[0];
   const panesResult = await execFileAsync('tmux', [
-    'list-panes', '-t', paneTarget, '-F', '#{pane_id}'
+    'list-panes', '-s', '-t', paneTarget, '-F', '#{pane_id}'
   ]);
   const allPanes = panesResult.stdout.trim().split('\n').filter(Boolean);
   // First pane is leader, rest are workers

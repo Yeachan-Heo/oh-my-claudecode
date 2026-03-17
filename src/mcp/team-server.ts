@@ -526,15 +526,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
   }
 
-  try {
-    if (name === 'omc_run_team_start') return await handleStart(args ?? {});
-    if (name === 'omc_run_team_status') return await handleStatus(args ?? {});
-    if (name === 'omc_run_team_wait') return await handleWait(args ?? {});
-    if (name === 'omc_run_team_cleanup') return await handleCleanup(args ?? {});
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
-  } catch (error) {
-    return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-  }
+  return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
 });
 
 async function main() {

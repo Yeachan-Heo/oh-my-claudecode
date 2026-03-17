@@ -17,7 +17,12 @@ const INLINE_CODE_PATTERN = /`[^`]+`/g;
  * Remove code blocks from text for keyword detection
  */
 function removeCodeBlocks(text: string): string {
+  if (text.length > 100_000) text = text.slice(0, 100_000);
   return text.replace(CODE_BLOCK_PATTERN, '').replace(INLINE_CODE_PATTERN, '');
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -330,7 +335,7 @@ Use maximum cognitive effort before responding.`;
 function removeTriggerWords(prompt: string, triggers: string[]): string {
   let result = prompt;
   for (const trigger of triggers) {
-    const regex = new RegExp(`\\b${trigger}\\b`, 'gi');
+    const regex = new RegExp(`\\b${escapeRegex(trigger)}\\b`, 'gi');
     result = result.replace(regex, '');
   }
   return result.trim();
@@ -385,7 +390,7 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
 
     for (const keyword of keywords) {
       const hasKeyword = keyword.triggers.some(trigger => {
-        const regex = new RegExp(`\\b${trigger}\\b`, 'i');
+        const regex = new RegExp(`\\b${escapeRegex(trigger)}\\b`, 'i');
         return regex.test(removeCodeBlocks(result));
       });
 
@@ -428,7 +433,7 @@ export function detectMagicKeywords(prompt: string, config?: PluginConfig['magic
 
   for (const keyword of keywords) {
     for (const trigger of keyword.triggers) {
-      const regex = new RegExp(`\\b${trigger}\\b`, 'i');
+      const regex = new RegExp(`\\b${escapeRegex(trigger)}\\b`, 'i');
       if (regex.test(cleanedPrompt)) {
         detected.push(trigger);
         break;

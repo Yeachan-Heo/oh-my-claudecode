@@ -183,11 +183,10 @@ export function acquireFileLockSync(
   // Retry loop with busy-wait using Atomics (avoids blocking the event loop
   // in a way that prevents signal handling, but is acceptable for short locks)
   const deadline = Date.now() + timeoutMs;
-  const sharedBuf = new SharedArrayBuffer(4);
-  const sharedArr = new Int32Array(sharedBuf);
 
   while (Date.now() < deadline) {
-    Atomics.wait(sharedArr, 0, 0, Math.min(retryDelayMs, deadline - Date.now()));
+    const sleepUntil = Date.now() + Math.min(retryDelayMs, deadline - Date.now());
+    while (Date.now() < sleepUntil) { /* busy-wait */ }
     const retryHandle = tryAcquireSync(lockPath, staleLockMs);
     if (retryHandle) return retryHandle;
   }

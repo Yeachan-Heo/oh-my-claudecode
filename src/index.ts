@@ -270,9 +270,9 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   };
 
   // Find and load context files
+  const contextFiles = findContextFiles(options?.workingDirectory);
   let contextAddition = '';
   if (!options?.skipContextInjection && config.features?.autoContextInjection !== false) {
-    const contextFiles = findContextFiles(options?.workingDirectory);
     if (contextFiles.length > 0) {
       contextAddition = `\n\n## Project Context\n\n${loadContextFromFiles(contextFiles)}`;
     }
@@ -343,7 +343,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   const state: SessionState = {
     activeAgents: new Map(),
     backgroundTasks: [],
-    contextFiles: findContextFiles(options?.workingDirectory)
+    contextFiles
   };
 
   // Create background task manager

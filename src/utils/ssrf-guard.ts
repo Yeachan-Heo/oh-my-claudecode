@@ -25,7 +25,7 @@ const BLOCKED_HOST_PATTERNS = [
   /^169\.254\.[0-9]+\.[0-9]+$/, // Link-local
   /^(0|22[4-9]|23[0-9])\.[0-9]+\.[0-9]+\.[0-9]+$/, // Multicast, reserved
   /^\[?::1\]?$/, // IPv6 loopback
-  /^\[?fc00:/i, // IPv6 unique local
+  /^\[?f[cd][0-9a-f]{2}:/i, // IPv6 unique local (fc00::/7 covers both fc and fd prefixes)
   /^\[?fe80:/i, // IPv6 link-local
   /^\[?::ffff:/i, // IPv6-mapped IPv4 (all private ranges accessible via this prefix)
   /^\[?0{0,4}:{0,2}ffff:/i, // IPv6-mapped IPv4 expanded forms

@@ -71,6 +71,7 @@ import {
 } from './worker-bootstrap.js';
 import { queueInboxInstruction, type DispatchOutcome } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
+import { withTaskLock } from './task-file-ops.js';
 
 // ---------------------------------------------------------------------------
 // Feature flag
@@ -897,13 +898,16 @@ export async function requeueDeadWorkerTasks(
     // Reset task to pending (clear owner and claim)
     const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const raw = await import('fs/promises').then(fs => fs.readFile(taskPath, 'utf-8'));
-      const taskData = JSON.parse(raw);
-      taskData.status = 'pending';
-      taskData.owner = undefined;
-      taskData.claim = undefined;
-      await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
-      requeued.push(task.id);
+      const result = await withTaskLock(sanitized, task.id, async () => {
+        const raw = await import('fs/promises').then(fs => fs.readFile(taskPath, 'utf-8'));
+        const taskData = JSON.parse(raw);
+        taskData.status = 'pending';
+        taskData.owner = undefined;
+        taskData.claim = undefined;
+        await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+        return true;
+      }, { cwd });
+      if (result) requeued.push(task.id);
     } catch {
       // Task file may have been removed; skip
     }
