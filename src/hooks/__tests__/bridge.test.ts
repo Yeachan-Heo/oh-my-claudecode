@@ -258,7 +258,6 @@ describe('processHook - Environment Kill-Switches', () => {
         sessionId: 'test-session',
         prompt: 'test',
         directory: '/tmp/test',
-        hookType: 'pre-tool-use',
         toolName: 'Agent',
         toolInput: {
           description: 'Test agent',
@@ -270,7 +269,7 @@ describe('processHook - Environment Kill-Switches', () => {
 
       const result = await processHook('pre-tool-use', input);
       expect(result).toHaveProperty('hookSpecificOutput');
-      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
+      const output = (result as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
       expect(output.permissionDecision).toBe('deny');
       expect(output.permissionDecisionReason).toContain('MODEL ROUTING');
       expect(output.permissionDecisionReason).toContain('Agent');
@@ -283,7 +282,6 @@ describe('processHook - Environment Kill-Switches', () => {
         sessionId: 'test-session',
         prompt: 'test',
         directory: '/tmp/test',
-        hookType: 'pre-tool-use',
         toolName: 'Task',
         toolInput: {
           description: 'Test task',
@@ -295,7 +293,7 @@ describe('processHook - Environment Kill-Switches', () => {
 
       const result = await processHook('pre-tool-use', input);
       expect(result).toHaveProperty('hookSpecificOutput');
-      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
+      const output = (result as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
       expect(output.permissionDecision).toBe('deny');
       expect(output.permissionDecisionReason).toContain('MODEL ROUTING');
       expect(output.permissionDecisionReason).toContain('Task');
@@ -308,7 +306,6 @@ describe('processHook - Environment Kill-Switches', () => {
         sessionId: 'test-session',
         prompt: 'test',
         directory: '/tmp/test',
-        hookType: 'pre-tool-use',
         toolName: 'Agent',
         toolInput: {
           description: 'Test agent',
@@ -318,7 +315,7 @@ describe('processHook - Environment Kill-Switches', () => {
       };
 
       const result = await processHook('pre-tool-use', input);
-      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown> | undefined;
+      const output = (result as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown> | undefined;
       expect(output?.permissionDecision).not.toBe('deny');
     });
   });
