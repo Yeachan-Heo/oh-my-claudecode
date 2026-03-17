@@ -30,7 +30,6 @@ _Don't learn Claude Code. Just use OMC._
 **Step 2: Setup**
 
 ```bash
-/setup
 /omc-setup
 ```
 
