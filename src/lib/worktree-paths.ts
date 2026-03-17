@@ -31,6 +31,7 @@ export const OmcPaths = {
   AUTOPILOT: '.omc/autopilot',
   SKILLS: '.omc/skills',
   SHARED_MEMORY: '.omc/state/shared-memory',
+  DEEPINIT_MANIFEST: '.omc/deepinit-manifest.json',
 } as const;
 
 /**

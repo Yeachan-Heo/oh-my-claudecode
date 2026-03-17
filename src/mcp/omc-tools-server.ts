@@ -16,6 +16,7 @@ import { memoryTools } from "../tools/memory-tools.js";
 import { traceTools } from "../tools/trace-tools.js";
 import { sharedMemoryTools } from "../tools/shared-memory-tools.js";
 import { getInteropTools } from "../interop/mcp-bridge.js";
+import { deepinitManifestTool } from "../tools/deepinit-manifest.js";
 import { TOOL_CATEGORIES, type ToolCategory } from "../constants/index.js";
 
 // Type for our tool definitions
@@ -51,6 +52,8 @@ export const DISABLE_TOOLS_GROUP_MAP: Record<string, ToolCategory> = {
   'codex': TOOL_CATEGORIES.CODEX,
   'gemini': TOOL_CATEGORIES.GEMINI,
   'shared-memory': TOOL_CATEGORIES.SHARED_MEMORY,
+  'deepinit': TOOL_CATEGORIES.DEEPINIT,
+  'deepinit-manifest': TOOL_CATEGORIES.DEEPINIT,
 };
 
 /**
@@ -98,6 +101,7 @@ const allTools: ToolDef[] = [
   ...tagCategory(memoryTools as unknown as ToolDef[], TOOL_CATEGORIES.MEMORY),
   ...tagCategory(traceTools as unknown as ToolDef[], TOOL_CATEGORIES.TRACE),
   ...tagCategory(sharedMemoryTools as unknown as ToolDef[], TOOL_CATEGORIES.SHARED_MEMORY),
+  { ...(deepinitManifestTool as unknown as ToolDef), category: TOOL_CATEGORIES.DEEPINIT },
   ...interopTools,
 ];
 
@@ -157,6 +161,7 @@ export function getOmcToolNames(options?: {
   includeTrace?: boolean;
   includeInterop?: boolean;
   includeSharedMemory?: boolean;
+  includeDeepinit?: boolean;
 }): string[] {
   const {
     includeLsp = true,
@@ -169,6 +174,7 @@ export function getOmcToolNames(options?: {
     includeTrace = true,
     includeInterop = true,
     includeSharedMemory = true,
+    includeDeepinit = true,
   } = options || {};
 
   const excludedCategories = new Set<ToolCategory>();
@@ -182,6 +188,7 @@ export function getOmcToolNames(options?: {
   if (!includeTrace) excludedCategories.add(TOOL_CATEGORIES.TRACE);
   if (!includeInterop) excludedCategories.add(TOOL_CATEGORIES.INTEROP);
   if (!includeSharedMemory) excludedCategories.add(TOOL_CATEGORIES.SHARED_MEMORY);
+  if (!includeDeepinit) excludedCategories.add(TOOL_CATEGORIES.DEEPINIT);
 
   if (excludedCategories.size === 0) return [...omcToolNames];
 
@@ -205,6 +212,7 @@ export function _getAllToolNamesForTests(options?: {
   includeTrace?: boolean;
   includeInterop?: boolean;
   includeSharedMemory?: boolean;
+  includeDeepinit?: boolean;
 }): string[] {
   const {
     includeLsp = true,
@@ -217,6 +225,7 @@ export function _getAllToolNamesForTests(options?: {
     includeTrace = true,
     includeInterop = true,
     includeSharedMemory = true,
+    includeDeepinit = true,
   } = options || {};
 
   const excludedCategories = new Set<ToolCategory>();
@@ -230,6 +239,7 @@ export function _getAllToolNamesForTests(options?: {
   if (!includeTrace) excludedCategories.add(TOOL_CATEGORIES.TRACE);
   if (!includeInterop) excludedCategories.add(TOOL_CATEGORIES.INTEROP);
   if (!includeSharedMemory) excludedCategories.add(TOOL_CATEGORIES.SHARED_MEMORY);
+  if (!includeDeepinit) excludedCategories.add(TOOL_CATEGORIES.DEEPINIT);
 
   return allTools
     .filter(t => !t.category || !excludedCategories.has(t.category))

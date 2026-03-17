@@ -30,6 +30,7 @@ export const TOOL_CATEGORIES = {
   CODEX: 'codex',
   GEMINI: 'gemini',
   SHARED_MEMORY: 'shared-memory',
+  DEEPINIT: 'deepinit',
 } as const;
 export type ToolCategory = typeof TOOL_CATEGORIES[keyof typeof TOOL_CATEGORIES];
 
