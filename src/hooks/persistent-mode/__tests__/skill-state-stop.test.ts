@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -40,6 +40,28 @@ function writeSkillState(
   );
 }
 
+function writeSubagentTrackingState(
+  tempDir: string,
+  agents: Array<Record<string, unknown>>,
+): void {
+  const stateDir = join(tempDir, '.omc', 'state');
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(
+    join(stateDir, 'subagent-tracking.json'),
+    JSON.stringify(
+      {
+        agents,
+        total_spawned: agents.length,
+        total_completed: agents.filter((agent) => agent.status === 'completed').length,
+        total_failed: agents.filter((agent) => agent.status === 'failed').length,
+        last_updated: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 describe('persistent-mode skill-state stop integration (issue #1033)', () => {
   it('blocks stop when a skill is actively executing', async () => {
     const sessionId = 'session-skill-1033-block';
@@ -64,6 +86,42 @@ describe('persistent-mode skill-state stop integration (issue #1033)', () => {
     try {
       const result = await checkPersistentModes(sessionId, tempDir);
       expect(result.shouldBlock).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows orchestrator idle when a skill is active but delegated subagents are still running', async () => {
+    const sessionId = 'session-skill-1721-active-agents';
+    const tempDir = makeTempProject();
+
+    try {
+      writeSkillState(tempDir, sessionId, 'ralplan');
+      writeSubagentTrackingState(tempDir, [
+        {
+          agent_id: 'agent-1721',
+          agent_type: 'explore',
+          started_at: new Date().toISOString(),
+          parent_mode: 'none',
+          status: 'running',
+        },
+      ]);
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+
+      const statePath = join(
+        tempDir,
+        '.omc',
+        'state',
+        'sessions',
+        sessionId,
+        'skill-active-state.json',
+      );
+      const persisted = JSON.parse(readFileSync(statePath, 'utf-8')) as {
+        reinforcement_count?: number;
+      };
+      expect(persisted.reinforcement_count).toBe(0);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

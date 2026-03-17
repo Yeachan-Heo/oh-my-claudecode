@@ -17,6 +17,7 @@
  */
 
 import { writeModeState, readModeState, clearModeStateFile } from '../../lib/mode-state-io.js';
+import { getActiveAgentCount } from '../subagent-tracker/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -253,6 +254,13 @@ export function checkSkillActiveState(
   if (state.reinforcement_count >= state.max_reinforcements) {
     clearSkillActiveState(directory, sessionId);
     return { shouldBlock: false, message: '' };
+  }
+
+  // Orchestrators are allowed to go idle while delegated work is still active.
+  // Do not consume a reinforcement here; the skill is still active and should
+  // resume enforcement only after the running subagents finish.
+  if (getActiveAgentCount(directory) > 0) {
+    return { shouldBlock: false, message: '', skillName: state.skill_name };
   }
 
   // Block the stop and increment reinforcement count

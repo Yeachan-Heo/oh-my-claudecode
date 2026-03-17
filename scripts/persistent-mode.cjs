@@ -368,6 +368,18 @@ function readStateFileWithSession(stateDir, filename, sessionId) {
   return readStateFile(stateDir, filename);
 }
 
+function getActiveSubagentCount(stateDir) {
+  try {
+    const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+    if (!tracking || !Array.isArray(tracking.agents)) {
+      return 0;
+    }
+    return tracking.agents.filter((agent) => agent?.status === "running").length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Count incomplete Tasks from Claude Code's native Task system.
  */
@@ -1009,6 +1021,11 @@ async function main() {
           const maxReinforcements = skillState.state.max_reinforcements || 3;
 
           if (count < maxReinforcements) {
+            if (getActiveSubagentCount(stateDir) > 0) {
+              console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+              return;
+            }
+
             skillState.state.reinforcement_count = count + 1;
             skillState.state.last_checked_at = new Date().toISOString();
             writeJsonFile(skillState.path, skillState.state);

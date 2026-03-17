@@ -20,6 +20,28 @@ function makeTempDir(): string {
   return tempDir;
 }
 
+function writeSubagentTrackingState(
+  tempDir: string,
+  agents: Array<Record<string, unknown>>,
+): void {
+  const stateDir = join(tempDir, '.omc', 'state');
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(
+    join(stateDir, 'subagent-tracking.json'),
+    JSON.stringify(
+      {
+        agents,
+        total_spawned: agents.length,
+        total_completed: agents.filter((agent) => agent.status === 'completed').length,
+        total_failed: agents.filter((agent) => agent.status === 'failed').length,
+        last_updated: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 describe('skill-state', () => {
   let tempDir: string;
 
@@ -336,6 +358,25 @@ describe('skill-state', () => {
       // Different session should not be blocked
       const result = checkSkillActiveState(tempDir, 'session-2');
       expect(result.shouldBlock).toBe(false);
+    });
+
+    it('allows orchestrator idle while delegated subagents are still running', () => {
+      writeSkillActiveState(tempDir, 'plan', 'session-1');
+      writeSubagentTrackingState(tempDir, [
+        {
+          agent_id: 'agent-1',
+          agent_type: 'executor',
+          started_at: new Date().toISOString(),
+          parent_mode: 'none',
+          status: 'running',
+        },
+      ]);
+
+      const result = checkSkillActiveState(tempDir, 'session-1');
+      expect(result.shouldBlock).toBe(false);
+
+      const state = readSkillActiveState(tempDir, 'session-1');
+      expect(state?.reinforcement_count).toBe(0);
     });
 
     it('clears stale state and allows stop', () => {
