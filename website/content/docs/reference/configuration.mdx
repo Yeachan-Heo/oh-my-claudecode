@@ -163,8 +163,8 @@ MCP 서버 설정입니다.
 {
   "externalModels": {
     "defaults": {
-      "codexModel": "o4-mini",         // 기본 Codex 모델
-      "geminiModel": "gemini-2.5-pro"  // 기본 Gemini 모델
+      "codexModel": "gpt-5.3-codex",          // 기본 Codex 모델
+      "geminiModel": "gemini-3.1-pro-preview"  // 기본 Gemini 모델
     },
     "fallbackPolicy": {
       "onModelFailure": "provider_chain",  // provider_chain | cross_provider | claude_only
@@ -276,6 +276,33 @@ MCP 서버 설정입니다.
     "allowEdit": true,
     "allowWrite": true,
     "maxBackgroundTasks": 5
+  },
+  "externalModels": {
+    "defaults": {
+      "codexModel": "gpt-5.3-codex",
+      "geminiModel": "gemini-3.1-pro-preview"
+    },
+    "fallbackPolicy": {
+      "onModelFailure": "provider_chain",
+      "allowCrossProvider": false,
+      "crossProviderOrder": ["codex", "gemini"]
+    }
+  },
+  "delegationRouting": {
+    "enabled": false,
+    "defaultProvider": "claude",
+    "roles": {}
+  },
+  "startupCodebaseMap": {
+    "enabled": true,
+    "maxFiles": 200,
+    "maxDepth": 4
+  },
+  "taskSizeDetection": {
+    "enabled": true,
+    "smallWordLimit": 50,
+    "largeWordLimit": 200,
+    "suppressHeavyModesForSmallTasks": true
   }
 }
 ```

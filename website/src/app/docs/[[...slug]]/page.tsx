@@ -20,8 +20,18 @@ export default async function Page(props: {
 
   const MDXContent = page.data.body;
 
+  // For single-page sections with anchor links in meta.json,
+  // override footer to show correct prev/next pages
+  const anchorPageNav: Record<string, { previous?: { name: string; url: string }; next?: { name: string; url: string } }> = {
+    'getting-started': { previous: { name: 'Docs', url: '/docs' }, next: { name: 'Core Concepts', url: '/docs/concepts' } },
+    'concepts': { previous: { name: 'Getting Started', url: '/docs/getting-started' }, next: { name: 'Guides', url: '/docs/guides' } },
+    'guides': { previous: { name: 'Core Concepts', url: '/docs/concepts' }, next: { name: 'Agents', url: '/docs/agents' } },
+  };
+  const slugKey = params.slug?.length === 1 ? params.slug[0] : null;
+  const customNav = slugKey ? anchorPageNav[slugKey] : null;
+
   return (
-    <DocsPage toc={page.data.toc}>
+    <DocsPage toc={page.data.toc} footer={customNav ? { items: customNav } : undefined}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>

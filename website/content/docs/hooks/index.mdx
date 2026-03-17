@@ -6,7 +6,7 @@ description: OMC 훅 시스템의 동작 원리와 전체 구조를 설명합니
 ## 훅이란?
 
 훅(Hook)은 Claude Code의 라이프사이클 이벤트에 반응하여 자동으로 실행되는 스크립트입니다.
-oh-my-claudecode는 31개의 훅으로 Claude Code의 기본 동작을 확장합니다.
+oh-my-claudecode는 다수의 훅으로 Claude Code의 기본 동작을 확장합니다.
 
 사용자가 프롬프트를 제출하거나, 도구가 실행되거나, 세션이 시작/종료될 때
 훅이 자동으로 실행되어 추가 컨텍스트를 주입하거나, 모드를 활성화하거나, 상태를 관리합니다.
@@ -58,13 +58,14 @@ OMC의 훅은 크게 4가지 카테고리로 나뉩니다.
 
 ### 핵심 훅
 
-오케스트레이션, 키워드 감지, 복구 등 핵심 기능을 담당합니다.
+오케스트레이션, 키워드 감지 등 핵심 기능을 담당합니다.
 
 | 훅 | 설명 |
 |----|------|
 | keyword-detector | 매직 키워드 감지 (ultrawork, ralph 등) |
-| omc-orchestrator | 오케스트레이터 행동과 위임 강제 |
-| recovery | 편집 에러, 세션, 컨텍스트 윈도우 복구 |
+| skill-injector | 스킬 프롬프트 주입 |
+| pre-tool-enforcer | 도구 사용 전 규칙 검증 |
+| post-tool-verifier | 도구 사용 결과 검증 |
 
 ### 컨텍스트 관리 훅
 
@@ -75,7 +76,6 @@ OMC의 훅은 크게 4가지 카테고리로 나뉩니다.
 | notepad | 컴팩션 내성 메모리 시스템 |
 | project-memory | 프로젝트 메모리 관리 |
 | pre-compact | 컴팩션 전 처리 |
-| preemptive-compaction | 컨텍스트 사용량 모니터링 |
 
 ### 품질/검증 훅
 
@@ -105,7 +105,7 @@ export OMC_SKIP_HOOKS="keyword-detector,notepad"
 
 ## 상세 페이지
 
-- [라이프사이클 이벤트](/docs/hooks/lifecycle-events) -- 10개 이벤트와 훅 매핑
+- [라이프사이클 이벤트](/docs/hooks/lifecycle-events) -- 11개 이벤트와 훅 매핑
 - [핵심 훅](/docs/hooks/core-hooks) -- 실행 모드와 오케스트레이션 훅
 - [컨텍스트 관리 훅](/docs/hooks/context-hooks) -- 메모리와 컴팩션 훅
 - [매직 키워드](/docs/hooks/magic-keywords) -- 자연어로 모드를 활성화하는 시스템

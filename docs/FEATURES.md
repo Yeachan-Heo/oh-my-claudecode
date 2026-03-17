@@ -1,6 +1,7 @@
-# Developer API Reference
+# Developer API Reference (Internal)
 
-> Internal API documentation for oh-my-claudecode developers and contributors.
+> **This document is for OMC contributors and plugin developers**, not end-users.
+> For user-facing documentation, see [Getting Started](./GETTING-STARTED.md), [Architecture](./ARCHITECTURE.md), and [Reference](./REFERENCE.md).
 
 ## Table of Contents
 1. [Notepad Wisdom System](#notepad-wisdom-system)

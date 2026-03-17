@@ -62,6 +62,16 @@ export OMC_STATE_DIR="$HOME/.claude/omc"
 | `OMC_ROUTING_FORCE_INHERIT` | `false` | 부모 모델 상속 강제 |
 | `OMC_ESCALATION_ENABLED` | `true` | 에스컬레이션 허용 |
 
+### 티어 모델 오버라이드
+
+```bash
+export OMC_MODEL_HIGH="claude-opus-4-6"    # HIGH 티어 기본 모델
+export OMC_MODEL_MEDIUM="claude-sonnet-4-6" # MEDIUM 티어 기본 모델
+export OMC_MODEL_LOW="claude-haiku-4-5"    # LOW 티어 기본 모델
+```
+
+각 티어의 기본 모델 ID를 오버라이드합니다. Bedrock/Vertex AI 환경에서 특히 유용합니다.
+
 ### 모델 별칭 오버라이드
 
 ```bash
@@ -76,10 +86,12 @@ export OMC_MODEL_ALIAS_OPUS="custom-opus-model"
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `OMC_CODEX_DEFAULT_MODEL` | (프로바이더 기본값) | Codex CLI 기본 모델 |
-| `OMC_GEMINI_DEFAULT_MODEL` | (프로바이더 기본값) | Gemini CLI 기본 모델 |
+| `OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL` | `gpt-5.3-codex` | Codex CLI 기본 모델 |
+| `OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Gemini CLI 기본 모델 |
 | `OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER` | - | 기본 외부 프로바이더 (codex/gemini) |
 | `OMC_EXTERNAL_MODELS_FALLBACK_POLICY` | `provider_chain` | 모델 실패 시 폴백 정책 |
+| `OMC_CODEX_DEFAULT_MODEL` | - | (레거시) `OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL` 사용 권장 |
+| `OMC_GEMINI_DEFAULT_MODEL` | - | (레거시) `OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL` 사용 권장 |
 
 ## 위임 라우팅
 

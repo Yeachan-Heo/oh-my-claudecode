@@ -17,23 +17,31 @@ This directory contains documentation for end-users and developers:
 
 | File | Description |
 |------|-------------|
+| `GETTING-STARTED.md` | Installation, first session, and configuration guide |
+| `ARCHITECTURE.md` | System architecture overview (agents, skills, hooks, state) |
+| `HOOKS.md` | Comprehensive hooks system documentation (31 hooks) |
+| `TOOLS.md` | MCP tools reference (state, notepad, LSP, AST, Python REPL) |
+| `REFERENCE.md` | Quick-reference for agents, skills, hooks, and configuration |
+| `FEATURES.md` | Internal developer API reference |
 | `CLAUDE.md` | End-user orchestration instructions (installed to user projects) |
-| `FEATURES.md` | Developer API reference for internal features |
-| `REFERENCE.md` | API reference and configuration options |
-| `ARCHITECTURE.md` | System architecture overview |
 | `MIGRATION.md` | Version migration guides |
-| `COMPATIBILITY.md` | Compatibility matrix and requirements |
-| `TIERED_AGENTS_V2.md` | Model routing and tiered agent design |
+| `COMPATIBILITY.md` | MCP/Plugin compatibility layer documentation |
 | `DELEGATION-ENFORCER.md` | Delegation protocol documentation |
-| `SYNC-SYSTEM.md` | State synchronization system |
-| `ANALYTICS-SYSTEM.md` | Historical note on the removed analytics subsystem and current monitoring replacements |
-| `LOCAL_PLUGIN_INSTALL.md` | Plugin installation guide |
+| `SYNC-SYSTEM.md` | Metadata synchronization system |
+| `PERFORMANCE-MONITORING.md` | Performance monitoring and debugging guide |
+| `LOCAL_PLUGIN_INSTALL.md` | Local plugin installation for developers |
+| `OPENCLAW-ROUTING.md` | OpenClaw/Clawhip routing contract |
+| `CJK-IME-KNOWN-ISSUES.md` | CJK input method known issues |
 
 ## Subdirectories
 
 | Directory | Purpose |
 |-----------|---------|
-| `design/` | Feature design specifications |
+| `design/` | Feature design specifications and architecture proposals |
+| `agent-templates/` | Reusable agent prompt templates |
+| `partials/` | Reusable documentation fragments |
+| `ko/` | Korean translations of documentation |
+| `issues/` | Bug reference materials |
 
 ## For AI Agents
 
@@ -55,7 +63,7 @@ This directory contains documentation for end-users and developers:
 | Skill composition or architecture changes | `ARCHITECTURE.md` |
 | New internal API or feature | `FEATURES.md` |
 | Breaking changes or migrations | `MIGRATION.md` |
-| Tiered agent design updates | `TIERED_AGENTS_V2.md` |
+| Tiered agent design updates | `design/TIERED_AGENTS_V2.md` |
 | Platform or version support changes | `COMPATIBILITY.md` |
 | End-user instructions change | `CLAUDE.md` |
 | Major user-facing features | `../README.md` |

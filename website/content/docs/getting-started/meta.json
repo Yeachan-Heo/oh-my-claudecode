@@ -1,7 +1,6 @@
 {
   "title": "Getting Started",
   "pages": [
-    "index",
     "[설치 방법](/docs/getting-started#설치-방법)",
     "[첫 세션 실행하기](/docs/getting-started#첫-세션-실행하기)",
     "[설정 파일](/docs/getting-started#설정-파일)"

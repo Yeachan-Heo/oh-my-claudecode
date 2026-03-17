@@ -1,7 +1,6 @@
 {
   "title": "Core Concepts",
   "pages": [
-    "index",
     "[에이전트](/docs/concepts#에이전트란)",
     "[스킬](/docs/concepts#스킬이란)",
     "[훅](/docs/concepts#훅이란)",

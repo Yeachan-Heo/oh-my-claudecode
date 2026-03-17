@@ -3,20 +3,80 @@ title: Oh My ClaudeCode
 description: Claude Code를 위한 멀티 에이전트 오케스트레이션 플러그인
 ---
 
-## Oh My ClaudeCode란?
+![Oh My ClaudeCode](/images/omc-social-preview.jpg)
+
+**Multi-agent orchestration for Claude Code. Zero learning curve.**
 
 Oh My ClaudeCode(OMC)는 Claude Code 위에서 돌아가는 멀티 에이전트 오케스트레이션 레이어입니다.
-
 프롬프트 하나로 여러 전문 에이전트를 조율해서 복잡한 개발 작업을 자동화합니다.
+
+## Quick Start
+
+```bash
+# 1. 설치
+/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
+/plugin install oh-my-claudecode
+
+# 2. 설정
+setup omc
+
+# 3. 실행
+autopilot build me a REST API for managing tasks
+```
+
+그게 전부입니다. 나머지는 자동입니다.
 
 ## 주요 기능
 
-- 20개 전문 에이전트 — 탐색, 계획, 구현, 검증, 리뷰까지 역할 분담
-- 28개 스킬 — autopilot, ralph, ultrawork 등 자동화 워크플로우
-- 매직 키워드 — "autopilot build me X" 한 마디로 전체 파이프라인 실행
-- 팀 오케스트레이션 — 여러 Claude 에이전트를 동시에 조율
-- 상태 관리 — notepad, project-memory로 컨텍스트 유지
+| 기능 | 설명 |
+|------|------|
+| **20개 전문 에이전트** | 탐색, 계획, 구현, 검증, 리뷰까지 역할 분담 |
+| **34개 스킬** | autopilot, ralph, ultrawork 등 자동화 워크플로우 |
+| **매직 키워드** | "autopilot build me X" 한 마디로 전체 파이프라인 실행 |
+| **팀 오케스트레이션** | 여러 Claude/Codex/Gemini 에이전트를 동시에 조율 |
+| **상태 관리** | notepad, project-memory로 컨텍스트 유지 |
+| **멀티 AI** | Claude, Codex, Gemini를 교차 검증에 활용 (선택) |
 
-## 시작하기
+## 팀 모드
 
-왼쪽 사이드바의 **Getting Started**에서 설치부터 첫 세션까지 안내합니다.
+OMC의 핵심 오케스트레이션 모드입니다. 여러 에이전트가 파이프라인으로 협업합니다.
+
+```bash
+/team 3:executor "fix all TypeScript errors"
+```
+
+| 명령 | 워커 | 용도 |
+|------|------|------|
+| `omc team N:claude "..."` | Claude CLI | 일반 작업 |
+| `omc team N:codex "..."` | Codex CLI | 코드 리뷰, 보안 분석 |
+| `omc team N:gemini "..."` | Gemini CLI | UI/UX, 문서, 대용량 컨텍스트 |
+| `/ccg` | Claude + Codex + Gemini | 트리-모델 합성 |
+
+## 문서 구조
+
+<Cards>
+  <Card title="Getting Started" href="/docs/getting-started">
+    설치, 첫 세션 실행, 설정
+  </Card>
+  <Card title="Core Concepts" href="/docs/concepts">
+    에이전트, 스킬, 훅, 상태 관리
+  </Card>
+  <Card title="Guides" href="/docs/guides">
+    Autopilot, 팀 모드, 디버깅 가이드
+  </Card>
+  <Card title="Agents" href="/docs/agents">
+    20개 에이전트 상세 레퍼런스
+  </Card>
+  <Card title="Skills" href="/docs/skills">
+    34개 스킬 상세 레퍼런스
+  </Card>
+  <Card title="Hooks" href="/docs/hooks">
+    훅 시스템과 매직 키워드
+  </Card>
+  <Card title="Tools" href="/docs/tools">
+    MCP 도구 (State, Notepad, LSP 등)
+  </Card>
+  <Card title="Reference" href="/docs/reference">
+    설정, 환경변수, 체인지로그
+  </Card>
+</Cards>

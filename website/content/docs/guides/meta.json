@@ -1,7 +1,6 @@
 {
   "title": "Guides",
   "pages": [
-    "index",
     "[Autopilot](/docs/guides#autopilot이란)",
     "[팀 오케스트레이션](/docs/guides#팀-모드란)",
     "[계획 워크플로우](/docs/guides#계획이-왜-필요한가)",

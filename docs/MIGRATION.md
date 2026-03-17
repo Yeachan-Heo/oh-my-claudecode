@@ -2,6 +2,11 @@
 
 This guide covers all migration paths for oh-my-claudecode. Find your current version below.
 
+**Related docs:**
+- [GETTING-STARTED.md](GETTING-STARTED.md) — Installation and first steps
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System design and agent model
+- [HOOKS.md](HOOKS.md) — Hook system, keyword triggers, and skill activation
+
 ---
 
 ## Table of Contents
@@ -11,7 +16,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.5.2 → v3.5.3: Skill Consolidation](#v352--v353-skill-consolidation)
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
 - [v3.0 → v3.1: Notepad Wisdom & Enhanced Features](#v30--v31-notepad-wisdom--enhanced-features)
-- [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
+- [v3.x → v4.0: Major Architecture Overhaul (Historical)](#v3x--v40-major-architecture-overhaul-historical)
 
 ---
 
@@ -223,45 +228,14 @@ Agent naming is now strictly descriptive and role-based (for example: `architect
 
 Use canonical role names across prompts, commands, docs, and scripts. Avoid introducing alternate myth-style or legacy aliases in new content.
 
-### Directory Migration
+### Config File Rename
 
-Directory structures have been renamed for consistency with the new package name:
-
-#### Local Project Directories
-
-- **Old**: `.omc/`
-- **New**: `.omc/`
-
-#### Global Directories
-
-- **Old**: `~/.omc/`
-- **New**: `~/.omc/`
-
-#### Skills Directory
-
-- **Old**: `~/.claude/skills/omc-learned/`
-- **New**: `~/.claude/skills/omc-learned/`
-
-#### Config Files
+One config file was renamed in v3.0:
 
 - **Old**: `~/.claude/omc/mnemosyne.json`
 - **New**: `~/.claude/omc/learner.json`
 
-### Environment Variables
-
-All environment variables have been renamed from `OMC_*` to `OMC_*`:
-
-| Old                      | New                      |
-| ------------------------ | ------------------------ |
-| OMC_USE_NODE_HOOKS       | OMC_USE_NODE_HOOKS       |
-| OMC_USE_BASH_HOOKS       | OMC_USE_BASH_HOOKS       |
-| OMC_PARALLEL_EXECUTION   | OMC_PARALLEL_EXECUTION   |
-| OMC_LSP_TOOLS            | OMC_LSP_TOOLS            |
-| OMC_MAX_BACKGROUND_TASKS | OMC_MAX_BACKGROUND_TASKS |
-| OMC_ROUTING_ENABLED      | OMC_ROUTING_ENABLED      |
-| OMC_ROUTING_DEFAULT_TIER | OMC_ROUTING_DEFAULT_TIER |
-| OMC_ESCALATION_ENABLED   | OMC_ESCALATION_ENABLED   |
-| OMC_DEBUG                | OMC_DEBUG                |
+All directory paths (`.omc/`, `~/.omc/`, `~/.claude/skills/omc-learned/`) and environment variable names (`OMC_*`) are unchanged from v2.x.
 
 ### Command Mapping
 
@@ -287,52 +261,9 @@ All 2.x commands continue to work. Here's what changed:
 
 ### Magic Keywords
 
-Include these anywhere in your message to explicitly activate behaviors. Use keywords when you want explicit control (optional):
+Keywords (`ralph`, `ralplan`, `ulw`/`ultrawork`, `plan`) trigger specific execution modes when included anywhere in your message. Natural language also auto-detects intent without explicit keywords.
 
-| Keyword             | Effect                                   | Example                           |
-| ------------------- | ---------------------------------------- | --------------------------------- |
-| `ralph`             | Persistence mode - won't stop until done | "ralph: refactor the auth system" |
-| `ralplan`           | Iterative planning with consensus        | "ralplan: add OAuth support"      |
-| `ulw` / `ultrawork` | Maximum parallel execution               | "ulw: fix all type errors"        |
-| `plan`              | Planning interview                       | "plan: new API design"            |
-
-**ralph includes ultrawork:**
-
-```
-ralph: migrate the entire database
-    ↓
-Persistence (won't stop) + Ultrawork (maximum parallelism) built-in
-```
-
-**No keywords?** Claude still auto-detects:
-
-```
-"don't stop until this works"      # Triggers ralph
-"fast, I'm in a hurry"             # Triggers ultrawork
-"help me design the dashboard"     # Triggers planning
-```
-
-### Natural Cancellation
-
-Say any of these to stop:
-
-- "stop"
-- "cancel"
-- "abort"
-- "nevermind"
-- "enough"
-- "halt"
-
-Claude intelligently determines what to stop:
-
-```
-If in ralph-loop     → Exit persistence loop
-If in ultrawork      → Return to normal mode
-If in planning       → End planning interview
-If multiple active   → Stop the most recent
-```
-
-No more `/oh-my-claudecode:cancel-ralph` - just say "cancel"!
+For the full keyword reference, trigger patterns, and cancellation behavior, see [HOOKS.md](HOOKS.md).
 
 ### Migration Steps
 
@@ -354,49 +285,13 @@ npm uninstall -g oh-my-claudecode
 
 > **Note**: npm/bun global installs are no longer supported. Use the plugin system.
 
-#### 3. Rename Local Project Directories
-
-If you have existing projects using the old directory structure:
+#### 3. Rename Config File (if it exists)
 
 ```bash
-# In each project directory
-mv .omc .omc
+mv ~/.claude/omc/mnemosyne.json ~/.claude/omc/learner.json
 ```
 
-#### 4. Rename Global Directories
-
-```bash
-# Global configuration directory
-mv ~/.omc ~/.omc
-
-# Skills directory
-mv ~/.claude/skills/omc-learned ~/.claude/skills/omc-learned
-
-# Config directory
-mv ~/.claude/omc ~/.claude/omc
-```
-
-#### 5. Update Environment Variables
-
-Update your shell configuration files (`.bashrc`, `.zshrc`, etc.):
-
-```bash
-# Replace all OMC_* variables with OMC_*
-# Example:
-# OLD: export OMC_ROUTING_ENABLED=true
-# NEW: export OMC_ROUTING_ENABLED=true
-```
-
-#### 6. Update Scripts and Configurations
-
-Search for and update any references to:
-
-- Package name: `oh-my-claudecode` → `oh-my-claudecode`
-- Agent names: Use the mapping table above
-- Commands: Use the new slash commands
-- Directory paths: Update `.omc` → `.omc`
-
-#### 7. Run One-Time Setup
+#### 4. Run One-Time Setup
 
 In Claude Code, just say "setup omc", "omc setup", or any natural language equivalent.
 
@@ -796,48 +691,44 @@ After upgrading, verify new features:
 
 ---
 
-## v3.x → v4.0: Major Architecture Overhaul
+## v3.x → v4.0: Major Architecture Overhaul (Historical)
 
 ### Overview
 
-Version 4.0 is a complete architectural redesign focusing on scalability, maintainability, and developer experience.
+Version 4.0 was released as a major architectural redesign. The project is currently at v4.8.x.
 
-### What's Coming
+For a full list of what changed in v4.0 and subsequent releases, see [CHANGELOG.md](../CHANGELOG.md).
 
-⚠️ **This section is under active development as v4.0 is being built.**
+### Key Changes in v4.x
 
-#### Planned Changes
+- Plugin-based installation via Claude Code (npm global installs removed)
+- Modular agent system with improved lifecycle management
+- Unified CLI (`omc team`) replacing MCP runtime team tools
+- State files standardized under `.omc/state/`
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for the current system design
 
-1. **Modular Architecture**
-   - Plugin system for extensibility
-   - Core/extension separation
-   - Better dependency management
+### Migration Steps
 
-2. **Enhanced Agent System**
-   - Improved agent lifecycle management
-   - Better error recovery
-   - Performance optimizations
+1. **Reinstall via plugin system** if coming from a v3.x npm install:
 
-3. **Improved Configuration**
-   - Unified config schema
-   - Better validation
-   - Migration tooling
+   ```bash
+   npm uninstall -g oh-my-claudecode
+   # Then in Claude Code:
+   /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
+   ```
 
-4. **Breaking Changes**
-   - TBD based on development progress
-   - Full migration guide will be provided
+2. **Re-run setup**:
 
-### Migration Path (Coming Soon)
+   ```
+   /oh-my-claudecode:omc-setup
+   ```
 
-Detailed migration instructions will be provided when v4.0 reaches release candidate status.
-
-Expected timeline: Q1 2026
+3. **Review breaking changes** in [CHANGELOG.md](../CHANGELOG.md) for the specific v4.x release you are upgrading to.
 
 ### Stay Updated
 
-- Watch the [GitHub repository](https://github.com/Yeachan-Heo/oh-my-claudecode) for announcements
-- Check [CHANGELOG.md](../CHANGELOG.md) for detailed release notes
-- Join discussions in GitHub Issues
+- [CHANGELOG.md](../CHANGELOG.md) — full release notes
+- [GitHub repository](https://github.com/Yeachan-Heo/oh-my-claudecode) — announcements and issues
 
 ---
 
@@ -980,8 +871,9 @@ A: Keywords are explicit shortcuts. Natural language triggers auto-detection. Bo
 Now that you understand the migration:
 
 1. **For immediate impact**: Start using keywords (`ralph`, `ulw`, `plan`) in your work
-2. **For full power**: Read [docs/CLAUDE.md](CLAUDE.md) to understand orchestration
-3. **For advanced usage**: Check [docs/ARCHITECTURE.md](ARCHITECTURE.md) for deep dives
-4. **For team onboarding**: Share this guide with teammates
+2. **For new users**: Read [GETTING-STARTED.md](GETTING-STARTED.md) for installation and first steps
+3. **For advanced usage**: Check [ARCHITECTURE.md](ARCHITECTURE.md) for system design and agent model
+4. **For hook/keyword details**: See [HOOKS.md](HOOKS.md) for trigger patterns and skill activation
+5. **For team onboarding**: Share this guide with teammates
 
 Welcome to oh-my-claudecode!
