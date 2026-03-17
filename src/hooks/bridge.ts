@@ -1241,25 +1241,25 @@ function processPreToolUse(input: HookInput): HookOutput {
     : [];
   let modifiedToolInput: Record<string, unknown> | undefined;
 
-  // Force-inherit: deny Task calls that carry a `model` parameter when
+  // Force-inherit: deny Task/Agent calls that carry a `model` parameter when
   // forceInherit is enabled (Bedrock, Vertex, CC Switch, etc.).
   // Claude Code's hook protocol does not support modifiedInput, so we cannot
   // silently strip the model. Instead, deny the call so Claude retries without
   // the model param, letting agents inherit the parent session's model.
-  // (issues #1135, #1201)
-  if (input.toolName === "Task") {
-    const originalTaskInput = input.toolInput as
+  // (issues #1135, #1201, #1415)
+  if (input.toolName === "Task" || input.toolName === "Agent") {
+    const originalInput = input.toolInput as
       | Record<string, unknown>
       | undefined;
-    const taskModel = originalTaskInput?.model;
+    const inputModel = originalInput?.model;
 
-    if (taskModel) {
+    if (inputModel) {
       const config = loadConfig();
       if (config.routing?.forceInherit) {
         // Use permissionDecision:"deny" — the only PreToolUse mechanism
         // Claude Code supports for blocking a specific tool call with
         // feedback. modifiedInput is NOT supported by the hook protocol.
-        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on Task calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${taskModel}" is not valid for this provider.`;
+        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on ${input.toolName} calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${inputModel}" is not valid for this provider.`;
         return {
           continue: true,
           hookSpecificOutput: {
@@ -1270,6 +1270,12 @@ function processPreToolUse(input: HookInput): HookOutput {
         } as HookOutput & { hookSpecificOutput: Record<string, unknown> };
       }
     }
+  }
+
+  if (input.toolName === "Task") {
+    const originalTaskInput = input.toolInput as
+      | Record<string, unknown>
+      | undefined;
 
     if (originalTaskInput?.run_in_background === true) {
       const subagentType =

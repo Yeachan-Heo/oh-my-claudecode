@@ -249,4 +249,77 @@ describe('processHook - Environment Kill-Switches', () => {
       }
     });
   });
+
+  describe('Bedrock/Vertex model deny on Agent tool (issue #1415)', () => {
+    it('should deny Agent calls with model param when forceInherit is enabled', async () => {
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+
+      const input: HookInput = {
+        sessionId: 'test-session',
+        prompt: 'test',
+        directory: '/tmp/test',
+        hookType: 'pre-tool-use',
+        toolName: 'Agent',
+        toolInput: {
+          description: 'Test agent',
+          prompt: 'Do something',
+          subagent_type: 'oh-my-claudecode:executor',
+          model: 'sonnet',
+        },
+      };
+
+      const result = await processHook('pre-tool-use', input);
+      expect(result).toHaveProperty('hookSpecificOutput');
+      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
+      expect(output.permissionDecision).toBe('deny');
+      expect(output.permissionDecisionReason).toContain('MODEL ROUTING');
+      expect(output.permissionDecisionReason).toContain('Agent');
+    });
+
+    it('should deny Task calls with model param when forceInherit is enabled', async () => {
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+
+      const input: HookInput = {
+        sessionId: 'test-session',
+        prompt: 'test',
+        directory: '/tmp/test',
+        hookType: 'pre-tool-use',
+        toolName: 'Task',
+        toolInput: {
+          description: 'Test task',
+          prompt: 'Do something',
+          subagent_type: 'oh-my-claudecode:executor',
+          model: 'opus',
+        },
+      };
+
+      const result = await processHook('pre-tool-use', input);
+      expect(result).toHaveProperty('hookSpecificOutput');
+      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
+      expect(output.permissionDecision).toBe('deny');
+      expect(output.permissionDecisionReason).toContain('MODEL ROUTING');
+      expect(output.permissionDecisionReason).toContain('Task');
+    });
+
+    it('should allow Agent calls without model param on Bedrock', async () => {
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+
+      const input: HookInput = {
+        sessionId: 'test-session',
+        prompt: 'test',
+        directory: '/tmp/test',
+        hookType: 'pre-tool-use',
+        toolName: 'Agent',
+        toolInput: {
+          description: 'Test agent',
+          prompt: 'Do something',
+          subagent_type: 'oh-my-claudecode:executor',
+        },
+      };
+
+      const result = await processHook('pre-tool-use', input);
+      const output = (result as Record<string, unknown>).hookSpecificOutput as Record<string, unknown> | undefined;
+      expect(output?.permissionDecision).not.toBe('deny');
+    });
+  });
 });
