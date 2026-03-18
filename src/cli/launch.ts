@@ -318,7 +318,12 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
   try {
     execFileSync('tmux', tmuxArgs, { stdio: 'inherit' });
   } catch {
-    // tmux failed, fall back to direct launch
+    // tmux attach failed — kill the orphaned detached session that
+    // new-session -d just created so they don't accumulate.
+    try {
+      execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
+    } catch { /* session may already be gone */ }
+    // fall back to direct launch
     runClaudeDirect(cwd, args);
   }
 }
