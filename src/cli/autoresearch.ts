@@ -26,8 +26,8 @@ export const AUTORESEARCH_HELP = `omc autoresearch - Launch OMC autoresearch wit
 Usage:
   omc autoresearch                                                (launch interactive intake, then background launch)
   omc autoresearch [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
-  omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
   omc autoresearch init [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
+  omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
   omc autoresearch <mission-dir> [claude-args...]
   omc autoresearch --resume <run-id> [claude-args...]
 
@@ -35,11 +35,10 @@ Arguments:
   (no args)        Launch interactive intake that refines the mission/evaluator, writes .omc/specs
                    artifacts, and launches only after explicit confirmation.
   --topic/...      Seed the intake with draft values; still requires refinement/confirmation before launch.
-  --mission/       Explicit bypass path. --mission is raw mission text and --sandbox is the raw
+  init             Bare init is an interactive alias on TTYs; init with flags is the expert scaffold path.
+  --mission/       Expert bypass path. --mission is raw mission text and --sandbox is the raw
   --sandbox        evaluator/sandbox command. Both flags are required together; --keep-policy and
-                   --slug remain optional. Partial bypass is invalid.
-  init             Non-interactive mission scaffolding via flags (--topic, --evaluator, --slug;
-                   optional --keep-policy).
+                   --slug remain optional only when both are present.
   <mission-dir>    Directory inside a git repository containing mission.md and sandbox.md
   <run-id>         Existing autoresearch run id from .omc/logs/autoresearch/<run-id>/manifest.json
 

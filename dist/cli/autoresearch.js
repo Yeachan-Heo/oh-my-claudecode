@@ -7,24 +7,26 @@ const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
 export const AUTORESEARCH_HELP = `omc autoresearch - Launch OMC autoresearch with thin-supervisor parity semantics
 
 Usage:
-  omc autoresearch                                                (Claude setup + background launch)
-  omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
+  omc autoresearch                                                (launch interactive intake, then background launch)
+  omc autoresearch [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
   omc autoresearch init [--topic T] [--evaluator CMD] [--keep-policy P] [--slug S]
+  omc autoresearch --mission TEXT --sandbox CMD [--keep-policy P] [--slug S]
   omc autoresearch <mission-dir> [claude-args...]
   omc autoresearch --resume <run-id> [claude-args...]
 
 Arguments:
-  (no args)        Short-lived Claude-backed setup: discusses the mission, validates or infers
-                   an evaluator with confidence gating, then spawns autoresearch in a background tmux session.
-  --mission/       Explicit bypass path. --mission is raw mission text and --sandbox is the raw
+  (no args)        Launch interactive intake that refines the mission/evaluator, writes .omc/specs
+                   artifacts, and launches only after explicit confirmation.
+  --topic/...      Seed the intake with draft values; still requires refinement/confirmation before launch.
+  init             Bare init is an interactive alias on TTYs; init with flags is the expert scaffold path.
+  --mission/       Expert bypass path. --mission is raw mission text and --sandbox is the raw
   --sandbox        evaluator/sandbox command. Both flags are required together; --keep-policy and
-                   --slug remain optional. Partial bypass is invalid.
-  init             Non-interactive mission scaffolding via flags (--topic, --evaluator, --slug;
-                   optional --keep-policy).
+                   --slug remain optional only when both are present.
   <mission-dir>    Directory inside a git repository containing mission.md and sandbox.md
   <run-id>         Existing autoresearch run id from .omc/logs/autoresearch/<run-id>/manifest.json
 
 Behavior:
+  - intake writes canonical artifacts under .omc/specs before launch
   - validates mission.md and sandbox.md
   - requires sandbox.md YAML frontmatter with evaluator.command and evaluator.format=json
   - fresh launch creates a run-tagged autoresearch/<slug>/<run-tag> lane
@@ -83,11 +85,7 @@ function parseAutoresearchBypassArgs(args) {
     const hasBypassFlag = args.some((arg) => arg === '--mission'
         || arg.startsWith('--mission=')
         || arg === '--sandbox'
-        || arg.startsWith('--sandbox=')
-        || arg === '--keep-policy'
-        || arg.startsWith('--keep-policy=')
-        || arg === '--slug'
-        || arg.startsWith('--slug='));
+        || arg.startsWith('--sandbox='));
     if (!hasBypassFlag) {
         return null;
     }
@@ -140,7 +138,7 @@ function parseAutoresearchBypassArgs(args) {
         }
         if (arg.startsWith('-')) {
             throw new Error(`Unknown autoresearch flag: ${arg.split('=')[0]}.\n`
-                + 'Use --mission plus --sandbox to bypass the interview, or provide a mission-dir.\n\n'
+                + 'Use --mission plus --sandbox to bypass the intake, seed with --topic/--evaluator/--slug, or provide a mission-dir.\n\n'
                 + `${AUTORESEARCH_HELP}`);
         }
         throw new Error(`Positional arguments are not supported with --mission/--sandbox bypass mode: ${arg}.\n\n${AUTORESEARCH_HELP}`);
@@ -148,12 +146,12 @@ function parseAutoresearchBypassArgs(args) {
     const hasMission = typeof missionText === 'string' && missionText.trim().length > 0;
     const hasSandbox = typeof sandboxCommand === 'string' && sandboxCommand.trim().length > 0;
     if (hasMission !== hasSandbox) {
-        throw new Error('Both --mission and --sandbox are required together to bypass the interview. '
-            + 'Provide both flags, or neither to use interactive setup.\n\n'
+        throw new Error('Both --mission and --sandbox are required together to bypass the intake. '
+            + 'Provide both flags, or neither to use interactive intake.\n\n'
             + `${AUTORESEARCH_HELP}`);
     }
     if (!hasMission || !hasSandbox) {
-        throw new Error('Use --mission plus --sandbox together to bypass the interview. '
+        throw new Error('Use --mission plus --sandbox together to bypass the intake. '
             + '--keep-policy and --slug are optional only when both are present.\n\n'
             + `${AUTORESEARCH_HELP}`);
     }
@@ -205,7 +203,13 @@ export function parseAutoresearchArgs(args) {
         return { missionDir: null, runId, claudeArgs: values.slice(1) };
     }
     if (first.startsWith('-')) {
-        throw new Error(`mission-dir must be the first positional argument unless using --resume.\n${AUTORESEARCH_HELP}`);
+        return {
+            missionDir: null,
+            runId: null,
+            claudeArgs: [],
+            guided: true,
+            seedArgs: parseInitArgs(values),
+        };
     }
     return { missionDir: first, runId: null, claudeArgs: values.slice(1) };
 }
@@ -284,7 +288,7 @@ export async function autoresearchCommand(args) {
             });
         }
         else {
-            result = await guidedAutoresearchSetup(repoRoot);
+            result = await guidedAutoresearchSetup(repoRoot, parsed.seedArgs);
         }
         spawnAutoresearchTmux(result.missionDir, result.slug);
         return;

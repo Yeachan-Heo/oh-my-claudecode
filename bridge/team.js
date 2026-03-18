@@ -1401,6 +1401,7 @@ __export(tmux_session_exports, {
   buildWorkerStartCommand: () => buildWorkerStartCommand,
   createSession: () => createSession,
   createTeamSession: () => createTeamSession,
+  detectTeamMultiplexerContext: () => detectTeamMultiplexerContext,
   getDefaultShell: () => getDefaultShell,
   injectToLeaderPane: () => injectToLeaderPane,
   isSessionAlive: () => isSessionAlive,
@@ -1428,6 +1429,11 @@ import { existsSync as existsSync5 } from "fs";
 import { join as join5, basename as basename2, isAbsolute, win32 } from "path";
 import { promisify } from "util";
 import fs from "fs/promises";
+function detectTeamMultiplexerContext(env = process.env) {
+  if (env.TMUX) return "tmux";
+  if (env.CMUX_SURFACE_ID) return "cmux";
+  return "none";
+}
 function isUnixLikeOnWindows() {
   return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
 }
@@ -1650,7 +1656,8 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
   const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
   const execFileAsync = promisify2(execFile3);
-  const inTmux = Boolean(process.env.TMUX);
+  const multiplexerContext = detectTeamMultiplexerContext();
+  const inTmux = multiplexerContext === "tmux";
   const useDedicatedWindow = Boolean(options.newWindow && inTmux);
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
   const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";

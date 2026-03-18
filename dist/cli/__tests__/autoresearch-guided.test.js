@@ -21,7 +21,7 @@ vi.mock('../tmux-utils.js', () => ({
     buildTmuxShellCommand: buildTmuxShellCommandMock,
     wrapWithLoginShell: wrapWithLoginShellMock,
 }));
-import { guidedAutoresearchSetup, initAutoresearchMission, parseInitArgs, checkTmuxAvailable, spawnAutoresearchTmux } from '../autoresearch-guided.js';
+import { checkTmuxAvailable, guidedAutoresearchSetup, initAutoresearchMission, parseInitArgs, runAutoresearchNoviceBridge, spawnAutoresearchTmux, } from '../autoresearch-guided.js';
 async function initRepo() {
     const cwd = await mkdtemp(join(tmpdir(), 'omc-autoresearch-guided-test-'));
     execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
@@ -31,6 +31,27 @@ async function initRepo() {
     execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'ignore' });
     execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore' });
     return cwd;
+}
+function withMockedTty(fn) {
+    const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    return fn().finally(() => {
+        if (descriptor) {
+            Object.defineProperty(process.stdin, 'isTTY', descriptor);
+        }
+        else {
+            Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+        }
+    });
+}
+function makeFakeIo(answers) {
+    const queue = [...answers];
+    return {
+        async question() {
+            return queue.shift() ?? '';
+        },
+        close() { },
+    };
 }
 describe('initAutoresearchMission', () => {
     it('creates mission.md with correct content', async () => {
@@ -196,6 +217,78 @@ describe('parseInitArgs', () => {
         expect(result.slug).not.toMatch(/\//);
     });
 });
+describe('runAutoresearchNoviceBridge', () => {
+    it('loops through refine further before launching and writes draft + mission files', async () => {
+        const repo = await initRepo();
+        try {
+            const result = await withMockedTty(() => runAutoresearchNoviceBridge(repo, {}, makeFakeIo([
+                'Improve evaluator UX',
+                'Make success measurable',
+                'TODO replace with evaluator command',
+                'score_improvement',
+                'ux-eval',
+                'refine further',
+                'Improve evaluator UX',
+                'Passing evaluator output',
+                'node scripts/eval.js',
+                'pass_only',
+                'ux-eval',
+                'launch',
+            ])));
+            const draftContent = await readFile(join(repo, '.omc', 'specs', 'deep-interview-autoresearch-ux-eval.md'), 'utf-8');
+            const resultContent = await readFile(join(repo, '.omc', 'specs', 'autoresearch-ux-eval', 'result.json'), 'utf-8');
+            const missionContent = await readFile(join(result.missionDir, 'mission.md'), 'utf-8');
+            const sandboxContent = await readFile(join(result.missionDir, 'sandbox.md'), 'utf-8');
+            expect(result.slug).toBe('ux-eval');
+            expect(draftContent).toMatch(/Launch-ready: yes/);
+            expect(resultContent).toMatch(/"launchReady": true/);
+            expect(missionContent).toMatch(/Improve evaluator UX/);
+            expect(sandboxContent).toMatch(/command: node scripts\/eval\.js/);
+            expect(sandboxContent).toMatch(/keep_policy: pass_only/);
+        }
+        finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+    it('uses seeded inputs while still requiring confirmation-driven launch', async () => {
+        const repo = await initRepo();
+        try {
+            const result = await withMockedTty(() => runAutoresearchNoviceBridge(repo, {
+                topic: 'Seeded topic',
+                evaluatorCommand: 'node scripts/eval.js',
+                keepPolicy: 'score_improvement',
+                slug: 'seeded-topic',
+            }, makeFakeIo([
+                '',
+                '',
+                '',
+                '',
+                '',
+                'launch',
+            ])));
+            const draftContent = await readFile(join(repo, '.omc', 'specs', 'deep-interview-autoresearch-seeded-topic.md'), 'utf-8');
+            expect(result.slug).toBe('seeded-topic');
+            expect(draftContent).toMatch(/- topic: Seeded topic/);
+            expect(draftContent).toMatch(/- evaluator: node scripts\/eval\.js/);
+            expect(draftContent).toMatch(/Launch-ready: yes/);
+        }
+        finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+});
+describe('guidedAutoresearchSetup', () => {
+    it('delegates to the novice bridge behavior', async () => {
+        const repo = await initRepo();
+        try {
+            const result = await withMockedTty(() => guidedAutoresearchSetup(repo, { topic: 'Seeded topic', evaluatorCommand: 'node scripts/eval.js', keepPolicy: 'score_improvement', slug: 'seeded-topic' }, makeFakeIo(['', '', '', '', '', 'launch'])));
+            expect(result.slug).toBe('seeded-topic');
+        }
+        finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+});
 describe('checkTmuxAvailable', () => {
     beforeEach(() => {
         tmuxAvailableMock.mockReset();
@@ -220,7 +313,7 @@ describe('spawnAutoresearchTmux', () => {
     });
     it('throws when tmux is unavailable', () => {
         tmuxAvailableMock.mockReturnValue(false);
-        expect(() => spawnAutoresearchTmux('/repo/missions/demo', 'demo')).toThrow(/tmux is required/);
+        expect(() => spawnAutoresearchTmux('/repo/missions/demo', 'demo')).toThrow(/detached background autoresearch execution/);
     });
     it('throws when the session already exists', () => {
         tmuxAvailableMock.mockReturnValue(true);
@@ -258,7 +351,7 @@ describe('spawnAutoresearchTmux', () => {
         spawnAutoresearchTmux('/repo/missions/demo', 'demo');
         expect(buildTmuxShellCommandMock).toHaveBeenCalledWith(process.execPath, [expect.stringMatching(/bin\/omc\.js$/), 'autoresearch', '/repo/missions/demo']);
         expect(wrapWithLoginShellMock).toHaveBeenCalledWith(`${process.execPath} ${process.cwd()}/bin/omc.js autoresearch /repo/missions/demo`);
-        expect(logSpy).toHaveBeenCalledWith('\nAutoresearch launched in background tmux session.');
+        expect(logSpy).toHaveBeenCalledWith('\nAutoresearch launched in background.');
         expect(logSpy).toHaveBeenCalledWith('  Attach:   tmux attach -t omc-autoresearch-demo');
     });
     it('throws if startup verification fails after creating the session', () => {
@@ -277,49 +370,6 @@ describe('spawnAutoresearchTmux', () => {
         });
         expect(() => spawnAutoresearchTmux('/repo/missions/demo', 'demo')).toThrow(/did not stay available after launch/);
         expect(logSpy).not.toHaveBeenCalled();
-    });
-});
-describe('guidedAutoresearchSetup', () => {
-    it('loops on low-confidence inference until clarification produces a launch-ready handoff', async () => {
-        const questionMock = vi.fn()
-            .mockResolvedValueOnce('Improve search onboarding')
-            .mockResolvedValueOnce('')
-            .mockResolvedValueOnce('Use the vitest onboarding smoke test as evaluator');
-        const closeMock = vi.fn();
-        const createPromptInterface = vi.fn(() => ({ question: questionMock, close: closeMock }));
-        const runSetupSession = vi.fn()
-            .mockReturnValueOnce({
-            missionText: 'Improve search onboarding',
-            evaluatorCommand: 'npm run test:onboarding',
-            evaluatorSource: 'inferred',
-            confidence: 0.4,
-            slug: 'search-onboarding',
-            readyToLaunch: false,
-            clarificationQuestion: 'Which script or command should prove the goal?',
-        })
-            .mockReturnValueOnce({
-            missionText: 'Improve search onboarding',
-            evaluatorCommand: 'npm run test:onboarding',
-            evaluatorSource: 'inferred',
-            confidence: 0.92,
-            slug: 'search-onboarding',
-            readyToLaunch: true,
-        });
-        const isTty = process.stdin.isTTY;
-        Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-        try {
-            const repo = await initRepo();
-            const result = await guidedAutoresearchSetup(repo, {
-                createPromptInterface: createPromptInterface,
-                runSetupSession,
-            });
-            expect(result.slug).toBe('search-onboarding');
-            expect(runSetupSession).toHaveBeenCalledTimes(2);
-            expect(closeMock).toHaveBeenCalled();
-        }
-        finally {
-            Object.defineProperty(process.stdin, 'isTTY', { value: isTty, configurable: true });
-        }
     });
 });
 //# sourceMappingURL=autoresearch-guided.test.js.map

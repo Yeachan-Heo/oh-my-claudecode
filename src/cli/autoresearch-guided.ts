@@ -233,7 +233,7 @@ function assertTmuxSessionAvailable(sessionName: string): void {
 
 export function spawnAutoresearchTmux(missionDir: string, slug: string): void {
   if (!checkTmuxAvailable()) {
-    throw new Error('tmux is required for background autoresearch execution. Install tmux and try again.');
+    throw new Error('tmux is required for detached background autoresearch execution. Install tmux or run `omc autoresearch <mission-dir>` directly.');
   }
 
   const sessionName = `omc-autoresearch-${slug}`;
@@ -260,10 +260,8 @@ export function spawnAutoresearchTmux(missionDir: string, slug: string): void {
   execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', repoRoot, wrappedCommand], { stdio: 'ignore' });
   assertTmuxSessionAvailable(sessionName);
 
-  console.log('\nAutoresearch launched in background tmux session.');
+  console.log('\nAutoresearch launched in background.');
   console.log(`  Session:  ${sessionName}`);
   console.log(`  Mission:  ${missionDir}`);
   console.log(`  Attach:   tmux attach -t ${sessionName}`);
 }
-
-export { buildAutoresearchSetupPrompt } from './autoresearch-setup-session.js';
