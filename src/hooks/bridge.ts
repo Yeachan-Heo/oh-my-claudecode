@@ -1345,14 +1345,17 @@ function processPreToolUse(input: HookInput): HookOutput {
   // Activate skill state when Skill tool is invoked (issue #1033)
   // This writes skill-active-state.json so the Stop hook can prevent premature
   // session termination while a skill is executing.
+  // Pass rawSkillName so writeSkillActiveState can distinguish OMC built-in
+  // skills from project custom skills with the same name (issue #1581).
   if (input.toolName === "Skill") {
     const skillName = getInvokedSkillName(input.toolInput);
     if (skillName) {
+      const rawSkillName = getRawSkillName(input.toolInput);
       // Use the statically-imported synchronous write so it completes before
       // the Stop hook can fire. The previous fire-and-forget .then() raced with
       // the Stop hook in short-lived processes.
       try {
-        writeSkillActiveState(directory, skillName, input.sessionId);
+        writeSkillActiveState(directory, skillName, input.sessionId, rawSkillName);
       } catch {
         // Skill-state write is best-effort; don't fail the hook on error.
       }
@@ -1531,6 +1534,19 @@ function getInvokedSkillName(toolInput: unknown): string | null {
     ? normalized.split(":").at(-1)
     : normalized;
   return namespaced?.toLowerCase() || null;
+}
+
+/**
+ * Extract the raw (un-normalized) skill name from Skill tool input.
+ * Used to distinguish OMC built-in skills (prefixed with 'oh-my-claudecode:')
+ * from project custom skills or other plugin skills with the same bare name.
+ * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+ */
+function getRawSkillName(toolInput: unknown): string | undefined {
+  if (!toolInput || typeof toolInput !== "object") return undefined;
+  const input = toolInput as Record<string, unknown>;
+  const raw = input.skill ?? input.skill_name ?? input.skillName ?? input.command ?? null;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined;
 }
 
 async function processPostToolUse(input: HookInput): Promise<HookOutput> {

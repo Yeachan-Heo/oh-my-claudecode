@@ -85,6 +85,30 @@ describe('skill-state', () => {
       expect(getSkillProtection('SKILL')).toBe('light');
       expect(getSkillProtection('Plan')).toBe('medium');
     });
+
+    it('returns none for project custom skills with same name as OMC skills (issue #1581)', () => {
+      // rawSkillName without oh-my-claudecode: prefix → project custom skill
+      expect(getSkillProtection('plan', 'plan')).toBe('none');
+      expect(getSkillProtection('review', 'review')).toBe('none');
+      expect(getSkillProtection('tdd', 'tdd')).toBe('none');
+    });
+
+    it('returns protection for OMC skills when rawSkillName has prefix', () => {
+      expect(getSkillProtection('plan', 'oh-my-claudecode:plan')).toBe('medium');
+      expect(getSkillProtection('deepinit', 'oh-my-claudecode:deepinit')).toBe('heavy');
+    });
+
+    it('returns none for other plugin skills with rawSkillName', () => {
+      // ouroboros:plan, claude-mem:make-plan etc. should not get OMC protection
+      expect(getSkillProtection('plan', 'ouroboros:plan')).toBe('none');
+      expect(getSkillProtection('make-plan', 'claude-mem:make-plan')).toBe('none');
+    });
+
+    it('falls back to map lookup when rawSkillName is not provided', () => {
+      // Backward compatibility: no rawSkillName → use SKILL_PROTECTION map
+      expect(getSkillProtection('plan')).toBe('medium');
+      expect(getSkillProtection('deepinit')).toBe('heavy');
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -153,6 +177,20 @@ describe('skill-state', () => {
     it('strips namespace prefix from skill name', () => {
       const state = writeSkillActiveState(tempDir, 'oh-my-claudecode:plan', 'session-1');
       expect(state!.skill_name).toBe('plan');
+    });
+
+    it('does not write state for project custom skills with same name as OMC skills (issue #1581)', () => {
+      // rawSkillName='plan' (no prefix) → project custom skill → no state
+      const state = writeSkillActiveState(tempDir, 'plan', 'session-1', 'plan');
+      expect(state).toBeNull();
+      expect(readSkillActiveState(tempDir, 'session-1')).toBeNull();
+    });
+
+    it('writes state for OMC skills when rawSkillName has prefix', () => {
+      const state = writeSkillActiveState(tempDir, 'plan', 'session-1', 'oh-my-claudecode:plan');
+      expect(state).not.toBeNull();
+      expect(state!.skill_name).toBe('plan');
+      expect(state!.max_reinforcements).toBe(5);
     });
 
     it('overwrites existing state when new skill is invoked', () => {

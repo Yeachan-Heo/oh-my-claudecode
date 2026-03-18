@@ -360,7 +360,14 @@ const SKILL_PROTECTION_MAP = {
   deepinit: 'heavy',
 };
 
-function getSkillProtectionLevel(skillName) {
+function getSkillProtectionLevel(skillName, rawSkillName) {
+  // When rawSkillName is provided, only apply protection to OMC-prefixed skills.
+  // Non-prefixed skills are project custom skills or other plugins — no protection.
+  // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+  if (rawSkillName != null && typeof rawSkillName === 'string' &&
+      !rawSkillName.toLowerCase().startsWith('oh-my-claudecode:')) {
+    return 'none';
+  }
   const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
   return SKILL_PROTECTION_MAP[normalized] || 'none';
 }
@@ -373,8 +380,8 @@ function extractSkillName(toolInput) {
   return normalized.includes(':') ? normalized.split(':').at(-1).toLowerCase() : normalized.toLowerCase();
 }
 
-function writeSkillActiveState(directory, skillName, sessionId) {
-  const protection = getSkillProtectionLevel(skillName);
+function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
+  const protection = getSkillProtectionLevel(skillName, rawSkillName);
   if (protection === 'none') return;
 
   const config = SKILL_PROTECTION_CONFIGS[protection];
@@ -456,7 +463,10 @@ async function main() {
       if (skillName) {
         const sid = typeof data.session_id === 'string' ? data.session_id
           : typeof data.sessionId === 'string' ? data.sessionId : '';
-        writeSkillActiveState(directory, skillName, sid);
+        // Pass rawSkillName to distinguish OMC skills from project custom skills (issue #1581)
+        const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || '';
+        const rawSkillName = typeof rawSkill === 'string' && rawSkill.trim() ? rawSkill.trim() : undefined;
+        writeSkillActiveState(directory, skillName, sid, rawSkillName);
       }
     }
 
