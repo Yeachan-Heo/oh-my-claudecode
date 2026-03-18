@@ -63,7 +63,7 @@ lsp_diagnostics(file="src/auth.ts")
 
 ### lsp_diagnostics_directory
 
-프로젝트 전체의 진단 결과를 반환합니다.
+지정 디렉토리에 대해 프로젝트 수준 진단을 실행합니다. `tsc --noEmit`을 우선 사용하고, 실패 시 LSP 반복 방식으로 폴백합니다.
 
 ```
 lsp_diagnostics_directory(path="src/")
@@ -81,7 +81,7 @@ lsp_prepare_rename(file="src/auth.ts", line=42, character=10)
 
 ### lsp_rename
 
-프로젝트 전체에서 심볼의 이름을 변경합니다.
+프로젝트 전체에서 심볼의 이름을 변경할 편집 목록을 반환합니다. **변경 사항을 자동으로 적용하지 않습니다.**
 
 ```
 lsp_rename(file="src/auth.ts", line=42, character=10, newName="AuthService")

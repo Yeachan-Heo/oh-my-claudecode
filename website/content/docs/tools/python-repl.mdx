@@ -11,7 +11,14 @@ Python REPL은 세션 간 상태가 유지되는 Python 실행 환경입니다. 
 
 ### python_repl
 
-Python 코드를 실행하고 결과를 반환합니다.
+Python 코드를 실행하고 결과를 반환합니다. `action` 파라미터로 동작을 지정할 수 있습니다.
+
+| action | 설명 |
+|--------|------|
+| `execute` (기본값) | 코드 실행 |
+| `interrupt` | 실행 중단 |
+| `reset` | 상태 초기화 |
+| `get_state` | 메모리/변수 확인 |
 
 ```
 python_repl(code="import json; data = json.loads('{\"key\": \"value\"}'); print(data)")

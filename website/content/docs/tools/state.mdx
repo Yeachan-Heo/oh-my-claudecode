@@ -61,23 +61,23 @@ state_clear(mode="ralph", session_id="abc123")
 
 ### state_list_active
 
-현재 활성 중인 모든 세션을 나열합니다.
+현재 활성 중인 모든 모드를 나열합니다.
 
 ```
 state_list_active()
 ```
 
-`.omc/state/sessions/` 하위의 모든 세션 ID와 해당 모드를 반환합니다.
+활성 상태 파일이 있는 모드들을 반환합니다.
 
 ### state_get_status
 
-특정 세션의 상태 요약을 반환합니다.
+특정 모드 또는 전체 모드의 상세 상태를 반환합니다.
 
 ```
-state_get_status(session_id="abc123")
+state_get_status(mode="ralph")
 ```
 
-활성 모드 이름, 의존 모드 존재 여부를 포함합니다.
+활성 상태, 파일 경로, 상태 내용을 포함합니다.
 
 ## 환경 변수
 
