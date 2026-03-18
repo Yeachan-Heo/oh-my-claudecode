@@ -186,14 +186,43 @@ class CoupangSession {
 // ─── Coupang Search ─────────────────────────────────────
 
 /**
- * NeedItem에서 쿠팡 검색 키워드를 추출한다.
+ * 쿠팡에서 검색 불가능한 서비스/추상 키워드 블랙리스트.
+ * 이 단어가 포함된 product_category는 쿠팡 검색 키워드로 사용하지 않는다.
  */
-function extractSearchKeyword(need: DetectedNeed): string {
-  if (need.product_categories.length > 0) {
-    const primaryCategory = need.product_categories[0];
-    if (primaryCategory.length >= 3) return primaryCategory;
+const SERVICE_BLACKLIST = [
+  '상담', '시술', '교육', '서비스', '앱', '플랫폼', '코칭', '강의',
+  '임대', '구독', '보험', '투자', '재테크', '대행', '컨설팅',
+  '오피스', '클리닉', '병원', '성형', '시스템', '소프트웨어',
+];
+
+/**
+ * 키워드가 쿠팡에서 물리적 제품 검색에 적합한지 판단한다.
+ */
+function isCoupangSearchable(keyword: string): boolean {
+  return !SERVICE_BLACKLIST.some((blocked) => keyword.includes(blocked));
+}
+
+/**
+ * NeedItem에서 쿠팡 검색 키워드를 추출한다.
+ * 서비스/앱 등 쿠팡에 없는 키워드는 건너뛴다.
+ */
+function extractSearchKeyword(need: DetectedNeed): string | null {
+  // product_categories에서 쿠팡 검색 가능한 첫 번째 키워드를 찾는다
+  for (const category of need.product_categories) {
+    if (category.length >= 3 && isCoupangSearchable(category)) {
+      return category;
+    }
   }
-  return need.problem.length > 30 ? need.problem.slice(0, 30) : need.problem;
+
+  // 모든 product_categories가 블랙리스트 또는 너무 짧으면 null 반환 (검색 스킵)
+  // product_categories가 비어있으면 problem에서 추출 시도
+  if (need.product_categories.length > 0) {
+    console.warn(`[product-matcher] 모든 product_categories가 쿠팡 부적합 — 스킵: ${JSON.stringify(need.product_categories)}`);
+    return null;
+  }
+
+  const keyword = need.problem.length > 30 ? need.problem.slice(0, 30) : need.problem;
+  return isCoupangSearchable(keyword) ? keyword : null;
 }
 
 // ─── Fallback: DB 사전 기반 매칭 ────────────────────────
@@ -241,7 +270,7 @@ async function matchFromDictionary(needs: DetectedNeed[]): Promise<ProductMatch[
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-6-20250715',
+    model: 'claude-sonnet-4-20250514',
     systemPrompt,
     userMessage,
     maxTokens: 4096,
@@ -307,6 +336,12 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
   const allMatches: ProductMatch[] = [];
   const fallbackNeeds: DetectedNeed[] = [];
 
+  // SKIP_COUPANG=1 이면 브라우저 검색 없이 DB 사전만 사용 (CI/테스트/안정성)
+  if (process.env.SKIP_COUPANG === '1') {
+    console.log('[product-matcher] SKIP_COUPANG=1 — DB 사전 fallback 모드');
+    return matchFromDictionary(needs);
+  }
+
   // Step 1: 쿠팡 세션 열기 (한 번만 연결, 같은 탭에서 검색어만 변경)
   const session = new CoupangSession();
   const connected = await session.connect();
@@ -321,29 +356,34 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
   for (let i = 0; i < needs.length; i++) {
     const need = needs[i];
     const keyword = extractSearchKeyword(need);
+
+    // 쿠팡 검색 불가능한 키워드(서비스/앱 등)는 스킵
+    if (keyword === null) {
+      console.log(`[product-matcher] 스킵 ${i + 1}/${needs.length}: 쿠팡 검색 불가 (need=${need.need_id}, categories=${JSON.stringify(need.product_categories)})`);
+      fallbackNeeds.push(need);
+      continue;
+    }
+
     console.log(`[product-matcher] 쿠팡 검색 ${i + 1}/${needs.length}: "${keyword}" (need=${need.need_id})`);
 
     const coupangResults = await session.search(keyword, 5);
 
     // 안티봇 딜레이: 검색 완료 후 다음 검색 전 대기
     if (i < needs.length - 1) {
-      // 3개마다 긴 휴식 (60~120초) — 사람이 다른 일 하다가 돌아온 패턴
       if ((i + 1) % 3 === 0) {
-        const longBreak = randInt(60_000, 120_000);
-        console.log(`[product-matcher] 긴 휴식: ${(longBreak / 1000).toFixed(0)}초 (${i + 1}/${needs.length} 완료)`);
-        await new Promise(r => setTimeout(r, longBreak));
+        // 3개마다 긴 휴식 (60~120초) — 사람이 다른 일 하다가 돌아온 패턴
+        console.log(`[product-matcher] 긴 휴식 시작 (${i + 1}/${needs.length} 완료)`);
+        await humanDelay(60_000, 120_000);
       } else {
         // 일반 딜레이 (15~30초) — 결과를 읽고 생각하는 시간
-        const delay = randInt(15_000, 30_000);
-        console.log(`[product-matcher] 대기: ${(delay / 1000).toFixed(1)}초`);
-        await new Promise(r => setTimeout(r, delay));
+        await humanDelay(15_000, 30_000);
       }
     }
 
     if (coupangResults.length > 0) {
       // 검색 성공: 쿠팡 결과를 DB에 저장 후 ProductMatch로 변환
       const needMatches: ProductMatch[] = [];
-      for (let idx = 0; idx < Math.min(coupangResults.length, 5); idx++) {
+      for (let idx = 0; idx < coupangResults.length; idx++) {
         const result = coupangResults[idx];
         const productId = `coupang-${Date.now()}-${idx}`;
 
@@ -385,7 +425,7 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
         product_categories: need.product_categories,
       };
 
-      const coupangProducts: CoupangProduct[] = coupangResults.slice(0, 5).map((r) => ({
+      const coupangProducts: CoupangProduct[] = coupangResults.map((r) => ({
         name: r.name,
         price: r.price !== '가격 미표시' ? r.price : undefined,
         url: r.url,
@@ -404,7 +444,7 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
     }
   }
 
-  // Step 2: 검색 실패한 니즈는 기존 DB 사전으로 fallback
+  // Step 3: 검색 실패한 니즈는 기존 DB 사전으로 fallback
   if (fallbackNeeds.length > 0) {
     console.log(`[product-matcher] DB 사전 fallback: ${fallbackNeeds.length}개 니즈`);
     try {
@@ -461,7 +501,7 @@ export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch
     }
   }
 
-  // Step 4: 쿠팡 세션 정리
+  // Step 4: 쿠팡 세션 정리 (cleanup)
   await session.disconnect();
 
   console.log(`[product-matcher] 최종 매칭: ${allMatches.length}개 (fallback: ${fallbackNeeds.length}개)`);

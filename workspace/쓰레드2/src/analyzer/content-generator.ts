@@ -136,7 +136,7 @@ async function generatePositioning(
   const systemPrompt = loadAgentPrompt('positioning');
 
   const userMessage = JSON.stringify({
-    instruction: `Generate a positioning card for this product-need pair. The format MUST be "${selectedFormat}". Return a single JSON object.`,
+    instruction: `Generate a positioning card for this product-need pair. The format MUST be "${selectedFormat}". You MUST respond with ONLY a valid JSON object. No explanations, no prose, no markdown — just raw JSON.`,
     need: {
       need_id: need.need_id,
       category: need.category,
@@ -167,7 +167,7 @@ async function generatePositioning(
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-6-20250715',
+    model: 'claude-sonnet-4-20250514',
     systemPrompt,
     userMessage,
     maxTokens: 2048,
@@ -223,7 +223,7 @@ export async function generateContent(
 Format: ${selectedFormat}
 ${hookInstruction}
 ${selfCommentInstruction}
-Return JSON with hook, bodies (3 variations), hooks (5 variations), and self_comments.`,
+You MUST respond with ONLY a valid JSON object containing: hook, bodies (3 variations), hooks (5 variations), and self_comments. No explanations, no prose, no markdown — just raw JSON.`,
     positioning: {
       format: positioning.format,
       angle: positioning.angle,
@@ -253,7 +253,7 @@ Return JSON with hook, bodies (3 variations), hooks (5 variations), and self_com
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-6-20250715',
+    model: 'claude-sonnet-4-20250514',
     systemPrompt,
     userMessage,
     maxTokens: 4096,

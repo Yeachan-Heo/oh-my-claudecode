@@ -1,173 +1,277 @@
-# Threads 파이프라인 개선 — Handoff
+# Threads2 Handoff — 2026-03-18 (세션 5)
 
-> 2026-03-16 기준. 각 Phase는 독립적으로 병렬 작업 가능.
+## 현재 상태: 전체 시스템 완성 + pm-skills 설치 + 성과 추적 자동화 완료
 
-## 현재 상태
+### DB (Supabase PostgreSQL 17.6)
+- 연결: `postgresql://postgres:fkeldjstm3%23D@db.smexrvpobdeszublfgwq.supabase.co:5432/postgres`
 
-- 137개 포스트 수집 완료 (소비자 키워드 기반)
-- 분석 파이프라인 1회 실행 완료: 니즈 9개, 매칭 4개, 콘텐츠 4개
-- DB: PGlite (로컬), Drizzle ORM
-- 텔레그램 봇 연결 완료 (`@threads_kr_bot`, .env에 토큰/채팅ID 저장됨)
+| 테이블 | 행 수 | 비고 |
+|--------|-------|------|
+| thread_posts | **464** | 194(기존) + 270(벤치마크 9채널×30) |
+| needs | **56** | 38(기존) + 18(신규). 쿠팡 바이어블 48개 |
+| aff_contents | **7** | 2(기존) + 5(워밍업 공감형) |
+| products | 2 | 쿠팡 파트너스 링크 |
+| channels | 9 verified | 5개 모니터링 완료 |
+| thread_comments | 0 | 미사용 |
 
-## 발견된 문제
+### 수집 시스템 (GraphQL 인터셉션 적용)
 
-1. 셀프댓글 전부 "좋은 정보 감사합니다!" — 제휴링크 미삽입
-2. 포맷 전부 "문제공감형" — 6가지 중 1개만 사용
-3. 건강식품으로 카테고리 편향 — 뷰티/주방/생활 니즈 미추출
-4. 상품사전 50개로 매칭 실패 5/9 → **실시간 검색으로 전환 결정**
-5. snapshot.ts의 clicks/conversions/revenue 하드코딩 0
-6. topic_tags, 정확한 포스트 날짜 미수집
-7. DB `threads_post_id` 컬럼 누락 에러
+**핵심 변경**: 3개 수집 경로 모두 GraphQL 대응 완료
 
-## 운영 규칙 (반드시 준수)
+| 수집 방식 | 파일 | GraphQL | 비고 |
+|----------|------|---------|------|
+| 키워드 검색 | `scripts/collect-by-keyword.ts` | ✅ 적용 | 테스트 통과, 20개 캡처 확인 |
+| 채널 수집 | `src/scraper/collect.ts` | ✅ 적용 | 타입체크 통과, DOM 폴백 유지 |
+| MCP 에이전트 | 스킬 가이드 업데이트 | ✅ CLI 권장 | `COLLECTION_GUIDE.md` 생성 |
 
-- **워밍업**: 첫 20개 포스트는 광고/셀프댓글 없이 순수 콘텐츠만 발행
-- **상품사전 폐지**: 정적 products_v1.json → 니즈 기반 실시간 쿠팡/네이버 검색
-- **파트너스 링크**: 쿠팡 제품 링크를 사용자에게 텔레그램으로 전달 → 사용자가 파트너스에서 링크 생성 → 시스템에 입력
+**GraphQL 인터셉터**: `src/scraper/graphql-interceptor.ts` (신규)
+- `page.on('response')`로 `/graphql/query` 응답 자동 캡처
+- `searchResults.edges` (검색) + `mediaData.edges` (프로필) 두 형태 모두 처리
+- DOM 파싱 자동 폴백
 
----
+**개선 효과**:
+- like_count: "1.8만" 파싱 → **정확한 정수** (18033)
+- timestamp: "3일 전" → **정확한 unix epoch**
+- text: UI 아티팩트 없이 깨끗한 본문
+- 검색 1회 로드로 20개 포스트 캡처 (DOM은 개별 방문 필요)
+- view_count는 여전히 개별 방문 필요 (GraphQL 미포함)
 
-## Phase 1: 수집 개선 (collect.ts + DB 스키마)
+**추가 수정**:
+- 키워드 검색 스크롤 5→10회 확대
+- 최신순 탭 자동 전환 시도 (없으면 기본 정렬 폴백)
 
-**목표**: topic_tags, 정확한 날짜, 조회수를 수집할 수 있도록 개선
+### 벤치마크 모니터링 결과 (5채널)
 
-### Task 1-1: DB 스키마 수정
-- `thread_posts` 테이블에 컬럼 추가:
-  - `topic_tags TEXT[]` — Threads 네이티브 주제 태그 (raw)
-  - `topic_category TEXT` — 분류된 주제 카테고리 (배치 분류 후 UPDATE)
-- `content_lifecycle` 테이블에 컬럼 추가:
-  - `threads_post_id TEXT` — 발행된 포스트 ID
-  - `threads_post_url TEXT` — 발행된 포스트 URL
-- `post_snapshots` 테이블에 컬럼 추가:
-  - `post_views INTEGER` — 본문 조회수
-  - `comment_views INTEGER` — 셀프댓글 조회수
-- 파일: `src/db/schema.ts`, `src/types.ts`
+| 채널 | 평균조회 | 참여율 | 제휴% | 인사이트 |
+|------|---------|--------|------|---------|
+| ez_yaksa | 2,511 | **14.21%** | 0% | 전문 정보 + 논문 레퍼런스 |
+| jonses98 | 675 | **15.84%** | 30% | 동료형 톤, 답글 최다 |
+| manyjjju_yaksa | 1,551 | 1.68% | 20% | 약사 권위 + 리스트형 |
+| peach_bly | 503 | 2.79% | 100% | 본문=정보, 후속글=쿠팡 분리 |
+| ilipmaster_ | 1,227 | 0.24% | 90% | 과도한 제휴 → 참여 저하 |
 
-### Task 1-2: collect.ts — topic_tags + 날짜 수집
-- 피드 스크롤 시 포스트 헤더에서 추출:
-  - `username > 주제태그 날짜` 패턴 파싱
-  - 주제태그 없는 경우 null
-  - 상대 날짜("6일") → 절대 날짜 변환
-  - 절대 날짜("2025-03-26") → 그대로 저장
-- DOM 패턴 참고 (스크린샷 기반):
-  - `작성자 > 주제태그 날짜` (태그 있는 경우)
-  - `작성자 상대시간` (태그 없는 경우)
-- 파일: `src/scraper/collect.ts`
+### 페르소나 업그레이드 (persona-writer.md)
 
-### Task 1-3: collect.ts — 조회수 수집
-- 현재: 포스트 상세 페이지 방문 시 좋아요/댓글/리포스트만 수집
-- 변경: 상단 "스레드 조회 N회" 텍스트도 추출하여 `view_count`에 저장
-- DOM 위치: 포스트 상세 페이지 상단 중앙 "스레드" 아래 "조회 X회" 또는 "조회 X천회" / "조회 X만회"
-- 파일: `src/scraper/collect.ts`
+1. **문체 가이드라인 (데이터 기반)**
+   - 163개 포스트 Top30 vs Bottom30 비교
+   - 훅 20자 이내, 이미지 필수(80%), 이모지 0개, ㅜㅠ 적극 사용
+   - SHORT-SHORT-TEXT-SHORT 구조, 137자 이내
 
----
+2. **호모필리(Homophily) 원칙**
+   - 빈이 = 전문가(↓)가 아니라 동료(→)
+   - 건강/의료 안전 규칙: 효능 단정 금지, 개인 경험 한정
 
-## Phase 2: 분류 + 파이프라인 개선
+3. **심리 트리거 × 패턴 로테이션**
+   - 4 트리거: 손실회피(3.3x), FOMO(1.7x), 사회적증거(1.3x), 선택과부하
+   - 3 패턴: A(경험), B(공감), C(발견) = 12가지 조합 순환
 
-**목표**: TopicCategory 배치 분류 → 카테고리별 그룹 분석
+### 심리 트리거 분석 결과 (464개 포스트)
 
-### Task 2-1: TopicCategory 타입 정의
-- `src/types.ts`에 추가:
-```typescript
-export type TopicCategory =
-  | '건강' | '뷰티' | '다이어트' | '운동' | '생활' | '주방'
-  | '디지털' | '육아' | '인테리어' | '패션' | '식품' | '문구' | '향수' | '기타';
+| 트리거 | 평균 조회수 | 배수 | 최고 예시 |
+|--------|-----------|------|----------|
+| **손실회피** | 105,374 | **3.3x** | "협찬제품 샀다가 후회" (135만뷰) |
+| **FOMO** | 66,406 | **1.7x** | "알고 나면 못 돌아감" |
+| **사회적증거** | 46,887 | 1.3x | "다들 이거 쓰더라" |
+| **선택과부하** | 28,709 | 0.7x | 조합 시 효과적 |
+
+최강 조합: **손실회피 + 선택과부하** = 평균 12.6만뷰
+
+### 이번 세션 완료 작업
+
+| # | 작업 | 상태 |
+|---|------|------|
+| 1 | 벤치마크 9채널 × 30포스트 수집 (270개) | ✅ |
+| 2 | 벤치마크 5채널 모니터링 + Obsidian 저장 | ✅ |
+| 3 | 분석 파이프라인 실행 (277개 분류 + 니즈 56개) | ✅ |
+| 4 | 워밍업 공감형 포스트 5개 생성 (DB 저장) | ✅ |
+| 5 | persona-writer.md — 문체 가이드라인 (163개 분석) | ✅ |
+| 6 | persona-writer.md — 호모필리 원칙 + 건강 안전 규칙 | ✅ |
+| 7 | persona-writer.md — 심리 트리거 × 패턴 로테이션 | ✅ |
+| 8 | 심리 트리거 분석 (손실회피 3.3x 발견) | ✅ |
+| 9 | GraphQL 인터셉터 모듈 생성 + 3개 수집 경로 적용 | ✅ |
+| 10 | X 트렌드 파이프라인 (fetcher + filter + orchestrator) | ✅ |
+| 11 | 성과 추적 CLI (track-performance.ts) + DOM 폴백 수정 | ✅ |
+| 12 | 미세먼지 트렌드 E2E 검증 (수집→댓글분석→니즈4개→콘텐츠3개) | ✅ |
+| 13 | 벚꽃 수집 + 니즈 분석 (19포스트→니즈4개→콘텐츠2개) | ✅ |
+| 14 | --with-comments 플래그 추가 (답글10개+ 포스트 댓글 수집) | ✅ |
+| 15 | --today 옵션 (당일 수집분만 분석) 스킬 문서 추가 | ✅ |
+| 16 | 빈이 페르소나 → 똘끼+밝은 자조형 캐릭터 업데이트 | ✅ |
+| 17 | AI 냄새 제거 규칙 추가 (문장 미완성, 감정 먼저, 정보 1개) | ✅ |
+| 18 | MCP 에이전트 CLI 수집 가이드 + COLLECTION_GUIDE.md | ✅ |
+| 19 | 미세먼지 포스트 1개 게시 (@duribeon231) | ✅ |
+| 20 | 벚꽃 포스트 텍스트 입력 (사진 첨부 대기 중) | 🔄 |
+
+### 에이전트 프롬프트 (8개)
+
+| 에이전트 | 용도 |
+|---------|------|
+| `researcher.md` | 포스트 → 리서치 브리핑 |
+| `needs-detector.md` | 브리핑 → 니즈 클러스터링 (6단계 CoT) |
+| `product-matcher.md` | 니즈 → 제품 매칭 |
+| `positioning.md` | 니즈+제품 → 포지셔닝 카드 |
+| `content.md` | 포지셔닝 → 콘텐츠 생성 |
+| `persona-writer.md` | 빈이 페르소나 (문체+호모필리+심리 로테이션) |
+| `performance.md` | 성과 분석 |
+| `COLLECTION_GUIDE.md` | **신규** — 에이전트용 수집 방법 가이드 (CLI 우선) |
+
+### 스킬 체계 (3개)
+
+| 스킬 | 설명 |
+|------|------|
+| `/threads-pipeline` | 분석 파이프라인 (API $0, Phase 5.5 페르소나 리라이트 포함) |
+| `/threads-post` | Threads 자동 포스팅 (CDP, anti-bot, 세션당 5개) |
+| `/threads-analyze` | 채널 성과 분석 + **CLI 수집 권장 섹션 추가** |
+
+### X 트렌드 파이프라인 (신규)
+
+**흐름:**
+```
+Apify API → 한국 X 트렌딩 99개
+  → trend-filter로 제품 연결 가능한 키워드 필터 (뷰티/건강 우선)
+  → 필터된 키워드로 Threads 검색 수집 (collect-by-keyword.ts)
+  → /threads-pipeline으로 니즈 분석 → 콘텐츠 생성 → 게시
 ```
 
-### Task 2-2: topic-classifier.ts (신규)
-- 위치: `src/analyzer/topic-classifier.ts`
-- 입력: `topic_category = null`인 포스트 배치 (50~100개)
-- 처리:
-  1. `topic_tags`가 있으면 규칙 매핑 (빈번 태그 ~50개 테이블)
-  2. 매핑 실패 or 태그 없음 → Haiku 배치 호출 (본문 + topic_tags → TopicCategory)
-  3. DB UPDATE: `topic_category` 채움
-- 비용 목표: $0.01~0.05/일 (300포스트 기준)
-
-### Task 2-3: pipeline.ts — 카테고리별 그룹 분석
-- 기존: 100개 포스트를 통째로 Researcher에게 전달
-- 변경:
-  1. Step 0: Topic Classification (Task 2-2 호출)
-  2. Step 1: TopicCategory별로 그룹핑
-  3. Step 2: 각 그룹별로 Researcher → Needs-detector 실행
-  4. 이후 단계는 동일
-- 파일: `src/analyzer/pipeline.ts`
-
----
-
-## Phase 3: 제품 검색 + 콘텐츠 개선
-
-**목표**: 실시간 제품 검색, 포맷 다양화, 셀프댓글 품질 개선
-
-### Task 3-1: 실시간 제품 검색 (product-matcher.ts 교체)
-- 기존: `products_v1.json` 정적 사전에서 검색
-- 변경: 니즈 기반으로 쿠팡 웹 검색 → 상위 제품 추출
-- 흐름:
-  1. 니즈에서 검색 키워드 추출 (AI 또는 규칙)
-  2. 쿠팡 웹 검색 (Playwright or HTTP)
-  3. 상위 3~5개 제품 추출 (이름, 가격, URL)
-  4. 텔레그램으로 사용자에게 전달: "이 제품의 파트너스 링크를 만들어주세요"
-  5. 사용자가 파트너스 링크 입력 → DB 저장 → 콘텐츠 생성 진행
-- 파일: `src/analyzer/product-matcher.ts` (교체)
-
-### Task 3-2: content-generator.ts 개선
-- **포맷 다양화**: 6가지 포맷(문제공감형/솔직후기형/비교형/입문추천형/실수방지형/비추천형)을 라운드로빈 또는 니즈 성격에 맞게 선택
-- **셀프댓글 품질**: 워밍업(post_count < 20)이면 셀프댓글 생략. 이후에는:
-  - 자연스러운 후기 톤 + 제휴링크 포함
-  - "좋은 정보 감사합니다" 같은 무의미한 댓글 금지
-- **훅 품질**: 제품명 직접 노출 금지, 니즈/공감 중심 훅
-- 파일: `src/analyzer/content-generator.ts`
-
----
-
-## Phase 4: 추적 + 알림
-
-**목표**: 조회수 기반 전환율 측정, 텔레그램 알림 시스템
-
-### Task 4-1: snapshot.ts — 조회수 기반 전환율
-- 기존: `clicks = 0, conversions = 0, revenue = 0` 하드코딩
-- 변경:
-  - 포스트 상세 페이지 방문 → "조회 N회" 추출 → `post_views`
-  - 셀프댓글 상세 페이지 방문 → "조회 N회" 추출 → `comment_views`
-  - 전환율 프록시: `comment_views / post_views`
-  - `clicks` 필드에 `comment_views` 저장 (제휴링크 노출 수의 프록시)
-- 파일: `src/tracker/snapshot.ts`
-
-### Task 4-2: 텔레그램 알림 모듈 (신규)
-- 위치: `src/utils/telegram.ts`
-- 기능:
-  - `sendAlert(message)` — 일반 알림
-  - `sendProductRequest(needInfo, coupangLinks)` — 파트너스 링크 요청
-  - `sendErrorAlert(error)` — 크롤 에러/차단 알림
-  - `sendWeeklyReport(stats)` — 주간 리포트
-- 환경변수: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (.env)
-- 파일: `src/utils/telegram.ts`
-
-### Task 4-3: 파이프라인에 텔레그램 연동
-- pipeline.ts: 각 단계 완료/에러 시 알림
-- product-matcher.ts: 제품 발견 시 쿠팡 링크 + 파트너스 요청 전송
-- orchestrator.ts: 크롤 에러/차단 감지 시 긴급 알림
-- scheduler.ts: 워밍업 20개 완료 알림
-- 파일: 각 모듈에 telegram import 추가
-
----
-
-## Phase 간 의존성
-
-```
-Phase 1 (수집) ──→ Phase 2 (분류/파이프라인)
-                        ↓
-Phase 3 (제품/콘텐츠) ←─┘
-                        ↓
-Phase 4 (추적/알림) ←───┘
-
-단, Phase 4의 텔레그램 모듈(Task 4-2)은 독립적으로 먼저 작업 가능
+**CLI:**
+```bash
+npx tsx scripts/run-trend-pipeline.ts           # 전체 자동 실행
+npx tsx scripts/run-trend-pipeline.ts --dry-run  # 트렌드+필터만 (수집 안 함)
+npx tsx src/scraper/trend-fetcher.ts             # 트렌드 수집만
+npx tsx src/scraper/trend-filter.ts              # 필터링만
 ```
 
-## 기술 스택
+**테스트 결과 (2026-03-17):**
+- 99개 트렌드 중 "미세먼지" 1개 통과 (나머지: 게임/연예/정치/스포츠)
+- "미세먼지"로 Threads 검색 → 8개 포스트 수집
+- 댓글 분석 결과 니즈 발견: 안경 김서림(3명), KF94 대량구매, 가습마스크, 알레르기, 목 보호
 
-- Runtime: Node.js + tsx
-- DB: PGlite (로컬) + Drizzle ORM
-- Scraping: Playwright (CDP, port 9223)
-- LLM: Anthropic API (Haiku/Sonnet)
-- Notification: Telegram Bot API
-- Test: Vitest
+**댓글 수집 (`--with-comments` 구현 완료):**
+```bash
+npx tsx scripts/collect-by-keyword.ts --keywords "미세먼지" --with-comments
+```
+- 모든 키워드에 사용 가능 (미세먼지, 벚꽃, 선크림 등)
+- 답글 10개 이상 포스트만 댓글 수집 → thread_comments 테이블 저장
+- 기본은 본문만, `--with-comments` 붙이면 댓글도 수집
+
+**당일 분석 (`--today` 옵션):**
+```bash
+/threads-pipeline --today    # 오늘 수집분만 분석
+```
+- `crawl_at >= CURRENT_DATE` 조건으로 당일 포스트만 대상
+
+**비용:** Apify $0.04/회 (월 ~$1.20)
+
+### 성과 추적 시스템 (신규)
+
+**CLI:** `npx tsx scripts/track-performance.ts`
+
+**동작:**
+1. @duribeon231 포스트를 content_lifecycle에 자동 등록
+2. 프로필 스크롤 → GraphQL로 engagement 일괄 수집
+3. 개별 방문 → DOM에서 view_count 추출 (GraphQL에 없음)
+4. DOM 폴백으로 좋아요/답글도 수집 (GraphQL 캡처 실패 시)
+5. post_snapshots에 저장 + content_lifecycle 업데이트
+
+**테스트 결과 (2026-03-17):**
+| 포스트 | 조회수 | 좋아요 | 답글 | 참여율 |
+|--------|--------|--------|------|--------|
+| DV-FZd_geXn | 681 | 2 | 1 | 0.44% |
+| DV8ld0QgYXa (선크림) | 976 | 3 | 6 | 0.92% |
+| DV54gfFAdmj | 891 | 0 | 0 | 0.00% |
+
+### Threads 알고리즘 조사 결과
+
+- **니치 페널티 없음** — 유튜브와 달리 다양한 주제 포스팅 OK
+- **핵심 신호 = 답글 깊이** — 좋아요보다 대화(multi-turn replies)가 중요
+- "Threads doesn't want you to go viral. It wants you to spark discussions."
+- 트렌드 주제로 포스팅해도 대화를 촉발하면 알고리즘 부스트
+
+### DB 현황
+
+| 테이블 | 행 수 | 비고 |
+|--------|-------|------|
+| thread_posts | ~490 | 464 + 미세먼지 8 + 벚꽃 19 |
+| needs | **64** | 56기존 + 미세먼지4 + 벚꽃4 |
+| aff_contents | **12** | 7워밍업 + 미세먼지3 + 벚꽃2 |
+| post_snapshots | 6 | @duribeon231 성과 스냅샷 |
+| thread_comments | 0 | --with-comments 구현 완료, 아직 미사용 |
+
+### 다음 세션 우선순위
+
+### 이번 세션(5) 추가 완료 작업
+
+| # | 작업 | 상태 |
+|---|------|------|
+| 1 | track-performance.ts — DOM 폴백 포스트 발견 (직접 게시 포스트도 자동 추적) | ✅ |
+| 2 | track-performance.ts — GraphQL→자동등록→lifecycle 순서 수정 | ✅ |
+| 3 | 성과 추적 실행 — 5개 포스트 전체 추적 확인 | ✅ |
+| 4 | pm-skills 8개 플러그인 설치 (다음 세션부터 사용 가능) | ✅ |
+| 5 | 벚꽃 포스트 직접 게시 (사진 첨부) | ✅ |
+| 6 | 미세먼지 마스크 포스트 게시 | ✅ |
+
+### 성과 추적 최신 (2026-03-18)
+
+| 포스트 | 조회수 | 좋아요 | 답글 | 참여율 | 상태 |
+|--------|--------|--------|------|--------|------|
+| DV-7LM (미세먼지 마스크) | 230 | 4 | 0 | 1.74% | warmup |
+| DV-nld (벚꽃 피크닉) | 751 | 1 | 0 | 0.13% | warmup |
+| DV-FZd (클렌징) | 947 | 4 | 8 | **1.27%** | early |
+| DV8ld0 (선크림) | 978 | 3 | 6 | 0.92% | early |
+| DV54gf (초기) | 891 | 0 | 0 | 0.00% | early |
+
+**인사이트**: 클렌징 포스트가 답글 8개로 최다 참여. 질문형 마무리 + 공감 톤이 효과적.
+
+### pm-skills 플러그인 (설치 완료, 다음 세션에서 활성화)
+
+| 플러그인 | 주요 커맨드 | 쓰레드2 활용 |
+|---------|-----------|------------|
+| pm-product-discovery | `/discover` | 니즈 탐색 프레임워크 |
+| pm-product-strategy | `/strategy` | 빈이 채널 전략 |
+| pm-execution | `/write-prd` | 기능 기획 구조화 |
+| pm-market-research | 페르소나/세그먼트 | 타겟 오디언스 분석 |
+| pm-marketing-growth | `/north-star` | 핵심 지표 정의 |
+| pm-go-to-market | `/plan-launch` | 워밍업→제휴링크 전환 계획 |
+| pm-data-analytics | A/B 테스트 | 포스트 성과 비교 |
+| pm-toolkit | 유틸리티 | 기타 PM 도구 |
+
+### 다음 세션 우선순위
+
+#### 1. pm-skills로 전략 수립
+- `/strategy`로 빈이 채널 전략 정리
+- `/north-star`로 핵심 지표 정의 (참여율? 전환율? 팔로워?)
+- `/plan-launch`로 워밍업→제휴링크 전환 계획
+
+#### 2. 워밍업 포스트 추가 게시
+- 현재: 5개 게시
+- DB에 콘텐츠 12개 준비됨
+- 빈이 똘끼 톤으로 새로 생성 권장
+- 15개 더 게시하면 워밍업 완료
+
+#### 3. trend-filter 개선
+- Claude 2단계 판단 추가
+- 제품명 트렌드("네이처 클렌징폼", "리스테린") 잡기
+
+#### 4. 빈이 프로필 이미지 + 소개
+- 똘끼 캐릭터 (NanoBanana V2 프롬프트 준비됨)
+- 소개: "이상한 거 사서 후회하는 기록 남기는 중 / 가끔 진짜 좋은 것도 찾음 (가끔)"
+
+#### 5. 워밍업 20개 → 제휴링크 시작
+- peach_bly 모델 (본문=정보, 후속글=쿠팡링크)
+
+### 수정한 파일
+
+| 파일 | 변경 |
+|------|------|
+| `src/scraper/graphql-interceptor.ts` | **신규** — GraphQL 응답 캡처 + 파싱 모듈 |
+| `scripts/collect-by-keyword.ts` | GraphQL + --with-comments + 스크롤10회 + 최신순 |
+| `src/scraper/collect.ts` | GraphQL 인터셉터 레이어 추가 (DOM 폴백 유지) |
+| `src/agents/persona-writer.md` | 똘끼 캐릭터 + 문체 + 호모필리 + 심리 로테이션 + AI냄새 제거 |
+| `src/agents/COLLECTION_GUIDE.md` | **신규** — 에이전트용 수집 방법 가이드 |
+| `~/.claude/skills/threads-analyze/SKILL.md` | CLI 수집 권장 섹션 추가 |
+| `~/.claude/skills/threads-pipeline/SKILL.md` | --today 옵션 추가 |
+| `src/scraper/trend-fetcher.ts` | **신규** — Apify X 트렌드 수집 |
+| `src/scraper/trend-filter.ts` | **신규** — 트렌드 → 제품 키워드 필터 |
+| `scripts/run-trend-pipeline.ts` | **신규** — 트렌드 파이프라인 오케스트레이터 |
+| `scripts/track-performance.ts` | **신규** — @duribeon231 성과 추적 CLI |
+| `.env` | APIFY_TOKEN 추가 |
+| `package.json` | apify-client 패키지 추가 |

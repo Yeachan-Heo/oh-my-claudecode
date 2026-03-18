@@ -26,10 +26,12 @@ import { execSync } from 'child_process';
 import http from 'http';
 import type { Tags, CanonicalPost, CrawlMeta } from '../types.js';
 import { savePostsToDB, getSeenPostIds } from './db-adapter.js';
+import { createGraphQLInterceptor } from './graphql-interceptor.js';
+import type { GraphQLInterceptor, GraphQLExtractedPost } from './graphql-interceptor.js';
 
 // ─── Config ──────────────────────────────────────────────
 const CDP_URL = 'http://127.0.0.1:9223';
-const BASE_URL = 'https://www.threads.net';
+const BASE_URL = 'https://www.threads.com';
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'raw_posts');
 const SEEN_POSTS_PATH = path.join(__dirname, '..', '..', 'data', 'seen_posts.json');
 const QUARANTINE_DIR = path.join(__dirname, '..', '..', 'data', 'quarantine');
@@ -825,7 +827,7 @@ async function extractHookPageData(page: Page, channelId: string): Promise<HookP
       // Reply URL
       let replyUrl = '';
       if (replyPostId) {
-        replyUrl = `https://www.threads.net/@${chId}/post/${replyPostId}`;
+        replyUrl = `https://www.threads.com/@${chId}/post/${replyPostId}`;
       }
 
       selfReply = {
@@ -1249,6 +1251,11 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
     }
   }
 
+  // GraphQL interceptor: register before any navigation so profile feed responses are captured
+  const gqlInterceptor: GraphQLInterceptor = createGraphQLInterceptor(page);
+  // Map of post_id -> GraphQL post data, populated after feed scroll
+  let gqlPostMap = new Map<string, GraphQLExtractedPost>();
+
   try {
     // Step 1: Collect post IDs from feed
     let postIds: string[];
@@ -1316,6 +1323,17 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
       saveCheckpoint(cp);
     }
 
+    // Build GraphQL post map from intercepted feed responses
+    const gqlPosts = gqlInterceptor.getCollectedPosts();
+    if (gqlPosts.length > 0) {
+      for (const gp of gqlPosts) {
+        gqlPostMap.set(gp.post_id, gp);
+      }
+      log(`GraphQL 캡처: ${gqlPosts.length}개 (text/metrics 재사용, view_count만 개별 방문)`);
+    } else {
+      log(`GraphQL 응답 없음 — DOM 폴백으로 진행`);
+    }
+
     // Step 2: Visit each post — extract hook + self-reply + reply view count
     const completedSet = new Set(cp.completedHooks);
     const remaining = postIds.filter(id => !completedSet.has(id));
@@ -1367,13 +1385,42 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
         await humanDelay(TIMING.pageLoad);
         await idleBehavior(page);
 
-        const hookData = await extractHookPageData(page, channelId);
-        hookData.postId = pid;
-        hookData.url = url;
-        // C-2: Track selector tier
-        if (hookData.selectorTier && selectorCounts[hookData.selectorTier] !== undefined)
-          selectorCounts[hookData.selectorTier]++;
-        else selectorCounts['fallback']++;
+        let hookData: HookPageData;
+        const gqlPost = gqlPostMap.get(pid);
+
+        if (gqlPost) {
+          // ── GraphQL fast path: extract only view_count from DOM, use GraphQL for everything else ──
+          log(`${progress}   [GraphQL] text/metrics 재사용, view_count 추출 중`);
+          const viewCount = await extractReplyViewCount(page);
+
+          hookData = {
+            hookText: gqlPost.text,
+            viewCount: viewCount >= 0 ? viewCount : 0,
+            likeCount: gqlPost.like_count,
+            replyCount: gqlPost.reply_count,
+            repostCount: gqlPost.repost_count,
+            postDate: gqlPost.time_text ?? new Date().toISOString(),
+            hasImage: gqlPost.has_image,
+            hookMediaUrls: gqlPost.media_urls,
+            hookAffLinks: gqlPost.link_url ? [gqlPost.link_url] : [],
+            textHasAff: AFF_TEXT_KEYWORDS.some(kw => gqlPost.text.includes(kw)),
+            selfReply: null,  // self-reply detection still requires DOM (GraphQL flat list doesn't preserve edge structure)
+            selectorTier: 'graphql',
+            postId: pid,
+            url,
+            topicTags: [],
+          };
+          selectorCounts['fallback']++;  // use fallback bucket for graphql (doesn't affect tier stats)
+        } else {
+          // ── DOM fallback path ──
+          hookData = await extractHookPageData(page, channelId);
+          hookData.postId = pid;
+          hookData.url = url;
+          // C-2: Track selector tier
+          if (hookData.selectorTier && selectorCounts[hookData.selectorTier] !== undefined)
+            selectorCounts[hookData.selectorTier]++;
+          else selectorCounts['fallback']++;
+        }
 
         // ── If self-reply detected, visit reply page for view count ──
         if (hookData.selfReply && hookData.selfReply.postId) {
@@ -1646,6 +1693,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
   } catch (e) {
     log(`치명적 오류: ${(e as Error).message}`);
+    gqlInterceptor.destroy();
     saveCheckpoint(cp);
     saveSeenPosts();
     if (globalMode && _globalCheckpoint) {
@@ -1656,6 +1704,8 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
     console.error(e);
     process.exit(1);
   }
+
+  gqlInterceptor.destroy();
 }
 
 async function main(): Promise<void> {

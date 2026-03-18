@@ -72,6 +72,8 @@ CREATE TABLE "content_lifecycle" (
 	"hook_type" text NOT NULL,
 	"posted_account_id" text NOT NULL,
 	"posted_at" timestamp with time zone,
+	"threads_post_id" text,
+	"threads_post_url" text,
 	"maturity" "post_maturity" DEFAULT 'warmup' NOT NULL,
 	"current_impressions" integer DEFAULT 0 NOT NULL,
 	"current_clicks" integer DEFAULT 0 NOT NULL,
@@ -149,7 +151,9 @@ CREATE TABLE "post_snapshots" (
 	"revenue" real DEFAULT 0 NOT NULL,
 	"engagement_velocity" real DEFAULT 0 NOT NULL,
 	"click_velocity" real DEFAULT 0 NOT NULL,
-	"conversion_velocity" real DEFAULT 0 NOT NULL
+	"conversion_velocity" real DEFAULT 0 NOT NULL,
+	"post_views" integer,
+	"comment_views" integer
 );
 --> statement-breakpoint
 CREATE TABLE "products" (
@@ -193,7 +197,9 @@ CREATE TABLE "thread_posts" (
 	"login_status" boolean,
 	"block_detected" boolean,
 	"thread_type" text,
-	"conversion_rate" real
+	"conversion_rate" real,
+	"topic_tags" text[],
+	"topic_category" text
 );
 --> statement-breakpoint
 CREATE TABLE "tuning_actions" (

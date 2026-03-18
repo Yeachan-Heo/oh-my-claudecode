@@ -46,7 +46,7 @@ export async function detectNeeds(brief: ResearchBrief): Promise<DetectedNeed[]>
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-6-20250715',
+    model: 'claude-sonnet-4-20250514',
     systemPrompt,
     userMessage,
     maxTokens: 8192,
@@ -88,20 +88,24 @@ export async function detectNeeds(brief: ResearchBrief): Promise<DetectedNeed[]>
   }));
 
   for (const n of detected) {
-    await db.insert(needs).values({
-      need_id: n.need_id,
-      category: n.category,
-      problem: n.problem,
-      representative_expressions: n.representative_expressions,
-      signal_strength: n.signal_strength,
-      post_count: n.post_count,
-      purchase_linkage: n.purchase_linkage,
-      why_linkage: n.why_linkage,
-      product_categories: n.product_categories,
-      threads_fit: n.threads_fit,
-      threads_fit_reason: n.threads_fit_reason,
-      sample_post_ids: n.sample_post_ids,
-    });
+    try {
+      await db.insert(needs).values({
+        need_id: n.need_id,
+        category: n.category,
+        problem: n.problem,
+        representative_expressions: n.representative_expressions,
+        signal_strength: n.signal_strength,
+        post_count: n.post_count ?? 0,
+        purchase_linkage: n.purchase_linkage,
+        why_linkage: String(n.why_linkage ?? ''),
+        product_categories: n.product_categories,
+        threads_fit: Math.min(5, Math.max(0, n.threads_fit ?? 0)),
+        threads_fit_reason: String(n.threads_fit_reason ?? ''),
+        sample_post_ids: n.sample_post_ids ?? [],
+      }).onConflictDoNothing();
+    } catch (err) {
+      console.warn(`[needs-detector] DB insert failed for need ${n.need_id}: ${(err as Error).message}`);
+    }
   }
 
   return detected;

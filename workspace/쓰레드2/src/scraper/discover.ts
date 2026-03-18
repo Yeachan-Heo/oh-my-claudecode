@@ -19,58 +19,39 @@ import { saveChannelsToDB } from './db-adapter.js';
 // ─── Config ──────────────────────────────────────────────
 
 const CDP_URL = 'http://127.0.0.1:9223';
-const BASE_URL = 'https://www.threads.net';
+const BASE_URL = 'https://www.threads.com';
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const DISCOVERED_PATH = path.join(DATA_DIR, 'discovered_channels.json');
 const SEEN_POSTS_PATH = path.join(DATA_DIR, 'seen_posts.json');
 const CHECKPOINT_PATH = path.join(DATA_DIR, 'threads-watch-checkpoint.json');
 
 const DEFAULT_KEYWORDS = [
-  // --- Tier 1: 제휴마케팅 직접 ---
-  '쿠팡파트너스',
-  '제휴마케팅',
-  '파트너스수익',
-  '링크수익',
-  '쿠팡추천',
+  // --- Tier 1: 쿠팡 물리적 제품 카테고리 (products 테이블 기반) ---
+  '선크림',
+  '영양제',
+  '클렌징',
+  '에어프라이어',
+  '공기청정기',
+  '마사지건',
+  '콜라겐',
+  '유산균',
+  '단백질쉐이크',
+  '닭가슴살',
+  '요가매트',
+  '무선이어폰',
+  '보조배터리',
+  '로봇청소기',
+  '곤약젤리',
 
-  // --- Tier 2: 쇼핑 행동/핫딜 ---
-  '핫딜',
-  '최저가',
-  '가성비템',
-  '오늘만특가',
-  '오늘의특가',
-  '할인코드',
-  '타임세일',
-  '역대최저가',
-  '추천템',
-  '공구',
-
-  // --- Tier 3: 니즈/카테고리 기반 ---
-  '육아템추천',
-  '자취필수템',
-  '홈카페추천',
-  '청소꿀팁',
-  '다이어트식품',
-  '여름준비템',
-  '뷰티추천',
-  '건강식품추천',
-  '주방용품추천',
-  '생활용품추천',
-
-  // --- Tier 4: 소비자 니즈/질문 ---
-  '추천해줘',
-  '뭐가좋아',
-  '어디서사',
-  '후기',
-  '고민',
-  '살까말까',
-  '가성비',
-  '꿀템',
-  '인생템',
-  '갓성비',
-  '요즘뭐써',
-  '이거써봤는데',
-  '써본사람',
+  // --- Tier 2: 쿠팡에서 잘 팔리는 생활용품 ---
+  '쿠션파운데이션',
+  '치아미백',
+  '제모기',
+  '전기주전자',
+  '디퓨저',
+  '폼롤러',
+  '립밤',
+  '트리트먼트',
 ];
 
 const TIMING = {

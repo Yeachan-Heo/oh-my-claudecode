@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { eq } from 'drizzle-orm';
+import { eq, gte, like, notLike, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { threadPosts, products } from '../db/schema.js';
+import { threadPosts, products, affContents } from '../db/schema.js';
 import type { CanonicalPost, CrawlMeta, TopicCategory } from '../types.js';
 import { classifyTopics } from './topic-classifier.js';
 import { analyzeWithResearcher } from './researcher.js';
@@ -95,11 +95,19 @@ async function backupPglite(): Promise<void> {
   }
 }
 
+export type PostSource = 'all' | 'benchmark' | 'trend';
+
 export async function runAnalysisPipeline(options?: {
   postLimit?: number;
   skipContentGeneration?: boolean;
+  category?: string; // 특정 카테고리만 분석 (예: "뷰티", "건강")
+  todayOnly?: boolean; // 오늘 수집한 포스트만 분석
+  source?: PostSource; // 'benchmark' = 채널수집, 'trend' = 키워드/트렌드 검색, 'all' = 전체
 }): Promise<PipelineResult> {
-  const limit = options?.postLimit ?? 100;
+  const limit = options?.postLimit ?? 500;
+  const targetCategory = options?.category;
+  const todayOnly = options?.todayOnly ?? true;
+  const source = options?.source ?? 'all';
   const errors: string[] = [];
   const emptyClassification = { classified: 0, ruleMatched: 0, llmClassified: 0 };
 
@@ -110,9 +118,11 @@ export async function runAnalysisPipeline(options?: {
     console.error(`[pipeline] Backup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  console.log('[pipeline] Starting analysis pipeline...');
-  pipelineLog('pipeline-start', { limit });
-  await sendAlert('🚀 분석 파이프라인 시작').catch(() => {});
+  const sourceLabel = source === 'all' ? '' : ` [${source}]`;
+  const todayLabel = todayOnly ? ' (오늘 수집분)' : '';
+  console.log(`[pipeline] Starting analysis pipeline...${targetCategory ? ` (category: ${targetCategory})` : ''}${sourceLabel}${todayLabel}`);
+  pipelineLog('pipeline-start', { limit, category: targetCategory ?? 'all', source, todayOnly });
+  await sendAlert(`🚀 분석 파이프라인 시작${sourceLabel}${todayLabel}${targetCategory ? ` (${targetCategory})` : ''}`).catch(() => {});
 
   // Step 0: Topic Classification — classify unclassified posts first
   let classificationResult = emptyClassification;
@@ -131,12 +141,40 @@ export async function runAnalysisPipeline(options?: {
     // Non-fatal: continue with uncategorized posts
   }
 
-  // Step 1: Fetch posts from DB and group by TopicCategory
-  const rows = await db.select().from(threadPosts).limit(limit);
+  // Step 1: Fetch posts from DB with filters (todayOnly, source, unanalyzed)
+  const conditions = [];
+
+  // 미분석 포스트만 (analyzed_at IS NULL)
+  conditions.push(sql`${threadPosts.analyzed_at} IS NULL`);
+
+  // 오늘 수집분만 필터 (crawl_at >= 오늘 00:00 UTC)
+  if (todayOnly) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    conditions.push(gte(threadPosts.crawl_at, todayStart));
+  }
+
+  // 소스별 필터 (run_id 패턴)
+  if (source === 'benchmark') {
+    // 채널 수집: run_id = 'benchmark_collect_*' 또는 'run_*'
+    conditions.push(sql`(${threadPosts.run_id} LIKE 'benchmark_%' OR ${threadPosts.run_id} LIKE 'run_%')`);
+  } else if (source === 'trend') {
+    // 키워드/트렌드 검색: run_id = 'search_*'
+    conditions.push(like(threadPosts.run_id, 'search_%'));
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+  const rows = whereClause
+    ? await db.select().from(threadPosts).where(whereClause).limit(limit)
+    : await db.select().from(threadPosts).limit(limit);
 
   if (rows.length === 0) {
-    console.log('[pipeline] No posts found in DB');
-    pipelineLog('pipeline-end', { reason: 'no-posts' });
+    const noPostsMsg = todayOnly
+      ? `오늘 수집한 포스트가 없습니다${source !== 'all' ? ` (source: ${source})` : ''}. 먼저 수집을 실행하세요.`
+      : 'DB에 포스트가 없습니다.';
+    console.log(`[pipeline] ${noPostsMsg}`);
+    pipelineLog('pipeline-end', { reason: 'no-posts', todayOnly, source });
+    await sendAlert(`⚠️ ${noPostsMsg}`).catch(() => {});
     return {
       postsAnalyzed: 0,
       topicClassification: classificationResult,
@@ -144,7 +182,7 @@ export async function runAnalysisPipeline(options?: {
       needsDetected: 0,
       productsMatched: 0,
       contentsGenerated: 0,
-      errors: [],
+      errors: [noPostsMsg],
     };
   }
 
@@ -159,6 +197,25 @@ export async function runAnalysisPipeline(options?: {
     const group = categoryGroups.get(category) ?? [];
     group.push(post);
     categoryGroups.set(category, group);
+  }
+
+  // 특정 카테고리만 분석할 경우 나머지 제거
+  if (targetCategory) {
+    for (const key of [...categoryGroups.keys()]) {
+      if (key !== targetCategory) categoryGroups.delete(key);
+    }
+    if (categoryGroups.size === 0) {
+      console.log(`[pipeline] 카테고리 "${targetCategory}"에 해당하는 포스트가 없습니다.`);
+      return {
+        postsAnalyzed: posts.length,
+        topicClassification: classificationResult,
+        categoryGroups: 0,
+        needsDetected: 0,
+        productsMatched: 0,
+        contentsGenerated: 0,
+        errors: [`No posts found for category "${targetCategory}"`],
+      };
+    }
   }
 
   console.log(`[pipeline] Grouped into ${categoryGroups.size} categories: ${[...categoryGroups.keys()].join(', ')}`);
@@ -215,12 +272,43 @@ export async function runAnalysisPipeline(options?: {
 
   console.log(`[pipeline] Total needs detected across all categories: ${allDetectedNeeds.length}`);
 
-  // Step 3: Product matching (across all needs)
+  // Step 2.5: Filter out needs that are not suitable for Coupang product matching
+  const coupangViableNeeds = allDetectedNeeds.filter((need) => {
+    // Skip needs with low purchase linkage (services, apps, education, etc.)
+    if (need.purchase_linkage === '하') {
+      console.log(`[pipeline] 스킵 (linkage=하): "${need.problem}" [${need.category}]`);
+      return false;
+    }
+    // Skip needs with empty product categories
+    if (!need.product_categories || need.product_categories.length === 0) {
+      console.log(`[pipeline] 스킵 (product_categories 없음): "${need.problem}" [${need.category}]`);
+      return false;
+    }
+    return true;
+  });
+
+  console.log(`[pipeline] Coupang-viable needs: ${coupangViableNeeds.length}/${allDetectedNeeds.length}`);
+  pipelineLog('filter-needs', { total: allDetectedNeeds.length, viable: coupangViableNeeds.length });
+
+  if (coupangViableNeeds.length === 0) {
+    console.log('[pipeline] No Coupang-viable needs found — skipping product matching');
+    return {
+      postsAnalyzed: posts.length,
+      topicClassification: classificationResult,
+      categoryGroups: categoryGroups.size,
+      needsDetected: allDetectedNeeds.length,
+      productsMatched: 0,
+      contentsGenerated: 0,
+      errors: [...errors, 'No Coupang-viable needs found (all filtered out)'],
+    };
+  }
+
+  // Step 3: Product matching (across Coupang-viable needs only)
   let matches;
   try {
-    matches = await matchProducts(allDetectedNeeds);
+    matches = await matchProducts(coupangViableNeeds);
     console.log(`[pipeline] Products matched: ${matches.length}`);
-    pipelineLog('product-match', { matched: matches.length, needsCount: allDetectedNeeds.length });
+    pipelineLog('product-match', { matched: matches.length, needsCount: coupangViableNeeds.length });
   } catch (err) {
     const msg = `Product matching failed: ${err instanceof Error ? err.message : String(err)}`;
     errors.push(msg);
@@ -260,26 +348,53 @@ export async function runAnalysisPipeline(options?: {
         continue;
       }
 
+      let productInfo: {
+        product_id: string;
+        name: string;
+        category: string;
+        price_range: string;
+        description: string;
+        affiliate_link: string | null;
+      };
+
       const productRows = await db
         .select()
         .from(products)
         .where(eq(products.product_id, match.product_id));
 
-      if (productRows.length === 0) {
-        errors.push(`Product ${match.product_id} not found in DB`);
-        continue;
+      if (productRows.length > 0) {
+        const product = productRows[0];
+        productInfo = {
+          product_id: product.product_id,
+          name: product.name,
+          category: product.category,
+          price_range: product.price_range,
+          description: product.description,
+          affiliate_link: product.affiliate_link,
+        };
+      } else {
+        // Fallback: construct from match metadata (coupang search results that failed DB insert)
+        console.log(`[pipeline] Product ${match.product_id} not in DB — using match metadata`);
+        productInfo = {
+          product_id: match.product_id,
+          name: need.product_categories[0] ?? need.problem.slice(0, 50),
+          category: need.category,
+          price_range: '',
+          description: match.match_why,
+          affiliate_link: null,
+        };
       }
 
-      const product = productRows[0];
-      await generateContent(match, need, {
-        product_id: product.product_id,
-        name: product.name,
-        category: product.category,
-        price_range: product.price_range,
-        description: product.description,
-        affiliate_link: product.affiliate_link,
-      });
+      const generated = await generateContent(match, need, productInfo);
       contentsGenerated++;
+
+      // Set source_type on the newly created aff_content record
+      const sourceType = source === 'all' ? null : source; // 'benchmark' | 'trend' | null
+      if (sourceType) {
+        await db.update(affContents)
+          .set({ source_type: sourceType })
+          .where(eq(affContents.id, generated.id));
+      }
     } catch (err) {
       const msg = `Content generation failed for product ${match.product_id}: ${err instanceof Error ? err.message : String(err)}`;
       errors.push(msg);
@@ -289,6 +404,21 @@ export async function runAnalysisPipeline(options?: {
 
   console.log(`[pipeline] Content generated: ${contentsGenerated}`);
   pipelineLog('content-generate', { generated: contentsGenerated });
+
+  // Step 5: 분석 완료된 포스트에 analyzed_at 마킹
+  const postIds = posts.map(p => p.post_id);
+  const now = new Date();
+  let markedCount = 0;
+  for (const postId of postIds) {
+    try {
+      await db.update(threadPosts)
+        .set({ analyzed_at: now })
+        .where(eq(threadPosts.post_id, postId));
+      markedCount++;
+    } catch { /* non-critical */ }
+  }
+  console.log(`[pipeline] Marked ${markedCount} posts as analyzed`);
+  pipelineLog('mark-analyzed', { marked: markedCount });
 
   const result: PipelineResult = {
     postsAnalyzed: posts.length,
@@ -319,9 +449,51 @@ export async function runAnalysisPipeline(options?: {
 }
 
 // CLI entrypoint
+// Usage: npx tsx src/analyzer/pipeline.ts [--category 뷰티] [--limit 50] [--skip-content] [--all] [--source benchmark|trend]
 const isDirectRun = process.argv[1]?.endsWith('pipeline.ts') || process.argv[1]?.endsWith('pipeline.js');
 if (isDirectRun) {
-  runAnalysisPipeline()
+  // ⚠️ API 비용 경고: 이 코드는 Anthropic API(Sonnet)를 호출하며 비용이 발생합니다.
+  // $0 대안: Claude Code에서 /threads-pipeline 스킬을 사용하세요.
+  const args = process.argv.slice(2);
+
+  if (!args.includes('--force')) {
+    console.warn('\n' + '='.repeat(60));
+    console.warn('⚠️  경고: 이 명령은 Anthropic API를 호출하여 비용이 발생합니다.');
+    console.warn('');
+    console.warn('$0 대안: Claude Code에서 /threads-pipeline 스킬을 사용하세요.');
+    console.warn('  → Claude Code가 직접 분석하므로 API 비용 $0');
+    console.warn('');
+    console.warn('그래도 API로 실행하려면: npm run analyze -- --force');
+    console.warn('='.repeat(60) + '\n');
+    process.exit(0);
+  }
+
+  const categoryIdx = args.indexOf('--category');
+  const limitIdx = args.indexOf('--limit');
+  const sourceIdx = args.indexOf('--source');
+  const cliOptions: Parameters<typeof runAnalysisPipeline>[0] = {};
+  if (categoryIdx !== -1 && args[categoryIdx + 1]) {
+    cliOptions.category = args[categoryIdx + 1];
+  }
+  if (limitIdx !== -1 && args[limitIdx + 1]) {
+    cliOptions.postLimit = parseInt(args[limitIdx + 1], 10);
+  }
+  if (args.includes('--skip-content')) {
+    cliOptions.skipContentGeneration = true;
+  }
+  // --all: 오늘 수집분뿐 아니라 전체 포스트 분석 (기본은 todayOnly=true)
+  if (args.includes('--all')) {
+    cliOptions.todayOnly = false;
+  }
+  // --source benchmark|trend: 수집 소스별 필터
+  if (sourceIdx !== -1 && args[sourceIdx + 1]) {
+    const src = args[sourceIdx + 1];
+    if (src === 'benchmark' || src === 'trend' || src === 'all') {
+      cliOptions.source = src as PostSource;
+    }
+  }
+
+  runAnalysisPipeline(cliOptions)
     .then((r) => {
       console.log(JSON.stringify(r, null, 2));
       process.exit(r.errors.length > 0 ? 1 : 0);

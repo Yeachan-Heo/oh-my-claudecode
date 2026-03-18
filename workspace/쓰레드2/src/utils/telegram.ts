@@ -6,6 +6,7 @@
  */
 
 import 'dotenv/config';
+import https from 'https';
 
 // ─── Config ──────────────────────────────────────────────
 
@@ -57,7 +58,6 @@ async function sendTelegramMessage(text: string, parseMode: 'HTML' | 'Markdown' 
   }
 
   try {
-    const url = `${TELEGRAM_API_BASE}/sendMessage`;
     const body = JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text,
@@ -65,14 +65,37 @@ async function sendTelegramMessage(text: string, parseMode: 'HTML' | 'Markdown' 
       disable_web_page_preview: true,
     });
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      signal: AbortSignal.timeout(10_000), // 10초 타임아웃
+    const data = await new Promise<TelegramResponse>((resolve, reject) => {
+      const req = https.request(
+        {
+          hostname: 'api.telegram.org',
+          port: 443,
+          path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body),
+          },
+          family: 4, // Force IPv4 — IPv6 unreachable in WSL
+          timeout: 10_000,
+        },
+        (res) => {
+          let raw = '';
+          res.on('data', (chunk: Buffer) => { raw += chunk; });
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(raw) as TelegramResponse);
+            } catch {
+              reject(new Error(`Invalid JSON: ${raw.slice(0, 200)}`));
+            }
+          });
+        },
+      );
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      req.write(body);
+      req.end();
     });
-
-    const data = (await response.json()) as TelegramResponse;
 
     if (!data.ok) {
       console.error(`[telegram] API 오류: ${data.description ?? 'unknown'}`);

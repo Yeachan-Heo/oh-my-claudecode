@@ -37,7 +37,7 @@ export async function analyzeWithResearcher(posts: CanonicalPost[]): Promise<Res
   });
 
   const raw = await callLLM({
-    model: 'claude-sonnet-4-6-20250715',
+    model: 'claude-sonnet-4-20250514',
     systemPrompt,
     userMessage,
     maxTokens: 8192,

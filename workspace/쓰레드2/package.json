@@ -23,9 +23,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@electric-sql/pglite": "^0.3.16",
+    "apify-client": "^2.22.2",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "postgres": "^3.4.8"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

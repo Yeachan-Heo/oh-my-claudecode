@@ -139,6 +139,29 @@ export const competitionLevelEnum = pgEnum('competition_level', [
 // ---------------------------------------------------------------------------
 
 /**
+ * trend_keywords - X(트위터) 트렌드 키워드 수집 + AI 선택 추적.
+ *
+ * 100개 전부 저장, AI가 고른 것만 selected=true.
+ */
+export const trendKeywords = pgTable(
+  'trend_keywords',
+  {
+    id: text('id').primaryKey(),
+    keyword: text('keyword').notNull(),
+    rank: integer('rank'),                // 트렌딩 순위 (1~99)
+    source: text('source').notNull().default('x_trending'), // 'x_trending', 'naver' 등
+    fetched_at: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    selected: boolean('selected').notNull().default(false),  // AI가 선택했는지
+    selected_reason: text('selected_reason'),                // 선택/거절 이유
+    posts_collected: integer('posts_collected').notNull().default(0), // 수집된 포스트 수
+  },
+  (table) => [
+    index('idx_trend_fetched_at').on(table.fetched_at),
+    index('idx_trend_selected').on(table.selected),
+  ],
+);
+
+/**
  * channels - Discovered channels (maps to discovered_channels.json).
  */
 export const channels = pgTable(
@@ -152,6 +175,21 @@ export const channels = pgTable(
     source_keyword: text('source_keyword').notNull(),
     discovered_at: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
     is_active: boolean('is_active').notNull().default(true),
+
+    // Benchmark tracking
+    is_benchmark: boolean('is_benchmark').notNull().default(false),
+    category: text('category'), // '뷰티', '건강' etc
+    last_monitored_at: timestamp('last_monitored_at', { withTimezone: true }),
+    monitor_interval_days: integer('monitor_interval_days').notNull().default(7),
+    avg_engagement_rate: real('avg_engagement_rate'),
+    notes: text('notes'),
+
+    // Benchmark validation
+    affiliate_link_ratio: real('affiliate_link_ratio'), // 제휴링크 비율 (본문+첫댓글 기준)
+    content_category_ratio: real('content_category_ratio'), // 뷰티/건강 콘텐츠 비율
+    benchmark_status: text('benchmark_status').default('candidate'), // 'candidate' | 'verified' | 'rejected'
+    total_posts_checked: integer('total_posts_checked').default(0),
+    posting_frequency: text('posting_frequency'), // '주 N회' 등
   },
   (table) => [
     index('idx_channels_keyword').on(table.source_keyword),
@@ -221,11 +259,15 @@ export const threadPosts = pgTable(
     // Phase 1: topic tags from Threads native topic tags
     topic_tags: text('topic_tags').array(),
     topic_category: text('topic_category'),
+
+    // Analysis tracking: null = 미분석, timestamp = 분석 완료 시점
+    analyzed_at: timestamp('analyzed_at', { withTimezone: true }),
   },
   (table) => [
     index('idx_posts_channel').on(table.channel_id),
     index('idx_posts_crawl_at').on(table.crawl_at),
     index('idx_posts_primary_tag').on(table.primary_tag),
+    index('idx_posts_analyzed_at').on(table.analyzed_at),
   ],
 );
 
@@ -315,6 +357,8 @@ export const affContents = pgTable(
     competition: competitionLevelEnum('competition'),
     match_priority: integer('match_priority'),
     match_why: text('match_why'),
+
+    source_type: text('source_type'),  // 'trend' | 'benchmark' — 니즈 발견 소스
 
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -489,6 +533,32 @@ export const tuningActions = pgTable(
 /**
  * crawl_sessions - Crawl session state (maps to checkpoint JSON).
  */
+/**
+ * thread_comments - 포스트 댓글 별도 저장. 제품 언급 추적 + 전환율 추정용.
+ */
+export const threadComments = pgTable(
+  'thread_comments',
+  {
+    comment_id: text('comment_id').primaryKey(),
+    post_id: text('post_id').notNull(),
+    author: text('author').notNull(),
+    text: text('text').notNull(),
+    view_count: integer('view_count'),
+    like_count: integer('like_count').notNull().default(0),
+    has_affiliate_link: boolean('has_affiliate_link').notNull().default(false),
+    affiliate_platform: text('affiliate_platform'), // 'coupang', 'naver', 'ali' etc
+    mentioned_product: text('mentioned_product'), // 댓글에서 언급된 제품명
+    is_our_comment: boolean('is_our_comment').notNull().default(false), // 우리 계정(@duribeon231) 댓글
+    crawl_at: timestamp('crawl_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_comments_post').on(table.post_id),
+    index('idx_comments_author').on(table.author),
+    index('idx_comments_product').on(table.mentioned_product),
+    index('idx_comments_our').on(table.is_our_comment),
+  ],
+);
+
 export const crawlSessions = pgTable(
   'crawl_sessions',
   {
