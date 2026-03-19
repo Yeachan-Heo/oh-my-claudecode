@@ -214,7 +214,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 
 ## Skills
 
-28 skills total (27 canonical + 1 deprecated alias `psm`). For skill internals and composition layers, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+For skill internals and composition layers, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 | Skill | Trigger / Command | Description |
 |-------|-------------------|-------------|
@@ -222,9 +222,10 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | `ralph` | `ralph`, `don't stop`, `must complete` | Persistence loop until verified completion |
 | `ultrawork` | `ultrawork`, `ulw` | Maximum parallel throughput mode |
 | `team` | `/oh-my-claudecode:team` | Coordinated multi-agent workflow (5-stage pipeline) |
+| `omc-teams` | `/oh-my-claudecode:omc-teams` | Spawn CLI workers in tmux panes (Codex, Gemini, etc.) |
 | `ccg` | `ccg`, `claude-codex-gemini` | Tri-model workflow: Codex + Gemini, Claude synthesizes |
 | `ultraqa` | auto (within autopilot) | QA cycle until goal is met |
-| `omc-plan` | `/oh-my-claudecode:omc-plan` | Planning workflow |
+| `plan` | `/oh-my-claudecode:omc-plan` | Strategic planning with interview workflow |
 | `ralplan` | `ralplan` | Consensus planning (Planner + Architect + Critic loop) |
 | `deep-interview` | `deep interview`, `ouroboros` | Socratic deep interview with ambiguity gating |
 | `deepinit` | `/oh-my-claudecode:deepinit` | Generate hierarchical AGENTS.md docs |
@@ -232,25 +233,19 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | `external-context` | `/oh-my-claudecode:external-context` | Parallel document-specialist research |
 | `ai-slop-cleaner` | `deslop`, `anti-slop`, cleanup + slop smell | Anti-slop cleanup workflow |
 | `trace` | `/oh-my-claudecode:trace` | Evidence-driven tracing with parallel tracer hypotheses |
+| `ask` | `/oh-my-claudecode:ask` | Ask Claude/Codex/Gemini and capture artifacts |
 | `cancel` | `cancelomc`, `stopomc` | Unified cancellation for active modes |
-| `note` | `/oh-my-claudecode:note` | Save notes to notepad |
 | `hud` | `/oh-my-claudecode:hud` | Configure HUD/statusline |
 | `omc-setup` | `/oh-my-claudecode:omc-setup` | One-time setup wizard |
 | `omc-doctor` | `/oh-my-claudecode:omc-doctor` | Diagnose and fix installation issues |
-| `omc-help` | `/oh-my-claudecode:omc-help` | Show OMC usage guide |
 | `learner` | `/oh-my-claudecode:learner` | Extract reusable skill from session |
 | `skill` | `/oh-my-claudecode:skill` | Manage local skills (list/add/remove/search/edit) |
 | `release` | `/oh-my-claudecode:release` | Automated release workflow |
-| `ralph-init` | `/oh-my-claudecode:ralph-init` | Initialize PRD for structured ralph execution |
-| `ask-codex` | `/oh-my-claudecode:ask-codex` | Ask Codex and store artifact |
-| `ask-gemini` | `/oh-my-claudecode:ask-gemini` | Ask Gemini and store artifact |
 | `configure-notifications` | `/oh-my-claudecode:configure-notifications` | Configure Discord/Telegram/Slack notifications |
 | `mcp-setup` | `/oh-my-claudecode:mcp-setup` | Configure MCP servers |
 | `setup` | `/oh-my-claudecode:setup` | Unified setup entrypoint |
 | `project-session-manager` | `/oh-my-claudecode:project-session-manager` | Manage isolated dev environments (worktrees + tmux) |
 | `writer-memory` | `/oh-my-claudecode:writer-memory` | Agentic memory system for writing projects |
-| `learn-about-omc` | `/oh-my-claudecode:learn-about-omc` | Analyze OMC usage patterns |
-| `psm` | `/oh-my-claudecode:psm` | **Deprecated** alias for `project-session-manager` |
 
 ---
 
@@ -288,17 +283,23 @@ All skills are available as `/oh-my-claudecode:<name>`. Key commands:
 
 ## Hooks System
 
-OMC includes 31 lifecycle hooks. For full hook documentation and lifecycle events, see [HOOKS.md](./HOOKS.md).
+OMC includes 20 hooks across 11 lifecycle events. For full hook documentation and lifecycle events, see [HOOKS.md](./HOOKS.md).
 
-### Hook Categories (Summary)
+### Hook Scripts by Lifecycle Event (Summary)
 
-| Category | Key Hooks |
-|----------|-----------|
-| **Execution Modes** | `autopilot`, `ralph`, `ultrawork`, `ultraqa`, `persistent-mode`, `mode-registry`, `team-pipeline` |
-| **Core / Orchestration** | `keyword-detector`, `omc-orchestrator`, `auto-slash-command`, `todo-continuation`, `notepad`, `learner`, `rules-injector` |
-| **Context & Recovery** | `recovery`, `pre-compact`, `preemptive-compaction`, `directory-readme-injector` |
-| **Quality & Validation** | `code-simplifier`, `permission-handler`, `comment-checker`, `thinking-block-validator`, `think-mode`, `empty-message-sanitizer` |
-| **Coordination** | `subagent-tracker`, `session-end`, `non-interactive-env`, `agent-usage-reminder`, `background-notification`, `plugin-patterns`, `setup` |
+| Event | Scripts |
+|-------|---------|
+| `UserPromptSubmit` | `keyword-detector.mjs`, `skill-injector.mjs` |
+| `SessionStart` | `session-start.mjs`, `project-memory-session.mjs`, `setup-init.mjs`, `setup-maintenance.mjs` |
+| `PreToolUse` | `pre-tool-enforcer.mjs` |
+| `PermissionRequest` | `permission-handler.mjs` |
+| `PostToolUse` | `post-tool-verifier.mjs`, `project-memory-posttool.mjs` |
+| `PostToolUseFailure` | `post-tool-use-failure.mjs` |
+| `SubagentStart` | `subagent-tracker.mjs` (start) |
+| `SubagentStop` | `subagent-tracker.mjs` (stop), `verify-deliverables.mjs` |
+| `PreCompact` | `pre-compact.mjs`, `project-memory-precompact.mjs` |
+| `Stop` | `context-guard-stop.mjs`, `persistent-mode.cjs`, `code-simplifier.mjs` |
+| `SessionEnd` | `session-end.mjs` |
 
 ### Disabling Hooks
 
@@ -329,9 +330,9 @@ Include these phrases in natural language prompts to activate modes. No slash co
 
 | Keyword | Effect |
 |---------|--------|
-| `ultrawork`, `ulw` | Parallel agent orchestration |
-| `autopilot`, `build me`, `I want a` | Full autonomous execution |
-| `ralph`, `don't stop`, `must complete` | Persistence until verified complete |
+| `ultrawork`, `ulw`, `uw` | Parallel agent orchestration |
+| `autopilot`, `build me`, `I want a`, `auto-pilot`, `full auto`, `fullsend`, `e2e this` | Full autonomous execution |
+| `ralph`, `don't stop`, `must complete`, `until done` | Persistence until verified complete |
 | `ccg`, `claude-codex-gemini` | Claude-Codex-Gemini tri-model orchestration |
 | `ralplan` | Iterative planning consensus |
 | `deep interview`, `ouroboros` | Socratic deep interview |

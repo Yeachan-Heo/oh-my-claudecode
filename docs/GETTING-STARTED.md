@@ -284,10 +284,19 @@ You can change the AI model used by each agent:
 | `debugger` | sonnet | Debugging |
 | `designer` | sonnet | UI/UX design |
 | `verifier` | sonnet | Verification |
+| `tracer` | sonnet | Evidence-driven causal tracing |
+| `security-reviewer` | sonnet | Security vulnerabilities and trust boundaries |
+| `test-engineer` | sonnet | Test strategy and coverage |
+| `qa-tester` | sonnet | Interactive CLI/service runtime validation |
+| `scientist` | sonnet | Data and statistical analysis |
+| `git-master` | sonnet | Git operations and history management |
+| `document-specialist` | sonnet | External documentation and API reference lookup |
 | `architect` | opus | System design |
 | `planner` | opus | Strategic planning |
 | `critic` | opus | Plan review |
-| `codeReviewer` | opus | Code review |
+| `analyst` | opus | Requirements analysis |
+| `code-reviewer` | opus | Comprehensive code review |
+| `code-simplifier` | opus | Code clarity and simplification |
 
 ### Customizing magic keywords
 

@@ -406,8 +406,8 @@ These keywords invoke a skill and create a state file.
 | Keyword | Skill | Description |
 |---------|-------|-------------|
 | `cancelomc`, `stopomc` | cancel | Cancels all active modes |
-| `ralph`, `don't stop`, `must complete` | ralph | Persistent execution until verification completes |
-| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end` | autopilot | Fully autonomous execution |
+| `ralph`, `don't stop`, `must complete`, `until done` | ralph | Persistent execution until verification completes |
+| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `auto-pilot`, `full auto`, `fullsend`, `e2e this` | autopilot | Fully autonomous execution |
 | `ultrawork`, `ulw`, `uw` | ultrawork | Maximum parallel execution |
 | `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini tri-model orchestration |
 | `ralplan` | ralplan | Consensus-based iterative planning |

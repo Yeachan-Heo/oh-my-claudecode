@@ -49,7 +49,7 @@ User Input --> Hooks (event detection) --> Skills (behavior injection)
 
 ### Overview
 
-OMC provides 20 specialized agents organized into 4 lanes. Each agent is invoked as `oh-my-claudecode:<agent-name>` and runs on the appropriate model tier.
+OMC provides 19 specialized agents organized into 4 lanes. Each agent is invoked as `oh-my-claudecode:<agent-name>` and runs on the appropriate model tier.
 
 ### Build/Analysis Lane
 
