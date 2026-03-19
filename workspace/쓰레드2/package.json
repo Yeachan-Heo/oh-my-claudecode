@@ -18,12 +18,15 @@
     "analyze": "tsx src/analyzer/pipeline.ts",
     "categories": "tsx scripts/analyze-categories.ts",
     "collect:keyword": "tsx scripts/collect-by-keyword.ts",
+    "collect:cafe": "tsx scripts/collect-naver-cafe.ts",
+    "collect:theqoo": "tsx scripts/collect-theqoo.ts",
     "analyze:collection": "tsx scripts/analyze-collection.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@electric-sql/pglite": "^0.3.16",
     "apify-client": "^2.22.2",
+    "cheerio": "^1.2.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "playwright": "^1.58.2",

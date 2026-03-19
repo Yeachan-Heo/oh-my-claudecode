@@ -583,3 +583,53 @@ export const crawlSessions = pgTable(
     updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
 );
+
+// ---------------------------------------------------------------------------
+// Community Posts (네이버 카페 등 외부 커뮤니티 수집)
+// ---------------------------------------------------------------------------
+
+export const sourcePlatformEnum = pgEnum('source_platform', [
+  'naver_cafe',
+  'naver_blog',
+  'theqoo',
+]);
+
+/**
+ * community_posts - 네이버 카페/블로그 등 외부 커뮤니티에서 수집한 포스트.
+ *
+ * 여성 니즈/불편함 발굴 목적. 닉네임 외 개인정보 수집 금지.
+ */
+export const communityPosts = pgTable(
+  'community_posts',
+  {
+    id: text('id').primaryKey(),
+    source_platform: sourcePlatformEnum('source_platform').notNull(),
+    source_cafe: text('source_cafe').notNull(),       // 카페 ID: 'cosmania', 'powderroom' 등
+    source_url: text('source_url').notNull(),          // 원본 URL
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    comments: jsonb('comments').$type<Array<{
+      nickname: string;
+      text: string;
+      like_count?: number;
+    }>>().default([]),
+    author_nickname: text('author_nickname'),           // 닉네임 — 개인정보 아님
+    like_count: integer('like_count').notNull().default(0),
+    comment_count: integer('comment_count').notNull().default(0),
+    view_count: integer('view_count').notNull().default(0),
+    posted_at: timestamp('posted_at', { withTimezone: true }),
+    collected_at: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
+    analyzed: boolean('analyzed').notNull().default(false),
+    extracted_needs: jsonb('extracted_needs').$type<Array<{
+      need: string;
+      category?: string;
+      confidence?: number;
+    }>>().default([]),
+  },
+  (table) => [
+    index('idx_community_posts_platform').on(table.source_platform),
+    index('idx_community_posts_cafe').on(table.source_cafe),
+    index('idx_community_posts_analyzed').on(table.analyzed),
+    index('idx_community_posts_collected_at').on(table.collected_at),
+  ],
+);

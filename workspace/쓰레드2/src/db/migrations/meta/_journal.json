@@ -8,6 +8,20 @@
       "when": 1773556617524,
       "tag": "0000_curly_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773900975653,
+      "tag": "0001_careless_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773906963725,
+      "tag": "0002_perpetual_freak",
+      "breakpoints": true
     }
   ]
 }
