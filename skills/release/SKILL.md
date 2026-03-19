@@ -1,6 +1,7 @@
 ---
 name: release
 description: Automated release workflow for oh-my-claudecode
+disable-model-invocation: true
 ---
 
 # Release Skill

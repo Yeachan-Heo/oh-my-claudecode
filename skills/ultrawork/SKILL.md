@@ -1,6 +1,8 @@
 ---
 name: ultrawork
 description: Parallel execution engine for high-throughput task completion
+disable-model-invocation: true
+argument-hint: "<task description>"
 ---
 
 <Purpose>

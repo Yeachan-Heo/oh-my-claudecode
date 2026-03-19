@@ -2,6 +2,8 @@
 name: team
 description: N coordinated agents on shared task list using Claude Code native teams
 aliases: []
+disable-model-invocation: true
+argument-hint: "[N:agent-type] <task description>"
 ---
 
 # Team Skill

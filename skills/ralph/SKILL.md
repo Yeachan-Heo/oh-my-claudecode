@@ -1,6 +1,8 @@
 ---
 name: ralph
 description: Self-referential loop until task completion with configurable verification reviewer
+disable-model-invocation: true
+argument-hint: "<task description>"
 ---
 
 [RALPH + ULTRAWORK - ITERATION {{ITERATION}}/{{MAX}}]

@@ -4,6 +4,7 @@ description: Strategic planning with optional interview workflow
 pipeline: [deep-interview, omc-plan, autopilot]
 next-skill: autopilot
 handoff: .omc/plans/ralplan-*.md
+argument-hint: "<topic> [--consensus] [--review]"
 ---
 
 <Purpose>

@@ -1,6 +1,7 @@
 ---
 name: ralplan
 description: Alias for /omc-plan --consensus
+argument-hint: "<topic>"
 ---
 
 # Ralplan (Consensus Planning Alias)

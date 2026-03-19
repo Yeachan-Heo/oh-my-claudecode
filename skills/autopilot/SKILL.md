@@ -1,6 +1,8 @@
 ---
 name: autopilot
 description: Full autonomous execution from idea to working code
+disable-model-invocation: true
+argument-hint: "<task description>"
 ---
 
 <Purpose>

@@ -2,6 +2,7 @@
 name: trace
 description: Evidence-driven tracing lane that orchestrates competing tracer hypotheses in Claude built-in team mode
 agent: tracer
+argument-hint: "<issue description>"
 ---
 
 # Trace Skill

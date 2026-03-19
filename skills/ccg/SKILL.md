@@ -1,6 +1,8 @@
 ---
 name: ccg
 description: Claude-Codex-Gemini tri-model orchestration via /ask codex + /ask gemini, then Claude synthesizes results
+disable-model-invocation: true
+argument-hint: "<question>"
 ---
 
 # CCG - Claude-Codex-Gemini Tri-Model Orchestration

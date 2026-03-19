@@ -1,6 +1,7 @@
 ---
 name: ask
 description: Ask Claude, Codex, or Gemini via local CLI and capture a reusable artifact
+argument-hint: "<provider> [role] <question>"
 ---
 
 # Ask

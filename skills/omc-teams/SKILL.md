@@ -2,6 +2,8 @@
 name: omc-teams
 description: Spawn claude, codex, or gemini CLI workers in tmux panes for parallel task execution
 aliases: []
+disable-model-invocation: true
+argument-hint: "<task description>"
 ---
 
 # OMC Teams Skill

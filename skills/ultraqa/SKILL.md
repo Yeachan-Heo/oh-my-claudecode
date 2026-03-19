@@ -1,6 +1,8 @@
 ---
 name: ultraqa
 description: QA cycling workflow - test, verify, fix, repeat until goal met
+disable-model-invocation: true
+argument-hint: "<task description>"
 ---
 
 # UltraQA Skill

@@ -1,6 +1,7 @@
 ---
 name: learner
 description: Extract a learned skill from the current conversation
+argument-hint: "[skill-name]"
 ---
 
 # Learner Skill
