@@ -2,7 +2,7 @@
 name: ai-slop-cleaner
 description: Clean AI-generated code slop with a regression-safe, deletion-first workflow and optional reviewer-only mode
 disable-model-invocation: true
-argument-hint: "[--reviewer-only] [path]"
+argument-hint: "[--review] [path]"
 ---
 
 # AI Slop Cleaner
