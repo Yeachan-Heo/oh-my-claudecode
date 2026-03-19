@@ -372,6 +372,29 @@ function getSkillProtectionLevel(skillName, rawSkillName) {
   return SKILL_PROTECTION_MAP[normalized] || 'none';
 }
 
+// Load OMC config to check forceInherit setting (issues #1135, #1201)
+function loadOmcConfig() {
+  const configPaths = [
+    join(homedir(), '.claude', '.omc-config.json'),
+    join(process.cwd(), '.omc', 'config.json'),
+  ];
+  for (const configPath of configPaths) {
+    try {
+      if (existsSync(configPath)) {
+        return JSON.parse(readFileSync(configPath, 'utf-8'));
+      }
+    } catch { /* continue */ }
+  }
+  return {};
+}
+
+// Check if forceInherit is enabled via config or env var
+function isForceInheritEnabled() {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') return true;
+  const config = loadOmcConfig();
+  return config.routing?.forceInherit === true;
+}
+
 function extractSkillName(toolInput) {
   if (!toolInput || typeof toolInput !== 'object') return null;
   const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || null;
@@ -477,6 +500,24 @@ async function main() {
           ? data.sessionId
           : '';
     const modeActive = hasActiveMode(directory, sessionId);
+
+    // Force-inherit check: deny Task/Agent calls with model param when forceInherit is enabled
+    // (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      const toolModel = toolInput.model;
+      if (toolModel && isForceInheritEnabled()) {
+        console.log(JSON.stringify({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on ${toolName} calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${toolModel}" is not valid for this provider.`
+          }
+        }));
+        return;
+      }
+    }
 
     // Send notification when AskUserQuestion is about to execute (user input needed)
     // Fires in PreToolUse so users get notified BEFORE the tool blocks for input (#597)
