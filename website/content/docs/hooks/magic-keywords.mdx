@@ -35,11 +35,11 @@ Keywords that invoke a skill and create a state file.
 |--------|------|------|
 | `cancelomc`, `stopomc` | cancel | Cancels all active modes |
 | `ralph`, `don't stop`, `must complete`, `until done` | ralph | Persistent execution until verification complete |
-| `autopilot`, `auto pilot`, `autonomous`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | autopilot | Fully autonomous execution |
+| `autopilot`, `auto pilot`, `auto-pilot`, `autonomous`, `build me`, `I want a`, `create me`, `make me`, `handle it all`, `full auto`, `fullsend`, `end to end`, `e2e this` | autopilot | Fully autonomous execution |
 | `ultrawork`, `ulw`, `uw` | ultrawork | Maximum parallel execution |
 | `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini tri-model orchestration |
 | `ralplan` | ralplan | Consensus-based iterative planning |
-| `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
+| `deep interview`, `ouroboros`, `socratic` | deep-interview | Socratic deep interview |
 
 ### AI Slop Cleanup Keywords
 
@@ -52,7 +52,7 @@ Supports two types: explicit patterns and combination patterns.
 
 | Action keywords | Smell keywords |
 |------------|------------|
-| `cleanup`, `refactor`, `simplify`, `dedupe`, `prune` | `slop`, `duplicate`, `dead code`, `unused code`, `over-abstraction`, `wrapper layers`, `needless abstractions`, `ai-generated`, `tech debt` |
+| `cleanup`, `refactor`, `simplify`, `dedupe`, `prune` | `slop`, `duplicate`, `duplication`, `dead code`, `unused code`, `over-abstraction`, `wrapper layers`, `needless abstractions`, `unnecessary abstractions`, `ai-generated`, `generated code`, `tech debt`, `boundary violations` |
 
 Example: "cleanup the duplicate code" → activates the ai-slop-cleaner skill
 
@@ -73,7 +73,7 @@ These keywords inject an inline mode message instead of invoking a skill.
 | Keyword | Effect |
 |--------|------|
 | `ultrathink`, `think hard`, `think deeply` | Activates extended reasoning mode |
-| `deepsearch`, `search the codebase`, `find in codebase` | Codebase-focused search mode |
+| `deepsearch`, `search the codebase`, `find in codebase` (also: `search code`, `search files`, `search project`, `find in code`, `find in all files`) | Codebase-focused search mode |
 | `deep-analyze`, `deepanalyze` | Deep analysis mode |
 
 ## Priority and Conflict Resolution

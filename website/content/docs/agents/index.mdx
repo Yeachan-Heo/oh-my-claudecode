@@ -36,7 +36,7 @@ Reviews code quality and security.
 
 | Agent | Default Model | Role |
 |----------|-----------|------|
-| [`security-reviewer`](/docs/agents/review/security-reviewer) | opus | OWASP Top 10, authentication/authorization vulnerability review |
+| [`security-reviewer`](/docs/agents/review/security-reviewer) | sonnet | OWASP Top 10, authentication/authorization vulnerability review |
 | [`code-reviewer`](/docs/agents/review/code-reviewer) | opus | Logic defects, API contracts, backward compatibility review |
 
 ### Domain
@@ -89,7 +89,7 @@ For example, `explore` defaults to haiku, but `explore-high` uses the opus tier.
 | Write documentation | `writer` | haiku |
 | SDK/API doc lookup | `document-specialist` | sonnet |
 | Test strategy | `test-engineer` | sonnet |
-| Security review | `security-reviewer` | opus |
+| Security review | `security-reviewer` | sonnet |
 | Code review | `code-reviewer` | opus |
 | Data analysis | `scientist` | sonnet |
 | Strategic planning | `planner` | opus |
@@ -126,3 +126,4 @@ The following aliases remain for backward compatibility.
 | `deep-executor` | executor |
 | `build-fixer` | debugger |
 | `harsh-critic` | critic |
+| `vision` | document-specialist |

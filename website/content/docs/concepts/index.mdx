@@ -71,7 +71,7 @@ The quality gate before handing off code. Catches quality and security issues.
 
 | Agent | Default Model | Role |
 |-------|---------------|------|
-| `security-reviewer` | opus | Security vulnerabilities, trust boundaries, authn/authz |
+| `security-reviewer` | sonnet | Security vulnerabilities, trust boundaries, authn/authz |
 | `code-reviewer` | opus | Comprehensive code review, API contracts, backward compatibility |
 
 ### Domain Lane
@@ -165,7 +165,7 @@ graph LR
 | UI component | `designer` | sonnet |
 | Documentation | `writer` | haiku |
 | Test strategy | `test-engineer` | sonnet |
-| Security review | `security-reviewer` | opus |
+| Security review | `security-reviewer` | sonnet |
 | Code review | `code-reviewer` | opus |
 | Data analysis | `scientist` | sonnet |
 
