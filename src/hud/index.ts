@@ -246,7 +246,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       }
     }
 
-    const missionBoardEnabled = config.missionBoard?.enabled ?? config.elements.missionBoard ?? false;
+    const missionBoardEnabled = config.missionBoard?.enabled ?? false;
     const missionBoard = missionBoardEnabled
       ? await refreshMissionBoardState(cwd, config.missionBoard)
       : null;
@@ -304,8 +304,8 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       );
     }
 
-    // autoCompact: write trigger file when context exceeds threshold
-    // A companion hook can read this file to inject a /compact suggestion.
+    // autoCompact: write a compact-requested trigger file when context exceeds the threshold.
+    // This does not execute /compact directly; a companion hook may react to the request.
     if (
       config.contextLimitWarning.autoCompact &&
       context.contextPercent >= config.contextLimitWarning.threshold

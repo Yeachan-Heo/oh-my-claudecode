@@ -225,7 +225,8 @@ export function isOmcStatusLine(statusLine: unknown): boolean {
   if (typeof statusLine === 'string') {
     return statusLine.includes('omc-hud');
   }
-  // Current object format: { type: "command", command: "node ...omc-hud.mjs" }
+  // Current object format: { type: "command", command: "...omc-hud.mjs" }
+  // This may be a direct node command or the Unix find-node.sh wrapper.
   if (typeof statusLine === 'object') {
     const sl = statusLine as Record<string, unknown>;
     if (typeof sl.command === 'string') {
@@ -1005,9 +1006,11 @@ export function install(options: InstallOptions = {}): InstallResult {
       // 2. Configure statusLine (always, even in plugin mode)
       if (hudScriptPath) {
         const nodeBin = resolveNodeBinary();
-        const absoluteCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+        const normalizedNodeBin = nodeBin.replace(/\\/g, '/');
+        const absoluteCommand = '"' + normalizedNodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
+        const portableClaudeConfigDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
 
-        // On Unix, use find-node.sh for portable $HOME paths (multi-machine sync)
+        // On Unix, use find-node.sh for portable config-dir-aware paths
         // and robust node discovery (nvm/fnm in non-interactive shells).
         // Copy find-node.sh into the HUD directory so statusLine can reference it
         // without depending on CLAUDE_PLUGIN_ROOT (which is only set for hooks).
@@ -1018,10 +1021,10 @@ export function install(options: InstallOptions = {}): InstallResult {
             const findNodeDest = join(HUD_DIR, 'find-node.sh');
             copyFileSync(findNodeSrc, findNodeDest);
             chmodSync(findNodeDest, 0o755);
-            statusLineCommand = 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = `sh "${portableClaudeConfigDir}/hud/find-node.sh" "${portableClaudeConfigDir}/hud/omc-hud.mjs"`;
           } catch {
             // Fallback to bare node if find-node.sh copy fails
-            statusLineCommand = 'node $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = `node "${portableClaudeConfigDir}/hud/omc-hud.mjs"`;
           }
         }
         // Auto-migrate legacy string format (pre-v4.5) to object format

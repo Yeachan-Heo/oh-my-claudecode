@@ -144,10 +144,10 @@ describe('readHudConfig', () => {
   });
 
   describe('merging with defaults', () => {
-    it('allows mission board to be explicitly enabled from settings', () => {
+    it('allows mission board to be explicitly enabled from legacy element settings', () => {
       mockExistsSync.mockImplementation((path) => {
         const s = String(path);
-        return /[\/]Users[\/]testuser[\/]\.claude[\/]settings\.json$/.test(s);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
       });
       mockReadFileSync.mockReturnValue(JSON.stringify({
         omcHud: {
@@ -161,6 +161,47 @@ describe('readHudConfig', () => {
 
       expect(config.elements.missionBoard).toBe(true);
       expect(config.missionBoard?.enabled).toBe(true);
+    });
+
+    it('allows mission board to be enabled from missionBoard.enabled', () => {
+      mockExistsSync.mockImplementation((path) => {
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
+      });
+      mockReadFileSync.mockReturnValue(JSON.stringify({
+        omcHud: {
+          missionBoard: {
+            enabled: true,
+          }
+        }
+      }));
+
+      const config = readHudConfig();
+
+      expect(config.elements.missionBoard).toBe(true);
+      expect(config.missionBoard?.enabled).toBe(true);
+    });
+
+    it('prefers missionBoard.enabled over legacy missionBoard element when both are set', () => {
+      mockExistsSync.mockImplementation((path) => {
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(s);
+      });
+      mockReadFileSync.mockReturnValue(JSON.stringify({
+        omcHud: {
+          elements: {
+            missionBoard: true,
+          },
+          missionBoard: {
+            enabled: false,
+          }
+        }
+      }));
+
+      const config = readHudConfig();
+
+      expect(config.elements.missionBoard).toBe(false);
+      expect(config.missionBoard?.enabled).toBe(false);
     });
 
     it('merges partial config with defaults', () => {

@@ -371,6 +371,16 @@ export interface HudRenderContext {
 export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense';
 
 /**
+ * Progress bar visual style options:
+ * - solid: ████████░░ (full blocks, default)
+ * - blocks: ▓▓▓▓▓▓░░ (dark shade blocks)
+ * - dots: ●●●●●●○○ (circles)
+ * - minimal: ▸▸▸▸▸▸▹▹ (arrows)
+ * - ascii: [======....] (ASCII fallback for limited terminals)
+ */
+export type ProgressBarStyle = 'solid' | 'blocks' | 'dots' | 'minimal' | 'ascii';
+
+/**
  * Agent display format options:
  * - count: agents:2
  * - codes: agents:Oes (type-coded with model tier casing)
@@ -432,18 +442,21 @@ export interface HudElementConfig {
   thinking: boolean;          // Show extended thinking indicator
   thinkingFormat: ThinkingFormat;  // Thinking indicator format
   apiKeySource: boolean;       // Show API key source (project/global/env)
-  profile: boolean;            // Show active profile name (from CLAUDE_CONFIG_DIR)
-  missionBoard?: boolean;      // Show opt-in mission board above existing HUD detail lines
+  profile: boolean;            // Show the active profile name derived from CLAUDE_CONFIG_DIR when present
+  missionBoard?: boolean;      // Legacy compatibility mirror; prefer missionBoard.enabled for new config
   promptTime: boolean;        // Show last prompt submission time (HH:MM:SS)
   sessionHealth: boolean;     // Show session health/duration
   showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
   showHealthIndicator?: boolean;  // Show 🟢/🟡/🔴 health indicator (default: true if sessionHealth is true)
-  showTokens?: boolean;           // Show last-request token usage when enabled (tok:i1.2k/o340)
+  showTokens?: boolean;           // Show token usage only when enabled and transcript usage data is available
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
+  progressBarStyle?: ProgressBarStyle;  // Progress bar visual style (default: 'solid')
+  useGradientColors?: boolean;  // Use gradient colors for progress bars (default: false)
+  showAgentIcons?: boolean;   // Show icons for agent types (default: true)
   showCallCounts?: boolean;   // Show tool/agent/skill call counts on the right of the status line (default: true)
-  sessionSummary: boolean;    // Show AI-generated session summary (<20 chars) - generated every 10 turns via claude -p
+  sessionSummary: boolean;    // Show cached AI-generated session summary when transcript/session data exists; refreshed in background
   maxOutputLines: number;     // Max total output lines to prevent input field shrinkage
-  safeMode: boolean;          // Strip ANSI codes and use ASCII-only output to prevent terminal rendering corruption (Issue #346)
+  safeMode: boolean;          // Strip ANSI codes and use ASCII-only output; Windows always forces safe mode at runtime
 }
 
 export interface HudThresholds {
@@ -461,7 +474,7 @@ export interface HudThresholds {
 export interface ContextLimitWarningConfig {
   /** Context percentage threshold that triggers the warning banner (default: 80) */
   threshold: number;
-  /** Automatically queue /compact when threshold is exceeded (default: false) */
+  /** Write .omc/state/compact-requested.json when threshold is exceeded; does not execute /compact directly */
   autoCompact: boolean;
 }
 
@@ -517,7 +530,10 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     promptTime: true,  // Show last prompt time by default
     sessionHealth: true,
     showTokens: false,
-    useBars: false,  // Disabled by default for backwards compatibility
+    useBars: true,  // Enabled by default for rich visualization
+    progressBarStyle: 'solid',  // Default solid blocks
+    useGradientColors: false,  // Use standard threshold colors
+    showAgentIcons: true,  // Show agent type icons
     showCallCounts: true,  // Show tool/agent/skill call counts by default (Issue #710)
     sessionSummary: false, // Disabled by default - opt-in AI-generated session summary
     maxOutputLines: 4,

@@ -2,7 +2,7 @@
  * OMC HUD - Context Limit Warning Element
  *
  * Renders a prominent warning banner when context usage exceeds the configured
- * threshold. Supports an autoCompact mode that queues a /compact request.
+ * threshold. Supports an autoCompact mode that signals a queued compact request.
  */
 
 import { RESET } from '../colors.js';
@@ -18,7 +18,7 @@ const BOLD = '\x1b[1m';
  *
  * @param contextPercent - Current context usage (0-100)
  * @param threshold - Configured threshold to trigger warning (default 80)
- * @param autoCompact - Whether autoCompact is enabled (affects message copy)
+ * @param autoCompact - Whether autoCompact is enabled (affects queued/requested copy)
  */
 export function renderContextLimitWarning(
   contextPercent: number,
@@ -34,7 +34,7 @@ export function renderContextLimitWarning(
   const isCritical = safePercent >= 90;
   const color = isCritical ? RED : YELLOW;
   const icon = isCritical ? '!!' : '!';
-  const action = autoCompact ? '(auto-compact queued)' : 'run /compact';
+  const action = autoCompact ? 'compact request queued' : 'run /compact';
 
   return `${color}${BOLD}[${icon}] ctx ${safePercent}% >= ${threshold}% threshold - ${action}${RESET}`;
 }

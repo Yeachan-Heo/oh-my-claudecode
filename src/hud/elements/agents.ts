@@ -5,13 +5,16 @@
  * - count: agents:2
  * - codes: agents:Oes (type-coded with model tier casing)
  * - detailed: agents:[architect(2m),explore,exec]
+ *
+ * Enhanced with icons and improved multi-line layout.
  */
 
 import type { ActiveAgent, AgentsFormat } from '../types.js';
-import { dim, RESET, getModelTierColor, getDurationColor } from '../colors.js';
+import { dim, RESET, getModelTierColor, getDurationColor, getAgentIcon, ICONS, ASCII_ICONS } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
 
 const CYAN = '\x1b[36m';
+const DIM = '\x1b[2m';
 
 // ============================================================================
 // Agent Type Codes
@@ -479,13 +482,20 @@ export interface MultiLineRenderResult {
  * Returns header addition + multiple detail lines.
  *
  * Format:
- * ├─ O architect     2m   analyzing architecture patterns...
+ * ├─ A architect     2m   analyzing architecture patterns...
  * ├─ e explore    45s  searching for test files
  * └─ x exec       1m   implementing validation logic
+ *
+ * @param agents - List of active agents
+ * @param maxLines - Maximum number of detail lines to show
+ * @param showIcons - Whether to show agent type icons (default: true)
+ * @param useAscii - Whether to use ASCII fallback for box drawing (default: false)
  */
 export function renderAgentsMultiLine(
   agents: ActiveAgent[],
-  maxLines: number = 5
+  maxLines: number = 5,
+  showIcons: boolean = true,
+  useAscii: boolean = false
 ): MultiLineRenderResult {
   const running = sortByFreshest(agents.filter((a) => a.status === 'running'));
 
@@ -501,9 +511,12 @@ export function renderAgentsMultiLine(
   const detailLines: string[] = [];
   const displayCount = Math.min(running.length, maxLines);
 
+  // Get the appropriate icons set
+  const icons = useAscii ? ASCII_ICONS : ICONS;
+
   running.slice(0, maxLines).forEach((a, index) => {
     const isLast = index === displayCount - 1 && running.length <= maxLines;
-    const prefix = isLast ? '└─' : '├─';
+    const prefix = isLast ? icons.endSeparator : icons.branchSeparator;
 
     const code = getAgentCode(a.type, a.model);
     const color = getModelTierColor(a.model);
@@ -513,19 +526,24 @@ export function renderAgentsMultiLine(
     const duration = formatDurationPadded(durationMs);
     const durationColor = getDurationColor(durationMs);
 
+    // Get icon for agent type
+    const icon = showIcons ? getAgentIcon(a.type, useAscii) : '';
+
     const desc = a.description || '...';
     // Use CJK-aware truncation (45 visual columns)
     const truncatedDesc = truncateToWidth(desc, 45);
 
+    // Build line with icon and code
+    const iconPart = showIcons && icon ? `${dim(icon)} ` : '';
     detailLines.push(
-      `${dim(prefix)} ${color}${code}${RESET} ${dim(shortName)}${durationColor}${duration}${RESET}  ${truncatedDesc}`
+      `${dim(prefix)} ${iconPart}${color}${code}${RESET} ${dim(shortName)}${durationColor}${duration}${RESET}  ${truncatedDesc}`
     );
   });
 
   // Add overflow indicator if needed
   if (running.length > maxLines) {
     const remaining = running.length - maxLines;
-    detailLines.push(`${dim(`└─ +${remaining} more agents...`)}`);
+    detailLines.push(`${dim(`${icons.endSeparator} +${remaining} more agents...`)}`);
   }
 
   return { headerPart, detailLines };

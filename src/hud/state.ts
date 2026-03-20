@@ -210,6 +210,7 @@ function mergeWithDefaults(config: Partial<HudConfig>): HudConfig {
       ...DEFAULT_HUD_CONFIG.elements,  // Base defaults
       ...presetElements,                // Preset overrides
       ...config.elements,               // User overrides
+      missionBoard: missionBoardEnabled,
     },
     thresholds: {
       ...DEFAULT_HUD_CONFIG.thresholds,

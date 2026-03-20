@@ -148,4 +148,67 @@ describe('mission board renderer', () => {
     expect(lines[5]).toContain('todos:');
     expect(lines[5]).toContain('keep shipping');
   });
+
+  it('renders mission board from missionBoard.enabled even when legacy element flag is false', async () => {
+    const context: HudRenderContext = {
+      contextPercent: 20,
+      modelName: 'claude-sonnet',
+      ralph: null,
+      ultrawork: null,
+      prd: null,
+      autopilot: null,
+      activeAgents: [],
+      todos: [],
+      backgroundTasks: [],
+      cwd: '/tmp/project',
+      missionBoard: createMissionState(),
+      lastSkill: null,
+      rateLimitsResult: null,
+      customBuckets: null,
+      pendingPermission: null,
+      thinkingState: null,
+      sessionHealth: null,
+      omcVersion: '4.7.8',
+      updateAvailable: null,
+      toolCallCount: 0,
+      agentCallCount: 0,
+      skillCallCount: 0,
+      promptTime: null,
+      apiKeySource: null,
+      profileName: null,
+      sessionSummary: null,
+    };
+
+    const config: HudConfig = {
+      ...DEFAULT_HUD_CONFIG,
+      missionBoard: {
+        enabled: true,
+        maxMissions: 2,
+        maxAgentsPerMission: 3,
+        maxTimelineEvents: 3,
+        persistCompletedForMinutes: 20,
+      },
+      elements: {
+        ...DEFAULT_HUD_CONFIG.elements,
+        missionBoard: false,
+        omcLabel: true,
+        rateLimits: false,
+        ralph: false,
+        autopilot: false,
+        prdStory: false,
+        activeSkills: false,
+        contextBar: false,
+        agents: false,
+        backgroundTasks: false,
+        sessionHealth: false,
+        promptTime: false,
+        todos: false,
+        maxOutputLines: 12,
+      },
+    };
+
+    const output = await render(context, config);
+
+    expect(output).toContain('MISSION demo [running]');
+  });
 });

@@ -2,23 +2,32 @@
  * OMC HUD - Main Renderer
  *
  * Composes statusline output from render context.
+ * Enhanced with terminal capability detection and new visual styles.
  */
 
 import type { HudRenderContext, HudConfig } from './types.js';
 import { DEFAULT_HUD_CONFIG } from './types.js';
-import { bold, dim } from './colors.js';
+import { bold, dim, horizontalLine, separator } from './colors.js';
 import { stringWidth, getCharWidth } from '../utils/string-width.js';
+import {
+  getTerminalCapabilities,
+  shouldUseSafeMode,
+  sanitizeForTerminal,
+  type TerminalCapabilities
+} from './terminal-capabilities.js';
+
+// Element imports
 import { renderRalph } from './elements/ralph.js';
 import { renderAgentsByFormat, renderAgentsMultiLine } from './elements/agents.js';
-import { renderTodosWithCurrent } from './elements/todos.js';
+import { renderTodosWithCurrent, renderTodosWithBarAndCurrent } from './elements/todos.js';
 import { renderSkills, renderLastSkill } from './elements/skills.js';
 import { renderContext, renderContextWithBar } from './elements/context.js';
 import { renderBackground } from './elements/background.js';
 import { renderPrd } from './elements/prd.js';
 import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderCustomBuckets } from './elements/limits.js';
 import { renderPermission } from './elements/permission.js';
-import { renderThinking } from './elements/thinking.js';
-import { renderSession } from './elements/session.js';
+import { renderThinkingDynamic } from './elements/thinking.js';
+import { renderSessionFull, renderSessionWithHealth } from './elements/session.js';
 import { renderTokenUsage } from './elements/token-usage.js';
 import { renderPromptTime } from './elements/prompt-time.js';
 import { renderAutopilot } from './elements/autopilot.js';
@@ -186,12 +195,34 @@ export function limitOutputLines(lines: string[], maxLines?: number): string[] {
 }
 
 /**
+ * Determine the actual safe mode setting based on terminal capabilities.
+ */
+function resolveSafeMode(config: HudConfig, capabilities: TerminalCapabilities): boolean {
+  // If safeMode is explicitly set in config, respect it
+  // Otherwise, use terminal capability detection
+  if (config.elements.safeMode) {
+    return shouldUseSafeMode(capabilities);
+  }
+  return false; // Allow ANSI if config says no safe mode
+}
+
+/**
  * Render the complete statusline (single or multi-line)
  */
 export async function render(context: HudRenderContext, config: HudConfig): Promise<string> {
+  // Detect terminal capabilities
+  const capabilities = getTerminalCapabilities();
+  const useSafeMode = resolveSafeMode(config, capabilities);
+  const useAscii = !capabilities.supportsUnicode || useSafeMode;
+
   const elements: string[] = [];
   const detailLines: string[] = [];
   const { elements: enabledElements } = config;
+
+  // Get style options
+  const progressBarStyle = enabledElements.progressBarStyle || 'solid';
+  const useGradient = enabledElements.useGradientColors ?? false;
+  const showAgentIcons = enabledElements.showAgentIcons ?? true;
 
   // Git info line (separate line above HUD)
   const gitElements: string[] = [];
@@ -247,7 +278,13 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
       // Data available (possibly stale from 429) → always show data
       const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars
-        ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits, undefined, stale)
+        ? renderRateLimitsWithBar(
+            context.rateLimitsResult.rateLimits,
+            8,
+            stale,
+            progressBarStyle,
+            useGradient
+          )
         : renderRateLimits(context.rateLimitsResult.rateLimits, stale);
       if (limits) elements.push(limits);
     } else {
@@ -270,9 +307,13 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     if (permission) elements.push(permission);
   }
 
-  // Extended thinking indicator
+  // Extended thinking indicator with dynamic animation
   if (enabledElements.thinking && context.thinkingState) {
-    const thinking = renderThinking(context.thinkingState, enabledElements.thinkingFormat || 'text');
+    const thinking = renderThinkingDynamic(
+      context.thinkingState,
+      enabledElements.thinkingFormat || 'text',
+      useAscii
+    );
     if (thinking) elements.push(thinking);
   }
 
@@ -287,8 +328,12 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     // Session duration display (session:19m)
     // If showSessionDuration is explicitly set, use it; otherwise default to true (backward compat)
     const showDuration = enabledElements.showSessionDuration ?? true;
+    const showHealthIndicator = enabledElements.showHealthIndicator ?? true;
+
     if (showDuration) {
-      const session = renderSession(context.sessionHealth);
+      const session = showHealthIndicator
+        ? renderSessionWithHealth(context.sessionHealth, useAscii)
+        : renderSessionFull(context.sessionHealth, useAscii);
       if (session) elements.push(session);
     }
   }
@@ -332,10 +377,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     if (lastSkillElement) elements.push(lastSkillElement);
   }
 
-  // Context window
+  // Context window with enhanced progress bar
   if (enabledElements.contextBar) {
     const ctx = enabledElements.useBars
-      ? renderContextWithBar(context.contextPercent, config.thresholds)
+      ? renderContextWithBar(context.contextPercent, config.thresholds, progressBarStyle, useGradient)
       : renderContext(context.contextPercent, config.thresholds);
     if (ctx) elements.push(ctx);
   }
@@ -347,7 +392,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     if (format === 'multiline') {
       // Multi-line mode: get header part and detail lines
       const maxLines = enabledElements.agentsMaxLines || 5;
-      const result = renderAgentsMultiLine(context.activeAgents, maxLines);
+      const result = renderAgentsMultiLine(context.activeAgents, maxLines, showAgentIcons, useAscii);
       if (result.headerPart) elements.push(result.headerPart);
       detailLines.push(...result.detailLines);
     } else {
@@ -411,13 +456,15 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     }
   }
 
-  // Todos on next line (if available)
+  // Todos on next line (if available) with optional progress bar
   if (enabledElements.todos) {
-    const todos = renderTodosWithCurrent(context.todos);
+    const todos = enabledElements.useBars
+      ? renderTodosWithBarAndCurrent(context.todos, progressBarStyle)
+      : renderTodosWithCurrent(context.todos);
     if (todos) detailLines.push(todos);
   }
 
-  if (context.missionBoard && (config.missionBoard?.enabled ?? config.elements.missionBoard ?? false)) {
+  if (context.missionBoard && (config.missionBoard?.enabled ?? false)) {
     detailLines.unshift(...renderMissionBoard(context.missionBoard, config.missionBoard));
   }
 
@@ -435,5 +482,12 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     ? limitedLines.map(line => truncateLineToMaxWidth(line, config.maxWidth!))
     : limitedLines;
 
-  return finalLines.join('\n');
+  // Apply terminal sanitization if needed
+  const result = finalLines.join('\n');
+
+  if (useSafeMode) {
+    return sanitizeForTerminal(result, capabilities);
+  }
+
+  return result;
 }

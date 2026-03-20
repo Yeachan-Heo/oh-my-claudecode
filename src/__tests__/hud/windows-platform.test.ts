@@ -127,10 +127,15 @@ describe('Windows HUD Platform Fixes (#739)', () => {
 
     afterEach(() => {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
+      vi.doUnmock('../../platform/index.js');
       vi.resetModules();
     });
 
-    it('should use emoji icons on macOS/Linux (current platform)', async () => {
+    it('should use emoji icons on macOS/Linux when not running under WSL', async () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      vi.doMock('../../platform/index.js', () => ({ isWSL: () => false }));
+      vi.resetModules();
+
       const { renderCallCounts } = await import('../../hud/elements/call-counts.js');
       const result = renderCallCounts(42, 7, 3);
       expect(result).toContain('\u{1F527}'); // wrench

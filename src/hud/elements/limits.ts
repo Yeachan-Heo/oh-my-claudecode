@@ -5,8 +5,9 @@
  * and custom rate limit buckets from the rateLimitsProvider command.
  */
 
-import type { RateLimits, CustomProviderResult, CustomBucketUsage, UsageResult } from '../types.js';
-import { RESET } from '../colors.js';
+import type { RateLimits, CustomProviderResult, CustomBucketUsage, UsageResult, ProgressBarStyle } from '../types.js';
+import { RESET, getGradientColor } from '../colors.js';
+import { renderProgressBar, getRateLimitColor } from '../progress-bar.js';
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -20,7 +21,11 @@ const CRITICAL_THRESHOLD = 90;
 /**
  * Get color based on percentage
  */
-function getColor(percent: number): string {
+function getColor(percent: number, useGradient: boolean = false): string {
+  if (useGradient) {
+    return getGradientColor(percent);
+  }
+
   if (percent >= CRITICAL_THRESHOLD) {
     return RED;
   } else if (percent >= WARNING_THRESHOLD) {
@@ -134,59 +139,82 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
 }
 
 /**
- * Render rate limits with visual progress bars.
+ * Render rate limits with visual progress bars using the new progress bar component.
  *
- * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
+ * Format: 5h:[████░░░░]45%(3h42m) wk:[█░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
+ *
+ * @param limits - Rate limits data
+ * @param barWidth - Width of progress bar (default: 8)
+ * @param stale - Whether data is stale
+ * @param style - Progress bar visual style
+ * @param useGradient - Use gradient colors
  */
 export function renderRateLimitsWithBar(
   limits: RateLimits | null,
   barWidth: number = 8,
   stale?: boolean,
+  style: ProgressBarStyle = 'solid',
+  useGradient: boolean = false
 ): string | null {
   if (!limits) return null;
 
   const staleMarker = stale ? `${DIM}*${RESET}` : '';
   const resetPrefix = stale ? '~' : '';
 
+  // 5-hour limit
   const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
-  const fiveHourFilled = Math.round((fiveHour / 100) * barWidth);
-  const fiveHourEmpty = barWidth - fiveHourFilled;
-  const fiveHourBar = `${fiveHourColor}${'█'.repeat(fiveHourFilled)}${DIM}${'░'.repeat(fiveHourEmpty)}${RESET}`;
+  const fiveHourResult = renderProgressBar({
+    percent: fiveHour,
+    width: barWidth,
+    style,
+    showPercent: true,
+    useGradient,
+    colorFn: useGradient ? getRateLimitColor : undefined,
+  });
   const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
 
   const fiveHourPart = fiveHourReset
-    ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
-    : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
+    ? `5h:${fiveHourResult.bar}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+    : `5h:${fiveHourResult.bar}${staleMarker}`;
 
   const parts = [fiveHourPart];
 
+  // Weekly limit
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
-    const weeklyColor = getColor(weekly);
-    const weeklyFilled = Math.round((weekly / 100) * barWidth);
-    const weeklyEmpty = barWidth - weeklyFilled;
-    const weeklyBar = `${weeklyColor}${'█'.repeat(weeklyFilled)}${DIM}${'░'.repeat(weeklyEmpty)}${RESET}`;
+    const weeklyResult = renderProgressBar({
+      percent: weekly,
+      width: barWidth,
+      style,
+      showPercent: true,
+      useGradient,
+      colorFn: useGradient ? getRateLimitColor : undefined,
+    });
     const weeklyReset = formatResetTime(limits.weeklyResetsAt);
 
     const weeklyPart = weeklyReset
-      ? `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
-      : `${DIM}wk:${RESET}[${weeklyBar}]${weeklyColor}${weekly}%${RESET}${staleMarker}`;
+      ? `${DIM}wk:${RESET}${weeklyResult.bar}${staleMarker}${DIM}(${resetPrefix}${weeklyReset})${RESET}`
+      : `${DIM}wk:${RESET}${weeklyResult.bar}${staleMarker}`;
 
     parts.push(weeklyPart);
   }
 
+  // Monthly limit
   if (limits.monthlyPercent != null) {
     const monthly = Math.min(100, Math.max(0, Math.round(limits.monthlyPercent)));
-    const monthlyColor = getColor(monthly);
-    const monthlyFilled = Math.round((monthly / 100) * barWidth);
-    const monthlyEmpty = barWidth - monthlyFilled;
-    const monthlyBar = `${monthlyColor}${'█'.repeat(monthlyFilled)}${DIM}${'░'.repeat(monthlyEmpty)}${RESET}`;
+    const monthlyResult = renderProgressBar({
+      percent: monthly,
+      width: barWidth,
+      style,
+      showPercent: true,
+      useGradient,
+      colorFn: useGradient ? getRateLimitColor : undefined,
+    });
     const monthlyReset = formatResetTime(limits.monthlyResetsAt);
 
     const monthlyPart = monthlyReset
-      ? `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
-      : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}`;
+      ? `${DIM}mo:${RESET}${monthlyResult.bar}${staleMarker}${DIM}(${resetPrefix}${monthlyReset})${RESET}`
+      : `${DIM}mo:${RESET}${monthlyResult.bar}${staleMarker}`;
 
     parts.push(monthlyPart);
   }
@@ -282,4 +310,3 @@ export function renderCustomBuckets(
 
   return parts.join(' ');
 }
-

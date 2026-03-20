@@ -40,9 +40,9 @@ describe('renderContextLimitWarning', () => {
       expect(result).toContain('/compact');
     });
 
-    it('shows auto-compact queued message when autoCompact is true', () => {
+    it('shows queued compact-request message when autoCompact is true', () => {
       const result = renderContextLimitWarning(80, 80, true);
-      expect(result).toContain('auto-compact queued');
+      expect(result).toContain('compact request queued');
       expect(result).not.toContain('/compact');
     });
   });

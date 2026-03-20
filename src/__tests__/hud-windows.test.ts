@@ -68,19 +68,21 @@ describe('HUD Windows Compatibility', () => {
 
     it('pathToFileURL should correctly convert Unix paths', () => {
       const unixPath = '/home/user/test.js';
-      expect(pathToFileURL(unixPath).href).toBe(
+      const href = pathToFileURL(unixPath).href;
+      expect(href).toMatch(
         process.platform === 'win32'
-          ? 'file:///C:/home/user/test.js'
-          : 'file:///home/user/test.js'
+          ? /^file:\/\/\/[A-Za-z]:\/home\/user\/test\.js$/
+          : /^file:\/\/\/home\/user\/test\.js$/
       );
     });
 
     it('pathToFileURL should encode spaces in paths', () => {
       const spacePath = '/path/with spaces/file.js';
-      expect(pathToFileURL(spacePath).href).toBe(
+      const href = pathToFileURL(spacePath).href;
+      expect(href).toMatch(
         process.platform === 'win32'
-          ? 'file:///C:/path/with%20spaces/file.js'
-          : 'file:///path/with%20spaces/file.js'
+          ? /^file:\/\/\/[A-Za-z]:\/path\/with%20spaces\/file\.js$/
+          : /^file:\/\/\/path\/with%20spaces\/file\.js$/
       );
     });
   });
@@ -190,15 +192,24 @@ describe('HUD Windows Compatibility', () => {
       expect(content).toContain("node -e");
     });
 
-    it('hud skill should normalize statusLine command paths to forward slashes', () => {
+    it('hud skill should document forward-slash statusLine paths and command shapes', () => {
       const hudPath = join(packageRoot, 'skills', 'hud', 'SKILL.md');
       const content = readFileSync(hudPath, 'utf-8');
 
       expect(content).toContain(".split(require('path').sep).join('/')");
-      expect(content).toContain('The command path MUST use forward slashes on all platforms');
-      expect(content).toContain('On Windows the path uses forward slashes (not backslashes):');
-      expect(content).toContain('"command": "node C:/Users/username/.claude/hud/omc-hud.mjs"');
+      expect(content).toContain('The command path must use forward slashes on all platforms');
+      expect(content).toContain('find-node.sh');
+      expect(content).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh');
+      expect(content).toContain('\\"C:/Program Files/nodejs/node.exe\\" \\"C:/Users/username/.claude/hud/omc-hud.mjs\\"');
       expect(content).not.toContain('"command": "node C:\\Users\\username\\.claude\\hud\\omc-hud.mjs"');
+    });
+
+    it('hud skill should avoid inline wrapper templates and destructive cleanup steps', () => {
+      const hudPath = join(packageRoot, 'skills', 'hud', 'SKILL.md');
+      const content = readFileSync(hudPath, 'utf-8');
+
+      expect(content).not.toContain('use the Write tool to create `~/.claude/hud/omc-hud.mjs` with this exact content');
+      expect(content).not.toContain('Removed legacy script');
     });
 
     it('usage-api should use path.join with separate segments', () => {

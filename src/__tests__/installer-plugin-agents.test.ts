@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -134,5 +134,38 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(readdirSync(join(claudeConfigDir, 'agents')).some(file => file.endsWith('.md'))).toBe(true);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(false);
     expect(installer.isInstalled()).toBe(true);
+  });
+
+  it('writes a Unix statusLine command that respects CLAUDE_CONFIG_DIR', async () => {
+    const customConfigDir = join(tempRoot, 'custom-claude');
+    mkdirSync(customConfigDir, { recursive: true });
+    const originalPlatform = process.platform;
+
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'linux',
+    });
+
+    try {
+      const installer = await loadInstallerWithEnv(customConfigDir, homeDir);
+      const result = installer.install({
+        skipClaudeCheck: true,
+        force: true,
+      });
+
+      expect(result.success).toBe(true);
+
+      const settings = JSON.parse(readFileSync(join(customConfigDir, 'settings.json'), 'utf-8'));
+      expect(settings.statusLine).toEqual({
+        type: 'command',
+        command: 'sh "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"',
+      });
+      expect(existsSync(join(customConfigDir, 'hud', 'find-node.sh'))).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        configurable: true,
+        value: originalPlatform,
+      });
+    }
   });
 });

@@ -25,170 +25,88 @@ Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when t
 
 ## Auto-Setup
 
-When you run `/oh-my-claudecode:hud` or `/oh-my-claudecode:hud setup`, the system will automatically:
-1. Check if `~/.claude/hud/omc-hud.mjs` exists
-2. Check if `statusLine` is configured in `~/.claude/settings.json`
-3. If missing, create the HUD wrapper script and configure settings
-4. Report status and prompt to restart Claude Code if changes were made
+`/oh-my-claudecode:hud` and `/oh-my-claudecode:hud setup` should treat the installer as the source of truth for HUD repair.
 
-**IMPORTANT**: If the argument is `setup` OR if the HUD script doesn't exist at `~/.claude/hud/omc-hud.mjs`, you MUST create the HUD files directly using the instructions below.
+When setup runs, it should:
+1. Check whether `~/.claude/hud/omc-hud.mjs` exists.
+2. Check whether `statusLine` in `~/.claude/settings.json` is already an OMC-owned object config.
+3. Regenerate the HUD wrapper via the installer when needed.
+4. Reconcile `statusLine` without overwriting non-OMC configs; replacing another tool's `statusLine` requires a manual edit.
+5. Tell the user to restart Claude Code if files/settings changed.
 
-### Setup Instructions (Run These Commands)
+**Do not** paste an inline `omc-hud.mjs` template into the response. The generated wrapper in `src/installer/index.ts` is the only source of truth.
 
-**Step 1:** Check if setup is needed:
+**Do not** suggest deleting `~/.claude/hud/omc-hud.mjs` as a cleanup step during normal setup/repair. That can remove the active wrapper and leave the HUD broken.
+
+## Manual Verification / Diagnostics
+
+Prefer `/oh-my-claudecode:hud setup` for install/repair. Use the commands below only to inspect the current state or diagnose why setup did not stick.
+
+### Step 1: Check whether the wrapper exists
 ```bash
 node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude');console.log(f.existsSync(p.join(d,'hud','omc-hud.mjs'))?'EXISTS':'MISSING')"
 ```
 
-**Step 2:** Verify the plugin is installed:
+### Step 2: Verify the plugin install has a HUD build
 ```bash
 node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode');try{const v=f.readdirSync(b).filter(x=>/^\d/.test(x)).sort((a,c)=>a.localeCompare(c,void 0,{numeric:true}));if(v.length===0){console.log('Plugin not installed - run: /plugin install oh-my-claudecode');process.exit()}const l=v[v.length-1],h=p.join(b,l,'dist','hud','index.js');console.log('Version:',l);console.log(f.existsSync(h)?'READY':'NOT_FOUND - try reinstalling: /plugin install oh-my-claudecode')}catch{console.log('Plugin not installed - run: /plugin install oh-my-claudecode')}"
 ```
 
-**Step 3:** If omc-hud.mjs is MISSING or argument is `setup`, create the HUD directory and script:
+### Step 3: Verify `statusLine` uses the object format
 
-First, create the directory:
-```bash
-node -e "require('fs').mkdirSync(require('path').join(process.env.CLAUDE_CONFIG_DIR||require('path').join(require('os').homedir(),'.claude'),'hud'),{recursive:true})"
-```
+Read `~/.claude/settings.json` and confirm `statusLine` is an object:
 
-Then, use the Write tool to create `~/.claude/hud/omc-hud.mjs` with this exact content:
-
-```javascript
-#!/usr/bin/env node
-/**
- * OMC HUD - Statusline Script
- * Wrapper that imports from dev paths, plugin cache, or npm package
- */
-
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-
-async function main() {
-  const home = homedir();
-  let pluginCacheVersion = null;
-  let pluginCacheDir = null;
-
-  // 1. Development paths (only when OMC_DEV=1)
-  if (process.env.OMC_DEV === "1") {
-    const devPaths = [
-      join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),
-      join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),
-      join(home, "projects/oh-my-claudecode/dist/hud/index.js"),
-    ];
-
-    for (const devPath of devPaths) {
-      if (existsSync(devPath)) {
-        try {
-          await import(pathToFileURL(devPath).href);
-          return;
-        } catch { /* continue */ }
-      }
-    }
-  }
-
-  // 2. Plugin cache (for production installs)
-  // Respect CLAUDE_CONFIG_DIR so installs under a custom config dir are found
-  const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
-  const pluginCacheBase = join(configDir, "plugins", "cache", "omc", "oh-my-claudecode");
-  if (existsSync(pluginCacheBase)) {
-    try {
-      const versions = readdirSync(pluginCacheBase);
-      if (versions.length > 0) {
-        // Filter to only versions with built dist/hud/index.js
-        // This prevents picking an unbuilt new version after plugin update
-        const builtVersions = versions.filter(version => {
-          const pluginPath = join(pluginCacheBase, version, "dist/hud/index.js");
-          return existsSync(pluginPath);
-        });
-
-        if (builtVersions.length > 0) {
-          const latestVersion = builtVersions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()[0];
-          pluginCacheVersion = latestVersion;
-          pluginCacheDir = join(pluginCacheBase, latestVersion);
-          const pluginPath = join(pluginCacheDir, "dist/hud/index.js");
-          await import(pathToFileURL(pluginPath).href);
-          return;
-        }
-      }
-    } catch { /* continue */ }
-  }
-
-  // 3. npm package (global or local install)
-  try {
-    await import("oh-my-claudecode/dist/hud/index.js");
-    return;
-  } catch { /* continue */ }
-
-  // 4. Fallback: provide detailed error message with fix instructions
-  if (pluginCacheDir && existsSync(pluginCacheDir)) {
-    // Plugin exists but dist/ folder is missing - needs build
-    const distDir = join(pluginCacheDir, "dist");
-    if (!existsSync(distDir)) {
-      console.log(`[OMC HUD] Plugin installed but not built. Run: cd "${pluginCacheDir}" && npm install && npm run build`);
-    } else {
-      console.log(`[OMC HUD] Plugin dist/ exists but HUD not found. Run: cd "${pluginCacheDir}" && npm run build`);
-    }
-  } else if (existsSync(pluginCacheBase)) {
-    // Plugin cache directory exists but no built versions found
-    console.log("[OMC HUD] Plugin cache found but no built versions. Run: /oh-my-claudecode:omc-setup");
-  } else {
-    // No plugin installation found at all
-    console.log("[OMC HUD] Plugin not installed. Run: /oh-my-claudecode:omc-setup");
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "..."
   }
 }
-
-main();
 ```
 
-**Step 3:** Make it executable (Unix only, skip on Windows):
-```bash
-node -e "if(process.platform==='win32'){console.log('Skipped (Windows)')}else{require('fs').chmodSync(require('path').join(process.env.CLAUDE_CONFIG_DIR||require('path').join(require('os').homedir(),'.claude'),'hud','omc-hud.mjs'),0o755);console.log('Done')}"
-```
+Legacy string values such as `"~/.claude/hud/omc-hud.mjs"` are deprecated. Running the installer or `/oh-my-claudecode:hud setup` should migrate them to the object format automatically.
 
-**Step 4:** Update settings.json to use the HUD:
+### Step 4: Check the expected command shape
 
-Read `~/.claude/settings.json`, then update/add the `statusLine` field.
+**IMPORTANT:** The command path must use forward slashes on all platforms. Claude Code executes `statusLine` commands via bash, so backslashes in Windows paths can break execution.
 
-**IMPORTANT:** Do not use `~` in the command. On Unix, use `$HOME` to keep the path portable across machines. On Windows, use an absolute path because Windows does not expand `~` in shell commands.
+- Unix installer output normally prefers a config-dir-aware command:
+  ```json
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "sh \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh\" \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs\""
+    }
+  }
+  ```
+- Unix fallback if `find-node.sh` could not be copied:
+  ```json
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs\""
+    }
+  }
+  ```
+- Windows installer output uses a resolved Node binary path plus the HUD wrapper path, both normalized to forward slashes. Example:
+  ```json
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "\"C:/Program Files/nodejs/node.exe\" \"C:/Users/username/.claude/hud/omc-hud.mjs\""
+    }
+  }
+  ```
 
-If you are on Windows, first determine the correct path:
+If you need to inspect the Windows HUD path manually, use:
 ```bash
 node -e "const p=require('path').join(require('os').homedir(),'.claude','hud','omc-hud.mjs').split(require('path').sep).join('/');console.log(JSON.stringify(p))"
 ```
 
-**IMPORTANT:** The command path MUST use forward slashes on all platforms. Claude Code executes statusLine commands via bash, which interprets backslashes as escape characters and breaks the path.
+### Step 5: Restart Claude Code
 
-Then set the `statusLine` field. On Unix it should stay portable and look like:
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node $HOME/.claude/hud/omc-hud.mjs"
-  }
-}
-```
-
-On Windows the path uses forward slashes (not backslashes):
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node C:/Users/username/.claude/hud/omc-hud.mjs"
-  }
-}
-```
-
-Use the Edit tool to add/update this field while preserving other settings.
-
-**Step 5:** Clean up old HUD scripts (if any):
-```bash
-node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude'),t=p.join(d,'hud','omc-hud.mjs');try{if(f.existsSync(t)){f.unlinkSync(t);console.log('Removed legacy script')}else{console.log('No legacy script found')}}catch{}"
-```
-
-**Step 6:** Tell the user to restart Claude Code for changes to take effect.
+If setup created or changed the wrapper/statusLine, tell the user to restart Claude Code so the new configuration is picked up.
 
 ## Display Presets
 
@@ -275,6 +193,8 @@ You can manually edit the config file. Each option can be set individually - any
     "profile": true,
     "promptTime": true,
     "sessionHealth": true,
+    "showTokens": false,
+    "sessionSummary": false,
     "useBars": true,
     "showCallCounts": true,
     "safeMode": true,
@@ -290,13 +210,46 @@ You can manually edit the config file. Each option can be set individually - any
   "contextLimitWarning": {
     "threshold": 80,
     "autoCompact": false
+  },
+  "missionBoard": {
+    "enabled": false
   }
 }
 ```
 
 ### safeMode
 
-When `safeMode` is `true` (default), the HUD strips ANSI codes and uses ASCII-only output to prevent terminal rendering corruption during concurrent updates. This is especially important on Windows and when using terminal multiplexers.
+When `safeMode` is `true` (default), the HUD strips ANSI codes and uses ASCII-only output to prevent terminal rendering corruption during concurrent updates. On Windows, safe mode is forced on at runtime even if you set `safeMode` to `false`.
+
+### missionBoard
+
+Prefer `missionBoard.enabled` for new config:
+
+```json
+{
+  "missionBoard": {
+    "enabled": true
+  }
+}
+```
+
+Legacy `elements.missionBoard` is still accepted for compatibility, but it should no longer be the recommended form.
+
+### contextLimitWarning.autoCompact
+
+When `autoCompact` is `true`, the HUD only writes `.omc/state/compact-requested.json` as a trigger/request file. It does **not** execute `/compact` by itself.
+
+### profile
+
+`profile` displays the active profile name derived from `CLAUDE_CONFIG_DIR`. If `CLAUDE_CONFIG_DIR` is not set, there is no profile badge to show.
+
+### sessionSummary
+
+`sessionSummary` only renders when transcript/session information is available for the current run. The summary is read from cache and refreshed in the background, so it may appear or update after the HUD starts polling.
+
+### showTokens
+
+`showTokens` only renders when token usage data exists in the current transcript payload. Enabling the flag does not guarantee that a token badge will always appear.
 
 ### agentsFormat Options
 
@@ -315,15 +268,7 @@ If the HUD is not showing:
 2. Restart Claude Code after setup completes
 3. If still not working, run `/oh-my-claudecode:omc-doctor` for full diagnostics
 
-**Legacy string format migration:** Older OMC versions wrote `statusLine` as a plain string (e.g., `"~/.claude/hud/omc-hud.mjs"`). Modern Claude Code (v2.1+) requires an object format. Running the installer or `/oh-my-claudecode:hud setup` will auto-migrate legacy strings to the correct object format:
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node $HOME/.claude/hud/omc-hud.mjs"
-  }
-}
-```
+**Legacy string format migration:** Older OMC versions wrote `statusLine` as a plain string (e.g., `"~/.claude/hud/omc-hud.mjs"`). Modern Claude Code requires the object format. Running the installer or `/oh-my-claudecode:hud setup` will migrate legacy strings to an object-based `statusLine`, usually using `find-node.sh` on Unix and a normalized absolute command on Windows.
 
 **Node 24+ compatibility:** The HUD wrapper script imports `homedir` from `node:os` (not `node:path`). If you encounter `SyntaxError: The requested module 'path' does not provide an export named 'homedir'`, re-run the installer to regenerate `omc-hud.mjs`.
 
