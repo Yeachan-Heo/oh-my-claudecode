@@ -6,11 +6,13 @@ CREATE TYPE "public"."diagnosis_bottleneck" AS ENUM('collection', 'analysis', 'm
 CREATE TYPE "public"."needs_category" AS ENUM('불편해소', '시간절약', '돈절약', '성과향상', '외모건강', '자기표현');--> statement-breakpoint
 CREATE TYPE "public"."position_format" AS ENUM('문제공감형', '솔직후기형', '비교형', '입문추천형', '실수방지형', '비추천형');--> statement-breakpoint
 CREATE TYPE "public"."post_maturity" AS ENUM('warmup', 'early', 'mature', 'final');--> statement-breakpoint
+CREATE TYPE "public"."post_source" AS ENUM('brand', 'keyword_search', 'x_trend', 'benchmark');--> statement-breakpoint
 CREATE TYPE "public"."primary_tag" AS ENUM('affiliate', 'purchase_signal', 'review', 'complaint', 'interest', 'general');--> statement-breakpoint
 CREATE TYPE "public"."purchase_linkage" AS ENUM('상', '중', '하');--> statement-breakpoint
 CREATE TYPE "public"."report_type" AS ENUM('weekly', 'monthly');--> statement-breakpoint
 CREATE TYPE "public"."signal_level" AS ENUM('L1', 'L2', 'L3', 'L4', 'L5');--> statement-breakpoint
 CREATE TYPE "public"."snapshot_type" AS ENUM('early', 'mature', 'final');--> statement-breakpoint
+CREATE TYPE "public"."source_platform" AS ENUM('naver_cafe', 'naver_blog', 'theqoo', 'instiz', 'youtube');--> statement-breakpoint
 CREATE TYPE "public"."tuning_priority" AS ENUM('high', 'medium', 'low');--> statement-breakpoint
 CREATE TYPE "public"."tuning_target" AS ENUM('scraper', 'analyzer', 'matcher', 'content_generator', 'publisher');--> statement-breakpoint
 CREATE TABLE "accounts" (
@@ -42,7 +44,49 @@ CREATE TABLE "aff_contents" (
 	"competition" "competition_level",
 	"match_priority" integer,
 	"match_why" text,
+	"source_type" text,
+	"content_source" "post_source",
+	"source_brand_id" text,
+	"source_post_ids" jsonb DEFAULT '[]'::jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "brand_events" (
+	"event_id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"event_type" text NOT NULL,
+	"title" text NOT NULL,
+	"summary" text NOT NULL,
+	"source_url" text,
+	"source_title" text,
+	"threads_relevance" integer DEFAULT 0 NOT NULL,
+	"suggested_angle" text,
+	"urgency" text DEFAULT 'medium' NOT NULL,
+	"event_date" timestamp with time zone,
+	"expires_at" timestamp with time zone,
+	"discovered_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"is_stale" boolean DEFAULT false NOT NULL,
+	"is_used" boolean DEFAULT false NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "brands" (
+	"brand_id" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"category" text NOT NULL,
+	"subcategory" text,
+	"search_keywords" jsonb DEFAULT '[]'::jsonb,
+	"search_templates" jsonb DEFAULT '[]'::jsonb,
+	"related_channels" jsonb DEFAULT '[]'::jsonb,
+	"coupang_link" text,
+	"commission_rate" real,
+	"price_range" text,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"priority" integer DEFAULT 0 NOT NULL,
+	"notes" text,
+	"last_researched_at" timestamp with time zone,
+	"last_research_status" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "channels" (
@@ -53,7 +97,36 @@ CREATE TABLE "channels" (
 	"recent_ad_count" integer DEFAULT 0 NOT NULL,
 	"source_keyword" text NOT NULL,
 	"discovered_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"is_active" boolean DEFAULT true NOT NULL
+	"is_active" boolean DEFAULT true NOT NULL,
+	"is_benchmark" boolean DEFAULT false NOT NULL,
+	"category" text,
+	"last_monitored_at" timestamp with time zone,
+	"monitor_interval_days" integer DEFAULT 7 NOT NULL,
+	"avg_engagement_rate" real,
+	"notes" text,
+	"affiliate_link_ratio" real,
+	"content_category_ratio" real,
+	"benchmark_status" text DEFAULT 'candidate',
+	"total_posts_checked" integer DEFAULT 0,
+	"posting_frequency" text
+);
+--> statement-breakpoint
+CREATE TABLE "community_posts" (
+	"id" text PRIMARY KEY NOT NULL,
+	"source_platform" "source_platform" NOT NULL,
+	"source_cafe" text,
+	"source_url" text,
+	"title" text,
+	"body" text,
+	"comments" jsonb DEFAULT '[]'::jsonb,
+	"author_nickname" text,
+	"like_count" integer DEFAULT 0 NOT NULL,
+	"comment_count" integer DEFAULT 0 NOT NULL,
+	"view_count" integer DEFAULT 0 NOT NULL,
+	"posted_at" timestamp with time zone,
+	"collected_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"analyzed" boolean DEFAULT false NOT NULL,
+	"extracted_needs" jsonb DEFAULT '[]'::jsonb
 );
 --> statement-breakpoint
 CREATE TABLE "content_lifecycle" (
@@ -100,6 +173,30 @@ CREATE TABLE "crawl_sessions" (
 	"blocked_channels" jsonb DEFAULT '[]'::jsonb,
 	"status" "crawl_status" DEFAULT 'running' NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "daily_performance_reports" (
+	"id" text PRIMARY KEY NOT NULL,
+	"report_date" timestamp NOT NULL,
+	"total_posts" integer DEFAULT 0 NOT NULL,
+	"new_posts_today" integer DEFAULT 0 NOT NULL,
+	"total_views" integer DEFAULT 0 NOT NULL,
+	"total_likes" integer DEFAULT 0 NOT NULL,
+	"total_comments" integer DEFAULT 0 NOT NULL,
+	"total_reposts" integer DEFAULT 0 NOT NULL,
+	"avg_engagement_rate" real DEFAULT 0 NOT NULL,
+	"top_post_id" text,
+	"top_post_views" integer DEFAULT 0,
+	"top_post_text" text,
+	"worst_post_id" text,
+	"worst_post_views" integer DEFAULT 0,
+	"views_growth_pct" real DEFAULT 0,
+	"likes_growth_pct" real DEFAULT 0,
+	"content_analysis" jsonb,
+	"recommendations" jsonb,
+	"raw_post_data" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "daily_performance_reports_report_date_unique" UNIQUE("report_date")
 );
 --> statement-breakpoint
 CREATE TABLE "diagnosis_reports" (
@@ -171,6 +268,40 @@ CREATE TABLE "products" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "source_performance" (
+	"id" text PRIMARY KEY NOT NULL,
+	"period_start" timestamp with time zone NOT NULL,
+	"period_end" timestamp with time zone NOT NULL,
+	"source" "post_source" NOT NULL,
+	"brand_id" text,
+	"posts_collected" integer DEFAULT 0 NOT NULL,
+	"posts_analyzed" integer DEFAULT 0 NOT NULL,
+	"needs_detected" integer DEFAULT 0 NOT NULL,
+	"contents_generated" integer DEFAULT 0 NOT NULL,
+	"contents_posted" integer DEFAULT 0 NOT NULL,
+	"avg_likes" real DEFAULT 0 NOT NULL,
+	"avg_replies" real DEFAULT 0 NOT NULL,
+	"avg_views" real DEFAULT 0 NOT NULL,
+	"avg_engagement_rate" real DEFAULT 0 NOT NULL,
+	"total_clicks" integer DEFAULT 0 NOT NULL,
+	"total_revenue" real DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "thread_comments" (
+	"comment_id" text PRIMARY KEY NOT NULL,
+	"post_id" text NOT NULL,
+	"author" text NOT NULL,
+	"text" text NOT NULL,
+	"view_count" integer,
+	"like_count" integer DEFAULT 0 NOT NULL,
+	"has_affiliate_link" boolean DEFAULT false NOT NULL,
+	"affiliate_platform" text,
+	"mentioned_product" text,
+	"is_our_comment" boolean DEFAULT false NOT NULL,
+	"crawl_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "thread_posts" (
 	"post_id" text PRIMARY KEY NOT NULL,
 	"channel_id" text NOT NULL,
@@ -199,7 +330,21 @@ CREATE TABLE "thread_posts" (
 	"thread_type" text,
 	"conversion_rate" real,
 	"topic_tags" text[],
-	"topic_category" text
+	"topic_category" text,
+	"analyzed_at" timestamp with time zone,
+	"post_source" "post_source",
+	"brand_id" text
+);
+--> statement-breakpoint
+CREATE TABLE "trend_keywords" (
+	"id" text PRIMARY KEY NOT NULL,
+	"keyword" text NOT NULL,
+	"rank" integer,
+	"source" text DEFAULT 'x_trending' NOT NULL,
+	"fetched_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"selected" boolean DEFAULT false NOT NULL,
+	"selected_reason" text,
+	"posts_collected" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "tuning_actions" (
@@ -216,7 +361,20 @@ CREATE TABLE "tuning_actions" (
 CREATE UNIQUE INDEX "idx_accounts_username" ON "accounts" USING btree ("username");--> statement-breakpoint
 CREATE INDEX "idx_aff_contents_product" ON "aff_contents" USING btree ("product_id");--> statement-breakpoint
 CREATE INDEX "idx_aff_contents_need" ON "aff_contents" USING btree ("need_id");--> statement-breakpoint
+CREATE INDEX "idx_aff_contents_source" ON "aff_contents" USING btree ("content_source");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_brand" ON "brand_events" USING btree ("brand_id");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_type" ON "brand_events" USING btree ("event_type");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_relevance" ON "brand_events" USING btree ("threads_relevance");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_used" ON "brand_events" USING btree ("is_used");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_date" ON "brand_events" USING btree ("event_date");--> statement-breakpoint
+CREATE INDEX "idx_brand_events_stale" ON "brand_events" USING btree ("is_stale");--> statement-breakpoint
+CREATE INDEX "idx_brands_category" ON "brands" USING btree ("category");--> statement-breakpoint
+CREATE INDEX "idx_brands_active" ON "brands" USING btree ("is_active");--> statement-breakpoint
 CREATE INDEX "idx_channels_keyword" ON "channels" USING btree ("source_keyword");--> statement-breakpoint
+CREATE INDEX "idx_community_posts_platform" ON "community_posts" USING btree ("source_platform");--> statement-breakpoint
+CREATE INDEX "idx_community_posts_cafe" ON "community_posts" USING btree ("source_cafe");--> statement-breakpoint
+CREATE INDEX "idx_community_posts_analyzed" ON "community_posts" USING btree ("analyzed");--> statement-breakpoint
+CREATE INDEX "idx_community_posts_collected" ON "community_posts" USING btree ("collected_at");--> statement-breakpoint
 CREATE INDEX "idx_lifecycle_source_post" ON "content_lifecycle" USING btree ("source_post_id");--> statement-breakpoint
 CREATE INDEX "idx_lifecycle_product" ON "content_lifecycle" USING btree ("matched_product_id");--> statement-breakpoint
 CREATE INDEX "idx_lifecycle_account" ON "content_lifecycle" USING btree ("posted_account_id");--> statement-breakpoint
@@ -226,7 +384,17 @@ CREATE INDEX "idx_snapshots_post" ON "post_snapshots" USING btree ("post_id");--
 CREATE INDEX "idx_snapshots_type" ON "post_snapshots" USING btree ("snapshot_type");--> statement-breakpoint
 CREATE INDEX "idx_products_category" ON "products" USING btree ("category");--> statement-breakpoint
 CREATE INDEX "idx_products_platform" ON "products" USING btree ("affiliate_platform");--> statement-breakpoint
+CREATE INDEX "idx_source_perf_source" ON "source_performance" USING btree ("source");--> statement-breakpoint
+CREATE INDEX "idx_source_perf_period" ON "source_performance" USING btree ("period_start");--> statement-breakpoint
+CREATE INDEX "idx_comments_post" ON "thread_comments" USING btree ("post_id");--> statement-breakpoint
+CREATE INDEX "idx_comments_author" ON "thread_comments" USING btree ("author");--> statement-breakpoint
+CREATE INDEX "idx_comments_product" ON "thread_comments" USING btree ("mentioned_product");--> statement-breakpoint
+CREATE INDEX "idx_comments_our" ON "thread_comments" USING btree ("is_our_comment");--> statement-breakpoint
 CREATE INDEX "idx_posts_channel" ON "thread_posts" USING btree ("channel_id");--> statement-breakpoint
 CREATE INDEX "idx_posts_crawl_at" ON "thread_posts" USING btree ("crawl_at");--> statement-breakpoint
 CREATE INDEX "idx_posts_primary_tag" ON "thread_posts" USING btree ("primary_tag");--> statement-breakpoint
+CREATE INDEX "idx_posts_analyzed_at" ON "thread_posts" USING btree ("analyzed_at");--> statement-breakpoint
+CREATE INDEX "idx_posts_source" ON "thread_posts" USING btree ("post_source");--> statement-breakpoint
+CREATE INDEX "idx_trend_fetched_at" ON "trend_keywords" USING btree ("fetched_at");--> statement-breakpoint
+CREATE INDEX "idx_trend_selected" ON "trend_keywords" USING btree ("selected");--> statement-breakpoint
 CREATE INDEX "idx_tuning_report" ON "tuning_actions" USING btree ("report_id");

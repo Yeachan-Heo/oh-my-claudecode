@@ -134,6 +134,13 @@ export const competitionLevelEnum = pgEnum('competition_level', [
   '하',
 ]);
 
+export const postSourceEnum = pgEnum('post_source', [
+  'brand',
+  'keyword_search',
+  'x_trend',
+  'benchmark',
+]);
+
 // ---------------------------------------------------------------------------
 // Tables
 // ---------------------------------------------------------------------------
@@ -262,12 +269,17 @@ export const threadPosts = pgTable(
 
     // Analysis tracking: null = 미분석, timestamp = 분석 완료 시점
     analyzed_at: timestamp('analyzed_at', { withTimezone: true }),
+
+    // Source tracking: 수집 소스 구분
+    post_source: postSourceEnum('post_source'),   // 'brand' | 'keyword_search' | 'x_trend' | 'benchmark'
+    brand_id: text('brand_id'),                    // 브랜드 소스인 경우 brands FK
   },
   (table) => [
     index('idx_posts_channel').on(table.channel_id),
     index('idx_posts_crawl_at').on(table.crawl_at),
     index('idx_posts_primary_tag').on(table.primary_tag),
     index('idx_posts_analyzed_at').on(table.analyzed_at),
+    index('idx_posts_source').on(table.post_source),
   ],
 );
 
@@ -358,13 +370,17 @@ export const affContents = pgTable(
     match_priority: integer('match_priority'),
     match_why: text('match_why'),
 
-    source_type: text('source_type'),  // 'trend' | 'benchmark' — 니즈 발견 소스
+    source_type: text('source_type'),  // 레거시 — content_source로 대체
+    content_source: postSourceEnum('content_source'),  // 어떤 분석 소스에서 생성됐는지
+    source_brand_id: text('source_brand_id'),          // 브랜드 기반이면 어떤 브랜드
+    source_post_ids: jsonb('source_post_ids').$type<string[]>().default([]),  // 원본 포스트 ID들
 
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('idx_aff_contents_product').on(table.product_id),
     index('idx_aff_contents_need').on(table.need_id),
+    index('idx_aff_contents_source').on(table.content_source),
   ],
 );
 
@@ -585,51 +601,205 @@ export const crawlSessions = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Community Posts (네이버 카페 등 외부 커뮤니티 수집)
+// Brand Research
+// ---------------------------------------------------------------------------
+
+/**
+ * brands - 모니터링 대상 브랜드/제품.
+ * 리서치 에이전트가 병렬로 이벤트/신제품/할인을 조사.
+ */
+export const brands = pgTable(
+  'brands',
+  {
+    brand_id: text('brand_id').primaryKey(),           // 'brand_nivea', 'brand_anua'
+    name: text('name').notNull(),                       // '니베아', '아누아'
+    category: text('category').notNull(),               // '스킨케어', '영양제', '생활용품'
+    subcategory: text('subcategory'),                   // '선크림', '비타민C'
+
+    // 검색용
+    search_keywords: jsonb('search_keywords').$type<string[]>().default([]),  // ['니베아 선크림', '니베아 바디로션']
+    search_templates: jsonb('search_templates').$type<string[]>().default([]), // ['{name} 신제품', '{name} 할인']
+    related_channels: jsonb('related_channels').$type<string[]>().default([]), // ['@yaksamom']
+
+    // 제휴 정보
+    coupang_link: text('coupang_link'),
+    commission_rate: real('commission_rate'),            // 0.03 = 3%
+    price_range: text('price_range'),                   // '10000-30000'
+
+    // 상태
+    is_active: boolean('is_active').notNull().default(true),
+    priority: integer('priority').notNull().default(0),  // 높을수록 우선 분석
+    notes: text('notes'),
+
+    last_researched_at: timestamp('last_researched_at', { withTimezone: true }),
+    last_research_status: text('last_research_status'),   // 'found_3' | 'no_events' | 'error: ...'
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_brands_category').on(table.category),
+    index('idx_brands_active').on(table.is_active),
+  ],
+);
+
+/**
+ * brand_events - 브랜드 리서치 결과 (신제품, 할인, 팝업, 이벤트).
+ * 리서치 에이전트가 웹 검색 → 이벤트 추출 → 여기에 저장.
+ * 중복 체크: pg_trgm similarity(title) > 0.4 within 7 days.
+ */
+export const brandEvents = pgTable(
+  'brand_events',
+  {
+    event_id: text('event_id').primaryKey(),
+    brand_id: text('brand_id').notNull(),               // brands FK
+
+    event_type: text('event_type').notNull(),            // 'new_product' | 'sale' | 'popup' | 'event' | 'collab'
+    title: text('title').notNull(),                      // '아누아 어성초 라인 2세대 출시'
+    summary: text('summary').notNull(),                  // 1-2문장 요약
+    source_url: text('source_url'),                      // 출처 URL
+    source_title: text('source_title'),                  // 출처 제목
+
+    // 콘텐츠 적합성 (에이전트 평가)
+    threads_relevance: integer('threads_relevance').notNull().default(0), // 1-5 (포스트 소재 적합도)
+    suggested_angle: text('suggested_angle'),            // '비교형: 1세대 vs 2세대 차이점'
+    urgency: text('urgency').notNull().default('medium'), // 'high' | 'medium' | 'low'
+
+    // 날짜 관리
+    event_date: timestamp('event_date', { withTimezone: true }), // 이벤트 실제 발생/시작일
+    expires_at: timestamp('expires_at', { withTimezone: true }),  // 이벤트 종료일
+    discovered_at: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
+    is_stale: boolean('is_stale').notNull().default(false),      // 30일+ 경과 자동 마킹
+    is_used: boolean('is_used').notNull().default(false),         // 포스트에 활용했는지
+  },
+  (table) => [
+    index('idx_brand_events_brand').on(table.brand_id),
+    index('idx_brand_events_type').on(table.event_type),
+    index('idx_brand_events_relevance').on(table.threads_relevance),
+    index('idx_brand_events_used').on(table.is_used),
+    index('idx_brand_events_date').on(table.event_date),
+    index('idx_brand_events_stale').on(table.is_stale),
+  ],
+);
+
+/**
+ * daily_performance_reports - 일일 성과분석 리포트.
+ * Claude Code가 매일 포스트 성과를 분석하여 패턴/추천을 저장.
+ */
+export const dailyPerformanceReports = pgTable(
+  'daily_performance_reports',
+  {
+    id: text('id').primaryKey(),
+    report_date: timestamp('report_date', { mode: 'date' }).notNull().unique(),
+
+    // 포스트 현황
+    total_posts: integer('total_posts').notNull().default(0),
+    new_posts_today: integer('new_posts_today').notNull().default(0),
+
+    // 절대 지표 요약 (당일 스냅샷 기준)
+    total_views: integer('total_views').notNull().default(0),
+    total_likes: integer('total_likes').notNull().default(0),
+    total_comments: integer('total_comments').notNull().default(0),
+    total_reposts: integer('total_reposts').notNull().default(0),
+    avg_engagement_rate: real('avg_engagement_rate').notNull().default(0),
+
+    // 최고/최저 포스트
+    top_post_id: text('top_post_id'),
+    top_post_views: integer('top_post_views').default(0),
+    top_post_text: text('top_post_text'),
+    worst_post_id: text('worst_post_id'),
+    worst_post_views: integer('worst_post_views').default(0),
+
+    // 성장 추이
+    views_growth_pct: real('views_growth_pct').default(0),
+    likes_growth_pct: real('likes_growth_pct').default(0),
+
+    // Claude Code 분석 결과 (JSON)
+    content_analysis: jsonb('content_analysis'),
+    recommendations: jsonb('recommendations'),
+    raw_post_data: jsonb('raw_post_data'),
+
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/**
+ * source_performance - 소스별 성과 집계 (주기적 스냅샷).
+ */
+export const sourcePerformance = pgTable(
+  'source_performance',
+  {
+    id: text('id').primaryKey(),
+    period_start: timestamp('period_start', { withTimezone: true }).notNull(),
+    period_end: timestamp('period_end', { withTimezone: true }).notNull(),
+    source: postSourceEnum('source').notNull(),
+    brand_id: text('brand_id'),                          // brand 소스인 경우
+
+    // 퍼널 지표
+    posts_collected: integer('posts_collected').notNull().default(0),
+    posts_analyzed: integer('posts_analyzed').notNull().default(0),
+    needs_detected: integer('needs_detected').notNull().default(0),
+    contents_generated: integer('contents_generated').notNull().default(0),
+    contents_posted: integer('contents_posted').notNull().default(0),
+
+    // 성과 지표
+    avg_likes: real('avg_likes').notNull().default(0),
+    avg_replies: real('avg_replies').notNull().default(0),
+    avg_views: real('avg_views').notNull().default(0),
+    avg_engagement_rate: real('avg_engagement_rate').notNull().default(0),
+    total_clicks: integer('total_clicks').notNull().default(0),
+    total_revenue: real('total_revenue').notNull().default(0),
+
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_source_perf_source').on(table.source),
+    index('idx_source_perf_period').on(table.period_start),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Community Posts (네이버 카페 + 더쿠 + 인스티즈 통합)
 // ---------------------------------------------------------------------------
 
 export const sourcePlatformEnum = pgEnum('source_platform', [
   'naver_cafe',
   'naver_blog',
   'theqoo',
+  'instiz',
+  'youtube',
 ]);
 
 /**
- * community_posts - 네이버 카페/블로그 등 외부 커뮤니티에서 수집한 포스트.
- *
- * 여성 니즈/불편함 발굴 목적. 닉네임 외 개인정보 수집 금지.
+ * community_posts - 외부 커뮤니티 수집 포스트 (니즈 발굴용).
+ * source_platform으로 플랫폼 구분, source_cafe로 세부 소스 구분.
  */
 export const communityPosts = pgTable(
   'community_posts',
   {
     id: text('id').primaryKey(),
     source_platform: sourcePlatformEnum('source_platform').notNull(),
-    source_cafe: text('source_cafe').notNull(),       // 카페 ID: 'cosmania', 'powderroom' 등
-    source_url: text('source_url').notNull(),          // 원본 URL
-    title: text('title').notNull(),
-    body: text('body').notNull(),
+    source_cafe: text('source_cafe'),           // 'cosmania', 'theqoo_hot' 등
+    source_url: text('source_url'),
+    title: text('title'),
+    body: text('body'),
     comments: jsonb('comments').$type<Array<{
-      nickname: string;
-      text: string;
+      nickname?: string;
+      text?: string;
       like_count?: number;
     }>>().default([]),
-    author_nickname: text('author_nickname'),           // 닉네임 — 개인정보 아님
+    author_nickname: text('author_nickname'),
     like_count: integer('like_count').notNull().default(0),
     comment_count: integer('comment_count').notNull().default(0),
     view_count: integer('view_count').notNull().default(0),
     posted_at: timestamp('posted_at', { withTimezone: true }),
     collected_at: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
     analyzed: boolean('analyzed').notNull().default(false),
-    extracted_needs: jsonb('extracted_needs').$type<Array<{
-      need: string;
-      category?: string;
-      confidence?: number;
-    }>>().default([]),
+    extracted_needs: jsonb('extracted_needs').$type<string[]>().default([]),
   },
   (table) => [
     index('idx_community_posts_platform').on(table.source_platform),
     index('idx_community_posts_cafe').on(table.source_cafe),
     index('idx_community_posts_analyzed').on(table.analyzed),
-    index('idx_community_posts_collected_at').on(table.collected_at),
+    index('idx_community_posts_collected').on(table.collected_at),
   ],
 );

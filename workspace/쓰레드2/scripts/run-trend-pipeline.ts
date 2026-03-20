@@ -22,7 +22,7 @@ import { eq, and, gte, sql } from 'drizzle-orm';
 import { db } from '../src/db/index.js';
 import { trendKeywords, threadPosts } from '../src/db/schema.js';
 import { fetchTrends } from '../src/scraper/trend-fetcher.js';
-import { filterTrends, extractSearchKeywords } from '../src/scraper/trend-filter.js';
+import { getTodayTrends } from '../src/scraper/trend-filter.js';
 import { sendAlert } from '../src/utils/telegram.js';
 
 // ─── Config ──────────────────────────────────────────────
@@ -87,14 +87,21 @@ async function main(): Promise<void> {
       log(`  ${i + 1}. ${t.trend} ${t.volume ? `(${t.volume})` : ''}`);
     });
 
-    // Step 2: 필터링
-    log('\nStep 2: 제품 연결 가능 키워드 필터링');
-    const filtered = await filterTrends(trends);
-    keywords = extractSearchKeywords(filtered);
+    // Step 2: DB에서 선택된 트렌드 키워드 조회 (에이전트가 사전 분석)
+    log('\nStep 2: DB에서 선택된 트렌드 키워드 조회');
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const selectedRows = await db.select()
+      .from(trendKeywords)
+      .where(and(
+        eq(trendKeywords.selected, true),
+        gte(trendKeywords.fetched_at, todayStart),
+      ));
 
-    log(`필터 결과: ${trends.length}개 → ${filtered.length}개 트렌드 통과`);
-    filtered.forEach(f => {
-      log(`  [${f.category}] "${f.trend}" → ${f.mapped_keywords.join(', ')}`);
+    keywords = selectedRows.map((r: { keyword: string }) => r.keyword);
+    log(`필터 결과: ${trends.length}개 → ${selectedRows.length}개 트렌드 통과`);
+    selectedRows.forEach((r: { keyword: string; selected_reason: string | null }) => {
+      log(`  "${r.keyword}" — ${r.selected_reason ?? ''}`);
     });
 
     if (keywords.length === 0) {

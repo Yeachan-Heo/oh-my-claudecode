@@ -272,6 +272,43 @@ export async function getWeeklyStats(weekStart: Date): Promise<WeeklyStats> {
   };
 }
 
+// ─── Absolute Metrics ────────────────────────────────────
+
+export interface AbsoluteMetrics {
+  views: number;
+  likes: number;
+  comments: number;
+  reposts: number;
+  saves: number;
+  engagement_rate: number;  // (likes+comments+reposts)/views
+}
+
+export interface PostRanking {
+  post_id: string;
+  text: string;
+  metrics: AbsoluteMetrics;
+  rank: number;           // 조회수 기준 순위
+  posted_at: string;
+}
+
+/**
+ * Rank posts by absolute view count (descending).
+ * Assigns 1-based rank to each post.
+ */
+export function rankPostsByAbsolute(posts: PostRanking[]): PostRanking[] {
+  return [...posts].sort((a, b) => b.metrics.views - a.metrics.views)
+    .map((p, i) => ({ ...p, rank: i + 1 }));
+}
+
+/**
+ * Calculate growth percentage between two values.
+ * Returns 100 if yesterday was 0 and today > 0, 0 if both are 0.
+ */
+export function calculateGrowth(today: number, yesterday: number): number {
+  if (yesterday === 0) return today > 0 ? 100 : 0;
+  return ((today - yesterday) / yesterday) * 100;
+}
+
 // ─── Row Mapping Helper ──────────────────────────────────
 
 function mapRowToLifecycle(row: typeof contentLifecycle.$inferSelect): ContentLifecycle {

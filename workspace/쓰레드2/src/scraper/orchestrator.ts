@@ -21,11 +21,9 @@ import type {
   CrawlCheckpoint,
   ChannelCompletion,
   LoginResult,
-  DiscoveryResult,
   DiscoveredChannel,
 } from '../types.js';
 import { loginThreads } from './login.js';
-import { discoverChannels } from './discover.js';
 import { saveCrawlSession } from './db-adapter.js';
 import { sendAlert, sendErrorAlert } from '../utils/telegram.js';
 
@@ -385,36 +383,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } else {
-    // 새 발굴
-    log('채널 발굴 시작...');
-    let discoveryResult: DiscoveryResult;
-    try {
-      // playwright Page 객체 획득 — loginThreads가 이미 연결했으므로
-      // discoverChannels는 내부적으로 CDP 연결
-      const { chromium } = await import('playwright');
-      const browser = await chromium.connectOverCDP(CDP_URL);
-      const contexts = browser.contexts();
-      const context = contexts[0] || await browser.newContext();
-      const pages = context.pages();
-      const page = pages[0] || await context.newPage();
-
-      discoveryResult = await discoverChannels(page, targetChannels, checkpoint ?? undefined);
-
-      // disconnect (close 금지 — CDP)
-      await browser.close().catch(() => {});
-    } catch (err) {
-      log(`채널 발굴 실패: ${(err as Error).message}`);
-      process.exit(1);
-    }
-
-    // 발굴된 채널 저장
-    fs.writeFileSync(
-      DISCOVERED_CHANNELS_PATH,
-      JSON.stringify(discoveryResult.channels, null, 2),
-    );
-    log(`채널 발굴 완료: ${discoveryResult.channels.length}개 발견, ${discoveryResult.stats.filtered}개 필터`);
-
-    channelIds = discoveryResult.channels.map((c) => c.channel_id).slice(0, targetChannels);
+    // 채널 발굴은 웹 검색 API(Exa)로 대체됨 — DISCOVERY_GUIDE.md 참조
+    log('채널 발굴은 --skip-discover + discovered_channels.json으로 진행하세요.');
+    log('새 채널 발굴은 Exa 웹 검색 → collect.ts 검증 방식을 사용합니다. (DISCOVERY_GUIDE.md 참조)');
+    process.exit(1);
   }
 
   if (channelIds.length === 0) {

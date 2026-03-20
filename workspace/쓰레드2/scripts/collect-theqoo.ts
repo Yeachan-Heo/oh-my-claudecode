@@ -16,7 +16,7 @@ import type { TheqooCliOptions } from '../src/scraper/theqoo/types.js';
 
 function parseArgs(): TheqooCliOptions {
   const args = process.argv.slice(2);
-  let board: 'hot' | 'square' = 'hot';
+  let board: 'hot' | 'square' | 'beauty' = 'beauty';
   let pages = 1;
   let limit = 10;
   let comments = false;
@@ -25,7 +25,7 @@ function parseArgs(): TheqooCliOptions {
     switch (args[i]) {
       case '--board': {
         const b = args[i + 1];
-        if (b === 'hot' || b === 'square') {
+        if (b === 'hot' || b === 'square' || b === 'beauty') {
           board = b;
         }
         i++;
@@ -51,7 +51,7 @@ function parseArgs(): TheqooCliOptions {
   npx tsx scripts/collect-theqoo.ts [옵션]
 
 옵션:
-  --board <hot|square>  게시판 선택 (기본: hot)
+  --board <hot|square|beauty>  게시판 선택 (기본: beauty)
   --pages <N>           수집할 페이지 수 (기본: 1)
   --limit <N>           최대 수집 게시글 수 (기본: 10)
   --comments            댓글도 수집

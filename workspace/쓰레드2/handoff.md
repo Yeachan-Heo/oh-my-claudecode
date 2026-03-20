@@ -1,140 +1,158 @@
-# Threads2 Handoff — 2026-03-18 (세션 6)
+# Threads2 Handoff — 2026-03-20 (세션 9)
 
-## 현재 상태: PM 전략 수립 + 파이프라인 고도화 + 벤치마크 확장 수집 + 트렌드 에이전트 + 콘텐츠 게시
+## 현재 상태: 커뮤니티 크롤러 확장 완료 (인스티즈 + YouTube), 파서 버그 수정, 속닥 발견
 
-### 이번 세션(6) 완료 작업
+### 이번 세션(9) 완료 작업
 
 | # | 작업 | 상태 |
 |---|------|------|
-| 1 | PM 전략 캔버스 (9섹션) — `/strategy` | ✅ |
-| 2 | North Star 프레임워크 — `/north-star` (2단계: 답글비율 → 클릭수) | ✅ |
-| 3 | GTM Plan — `/plan-launch` (워밍업→제휴 전환 타임라인) | ✅ |
-| 4 | PM 보고서 PDF + MD 생성 (바탕화면) + v2 리뷰 교정 | ✅ |
-| 5 | pipeline.ts — todayOnly/source/analyzed_at 필터 추가 | ✅ |
-| 6 | schema.ts — analyzed_at (thread_posts), source_type (aff_contents), trend_keywords 테이블 | ✅ |
-| 7 | trend-fetcher.ts — DB 저장 + trend-filter.ts — 에이전트 방식 교체 | ✅ |
-| 8 | trend-analyzer.md — 에이전트 프롬프트 생성 (직장인 관점, 지역맛집 스킵) | ✅ |
-| 9 | X 트렌드 수집 (99개) + 에이전트 분석 (8개 선택, 기존 규칙 2개 → 4배) | ✅ |
-| 10 | 중복 트렌드 삭제 (198→99) + Apify 중복호출 방지 | ✅ |
-| 11 | CLAUDE.md (쓰레드2 전용) + DISCOVERY_GUIDE.md 생성 | ✅ |
-| 12 | 벤치마크 채널 후보 21개 웹 검색 (건강7/생활7/다이어트7) | ✅ |
-| 13 | 벤치마크 21개 채널 collect.ts 셸 루프 수집 | 🔄 17/21 완료 |
-| 14 | 목이버섯 포스트 게시 (@duribeon231) + 댓글 대응 | ✅ |
-| 15 | 점심 도시락 포스트 게시 (@duribeon231) + 댓글 대응 | ✅ |
-| 16 | 목이버섯 요리 이미지 수집 (바탕화면 /목이버섯/, /목이버섯_중국/) | ✅ |
-| 17 | 뷰티/건강 브랜드 리서치 (~40개 브랜드 목록 정리) | ✅ |
+| 1 | 마이그레이션 정리 — 충돌 4파일 → 깨끗한 1파일 재생성 | ✅ |
+| 2 | CLAUDE.md 업데이트 — community_posts + 수집 도구 추가 | ✅ |
+| 3 | 인스티즈 크롤러 구현 — types/parser/fetcher/collector + CLI + 에이전트 가이드 | ✅ |
+| 4 | 네이버 카페 모듈 분리 — 676줄 → ~120줄 CLI + src/scraper/naver-cafe/ 4파일 | ✅ |
+| 5 | 더쿠 파서 버그 수정 — viewCount(항상 16), postedAt(항상 null) 수정 + 뷰티 보드 추가 | ✅ |
+| 6 | 인스티즈 파서 버그 수정 — postedAt null, 댓글 0, 제목 오염, 중복, commentCount 5개 버그 수정 | ✅ |
+| 7 | 16시간 필터 추가 — 더쿠/인스티즈 collector에 stale 스킵 로직 | ✅ |
+| 8 | 커뮤니티 리서치 — 10개 사이트 조사, 속닥(socdoc.co.kr) 1순위 발견 | ✅ |
+| 9 | YouTube 댓글 수집 모듈 구축 — Data API v3, types/api/channels/collector/CLI | ✅ |
+| 10 | YouTube 채널 리서치 — 16개 채널 검증, 10개 시드 등록 | ✅ |
+| 11 | YouTube 첫 수집 — 10영상, 700댓글 수집 성공 | ✅ |
+| 12 | 더쿠 기본 보드 hot → beauty 변경 | ✅ |
+| 13 | YouTube 댓글 429개 니즈 분석 — 183개(42.7%) 니즈 발견, 리포트 작성 | ✅ |
+| 14 | YouTube 답글(reply) 수집 기능 추가 — replyCount>=2 스레드의 답글 수집 | ✅ |
+| 15 | YouTube 기본값 변경 — daysBack 7→2, maxComments 100→300 | ✅ |
+| 16 | YouTube API 키 로테이션 — 3개 키 자동 전환 (403 시 다음 키) | ✅ |
+| 17 | YouTube 채널 발굴 스크립트 — discover-youtube-channels.py (yt-dlp+scrapetube, API 쿼터 0) | ✅ |
+| 18 | YouTube 채널 59개 등록 — 뷰티 키워드 9개 병렬 검색, 구독자 2만+ 기준 | ✅ |
+| 19 | 대본 자동 요약 — 10K자 초과 시 규칙 기반 추출형 압축 | ✅ |
+| 20 | YouTube 59채널 전체 수집 — 29영상, 1,418댓글, 대본 포함 | ✅ |
+| 21 | YouTube 댓글 니즈 분석 (Phase 1~4) — 15영상 분석, 5개 콘텐츠 기획+초안 | ✅ |
+| 22 | YouTube 채널 발굴 스크립트 yt-dlp 기반 재작성 (API 쿼터 0) | ✅ |
+| 23 | 포스트 작성 지침서 — 조회수 1만+ 209개 분석 기반 5대 패턴 | ✅ |
+| 24 | 포스트 토론 시스템 — 가이드+빈이 에이전트 2인 토론 (단독 작성 금지) | ✅ |
+| 25 | YouTube 수집 병렬화 — --from/--to 옵션 추가 | ✅ |
+| 26 | YouTube 중복 수집 방지 — DB 사전 체크 (API+yt-dlp 시간 절약) | ✅ |
 
-### 게시된 포스트 (총 7개, 워밍업 13개 남음)
+### 수집 시스템 현황
 
-| # | 주제 | 상태 | 댓글 |
-|---|------|------|------|
-| 1~5 | 기존 (클렌징, 선크림, 미세먼지 등) | 게시 완료 | - |
-| 6 | 목이버섯 (철분, 직장인 퇴근 후 간편식) | 게시 완료 | @michu_dora 탕수육 레시피 → 공감 답변 |
-| 7 | 점심 도시락 (직장인 20만원/월 절약) | 게시 완료 | @sallynsnoopy 계란+고구마 팁, @studio_2nd_ 여름 냄새 팁 → 답변 |
+```
+[Threads]        src/scraper/collect.ts              (Playwright CDP)     ✅ 기존
+[키워드검색]     scripts/collect-by-keyword.ts        (Playwright CDP)     ✅ 기존
+[네이버카페]     scripts/collect-naver-cafe.ts        (Playwright CDP)     ✅ 모듈 분리 완료
+                 src/scraper/naver-cafe/              (types, parser, collector, index)
 
-### DB (Supabase PostgreSQL 17.6)
+[더쿠]           scripts/collect-theqoo.ts            (HTTP + cheerio)     ✅ 파서 수정 완료
+                 src/scraper/theqoo/                  (types, parser, fetcher, collector)
 
-| 테이블 | 행 수 | 비고 |
-|--------|-------|------|
-| thread_posts | **499 + 수집중** | 499(기존 analyzed_at 마킹) + 벤치마크 17채널 수집 완료 |
-| needs | **64** | 쿠팡 바이어블 48개 |
-| aff_contents | **12** | source_type 컬럼 추가 (trend/benchmark) |
-| trend_keywords | **99** | 오늘 X 트렌드 (selected 8개 — 에이전트 분석) |
-| channels | 33 + 21예정 | verified 9 + rejected 15 + 21개 벤치마크 추가 예정 |
+[인스티즈]       scripts/collect-instiz.ts             (HTTP + cheerio)     ✅ 신규
+                 src/scraper/instiz/                  (types, parser, fetcher, collector)
 
-### 파이프라인 변경사항
+[YouTube]        scripts/collect-youtube-comments.ts  (YouTube API v3)     ✅ 신규
+                 src/scraper/youtube/                 (types, api, channels, collector)
 
-**분석 파이프라인 (pipeline.ts)**:
-- `todayOnly=true` 기본 — 오늘 수집 미분석 포스트만
-- `--source benchmark|trend` — 소스별 분리 분석
-- `analyzed_at` — 분석 완료 자동 마킹
-- `source_type` — 콘텐츠에 소스 태깅
+[채널 발굴]      scripts/discover-youtube-channels.py  (yt-dlp+scrapetube, 쿼터 0)  ✅
+```
 
-**트렌드 파이프라인**:
-- `trend-fetcher.ts` → 99개 DB 저장
-- `trend-analyzer.md` (에이전트, Opus) → 99개 전부 판단 ($0)
-- `trend-filter.ts` → DB 마킹 헬퍼만 (규칙 기반 제거됨)
-- Apify 중복호출 방지 (DB 재사용)
+### YouTube 채널 현황
+- 시드 채널: 59개 (메이크업 13, 리뷰 11, 가성비 11, 루틴 10, 피부고민 9, 비교 4, 남성뷰티 1)
+- 구독자 범위: 2만~190만
+- API 키: 3개 (일일 30,000 units)
+- 수집 설정: 2일 이내 영상, 댓글 300개, 답글 포함
 
-**트렌드 에이전트 분석 결과 (2026-03-18)**:
-- 99개 → 8개 선택 (8%): 미세먼지, 크루아상, 크로와상, 서브웨이, 할라피뇨, 목이버섯, 카트리지, 개강 2주동안
-- 기존 규칙 기반 2개 → 에이전트 8개 (4배 향상)
-- 직장인 관점 + 지역맛집 스킵 + 쿠팡 제품 연결 기준
+### 니즈 분석 결과
+- data/needs-analysis-2026-03-20.md — 전체 커뮤니티 니즈 분석
+- data/youtube-needs-analysis-2026-03-20.md — YouTube 429댓글 심층 분석
+- 니즈 Top 3: 제품 추천 요청(61건), 구매 의향(34건), 피부 고민(30건)
+- Threads 소재 Top 3: 더블웨어 리뷰, 지성vs건성 파데 비교, 속건조 토너 해결
 
-### 가이드 문서
+### DB 테이블
 
-| 문서 | 핵심 |
-|------|------|
-| CLAUDE.md | 세션 시작 시 가이드 읽기, 기존 도구 우선, 파이프 금지, 셸 루프 |
-| DISCOVERY_GUIDE.md | 검색 발굴 + 브라우저 검증, collect.ts 재사용 |
-| COLLECTION_GUIDE.md | CLI 수집 방법 |
-| trend-analyzer.md | 트렌드 키워드 분석 에이전트 (직장인 관점) |
+```
+[Threads 수집]      thread_posts → content_lifecycle → post_snapshots → daily_performance_reports
+[커뮤니티 수집]     community_posts (naver_cafe | theqoo | instiz | youtube)
+[브랜드]           brands → brand_events
+[기타]             channels, needs, aff_contents, trend_keywords
+```
 
-### 핵심 규칙 (이번 세션 추가)
+### 수집 데이터 현황
 
-1. 가이드 문서 필수 참조 (DISCOVERY_GUIDE.md, COLLECTION_GUIDE.md)
-2. 기존 도구 재사용 — 새 스크립트 만들지 않기
-3. 5개+ 채널 수집 → 셸 루프
-4. 백그라운드 실행 시 `| tail` 파이프 금지
-5. 채널 검증 = collect.ts 30개 수집 후 DB 데이터로 판단
-6. 트렌드 필터 = 에이전트(trend-analyzer.md)로 판단, 규칙 사전 아님
+| 소스 | 수집량 |
+|------|--------|
+| thread_posts | 1,100개 |
+| community_posts (naver_cafe) | ~15개 |
+| community_posts (theqoo) | ~7개 |
+| community_posts (instiz) | ~5개 |
+| community_posts (youtube) | ~10영상 700댓글 |
+| 워밍업 포스트 | 7/20개 |
 
-### 벤치마크 확장 (진행 중)
+### YouTube 시드 채널 (10개)
 
-21개 후보 (Exa 웹 검색 발굴 → collect.ts 셸 루프 수집):
+| 채널 | 카테고리 | 구독자 |
+|------|----------|--------|
+| 로지선 RohJiSun | 리뷰 | 55.7K |
+| 알라 ALLA BEAUTY | 리뷰 | 34K |
+| 박비비 VIVI | 리뷰 | 82.3K |
+| 화니 HWANE | 리뷰 | 169K |
+| 담쓰 Dams Beauty | 피부고민 | 208K |
+| 제이나 Jaina | 비교 | 284K |
+| 빛날영 bitnal young | 가성비 | 139K |
+| 아우라M | 가성비 | 125K |
+| 효블리 Hyovely | 루틴 | 122K |
+| 뽐니 bbomni | 루틴 | 228K |
 
-**건강/영양제**: @yaksamom, @alpaca_yaksa, @yak_secret, @bibi_yaksa, @yaksa_tipbox, @jy_yaksa, @myyaksa
-**생활용품**: @salimpop_official, @appasallim, @mingziroom, @sallim_gajang, @salrim.100, @salim_nam_official, @ilsangthd
-**다이어트/운동**: @daani._.e, @hanjobody, @crush_kimcoka, @gubonkang_diet, @raybangfitness, @mimoade_, @hongpro_diet
+### 커뮤니티 확장 로드맵
 
-수집 상태: 17/21 완료, 나머지 4개 진행 중
+```
+data/community-research.md 참고
+
+Phase 1 (HTTP+cheerio): 속닥(socdoc.co.kr) ← 1순위, 네이트판, DC미용갤
+Phase 2 (Playwright):   글로우픽, 언니의파우치
+```
+
+### 카페 정보
+
+| 카페 | cafeId | clubid | 가입 |
+|------|--------|--------|------|
+| 아프니까 사장이다 | jihosoccer123 | 23611966 | 가입됨 |
+| 직장인 탐구생활 | workee | 24470111 | 미가입 |
+| 파우더룸 | cosmania | 10050813 | 미확인 |
+
+### 참고 파일
+
+- `data/community-research.md` — 커뮤니티 10개 사이트 조사 결과
+- `data/youtube-channels.md` — YouTube 16개 채널 리서치 결과
+- `docs/superpowers/plans/2026-03-20-youtube-beauty-comments.md` — YouTube 구현 계획서
+- `src/agents/youtube-crawler.md` — YouTube 크롤러 에이전트 가이드
+- `src/agents/instiz-crawler.md` — 인스티즈 크롤러 에이전트 가이드
+- `scripts/discover-youtube-channels.py` — YouTube 채널 발굴 (yt-dlp+scrapetube, API 쿼터 0)
+- `data/youtube-needs-analysis-2026-03-20.md` — YouTube 댓글 니즈 심층 분석
+- `data/needs-analysis-2026-03-20.md` — 전체 커뮤니티 니즈 분석
+- `src/agents/post-writing-guide.md` — 조회수 1만+ 209개 분석 기반 글쓰기 지침서
+- `src/agents/post-debate-system.md` — 가이드+빈이 토론 시스템 (포스트 작성 필수)
+- `src/agents/youtube-needs-analyzer.md` — YouTube 니즈 분석 4-Phase 가이드
+
+### 포스트 작성 시스템 (hard rule)
+- 단독 작성 금지 — 반드시 가이드 에이전트 + 빈이 에이전트 토론
+- 최소 2라운드, 최대 4라운드
+- 체크리스트 10개 전부 통과해야 승인
+- 참조: post-debate-system.md, post-writing-guide.md, content.md
 
 ### 다음 세션 우선순위
 
-#### 1. 브랜드 DB + 이벤트 모니터링 스킬 (신규)
-- `brands` 테이블 생성 (~40개 브랜드 하드코딩)
-- `brand_events` 테이블 (이벤트/신제품/세일 정보)
-- 매일 웹 검색으로 브랜드별 새 소식 수집
-- 빈이가 다룰 수 있는 이벤트 필터 → 포스트 생성
+#### 1. 토론 시스템으로 포스트 작성 실전 테스트
+- 기획 5개 중 선택하여 가이드+빈이 토론 → 게시
+- `post-debate-system.md` 절차 따르기
 
-브랜드 목록 (리서치 완료):
-- **스킨케어**: 이니스프리, 라네즈, 미샤, 토코보, 조선미녀, 코스알엑스, 아누아, 라운드랩, 닥터지, 마녀공장 등
-- **메이크업**: 클리오, 롬앤, 페리페라, 바닐라코, 에뛰드, 헤라 등
-- **건강/영양제**: 종근당, 대웅제약, 유한양행, 동아제약, 광동제약, 고려은단 등
-- **리테일러**: 올리브영, 시코르, 무신사 뷰티
+#### 2. YouTube 59채널 일일 수집 자동화
+- 병렬 3분할, 2일 기준
+- 기존 `collect-youtube-comments.ts` --from/--to 옵션 활용
 
-#### 2. 벤치마크 수집 완료 + DB 검증
-- 21개 채널 수집 결과 확인 (존재/활동/참여율)
-- 통과 채널 → channels 테이블에 is_benchmark=true 등록
-- 실패 채널 → 대체 후보
+#### 3. 속닥 크롤러 구현
+- socdoc.co.kr — 1순위 커뮤니티, HTTP+cheerio
+- `src/scraper/socdoc/` + `scripts/collect-socdoc.ts`
 
-#### 3. 트렌드 vs 벤치마크 비교 분석
-- 오늘 트렌드 키워드(미세먼지 등)로 Threads 포스트 수집
-- `--source benchmark` vs `--source trend` 분리 분석
-- 참여율/답글/조회수 비교 리포트
+#### 4. 뷰티 셀럽 채널 등록
+- 이사배, 포니, 조효진 등 5개
 
-#### 4. trend-filter.ts 에이전트 연동 자동화
-- 현재: 수동으로 에이전트 호출 → JSON → applyAnalysis()
-- 목표: 스킬에서 자동으로 에이전트 호출 → DB 마킹 → 수집까지 원클릭
-
-#### 5. 워밍업 포스트 추가
-- 현재 7/20, 13개 남음
-- 트렌드 키워드 활용 (크루아상, 서브웨이, 할라피뇨 등)
-
-### PM 전략 보고서 (바탕화면)
-
-- `빈이_채널전략_PM보고서_2026.pdf` (138KB)
-- `빈이_채널전략_PM보고서_2026.md` (23KB)
-
-### 수정한 파일
-
-| 파일 | 변경 |
-|------|------|
-| `CLAUDE.md` | **신규** — 프로젝트 규칙 |
-| `src/agents/DISCOVERY_GUIDE.md` | **신규** — 검색 발굴 + 검증 패턴 |
-| `src/agents/trend-analyzer.md` | **신규** — 트렌드 키워드 분석 에이전트 |
-| `src/analyzer/pipeline.ts` | todayOnly/source/analyzed_at + source_type 태깅 |
-| `src/db/schema.ts` | analyzed_at, source_type, trend_keywords 테이블 |
-| `src/scraper/trend-fetcher.ts` | DB 저장 추가 |
-| `src/scraper/trend-filter.ts` | 에이전트 방식으로 전면 교체 (규칙 기반 제거) |
-| `scripts/run-trend-pipeline.ts` | posts_collected + drizzle import |
+#### 5. 워밍업 포스트 (8~20)
+- 토론 시스템으로 품질 보장

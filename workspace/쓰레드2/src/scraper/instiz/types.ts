@@ -1,22 +1,20 @@
 /**
- * @file 더쿠(theqoo.net) 크롤러 전용 타입 정의.
+ * @file 인스티즈(instiz.net) 크롤러 전용 타입 정의.
  */
 
-/** HOT 게시판 목록에서 추출한 게시글 요약 정보 */
-export interface TheqooListItem {
-  documentSrl: string;
+/** 게시판 목록에서 추출한 게시글 요약 정보 */
+export interface InstizListItem {
+  documentId: string;
   title: string;
-  category: string;
   href: string;
   viewCount: number;
   commentCount: number;
 }
 
 /** 상세 페이지에서 추출한 게시글 전체 정보 */
-export interface TheqooArticle {
-  documentSrl: string;
+export interface InstizArticle {
+  documentId: string;
   title: string;
-  category: string;
   body: string;
   authorNickname: string;
   viewCount: number;
@@ -24,26 +22,26 @@ export interface TheqooArticle {
   commentCount: number;
   postedAt: Date | null;
   sourceUrl: string;
-  comments: TheqooComment[];
+  comments: InstizComment[];
 }
 
 /** 댓글 */
-export interface TheqooComment {
+export interface InstizComment {
   nickname: string;
   text: string;
   like_count?: number;
 }
 
 /** CLI 옵션 */
-export interface TheqooCliOptions {
-  board: 'hot' | 'square' | 'beauty';
+export interface InstizCliOptions {
+  board: 'name_beauty' | 'pt';
   pages: number;
   limit: number;
   comments: boolean;
 }
 
 /** 수집 결과 통계 */
-export interface TheqooCollectResult {
+export interface InstizCollectResult {
   total: number;
   inserted: number;
   skipped: number;

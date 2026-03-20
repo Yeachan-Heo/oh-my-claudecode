@@ -53,14 +53,13 @@ export function parseListPage(html: string, board: string): TheqooListItem[] {
     const category = $row.find('td.cate').text().trim();
 
     // View count and comment count from td elements
-    // 더쿠 테이블: 번호 | 분류 | 제목 | 글쓴이 | 날짜 | 조회 | 추천
-    const tds = $row.find('td');
+    // 더쿠 테이블: 번호(no) | 카테고리(cate) | 제목(title) | 날짜(time) | 조회(m_no)
     let viewCount = 0;
     let commentCount = 0;
 
-    // 조회수는 보통 뒤에서 2번째 td
-    if (tds.length >= 2) {
-      const viewTd = tds.eq(tds.length - 2);
+    // 조회수는 td.m_no (마지막 컬럼)
+    const viewTd = $row.find('td.m_no');
+    if (viewTd.length) {
       viewCount = parseInt(viewTd.text().trim().replace(/,/g, ''), 10) || 0;
     }
 
@@ -139,9 +138,11 @@ export function parseDetailPage(
     '';
 
   // ── Date ──
+  // 더쿠 상세: .rd_hd .board .btm_area .side.fr > span 에 "2026.03.19 23:43" 형태
   const dateText =
-    $('.rd_hd .date').text().trim() ||
-    $('time').attr('datetime') ||
+    $('.rd_hd .btm_area .side.fr span').text().trim() ||
+    $('.rd_hd .board .side.fr').text().trim() ||
+    $('time[datetime]').attr('datetime') ||
     $('time').text().trim() ||
     '';
   const postedAt = parseTheqooDate(dateText);

@@ -23,7 +23,18 @@ CREATE TABLE IF NOT EXISTS channels (
   recent_ad_count INTEGER NOT NULL DEFAULT 0,
   source_keyword TEXT NOT NULL,
   discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_benchmark BOOLEAN NOT NULL DEFAULT FALSE,
+  category TEXT,
+  last_monitored_at TIMESTAMPTZ,
+  monitor_interval_days INTEGER NOT NULL DEFAULT 7,
+  avg_engagement_rate REAL,
+  notes TEXT,
+  affiliate_link_ratio REAL,
+  content_category_ratio REAL,
+  benchmark_status TEXT DEFAULT 'candidate',
+  total_posts_checked INTEGER DEFAULT 0,
+  posting_frequency TEXT
 );
 
 CREATE TABLE IF NOT EXISTS thread_posts (
@@ -54,7 +65,10 @@ CREATE TABLE IF NOT EXISTS thread_posts (
   thread_type TEXT,
   conversion_rate REAL,
   topic_tags TEXT[],
-  topic_category TEXT
+  topic_category TEXT,
+  analyzed_at TIMESTAMPTZ,
+  post_source TEXT,
+  brand_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS content_lifecycle (

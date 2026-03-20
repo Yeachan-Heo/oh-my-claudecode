@@ -1,15 +1,15 @@
 /**
- * @file 더쿠 수집 오케스트레이터.
+ * @file 인스티즈 수집 오케스트레이터.
  *
- * 목록 페이지 → 상세 페이지 → (선택) 댓글 API → community_posts DB 저장.
- * source_platform='theqoo', source_cafe='theqoo_hot' 등으로 통합 저장.
+ * 목록 페이지 → 상세 페이지 → (선택) 댓글 파싱 → community_posts DB 저장.
+ * source_platform='instiz', source_cafe='instiz_name_beauty' 등으로 통합 저장.
  */
 
 import { db } from '../../db/index.js';
 import { communityPosts } from '../../db/schema.js';
-import { fetchListPage, fetchDetailPage, fetchComments, requestDelay } from './fetcher.js';
+import { fetchListPage, fetchDetailPage, requestDelay } from './fetcher.js';
 import { parseListPage, parseDetailPage, parseComments } from './parser.js';
-import type { TheqooListItem, TheqooArticle, TheqooComment, TheqooCollectResult } from './types.js';
+import type { InstizListItem, InstizArticle, InstizComment, InstizCollectResult } from './types.js';
 
 // ─── Logging ─────────────────────────────────────────────
 
@@ -18,53 +18,32 @@ function log(msg: string): void {
   console.log(`[${ts}] ${msg}`);
 }
 
-// ─── Collect Comments via API ────────────────────────────
-
-/**
- * Rhymix 댓글 API로 첫 페이지 댓글을 가져온다.
- * 비회원은 1시간 이내 댓글이 숨겨지지만, 이전 댓글은 정상 조회 가능.
- */
-async function collectComments(
-  documentSrl: string,
-  board: string,
-): Promise<TheqooComment[]> {
-  try {
-    const response = await fetchComments(documentSrl, board, 1);
-    return parseComments(response.comment_list);
-  } catch (err) {
-    log(`    댓글 수집 실패 (${documentSrl}): ${(err as Error).message}`);
-    return [];
-  }
-}
-
 // ─── Collect Single Article ──────────────────────────────
 
 /**
- * 단일 게시글 상세 페이지를 수집하여 TheqooArticle로 변환한다.
+ * 단일 게시글 상세 페이지를 수집하여 InstizArticle로 변환한다.
  */
 async function collectArticle(
-  item: TheqooListItem,
+  item: InstizListItem,
   board: string,
   shouldFetchComments: boolean,
-): Promise<TheqooArticle | null> {
+): Promise<InstizArticle | null> {
   try {
-    const html = await fetchDetailPage(board, item.documentSrl);
-    const detail = parseDetailPage(html, item.documentSrl, board);
+    const html = await fetchDetailPage(board, item.documentId);
+    const detail = parseDetailPage(html, item.documentId, board);
 
-    // Fetch comments via API if requested
-    let comments: TheqooComment[] = [];
+    // Parse comments from HTML if requested
+    let comments: InstizComment[] = [];
     if (shouldFetchComments) {
-      await requestDelay();
-      comments = await collectComments(item.documentSrl, board);
+      comments = parseComments(html);
     }
 
     return {
-      documentSrl: item.documentSrl,
-      title: detail.title,
+      documentId: item.documentId,
+      title: detail.title || item.title,
       body: detail.body,
-      category: item.category,
       authorNickname: detail.authorNickname,
-      viewCount: item.viewCount,
+      viewCount: detail.viewCount || item.viewCount,
       likeCount: detail.likeCount,
       commentCount: detail.commentCount || item.commentCount,
       postedAt: detail.postedAt,
@@ -72,7 +51,7 @@ async function collectArticle(
       comments,
     };
   } catch (err) {
-    log(`    상세 페이지 수집 실패 (${item.documentSrl}): ${(err as Error).message}`);
+    log(`    상세 페이지 수집 실패 (${item.documentId}): ${(err as Error).message}`);
     return null;
   }
 }
@@ -80,18 +59,18 @@ async function collectArticle(
 // ─── Save to DB ──────────────────────────────────────────
 
 /**
- * TheqooArticle을 community_posts 테이블에 저장한다.
+ * InstizArticle을 community_posts 테이블에 저장한다.
  *
  * @returns true if newly inserted, false if duplicate
  */
-async function saveToDb(article: TheqooArticle, board: string): Promise<boolean> {
+async function saveToDb(article: InstizArticle, board: string): Promise<boolean> {
   try {
     const rows = await db
       .insert(communityPosts)
       .values({
-        id: `theqoo_${article.documentSrl}`,
-        source_platform: 'theqoo',
-        source_cafe: `theqoo_${board}`,
+        id: `instiz_${article.documentId}`,
+        source_platform: 'instiz',
+        source_cafe: `instiz_${board}`,
         source_url: article.sourceUrl,
         title: article.title,
         body: article.body,
@@ -110,7 +89,7 @@ async function saveToDb(article: TheqooArticle, board: string): Promise<boolean>
 
     return rows.length > 0;
   } catch (err) {
-    log(`    DB 저장 실패 (theqoo_${article.documentSrl}): ${(err as Error).message}`);
+    log(`    DB 저장 실패 (instiz_${article.documentId}): ${(err as Error).message}`);
     return false;
   }
 }
@@ -118,19 +97,19 @@ async function saveToDb(article: TheqooArticle, board: string): Promise<boolean>
 // ─── Main Collector ──────────────────────────────────────
 
 /**
- * 더쿠 게시판 수집 메인 함수.
+ * 인스티즈 게시판 수집 메인 함수.
  *
- * @param board - 게시판 ('hot' | 'square')
+ * @param board - 게시판 ('name_beauty' | 'pt')
  * @param pages - 수집할 페이지 수 (기본 1)
  * @param limit - 최대 수집 게시글 수 (기본 10)
  * @param shouldFetchComments - 댓글 수집 여부 (기본 false)
  */
-export async function collectTheqoo(
+export async function collectInstiz(
   board: string,
   pages: number,
   limit: number,
   shouldFetchComments: boolean,
-): Promise<TheqooCollectResult> {
+): Promise<InstizCollectResult> {
   const startTime = Date.now();
   let total = 0;
   let inserted = 0;
@@ -138,11 +117,12 @@ export async function collectTheqoo(
   let stale = 0;
   let failed = 0;
 
-  log(`=== 더쿠 ${board.toUpperCase()} 수집 시작 ===`);
+  const boardLabel = board === 'name_beauty' ? '뷰티' : board === 'pt' ? '인기글' : board;
+  log(`=== 인스티즈 ${boardLabel.toUpperCase()} 수집 시작 ===`);
   log(`페이지: ${pages}, 최대: ${limit}개, 댓글: ${shouldFetchComments ? 'O' : 'X'}`);
 
   // Step 1: Collect list items from all pages
-  const allItems: TheqooListItem[] = [];
+  const allItems: InstizListItem[] = [];
 
   for (let page = 1; page <= pages; page++) {
     log(`\n페이지 ${page}/${pages} 로드 중...`);

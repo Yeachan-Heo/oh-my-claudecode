@@ -9,22 +9,18 @@
     "typecheck": "tsc --noEmit",
     "collect": "tsx src/scraper/collect.ts",
     "crawl": "tsx src/scraper/orchestrator.ts",
-    "discover": "tsx src/scraper/discover.ts",
     "login": "tsx src/scraper/login.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:test": "tsx scripts/test-db.ts",
-    "analyze": "tsx src/analyzer/pipeline.ts",
-    "categories": "tsx scripts/analyze-categories.ts",
     "collect:keyword": "tsx scripts/collect-by-keyword.ts",
     "collect:cafe": "tsx scripts/collect-naver-cafe.ts",
     "collect:theqoo": "tsx scripts/collect-theqoo.ts",
-    "analyze:collection": "tsx scripts/analyze-collection.ts"
+    "collect:instiz": "tsx scripts/collect-instiz.ts",
+    "research:brands": "tsx scripts/research-brands.ts",
+    "collect:youtube": "tsx scripts/collect-youtube-comments.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
-    "@electric-sql/pglite": "^0.3.16",
     "apify-client": "^2.22.2",
     "cheerio": "^1.2.0",
     "dotenv": "^17.3.1",
@@ -33,6 +29,7 @@
     "postgres": "^3.4.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.16",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.31.9",
     "tsx": "^4.21.0",

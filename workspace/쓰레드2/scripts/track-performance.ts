@@ -14,7 +14,7 @@
  *   npx tsx scripts/track-performance.ts --post <post_id>   # 특정 포스트만
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { connectBrowser } from '../src/utils/browser.js';
 import { createGraphQLInterceptor } from '../src/scraper/graphql-interceptor.js';
 import { getPostMaturity } from '../src/tracker/snapshot.js';
@@ -56,6 +56,36 @@ function parseCliArgs(): CliOptions {
   }
 
   return { postId };
+}
+
+// ─── DOM: Post Text Extraction ───────────────────────────
+
+async function extractPostText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    // Threads 포스트 본문 추출 — span[dir="auto"]이 실제 텍스트를 담고 있음
+    const uiPatterns = /^(좋아요|답글|리포스트|공유|조회|팔로우|팔로잉|더 보기|수정|삭제|신고)/;
+
+    // 1차: span[dir="auto"] 중 가장 긴 텍스트 (Threads 현재 DOM 구조)
+    const spans = document.querySelectorAll('span[dir="auto"]');
+    let longest = '';
+    for (const span of spans) {
+      const text = span.textContent?.trim() || '';
+      if (text.length > longest.length && text.length > 20 && !uiPatterns.test(text)) {
+        longest = text;
+      }
+    }
+    if (longest.length > 20) return longest;
+
+    // 2차: div[dir="auto"] 폴백
+    const divs = document.querySelectorAll('div[dir="auto"]');
+    for (const div of divs) {
+      const text = div.textContent?.trim() || '';
+      if (text.length > longest.length && text.length > 20 && !uiPatterns.test(text)) {
+        longest = text;
+      }
+    }
+    return longest;
+  });
 }
 
 // ─── DOM: View Count Extraction ──────────────────────────
@@ -196,6 +226,16 @@ async function autoRegisterFromGraphQL(gqlMap: Map<string, GraphQLExtractedPost>
     }
   }
   if (newPosts > 0) log(`  thread_posts 신규 등록: ${newPosts}개`);
+
+  // 1.5. author가 잘못된 우리 포스트 보정 (DOM 크롤링 시 '프로필' 등으로 잡히는 케이스)
+  const fixed = await db.update(threadPosts)
+    .set({ author: OUR_CHANNEL })
+    .where(and(
+      eq(threadPosts.channel_id, OUR_CHANNEL),
+      sql`${threadPosts.author} != ${OUR_CHANNEL}`
+    ))
+    .returning({ post_id: threadPosts.post_id });
+  if (fixed.length > 0) log(`  author 보정: ${fixed.length}개 (${fixed.map(f => f.post_id).join(', ')})`);
 
   // 2. thread_posts에 있는 우리 포스트 전체 → content_lifecycle 등록
   const ourPosts = await db.select().from(threadPosts)
@@ -385,12 +425,26 @@ async function main(): Promise<void> {
       }
       log(`  조회수: ${viewCount}`);
 
-      // Get engagement from GraphQL (prefer), fallback to DOM parsing
+      // Extract post text from DOM if missing
       const gql = gqlMap.get(postId);
+      let postText = gql?.text || '';
+      if (!postText || postText.length < 5) {
+        postText = await extractPostText(page);
+        if (postText.length > 5) {
+          log(`  본문 수집: "${postText.slice(0, 50)}..."`);
+          // DB 업데이트 — thread_posts.text가 비어있으면 채운다
+          try {
+            await db.update(threadPosts)
+              .set({ text: postText })
+              .where(eq(threadPosts.post_id, postId));
+          } catch { /* non-critical */ }
+        }
+      }
+
+      // Get engagement from GraphQL (prefer), fallback to DOM parsing
       let likes = gql?.like_count ?? 0;
       let comments = gql?.reply_count ?? 0;
       let shares = gql?.repost_count ?? 0;
-      const postText = gql?.text ?? entry.id;
 
       // DOM fallback: if GraphQL didn't capture engagement, parse from page
       if (likes === 0 && comments === 0 && shares === 0) {
@@ -433,29 +487,64 @@ async function main(): Promise<void> {
         ageHours,
       );
 
-      // Save snapshot
-      const snapId = `snap_${Date.now()}_${postId.slice(0, 6)}`;
+      // Save snapshot — 하루에 포스트당 1개만 유지 (upsert)
+      const today = new Date().toISOString().slice(0, 10);
+      const snapId = `snap_${today}_${postId.slice(0, 6)}`;
       try {
-        await db.insert(postSnapshots).values({
-          id: snapId,
-          post_id: entry.id,
-          snapshot_type: snapshotType,
-          snapshot_at: new Date(),
-          likes,
-          comments,
-          shares,
-          saves: 0,
-          clicks: 0,
-          conversions: 0,
-          revenue: 0,
-          engagement_velocity: velocity.engagement_velocity,
-          click_velocity: velocity.click_velocity,
-          conversion_velocity: velocity.conversion_velocity,
-          post_views: viewCount || null,
-          comment_views: null,
-        });
-        snapshotCount++;
-        log(`  스냅샷 저장 완료 (${snapId})`);
+        // 오늘 같은 포스트의 기존 스냅샷 확인
+        const [existing] = await db.select({ id: postSnapshots.id })
+          .from(postSnapshots)
+          .where(and(
+            eq(postSnapshots.post_id, entry.id),
+            sql`${postSnapshots.snapshot_at}::date = ${today}::date`
+          ))
+          .limit(1);
+
+        if (existing) {
+          // 기존 스냅샷 업데이트
+          await db.update(postSnapshots)
+            .set({
+              snapshot_type: snapshotType,
+              snapshot_at: new Date(),
+              likes,
+              comments,
+              shares,
+              saves: 0,
+              clicks: 0,
+              conversions: 0,
+              revenue: 0,
+              engagement_velocity: velocity.engagement_velocity,
+              click_velocity: velocity.click_velocity,
+              conversion_velocity: velocity.conversion_velocity,
+              post_views: viewCount || null,
+              comment_views: null,
+            })
+            .where(eq(postSnapshots.id, existing.id));
+          snapshotCount++;
+          log(`  스냅샷 업데이트 (${existing.id})`);
+        } else {
+          // 신규 스냅샷
+          await db.insert(postSnapshots).values({
+            id: snapId,
+            post_id: entry.id,
+            snapshot_type: snapshotType,
+            snapshot_at: new Date(),
+            likes,
+            comments,
+            shares,
+            saves: 0,
+            clicks: 0,
+            conversions: 0,
+            revenue: 0,
+            engagement_velocity: velocity.engagement_velocity,
+            click_velocity: velocity.click_velocity,
+            conversion_velocity: velocity.conversion_velocity,
+            post_views: viewCount || null,
+            comment_views: null,
+          });
+          snapshotCount++;
+          log(`  스냅샷 저장 완료 (${snapId})`);
+        }
       } catch (err) {
         log(`  스냅샷 저장 실패: ${(err as Error).message}`);
       }

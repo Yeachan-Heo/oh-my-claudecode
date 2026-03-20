@@ -1,1 +1,0 @@
-ALTER TYPE "public"."source_platform" ADD VALUE 'theqoo';

@@ -5,7 +5,7 @@
  *   기존: products_v1.json 정적 사전에서 LLM 매칭
  *   변경: 니즈에서 검색 키워드 추출 → 쿠팡 웹 검색(Playwright CDP) → 상위 제품 추출
  *         → 텔레그램으로 파트너스 링크 요청 전송
- *         → 검색 실패 시 기존 DB 사전 fallback
+ *         → 검색 실패 시 기존 DB 사전 fallback (키워드 기반, LLM 없음)
  */
 
 import { eq } from 'drizzle-orm';
@@ -13,8 +13,7 @@ import { chromium } from 'playwright';
 import type { Browser, Page } from 'playwright';
 import { db } from '../db/index.js';
 import { products } from '../db/schema.js';
-import { callLLM, loadAgentPrompt, parseJSON } from './llm.js';
-import type { DetectedNeed } from './needs-detector.js';
+import type { DetectedNeed } from './content-generator.js';
 import { sendProductRequest } from '../utils/telegram.js';
 import type { NeedInfo, CoupangProduct } from '../utils/telegram.js';
 import { CDP_URL, connectBrowser } from '../utils/browser.js';
@@ -225,11 +224,11 @@ function extractSearchKeyword(need: DetectedNeed): string | null {
   return isCoupangSearchable(keyword) ? keyword : null;
 }
 
-// ─── Fallback: DB 사전 기반 매칭 ────────────────────────
+// ─── Fallback: DB 사전 기반 매칭 (키워드 기반) ──────────
 
 /**
- * 기존 DB 상품사전(products 테이블)에서 LLM 매칭을 수행한다.
- * 쿠팡 검색 실패 시 fallback으로 사용한다.
+ * 기존 DB 상품사전(products 테이블)에서 키워드 기반 매칭을 수행한다.
+ * 쿠팡 검색 실패 시 fallback으로 사용한다. LLM 없이 product_categories 키워드로 필터링.
  */
 async function matchFromDictionary(needs: DetectedNeed[]): Promise<ProductMatch[]> {
   const activeProducts = await db
@@ -242,79 +241,41 @@ async function matchFromDictionary(needs: DetectedNeed[]): Promise<ProductMatch[
     return [];
   }
 
-  const systemPrompt = loadAgentPrompt('product-matcher');
+  const matches: ProductMatch[] = [];
 
-  const userMessage = JSON.stringify({
-    instruction: 'Match needs to products. For each need, select up to 3 best-matching products. Return JSON with a "matches" array.',
-    needs: needs.map((n) => ({
-      need_id: n.need_id,
-      category: n.category,
-      problem: n.problem,
-      product_categories: n.product_categories,
-      signal_strength: n.signal_strength,
-      purchase_linkage: n.purchase_linkage,
-      threads_fit: n.threads_fit,
-    })),
-    products: activeProducts.map((p) => ({
-      product_id: p.product_id,
-      name: p.name,
-      category: p.category,
-      needs_categories: p.needs_categories,
-      keywords: p.keywords,
-      price_range: p.price_range,
-      description: p.description,
-    })),
-    expected_output_schema: {
-      matches: 'Array<{ need_id, product_id, match_score, match_why, competition, priority }>',
-    },
-  });
+  for (const need of needs) {
+    const keywords = need.product_categories.map((k) => k.toLowerCase());
 
-  const raw = await callLLM({
-    model: 'claude-sonnet-4-20250514',
-    systemPrompt,
-    userMessage,
-    maxTokens: 4096,
-  });
+    // 키워드가 제품의 needs_categories 또는 keywords와 겹치는 제품을 찾는다
+    const scored = activeProducts
+      .map((p) => {
+        const pKeywords = [
+          ...(p.needs_categories ?? []),
+          ...(p.keywords ?? []),
+          p.category ?? '',
+        ].map((k) => k.toLowerCase());
 
-  const rawParsed = parseJSON<Record<string, unknown>>(raw);
+        const overlap = keywords.filter((k) => pKeywords.some((pk) => pk.includes(k) || k.includes(pk)));
+        return { product: p, score: overlap.length };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
 
-  let matchesArray: ProductMatch[];
-  if (Array.isArray(rawParsed)) {
-    matchesArray = rawParsed as unknown as ProductMatch[];
-  } else if (Array.isArray((rawParsed as any).matches)) {
-    matchesArray = (rawParsed as any).matches;
-  } else {
-    const arrayProp = Object.values(rawParsed).find(v => Array.isArray(v));
-    if (arrayProp) {
-      matchesArray = arrayProp as unknown as ProductMatch[];
-    } else {
-      console.warn('[product-matcher] LLM returned unexpected shape:', Object.keys(rawParsed));
-      matchesArray = [];
+    for (let idx = 0; idx < scored.length; idx++) {
+      const { product: p, score } = scored[idx];
+      matches.push({
+        need_id: need.need_id,
+        product_id: p.product_id,
+        match_score: Math.min(100, score * 20),
+        match_why: `DB 사전 키워드 매칭 (overlap=${score})`,
+        competition: '중' as const,
+        priority: idx + 1,
+      });
     }
   }
 
-  // Handle nested format: LLM may return { need_id, products: [...] }
-  const flatMatches: ProductMatch[] = [];
-  for (const item of matchesArray) {
-    if (item.product_id && item.need_id) {
-      flatMatches.push(item);
-    } else if (item.need_id && Array.isArray((item as any).products)) {
-      for (const prod of (item as any).products) {
-        if (prod.product_id) {
-          flatMatches.push({
-            need_id: item.need_id,
-            product_id: prod.product_id,
-            match_score: prod.threads_score?.total ?? prod.match_score ?? 0,
-            match_why: prod.why ?? prod.match_why ?? '',
-            competition: prod.competition ?? '중',
-            priority: prod.priority ?? 1,
-          });
-        }
-      }
-    }
-  }
-
-  return flatMatches;
+  return matches;
 }
 
 // ─── Main: matchProducts ────────────────────────────────
@@ -326,7 +287,7 @@ async function matchFromDictionary(needs: DetectedNeed[]): Promise<ProductMatch[
  * 1. 각 니즈에서 검색 키워드 추출
  * 2. 쿠팡 웹 검색으로 상위 3~5개 제품 추출
  * 3. 검색 성공 시: 쿠팡 제품 기반 ProductMatch 생성 + 텔레그램 파트너스 링크 요청
- * 4. 검색 실패 시: 기존 DB 사전 fallback
+ * 4. 검색 실패 시: 기존 DB 사전 fallback (키워드 기반)
  */
 export async function matchProducts(needs: DetectedNeed[]): Promise<ProductMatch[]> {
   if (needs.length === 0) {
