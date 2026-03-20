@@ -113,6 +113,62 @@ function extractFromSearchResults(data: Record<string, unknown>): RawGraphQLPost
 }
 
 /**
+ * Extract posts from the userData shape (profile feed, newer Threads API):
+ *   data.userData.user.threads_feed.threads[].thread_items[].post
+ *   (also handles data.xdt_api__v1__text_feed__* keys)
+ */
+function extractFromUserData(data: Record<string, unknown>): RawGraphQLPost[] {
+  // Shape 1: data.userData.user.threads_feed.threads[]
+  const userData = data.userData as {
+    user?: {
+      threads_feed?: {
+        threads?: Array<{
+          thread_items?: Array<{ post?: RawGraphQLPost }>;
+        }>;
+      };
+    };
+  } | undefined;
+
+  const threads = userData?.user?.threads_feed?.threads;
+  if (threads) {
+    const posts: RawGraphQLPost[] = [];
+    for (const thread of threads) {
+      const threadItems = thread?.thread_items;
+      if (!threadItems) continue;
+      for (const item of threadItems) {
+        if (item?.post) posts.push(item.post);
+      }
+    }
+    if (posts.length > 0) return posts;
+  }
+
+  // Shape 2: data.<xdt_key>.edges[].node.thread_items[].post
+  // Threads uses dynamically-named keys like xdt_api__v1__text_feed_timeline_connection_with_viewer__results
+  for (const key of Object.keys(data)) {
+    if (!key.startsWith('xdt_')) continue;
+    const val = data[key] as {
+      edges?: Array<{
+        node?: {
+          thread_items?: Array<{ post?: RawGraphQLPost }>;
+        };
+      }>;
+    } | undefined;
+    if (!val?.edges) continue;
+    const posts: RawGraphQLPost[] = [];
+    for (const edge of val.edges) {
+      const threadItems = edge?.node?.thread_items;
+      if (!threadItems) continue;
+      for (const item of threadItems) {
+        if (item?.post) posts.push(item.post);
+      }
+    }
+    if (posts.length > 0) return posts;
+  }
+
+  return [];
+}
+
+/**
  * Extract posts from the mediaData shape (profile feed):
  *   data.mediaData.edges[].node.thread_items[].post
  */
@@ -148,7 +204,6 @@ function mapToExtractedPost(raw: RawGraphQLPost): GraphQLExtractedPost | null {
   if (!code || !username) return null;
 
   const text = raw.caption?.text ?? '';
-  if (!text || text.length < 5) return null;
 
   // Extract link URL from text_fragments or link_preview
   let linkUrl: string | null = null;
@@ -237,13 +292,18 @@ export function createGraphQLInterceptor(page: Page): GraphQLInterceptor {
 
       if (!json.data) return;
 
-      // Try both shapes
+      // Try all known shapes in priority order
       let rawPosts: RawGraphQLPost[] = [];
 
       if (json.data.searchResults) {
         rawPosts = extractFromSearchResults(json.data);
       } else if (json.data.mediaData) {
         rawPosts = extractFromMediaData(json.data);
+      } else if (json.data.userData) {
+        rawPosts = extractFromUserData(json.data);
+      } else {
+        // Fallback: scan for any xdt_* key (dynamic Threads API key names)
+        rawPosts = extractFromUserData(json.data);
       }
 
       if (rawPosts.length === 0) return;

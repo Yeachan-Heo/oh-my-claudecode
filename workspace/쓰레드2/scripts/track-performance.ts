@@ -119,6 +119,49 @@ async function extractViewCount(page: Page): Promise<number> {
   return views;
 }
 
+// ─── DOM: Extract post IDs from profile page links ──────
+
+async function extractPostIdsFromDOM(page: Page): Promise<string[]> {
+  const postIds = await page.evaluate(() => {
+    const links = document.querySelectorAll('a[href*="/post/"]');
+    const ids = new Set<string>();
+    for (const link of links) {
+      const href = link.getAttribute('href') || '';
+      // Match /@username/post/XXXXXXX or /post/XXXXXXX
+      const match = href.match(/\/post\/([A-Za-z0-9_-]+)/);
+      if (match && match[1]) {
+        ids.add(match[1]);
+      }
+    }
+    return Array.from(ids);
+  });
+  return postIds;
+}
+
+// ─── Scroll: Load all posts on profile page ─────────────
+
+async function scrollToLoadAllPosts(page: Page, maxScrolls: number = 10, minScrolls: number = 3): Promise<void> {
+  let noChangeCount = 0;
+  for (let i = 0; i < maxScrolls; i++) {
+    const previousHeight = await page.evaluate(() => document.body.scrollHeight);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await humanDelay(3000, 4000); // Threads 로드 시간 충분히 대기
+    const newHeight = await page.evaluate(() => document.body.scrollHeight);
+    if (newHeight === previousHeight) {
+      noChangeCount++;
+      log(`  스크롤 ${i + 1}회: 높이 변화 없음 (${noChangeCount}/2)`);
+      // 최소 스크롤 보장 + 2회 연속 변화 없으면 중단
+      if (i >= minScrolls - 1 && noChangeCount >= 2) {
+        log(`  스크롤 완료: 총 ${i + 1}회`);
+        break;
+      }
+    } else {
+      noChangeCount = 0;
+      log(`  스크롤 ${i + 1}회: 새 콘텐츠 로드됨`);
+    }
+  }
+}
+
 // ─── Step 1: GraphQL engagement collection ───────────────
 
 async function collectGraphQLEngagement(page: Page): Promise<Map<string, GraphQLExtractedPost>> {
@@ -130,11 +173,12 @@ async function collectGraphQLEngagement(page: Page): Promise<Map<string, GraphQL
     await page.goto(PROFILE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await humanDelay(3000, 5000);
 
-    // Scroll to load all posts
-    for (let i = 0; i < 10; i++) {
-      await page.keyboard.press('End');
-      await humanDelay(1500, 3000);
-    }
+    // Scroll down to load all posts (triggers additional GraphQL requests)
+    await scrollToLoadAllPosts(page);
+
+    // Scroll back to top before individual post visits
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await humanDelay(500, 1000);
 
     const gqlPosts = interceptor.getCollectedPosts();
     log(`GraphQL 캡처: ${gqlPosts.length}개 포스트`);
@@ -144,21 +188,12 @@ async function collectGraphQLEngagement(page: Page): Promise<Map<string, GraphQL
       map.set(post.post_id, post);
     }
 
-    // DOM 폴백: GraphQL이 적게 잡히면 프로필 DOM에서 포스트 링크 스캔
-    const domPostIds = await page.evaluate((channel: string) => {
-      const ids: string[] = [];
-      const links = document.querySelectorAll(`a[href*="/@${channel}/post/"]`);
-      for (const link of links) {
-        const href = link.getAttribute('href') || '';
-        const match = href.match(/\/post\/([^/?#]+)/);
-        if (match && match[1] && !ids.includes(match[1])) {
-          ids.push(match[1]);
-        }
-      }
-      return ids;
-    }, OUR_CHANNEL);
+    // DOM에서 포스트 ID 직접 추출 (GraphQL 누락 대비)
+    // 모든 a[href*="/post/"] 링크를 스캔 — 채널 접두사 유무 관계없이 포착
+    const domPostIds = await extractPostIdsFromDOM(page);
+    log(`DOM에서 포스트 링크 ${domPostIds.length}개 발견`);
 
-    // DOM에서 발견했지만 GraphQL에 없는 포스트 → 빈 엔트리로 추가
+    // GraphQL에 없는 포스트를 DOM 결과에서 추가
     let domAdded = 0;
     for (const pid of domPostIds) {
       if (!map.has(pid)) {
@@ -180,6 +215,7 @@ async function collectGraphQLEngagement(page: Page): Promise<Map<string, GraphQL
           source: 'graphql',
         });
         domAdded++;
+        log(`  DOM 추가 발견: ${pid}`);
       }
     }
     if (domAdded > 0) log(`DOM 폴백으로 ${domAdded}개 포스트 추가 발견`);
