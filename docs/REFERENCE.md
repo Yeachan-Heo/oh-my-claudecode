@@ -181,11 +181,11 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | **Pre-Planning** | — | — | `analyst` |
 | **Testing** | — | `qa-tester` | — |
 | **Tracing** | — | `tracer` | — |
-| **Security** | — | `security-reviewer` | — |
+| **Security** | `security-reviewer-low` | `security-reviewer` | — |
 | **Build** | — | `debugger` | — |
 | **TDD** | — | `test-engineer` | — |
 | **Code Review** | — | — | `code-reviewer` |
-| **Data Science** | — | `scientist` | — |
+| **Data Science** | — | `scientist` | `scientist-high` |
 
 ### Agent Selection Guide
 
@@ -197,7 +197,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | Feature implementation | `executor` | sonnet |
 | Complex refactoring | `executor-high` | opus |
 | Debug simple / complex issue | `debugger` / `architect` | sonnet / opus |
-| UI component / system | `designer` | sonnet |
+| UI component / system | `designer` / `designer-high` | sonnet / opus |
 | Write docs | `writer` | haiku |
 | Research docs/APIs | `document-specialist` | sonnet |
 | Strategic planning | `planner` | opus |
@@ -205,10 +205,10 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | Pre-planning analysis | `analyst` | opus |
 | Test CLI interactively | `qa-tester` | sonnet |
 | Evidence-driven tracing | `tracer` | sonnet |
-| Security review | `security-reviewer` | sonnet |
+| Security review / quick scan | `security-reviewer` / `security-reviewer-low` | sonnet / haiku |
 | TDD workflow | `test-engineer` | sonnet |
 | Code review | `code-reviewer` | opus |
-| Data analysis | `scientist` | sonnet |
+| Data analysis | `scientist` / `scientist-high` | sonnet / opus |
 
 ---
 
@@ -259,7 +259,6 @@ All skills are available as `/oh-my-claudecode:<name>`. Key commands:
 | `/oh-my-claudecode:ultrawork <task>` | Maximum performance mode |
 | `/oh-my-claudecode:team <N>:<agent> <task>` | Coordinated multi-agent workflow |
 | `/oh-my-claudecode:ralph <task>` | Persistence loop (`--critic=architect\|critic\|codex`) |
-| `/oh-my-claudecode:ralph-init <task>` | Initialize PRD for structured task tracking |
 | `/oh-my-claudecode:ultraqa <goal>` | Autonomous QA cycling |
 | `/oh-my-claudecode:omc-plan <description>` | Planning session |
 | `/oh-my-claudecode:ralplan <description>` | Consensus planning (`--deliberate` for high-risk) |
