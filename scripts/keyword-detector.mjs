@@ -174,6 +174,7 @@ function activateState(directory, prompt, stateName, sessionId) {
       session_id: sessionId || undefined,
       project_path: directory,
       linked_ultrawork: true,
+      awaiting_confirmation: true,
       last_checked_at: new Date().toISOString()
     };
   } else if (stateName === 'ralplan') {
@@ -183,6 +184,7 @@ function activateState(directory, prompt, stateName, sessionId) {
       started_at: new Date().toISOString(),
       session_id: sessionId || undefined,
       project_path: directory,
+      awaiting_confirmation: true,
       last_checked_at: new Date().toISOString()
     };
   } else {
@@ -194,6 +196,7 @@ function activateState(directory, prompt, stateName, sessionId) {
       session_id: sessionId || undefined,
       project_path: directory,
       reinforcement_count: 0,
+      awaiting_confirmation: true,
       last_checked_at: new Date().toISOString()
     };
   }

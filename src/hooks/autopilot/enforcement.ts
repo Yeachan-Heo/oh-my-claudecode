@@ -149,6 +149,14 @@ export function detectAnySignal(sessionId: string): AutopilotSignal | null {
 // ENFORCEMENT
 // ============================================================================
 
+function isAwaitingConfirmation(state: unknown): boolean {
+  return Boolean(
+    state &&
+    typeof state === 'object' &&
+    (state as Record<string, unknown>).awaiting_confirmation === true
+  );
+}
+
 /**
  * Get the next phase after current phase
  */
@@ -186,6 +194,10 @@ export async function checkAutopilot(
 
   // Strict session isolation: only process state for matching session
   if (state.session_id !== sessionId) {
+    return null;
+  }
+
+  if (isAwaitingConfirmation(state)) {
     return null;
   }
 

@@ -360,6 +360,14 @@ function isCriticalContextStop(stopContext?: StopContext): boolean {
   return estimateTranscriptContextPercent(transcriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT;
 }
 
+function isAwaitingConfirmation(state: unknown): boolean {
+  return Boolean(
+    state &&
+    typeof state === 'object' &&
+    (state as Record<string, unknown>).awaiting_confirmation === true
+  );
+}
+
 /**
  * Check for architect approval in session transcript
  */
@@ -431,6 +439,10 @@ async function checkRalphLoop(
 
   // Strict session isolation: only process state for matching session
   if (state.session_id !== sessionId) {
+    return null;
+  }
+
+  if (isAwaitingConfirmation(state)) {
     return null;
   }
 
@@ -864,6 +876,10 @@ async function checkRalplan(
     return null;
   }
 
+  if (isAwaitingConfirmation(state)) {
+    return null;
+  }
+
   // Terminal phase detection — allow stop when ralplan has completed
   const currentPhase = (state as unknown as Record<string, unknown>).current_phase;
   if (typeof currentPhase === 'string') {
@@ -933,6 +949,10 @@ async function checkUltrawork(
 
   // Strict session isolation: only process state for matching session
   if (state.session_id !== sessionId) {
+    return null;
+  }
+
+  if (isAwaitingConfirmation(state)) {
     return null;
   }
 

@@ -418,6 +418,50 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
   }
 }
 
+
+function clearAwaitingConfirmationFlag(directory, stateName, sessionId) {
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const paths = [
+    safeSessionId ? join(stateDir, 'sessions', safeSessionId, `${stateName}-state.json`) : null,
+    join(stateDir, `${stateName}-state.json`),
+  ].filter(Boolean);
+
+  for (const statePath of paths) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (!state || typeof state !== 'object' || !state.awaiting_confirmation) continue;
+      delete state.awaiting_confirmation;
+      const tmpPath = statePath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, statePath);
+    } catch {
+      // Best-effort; don't fail the hook
+    }
+  }
+}
+
+function confirmSkillModeStates(directory, skillName, sessionId) {
+  switch (skillName) {
+    case 'ralph':
+      clearAwaitingConfirmationFlag(directory, 'ralph', sessionId);
+      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      break;
+    case 'ultrawork':
+      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      break;
+    case 'autopilot':
+      clearAwaitingConfirmationFlag(directory, 'autopilot', sessionId);
+      break;
+    case 'ralplan':
+      clearAwaitingConfirmationFlag(directory, 'ralplan', sessionId);
+      break;
+    default:
+      break;
+  }
+}
+
 // Record Skill/Task invocations to flow trace (best-effort)
 async function recordToolInvocation(data, directory) {
   try {
@@ -467,6 +511,7 @@ async function main() {
         const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || '';
         const rawSkillName = typeof rawSkill === 'string' && rawSkill.trim() ? rawSkill.trim() : undefined;
         writeSkillActiveState(directory, skillName, sid, rawSkillName);
+        confirmSkillModeStates(directory, skillName, sid);
       }
     }
 

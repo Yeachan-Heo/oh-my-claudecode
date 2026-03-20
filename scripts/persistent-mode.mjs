@@ -193,6 +193,10 @@ function getSafeReinforcementCount(value) {
     : 0;
 }
 
+function isAwaitingConfirmation(state) {
+  return state?.awaiting_confirmation === true;
+}
+
 /**
  * Normalize a path for comparison.
  */
@@ -567,7 +571,7 @@ async function main() {
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
     if (
-      ralph.state?.active &&
+      ralph.state?.active && !isAwaitingConfirmation(ralph.state) &&
       !isStaleState(ralph.state) &&
       isStateForCurrentProject(ralph.state, directory, ralph.isGlobal)
     ) {
@@ -618,7 +622,7 @@ async function main() {
 
     // Priority 2: Autopilot (high-level orchestration)
     if (
-      autopilot.state?.active &&
+      autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
       !isStaleState(autopilot.state) &&
       isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal)
     ) {
@@ -879,7 +883,7 @@ async function main() {
     // If state has session_id, it must match. If no session_id (legacy), allow.
     // Project isolation: only block if state belongs to this project
     if (
-      ultrawork.state?.active &&
+      ultrawork.state?.active && !isAwaitingConfirmation(ultrawork.state) &&
       !isStaleState(ultrawork.state) &&
       (hasValidSessionId
         ? ultrawork.state.session_id === sessionId

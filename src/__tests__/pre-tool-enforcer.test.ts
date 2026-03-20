@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -380,6 +380,43 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
 
     expect(output.continue).toBe(true);
     expect(output.decision).toBeUndefined();
+  });
+
+
+  it('clears awaiting confirmation from session-scoped mode state when a skill is invoked', () => {
+    const sessionId = 'session-confirm';
+    const sessionStateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(sessionStateDir, { recursive: true });
+    writeJson(join(sessionStateDir, 'ralph-state.json'), {
+      active: true,
+      awaiting_confirmation: true,
+      session_id: sessionId,
+    });
+    writeJson(join(sessionStateDir, 'ultrawork-state.json'), {
+      active: true,
+      awaiting_confirmation: true,
+      session_id: sessionId,
+    });
+
+    const output = runPreToolEnforcer({
+      tool_name: 'Skill',
+      toolInput: {
+        skill: 'oh-my-claudecode:ralph',
+      },
+      cwd: tempDir,
+      session_id: sessionId,
+    });
+
+    expect(output.continue).toBe(true);
+    expect((output.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'The boulder never stops',
+    );
+    expect(
+      JSON.parse(readFileSync(join(sessionStateDir, 'ralph-state.json'), 'utf-8')).awaiting_confirmation,
+    ).toBeUndefined();
+    expect(
+      JSON.parse(readFileSync(join(sessionStateDir, 'ultrawork-state.json'), 'utf-8')).awaiting_confirmation,
+    ).toBeUndefined();
   });
 
   it('does not write skill-active-state for unknown custom skills', () => {

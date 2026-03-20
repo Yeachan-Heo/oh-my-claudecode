@@ -444,6 +444,22 @@ describe('ralplan standalone stop enforcement', () => {
     }
   });
 
+  it('ignores ralplan state that is still awaiting skill confirmation', async () => {
+    const sessionId = 'session-ralplan-awaiting-confirmation';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, { awaiting_confirmation: true });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('none');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+
   it('respects session isolation', async () => {
     const sessionId = 'session-ralplan-iso-a';
     const tempDir = makeTempProject();

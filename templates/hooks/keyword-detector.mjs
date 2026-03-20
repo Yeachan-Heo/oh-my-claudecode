@@ -184,6 +184,7 @@ function activateState(directory, prompt, stateName, sessionId) {
     original_prompt: prompt,
     session_id: sessionId || undefined,
     reinforcement_count: 0,
+    awaiting_confirmation: true,
     last_checked_at: new Date().toISOString()
   };
 

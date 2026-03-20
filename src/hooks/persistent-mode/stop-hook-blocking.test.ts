@@ -123,6 +123,29 @@ describe("Stop Hook Blocking Contract", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
+
+    it("ignores ultrawork states that are still awaiting skill confirmation", async () => {
+      const sessionId = "ultrawork-awaiting-confirmation";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          awaiting_confirmation: true,
+          started_at: new Date().toISOString(),
+          original_prompt: "Test task",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe("none");
+    });
+
     it("blocks stop for active ultrawork (shouldBlock: true -> continue: false)", async () => {
       const sessionId = "test-session-block";
       activateUltrawork("Fix the bug", sessionId, tempDir);
@@ -318,6 +341,30 @@ describe("Stop Hook Blocking Contract", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
+
+    it("returns continue: true when ralph is awaiting confirmation", () => {
+      const sessionId = "ralph-awaiting-confirmation-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ralph-state.json"),
+        JSON.stringify({
+          active: true,
+          awaiting_confirmation: true,
+          iteration: 1,
+          max_iterations: 50,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          prompt: "Test task",
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+    });
+
     it("returns decision: block when ralph is active", () => {
       const sessionId = "ralph-mjs-test";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -433,6 +480,30 @@ describe("Stop Hook Blocking Contract", () => {
         user_requested: true,
       });
       expect(output.continue).toBe(true);
+    });
+
+
+    it("returns continue: true when ultrawork is awaiting confirmation in cjs script", () => {
+      const sessionId = "ultrawork-awaiting-confirmation-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          awaiting_confirmation: true,
+          started_at: new Date().toISOString(),
+          original_prompt: "Test task",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          project_path: tempDir,
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
     });
 
     it("returns continue: true for authentication error stop", () => {

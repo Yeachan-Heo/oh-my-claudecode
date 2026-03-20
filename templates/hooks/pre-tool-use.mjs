@@ -7,8 +7,9 @@
 
 import * as path from 'path';
 import { dirname } from 'path';
-import { existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, renameSync, readFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { homedir } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -108,6 +109,51 @@ function writeSkillActiveState(directory, skillName, sessionId) {
     renameSync(tmpPath, targetPath);
   } catch {
     // Best-effort; don't fail the hook
+  }
+}
+
+
+function clearAwaitingConfirmationFlag(directory, stateName, sessionId) {
+  const stateDir = path.join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const paths = [
+    safeSessionId ? path.join(stateDir, 'sessions', safeSessionId, `${stateName}-state.json`) : null,
+    path.join(stateDir, `${stateName}-state.json`),
+    path.join(homedir(), '.omc', 'state', `${stateName}-state.json`),
+  ].filter(Boolean);
+
+  for (const statePath of paths) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (!state || typeof state !== 'object' || !state.awaiting_confirmation) continue;
+      delete state.awaiting_confirmation;
+      const tmpPath = statePath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, statePath);
+    } catch {
+      // Best-effort; don't fail the hook
+    }
+  }
+}
+
+function confirmSkillModeStates(directory, skillName, sessionId) {
+  switch (skillName) {
+    case 'ralph':
+      clearAwaitingConfirmationFlag(directory, 'ralph', sessionId);
+      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      break;
+    case 'ultrawork':
+      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      break;
+    case 'autopilot':
+      clearAwaitingConfirmationFlag(directory, 'autopilot', sessionId);
+      break;
+    case 'ralplan':
+      clearAwaitingConfirmationFlag(directory, 'ralplan', sessionId);
+      break;
+    default:
+      break;
   }
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { dirname, join } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { KEYWORD_DETECTOR_SCRIPT_NODE } from '../hooks.js';
 
@@ -87,6 +88,45 @@ describe('keyword-detector packaged artifacts', () => {
 
     expect(templateResult).toEqual({ continue: true, suppressOutput: true });
     expect(pluginResult).toEqual({ continue: true, suppressOutput: true });
+  });
+
+
+  it('marks packaged keyword-triggered states as awaiting confirmation', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+
+    const tempDir = mkdtempSync(join(tmpdir(), 'keyword-hook-awaiting-'));
+    const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-home-'));
+    try {
+      for (const [scriptPath, statePath] of [
+        [templatePath, join(tempDir, '.omc', 'state', 'ralph-state.json')],
+        [pluginPath, join(tempDir, '.omc', 'state', 'sessions', 'hook-session', 'ralph-state.json')],
+      ] as const) {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        execFileSync('node', [scriptPath], {
+          cwd: packageRoot,
+          env: { ...process.env, HOME: fakeHome },
+          input: JSON.stringify({
+            prompt: 'ralph fix the regression in src/hooks/bridge.ts after issue #1795',
+            directory: tempDir,
+            cwd: tempDir,
+            session_id: 'hook-session',
+          }),
+          encoding: 'utf-8',
+        });
+
+        const state = JSON.parse(readFileSync(statePath, 'utf-8')) as {
+          awaiting_confirmation?: boolean;
+        };
+        expect(state.awaiting_confirmation).toBe(true);
+
+        rmSync(join(tempDir, '.omc'), { recursive: true, force: true });
+        rmSync(join(fakeHome, '.omc'), { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
   });
 
   it('does not auto-trigger informational keyword questions in packaged artifacts', () => {
