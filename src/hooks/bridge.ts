@@ -23,6 +23,7 @@ import {
 } from "fs";
 import { dirname, join } from "path";
 import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
+import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import {
@@ -385,7 +386,7 @@ function workerBashBlockReason(command: string): string | null {
     return "Team worker cannot run tmux pane/session orchestration commands.";
   }
   if (WORKER_BLOCKED_TEAM_CLI_PATTERN.test(command)) {
-    return "Team worker cannot run team orchestration commands. Use only `omc team api ... --json`.";
+    return `Team worker cannot run team orchestration commands. Use only \`${formatOmcCliInvocation("team api ... --json")}\`.`;
   }
   if (WORKER_BLOCKED_SKILL_PATTERN.test(command)) {
     return "Team worker cannot invoke orchestration skills (`$team`, `$ultrawork`, `$autopilot`, `$ralph`).";
@@ -739,11 +740,12 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 
       case "codex":
       case "gemini": {
+        const teamStartCommand = formatOmcCliInvocation(`team start --agent ${keywordType} --count N --task "<task from user message>"`);
         messages.push(
           `[MAGIC KEYWORD: team]\n` +
-            `User intent: delegate to ${keywordType} CLI workers via omc team CLI.\n` +
+            `User intent: delegate to ${keywordType} CLI workers via ${formatOmcCliInvocation('team')}.\n` +
             `Agent type: ${keywordType}. Parse N from user message (default 1).\n` +
-            `Invoke: omc team start --agent ${keywordType} --count N --task "<task from user message>"`,
+            `Invoke: ${teamStartCommand}`,
         );
         break;
       }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const availability = vi.hoisted(() => ({
   claude: true,
@@ -14,10 +14,37 @@ import { clearSkillsCache, getBuiltinSkill } from '../features/builtin-skills/sk
 import { renderSkillRuntimeGuidance } from '../features/builtin-skills/runtime-guidance.js';
 
 describe('deep-interview provider-aware execution recommendations', () => {
+  const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const originalPath = process.env.PATH;
+
   beforeEach(() => {
     availability.claude = true;
     availability.codex = false;
     availability.gemini = false;
+    if (originalPluginRoot === undefined) {
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+    } else {
+      process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    clearSkillsCache();
+  });
+
+  afterEach(() => {
+    if (originalPluginRoot === undefined) {
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+    } else {
+      process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
     clearSkillsCache();
   });
 
@@ -48,9 +75,9 @@ describe('deep-interview provider-aware execution recommendations', () => {
     const ralplanSkill = getBuiltinSkill('ralplan');
 
     expect(planSkill?.template).toContain('--architect codex');
-    expect(planSkill?.template).toContain('omc ask codex --agent-prompt architect');
+    expect(planSkill?.template).toContain('ask codex --agent-prompt architect');
     expect(planSkill?.template).toContain('--critic codex');
-    expect(planSkill?.template).toContain('omc ask codex --agent-prompt critic');
+    expect(planSkill?.template).toContain('ask codex --agent-prompt critic');
 
     expect(ralplanSkill?.template).toContain('--architect codex');
     expect(ralplanSkill?.template).toContain('--critic codex');

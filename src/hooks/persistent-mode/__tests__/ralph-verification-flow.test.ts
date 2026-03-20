@@ -72,7 +72,7 @@ describe('Ralph verification flow', () => {
     expect(result.shouldBlock).toBe(true);
     expect(result.mode).toBe('ralph');
     expect(result.message).toContain('CODEX CRITIC VERIFICATION REQUIRED');
-    expect(result.message).toContain('omc ask codex --agent-prompt critic');
+    expect(result.message).toContain('ask codex --agent-prompt critic');
   });
 
   it('completes Ralph after generic approval marker is seen in transcript', async () => {

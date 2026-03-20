@@ -1,9 +1,36 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache } from '../features/builtin-skills/skills.js';
 
 describe('Builtin Skills', () => {
+  const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const originalPath = process.env.PATH;
+
   // Clear cache before each test to ensure fresh loads
   beforeEach(() => {
+    if (originalPluginRoot === undefined) {
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+    } else {
+      process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    clearSkillsCache();
+  });
+
+  afterEach(() => {
+    if (originalPluginRoot === undefined) {
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+    } else {
+      process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
     clearSkillsCache();
   });
 
@@ -184,7 +211,23 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('`.omc/specs/deep-interview-{slug}.md`');
       expect(skill?.argumentHint).toContain('--autoresearch');
       expect(skill?.template).toContain('zero-learning-curve setup lane for `omc autoresearch`');
-      expect(skill?.template).toContain('omc autoresearch --mission "<mission>" --eval "<evaluator>"');
+      expect(skill?.template).toContain('autoresearch --mission "<mission>" --eval "<evaluator>"');
+    });
+
+    it('rewrites built-in skill command examples to plugin-safe bridge invocations when omc is unavailable', () => {
+      process.env.CLAUDE_PLUGIN_ROOT = '/plugin-root';
+      process.env.PATH = '';
+      clearSkillsCache();
+
+      const deepInterviewSkill = getBuiltinSkill('deep-interview');
+      const askSkill = getBuiltinSkill('ask');
+
+      expect(deepInterviewSkill?.template)
+        .toContain('zero-learning-curve setup lane for `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs autoresearch`');
+      expect(deepInterviewSkill?.template)
+        .toContain('node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs autoresearch --mission "<mission>" --eval "<evaluator>"');
+      expect(askSkill?.template)
+        .toContain('node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask {{ARGUMENTS}}');
     });
 
     it('should expose pipeline metadata for omc-plan handoff into autopilot', () => {

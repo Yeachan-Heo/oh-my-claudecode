@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
   execFile: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0 })),
 }));
 
 const modelContractMocks = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const modelContractMocks = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({
   execFile: mocks.execFile,
+  spawnSync: mocks.spawnSync,
 }));
 
 vi.mock('../model-contract.js', () => ({
@@ -52,6 +54,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.sendToWorker.mockReset();
     mocks.waitForPaneReady.mockReset();
     mocks.execFile.mockReset();
+    mocks.spawnSync.mockReset();
     modelContractMocks.buildWorkerArgv.mockReset();
     modelContractMocks.resolveValidatedBinaryPath.mockReset();
     modelContractMocks.getWorkerEnv.mockReset();
@@ -67,6 +70,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockResolvedValue(undefined);
     mocks.waitForPaneReady.mockResolvedValue(true);
     mocks.sendToWorker.mockResolvedValue(true);
+    mocks.spawnSync.mockReturnValue({ status: 0 });
     modelContractMocks.buildWorkerArgv.mockImplementation((agentType?: string) => [`/usr/bin/${agentType ?? 'claude'}`]);
     modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => `/usr/bin/${agentType ?? 'claude'}`);
     modelContractMocks.getWorkerEnv.mockImplementation((...args: unknown[]) => {
@@ -394,7 +398,7 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(modelContractMocks.getPromptModeArgs).toHaveBeenCalledWith(
       'codex',
-      expect.stringContaining('omc team api claim-task'),
+      expect.stringContaining('team api claim-task'),
     );
     expect(modelContractMocks.getPromptModeArgs).toHaveBeenCalledWith(
       'codex',

@@ -15,6 +15,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
+import { formatOmcCliInvocation } from '../../utils/omc-cli-rendering.js';
 import type { UserStory } from './prd.js';
 import type { RalphCriticMode } from './loop.js';
 
@@ -67,7 +68,7 @@ function getVerificationAgentStep(mode?: RalphCriticMode): string {
     case 'codex':
       return `1. **Run an external Codex critic review**:
    \`\`\`
-   omc ask codex --agent-prompt critic "<verification prompt covering the task, completion claim, and acceptance criteria>"
+   ${formatOmcCliInvocation('ask codex --agent-prompt critic "<verification prompt covering the task, completion claim, and acceptance criteria>"')}
    \`\`\`
    Use the Codex output as the reviewer verdict before deciding pass/fix.`;
     default:

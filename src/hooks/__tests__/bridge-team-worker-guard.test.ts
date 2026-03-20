@@ -52,7 +52,7 @@ describe('team-worker pre-tool guardrails', () => {
     expect(result.reason).toBe('team-worker-bash-blocked');
   });
 
-  it('allows worker-safe omc team api commands', async () => {
+  it('allows worker-safe team api commands', async () => {
     const result = await processHook('pre-tool-use', {
       toolName: 'Bash',
       toolInput: { command: 'omc team api claim-task --input \'{"team_name":"demo-team","task_id":"1","worker":"worker-1"}\' --json' },
