@@ -11,8 +11,48 @@ MODE="${1:?Usage: setup-claude-md.sh <local|global>}"
 DOWNLOAD_URL="https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CANONICAL_CLAUDE_MD="${SCRIPT_PLUGIN_ROOT}/docs/CLAUDE.md"
-CANONICAL_OMC_REFERENCE_SKILL="${SCRIPT_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
+
+# Resolve active plugin root from installed_plugins.json.
+# Handles stale CLAUDE_PLUGIN_ROOT when a session was started before a plugin
+# update (e.g. 4.8.2 session invoking setup after updating to 4.9.0).
+# Same pattern as run.cjs resolveTarget() fallback.
+resolve_active_plugin_root() {
+  local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  local installed_plugins="${config_dir}/plugins/installed_plugins.json"
+
+  if [ -f "$installed_plugins" ] && command -v jq >/dev/null 2>&1; then
+    local active_path
+    active_path=$(jq -r '
+      (.plugins // .)
+      | to_entries[]
+      | select(.key | startswith("oh-my-claudecode"))
+      | .value[0].installPath // empty
+    ' "$installed_plugins" 2>/dev/null)
+
+    if [ -n "$active_path" ] && [ -d "$active_path" ]; then
+      echo "$active_path"
+      return 0
+    fi
+  fi
+
+  # Fallback: scan sibling version directories for the latest (mirrors run.cjs)
+  local cache_base
+  cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
+  if [ -d "$cache_base" ]; then
+    local latest
+    latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+    if [ -n "$latest" ] && [ -d "${cache_base}/${latest}" ]; then
+      echo "${cache_base}/${latest}"
+      return 0
+    fi
+  fi
+
+  echo "$SCRIPT_PLUGIN_ROOT"
+}
+
+ACTIVE_PLUGIN_ROOT="$(resolve_active_plugin_root)"
+CANONICAL_CLAUDE_MD="${ACTIVE_PLUGIN_ROOT}/docs/CLAUDE.md"
+CANONICAL_OMC_REFERENCE_SKILL="${ACTIVE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
 
 ensure_local_omc_git_exclude() {
   local exclude_path
