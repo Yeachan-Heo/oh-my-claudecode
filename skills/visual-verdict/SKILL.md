@@ -1,6 +1,7 @@
 ---
 name: visual-verdict
 description: Structured visual QA verdict for screenshot-to-reference comparisons
+level: 2
 ---
 
 <Purpose>
@@ -43,10 +44,8 @@ Rules:
 
 <Threshold_And_Loop>
 - Target pass threshold is **90+**.
-- If `score < 90`, continue editing and rerun `$visual-verdict` before any further code edits in the next iteration.
-- Persist the verdict in `.omx/state/{scope}/ralph-progress.json` with both:
-  - numeric signal (`score`, threshold pass/fail)
-  - qualitative signal (`reasoning`, `suggestions`, `next_actions`)
+- If `score < 90`, continue editing and rerun `/oh-my-claudecode:visual-verdict` before any further visual review pass.
+- Do **not** treat the visual task as complete until the next screenshot clears the threshold.
 </Threshold_And_Loop>
 
 <Debug_Visualization>
@@ -74,3 +73,5 @@ When mismatch diagnosis is hard:
 }
 ```
 </Example>
+
+Task: {{ARGUMENTS}}
