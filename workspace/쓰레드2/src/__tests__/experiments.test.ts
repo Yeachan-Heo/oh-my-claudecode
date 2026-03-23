@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS experiments (
   confidence TEXT DEFAULT 'directional',
   results JSONB,
   created_by TEXT DEFAULT 'minjun-ceo',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  autonomy_level INTEGER NOT NULL DEFAULT 0
 );
 `;
 

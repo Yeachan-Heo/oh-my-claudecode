@@ -260,3 +260,27 @@ Phase 2 완료 후 CEO 스탠드업 진행:
 - `.claude/agents/agency.md` — 조직 구조 + 권한 매트릭스
 - `ops/daily-standup-ops.md` — 스탠드업 진행 절차
 - `ops/weekly-retro-ops.md` — 주간 전략회의 절차
+
+---
+
+## 자율 실험 설계
+
+### 실험 설계 트리거
+
+- 3일 연속 하위 성과 카테고리 존재
+- 신규 트렌드 키워드 발견
+- 다양성 경고 (훅 반복 3회+)
+
+### 자율 권한 레벨
+
+| Level | 조건 | 자율 범위 |
+|-------|------|----------|
+| 0 | 기본 | 모든 실험 시훈 승인 필요 |
+| 1 | 성공 3회+ | low-risk 자율 (훅, 시간대) |
+| 2 | 성공 10회+ | medium-risk 자율 (카테고리 비율) |
+| 3 | 성공 20회+ | high-risk만 승인 (새 카테고리, 톤) |
+
+### 참조
+
+- `src/orchestrator/auto-experiment.ts` — 자율 실험 모듈
+- `ops/experiment-ops.md` — 실험 운영 가이드

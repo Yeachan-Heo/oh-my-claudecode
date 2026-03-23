@@ -92,3 +92,45 @@ FROM experiments
 WHERE status = 'closed' AND confidence = 'replicated'
 GROUP BY variable, verdict;
 ```
+
+---
+
+## 자율 실험 권한 체계
+
+CEO(`minjun-ceo`)가 성과 데이터를 기반으로 실험을 자동 설계하고, 자율 레벨에 따라 승인 없이 실행하거나 시훈에게 승인을 요청한다.
+
+### 레벨별 조건 및 범위
+
+| Level | 이름 | 진입 조건 | 자율 실험 범위 |
+|-------|------|----------|--------------|
+| 0 | manual | 기본 | 모든 실험 시훈 승인 필요 |
+| 1 | low-risk | 성공 3회+ | 훅 변형, 시간대 이동 자율 실행 |
+| 2 | medium-risk | 성공 10회+ | 카테고리 비율 조정 자율 실행 |
+| 3 | high-risk-only | 성공 20회+ | high-risk(새 카테고리, 톤 변경)만 승인 |
+
+> **성공 기준**: `experiments.status = 'closed' AND verdict = 'success'`
+
+### 실험 설계 트리거
+
+| 우선순위 | 트리거 | 실험 유형 |
+|---------|--------|----------|
+| 1 | 하위 20% 카테고리 존재 | 포맷 실험 (리스트형 vs 비교형) |
+| 2 | 신규 트렌드 키워드 | 시간대 실험 (08:00 vs 20:00) |
+| 3 | 훅 반복 3회+ 감지 | 훅 실험 (반복 훅 vs 질문형) |
+
+### 승인 플로우
+
+```
+designExperiment(performanceData)
+  → proposeExperiment(design)
+      ├─ risk ≤ autonomy_level → AUTO_APPROVED: executeApprovedExperiment()
+      └─ risk > autonomy_level → PENDING_APPROVAL: agent_messages(sihun)
+  → 48h 후 evaluateAndDecide(experimentId)
+      ├─ WAIT: N h remaining
+      └─ READY_FOR_EVALUATION → evaluateExperiment() → closeExperiment()
+```
+
+### 관련 코드
+
+- `src/orchestrator/auto-experiment.ts` — 자율 실험 모듈
+- `src/db/schema.ts` — `experiments.autonomy_level` 컬럼

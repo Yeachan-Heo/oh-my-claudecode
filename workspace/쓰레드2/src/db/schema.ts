@@ -16,6 +16,8 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  numeric,
+  date,
 } from 'drizzle-orm/pg-core';
 
 // ---------------------------------------------------------------------------
@@ -914,10 +916,35 @@ export const experiments = pgTable(
     results: jsonb('results'),
     created_by: text('created_by').notNull().default('minjun-ceo'),
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    autonomy_level: integer('autonomy_level').notNull().default(0), // 0=manual,1=low,2=medium,3=high-risk-only
   },
   (table) => [
     index('idx_experiments_status').on(table.status),
     index('idx_experiments_variable').on(table.variable),
     index('idx_experiments_created').on(table.created_at),
+  ],
+);
+
+/**
+ * revenue_tracking - 클릭/구매/수익 추적.
+ * 워밍업 완료(100포스트) 후 제휴 링크 포함 콘텐츠 발행 시 활성화.
+ */
+export const revenueTracking = pgTable(
+  'revenue_tracking',
+  {
+    id: text('id').primaryKey(),
+    post_id: text('post_id').notNull(),
+    product_id: text('product_id'),
+    coupang_link: text('coupang_link'),
+    click_count: integer('click_count').notNull().default(0),
+    purchase_count: integer('purchase_count').notNull().default(0),
+    revenue: numeric('revenue', { precision: 10, scale: 2 }).notNull().default('0'),
+    commission: numeric('commission', { precision: 10, scale: 2 }).notNull().default('0'),
+    tracked_date: date('tracked_date').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_revenue_post').on(table.post_id),
+    index('idx_revenue_date').on(table.tracked_date),
   ],
 );

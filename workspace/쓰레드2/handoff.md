@@ -1,21 +1,51 @@
-# Threads2 Handoff — 2026-03-23 (세션 15)
+# Threads2 Handoff — 2026-03-23 (세션 16)
 
-## 현재 상태: Phase 3 Round 1 완료 (S-13~S-15 ALL DONE), 검증 PASS
+## 현재 상태: PLAN-AI-COMPANY v4 전체 완료 (S-1 ~ S-17 ALL DONE) ✅
 
-### Phase 3 Round 1 검증 결과 (세션 15)
+### Phase 3 Round 2 검증 결과 (세션 16)
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
 | tsc --noEmit | ✅ 0 errors | |
-| npm test | ✅ 156/156 PASS (12 files) | safety-gates, orchestrator 포함 |
-| src/safety/gates.ts | ✅ EXISTS | 8개 게이트 |
-| src/__tests__/safety-gates.test.ts | ✅ EXISTS | 38개 테스트 |
-| src/orchestrator/types.ts | ✅ EXISTS | |
-| src/orchestrator/daily-pipeline.ts | ✅ EXISTS | --autonomous 모드 |
-| scripts/run-weekly-retro.ts | ✅ EXISTS + --dry-run 성공 | content_lifecycle 쿼리 수정 완료 |
-| ops/safety-ops.md | ✅ EXISTS | |
-| ~/.claude/skills/weekly-retro/SKILL.md | ✅ EXISTS | |
-| ~/.claude/skills/daily-run/SKILL.md | ✅ --autonomous + Safety Gates 반영 | |
+| npm test | ✅ 162/162 PASS (13 files) | revenue + experiments 포함 |
+| src/db/revenue.ts | ✅ EXISTS | CRUD 헬퍼 |
+| src/__tests__/revenue.test.ts | ✅ EXISTS | 6/6 PASS (TDD) |
+| src/orchestrator/auto-experiment.ts | ✅ EXISTS | autonomy levels 0-3 |
+| src/db/schema.ts experiments.autonomy_level | ✅ EXISTS | integer default 0 |
+| ops/revenue-ops.md | ✅ EXISTS | 수익 추적 운영 가이드 |
+| ops/experiment-ops.md | ✅ EXISTS | 자율 실험 권한 체계 포함 |
+| .claude/agents/minjun-ceo.md | ✅ 자율 실험 section 존재 | |
+
+### PLAN-AI-COMPANY v4 전체 완료 (S-1 ~ S-17)
+
+| Phase | S# | 작업 | 상태 |
+|-------|----|------|------|
+| Phase 1 | S-1 | Foundation — 9 에이전트, soul/ops 분리, agent_messages DB | ✅ |
+| Phase 1 | S-2 | CEO Shadow Mode + daily-standup-ops.md | ✅ |
+| Phase 1 | S-3 | performance-ops.md 7단계 분석 가이드 | ✅ |
+| Phase 2 | S-4 | aff_contents.status + 워밍업 게이트 TDD | ✅ |
+| Phase 2 | S-5 | /daily-run 스킬 — 6 Phase 일일 파이프라인 | ✅ |
+| Phase 2 | S-6 | 네이버 검색량/트렌드 → /수집 + /기획 통합 | ✅ |
+| Phase 2 | S-7 | 브랜드 리서치 확장 (40→80개/카테고리) | ✅ |
+| Phase 2 | S-8 | 경쟁사 모니터링 (evaluate-channels.ts) | ✅ |
+| Phase 2 | S-9 | autoresearch 실험 시스템 (experiments DB + TDD) | ✅ |
+| Phase 2 | S-10 | 포스트 리사이클 시스템 (recycle.ts + TDD) | ✅ |
+| Phase 2 | S-11 | 학습 시스템 (diversity-checker + strategy-logger + TDD) | ✅ |
+| Phase 2 | S-12 | /수집 스킬 v2 (7개 수집 도구 통합) | ✅ |
+| Phase 3 | S-13 | 8개 Safety Gates TDD (38/38 PASS) | ✅ |
+| Phase 3 | S-14 | daily-pipeline.ts 오케스트레이터 + --autonomous 모드 | ✅ |
+| Phase 3 | S-15 | run-weekly-retro.ts + /weekly-retro 스킬 | ✅ |
+| Phase 3 | S-16 | revenue_tracking 테이블 + TDD helpers (6/6 PASS) | ✅ |
+| Phase 3 | S-17 | auto-experiment.ts + autonomy levels (0-3) + CEO update | ✅ |
+
+### 다음 우선순위 — 운영 단계
+
+1. **워밍업 포스트 완료** — 7/20개 완료, 13개 남음 (하루 2~3개)
+2. **/daily-run --autonomous 실전 가동** — dry-run 검증 후 실제 포스트 생산
+3. **수익 추적 실전 연동** — 쿠팡 파트너스 클릭/전환 데이터 수집 시작
+4. **자율 실험 첫 가동** — autonomy_level 1 (저위험 실험 자동 승인)
+
+---
 
 ### Phase 3 Round 1 완료 작업 (S-13 ~ S-15)
 
@@ -24,13 +54,6 @@
 | S-13 | 8개 Safety Gates TDD (38/38 PASS) | ✅ | src/safety/gates.ts |
 | S-14 | daily-pipeline.ts 오케스트레이터 + --autonomous 모드 + EDITOR_MAP | ✅ | src/orchestrator/ |
 | S-15 | run-weekly-retro.ts 자동화 + /weekly-retro 스킬 | ✅ | scripts/ + ~/.claude/skills/ |
-
-### 다음 우선순위 — Phase 3 Round 2
-
-1. **S-16: 수익 추적 시스템** — 쿠팡 파트너스 클릭/전환/수익 집계 → `revenue_events` 테이블
-2. **S-17: 자율 실험 시스템** — `runSafetyGates()` 기반 자동 A/B 실험 시작/종료 로직
-3. **워밍업 포스트 진행** — 7/20개 완료, 13개 남음 (하루 2~3개)
-4. **/daily-run --autonomous 실전 가동** — dry-run 검증 후 실제 포스트 생산
 
 ---
 
