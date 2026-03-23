@@ -1,22 +1,81 @@
-# Threads2 Handoff — 2026-03-23 (세션 14)
+# Threads2 Handoff — 2026-03-24 (세션 15)
 
-## 현재 상태: PLAN v4 전체 완료 + /daily-run v2 에이전트 스폰 기반 업그레이드
+## 현재 상태: 자율 에이전트 회사 v1 구현 완료
 
-### 이번 세션(14) 핵심 작업
+### 이번 세션(15) 핵심 작업
 
 | 작업 | 상태 |
 |------|------|
-| PLAN v4 Phase 1 Foundation (S-1~S-4) | ✅ 9 에이전트 + soul/ops + agent_messages + 리서치 |
-| PLAN v4 Phase 2 Round 1 (S-6~S-9) | ✅ 워밍업게이트 + 네이버 + 브랜드확장 + 경쟁사모니터링 |
-| PLAN v4 Phase 2 Round 2 (S-5, S-10~S-12) | ✅ /daily-run + 실험 + 리사이클 + 학습 |
-| PLAN v4 Phase 3 Round 1 (S-13~S-15) | ✅ Safety Gates + 오케스트레이터 + 주간회의 |
-| PLAN v4 Phase 3 Round 2 (S-16~S-17) | ✅ 수익추적 + 자율실험 |
-| **/daily-run v2 에이전트 스폰 기반** | ✅ agent-spawner.ts + SKILL.md 재작성 |
-| /기획 통합 스캔 수정 | ✅ 5개 별도 → 1개 _signal-scan.ts |
-| track-performance.ts 버그수정 | ✅ content_lifecycle 본문 동기화 + 스냅샷 ID |
-| 성과 분석 | ✅ 16개 포스트 성과 수집 + 분석 |
+| /daily-run --posts 3 E2E 실행 | ✅ Phase 1~5 전체 성공 (에이전트 스폰 파이프라인) |
+| 문제 발견 8가지 | ✅ 전문가톤/글자수/수집kill/도구미사용/기획미적용/학습0건/반복실수/일방소통 |
+| **PLAN-AUTONOMOUS-COMPANY-v2** | ✅ /team ralph로 구현 (4 Workers) |
+| Worker A: agent-spawner.ts 업그레이드 | ✅ TOOL_REGISTRY + EDITOR_SELF_CHECK + playbook 주입 |
+| Worker B: Phase Gate + 학습 모듈 연결 | ✅ gatePhase1/2/3 + diversity-checker + strategy-logger |
+| Worker C: agent_messages 확장 | ✅ message_type + task_id + 핸드오프 함수 3개 |
+| Worker D: /daily-run SKILL.md v4 재작성 | ✅ 856줄, 서연+민준 분석 분산, 비전문가톤 |
+| 멀티에이전트 리서치 | ✅ 8개 프레임워크 비교 → MetaGPT+Swarm 하이브리드 |
+| 비전문가 톤 피드백 저장 | ✅ memory/feedback_non_expert_tone.md |
+
+### 자율 에이전트 시스템 — 구현 완료 항목
+
+**agent-spawner.ts (핵심 변경)**
+- TOOL_REGISTRY: 역할별(collector/analyst/ceo/editor/qa/engineer) 사용 가능 도구를 프롬프트에 인라인 삽입
+- EDITOR_SELF_CHECK: 에디터 자가 검증 8항목 (톤/글자수/CTA 등)
+- buildAgentPrompt(): TOOL_REGISTRY + SELF_CHECK + playbook/strategy-log 자동 주입
+- buildPhaseContextQuery(): agent_messages에서 이전 Phase 결과 읽기 스크립트 생성기
+
+**daily-pipeline.ts (Phase Gate + 학습 연결)**
+- gatePhase1(): thread_posts + youtube_videos 24h > 0 확인
+- gatePhase2(): 서연→민준 분석 메시지 존재 확인
+- gatePhase3(): CEO directive 메시지 존재 확인
+- getDiversityReport() 실제 연결 (content_lifecycle 7일)
+- logDecision() 자동 기록 (directive 생성 후)
+- updatePlaybook() QA 반려 시 자동 호출
+
+**agent_messages 확장 (Swarm 핸드오프)**
+- message_type 컬럼: report/directive/feedback/handoff/alert
+- task_id 컬럼: 같은 파이프라인 실행 추적 (daily-YYYYMMDD)
+- getMessagesByTaskId(), getMessagesByType(), getLatestHandoff() 함수
+
+**doyun-qa.md 추가 반려 규칙**
+- R1: 전문가 톤 감지 → 즉시 반려
+- R2: 120자 초과 → 즉시 반려
+- R3: 이미지 아이디어 없음 → 반려
+- R4: CTA 없음 → 반려
+
+**/daily-run SKILL.md v4 (856줄)**
+- Phase 1 준호: 순차 포그라운드 수집 (백그라운드 금지)
+- Phase 1.5 메인: _signal-scan.ts 직접 실행 → 서연에 context 전달
+- Phase 2 서연: /기획 2-1~2-3 인라인 (니즈/JTBD/기회평가)
+- Phase 3 민준: /기획 2-4~2-6 인라인 (구매여정/차별화/수익화) + directive
+- Phase 4 에디터: 비전문가 톤 + 80~100자 + SELF_CHECK
+- Phase 4 도윤: R1~R4 추가 반려
+- 모든 agent_messages에 message_type + task_id
+
+### 검증 결과
+
+| 항목 | 결과 |
+|------|------|
+| tsc --noEmit | ✅ 0 errors |
+| npm test | ✅ 13 files, 170 tests PASS |
+| agent_messages migration | ✅ message_type + task_id + 인덱스 2개 |
+
+### 이전 세션(14) 작업
+
+| 작업 | 상태 |
+|------|------|
+| PLAN v4 Phase 1~3 전체 (S-1~S-17) | ✅ |
+| /daily-run v2 에이전트 스폰 기반 | ✅ → v4로 업그레이드됨 |
+| /기획 통합 스캔 수정 | ✅ |
+| track-performance.ts 버그수정 | ✅ |
 | 포스트 게시 2개 | ✅ 클렌징 오일 + 여드름패치 |
-| 스킬 등록 | ✅ /daily-run, /수집, /weekly-retro, /기획 |
+
+### 다음 세션 우선순위
+
+1. **`/daily-run --posts 3` 재실행** — v4 SKILL.md로 E2E 검증 (비전문가톤 + 글자수 확인)
+2. **Phase 2: 학습 루프 작동** — QA 반려→playbook 업데이트 실제 확인, Cron 자동화
+3. **워밍업 포스트** — 16/100 → 하루 3~5개
+4. **claude-peers 도입 검토** — 에디터 병렬 실행 (비용 4배 감수 시)
 
 ### /daily-run v2 — 에이전트 스폰 방식 (핵심 업그레이드)
 

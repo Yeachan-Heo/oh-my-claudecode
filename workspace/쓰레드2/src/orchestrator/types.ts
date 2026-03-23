@@ -52,6 +52,13 @@ export interface PipelineOptions {
   phase?: number;          // run specific phase only
 }
 
+export interface PhaseGateResult {
+  phase: number;
+  passed: boolean;
+  reason?: string;
+  metrics?: Record<string, number>;
+}
+
 export interface PipelineResult {
   phases_completed: number[];
   directive?: DailyDirective;
@@ -60,4 +67,5 @@ export interface PipelineResult {
   safety_passed: boolean;
   ready_count: number;     // aff_contents status='ready'
   errors: string[];
+  gate_results?: PhaseGateResult[];
 }

@@ -9,6 +9,8 @@
 import { client } from '../db/index.js';
 import { sendMessage } from '../db/agent-messages.js';
 import { runSafetyGates } from '../safety/gates.js';
+import { getDiversityReport } from '../learning/diversity-checker.js';
+import { logDecision, updatePlaybook } from '../learning/strategy-logger.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -16,6 +18,7 @@ import type {
   QAResult,
   PipelineOptions,
   PipelineResult,
+  PhaseGateResult,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -186,6 +189,26 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
   }
 
+  // 다양성 체크: content_lifecycle 최근 7일 콘텐츠 기반
+  // thread_posts에는 content_style/hook_type 없으므로 content_lifecycle 사용
+  const lcRows = await client`
+    SELECT content_style, need_category, hook_type
+    FROM content_lifecycle
+    WHERE posted_at >= NOW() - INTERVAL '7 days'
+    LIMIT 50
+  `;
+  if (lcRows.length > 0) {
+    const lcPosts = lcRows.map((r) => ({
+      content_style: (r.content_style as string) ?? '',
+      need_category: (r.need_category as string) ?? '',
+      hook_type: (r.hook_type as string) ?? '',
+    }));
+    const diversityReport = getDiversityReport(lcPosts);
+    for (const w of diversityReport.warnings) {
+      if (w.warning) diversityWarnings.push(w.warning);
+    }
+  }
+
   // 리사이클 후보 조회 (14일+ 경과, 상위 20%)
   const recycleRows = await client`
     SELECT id
@@ -215,6 +238,17 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     diversity_warnings: diversityWarnings,
     roi_summary: roiSummary,
   };
+
+  // 전략 결정 자동 기록
+  const topCategories = Object.entries(roiSummary)
+    .filter(([, v]) => v.grade === 'A')
+    .map(([k]) => k)
+    .join(', ') || '없음';
+  logDecision(
+    date,
+    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
+    `ROI 점수 기반 조정. A등급: ${topCategories}`,
+  );
 
   // agent_messages 저장
   await sendMessage(
@@ -316,6 +350,65 @@ export async function runSafety(content: string, accountId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase Gate helpers
+// ---------------------------------------------------------------------------
+
+/** Phase 1 게이트: 24h 내 수집 데이터 존재 여부 확인. */
+async function gatePhase1(): Promise<PhaseGateResult> {
+  const [threadRows, ytRows] = await Promise.all([
+    client`SELECT COUNT(*)::int AS cnt FROM thread_posts WHERE crawl_at >= NOW() - INTERVAL '24 hours'`,
+    client`SELECT COUNT(*)::int AS cnt FROM youtube_videos WHERE collected_at >= NOW() - INTERVAL '24 hours'`,
+  ]);
+  const threadCount = Number((threadRows[0] as { cnt: number }).cnt ?? 0);
+  const ytCount = Number((ytRows[0] as { cnt: number }).cnt ?? 0);
+  const total = threadCount + ytCount;
+  return {
+    phase: 1,
+    passed: total > 0,
+    reason: total === 0 ? '24h 내 수집 데이터 없음 (thread_posts + youtube_videos = 0)' : undefined,
+    metrics: { thread_posts_24h: threadCount, youtube_videos_24h: ytCount },
+  };
+}
+
+/** Phase 2 게이트: 서연(분석가) 오늘자 pipeline 채널 메시지 존재 여부. */
+async function gatePhase2(): Promise<PhaseGateResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = await client`
+    SELECT COUNT(*)::int AS cnt
+    FROM agent_messages
+    WHERE sender = 'seoyeon-analyst'
+      AND channel = 'pipeline'
+      AND created_at >= ${today}::date
+  `;
+  const count = Number((rows[0] as { cnt: number }).cnt ?? 0);
+  return {
+    phase: 2,
+    passed: count > 0,
+    reason: count === 0 ? '서연(분석가) 오늘자 분석 메시지 없음' : undefined,
+    metrics: { analyst_messages: count },
+  };
+}
+
+/** Phase 3 게이트: 민준(CEO) 오늘자 standup 채널 메시지 존재 여부. */
+async function gatePhase3(): Promise<PhaseGateResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = await client`
+    SELECT COUNT(*)::int AS cnt
+    FROM agent_messages
+    WHERE sender = 'minjun-ceo'
+      AND channel = 'standup'
+      AND created_at >= ${today}::date
+  `;
+  const count = Number((rows[0] as { cnt: number }).cnt ?? 0);
+  return {
+    phase: 3,
+    passed: count > 0,
+    reason: count === 0 ? '민준(CEO) 오늘자 스탠드업 메시지 없음' : undefined,
+    metrics: { ceo_messages: count },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 메인 파이프라인
 // ---------------------------------------------------------------------------
 
@@ -331,6 +424,7 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
   const { dryRun, autonomous, posts } = options;
   const errors: string[] = [];
   const phasesCompleted: number[] = [];
+  const gateResults: PhaseGateResult[] = [];
   const drafts: ContentDraft[] = [];
   const qaResults: QAResult[] = [];
   let directive: DailyDirective | undefined;
@@ -361,6 +455,24 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     );
   }
 
+  // ── Gate 1→2: 24h 수집 데이터 확인 (dry-run 스킵) ────────────────────
+  if (!dryRun && (!options.phase || options.phase <= 1)) {
+    const gate1 = await gatePhase1();
+    gateResults.push(gate1);
+    if (!gate1.passed) {
+      errors.push(`[Gate 1] ${gate1.reason}`);
+      return {
+        phases_completed: phasesCompleted,
+        drafts,
+        qa_results: qaResults,
+        safety_passed: safetyPassed,
+        ready_count: readyCount,
+        errors,
+        gate_results: gateResults,
+      };
+    }
+  }
+
   // ── Phase 2: 분석 (dry-run 포함) ─────────────────────────────────────
   if (!options.phase || options.phase === 2 || dryRun) {
     await sendMessage(
@@ -371,6 +483,24 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       { phase: 2, status: 'started' },
     );
     phasesCompleted.push(2);
+  }
+
+  // ── Gate 2→3: 서연 분석 메시지 확인 (dry-run 스킵) ──────────────────
+  if (!dryRun && (!options.phase || options.phase <= 2)) {
+    const gate2 = await gatePhase2();
+    gateResults.push(gate2);
+    if (!gate2.passed) {
+      errors.push(`[Gate 2] ${gate2.reason}`);
+      return {
+        phases_completed: phasesCompleted,
+        drafts,
+        qa_results: qaResults,
+        safety_passed: safetyPassed,
+        ready_count: readyCount,
+        errors,
+        gate_results: gateResults,
+      };
+    }
   }
 
   // ── Phase 3: CEO 스탠드업 (dry-run 포함) ──────────────────────────────
@@ -402,6 +532,25 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       ready_count: 0,
       errors,
     };
+  }
+
+  // ── Gate 3→4: 민준 스탠드업 메시지 확인 ─────────────────────────────
+  if (!options.phase || options.phase <= 3) {
+    const gate3 = await gatePhase3();
+    gateResults.push(gate3);
+    if (!gate3.passed) {
+      errors.push(`[Gate 3] ${gate3.reason}`);
+      return {
+        phases_completed: phasesCompleted,
+        directive,
+        drafts,
+        qa_results: qaResults,
+        safety_passed: safetyPassed,
+        ready_count: readyCount,
+        errors,
+        gate_results: gateResults,
+      };
+    }
   }
 
   // ── Phase 4: 콘텐츠 생성 ─────────────────────────────────────────────
@@ -446,7 +595,10 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       // QA 검증
       const qa = runQA(draft);
       qaResults.push(qa);
-      if (!qa.passed) continue;
+      if (!qa.passed) {
+        updatePlaybook(draft.category, `QA 반려: ${qa.feedback.join('; ')}`);
+        continue;
+      }
 
       // Safety 게이트
       const safety = await runSafety(draft.text, 'duribeon231');
@@ -509,5 +661,6 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     safety_passed: safetyPassed,
     ready_count: readyCount,
     errors,
+    gate_results: gateResults,
   };
 }

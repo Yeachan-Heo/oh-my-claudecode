@@ -882,11 +882,17 @@ export const agentMessages = pgTable(
     context: jsonb('context'),
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     read_by: jsonb('read_by').notNull().default([]),
+    message_type: text('message_type').default('report'),
+    // 'report' | 'directive' | 'feedback' | 'handoff' | 'alert'
+    task_id: text('task_id'),
+    // 같은 daily-run 실행의 메시지를 묶는 ID (예: 'daily-20260323')
   },
   (table) => [
     index('idx_agent_msg_date').on(table.created_at),
     index('idx_agent_msg_channel').on(table.channel),
     index('idx_agent_msg_sender').on(table.sender),
+    index('idx_agent_messages_task_id').on(table.task_id),
+    index('idx_agent_messages_type').on(table.message_type),
   ],
 );
 

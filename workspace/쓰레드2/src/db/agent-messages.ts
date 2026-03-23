@@ -21,6 +21,8 @@ export async function sendMessage(
   channel: string,
   message: string,
   context?: Record<string, unknown>,
+  messageType?: string,
+  taskId?: string,
   db: DbLike = defaultDb,
 ) {
   const id = crypto.randomUUID();
@@ -34,9 +36,52 @@ export async function sendMessage(
       message,
       context: context ?? null,
       read_by: [],
+      message_type: messageType ?? 'report',
+      task_id: taskId ?? null,
     })
     .returning();
   return row;
+}
+
+/**
+ * task_id로 해당 실행의 모든 메시지 조회.
+ */
+export async function getMessagesByTaskId(taskId: string, db: DbLike = defaultDb) {
+  return db
+    .select()
+    .from(agentMessages)
+    .where(eq(agentMessages.task_id, taskId))
+    .orderBy(desc(agentMessages.created_at));
+}
+
+/**
+ * message_type으로 메시지 필터 조회 (선택적 since 날짜 필터).
+ */
+export async function getMessagesByType(
+  messageType: string,
+  since?: Date,
+  db: DbLike = defaultDb,
+) {
+  const conditions = [eq(agentMessages.message_type, messageType)];
+  if (since) conditions.push(gte(agentMessages.created_at, since));
+  return db
+    .select()
+    .from(agentMessages)
+    .where(and(...conditions))
+    .orderBy(desc(agentMessages.created_at));
+}
+
+/**
+ * 특정 task_id의 최신 핸드오프 메시지 조회.
+ */
+export async function getLatestHandoff(taskId: string, db: DbLike = defaultDb) {
+  const rows = await db
+    .select()
+    .from(agentMessages)
+    .where(and(eq(agentMessages.task_id, taskId), eq(agentMessages.message_type, 'handoff')))
+    .orderBy(desc(agentMessages.created_at))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 /**

@@ -14,6 +14,9 @@ import {
   getMessages,
   markAsRead,
   getUnreadMessages,
+  getMessagesByTaskId,
+  getMessagesByType,
+  getLatestHandoff,
 } from '../db/agent-messages.js';
 
 // ─── DDL ─────────────────────────────────────────────────
@@ -27,7 +30,9 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   message TEXT NOT NULL,
   context JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  read_by JSONB NOT NULL DEFAULT '[]'
+  read_by JSONB NOT NULL DEFAULT '[]',
+  message_type TEXT DEFAULT 'report',
+  task_id TEXT
 );
 `;
 
@@ -45,7 +50,7 @@ async function createTestDb() {
 describe('sendMessage()', () => {
   it('saves a message and it exists in DB', async () => {
     const { db } = await createTestDb();
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'Hello team', undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'Hello team', undefined, undefined, undefined, db);
 
     expect(msg.id).toBeTruthy();
     expect(msg.sender).toBe('minjun-ceo');
@@ -58,8 +63,8 @@ describe('sendMessage()', () => {
 describe('getMessages()', () => {
   it('filters by channel', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'standup msg', undefined, db);
-    await sendMessage('minjun-ceo', 'bini-beauty', 'general', 'general msg', undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'standup msg', undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'general', 'general msg', undefined, undefined, undefined, db);
 
     const msgs = await getMessages({ channel: 'standup' }, db);
     expect(msgs).toHaveLength(1);
@@ -68,8 +73,8 @@ describe('getMessages()', () => {
 
   it('filters by sender', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'from ceo', undefined, db);
-    await sendMessage('bini-beauty', 'minjun-ceo', 'standup', 'from bini', undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'from ceo', undefined, undefined, undefined, db);
+    await sendMessage('bini-beauty', 'minjun-ceo', 'standup', 'from bini', undefined, undefined, undefined, db);
 
     const msgs = await getMessages({ sender: 'minjun-ceo' }, db);
     expect(msgs).toHaveLength(1);
@@ -78,7 +83,7 @@ describe('getMessages()', () => {
 
   it('filters by date', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'today msg', undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'today msg', undefined, undefined, undefined, db);
 
     const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-23'
     const msgs = await getMessages({ date: today }, db);
@@ -89,7 +94,7 @@ describe('getMessages()', () => {
 describe('markAsRead()', () => {
   it('adds agentName to read_by array', async () => {
     const { db } = await createTestDb();
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read me', undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read me', undefined, undefined, undefined, db);
 
     await markAsRead(msg.id, 'bini-beauty', db);
 
@@ -102,13 +107,90 @@ describe('markAsRead()', () => {
 describe('getUnreadMessages()', () => {
   it('returns only unread messages for agent', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'unread msg', undefined, db);
-    const readMsg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read msg', undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'unread msg', undefined, undefined, undefined, db);
+    const readMsg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read msg', undefined, undefined, undefined, db);
 
     await markAsRead(readMsg.id, 'bini-beauty', db);
 
     const unread = await getUnreadMessages('bini-beauty', db);
     expect(unread).toHaveLength(1);
     expect(unread[0].message).toBe('unread msg');
+  });
+});
+
+describe('sendMessage() with messageType + taskId', () => {
+  it('saves message_type and task_id', async () => {
+    const { db } = await createTestDb();
+    const msg = await sendMessage(
+      'junho-researcher', 'seoyeon-analyst', 'handoff', 'phase1 done',
+      undefined, 'handoff', 'daily-20260323', db,
+    );
+
+    expect(msg.message_type).toBe('handoff');
+    expect(msg.task_id).toBe('daily-20260323');
+  });
+
+  it('defaults message_type to report when not provided', async () => {
+    const { db } = await createTestDb();
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'hello', undefined, undefined, undefined, db);
+    expect(msg.message_type).toBe('report');
+  });
+});
+
+describe('getMessagesByTaskId()', () => {
+  it('returns all messages for a task_id', async () => {
+    const { db } = await createTestDb();
+    await sendMessage('a', 'b', 'ch', 'msg1', undefined, 'report', 'daily-001', db);
+    await sendMessage('a', 'b', 'ch', 'msg2', undefined, 'handoff', 'daily-001', db);
+    await sendMessage('a', 'b', 'ch', 'other', undefined, 'report', 'daily-002', db);
+
+    const msgs = await getMessagesByTaskId('daily-001', db);
+    expect(msgs).toHaveLength(2);
+    expect(msgs.every((m: { task_id: string }) => m.task_id === 'daily-001')).toBe(true);
+  });
+
+  it('returns empty array when task_id not found', async () => {
+    const { db } = await createTestDb();
+    const msgs = await getMessagesByTaskId('nonexistent', db);
+    expect(msgs).toHaveLength(0);
+  });
+});
+
+describe('getMessagesByType()', () => {
+  it('filters by message_type', async () => {
+    const { db } = await createTestDb();
+    await sendMessage('a', 'b', 'ch', 'directive msg', undefined, 'directive', 'daily-001', db);
+    await sendMessage('a', 'b', 'ch', 'report msg', undefined, 'report', 'daily-001', db);
+
+    const directives = await getMessagesByType('directive', undefined, db);
+    expect(directives).toHaveLength(1);
+    expect(directives[0].message).toBe('directive msg');
+  });
+
+  it('filters by type + since date', async () => {
+    const { db } = await createTestDb();
+    await sendMessage('a', 'b', 'ch', 'old report', undefined, 'report', undefined, db);
+
+    const future = new Date(Date.now() + 60_000);
+    const msgs = await getMessagesByType('report', future, db);
+    expect(msgs).toHaveLength(0);
+  });
+});
+
+describe('getLatestHandoff()', () => {
+  it('returns the most recent handoff for a task_id', async () => {
+    const { db } = await createTestDb();
+    await sendMessage('a', 'b', 'ch', 'only handoff', undefined, 'handoff', 'daily-001', db);
+
+    const latest = await getLatestHandoff('daily-001', db);
+    expect(latest).not.toBeNull();
+    expect(latest!.message_type).toBe('handoff');
+    expect(latest!.task_id).toBe('daily-001');
+  });
+
+  it('returns null when no handoff exists', async () => {
+    const { db } = await createTestDb();
+    const result = await getLatestHandoff('no-handoff-task', db);
+    expect(result).toBeNull();
   });
 });
