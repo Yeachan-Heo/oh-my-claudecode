@@ -5,7 +5,8 @@
  * Used at cache-load time to expand triggersLower arrays so that
  * promptLower.includes(triggerLower) matches Korean user input.
  *
- * SCOPE: Only skills with explicit `triggers:` in YAML frontmatter,
+ * SCOPE: Only foreign-loanword transliterations, not native Korean translations.
+ * Only skills with explicit `triggers:` in YAML frontmatter,
  * limited to phrases specific enough to avoid false positives.
  * Built-in skills (autopilot, ralph, etc.) are handled by keyword-detector
  * regex patterns, NOT by this map.

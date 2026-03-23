@@ -25,7 +25,7 @@ const KEYWORD_PATTERNS = {
     ultrathink: /\b(ultrathink)\b|(울트라씽크)/i,
     deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)/i,
     analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)/i,
-    'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥\s?인터뷰|심층\s?인터뷰)/i,
+    'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥\s?인터뷰)/i,
     ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)/i,
     codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i

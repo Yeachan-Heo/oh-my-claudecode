@@ -75,14 +75,17 @@ describe("expandTriggers", () => {
       expect(result).not.toContain("노티 설정");
     });
 
-    it('expands "trace and interview" and "investigate deeply" correctly', () => {
-      const result = expandTriggers(["trace and interview", "investigate deeply"]);
+    it('expands "trace and interview" to loanword transliteration only', () => {
+      const result = expandTriggers(["trace and interview"]);
       expect(result).toContain("trace and interview");
-      expect(result).toContain("investigate deeply");
       expect(result).toContain("트레이스 앤 인터뷰");
-      expect(result).toContain("추적 인터뷰");
-      expect(result).toContain("깊이 조사");
-      expect(result).toContain("심층 조사");
+      // native Korean translations are excluded
+      expect(result).not.toContain("추적 인터뷰");
+    });
+
+    it('does not expand "investigate deeply" (native Korean translation — removed)', () => {
+      const result = expandTriggers(["investigate deeply"]);
+      expect(result).toEqual(["investigate deeply"]);
     });
   });
 
@@ -196,7 +199,6 @@ describe("expandTriggers", () => {
         "deep dive",
         "deep-dive",
         "trace and interview",
-        "investigate deeply",
         "deep-pipeline",
         "deep-pipe",
         "pipeline-cycle",

@@ -1357,16 +1357,6 @@ World`);
                 const match = result.find((r) => r.type === 'deep-interview');
                 expect(match).toBeDefined();
             });
-            it('should detect "심층인터뷰" as deep-interview', () => {
-                const result = detectKeywordsWithType('심층인터뷰');
-                const match = result.find((r) => r.type === 'deep-interview');
-                expect(match).toBeDefined();
-            });
-            it('should detect "심층 인터뷰" (spaced) as deep-interview', () => {
-                const result = detectKeywordsWithType('심층 인터뷰');
-                const match = result.find((r) => r.type === 'deep-interview');
-                expect(match).toBeDefined();
-            });
             it('should detect "씨씨지" as ccg', () => {
                 const result = detectKeywordsWithType('씨씨지');
                 const match = result.find((r) => r.type === 'ccg');

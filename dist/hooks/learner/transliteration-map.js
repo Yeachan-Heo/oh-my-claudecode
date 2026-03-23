@@ -5,7 +5,8 @@
  * Used at cache-load time to expand triggersLower arrays so that
  * promptLower.includes(triggerLower) matches Korean user input.
  *
- * SCOPE: Only skills with explicit `triggers:` in YAML frontmatter,
+ * SCOPE: Only foreign-loanword transliterations, not native Korean translations.
+ * Only skills with explicit `triggers:` in YAML frontmatter,
  * limited to phrases specific enough to avoid false positives.
  * Built-in skills (autopilot, ralph, etc.) are handled by keyword-detector
  * regex patterns, NOT by this map.
@@ -13,13 +14,12 @@
  * To add a new locale: create a new map file (e.g., japanese-map.ts)
  * and compose expandTriggers calls in bridge.ts.
  */
-/** English trigger -> Korean transliterations */
+/** English trigger -> Korean transliterations (loanwords only, no native Korean translations) */
 const KOREAN_MAP = {
     // === deep-dive skill ===
     "deep dive": ["딥다이브", "딥 다이브"],
     "deep-dive": ["딥다이브"],
-    "trace and interview": ["트레이스 앤 인터뷰", "추적 인터뷰"],
-    "investigate deeply": ["깊이 조사", "심층 조사"],
+    "trace and interview": ["트레이스 앤 인터뷰"],
     // === deep-pipeline skill ===
     "deep-pipeline": ["딥파이프라인", "딥 파이프라인"],
     "deep-pipe": ["딥파이프"],

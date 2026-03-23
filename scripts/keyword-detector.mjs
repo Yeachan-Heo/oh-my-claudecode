@@ -474,7 +474,7 @@ async function main() {
     }
 
     // Deep interview keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥\s?인터뷰|심층\s?인터뷰)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥\s?인터뷰)/i)) {
       matches.push({ name: 'deep-interview', args: '' });
     }
 
