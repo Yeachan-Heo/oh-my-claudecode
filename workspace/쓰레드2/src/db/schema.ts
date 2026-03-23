@@ -194,7 +194,7 @@ export const channels = pgTable(
     // Benchmark validation
     affiliate_link_ratio: real('affiliate_link_ratio'), // 제휴링크 비율 (본문+첫댓글 기준)
     content_category_ratio: real('content_category_ratio'), // 뷰티/건강 콘텐츠 비율
-    benchmark_status: text('benchmark_status').default('candidate'), // 'candidate' | 'verified' | 'rejected'
+    benchmark_status: text('benchmark_status').default('candidate'), // 'candidate' | 'verified' | 'rejected' | 'retired'
     total_posts_checked: integer('total_posts_checked').default(0),
     posting_frequency: text('posting_frequency'), // '주 N회' 등
   },
@@ -374,6 +374,8 @@ export const affContents = pgTable(
     content_source: postSourceEnum('content_source'),  // 어떤 분석 소스에서 생성됐는지
     source_brand_id: text('source_brand_id'),          // 브랜드 기반이면 어떤 브랜드
     source_post_ids: jsonb('source_post_ids').$type<string[]>().default([]),  // 원본 포스트 ID들
+
+    status: text('status').default('draft'),  // 'draft' | 'published' | 'rejected'
 
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -883,5 +885,39 @@ export const agentMessages = pgTable(
     index('idx_agent_msg_date').on(table.created_at),
     index('idx_agent_msg_channel').on(table.channel),
     index('idx_agent_msg_sender').on(table.sender),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Experiments (autoresearch)
+// ---------------------------------------------------------------------------
+
+/**
+ * experiments - A/B 실험 추적. 훅/포맷/시간대 최적화 실험.
+ * CEO가 daily_directive에서 실험 배정, 48h 후 평가.
+ */
+export const experiments = pgTable(
+  'experiments',
+  {
+    id: text('id').primaryKey(),
+    hypothesis: text('hypothesis').notNull(),
+    variable: text('variable').notNull(),      // '훅 스타일' | '포맷' | '시간대'
+    variant_a: text('variant_a').notNull(),
+    variant_b: text('variant_b').notNull(),
+    post_id_a: text('post_id_a'),
+    post_id_b: text('post_id_b'),
+    start_date: timestamp('start_date', { withTimezone: true }).notNull().defaultNow(),
+    end_date: timestamp('end_date', { withTimezone: true }),
+    status: text('status').notNull().default('active'),   // 'active' | 'closed'
+    verdict: text('verdict'),                             // 'variant_a_wins' | 'variant_b_wins' | 'no_difference'
+    confidence: text('confidence').notNull().default('directional'), // 'directional' | 'replicated'
+    results: jsonb('results'),
+    created_by: text('created_by').notNull().default('minjun-ceo'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_experiments_status').on(table.status),
+    index('idx_experiments_variable').on(table.variable),
+    index('idx_experiments_created').on(table.created_at),
   ],
 );

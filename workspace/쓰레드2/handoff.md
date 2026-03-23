@@ -1,41 +1,48 @@
 # Threads2 Handoff — 2026-03-23 (세션 14)
 
-## 현재 상태: Phase 2 Round 1 완료 (S-6~S-9), 검증 PASS
+## 현재 상태: Phase 2 전체 완료 (S-5~S-12 ALL DONE), 검증 PASS
 
-### Phase 2 Round 1 검증 결과 (세션 14)
+### Phase 2 Round 2 검증 결과 (세션 14)
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
 | tsc --noEmit | ✅ 0 errors | |
-| npm test | ✅ 107/107 PASS (9 files) | warmup-gate, agent-messages 포함 |
-| aff_contents.status 컬럼 | ✅ EXISTS | |
-| channels.benchmark_status 컬럼 | ✅ EXISTS | |
+| npm test | ✅ 118/118 PASS (11 files) | experiments, diversity-checker, warmup-gate 포함 |
+| experiments 테이블 | ✅ EXISTS (count=0) | |
 | agent_messages 테이블 | ✅ EXISTS (count=0) | |
-| warmup-gate.ts / warmup-gate.test.ts | ✅ EXISTS | |
-| ops/naver-data-ops.md | ✅ EXISTS | |
-| ops/competitor-monitoring-ops.md | ✅ EXISTS | |
-| data/brand-seeds.json | ✅ EXISTS | |
-| scripts/evaluate-channels.ts | ✅ EXISTS | |
-| /수집 스킬: 네이버 섹션 | ✅ 반영됨 | |
-| /수집 스킬: --evaluate 섹션 | ✅ 반영됨 | |
-| evaluate-channels.ts 실행 | ✅ 29채널 평가 정상 출력 | |
-| isWarmupMode() | ✅ true (15/100) | |
-| getWarmupProgress() | ✅ {current:15, target:100, remaining:85} | |
+| aff_contents.status 컬럼 | ✅ EXISTS | |
+| src/db/experiments.ts | ✅ EXISTS | |
+| src/recycler/recycle.ts | ✅ EXISTS | |
+| src/learning/diversity-checker.ts | ✅ EXISTS | |
+| src/learning/strategy-logger.ts | ✅ EXISTS | |
+| ops/experiment-ops.md | ✅ EXISTS | |
+| ops/recycle-ops.md | ✅ EXISTS | |
+| ops/learning-ops.md | ✅ EXISTS | |
+| ~/.claude/skills/daily-run.md | ✅ EXISTS (Phase 1~6, --dry-run, --posts N) | |
+| getCandidates() | ✅ 동작 | |
+| getDiversityReport() | ✅ 동작 | |
+| logDecision() | ✅ 동작 | |
+| getActiveExperiments() | ✅ 동작 | |
 
-### Phase 2 Round 1 완료 작업 (세션 13~14)
+### Phase 2 전체 완료 작업 (S-5 ~ S-12)
 
-| S# | 작업 | 상태 |
-|----|------|------|
-| S-6 | aff_contents.status 컬럼 + 워밍업 게이트 TDD | ✅ |
-| S-7 | 네이버 검색량/트렌드 → /수집 + /기획 통합 | ✅ |
-| S-8 | 브랜드 리서치 확장 (40→80개/카테고리) | ✅ |
-| S-9 | 경쟁사 모니터링 시스템 (evaluate-channels.ts) | ✅ |
+| S# | 작업 | 상태 | 라운드 |
+|----|------|------|--------|
+| S-5 | `/daily-run` 스킬 — 6 Phase 일일 파이프라인 | ✅ | Round 2 |
+| S-6 | aff_contents.status 컬럼 + 워밍업 게이트 TDD | ✅ | Round 1 |
+| S-7 | 네이버 검색량/트렌드 → /수집 + /기획 통합 | ✅ | Round 1 |
+| S-8 | 브랜드 리서치 확장 (40→80개/카테고리) | ✅ | Round 1 |
+| S-9 | 경쟁사 모니터링 시스템 (evaluate-channels.ts) | ✅ | Round 1 |
+| S-10 | autoresearch 실험 시스템 (experiments DB + TDD) | ✅ | Round 2 |
+| S-11 | 포스트 리사이클 시스템 (recycle.ts + TDD) | ✅ | Round 2 |
+| S-12 | 학습 시스템 (diversity-checker + strategy-logger + TDD) | ✅ | Round 2 |
 
-### 다음 우선순위 — Phase 2 Round 2
+### 다음 우선순위 — Phase 3: Full Automation
 
 1. **CEO Shadow Mode** (S-2b) — minjun-ceo 5일 Shadow, 추천만 / 시훈 채점 ≥80%
-2. **`/daily-run` 스킬** (S-5) — 10개 포스트 자동 생산 파이프라인
-3. **워밍업 포스트 15→25개** — 하루 2~3개 목표
+2. **워밍업 포스트 완료** — 15개 완료, 85개 남음 (하루 3~5개 목표)
+3. **`/daily-run` 실전 실행** — `--dry-run --posts 3`으로 첫 검증 후 전체 파이프라인 가동
+4. **실험 시스템 가동** — 첫 A/B 실험 설계 및 experiments 테이블에 등록
 
 ---
 

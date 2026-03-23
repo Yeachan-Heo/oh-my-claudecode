@@ -306,6 +306,28 @@ Step 6: daily_directive 생성 → strategy-log.md append
 }
 ```
 
+### 3-3. 리사이클 후보 확인
+
+**조건**: 14일+ 경과, 조회수 상위 20%, `duribeon231` 계정
+
+```sql
+SELECT cl.id, cl.content_text, cl.need_category, cl.hook_type, ps.post_views
+FROM content_lifecycle cl
+JOIN LATERAL (
+  SELECT post_views FROM post_snapshots WHERE post_id = cl.id ORDER BY snapshot_at DESC LIMIT 1
+) ps ON true
+WHERE cl.posted_account_id = 'duribeon231'
+  AND cl.posted_at < NOW() - INTERVAL '14 days'
+  AND ps.post_views IS NOT NULL
+ORDER BY ps.post_views DESC
+LIMIT 5;
+```
+
+**CEO 선정 기준**:
+- 같은 주제 최근 7일 미게시 여부 확인
+- 하루 최대 1~2개 (전체 10개 중 20% 초과 금지)
+- 선정 후 `recycle-ops.md` 워크플로우 진행
+
 ---
 
 ## Phase 4: 콘텐츠 생성
