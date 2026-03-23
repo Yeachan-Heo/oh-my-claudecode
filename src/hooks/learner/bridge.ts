@@ -19,6 +19,7 @@ import {
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { OmcPaths } from "../../lib/worktree-paths.js";
+import { expandTriggers } from "./transliteration-map.js";
 
 // Re-export constants
 export const USER_SKILLS_DIR = join(
@@ -133,7 +134,7 @@ function getSkillMetadataCache(projectRoot: string): CachedSkillData[] {
         path: candidate.path,
         name,
         triggers,
-        triggersLower: triggers.map((t) => t.toLowerCase()),
+        triggersLower: expandTriggers(triggers.map((t) => t.toLowerCase())),
         matching: parsed.metadata.matching,
         content: parsed.content,
         scope: candidate.scope,
