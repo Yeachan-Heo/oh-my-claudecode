@@ -468,11 +468,17 @@ async function main(): Promise<void> {
         postText = await extractPostText(page);
         if (postText.length > 5) {
           log(`  본문 수집: "${postText.slice(0, 50)}..."`);
-          // DB 업데이트 — thread_posts.text가 비어있으면 채운다
+          // DB 업데이트 — thread_posts.text + content_lifecycle.content_text 둘 다 채운다
           try {
             await db.update(threadPosts)
               .set({ text: postText })
               .where(eq(threadPosts.post_id, postId));
+            await db.update(contentLifecycle)
+              .set({ content_text: postText })
+              .where(and(
+                eq(contentLifecycle.id, entry.id),
+                sql`(${contentLifecycle.content_text} IS NULL OR ${contentLifecycle.content_text} = '')`
+              ));
           } catch { /* non-critical */ }
         }
       }
@@ -525,7 +531,7 @@ async function main(): Promise<void> {
 
       // Save snapshot — 하루에 포스트당 1개만 유지 (upsert)
       const today = new Date().toISOString().slice(0, 10);
-      const snapId = `snap_${today}_${postId.slice(0, 6)}`;
+      const snapId = `snap_${today}_${postId}`;
       try {
         // 오늘 같은 포스트의 기존 스냅샷 확인
         const [existing] = await db.select({ id: postSnapshots.id })

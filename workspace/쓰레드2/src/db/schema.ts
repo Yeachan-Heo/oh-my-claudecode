@@ -858,3 +858,30 @@ export const communityPosts = pgTable(
     index('idx_community_posts_collected').on(table.collected_at),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Agent Messages (AI Company Communication)
+// ---------------------------------------------------------------------------
+
+/**
+ * agent_messages - AI 에이전트 간 메시지 채널.
+ * CEO/에이전트 간 standup, general 등 채널 기반 소통.
+ */
+export const agentMessages = pgTable(
+  'agent_messages',
+  {
+    id: text('id').primaryKey(),
+    sender: text('sender').notNull(),
+    recipient: text('recipient').notNull(),
+    channel: text('channel').notNull(),
+    message: text('message').notNull(),
+    context: jsonb('context'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    read_by: jsonb('read_by').notNull().default([]),
+  },
+  (table) => [
+    index('idx_agent_msg_date').on(table.created_at),
+    index('idx_agent_msg_channel').on(table.channel),
+    index('idx_agent_msg_sender').on(table.sender),
+  ],
+);

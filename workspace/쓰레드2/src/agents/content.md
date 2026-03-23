@@ -1,5 +1,11 @@
 # 콘텐츠 에이전트
 
+> **분리 안내**: 이 파일은 두 파일로 분리되었습니다.
+> - 빈이 캐릭터/페르소나 → `souls/bini-persona.md`
+> - 운영 절차 (6단계 CoT, 포맷 규칙) → `ops/content-creation-ops.md`
+>
+> 기존 스킬 참조는 이 파일을 계속 사용합니다. 원본 내용은 아래에 유지됩니다.
+
 > 모델: **sonnet** | 입력: positioning cards + learning feedback | 출력: content drafts
 
 ## 역할

@@ -1,8 +1,85 @@
-# Threads2 Handoff — 2026-03-23 (세션 12)
+# Threads2 Handoff — 2026-03-23 (세션 13)
 
-## 현재 상태: 수집/기획/게시 E2E 완료, AI Company Plan v4 확정, Phase 1 구현 대기
+## 현재 상태: PLAN v4 Phase 1 Foundation 완료, Phase 2 Semi-Autonomous 구현 대기
 
-### 이번 세션(12) 완료 작업
+### 이번 세션(13) 완료 작업
+
+| # | 작업 | 상태 |
+|---|------|------|
+| 1 | agency.md 작성 (BiniLab 미션/조직도/권한 매트릭스/코드 수정 프로토콜) | ✅ |
+| 2 | 9개 에이전트 정의 파일 생성 (.claude/agents/ YAML frontmatter) | ✅ |
+| 3 | soul/ops 파일 분리 (content.md→souls/+ops/, debate→ops/, writing→ops/) | ✅ |
+| 4 | agents/memory/ 학습 시스템 디렉토리 구조 생성 | ✅ |
+| 5 | CEO soul 상세화 (ROI 공식, 시간대, 다양성 체크, 경쟁사 판단) | ✅ |
+| 6 | daily-standup-ops.md (Phase 1~6 파이프라인 + DB 쿼리 템플릿) | ✅ |
+| 7 | weekly-retro-ops.md (주간 전략회의 가이드) | ✅ |
+| 8 | agent_messages DB 테이블 + 3개 인덱스 (Supabase) | ✅ |
+| 9 | agent-messages.ts 헬퍼 (sendMessage/getMessages/markAsRead/getUnreadMessages) | ✅ |
+| 10 | agent-messages.test.ts TDD (6/6 PASS) | ✅ |
+| 11 | 멀티에이전트 소통 리서치 (CrewAI/AutoGen/MetaGPT/ChatDev 분석) | ✅ |
+| 12 | 전체 검증 통과 (tsc 0에러, 90테스트 PASS, 참조 정상, PLAN 일치) | ✅ |
+| 13 | telegram.ts fetch 기반 리팩토링 (테스트 호환성) | ✅ |
+
+### 생성된 파일 (세션 13)
+
+| 경로 | 설명 |
+|------|------|
+| `.claude/agents/agency.md` | BiniLab 미션/조직도/권한 |
+| `.claude/agents/minjun-ceo.md` | CEO (opus, 판단 기준 상세) |
+| `.claude/agents/bini-beauty-editor.md` | 뷰티 에디터 (sonnet) |
+| `.claude/agents/hana-health-editor.md` | 건강 에디터 (sonnet) |
+| `.claude/agents/sora-lifestyle-editor.md` | 생활 에디터 (sonnet) |
+| `.claude/agents/jiu-diet-editor.md` | 다이어트 에디터 (sonnet) |
+| `.claude/agents/doyun-qa.md` | QA (opus) |
+| `.claude/agents/seoyeon-analyst.md` | 분석가 (opus) |
+| `.claude/agents/junho-researcher.md` | 리서처 (sonnet) |
+| `.claude/agents/taeho-engineer.md` | 엔지니어 (opus) |
+| `souls/bini-persona.md` | 빈이 페르소나 |
+| `ops/content-creation-ops.md` | 6단계 CoT 운영 가이드 |
+| `ops/debate-ops.md` | 토론 시스템 운영 가이드 |
+| `ops/writing-guide-ops.md` | 글쓰기 지침 운영 가이드 |
+| `ops/daily-standup-ops.md` | 일일 스탠드업 (DB 쿼리 템플릿 포함) |
+| `ops/weekly-retro-ops.md` | 주간 전략회의 가이드 |
+| `src/db/agent-messages.ts` | 에이전트 메시지 CRUD 헬퍼 |
+| `src/__tests__/agent-messages.test.ts` | 메시지 헬퍼 테스트 (6개) |
+| `agents/memory/` | 학습 시스템 (strategy-log, experiment-log 등) |
+| `data/research/multi-agent-communication.md` | 멀티에이전트 리서치 보고서 |
+
+### 리서치 핵심 발견
+
+- **외부 프레임워크 도입 불필요** — Python SDK 기반이라 Claude Code에서 직접 실행 불가
+- **BiniLab은 이미 올바른 방향** — 4개 프레임워크의 핵심 패턴이 이미 부분 구현됨
+- **추천**: MetaGPT Pub/Sub + AutoGen 타입드 이벤트를 agent_messages DB로 하이브리드 구현
+
+### 다음 세션 우선순위 — PLAN v4 Phase 2 Semi-Autonomous
+
+#### 1. CEO Shadow Mode (S-2b)
+- minjun-ceo.md 기반 5일 Shadow Mode
+- 매일 daily_directive 추천만, 실행 안 함
+- 시훈 채점 → 정확도 ≥ 80%
+
+#### 2. `/daily-run` 스킬 구현 (S-5)
+- 10개 포스트 자동 생산 파이프라인
+- Phase 1~6 자동 오케스트레이션
+- 시간대별 분산 게시 (최소 1시간 간격)
+
+#### 3. 네이버 검색량/트렌드 통합 (S-7)
+- /수집 + /기획에 네이버 데이터 연동
+- 키워드 확장 검색 (L1→L2→L3)
+
+#### 4. 브랜드 리서치 확장 (S-8)
+- 40→80개/카테고리 (6에이전트 병렬)
+
+#### 5. 경쟁사 모니터링 (S-9)
+- 하위 20% 주간 교체 + 신규 채널 발굴
+
+#### 6. 추가 구현 (S-6, S-10~S-12)
+- aff_contents.status 컬럼 + 워밍업 게이트
+- autoresearch 실험 시스템
+- 포스트 리사이클 시스템
+- 학습 시스템 (memory/ + 다양성 체크)
+
+### 이전 세션(12) 완료 작업
 
 | # | 작업 | 상태 |
 |---|------|------|

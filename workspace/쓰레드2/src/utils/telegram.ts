@@ -6,13 +6,11 @@
  */
 
 import 'dotenv/config';
-import https from 'https';
 
 // ─── Config ──────────────────────────────────────────────
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID ?? '';
-const TELEGRAM_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 /** Telegram sendMessage API 응답 (필요한 필드만) */
 interface TelegramResponse {
@@ -58,6 +56,7 @@ async function sendTelegramMessage(text: string, parseMode: 'HTML' | 'Markdown' 
   }
 
   try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     const body = JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text,
@@ -65,37 +64,13 @@ async function sendTelegramMessage(text: string, parseMode: 'HTML' | 'Markdown' 
       disable_web_page_preview: true,
     });
 
-    const data = await new Promise<TelegramResponse>((resolve, reject) => {
-      const req = https.request(
-        {
-          hostname: 'api.telegram.org',
-          port: 443,
-          path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body),
-          },
-          family: 4, // Force IPv4 — IPv6 unreachable in WSL
-          timeout: 10_000,
-        },
-        (res) => {
-          let raw = '';
-          res.on('data', (chunk: Buffer) => { raw += chunk; });
-          res.on('end', () => {
-            try {
-              resolve(JSON.parse(raw) as TelegramResponse);
-            } catch {
-              reject(new Error(`Invalid JSON: ${raw.slice(0, 200)}`));
-            }
-          });
-        },
-      );
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-      req.write(body);
-      req.end();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
     });
+
+    const data = await res.json() as TelegramResponse;
 
     if (!data.ok) {
       console.error(`[telegram] API 오류: ${data.description ?? 'unknown'}`);
