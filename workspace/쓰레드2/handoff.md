@@ -38,6 +38,14 @@
 | Phase 3 | S-16 | revenue_tracking 테이블 + TDD helpers (6/6 PASS) | ✅ |
 | Phase 3 | S-17 | auto-experiment.ts + autonomy levels (0-3) + CEO update | ✅ |
 
+### /daily-run v2 업그레이드 (2026-03-23)
+
+- `/daily-run v2` — 에이전트 스폰 기반으로 업그레이드. 각 Phase에서 Agent 도구로 에이전트 스폰. `agent_messages` 기록 필수.
+- `src/orchestrator/agent-spawner.ts` — AGENT_REGISTRY (9개), EDITOR_MAP, `buildAgentPrompt()`, `buildMessageScript()`, `buildContextReaderScript()`
+- SKILL.md: Phase 1(준호) → 완료게이트 → Phase 2(서연) → Phase 3(민준) → Phase 4(에디터+도윤QA) → Phase 5(Safety)
+
+---
+
 ### 다음 우선순위 — 운영 단계
 
 1. **워밍업 포스트 완료** — 7/20개 완료, 13개 남음 (하루 2~3개)
