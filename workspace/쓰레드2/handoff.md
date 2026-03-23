@@ -1,28 +1,38 @@
-# Threads2 Handoff — 2026-03-23 (세션 14)
+# Threads2 Handoff — 2026-03-23 (세션 15)
 
-## 현재 상태: Phase 2 전체 완료 (S-5~S-12 ALL DONE), 검증 PASS
+## 현재 상태: Phase 3 Round 1 완료 (S-13~S-15 ALL DONE), 검증 PASS
 
-### Phase 2 Round 2 검증 결과 (세션 14)
+### Phase 3 Round 1 검증 결과 (세션 15)
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
 | tsc --noEmit | ✅ 0 errors | |
-| npm test | ✅ 118/118 PASS (11 files) | experiments, diversity-checker, warmup-gate 포함 |
-| experiments 테이블 | ✅ EXISTS (count=0) | |
-| agent_messages 테이블 | ✅ EXISTS (count=0) | |
-| aff_contents.status 컬럼 | ✅ EXISTS | |
-| src/db/experiments.ts | ✅ EXISTS | |
-| src/recycler/recycle.ts | ✅ EXISTS | |
-| src/learning/diversity-checker.ts | ✅ EXISTS | |
-| src/learning/strategy-logger.ts | ✅ EXISTS | |
-| ops/experiment-ops.md | ✅ EXISTS | |
-| ops/recycle-ops.md | ✅ EXISTS | |
-| ops/learning-ops.md | ✅ EXISTS | |
-| ~/.claude/skills/daily-run.md | ✅ EXISTS (Phase 1~6, --dry-run, --posts N) | |
-| getCandidates() | ✅ 동작 | |
-| getDiversityReport() | ✅ 동작 | |
-| logDecision() | ✅ 동작 | |
-| getActiveExperiments() | ✅ 동작 | |
+| npm test | ✅ 156/156 PASS (12 files) | safety-gates, orchestrator 포함 |
+| src/safety/gates.ts | ✅ EXISTS | 8개 게이트 |
+| src/__tests__/safety-gates.test.ts | ✅ EXISTS | 38개 테스트 |
+| src/orchestrator/types.ts | ✅ EXISTS | |
+| src/orchestrator/daily-pipeline.ts | ✅ EXISTS | --autonomous 모드 |
+| scripts/run-weekly-retro.ts | ✅ EXISTS + --dry-run 성공 | content_lifecycle 쿼리 수정 완료 |
+| ops/safety-ops.md | ✅ EXISTS | |
+| ~/.claude/skills/weekly-retro/SKILL.md | ✅ EXISTS | |
+| ~/.claude/skills/daily-run/SKILL.md | ✅ --autonomous + Safety Gates 반영 | |
+
+### Phase 3 Round 1 완료 작업 (S-13 ~ S-15)
+
+| S# | 작업 | 상태 | 비고 |
+|----|------|------|------|
+| S-13 | 8개 Safety Gates TDD (38/38 PASS) | ✅ | src/safety/gates.ts |
+| S-14 | daily-pipeline.ts 오케스트레이터 + --autonomous 모드 + EDITOR_MAP | ✅ | src/orchestrator/ |
+| S-15 | run-weekly-retro.ts 자동화 + /weekly-retro 스킬 | ✅ | scripts/ + ~/.claude/skills/ |
+
+### 다음 우선순위 — Phase 3 Round 2
+
+1. **S-16: 수익 추적 시스템** — 쿠팡 파트너스 클릭/전환/수익 집계 → `revenue_events` 테이블
+2. **S-17: 자율 실험 시스템** — `runSafetyGates()` 기반 자동 A/B 실험 시작/종료 로직
+3. **워밍업 포스트 진행** — 7/20개 완료, 13개 남음 (하루 2~3개)
+4. **/daily-run --autonomous 실전 가동** — dry-run 검증 후 실제 포스트 생산
+
+---
 
 ### Phase 2 전체 완료 작업 (S-5 ~ S-12)
 

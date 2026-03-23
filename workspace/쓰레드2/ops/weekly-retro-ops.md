@@ -1,5 +1,32 @@
 # 주간 전략회의 운영 절차 (weekly-retro-ops)
 
+## 자동화 실행 (스크립트)
+
+```bash
+cd /home/sihun92/projects/oh-my-claudecode/workspace/쓰레드2
+
+# 1. 데이터 확인만 (저장 없음)
+npx tsx scripts/run-weekly-retro.ts --dry-run
+
+# 2. 전체 실행 (회의록 저장 + 에이전트 메시지)
+npx tsx scripts/run-weekly-retro.ts
+
+# 3. 채널 교체까지 실행 (CEO 승인 후)
+npx tsx scripts/run-weekly-retro.ts --apply
+```
+
+> 스크립트가 자동으로 처리하는 것:
+> - 주간 성과 집계 (이번 주 vs 지난 주)
+> - 채널 하위 20% 평가
+> - 완료 실험 결과 수집
+> - 다양성 리포트
+> - CEO 전략 결정 생성
+> - `agents/memory/retro/retro-{date}.md` 저장
+> - `weekly-insights.md`, `strategy-log.md` 업데이트
+> - `agent_messages` channel='weekly' 기록
+
+---
+
 > **주기**: 매주 일요일
 > **참여자**: CEO(민준) + 분석가(서연) + 에디터 대표(빈이)
 > **목적**: 주간 성과 리뷰, 전략 조정, 실험 설계, 경쟁사 교체
