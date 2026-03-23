@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-discover-youtube-channels.py — YouTube 뷰티 채널 발굴 (API 쿼터 0)
+discover-youtube-channels.py — YouTube 채널 발굴 (API 쿼터 0)
 
 yt-dlp + scrapetube로 채널 검색/검증. YouTube Data API 쿼터를 사용하지 않는다.
+카테고리별 키워드로 검색 가능 (뷰티, 생활템, 건강, 식품 등).
 
 Usage:
-  python3 scripts/discover-youtube-channels.py search                    # 뷰티 키워드 8개로 자동 검색
-  python3 scripts/discover-youtube-channels.py search "올리브영 추천"     # 특정 키워드 검색
-  python3 scripts/discover-youtube-channels.py search --min-subs 50000   # 구독자 기준 변경
-  python3 scripts/discover-youtube-channels.py channel UCxxxxxxxx        # 단일 채널 검증
-  python3 scripts/discover-youtube-channels.py audit                     # 기존 시드 채널 감사
+  python3 scripts/discover-youtube-channels.py search                              # 뷰티 키워드로 자동 검색
+  python3 scripts/discover-youtube-channels.py search --category 생활템             # 생활템 카테고리 검색
+  python3 scripts/discover-youtube-channels.py search "올리브영 추천"               # 특정 키워드 검색
+  python3 scripts/discover-youtube-channels.py search --min-subs 20000             # 구독자 기준 변경
+  python3 scripts/discover-youtube-channels.py search --category 생활템 --min-subs 20000 --max-channels 30
+  python3 scripts/discover-youtube-channels.py channel UCxxxxxxxx                  # 단일 채널 검증
+  python3 scripts/discover-youtube-channels.py audit                               # 기존 시드 채널 감사
 """
 
 import argparse
@@ -109,41 +112,100 @@ def count_recent_videos(videos: list[dict], days: int = 7) -> int:
     return count
 
 
-# ─── Beauty Check ─────────────────────────────────────────
+# ─── Category Definitions ────────────────────────────────
 
-BEAUTY_KEYWORDS = [
-    "뷰티", "메이크업", "화장", "스킨케어", "리뷰", "추천", "올리브영",
-    "파운데이션", "립", "쿠션", "세럼", "토너", "크림", "선크림",
-    "피부", "모공", "트러블", "건조", "지성", "민감", "하울",
-    "beauty", "makeup", "skincare", "cosmetic", "코덕",
-]
+CATEGORY_CONFIG = {
+    "뷰티": {
+        "keywords": [
+            "뷰티", "메이크업", "화장", "스킨케어", "리뷰", "추천", "올리브영",
+            "파운데이션", "립", "쿠션", "세럼", "토너", "크림", "선크림",
+            "피부", "모공", "트러블", "건조", "지성", "민감", "하울",
+            "beauty", "makeup", "skincare", "cosmetic", "코덕",
+        ],
+        "search_queries": [
+            "뷰티 리뷰 추천",
+            "화장품 솔직 리뷰",
+            "올리브영 추천템",
+            "스킨케어 루틴",
+            "메이크업 튜토리얼 한국",
+            "피부 관리 꿀팁",
+            "뷰티 하울",
+            "화장품 비교",
+        ],
+        "min_keyword_matches": 3,
+    },
+    "생활템": {
+        "keywords": [
+            "생활", "꿀템", "쿠팡", "추천", "리뷰", "가성비", "살림",
+            "생활용품", "주방", "청소", "수납", "인테리어", "가전",
+            "다이소", "이케아", "홈카페", "언박싱", "하울", "필수템",
+            "편의점", "마트", "장보기", "집꾸미기", "자취", "신혼",
+            "best", "top", "쇼핑", "득템", "알뜰", "살림팁",
+            "home", "household", "kitchen", "cleaning", "organizing",
+        ],
+        "search_queries": [
+            "쿠팡 꿀템 추천",
+            "생활용품 추천 리뷰",
+            "자취 필수템 추천",
+            "다이소 꿀템 추천",
+            "가성비 생활템 추천",
+            "주방용품 추천 리뷰",
+            "쿠팡 로켓배송 추천",
+            "살림 꿀팁 추천템",
+            "인테리어 소품 추천",
+            "청소용품 추천 리뷰",
+        ],
+        "min_keyword_matches": 3,
+    },
+    "건강": {
+        "keywords": [
+            "건강", "영양제", "비타민", "다이어트", "운동", "헬스",
+            "프로틴", "유산균", "오메가3", "홈트", "식단", "건강기능식품",
+            "health", "supplement", "vitamin", "diet", "fitness",
+        ],
+        "search_queries": [
+            "영양제 추천 리뷰",
+            "건강기능식품 비교",
+            "다이어트 보조제 추천",
+            "비타민 추천 순위",
+            "유산균 추천",
+            "건강 꿀팁",
+        ],
+        "min_keyword_matches": 3,
+    },
+    "식품": {
+        "keywords": [
+            "먹방", "맛집", "요리", "레시피", "간식", "과자", "음료",
+            "편의점", "신상", "쿠팡", "로켓프레시", "밀키트",
+            "food", "recipe", "cooking", "snack", "review",
+        ],
+        "search_queries": [
+            "편의점 신상 리뷰",
+            "쿠팡 식품 추천",
+            "과자 추천 리뷰",
+            "밀키트 추천",
+            "간식 추천 하울",
+            "음료 신상 리뷰",
+        ],
+        "min_keyword_matches": 3,
+    },
+}
 
 
-def is_beauty_channel(info: dict, videos: list[dict]) -> bool:
-    """채널이 뷰티 콘텐츠인지 확인."""
+def is_category_channel(info: dict, videos: list[dict], category: str) -> bool:
+    """채널이 해당 카테고리 콘텐츠인지 확인."""
+    config = CATEGORY_CONFIG.get(category)
+    if not config:
+        return True  # 알 수 없는 카테고리면 필터 없이 통과
+
     text = f"{info.get('name', '')} {info.get('description', '')}"
     text += " ".join(v.get("title", "") for v in videos)
     text = text.lower()
-    matches = sum(1 for kw in BEAUTY_KEYWORDS if kw.lower() in text)
-    return matches >= 3
 
-
-def guess_category(ch: dict) -> str:
-    """채널 정보로 카테고리 추정."""
-    text = f"{ch.get('name', '')} {ch.get('description', '')} {' '.join(ch.get('sample_titles', []))}".lower()
-    if any(kw in text for kw in ["피부", "트러블", "여드름", "모공", "민감"]):
-        return "피부고민"
-    if any(kw in text for kw in ["가성비", "올리브영", "다이소", "만원"]):
-        return "가성비"
-    if any(kw in text for kw in ["비교", "vs", "순위", "top", "best"]):
-        return "비교"
-    if any(kw in text for kw in ["루틴", "하울", "겟레디", "grwm"]):
-        return "루틴"
-    if any(kw in text for kw in ["메이크업", "makeup", "튜토리얼"]):
-        return "메이크업"
-    if any(kw in text for kw in ["남자", "남성", "맨"]):
-        return "남성뷰티"
-    return "리뷰"
+    keywords = config["keywords"]
+    min_matches = config.get("min_keyword_matches", 3)
+    matches = sum(1 for kw in keywords if kw.lower() in text)
+    return matches >= min_matches
 
 
 # ─── Search Channels ──────────────────────────────────────
@@ -166,7 +228,7 @@ def search_channels_via_videos(query: str, max_results: int = 30) -> list[str]:
 
 # ─── Validate Channel ─────────────────────────────────────
 
-def validate_channel(channel_id: str, min_subs: int = 100_000, min_videos_7d: int = 2) -> dict | None:
+def validate_channel(channel_id: str, min_subs: int = 100_000, min_videos_7d: int = 2, category: str = "뷰티") -> dict | None:
     """채널이 조건을 충족하는지 검증."""
     info = get_channel_info(channel_id)
     if not info:
@@ -188,14 +250,15 @@ def validate_channel(channel_id: str, min_subs: int = 100_000, min_videos_7d: in
         print(f"  ✗ {name} — 7일 내 영상 {recent_count}개 (미달)")
         return None
 
-    # 뷰티 콘텐츠 체크
-    if not is_beauty_channel(info, videos):
-        print(f"  ✗ {name} — 뷰티 콘텐츠 아님")
+    # 카테고리 콘텐츠 체크
+    if not is_category_channel(info, videos, category):
+        print(f"  ✗ {name} — {category} 콘텐츠 아님")
         return None
 
     print(f"  ✓ {name} (@{info['handle']}) — {info['sub_text']} 구독, 7일 내 {recent_count}영상")
     return {
         **info,
+        "category": category,
         "recent_videos": recent_count,
         "sample_titles": [v["title"] for v in videos[:3]],
     }
@@ -205,16 +268,13 @@ def validate_channel(channel_id: str, min_subs: int = 100_000, min_videos_7d: in
 
 def cmd_search(args):
     """키워드로 채널 검색 + 검증."""
-    queries = [args.query] if args.query != "auto" else [
-        "뷰티 리뷰 추천",
-        "화장품 솔직 리뷰",
-        "올리브영 추천템",
-        "스킨케어 루틴",
-        "메이크업 튜토리얼 한국",
-        "피부 관리 꿀팁",
-        "뷰티 하울",
-        "화장품 비교",
-    ]
+    category = args.category
+    config = CATEGORY_CONFIG.get(category, CATEGORY_CONFIG["뷰티"])
+
+    if args.query != "auto":
+        queries = [args.query]
+    else:
+        queries = config["search_queries"]
 
     all_channel_ids = set()
     for q in queries:
@@ -224,12 +284,13 @@ def cmd_search(args):
         all_channel_ids.update(ids)
 
     print(f"\n총 고유 채널: {len(all_channel_ids)}개")
-    print(f"검증 기준: 구독자 {args.min_subs:,}+, 7일 내 영상 {args.min_videos}+, 뷰티 콘텐츠\n")
+    print(f"카테고리: {category}")
+    print(f"검증 기준: 구독자 {args.min_subs:,}+, 7일 내 영상 {args.min_videos}+, {category} 콘텐츠\n")
 
     validated = []
     for i, cid in enumerate(all_channel_ids):
         print(f"[{i+1}/{len(all_channel_ids)}] {cid}")
-        result = validate_channel(cid, args.min_subs, args.min_videos)
+        result = validate_channel(cid, args.min_subs, args.min_videos, category)
         if result:
             validated.append(result)
         if len(validated) >= args.max_channels:
@@ -238,25 +299,16 @@ def cmd_search(args):
 
     # Output
     print(f"\n{'='*60}")
-    print(f"검증 통과: {len(validated)}개 채널")
+    print(f"검증 통과: {len(validated)}개 채널 (카테고리: {category})")
     print(f"{'='*60}")
 
     for i, ch in enumerate(validated):
         print(f"\n{i+1}. {ch['name']} (@{ch['handle']})")
         print(f"   ID: {ch['channel_id']}")
         print(f"   구독자: {ch['sub_text']}")
+        print(f"   카테고리: {category}")
         print(f"   7일 내 영상: {ch['recent_videos']}개")
         print(f"   최근 영상: {', '.join(ch['sample_titles'][:2])}")
-
-    # TypeScript output for channels.ts
-    if validated:
-        print(f"\n{'='*60}")
-        print("channels.ts용 TypeScript:")
-        print(f"{'='*60}")
-        for ch in validated:
-            handle = ch["handle"] if ch["handle"] else ch["name"]
-            cat = guess_category(ch)
-            print(f"  {{ channelId: '{ch['channel_id']}', handle: '@{handle}', name: '{ch['name']}', category: '{cat}' }},")
 
     # JSON output
     if args.json:
@@ -308,7 +360,8 @@ def main():
 
     # search
     p_search = sub.add_parser("search", help="키워드로 채널 검색")
-    p_search.add_argument("query", nargs="?", default="auto", help="검색 키워드 (auto=미리 정의된 8개)")
+    p_search.add_argument("query", nargs="?", default="auto", help="검색 키워드 (auto=카테고리별 자동)")
+    p_search.add_argument("--category", default="뷰티", help="카테고리 (뷰티/생활템/건강/식품, 기본: 뷰티)")
     p_search.add_argument("--min-subs", type=int, default=100_000, help="최소 구독자 (기본 100K)")
     p_search.add_argument("--min-videos", type=int, default=2, help="7일 내 최소 영상 수 (기본 2)")
     p_search.add_argument("--max-channels", type=int, default=40, help="최대 채널 수 (기본 40)")
@@ -336,6 +389,7 @@ def main():
     else:
         # Default: auto search
         args.query = "auto"
+        args.category = "뷰티"
         args.min_subs = 100_000
         args.min_videos = 2
         args.max_channels = 40

@@ -7,7 +7,7 @@
 
 import { eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { communityPosts } from '../../db/schema.js';
+import { youtubeVideos, youtubeChannels } from '../../db/schema.js';
 import {
   searchVideos,
   getChannelVideos,
@@ -37,9 +37,8 @@ function log(msg: string): void {
 
 async function getExistingVideoIds(): Promise<Set<string>> {
   const rows = await db
-    .select({ id: communityPosts.id })
-    .from(communityPosts)
-    .where(eq(communityPosts.source_platform, 'youtube'));
+    .select({ id: youtubeVideos.id })
+    .from(youtubeVideos);
   return new Set(rows.map(r => r.id.replace('youtube_', '')));
 }
 
@@ -74,30 +73,29 @@ async function saveToDb(
 ): Promise<boolean> {
   try {
     const rows = await db
-      .insert(communityPosts)
+      .insert(youtubeVideos)
       .values({
         id: `youtube_${video.videoId}`,
-        source_platform: 'youtube',
-        source_cafe: `youtube_${sourceHandle}`,
-        source_url: `https://youtube.com/watch?v=${video.videoId}`,
+        channel_id: `youtube_${sourceHandle}`,
+        video_id: video.videoId,
         title: video.title,
-        body: transcript || video.description,
+        transcript: transcript || video.description,
         comments: comments.map(c => ({
           nickname: c.authorName,
           text: c.text,
           like_count: c.likeCount,
         })),
-        author_nickname: video.channelTitle,
+        view_count: video.viewCount,
         like_count: video.likeCount,
         comment_count: video.commentCount,
-        view_count: video.viewCount,
-        posted_at: new Date(video.publishedAt),
+        published_at: new Date(video.publishedAt),
         collected_at: new Date(),
         analyzed: false,
         extracted_needs: [],
+        source_url: `https://youtube.com/watch?v=${video.videoId}`,
       })
       .onConflictDoNothing()
-      .returning({ id: communityPosts.id });
+      .returning({ id: youtubeVideos.id });
 
     return rows.length > 0;
   } catch (err) {
@@ -301,7 +299,7 @@ export async function collectYouTube(opts: YouTubeCliOptions): Promise<YouTubeCo
     elapsed: 0,
   };
 
-  log('=== YouTube 뷰티 댓글 수집 시작 ===');
+  log('=== YouTube 영상 수집 시작 ===');
 
   const existingIds = await getExistingVideoIds();
   log(`기존 수집 영상: ${existingIds.size}개 (중복 스킵 대상)`);
@@ -320,6 +318,37 @@ export async function collectYouTube(opts: YouTubeCliOptions): Promise<YouTubeCo
       totals.postsDuplicate += r.duplicate;
       totals.stale += r.stale;
     }
+  } else if (opts.channels === 'db') {
+    // DB 채널 모드 — youtube_channels 테이블에서 읽기
+    const dbChannels = await db
+      .select()
+      .from(youtubeChannels)
+      .where(eq(youtubeChannels.is_active, true));
+
+    const channels: YouTubeChannel[] = dbChannels.map(ch => ({
+      channelId: ch.channel_id,
+      handle: ch.handle || ch.name,
+      name: ch.name,
+      category: ch.category,
+    }));
+
+    const sliced = channels.slice(opts.fromIndex, opts.toIndex || channels.length);
+    log(`DB 채널 모드: ${sliced.length}개 채널 (전체 ${channels.length}개), 채널당 최대 ${opts.maxVideosPerChannel}영상`);
+
+    for (const channel of sliced) {
+      try {
+        const r = await collectFromChannel(channel, opts, startTime, existingIds);
+        totals.channelsProcessed++;
+        totals.videosCollected += r.videos;
+        totals.commentsCollected += r.comments;
+        totals.postsInserted += r.inserted;
+        totals.postsDuplicate += r.duplicate;
+        totals.stale += r.stale;
+      } catch (err) {
+        log(`  ✗ 채널 수집 실패 (${channel.name}): ${(err as Error).message?.slice(0, 100)}`);
+        totals.channelsProcessed++;
+      }
+    }
   } else {
     // 채널 모드
     const allChannels = opts.channels === 'all' ? SEED_CHANNELS : opts.channels;
@@ -327,13 +356,18 @@ export async function collectYouTube(opts: YouTubeCliOptions): Promise<YouTubeCo
     log(`채널 모드: ${channels.length}개 채널 (인덱스 ${opts.fromIndex}~${opts.toIndex || allChannels.length}), 채널당 최대 ${opts.maxVideosPerChannel}영상`);
 
     for (const channel of channels) {
-      const r = await collectFromChannel(channel, opts, startTime, existingIds);
-      totals.channelsProcessed++;
-      totals.videosCollected += r.videos;
-      totals.commentsCollected += r.comments;
-      totals.postsInserted += r.inserted;
-      totals.postsDuplicate += r.duplicate;
-      totals.stale += r.stale;
+      try {
+        const r = await collectFromChannel(channel, opts, startTime, existingIds);
+        totals.channelsProcessed++;
+        totals.videosCollected += r.videos;
+        totals.commentsCollected += r.comments;
+        totals.postsInserted += r.inserted;
+        totals.postsDuplicate += r.duplicate;
+        totals.stale += r.stale;
+      } catch (err) {
+        log(`  ✗ 채널 수집 실패 (${channel.name}): ${(err as Error).message?.slice(0, 100)}`);
+        totals.channelsProcessed++;
+      }
     }
   }
 

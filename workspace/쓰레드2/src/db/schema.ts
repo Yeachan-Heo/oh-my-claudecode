@@ -758,6 +758,61 @@ export const sourcePerformance = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// YouTube Channels & Videos
+// ---------------------------------------------------------------------------
+
+export const youtubeChannels = pgTable(
+  'youtube_channels',
+  {
+    channel_id: text('channel_id').primaryKey(),
+    name: text('name').notNull(),
+    handle: text('handle'),
+    subscriber_count: integer('subscriber_count').default(0),
+    description: text('description'),
+    category: text('category').notNull().default('뷰티'),
+    recent_video_count: integer('recent_video_count').default(0),
+    sample_titles: jsonb('sample_titles').$type<string[]>().default([]),
+    is_active: boolean('is_active').notNull().default(true),
+    discovered_at: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
+    last_checked_at: timestamp('last_checked_at', { withTimezone: true }),
+    notes: text('notes'),
+  },
+  (table) => [
+    index('idx_yt_channels_category').on(table.category),
+    index('idx_yt_channels_active').on(table.is_active),
+  ],
+);
+
+export const youtubeVideos = pgTable(
+  'youtube_videos',
+  {
+    id: text('id').primaryKey(),
+    channel_id: text('channel_id').notNull(),
+    video_id: text('video_id'),
+    title: text('title'),
+    transcript: text('transcript'),
+    comments: jsonb('comments').$type<Array<{
+      nickname?: string;
+      text?: string;
+      like_count?: number;
+    }>>().default([]),
+    view_count: integer('view_count').default(0),
+    like_count: integer('like_count').default(0),
+    comment_count: integer('comment_count').default(0),
+    published_at: timestamp('published_at', { withTimezone: true }),
+    collected_at: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
+    analyzed: boolean('analyzed').notNull().default(false),
+    extracted_needs: jsonb('extracted_needs').$type<string[]>().default([]),
+    source_url: text('source_url'),
+  },
+  (table) => [
+    index('idx_yt_videos_channel').on(table.channel_id),
+    index('idx_yt_videos_analyzed').on(table.analyzed),
+    index('idx_yt_videos_collected').on(table.collected_at),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Community Posts (네이버 카페 + 더쿠 + 인스티즈 통합)
 // ---------------------------------------------------------------------------
 

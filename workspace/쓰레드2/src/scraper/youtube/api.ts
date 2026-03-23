@@ -48,17 +48,23 @@ export function buildSearchUrl(query: string, maxResults: number, pageToken?: st
   return `${BASE}/search?${params}`;
 }
 
-export function buildChannelVideosUrl(channelId: string, maxResults: number, publishedAfter?: string): string {
+/**
+ * 채널 업로드 재생목록 ID 변환: UC... → UU...
+ * playlistItems API는 채널의 업로드 재생목록을 직접 조회 (1 unit vs search 100 units)
+ */
+function channelToUploadsPlaylist(channelId: string): string {
+  return 'UU' + channelId.slice(2);
+}
+
+export function buildChannelVideosUrl(channelId: string, maxResults: number, _publishedAfter?: string): string {
+  const playlistId = channelToUploadsPlaylist(channelId);
   const params = new URLSearchParams({
     part: 'snippet',
-    channelId,
-    type: 'video',
+    playlistId,
     maxResults: String(maxResults),
-    order: 'date',
     key: getApiKey(),
   });
-  if (publishedAfter) params.set('publishedAfter', publishedAfter);
-  return `${BASE}/search?${params}`;
+  return `${BASE}/playlistItems?${params}`;
 }
 
 export function buildVideosUrl(videoIds: string[]): string {
@@ -162,17 +168,39 @@ export async function searchVideos(query: string, maxResults: number = 10): Prom
 }
 
 /**
- * 채널의 최신 영상 목록.
- * 비용: 100 units/호출
+ * 채널의 최신 영상 목록 (playlistItems API 사용).
+ * 비용: 1 unit/호출 (search 대비 100배 절약)
+ *
+ * playlistItems는 publishedAfter 필터가 없으므로 클라이언트 측에서 날짜 필터링.
  */
 export async function getChannelVideos(
   channelId: string,
   maxResults: number = 5,
   daysBack: number = 7,
 ): Promise<YouTubeVideoItem[]> {
-  const publishedAfter = new Date(Date.now() - daysBack * 86400000).toISOString();
-  const data = await fetchJson(buildChannelVideosUrl(channelId, maxResults, publishedAfter));
-  return (data.items || []).map(parseVideoItem);
+  const cutoff = Date.now() - daysBack * 86400000;
+  const data = await fetchJson(buildChannelVideosUrl(channelId, maxResults));
+
+  return (data.items || [])
+    .map((item: any) => {
+      const snippet = item.snippet || {};
+      // playlistItems returns videoId in snippet.resourceId.videoId
+      const videoId = snippet.resourceId?.videoId || item.id?.videoId || '';
+      return {
+        videoId,
+        channelId: snippet.channelId || channelId,
+        channelTitle: snippet.channelTitle || '',
+        title: snippet.title || '',
+        description: (snippet.description || '').slice(0, 5000),
+        publishedAt: snippet.publishedAt || '',
+        thumbnailUrl: snippet.thumbnails?.default?.url,
+      } as YouTubeVideoItem;
+    })
+    .filter((v: YouTubeVideoItem) => {
+      // 클라이언트 측 날짜 필터
+      if (!v.publishedAt) return false;
+      return new Date(v.publishedAt).getTime() >= cutoff;
+    });
 }
 
 /**

@@ -32,6 +32,7 @@
 - YouTube 댓글 수집: `scripts/collect-youtube-comments.ts` (`npm run collect:youtube`)
 - YouTube 니즈 분석: `src/agents/youtube-needs-analyzer.md` 가이드 참조 (Claude Code 직접 분석)
 - **YouTube 채널 발굴: `scripts/discover-youtube-channels.py`** (scrapetube, API 쿼터 0) — 채널 검색/검증은 반드시 이 스크립트 사용. YouTube Data API로 채널 검색 금지 (쿼터 낭비)
+- 콘텐츠 기획: `/threads-plan` 스킬 (24h 수집분 신호 분석 → 기획서 3개 생성, API 비용 $0)
 - **포스트 작성 시 토론 시스템 필수** (hard):
   - `src/agents/post-debate-system.md` — 가이드+빈이 토론 시스템 (단독 작성 금지)
   - `src/agents/post-writing-guide.md` — 조회수 1만+ 209개 분석 기반 글쓰기 지침서

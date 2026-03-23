@@ -57,7 +57,7 @@ export interface YouTubeCollectResult {
 
 /** CLI 옵션 */
 export interface YouTubeCliOptions {
-  channels: YouTubeChannel[] | 'all' | 'search';
+  channels: YouTubeChannel[] | 'all' | 'search' | 'db';
   searchQuery?: string;       // search 모드에서 사용
   maxVideosPerChannel: number; // 채널당 최대 영상 수 (기본 5)
   maxCommentsPerVideo: number; // 영상당 최대 댓글 수 (기본 100)

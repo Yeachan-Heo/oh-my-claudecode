@@ -43,7 +43,17 @@ export async function savePostsToDB(posts: CanonicalPost[], runId: string): Prom
           topic_tags: post.topic_tags ?? null,
           topic_category: post.topic_category ?? null,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: threadPosts.post_id,
+          set: {
+            view_count: sql`COALESCE(EXCLUDED.view_count, ${threadPosts.view_count})`,
+            like_count: sql`EXCLUDED.like_count`,
+            reply_count: sql`EXCLUDED.reply_count`,
+            repost_count: sql`EXCLUDED.repost_count`,
+            crawl_at: sql`EXCLUDED.crawl_at`,
+            run_id: sql`EXCLUDED.run_id`,
+          },
+        })
         .returning({ post_id: threadPosts.post_id });
 
       if (rows.length > 0) {

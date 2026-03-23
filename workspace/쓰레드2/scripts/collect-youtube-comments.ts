@@ -28,6 +28,9 @@ function parseArgs(): YouTubeCliOptions {
       case '--all':
         channels = 'all';
         break;
+      case '--db':
+        channels = 'db';
+        break;
       case '--search':
         channels = 'search';
         if (args[i + 1] && !args[i + 1].startsWith('--')) {
@@ -56,6 +59,7 @@ YouTube 뷰티 댓글 수집
 Usage:
   --search [query]     키워드 검색 모드 (기본: 미리 정의된 뷰티 키워드)
   --all                시드 채널 모드 (channels.ts 리스트)
+  --db               DB 채널 모드 (youtube_channels 테이블)
   --max-videos N       채널/검색당 최대 영상 수 (기본: 5)
   --max-comments N     영상당 최대 댓글 수 (기본: 300)
   --days N             최근 N일 이내 영상만 (기본: 2)

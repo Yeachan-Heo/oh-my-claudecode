@@ -141,6 +141,7 @@ interface ParsedArgs {
   channelId: string;
   postCount: number;
   isResume: boolean;
+  sinceHours: number; // 0 = 비활성 (개수 기반), >0 = 시간 기반 중단
 }
 
 interface GlobalCheckpoint {
@@ -219,6 +220,8 @@ interface CollectionParams {
   page: Page;
   gotoFn: (page: Page, url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }) => Promise<any>;
   globalMode: boolean;
+  sinceCutoff: number; // 0 = 비활성, >0 = ms 기준 cutoff timestamp
+  sinceHours: number;  // 로그용
 }
 
 // ─── Utility Functions ───────────────────────────────────
@@ -1041,18 +1044,22 @@ function parseArgs(): ParsedArgs {
       postCount = parseInt(args[postsIdx + 1], 10) || 20;
     }
     const isResume = args.includes('--resume');
-    return { mode: 'global', channelId, postCount, isResume };
+    const sinceIdx = args.indexOf('--since');
+    const sinceHours = sinceIdx !== -1 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) || 0 : 0;
+    return { mode: 'global', channelId, postCount, isResume, sinceHours };
   }
 
-  // Legacy mode: <channel_id> [post_count] [--resume]
+  // Legacy mode: <channel_id> [post_count] [--resume] [--since N]
   if (args.length < 1 || args[0].startsWith('--')) {
-    console.error('Usage: npx tsx src/scraper/collect.ts <channel_id> [post_count] [--resume]');
+    console.error('Usage: npx tsx src/scraper/collect.ts <channel_id> [post_count] [--resume] [--since 24]');
     process.exit(1);
   }
   const channelId = args[0];
   const postCount = parseInt(args[1], 10) || 40;
   const isResume = args.includes('--resume');
-  return { mode: 'legacy', channelId, postCount, isResume };
+  const sinceIdx = args.indexOf('--since');
+  const sinceHours = sinceIdx !== -1 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) || 0 : 0;
+  return { mode: 'legacy', channelId, postCount, isResume, sinceHours };
 }
 
 // ─── B-Stage: Global Checkpoint ─────────────────────────
@@ -1212,7 +1219,7 @@ async function checkLoginStatus(page: Page): Promise<boolean> {
 
 // ─── Main ────────────────────────────────────────────────
 
-async function runCollection({ channelId, postCount, isResume, runId, page, gotoFn, globalMode }: CollectionParams): Promise<CollectionResult> {
+async function runCollection({ channelId, postCount, isResume, runId, page, gotoFn, globalMode, sinceCutoff, sinceHours }: CollectionParams): Promise<CollectionResult> {
   // Patch #7: Load taxonomy version
   let taxonomyVersion = '0.0';
   try {
@@ -1344,6 +1351,9 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
     log(`처리 대상: ${remaining.length}개 (완료: ${completedSet.size}개, 답글로 확인됨: ${knownReplyIds.size}개)`);
 
+    // Metric-only updates for deduped posts (GraphQL data → upsert)
+    const dedupMetricPosts: CanonicalPost[] = [];
+
     let nextLongBreak = randInt(LONG_BREAK_INTERVAL.min, LONG_BREAK_INTERVAL.max);
     let processedSinceBreak = 0;
     let processedCount = 0; // B-Stage: absolute count for 10-post health check
@@ -1359,9 +1369,33 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
         continue;
       }
 
-      // Patch #2: dedup check
+      // Patch #2: dedup check — 지표만 업데이트 (본문 재수집 안 함)
       if (isPostSeen(channelId, pid)) {
-        log(`  ${pid} — dedup skip (이전 런에서 수집됨)`);
+        const gqlDedup = gqlPostMap.get(pid);
+        if (gqlDedup) {
+          dedupMetricPosts.push({
+            post_id: pid,
+            channel_id: channelId,
+            text: gqlDedup.text || '',
+            timestamp: gqlDedup.timestamp_unix ? new Date(gqlDedup.timestamp_unix * 1000).toISOString() : undefined,
+            metrics: {
+              view_count: null, // view_count는 개별 페이지에서만 확보 가능
+              like_count: gqlDedup.like_count ?? 0,
+              reply_count: gqlDedup.reply_count ?? 0,
+              repost_count: gqlDedup.repost_count ?? 0,
+            },
+            crawl_meta: {
+              crawl_at: new Date().toISOString(),
+              run_id: runId,
+              selector_tier: 'graphql_dedup' as any,
+              login_status: true,
+              block_detected: false,
+            },
+          } as unknown as CanonicalPost);
+          log(`  ${pid} — dedup 지표 업데이트 (likes:${gqlDedup.like_count}, replies:${gqlDedup.reply_count})`);
+        } else {
+          log(`  ${pid} — dedup skip (GraphQL 데이터 없음)`);
+        }
         completedSet.add(pid);
         cp.completedHooks.push(pid);
         continue;
@@ -1373,6 +1407,29 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
         completedSet.add(pid);
         cp.completedHooks.push(pid);
         continue;
+      }
+
+      // --since 시간 기반 중단: GraphQL timestamp로 판단
+      if (sinceCutoff > 0) {
+        const gqlTime = gqlPostMap.get(pid);
+        if (gqlTime?.timestamp_unix) {
+          const postTime = gqlTime.timestamp_unix * 1000;
+          if (postTime < sinceCutoff) {
+            log(`  ${pid} — ${sinceHours}h 이전 포스트 (${new Date(postTime).toISOString().slice(0,16)}) → 시간 기반 중단`);
+            break; // 피드는 최신순이므로 이후 포스트도 더 오래됨
+          }
+        } else if (gqlTime?.time_text) {
+          // timestamp_unix 없을 때 time_text로 판단 ("1일 전", "2일 전", "3시간 전")
+          const txt = gqlTime.time_text;
+          const dayMatch = txt.match(/(\d+)\s*(일|d)/);
+          if (dayMatch) {
+            const days = parseInt(dayMatch[1], 10);
+            if (days * 24 > sinceHours) {
+              log(`  ${pid} — "${txt}" → ${sinceHours}h 초과, 시간 기반 중단`);
+              break;
+            }
+          }
+        }
       }
 
       const url = `${BASE_URL}/@${channelId}/post/${pid}`;
@@ -1650,6 +1707,12 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
       const dbInserted = await savePostsToDB(canonicalPosts, runId);
       log(`DB 저장: ${dbInserted}/${canonicalPosts.length}개 신규 포스트`);
+
+      // Dedup 포스트 지표 업데이트 (본문 스킵, 조회수/좋아요/댓글/리포스트만)
+      if (dedupMetricPosts.length > 0) {
+        const dbUpdated = await savePostsToDB(dedupMetricPosts, runId);
+        log(`지표 업데이트: ${dbUpdated}/${dedupMetricPosts.length}개 기존 포스트`);
+      }
     } catch (e) {
       log(`DB 저장 실패 (JSON은 정상 저장됨): ${(e as Error).message}`);
     }
@@ -1710,9 +1773,10 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
 async function main(): Promise<void> {
   const parsed = parseArgs();
-  const { mode, channelId, postCount, isResume } = parsed;
+  const { mode, channelId, postCount, isResume, sinceHours } = parsed;
   const globalMode = mode === 'global';
   const runId = getRunId();
+  const sinceCutoff = sinceHours > 0 ? Date.now() - sinceHours * 3600 * 1000 : 0;
 
   log(`수집 시작: @${channelId} — ${postCount}개 포스트 (v2${globalMode ? ' global' : ''})`);
   log(`   Run ID: ${runId}`);
@@ -1767,7 +1831,7 @@ async function main(): Promise<void> {
     : (p: Page, url: string, opts: { waitUntil: 'domcontentloaded'; timeout: number }) => p.goto(url, opts);
 
   const result = await runCollection({
-    channelId, postCount, isResume, runId, page, gotoFn, globalMode,
+    channelId, postCount, isResume, runId, page, gotoFn, globalMode, sinceCutoff, sinceHours,
   });
 
   // B-Stage: Update global checkpoint on successful completion
