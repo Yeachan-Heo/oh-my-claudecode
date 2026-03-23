@@ -90,6 +90,17 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
             const workerIndex = nextIndex;
             nextIndex++;
             const workerName = `worker-${workerIndex}`;
+            if (config.workers.some((worker) => worker.name === workerName)) {
+                await teamAppendEvent(sanitized, {
+                    type: 'team_leader_nudge',
+                    worker: 'leader-fixed',
+                    reason: `scale_up_duplicate_worker_blocked:${workerName}`,
+                }, leaderCwd);
+                return {
+                    ok: false,
+                    error: `Worker ${workerName} already exists in team ${sanitized}; refusing to spawn duplicate worker identity.`,
+                };
+            }
             // Create worker directory
             const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
             await mkdir(workerDirPath, { recursive: true });

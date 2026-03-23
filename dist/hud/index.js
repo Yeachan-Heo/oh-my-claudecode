@@ -131,11 +131,12 @@ async function main(watchMode = false, skipInit = false) {
         const transcriptData = await parseTranscript(resolvedTranscriptPath, {
             staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
         });
+        const currentSessionId = extractSessionIdFromPath(resolvedTranscriptPath ?? stdin.transcript_path);
         // Read OMC state files
-        const ralph = readRalphStateForHud(cwd);
-        const ultrawork = readUltraworkStateForHud(cwd);
+        const ralph = readRalphStateForHud(cwd, currentSessionId ?? undefined);
+        const ultrawork = readUltraworkStateForHud(cwd, currentSessionId ?? undefined);
         const prd = readPrdStateForHud(cwd);
-        const autopilot = readAutopilotStateForHud(cwd);
+        const autopilot = readAutopilotStateForHud(cwd, currentSessionId ?? undefined);
         // Read HUD state for background tasks
         const hudState = readHudState(cwd);
         const _backgroundTasks = hudState?.backgroundTasks || [];
@@ -145,7 +146,6 @@ async function main(watchMode = false, skipInit = false) {
         // We persist the real start time in HUD state on first observation.
         // Scoped per session ID so a new session in the same cwd resets the timestamp.
         let sessionStart = transcriptData.sessionStart;
-        const currentSessionId = extractSessionIdFromPath(resolvedTranscriptPath ?? stdin.transcript_path);
         const sameSession = hudState?.sessionId === currentSessionId;
         if (sameSession && hudState?.sessionStartTimestamp) {
             // Use persisted value (the real session start) - but validate first
@@ -222,6 +222,7 @@ async function main(watchMode = false, skipInit = false) {
         // Build render context
         const context = {
             contextPercent,
+            contextDisplayScope: currentSessionId ?? cwd,
             modelName: getModelName(stdin),
             ralph,
             ultrawork,

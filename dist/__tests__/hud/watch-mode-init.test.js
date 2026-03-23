@@ -34,11 +34,17 @@ const fakeConfig = {
 describe('HUD watch mode initialization', () => {
     const originalIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
     let initializeHUDState;
+    let readRalphStateForHud;
+    let readUltraworkStateForHud;
+    let readAutopilotStateForHud;
     let consoleLogSpy;
     let consoleErrorSpy;
     async function importHudModule() {
         vi.resetModules();
         initializeHUDState = vi.fn(async () => { });
+        readRalphStateForHud = vi.fn(() => null);
+        readUltraworkStateForHud = vi.fn(() => null);
+        readAutopilotStateForHud = vi.fn(() => null);
         vi.doMock('../../hud/stdin.js', () => ({
             readStdin: vi.fn(async () => null),
             writeStdinCache: vi.fn(),
@@ -67,10 +73,10 @@ describe('HUD watch mode initialization', () => {
             writeHudState: vi.fn(() => true),
         }));
         vi.doMock('../../hud/omc-state.js', () => ({
-            readRalphStateForHud: vi.fn(() => null),
-            readUltraworkStateForHud: vi.fn(() => null),
+            readRalphStateForHud,
+            readUltraworkStateForHud,
             readPrdStateForHud: vi.fn(() => null),
-            readAutopilotStateForHud: vi.fn(() => null),
+            readAutopilotStateForHud,
         }));
         vi.doMock('../../hud/usage-api.js', () => ({ getUsage: vi.fn(async () => null) }));
         vi.doMock('../../hud/custom-rate-provider.js', () => ({ executeCustomProvider: vi.fn(async () => null) }));
@@ -96,6 +102,7 @@ describe('HUD watch mode initialization', () => {
         consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
     });
     afterEach(() => {
+        fakeStdin.transcript_path = '/tmp/worktree/transcript.jsonl';
         vi.resetModules();
         vi.clearAllMocks();
         vi.doUnmock('../../hud/stdin.js');
@@ -128,6 +135,14 @@ describe('HUD watch mode initialization', () => {
         initializeHUDState.mockClear();
         await hud.main(true, false);
         expect(initializeHUDState).toHaveBeenCalledTimes(1);
+    });
+    it('passes the current session id to OMC state readers', async () => {
+        const hud = await importHudModule();
+        fakeStdin.transcript_path = '/tmp/worktree/transcripts/123e4567-e89b-12d3-a456-426614174000.jsonl';
+        await hud.main(true, false);
+        expect(readRalphStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
+        expect(readUltraworkStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
+        expect(readAutopilotStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
     });
 });
 //# sourceMappingURL=watch-mode-init.test.js.map

@@ -17,6 +17,7 @@ import { normalizeTeamManifest } from './governance.js';
 import { normalizeTeamGovernance } from './governance.js';
 import { isTerminalTeamTaskStatus, canTransitionTeamTaskStatus, } from './contracts.js';
 import { claimTask as claimTaskImpl, transitionTaskStatus as transitionTaskStatusImpl, releaseTaskClaim as releaseTaskClaimImpl, listTasks as listTasksImpl, } from './state/tasks.js';
+import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -133,7 +134,7 @@ export async function teamReadConfig(teamName, cwd) {
     // Try manifest first, fall back to config.json
     const manifest = await teamReadManifest(teamName, cwd);
     if (manifest) {
-        return {
+        return canonicalizeTeamConfigWorkers({
             name: manifest.name,
             task: manifest.task,
             agent_type: 'claude',
@@ -154,10 +155,11 @@ export async function teamReadConfig(teamName, cwd) {
             resize_hook_name: manifest.resize_hook_name,
             resize_hook_target: manifest.resize_hook_target,
             next_worker_index: manifest.next_worker_index,
-        };
+        });
     }
     const configPath = absPath(cwd, TeamPaths.config(teamName));
-    return readJsonSafe(configPath);
+    const config = await readJsonSafe(configPath);
+    return config ? canonicalizeTeamConfigWorkers(config) : null;
 }
 export async function teamReadManifest(teamName, cwd) {
     const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));

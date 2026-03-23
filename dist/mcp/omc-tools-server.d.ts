@@ -30,7 +30,7 @@ export declare function parseDisabledGroups(envValue?: string): Set<ToolCategory
  * Tools will be available as mcp__t__<tool_name>.
  * Tools in disabled groups (via OMC_DISABLE_TOOLS) are excluded at startup.
  */
-export declare const omcToolsServer: any;
+export declare const omcToolsServer: import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance;
 /**
  * Tool names in MCP format for allowedTools configuration.
  * Only includes tools that are enabled (not disabled via OMC_DISABLE_TOOLS).

@@ -54,6 +54,7 @@ __export(tmux_session_exports, {
   buildWorkerStartCommand: () => buildWorkerStartCommand,
   createSession: () => createSession,
   createTeamSession: () => createTeamSession,
+  detectTeamMultiplexerContext: () => detectTeamMultiplexerContext,
   getDefaultShell: () => getDefaultShell,
   injectToLeaderPane: () => injectToLeaderPane,
   isSessionAlive: () => isSessionAlive,
@@ -66,6 +67,7 @@ __export(tmux_session_exports, {
   paneHasActiveTask: () => paneHasActiveTask,
   paneLooksReady: () => paneLooksReady,
   resolveShellFromCandidates: () => resolveShellFromCandidates,
+  resolveSplitPaneWorkerPaneIds: () => resolveSplitPaneWorkerPaneIds,
   resolveSupportedShellAffinity: () => resolveSupportedShellAffinity,
   sanitizeName: () => sanitizeName,
   sendToWorker: () => sendToWorker,
@@ -76,6 +78,11 @@ __export(tmux_session_exports, {
   validateTmux: () => validateTmux,
   waitForPaneReady: () => waitForPaneReady
 });
+function detectTeamMultiplexerContext(env = process.env) {
+  if (env.TMUX) return "tmux";
+  if (env.CMUX_SURFACE_ID) return "cmux";
+  return "none";
+}
 function isUnixLikeOnWindows() {
   return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
 }
@@ -298,7 +305,8 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
   const { execFile: execFile3 } = await import("child_process");
   const { promisify: promisify2 } = await import("util");
   const execFileAsync = promisify2(execFile3);
-  const inTmux = Boolean(process.env.TMUX);
+  const multiplexerContext = detectTeamMultiplexerContext();
+  const inTmux = multiplexerContext === "tmux";
   const useDedicatedWindow = Boolean(options.newWindow && inTmux);
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
   const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
@@ -687,6 +695,32 @@ async function killWorkerPanes(opts) {
       await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
     } catch {
     }
+  }
+}
+function isPaneId(value) {
+  return typeof value === "string" && /^%\d+$/.test(value.trim());
+}
+function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
+  const unique = /* @__PURE__ */ new Set();
+  for (const paneId of paneIds) {
+    if (!isPaneId(paneId)) continue;
+    const normalized = paneId.trim();
+    if (normalized === leaderPaneId) continue;
+    unique.add(normalized);
+  }
+  return [...unique];
+}
+async function resolveSplitPaneWorkerPaneIds(sessionName2, recordedPaneIds, leaderPaneId) {
+  const resolved = dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
+  if (!sessionName2.includes(":")) return resolved;
+  try {
+    const paneResult = await tmuxAsync(["list-panes", "-t", sessionName2, "-F", "#{pane_id}"]);
+    return dedupeWorkerPaneIds(
+      [...resolved, ...paneResult.stdout.split("\n").map((paneId) => paneId.trim())],
+      leaderPaneId
+    );
+  } catch {
+    return resolved;
   }
 }
 async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, options = {}) {
@@ -2252,6 +2286,35 @@ function sanitizePromptContent(content, maxLength = 4e3) {
   return sanitized;
 }
 
+// src/utils/omc-cli-rendering.ts
+var import_child_process3 = require("child_process");
+var OMC_CLI_BINARY = "omc";
+var OMC_PLUGIN_BRIDGE_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs';
+function commandExists(command, env) {
+  const lookupCommand = process.platform === "win32" ? "where" : "which";
+  const result = (0, import_child_process3.spawnSync)(lookupCommand, [command], {
+    stdio: "ignore",
+    env
+  });
+  return result.status === 0;
+}
+function resolveOmcCliPrefix(options = {}) {
+  const env = options.env ?? process.env;
+  const omcAvailable = options.omcAvailable ?? commandExists(OMC_CLI_BINARY, env);
+  if (omcAvailable) {
+    return OMC_CLI_BINARY;
+  }
+  const pluginRoot = typeof env.CLAUDE_PLUGIN_ROOT === "string" ? env.CLAUDE_PLUGIN_ROOT.trim() : "";
+  if (pluginRoot) {
+    return OMC_PLUGIN_BRIDGE_PREFIX;
+  }
+  return OMC_CLI_BINARY;
+}
+function formatOmcCliInvocation(commandSuffix, options = {}) {
+  const suffix = commandSuffix.trim().replace(/^omc\s+/, "");
+  return `${resolveOmcCliPrefix(options)} ${suffix}`.trim();
+}
+
 // src/team/worker-bootstrap.ts
 function buildInstructionPath(...parts) {
   return (0, import_path7.join)(...parts).replaceAll("\\", "/");
@@ -2264,20 +2327,23 @@ function generateTriggerMessage(teamName, workerName2, teamStateRoot2 = ".omc/st
   return `Read ${inboxPath}, start work now, report concrete progress (not ACK-only), and keep executing your assigned or next feasible work.`;
 }
 function agentTypeGuidance(agentType) {
+  const teamApiCommand = formatOmcCliInvocation("team api");
+  const claimTaskCommand = formatOmcCliInvocation("team api claim-task");
+  const transitionTaskStatusCommand = formatOmcCliInvocation("team api transition-task-status");
   switch (agentType) {
     case "codex":
       return [
         "### Agent-Type Guidance (codex)",
-        "- Prefer short, explicit `omc team api ... --json` commands and parse outputs before next step.",
+        `- Prefer short, explicit \`${teamApiCommand} ... --json\` commands and parse outputs before next step.`,
         "- If a command fails, report the exact stderr to leader-fixed before retrying.",
-        "- You MUST run `omc team api claim-task` before starting work and `omc team api transition-task-status` when done."
+        `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done.`
       ].join("\n");
     case "gemini":
       return [
         "### Agent-Type Guidance (gemini)",
         "- Execute task work in small, verifiable increments and report each milestone to leader-fixed.",
         "- Keep commit-sized changes scoped to assigned files only; no broad refactors.",
-        "- CRITICAL: You MUST run `omc team api claim-task` before starting work and `omc team api transition-task-status` when done. Do not exit without transitioning the task status."
+        `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`
       ].join("\n");
     case "claude":
     default:
@@ -2299,6 +2365,16 @@ function generateWorkerOverlay(params) {
   const heartbeatPath = `.omc/state/team/${teamName}/workers/${workerName2}/heartbeat.json`;
   const inboxPath = `.omc/state/team/${teamName}/workers/${workerName2}/inbox.md`;
   const statusPath = `.omc/state/team/${teamName}/workers/${workerName2}/status.json`;
+  const claimTaskCommand = formatOmcCliInvocation(`team api claim-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName2}\\"}" --json`);
+  const sendAckCommand = formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName2}\\",\\"to_worker\\":\\"leader-fixed\\",\\"body\\":\\"ACK: ${workerName2} initialized\\"}" --json`);
+  const completeTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"from\\":\\"in_progress\\",\\"to\\":\\"completed\\",\\"claim_token\\":\\"<claim_token>\\"}" --json`);
+  const failTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"from\\":\\"in_progress\\",\\"to\\":\\"failed\\",\\"claim_token\\":\\"<claim_token>\\"}" --json`);
+  const readTaskCommand = formatOmcCliInvocation(`team api read-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\"}" --json`);
+  const releaseClaimCommand = formatOmcCliInvocation(`team api release-task-claim --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"claim_token\\":\\"<claim_token>\\",\\"worker\\":\\"${workerName2}\\"}" --json`);
+  const mailboxListCommand = formatOmcCliInvocation(`team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName2}\\"}" --json`);
+  const mailboxDeliveredCommand = formatOmcCliInvocation(`team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName2}\\",\\"message_id\\":\\"<id>\\"}" --json`);
+  const teamApiCommand = formatOmcCliInvocation("team api");
+  const teamCommand = formatOmcCliInvocation("team");
   const taskList = sanitizedTasks.length > 0 ? sanitizedTasks.map((t) => `- **Task ${t.id}**: ${t.subject}
   Description: ${t.description}
   Status: pending`).join("\n") : "- No tasks assigned yet. Check your inbox for assignments.";
@@ -2316,14 +2392,14 @@ mkdir -p $(dirname ${sentinelPath}) && touch ${sentinelPath}
 You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.
 
 1. **Claim** your task (run this command first):
-   \`omc team api claim-task --input "{"team_name":"${teamName}","task_id":"<id>","worker":"${workerName2}"}" --json\`
+   \`${claimTaskCommand}\`
    Save the \`claim_token\` from the response \u2014 you need it for step 4.
 2. **Do the work** described in your task assignment below.
 3. **Send ACK** to the leader:
-   \`omc team api send-message --input "{"team_name":"${teamName}","from_worker":"${workerName2}","to_worker":"leader-fixed","body":"ACK: ${workerName2} initialized"}" --json\`
+   \`${sendAckCommand}\`
 4. **Transition** the task status (REQUIRED before exit):
-   - On success: \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"completed","claim_token":"<claim_token>"}" --json\`
-   - On failure: \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"failed","claim_token":"<claim_token>"}" --json\`
+   - On success: \`${completeTaskCommand}\`
+   - On failure: \`${failTaskCommand}\`
 5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.
 
 ## Identity
@@ -2338,12 +2414,12 @@ ${taskList}
 ## Task Lifecycle Reference (CLI API)
 Use the CLI API for all task lifecycle operations. Do NOT directly edit task files.
 
-- Inspect task state: \`omc team api read-task --input "{"team_name":"${teamName}","task_id":"<id>"}" --json\`
+- Inspect task state: \`${readTaskCommand}\`
 - Task id format: State/CLI APIs use task_id: "<id>" (example: "1"), not "task-1"
-- Claim task: \`omc team api claim-task --input "{"team_name":"${teamName}","task_id":"<id>","worker":"${workerName2}"}" --json\`
-- Complete task: \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"completed","claim_token":"<claim_token>"}" --json\`
-- Fail task: \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"failed","claim_token":"<claim_token>"}" --json\`
-- Release claim (rollback): \`omc team api release-task-claim --input "{"team_name":"${teamName}","task_id":"<id>","claim_token":"<claim_token>","worker":"${workerName2}"}" --json\`
+- Claim task: \`${claimTaskCommand}\`
+- Complete task: \`${completeTaskCommand}\`
+- Fail task: \`${failTaskCommand}\`
+- Release claim (rollback): \`${releaseClaimCommand}\`
 
 ## Communication Protocol
 - **Inbox**: Read ${inboxPath} for new instructions
@@ -2359,13 +2435,13 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
 
 ## Message Protocol
 Send messages via CLI API:
-- To leader: \`omc team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName2}\\",\\"to_worker\\":\\"leader-fixed\\",\\"body\\":\\"<message>\\"}" --json\`
-- Check mailbox: \`omc team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName2}\\"}" --json\`
-- Mark delivered: \`omc team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName2}\\",\\"message_id\\":\\"<id>\\"}" --json\`
+- To leader: \`${formatOmcCliInvocation(`team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName2}\\",\\"to_worker\\":\\"leader-fixed\\",\\"body\\":\\"<message>\\"}" --json`)}\`
+- Check mailbox: \`${mailboxListCommand}\`
+- Mark delivered: \`${mailboxDeliveredCommand}\`
 
 ## Startup Handshake (Required)
 Before doing any task work, send exactly one startup ACK to the leader:
-\`omc team api send-message --input "{\\"team_name\\":\\"${teamName}\\",\\"from_worker\\":\\"${workerName2}\\",\\"to_worker\\":\\"leader-fixed\\",\\"body\\":\\"ACK: ${workerName2} initialized\\"}" --json\`
+\`${sendAckCommand}\`
 
 ## Shutdown Protocol
 When you see a shutdown request in your inbox:
@@ -2381,14 +2457,14 @@ When you see a shutdown request in your inbox:
 - Do NOT write lifecycle fields (status, owner, result, error) directly in task files; use CLI API
 - Do NOT spawn sub-agents. Complete work in this worker session only.
 - Do NOT create tmux panes/sessions (\`tmux split-window\`, \`tmux new-session\`, etc.).
-- Do NOT run team spawning/orchestration commands (for example: \`omc team ...\`, \`omx team ...\`, \`$team\`, \`$ultrawork\`, \`$autopilot\`, \`$ralph\`).
-- Worker-allowed control surface is only: \`omc team api ... --json\` (and equivalent \`omx team api ... --json\` where configured).
+- Do NOT run team spawning/orchestration commands (for example: \`${teamCommand} ...\`, \`omx team ...\`, \`$team\`, \`$ultrawork\`, \`$autopilot\`, \`$ralph\`).
+- Worker-allowed control surface is only: \`${teamApiCommand} ... --json\` (and equivalent \`omx team api ... --json\` where configured).
 - If blocked, write {"state": "blocked", "reason": "..."} to your status file
 
 ${agentTypeGuidance(agentType)}
 
 ## BEFORE YOU EXIT
-You MUST call \`omc team api transition-task-status\` to mark your task as "completed" or "failed" before exiting.
+You MUST call \`${formatOmcCliInvocation("team api transition-task-status")}\` to mark your task as "completed" or "failed" before exiting.
 If you skip this step, the leader cannot track your work and the task will appear stuck.
 
 ${bootstrapInstructions ? `## Role Context
@@ -3280,7 +3356,8 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
     }
   }
   const sessionMode = ownsWindow ?? Boolean(configData?.tmuxOwnsWindow) ? sessionName2.includes(":") ? "dedicated-window" : "detached-session" : "split-pane";
-  await killTeamSession(sessionName2, workerPaneIds, leaderPaneId, { sessionMode });
+  const effectiveWorkerPaneIds = sessionMode === "split-pane" ? await resolveSplitPaneWorkerPaneIds(sessionName2, workerPaneIds, leaderPaneId) : workerPaneIds;
+  await killTeamSession(sessionName2, effectiveWorkerPaneIds, leaderPaneId, { sessionMode });
   try {
     cleanupTeamWorktrees(teamName, cwd);
   } catch {
@@ -3918,7 +3995,7 @@ async function waitForSentinelReadiness(options = {}) {
 }
 
 // src/team/runtime-v2.ts
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_path16 = require("path");
 var import_fs14 = require("fs");
 var import_promises7 = require("fs/promises");
@@ -4028,6 +4105,98 @@ function getConfigGovernance(config) {
   return normalizeTeamGovernance(config?.governance, config?.policy);
 }
 
+// src/team/worker-canonicalization.ts
+function hasText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function hasAssignedTasks(worker) {
+  return Array.isArray(worker.assigned_tasks) && worker.assigned_tasks.length > 0;
+}
+function workerPriority(worker) {
+  if (hasText(worker.pane_id)) return 4;
+  if (typeof worker.pid === "number" && Number.isFinite(worker.pid)) return 3;
+  if (hasAssignedTasks(worker)) return 2;
+  if (typeof worker.index === "number" && worker.index > 0) return 1;
+  return 0;
+}
+function mergeAssignedTasks(primary, secondary) {
+  const merged = [];
+  for (const taskId of [...primary ?? [], ...secondary ?? []]) {
+    if (typeof taskId !== "string" || taskId.trim() === "" || merged.includes(taskId)) continue;
+    merged.push(taskId);
+  }
+  return merged;
+}
+function backfillText(primary, secondary) {
+  return hasText(primary) ? primary : secondary;
+}
+function backfillBoolean(primary, secondary) {
+  return typeof primary === "boolean" ? primary : secondary;
+}
+function backfillNumber(primary, secondary, predicate) {
+  const isUsable = (value) => typeof value === "number" && Number.isFinite(value) && (predicate ? predicate(value) : true);
+  return isUsable(primary) ? primary : isUsable(secondary) ? secondary : void 0;
+}
+function chooseWinningWorker(existing, incoming) {
+  const existingPriority = workerPriority(existing);
+  const incomingPriority = workerPriority(incoming);
+  if (incomingPriority > existingPriority) return { winner: incoming, loser: existing };
+  if (incomingPriority < existingPriority) return { winner: existing, loser: incoming };
+  if ((incoming.index ?? 0) >= (existing.index ?? 0)) return { winner: incoming, loser: existing };
+  return { winner: existing, loser: incoming };
+}
+function canonicalizeWorkers(workers) {
+  const byName = /* @__PURE__ */ new Map();
+  const duplicateNames = /* @__PURE__ */ new Set();
+  for (const worker of workers) {
+    const name = typeof worker.name === "string" ? worker.name.trim() : "";
+    if (!name) continue;
+    const normalized = {
+      ...worker,
+      name,
+      assigned_tasks: Array.isArray(worker.assigned_tasks) ? worker.assigned_tasks : []
+    };
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, normalized);
+      continue;
+    }
+    duplicateNames.add(name);
+    const { winner, loser } = chooseWinningWorker(existing, normalized);
+    byName.set(name, {
+      ...winner,
+      name,
+      assigned_tasks: mergeAssignedTasks(winner.assigned_tasks, loser.assigned_tasks),
+      pane_id: backfillText(winner.pane_id, loser.pane_id),
+      pid: backfillNumber(winner.pid, loser.pid),
+      index: backfillNumber(winner.index, loser.index, (value) => value > 0) ?? 0,
+      role: backfillText(winner.role, loser.role) ?? winner.role,
+      worker_cli: backfillText(winner.worker_cli, loser.worker_cli),
+      working_dir: backfillText(winner.working_dir, loser.working_dir),
+      worktree_path: backfillText(winner.worktree_path, loser.worktree_path),
+      worktree_branch: backfillText(winner.worktree_branch, loser.worktree_branch),
+      worktree_detached: backfillBoolean(winner.worktree_detached, loser.worktree_detached),
+      team_state_root: backfillText(winner.team_state_root, loser.team_state_root)
+    });
+  }
+  return {
+    workers: Array.from(byName.values()),
+    duplicateNames: Array.from(duplicateNames.values())
+  };
+}
+function canonicalizeTeamConfigWorkers(config) {
+  const { workers, duplicateNames } = canonicalizeWorkers(config.workers ?? []);
+  if (duplicateNames.length > 0) {
+    console.warn(
+      `[team] canonicalized duplicate worker entries: ${duplicateNames.join(", ")}`
+    );
+  }
+  return {
+    ...config,
+    workers
+  };
+}
+
 // src/team/monitor.ts
 async function readJsonSafe2(filePath) {
   try {
@@ -4047,7 +4216,8 @@ async function writeAtomic(filePath, data) {
   await rename3(tmpPath, filePath);
 }
 async function readTeamConfig(teamName, cwd) {
-  return readJsonSafe2(absPath(cwd, TeamPaths.config(teamName)));
+  const config = await readJsonSafe2(absPath(cwd, TeamPaths.config(teamName)));
+  return config ? canonicalizeTeamConfigWorkers(config) : null;
 }
 async function readWorkerStatus(teamName, workerName2, cwd) {
   const data = await readJsonSafe2(absPath(cwd, TeamPaths.workerStatus(teamName, workerName2)));
@@ -4528,7 +4698,7 @@ async function isWorkerPaneAlive(paneId) {
 async function captureWorkerPane(paneId) {
   if (!paneId) return "";
   return await new Promise((resolve5) => {
-    (0, import_child_process3.execFile)("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"], (err, stdout) => {
+    (0, import_child_process4.execFile)("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"], (err, stdout) => {
       if (err) resolve5("");
       else resolve5(stdout ?? "");
     });
@@ -4553,18 +4723,28 @@ function findOutstandingWorkerTask(worker, taskById, inProgressByOwner) {
   return owned[0] ?? null;
 }
 function buildV2TaskInstruction(teamName, workerName2, task, taskId) {
+  const claimTaskCommand = formatOmcCliInvocation(
+    `team api claim-task --input '${JSON.stringify({ team_name: teamName, task_id: taskId, worker: workerName2 })}' --json`,
+    {}
+  );
+  const completeTaskCommand = formatOmcCliInvocation(
+    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: "in_progress", to: "completed", claim_token: "<claim_token>" })}' --json`
+  );
+  const failTaskCommand = formatOmcCliInvocation(
+    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: "in_progress", to: "failed", claim_token: "<claim_token>" })}' --json`
+  );
   return [
     `## REQUIRED: Task Lifecycle Commands`,
     `You MUST run these commands. Do NOT skip any step.`,
     ``,
     `1. Claim your task:`,
-    `   omc team api claim-task --input '{"team_name":"${teamName}","task_id":"${taskId}","worker":"${workerName2}"}' --json`,
+    `   ${claimTaskCommand}`,
     `   Save the claim_token from the response.`,
     `2. Do the work described below.`,
     `3. On completion (use claim_token from step 1):`,
-    `   omc team api transition-task-status --input '{"team_name":"${teamName}","task_id":"${taskId}","from":"in_progress","to":"completed","claim_token":"<claim_token>"}' --json`,
+    `   ${completeTaskCommand}`,
     `4. On failure (use claim_token from step 1):`,
-    `   omc team api transition-task-status --input '{"team_name":"${teamName}","task_id":"${taskId}","from":"in_progress","to":"failed","claim_token":"<claim_token>"}' --json`,
+    `   ${failTaskCommand}`,
     `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
     ``,
     `## Task Assignment`,
@@ -5241,9 +5421,14 @@ Then exit your session.
     await new Promise((r) => setTimeout(r, 2e3));
   }
   try {
-    const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
-    const workerPaneIds = config.workers.map((w) => w.pane_id).filter((p) => typeof p === "string" && p.trim().length > 0);
+    const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2, resolveSplitPaneWorkerPaneIds: resolveSplitPaneWorkerPaneIds2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
+    const recordedWorkerPaneIds = config.workers.map((w) => w.pane_id).filter((p) => typeof p === "string" && p.trim().length > 0);
     const ownsWindow = config.tmux_window_owned === true;
+    const workerPaneIds = ownsWindow ? recordedWorkerPaneIds : await resolveSplitPaneWorkerPaneIds2(
+      config.tmux_session,
+      recordedWorkerPaneIds,
+      config.leader_pane_id ?? void 0
+    );
     await killWorkerPanes2({
       paneIds: workerPaneIds,
       leaderPaneId: config.leader_pane_id ?? void 0,

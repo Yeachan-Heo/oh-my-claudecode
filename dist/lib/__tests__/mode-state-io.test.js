@@ -209,6 +209,18 @@ describe('mode-state-io', () => {
             clearModeStateFile('autopilot', tempDir, 'session-mine-123');
             expect(existsSync(legacyPath)).toBe(false);
         });
+        it('should remove all session-scoped files when no session_id is provided', () => {
+            const sessionAPath = join(tempDir, '.omc', 'state', 'sessions', 'session-a', 'ralph-state.json');
+            const sessionBPath = join(tempDir, '.omc', 'state', 'sessions', 'session-b', 'ralph-state.json');
+            mkdirSync(join(tempDir, '.omc', 'state', 'sessions', 'session-a'), { recursive: true });
+            mkdirSync(join(tempDir, '.omc', 'state', 'sessions', 'session-b'), { recursive: true });
+            writeFileSync(sessionAPath, JSON.stringify({ active: true, session_id: 'session-a' }));
+            writeFileSync(sessionBPath, JSON.stringify({ active: true, session_id: 'session-b' }));
+            const result = clearModeStateFile('ralph', tempDir);
+            expect(result).toBe(true);
+            expect(existsSync(sessionAPath)).toBe(false);
+            expect(existsSync(sessionBPath)).toBe(false);
+        });
         it('should return true when file does not exist (already absent)', () => {
             const result = clearModeStateFile('ralph', tempDir);
             expect(result).toBe(true);

@@ -133,6 +133,37 @@ describe('processHook - Routing Matrix', () => {
             const result = await processHook('post-tool-use', input);
             expect(result.continue).toBe(true);
         });
+        it('marks keyword-triggered ralph state as awaiting confirmation so stop enforcement stays inert', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-ralph-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-ralph-session';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'ralph fix the regression in src/hooks/bridge.ts after issue #1795 by tracing keyword-detector into persistent-mode, preserving session-scoped state behavior, verifying the confirmation gate, keeping linked ultrawork activation intact, adding a focused regression test for false-positive prose prompts, checking stop-hook enforcement only after real Skill invocation, and confirming the smallest safe fix without widening the mode activation surface or changing unrelated orchestration behavior in this worktree',
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toContain('[RALPH + ULTRAWORK MODE ACTIVATED]');
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                const ralphState = JSON.parse(readFileSync(join(sessionDir, 'ralph-state.json'), 'utf-8'));
+                const ultraworkState = JSON.parse(readFileSync(join(sessionDir, 'ultrawork-state.json'), 'utf-8'));
+                expect(ralphState.active).toBe(true);
+                expect(ralphState.awaiting_confirmation).toBe(true);
+                expect(ultraworkState.active).toBe(true);
+                expect(ultraworkState.awaiting_confirmation).toBe(true);
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
         it('should activate ralph and linked ultrawork when Skill tool invokes ralph', async () => {
             const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralph-'));
             try {
@@ -156,6 +187,48 @@ describe('processHook - Routing Matrix', () => {
                 expect(ralphState.linked_ultrawork).toBe(true);
                 expect(ultraworkState.active).toBe(true);
                 expect(ultraworkState.linked_to_ralph).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('clears awaiting confirmation when Skill tool actually invokes ralph', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-confirm-ralph-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'confirm-ralph-session';
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                mkdirSync(sessionDir, { recursive: true });
+                writeFileSync(join(sessionDir, 'ralph-state.json'), JSON.stringify({
+                    active: true,
+                    awaiting_confirmation: true,
+                    iteration: 1,
+                    max_iterations: 10,
+                    session_id: sessionId,
+                    started_at: new Date().toISOString(),
+                    last_checked_at: new Date().toISOString(),
+                    prompt: 'Test task',
+                }, null, 2));
+                writeFileSync(join(sessionDir, 'ultrawork-state.json'), JSON.stringify({
+                    active: true,
+                    awaiting_confirmation: true,
+                    started_at: new Date().toISOString(),
+                    original_prompt: 'Test task',
+                    session_id: sessionId,
+                    reinforcement_count: 0,
+                    last_checked_at: new Date().toISOString(),
+                }, null, 2));
+                const result = await processHook('pre-tool-use', {
+                    sessionId,
+                    toolName: 'Skill',
+                    toolInput: { skill: 'oh-my-claudecode:ralph' },
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const ralphState = JSON.parse(readFileSync(join(sessionDir, 'ralph-state.json'), 'utf-8'));
+                const ultraworkState = JSON.parse(readFileSync(join(sessionDir, 'ultrawork-state.json'), 'utf-8'));
+                expect(ralphState.awaiting_confirmation).toBeUndefined();
+                expect(ultraworkState.awaiting_confirmation).toBeUndefined();
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });

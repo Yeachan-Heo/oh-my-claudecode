@@ -21,6 +21,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var bridge_exports = {};
 __export(bridge_exports, {
   GLOBAL_SKILLS_DIR: () => GLOBAL_SKILLS_DIR,
+  PROJECT_AGENT_SKILLS_SUBDIR: () => PROJECT_AGENT_SKILLS_SUBDIR,
   PROJECT_SKILLS_SUBDIR: () => PROJECT_SKILLS_SUBDIR,
   SKILL_EXTENSION: () => SKILL_EXTENSION,
   USER_SKILLS_DIR: () => USER_SKILLS_DIR,
@@ -57,7 +58,8 @@ var OmcPaths = {
   SCIENTIST: ".omc/scientist",
   AUTOPILOT: ".omc/autopilot",
   SKILLS: ".omc/skills",
-  SHARED_MEMORY: ".omc/state/shared-memory"
+  SHARED_MEMORY: ".omc/state/shared-memory",
+  DEEPINIT_MANIFEST: ".omc/deepinit-manifest.json"
 };
 
 // src/hooks/learner/bridge.ts
@@ -69,6 +71,7 @@ var USER_SKILLS_DIR = (0, import_path2.join)(
 );
 var GLOBAL_SKILLS_DIR = (0, import_path2.join)((0, import_os2.homedir)(), ".omc", "skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
+var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path2.join)(".agents", "skills");
 var SKILL_EXTENSION = ".md";
 var SESSION_TTL_MS = 60 * 60 * 1e3;
 var MAX_RECURSION_DEPTH = 10;
@@ -210,8 +213,8 @@ function safeRealpathSync(filePath) {
   }
 }
 function isWithinBoundary(realPath, boundary) {
-  const normalizedReal = realPath.replace(/\\/g, "/").replace(/\/+/g, "/");
-  const normalizedBoundary = boundary.replace(/\\/g, "/").replace(/\/+/g, "/");
+  const normalizedReal = safeRealpathSync(realPath).replace(/\\/g, "/").replace(/\/+/g, "/");
+  const normalizedBoundary = safeRealpathSync(boundary).replace(/\\/g, "/").replace(/\/+/g, "/");
   return normalizedReal === normalizedBoundary || normalizedReal.startsWith(normalizedBoundary + "/");
 }
 function findSkillFiles(projectRoot, options) {
@@ -219,20 +222,25 @@ function findSkillFiles(projectRoot, options) {
   const seenRealPaths = /* @__PURE__ */ new Set();
   const scope = options?.scope ?? "all";
   if (scope === "project" || scope === "all") {
-    const projectSkillsDir = (0, import_path2.join)(projectRoot, PROJECT_SKILLS_SUBDIR);
-    const projectFiles = [];
-    findSkillFilesRecursive(projectSkillsDir, projectFiles);
-    for (const filePath of projectFiles) {
-      const realPath = safeRealpathSync(filePath);
-      if (seenRealPaths.has(realPath)) continue;
-      if (!isWithinBoundary(realPath, projectSkillsDir)) continue;
-      seenRealPaths.add(realPath);
-      candidates.push({
-        path: filePath,
-        realPath,
-        scope: "project",
-        sourceDir: projectSkillsDir
-      });
+    const projectSkillDirs = [
+      (0, import_path2.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
+      (0, import_path2.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
+    ];
+    for (const projectSkillsDir of projectSkillDirs) {
+      const projectFiles = [];
+      findSkillFilesRecursive(projectSkillsDir, projectFiles);
+      for (const filePath of projectFiles) {
+        const realPath = safeRealpathSync(filePath);
+        if (seenRealPaths.has(realPath)) continue;
+        if (!isWithinBoundary(realPath, projectSkillsDir)) continue;
+        seenRealPaths.add(realPath);
+        candidates.push({
+          path: filePath,
+          realPath,
+          scope: "project",
+          sourceDir: projectSkillsDir
+        });
+      }
     }
   }
   if (scope === "user" || scope === "all") {
@@ -454,6 +462,7 @@ function matchSkillsForInjection(prompt, projectRoot, sessionId, options = {}) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   GLOBAL_SKILLS_DIR,
+  PROJECT_AGENT_SKILLS_SUBDIR,
   PROJECT_SKILLS_SUBDIR,
   SKILL_EXTENSION,
   USER_SKILLS_DIR,

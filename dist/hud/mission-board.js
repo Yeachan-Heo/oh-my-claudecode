@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { truncateToWidth } from '../utils/string-width.js';
+import { canonicalizeWorkers } from '../team/worker-canonicalization.js';
 const DEFAULT_CONFIG = {
     enabled: false,
     maxMissions: 2,
@@ -231,7 +232,12 @@ function collectTeamMission(teamRoot, teamName, config) {
     const teamConfig = readJsonSafe(join(teamRoot, 'config.json'));
     if (!teamConfig)
         return null;
-    const workers = Array.isArray(teamConfig.workers) ? teamConfig.workers : [];
+    const workers = canonicalizeWorkers((Array.isArray(teamConfig.workers) ? teamConfig.workers : []).map((worker, index) => ({
+        name: worker.name ?? '',
+        index: index + 1,
+        role: worker.role ?? 'worker',
+        assigned_tasks: Array.isArray(worker.assigned_tasks) ? worker.assigned_tasks : [],
+    }))).workers;
     const tasksDir = join(teamRoot, 'tasks');
     const tasks = existsSync(tasksDir)
         ? readdirSync(tasksDir)
@@ -336,7 +342,7 @@ function collectTeamMission(teamRoot, teamName, config) {
         createdAt,
         updatedAt,
         status: deriveTeamStatus(taskCounts, agents),
-        workerCount: teamConfig.worker_count || workers.length,
+        workerCount: workers.length,
         taskCounts,
         agents,
         timeline: timeline.slice(-config.maxTimelineEvents),

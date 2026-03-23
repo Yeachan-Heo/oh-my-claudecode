@@ -166,5 +166,37 @@ describe('mission board state tracking', () => {
         expect(mission?.agents[0]?.status).toBe('blocked');
         expect(mission?.agents[0]?.latestUpdate).toContain('waiting for approval');
     });
+    it('deduplicates duplicate team worker rows when refreshing mission board state', () => {
+        const cwd = makeTempDir();
+        const teamRoot = join(cwd, '.omc', 'state', 'team', 'dedupe-demo');
+        mkdirSync(join(teamRoot, 'tasks'), { recursive: true });
+        mkdirSync(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
+        writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+            name: 'dedupe-demo',
+            task: 'dedupe workers',
+            created_at: '2026-03-09T09:00:00.000Z',
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', role: 'executor', assigned_tasks: ['1'] },
+                { name: 'worker-1', role: 'executor', assigned_tasks: [], pane_id: '%7' },
+            ],
+        }, null, 2));
+        writeFileSync(join(teamRoot, 'tasks', '1.json'), JSON.stringify({
+            id: '1',
+            subject: 'Fix duplication',
+            status: 'in_progress',
+            owner: 'worker-1',
+        }, null, 2));
+        writeFileSync(join(teamRoot, 'workers', 'worker-1', 'status.json'), JSON.stringify({
+            state: 'working',
+            current_task_id: '1',
+            updated_at: '2026-03-09T09:05:00.000Z',
+        }, null, 2));
+        const state = refreshMissionBoardState(cwd);
+        const mission = state.missions.find((entry) => entry.source === 'team' && entry.teamName === 'dedupe-demo');
+        expect(mission?.agents).toHaveLength(1);
+        expect(mission?.agents[0]?.name).toBe('worker-1');
+        expect(mission?.workerCount).toBe(1);
+    });
 });
 //# sourceMappingURL=mission-board-state.test.js.map

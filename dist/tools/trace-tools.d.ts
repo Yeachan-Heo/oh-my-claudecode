@@ -19,8 +19,22 @@ export declare const traceSummaryTool: ToolDefinition<{
 /**
  * All trace tools for registration
  */
-export declare const traceTools: ToolDefinition<{
+export declare const traceTools: (ToolDefinition<{
+    query: z.ZodString;
+    limit: z.ZodOptional<z.ZodNumber>;
+    sessionId: z.ZodOptional<z.ZodString>;
+    since: z.ZodOptional<z.ZodString>;
+    project: z.ZodOptional<z.ZodString>;
+    caseSensitive: z.ZodOptional<z.ZodBoolean>;
+    contextChars: z.ZodOptional<z.ZodNumber>;
+    workingDirectory: z.ZodOptional<z.ZodString>;
+}> | ToolDefinition<{
+    sessionId: z.ZodOptional<z.ZodString>;
+    filter: z.ZodOptional<z.ZodEnum<["all", "hooks", "skills", "agents", "keywords", "tools", "modes"]>>;
+    last: z.ZodOptional<z.ZodNumber>;
+    workingDirectory: z.ZodOptional<z.ZodString>;
+}> | ToolDefinition<{
     sessionId: z.ZodOptional<z.ZodString>;
     workingDirectory: z.ZodOptional<z.ZodString>;
-}>[];
+}>)[];
 //# sourceMappingURL=trace-tools.d.ts.map

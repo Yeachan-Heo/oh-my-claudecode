@@ -91,6 +91,11 @@ export function detectAnySignal(sessionId) {
 // ============================================================================
 // ENFORCEMENT
 // ============================================================================
+function isAwaitingConfirmation(state) {
+    return Boolean(state &&
+        typeof state === 'object' &&
+        state.awaiting_confirmation === true);
+}
 /**
  * Get the next phase after current phase
  */
@@ -122,6 +127,9 @@ export async function checkAutopilot(sessionId, directory) {
     }
     // Strict session isolation: only process state for matching session
     if (state.session_id !== sessionId) {
+        return null;
+    }
+    if (isAwaitingConfirmation(state)) {
         return null;
     }
     // Check max iterations (safety limit)

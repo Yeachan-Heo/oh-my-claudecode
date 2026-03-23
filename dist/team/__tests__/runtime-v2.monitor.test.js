@@ -113,5 +113,36 @@ describe('monitorTeamV2 pane-based stall inference', () => {
         const snapshot = await monitorTeamV2('demo-team', cwd);
         expect(snapshot?.nonReportingWorkers).toEqual([]);
     });
+    it('deduplicates duplicate worker rows from persisted config during monitoring', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-dedup-'));
+        await writeConfigAndTask('pending');
+        const root = join(cwd, '.omc', 'state', 'team', 'demo-team');
+        await writeFile(join(root, 'config.json'), JSON.stringify({
+            name: 'demo-team',
+            task: 'demo',
+            agent_type: 'claude',
+            worker_launch_mode: 'interactive',
+            worker_count: 2,
+            max_workers: 20,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: ['1'] },
+                { name: 'worker-1', index: 0, role: 'claude', assigned_tasks: [], pane_id: '%2', working_dir: cwd },
+            ],
+            created_at: new Date().toISOString(),
+            tmux_session: 'demo-session:0',
+            leader_pane_id: '%1',
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+            next_task_id: 2,
+            team_state_root: join(cwd, '.omc', 'state', 'team', 'demo-team'),
+            workspace_mode: 'single',
+        }, null, 2), 'utf-8');
+        const { monitorTeamV2 } = await import('../runtime-v2.js');
+        const snapshot = await monitorTeamV2('demo-team', cwd);
+        expect(snapshot?.workers).toHaveLength(1);
+        expect(snapshot?.workers[0]?.name).toBe('worker-1');
+        expect(snapshot?.workers[0]?.assignedTasks).toEqual(['1']);
+    });
 });
 //# sourceMappingURL=runtime-v2.monitor.test.js.map

@@ -14,6 +14,7 @@ import { dirname } from 'path';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath } from './state-paths.js';
 import { normalizeTeamManifest } from './governance.js';
+import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
 // ---------------------------------------------------------------------------
@@ -40,7 +41,8 @@ async function writeAtomic(filePath, data) {
 // Config / Manifest readers
 // ---------------------------------------------------------------------------
 export async function readTeamConfig(teamName, cwd) {
-    return readJsonSafe(absPath(cwd, TeamPaths.config(teamName)));
+    const config = await readJsonSafe(absPath(cwd, TeamPaths.config(teamName)));
+    return config ? canonicalizeTeamConfigWorkers(config) : null;
 }
 export async function readTeamManifest(teamName, cwd) {
     const manifest = await readJsonSafe(absPath(cwd, TeamPaths.manifest(teamName)));

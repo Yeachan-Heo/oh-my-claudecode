@@ -304,8 +304,8 @@ export async function render(context, config) {
     // Context window
     if (enabledElements.contextBar) {
         const ctx = enabledElements.useBars
-            ? renderContextWithBar(context.contextPercent, config.thresholds)
-            : renderContext(context.contextPercent, config.thresholds);
+            ? renderContextWithBar(context.contextPercent, config.thresholds, 10, context.contextDisplayScope)
+            : renderContext(context.contextPercent, config.thresholds, context.contextDisplayScope);
         if (ctx)
             elements.push(ctx);
     }

@@ -35,10 +35,10 @@ describe('Builtin Skills', () => {
         clearSkillsCache();
     });
     describe('createBuiltinSkills()', () => {
-        it('should return correct number of skills (30 canonical + 1 alias)', () => {
+        it('should return correct number of skills (31 canonical + 1 alias)', () => {
             const skills = createBuiltinSkills();
-            // 31 entries: 30 canonical skills + 1 deprecated alias (psm)
-            expect(skills).toHaveLength(31);
+            // 32 entries: 31 canonical skills + 1 deprecated alias (psm)
+            expect(skills).toHaveLength(32);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -98,6 +98,7 @@ describe('Builtin Skills', () => {
                 'omc-setup',
                 'omc-teams',
                 'omc-plan',
+                'omc-reference',
                 'project-session-manager',
                 'psm',
                 'ralph',
@@ -268,7 +269,7 @@ describe('Builtin Skills', () => {
     describe('listBuiltinSkillNames()', () => {
         it('should return canonical skill names by default', () => {
             const names = listBuiltinSkillNames();
-            expect(names).toHaveLength(30);
+            expect(names).toHaveLength(31);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('ask');
             expect(names).toContain('autopilot');
@@ -278,6 +279,7 @@ describe('Builtin Skills', () => {
             expect(names).toContain('ralph');
             expect(names).toContain('ultrawork');
             expect(names).toContain('omc-plan');
+            expect(names).toContain('omc-reference');
             expect(names).toContain('deepinit');
             expect(names).toContain('release');
             expect(names).toContain('omc-doctor');
@@ -298,7 +300,7 @@ describe('Builtin Skills', () => {
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
             // swarm alias removed in #1131, psm still exists
-            expect(names).toHaveLength(31);
+            expect(names).toHaveLength(32);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('trace');
             expect(names).toContain('visual-verdict');

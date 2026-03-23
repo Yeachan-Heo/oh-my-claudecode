@@ -72,6 +72,13 @@ const TEAM_STAGE_ALIASES = {
 const BACKGROUND_AGENT_ID_PATTERN = /agentId:\s*([a-zA-Z0-9_-]+)/;
 const TASK_OUTPUT_ID_PATTERN = /<task_id>([^<]+)<\/task_id>/i;
 const TASK_OUTPUT_STATUS_PATTERN = /<status>([^<]+)<\/status>/i;
+const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+const MODE_CONFIRMATION_SKILL_MAP = {
+    ralph: ["ralph", "ultrawork"],
+    ultrawork: ["ultrawork"],
+    autopilot: ["autopilot"],
+    ralplan: ["ralplan"],
+};
 function getExtraField(input, key) {
     return input[key];
 }
@@ -105,6 +112,52 @@ function taskLaunchDidFail(toolOutput) {
     }
     const normalized = toolOutput.toLowerCase();
     return normalized.includes("error") || normalized.includes("failed");
+}
+function getModeStatePaths(directory, modeName, sessionId) {
+    const stateDir = join(getOmcRoot(directory), "state");
+    const safeSessionId = typeof sessionId === "string" && SAFE_SESSION_ID_PATTERN.test(sessionId)
+        ? sessionId
+        : undefined;
+    return [
+        safeSessionId ? join(stateDir, "sessions", safeSessionId, `${modeName}-state.json`) : null,
+        join(stateDir, `${modeName}-state.json`),
+    ].filter((statePath) => Boolean(statePath));
+}
+function updateModeAwaitingConfirmation(directory, modeName, sessionId, awaitingConfirmation) {
+    for (const statePath of getModeStatePaths(directory, modeName, sessionId)) {
+        if (!existsSync(statePath)) {
+            continue;
+        }
+        try {
+            const state = JSON.parse(readFileSync(statePath, "utf-8"));
+            if (!state || typeof state !== "object") {
+                continue;
+            }
+            if (awaitingConfirmation) {
+                state.awaiting_confirmation = true;
+            }
+            else if (state.awaiting_confirmation === true) {
+                delete state.awaiting_confirmation;
+            }
+            else {
+                continue;
+            }
+            writeFileSync(statePath, JSON.stringify(state, null, 2));
+        }
+        catch {
+            // Best-effort state sync only.
+        }
+    }
+}
+function markModeAwaitingConfirmation(directory, sessionId, ...modeNames) {
+    for (const modeName of modeNames) {
+        updateModeAwaitingConfirmation(directory, modeName, sessionId, true);
+    }
+}
+function confirmSkillModeStates(directory, skillName, sessionId) {
+    for (const modeName of MODE_CONFIRMATION_SKILL_MAP[skillName] ?? []) {
+        updateModeAwaitingConfirmation(directory, modeName, sessionId, false);
+    }
 }
 function readTeamStagedState(directory, sessionId) {
     const stateDir = join(getOmcRoot(directory), "state");
@@ -447,7 +500,10 @@ async function processKeywordDetector(input) {
                 }
                 // Activate ralph state which also auto-activates ultrawork
                 const hook = createRalphLoopHook(directory);
-                hook.startLoop(sessionId, cleanPrompt, criticMode ? { criticMode } : undefined);
+                const started = hook.startLoop(sessionId, cleanPrompt, criticMode ? { criticMode } : undefined);
+                if (started) {
+                    markModeAwaitingConfirmation(directory, sessionId, 'ralph', 'ultrawork');
+                }
                 messages.push(RALPH_MESSAGE);
                 break;
             }
@@ -455,7 +511,10 @@ async function processKeywordDetector(input) {
                 // Lazy-load ultrawork module
                 const { activateUltrawork } = await import("./ultrawork/index.js");
                 // Activate persistent ultrawork state
-                activateUltrawork(promptText, sessionId, directory);
+                const activated = activateUltrawork(promptText, sessionId, directory);
+                if (activated) {
+                    markModeAwaitingConfirmation(directory, sessionId, 'ultrawork');
+                }
                 messages.push(ULTRAWORK_MESSAGE);
                 break;
             }
@@ -1036,9 +1095,10 @@ function processPreToolUse(input) {
             // the Stop hook in short-lived processes.
             try {
                 writeSkillActiveState(directory, skillName, input.sessionId, rawSkillName);
+                confirmSkillModeStates(directory, skillName, input.sessionId);
             }
             catch {
-                // Skill-state write is best-effort; don't fail the hook on error.
+                // Skill-state/state-sync writes are best-effort; don't fail the hook on error.
             }
         }
     }

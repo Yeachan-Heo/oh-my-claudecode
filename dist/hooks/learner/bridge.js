@@ -232,8 +232,12 @@ function safeRealpathSync(filePath) {
  * Check if a resolved path is within a boundary directory.
  */
 function isWithinBoundary(realPath, boundary) {
-    const normalizedReal = realPath.replace(/\\/g, "/").replace(/\/+/g, "/");
-    const normalizedBoundary = boundary.replace(/\\/g, "/").replace(/\/+/g, "/");
+    const normalizedReal = safeRealpathSync(realPath)
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/");
+    const normalizedBoundary = safeRealpathSync(boundary)
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/");
     return (normalizedReal === normalizedBoundary ||
         normalizedReal.startsWith(normalizedBoundary + "/"));
 }
