@@ -1,6 +1,52 @@
-# Threads2 Handoff — 2026-03-23 (세션 16)
+# Threads2 Handoff — 2026-03-23 (세션 14)
 
-## 현재 상태: PLAN-AI-COMPANY v4 전체 완료 (S-1 ~ S-17 ALL DONE) ✅
+## 현재 상태: PLAN v4 전체 완료 + /daily-run v2 에이전트 스폰 기반 업그레이드
+
+### 이번 세션(14) 핵심 작업
+
+| 작업 | 상태 |
+|------|------|
+| PLAN v4 Phase 1 Foundation (S-1~S-4) | ✅ 9 에이전트 + soul/ops + agent_messages + 리서치 |
+| PLAN v4 Phase 2 Round 1 (S-6~S-9) | ✅ 워밍업게이트 + 네이버 + 브랜드확장 + 경쟁사모니터링 |
+| PLAN v4 Phase 2 Round 2 (S-5, S-10~S-12) | ✅ /daily-run + 실험 + 리사이클 + 학습 |
+| PLAN v4 Phase 3 Round 1 (S-13~S-15) | ✅ Safety Gates + 오케스트레이터 + 주간회의 |
+| PLAN v4 Phase 3 Round 2 (S-16~S-17) | ✅ 수익추적 + 자율실험 |
+| **/daily-run v2 에이전트 스폰 기반** | ✅ agent-spawner.ts + SKILL.md 재작성 |
+| /기획 통합 스캔 수정 | ✅ 5개 별도 → 1개 _signal-scan.ts |
+| track-performance.ts 버그수정 | ✅ content_lifecycle 본문 동기화 + 스냅샷 ID |
+| 성과 분석 | ✅ 16개 포스트 성과 수집 + 분석 |
+| 포스트 게시 2개 | ✅ 클렌징 오일 + 여드름패치 |
+| 스킬 등록 | ✅ /daily-run, /수집, /weekly-retro, /기획 |
+
+### /daily-run v2 — 에이전트 스폰 방식 (핵심 업그레이드)
+
+이전: 스킬이 "지시서" → Claude가 직접 모든 작업 수행
+이후: 각 Phase에서 Agent 도구로 해당 에이전트를 스폰 → 역할별 독립 실행
+
+```
+Phase 1: 준호(리서처) 스폰 → 수집 → agent_messages 보고
+Phase 2: 서연(분석가) 스폰 → 분석 → CEO에게 보고
+Phase 3: 민준(CEO) 스폰 → directive 생성 → 전체 배포
+Phase 4: 에디터 스폰 → 초안 → 도윤(QA) 검증 → 통과/반려 루프
+Phase 5: Safety Gates 자동 → aff_contents 'ready'
+```
+
+파일: `src/orchestrator/agent-spawner.ts` (AGENT_REGISTRY 9개 + EDITOR_MAP + buildAgentPrompt)
+스킬: `~/.claude/skills/daily-run/SKILL.md` (v2 에이전트 스폰 기반)
+
+### 발견된 문제 + 해결
+
+1. **수집→분석 전환 시 완료 대기 누락** → Phase 1 완료 게이트 추가
+2. **/기획에서 24h 데이터 안 읽음** → _signal-scan.ts 통합 스크립트로 교체
+3. **에이전트가 실제 스폰 안 됨** → /daily-run v2로 재작성 (에이전트 스폰 기반)
+4. **content_lifecycle 본문 비어있음** → track-performance.ts에서 동시 업데이트
+
+### 다음 세션 우선순위
+
+1. **`/daily-run --posts 3` 실제 실행** — 에이전트 스폰 파이프라인 E2E 검증
+2. **CEO Shadow Mode (S-2b)** — 5일 directive 채점
+3. **워밍업 포스트 계속** — 16/100 → 하루 3~5개
+4. **agent_messages 실제 사용 검증** — 에이전트 간 소통 로그 확인
 
 ### Phase 3 Round 2 검증 결과 (세션 16)
 
