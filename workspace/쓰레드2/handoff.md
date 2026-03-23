@@ -1,6 +1,6 @@
 # Threads2 Handoff — 2026-03-23 (세션 12)
 
-## 현재 상태: DB 정리 완료, /수집 스킬 생성, TAG_MAP 확장 + /기획 E2E 대기
+## 현재 상태: 수집/기획/게시 E2E 완료, AI Company Plan v4 확정, Phase 1 구현 대기
 
 ### 이번 세션(12) 완료 작업
 
@@ -15,6 +15,14 @@
 | 7 | TAG_MAP 확장 — classifyByText() 추가, 72개 본문 매칭 재분류 (기타 804→732) | ✅ |
 | 8 | `/기획` E2E 테스트 — 수집→기획→토론→게시 완료 | ✅ |
 | 9 | 여드름패치 포스트 게시 — https://www.threads.com/@duribeon231/post/DWNkJLTkZnZ | ✅ |
+| 10 | `/수집` 스킬 v2 — YouTube(playlistItems 1unit) + 트렌드 + 벤치마크(--since) + 병렬 | ✅ |
+| 11 | YouTube API search→playlistItems 전환 (쿼터 99% 절약) | ✅ |
+| 12 | YouTube 채널 ID 변환 (29개 handle→UC, 27/29 성공) | ✅ |
+| 13 | YouTube collector 에러 핸들링 (per-channel try-catch) | ✅ |
+| 14 | collect.ts --since N 시간 기반 수집 중단 | ✅ |
+| 15 | 벤치마크 29채널 전체 수집 — 신규 94개 + 지표 업데이트 156개 | ✅ |
+| 16 | PLAN-AI-COMPANY v4 확정 — 9에이전트, 권한 분리, 코드 수정 프로토콜 | ✅ |
+| 17 | Claude-Code-Game-Studios 분석 — 6개 적용 패턴 도출 | ✅ |
 
 ### DB 현황 (세션 12 정리 후)
 
@@ -76,24 +84,31 @@
 [통합 스킬]      ~/.claude/skills/수집.md             (위 도구 통합)       ✅ 신규
 ```
 
-### 다음 세션 우선순위
+### 다음 세션 우선순위 — PLAN-AI-COMPANY v4 Phase 1
 
-#### 1. TAG_MAP 확장 + 재분류
-- '기타' 804개의 topic_tags 분석 → TAG_MAP에 누락 키워드 추가
-- classifyTopics() 재실행하여 재분류
+#### 1. Phase 1 Foundation 구현 (세션 A)
+- `agency.md` 작성 (BiniLab 미션/가치관)
+- `.claude/agents/` 에 9개 에이전트 정의 파일 생성 (YAML frontmatter)
+- 기존 파일 soul/ops 분리 (content.md, post-debate-system.md 등)
+- 토론 시스템이 새 구조에서 동작하는지 검증
 
-#### 2. `/기획` E2E 테스트 (Chrome CDP 필요)
-- `/수집 전체` → `/threads-plan` → 토론 시스템 → 포스트 초안
-- End-to-End 파이프라인 검증
+#### 2. CEO Shadow Mode (세션 B)
+- `souls/minjun-ceo.md` 상세화 + `daily-standup-ops.md`
+- CEO Shadow Mode 5일 — 추천만, 시훈 채점, 정확도 ≥80%
 
-#### 3. 워밍업 포스트 (8~20)
-- 현재 7/20개 완료, 13개 남음
-- 토론 시스템 + 기획 스킬 조합으로 품질 보장
+#### 3. `/daily-pipeline` 구현 (세션 C)
+- 10개 포스트 자동 생산 파이프라인
+- 네이버 검색량/트렌드 통합
+- 게시 큐 (aff_contents.status)
+- 경쟁사 모니터링 (하위 20% 주간 교체)
 
-#### 4. 분석 파이프라인 가동
-- thread_posts 632개 미분석 처리
-- primary_tag 세분화
-- 성과 리포트 일일 실행 정착
+#### 4. 워밍업 포스트 (8/100)
+- 하루 10개 목표, ~10일이면 워밍업 완료
+- 카테고리별 에디터가 병렬 작성
 
-#### 5. Plan B 시스템 구현
-- 댓글 감성 분석, 제품 생명주기 추적, A/B 테스트
+### 미해결 사항
+- agent_messages DB 테이블 (에이전트 소통 시스템)
+- 멀티에이전트 소통 시스템 리서치 (CrewAI, AutoGen, MetaGPT 조사 필요)
+- 브랜드 리서치 40→80개/카테고리 확장
+- 포스트 리사이클 시스템
+- 수익 추적 (워밍업 100 완료 후)
