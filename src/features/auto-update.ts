@@ -25,6 +25,8 @@ export const REPO_NAME = 'oh-my-claudecode';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
 
+const OMC_PLUGIN_INSTALL_ID = 'oh-my-claudecode@omc';
+
 /**
  * Best-effort sync of the Claude Code marketplace clone.
  * The marketplace clone at ~/.claude/plugins/marketplaces/omc/ is used by
@@ -494,6 +496,114 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   };
 }
 
+
+interface InstalledPluginRegistryEntry {
+  installPath?: string;
+  version?: string;
+}
+
+interface InstalledPluginRegistry {
+  plugins?: Record<string, InstalledPluginRegistryEntry[]>;
+}
+
+interface PluginRefreshResult {
+  attempted: boolean;
+  refreshed: boolean;
+  message: string;
+  error?: string;
+}
+
+function getFirstResolvedPath(output: string, binaryLabel: string): string {
+  const resolved = output
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean);
+
+  if (!resolved) {
+    throw new Error(`Unable to resolve ${binaryLabel} binary path`);
+  }
+
+  return resolved;
+}
+
+function hasInstalledOmcPlugin(): boolean {
+  const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
+  if (!existsSync(installedPluginsPath)) {
+    return false;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(installedPluginsPath, 'utf-8')) as InstalledPluginRegistry | Record<string, InstalledPluginRegistryEntry[]>;
+    const plugins = (raw as InstalledPluginRegistry).plugins ?? raw;
+    const entries = (plugins as Record<string, InstalledPluginRegistryEntry[]>)[OMC_PLUGIN_INSTALL_ID];
+    return Array.isArray(entries) && entries.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolveClaudeBinaryPath(): string {
+  if (process.platform === 'win32') {
+    return getFirstResolvedPath(execFileSync('where.exe', ['claude.exe'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 5000,
+      windowsHide: true,
+    }), 'claude');
+  }
+
+  return getFirstResolvedPath(execSync('which claude 2>/dev/null || where claude 2>NUL', {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+    timeout: 5000,
+  }), 'claude');
+}
+
+function refreshInstalledPluginCache(verbose: boolean = false): PluginRefreshResult {
+  if (!hasInstalledOmcPlugin()) {
+    return {
+      attempted: false,
+      refreshed: false,
+      message: 'Installed OMC plugin not found; skipping plugin cache refresh',
+    };
+  }
+
+  let claudePath: string;
+  try {
+    claudePath = resolveClaudeBinaryPath();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      attempted: true,
+      refreshed: false,
+      message: 'Failed to resolve Claude CLI for plugin cache refresh',
+      error: message,
+    };
+  }
+
+  try {
+    execFileSync(claudePath, ['plugin', 'update', OMC_PLUGIN_INSTALL_ID], {
+      encoding: 'utf-8',
+      stdio: verbose ? 'inherit' : 'pipe',
+      timeout: 120000,
+      ...(process.platform === 'win32' ? { windowsHide: true } : {}),
+    });
+    return {
+      attempted: true,
+      refreshed: true,
+      message: `Refreshed installed plugin cache via \`claude plugin update ${OMC_PLUGIN_INSTALL_ID}\``,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      attempted: true,
+      refreshed: false,
+      message: `Failed to refresh installed plugin cache via \`claude plugin update ${OMC_PLUGIN_INSTALL_ID}\``,
+      error: message,
+    };
+  }
+}
+
 /**
  * Reconcile runtime state after update
  *
@@ -532,6 +642,15 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
     errors.push(`Failed to refresh installer artifacts: ${message}`);
   }
 
+  const pluginRefreshResult = refreshInstalledPluginCache(options?.verbose ?? false);
+  if (pluginRefreshResult.attempted && !pluginRefreshResult.refreshed) {
+    errors.push(pluginRefreshResult.error
+      ? `${pluginRefreshResult.message}: ${pluginRefreshResult.error}`
+      : pluginRefreshResult.message);
+  } else if (options?.verbose) {
+    console.log(`[omc] ${pluginRefreshResult.message}`);
+  }
+
   // Purge stale plugin cache versions (non-fatal)
   try {
     const purgeResult = purgeStalePluginCacheVersions({ skipGracePeriod: options?.skipGracePeriod });
@@ -557,18 +676,20 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
 
   return {
     success: true,
-    message: 'Runtime state reconciled successfully',
+    message: pluginRefreshResult.refreshed
+      ? 'Runtime state reconciled successfully and plugin cache refreshed'
+      : 'Runtime state reconciled successfully',
   };
 }
 
-function getFirstResolvedBinaryPath(output: string): string {
+function getFirstResolvedBinaryPath(output: string, binaryLabel: string = 'omc'): string {
   const resolved = output
     .split(/\r?\n/)
     .map(line => line.trim())
     .find(Boolean);
 
   if (!resolved) {
-    throw new Error('Unable to resolve omc binary path for update reconciliation');
+    throw new Error(`Unable to resolve ${binaryLabel} binary path for update reconciliation`);
   }
 
   return resolved;
@@ -581,14 +702,14 @@ function resolveOmcBinaryPath(): string {
       stdio: 'pipe',
       timeout: 5000,
       windowsHide: true,
-    }));
+    }), 'omc');
   }
 
   return getFirstResolvedBinaryPath(execSync('which omc 2>/dev/null || where omc 2>NUL', {
     encoding: 'utf-8',
     stdio: 'pipe',
     timeout: 5000,
-  }));
+  }), 'omc');
 }
 
 /**

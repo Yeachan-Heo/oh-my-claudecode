@@ -48,6 +48,17 @@ const mockedInstall = vi.mocked(install);
 const mockedIsProjectScopedPlugin = vi.mocked(isProjectScopedPlugin);
 const mockedCheckNodeVersion = vi.mocked(checkNodeVersion);
 const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+const installedPluginRegistry = JSON.stringify({
+  version: 2,
+  plugins: {
+    'oh-my-claudecode@omc': [
+      {
+        installPath: '/mock/.claude/plugins/cache/omc/oh-my-claudecode/4.8.2',
+        version: '4.8.2',
+      },
+    ],
+  },
+});
 
 function mockPlatform(platform: NodeJS.Platform): void {
   Object.defineProperty(process, 'platform', {
@@ -150,6 +161,72 @@ describe('auto-update reconciliation', () => {
     });
   });
 
+  it('refreshes the installed Claude plugin cache during reconciliation when the plugin is installed', () => {
+    mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
+      const asString = String(path);
+      if (asString.includes('installed_plugins.json')) {
+        return installedPluginRegistry;
+      }
+      if (asString.includes('.omc-version.json')) {
+        return JSON.stringify({
+          version: '4.1.5',
+          installedAt: '2026-02-09T00:00:00.000Z',
+          installMethod: 'npm',
+        });
+      }
+      return '';
+    });
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command.includes('which claude')) {
+        return '/usr/local/bin/claude\n';
+      }
+      return '';
+    });
+    mockedExecFileSync.mockImplementation((command: string) => {
+      if (command === '/usr/local/bin/claude') {
+        return '';
+      }
+      return '';
+    });
+
+    const result = reconcileUpdateRuntime({ verbose: false });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Runtime state reconciled successfully and plugin cache refreshed');
+    expect(mockedExecSync).toHaveBeenCalledWith('which claude 2>/dev/null || where claude 2>NUL', expect.any(Object));
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      '/usr/local/bin/claude',
+      ['plugin', 'update', 'oh-my-claudecode@omc'],
+      expect.objectContaining({
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 120000,
+      })
+    );
+  });
+
+  it('fails reconciliation when the OMC plugin is installed but Claude CLI cannot be resolved', () => {
+    mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
+      if (String(path).includes('installed_plugins.json')) {
+        return installedPluginRegistry;
+      }
+      return '';
+    });
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command.includes('which claude')) {
+        throw new Error('claude not found');
+      }
+      return '';
+    });
+
+    const result = reconcileUpdateRuntime({ verbose: false });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toEqual([
+      'Failed to resolve Claude CLI for plugin cache refresh: claude not found',
+    ]);
+  });
+
   it('runs reconciliation as part of performUpdate', async () => {
     // Set env var so performUpdate takes the direct reconciliation path
     // (simulates being in the re-exec'd process after npm install)
@@ -218,6 +295,61 @@ describe('auto-update reconciliation', () => {
 
     expect(result.success).toBe(false);
     expect(result.errors).toEqual(['Reconciliation failed: boom']);
+    expect(mockedWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it('does not persist metadata when plugin refresh fails during performUpdate reconciliation', async () => {
+    process.env.OMC_UPDATE_RECONCILE = '1';
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tag_name: 'v4.1.5',
+        name: '4.1.5',
+        published_at: '2026-02-09T00:00:00.000Z',
+        html_url: 'https://example.com/release',
+        body: 'notes',
+        prerelease: false,
+        draft: false,
+      }),
+    }));
+
+    mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
+      if (String(path).includes('installed_plugins.json')) {
+        return installedPluginRegistry;
+      }
+      if (String(path).includes('.omc-version.json')) {
+        return JSON.stringify({
+          version: '4.1.4',
+          installedAt: '2026-02-08T00:00:00.000Z',
+          installMethod: 'npm',
+        });
+      }
+      return '';
+    });
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command === 'npm install -g oh-my-claude-sisyphus@latest') {
+        return '';
+      }
+      if (command.includes('which claude')) {
+        return '/usr/local/bin/claude\n';
+      }
+      return '';
+    });
+    mockedExecFileSync.mockImplementation((command: string) => {
+      if (command === '/usr/local/bin/claude') {
+        throw new Error('plugin update failed');
+      }
+      return '';
+    });
+
+    const result = await performUpdate({ verbose: false });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toBe('Updated to 4.1.5, but runtime reconciliation failed');
+    expect(result.errors).toEqual([
+      'Reconciliation failed: Failed to refresh installed plugin cache via `claude plugin update oh-my-claudecode@omc`: plugin update failed',
+    ]);
     expect(mockedWriteFileSync).not.toHaveBeenCalled();
   });
 
@@ -546,7 +678,7 @@ describe('auto-update reconciliation', () => {
       },
     };
 
-    mockedExistsSync.mockImplementation((path) => {
+    mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
       if (normalized === settingsPath) {
         return true;
@@ -588,7 +720,7 @@ describe('auto-update reconciliation', () => {
       delete process.env.CLAUDE_PLUGIN_ROOT;
     }
 
-    const settingsWrite = mockedWriteFileSync.mock.calls.find((call) => String(call[0]).includes('settings.json'));
+    const settingsWrite = mockedWriteFileSync.mock.calls.find((call: Parameters<typeof writeFileSync>) => String(call[0]).includes('settings.json'));
     if (settingsWrite) {
       const writtenSettings = JSON.parse(String(settingsWrite[1]));
       expect(writtenSettings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('node $HOME/.claude/hooks/other-plugin.mjs');
