@@ -32,6 +32,7 @@ import { z } from 'zod';
 interface ToolDef {
   name: string;
   description: string;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean };
   schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>;
   handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 }
@@ -155,6 +156,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       name: tool.name,
       description: tool.description,
       inputSchema: zodToJsonSchema(tool.schema),
+      ...(tool.annotations ? { annotations: tool.annotations } : {}),
     })),
   };
 });

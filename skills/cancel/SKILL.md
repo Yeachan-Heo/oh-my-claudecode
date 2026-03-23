@@ -103,6 +103,35 @@ Legacy compatibility list (removed only under `--force`/`--all`):
 - `.omc/state/checkpoints/` (directory)
 - `.omc/state/sessions/` (empty directory cleanup after clearing sessions)
 
+## Critical: Deferred Tool Handling
+
+The state management tools (`state_clear`, `state_list_active`, `state_get_status`) may be
+registered as **deferred tools** by Claude Code. Before calling any state tool, you MUST
+first load it via `ToolSearch`:
+
+```
+ToolSearch(query="select:mcp__plugin_oh-my-claudecode_t__state_clear,mcp__plugin_oh-my-claudecode_t__state_list_active,mcp__plugin_oh-my-claudecode_t__state_get_status")
+```
+
+If `state_clear` is unavailable or fails, use this **bash fallback** to directly remove
+state files for the current session:
+
+```bash
+# Fallback: direct file removal when state_clear MCP tool is unavailable
+SESSION_ID="${CLAUDE_SESSION_ID:-}"
+OMC_STATE=".omc/state"
+
+# Clear session-scoped state
+if [ -n "$SESSION_ID" ] && [ -d "$OMC_STATE/sessions/$SESSION_ID" ]; then
+  rm -f "$OMC_STATE/sessions/$SESSION_ID"/*-state.json
+  rm -f "$OMC_STATE/sessions/$SESSION_ID"/*-stop-breaker.json
+fi
+
+# Clear legacy state for the target mode
+# Replace MODE with: ralplan, ralph, ultrawork, autopilot, etc.
+rm -f "$OMC_STATE/MODE-state.json"
+```
+
 ## Implementation Steps
 
 When you invoke this skill:
