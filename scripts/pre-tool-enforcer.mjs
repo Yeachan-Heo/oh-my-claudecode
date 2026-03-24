@@ -546,21 +546,65 @@ async function main() {
           : '';
     const modeActive = hasActiveMode(directory, sessionId);
 
-    // Force-inherit check: deny Task/Agent calls with model param when forceInherit is enabled
-    // (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201
+    // Force-inherit check: deny Task/Agent calls with invalid model param when forceInherit is
+    // enabled (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201, #1767, #1868
+    //
+    // New behaviour (issue #1868 — [1m] suffix deadlock):
+    //   ALLOW explicit valid provider-specific model IDs (full Bedrock/Vertex format, no [1m])
+    //   DENY  tier names (sonnet/opus/haiku) and [1m]-suffixed IDs
+    //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
       const toolModel = toolInput.model;
-      if (toolModel && isForceInheritEnabled()) {
-        console.log(JSON.stringify({
-          continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on ${toolName} calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${toolModel}" is not valid for this provider.`
+      if (isForceInheritEnabled()) {
+        const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
+        const sessionHasLmSuffix = /\[\d+[mk]\]$/i.test(sessionModel);
+
+        if (toolModel) {
+          // Allow explicit valid provider-specific IDs without a [1m] suffix.
+          // These are full Bedrock/Vertex model IDs — blocking them leaves no escape hatch
+          // when the inherited session model is itself invalid.
+          const isProviderSpecific = /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude|arn:aws|vertex_ai\/)/i.test(toolModel);
+          const toolModelHasLmSuffix = /\[\d+[mk]\]$/i.test(toolModel);
+          if (isProviderSpecific && !toolModelHasLmSuffix) {
+            // Valid provider-specific model ID — allow it through (fall through to continue).
+          } else {
+            // Tier name (sonnet/opus/haiku) or [1m]-suffixed ID — deny with guidance.
+            const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
+            const guidance = subagentModel
+              ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL value).`
+              : `Remove the \`model\` parameter, or set OMC_SUBAGENT_MODEL=<valid-bedrock-id> and pass that value explicitly.`;
+            console.log(JSON.stringify({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). ${guidance} The model "${toolModel}" is not valid for this provider.`
+              }
+            }));
+            return;
           }
-        }));
-        return;
+        } else if (sessionHasLmSuffix) {
+          // No model param, but the session model has a [1m] context-window suffix.
+          // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
+          // Anthropic model ID (e.g. claude-sonnet-4-6) which is invalid on Bedrock.
+          const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
+          const strippedModel = sessionModel.replace(/\[\d+[mk]\]$/i, '');
+          const suggestion = subagentModel
+            ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly on this ${toolName} call.`
+            : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> in your environment (use the model ID from the 400 error message, e.g. "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), then pass that value as the model parameter. The stripped value "${strippedModel}" may also work as a fallback.`;
+          console.log(JSON.stringify({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`
+            }
+          }));
+          return;
+        }
+        // else: no model param and no [1m] on session model → normal forceInherit,
+        // agents inherit the parent session's model cleanly.
       }
     }
 

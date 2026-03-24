@@ -194,6 +194,29 @@ export function isProviderSpecificModelId(modelId) {
     return false;
 }
 /**
+ * Detect whether a model ID has a Claude Code extended-context window suffix
+ * (e.g., `[1m]`, `[200k]`) that is NOT a valid Bedrock API identifier.
+ *
+ * The `[1m]` suffix is a Claude Code internal annotation for the 1M context
+ * window variant. It is valid for the parent session's API path but is
+ * rejected by the sub-agent spawning runtime, which strips it to a bare
+ * Anthropic model ID (e.g., `claude-sonnet-4-6`) that is invalid on Bedrock.
+ */
+export function hasExtendedContextSuffix(modelId) {
+    return /\[\d+[mk]\]$/i.test(modelId);
+}
+/**
+ * Check whether a model ID is safe to pass as the `model` parameter when
+ * spawning sub-agents on non-standard providers (Bedrock, Vertex AI).
+ *
+ * A model ID is sub-agent safe if it is provider-specific (full Bedrock or
+ * Vertex AI format) AND does not carry a Claude Code context-window suffix
+ * like `[1m]` that the sub-agent runtime cannot handle.
+ */
+export function isSubagentSafeModelId(modelId) {
+    return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
+}
+/**
  * Detect whether Claude Code is running on Google Vertex AI.
  *
  * Claude Code sets CLAUDE_CODE_USE_VERTEX=1 when configured for Vertex AI.
