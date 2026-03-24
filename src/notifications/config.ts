@@ -876,7 +876,6 @@ export function getReplyConfig(): import("./types.js").ReplyConfig | null {
 import type {
   CustomIntegration,
   CustomIntegrationsConfig,
-  ExtendedNotificationConfig,
 } from "./types.js";
 import { validateCustomIntegration, checkDuplicateIds } from "./validation.js";
 

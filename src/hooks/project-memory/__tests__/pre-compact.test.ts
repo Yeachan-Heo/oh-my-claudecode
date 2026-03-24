@@ -2,7 +2,7 @@
  * Tests for Project Memory PreCompact Handler
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { processPreCompact, PreCompactInput } from '../pre-compact.js';
 import { ProjectMemory } from '../types.js';
 import { SCHEMA_VERSION } from '../constants.js';

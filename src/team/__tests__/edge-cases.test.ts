@@ -48,7 +48,7 @@ import { sanitizeName, sessionName } from '../tmux-session.js';
 
 // --- team-registration imports ---
 import {
-  readProbeResult, writeProbeResult, getRegistrationStrategy,
+  readProbeResult, writeProbeResult,
   registerMcpWorker, unregisterMcpWorker, isMcpWorker, listMcpWorkers
 } from '../team-registration.js';
 
