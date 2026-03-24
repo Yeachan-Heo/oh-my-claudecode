@@ -32,6 +32,10 @@ describe('HUD Default Configuration', () => {
       expect(DEFAULT_HUD_CONFIG.wrapMode).toBe('truncate');
     });
 
+    it('should default session duration display to enabled', () => {
+      expect(DEFAULT_HUD_CONFIG.elements.showSessionDuration).toBe(true);
+    });
+
     it('should keep token usage display optional by default', () => {
       expect(DEFAULT_HUD_CONFIG.elements.showTokens).toBe(false);
     });

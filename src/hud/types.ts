@@ -45,25 +45,25 @@ export interface OmcHudState {
 
 export interface StatuslineStdin {
   /** Transcript path for parsing conversation history */
-  transcript_path: string;
+  transcript_path?: string;
 
   /** Current working directory */
-  cwd: string;
+  cwd?: string;
 
-  /** Model information */
-  model: {
-    id: string;
-    display_name: string;
+  /** Model information from Claude Code statusline stdin */
+  model?: {
+    id?: string;
+    display_name?: string;
   };
 
-  /** Context window metrics */
-  context_window: {
-    context_window_size: number;
+  /** Context window metrics from Claude Code statusline stdin */
+  context_window?: {
+    context_window_size?: number;
     used_percentage?: number;
     current_usage?: {
-      input_tokens: number;
-      cache_creation_input_tokens: number;
-      cache_read_input_tokens: number;
+      input_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
     };
   };
 }
@@ -519,6 +519,8 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     missionBoard: false,  // Opt-in mission board for whole-run progress tracking
     promptTime: true,  // Show last prompt time by default
     sessionHealth: true,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: false,  // Disabled by default for backwards compatibility
     showCallCounts: true,  // Show tool/agent/skill call counts by default (Issue #710)
@@ -572,6 +574,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     missionBoard: false,
     promptTime: false,
     sessionHealth: false,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: false,
     showCallCounts: false,
@@ -608,6 +612,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     missionBoard: false,
     promptTime: true,
     sessionHealth: true,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: true,
     showCallCounts: true,
@@ -644,6 +650,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     missionBoard: false,
     promptTime: true,
     sessionHealth: true,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: true,
     showCallCounts: true,
@@ -680,6 +688,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     missionBoard: false,
     promptTime: true,
     sessionHealth: true,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: false,
     showCallCounts: true,
@@ -716,6 +726,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     missionBoard: false,
     promptTime: true,
     sessionHealth: true,
+    showSessionDuration: true,
+    showHealthIndicator: true,
     showTokens: false,
     useBars: true,
     showCallCounts: true,

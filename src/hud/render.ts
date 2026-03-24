@@ -4,32 +4,40 @@
  * Composes statusline output from render context.
  */
 
-import type { HudRenderContext, HudConfig } from './types.js';
-import { DEFAULT_HUD_CONFIG } from './types.js';
-import { bold, dim } from './colors.js';
-import { stringWidth, getCharWidth } from '../utils/string-width.js';
-import { renderRalph } from './elements/ralph.js';
-import { renderAgentsByFormat, renderAgentsMultiLine } from './elements/agents.js';
-import { renderTodosWithCurrent } from './elements/todos.js';
-import { renderSkills, renderLastSkill } from './elements/skills.js';
-import { renderContext, renderContextWithBar } from './elements/context.js';
-import { renderBackground } from './elements/background.js';
-import { renderPrd } from './elements/prd.js';
-import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderCustomBuckets } from './elements/limits.js';
-import { renderPermission } from './elements/permission.js';
-import { renderThinking } from './elements/thinking.js';
-import { renderSession } from './elements/session.js';
-import { renderTokenUsage } from './elements/token-usage.js';
-import { renderPromptTime } from './elements/prompt-time.js';
-import { renderAutopilot } from './elements/autopilot.js';
-import { renderCwd } from './elements/cwd.js';
-import { renderGitRepo, renderGitBranch } from './elements/git.js';
-import { renderModel } from './elements/model.js';
-import { renderApiKeySource } from './elements/api-key-source.js';
-import { renderCallCounts } from './elements/call-counts.js';
-import { renderContextLimitWarning } from './elements/context-warning.js';
-import { renderMissionBoard } from './mission-board.js';
-import { renderSessionSummary } from './elements/session-summary.js';
+import type { HudRenderContext, HudConfig } from "./types.js";
+import { DEFAULT_HUD_CONFIG } from "./types.js";
+import { bold, dim } from "./colors.js";
+import { stringWidth, getCharWidth } from "../utils/string-width.js";
+import { renderRalph } from "./elements/ralph.js";
+import {
+  renderAgentsByFormat,
+  renderAgentsMultiLine,
+} from "./elements/agents.js";
+import { renderTodosWithCurrent } from "./elements/todos.js";
+import { renderSkills, renderLastSkill } from "./elements/skills.js";
+import { renderContext, renderContextWithBar } from "./elements/context.js";
+import { renderBackground } from "./elements/background.js";
+import { renderPrd } from "./elements/prd.js";
+import {
+  renderRateLimits,
+  renderRateLimitsWithBar,
+  renderRateLimitsError,
+  renderCustomBuckets,
+} from "./elements/limits.js";
+import { renderPermission } from "./elements/permission.js";
+import { renderThinking } from "./elements/thinking.js";
+import { renderSession } from "./elements/session.js";
+import { renderTokenUsage } from "./elements/token-usage.js";
+import { renderPromptTime } from "./elements/prompt-time.js";
+import { renderAutopilot } from "./elements/autopilot.js";
+import { renderCwd } from "./elements/cwd.js";
+import { renderGitRepo, renderGitBranch } from "./elements/git.js";
+import { renderModel } from "./elements/model.js";
+import { renderApiKeySource } from "./elements/api-key-source.js";
+import { renderCallCounts } from "./elements/call-counts.js";
+import { renderContextLimitWarning } from "./elements/context-warning.js";
+import { renderMissionBoard } from "./mission-board.js";
+import { renderSessionSummary } from "./elements/session-summary.js";
 
 /**
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
@@ -37,8 +45,7 @@ import { renderSessionSummary } from './elements/session-summary.js';
  */
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/;
 
-
-const PLAIN_SEPARATOR = ' | ';
+const PLAIN_SEPARATOR = " | ";
 const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
 
 /**
@@ -50,15 +57,15 @@ const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
  * @returns Truncated line that fits within maxWidth visible columns
  */
 export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
-  if (maxWidth <= 0) return '';
+  if (maxWidth <= 0) return "";
   if (stringWidth(line) <= maxWidth) return line;
 
-  const ELLIPSIS = '...';
+  const ELLIPSIS = "...";
   const ellipsisWidth = 3;
   const targetWidth = Math.max(0, maxWidth - ellipsisWidth);
 
   let visibleWidth = 0;
-  let result = '';
+  let result = "";
   let hasAnsi = false;
   let i = 0;
 
@@ -77,7 +84,7 @@ export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
 
     // Read the full code point (handles surrogate pairs for astral-plane chars like emoji)
     const codePoint = line.codePointAt(i)!;
-    const codeUnits = codePoint > 0xFFFF ? 2 : 1;
+    const codeUnits = codePoint > 0xffff ? 2 : 1;
     const char = line.slice(i, i + codeUnits);
     const charWidth = getCharWidth(char);
 
@@ -90,7 +97,7 @@ export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
 
   // Append ANSI reset before ellipsis if any escape codes were seen,
   // to prevent color/style bleed into subsequent terminal output
-  const reset = hasAnsi ? '\x1b[0m' : '';
+  const reset = hasAnsi ? "\x1b[0m" : "";
   return result + reset + ELLIPSIS;
 }
 
@@ -103,7 +110,7 @@ export function truncateLineToMaxWidth(line: string, maxWidth: number): string {
  * - any single segment exceeds maxWidth
  */
 function wrapLineToMaxWidth(line: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [''];
+  if (maxWidth <= 0) return [""];
   if (stringWidth(line) <= maxWidth) return [line];
 
   const separator = line.includes(DIM_SEPARATOR)
@@ -122,10 +129,10 @@ function wrapLineToMaxWidth(line: string, maxWidth: number): string[] {
   }
 
   const wrapped: string[] = [];
-  let current = segments[0] ?? '';
+  let current = segments[0] ?? "";
 
   for (let i = 1; i < segments.length; i += 1) {
-    const nextSegment = segments[i] ?? '';
+    const nextSegment = segments[i] ?? "";
     const candidate = `${current}${separator}${nextSegment}`;
 
     if (stringWidth(candidate) <= maxWidth) {
@@ -157,15 +164,15 @@ function wrapLineToMaxWidth(line: string, maxWidth: number): string[] {
 function applyMaxWidthByMode(
   lines: string[],
   maxWidth: number | undefined,
-  wrapMode: 'truncate' | 'wrap' | undefined
+  wrapMode: "truncate" | "wrap" | undefined,
 ): string[] {
   if (!maxWidth || maxWidth <= 0) return lines;
 
-  if (wrapMode === 'wrap') {
-    return lines.flatMap(line => wrapLineToMaxWidth(line, maxWidth));
+  if (wrapMode === "wrap") {
+    return lines.flatMap((line) => wrapLineToMaxWidth(line, maxWidth));
   }
 
-  return lines.map(line => truncateLineToMaxWidth(line, maxWidth));
+  return lines.map((line) => truncateLineToMaxWidth(line, maxWidth));
 }
 
 /**
@@ -177,7 +184,10 @@ function applyMaxWidthByMode(
  * @returns Trimmed array of lines
  */
 export function limitOutputLines(lines: string[], maxLines?: number): string[] {
-  const limit = Math.max(1, maxLines ?? DEFAULT_HUD_CONFIG.elements.maxOutputLines);
+  const limit = Math.max(
+    1,
+    maxLines ?? DEFAULT_HUD_CONFIG.elements.maxOutputLines,
+  );
   if (lines.length <= limit) {
     return lines;
   }
@@ -188,7 +198,10 @@ export function limitOutputLines(lines: string[], maxLines?: number): string[] {
 /**
  * Render the complete statusline (single or multi-line)
  */
-export async function render(context: HudRenderContext, config: HudConfig): Promise<string> {
+export async function render(
+  context: HudRenderContext,
+  config: HudConfig,
+): Promise<string> {
   const elements: string[] = [];
   const detailLines: string[] = [];
   const { elements: enabledElements } = config;
@@ -198,7 +211,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Working directory
   if (enabledElements.cwd) {
-    const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || 'relative');
+    const cwdElement = renderCwd(
+      context.cwd,
+      enabledElements.cwdFormat || "relative",
+    );
     if (cwdElement) gitElements.push(cwdElement);
   }
 
@@ -216,7 +232,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Model name
   if (enabledElements.model && context.modelName) {
-    const modelElement = renderModel(context.modelName, enabledElements.modelFormat);
+    const modelElement = renderModel(
+      context.modelName,
+      enabledElements.modelFormat,
+    );
     if (modelElement) gitElements.push(modelElement);
   }
 
@@ -233,9 +252,11 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // [OMC#X.Y.Z] label with optional update notification
   if (enabledElements.omcLabel) {
-    const versionTag = context.omcVersion ? `#${context.omcVersion}` : '';
+    const versionTag = context.omcVersion ? `#${context.omcVersion}` : "";
     if (context.updateAvailable) {
-      elements.push(bold(`[OMC${versionTag}] -> ${context.updateAvailable} omc update`));
+      elements.push(
+        bold(`[OMC${versionTag}] -> ${context.updateAvailable} omc update`),
+      );
     } else {
       elements.push(bold(`[OMC${versionTag}]`));
     }
@@ -247,7 +268,11 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
       // Data available (possibly stale from 429) → always show data
       const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars
-        ? renderRateLimitsWithBar(context.rateLimitsResult.rateLimits, undefined, stale)
+        ? renderRateLimitsWithBar(
+            context.rateLimitsResult.rateLimits,
+            undefined,
+            stale,
+          )
         : renderRateLimits(context.rateLimitsResult.rateLimits, stale);
       if (limits) elements.push(limits);
     } else {
@@ -259,7 +284,8 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Custom rate limit buckets
   if (context.customBuckets) {
-    const thresholdPercent = config.rateLimitsProvider?.resetsAtDisplayThresholdPercent;
+    const thresholdPercent =
+      config.rateLimitsProvider?.resetsAtDisplayThresholdPercent;
     const custom = renderCustomBuckets(context.customBuckets, thresholdPercent);
     if (custom) elements.push(custom);
   }
@@ -272,7 +298,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
 
   // Extended thinking indicator
   if (enabledElements.thinking && context.thinkingState) {
-    const thinking = renderThinking(context.thinkingState, enabledElements.thinkingFormat || 'text');
+    const thinking = renderThinking(
+      context.thinkingState,
+      enabledElements.thinkingFormat,
+    );
     if (thinking) elements.push(thinking);
   }
 
@@ -286,7 +315,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   if (enabledElements.sessionHealth && context.sessionHealth) {
     // Session duration display (session:19m)
     // If showSessionDuration is explicitly set, use it; otherwise default to true (backward compat)
-    const showDuration = enabledElements.showSessionDuration ?? true;
+    const showDuration = enabledElements.showSessionDuration;
     if (showDuration) {
       const session = renderSession(context.sessionHealth);
       if (session) elements.push(session);
@@ -294,7 +323,10 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   }
 
   if (enabledElements.showTokens === true) {
-    const tokenUsage = renderTokenUsage(context.lastRequestTokenUsage, context.sessionTotalTokens);
+    const tokenUsage = renderTokenUsage(
+      context.lastRequestTokenUsage,
+      context.sessionTotalTokens,
+    );
     if (tokenUsage) elements.push(tokenUsage);
   }
 
@@ -321,7 +353,7 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     const skills = renderSkills(
       context.ultrawork,
       context.ralph,
-      (enabledElements.lastSkill ?? true) ? context.lastSkill : null
+      (enabledElements.lastSkill ?? true) ? context.lastSkill : null,
     );
     if (skills) elements.push(skills);
   }
@@ -335,16 +367,25 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   // Context window
   if (enabledElements.contextBar) {
     const ctx = enabledElements.useBars
-      ? renderContextWithBar(context.contextPercent, config.thresholds, 10, context.contextDisplayScope)
-      : renderContext(context.contextPercent, config.thresholds, context.contextDisplayScope);
+      ? renderContextWithBar(
+          context.contextPercent,
+          config.thresholds,
+          10,
+          context.contextDisplayScope,
+        )
+      : renderContext(
+          context.contextPercent,
+          config.thresholds,
+          context.contextDisplayScope,
+        );
     if (ctx) elements.push(ctx);
   }
 
   // Active agents - handle multi-line format specially
   if (enabledElements.agents) {
-    const format = enabledElements.agentsFormat || 'codes';
+    const format = enabledElements.agentsFormat || "codes";
 
-    if (format === 'multiline') {
+    if (format === "multiline") {
       // Multi-line mode: get header part and detail lines
       const maxLines = enabledElements.agentsMaxLines || 5;
       const result = renderAgentsMultiLine(context.activeAgents, maxLines);
@@ -385,27 +426,30 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
   const ctxWarning = renderContextLimitWarning(
     context.contextPercent,
     config.contextLimitWarning.threshold,
-    config.contextLimitWarning.autoCompact
+    config.contextLimitWarning.autoCompact,
   );
   if (ctxWarning) detailLines.push(ctxWarning);
 
   // Compose output
   const outputLines: string[] = [];
-  const gitInfoLine = gitElements.length > 0 ? gitElements.join(dim(PLAIN_SEPARATOR)) : null;
-  const headerLine = elements.join(dim(PLAIN_SEPARATOR));
+  const gitInfoLine =
+    gitElements.length > 0 ? gitElements.join(dim(PLAIN_SEPARATOR)) : null;
+  const headerLine =
+    elements.length > 0 ? elements.join(dim(PLAIN_SEPARATOR)) : null;
 
-  // Position git info based on config (default: above for backward compatibility)
-  const gitPosition = config.elements.gitInfoPosition ?? 'above';
+  const gitPosition = config.elements.gitInfoPosition ?? "above";
 
-  if (gitPosition === 'above') {
-    // Git info line above HUD header (traditional layout)
+  if (gitPosition === "above") {
     if (gitInfoLine) {
       outputLines.push(gitInfoLine);
     }
-    outputLines.push(headerLine);
+    if (headerLine) {
+      outputLines.push(headerLine);
+    }
   } else {
-    // Git info line below HUD header
-    outputLines.push(headerLine);
+    if (headerLine) {
+      outputLines.push(headerLine);
+    }
     if (gitInfoLine) {
       outputLines.push(gitInfoLine);
     }
@@ -417,23 +461,34 @@ export async function render(context: HudRenderContext, config: HudConfig): Prom
     if (todos) detailLines.push(todos);
   }
 
-  if (context.missionBoard && (config.missionBoard?.enabled ?? config.elements.missionBoard ?? false)) {
-    detailLines.unshift(...renderMissionBoard(context.missionBoard, config.missionBoard));
+  if (
+    context.missionBoard &&
+    (config.missionBoard?.enabled ?? config.elements.missionBoard ?? false)
+  ) {
+    detailLines.unshift(
+      ...renderMissionBoard(context.missionBoard, config.missionBoard),
+    );
   }
 
   const widthAdjustedLines = applyMaxWidthByMode(
     [...outputLines, ...detailLines],
     config.maxWidth,
-    config.wrapMode
+    config.wrapMode,
   );
 
   // Apply max output line limit after wrapping so wrapped output still respects maxOutputLines.
-  const limitedLines = limitOutputLines(widthAdjustedLines, config.elements.maxOutputLines);
+  const limitedLines = limitOutputLines(
+    widthAdjustedLines,
+    config.elements.maxOutputLines,
+  );
 
   // Ensure line-limit indicator and all other lines still respect maxWidth.
-  const finalLines = config.maxWidth && config.maxWidth > 0
-    ? limitedLines.map(line => truncateLineToMaxWidth(line, config.maxWidth!))
-    : limitedLines;
+  const finalLines =
+    config.maxWidth && config.maxWidth > 0
+      ? limitedLines.map((line) =>
+          truncateLineToMaxWidth(line, config.maxWidth!),
+        )
+      : limitedLines;
 
-  return finalLines.join('\n');
+  return finalLines.join("\n");
 }
