@@ -203,10 +203,15 @@ export async function handleWaitForJob(
     const found = findJobStatusFile(provider, jobId, jobDir);
 
     if (!found) {
-      // Job may not be written yet (async SQLite init race) — retry with backoff
-      notFoundCount++;
-      if (notFoundCount >= 10) {
-        return textResult(`No job found with ID: ${jobId}`, true);
+      // When SQLite is initialized but the job isn't in the DB yet, this
+      // is likely a creation race — keep polling until the deadline rather
+      // than giving up early. When SQLite is NOT initialized, the JSON
+      // file path is the only source, so 10 retries is a reasonable limit.
+      if (!isJobDbInitialized()) {
+        notFoundCount++;
+        if (notFoundCount >= 10) {
+          return textResult(`No job found with ID: ${jobId}`, true);
+        }
       }
       await new Promise(resolve => setTimeout(resolve, pollDelay));
       pollDelay = Math.min(pollDelay * 1.5, 2000);
