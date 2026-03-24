@@ -12,7 +12,21 @@ import { execSync } from 'child_process';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
-import { isSubagentSafeModelId, hasExtendedContextSuffix } from '../dist/config/models.js';
+
+// Inlined from src/config/models.ts — avoids a dist/ import so the hook works
+// before a build and stays consistent with the TypeScript source.
+function isProviderSpecificModelId(modelId) {
+  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)) return true;
+  if (modelId.toLowerCase().startsWith('vertex_ai/')) return true;
+  return false;
+}
+function hasExtendedContextSuffix(modelId) {
+  return /\[\d+[mk]\]$/i.test(modelId);
+}
+function isSubagentSafeModelId(modelId) {
+  return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
+}
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const MODE_STATE_FILES = [
