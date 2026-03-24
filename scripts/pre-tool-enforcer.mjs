@@ -558,7 +558,7 @@ async function main() {
       const toolInput = data.toolInput || data.tool_input || {};
       const toolModel = toolInput.model;
       if (isForceInheritEnabled()) {
-        const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
+        const sessionModel = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
         const sessionHasLmSuffix = hasExtendedContextSuffix(sessionModel);
 
         if (toolModel) {
