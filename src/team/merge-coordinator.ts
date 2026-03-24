@@ -30,7 +30,9 @@ export interface MergeResult {
 
 /**
  * Check for merge conflicts between a worker branch and the base branch.
- * Does NOT actually merge -- uses git merge-tree for non-destructive check.
+ * Does NOT actually merge — uses `git merge-tree --write-tree` (Git 2.38+)
+ * for non-destructive three-way merge simulation.
+ * Falls back to file-overlap heuristic on older Git versions.
  * Returns list of conflicting file paths, empty if clean.
  */
 export function checkMergeConflicts(
@@ -41,13 +43,37 @@ export function checkMergeConflicts(
   validateBranchName(workerBranch);
   validateBranchName(baseBranch);
 
-  // Find merge base
+  // Try git merge-tree --write-tree (Git 2.38+) for accurate conflict detection
+  try {
+    execFileSync(
+      'git', ['merge-tree', '--write-tree', baseBranch, workerBranch],
+      { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    // Exit code 0 means no conflicts
+    return [];
+  } catch (err: unknown) {
+    const error = err as { status?: number; stdout?: string };
+    if (error.status === 1 && typeof error.stdout === 'string') {
+      // Exit code 1 means conflicts — parse conflicting file paths from output
+      const lines = error.stdout.split('\n');
+      const conflicts: string[] = [];
+      for (const line of lines) {
+        const match = line.match(/^CONFLICT\s.*?:\s+.*?\s+in\s+(.+)$/);
+        if (match) {
+          conflicts.push(match[1].trim());
+        }
+      }
+      return conflicts.length > 0 ? conflicts : ['(merge-tree reported conflicts)'];
+    }
+    // If merge-tree --write-tree is not supported, fall back to overlap heuristic
+  }
+
+  // Fallback: file-overlap heuristic for Git < 2.38
   const mergeBase = execFileSync(
     'git', ['merge-base', baseBranch, workerBranch],
     { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
   ).trim();
 
-  // Check for overlapping changes by comparing what changed in each branch
   const baseDiff = execFileSync(
     'git', ['diff', '--name-only', mergeBase, baseBranch],
     { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
@@ -58,13 +84,12 @@ export function checkMergeConflicts(
   ).trim();
 
   if (!baseDiff || !workerDiff) {
-    return []; // No changes in one or both branches
+    return [];
   }
 
   const baseFiles = new Set(baseDiff.split('\n').filter(f => f));
   const workerFiles = workerDiff.split('\n').filter(f => f);
 
-  // Files changed in both branches are potential conflicts
   return workerFiles.filter(f => baseFiles.has(f));
 }
 

@@ -730,10 +730,8 @@ export async function pollLoopWithConfigFile(configPath: string): Promise<void> 
   const configContent = readFileSync(configPath, 'utf-8');
   const config = JSON.parse(configContent) as Required<DaemonConfig>;
 
-  // Restore Date objects from JSON
-  if (config.stateFilePath) {
-    // Config is valid, proceed with poll loop
-  }
+  // Clean up the temp config file now that we've read it
+  try { unlinkSync(configPath); } catch { /* ignore cleanup errors */ }
 
   await pollLoop(config);
 }
