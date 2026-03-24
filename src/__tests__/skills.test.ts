@@ -157,6 +157,31 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('`psm.sh`');
     });
 
+    it('should emphasize process-first install routing in the setup skill', () => {
+      const skill = getBuiltinSkill('setup');
+      expect(skill).toBeDefined();
+      expect(skill?.description).toContain('install/update routing');
+      expect(skill?.template).toContain('Process the request by the **first argument only**');
+      expect(skill?.template).toContain('/oh-my-claudecode:setup doctor --json');
+      expect(skill?.template).not.toContain('{{ARGUMENTS_AFTER_DOCTOR}}');
+    });
+
+    it('should emphasize worktree-first guidance in project session manager skill text', () => {
+      const skill = getBuiltinSkill('project-session-manager');
+      expect(skill).toBeDefined();
+      expect(skill?.description).toContain('Worktree-first');
+      expect(skill?.template).toContain('Quick Start (worktree-first)');
+      expect(skill?.template).toContain('`omc teleport`');
+    });
+
+    it('should keep ask as the canonical process-first advisor wrapper', () => {
+      const skill = getBuiltinSkill('ask');
+      expect(skill).toBeDefined();
+      expect(skill?.description).toContain('Process-first advisor routing');
+      expect(skill?.template).toContain('omc ask {{ARGUMENTS}}');
+      expect(skill?.template).toContain('Do NOT manually construct raw provider CLI commands');
+    });
+
     it('should retrieve the trace skill by name', () => {
       const skill = getBuiltinSkill('trace');
       expect(skill).toBeDefined();

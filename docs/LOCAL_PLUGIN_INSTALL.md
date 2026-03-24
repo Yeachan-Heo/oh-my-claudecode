@@ -2,6 +2,14 @@
 
 How to install oh-my-claudecode from a local development directory as a Claude Code plugin.
 
+## When to use this guide
+
+Use this document for **local development checkouts and git worktrees** where you want Claude Code to load the plugin from your current repo state.
+
+- **Marketplace/plugin users**: prefer the README quick-start flow
+- **npm users**: prefer `npm i -g oh-my-claude-sisyphus@latest`
+- **Local-dev/worktree users**: use this guide so the installed plugin matches the branch/worktree you are editing
+
 ## Quick Install
 
 ```bash
@@ -11,7 +19,10 @@ claude plugin marketplace add /path/to/oh-my-claudecode
 # 2. Install the plugin from the local marketplace
 claude plugin install oh-my-claudecode@oh-my-claudecode
 
-# 3. Restart Claude Code to pick up the plugin
+# 3. Re-run setup inside Claude Code so CLAUDE.md / skills reflect this checkout
+/setup
+
+# 4. Restart Claude Code to pick up the plugin
 ```
 
 ## Commands Reference
@@ -58,7 +69,7 @@ The plugin requires a `plugin.json` manifest:
 
 ## Development Workflow
 
-After making changes to the plugin:
+After making changes to the plugin (including from a linked git worktree):
 
 ```bash
 # 1. Build (if TypeScript changes)
@@ -70,7 +81,10 @@ claude plugin marketplace update oh-my-claudecode
 # 3. Update the installed plugin
 claude plugin update oh-my-claudecode@oh-my-claudecode
 
-# 4. Restart Claude Code session
+# 4. Re-run setup in Claude Code so prompts/skills match the refreshed plugin
+/setup
+
+# 5. Restart Claude Code session
 ```
 
 ## Vs. npm Global Install

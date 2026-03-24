@@ -23,9 +23,17 @@ _Don't learn Claude Code. Just use OMC._
 
 **Step 1: Install**
 
+Marketplace/plugin install (recommended for most Claude Code users):
+
 ```bash
 /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
 /plugin install oh-my-claudecode
+```
+
+If you prefer the npm CLI/runtime path instead of the marketplace flow:
+
+```bash
+npm i -g oh-my-claude-sisyphus@latest
 ```
 
 **Step 2: Setup**
@@ -125,8 +133,10 @@ If you installed OMC via the Claude Code marketplace/plugin flow, update with:
 /plugin marketplace update omc
 
 # 2. Re-run setup to refresh configuration
-/omc-setup
+/setup
 ```
+
+If you are developing from a local checkout or git worktree, update the checkout first, then re-run setup from that worktree so the active runtime matches the code you are testing.
 
 > **Note:** If marketplace auto-update is not enabled, you must manually run `/plugin marketplace update omc` to sync the latest version before running setup.
 

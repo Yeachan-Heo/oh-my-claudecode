@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Unified setup entrypoint for install, diagnostics, and MCP configuration
+description: Use first for install/update routing — sends setup, doctor, or MCP requests to the correct OMC setup flow
 level: 2
 ---
 
@@ -19,18 +19,18 @@ Use `/oh-my-claudecode:setup` as the unified setup/configuration entrypoint.
 
 ## Routing
 
-Route by the first argument:
+Process the request by the **first argument only** so install/setup questions land on the right flow immediately:
 
-- No argument, `wizard`, `local`, `global`, or `--force` -> run `/oh-my-claudecode:omc-setup {{ARGUMENTS}}`
-- `doctor` -> run `/oh-my-claudecode:omc-doctor {{ARGUMENTS_AFTER_DOCTOR}}`
-- `mcp` -> run `/oh-my-claudecode:mcp-setup {{ARGUMENTS_AFTER_MCP}}`
+- No argument, `wizard`, `local`, `global`, or `--force` -> route to `/oh-my-claudecode:omc-setup` with the same remaining args
+- `doctor` -> route to `/oh-my-claudecode:omc-doctor` with everything after the `doctor` token
+- `mcp` -> route to `/oh-my-claudecode:mcp-setup` with everything after the `mcp` token
 
 Examples:
 
 ```bash
-/oh-my-claudecode:omc-setup {{ARGUMENTS}}
-/oh-my-claudecode:omc-doctor {{ARGUMENTS_AFTER_DOCTOR}}
-/oh-my-claudecode:mcp-setup {{ARGUMENTS_AFTER_MCP}}
+/oh-my-claudecode:setup --local          # => /oh-my-claudecode:omc-setup --local
+/oh-my-claudecode:setup doctor --json    # => /oh-my-claudecode:omc-doctor --json
+/oh-my-claudecode:setup mcp github       # => /oh-my-claudecode:mcp-setup github
 ```
 
 ## Notes

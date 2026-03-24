@@ -1,6 +1,6 @@
 ---
 name: omc-setup
-description: Setup and configure oh-my-claudecode (the ONLY command you need to learn)
+description: Install or refresh oh-my-claudecode for plugin, npm, and local-dev setups from the canonical setup flow
 level: 2
 ---
 
@@ -11,6 +11,14 @@ This is the **only command you need to learn**. After running this, everything e
 **When this skill is invoked, immediately execute the workflow below. Do not only restate or summarize these instructions back to the user.**
 
 Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set.
+
+## Best-Fit Use
+
+Choose this setup flow when the user wants to **install, refresh, or repair OMC itself**.
+
+- Marketplace/plugin install users should land here after `/plugin install oh-my-claudecode`
+- npm users should land here after `npm i -g oh-my-claude-sisyphus@latest`
+- local-dev and worktree users should land here after updating the checked-out repo and rerunning setup
 
 ## Flag Parsing
 

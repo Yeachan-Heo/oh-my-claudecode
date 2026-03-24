@@ -1,6 +1,6 @@
 ---
 name: ask
-description: Ask Claude, Codex, or Gemini via local CLI and capture a reusable artifact
+description: Process-first advisor routing for Claude, Codex, or Gemini via `omc ask`, with artifact capture and no raw CLI assembly
 ---
 
 # Ask

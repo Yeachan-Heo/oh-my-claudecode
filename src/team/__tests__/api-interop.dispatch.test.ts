@@ -176,6 +176,7 @@ describe('team api dispatch-aware messaging', () => {
     const requests = await listDispatchRequests(teamName, cwd, { kind: 'mailbox', to_worker: 'worker-1' });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.message_id).toBe(messageId);
-    expect(requests[0]?.status).toBe('pending');
+    expect(requests[0]?.status).toBe('notified');
+    expect(typeof requests[0]?.notified_at).toBe('string');
   });
 });
