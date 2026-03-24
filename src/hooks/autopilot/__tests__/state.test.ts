@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -10,7 +10,6 @@ import {
   transitionPhase,
   updateExpansion,
   updateExecution,
-  getPlanPath,
 } from "../state.js";
 
 describe("AutopilotState", () => {

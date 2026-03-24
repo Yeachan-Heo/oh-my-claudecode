@@ -2,7 +2,7 @@
  * Tests for Ralphthon Orchestrator
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -17,7 +17,6 @@ import {
   endHardeningWave,
   recordTaskCompletion,
   recordTaskSkip,
-  detectCompletionSignal,
 } from '../orchestrator.js';
 import {
   writeRalphthonPrd,
@@ -28,7 +27,6 @@ import type {
   RalphthonStory,
   OrchestratorEvent,
 } from '../types.js';
-import { RALPHTHON_DEFAULTS } from '../types.js';
 
 describe('Ralphthon Orchestrator', () => {
   let testDir: string;

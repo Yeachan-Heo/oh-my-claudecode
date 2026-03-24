@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'fs';
-import { dirname, join, relative } from 'path';
+import { dirname, relative } from 'path';
 
 const MAX_RESOURCE_ENTRIES = 12;
 
