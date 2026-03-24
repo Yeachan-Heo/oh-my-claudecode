@@ -7,7 +7,7 @@
  *  - missing_tags → 재시도 2회 → quarantine
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../db/index.js', () => ({ db: {} }));
 
@@ -30,6 +30,10 @@ import {
 } from '../orchestrator/agent-output-parser.js';
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 // ─── parseTag ─────────────────────────────────────────────────
 
