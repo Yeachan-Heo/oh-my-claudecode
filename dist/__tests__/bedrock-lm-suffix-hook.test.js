@@ -20,9 +20,14 @@
  *     node scripts/pre-tool-enforcer.mjs
  *   → expect: continue (allowed through as valid Bedrock ID)
  */
+import { spawnSync } from 'child_process';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { hasExtendedContextSuffix, isSubagentSafeModelId, isProviderSpecificModelId, } from '../config/models.js';
 import { saveAndClear, restore } from '../config/__tests__/test-helpers.js';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const HOOK_PATH = resolve(__dirname, '../../scripts/pre-tool-enforcer.mjs');
 const ENV_KEYS = ['ANTHROPIC_MODEL', 'CLAUDE_MODEL', 'OMC_ROUTING_FORCE_INHERIT', 'OMC_SUBAGENT_MODEL'];
 // ---------------------------------------------------------------------------
 // Hook ALLOW path: explicit model param is a valid provider-specific ID
@@ -129,6 +134,62 @@ describe('environment-based session model detection', () => {
         process.env.ANTHROPIC_MODEL = 'global.anthropic.claude-opus-4-6-v1';
         const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
         expect(hasExtendedContextSuffix(sessionModel)).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
+// Hook integration tests — spawn the hook and verify stdin→stdout behaviour
+// ---------------------------------------------------------------------------
+function runHook(toolInput, env) {
+    const stdin = JSON.stringify({
+        tool_name: 'Agent',
+        toolInput,
+        cwd: '/tmp',
+        session_id: 'test-hook-integration',
+    });
+    const result = spawnSync('node', [HOOK_PATH], {
+        input: stdin,
+        encoding: 'utf8',
+        env: { ...process.env, ...env, OMC_ROUTING_FORCE_INHERIT: 'true' },
+        timeout: 10000,
+    });
+    const lines = (result.stdout || '').split('\n').filter(Boolean);
+    for (const line of lines) {
+        try {
+            const parsed = JSON.parse(line);
+            if (parsed?.hookSpecificOutput?.permissionDecision === 'deny') {
+                return { denied: true, reason: parsed.hookSpecificOutput.permissionDecisionReason };
+            }
+        }
+        catch {
+            // non-JSON line — skip
+        }
+    }
+    return { denied: false };
+}
+describe('hook integration — force-inherit + [1m] scenarios', () => {
+    it('denies [1m]-suffixed explicit model param', () => {
+        const result = runHook({ model: 'global.anthropic.claude-sonnet-4-6[1m]' }, { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]' });
+        expect(result.denied).toBe(true);
+        expect(result.reason).toMatch(/\[1m\]/);
+        expect(result.reason).toMatch(/MODEL ROUTING/);
+    });
+    it('allows valid Bedrock cross-region profile through without denying', () => {
+        const result = runHook({ model: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' }, { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]' });
+        expect(result.denied).toBe(false);
+    });
+    it('denies no-model call when session model has [1m] suffix and guides to OMC_SUBAGENT_MODEL', () => {
+        const result = runHook({}, { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]' });
+        expect(result.denied).toBe(true);
+        expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+        expect(result.reason).toMatch(/global\.anthropic\.claude-sonnet-4-6\[1m\]/);
+    });
+    it('includes configured OMC_SUBAGENT_MODEL value in guidance when set', () => {
+        const result = runHook({}, {
+            ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
+            OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        });
+        expect(result.denied).toBe(true);
+        expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
     });
 });
 //# sourceMappingURL=bedrock-lm-suffix-hook.test.js.map

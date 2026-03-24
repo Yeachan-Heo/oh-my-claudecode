@@ -10,8 +10,9 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, ren
 import { dirname, join, resolve } from 'path';
 import { execSync } from 'child_process';
 import { homedir } from 'os';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
+import { isSubagentSafeModelId, hasExtendedContextSuffix } from '../dist/config/models.js';
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const MODE_STATE_FILES = [
@@ -558,18 +559,13 @@ async function main() {
       const toolModel = toolInput.model;
       if (isForceInheritEnabled()) {
         const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
-        const sessionHasLmSuffix = /\[\d+[mk]\]$/i.test(sessionModel);
+        const sessionHasLmSuffix = hasExtendedContextSuffix(sessionModel);
 
         if (toolModel) {
-          // Allow explicit valid provider-specific IDs without a [1m] suffix.
-          // These are full Bedrock/Vertex model IDs — blocking them leaves no escape hatch
-          // when the inherited session model is itself invalid.
-          const isProviderSpecific = /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude|arn:aws|vertex_ai\/)/i.test(toolModel);
-          const toolModelHasLmSuffix = /\[\d+[mk]\]$/i.test(toolModel);
-          if (isProviderSpecific && !toolModelHasLmSuffix) {
-            // Valid provider-specific model ID — allow it through (fall through to continue).
-          } else {
-            // Tier name (sonnet/opus/haiku) or [1m]-suffixed ID — deny with guidance.
+          // Allow explicit valid provider-specific IDs (full Bedrock/Vertex format) without a
+          // [1m] suffix — blocking these leaves no escape hatch when the inherited session model
+          // is itself invalid. Reject tier names (sonnet/opus/haiku) and [1m]-suffixed IDs.
+          if (!isSubagentSafeModelId(toolModel)) {
             const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
             const guidance = subagentModel
               ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL value).`
@@ -584,15 +580,15 @@ async function main() {
             }));
             return;
           }
+          // else: valid provider-specific model ID — fall through to continue.
         } else if (sessionHasLmSuffix) {
           // No model param, but the session model has a [1m] context-window suffix.
           // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
           // Anthropic model ID (e.g. claude-sonnet-4-6) which is invalid on Bedrock.
           const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
-          const strippedModel = sessionModel.replace(/\[\d+[mk]\]$/i, '');
           const suggestion = subagentModel
             ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly on this ${toolName} call.`
-            : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> in your environment (use the model ID from the 400 error message, e.g. "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), then pass that value as the model parameter. The stripped value "${strippedModel}" may also work as a fallback.`;
+            : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> in your environment (use the model ID from the 400 error message, e.g. "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), then pass that value as the model parameter.`;
           console.log(JSON.stringify({
             continue: true,
             hookSpecificOutput: {
