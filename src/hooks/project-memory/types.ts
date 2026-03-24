@@ -27,14 +27,14 @@ export interface TechStack {
 export interface LanguageDetection {
   name: string;
   version: string | null;
-  confidence: 'high' | 'medium' | 'low';
+  confidence: "high" | "medium" | "low";
   markers: string[];
 }
 
 export interface FrameworkDetection {
   name: string;
   version: string | null;
-  category: 'frontend' | 'backend' | 'fullstack' | 'testing' | 'build';
+  category: "frontend" | "backend" | "fullstack" | "testing" | "build";
 }
 
 export interface BuildInfo {
@@ -66,7 +66,7 @@ export interface GitBranchPattern {
 
 export interface CustomNote {
   timestamp: number;
-  source: 'manual' | 'learned';
+  source: "manual" | "learned";
   category: string;
   content: string;
 }
@@ -98,7 +98,7 @@ export interface HotPath {
   path: string;
   accessCount: number;
   lastAccessed: number;
-  type: 'file' | 'directory';
+  type: "file" | "directory";
 }
 
 /**
@@ -108,6 +108,12 @@ export interface UserDirective {
   timestamp: number;
   directive: string;
   context: string;
-  source: 'explicit' | 'inferred';
-  priority: 'high' | 'normal';
+  source: "explicit" | "inferred";
+  priority: "high" | "normal";
+}
+
+export interface ProjectMemoryContext {
+  workingDirectory?: string;
+  scopeKey?: string;
+  now?: number;
 }
