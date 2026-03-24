@@ -11,6 +11,8 @@ import { sendMessage } from '../db/agent-messages.js';
 import { runSafetyGates } from '../safety/gates.js';
 import { getDiversityReport } from '../learning/diversity-checker.js';
 import { logDecision, updatePlaybook } from '../learning/strategy-logger.js';
+import { startMeeting, concludeMeeting } from './meeting.js';
+import { logEpisode } from '../db/memory.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -127,6 +129,169 @@ async function fetchPhase2Data(): Promise<PreviousDayStats> {
 // ---------------------------------------------------------------------------
 // Phase 3: CEO 스탠드업
 // ---------------------------------------------------------------------------
+
+/**
+ * meeting.ts의 startMeeting/concludeMeeting을 사용하는 standup 회의 실행 헬퍼.
+ * channel='standup' 메시지를 저장해 gatePhase3()가 통과할 수 있도록 함.
+ */
+async function runMeeting(params: {
+  type: 'standup';
+  agenda: string;
+  participants: string[];
+  summary: string;
+  decisions: string[];
+}): Promise<string> {
+  const transcript = await startMeeting({
+    roomName: `standup-${new Date().toISOString().slice(0, 10)}`,
+    type: params.type,
+    agenda: params.agenda,
+    participants: params.participants,
+    createdBy: 'orchestrator',
+    consensusRequired: false,
+  });
+  await concludeMeeting(transcript.meetingId, params.decisions, 'info_shared');
+  // gatePhase3()가 확인하는 channel='standup' 메시지 저장
+  await sendMessage(
+    'minjun-ceo',
+    'all',
+    'standup',
+    params.summary,
+    { meetingId: transcript.meetingId, decisions: params.decisions },
+  );
+  return transcript.meetingId;
+}
+
+/**
+ * 회의 메시지 → DailyDirective 변환.
+ * ROI 계산 로직을 재사용해 DailyDirective를 생성.
+ */
+async function meetingToDirective(
+  totalPosts: number,
+  date: string,
+): Promise<{ directive: DailyDirective; meetingSummary: string; decisions: string[] }> {
+  // Phase 2 데이터 수집
+  const { categoryStats, brandEventsCount } = await fetchPhase2Data();
+
+  // ROI 점수 계산
+  const roiSummary: Record<string, { score: number; grade: string }> = {};
+  for (const cat of Object.keys(DEFAULT_ALLOCATION)) {
+    const stats = categoryStats.find((s) => s.category === cat);
+    const score = stats ? parseFloat(calcRoiScore(stats).toFixed(1)) : 0;
+    roiSummary[cat] = { score, grade: roiGrade(score) };
+  }
+
+  // 카테고리 비율 결정 (ROI A → +1, max 5; C → -1, min 1)
+  const allocation = { ...DEFAULT_ALLOCATION };
+  for (const [cat, { grade }] of Object.entries(roiSummary)) {
+    if (grade === 'A' && allocation[cat]! < 5) allocation[cat] = allocation[cat]! + 1;
+    if (grade === 'C' && allocation[cat]! > 1) allocation[cat] = allocation[cat]! - 1;
+  }
+  // 합계를 totalPosts에 맞게 정규화
+  const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
+  if (allocTotal !== totalPosts) {
+    const diff = totalPosts - allocTotal;
+    const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0]![0];
+    allocation[topCat] = Math.max(1, allocation[topCat]! + diff);
+  }
+
+  const regularPosts = Math.ceil(totalPosts * 0.7);
+  const experimentPosts = totalPosts - regularPosts;
+
+  // 시간대 슬롯 생성
+  const slots = TIME_SLOT_TEMPLATE.slice(0, totalPosts);
+  const experimentSlotDate = date.replace(/-/g, '');
+  let expIdx = 1;
+
+  const timeSlots: TimeSlot[] = slots.map((s) => {
+    const editorMap = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
+    const slot: TimeSlot = {
+      time: s.time,
+      category: s.category,
+      type: s.type,
+      editor: editorMap!.agent.replace('.claude/agents/', '').replace('.md', ''),
+      brief: '',
+    };
+    if (s.type === 'experiment') {
+      slot.experiment_id = `EXP-${experimentSlotDate}-${String(expIdx++).padStart(3, '0')}`;
+    }
+    return slot;
+  });
+
+  const diversityWarnings: string[] = [];
+  if (brandEventsCount < 3) {
+    diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
+  }
+
+  const lcRows = await client`
+    SELECT content_style, need_category, hook_type
+    FROM content_lifecycle
+    WHERE posted_at >= NOW() - INTERVAL '7 days'
+    LIMIT 50
+  `;
+  if (lcRows.length > 0) {
+    const lcPosts = lcRows.map((r) => ({
+      content_style: (r.content_style as string) ?? '',
+      need_category: (r.need_category as string) ?? '',
+      hook_type: (r.hook_type as string) ?? '',
+    }));
+    const diversityReport = getDiversityReport(lcPosts);
+    for (const w of diversityReport.warnings) {
+      if (w.warning) diversityWarnings.push(w.warning);
+    }
+  }
+
+  const recycleRows = await client`
+    SELECT id
+    FROM thread_posts
+    WHERE is_published = true
+      AND published_at <= NOW() - INTERVAL '14 days'
+    ORDER BY view_count DESC
+    LIMIT 2
+  `;
+  const recycleCandidates = recycleRows.map((r) => r.id as string);
+
+  const directive: DailyDirective = {
+    date,
+    total_posts: totalPosts,
+    category_allocation: allocation,
+    regular_posts: regularPosts,
+    experiment_posts: experimentPosts,
+    time_slots: timeSlots,
+    experiments: timeSlots
+      .filter((s) => s.experiment_id)
+      .map((s) => ({
+        id: s.experiment_id!,
+        hypothesis: '(Claude Code가 채워야 함)',
+        variable: 'hook_type',
+      })),
+    recycle_candidates: recycleCandidates,
+    diversity_warnings: diversityWarnings,
+    roi_summary: roiSummary,
+  };
+
+  // 전략 결정 자동 기록
+  const topCategories = Object.entries(roiSummary)
+    .filter(([, v]) => v.grade === 'A')
+    .map(([k]) => k)
+    .join(', ') || '없음';
+  logDecision(
+    date,
+    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
+    `ROI 점수 기반 조정. A등급: ${topCategories}`,
+  );
+
+  const meetingSummary =
+    `[daily_directive ${date}] ${totalPosts}개 슬롯 배분 완료. ` +
+    Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/') +
+    `. 실험 ${experimentPosts}개.`;
+
+  const decisions = [
+    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
+    `실험 슬롯 ${experimentPosts}개. A등급: ${topCategories}`,
+  ];
+
+  return { directive, meetingSummary, decisions };
+}
 
 /**
  * CEO 스탠드업 실행.
@@ -506,7 +671,16 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
   // ── Phase 3: CEO 스탠드업 (dry-run 포함) ──────────────────────────────
   if (!options.phase || options.phase === 3 || dryRun) {
     try {
-      directive = await runCEOStandup(posts);
+      const date = new Date().toISOString().slice(0, 10);
+      const { directive: d, meetingSummary, decisions } = await meetingToDirective(posts, date);
+      directive = d;
+      await runMeeting({
+        type: 'standup',
+        agenda: `[daily_directive ${date}] 일일 콘텐츠 배분 스탠드업`,
+        participants: ['minjun-ceo', 'seoyeon-analyst', 'juhun-researcher'],
+        summary: meetingSummary,
+        decisions,
+      });
       phasesCompleted.push(3);
       await sendMessage(
         'orchestrator',
@@ -652,6 +826,14 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     );
     if (!autonomous) phasesCompleted.push(6);
   }
+
+  const gateFailures = gateResults.filter((g) => !g.passed).length;
+  await logEpisode({
+    agentId: 'system',
+    eventType: 'pipeline_run',
+    summary: `Pipeline completed: ${phasesCompleted.length} phases, gate_failures: ${gateFailures}`,
+    details: { phases_completed: phasesCompleted, gate_failures: gateFailures, errors },
+  });
 
   return {
     phases_completed: phasesCompleted,
