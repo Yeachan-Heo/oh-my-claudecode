@@ -1,0 +1,385 @@
+{
+  "version": "1.0",
+  "description": "auto-execute 스킬 라우팅 정확도 평가용 테스트 케이스",
+  "pass_threshold": 0.85,
+  "cases": [
+    {
+      "id": "domain-01",
+      "input": "수집해줘",
+      "expected": ["/수집"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-02",
+      "input": "벤치마크 채널 수집해줘",
+      "expected": ["/수집"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-03",
+      "input": "트렌드 수집 돌려",
+      "expected": ["/수집"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-04",
+      "input": "성과분석 해줘",
+      "expected": ["/analyze-performance"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-05",
+      "input": "성과 봐줘",
+      "expected": ["/analyze-performance"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-06",
+      "input": "파이프라인 돌려",
+      "expected": ["/threads-pipeline"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-07",
+      "input": "오늘 포스트 기획해줘",
+      "expected": ["/threads-plan"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-08",
+      "input": "포스트 올려줘",
+      "expected": ["/threads-post"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-09",
+      "input": "데일리런 실행",
+      "expected": ["/daily-run"],
+      "category": "domain"
+    },
+    {
+      "id": "domain-10",
+      "input": "주간 회의 돌려",
+      "expected": ["/weekly-retro"],
+      "category": "domain"
+    },
+
+    {
+      "id": "workflow-01",
+      "input": "플랜 짜줘",
+      "expected": ["/oh-my-claudecode:plan"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-02",
+      "input": "계획 세워줘",
+      "expected": ["/oh-my-claudecode:plan"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-03",
+      "input": "플랜 리뷰해줘",
+      "expected": ["/codex-plan"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-04",
+      "input": "아이디어 좀 내봐",
+      "expected": ["/superpowers:brainstorming"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-05",
+      "input": "알아서 해",
+      "expected": ["/oh-my-claudecode:autopilot"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-06",
+      "input": "될때까지 반복해",
+      "expected": ["/oh-my-claudecode:ralph"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-07",
+      "input": "병렬로 처리해줘",
+      "expected": ["/superpowers:dispatching-parallel-agents", "/oh-my-claudecode:ultrawork"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-08",
+      "input": "팀으로 나눠서 해",
+      "expected": ["/oh-my-claudecode:team"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-09",
+      "input": "QA 반복 돌려",
+      "expected": ["/oh-my-claudecode:ultraqa"],
+      "category": "workflow"
+    },
+    {
+      "id": "workflow-10",
+      "input": "자율적으로 구현해",
+      "expected": ["/oh-my-claudecode:autopilot"],
+      "category": "workflow"
+    },
+
+    {
+      "id": "quality-01",
+      "input": "TDD로 해줘",
+      "expected": ["/superpowers:test-driven-development", "/tdd-workflow"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-02",
+      "input": "테스트부터 짜줘",
+      "expected": ["/superpowers:test-driven-development", "/tdd-workflow"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-03",
+      "input": "코드 리뷰해줘",
+      "expected": ["/oh-my-claudecode:code-review", "code-reviewer"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-04",
+      "input": "보안 점검해줘",
+      "expected": ["/oh-my-claudecode:security-review", "/security-scan", "security-reviewer"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-05",
+      "input": "빌드 에러 고쳐줘",
+      "expected": ["/oh-my-claudecode:build-fix", "build-fixer"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-06",
+      "input": "버그야 고쳐",
+      "expected": ["/superpowers:systematic-debugging", "debugger"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-07",
+      "input": "코드 정리해줘",
+      "expected": ["/simplify", "code-simplifier"],
+      "category": "quality"
+    },
+    {
+      "id": "quality-08",
+      "input": "다 했어 확인해줘",
+      "expected": ["/superpowers:verification-before-completion", "verifier"],
+      "category": "quality"
+    },
+
+    {
+      "id": "git-01",
+      "input": "워크트리로 분리해줘",
+      "expected": ["/superpowers:using-git-worktrees"],
+      "category": "git"
+    },
+    {
+      "id": "git-02",
+      "input": "PR 만들어줘",
+      "expected": ["/superpowers:finishing-a-development-branch"],
+      "category": "git"
+    },
+    {
+      "id": "git-03",
+      "input": "리뷰 요청해줘",
+      "expected": ["/superpowers:requesting-code-review"],
+      "category": "git"
+    },
+    {
+      "id": "git-04",
+      "input": "브랜치 정리하고 머지해",
+      "expected": ["/superpowers:finishing-a-development-branch", "git-master"],
+      "category": "git"
+    },
+    {
+      "id": "git-05",
+      "input": "리뷰 피드백 반영해",
+      "expected": ["/superpowers:receiving-code-review"],
+      "category": "git"
+    },
+
+    {
+      "id": "research-01",
+      "input": "공식문서 찾아봐",
+      "expected": ["/oh-my-claudecode:external-context"],
+      "category": "research"
+    },
+    {
+      "id": "research-02",
+      "input": "과학적으로 분석해줘",
+      "expected": ["/oh-my-claudecode:sciomc"],
+      "category": "research"
+    },
+    {
+      "id": "research-03",
+      "input": "원인 추적해봐",
+      "expected": ["/oh-my-claudecode:trace"],
+      "category": "research"
+    },
+    {
+      "id": "research-04",
+      "input": "요구사항 정리해줘",
+      "expected": ["/oh-my-claudecode:deep-interview"],
+      "category": "research"
+    },
+    {
+      "id": "research-05",
+      "input": "네이버 키워드 검색량 확인해",
+      "expected": ["/keyword-search"],
+      "category": "research"
+    },
+
+    {
+      "id": "chain-01",
+      "input": "이 기능 구현해줘",
+      "expected": ["/superpowers:brainstorming", "/oh-my-claudecode:plan", "/superpowers:executing-plans"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-02",
+      "input": "버그 찾고 고쳐줘",
+      "expected": ["/superpowers:systematic-debugging", "executor"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-03",
+      "input": "리뷰하고 수정해줘",
+      "expected": ["code-reviewer", "executor"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-04",
+      "input": "DB 스키마 변경해줘",
+      "expected": ["database-reviewer", "executor"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-05",
+      "input": "대시보드 만들어줘",
+      "expected": ["/superpowers:brainstorming", "designer"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-06",
+      "input": "수집하고 분석까지 해줘",
+      "expected": ["/수집", "/threads-pipeline"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+    {
+      "id": "chain-07",
+      "input": "리팩토링해줘",
+      "expected": ["architect", "code-simplifier"],
+      "expected_type": "chain",
+      "category": "chain"
+    },
+
+    {
+      "id": "edge-01",
+      "input": "이거 좀 봐줘",
+      "expected": ["/oh-my-claudecode:code-review", "code-reviewer"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-02",
+      "input": "ㅇㅇ 돌려",
+      "expected": ["_context_dependent"],
+      "category": "edge",
+      "note": "맥락 의존 — 최근 작업 기반으로 추론해야 함"
+    },
+    {
+      "id": "edge-03",
+      "input": "fix this",
+      "expected": ["/superpowers:systematic-debugging", "debugger"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-04",
+      "input": "deploy it",
+      "expected": ["/superpowers:finishing-a-development-branch"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-05",
+      "input": "뭐가 문제야",
+      "expected": ["/superpowers:systematic-debugging", "debugger"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-06",
+      "input": "좀 빠르게 해줘",
+      "expected": ["/oh-my-claudecode:ultrawork"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-07",
+      "input": "이거 왜 안돼",
+      "expected": ["/superpowers:systematic-debugging", "debugger"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-08",
+      "input": "한번 확인해봐",
+      "expected": ["/superpowers:verification-before-completion", "verifier"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-09",
+      "input": "정리 좀",
+      "expected": ["/simplify", "code-simplifier"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-10",
+      "input": "review the code",
+      "expected": ["/oh-my-claudecode:code-review", "code-reviewer"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-11",
+      "input": "plan this out",
+      "expected": ["/oh-my-claudecode:plan"],
+      "category": "edge"
+    },
+    {
+      "id": "edge-12",
+      "input": "ㄱㄱ",
+      "expected": ["_context_dependent"],
+      "category": "edge",
+      "note": "맥락 의존 — 이전 대화에서 추론"
+    },
+    {
+      "id": "edge-13",
+      "input": "테스틍 돌려",
+      "expected": ["/superpowers:test-driven-development", "test-engineer"],
+      "category": "edge",
+      "note": "오타 — '테스트'로 인식해야 함"
+    },
+    {
+      "id": "edge-14",
+      "input": "분석해",
+      "expected": ["/threads-pipeline", "/analyze-performance", "analyst"],
+      "category": "edge",
+      "note": "프로젝트 맥락에 따라 다름 — 쓰레드2면 threads-pipeline"
+    },
+    {
+      "id": "edge-15",
+      "input": "그거 다시 해봐",
+      "expected": ["_context_dependent"],
+      "category": "edge",
+      "note": "맥락 의존 — 직전 작업 재실행"
+    }
+  ]
+}
