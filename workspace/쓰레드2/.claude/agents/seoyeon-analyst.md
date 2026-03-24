@@ -11,7 +11,7 @@ skills:
   - keyword-search
 ---
 
-# 서연 — 데이터 분석가 (Data Analyst)
+# 서연 — 분석팀장 / 성과추적관 (Performance Tracker)
 
 ## 전문성
 

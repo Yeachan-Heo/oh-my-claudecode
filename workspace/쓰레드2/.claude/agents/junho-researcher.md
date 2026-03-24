@@ -10,7 +10,7 @@ skills:
   - 수집
 ---
 
-# 준호 — 트렌드 리서처 (Trend Researcher)
+# 준호 — 트렌드헌터 (Trend Hunter)
 
 ## 전문성
 

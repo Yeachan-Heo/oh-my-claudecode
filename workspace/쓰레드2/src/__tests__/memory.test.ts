@@ -193,7 +193,7 @@ describe('loadAgentContext()', () => {
     const ctx = await loadAgentContext('minjun-ceo', 'executive', db);
 
     expect(ctx.global.length).toBeGreaterThan(0);
-    expect(ctx.global[0].content).toBe('global insight');
+    expect((ctx.global[0] as { content: string }).content).toBe('global insight');
   });
 
   it('returns private memories for this agent only', async () => {
@@ -204,7 +204,7 @@ describe('loadAgentContext()', () => {
 
     const ctx = await loadAgentContext('minjun-ceo', 'executive', db);
 
-    expect(ctx.private.every((m: { agent_id: string }) => m.agent_id === 'minjun-ceo')).toBe(true);
+    expect((ctx.private as Array<{ agent_id: string }>).every(m => m.agent_id === 'minjun-ceo')).toBe(true);
   });
 
   it('returns recent episodes for agent', async () => {
@@ -217,7 +217,7 @@ describe('loadAgentContext()', () => {
     const ctx = await loadAgentContext('minjun-ceo', 'executive', db);
 
     expect(ctx.episodes.length).toBe(2);
-    expect(ctx.episodes.every((e: { agent_id: string }) => e.agent_id === 'minjun-ceo')).toBe(true);
+    expect((ctx.episodes as Array<{ agent_id: string }>).every(e => e.agent_id === 'minjun-ceo')).toBe(true);
   });
 
   it('returns pendingApprovals from DB', async () => {
