@@ -14,8 +14,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { writeFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import {
   loadConfig,
   getConfigPaths,
@@ -57,10 +55,8 @@ import { launchCommand } from './launch.js';
 import { interopCommand } from './interop.js';
 import { askCommand, ASK_USAGE } from './ask.js';
 import { warnIfWin32 } from './win32-warning.js';
-import { autoresearchCommand, AUTORESEARCH_HELP } from './autoresearch.js';
+import { autoresearchCommand } from './autoresearch.js';
 import { runHudWatchLoop } from './hud-watch.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const version = getRuntimePackageVersion();
 

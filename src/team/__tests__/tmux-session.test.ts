@@ -9,7 +9,6 @@ import {
   shouldAttemptAdaptiveRetry,
   getDefaultShell,
   buildWorkerStartCommand,
-  isUnixLikeOnWindows,
 } from '../tmux-session.js';
 
 afterEach(() => {

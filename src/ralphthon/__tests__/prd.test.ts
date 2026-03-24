@@ -24,7 +24,7 @@ import {
 import type {
   RalphthonPRD,
   RalphthonStory,
-  HardeningTask,
+
 } from '../types.js';
 import { RALPHTHON_DEFAULTS } from '../types.js';
 

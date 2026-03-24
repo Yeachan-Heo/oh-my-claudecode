@@ -141,7 +141,7 @@ describe('Project Memory Integration', () => {
       await registerProjectMemoryContext(sessionId, tempDir);
 
       // Add custom notes and directives to the persisted memory
-      let memory = await loadProjectMemory(tempDir);
+      const memory = await loadProjectMemory(tempDir);
       expect(memory).not.toBeNull();
       memory!.customNotes = [
         { timestamp: Date.now(), source: 'manual', category: 'deploy', content: 'Uses Docker' },
