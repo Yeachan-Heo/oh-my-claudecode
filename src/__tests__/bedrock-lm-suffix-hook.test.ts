@@ -146,27 +146,36 @@ describe('environment-based session model detection', () => {
   beforeEach(() => { saved = saveAndClear(ENV_KEYS); });
   afterEach(() => { restore(saved); });
 
+  // Helper matching the dual-check logic in pre-tool-enforcer.mjs
+  const sessionHasLmSuffix = () =>
+    hasExtendedContextSuffix(process.env.CLAUDE_MODEL || '') ||
+    hasExtendedContextSuffix(process.env.ANTHROPIC_MODEL || '');
+
   it('detects [1m] session model via ANTHROPIC_MODEL env var', () => {
     process.env.ANTHROPIC_MODEL = 'global.anthropic.claude-sonnet-4-6[1m]';
-    const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
-    expect(hasExtendedContextSuffix(sessionModel)).toBe(true);
+    expect(sessionHasLmSuffix()).toBe(true);
   });
 
   it('detects [1m] session model via CLAUDE_MODEL env var', () => {
     process.env.CLAUDE_MODEL = 'global.anthropic.claude-sonnet-4-6[1m]';
-    const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
-    expect(hasExtendedContextSuffix(sessionModel)).toBe(true);
+    expect(sessionHasLmSuffix()).toBe(true);
+  });
+
+  it('detects [1m] when only ANTHROPIC_MODEL has suffix and CLAUDE_MODEL is set without it', () => {
+    // Split-brain scenario: CLAUDE_MODEL is clean but ANTHROPIC_MODEL carries [1m].
+    // A single CLAUDE_MODEL || ANTHROPIC_MODEL lookup would miss this.
+    process.env.CLAUDE_MODEL = 'global.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.ANTHROPIC_MODEL = 'global.anthropic.claude-sonnet-4-6[1m]';
+    expect(sessionHasLmSuffix()).toBe(true);
   });
 
   it('does not flag missing env vars', () => {
-    const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
-    expect(hasExtendedContextSuffix(sessionModel)).toBe(false);
+    expect(sessionHasLmSuffix()).toBe(false);
   });
 
   it('does not flag a valid Bedrock model in env vars', () => {
     process.env.ANTHROPIC_MODEL = 'global.anthropic.claude-opus-4-6-v1';
-    const sessionModel = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
-    expect(hasExtendedContextSuffix(sessionModel)).toBe(false);
+    expect(sessionHasLmSuffix()).toBe(false);
   });
 });
 
@@ -243,5 +252,18 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     );
     expect(result.denied).toBe(true);
     expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
+  });
+
+  it('denies no-model call when only ANTHROPIC_MODEL has [1m] and CLAUDE_MODEL is clean', () => {
+    // Verifies the dual-check: CLAUDE_MODEL || ANTHROPIC_MODEL alone would miss this case.
+    const result = runHook(
+      {},
+      {
+        CLAUDE_MODEL: 'global.anthropic.claude-sonnet-4-6-v1:0',
+        ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
+      },
+    );
+    expect(result.denied).toBe(true);
+    expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
   });
 });

@@ -572,8 +572,19 @@ async function main() {
       const toolInput = data.toolInput || data.tool_input || {};
       const toolModel = toolInput.model;
       if (isForceInheritEnabled()) {
-        const sessionModel = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-        const sessionHasLmSuffix = hasExtendedContextSuffix(sessionModel);
+        // Check both vars: if either carries [1m] the session model is unsafe for sub-agents.
+        // Avoids a split-brain between the hook and runtime code that may read the vars in
+        // different orders (e.g. model-contract.ts uses ANTHROPIC_MODEL first).
+        const claudeModel = process.env.CLAUDE_MODEL || '';
+        const anthropicModel = process.env.ANTHROPIC_MODEL || '';
+        const sessionHasLmSuffix =
+          hasExtendedContextSuffix(claudeModel) || hasExtendedContextSuffix(anthropicModel);
+        // For error messages: prefer whichever var actually carries the [1m] suffix.
+        const sessionModel = hasExtendedContextSuffix(claudeModel)
+          ? claudeModel
+          : hasExtendedContextSuffix(anthropicModel)
+            ? anthropicModel
+            : claudeModel || anthropicModel;
 
         if (toolModel) {
           // Allow explicit valid provider-specific IDs (full Bedrock/Vertex format) without a
