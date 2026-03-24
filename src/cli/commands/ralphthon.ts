@@ -22,6 +22,7 @@ import {
   formatRalphthonStatus,
   getRalphthonPrdPath,
   initRalphthonPrd,
+  sendKeysToPane,
 } from '../../ralphthon/index.js';
 import type {
   RalphthonCliOptions,
@@ -266,7 +267,9 @@ export async function ralphthonCommand(args: string[]): Promise<void> {
 
     // Inject deep-interview command to the leader pane
     // The orchestrator will wait for the PRD to appear
-    const interviewPrompt = `/deep-interview ${options.task}
+    // Sanitize task to prevent newline/control char injection via tmux send-keys
+    const sanitizedTask = options.task!.replace(/[\r\n\0]+/g, ' ').trim();
+    const interviewPrompt = `/deep-interview ${sanitizedTask}
 
 After the interview, generate a ralphthon-prd.json file in .omc/ with this structure:
 {
@@ -289,6 +292,13 @@ After the interview, generate a ralphthon-prd.json file in .omc/ with this struc
     );
     state.phase = 'interview';
     writeRalphthonState(cwd, state, sessionId);
+
+    // Send the deep-interview prompt to the leader pane
+    if (!sendKeysToPane(leaderPane, interviewPrompt)) {
+      console.log(chalk.red('Failed to inject deep-interview prompt to leader pane.'));
+      clearRalphthonState(cwd, sessionId);
+      process.exit(1);
+    }
 
     console.log(chalk.gray('Waiting for PRD generation...'));
 

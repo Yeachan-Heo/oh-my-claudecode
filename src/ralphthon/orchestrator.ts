@@ -8,7 +8,7 @@
  * Terminates after N consecutive hardening waves with no new issues.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import {
   writeModeState,
   readModeState,
@@ -25,7 +25,6 @@ import type {
   RalphthonState,
   RalphthonPhase,
   RalphthonConfig,
-  OrchestratorEvent,
   OrchestratorEventHandler,
 } from './types.js';
 import { RALPHTHON_DEFAULTS } from './types.js';
@@ -86,8 +85,8 @@ export function clearRalphthonState(
  */
 export function isPaneIdle(paneId: string): boolean {
   try {
-    const output = execSync(
-      `tmux display-message -t '${paneId}' -p '#{pane_current_command}'`,
+    const output = execFileSync(
+      'tmux', ['display-message', '-t', paneId, '-p', '#{pane_current_command}'],
       { encoding: 'utf-8', timeout: 5000 },
     ).trim();
 
@@ -103,7 +102,7 @@ export function isPaneIdle(paneId: string): boolean {
  */
 export function paneExists(paneId: string): boolean {
   try {
-    execSync(`tmux has-session -t '${paneId}' 2>/dev/null`, { timeout: 5000 });
+    execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -115,12 +114,7 @@ export function paneExists(paneId: string): boolean {
  */
 export function sendKeysToPane(paneId: string, text: string): boolean {
   try {
-    // Escape single quotes in the text for shell safety
-    const escaped = text.replace(/'/g, "'\\''");
-    execSync(
-      `tmux send-keys -t '${paneId}' '${escaped}' Enter`,
-      { timeout: 10000 },
-    );
+    execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
     return true;
   } catch {
     return false;
@@ -132,8 +126,8 @@ export function sendKeysToPane(paneId: string, text: string): boolean {
  */
 export function capturePaneContent(paneId: string, lines = 50): string {
   try {
-    return execSync(
-      `tmux capture-pane -t '${paneId}' -p -S -${lines}`,
+    return execFileSync(
+      'tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`],
       { encoding: 'utf-8', timeout: 5000 },
     ).trim();
   } catch {
@@ -212,7 +206,7 @@ export function initOrchestrator(
   leaderPaneId: string,
   prdPath: string,
   sessionId?: string,
-  config?: Partial<RalphthonConfig>,
+  _config?: Partial<RalphthonConfig>,
 ): RalphthonState {
   const state: RalphthonState = {
     active: true,
