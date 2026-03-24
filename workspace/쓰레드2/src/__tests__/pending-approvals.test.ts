@@ -3,6 +3,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+
+// DB connection mock
+vi.mock('../db/index.js', () => ({ db: {} }));
+
 import {
   createApproval,
   getApprovals,

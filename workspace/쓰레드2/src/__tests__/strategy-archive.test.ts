@@ -4,7 +4,11 @@
  * 핵심 시나리오: v1 → v2 → v3 → rollback → v2 active
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// DB connection mock — DATABASE_URL 없는 환경에서 index.ts throw 방지
+vi.mock('../db/index.js', () => ({ db: {} }));
+
 import {
   createStrategyVersion,
   getActiveStrategy,
