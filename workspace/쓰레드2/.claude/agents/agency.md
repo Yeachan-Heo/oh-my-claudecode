@@ -99,8 +99,8 @@
 | `sora-lifestyle-editor.md` | 생활 에디터 | sonnet |
 | `jiu-diet-editor.md` | 다이어트 에디터 | sonnet |
 | `doyun-qa.md` | QA 매니저 | opus |
-| `seoyeon-analyst.md` | 데이터 분석가 | opus |
-| `junho-researcher.md` | 트렌드 리서처 | sonnet |
+| `seoyeon-analyst.md` | 분석팀장/성과추적관 | opus |
+| `junho-researcher.md` | 트렌드헌터 | sonnet |
 | `taeho-engineer.md` | 시스템 엔지니어 | opus |
 
 ## 운영 문서 (ops/)

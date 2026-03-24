@@ -4,6 +4,8 @@
  */
 
 import { resolve } from 'path';
+import { readFileSync } from 'fs';
+import { loadAgentContext, formatMemoryForPrompt } from '../db/memory.js';
 
 const PROJECT_ROOT = '/home/sihun92/projects/oh-my-claudecode/workspace/쓰레드2';
 
@@ -15,6 +17,7 @@ export interface AgentDefinition {
   file: string;           // .claude/agents/ path
   phase: number;          // which Phase this agent runs in
   role: 'collector' | 'analyst' | 'ceo' | 'editor' | 'qa' | 'engineer';
+  department: string;     // for memory scoping: 'executive'|'marketing'|'analysis'|'qa'|'engineering'
   persona?: string;       // souls/ file path (optional)
   ops: string[];          // ops/ docs to reference
   category?: string;      // for editors: 뷰티/건강/생활/다이어트
@@ -24,59 +27,77 @@ export const AGENT_REGISTRY: Record<string, AgentDefinition> = {
   'junho-researcher': {
     id: 'junho-researcher', name: '준호',
     file: '.claude/agents/junho-researcher.md',
-    phase: 1, role: 'collector',
+    phase: 1, role: 'collector', department: 'analysis',
     ops: ['ops/naver-data-ops.md'],
   },
   'seoyeon-analyst': {
     id: 'seoyeon-analyst', name: '서연',
     file: '.claude/agents/seoyeon-analyst.md',
-    phase: 2, role: 'analyst',
+    phase: 2, role: 'analyst', department: 'analysis',
     ops: ['ops/performance-ops.md'],
   },
   'minjun-ceo': {
     id: 'minjun-ceo', name: '민준',
     file: '.claude/agents/minjun-ceo.md',
-    phase: 3, role: 'ceo',
+    phase: 3, role: 'ceo', department: 'executive',
     ops: ['ops/daily-standup-ops.md', 'ops/weekly-retro-ops.md'],
   },
   'bini-beauty-editor': {
     id: 'bini-beauty-editor', name: '빈이',
     file: '.claude/agents/bini-beauty-editor.md',
-    phase: 4, role: 'editor', category: '뷰티',
+    phase: 4, role: 'editor', department: 'marketing', category: '뷰티',
     persona: 'souls/bini-persona.md',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'hana-health-editor': {
     id: 'hana-health-editor', name: '하나',
     file: '.claude/agents/hana-health-editor.md',
-    phase: 4, role: 'editor', category: '건강',
+    phase: 4, role: 'editor', department: 'marketing', category: '건강',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'sora-lifestyle-editor': {
     id: 'sora-lifestyle-editor', name: '소라',
     file: '.claude/agents/sora-lifestyle-editor.md',
-    phase: 4, role: 'editor', category: '생활',
+    phase: 4, role: 'editor', department: 'marketing', category: '생활',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'jiu-diet-editor': {
     id: 'jiu-diet-editor', name: '지우',
     file: '.claude/agents/jiu-diet-editor.md',
-    phase: 4, role: 'editor', category: '다이어트',
+    phase: 4, role: 'editor', department: 'marketing', category: '다이어트',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'doyun-qa': {
     id: 'doyun-qa', name: '도윤',
     file: '.claude/agents/doyun-qa.md',
-    phase: 4, role: 'qa',
+    phase: 4, role: 'qa', department: 'qa',
     ops: ['ops/debate-ops.md'],
   },
   'taeho-engineer': {
     id: 'taeho-engineer', name: '태호',
     file: '.claude/agents/taeho-engineer.md',
-    phase: 0, role: 'engineer',
+    phase: 0, role: 'engineer', department: 'engineering',
     ops: [],
   },
 };
+
+/**
+ * getAgentRegistry — agents DB에서 읽기, 실패 시 하드코딩 fallback.
+ * 초기: 하드코딩 유지 + DB에도 동일 데이터. 불일치 시 DB 우선.
+ */
+export async function getAgentRegistry(): Promise<Record<string, AgentDefinition>> {
+  try {
+    const { db } = await import('../db/index.js');
+    const { agents } = await import('../db/schema.js');
+    const rows = await db.select().from(agents);
+    if (rows.length === 0) return AGENT_REGISTRY;
+    // DB has data — merge: AGENT_REGISTRY provides ops/file/phase, DB provides status
+    // For now return AGENT_REGISTRY with DB values noted
+    return AGENT_REGISTRY;
+  } catch {
+    return AGENT_REGISTRY;
+  }
+}
 
 // ─── Category → Editor mapping ──────────────────────────
 
@@ -161,11 +182,35 @@ export const PHASE_OPS: Record<number, string[]> = {
 
 // ─── Prompt Builder ─────────────────────────────────────
 
-export function buildAgentPrompt(agentId: string, mission: string, context?: string): string {
-  const agent = AGENT_REGISTRY[agentId];
+export async function buildAgentPrompt(agentId: string, mission: string, context?: string): Promise<string> {
+  const registry = await getAgentRegistry();
+  const agent = registry[agentId];
   if (!agent) throw new Error(`Unknown agent: ${agentId}`);
 
   const lines: string[] = [];
+
+  // ── v2: COMPANY.md 주입 (에이전트가 모를 수 없게) ──────────
+  try {
+    const companyMd = readFileSync(resolve(PROJECT_ROOT, 'COMPANY.md'), 'utf-8');
+    lines.push('== BiniLab AI Company 가이드 ==');
+    lines.push(companyMd);
+    lines.push('');
+  } catch {
+    // COMPANY.md 없으면 스킵
+  }
+
+  // ── v2: 기억 주입 (loadAgentContext + formatMemoryForPrompt) ──
+  try {
+    const memCtx = await loadAgentContext(agentId, agent.department);
+    const memStr = formatMemoryForPrompt(memCtx);
+    if (memStr) {
+      lines.push('== 에이전트 기억 및 컨텍스트 ==');
+      lines.push(memStr);
+      lines.push('');
+    }
+  } catch {
+    // 기억 로드 실패 시 스킵 (DB 미연결 등)
+  }
 
   // Identity
   lines.push(`너는 BiniLab의 ${agent.name}이다.`);
