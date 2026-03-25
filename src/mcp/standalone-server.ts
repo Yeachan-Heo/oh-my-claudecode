@@ -34,7 +34,7 @@ interface ToolDef {
   description: string;
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
   schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>;
-  handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
+  handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
 }
 
 // Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
@@ -177,7 +177,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const result = await tool.handler((args ?? {}) as unknown);
     return {
       content: result.content,
-      isError: false,
+      isError: result.isError ?? false,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

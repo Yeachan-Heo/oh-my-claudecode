@@ -522,19 +522,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  if (isDeprecatedTeamToolName(name)) {
-    return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
-  }
 
+  // Dispatch live handlers first. The deprecation guard below currently overlaps
+  // with these same tool names but is kept as a safety net for future tool
+  // renames — if a tool name is removed from this dispatch block, the
+  // deprecation guard will catch stale callers and return a migration hint.
   try {
     if (name === 'omc_run_team_start') return await handleStart(args ?? {});
     if (name === 'omc_run_team_status') return await handleStatus(args ?? {});
     if (name === 'omc_run_team_wait') return await handleWait(args ?? {});
     if (name === 'omc_run_team_cleanup') return await handleCleanup(args ?? {});
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   } catch (error) {
     return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
   }
+
+  if (isDeprecatedTeamToolName(name)) {
+    return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
+  }
+
+  return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
 });
 
 async function main() {

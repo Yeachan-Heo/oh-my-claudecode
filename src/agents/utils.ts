@@ -364,6 +364,7 @@ export function deepMerge<T extends Record<string, unknown>>(
   const result = { ...target };
 
   for (const key of Object.keys(source)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     const sourceValue = source[key as keyof T];
     const targetValue = target[key as keyof T];
 

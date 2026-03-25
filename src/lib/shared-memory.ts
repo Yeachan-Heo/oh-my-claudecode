@@ -180,9 +180,16 @@ export function writeEntry(
     entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
   }
 
-  const tmpPath = filePath + '.tmp';
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
   writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
   renameSync(tmpPath, filePath);
+
+  // Clean up legacy .tmp file (old constant-suffix scheme) if it exists
+  try {
+    const legacyTmp = filePath + '.tmp';
+    if (existsSync(legacyTmp)) unlinkSync(legacyTmp);
+  } catch { /* best-effort cleanup */ }
+
   return entry;
 }
 

@@ -506,9 +506,9 @@ describe('extractDiscordFlag', () => {
 // extractOpenClawFlag
 // ---------------------------------------------------------------------------
 describe('extractOpenClawFlag', () => {
-  it('returns openclawEnabled=false with no --openclaw flag', () => {
+  it('returns openclawEnabled=undefined with no --openclaw flag', () => {
     const result = extractOpenClawFlag(['--madmax']);
-    expect(result.openclawEnabled).toBe(false);
+    expect(result.openclawEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual(['--madmax']);
   });
 
@@ -560,9 +560,9 @@ describe('extractOpenClawFlag', () => {
     expect(result.openclawEnabled).toBe(false);
   });
 
-  it('returns openclawEnabled=false for empty args', () => {
+  it('returns openclawEnabled=undefined for empty args', () => {
     const result = extractOpenClawFlag([]);
-    expect(result.openclawEnabled).toBe(false);
+    expect(result.openclawEnabled).toBeUndefined();
     expect(result.remainingArgs).toEqual([]);
   });
 
