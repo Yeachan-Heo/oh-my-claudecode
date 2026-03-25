@@ -236,8 +236,31 @@ export async function collectSnapshot(
   } catch (e) {
     const err = e as Error;
     log(`메트릭 수집 실패: ${err.message}`);
-    // Use zeroed metrics on failure
-    rawMetrics = { likes: 0, comments: 0, shares: 0, saves: 0, postViews: 0, commentViews: 0 };
+    // Record failure snapshot with status='failed' to distinguish from zero-performance
+    if (browser) {
+      try { await browser.close(); } catch { /* ignore disconnect errors */ }
+    }
+    const failedId = generateId('snap');
+    await db.insert(postSnapshots).values({
+      id: failedId,
+      post_id: postId,
+      snapshot_type: snapshotType,
+      snapshot_at: new Date(),
+      likes: 0, comments: 0, shares: 0, saves: 0,
+      clicks: 0, conversions: 0, revenue: 0,
+      engagement_velocity: 0, click_velocity: 0, conversion_velocity: 0,
+      post_views: 0, comment_views: 0,
+      status: 'failed',
+    });
+    log(`실패 스냅샷 기록: ${failedId} status=failed`);
+    return {
+      id: failedId, post_id: postId, snapshot_type: snapshotType,
+      snapshot_at: new Date().toISOString(),
+      likes: 0, comments: 0, shares: 0, saves: 0,
+      clicks: 0, conversions: 0, revenue: 0,
+      engagement_velocity: 0, click_velocity: 0, conversion_velocity: 0,
+      post_views: 0, comment_views: 0,
+    } as PostSnapshot;
   } finally {
     if (browser) {
       try { await browser.close(); } catch { /* ignore disconnect errors */ }
@@ -299,6 +322,7 @@ export async function collectSnapshot(
     conversion_velocity: snapshot.conversion_velocity,
     post_views: snapshot.post_views,
     comment_views: snapshot.comment_views,
+    status: 'success',
   });
 
   // Update maturity + performance metrics in content_lifecycle
@@ -325,6 +349,86 @@ export async function collectSnapshot(
   log(`수집 완료: post=${postId} type=${snapshotType} views=${rawMetrics.postViews} commentViews=${rawMetrics.commentViews} CTR=${ctrProxy}%`);
 
   return snapshot;
+}
+
+// ─── Post Registration ──────────────────────────────────
+
+export interface RegisterPostInput {
+  /** Threads post ID (from post URL). */
+  threadsPostId: string;
+  /** Full Threads post URL. */
+  threadsPostUrl?: string;
+  /** Content category (e.g. '뷰티'). */
+  category: string;
+  /** Content style / format (e.g. '솔직후기형'). */
+  contentStyle: string;
+  /** Hook type (e.g. 'empathy'). */
+  hookType: string;
+  /** Need category if available. */
+  needCategory?: string;
+  /** Post source identifier. */
+  postSource: string;
+  /** The actual content text. */
+  contentText?: string;
+  /** Account ID used for posting. */
+  accountId?: string;
+}
+
+/**
+ * Register a newly published post into content_lifecycle.
+ *
+ * Called after Phase 5 publish to start the OODA feedback loop.
+ * Uses ON CONFLICT to avoid duplicate inserts for the same threads_post_id.
+ */
+export async function registerPost(input: RegisterPostInput): Promise<string | null> {
+  // Skip if already registered (threads_post_id has no unique index, check manually)
+  const existing = await db
+    .select({ id: contentLifecycle.id })
+    .from(contentLifecycle)
+    .where(eq(contentLifecycle.threads_post_id, input.threadsPostId))
+    .limit(1);
+
+  if (existing.length > 0) {
+    log(`이미 등록됨: threads_post_id=${input.threadsPostId} → id=${existing[0]!.id}`);
+    return existing[0]!.id;
+  }
+
+  const id = generateId('lc');
+  const now = new Date();
+
+  await db.insert(contentLifecycle).values({
+    id,
+    // Collection stage — filled with pipeline source defaults
+    source_post_id: input.threadsPostId,
+    source_channel_id: 'binilab__',
+    source_engagement: 0,
+    source_relevance: 0,
+    // Analysis stage
+    extracted_need: input.needCategory ?? 'pending',
+    need_category: input.needCategory ?? 'pending',
+    need_confidence: 0,
+    // Matching stage
+    matched_product_id: 'pending',
+    match_relevance: 0,
+    // Content stage
+    content_text: input.contentText ?? '',
+    content_style: input.contentStyle,
+    hook_type: input.hookType,
+    // Publishing stage
+    posted_account_id: input.accountId ?? 'binilab__',
+    posted_at: now,
+    threads_post_id: input.threadsPostId,
+    threads_post_url: input.threadsPostUrl,
+    // Performance defaults
+    maturity: 'warmup',
+    current_impressions: 0,
+    current_clicks: 0,
+    current_conversions: 0,
+    current_revenue: 0,
+  });
+
+  log(`포스트 등록 완료: id=${id} threads_post_id=${input.threadsPostId}`);
+  return id;
 }
 
 // ─── Snapshot Scheduling ─────────────────────────────────

@@ -436,6 +436,9 @@ export const postSnapshots = pgTable(
     // Phase 1: separate view counts for post and comment
     post_views: integer('post_views'),
     comment_views: integer('comment_views'),
+
+    // Phase 2: distinguish collection failures from zero-performance
+    status: text('status').notNull().default('success'),
   },
   (table) => [
     index('idx_snapshots_post').on(table.post_id),

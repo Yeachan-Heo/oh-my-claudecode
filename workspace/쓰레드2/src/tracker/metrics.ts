@@ -84,7 +84,7 @@ export async function classifyPerformance(posts: ContentLifecycle[]): Promise<Cl
       snapshot_at: postSnapshots.snapshot_at,
     })
     .from(postSnapshots)
-    .where(sql`${postSnapshots.post_id} IN (${sql.join(postIds.map(id => sql`${id}`), sql`, `)})`);
+    .where(sql`${postSnapshots.post_id} IN (${sql.join(postIds.map(id => sql`${id}`), sql`, `)}) AND COALESCE(${postSnapshots.status}, 'success') = 'success'`);
 
   // Build map: postId -> latest engagement_velocity
   const velocityMap = new Map<string, number>();
