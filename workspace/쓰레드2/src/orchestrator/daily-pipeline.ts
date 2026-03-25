@@ -17,6 +17,7 @@ import { createStrategyVersion } from '../db/strategy-archive.js';
 import { startMeeting, concludeMeeting } from './meeting.js';
 import { logEpisode } from '../db/memory.js';
 import { registerPost, scheduleSnapshots, collectSnapshot } from '../tracker/snapshot.js';
+import { getLatestDiagnosis } from '../tracker/diagnosis.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -146,6 +147,34 @@ export async function buildDirective(
     if (grade === 'A' && allocation[cat]! < 5) allocation[cat] = allocation[cat]! + 1;
     if (grade === 'C' && allocation[cat]! > 1) allocation[cat] = allocation[cat]! - 1;
   }
+
+  // diagnosis 피드백 반영 — 최근 진단의 tuning_actions에서 카테고리 조정
+  let diagnosisApplied = false;
+  try {
+    const latestDiagnosis = await getLatestDiagnosis();
+    if (latestDiagnosis?.tuning_actions && latestDiagnosis.tuning_actions.length > 0) {
+      // bottleneck이 content면 해당 카테고리 비율 조정 가능
+      // bottleneck이 collection/matching이면 특정 카테고리가 아닌 전체 영향
+      // categoryPerformance 기반으로 저성과 카테고리 축소, 고성과 카테고리 확대
+      if (latestDiagnosis.bottleneck !== 'none' && categoryStats.length > 0) {
+        // 저성과 카테고리 식별 (engagement_rate 기준 하위)
+        const sorted = [...categoryStats].sort((a, b) => a.engagement_rate - b.engagement_rate);
+        const worstCat = sorted[0]?.category;
+        const bestCat = sorted[sorted.length - 1]?.category;
+        if (worstCat && bestCat && worstCat !== bestCat
+            && allocation[worstCat] !== undefined && allocation[bestCat] !== undefined) {
+          if (allocation[worstCat]! > 1) {
+            allocation[worstCat] = allocation[worstCat]! - 1;
+            allocation[bestCat] = allocation[bestCat]! + 1;
+            diagnosisApplied = true;
+          }
+        }
+      }
+    }
+  } catch {
+    // Diagnosis 조회 실패 시 기존 ROI 로직만 사용 (graceful degradation)
+  }
+
   const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
   if (allocTotal !== totalPosts) {
     const diff = totalPosts - allocTotal;
@@ -247,10 +276,11 @@ export async function buildDirective(
     .filter(([, v]) => v.grade === 'A')
     .map(([k]) => k)
     .join(', ') || '없음';
+  const diagNote = diagnosisApplied ? ' + diagnosis 피드백 반영' : '';
   logDecision(
     date,
     `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
-    `ROI 점수 기반 조정. A등급: ${topCategories}`,
+    `ROI 점수 기반 조정. A등급: ${topCategories}${diagNote}`,
   );
 
   // strategy_archive에 CEO 결정 기록

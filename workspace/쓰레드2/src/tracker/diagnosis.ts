@@ -13,7 +13,7 @@
  *   └─ 전체 저조?          → 'collection' (필터 강화)
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   diagnosisReports,
@@ -343,6 +343,58 @@ export async function createDiagnosisReport(weekStart: Date): Promise<DiagnosisR
 
   log(`진단 완료: bottleneck=${report.bottleneck}, actions=${actions.length}건`);
   return report;
+}
+
+// ─── Latest Diagnosis Retrieval ──────────────────────────
+
+/**
+ * Retrieve the most recent diagnosis report with its unapplied tuning actions.
+ * Returns null if no reports exist yet (graceful degradation).
+ */
+export async function getLatestDiagnosis(): Promise<DiagnosisReport | null> {
+  const rows = await db
+    .select()
+    .from(diagnosisReports)
+    .orderBy(desc(diagnosisReports.created_at))
+    .limit(1);
+
+  if (rows.length === 0) return null;
+
+  const row = rows[0]!;
+
+  // Fetch associated tuning actions
+  const actionRows = await db
+    .select()
+    .from(tuningActionsTable)
+    .where(eq(tuningActionsTable.report_id, row.id));
+
+  const tuning_actions: TuningAction[] = actionRows.map((a) => ({
+    target: a.target as TuningAction['target'],
+    action: a.action,
+    priority: a.priority as TuningAction['priority'],
+    applied: a.applied,
+    applied_at: a.applied_at ? a.applied_at.toISOString() : null,
+  }));
+
+  return {
+    id: row.id,
+    report_type: row.report_type as DiagnosisReport['report_type'],
+    period_start: row.period_start.toISOString(),
+    period_end: row.period_end.toISOString(),
+    created_at: row.created_at.toISOString(),
+    total_posts: row.total_posts,
+    top_10_percent_count: row.top_10_percent_count,
+    bottom_10_percent_count: row.bottom_10_percent_count,
+    avg_source_engagement: row.avg_source_engagement,
+    avg_need_confidence: row.avg_need_confidence,
+    avg_ctr: row.avg_ctr,
+    avg_conversion_rate: row.avg_conversion_rate,
+    avg_revenue_per_post: row.avg_revenue_per_post,
+    bottleneck: row.bottleneck as DiagnosisReport['bottleneck'],
+    bottleneck_evidence: row.bottleneck_evidence,
+    tuning_actions,
+    ai_analysis: row.ai_analysis,
+  };
 }
 
 // ─── Tuning Action Application ───────────────────────────
