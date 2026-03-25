@@ -144,8 +144,9 @@ export async function buildDirective(
   // 카테고리 비율 결정
   const allocation = { ...DEFAULT_ALLOCATION };
   for (const [cat, { grade }] of Object.entries(roiSummary)) {
-    if (grade === 'A' && allocation[cat]! < 5) allocation[cat] = allocation[cat]! + 1;
-    if (grade === 'C' && allocation[cat]! > 1) allocation[cat] = allocation[cat]! - 1;
+    const cur = allocation[cat] || 0;
+    if (grade === 'A' && cur < 5) allocation[cat] = cur + 1;
+    if (grade === 'C' && cur > 1) allocation[cat] = cur - 1;
   }
 
   // diagnosis 피드백 반영 — 최근 진단의 tuning_actions에서 카테고리 조정
@@ -163,9 +164,10 @@ export async function buildDirective(
         const bestCat = sorted[sorted.length - 1]?.category;
         if (worstCat && bestCat && worstCat !== bestCat
             && allocation[worstCat] !== undefined && allocation[bestCat] !== undefined) {
-          if (allocation[worstCat]! > 1) {
-            allocation[worstCat] = allocation[worstCat]! - 1;
-            allocation[bestCat] = allocation[bestCat]! + 1;
+          const worstVal = allocation[worstCat] || 0;
+          if (worstVal > 1) {
+            allocation[worstCat] = worstVal - 1;
+            allocation[bestCat] = (allocation[bestCat] || 0) + 1;
             diagnosisApplied = true;
           }
         }
@@ -175,11 +177,28 @@ export async function buildDirective(
     // Diagnosis 조회 실패 시 기존 ROI 로직만 사용 (graceful degradation)
   }
 
-  const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
-  if (allocTotal !== totalPosts) {
-    const diff = totalPosts - allocTotal;
-    const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0]![0];
-    allocation[topCat] = Math.max(1, allocation[topCat]! + diff);
+  // NaN 방어: 모든 allocation 값이 유효한 정수인지 확인
+  for (const cat of Object.keys(allocation)) {
+    if (!Number.isFinite(allocation[cat])) allocation[cat] = DEFAULT_ALLOCATION[cat] || 0;
+  }
+
+  // allocation 합계를 totalPosts에 맞추기 (반복 조정)
+  const cats = Object.keys(allocation);
+  let allocTotal = cats.reduce((sum, c) => sum + (allocation[c] || 0), 0);
+  while (allocTotal !== totalPosts && cats.length > 0) {
+    // 내림차순 정렬로 가장 큰 카테고리부터 조정
+    cats.sort((a, b) => (allocation[b] || 0) - (allocation[a] || 0));
+    if (allocTotal > totalPosts) {
+      // 초과: 가장 큰 카테고리에서 1 감소 (최소 0 보장)
+      const target = cats.find((c) => (allocation[c] || 0) > 0);
+      if (!target) break;
+      allocation[target] = (allocation[target] || 0) - 1;
+      allocTotal--;
+    } else {
+      // 부족: 가장 큰 카테고리에 1 증가
+      allocation[cats[0]] = (allocation[cats[0]] || 0) + 1;
+      allocTotal++;
+    }
   }
 
   const regularPosts = Math.ceil(totalPosts * 0.7);
