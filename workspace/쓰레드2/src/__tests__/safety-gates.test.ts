@@ -396,9 +396,30 @@ describe('runSafetyGates()', () => {
     expect(report.allPassed).toBe(true); // warn은 차단 아님
   });
 
-  it('results 배열에 8개 게이트 결과 포함', async () => {
+  it('results 배열에 9개 게이트 결과 포함', async () => {
     const { db } = await createTestDb();
     const report = await runSafetyGates('테스트 콘텐츠', 'acc1', 10, db);
-    expect(report.results).toHaveLength(8);
+    expect(report.results).toHaveLength(9);
+  });
+});
+
+// ─── gate_toneCheck in runSafetyGates ────────────────────
+
+describe('gate_toneCheck in runSafetyGates()', () => {
+  it('전문가 용어(나이아신아마이드) 포함 → allPassed: false, blockers에 gate_toneCheck', async () => {
+    const { db } = await createTestDb();
+    const report = await runSafetyGates('나이아신아마이드 함유 크림 추천드려요', 'acc1', 10, db);
+    expect(report.allPassed).toBe(false);
+    expect(report.blockers.some(r => r.gate === 'gate_toneCheck')).toBe(true);
+  });
+
+  it('일반 비전문가 콘텐츠 → gate_toneCheck 통과', async () => {
+    const { client, db } = await createTestDb();
+    // 워밍업 해제 (100개 이상)
+    for (let i = 0; i < 100; i++) {
+      await insertPostedEntry(client, { id: `lc-${i}`, postedAt: new Date(Date.now() - (i + 200) * 60 * 60 * 1000) });
+    }
+    const report = await runSafetyGates('피부가 촉촉해지는 느낌이에요', 'duribeon231', 10, db);
+    expect(report.blockers.some(r => r.gate === 'gate_toneCheck')).toBe(false);
   });
 });

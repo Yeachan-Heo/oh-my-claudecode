@@ -18,6 +18,7 @@ import { contentLifecycle } from '../db/schema.js';
 import { isWarmupMode, validateContent } from '../utils/warmup-gate.js';
 import { checkSimilarity } from '../recycler/recycle.js';
 import { and, eq, gte, isNotNull, desc, sql } from 'drizzle-orm';
+import { gate_toneCheck } from './tone-validator.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDb = any;
@@ -236,6 +237,7 @@ export async function runSafetyGates(
     Promise.resolve(gate6_qaPassCheck(qaScore)),
     gate7_dailyLimitCheck(accountId, db),
     gate8_captchaRisk(accountId, db),
+    Promise.resolve(gate_toneCheck(content)),
   ]);
 
   const blockers = results.filter(r => !r.passed && r.severity === 'block');
