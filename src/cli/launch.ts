@@ -67,8 +67,8 @@ export function extractNotifyFlag(args: string[]): { notifyEnabled: boolean; rem
  * Does NOT consume the next positional arg (no space-separated value).
  * This flag is stripped before passing args to Claude CLI.
  */
-export function extractOpenClawFlag(args: string[]): { openclawEnabled: boolean; remainingArgs: string[] } {
-  let openclawEnabled = false;
+export function extractOpenClawFlag(args: string[]): { openclawEnabled: boolean | undefined; remainingArgs: string[] } {
+  let openclawEnabled: boolean | undefined = undefined;
   const remainingArgs: string[] = [];
 
   for (const arg of args) {

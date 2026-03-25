@@ -415,7 +415,32 @@ export function transitionRalphToUltraQA(
     };
   }
 
-  // Step 2: Cleanly terminate Ralph (and linked Ultrawork)
+  // Step 2: Transition to QA phase
+  const newState = transitionPhase(directory, "qa", sessionId);
+  if (!newState) {
+    return {
+      success: false,
+      error: "Failed to transition to QA phase",
+    };
+  }
+
+  // Step 3: Start UltraQA (before clearing Ralph, so we can rollback if it fails)
+  const qaResult = startUltraQA(directory, "tests", sessionId, {
+    maxCycles: 5,
+  });
+
+  if (!qaResult.success) {
+    // Rollback on failure - restore execution phase (Ralph state still intact)
+    transitionPhase(directory, "execution", sessionId);
+    updateExecution(directory, { ralph_completed_at: undefined }, sessionId);
+
+    return {
+      success: false,
+      error: qaResult.error || "Failed to start UltraQA",
+    };
+  }
+
+  // Step 4: Only clear Ralph state AFTER UltraQA started successfully
   if (ralphState?.linked_ultrawork) {
     clearLinkedUltraworkState(directory, sessionId);
   }
@@ -425,31 +450,6 @@ export function transitionRalphToUltraQA(
     return {
       success: false,
       error: "Failed to clear Ralph state",
-    };
-  }
-
-  // Step 3: Transition to QA phase
-  const newState = transitionPhase(directory, "qa", sessionId);
-  if (!newState) {
-    return {
-      success: false,
-      error: "Failed to transition to QA phase",
-    };
-  }
-
-  // Step 4: Start UltraQA
-  const qaResult = startUltraQA(directory, "tests", sessionId, {
-    maxCycles: 5,
-  });
-
-  if (!qaResult.success) {
-    // Rollback on failure - restore execution phase
-    transitionPhase(directory, "execution", sessionId);
-    updateExecution(directory, { ralph_completed_at: undefined }, sessionId);
-
-    return {
-      success: false,
-      error: qaResult.error || "Failed to start UltraQA",
     };
   }
 
