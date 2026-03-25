@@ -40,6 +40,12 @@ WHERE posted_account_id = 'duribeon231'
 포스트별 최신 스냅샷에서 절대 수치를 평가한다.
 
 ```sql
+-- 간단 조회 (View 기반)
+SELECT * FROM v_post_ranking ORDER BY rank_by_views LIMIT 10;
+```
+
+또는 상세 쿼리가 필요하면:
+```sql
 SELECT
   cl.id,
   LEFT(cl.content_text, 50) AS preview,
@@ -77,6 +83,12 @@ ORDER BY ps.post_views DESC NULLS LAST;
 
 ### 3-1. 카테고리별 성과
 
+```sql
+-- 간단 조회 (View 기반)
+SELECT * FROM v_category_performance ORDER BY roi_score DESC;
+```
+
+또는 상세 쿼리가 필요하면:
 ```sql
 SELECT
   cl.need_category,
@@ -212,6 +224,12 @@ await sendMessage(
 주간 분석은 `ops/weekly-retro-ops.md` 절차를 따른다.
 
 추가 쿼리:
+```sql
+-- 간단 조회 (View 기반)
+SELECT * FROM v_weekly_growth;
+```
+
+또는 상세 쿼리가 필요하면:
 ```sql
 -- 이번 주 vs 지난 주 비교
 WITH this_week AS (

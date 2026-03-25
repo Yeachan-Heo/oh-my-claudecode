@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     log(`실제 실행 시 명령: npx tsx ${COLLECT_SCRIPT} --keywords "${keywords.join(',')}" --posts-per-keyword 10`);
   } else {
     log(`\nStep 3: Threads 검색 수집 (키워드 ${keywords.length}개, 키워드당 10개)`);
-    const cmd = `npx tsx "${COLLECT_SCRIPT}" --keywords "${keywords.join(',')}" --posts-per-keyword 10 --max-age-days 7`;
+    const cmd = `npx tsx "${COLLECT_SCRIPT}" --keywords "${keywords.join(',')}" --posts-per-keyword 10 --max-age-days 7 --source x_trend`;
     log(`실행: ${cmd}`);
 
     try {
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
         // 오늘 search_*로 수집된 포스트 중 이 키워드와 관련된 것 카운트
         const result = await db.execute(sql`
           SELECT COUNT(*) as cnt FROM thread_posts
-          WHERE run_id LIKE 'search_%'
+          WHERE post_source = 'x_trend'
             AND crawl_at >= ${todayStart}
             AND text ILIKE ${'%' + kw.split(' ')[0] + '%'}
         `);

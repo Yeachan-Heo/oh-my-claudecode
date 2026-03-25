@@ -49,14 +49,20 @@ npx tsx scripts/research-brands.ts
 
 ### Phase 1 완료 확인 쿼리
 
+간단 조회:
+```sql
+SELECT * FROM v_collection_status WHERE crawl_date >= CURRENT_DATE - 1;
+```
+
+상세 쿼리:
 ```sql
 -- 최근 24h 수집 건수 (소스별)
 SELECT
   post_source,
   COUNT(*) AS count,
-  MAX(collected_at) AS last_collected
+  MAX(crawl_at) AS last_collected
 FROM thread_posts
-WHERE collected_at >= NOW() - INTERVAL '24 hours'
+WHERE crawl_at >= NOW() - INTERVAL '24 hours'
 GROUP BY post_source
 ORDER BY count DESC;
 ```
@@ -77,14 +83,14 @@ ORDER BY count DESC;
 ```sql
 -- 최근 24h 수집 포스트 카테고리 분포
 SELECT
-  category,
+  topic_category,
   COUNT(*) AS count,
   ROUND(AVG(view_count)) AS avg_views,
   ROUND(AVG(like_count::float / NULLIF(view_count, 0) * 100), 2) AS avg_like_rate
 FROM thread_posts
-WHERE collected_at >= NOW() - INTERVAL '24 hours'
-  AND category IS NOT NULL
-GROUP BY category
+WHERE crawl_at >= NOW() - INTERVAL '24 hours'
+  AND topic_category IS NOT NULL
+GROUP BY topic_category
 ORDER BY count DESC;
 ```
 
@@ -93,22 +99,28 @@ ORDER BY count DESC;
 ```sql
 -- 최근 24h 수집 중 조회수 TOP 10
 SELECT
-  username,
-  content,
+  author,
+  text,
   view_count,
   like_count,
   reply_count,
   repost_count,
-  category,
+  topic_category,
   post_source
 FROM thread_posts
-WHERE collected_at >= NOW() - INTERVAL '24 hours'
+WHERE crawl_at >= NOW() - INTERVAL '24 hours'
 ORDER BY view_count DESC
 LIMIT 10;
 ```
 
 ### 2-3. 브랜드 이벤트 (유효기간 7일 이내)
 
+간단 조회:
+```sql
+SELECT * FROM v_brand_radar ORDER BY threads_relevance DESC;
+```
+
+상세 쿼리:
 ```sql
 -- 유효 브랜드 이벤트
 SELECT
@@ -116,14 +128,14 @@ SELECT
   be.event_type,
   be.title,
   be.description,
-  be.valid_until,
+  be.expires_at,
   be.is_used
 FROM brand_events be
-JOIN brands b ON b.id = be.brand_id
+JOIN brands b ON b.brand_id = be.brand_id
 WHERE be.is_stale = false
   AND be.is_used = false
-  AND be.valid_until >= NOW()
-ORDER BY be.valid_until ASC
+  AND be.expires_at >= NOW()
+ORDER BY be.expires_at ASC
 LIMIT 20;
 ```
 
@@ -132,19 +144,20 @@ LIMIT 20;
 ```sql
 -- 어제 게시한 포스트 24h 성과
 SELECT
-  p.content,
-  p.category,
+  p.text,
+  p.topic_category,
   p.view_count,
   p.like_count,
   p.reply_count,
   p.repost_count,
   ROUND((p.like_count + p.reply_count + p.repost_count)::float / NULLIF(p.view_count, 0) * 100, 2) AS engagement_rate,
   p.post_source,
-  p.published_at
-FROM thread_posts p
-WHERE p.is_published = true
-  AND p.published_at >= NOW() - INTERVAL '48 hours'
-  AND p.published_at < NOW() - INTERVAL '24 hours'
+  cl.posted_at
+FROM content_lifecycle cl
+JOIN thread_posts p ON p.post_id = cl.threads_post_id
+WHERE cl.posted_at IS NOT NULL
+  AND cl.posted_at >= NOW() - INTERVAL '48 hours'
+  AND cl.posted_at < NOW() - INTERVAL '24 hours'
 ORDER BY p.view_count DESC;
 ```
 
@@ -341,14 +354,13 @@ LIMIT 5;
 -- 오늘 콘텐츠 생성 큐
 SELECT
   ac.id,
-  ac.category,
-  ac.scheduled_time,
+  ac.format,
+  ac.created_at,
   ac.status,
-  ac.editor_agent,
-  ac.brief
+  ac.hook
 FROM aff_contents ac
 WHERE DATE(ac.created_at) = CURRENT_DATE
-ORDER BY ac.scheduled_time ASC;
+ORDER BY ac.created_at ASC;
 ```
 
 **CEO 판단 포인트**:
@@ -368,14 +380,14 @@ ORDER BY ac.scheduled_time ASC;
 -- 게시 대기 중인 콘텐츠
 SELECT
   ac.id,
-  ac.scheduled_time,
-  ac.category,
-  LEFT(ac.content, 50) AS preview,
+  ac.created_at,
+  ac.format,
+  LEFT(ac.hook, 50) AS preview,
   ac.status
 FROM aff_contents ac
 WHERE ac.status = 'ready'
-  AND DATE(ac.scheduled_time) = CURRENT_DATE
-ORDER BY ac.scheduled_time ASC;
+  AND DATE(ac.created_at) = CURRENT_DATE
+ORDER BY ac.created_at ASC;
 ```
 
 **CEO 판단 포인트**:
@@ -400,19 +412,20 @@ npx tsx scripts/track-performance.ts
 ```sql
 -- 어제 게시 포스트 24h 성과 확인
 SELECT
-  p.id,
-  LEFT(p.content, 60) AS preview,
+  p.post_id,
+  LEFT(p.text, 60) AS preview,
   p.view_count,
   p.like_count,
   p.reply_count,
   p.repost_count,
   ROUND((p.like_count + p.reply_count + p.repost_count)::float
     / NULLIF(p.view_count, 0) * 100, 2) AS engagement_rate,
-  p.category,
-  p.published_at
-FROM thread_posts p
-WHERE p.is_published = true
-  AND p.published_at BETWEEN NOW() - INTERVAL '48h' AND NOW() - INTERVAL '20h'
+  p.topic_category,
+  cl.posted_at
+FROM content_lifecycle cl
+JOIN thread_posts p ON p.post_id = cl.threads_post_id
+WHERE cl.posted_at IS NOT NULL
+  AND cl.posted_at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '20 hours'
 ORDER BY p.view_count DESC;
 ```
 

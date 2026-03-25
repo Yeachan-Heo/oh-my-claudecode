@@ -252,6 +252,7 @@ async function autoRegisterFromGraphQL(gqlMap: Map<string, GraphQLExtractedPost>
       repost_count: gql.repost_count,
       has_image: gql.has_image,
       media_urls: gql.media_urls?.length ? gql.media_urls : [],
+      post_source: 'benchmark',
       crawl_at: new Date(),
       run_id: 'track_performance_auto',
     }).onConflictDoNothing().returning({ post_id: threadPosts.post_id });

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { classifyByRule, TAG_MAP } from '../analyzer/topic-classifier.js';
+import { classifyByRule, classifyPrimaryTag, TAG_MAP } from '../analyzer/topic-classifier.js';
 import type { TopicCategory } from '../types.js';
 
 // ─── classifyByRule ────────────────────────────────────────
@@ -123,5 +123,34 @@ describe('TAG_MAP', () => {
     for (const key of Object.keys(TAG_MAP)) {
       expect(key).toBe(key.toLowerCase());
     }
+  });
+});
+
+// ─── classifyPrimaryTag ──────────────────────────────────────
+
+describe('classifyPrimaryTag', () => {
+  it('detects affiliate links', () => {
+    expect(classifyPrimaryTag('좋은 제품', 'https://link.coupang.com/abc')).toBe('affiliate');
+  });
+
+  it('detects purchase signals', () => {
+    expect(classifyPrimaryTag('이거 살까말까 고민중')).toBe('purchase_signal');
+    expect(classifyPrimaryTag('뭐가 좋을까요 추천해주세요')).toBe('purchase_signal');
+  });
+
+  it('detects reviews', () => {
+    expect(classifyPrimaryTag('써봤는데 솔직후기')).toBe('review');
+  });
+
+  it('detects complaints', () => {
+    expect(classifyPrimaryTag('진짜 실망이다 환불해야지')).toBe('complaint');
+  });
+
+  it('detects interest', () => {
+    expect(classifyPrimaryTag('이거 효과 있나요? 궁금해요')).toBe('interest');
+  });
+
+  it('defaults to general', () => {
+    expect(classifyPrimaryTag('오늘 날씨 좋다')).toBe('general');
   });
 });

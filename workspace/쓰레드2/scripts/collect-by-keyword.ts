@@ -59,6 +59,7 @@ interface CliOptions {
   postsPerKeyword: number;
   maxAgeDays: number;
   withComments: boolean;
+  source: 'brand' | 'keyword_search' | 'x_trend' | 'benchmark';
 }
 
 // ─── Logging ─────────────────────────────────────────────
@@ -76,6 +77,7 @@ function parseCliArgs(): CliOptions {
   let postsPerKeyword = DEFAULT_POSTS_PER_KEYWORD;
   let maxAgeDays = DEFAULT_MAX_AGE_DAYS;
   let withComments = false;
+  let source: CliOptions['source'] = 'keyword_search';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--keywords' && args[i + 1]) {
@@ -89,10 +91,17 @@ function parseCliArgs(): CliOptions {
       i++;
     } else if (args[i] === '--with-comments') {
       withComments = true;
+    } else if (args[i] === '--source' && args[i + 1]) {
+      const valid = ['brand', 'keyword_search', 'x_trend', 'benchmark'] as const;
+      const val = args[i + 1] as typeof valid[number];
+      if ((valid as readonly string[]).includes(val)) {
+        source = val;
+      }
+      i++;
     }
   }
 
-  return { keywords, postsPerKeyword, maxAgeDays, withComments };
+  return { keywords, postsPerKeyword, maxAgeDays, withComments, source };
 }
 
 // ─── Deduplication ───────────────────────────────────────
@@ -547,6 +556,7 @@ async function main(): Promise<void> {
               has_image: raw.has_image,
               media_urls: raw.media_urls?.length ? raw.media_urls : undefined,
               link_url: raw.link_url ?? undefined,
+              post_source: opts.source,
               crawl_at: new Date(),
               run_id: runId,
             })

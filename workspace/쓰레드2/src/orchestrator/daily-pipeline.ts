@@ -23,13 +23,7 @@ import type {
   PhaseGateResult,
 } from './types.js';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * 에디터 매핑: 카테고리 → 에이전트 파일 → 페르소나 파일.
- */
+/** 에디터 매핑: 카테고리 → 에이전트 파일 → 페르소나 파일. */
 export const EDITOR_MAP: Record<string, { agent: string; persona?: string }> = {
   '뷰티': {
     agent: '.claude/agents/bini-beauty-editor.md',
@@ -62,10 +56,6 @@ const TIME_SLOT_TEMPLATE: Array<{ time: string; category: string; type: 'regular
   { time: '22:00', category: '뷰티',    type: 'experiment' },
 ];
 
-// ---------------------------------------------------------------------------
-// ROI helpers
-// ---------------------------------------------------------------------------
-
 interface CategoryStats {
   category: string;
   avg_views: number;
@@ -82,10 +72,6 @@ function roiGrade(score: number): string {
   return 'C';
 }
 
-// ---------------------------------------------------------------------------
-// Phase 2 helpers: DB queries
-// ---------------------------------------------------------------------------
-
 interface PreviousDayStats {
   categoryStats: CategoryStats[];
   brandEventsCount: number;
@@ -95,23 +81,23 @@ async function fetchPhase2Data(): Promise<PreviousDayStats> {
   const [catRows, eventsRows] = await Promise.all([
     client`
       SELECT
-        category,
-        COALESCE(AVG(view_count), 0)::float AS avg_views,
+        tp.topic_category AS category,
+        COALESCE(AVG(tp.view_count), 0)::float AS avg_views,
         COALESCE(
-          AVG((like_count + reply_count + repost_count)::float / NULLIF(view_count, 0)),
+          AVG((tp.like_count + tp.reply_count + tp.repost_count)::float / NULLIF(tp.view_count, 0)),
           0
         )::float AS engagement_rate
-      FROM thread_posts
-      WHERE is_published = true
-        AND published_at >= NOW() - INTERVAL '48 hours'
-        AND published_at < NOW() - INTERVAL '24 hours'
-        AND category IS NOT NULL
-      GROUP BY category
+      FROM content_lifecycle cl
+      JOIN thread_posts tp ON cl.threads_post_id = tp.post_id
+      WHERE cl.posted_at >= NOW() - INTERVAL '48 hours'
+        AND cl.posted_at < NOW() - INTERVAL '24 hours'
+        AND tp.topic_category IS NOT NULL
+      GROUP BY tp.topic_category
     `,
     client`
       SELECT COUNT(*)::int AS cnt
       FROM brand_events
-      WHERE is_stale = false AND is_used = false AND valid_until >= NOW()
+      WHERE is_stale = false AND is_used = false AND expires_at >= NOW()
     `,
   ]);
 
@@ -300,10 +286,8 @@ async function meetingToDirective(
 export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
   const date = new Date().toISOString().slice(0, 10);
 
-  // Phase 2 데이터 수집
   const { categoryStats, brandEventsCount } = await fetchPhase2Data();
 
-  // ROI 점수 계산
   const roiSummary: Record<string, { score: number; grade: string }> = {};
   for (const cat of Object.keys(DEFAULT_ALLOCATION)) {
     const stats = categoryStats.find((s) => s.category === cat);
@@ -311,16 +295,13 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     roiSummary[cat] = { score, grade: roiGrade(score) };
   }
 
-  // 카테고리 비율 결정 (ROI A → +1, max 5; C → -1, min 1)
   const allocation = { ...DEFAULT_ALLOCATION };
   for (const [cat, { grade }] of Object.entries(roiSummary)) {
     if (grade === 'A' && allocation[cat] < 5) allocation[cat] += 1;
     if (grade === 'C' && allocation[cat] > 1) allocation[cat] -= 1;
   }
-  // 합계를 totalPosts에 맞게 정규화
   const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
   if (allocTotal !== totalPosts) {
-    // 가장 큰 카테고리에서 차이만큼 조정
     const diff = totalPosts - allocTotal;
     const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0][0];
     allocation[topCat] = Math.max(1, allocation[topCat] + diff);
@@ -329,7 +310,6 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
   const regularPosts = Math.ceil(totalPosts * 0.7);
   const experimentPosts = totalPosts - regularPosts;
 
-  // 시간대 슬롯 생성 (totalPosts 수에 맞게 자름)
   const slots = TIME_SLOT_TEMPLATE.slice(0, totalPosts);
   const experimentSlotDate = date.replace(/-/g, '');
   let expIdx = 1;
@@ -374,16 +354,15 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     }
   }
 
-  // 리사이클 후보 조회 (14일+ 경과, 상위 20%)
   const recycleRows = await client`
-    SELECT id
-    FROM thread_posts
-    WHERE is_published = true
-      AND published_at <= NOW() - INTERVAL '14 days'
-    ORDER BY view_count DESC
+    SELECT cl.threads_post_id AS post_id
+    FROM content_lifecycle cl
+    JOIN thread_posts tp ON cl.threads_post_id = tp.post_id
+    WHERE cl.posted_at <= NOW() - INTERVAL '14 days'
+    ORDER BY tp.view_count DESC
     LIMIT 2
   `;
-  const recycleCandidates = recycleRows.map((r) => r.id as string);
+  const recycleCandidates = recycleRows.map((r) => r.post_id as string);
 
   const directive: DailyDirective = {
     date,
@@ -404,7 +383,6 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     roi_summary: roiSummary,
   };
 
-  // 전략 결정 자동 기록
   const topCategories = Object.entries(roiSummary)
     .filter(([, v]) => v.grade === 'A')
     .map(([k]) => k)
@@ -415,7 +393,6 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
     `ROI 점수 기반 조정. A등급: ${topCategories}`,
   );
 
-  // agent_messages 저장
   await sendMessage(
     'minjun-ceo',
     'all',
@@ -429,14 +406,7 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
   return directive;
 }
 
-// ---------------------------------------------------------------------------
-// Phase 4: 콘텐츠 생성 (에디터 매핑 반환)
-// ---------------------------------------------------------------------------
-
-/**
- * 슬롯에 대한 ContentDraft 뼈대를 생성.
- * 실제 텍스트 생성은 Claude Code가 해당 에디터 에이전트 파일을 참조해서 수행.
- */
+/** 슬롯에 대한 ContentDraft 뼈대를 생성. 실제 텍스트는 Claude Code가 에디터 파일 참조해서 채움. */
 export function generateContent(slot: TimeSlot, _directive: DailyDirective): ContentDraft {
   const editorKey = slot.category;
   const editorInfo = EDITOR_MAP[editorKey] ?? EDITOR_MAP['뷰티'];
@@ -452,14 +422,7 @@ export function generateContent(slot: TimeSlot, _directive: DailyDirective): Con
   };
 }
 
-// ---------------------------------------------------------------------------
-// Phase 4: QA 검증
-// ---------------------------------------------------------------------------
-
-/**
- * 도윤(QA) 기준 콘텐츠 검증.
- * 킬러게이트 K1~K4 + 체크리스트 10항목.
- */
+/** 도윤(QA) 기준 콘텐츠 검증. 킬러게이트 K1~K4 + 체크리스트 10항목. */
 export function runQA(draft: ContentDraft): QAResult {
   const text = draft.text;
   const feedback: string[] = [];
@@ -503,20 +466,10 @@ export function runQA(draft: ContentDraft): QAResult {
   return { passed: feedback.length === 0, score, feedback, killerGates };
 }
 
-// ---------------------------------------------------------------------------
-// Phase 5: Safety 게이트
-// ---------------------------------------------------------------------------
-
-/**
- * Worker A가 구현한 안전 게이트 실행.
- */
+/** 안전 게이트 실행 (Worker A 구현). */
 export async function runSafety(content: string, accountId: string) {
   return runSafetyGates(content, accountId);
 }
-
-// ---------------------------------------------------------------------------
-// Phase Gate helpers
-// ---------------------------------------------------------------------------
 
 /** Phase 1 게이트: 24h 내 수집 데이터 존재 여부 확인. */
 async function gatePhase1(): Promise<PhaseGateResult> {
@@ -573,17 +526,11 @@ async function gatePhase3(): Promise<PhaseGateResult> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 메인 파이프라인
-// ---------------------------------------------------------------------------
-
 /**
  * 일일 파이프라인 전체 실행.
- *
- * Phase 별 동작:
- *   --dry-run:     Phase 2 DB 쿼리 + Phase 3 directive 생성/출력. 나머지 스킵.
- *   --autonomous:  Phase 1~5 자동 (aff_contents status='ready' 등록까지).
- *   기본:          Phase 1~6 순차 (게시는 시훈 승인 후 별도 /threads-post).
+ * - dry-run: Phase 2~3만 (directive 출력).
+ * - autonomous: Phase 1~5 자동 (aff_contents ready 등록까지).
+ * - 기본: Phase 1~6 순차 (게시는 시훈 승인 후 별도).
  */
 export async function runDailyPipeline(options: PipelineOptions): Promise<PipelineResult> {
   const { dryRun, autonomous, posts } = options;
@@ -606,11 +553,9 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       { phase: 1, status: 'started' },
     );
     phasesCompleted.push(1);
-    // 실제 수집은 Claude Code가 /수집 스킬로 실행
   }
 
   if (dryRun) {
-    // dry-run: Phase 1 스킵, Phase 2는 기존 DB 데이터 기반
     await sendMessage(
       'orchestrator',
       'all',
@@ -740,7 +685,6 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     for (const slot of directive.time_slots) {
       const draft = generateContent(slot, directive);
       drafts.push(draft);
-      // 실제 텍스트 생성은 Claude Code가 에디터 파일 참조 후 채움
     }
 
     phasesCompleted.push(4);
@@ -766,7 +710,6 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     for (const draft of drafts) {
       if (!draft.text) continue;
 
-      // QA 검증
       const qa = runQA(draft);
       qaResults.push(qa);
       if (!qa.passed) {
@@ -774,7 +717,6 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         continue;
       }
 
-      // Safety 게이트
       const safety = await runSafety(draft.text, 'duribeon231');
       if (!safety.allPassed) {
         safetyPassed = false;
@@ -782,22 +724,36 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         continue;
       }
 
-      // aff_contents 등록 (status='ready')
+      // format: positionFormatEnum 허용값만 가능. draft.format 없으면 '솔직후기형' fallback.
+      // product_id, product_name, need_id: notNull이므로 'pending' placeholder 사용.
+      const validFormats = ['문제공감형', '솔직후기형', '비교형', '입문추천형', '실수방지형', '비추천형'] as const;
+      type ValidFormat = (typeof validFormats)[number];
+      const formatValue: ValidFormat = (validFormats as readonly string[]).includes(draft.format)
+        ? (draft.format as ValidFormat)
+        : '솔직후기형';
       try {
-        const datePrefix = directive.date;
-        await client`
-          INSERT INTO aff_contents (
-            category, scheduled_time, status, editor_agent, brief, content, created_at
-          ) VALUES (
-            ${draft.category},
-            ${datePrefix + ' 08:00:00+09'}::timestamptz,
-            'ready',
-            ${draft.editor},
-            ${draft.hook || ''},
-            ${draft.text},
-            NOW()
-          )
-        `;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- postgres.js TransactionSql Omit strips call signatures
+        await client.begin(async (tx: any) => {
+          await tx`
+            INSERT INTO aff_contents (
+              id, product_id, product_name, need_id,
+              format, status, hook, created_at
+            ) VALUES (
+              ${crypto.randomUUID()},
+              'pending',
+              'pending',
+              'pending',
+              ${formatValue},
+              'ready',
+              ${draft.hook || ''},
+              NOW()
+            )
+          `;
+          // TODO: brand_events.is_used 업데이트 — draft에 brandEventId 연결 후 구현
+          // if (draft.brandEventId) {
+          //   await tx`UPDATE brand_events SET is_used = true WHERE event_id = ${draft.brandEventId}`;
+          // }
+        });
         readyCount++;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
