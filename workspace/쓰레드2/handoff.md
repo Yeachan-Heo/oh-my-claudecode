@@ -1,381 +1,117 @@
-# Threads2 Handoff — 2026-03-24 (세션 15)
-
-## 현재 상태: 자율 에이전트 회사 v1 구현 완료
-
-### 이번 세션(15) 핵심 작업
-
-| 작업 | 상태 |
-|------|------|
-| /daily-run --posts 3 E2E 실행 | ✅ Phase 1~5 전체 성공 (에이전트 스폰 파이프라인) |
-| 문제 발견 8가지 | ✅ 전문가톤/글자수/수집kill/도구미사용/기획미적용/학습0건/반복실수/일방소통 |
-| **PLAN-AUTONOMOUS-COMPANY-v2** | ✅ /team ralph로 구현 (4 Workers) |
-| Worker A: agent-spawner.ts 업그레이드 | ✅ TOOL_REGISTRY + EDITOR_SELF_CHECK + playbook 주입 |
-| Worker B: Phase Gate + 학습 모듈 연결 | ✅ gatePhase1/2/3 + diversity-checker + strategy-logger |
-| Worker C: agent_messages 확장 | ✅ message_type + task_id + 핸드오프 함수 3개 |
-| Worker D: /daily-run SKILL.md v4 재작성 | ✅ 856줄, 서연+민준 분석 분산, 비전문가톤 |
-| 멀티에이전트 리서치 | ✅ 8개 프레임워크 비교 → MetaGPT+Swarm 하이브리드 |
-| 비전문가 톤 피드백 저장 | ✅ memory/feedback_non_expert_tone.md |
-
-### 자율 에이전트 시스템 — 구현 완료 항목
-
-**agent-spawner.ts (핵심 변경)**
-- TOOL_REGISTRY: 역할별(collector/analyst/ceo/editor/qa/engineer) 사용 가능 도구를 프롬프트에 인라인 삽입
-- EDITOR_SELF_CHECK: 에디터 자가 검증 8항목 (톤/글자수/CTA 등)
-- buildAgentPrompt(): TOOL_REGISTRY + SELF_CHECK + playbook/strategy-log 자동 주입
-- buildPhaseContextQuery(): agent_messages에서 이전 Phase 결과 읽기 스크립트 생성기
-
-**daily-pipeline.ts (Phase Gate + 학습 연결)**
-- gatePhase1(): thread_posts + youtube_videos 24h > 0 확인
-- gatePhase2(): 서연→민준 분석 메시지 존재 확인
-- gatePhase3(): CEO directive 메시지 존재 확인
-- getDiversityReport() 실제 연결 (content_lifecycle 7일)
-- logDecision() 자동 기록 (directive 생성 후)
-- updatePlaybook() QA 반려 시 자동 호출
-
-**agent_messages 확장 (Swarm 핸드오프)**
-- message_type 컬럼: report/directive/feedback/handoff/alert
-- task_id 컬럼: 같은 파이프라인 실행 추적 (daily-YYYYMMDD)
-- getMessagesByTaskId(), getMessagesByType(), getLatestHandoff() 함수
-
-**doyun-qa.md 추가 반려 규칙**
-- R1: 전문가 톤 감지 → 즉시 반려
-- R2: 120자 초과 → 즉시 반려
-- R3: 이미지 아이디어 없음 → 반려
-- R4: CTA 없음 → 반려
-
-**/daily-run SKILL.md v4 (856줄)**
-- Phase 1 준호: 순차 포그라운드 수집 (백그라운드 금지)
-- Phase 1.5 메인: _signal-scan.ts 직접 실행 → 서연에 context 전달
-- Phase 2 서연: /기획 2-1~2-3 인라인 (니즈/JTBD/기회평가)
-- Phase 3 민준: /기획 2-4~2-6 인라인 (구매여정/차별화/수익화) + directive
-- Phase 4 에디터: 비전문가 톤 + 80~100자 + SELF_CHECK
-- Phase 4 도윤: R1~R4 추가 반려
-- 모든 agent_messages에 message_type + task_id
-
-### 검증 결과
-
-| 항목 | 결과 |
-|------|------|
-| tsc --noEmit | ✅ 0 errors |
-| npm test | ✅ 13 files, 170 tests PASS |
-| agent_messages migration | ✅ message_type + task_id + 인덱스 2개 |
-
-### 이전 세션(14) 작업
-
-| 작업 | 상태 |
-|------|------|
-| PLAN v4 Phase 1~3 전체 (S-1~S-17) | ✅ |
-| /daily-run v2 에이전트 스폰 기반 | ✅ → v4로 업그레이드됨 |
-| /기획 통합 스캔 수정 | ✅ |
-| track-performance.ts 버그수정 | ✅ |
-| 포스트 게시 2개 | ✅ 클렌징 오일 + 여드름패치 |
-
-### 다음 세션 우선순위
-
-1. **`/daily-run --posts 3` 재실행** — v4 SKILL.md로 E2E 검증 (비전문가톤 + 글자수 확인)
-2. **Phase 2: 학습 루프 작동** — QA 반려→playbook 업데이트 실제 확인, Cron 자동화
-3. **워밍업 포스트** — 16/100 → 하루 3~5개
-4. **claude-peers 도입 검토** — 에디터 병렬 실행 (비용 4배 감수 시)
-
-### /daily-run v2 — 에이전트 스폰 방식 (핵심 업그레이드)
-
-이전: 스킬이 "지시서" → Claude가 직접 모든 작업 수행
-이후: 각 Phase에서 Agent 도구로 해당 에이전트를 스폰 → 역할별 독립 실행
-
-```
-Phase 1: 준호(리서처) 스폰 → 수집 → agent_messages 보고
-Phase 2: 서연(분석가) 스폰 → 분석 → CEO에게 보고
-Phase 3: 민준(CEO) 스폰 → directive 생성 → 전체 배포
-Phase 4: 에디터 스폰 → 초안 → 도윤(QA) 검증 → 통과/반려 루프
-Phase 5: Safety Gates 자동 → aff_contents 'ready'
-```
-
-파일: `src/orchestrator/agent-spawner.ts` (AGENT_REGISTRY 9개 + EDITOR_MAP + buildAgentPrompt)
-스킬: `~/.claude/skills/daily-run/SKILL.md` (v2 에이전트 스폰 기반)
-
-### 발견된 문제 + 해결
-
-1. **수집→분석 전환 시 완료 대기 누락** → Phase 1 완료 게이트 추가
-2. **/기획에서 24h 데이터 안 읽음** → _signal-scan.ts 통합 스크립트로 교체
-3. **에이전트가 실제 스폰 안 됨** → /daily-run v2로 재작성 (에이전트 스폰 기반)
-4. **content_lifecycle 본문 비어있음** → track-performance.ts에서 동시 업데이트
-
-### 다음 세션 우선순위
-
-1. **`/daily-run --posts 3` 실제 실행** — 에이전트 스폰 파이프라인 E2E 검증
-2. **CEO Shadow Mode (S-2b)** — 5일 directive 채점
-3. **워밍업 포스트 계속** — 16/100 → 하루 3~5개
-4. **agent_messages 실제 사용 검증** — 에이전트 간 소통 로그 확인
-
-### Phase 3 Round 2 검증 결과 (세션 16)
-
-| 항목 | 결과 | 비고 |
-|------|------|------|
-| tsc --noEmit | ✅ 0 errors | |
-| npm test | ✅ 162/162 PASS (13 files) | revenue + experiments 포함 |
-| src/db/revenue.ts | ✅ EXISTS | CRUD 헬퍼 |
-| src/__tests__/revenue.test.ts | ✅ EXISTS | 6/6 PASS (TDD) |
-| src/orchestrator/auto-experiment.ts | ✅ EXISTS | autonomy levels 0-3 |
-| src/db/schema.ts experiments.autonomy_level | ✅ EXISTS | integer default 0 |
-| ops/revenue-ops.md | ✅ EXISTS | 수익 추적 운영 가이드 |
-| ops/experiment-ops.md | ✅ EXISTS | 자율 실험 권한 체계 포함 |
-| .claude/agents/minjun-ceo.md | ✅ 자율 실험 section 존재 | |
-
-### PLAN-AI-COMPANY v4 전체 완료 (S-1 ~ S-17)
-
-| Phase | S# | 작업 | 상태 |
-|-------|----|------|------|
-| Phase 1 | S-1 | Foundation — 9 에이전트, soul/ops 분리, agent_messages DB | ✅ |
-| Phase 1 | S-2 | CEO Shadow Mode + daily-standup-ops.md | ✅ |
-| Phase 1 | S-3 | performance-ops.md 7단계 분석 가이드 | ✅ |
-| Phase 2 | S-4 | aff_contents.status + 워밍업 게이트 TDD | ✅ |
-| Phase 2 | S-5 | /daily-run 스킬 — 6 Phase 일일 파이프라인 | ✅ |
-| Phase 2 | S-6 | 네이버 검색량/트렌드 → /수집 + /기획 통합 | ✅ |
-| Phase 2 | S-7 | 브랜드 리서치 확장 (40→80개/카테고리) | ✅ |
-| Phase 2 | S-8 | 경쟁사 모니터링 (evaluate-channels.ts) | ✅ |
-| Phase 2 | S-9 | autoresearch 실험 시스템 (experiments DB + TDD) | ✅ |
-| Phase 2 | S-10 | 포스트 리사이클 시스템 (recycle.ts + TDD) | ✅ |
-| Phase 2 | S-11 | 학습 시스템 (diversity-checker + strategy-logger + TDD) | ✅ |
-| Phase 2 | S-12 | /수집 스킬 v2 (7개 수집 도구 통합) | ✅ |
-| Phase 3 | S-13 | 8개 Safety Gates TDD (38/38 PASS) | ✅ |
-| Phase 3 | S-14 | daily-pipeline.ts 오케스트레이터 + --autonomous 모드 | ✅ |
-| Phase 3 | S-15 | run-weekly-retro.ts + /weekly-retro 스킬 | ✅ |
-| Phase 3 | S-16 | revenue_tracking 테이블 + TDD helpers (6/6 PASS) | ✅ |
-| Phase 3 | S-17 | auto-experiment.ts + autonomy levels (0-3) + CEO update | ✅ |
-
-### /daily-run v2 업그레이드 (2026-03-23)
-
-- `/daily-run v2` — 에이전트 스폰 기반으로 업그레이드. 각 Phase에서 Agent 도구로 에이전트 스폰. `agent_messages` 기록 필수.
-- `src/orchestrator/agent-spawner.ts` — AGENT_REGISTRY (9개), EDITOR_MAP, `buildAgentPrompt()`, `buildMessageScript()`, `buildContextReaderScript()`
-- SKILL.md: Phase 1(준호) → 완료게이트 → Phase 2(서연) → Phase 3(민준) → Phase 4(에디터+도윤QA) → Phase 5(Safety)
-
----
-
-### 다음 우선순위 — 운영 단계
-
-1. **워밍업 포스트 완료** — 7/20개 완료, 13개 남음 (하루 2~3개)
-2. **/daily-run --autonomous 실전 가동** — dry-run 검증 후 실제 포스트 생산
-3. **수익 추적 실전 연동** — 쿠팡 파트너스 클릭/전환 데이터 수집 시작
-4. **자율 실험 첫 가동** — autonomy_level 1 (저위험 실험 자동 승인)
-
----
-
-### Phase 3 Round 1 완료 작업 (S-13 ~ S-15)
-
-| S# | 작업 | 상태 | 비고 |
-|----|------|------|------|
-| S-13 | 8개 Safety Gates TDD (38/38 PASS) | ✅ | src/safety/gates.ts |
-| S-14 | daily-pipeline.ts 오케스트레이터 + --autonomous 모드 + EDITOR_MAP | ✅ | src/orchestrator/ |
-| S-15 | run-weekly-retro.ts 자동화 + /weekly-retro 스킬 | ✅ | scripts/ + ~/.claude/skills/ |
-
----
-
-### Phase 2 전체 완료 작업 (S-5 ~ S-12)
-
-| S# | 작업 | 상태 | 라운드 |
-|----|------|------|--------|
-| S-5 | `/daily-run` 스킬 — 6 Phase 일일 파이프라인 | ✅ | Round 2 |
-| S-6 | aff_contents.status 컬럼 + 워밍업 게이트 TDD | ✅ | Round 1 |
-| S-7 | 네이버 검색량/트렌드 → /수집 + /기획 통합 | ✅ | Round 1 |
-| S-8 | 브랜드 리서치 확장 (40→80개/카테고리) | ✅ | Round 1 |
-| S-9 | 경쟁사 모니터링 시스템 (evaluate-channels.ts) | ✅ | Round 1 |
-| S-10 | autoresearch 실험 시스템 (experiments DB + TDD) | ✅ | Round 2 |
-| S-11 | 포스트 리사이클 시스템 (recycle.ts + TDD) | ✅ | Round 2 |
-| S-12 | 학습 시스템 (diversity-checker + strategy-logger + TDD) | ✅ | Round 2 |
-
-### 다음 우선순위 — Phase 3: Full Automation
-
-1. **CEO Shadow Mode** (S-2b) — minjun-ceo 5일 Shadow, 추천만 / 시훈 채점 ≥80%
-2. **워밍업 포스트 완료** — 15개 완료, 85개 남음 (하루 3~5개 목표)
-3. **`/daily-run` 실전 실행** — `--dry-run --posts 3`으로 첫 검증 후 전체 파이프라인 가동
-4. **실험 시스템 가동** — 첫 A/B 실험 설계 및 experiments 테이블에 등록
-
----
-
-### 이번 세션(13) 완료 작업
-
-| # | 작업 | 상태 |
-|---|------|------|
-| 1 | agency.md 작성 (BiniLab 미션/조직도/권한 매트릭스/코드 수정 프로토콜) | ✅ |
-| 2 | 9개 에이전트 정의 파일 생성 (.claude/agents/ YAML frontmatter) | ✅ |
-| 3 | soul/ops 파일 분리 (content.md→souls/+ops/, debate→ops/, writing→ops/) | ✅ |
-| 4 | agents/memory/ 학습 시스템 디렉토리 구조 생성 | ✅ |
-| 5 | CEO soul 상세화 (ROI 공식, 시간대, 다양성 체크, 경쟁사 판단) | ✅ |
-| 6 | daily-standup-ops.md (Phase 1~6 파이프라인 + DB 쿼리 템플릿) | ✅ |
-| 7 | weekly-retro-ops.md (주간 전략회의 가이드) | ✅ |
-| 8 | agent_messages DB 테이블 + 3개 인덱스 (Supabase) | ✅ |
-| 9 | agent-messages.ts 헬퍼 (sendMessage/getMessages/markAsRead/getUnreadMessages) | ✅ |
-| 10 | agent-messages.test.ts TDD (6/6 PASS) | ✅ |
-| 11 | 멀티에이전트 소통 리서치 (CrewAI/AutoGen/MetaGPT/ChatDev 분석) | ✅ |
-| 12 | 전체 검증 통과 (tsc 0에러, 90테스트 PASS, 참조 정상, PLAN 일치) | ✅ |
-| 13 | telegram.ts fetch 기반 리팩토링 (테스트 호환성) | ✅ |
-
-### 생성된 파일 (세션 13)
-
-| 경로 | 설명 |
-|------|------|
-| `.claude/agents/agency.md` | BiniLab 미션/조직도/권한 |
-| `.claude/agents/minjun-ceo.md` | CEO (opus, 판단 기준 상세) |
-| `.claude/agents/bini-beauty-editor.md` | 뷰티 에디터 (sonnet) |
-| `.claude/agents/hana-health-editor.md` | 건강 에디터 (sonnet) |
-| `.claude/agents/sora-lifestyle-editor.md` | 생활 에디터 (sonnet) |
-| `.claude/agents/jiu-diet-editor.md` | 다이어트 에디터 (sonnet) |
-| `.claude/agents/doyun-qa.md` | QA (opus) |
-| `.claude/agents/seoyeon-analyst.md` | 분석가 (opus) |
-| `.claude/agents/junho-researcher.md` | 리서처 (sonnet) |
-| `.claude/agents/taeho-engineer.md` | 엔지니어 (opus) |
-| `souls/bini-persona.md` | 빈이 페르소나 |
-| `ops/content-creation-ops.md` | 6단계 CoT 운영 가이드 |
-| `ops/debate-ops.md` | 토론 시스템 운영 가이드 |
-| `ops/writing-guide-ops.md` | 글쓰기 지침 운영 가이드 |
-| `ops/daily-standup-ops.md` | 일일 스탠드업 (DB 쿼리 템플릿 포함) |
-| `ops/weekly-retro-ops.md` | 주간 전략회의 가이드 |
-| `src/db/agent-messages.ts` | 에이전트 메시지 CRUD 헬퍼 |
-| `src/__tests__/agent-messages.test.ts` | 메시지 헬퍼 테스트 (6개) |
-| `agents/memory/` | 학습 시스템 (strategy-log, experiment-log 등) |
-| `data/research/multi-agent-communication.md` | 멀티에이전트 리서치 보고서 |
-
-### 리서치 핵심 발견
-
-- **외부 프레임워크 도입 불필요** — Python SDK 기반이라 Claude Code에서 직접 실행 불가
-- **BiniLab은 이미 올바른 방향** — 4개 프레임워크의 핵심 패턴이 이미 부분 구현됨
-- **추천**: MetaGPT Pub/Sub + AutoGen 타입드 이벤트를 agent_messages DB로 하이브리드 구현
-
-### 다음 세션 우선순위 — PLAN v4 Phase 2 Semi-Autonomous
-
-#### 1. CEO Shadow Mode (S-2b)
-- minjun-ceo.md 기반 5일 Shadow Mode
-- 매일 daily_directive 추천만, 실행 안 함
-- 시훈 채점 → 정확도 ≥ 80%
-
-#### 2. `/daily-run` 스킬 구현 (S-5)
-- 10개 포스트 자동 생산 파이프라인
-- Phase 1~6 자동 오케스트레이션
-- 시간대별 분산 게시 (최소 1시간 간격)
-
-#### 3. 네이버 검색량/트렌드 통합 (S-7)
-- /수집 + /기획에 네이버 데이터 연동
-- 키워드 확장 검색 (L1→L2→L3)
-
-#### 4. 브랜드 리서치 확장 (S-8)
-- 40→80개/카테고리 (6에이전트 병렬)
-
-#### 5. 경쟁사 모니터링 (S-9)
-- 하위 20% 주간 교체 + 신규 채널 발굴
-
-#### 6. 추가 구현 (S-6, S-10~S-12)
-- aff_contents.status 컬럼 + 워밍업 게이트
-- autoresearch 실험 시스템
-- 포스트 리사이클 시스템
-- 학습 시스템 (memory/ + 다양성 체크)
-
-### 이전 세션(12) 완료 작업
-
-| # | 작업 | 상태 |
-|---|------|------|
-| 1 | brand_events stale 갱신 — 78건 is_stale=true (이미 마킹됨 확인) | ✅ |
-| 2 | youtube_videos video_id 수정 — 36건 source_url에서 추출, NULL 0개 | ✅ |
-| 3 | 뷰티 YouTube 채널 메타 보강 — 29/29개 구독자수/설명 전부 채움 | ✅ |
-| 4 | thread_posts 718개 카테고리 분류 — NULL 0개 (단, 전부 '기타' → TAG_MAP 확장 필요) | ✅ |
-| 5 | channels rejected 20개 삭제 — thread_posts 참조 없어 전부 삭제, verified 29개 유지 | ✅ |
-| 6 | `/수집` 스킬 생성 — ~/.claude/skills/수집.md (7개 수집 도구 통합) | ✅ |
-| 7 | TAG_MAP 확장 — classifyByText() 추가, 72개 본문 매칭 재분류 (기타 804→732) | ✅ |
-| 8 | `/기획` E2E 테스트 — 수집→기획→토론→게시 완료 | ✅ |
-| 9 | 여드름패치 포스트 게시 — https://www.threads.com/@duribeon231/post/DWNkJLTkZnZ | ✅ |
-| 10 | `/수집` 스킬 v2 — YouTube(playlistItems 1unit) + 트렌드 + 벤치마크(--since) + 병렬 | ✅ |
-| 11 | YouTube API search→playlistItems 전환 (쿼터 99% 절약) | ✅ |
-| 12 | YouTube 채널 ID 변환 (29개 handle→UC, 27/29 성공) | ✅ |
-| 13 | YouTube collector 에러 핸들링 (per-channel try-catch) | ✅ |
-| 14 | collect.ts --since N 시간 기반 수집 중단 | ✅ |
-| 15 | 벤치마크 29채널 전체 수집 — 신규 94개 + 지표 업데이트 156개 | ✅ |
-| 16 | PLAN-AI-COMPANY v4 확정 — 9에이전트, 권한 분리, 코드 수정 프로토콜 | ✅ |
-| 17 | Claude-Code-Game-Studios 분석 — 6개 적용 패턴 도출 | ✅ |
-
-### DB 현황 (세션 12 정리 후)
-
-| 테이블 | 건수 | 변경사항 |
-|--------|------|----------|
-| thread_posts | 1,217 | topic_category NULL 0개 (기타 804개 — TAG_MAP 확장 필요) |
-| channels | **29** | rejected 20개 삭제, verified 29개만 남음 |
-| youtube_channels | 49 | 뷰티 29개 메타 보강 완료 (subscriber_count NULL 0개) |
-| youtube_videos | 36 | video_id NULL 0개 (36건 수정) |
-| brand_events | 85 | is_stale=true 78건, 활성 7건 |
-| community_posts | 27 | 변경 없음 |
-| brands | 40 | 변경 없음 |
-| needs | 73 | 변경 없음 |
-| aff_contents | 12 | 변경 없음 |
-| trend_keywords | 297 | 변경 없음 |
-| content_lifecycle | 10 | 변경 없음 |
-| post_snapshots | 25 | 변경 없음 |
-| daily_performance_reports | 1 | 변경 없음 |
-
-### 해소된 DB 이슈 (세션 11 → 12)
-
-| 이슈 | 세션 11 | 세션 12 | 상태 |
-|------|---------|---------|------|
-| thread_posts 59% 미분류 | 718개 NULL | **0개 NULL** | ✅ 해소 (기타 804개, TAG_MAP 확장 필요) |
-| brand_events stale 미갱신 | is_stale=false | **78건 stale** | ✅ 해소 |
-| 뷰티 YouTube 메타 누락 | 29개 전부 null | **0개 null** | ✅ 해소 |
-| youtube_videos video_id null | 36개 전부 null | **0개 null** | ✅ 해소 |
-| channels 비활성 20개 | rejected 20개 | **삭제 완료** | ✅ 해소 |
-
-### 남은 DB 이슈
-
-1. **thread_posts 52% 미분석** — 632개 analyzed_at=null (분석 파이프라인 미실행)
-2. **primary_tag 미세분화** — general/null만 존재
-3. **brand_events 전부 미사용** — is_used=true가 0개
-4. **트렌드 키워드 수집 미가동** — selected=true 7개, posts_collected 전부 0
-5. **성과 리포트 1회만 실행** — 3/19 단 1건
-6. **스키마-DB 불일치** — brands.name vs brand_name, aff_contents에 status 없음
-7. **topic_category '기타' 66%** — TAG_MAP 확장으로 재분류 필요
-
-### 신규 스킬
-
-| 스킬 | 위치 | 설명 |
-|------|------|------|
-| `/수집` | `~/.claude/skills/수집.md` | 7개 수집 도구 통합 (벤치마크/키워드/커뮤니티/유튜브/성과/브랜드/전체) |
-
-### 수집 시스템 현황
-
-```
-[Threads]        src/scraper/collect.ts              (Playwright CDP)     ✅ 기존
-[키워드검색]     scripts/collect-by-keyword.ts        (Playwright CDP)     ✅ 기존
-[네이버카페]     scripts/collect-naver-cafe.ts        (Playwright CDP)     ✅ 기존
-[더쿠]           scripts/collect-theqoo.ts            (HTTP + cheerio)     ✅ 기존
-[인스티즈]       scripts/collect-instiz.ts            (HTTP + cheerio)     ✅ 기존
-[YouTube]        scripts/collect-youtube-comments.ts  (YouTube API v3)     ✅ 기존
-[채널 발굴]      scripts/discover-youtube-channels.py (yt-dlp+scrapetube)  ✅ 기존
-[쿠팡 제품]      scripts/coupang-check.ts             (Playwright CDP)     ✅ 기존
-[네이버 검색량]  naver-keyword-search/search.py       (검색광고 API)       ✅ 기존
-[네이버 트렌드]  naver-keyword-search/trend.py        (DataLab API)        ✅ 기존
-[통합 스킬]      ~/.claude/skills/수집.md             (위 도구 통합)       ✅ 신규
-```
-
-### 다음 세션 우선순위 — PLAN-AI-COMPANY v4 Phase 1
-
-#### 1. Phase 1 Foundation 구현 (세션 A)
-- `agency.md` 작성 (BiniLab 미션/가치관)
-- `.claude/agents/` 에 9개 에이전트 정의 파일 생성 (YAML frontmatter)
-- 기존 파일 soul/ops 분리 (content.md, post-debate-system.md 등)
-- 토론 시스템이 새 구조에서 동작하는지 검증
-
-#### 2. CEO Shadow Mode (세션 B)
-- `souls/minjun-ceo.md` 상세화 + `daily-standup-ops.md`
-- CEO Shadow Mode 5일 — 추천만, 시훈 채점, 정확도 ≥80%
-
-#### 3. `/daily-pipeline` 구현 (세션 C)
-- 10개 포스트 자동 생산 파이프라인
-- 네이버 검색량/트렌드 통합
-- 게시 큐 (aff_contents.status)
-- 경쟁사 모니터링 (하위 20% 주간 교체)
-
-#### 4. 워밍업 포스트 (8/100)
-- 하루 10개 목표, ~10일이면 워밍업 완료
-- 카테고리별 에디터가 병렬 작성
-
-### 미해결 사항
-- agent_messages DB 테이블 (에이전트 소통 시스템)
-- 멀티에이전트 소통 시스템 리서치 (CrewAI, AutoGen, MetaGPT 조사 필요)
-- 브랜드 리서치 40→80개/카테고리 확장
-- 포스트 리사이클 시스템
-- 수익 추적 (워밍업 100 완료 후)
+# BiniLab Handoff — 세션 17 (2026-03-25)
+
+## 현재 상태: 벤치마크 리밸런싱 완료 + 수집 기준 확립
+
+### 이번 세션(17) 핵심 작업
+
+1. **벤치마크 리밸런싱 (팀 회의 → 계획 → 실행)**
+   - 유령 채널 9개 + 저활동 1개 = 10개 퇴출
+   - 뷰티 24→8 축소 (댓글 하위 퇴출)
+   - 다이어트 7→4 축소
+   - 건강 1→5+ 확대 (ez_yaksa, manyjjju_yaksa, alpaca_yaksa, myyaksa 승격)
+   - 식품/인테리어 채널 후보 발굴 완료 (CDP 문제로 검증 수집 실패 → 다음 세션)
+
+2. **post_source 데이터 정합성**
+   - null 546개 백필 (benchmark 322 + legacy 224)
+   - NOT NULL 제약 추가, enum에 'legacy' 추가
+
+3. **evaluate-channels.ts 개선**
+   - 스코어링: 댓글 가중치 30% 신설, 조회수 40%→25% 감소
+   - --apply 시 카테고리 최소 3개 보호
+
+5. **Harness Design Upgrade (7개 Task 전부 완료)**
+   - Task 1: 톤 검증 gate 연결 (`8db970bc`)
+   - Task 2: ROI 중복 → buildDirective 추출 (`68b271fb`)
+   - Task 3: Phase Gate 내용 검증 강화 (`faabdb03`)
+   - Task 4: PostContract (Sprint Contract 패턴) (`217d6902`)
+   - Task 5: 4축 QA 채점 hook/originality/authenticity/conversion (`ac6c4a2f`)
+   - Task 6: QA 재작성 루프 3회 (`ca3c6dfc`)
+   - Task 7: Dead code 정리 (getAgentRegistry)
+   - 전체 테스트: 331 passed, 0 failed
+
+6. **운영 전략 전환 (팀 전체 회의 → PDF 보고서)**
+   - Content Pillar: 자취생활 50% / 건강식품 30% / 시행착오 20%
+   - 훅 4종 로테이션 (공감질문/발견공유/비교대립/실패고백)
+   - 뷰티 독립 카테고리 폐지 → "생활 속 뷰티"로 흡수
+   - 댓글 유도 전략 + 제휴링크 댓글 삽입 전략 확정
+   - operations-guide.md, post-writing-guide.md, content.md 업데이트
+   - PDF: 바탕화면 `BiniLab_쓰레드_운영전략_회의보고서.pdf`
+
+7. **collect.ts 개선**
+   - 최근 5개 포스트 중 3일 이내 없으면 비활성 채널로 자동 스킵
+   - --check-limits 포화도 표시
+
+4. **채널 선정 기준 문서화**
+   - DISCOVERY_GUIDE.md에 선정 기준표 + 카테고리 가드레일 추가
+
+### 이전 세션(16) 작업
+
+1. **AI Company v2 전체 구현 (feature/company-v2 → 머지 완료)**
+   - 기억 시스템: agent_memories/episodes DB + loadAgentContext/saveMemory/logEpisode
+   - 회의 시스템: meeting.ts (자유토론, 합의 종료, selectNextSpeaker)
+   - 전략 아카이브: strategy_archive + 롤백 + pending_approvals
+   - 에이전트 캐릭터: 11명 성격 + 지현 마케팅팀장 + 팀장 구조
+   - Output Parser: agent-output-parser.ts (태그 파싱 + Phase Gate)
+   - Spawner: async 전환 + COMPANY.md + 기억 주입
+   - Pipeline: Phase 3 회의 기반 + meetingToDirective
+
+2. **/daily-run v5 재작성**
+   - COMPANY.md + 기억 + 성격 + 회의 + output-parser 통합
+   - Phase 0: 비활성 채널 교체 + 성과 수집
+   - TAG_MAP → Claude 직접 분류
+   - 모든 에이전트에 [SAVE_MEMORY]/[LOG_EPISODE] 태그 필수
+
+3. **수집 시스템 수정**
+   - collect.ts: 스크롤 단계 비활성 채널 조기 감지 (4개 연속 → 스킵)
+   - 벤치마크 + 나머지 병렬 수집
+   - 비활성 벤치마크 11개 자동 비활성화
+
+4. **Supabase DB v2 테이블 6개 생성**
+   - agent_memories, agent_episodes, strategy_archive, meetings, pending_approvals, agents
+   - agent_messages에 room_id 추가
+
+5. **v5 dry-run 테스트 성공**
+   - 서연 기억 저장 확인 (importance 0.7)
+   - CEO 기억 저장 확인 (importance 0.9)
+   - 다음 세션에서 자동 로드 예정
+
+6. **포스트 게시 + 댓글**
+   - "세안 바꿨더니 진짜 달라짐" 게시 (DWSfzAvgaS1, 506뷰/32분)
+   - ssa_eune "제품뭐야" → "마녀공장 오일 + 라곰 마이크로폼" 답변
+
+## 기억 DB 현황 (다음 세션에서 자동 로드)
+- 서연: "YouTube+벤치마크 교차 검증 소재가 기회점수 최고"
+- 민준: "뷰티(15)+봄패션(11)+건강 다양성보정(10) 배분. 경고 해소 우선"
+
+## 벤치마크 현황 (리밸런싱 후)
+| 카테고리 | 수 | 변경 |
+|---------|-----|------|
+| 뷰티 | 8 | 24→8 (16개 퇴출) |
+| 건강 | 5+ | 1→5+ (4개 승격) |
+| 생활 | 6 | 유지 |
+| 다이어트 | 4 | 7→4 (3개 퇴출) |
+| 식품 | 발굴 중 | 0→목표 5 |
+| 인테리어 | 발굴 중 | 0→목표 3 |
+
+## 다음 세션 우선순위
+
+### 1순위: 운영
+- /daily-run --posts 3 전체 실행 (v5)
+- 워밍업: 8/20 완료 (12개 남음)
+- 기억 시스템 검증
+
+### 2순위: 수집 시스템
+- 식품/인테리어 채널 발굴 완료 (미완료 시)
+- evaluate-channels.ts --apply 주간 실행 시작
+- 빈이 channel_id 정합성 수정 (thread_posts에서 조회 안 됨)
+- 트렌드 파이프라인 폐기 판단 (활용률 0.8%)
+
+### 3순위: 장기
+- 대시보드 (S-9~S-13)
+- 워밍업 완료 후 제휴링크 시작
+
+## 브랜치
+- feat/threads-watch-p0 (company-v2 머지 + 수집 수정 커밋)
+
+## 워밍업 상태
+- 8/20 완료, 제휴링크/광고 금지

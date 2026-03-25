@@ -141,6 +141,7 @@ export const postSourceEnum = pgEnum('post_source', [
   'keyword_search',
   'x_trend',
   'benchmark',
+  'legacy',
 ]);
 
 // ---------------------------------------------------------------------------

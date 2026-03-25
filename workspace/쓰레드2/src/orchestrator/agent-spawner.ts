@@ -81,22 +81,8 @@ export const AGENT_REGISTRY: Record<string, AgentDefinition> = {
   },
 };
 
-/**
- * getAgentRegistry — agents DB에서 읽기, 실패 시 하드코딩 fallback.
- * 초기: 하드코딩 유지 + DB에도 동일 데이터. 불일치 시 DB 우선.
- */
-export async function getAgentRegistry(): Promise<Record<string, AgentDefinition>> {
-  try {
-    const { db } = await import('../db/index.js');
-    const { agents } = await import('../db/schema.js');
-    const rows = await db.select().from(agents);
-    if (rows.length === 0) return AGENT_REGISTRY;
-    // DB has data — merge: AGENT_REGISTRY provides ops/file/phase, DB provides status
-    // For now return AGENT_REGISTRY with DB values noted
-    return AGENT_REGISTRY;
-  } catch {
-    return AGENT_REGISTRY;
-  }
+export function getAgentRegistry(): Record<string, AgentDefinition> {
+  return AGENT_REGISTRY;
 }
 
 // ─── Category → Editor mapping ──────────────────────────
@@ -183,7 +169,7 @@ export const PHASE_OPS: Record<number, string[]> = {
 // ─── Prompt Builder ─────────────────────────────────────
 
 export async function buildAgentPrompt(agentId: string, mission: string, context?: string): Promise<string> {
-  const registry = await getAgentRegistry();
+  const registry = getAgentRegistry();
   const agent = registry[agentId];
   if (!agent) throw new Error(`Unknown agent: ${agentId}`);
 

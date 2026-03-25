@@ -1337,6 +1337,29 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
           }
         }
 
+        // 최근 5개 포스트 중 3일 이내가 0개면 비활성 채널로 판단, 스크롤 조기 중단
+        const gqlAll = gqlInterceptor.getCollectedPosts();
+        if (gqlAll.length >= 5 && feedStatus === 'ok') {
+          const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+          const recent5 = gqlAll.slice(0, 5); // 최신 포스트 5개
+          const hasRecent = recent5.some(p => {
+            if (p?.timestamp_unix) return p.timestamp_unix * 1000 >= threeDaysAgo;
+            if (p?.time_text) {
+              // "1시간", "3h", "2일", "1d" 등은 3일 이내
+              if (/^\d+\s*(시간|h|분|m|초|s)/.test(p.time_text)) return true;
+              const dayMatch = p.time_text.match(/^(\d+)\s*(일|d)/);
+              if (dayMatch && parseInt(dayMatch[1], 10) <= 3) return true;
+              return false; // "주", "w", "개월" 등은 3일 초과
+            }
+            return false;
+          });
+          if (!hasRecent) {
+            log(`  ⚠ 최근 5개 포스트 중 3일 이내 포스트 없음 → 비활성 채널, 수집 제외`);
+            feedStatus = 'inactive_recent';
+            break;
+          }
+        }
+
         log(`  스크롤: ${collected.size}/${postCount} (+${added})`);
         if (collected.size >= postCount) break;
         if (overlapHit) break;
@@ -1355,6 +1378,10 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
       log(`피드 스크롤 완료 — ${collected.size}개 수집`);
       postIds = [...collected];
 
+      if (feedStatus === 'inactive_recent') {
+        log(`비활성 채널 — 최근 3일 이내 포스트 없음. 수집 중단.`);
+        return;
+      }
       if (feedStatus === 'exhausted') {
         log(`채널이 소진되었지만 ${postIds.length}개로 계속 진행`);
       }
