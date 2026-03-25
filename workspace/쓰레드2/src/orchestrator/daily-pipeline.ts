@@ -113,6 +113,130 @@ async function fetchPhase2Data(): Promise<PreviousDayStats> {
 }
 
 // ---------------------------------------------------------------------------
+// buildDirective — ROI 기반 DailyDirective 생성 (공통 함수)
+// ---------------------------------------------------------------------------
+
+/**
+ * buildDirective — ROI 기반 DailyDirective 생성 (공통 함수).
+ * runCEOStandup과 meetingToDirective가 모두 이 함수를 사용.
+ */
+export async function buildDirective(
+  totalPosts: number,
+  date: string,
+): Promise<DailyDirective> {
+  const { categoryStats, brandEventsCount } = await fetchPhase2Data();
+
+  // ROI 점수 계산
+  const roiSummary: Record<string, { score: number; grade: string }> = {};
+  for (const cat of Object.keys(DEFAULT_ALLOCATION)) {
+    const stats = categoryStats.find((s) => s.category === cat);
+    const score = stats ? parseFloat(calcRoiScore(stats).toFixed(1)) : 0;
+    roiSummary[cat] = { score, grade: roiGrade(score) };
+  }
+
+  // 카테고리 비율 결정
+  const allocation = { ...DEFAULT_ALLOCATION };
+  for (const [cat, { grade }] of Object.entries(roiSummary)) {
+    if (grade === 'A' && allocation[cat]! < 5) allocation[cat] = allocation[cat]! + 1;
+    if (grade === 'C' && allocation[cat]! > 1) allocation[cat] = allocation[cat]! - 1;
+  }
+  const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
+  if (allocTotal !== totalPosts) {
+    const diff = totalPosts - allocTotal;
+    const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0]![0];
+    allocation[topCat] = Math.max(1, allocation[topCat]! + diff);
+  }
+
+  const regularPosts = Math.ceil(totalPosts * 0.7);
+  const experimentPosts = totalPosts - regularPosts;
+
+  // 시간대 슬롯 생성
+  const slots = TIME_SLOT_TEMPLATE.slice(0, totalPosts);
+  const experimentSlotDate = date.replace(/-/g, '');
+  let expIdx = 1;
+  const timeSlots: TimeSlot[] = slots.map((s) => {
+    const editorInfo = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
+    const slot: TimeSlot = {
+      time: s.time,
+      category: s.category,
+      type: s.type,
+      editor: editorInfo!.agent.replace('.claude/agents/', '').replace('.md', ''),
+      brief: '',
+    };
+    if (s.type === 'experiment') {
+      slot.experiment_id = `EXP-${experimentSlotDate}-${String(expIdx++).padStart(3, '0')}`;
+    }
+    return slot;
+  });
+
+  // 다양성 경고
+  const diversityWarnings: string[] = [];
+  if (brandEventsCount < 3) {
+    diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
+  }
+  const lcRows = await client`
+    SELECT content_style, need_category, hook_type
+    FROM content_lifecycle
+    WHERE posted_at >= NOW() - INTERVAL '7 days'
+    LIMIT 50
+  `;
+  if (lcRows.length > 0) {
+    const lcPosts = lcRows.map((r) => ({
+      content_style: (r.content_style as string) ?? '',
+      need_category: (r.need_category as string) ?? '',
+      hook_type: (r.hook_type as string) ?? '',
+    }));
+    const diversityReport = getDiversityReport(lcPosts);
+    for (const w of diversityReport.warnings) {
+      if (w.warning) diversityWarnings.push(w.warning);
+    }
+  }
+
+  // 재활용 후보
+  const recycleRows = await client`
+    SELECT cl.threads_post_id AS post_id
+    FROM content_lifecycle cl
+    JOIN thread_posts tp ON cl.threads_post_id = tp.post_id
+    WHERE cl.posted_at <= NOW() - INTERVAL '14 days'
+    ORDER BY tp.view_count DESC
+    LIMIT 2
+  `;
+  const recycleCandidates = recycleRows.map((r) => r.post_id as string);
+
+  const directive: DailyDirective = {
+    date,
+    total_posts: totalPosts,
+    category_allocation: allocation,
+    regular_posts: regularPosts,
+    experiment_posts: experimentPosts,
+    time_slots: timeSlots,
+    experiments: timeSlots
+      .filter((s) => s.experiment_id)
+      .map((s) => ({
+        id: s.experiment_id!,
+        hypothesis: '(Claude Code가 채워야 함)',
+        variable: 'hook_type',
+      })),
+    recycle_candidates: recycleCandidates,
+    diversity_warnings: diversityWarnings,
+    roi_summary: roiSummary,
+  };
+
+  // 전략 기록
+  const topCategories = Object.entries(roiSummary)
+    .filter(([, v]) => v.grade === 'A')
+    .map(([k]) => k)
+    .join(', ') || '없음';
+  logDecision(
+    date,
+    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
+    `ROI 점수 기반 조정. A등급: ${topCategories}`,
+  );
+
+  return directive;
+}
+
+// ---------------------------------------------------------------------------
 // Phase 3: CEO 스탠드업
 // ---------------------------------------------------------------------------
 
@@ -149,131 +273,27 @@ async function runMeeting(params: {
 
 /**
  * 회의 메시지 → DailyDirective 변환.
- * ROI 계산 로직을 재사용해 DailyDirective를 생성.
+ * buildDirective를 재사용해 DailyDirective를 생성.
  */
 async function meetingToDirective(
   totalPosts: number,
   date: string,
 ): Promise<{ directive: DailyDirective; meetingSummary: string; decisions: string[] }> {
-  // Phase 2 데이터 수집
-  const { categoryStats, brandEventsCount } = await fetchPhase2Data();
+  const directive = await buildDirective(totalPosts, date);
 
-  // ROI 점수 계산
-  const roiSummary: Record<string, { score: number; grade: string }> = {};
-  for (const cat of Object.keys(DEFAULT_ALLOCATION)) {
-    const stats = categoryStats.find((s) => s.category === cat);
-    const score = stats ? parseFloat(calcRoiScore(stats).toFixed(1)) : 0;
-    roiSummary[cat] = { score, grade: roiGrade(score) };
-  }
-
-  // 카테고리 비율 결정 (ROI A → +1, max 5; C → -1, min 1)
-  const allocation = { ...DEFAULT_ALLOCATION };
-  for (const [cat, { grade }] of Object.entries(roiSummary)) {
-    if (grade === 'A' && allocation[cat]! < 5) allocation[cat] = allocation[cat]! + 1;
-    if (grade === 'C' && allocation[cat]! > 1) allocation[cat] = allocation[cat]! - 1;
-  }
-  // 합계를 totalPosts에 맞게 정규화
-  const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
-  if (allocTotal !== totalPosts) {
-    const diff = totalPosts - allocTotal;
-    const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0]![0];
-    allocation[topCat] = Math.max(1, allocation[topCat]! + diff);
-  }
-
-  const regularPosts = Math.ceil(totalPosts * 0.7);
-  const experimentPosts = totalPosts - regularPosts;
-
-  // 시간대 슬롯 생성
-  const slots = TIME_SLOT_TEMPLATE.slice(0, totalPosts);
-  const experimentSlotDate = date.replace(/-/g, '');
-  let expIdx = 1;
-
-  const timeSlots: TimeSlot[] = slots.map((s) => {
-    const editorMap = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
-    const slot: TimeSlot = {
-      time: s.time,
-      category: s.category,
-      type: s.type,
-      editor: editorMap!.agent.replace('.claude/agents/', '').replace('.md', ''),
-      brief: '',
-    };
-    if (s.type === 'experiment') {
-      slot.experiment_id = `EXP-${experimentSlotDate}-${String(expIdx++).padStart(3, '0')}`;
-    }
-    return slot;
-  });
-
-  const diversityWarnings: string[] = [];
-  if (brandEventsCount < 3) {
-    diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
-  }
-
-  const lcRows = await client`
-    SELECT content_style, need_category, hook_type
-    FROM content_lifecycle
-    WHERE posted_at >= NOW() - INTERVAL '7 days'
-    LIMIT 50
-  `;
-  if (lcRows.length > 0) {
-    const lcPosts = lcRows.map((r) => ({
-      content_style: (r.content_style as string) ?? '',
-      need_category: (r.need_category as string) ?? '',
-      hook_type: (r.hook_type as string) ?? '',
-    }));
-    const diversityReport = getDiversityReport(lcPosts);
-    for (const w of diversityReport.warnings) {
-      if (w.warning) diversityWarnings.push(w.warning);
-    }
-  }
-
-  const recycleRows = await client`
-    SELECT id
-    FROM thread_posts
-    WHERE is_published = true
-      AND published_at <= NOW() - INTERVAL '14 days'
-    ORDER BY view_count DESC
-    LIMIT 2
-  `;
-  const recycleCandidates = recycleRows.map((r) => r.id as string);
-
-  const directive: DailyDirective = {
-    date,
-    total_posts: totalPosts,
-    category_allocation: allocation,
-    regular_posts: regularPosts,
-    experiment_posts: experimentPosts,
-    time_slots: timeSlots,
-    experiments: timeSlots
-      .filter((s) => s.experiment_id)
-      .map((s) => ({
-        id: s.experiment_id!,
-        hypothesis: '(Claude Code가 채워야 함)',
-        variable: 'hook_type',
-      })),
-    recycle_candidates: recycleCandidates,
-    diversity_warnings: diversityWarnings,
-    roi_summary: roiSummary,
-  };
-
-  // 전략 결정 자동 기록
-  const topCategories = Object.entries(roiSummary)
+  const topCategories = Object.entries(directive.roi_summary)
     .filter(([, v]) => v.grade === 'A')
     .map(([k]) => k)
     .join(', ') || '없음';
-  logDecision(
-    date,
-    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
-    `ROI 점수 기반 조정. A등급: ${topCategories}`,
-  );
 
   const meetingSummary =
     `[daily_directive ${date}] ${totalPosts}개 슬롯 배분 완료. ` +
-    Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/') +
-    `. 실험 ${experimentPosts}개.`;
+    Object.entries(directive.category_allocation).map(([k, v]) => `${k}${v}`).join('/') +
+    `. 실험 ${directive.experiment_posts}개.`;
 
   const decisions = [
-    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
-    `실험 슬롯 ${experimentPosts}개. A등급: ${topCategories}`,
+    `카테고리 배분: ${Object.entries(directive.category_allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
+    `실험 슬롯 ${directive.experiment_posts}개. A등급: ${topCategories}`,
   ];
 
   return { directive, meetingSummary, decisions };
@@ -281,125 +301,19 @@ async function meetingToDirective(
 
 /**
  * CEO 스탠드업 실행.
- * 전일 성과 데이터 기반 ROI 계산 → DailyDirective 생성 → agent_messages 저장.
+ * buildDirective로 DailyDirective 생성 → agent_messages 저장.
  */
 export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
   const date = new Date().toISOString().slice(0, 10);
-
-  const { categoryStats, brandEventsCount } = await fetchPhase2Data();
-
-  const roiSummary: Record<string, { score: number; grade: string }> = {};
-  for (const cat of Object.keys(DEFAULT_ALLOCATION)) {
-    const stats = categoryStats.find((s) => s.category === cat);
-    const score = stats ? parseFloat(calcRoiScore(stats).toFixed(1)) : 0;
-    roiSummary[cat] = { score, grade: roiGrade(score) };
-  }
-
-  const allocation = { ...DEFAULT_ALLOCATION };
-  for (const [cat, { grade }] of Object.entries(roiSummary)) {
-    if (grade === 'A' && allocation[cat] < 5) allocation[cat] += 1;
-    if (grade === 'C' && allocation[cat] > 1) allocation[cat] -= 1;
-  }
-  const allocTotal = Object.values(allocation).reduce((a, b) => a + b, 0);
-  if (allocTotal !== totalPosts) {
-    const diff = totalPosts - allocTotal;
-    const topCat = Object.entries(allocation).sort((a, b) => b[1] - a[1])[0][0];
-    allocation[topCat] = Math.max(1, allocation[topCat] + diff);
-  }
-
-  const regularPosts = Math.ceil(totalPosts * 0.7);
-  const experimentPosts = totalPosts - regularPosts;
-
-  const slots = TIME_SLOT_TEMPLATE.slice(0, totalPosts);
-  const experimentSlotDate = date.replace(/-/g, '');
-  let expIdx = 1;
-
-  const timeSlots: TimeSlot[] = slots.map((s) => {
-    const editorMap = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
-    const slot: TimeSlot = {
-      time: s.time,
-      category: s.category,
-      type: s.type,
-      editor: editorMap.agent.replace('.claude/agents/', '').replace('.md', ''),
-      brief: '',
-    };
-    if (s.type === 'experiment') {
-      slot.experiment_id = `EXP-${experimentSlotDate}-${String(expIdx++).padStart(3, '0')}`;
-    }
-    return slot;
-  });
-
-  const diversityWarnings: string[] = [];
-  if (brandEventsCount < 3) {
-    diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
-  }
-
-  // 다양성 체크: content_lifecycle 최근 7일 콘텐츠 기반
-  // thread_posts에는 content_style/hook_type 없으므로 content_lifecycle 사용
-  const lcRows = await client`
-    SELECT content_style, need_category, hook_type
-    FROM content_lifecycle
-    WHERE posted_at >= NOW() - INTERVAL '7 days'
-    LIMIT 50
-  `;
-  if (lcRows.length > 0) {
-    const lcPosts = lcRows.map((r) => ({
-      content_style: (r.content_style as string) ?? '',
-      need_category: (r.need_category as string) ?? '',
-      hook_type: (r.hook_type as string) ?? '',
-    }));
-    const diversityReport = getDiversityReport(lcPosts);
-    for (const w of diversityReport.warnings) {
-      if (w.warning) diversityWarnings.push(w.warning);
-    }
-  }
-
-  const recycleRows = await client`
-    SELECT cl.threads_post_id AS post_id
-    FROM content_lifecycle cl
-    JOIN thread_posts tp ON cl.threads_post_id = tp.post_id
-    WHERE cl.posted_at <= NOW() - INTERVAL '14 days'
-    ORDER BY tp.view_count DESC
-    LIMIT 2
-  `;
-  const recycleCandidates = recycleRows.map((r) => r.post_id as string);
-
-  const directive: DailyDirective = {
-    date,
-    total_posts: totalPosts,
-    category_allocation: allocation,
-    regular_posts: regularPosts,
-    experiment_posts: experimentPosts,
-    time_slots: timeSlots,
-    experiments: timeSlots
-      .filter((s) => s.experiment_id)
-      .map((s) => ({
-        id: s.experiment_id!,
-        hypothesis: '(Claude Code가 채워야 함)',
-        variable: 'hook_type',
-      })),
-    recycle_candidates: recycleCandidates,
-    diversity_warnings: diversityWarnings,
-    roi_summary: roiSummary,
-  };
-
-  const topCategories = Object.entries(roiSummary)
-    .filter(([, v]) => v.grade === 'A')
-    .map(([k]) => k)
-    .join(', ') || '없음';
-  logDecision(
-    date,
-    `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
-    `ROI 점수 기반 조정. A등급: ${topCategories}`,
-  );
+  const directive = await buildDirective(totalPosts, date);
 
   await sendMessage(
     'minjun-ceo',
     'all',
     'standup',
     `[daily_directive ${date}] ${totalPosts}개 슬롯 배분 완료. ` +
-      Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/') +
-      `. 실험 ${experimentPosts}개.`,
+      Object.entries(directive.category_allocation).map(([k, v]) => `${k}${v}`).join('/') +
+      `. 실험 ${directive.experiment_posts}개.`,
     { directive },
   );
 
