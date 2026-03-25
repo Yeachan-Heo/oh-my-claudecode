@@ -26,6 +26,12 @@ vi.mock('../db/index.js', () => ({
 
 vi.mock('../db/schema.js', () => ({
   agentMessages: {},
+  strategyArchive: { status: 'status', version: 'version' },
+}));
+
+// ─── Mock: strategy-archive ────────────────────────────────────────────────
+vi.mock('../db/strategy-archive.js', () => ({
+  createStrategyVersion: vi.fn().mockResolvedValue({ id: 'mock-strategy-id', version: 'v1', status: 'active' }),
 }));
 
 // ─── Mock: sendMessage ──────────────────────────────────────────────────────

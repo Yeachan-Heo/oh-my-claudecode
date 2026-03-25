@@ -1,9 +1,11 @@
 /**
  * @file daily-pipeline.ts — BiniLab 일일 파이프라인 오케스트레이터.
  *
- * runDailyPipeline(options) 가 Phase 1~6을 순차 조율.
+ * runDailyPipeline(options) 가 Phase 0~6을 순차 조율.
+ * Phase 0: 어제 게시 포스트 성과 스냅샷 수집 (scheduleSnapshots + collectSnapshot).
+ * Phase 5: Safety 검증 + aff_contents 등록 + content_lifecycle INSERT.
  * --dry-run: Phase 2~3만 실행 (directive 출력).
- * --autonomous: Phase 1~5 자동 실행 (aff_contents status='ready' 등록까지).
+ * --autonomous: Phase 0~5 자동 실행 (aff_contents status='ready' 등록까지).
  */
 
 import { client } from '../db/index.js';
@@ -11,8 +13,10 @@ import { sendMessage } from '../db/agent-messages.js';
 import { runSafetyGates } from '../safety/gates.js';
 import { getDiversityReport } from '../learning/diversity-checker.js';
 import { logDecision, updatePlaybook } from '../learning/strategy-logger.js';
+import { createStrategyVersion } from '../db/strategy-archive.js';
 import { startMeeting, concludeMeeting } from './meeting.js';
 import { logEpisode } from '../db/memory.js';
+import { registerPost, scheduleSnapshots, collectSnapshot } from '../tracker/snapshot.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -248,6 +252,21 @@ export async function buildDirective(
     `카테고리 배분: ${Object.entries(allocation).map(([k, v]) => `${k}${v}`).join('/')}`,
     `ROI 점수 기반 조정. A등급: ${topCategories}`,
   );
+
+  // strategy_archive에 CEO 결정 기록
+  await createStrategyVersion({
+    version: `directive-${date}`,
+    strategy: {
+      category_allocation: allocation,
+      roi_summary: roiSummary,
+      total_posts: totalPosts,
+      regular_posts: regularPosts,
+      experiment_posts: experimentPosts,
+    },
+    performance: {
+      avg_roi: Object.values(roiSummary).reduce((sum, r) => sum + r.score, 0) / Object.keys(roiSummary).length,
+    },
+  });
 
   return directive;
 }
@@ -592,6 +611,51 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
   let safetyPassed = true;
   let readyCount = 0;
 
+  // ── Phase 0: 어제 게시 포스트 성과 스냅샷 수집 ─────────────────────────
+  if (!dryRun && (!options.phase || options.phase === 0)) {
+    try {
+      const snapshotTargets = await scheduleSnapshots();
+      if (snapshotTargets.length > 0) {
+        await sendMessage(
+          'orchestrator',
+          'all',
+          'pipeline',
+          `[Phase 0] ${snapshotTargets.length}개 포스트 성과 스냅샷 수집 시작.`,
+          { phase: 0, status: 'started', targetCount: snapshotTargets.length },
+        );
+        let collected = 0;
+        for (const target of snapshotTargets) {
+          try {
+            await collectSnapshot(target.postId, target.snapshotType);
+            collected++;
+          } catch (snapErr) {
+            const snapMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+            errors.push(`Phase 0 snapshot 실패 (${target.postId}/${target.snapshotType}): ${snapMsg}`);
+          }
+        }
+        await sendMessage(
+          'orchestrator',
+          'all',
+          'pipeline',
+          `[Phase 0] 스냅샷 수집 완료: ${collected}/${snapshotTargets.length}건.`,
+          { phase: 0, status: 'completed', collected, total: snapshotTargets.length },
+        );
+      } else {
+        await sendMessage(
+          'orchestrator',
+          'all',
+          'pipeline',
+          '[Phase 0] 수집 대상 스냅샷 없음 — 스킵.',
+          { phase: 0, status: 'skipped' },
+        );
+      }
+      phasesCompleted.push(0);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Phase 0: ${msg}`);
+    }
+  }
+
   // ── Phase 1: 데이터 수집 (dry-run은 스킵) ─────────────────────────────
   if (!dryRun && !options.phase || options.phase === 1) {
     await sendMessage(
@@ -781,6 +845,7 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         ? (draft.format as ValidFormat)
         : '솔직후기형';
       try {
+        const affContentId = crypto.randomUUID();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- postgres.js TransactionSql Omit strips call signatures
         await client.begin(async (tx: any) => {
           await tx`
@@ -788,7 +853,7 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
               id, product_id, product_name, need_id,
               format, status, hook, created_at
             ) VALUES (
-              ${crypto.randomUUID()},
+              ${affContentId},
               'pending',
               'pending',
               'pending',
@@ -804,6 +869,17 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
           // }
         });
         readyCount++;
+
+        // Register in content_lifecycle to start the OODA feedback loop
+        await registerPost({
+          threadsPostId: affContentId, // placeholder until actual Threads post ID is available
+          category: draft.category,
+          contentStyle: formatValue,
+          hookType: draft.hook || 'unknown',
+          postSource: 'pipeline',
+          contentText: draft.text,
+          accountId: 'binilab__',
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`aff_contents 등록 실패: ${msg}`);
@@ -820,13 +896,13 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     );
   }
 
-  // ── Phase 6: 사후 관리 (게시 24h 후 별도 실행) ────────────────────────
+  // ── Phase 6: 사후 관리 (스냅샷 수집은 Phase 0으로 이동됨) ───────────
   if (!options.phase || options.phase === 6) {
     await sendMessage(
       'orchestrator',
       'all',
       'pipeline',
-      '[Phase 6] 사후 관리 — 게시 24h 후 track-performance.ts + /analyze-performance 실행 필요.',
+      '[Phase 6] 사후 관리 — 스냅샷 수집은 Phase 0에서 자동 실행. /analyze-performance 별도 실행 필요.',
       { phase: 6, status: 'deferred' },
     );
     if (!autonomous) phasesCompleted.push(6);
