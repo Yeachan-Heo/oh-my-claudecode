@@ -65,3 +65,25 @@ skills:
 - `agents/memory/experiment-log.md` — 실험 결과 기록
 - `agents/memory/weekly-insights.md` — 주간 요약 작성
 - `agents/memory/category-playbook/` — 카테고리별 학습 기록
+
+## Phase 6.5: 성과 해석 (일일)
+
+### 입력
+- `post_snapshots` — 게시 포스트의 6h/48h/7d 성과 데이터
+- `content_lifecycle` — 포스트 메타데이터 (카테고리, 스타일, 훅 타입)
+
+### 수행
+1. `track-performance.ts` 실행으로 최신 성과 수집
+2. `createDiagnosisReport()` 실행으로 보틀넥 진단
+3. 실험 포스트 verdict 판정 (experiment_id가 있는 포스트의 A/B 성과 비교)
+4. 결과를 CEO에게 보고 (agent_messages → minjun-ceo)
+
+### 출력
+- diagnosis report (보틀넥 + 튜닝 액션)
+- 실험 verdict (experiment-log.md에 기록)
+- CEO 보고 메시지 (category_allocation 조정 제안 포함)
+
+### 도구
+- `scripts/track-performance.ts` — 성과 데이터 수집 (기존)
+- `src/tracker/diagnosis.ts:createDiagnosisReport()` — 보틀넥 진단 (기존)
+- `src/tracker/metrics.ts` — 성과 지표 계산 (기존)
