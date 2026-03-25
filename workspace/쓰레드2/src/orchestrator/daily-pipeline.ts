@@ -18,6 +18,7 @@ import type {
   DailyDirective,
   ContentDraft,
   QAResult,
+  QAScores,
   PostContract,
   PipelineOptions,
   PipelineResult,
@@ -351,7 +352,50 @@ export function generateContent(slot: TimeSlot, _directive: DailyDirective): Con
   };
 }
 
-/** 도윤(QA) 기준 콘텐츠 검증. 킬러게이트 K1~K4 + 체크리스트 10항목. */
+/** 4축 채점 헬퍼: 텍스트 기반으로 hook/originality/authenticity/conversion 계산. */
+function scoreAxes(text: string): QAScores {
+  const hookScore = (() => {
+    const firstLine = text.split('\n')[0] ?? '';
+    let s = 7;
+    if (firstLine.length > 30) s -= 3;
+    if (firstLine.length > 20) s -= 1;
+    if (/\?|ㅋ|ㅜ|!/.test(firstLine)) s += 1;
+    return Math.max(1, Math.min(10, s));
+  })();
+
+  const originalityScore = (() => {
+    let s = 7;
+    if (/합니다|여러분|추천드립니다|효과적입니다/.test(text)) s -= 3;
+    if (/소개합니다|알려드|말씀드/.test(text)) s -= 2;
+    if (/ㅋㅋ|ㅜ|거든|임\b/.test(text)) s += 1;
+    return Math.max(1, Math.min(10, s));
+  })();
+
+  const authenticityScore = (() => {
+    let s = 8;
+    const expertTerms = /나이아신아마이드|레티놀|히알루론산|비타민C|AHA|BHA|글루타치온/i;
+    if (expertTerms.test(text)) s -= 4;
+    if (/합니다|~입니다/.test(text)) s -= 2;
+    return Math.max(1, Math.min(10, s));
+  })();
+
+  const conversionScore = (() => {
+    let s = 5;
+    if (/써봐|먹어봐|해봐|적어줘|댓글|알려줘/.test(text)) s += 3;
+    if (/링크|프로필|바이오/.test(text)) s += 1;
+    if (/추천$|드립니다/.test(text)) s -= 1;
+    return Math.max(1, Math.min(10, s));
+  })();
+
+  return {
+    hook: hookScore,
+    originality: originalityScore,
+    authenticity: authenticityScore,
+    conversion: conversionScore,
+  };
+}
+
+/** 도윤(QA) 기준 콘텐츠 검증. 킬러게이트 K1~K4 + 체크리스트 10항목 + 4축 채점. */
 export function runQA(draft: ContentDraft): QAResult {
   const text = draft.text;
   const feedback: string[] = [];
@@ -375,8 +419,11 @@ export function runQA(draft: ContentDraft): QAResult {
   const killerGates = { k1, k2, k3, k4 };
   const killersPassed = k1 && k2 && k3 && k4;
 
+  // 4축 채점은 킬러게이트와 무관하게 항상 계산 (피드백용)
+  const scores = text ? scoreAxes(text) : undefined;
+
   if (!killersPassed) {
-    return { passed: false, score: 0, feedback, killerGates };
+    return { passed: false, score: 0, scores, feedback, killerGates };
   }
 
   // 기본 체크리스트 10항목 (텍스트 없으면 스킵)
@@ -392,7 +439,21 @@ export function runQA(draft: ContentDraft): QAResult {
   }
 
   const score = Math.max(0, 10 - feedback.length * 2);
-  return { passed: feedback.length === 0, score, feedback, killerGates };
+
+  // 가중 평균 (후킹 30%, 독창성 30%, 진정성 25%, 전환 15%)
+  const weightedScore = scores
+    ? Math.round(
+        scores.hook * 0.3 + scores.originality * 0.3 + scores.authenticity * 0.25 + scores.conversion * 0.15,
+      )
+    : score;
+
+  return {
+    passed: feedback.length === 0 && weightedScore >= 6,
+    score: Math.min(score, weightedScore),
+    scores,
+    feedback,
+    killerGates,
+  };
 }
 
 /** 안전 게이트 실행 (Worker A 구현). */

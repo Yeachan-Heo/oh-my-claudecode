@@ -272,3 +272,38 @@ describe('buildDirective post_contracts', () => {
     }
   });
 });
+
+// ─── Task 5: runQA 4-axis scoring ───────────────────────────────────────────
+
+describe('runQA 4-axis scoring', () => {
+  it('should return QAScores with 4 axes', () => {
+    const draft: ContentDraft = {
+      text: '이거 써봤는데 진짜 좋음 ㅋㅋ 3일 만에 달라짐. 한번 써봐',
+      hook: '이거 써봤는데',
+      format: 'story',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    const result = runQA(draft);
+    expect(result.scores).toBeDefined();
+    expect(result.scores!.hook).toBeGreaterThanOrEqual(1);
+    expect(result.scores!.hook).toBeLessThanOrEqual(10);
+    expect(result.scores!.originality).toBeDefined();
+    expect(result.scores!.authenticity).toBeDefined();
+    expect(result.scores!.conversion).toBeDefined();
+  });
+
+  it('should penalize AI-sounding content on originality', () => {
+    const aiDraft: ContentDraft = {
+      text: '여러분 추천드립니다 효과적인 세럼을 소개합니다',
+      hook: '여러분',
+      format: 'list',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    const result = runQA(aiDraft);
+    expect(result.scores!.originality).toBeLessThan(5);
+  });
+});

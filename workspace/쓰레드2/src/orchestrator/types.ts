@@ -46,9 +46,17 @@ export interface ContentDraft {
   persona_file?: string;   // "souls/bini-persona.md"
 }
 
+export interface QAScores {
+  hook: number;         // 1-10: 첫 문장이 스크롤 멈추게 하는가?
+  originality: number;  // 1-10: AI냄새 없이 사람 느낌? 템플릿 반복 없는가?
+  authenticity: number; // 1-10: 비전문가 관점? 성분명/의학용어 없는가?
+  conversion: number;   // 1-10: 구체적 CTA? 제품 연결 자연스러운가?
+}
+
 export interface QAResult {
   passed: boolean;
-  score: number;           // 0-10
+  score: number;           // 0-10 (QAScores 가중 평균)
+  scores?: QAScores;       // 4축 상세 점수
   feedback: string[];
   killerGates: { k1: boolean; k2: boolean; k3: boolean; k4: boolean };
 }
