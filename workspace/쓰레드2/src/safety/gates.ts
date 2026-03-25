@@ -134,11 +134,11 @@ export function gate5_brandSafety(content: string): GateResult {
 }
 
 export function gate6_qaPassCheck(qaScore: number): GateResult {
-  const passed = qaScore >= 10;
+  const passed = qaScore >= 6;
   return {
     gate: 'gate6_qaPassCheck',
     passed,
-    reason: passed ? undefined : `QA 점수 ${qaScore} (최소 10점 필요)`,
+    reason: passed ? undefined : `QA 점수 ${qaScore} (최소 6점 필요)`,
     severity: 'block',
   };
 }

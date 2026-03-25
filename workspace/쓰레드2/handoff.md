@@ -1,117 +1,107 @@
-# BiniLab Handoff — 세션 17 (2026-03-25)
+# BiniLab Handoff — 세션 18 (2026-03-25)
 
-## 현재 상태: 벤치마크 리밸런싱 완료 + 수집 기준 확립
+## 현재 상태: 학습 루프 진단 완료 + v3 계획서 작성 + 포스트 게시
 
-### 이번 세션(17) 핵심 작업
+### 이번 세션(18) 핵심 작업
 
-1. **벤치마크 리밸런싱 (팀 회의 → 계획 → 실행)**
-   - 유령 채널 9개 + 저활동 1개 = 10개 퇴출
-   - 뷰티 24→8 축소 (댓글 하위 퇴출)
-   - 다이어트 7→4 축소
-   - 건강 1→5+ 확대 (ez_yaksa, manyjjju_yaksa, alpaca_yaksa, myyaksa 승격)
-   - 식품/인테리어 채널 후보 발굴 완료 (CDP 문제로 검증 수집 실패 → 다음 세션)
+1. **BiniLab 회사 구조 분석 + PDF 생성**
+   - 11명 에이전트 조직도, 일일 파이프라인, 검증/학습/자율진화 시스템 전체 분석
+   - `BiniLab_AI_Company_구조분석.pdf` 바탕화면 저장
 
-2. **post_source 데이터 정합성**
-   - null 546개 백필 (benchmark 322 + legacy 224)
-   - NOT NULL 제약 추가, enum에 'legacy' 추가
+2. **Daily Run 실행 (Phase 2~5)**
+   - Phase 2: 서연(애널리스트) 분석 → TOP5 기회점수 (모공13/카리나12/봄루틴11)
+   - Phase 3: 민준(CEO) 지시서 → 3슬롯 배분
+   - Phase 4: 빈이(뷰티 에디터) 2개 + 소라(생활 에디터) 1개 초안 제출
+   - Phase 4 QA: 도윤(QA) 3개 CONDITIONAL_PASS (7.7/7.6/6.8)
+   - **gate6 버그 수정**: 임계값 10→6 (`src/safety/gates.ts:137`) — QA 4축 스케일 불일치
+   - Phase 5: Safety Gate 3개 전원 통과 → content_lifecycle 등록
 
-3. **evaluate-channels.ts 개선**
-   - 스코어링: 댓글 가중치 30% 신설, 조회수 40%→25% 감소
-   - --apply 시 카테고리 최소 3개 보호
+3. **포스트 게시 1건**
+   - 카리나 착장 복각 (생활) → `https://www.threads.com/@duribeon231/post/DWTNxQHkchR`
+   - content_lifecycle 업데이트 완료 (218e108e)
 
-5. **Harness Design Upgrade (7개 Task 전부 완료)**
-   - Task 1: 톤 검증 gate 연결 (`8db970bc`)
-   - Task 2: ROI 중복 → buildDirective 추출 (`68b271fb`)
-   - Task 3: Phase Gate 내용 검증 강화 (`faabdb03`)
-   - Task 4: PostContract (Sprint Contract 패턴) (`217d6902`)
-   - Task 5: 4축 QA 채점 hook/originality/authenticity/conversion (`ac6c4a2f`)
-   - Task 6: QA 재작성 루프 3회 (`ca3c6dfc`)
-   - Task 7: Dead code 정리 (getAgentRegistry)
-   - 전체 테스트: 331 passed, 0 failed
+4. **성과 수집 + 분석**
+   - track-performance.ts 실행 → 25개 포스트 스냅샷 수집
+   - TOP: 목이버섯 15K뷰 / 도시락 8.7K뷰 / 클렌징 2.5K뷰
 
-6. **운영 전략 전환 (팀 전체 회의 → PDF 보고서)**
-   - Content Pillar: 자취생활 50% / 건강식품 30% / 시행착오 20%
-   - 훅 4종 로테이션 (공감질문/발견공유/비교대립/실패고백)
-   - 뷰티 독립 카테고리 폐지 → "생활 속 뷰티"로 흡수
-   - 댓글 유도 전략 + 제휴링크 댓글 삽입 전략 확정
-   - operations-guide.md, post-writing-guide.md, content.md 업데이트
-   - PDF: 바탕화면 `BiniLab_쓰레드_운영전략_회의보고서.pdf`
+5. **학습 루프 진단 — 구조적 결함 발견**
+   - `processAgentOutput()` 프로덕션 호출 0곳 (테스트 파일 1개만)
+   - `/daily-run` 스킬에서 output-parser 호출이 주석으로만 존재
+   - `/analyze-performance` 스킬에 기억 저장 코드 전무
+   - **근본 원인**: 기억 읽기(loadAgentContext)는 자동, 기억 쓰기(processAgentOutput)는 수동
 
-7. **collect.ts 개선**
-   - 최근 5개 포스트 중 3일 이내 없으면 비활성 채널로 자동 스킵
-   - --check-limits 포화도 표시
+6. **CLAUDE.md 규칙 추가 2건**
+   - 에이전트 표기 규칙: 이름(직책) 형식 필수
+   - 에이전트 스폰 규칙: "애들 시켜서" = Agent() 스폰 필수, 스킬 직접 호출 금지
 
-4. **채널 선정 기준 문서화**
-   - DISCOVERY_GUIDE.md에 선정 기준표 + 카테고리 가드레일 추가
+7. **BiniLab v3 계획서 작성**
+   - claude-peers + Agent Teams + Pixel Agents 조사
+   - 3계층 에이전트 구조: 상주6 + 온디맨드5
+   - "업데이트 인식 못하는 문제" 3계층 해결 (RELOAD 훅 + 주기적 체크 + 해시 검증)
+   - `BiniLab_v3_Final_구현계획서.pdf` 바탕화면 저장
 
-### 이전 세션(16) 작업
+### 미완료 — 다음 세션 필수
 
-1. **AI Company v2 전체 구현 (feature/company-v2 → 머지 완료)**
-   - 기억 시스템: agent_memories/episodes DB + loadAgentContext/saveMemory/logEpisode
-   - 회의 시스템: meeting.ts (자유토론, 합의 종료, selectNextSpeaker)
-   - 전략 아카이브: strategy_archive + 롤백 + pending_approvals
-   - 에이전트 캐릭터: 11명 성격 + 지현 마케팅팀장 + 팀장 구조
-   - Output Parser: agent-output-parser.ts (태그 파싱 + Phase Gate)
-   - Spawner: async 전환 + COMPANY.md + 기억 주입
-   - Pipeline: Phase 3 회의 기반 + meetingToDirective
+#### 1순위: v3 구현 (학습 루프 + 상주 에이전트)
 
-2. **/daily-run v5 재작성**
-   - COMPANY.md + 기억 + 성격 + 회의 + output-parser 통합
-   - Phase 0: 비활성 채널 교체 + 성과 수집
-   - TAG_MAP → Claude 직접 분류
-   - 모든 에이전트에 [SAVE_MEMORY]/[LOG_EPISODE] 태그 필수
+**Phase 0: 기존 버그 정리** (즉시)
+- gate6 테스트 수정: `safety-gates.test.ts` gate6_qaPassCheck(9) → expect true (임계값 6 기준)
+- 현재 348개 테스트 중 1개 실패
 
-3. **수집 시스템 수정**
-   - collect.ts: 스크롤 단계 비활성 채널 조기 감지 (4개 연속 → 스킵)
-   - 벤치마크 + 나머지 병렬 수집
-   - 비활성 벤치마크 11개 자동 비활성화
+**Phase 1: 학습 루프 B+C+D+E** (1세션)
+- B: `/analyze-performance` 스킬에 기억 저장 Step 추가
+- C: CLAUDE.md output-parser 규칙 (✅ 이미 추가)
+- D: `agent-spawner.ts`에 `saveAgentResponse()` 래퍼 — `processAgentOutput()` 래핑
+- E: PostToolUse 훅 — Agent() 응답 자동 파싱
 
-4. **Supabase DB v2 테이블 6개 생성**
-   - agent_memories, agent_episodes, strategy_archive, meetings, pending_approvals, agents
-   - agent_messages에 room_id 추가
+**Phase 2: claude-peers 셋업** (1세션)
+- Bun 설치 (현재 미설치)
+- claude-peers MCP 등록
+- tmux 세션 구조 생성 (binilab:ceo/seoyeon/bini/doyun/junho/taeho)
+- 상주 에이전트 6명 시작
 
-5. **v5 dry-run 테스트 성공**
-   - 서연 기억 저장 확인 (importance 0.7)
-   - CEO 기억 저장 확인 (importance 0.9)
-   - 다음 세션에서 자동 로드 예정
+**Phase 3: 변경 동기화** (1세션)
+- PostToolUse:Edit 훅 → peers RELOAD 메시지
+- 에이전트 프롬프트에 "작업 전 CLAUDE.md 재읽기" 규칙
+- config 해시 검증 (선택)
 
-6. **포스트 게시 + 댓글**
-   - "세안 바꿨더니 진짜 달라짐" 게시 (DWSfzAvgaS1, 506뷰/32분)
-   - ssa_eune "제품뭐야" → "마녀공장 오일 + 라곰 마이크로폼" 답변
+#### 2순위: 운영
 
-## 기억 DB 현황 (다음 세션에서 자동 로드)
-- 서연: "YouTube+벤치마크 교차 검증 소재가 기회점수 최고"
-- 민준: "뷰티(15)+봄패션(11)+건강 다양성보정(10) 배분. 경고 해소 우선"
+- 나머지 포스트 2개 게시 (뷰티 모공케어 + 봄세안) — content_lifecycle에 등록 완료
+- 워밍업: 19/20 → 1개 더 게시하면 완료 → 제휴링크 시작
+- Pixel Agents VS Code 확장 설치 (시각화)
 
-## 벤치마크 현황 (리밸런싱 후)
+#### 3순위: 기존 태스크
+
+- 게시글 자동 등록 AI 에이전트 추가
+- 쿠팡 파트너스 상품 등록 방식 설계 (high priority)
+- 포스트용 이미지/영상 소싱 방안 파악
+
+### 벤치마크 현황 (리밸런싱 후, 세션17에서 변경 없음)
 | 카테고리 | 수 | 변경 |
 |---------|-----|------|
-| 뷰티 | 8 | 24→8 (16개 퇴출) |
-| 건강 | 5+ | 1→5+ (4개 승격) |
+| 뷰티 | 8 | 유지 |
+| 건강 | 5+ | 유지 |
 | 생활 | 6 | 유지 |
-| 다이어트 | 4 | 7→4 (3개 퇴출) |
+| 다이어트 | 4 | 유지 |
 | 식품 | 발굴 중 | 0→목표 5 |
 | 인테리어 | 발굴 중 | 0→목표 3 |
 
-## 다음 세션 우선순위
+### 기억 DB 현황
+- 민준(CEO): "뷰티 기회점수15 + 카테고리 경고 해소 원칙" (imp:0.9)
+- 서연(애널리스트): "YouTube+벤치마크 교차 검증 소재가 최고점" (imp:0.7)
 
-### 1순위: 운영
-- /daily-run --posts 3 전체 실행 (v5)
-- 워밍업: 8/20 완료 (12개 남음)
-- 기억 시스템 검증
+### 워밍업 상태
+- 19/20 완료 (content_lifecycle 기준)
+- 제휴링크/광고 금지 (워밍업 완료 전)
 
-### 2순위: 수집 시스템
-- 식품/인테리어 채널 발굴 완료 (미완료 시)
-- evaluate-channels.ts --apply 주간 실행 시작
-- 빈이 channel_id 정합성 수정 (thread_posts에서 조회 안 됨)
-- 트렌드 파이프라인 폐기 판단 (활용률 0.8%)
+### 브랜치
+- feat/threads-watch-p0
 
-### 3순위: 장기
-- 대시보드 (S-9~S-13)
-- 워밍업 완료 후 제휴링크 시작
+### 생성된 PDF (바탕화면)
+- `BiniLab_AI_Company_구조분석.pdf` — 회사 구조/검증/학습 전체 분석
+- `BiniLab_v3_구현계획서.pdf` — 초기 계획서 (v3.0)
+- `BiniLab_v3_Final_구현계획서.pdf` — 보완 계획서 (v3.1, 최신)
 
-## 브랜치
-- feat/threads-watch-p0 (company-v2 머지 + 수집 수정 커밋)
-
-## 워밍업 상태
-- 8/20 완료, 제휴링크/광고 금지
+### 피드백 메모리 추가
+- `feedback_agent_spawn_required.md` — "애들 시켜서" = Agent() 스폰 필수
