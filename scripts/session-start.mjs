@@ -399,6 +399,17 @@ async function main() {
       }
     } catch {}
 
+    // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
+    if (process.env.CLAUDE_PLUGIN_ROOT) {
+      try {
+        const omcConfigPath = join(configDir, '.omc-config.json');
+        const omcConfig = readJsonFile(omcConfigPath);
+        if (omcConfig?.silentAutoUpdate) {
+          messages.push(`<session-restore>\n\n[OMC] silentAutoUpdate is enabled in .omc-config.json but has no effect in plugin mode.\nTo update, use: /plugin marketplace update omc && /omc-setup\nOr run manually: omc update\n\n</session-restore>\n\n---\n`);
+        }
+      } catch {}
+    }
+
     // Check HUD installation (one-time setup guidance)
     const hudCheck = await checkHudInstallation();
     if (!hudCheck.installed) {
