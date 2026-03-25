@@ -177,7 +177,22 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     const cwd = resolveToWorktreeRoot(stdin.cwd || undefined);
 
     // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
-    const config = readHudConfig();
+    // Clone to avoid mutating shared DEFAULT_HUD_CONFIG when applying runtime width detection
+    const config = { ...readHudConfig() };
+
+    // Auto-detect terminal width if not explicitly configured (#1726)
+    // Prefer live TTY columns (responds to resize) over static COLUMNS env var
+    if (config.maxWidth === undefined) {
+      const cols =
+        process.stderr.columns ||
+        process.stdout.columns ||
+        parseInt(process.env.COLUMNS ?? "0", 10) ||
+        0;
+      if (cols > 0) {
+        config.maxWidth = cols;
+        if (!config.wrapMode) config.wrapMode = "wrap";
+      }
+    }
 
     // Resolve worktree-mismatched transcript paths (issue #1094)
     const resolvedTranscriptPath = resolveTranscriptPath(
