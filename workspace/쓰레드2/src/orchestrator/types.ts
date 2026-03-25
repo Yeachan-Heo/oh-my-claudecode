@@ -59,6 +59,8 @@ export interface QAResult {
   scores?: QAScores;       // 4축 상세 점수
   feedback: string[];
   killerGates: { k1: boolean; k2: boolean; k3: boolean; k4: boolean };
+  iteration?: number;              // 몇 번째 시도인지 (1-3)
+  max_retries_exhausted?: boolean; // 3회 실패 시 true
 }
 
 // SafetyReport is defined and owned by src/safety/gates.ts (Worker A).

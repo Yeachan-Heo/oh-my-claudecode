@@ -59,7 +59,7 @@ vi.mock('../db/memory.js', () => ({
   logEpisode: vi.fn(),
 }));
 
-import { buildDirective, gatePhase2, gatePhase3, runQA } from '../orchestrator/daily-pipeline.js';
+import { buildDirective, gatePhase2, gatePhase3, runQA, runQAWithRetry } from '../orchestrator/daily-pipeline.js';
 import type { ContentDraft } from '../orchestrator/types.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -305,5 +305,75 @@ describe('runQA 4-axis scoring', () => {
     };
     const result = runQA(aiDraft);
     expect(result.scores!.originality).toBeLessThan(5);
+  });
+});
+
+// ─── Task 6: runQAWithRetry ─────────────────────────────────────────────────
+
+describe('runQAWithRetry', () => {
+  it('should return iteration count in QAResult', () => {
+    const draft: ContentDraft = {
+      text: '이거 진짜 좋음 ㅋㅋ 한번 써봐',
+      hook: '이거 진짜 좋음',
+      format: 'empathy',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    const result = runQAWithRetry(draft);
+    expect(result.iteration).toBe(1);
+  });
+
+  it('should mark max_retries_exhausted after maxRetries failures', () => {
+    const badDraft: ContentDraft = {
+      text: '',
+      hook: '',
+      format: '',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    // iteration=3, maxRetries=3 → exhausted
+    const result = runQAWithRetry(badDraft, 3, 3);
+    expect(result.iteration).toBe(3);
+    expect(result.passed).toBe(false);
+    expect(result.max_retries_exhausted).toBe(true);
+    expect(result.feedback.some(f => f.includes('[폐기]'))).toBe(true);
+  });
+
+  it('should add retry feedback when not exhausted', () => {
+    const badDraft: ContentDraft = {
+      text: '',
+      hook: '',
+      format: '',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    // iteration=1, maxRetries=3 → not exhausted, should add retry guide
+    const result = runQAWithRetry(badDraft, 1, 3);
+    expect(result.iteration).toBe(1);
+    expect(result.max_retries_exhausted).toBe(false);
+    expect(result.feedback.some(f => f.includes('[재작성 1/3]'))).toBe(true);
+  });
+
+  it('should not add retry/discard feedback when passed', () => {
+    // 첫 줄 30자 이하 + 구어체(ㅋ,거든,임) + 숫자/제품명(크림,3) + 100~200자
+    const goodDraft: ContentDraft = {
+      text: '이거 써봤는데 진짜 좋음 ㅋㅋ\n3일 만에 피부가 달라짐 거든\n크림 하나로 이렇게 되는 거 실화임?\n한번 써봐 근데 진짜 피부 좋아진 거 보면 놀람\n내가 원래 건성이라 겨울에 항상 갈라졌었는데\n이거 바르고 나서 확실히 촉촉해짐~\n진짜 별거 아닌 줄 알았는데 대박임요',
+      hook: '이거 써봤는데 진짜 좋음 ㅋㅋ',
+      format: 'story',
+      category: '뷰티',
+      editor: 'bini-beauty-editor',
+      agent_file: '.claude/agents/bini-beauty-editor.md',
+    };
+    // 먼저 QA 자체가 통과하는지 확인
+    const qaOnly = runQA(goodDraft);
+    expect(qaOnly.passed).toBe(true);
+    // runQAWithRetry: passed면 재작성/폐기 피드백 없음
+    const result = runQAWithRetry(goodDraft);
+    expect(result.iteration).toBe(1);
+    expect(result.feedback.some(f => f.includes('[재작성'))).toBe(false);
+    expect(result.feedback.some(f => f.includes('[폐기]'))).toBe(false);
   });
 });

@@ -456,6 +456,38 @@ export function runQA(draft: ContentDraft): QAResult {
   };
 }
 
+/**
+ * runQAWithRetry — QA 검증 + 피드백 반환.
+ * 실제 재작성은 호출자(daily-run 스킬)가 에이전트에게 피드백 전달하여 수행.
+ * 이 함수는 iteration 메타데이터를 QAResult에 첨부.
+ */
+export function runQAWithRetry(
+  draft: ContentDraft,
+  iteration = 1,
+  maxRetries = 3,
+): QAResult {
+  const result = runQA(draft);
+  result.iteration = iteration;
+  result.max_retries_exhausted = !result.passed && iteration >= maxRetries;
+
+  if (!result.passed && iteration < maxRetries) {
+    result.feedback.push(
+      `[재작성 ${iteration}/${maxRetries}] 위 피드백 반영하여 수정 후 재제출. ` +
+      (result.scores
+        ? `점수: 후킹=${result.scores.hook}, 독창성=${result.scores.originality}, 진정성=${result.scores.authenticity}, 전환=${result.scores.conversion}`
+        : ''),
+    );
+  }
+
+  if (result.max_retries_exhausted) {
+    result.feedback.push(
+      `[폐기] ${maxRetries}회 재작성 실패 — 이 슬롯은 다른 전략으로 처음부터 재시작 필요`,
+    );
+  }
+
+  return result;
+}
+
 /** 안전 게이트 실행 (Worker A 구현). */
 export async function runSafety(content: string, accountId: string) {
   return runSafetyGates(content, accountId);
