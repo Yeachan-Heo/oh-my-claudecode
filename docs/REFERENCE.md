@@ -186,6 +186,8 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | **TDD** | — | `test-engineer` | — |
 | **Code Review** | — | — | `code-reviewer` |
 | **Data Science** | — | `scientist` | `scientist-high` |
+| **Git** | — | `git-master` | — |
+| **Simplification** | — | — | `code-simplifier` |
 
 ### Agent Selection Guide
 
@@ -209,6 +211,8 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool. For full agent
 | TDD workflow | `test-engineer` | sonnet |
 | Code review | `code-reviewer` | opus |
 | Data analysis | `scientist` / `scientist-high` | sonnet / opus |
+| Git operations | `git-master` | sonnet |
+| Code simplification | `code-simplifier` | opus |
 
 ---
 
@@ -340,6 +344,8 @@ Include these phrases in natural language prompts to activate modes. No slash co
 | `ultrathink`, `think hard`, `think deeply` | Extended reasoning mode |
 | `tdd`, `test first`, `red green` | TDD workflow enforcement |
 | `deslop`, `anti-slop`, cleanup + slop smells | Anti-slop cleanup |
+| `code review`, `review code` | Comprehensive code review mode |
+| `security review`, `review security` | Security-focused review mode |
 | `cancelomc`, `stopomc` | Cancel all active modes |
 
 **Priority order (highest first):** `cancel` → `ralph` → `autopilot` → `ultrawork` → `ccg` → `ralplan` → `deep-interview` → `ai-slop-cleaner` → `tdd` → `code-review` → `security-review` → `ultrathink` → `deepsearch` → `analyze`
