@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "run_id": "run_20260325_1005",
+    "channel_id": "hanjobody",
+    "channel_info": {
+      "display_name": "hanjobody",
+      "follower_count": 25000,
+      "category": "기타"
+    },
+    "thread_units": 1,
+    "ad_count": 0,
+    "non_ad_count": 1,
+    "collected_at": "2026-03-25T01:06:12.067Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "hanjobody",
+      "display_name": "hanjobody",
+      "follower_count": 25000,
+      "category": "",
+      "hook_post_id": "DWSUXWsk_ja",
+      "hook_post_url": "https://www.threads.com/@hanjobody/post/DWSUXWsk_ja",
+      "hook_date": "2026-03-24T23:49:39.000Z",
+      "hook_text": "오히려 한걸음 더 물러나서 주위를 살피고 가면\n한껏 더 즐거운 보디빌딩 라이프가 되는거 같다.\n항상 진심어린 좋은 말씀 해주시고 잘 챙겨주시는 기봉이햄\n늘 감사합니다.\nback_ki_bong82",
+      "hook_view_count": 139,
+      "hook_like_count": 11,
+      "hook_reply_count": 0,
+      "hook_repost_count": 0,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656371040_18588140833031002_5338425496126315682_n.jpg?stp=dst-jpg_e15_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uNzIweDk2MC5zZHIuZjgyNzg3LmRlZmF1bHRfY292ZXJfZnJhbWUuZXhwZXJpbWVudGFsIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=110&_nc_oc=Q6cZ2gFRJlm4AV4diZN80lQJRmtg0OYxCnqVyUY8uo8looJINIFgqv11E1ILGwCoSKub9hhvN-z0FdCWdv5hlxWKVqwz&_nc_ohc=MXljdhW3vxMQ7kNvwF3qJhX&_nc_gid=9KwqiOPthpLSEtMBwqt0qA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg2MDIzNzM2NzQ4NDA3NTE4Ng%3D%3D.3-ccb7-5&oh=00_AfzlISuRNaLXEglDSvAa7_daIIAejW4yKj4jG6nmt3defA&oe=69C8FF75&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/655568726_18588140800031002_5449050799463547385_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTMyMHgxNzU5LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5leHBlcmltZW50YWwifQ&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=110&_nc_oc=Q6cZ2gFRJlm4AV4diZN80lQJRmtg0OYxCnqVyUY8uo8looJINIFgqv11E1ILGwCoSKub9hhvN-z0FdCWdv5hlxWKVqwz&_nc_ohc=0QpcG2NPtd4Q7kNvwEHTHeI&_nc_gid=9KwqiOPthpLSEtMBwqt0qA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg2MDIzNzM2NzM2NjYzNjA2MA%3D%3D.3-ccb7-5&oh=00_AfyW8pd2MiYVylHD2cN6sFfBxk-G28VzVadrHc0mw-TQCQ&oe=69C90EB1&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656197522_18588140815031002_8062168371302438574_n.jpg?stp=dst-jpegr_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLmhkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5leHBlcmltZW50YWwifQ&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=110&_nc_oc=Q6cZ2gFRJlm4AV4diZN80lQJRmtg0OYxCnqVyUY8uo8looJINIFgqv11E1ILGwCoSKub9hhvN-z0FdCWdv5hlxWKVqwz&_nc_ohc=kkNcYvYOrysQ7kNvwFoc4Hg&_nc_gid=9KwqiOPthpLSEtMBwqt0qA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg2MDIzNzM2NzY1MTg0MDE3Mg%3D%3D.3-ccb7-5&oh=00_AfxVK5e-EhDMGB7Pc84EZGPigHQWvaNtzyLQNCSs8dImgQ&oe=69C907C4&_nc_sid=10d13b&se=-1",
+        "https://scontent-ssn1-1.cdninstagram.com/o1/v/t16/f2/m84/AQNOr_UQ6JGjElXsne83_YofggGEjoy4VK2tyFFP9BUjeT3jwh7nB8SFnlylFP-hrNrgITBBziffIbEZl9njkq9L7B4tYUZiW7ztlDc.mp4?_nc_cat=109&_nc_sid=5e9851&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_ohc=V_1XA_knjfQQ7kNvwFouxi8&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0FST1VTRUxfSVRFTS5DMy43MjAuZGFzaF9iYXNlbGluZV8xX3YxIiwieHB2X2Fzc2V0X2lkIjoxNzk1NDk3NjA1MTEwMDEwNCwiYXNzZXRfYWdlX2RheXMiOjAsInZpX3VzZWNhc2VfaWQiOjEwMTQ2LCJkdXJhdGlvbl9zIjo3LCJ1cmxnZW5fc291cmNlIjoid3d3In0%3D&ccb=17-1&vs=8a4f31143d656af2&_nc_vs=HBkcFQIYTGlnX2JhY2tmaWxsX3RpbWVsaW5lX3ZvZC9CODQzREZCQUUyRDRFQThBODU0QkY2OEU4MTdDMEU4RF92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAKAAYABsCiAd1c2Vfb2lsATEScHJvZ3Jlc3NpdmVfcmVjaXBlATEVAAAmkOfPl5T95D8VAigCQzMsF0AfEGJN0vGqGBJkYXNoX2Jhc2VsaW5lXzFfdjERAHXuB2XEngEA&_nc_gid=9KwqiOPthpLSEtMBwqt0qA&_nc_zt=28&_nc_ss=7a32e&oh=00_Afxm3iJF04728X1f4ezJPhEA5ML3N4E68SEKi7MH-nHLew&oe=69C51537"
+      ],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@hanjobody/post/DWSUXWsk_ja",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T01:06:02.838Z",
+        "run_id": "run_20260325_1005",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@hanjobody/post/DWSUXWsk_ja",
+      "topic_tags": []
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "run_id": "run_20260324_0826",
+    "channel_id": "bibi_yaksa",
+    "channel_info": {
+      "display_name": "bibi_yaksa",
+      "follower_count": 2649,
+      "category": "기타"
+    },
+    "thread_units": 0,
+    "ad_count": 0,
+    "non_ad_count": 0,
+    "collected_at": "2026-03-23T23:28:16.906Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": []
+}

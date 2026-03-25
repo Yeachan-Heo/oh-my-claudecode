@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "run_id": "run_20260325_0920",
+    "channel_id": "yaksa_tipbox",
+    "channel_info": {
+      "display_name": "yaksa_tipbox",
+      "follower_count": 5159,
+      "category": "기타"
+    },
+    "thread_units": 2,
+    "ad_count": 0,
+    "non_ad_count": 2,
+    "collected_at": "2026-03-25T00:21:44.314Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "yaksa_tipbox",
+      "display_name": "yaksa_tipbox",
+      "follower_count": 5159,
+      "category": "",
+      "hook_post_id": "DHbFExyT51Y",
+      "hook_post_url": "https://www.threads.com/@yaksa_tipbox/post/DHbFExyT51Y",
+      "hook_date": "2025-03-20T13:38:17.000Z",
+      "hook_text": "다들 질문 넘 고마워♡\n짬짬히 열심히 답 달고 있으니, \n조금만 기다려줘🥹🥹",
+      "hook_view_count": 11000,
+      "hook_like_count": 12,
+      "hook_reply_count": 2,
+      "hook_repost_count": 1,
+      "hook_has_image": false,
+      "hook_media_urls": [],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@yaksa_tipbox/post/DHbFExyT51Y",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T00:21:25.669Z",
+        "run_id": "run_20260325_0920",
+        "selector_tier": "aria-label",
+        "login_status": false,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@yaksa_tipbox/post/DHbFExyT51Y",
+      "topic_tags": []
+    },
+    {
+      "channel_id": "yaksa_tipbox",
+      "display_name": "yaksa_tipbox",
+      "follower_count": 5159,
+      "category": "",
+      "hook_post_id": "DU2TUX5Ezf-",
+      "hook_post_url": "https://www.threads.com/@yaksa_tipbox/post/DU2TUX5Ezf-",
+      "hook_date": "2026-02-17T06:10:22.000Z",
+      "hook_text": "'가넥트\n'라는 피로회복제야.\n많이 달지않고 파인애플향이 상큼~ \n환자분들도 약국 드링크가 \n왜 맛있냐며 종종 얘기하셔!\n스친이들 좋아하는것도 궁금해♡",
+      "hook_view_count": 6500,
+      "hook_like_count": 10,
+      "hook_reply_count": 0,
+      "hook_repost_count": 1,
+      "hook_has_image": false,
+      "hook_media_urls": [],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@yaksa_tipbox/post/DU2TUX5Ezf-",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T00:21:33.978Z",
+        "run_id": "run_20260325_0920",
+        "selector_tier": "aria-label",
+        "login_status": false,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@yaksa_tipbox/post/DU2TUX5Ezf-",
+      "topic_tags": []
+    }
+  ]
+}

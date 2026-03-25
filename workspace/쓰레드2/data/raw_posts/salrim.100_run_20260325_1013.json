@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "run_id": "run_20260325_1013",
+    "channel_id": "salrim.100",
+    "channel_info": {
+      "display_name": "salrim.100",
+      "follower_count": 10000,
+      "category": "기타"
+    },
+    "thread_units": 1,
+    "ad_count": 1,
+    "non_ad_count": 0,
+    "collected_at": "2026-03-25T01:14:08.739Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "salrim.100",
+      "display_name": "salrim.100",
+      "follower_count": 10000,
+      "category": "",
+      "hook_post_id": "DCc4rsIzfQ0",
+      "hook_post_url": "https://www.threads.com/@salrim.100/post/DCc4rsIzfQ0",
+      "hook_date": "2024-11-16T23:51:31.000Z",
+      "hook_text": "인증된 계정\n살림에진심\n끈을 풀지 않고 자르면\n한방에 자를 수 있어서 1초만에 자를 수 있고\n계란과 궁합도 좋아서 \n계란말이에 시금치를 넣거나, 스크램블할때\n시금치를 넣어서 시금치 스크램블해먹거나..등등\n간단한 아침으로도 좋더라고\n서늘한 기온에 제철인 시금치가 \n요즘 너무 맛있어서😋\n제철 지나가기 전에 꼬~옥 먹어봐~🧡\n살림에진심",
+      "hook_view_count": 707,
+      "hook_like_count": 5,
+      "hook_reply_count": 1,
+      "hook_repost_count": 0,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/641467925_17888563329327077_8469432543907940486_n.webp?efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uOTQxeDE2NTMuc2RyLmY4Mjc4Ny5kZWZhdWx0X2ltYWdlLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=105&_nc_oc=Q6cZ2gFzw708GljnHN-liFcv2ORg4Y8qiIbMkRD4FkfrQqThBh9iAbMEOALuZJUxaPPF6k7d2mnYxSCOLqcWXaNVjFXF&_nc_ohc=MXNlGloKtCkQ7kNvwEFCXke&_nc_gid=Ak2wYkmSBmScuW-f-q4bCQ&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=MzUwMjkyMzg5NDk5MzIxNDM3Ng%3D%3D.3-ccb7-5&oh=00_AfwdccdWZmppzkecenmgU5wC1qF4DM-zGQfWm8w-xa8tjw&oe=69C90DAF&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.29350-15/467182686_1076454057552384_1725199637947781780_n.webp?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uOTM0eDE3NzMuc2RyLmYyOTM1MC5kZWZhdWx0X2ltYWdlLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=100&_nc_oc=Q6cZ2gFzw708GljnHN-liFcv2ORg4Y8qiIbMkRD4FkfrQqThBh9iAbMEOALuZJUxaPPF6k7d2mnYxSCOLqcWXaNVjFXF&_nc_ohc=i2FmpkpgKDwQ7kNvwHiMRrO&_nc_gid=Ak2wYkmSBmScuW-f-q4bCQ&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=MzUwMjkyMzg5NDg2NzQ3MjA3NA%3D%3D.3-ccb7-5&oh=00_AfxYf-v7TPbtK1QcLm6vpY2xRU-SH_k8j08rlkhTkhwj3A&oe=69C8F956&_nc_sid=10d13b"
+      ],
+      "reply_post_id": "DCeEXvQpHwC",
+      "reply_post_url": "https://www.threads.com/@salrim.100/post/DCc4rsIzfQ0",
+      "reply_text": "인증된 계정\n우와 기분 째진다~~lkw1325님 최고 최고🥰😁😁🧡",
+      "reply_view_count": 19,
+      "reply_like_count": 1,
+      "reply_media_urls": [],
+      "conversion_rate": 2.7,
+      "thread_type": "쓰레드형",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T01:13:59.478Z",
+        "run_id": "run_20260325_1013",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@salrim.100/post/DCc4rsIzfQ0",
+      "topic_tags": []
+    }
+  ]
+}

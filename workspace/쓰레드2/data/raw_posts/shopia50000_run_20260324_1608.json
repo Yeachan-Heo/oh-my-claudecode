@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "run_id": "run_20260324_1608",
+    "channel_id": "shopia50000",
+    "channel_info": {
+      "display_name": "shopia50000",
+      "follower_count": 0,
+      "category": "기타"
+    },
+    "thread_units": 1,
+    "ad_count": 1,
+    "non_ad_count": 0,
+    "collected_at": "2026-03-24T07:09:05.434Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "shopia50000",
+      "display_name": "shopia50000",
+      "follower_count": 0,
+      "category": "",
+      "hook_post_id": "DWOfMwrEn1l",
+      "hook_post_url": "https://www.threads.com/@shopia50000/post/DWOfMwrEn1l",
+      "hook_date": "2026-03-22T11:34:55.000Z",
+      "hook_text": "쿠팡 파트너스 활동으로 이에 따른 수수료를 받습니다\n⬇️⬇️꽃구경해봐⬇️⬇️\nlink.coupang.com/a/d9j…\n다 예뻐서 결정장애 옴😵‍💫",
+      "hook_view_count": 12,
+      "hook_like_count": 1,
+      "hook_reply_count": 0,
+      "hook_repost_count": 0,
+      "hook_has_image": false,
+      "hook_media_urls": [],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@shopia50000/post/DWOfMwrEn1l",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "단독형",
+      "link_location": "본문",
+      "link_url": "https://link.coupang.com/a/d9jbJf",
+      "link_domain": "link.coupang.com",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-24T07:09:02.687Z",
+        "run_id": "run_20260324_1608",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@shopia50000/post/DWOfMwrEn1l",
+      "topic_tags": []
+    }
+  ]
+}

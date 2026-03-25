@@ -1,0 +1,105 @@
+{
+  "meta": {
+    "run_id": "run_20260324_0837",
+    "channel_id": "gubonkang_diet",
+    "channel_info": {
+      "display_name": "gubonkang_diet",
+      "follower_count": 7823,
+      "category": "기타"
+    },
+    "thread_units": 2,
+    "ad_count": 1,
+    "non_ad_count": 1,
+    "collected_at": "2026-03-23T23:39:19.718Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "gubonkang_diet",
+      "display_name": "gubonkang_diet",
+      "follower_count": 7823,
+      "category": "",
+      "hook_post_id": "DWOUjfAkr7e",
+      "hook_post_url": "https://www.threads.com/@gubonkang_diet/post/DWOUjfAkr7e",
+      "hook_date": "2026-03-23T10:34:20.000Z",
+      "hook_text": "인증된 계정\n오십견\n어깨가 돌처럼 굳은 사람?",
+      "hook_view_count": 571,
+      "hook_like_count": 4,
+      "hook_reply_count": 0,
+      "hook_repost_count": 0,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/657393170_17955261747109832_4091327628924316927_n.webp?efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTE3NXg4NDIuc2RyLmY4Mjc4Ny5kZWZhdWx0X2ltYWdlLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=108&_nc_oc=Q6cZ2gF9KZDL78JTMXOUGoDduwhbR9QgNrxOoCArXQqrFXRU4Ud9ihQ7-Xk7E_J2g7KCGne-454ZIbPOu66Nx0ecbyyR&_nc_ohc=aUnnvGQjTAEQ7kNvwGm0LGB&_nc_gid=NvAebjlszHYd3LkRiRwk7A&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTExMTcwNDkwNzY1MTU4MQ%3D%3D.3-ccb7-5&oh=00_AfwO6Um1URrmbVfBlofCQFAlwyj-hd4Ny6vjk3N9n91a3Q&oe=69C78D2A&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.71878-15/657572469_26537225429299617_5744386854790507552_n.jpg?stp=dst-jpg_e15_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uNjQweDExMzYuc2RyLmY3MTg3OC5kZWZhdWx0X2NvdmVyX2ZyYW1lLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=109&_nc_oc=Q6cZ2gF9KZDL78JTMXOUGoDduwhbR9QgNrxOoCArXQqrFXRU4Ud9ihQ7-Xk7E_J2g7KCGne-454ZIbPOu66Nx0ecbyyR&_nc_ohc=KorAIEDDHNEQ7kNvwEA6Vy_&_nc_gid=NvAebjlszHYd3LkRiRwk7A&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTExMTkzMTQyNTE5NzE4OQ%3D%3D.3-ccb7-5&oh=00_AfxtsfNDVRnMHx7-YMemDSwRd-7Hra8T-Qxi7tqrgutb5g&oe=69C796C2&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/o1/v/t16/f2/m84/AQP7UnwktSr8aGrQbkwQ8bWxiy2PhnquQ4KCgILT_9WS7rt2vw3wZkq96C-4xXBrqRi-xHTY4RUaQ5ABWAzo7kqH2weXHbn_qu5V7LQ.mp4?_nc_cat=100&_nc_sid=5e9851&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_ohc=K0X8aDloZ_QQ7kNvwG9kT8I&efg=eyJ2ZW5jb2RlX3RhZyI6Inhwdl9wcm9ncmVzc2l2ZS5JTlNUQUdSQU0uQ0FST1VTRUxfSVRFTS5DMy43MjAuZGFzaF9iYXNlbGluZV8xX3YxIiwieHB2X2Fzc2V0X2lkIjoxNzk1NTI2MTg5MTEwOTgzMiwiYXNzZXRfYWdlX2RheXMiOjAsInZpX3VzZWNhc2VfaWQiOjEwMTY0LCJkdXJhdGlvbl9zIjoxMDQsInVybGdlbl9zb3VyY2UiOiJ3d3cifQ%3D%3D&ccb=17-1&vs=b226d41e75195ef6&_nc_vs=HBksFQIYTGlnX2JhY2tmaWxsX3RpbWVsaW5lX3ZvZC81MDQzMjAwMEE2QjEyNTQ4RTY5QjYxNjI5NDEyRENBRF92aWRlb19kYXNoaW5pdC5tcDQVAALIARIAFQIYUWlnX3hwdl9wbGFjZW1lbnRfcGVybWFuZW50X3YyLzhFNDJDNEU2MDQ0NEIyMzhDQTcyRTAxNjdENTFDNUI1X2F1ZGlvX2Rhc2hpbml0Lm1wNBUCAsgBEgAoABgAGwKIB3VzZV9vaWwBMRJwcm9ncmVzc2l2ZV9yZWNpcGUBMRUAACaQj_Pt5Y3lPxUCKAJDMywXQFn4UeuFHrgYEmRhc2hfYmFzZWxpbmVfMV92MREAde4HZeieAQA&_nc_gid=NvAebjlszHYd3LkRiRwk7A&_nc_zt=28&_nc_ss=7a32e&oh=00_AfyGvfjHDZx6_fqq2tXqiphAqucavjDvIgHs7otX4h2a2Q&oe=69C3ADB4"
+      ],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@gubonkang_diet/post/DWOUjfAkr7e",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-23T23:38:52.073Z",
+        "run_id": "run_20260324_0837",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@gubonkang_diet/post/DWOUjfAkr7e",
+      "topic_tags": []
+    },
+    {
+      "channel_id": "gubonkang_diet",
+      "display_name": "gubonkang_diet",
+      "follower_count": 7823,
+      "category": "",
+      "hook_post_id": "DV_FDjoEhva",
+      "hook_post_url": "https://www.threads.com/@gubonkang_diet/post/DV_FDjoEhva",
+      "hook_date": "2026-03-17T12:30:18.000Z",
+      "hook_text": "인증된 계정\n인체 반사점(Reflex point)은 특정 부위의 압통과 긴장 반응을 통해 몸의 불균형 신호를 읽는 하나의 참고 기준이 될 수 있습니다.\n손등과 손바닥의 빨간점은 천골 S1~S5 및 골반저근과 연결해 해석하기도 하는데, 이 부위를 눌렀을 때 압통이 유독 심하다면 몸의 자율신경 균형과 골반·배설·생식계 기능을 함께 살펴볼 필요가 있습니다.\n손등 빨간점의 압통이 심한 경우에는 천골과 대칭되는 부위의 과긴장, 즉 교감신경계의 항진 상태로 보며, 생식계와 배설계 기능이 예민해지고 항상성이 흔들리면서 부종, 정체기, 요요, 염증 반응으로 이어질 수 있습니다. 이와 함께 생리불순, 전립선 비대, 과민성대장증후군, 골반통, 고관절 불편, 천장관절 및 천결절 주변 불편감, 평소 발진, 초조, 긴장, 불안, 식욕 폭발이나 과식·폭식 경향도 함께 참고해 볼 수 있습니다.\n반대로 손바닥 빨간점의 압통이 심한 경우에는 골반저근 및 생식계와 대칭되는 부위의 기능 저하, 즉 부교감신경계의 저하와 허약",
+      "hook_view_count": 134,
+      "hook_like_count": 3,
+      "hook_reply_count": 3,
+      "hook_repost_count": 0,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/651591502_17953593213109832_7096654318406398995_n.webp?efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuRkVFRC5pbWFnZV91cmxnZW4uOTI4eDExNTIuc2RyLmY4Mjc4Ny5kZWZhdWx0X2ltYWdlLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=108&_nc_oc=Q6cZ2gHOxbn00gDGov3VyKcjZz2WEESZTt7yRqOSBA4a8qHOmJnXOKYNHi8pezpFGpSt6XVdkINcSS28zCOXnAHquxgi&_nc_ohc=-rlK__kP2mQQ7kNvwEAxSrO&_nc_gid=tISatRx_xU5lEzCOBWqTqA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1NDgyMjA0MDY5NjY1ODkwNg%3D%3D.3-ccb7-5&oh=00_AfxzDE1QLU5n-GfyOhBNz_Oee0L1ZhbRnKJr52aY4Y9whw&oe=69C7ABBF&_nc_sid=10d13b"
+      ],
+      "reply_post_id": "DV_FF9ekmCG",
+      "reply_post_url": "https://www.threads.com/@gubonkang_diet/post/DV_FDjoEhva",
+      "reply_text": "인증된 계정\n상태로 해석할 수 있습니다. 이 경우 대사 저하, 배출 저하, 회복 저하, 순환 저하가 동반되기 쉬워 늘 붓고, 종아리나 발가락에 쥐가 자주 나며, 위장과 식도가 약하고, 허리와 무릎 통증이 잦을 수 있습니다. 심리적으로는 불안과 불면으로 이어지는 경우도 있습니다.\n즉, 손의 작은 압통 반응도 몸 전체의 균형을 읽는 하나의 단서가 될 수 있으니, 단순 통증으로만 보지 말고 자율신경, 골반, 순환, 대사 상태를 함께 점검해 보시는 것이 좋겠습니다.",
+      "reply_view_count": 23,
+      "reply_like_count": 1,
+      "reply_media_urls": [],
+      "conversion_rate": 17.2,
+      "thread_type": "쓰레드형",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-23T23:39:11.361Z",
+        "run_id": "run_20260324_0837",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@gubonkang_diet/post/DV_FDjoEhva",
+      "topic_tags": []
+    }
+  ]
+}

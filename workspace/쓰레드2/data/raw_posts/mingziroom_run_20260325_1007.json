@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "run_id": "run_20260325_1007",
+    "channel_id": "mingziroom",
+    "channel_info": {
+      "display_name": "mingziroom",
+      "follower_count": 22000,
+      "category": "기타"
+    },
+    "thread_units": 3,
+    "ad_count": 1,
+    "non_ad_count": 2,
+    "collected_at": "2026-03-25T01:08:25.174Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": [
+    {
+      "channel_id": "mingziroom",
+      "display_name": "mingziroom",
+      "follower_count": 22000,
+      "category": "",
+      "hook_post_id": "DWOQsyzka0o",
+      "hook_post_url": "https://www.threads.com/@mingziroom/post/DWOQsyzka0o",
+      "hook_date": "2026-03-23T10:00:40.000Z",
+      "hook_text": "진짜 내가 딱 찾았던 유청분리기 .. 🔥\n5시간이면 완성되고 \n사이즈가 작아서 작은 냉장고에 들어가서\n거의 1년째 매일 쓸 정도로 뽕 뽑고 있는데\n그릭요거트 레시피랑 할인링크 \n댓글에 남겨둘게 !!",
+      "hook_view_count": 5700,
+      "hook_like_count": 36,
+      "hook_reply_count": 2,
+      "hook_repost_count": 0,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/655977372_17932752801421828_8013703935788268345_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=QyVc1Lw8rhcQ7kNvwGhhpD6&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM0OTU5NjYxNTY0Mg%3D%3D.3-ccb7-5&oh=00_AfyBZ911ffQ4JSpKVR9hEDUflHn36SY4f7vNiqkxpOjbJQ&oe=69C8EEA5&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656283234_17932752816421828_2768460781710843325_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=etzOsNK-qFkQ7kNvwH38rrH&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MDM2ODM0MjgyOA%3D%3D.3-ccb7-5&oh=00_AfzYOBPnji7BJ8nkcjNqIQXXTE4gRLuKUY5KWW1X6NrEoQ&oe=69C902F2&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656278512_17932752813421828_4167480364136985401_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTEyNXgxODU0LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=mqK9dx3K5GAQ7kNvwGUOZ2e&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MDAxNjAzOTQ4NQ%3D%3D.3-ccb7-5&oh=00_Afzr_JIvE6RaXJL6OpjwsbtmTqbRvQQX1DQCutWmiw1eXw&oe=69C91F46&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656156525_17932752852421828_9173542106703008997_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTA0NngxNjAwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=uhtfpJNARmwQ7kNvwHqRhou&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MzcxNTQwNzE2Mw%3D%3D.3-ccb7-5&oh=00_AfzSQkxZ7EZ6N1yRebL1wXOnFtVyXvYVi7kbuiSM7KWFmQ&oe=69C8FEC4&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656279477_17932752810421828_969024651729505396_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTA3MXgxODg1LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=avkMQhp0rAUQ7kNvwHonlOS&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM0OTk0ODkzNzI3Mg%3D%3D.3-ccb7-5&oh=00_AfxpcRbUnWLFJdLw187EAyhmalJwjA3ITcmtISAuo-_R6A&oe=69C8EDFB&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656272577_17932752780421828_6633525376040795045_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTA1OHgxODMwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=IV4aOpkJVFcQ7kNvwEWulxT&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM0OTcwNTY4NDgyNA%3D%3D.3-ccb7-5&oh=00_Afzu6jVqEPWkB4JnsuleIcnvNE0JN5GErHYUom14xltCsw&oe=69C9173E&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/657256777_17932752825421828_6520417806242619350_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTA1M3gxOTAwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=J2aCHB6wqLYQ7kNvwEhTP6b&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MDg4MDA2NDg5MQ%3D%3D.3-ccb7-5&oh=00_AfzgIPpHVpvik3HUXxPR2XNU7JomKIdFV2TxKIcZt-3Exg&oe=69C8F012&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656295604_17932752834421828_4210920667461223524_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTA1MngxODM0LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=SnV1zC46WwkQ7kNvwFoHNhr&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MTYwOTg5NjAyNg%3D%3D.3-ccb7-5&oh=00_AfwZxOjv5gCbSK9imlkNsEtV3yw-eZsQVThtiQuf6pPd_A&oe=69C8F18A&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656278368_17932752843421828_7521260666525562692_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTAzOXgxODQ3LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gGRnoqdw_hirJ4CuBZ1zzwD_dxwPPxnmEX9sA5HTsT63VOdazliapYXmteZe-2OujRu-_IUT9MzVyPcO4XxoB_a&_nc_ohc=ao484jLd4JAQ7kNvwGoapxW&_nc_gid=-NUYzKkt3l3CPPFYwwyXGw&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5NTM1MTE5MDQ4NDYxMA%3D%3D.3-ccb7-5&oh=00_AfztyzLS7_tHND1U1rUa6fKgRxMHyd7KDVrXmt9j5H7v0g&oe=69C8FBDE&_nc_sid=10d13b"
+      ],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@mingziroom/post/DWOQsyzka0o",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T01:07:42.433Z",
+        "run_id": "run_20260325_1007",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@mingziroom/post/DWOQsyzka0o",
+      "topic_tags": []
+    },
+    {
+      "channel_id": "mingziroom",
+      "display_name": "mingziroom",
+      "follower_count": 22000,
+      "category": "",
+      "hook_post_id": "DWOQxVekUwI",
+      "hook_post_url": "https://www.threads.com/@mingziroom/post/DWOQxVekUwI",
+      "hook_date": "2026-03-23T10:01:17.000Z",
+      "hook_text": "다이어트할 때는 그릭요거트 필수인거 알지 🫶🏻\nm.blog.naver.com/qkral…\nblog.naver.com\n그릭요거트로 만드는 아침 식단 레시피",
+      "hook_view_count": 243,
+      "hook_like_count": 0,
+      "hook_reply_count": 0,
+      "hook_repost_count": 0,
+      "hook_has_image": false,
+      "hook_media_urls": [],
+      "reply_post_id": "",
+      "reply_post_url": "https://www.threads.com/@mingziroom/post/DWOQxVekUwI",
+      "reply_text": "",
+      "reply_view_count": null,
+      "reply_like_count": null,
+      "reply_media_urls": [],
+      "conversion_rate": null,
+      "thread_type": "비광고",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T01:07:53.297Z",
+        "run_id": "run_20260325_1007",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@mingziroom/post/DWOQxVekUwI",
+      "topic_tags": []
+    },
+    {
+      "channel_id": "mingziroom",
+      "display_name": "mingziroom",
+      "follower_count": 22000,
+      "category": "",
+      "hook_post_id": "DWOPwxxERyG",
+      "hook_post_url": "https://www.threads.com/@mingziroom/post/DWOPwxxERyG",
+      "hook_date": "2026-03-23T09:52:28.000Z",
+      "hook_text": "아침마다 그릭요거트 만들어 먹는 자취생 🥣 \n자주 먹는 레시피는 댓글에 남겨둘게 !",
+      "hook_view_count": 4600,
+      "hook_like_count": 137,
+      "hook_reply_count": 3,
+      "hook_repost_count": 3,
+      "hook_has_image": true,
+      "hook_media_urls": [
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656274451_17932751538421828_1815331920103487509_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=59L_zG62yJsQ7kNvwH4k4qO&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY1Njc3NDQxNzI4Nw%3D%3D.3-ccb7-5&oh=00_Afwi8zEHpynxrrKbwIKB7zvTUkp8c-4EtOqebhwYT1d9hg&oe=69C8F2DB&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/655899643_17932751532421828_3496071902516606454_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTEyNXgxODczLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=F8Hxe59ZXj0Q7kNvwFm5pIj&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY1NjkwODYzMTI4NA%3D%3D.3-ccb7-5&oh=00_Afy-_U6vnOpt6I2fvi5zg-AvM3K2rFjk3XUFPJ1fmkqi3Q&oe=69C91FC7&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656278429_17932751547421828_6798265487216364665_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=ixzATSqVyqYQ7kNvwEPeqti&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY2MDk0MzU3OTk1NA%3D%3D.3-ccb7-5&oh=00_AfyKnxQ2VLcB6-o0FW4QGlNLRgGsCVScMd5RT2E6g_UlNg&oe=69C8FCD6&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656159703_17932751565421828_3601580848299548443_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTEyNXgxOTQ3LnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=3i13zknp_i0Q7kNvwFYi27Y&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY2Mjc4MDY2MjkwMg%3D%3D.3-ccb7-5&oh=00_AfwRcFwgf49JmSH0JdbHazMM7xyuB5wY4X-eco5xrWcwuA&oe=69C90169&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656299596_17932751562421828_3618882797197010418_n.jpg?stp=dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uNzg1eDEwNDYuc2RyLmY4Mjc4Ny5kZWZhdWx0X2ltYWdlLmMyIn0&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=ALfTK_xFq98Q7kNvwEd9nuo&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY2MzYyNzg4ODE3MQ%3D%3D.3-ccb7-5&oh=00_AfxM_-w7FlY9B5Ijl7QLbLrBThkGxjm8-AvJ8QZG922v4A&oe=69C9048A&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656299015_17932751574421828_2891430014396204110_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=X3sruOE3PRwQ7kNvwHYmwVX&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY2NzI2ODU2NDQ5OQ%3D%3D.3-ccb7-5&oh=00_AfywttlveIUFpyT_lx3ABmkx2stLlMaAVAs3FjIB1LEX1Q&oe=69C8F5BA&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656283181_17932751583421828_7488020244216800676_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=pNyzVZEFIvgQ7kNvwFQNsU4&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY2OTk5NDg3ODk2OQ%3D%3D.3-ccb7-5&oh=00_Afysh1Mr0HORbBP3Yt7ICL6lYTtP80MhaRubfw9bBk8rUA&oe=69C900C6&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/656282989_17932751592421828_2785535173351630757_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=Nq2ebgmddKAQ7kNvwEBsWYq&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY3MzMwODM1MDE1OQ%3D%3D.3-ccb7-5&oh=00_AfwwYpARfbE9DuPm1H6e3Qisp9onpjGci3zhoRumg0Gi6w&oe=69C92379&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/655589781_17932751601421828_3289425630584536753_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=daEIJ0cHJGUQ7kNvwFBGQlR&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY3NjAzNDY3NTc0NQ%3D%3D.3-ccb7-5&oh=00_Afy36aVM5ZGsaULhV3li6_qeSpkd_IieVpC5rHrOMdg2JA&oe=69C9176D&_nc_sid=10d13b",
+        "https://scontent-ssn1-1.cdninstagram.com/v/t51.82787-15/657742213_17932751610421828_3873170485417227219_n.jpg?stp=cp6_dst-jpg_e35_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InRocmVhZHMuQ0FST1VTRUxfSVRFTS5pbWFnZV91cmxnZW4uMTQ0MHgxOTIwLnNkci5mODI3ODcuZGVmYXVsdF9pbWFnZS5jMiJ9&_nc_ht=scontent-ssn1-1.cdninstagram.com&_nc_cat=104&_nc_oc=Q6cZ2gHe5xySbiX4n5NT2ecQUwiHKnLdn9TEfxEMNuT41suX0jv52aiinfmK5NYtNzUAN0UFUrKbQ_YbbANmwxsZ6c6z&_nc_ohc=ZwutkeqchroQ7kNvwGkmZOr&_nc_gid=Nrv_VnK5FuH7teFQzqTtJA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=Mzg1OTA5MDY3OTAwNDI0OTcxNw%3D%3D.3-ccb7-5&oh=00_Afw4TeVRBAkigRsbIKD2n23O4aPMZfUYMn7b2Vz6rfIbKg&oe=69C8EF84&_nc_sid=10d13b"
+      ],
+      "reply_post_id": "DWOP0kFkcSx",
+      "reply_post_url": "https://www.threads.com/@mingziroom/post/DWOPwxxERyG",
+      "reply_text": "그릭요거트로 식비아끼고 \n다이어트 하고 싶은 사람들 모여라 !\nm.blog.naver.com/qkral…\nblog.naver.com\n그릭요거트로 만드는 아침 식단 레시피",
+      "reply_view_count": 220,
+      "reply_like_count": 0,
+      "reply_media_urls": [],
+      "conversion_rate": 4.8,
+      "thread_type": "쓰레드형",
+      "link_location": "없음",
+      "link_url": "",
+      "link_domain": "",
+      "tags": {
+        "primary": "general",
+        "secondary": []
+      },
+      "crawl_meta": {
+        "crawl_at": "2026-03-25T01:08:13.547Z",
+        "run_id": "run_20260325_1007",
+        "selector_tier": "aria-label",
+        "login_status": true,
+        "block_detected": false
+      },
+      "permalink": "https://www.threads.com/@mingziroom/post/DWOPwxxERyG",
+      "topic_tags": []
+    }
+  ]
+}

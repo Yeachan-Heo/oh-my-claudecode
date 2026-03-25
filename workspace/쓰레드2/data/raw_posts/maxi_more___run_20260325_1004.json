@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "run_id": "run_20260325_1004",
+    "channel_id": "maxi_more__",
+    "channel_info": {
+      "display_name": "maxi_more__",
+      "follower_count": 34000,
+      "category": "기타"
+    },
+    "thread_units": 0,
+    "ad_count": 0,
+    "non_ad_count": 0,
+    "collected_at": "2026-03-25T01:04:53.283Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": []
+}

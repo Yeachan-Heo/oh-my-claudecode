@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "run_id": "run_20260324_0841",
+    "channel_id": "hongpro_diet",
+    "channel_info": {
+      "display_name": "hongpro_diet",
+      "follower_count": 1002,
+      "category": "기타"
+    },
+    "thread_units": 0,
+    "ad_count": 0,
+    "non_ad_count": 0,
+    "collected_at": "2026-03-23T23:43:00.776Z",
+    "taxonomy_version": "0.0",
+    "schema_version": "1.0"
+  },
+  "thread_units": []
+}
