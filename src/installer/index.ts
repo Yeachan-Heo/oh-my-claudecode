@@ -410,6 +410,16 @@ export function hasPluginProvidedAgentFiles(): boolean {
 }
 
 /**
+ * Detect whether an installed Claude Code plugin already provides OMC skill
+ * files, so the legacy ~/.claude/skills copy can be skipped.
+ */
+export function hasPluginProvidedSkillFiles(): boolean {
+  return getInstalledOmcPluginRoots().some(pluginRoot =>
+    directoryHasMarkdownFiles(join(pluginRoot, 'skills'))
+  );
+}
+
+/**
  * Get the package root directory.
  * Works for both ESM (dist/installer/) and CJS bundles (bridge/).
  * When esbuild bundles to CJS, import.meta is replaced with {} so we
@@ -492,6 +502,29 @@ function loadBundledSkillContent(skillName: string): string | null {
   }
 
   return readFileSync(skillPath, 'utf-8');
+}
+
+/**
+ * Load all bundled skill definitions from the skills/ directory.
+ * Returns a map of skill name → SKILL.md content.
+ */
+function loadBundledSkillDefinitions(): Record<string, string> {
+  const skillsDir = join(getPackageDir(), 'skills');
+  const definitions: Record<string, string> = {};
+
+  if (!existsSync(skillsDir)) {
+    return definitions;
+  }
+
+  for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
+    if (existsSync(skillMdPath)) {
+      definitions[entry.name] = readFileSync(skillMdPath, 'utf-8');
+    }
+  }
+
+  return definitions;
 }
 
 function loadClaudeMdContent(): string {
@@ -687,7 +720,9 @@ export function install(options: InstallOptions = {}): InstallResult {
   const runningAsPlugin = isRunningAsPlugin();
   const projectScoped = isProjectScopedPlugin();
   const pluginProvidesAgentFiles = hasPluginProvidedAgentFiles();
+  const pluginProvidesSkillFiles = hasPluginProvidedSkillFiles();
   const shouldInstallLegacyAgents = !runningAsPlugin && !pluginProvidesAgentFiles;
+  const shouldInstallLegacySkills = !runningAsPlugin && !pluginProvidesSkillFiles;
   const allowPluginHookRefresh = runningAsPlugin && options.refreshHooksInPlugin && !projectScoped;
   if (runningAsPlugin) {
     log('Detected Claude Code plugin context - skipping agent/command file installation');
@@ -789,23 +824,43 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
       }
 
-      // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
-      // to avoid duplicate entries in Claude Code's available skills list
-
-      const omcReferenceSkillContent = loadBundledSkillContent('omc-reference');
-      if (omcReferenceSkillContent) {
-        const omcReferenceDir = join(SKILLS_DIR, 'omc-reference');
-        const omcReferencePath = join(omcReferenceDir, 'SKILL.md');
-        if (!existsSync(omcReferenceDir)) {
-          mkdirSync(omcReferenceDir, { recursive: true });
+      // Install skills to ~/.claude/skills/ when not running as a plugin.
+      // When the plugin system is active, skills are discovered from
+      // ${CLAUDE_PLUGIN_ROOT}/skills/ and should NOT be duplicated here.
+      if (shouldInstallLegacySkills) {
+        log('Installing skill definitions...');
+        for (const [skillName, content] of Object.entries(loadBundledSkillDefinitions())) {
+          const skillDir = join(SKILLS_DIR, skillName);
+          const skillPath = join(skillDir, 'SKILL.md');
+          if (!existsSync(skillDir)) {
+            mkdirSync(skillDir, { recursive: true });
+          }
+          if (existsSync(skillPath) && !options.force) {
+            log(`  Skipping ${skillName}/SKILL.md (already exists)`);
+          } else {
+            writeFileSync(skillPath, content);
+            result.installedSkills.push(`${skillName}/SKILL.md`);
+            log(`  Installed ${skillName}/SKILL.md`);
+          }
         }
-        if (existsSync(omcReferencePath) && !options.force) {
-          log('  Skipping omc-reference/SKILL.md (already exists)');
-        } else {
-          writeFileSync(omcReferencePath, omcReferenceSkillContent);
-          result.installedSkills.push('omc-reference/SKILL.md');
-          log('  Installed omc-reference/SKILL.md');
+      } else {
+        // Always ensure omc-reference is present as a minimum
+        const omcReferenceSkillContent = loadBundledSkillContent('omc-reference');
+        if (omcReferenceSkillContent) {
+          const omcReferenceDir = join(SKILLS_DIR, 'omc-reference');
+          const omcReferencePath = join(omcReferenceDir, 'SKILL.md');
+          if (!existsSync(omcReferenceDir)) {
+            mkdirSync(omcReferenceDir, { recursive: true });
+          }
+          if (existsSync(omcReferencePath) && !options.force) {
+            log('  Skipping omc-reference/SKILL.md (already exists)');
+          } else {
+            writeFileSync(omcReferencePath, omcReferenceSkillContent);
+            result.installedSkills.push('omc-reference/SKILL.md');
+            log('  Installed omc-reference/SKILL.md');
+          }
         }
+        log('Skipping full skill installation (plugin-provided skills are available)');
       }
 
       // Install CLAUDE.md with merge support
