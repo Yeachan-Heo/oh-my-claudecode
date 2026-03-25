@@ -612,7 +612,7 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
   let readyCount = 0;
 
   // ── Phase 0: 어제 게시 포스트 성과 스냅샷 수집 ─────────────────────────
-  if (!dryRun && (!options.phase || options.phase === 0)) {
+  if (!dryRun && (options.phase == null || options.phase === 0)) {
     try {
       const snapshotTargets = await scheduleSnapshots();
       if (snapshotTargets.length > 0) {
