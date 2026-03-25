@@ -213,7 +213,7 @@ Fires when a session ends.
 
 | Script | Role | Timeout |
 |--------|------|---------|
-| `session-end.mjs` | Saves session summary, sends callback notifications | 10s |
+| `session-end.mjs` | Saves session summary, sends callback notifications | 30s |
 
 Saves agent activity, token usage, and other session data to `.omc/sessions/`. If configured, sends completion notifications via Discord, Telegram, or Slack.
 

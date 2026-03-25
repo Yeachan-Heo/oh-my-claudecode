@@ -250,6 +250,9 @@ For skill internals and composition layers, see [ARCHITECTURE.md](./ARCHITECTURE
 | `setup` | `/oh-my-claudecode:setup` | Unified setup entrypoint |
 | `project-session-manager` | `/oh-my-claudecode:project-session-manager` | Manage isolated dev environments (worktrees + tmux) |
 | `writer-memory` | `/oh-my-claudecode:writer-memory` | Agentic memory system for writing projects |
+| `deep-dive` | `deep dive` | 2-stage pipeline: trace → deep-interview |
+| `visual-verdict` | `/oh-my-claudecode:visual-verdict` | Structured visual QA verdict for screenshots |
+| `omc-reference` | auto-injected | Agent catalog, tools, pipeline routing (internal) |
 
 ---
 
@@ -272,7 +275,6 @@ All skills are available as `/oh-my-claudecode:<name>`. Key commands:
 | `/oh-my-claudecode:ai-slop-cleaner <target>` | Anti-slop cleanup (`--review` for reviewer-only) |
 | `/oh-my-claudecode:trace` | Evidence-driven tracing lane |
 | `/oh-my-claudecode:learner` | Extract reusable skill from session |
-| `/oh-my-claudecode:note <content>` | Save notes to notepad.md |
 | `/oh-my-claudecode:cancel` | Unified cancellation |
 | `/oh-my-claudecode:setup` | Unified setup (`setup`, `setup doctor`, `setup mcp`) |
 | `/oh-my-claudecode:omc-setup` | One-time setup wizard |
@@ -280,7 +282,8 @@ All skills are available as `/oh-my-claudecode:<name>`. Key commands:
 | `/oh-my-claudecode:hud` | Configure HUD statusline |
 | `/oh-my-claudecode:release` | Automated release workflow |
 | `/oh-my-claudecode:mcp-setup` | Configure MCP servers |
-| `/oh-my-claudecode:psm <arguments>` | Deprecated alias for project session manager |
+| `/oh-my-claudecode:deep-dive <target>` | 2-stage pipeline: trace → deep-interview |
+| `/oh-my-claudecode:visual-verdict` | Structured visual QA verdict for screenshots |
 
 ---
 
