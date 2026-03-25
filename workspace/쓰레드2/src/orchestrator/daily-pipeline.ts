@@ -18,6 +18,7 @@ import type {
   DailyDirective,
   ContentDraft,
   QAResult,
+  PostContract,
   PipelineOptions,
   PipelineResult,
   PhaseGateResult,
@@ -221,6 +222,20 @@ export async function buildDirective(
     diversity_warnings: diversityWarnings,
     roi_summary: roiSummary,
   };
+
+  // 포스트별 계약 생성 (Sprint Contract 패턴)
+  const STRATEGIES: PostContract['strategy'][] = ['empathy', 'story', 'curiosity', 'comparison', 'list'];
+  const postContracts: PostContract[] = timeSlots.map((slot, idx) => ({
+    slot_index: idx,
+    category: slot.category,
+    strategy: STRATEGIES[idx % STRATEGIES.length],
+    min_hook_score: slot.type === 'experiment' ? 5 : 6,
+    min_originality_score: slot.type === 'experiment' ? 4 : 5,
+    success_criteria: slot.type === 'experiment'
+      ? `실험 슬롯: ${slot.experiment_id} — 변수 자유 조정`
+      : `${slot.category} 일반 포스트 — 후킹 6+, 독창성 5+`,
+  }));
+  directive.post_contracts = postContracts;
 
   // 전략 기록
   const topCategories = Object.entries(roiSummary)

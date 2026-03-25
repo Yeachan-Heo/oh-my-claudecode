@@ -11,6 +11,16 @@ export interface TimeSlot {
   experiment_id?: string;
 }
 
+export interface PostContract {
+  slot_index: number;         // time_slots 배열 인덱스
+  category: string;
+  strategy: 'empathy' | 'story' | 'curiosity' | 'comparison' | 'list';
+  topic_signal?: string;      // DB에서 발견된 니즈 신호 (있으면)
+  min_hook_score: number;     // 1-10, 기본 6
+  min_originality_score: number; // 1-10, 기본 5
+  success_criteria: string;   // 한 줄 요약
+}
+
 export interface DailyDirective {
   date: string;
   total_posts: number;
@@ -22,6 +32,7 @@ export interface DailyDirective {
   recycle_candidates: string[];
   diversity_warnings: string[];
   roi_summary: Record<string, { score: number; grade: string }>;
+  post_contracts?: PostContract[];
   notes?: string;
 }
 

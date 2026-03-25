@@ -59,7 +59,8 @@ vi.mock('../db/memory.js', () => ({
   logEpisode: vi.fn(),
 }));
 
-import { buildDirective, gatePhase2, gatePhase3 } from '../orchestrator/daily-pipeline.js';
+import { buildDirective, gatePhase2, gatePhase3, runQA } from '../orchestrator/daily-pipeline.js';
+import type { ContentDraft } from '../orchestrator/types.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -235,5 +236,39 @@ describe('gatePhase2 content validation', () => {
     const result = await gatePhase2();
     expect(result.passed).toBe(true);
     expect(result.reason).toBeUndefined();
+  });
+});
+
+// ─── Task 4: buildDirective post_contracts ──────────────────────────────────
+
+describe('buildDirective post_contracts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should generate post_contracts matching time_slots count', async () => {
+    setupMockClient();
+    const directive = await buildDirective(10, '2026-03-25');
+    expect(directive.post_contracts).toBeDefined();
+    expect(directive.post_contracts!.length).toBe(directive.time_slots.length);
+  });
+
+  it('should assign varied strategies across contracts', async () => {
+    setupMockClient();
+    const directive = await buildDirective(10, '2026-03-25');
+    const strategies = new Set(directive.post_contracts!.map(c => c.strategy));
+    expect(strategies.size).toBeGreaterThan(1);
+  });
+
+  it('should set lower thresholds for experiment slots', async () => {
+    setupMockClient();
+    const directive = await buildDirective(10, '2026-03-25');
+    const experimentContracts = directive.post_contracts!.filter(
+      (_, idx) => directive.time_slots[idx]!.type === 'experiment',
+    );
+    for (const contract of experimentContracts) {
+      expect(contract.min_hook_score).toBe(5);
+      expect(contract.min_originality_score).toBe(4);
+    }
   });
 });
