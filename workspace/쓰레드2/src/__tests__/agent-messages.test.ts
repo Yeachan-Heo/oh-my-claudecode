@@ -3,6 +3,9 @@
  *
  * TDD RED→GREEN: these tests drive the creation of agent_messages table
  * and CRUD helper functions.
+ *
+ * sendMessage signature (v2):
+ *   sendMessage(sender, recipient, channel, message, context?, messageType?, taskId?, roomId?, db?)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,6 +20,7 @@ import {
   getMessagesByTaskId,
   getMessagesByType,
   getLatestHandoff,
+  getMessagesByRoomId,
 } from '../db/agent-messages.js';
 
 // ─── DDL ─────────────────────────────────────────────────
@@ -32,7 +36,8 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   read_by JSONB NOT NULL DEFAULT '[]',
   message_type TEXT DEFAULT 'report',
-  task_id TEXT
+  task_id TEXT,
+  room_id TEXT
 );
 `;
 
@@ -50,7 +55,7 @@ async function createTestDb() {
 describe('sendMessage()', () => {
   it('saves a message and it exists in DB', async () => {
     const { db } = await createTestDb();
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'Hello team', undefined, undefined, undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'Hello team', undefined, undefined, undefined, undefined, db);
 
     expect(msg.id).toBeTruthy();
     expect(msg.sender).toBe('minjun-ceo');
@@ -63,8 +68,8 @@ describe('sendMessage()', () => {
 describe('getMessages()', () => {
   it('filters by channel', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'standup msg', undefined, undefined, undefined, db);
-    await sendMessage('minjun-ceo', 'bini-beauty', 'general', 'general msg', undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'standup msg', undefined, undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'general', 'general msg', undefined, undefined, undefined, undefined, db);
 
     const msgs = await getMessages({ channel: 'standup' }, db);
     expect(msgs).toHaveLength(1);
@@ -73,8 +78,8 @@ describe('getMessages()', () => {
 
   it('filters by sender', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'from ceo', undefined, undefined, undefined, db);
-    await sendMessage('bini-beauty', 'minjun-ceo', 'standup', 'from bini', undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'from ceo', undefined, undefined, undefined, undefined, db);
+    await sendMessage('bini-beauty', 'minjun-ceo', 'standup', 'from bini', undefined, undefined, undefined, undefined, db);
 
     const msgs = await getMessages({ sender: 'minjun-ceo' }, db);
     expect(msgs).toHaveLength(1);
@@ -83,7 +88,7 @@ describe('getMessages()', () => {
 
   it('filters by date', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'today msg', undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'today msg', undefined, undefined, undefined, undefined, db);
 
     const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-23'
     const msgs = await getMessages({ date: today }, db);
@@ -94,7 +99,7 @@ describe('getMessages()', () => {
 describe('markAsRead()', () => {
   it('adds agentName to read_by array', async () => {
     const { db } = await createTestDb();
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read me', undefined, undefined, undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read me', undefined, undefined, undefined, undefined, db);
 
     await markAsRead(msg.id, 'bini-beauty', db);
 
@@ -107,8 +112,8 @@ describe('markAsRead()', () => {
 describe('getUnreadMessages()', () => {
   it('returns only unread messages for agent', async () => {
     const { db } = await createTestDb();
-    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'unread msg', undefined, undefined, undefined, db);
-    const readMsg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read msg', undefined, undefined, undefined, db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'unread msg', undefined, undefined, undefined, undefined, db);
+    const readMsg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'read msg', undefined, undefined, undefined, undefined, db);
 
     await markAsRead(readMsg.id, 'bini-beauty', db);
 
@@ -123,7 +128,7 @@ describe('sendMessage() with messageType + taskId', () => {
     const { db } = await createTestDb();
     const msg = await sendMessage(
       'junho-researcher', 'seoyeon-analyst', 'handoff', 'phase1 done',
-      undefined, 'handoff', 'daily-20260323', db,
+      undefined, 'handoff', 'daily-20260323', undefined, db,
     );
 
     expect(msg.message_type).toBe('handoff');
@@ -132,7 +137,7 @@ describe('sendMessage() with messageType + taskId', () => {
 
   it('defaults message_type to report when not provided', async () => {
     const { db } = await createTestDb();
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'hello', undefined, undefined, undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'hello', undefined, undefined, undefined, undefined, db);
     expect(msg.message_type).toBe('report');
   });
 });
@@ -140,9 +145,9 @@ describe('sendMessage() with messageType + taskId', () => {
 describe('getMessagesByTaskId()', () => {
   it('returns all messages for a task_id', async () => {
     const { db } = await createTestDb();
-    await sendMessage('a', 'b', 'ch', 'msg1', undefined, 'report', 'daily-001', db);
-    await sendMessage('a', 'b', 'ch', 'msg2', undefined, 'handoff', 'daily-001', db);
-    await sendMessage('a', 'b', 'ch', 'other', undefined, 'report', 'daily-002', db);
+    await sendMessage('a', 'b', 'ch', 'msg1', undefined, 'report', 'daily-001', undefined, db);
+    await sendMessage('a', 'b', 'ch', 'msg2', undefined, 'handoff', 'daily-001', undefined, db);
+    await sendMessage('a', 'b', 'ch', 'other', undefined, 'report', 'daily-002', undefined, db);
 
     const msgs = await getMessagesByTaskId('daily-001', db);
     expect(msgs).toHaveLength(2);
@@ -159,8 +164,8 @@ describe('getMessagesByTaskId()', () => {
 describe('getMessagesByType()', () => {
   it('filters by message_type', async () => {
     const { db } = await createTestDb();
-    await sendMessage('a', 'b', 'ch', 'directive msg', undefined, 'directive', 'daily-001', db);
-    await sendMessage('a', 'b', 'ch', 'report msg', undefined, 'report', 'daily-001', db);
+    await sendMessage('a', 'b', 'ch', 'directive msg', undefined, 'directive', 'daily-001', undefined, db);
+    await sendMessage('a', 'b', 'ch', 'report msg', undefined, 'report', 'daily-001', undefined, db);
 
     const directives = await getMessagesByType('directive', undefined, db);
     expect(directives).toHaveLength(1);
@@ -169,7 +174,7 @@ describe('getMessagesByType()', () => {
 
   it('filters by type + since date', async () => {
     const { db } = await createTestDb();
-    await sendMessage('a', 'b', 'ch', 'old report', undefined, 'report', undefined, db);
+    await sendMessage('a', 'b', 'ch', 'old report', undefined, 'report', undefined, undefined, db);
 
     const future = new Date(Date.now() + 60_000);
     const msgs = await getMessagesByType('report', future, db);
@@ -180,7 +185,7 @@ describe('getMessagesByType()', () => {
 describe('getLatestHandoff()', () => {
   it('returns the most recent handoff for a task_id', async () => {
     const { db } = await createTestDb();
-    await sendMessage('a', 'b', 'ch', 'only handoff', undefined, 'handoff', 'daily-001', db);
+    await sendMessage('a', 'b', 'ch', 'only handoff', undefined, 'handoff', 'daily-001', undefined, db);
 
     const latest = await getLatestHandoff('daily-001', db);
     expect(latest).not.toBeNull();
@@ -192,5 +197,24 @@ describe('getLatestHandoff()', () => {
     const { db } = await createTestDb();
     const result = await getLatestHandoff('no-handoff-task', db);
     expect(result).toBeNull();
+  });
+});
+
+describe('getMessagesByRoomId()', () => {
+  it('returns all messages for a room_id', async () => {
+    const { db } = await createTestDb();
+    await sendMessage('minjun-ceo', 'bini-beauty', 'meeting', 'msg1', undefined, undefined, undefined, 'room-A', db);
+    await sendMessage('bini-beauty', 'minjun-ceo', 'meeting', 'msg2', undefined, undefined, undefined, 'room-A', db);
+    await sendMessage('seoyeon', 'minjun-ceo', 'standup', 'msg3', undefined, undefined, undefined, 'room-B', db);
+
+    const msgs = await getMessagesByRoomId('room-A', db);
+    expect(msgs).toHaveLength(2);
+    expect(msgs.every((m: { room_id: string }) => m.room_id === 'room-A')).toBe(true);
+  });
+
+  it('returns empty array when room not found', async () => {
+    const { db } = await createTestDb();
+    const msgs = await getMessagesByRoomId('nonexistent', db);
+    expect(msgs).toHaveLength(0);
   });
 });

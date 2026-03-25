@@ -23,6 +23,7 @@ export async function sendMessage(
   context?: Record<string, unknown>,
   messageType?: string,
   taskId?: string,
+  roomId?: string,
   db: DbLike = defaultDb,
 ) {
   const id = crypto.randomUUID();
@@ -38,9 +39,21 @@ export async function sendMessage(
       read_by: [],
       message_type: messageType ?? 'report',
       task_id: taskId ?? null,
+      room_id: roomId ?? null,
     })
     .returning();
   return row;
+}
+
+/**
+ * room_id로 회의 메시지 조회 (회의방 그루핑).
+ */
+export async function getMessagesByRoomId(roomId: string, db: DbLike = defaultDb) {
+  return db
+    .select()
+    .from(agentMessages)
+    .where(eq(agentMessages.room_id, roomId))
+    .orderBy(desc(agentMessages.created_at));
 }
 
 /**

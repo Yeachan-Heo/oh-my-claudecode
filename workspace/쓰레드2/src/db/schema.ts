@@ -886,6 +886,8 @@ export const agentMessages = pgTable(
     // 'report' | 'directive' | 'feedback' | 'handoff' | 'alert'
     task_id: text('task_id'),
     // 같은 daily-run 실행의 메시지를 묶는 ID (예: 'daily-20260323')
+    room_id: text('room_id'),
+    // 회의방 ID — 회의 메시지 그루핑 (v2 추가)
   },
   (table) => [
     index('idx_agent_msg_date').on(table.created_at),
@@ -893,6 +895,7 @@ export const agentMessages = pgTable(
     index('idx_agent_msg_sender').on(table.sender),
     index('idx_agent_messages_task_id').on(table.task_id),
     index('idx_agent_messages_type').on(table.message_type),
+    index('idx_agent_messages_room').on(table.room_id),
   ],
 );
 
@@ -952,5 +955,149 @@ export const revenueTracking = pgTable(
   (table) => [
     index('idx_revenue_post').on(table.post_id),
     index('idx_revenue_date').on(table.tracked_date),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// AI Company v2 — 6 신규 테이블
+// ---------------------------------------------------------------------------
+
+/**
+ * agents - 에이전트 레지스트리 (대시보드 연동).
+ * 11명 시딩: seed-agents.ts 참조.
+ */
+export const agents = pgTable(
+  'agents',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    role: text('role').notNull(),
+    department: text('department').notNull(),
+    team: text('team'),
+    is_team_lead: boolean('is_team_lead').notNull().default(false),
+    personality: jsonb('personality'),
+    avatar_color: text('avatar_color'),
+    status: text('status').notNull().default('idle'),
+    // 'idle' | 'active' | 'standby'
+    agent_file: text('agent_file'),
+    // 예: '.claude/agents/bini-beauty-editor.md'
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/**
+ * agent_memories - 에이전트 의미 기억 (Semantic Memory).
+ * 랭킹 공식: recency×0.4 + importance×0.4 + scope_match×0.2
+ */
+export const agentMemories = pgTable(
+  'agent_memories',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    agent_id: text('agent_id').notNull(),
+    scope: text('scope').notNull(),
+    // 'global' | 'marketing' | 'analysis' | 'private'
+    memory_type: text('memory_type').notNull(),
+    // 'pattern' | 'insight' | 'rule' | 'fact'
+    content: text('content').notNull(),
+    importance: real('importance').notNull().default(0.5),
+    source: text('source'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expires_at: timestamp('expires_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_memories_agent_scope').on(table.agent_id, table.scope),
+    index('idx_memories_global').on(table.scope),
+  ],
+);
+
+/**
+ * agent_episodes - 에피소드 기억 (pipeline_run 통합 — M7).
+ * event_type: 'decision' | 'experiment' | 'meeting' | 'post' | 'error' | 'pipeline_run'
+ */
+export const agentEpisodes = pgTable(
+  'agent_episodes',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    agent_id: text('agent_id').notNull(),
+    event_type: text('event_type').notNull(),
+    summary: text('summary').notNull(),
+    details: jsonb('details'),
+    // pipeline_run 시: {phases_completed, gate_failures, errors}
+    occurred_at: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_episodes_agent').on(table.agent_id, table.occurred_at),
+    index('idx_episodes_pipeline').on(table.event_type),
+  ],
+);
+
+/**
+ * strategy_archive - 전략 버전 관리 + 롤백.
+ * CEO 전용 태그: [CREATE_STRATEGY_VERSION]
+ */
+export const strategyArchive = pgTable(
+  'strategy_archive',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    version: text('version').notNull(),
+    parent_version: text('parent_version'),
+    strategy: jsonb('strategy').notNull(),
+    // {category_ratio, time_slots, experiments, categories[], ...}
+    performance: jsonb('performance'),
+    // {avg_roi, avg_views, revenue_target, revenue_actual}
+    status: text('status').notNull().default('active'),
+    // 'active' | 'archived' | 'rolled_back'
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    evaluated_at: timestamp('evaluated_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_archive_status').on(table.status, table.created_at),
+  ],
+);
+
+/**
+ * meetings - 회의 메타데이터 (자유토론 세션).
+ * room_id는 agent_messages.room_id와 연결.
+ */
+export const meetings = pgTable(
+  'meetings',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    room_name: text('room_name').notNull(),
+    meeting_type: text('meeting_type').notNull(),
+    // 'standup' | 'strategy' | 'review' | 'debate'
+    agenda: text('agenda'),
+    participants: jsonb('participants').$type<string[]>().default([]),
+    status: text('status').notNull().default('active'),
+    // 'active' | 'concluded'
+    decisions: jsonb('decisions'),
+    created_by: text('created_by').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    concluded_at: timestamp('concluded_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_meetings_status').on(table.status, table.created_at),
+  ],
+);
+
+/**
+ * pending_approvals - 시훈(오너) 승인 대기 항목.
+ * approval_type: 'ops_change' | 'new_agent' | 'system_change' | 'rollback' | 'budget' | 'new_category'
+ */
+export const pendingApprovals = pgTable(
+  'pending_approvals',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requested_by: text('requested_by').notNull(),
+    approval_type: text('approval_type').notNull(),
+    description: text('description').notNull(),
+    details: jsonb('details'),
+    status: text('status').notNull().default('pending'),
+    // 'pending' | 'approved' | 'rejected'
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolved_at: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_approvals_status').on(table.status, table.created_at),
   ],
 );
