@@ -554,6 +554,9 @@ export interface DiagnosisReport {
 
   // AI 분석 결과 (TOP/BOTTOM 비교)
   ai_analysis: string | null;
+
+  // 워밍업 모드 플래그 — true이면 revenue/conversion 기반 진단이 스킵됨
+  warmup_mode?: boolean;
 }
 
 export interface TuningAction {

@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   diagnoseBottleneck,
+  diagnoseBottleneckWarmup,
   generateTuningActions,
   THRESHOLDS,
 } from '../tracker/diagnosis.js';
@@ -171,5 +172,79 @@ describe('generateTuningActions', () => {
       const hasHigh = actions.some(a => a.priority === 'high');
       expect(hasHigh, `${bottleneck} should have a high priority action`).toBe(true);
     }
+  });
+});
+
+// ─── diagnoseBottleneckWarmup ──────────────────────────────
+
+describe('diagnoseBottleneckWarmup', () => {
+  it('returns none when totalPosts is zero', () => {
+    const stats = makeStats({ totalPosts: 0 });
+    const result = diagnoseBottleneckWarmup(stats);
+    expect(result.bottleneck).toBe('none');
+    expect(result.evidence).toContain('워밍업');
+  });
+
+  it('returns publishing when reach is below threshold', () => {
+    const stats = makeStats({
+      avgReach: THRESHOLDS.MIN_REACH - 1,
+      avgRevenuePerPost: 0,
+      avgCtr: 0,
+      avgConversionRate: 0,
+    });
+    const result = diagnoseBottleneckWarmup(stats);
+    expect(result.bottleneck).toBe('publishing');
+    expect(result.evidence).toContain('워밍업');
+  });
+
+  it('returns none when reach is OK (ignores revenue/CTR/conversion)', () => {
+    const stats = makeStats({
+      avgReach: THRESHOLDS.MIN_REACH + 100,
+      avgRevenuePerPost: 0,        // Would normally trigger bottleneck
+      avgCtr: 0,                    // Would normally trigger bottleneck
+      avgConversionRate: 0,          // Would normally trigger bottleneck
+    });
+    const result = diagnoseBottleneckWarmup(stats);
+    expect(result.bottleneck).toBe('none');
+    expect(result.evidence).toContain('워밍업');
+    expect(result.evidence).toContain('정상');
+  });
+
+  it('differs from standard diagnosis when revenue is 0 but reach is OK', () => {
+    const stats = makeStats({
+      avgReach: 500,
+      avgRevenuePerPost: 0,
+      avgCtr: 0.05,
+      avgConversionRate: 0,
+    });
+    // Standard diagnosis: revenue=0 → traces to conversion → 'matching'
+    const standard = diagnoseBottleneck(stats);
+    expect(standard.bottleneck).not.toBe('none');
+
+    // Warmup diagnosis: reach OK → 'none' (ignores revenue/conversion)
+    const warmup = diagnoseBottleneckWarmup(stats);
+    expect(warmup.bottleneck).toBe('none');
+  });
+
+  it('generates no tuning actions when warmup diagnosis is none', () => {
+    const stats = makeStats({
+      avgReach: 500,
+      avgRevenuePerPost: 0,
+    });
+    const diagnosis = diagnoseBottleneckWarmup(stats);
+    const actions = generateTuningActions(diagnosis);
+    expect(actions).toHaveLength(0);
+  });
+
+  it('generates publishing actions when warmup diagnosis is publishing', () => {
+    const stats = makeStats({
+      avgReach: 10,
+      avgRevenuePerPost: 0,
+    });
+    const diagnosis = diagnoseBottleneckWarmup(stats);
+    expect(diagnosis.bottleneck).toBe('publishing');
+    const actions = generateTuningActions(diagnosis);
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.every(a => a.target === 'publisher')).toBe(true);
   });
 });

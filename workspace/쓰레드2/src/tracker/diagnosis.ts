@@ -36,6 +36,7 @@ export const THRESHOLDS = {
   MIN_CONVERSION: 0.001,             // conversion rate — below = product issue
   MIN_REVENUE_PER_POST: 100,         // KRW — below = overall underperformance
   PRODUCT_RELEVANCE_THRESHOLD: 0.5,  // above = matching OK, content problem
+  WARMUP_POST_THRESHOLD: 20,         // total posts below this → warmup mode
 };
 
 // ─── Diagnosis Types ─────────────────────────────────────
@@ -141,6 +142,59 @@ export function diagnoseBottleneck(weeklyStats: WeeklyStats): DiagnosisResult {
     evidence: `전체 지표 저조 (수익 ${avgRevenuePerPost.toFixed(0)}원/포스트). 수집 필터 강화 및 소스 채널 재검토 필요.`,
     stats: weeklyStats,
   };
+}
+
+// ─── Warmup Diagnosis ────────────────────────────────────
+
+/**
+ * Engagement-only diagnosis for warmup period.
+ * During warmup, there are no affiliate links, so revenue/CTR/conversion are
+ * always 0 and should not trigger bottleneck alerts. Only reach (views) is
+ * meaningful as an engagement signal.
+ *
+ * Decision tree:
+ * 1. No posts → 'none'
+ * 2. Reach low → 'publishing' (시간대/계정 문제)
+ * 3. Reach OK → 'none' (워밍업 기간 정상)
+ */
+export function diagnoseBottleneckWarmup(weeklyStats: WeeklyStats): DiagnosisResult {
+  const { avgReach, totalPosts } = weeklyStats;
+
+  if (totalPosts === 0) {
+    return {
+      bottleneck: 'none',
+      evidence: '워밍업: 진단할 포스트가 없습니다.',
+      stats: weeklyStats,
+    };
+  }
+
+  if (avgReach < THRESHOLDS.MIN_REACH) {
+    return {
+      bottleneck: 'publishing',
+      evidence: `워밍업: 평균 도달 ${avgReach.toFixed(0)}회 < 임계값 ${THRESHOLDS.MIN_REACH}. 발행 시간대/계정 상태 확인 필요.`,
+      stats: weeklyStats,
+    };
+  }
+
+  return {
+    bottleneck: 'none',
+    evidence: `워밍업: 평균 도달 ${avgReach.toFixed(0)}회 — 참여 지표 정상. revenue/conversion 진단은 워밍업 종료 후 시작.`,
+    stats: weeklyStats,
+  };
+}
+
+// ─── Warmup Detection ────────────────────────────────────
+
+/**
+ * Detect whether the pipeline is in warmup mode.
+ * Warmup = total published posts < WARMUP_POST_THRESHOLD.
+ */
+export async function detectWarmupMode(): Promise<boolean> {
+  const rows = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(contentLifecycle);
+  const totalPosts = Number(rows[0]?.count ?? 0);
+  return totalPosts < THRESHOLDS.WARMUP_POST_THRESHOLD;
 }
 
 // ─── Tuning Action Generation ────────────────────────────
@@ -263,13 +317,21 @@ export async function createDiagnosisReport(weekStart: Date): Promise<DiagnosisR
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
 
+  // 0. Warmup mode detection
+  const isWarmup = await detectWarmupMode();
+  if (isWarmup) {
+    log('워밍업 모드 감지 — engagement 기반 진단만 실행');
+  }
+
   // 1. Aggregate stats
   const stats = await getWeeklyStats(weekStart);
 
-  // 2. Diagnose
-  const diagnosis = diagnoseBottleneck(stats);
+  // 2. Diagnose — warmup mode uses engagement-only tree
+  const diagnosis = isWarmup
+    ? diagnoseBottleneckWarmup(stats)
+    : diagnoseBottleneck(stats);
 
-  // 3. Generate actions
+  // 3. Generate actions (warmup 'none' → no actions; warmup 'publishing' → normal actions)
   const actions = generateTuningActions(diagnosis);
 
   // 4. Count top/bottom for cohort stats
@@ -306,6 +368,7 @@ export async function createDiagnosisReport(weekStart: Date): Promise<DiagnosisR
     bottleneck_evidence: diagnosis.evidence,
     tuning_actions: actions,
     ai_analysis: null, // Populated by AI analysis step (weekly TOP/BOTTOM comparison)
+    warmup_mode: isWarmup,
   };
 
   // 6. Insert diagnosis report
