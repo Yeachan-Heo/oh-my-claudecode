@@ -290,15 +290,17 @@ ralplan this feature
 
 | Keyword | Effect |
 |---------|--------|
-| `ultrawork`, `ulw` | Parallel agent orchestration |
-| `autopilot`, `build me`, `I want a` | Autonomous execution pipeline |
-| `ralph`, `don't stop`, `must complete` | Loop until verified complete |
+| `ultrawork`, `ulw`, `uw` | Parallel agent orchestration |
+| `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Autonomous execution pipeline |
+| `ralph`, `don't stop`, `must complete`, `until done` | Loop until verified complete |
 | `ccg`, `claude-codex-gemini` | 3-model orchestration |
 | `ralplan` | Consensus-based planning |
 | `deep interview`, `ouroboros` | Socratic deep interview |
-| `deepsearch`, `search the codebase` | Codebase search mode |
+| `code review`, `review code` | Comprehensive code review mode |
+| `security review`, `review security` | Security-focused review mode |
+| `deepsearch`, `search the codebase`, `find in codebase` | Codebase search mode |
 | `deepanalyze`, `deep-analyze` | Deep analysis mode |
-| `ultrathink` | Deep reasoning mode |
+| `ultrathink`, `think hard`, `think deeply` | Deep reasoning mode |
 | `tdd`, `test first`, `red green` | TDD workflow |
 | `deslop`, `anti-slop` | AI expression cleanup |
 | `cancelomc`, `stopomc` | Cancel active execution mode |
