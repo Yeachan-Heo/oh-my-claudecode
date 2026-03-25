@@ -1279,6 +1279,8 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
       let feedStatus = 'ok';
       let overlapHit = false;
 
+      let scrollOldPostStreak = 0; // 스크롤 중 연속 오래된 포스트 카운터
+
       while (collected.size < postCount && noNewCount < 3 && !overlapHit) {
         const ids: string[] = await page.evaluate(() => {
           const links = document.querySelectorAll('a[href*="/post/"]');
@@ -1304,6 +1306,36 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
         if (added === 0 && !overlapHit) noNewCount++;
         else noNewCount = 0;
+
+        // --since: 스크롤 중 GraphQL 타임스탬프로 비활성 채널 조기 감지
+        if (sinceCutoff > 0 && added > 0) {
+          const gqlPosts = gqlInterceptor.getCollectedPosts();
+          // 최근 캡처된 포스트의 타임스탬프 확인
+          let recentOldCount = 0;
+          for (let gi = Math.max(0, gqlPosts.length - added); gi < gqlPosts.length; gi++) {
+            const gp = gqlPosts[gi];
+            if (gp?.timestamp_unix) {
+              if (gp.timestamp_unix * 1000 < sinceCutoff) recentOldCount++;
+            } else if (gp?.time_text) {
+              const dayMatch = gp.time_text.match(/(\d+)\s*(일|d|주|w)/);
+              if (dayMatch) {
+                const val = parseInt(dayMatch[1], 10);
+                const unit = dayMatch[2];
+                const hours = (unit === '주' || unit === 'w') ? val * 168 : val * 24;
+                if (hours > sinceHours) recentOldCount++;
+              }
+            }
+          }
+          if (recentOldCount >= added) {
+            scrollOldPostStreak += recentOldCount;
+          } else {
+            scrollOldPostStreak = 0;
+          }
+          if (scrollOldPostStreak >= 4) {
+            log(`  ⚠ 스크롤 중 연속 ${scrollOldPostStreak}개 포스트가 ${sinceHours}h 초과 → 비활성 채널, 스크롤 조기 중단`);
+            break;
+          }
+        }
 
         log(`  스크롤: ${collected.size}/${postCount} (+${added})`);
         if (collected.size >= postCount) break;
