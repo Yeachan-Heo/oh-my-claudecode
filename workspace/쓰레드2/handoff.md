@@ -98,10 +98,24 @@
 ### 브랜치
 - feat/threads-watch-p0
 
+### 자산 활용 현황 (미활용 자산 — Phase 2.5에서 해결)
+| 자산 | 수집량 | 활용 | 다음 액션 |
+|------|--------|------|----------|
+| youtube_videos | 85개 | 0% | 서연(애널리스트)이 소재로 활용 → 콘텐츠 기획 투입 |
+| brand_events | 7개 유효 (토리든/일동/샤오미/다이슨/무인양품) | 0% | 긴급도순 소재 선정 → 포스트 기획 |
+| trend_keywords | 847개 (selected 7) | 0% | selected 키워드 → collect-by-keyword.ts → 콘텐츠 전환 |
+| 벤치마크 포스트 | 1,215개 | 2.1% | 고성과 패턴 포스트 → 유사 주제 재생산 |
+
 ### 생성된 PDF (바탕화면)
 - `BiniLab_AI_Company_구조분석.pdf` — 회사 구조/검증/학습 전체 분석
-- `BiniLab_v3_구현계획서.pdf` — 초기 계획서 (v3.0)
-- `BiniLab_v3_Final_구현계획서.pdf` — 보완 계획서 (v3.1, 최신)
+- `BiniLab_v3.2_최종계획서.pdf` — **최종 계획서** (분석리포트+크리틱 반영)
+- `BiniLab_v3_Final_구현계획서.pdf` — 이전 버전 (v3.1)
+- `BiniLab_v3_구현계획서.pdf` — 초기 (v3.0)
+
+### v3.2 Phase별 구현 프롬프트
+- `docs/superpowers/plans/2026-03-25-binilab-v3.2-prompts.md`
+- 각 Phase를 새 세션에서 프롬프트 복사→붙여넣기로 즉시 실행 가능
+- Phase 0 → 0.5 → 1 → 2-A → 2-B → 2-C → 2.5 → 3 → 4 순서
 
 ### 피드백 메모리 추가
 - `feedback_agent_spawn_required.md` — "애들 시켜서" = Agent() 스폰 필수
