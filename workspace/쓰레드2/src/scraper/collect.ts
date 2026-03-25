@@ -1358,6 +1358,8 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
     let processedSinceBreak = 0;
     let processedCount = 0; // B-Stage: absolute count for 10-post health check
 
+    let consecutiveOldPosts = 0; // 연속 24h 초과 포스트 카운터 (4개 이상 → 비활성 채널)
+
     for (let i = 0; i < remaining.length; i++) {
       const pid = remaining[i];
 
@@ -1410,13 +1412,16 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
       }
 
       // --since 시간 기반 중단: GraphQL timestamp로 판단
+      // 연속 4개 이상 24h 초과 시 비활성 채널로 판단하고 스킵
       if (sinceCutoff > 0) {
         const gqlTime = gqlPostMap.get(pid);
+        let isOldPost = false;
+
         if (gqlTime?.timestamp_unix) {
           const postTime = gqlTime.timestamp_unix * 1000;
           if (postTime < sinceCutoff) {
-            log(`  ${pid} — ${sinceHours}h 이전 포스트 (${new Date(postTime).toISOString().slice(0,16)}) → 시간 기반 중단`);
-            break; // 피드는 최신순이므로 이후 포스트도 더 오래됨
+            isOldPost = true;
+            log(`  ${pid} — ${sinceHours}h 이전 포스트 (${new Date(postTime).toISOString().slice(0,16)})`);
           }
         } else if (gqlTime?.time_text) {
           // timestamp_unix 없을 때 time_text로 판단 ("1일 전", "2일 전", "3시간 전")
@@ -1425,10 +1430,21 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
           if (dayMatch) {
             const days = parseInt(dayMatch[1], 10);
             if (days * 24 > sinceHours) {
-              log(`  ${pid} — "${txt}" → ${sinceHours}h 초과, 시간 기반 중단`);
-              break;
+              isOldPost = true;
+              log(`  ${pid} — "${txt}" → ${sinceHours}h 초과`);
             }
           }
+        }
+
+        if (isOldPost) {
+          consecutiveOldPosts++;
+          if (consecutiveOldPosts >= 4) {
+            log(`  ⚠ 연속 ${consecutiveOldPosts}개 포스트가 ${sinceHours}h 초과 → 비활성 채널로 판단, 수집 중단`);
+            break;
+          }
+          continue; // 오래된 포스트는 수집하지 않고 건너뜀
+        } else {
+          consecutiveOldPosts = 0; // 최신 포스트 발견 시 카운터 리셋
         }
       }
 
