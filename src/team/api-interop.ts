@@ -274,8 +274,10 @@ function resolveTeamWorkingDirectoryFromMetadata(
   const fromConfig = readTeamStateRootFromFile(join(teamRoot, 'config.json'));
   if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
 
-  const fromManifest = readTeamStateRootFromFile(join(teamRoot, 'manifest.v2.json'));
-  if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
+  for (const manifestName of ['manifest.json', 'manifest.v2.json']) {
+    const fromManifest = readTeamStateRootFromFile(join(teamRoot, manifestName));
+    if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
+  }
 
   return null;
 }

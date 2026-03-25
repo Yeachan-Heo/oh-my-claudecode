@@ -82,4 +82,28 @@ describe('team api working-directory resolution', () => {
     if (!claimResult.ok) return;
     expect(typeof (claimResult.data as { claimToken?: string }).claimToken).toBe('string');
   });
+
+
+  it('claims tasks using config workers even when manifest workers are stale', async () => {
+    const teamStateRoot = await seedTeamState();
+    await writeFile(join(teamStateRoot, 'manifest.json'), JSON.stringify({
+      schema_version: 2,
+      name: teamName,
+      task: 'resolution test',
+      worker_count: 0,
+      workers: [],
+      created_at: '2026-03-06T00:00:00.000Z',
+      team_state_root: teamStateRoot,
+    }, null, 2));
+
+    const claimResult = await executeTeamApiOperation('claim-task', {
+      team_name: teamName,
+      task_id: '1',
+      worker: 'worker-1',
+    }, cwd);
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    expect((claimResult.data as { ok?: boolean }).ok).toBe(true);
+    expect(typeof (claimResult.data as { claimToken?: string }).claimToken).toBe('string');
+  });
 });

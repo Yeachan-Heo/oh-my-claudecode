@@ -191,37 +191,52 @@ async function withMailboxLock<T>(teamName: string, workerName: string, cwd: str
 // Team lifecycle
 // ---------------------------------------------------------------------------
 
-export async function teamReadConfig(teamName: string, cwd: string): Promise<TeamConfig | null> {
-  // Try manifest first, fall back to config.json
-  const manifest = await teamReadManifest(teamName, cwd);
-  if (manifest) {
-    return canonicalizeTeamConfigWorkers({
-      name: manifest.name,
-      task: manifest.task,
-      agent_type: 'claude',
-      policy: manifest.policy,
-      governance: manifest.governance,
-      worker_launch_mode: manifest.policy.worker_launch_mode,
-      worker_count: manifest.worker_count,
-      max_workers: 20,
-      workers: manifest.workers,
-      created_at: manifest.created_at,
-      tmux_session: manifest.tmux_session,
-      next_task_id: manifest.next_task_id,
-      leader_cwd: manifest.leader_cwd,
-      team_state_root: manifest.team_state_root,
-      workspace_mode: manifest.workspace_mode,
-      leader_pane_id: manifest.leader_pane_id,
-      hud_pane_id: manifest.hud_pane_id,
-      resize_hook_name: manifest.resize_hook_name,
-      resize_hook_target: manifest.resize_hook_target,
-      next_worker_index: manifest.next_worker_index,
-    });
-  }
+function configFromManifest(manifest: TeamManifestV2): TeamConfig {
+  return {
+    name: manifest.name,
+    task: manifest.task,
+    agent_type: 'claude',
+    policy: manifest.policy,
+    governance: manifest.governance,
+    worker_launch_mode: manifest.policy.worker_launch_mode,
+    worker_count: manifest.worker_count,
+    max_workers: 20,
+    workers: manifest.workers,
+    created_at: manifest.created_at,
+    tmux_session: manifest.tmux_session,
+    next_task_id: manifest.next_task_id,
+    leader_cwd: manifest.leader_cwd,
+    team_state_root: manifest.team_state_root,
+    workspace_mode: manifest.workspace_mode,
+    leader_pane_id: manifest.leader_pane_id,
+    hud_pane_id: manifest.hud_pane_id,
+    resize_hook_name: manifest.resize_hook_name,
+    resize_hook_target: manifest.resize_hook_target,
+    next_worker_index: manifest.next_worker_index,
+  };
+}
 
-  const configPath = absPath(cwd, TeamPaths.config(teamName));
-  const config = await readJsonSafe<TeamConfig>(configPath);
-  return config ? canonicalizeTeamConfigWorkers(config) : null;
+function mergeTeamConfigSources(config: TeamConfig | null, manifest: TeamManifestV2 | null): TeamConfig | null {
+  if (!config && !manifest) return null;
+  if (!manifest) return config ? canonicalizeTeamConfigWorkers(config) : null;
+  if (!config) return canonicalizeTeamConfigWorkers(configFromManifest(manifest));
+
+  return canonicalizeTeamConfigWorkers({
+    ...configFromManifest(manifest),
+    ...config,
+    workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
+    worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
+    next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
+    max_workers: Math.max(config.max_workers ?? 0, 20),
+  });
+}
+
+export async function teamReadConfig(teamName: string, cwd: string): Promise<TeamConfig | null> {
+  const [manifest, config] = await Promise.all([
+    teamReadManifest(teamName, cwd),
+    readJsonSafe<TeamConfig>(absPath(cwd, TeamPaths.config(teamName))),
+  ]);
+  return mergeTeamConfigSources(config, manifest);
 }
 
 export async function teamReadManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null> {
