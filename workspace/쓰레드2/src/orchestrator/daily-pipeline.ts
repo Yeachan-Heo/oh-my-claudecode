@@ -402,41 +402,68 @@ async function gatePhase1(): Promise<PhaseGateResult> {
   };
 }
 
-/** Phase 2 게이트: 서연(분석가) 오늘자 pipeline 채널 메시지 존재 여부. */
-async function gatePhase2(): Promise<PhaseGateResult> {
+/** Phase 2 게이트: 서연(분석가) 오늘자 pipeline 채널 메시지 존재 + 내용 검증. */
+export async function gatePhase2(): Promise<PhaseGateResult> {
   const today = new Date().toISOString().slice(0, 10);
   const rows = await client`
-    SELECT COUNT(*)::int AS cnt
+    SELECT message
     FROM agent_messages
     WHERE sender = 'seoyeon-analyst'
       AND channel = 'pipeline'
       AND created_at >= ${today}::date
+    ORDER BY created_at DESC
+    LIMIT 1
   `;
-  const count = Number((rows[0] as { cnt: number }).cnt ?? 0);
+  if (rows.length === 0) {
+    return {
+      phase: 2,
+      passed: false,
+      reason: '서연(분석가) 오늘자 분석 메시지 없음',
+      metrics: { analyst_messages: 0 },
+    };
+  }
+
+  const msg = rows[0];
+  const hasContent = typeof msg.message === 'string' && msg.message.length > 20;
+
   return {
     phase: 2,
-    passed: count > 0,
-    reason: count === 0 ? '서연(분석가) 오늘자 분석 메시지 없음' : undefined,
-    metrics: { analyst_messages: count },
+    passed: hasContent,
+    reason: hasContent ? undefined : '서연 분석 메시지가 비어있거나 너무 짧음 (20자 미만)',
+    metrics: { analyst_messages: 1, message_length: (msg.message as string)?.length ?? 0 },
   };
 }
 
-/** Phase 3 게이트: 민준(CEO) 오늘자 standup 채널 메시지 존재 여부. */
-async function gatePhase3(): Promise<PhaseGateResult> {
+/** Phase 3 게이트: 민준(CEO) 오늘자 standup 채널 메시지 존재 + directive 내용 검증. */
+export async function gatePhase3(): Promise<PhaseGateResult> {
   const today = new Date().toISOString().slice(0, 10);
   const rows = await client`
-    SELECT COUNT(*)::int AS cnt
+    SELECT message, metadata
     FROM agent_messages
     WHERE sender = 'minjun-ceo'
       AND channel = 'standup'
       AND created_at >= ${today}::date
+    ORDER BY created_at DESC
+    LIMIT 1
   `;
-  const count = Number((rows[0] as { cnt: number }).cnt ?? 0);
+  if (rows.length === 0) {
+    return {
+      phase: 3,
+      passed: false,
+      reason: '민준(CEO) 오늘자 스탠드업 메시지 없음',
+      metrics: { ceo_messages: 0 },
+    };
+  }
+
+  const msg = rows[0];
+  const metadata = msg.metadata as Record<string, unknown> | null;
+  const hasDirective = metadata && 'directive' in metadata;
+
   return {
     phase: 3,
-    passed: count > 0,
-    reason: count === 0 ? '민준(CEO) 오늘자 스탠드업 메시지 없음' : undefined,
-    metrics: { ceo_messages: count },
+    passed: !!hasDirective,
+    reason: hasDirective ? undefined : 'CEO 메시지에 directive 없음 — DailyDirective 누락',
+    metrics: { ceo_messages: 1, has_directive: hasDirective ? 1 : 0 },
   };
 }
 

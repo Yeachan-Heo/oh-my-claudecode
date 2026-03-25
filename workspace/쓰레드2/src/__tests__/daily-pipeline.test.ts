@@ -59,7 +59,7 @@ vi.mock('../db/memory.js', () => ({
   logEpisode: vi.fn(),
 }));
 
-import { buildDirective } from '../orchestrator/daily-pipeline.js';
+import { buildDirective, gatePhase2, gatePhase3 } from '../orchestrator/daily-pipeline.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -151,5 +151,89 @@ describe('buildDirective', () => {
     for (const slot of experimentSlots) {
       expect(slot.experiment_id).toMatch(/^EXP-\d{8}-\d{3}$/);
     }
+  });
+});
+
+// ─── Task 3: Phase Gate content validation ──────────────────────────────────
+
+describe('gatePhase3 content validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should fail when no CEO message exists', async () => {
+    // No messages for today
+    mockClient.mockResolvedValueOnce([]);
+    const result = await gatePhase3();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('스탠드업 메시지 없음');
+  });
+
+  it('should fail when CEO message has no directive in metadata', async () => {
+    // Message exists but metadata has no 'directive' key
+    mockClient.mockResolvedValueOnce([
+      { message: 'test standup', metadata: {} },
+    ]);
+    const result = await gatePhase3();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('directive');
+  });
+
+  it('should fail when CEO message metadata is null', async () => {
+    mockClient.mockResolvedValueOnce([
+      { message: 'test standup', metadata: null },
+    ]);
+    const result = await gatePhase3();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('directive');
+  });
+
+  it('should pass when CEO message has directive in metadata', async () => {
+    mockClient.mockResolvedValueOnce([
+      { message: '[daily_directive] 10개 슬롯', metadata: { directive: { date: '2026-03-25' } } },
+    ]);
+    const result = await gatePhase3();
+    expect(result.passed).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+});
+
+describe('gatePhase2 content validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should fail when no analyst message exists', async () => {
+    mockClient.mockResolvedValueOnce([]);
+    const result = await gatePhase2();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('분석 메시지 없음');
+  });
+
+  it('should fail when analyst message is too short (< 20 chars)', async () => {
+    mockClient.mockResolvedValueOnce([
+      { message: '짧은 메시지' },
+    ]);
+    const result = await gatePhase2();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('20자 미만');
+  });
+
+  it('should fail when analyst message is empty string', async () => {
+    mockClient.mockResolvedValueOnce([
+      { message: '' },
+    ]);
+    const result = await gatePhase2();
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain('비어있거나 너무 짧음');
+  });
+
+  it('should pass when analyst message has sufficient content', async () => {
+    mockClient.mockResolvedValueOnce([
+      { message: '전일 성과 분석 완료: 뷰티 카테고리 평균 조회수 5,000회, 참여율 5% 기록' },
+    ]);
+    const result = await gatePhase2();
+    expect(result.passed).toBe(true);
+    expect(result.reason).toBeUndefined();
   });
 });
