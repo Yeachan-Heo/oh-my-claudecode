@@ -272,7 +272,6 @@ ralplan this feature
 | Skill | Description | Command |
 |-------|-------------|---------|
 | `cancel` | Cancel active execution mode | `/oh-my-claudecode:cancel` |
-| `note` | Save memo to notepad | `/oh-my-claudecode:note` |
 | `hud` | Status bar configuration | `/oh-my-claudecode:hud` |
 | `omc-setup` | Initial setup wizard | `/oh-my-claudecode:omc-setup` |
 | `omc-doctor` | Diagnose installation | `/oh-my-claudecode:omc-doctor` |
@@ -466,10 +465,7 @@ Legacy locations are auto-migrated on read.
 
 The notepad survives context compaction. Content written to it persists even after the context window is reset.
 
-```bash
-# Save a note via skill
-/oh-my-claudecode:note "Use /api/v2 for all API endpoints"
-```
+Notes can be saved using the `notepad_write_manual` MCP tool or the `notepad_write_priority` tool for persistent notes.
 
 **MCP Tools:**
 
