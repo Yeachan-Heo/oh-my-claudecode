@@ -10,6 +10,8 @@
 
 import { client } from '../db/index.js';
 import { sendMessage } from '../db/agent-messages.js';
+import { evaluateTriggers } from '../chat/chat-triggers.js';
+import type { TriggerContext } from '../chat/chat-triggers.js';
 import { runSafetyGates } from '../safety/gates.js';
 import { getDiversityReport } from '../learning/diversity-checker.js';
 import { logDecision, updatePlaybook } from '../learning/strategy-logger.js';
@@ -832,6 +834,20 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         gate_results: gateResults,
       };
     }
+  }
+
+  // ── Phase 2.5: Autonomous Chat Triggers ──────────────────────────────
+  try {
+    const triggerCtx: TriggerContext = {
+      avgViews: 1500, // TODO: compute from actual data when available
+      contentCount: posts ?? 0,
+    };
+    const fired = await evaluateTriggers(triggerCtx);
+    if (fired.length > 0) {
+      console.log(`[Phase 2.5] Chat triggers fired: ${fired.join(', ')}`);
+    }
+  } catch (err) {
+    console.error('[Phase 2.5] Chat trigger evaluation failed:', err);
   }
 
   // ── Phase 4: 콘텐츠 생성 ─────────────────────────────────────────────
