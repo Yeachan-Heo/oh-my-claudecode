@@ -1,88 +1,109 @@
 /**
  * @file scripts/migrate-memory-to-db.ts
- * S-1.5: 파일 기반 기억 → DB 마이그레이션
+ * Phase 2-B: agents/memory/ md 파일 → DB(agent_memories, agent_episodes) 마이그레이션
  *
  * 마이그레이션 대상:
- * 1. agents/memory/strategy-log.md       → agent_episodes (event_type='decision')
- * 2. agents/memory/experiment-log.md     → experiments 테이블 보강
- * 3. agents/memory/category-playbook/*.md → agent_memories (scope='marketing', type='pattern')
- * 4. agents/memory/weekly-insights.md   → agent_memories (scope='global', type='insight')
+ *   strategy-log.md          → agent_memories (scope=global, type=decision)
+ *   experiment-log.md        → agent_episodes (agent_id=system, event_type=experiment)
+ *   category-playbook/*.md   → agent_memories (scope=marketing, type=playbook)
  *
- * 완료 후: agents/memory/ → agents/memory-archive/ 리네임
+ * Usage:
+ *   npx tsx scripts/migrate-memory-to-db.ts            # 실제 마이그레이션
+ *   npx tsx scripts/migrate-memory-to-db.ts --dry-run  # 파싱 결과만 출력
  */
 
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { eq } from 'drizzle-orm';
 import { db } from '../src/db/index.js';
-import { agentEpisodes, agentMemories } from '../src/db/schema.js';
+import { agentMemories, agentEpisodes, systemState } from '../src/db/schema.js';
 
-const MEMORY_DIR = path.join(__dirname, '..', 'agents', 'memory');
-const ARCHIVE_DIR = path.join(__dirname, '..', 'agents', 'memory-archive');
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const MEMORY_DIR = path.join(PROJECT_ROOT, 'agents', 'memory');
+const DRY_RUN = process.argv.includes('--dry-run');
 
-// ─── 1. strategy-log.md → agent_episodes ───────────────────────────────────
+const MIGRATION_KEY = 'memory_migration_v1';
 
-function parseStrategyLog(content: string): Array<{
-  summary: string;
-  details: Record<string, unknown>;
-  occurred_at: Date;
-}> {
-  const entries: Array<{ summary: string; details: Record<string, unknown>; occurred_at: Date }> = [];
+// ─── 유틸 ───────────────────────────────────────────────────────────────────
 
-  // 각 날짜 블록 파싱: ## YYYY-MM-DD 로 시작
-  const dateBlockRegex = /^#{1,3}\s+(\d{4}-\d{2}-\d{2})\s*$/gm;
-  const blocks = content.split(dateBlockRegex);
+function log(msg: string): void {
+  console.log(msg);
+}
 
-  // split 결과: [before, date1, content1, date2, content2, ...]
-  for (let i = 1; i < blocks.length; i += 2) {
-    const dateStr = blocks[i]?.trim();
-    const body = blocks[i + 1] ?? '';
+function isTemplateOnly(content: string): boolean {
+  // 실제 데이터가 없고 템플릿/주석만 있는지 판별
+  const stripped = content
+    .replace(/<!--[\s\S]*?-->/g, '')   // HTML 주석 제거
+    .replace(/```[\s\S]*?```/g, '')    // 코드블록 제거
+    .replace(/^#+\s.*/gm, '')          // 헤더 제거
+    .replace(/\(데이터 축적 중\)/g, '')
+    .replace(/\(초기 생성\)/g, '')
+    .replace(/^\s*[-|]\s*$/gm, '')     // 빈 리스트/테이블 구분자
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length < 30;
+}
 
-    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+// ─── 1. strategy-log.md → agent_memories ────────────────────────────────────
 
-    const date = new Date(dateStr + 'T09:00:00+09:00');
-    if (isNaN(date.getTime())) continue;
+interface StrategyEntry {
+  sectionTitle: string;
+  content: string;
+  date: string;
+}
 
-    // 결정 섹션 추출
-    const decisionMatch = body.match(/###\s*결정\s*\n([\s\S]*?)(?=###|$)/);
-    const resultMatch = body.match(/###\s*결과[^#]*\n([\s\S]*?)(?=###|$)/);
-    const memoMatch = body.match(/###\s*메모\s*\n([\s\S]*?)(?=###|$)/);
+function parseStrategyLog(fileContent: string): StrategyEntry[] {
+  const entries: StrategyEntry[] = [];
 
-    const decision = decisionMatch?.[1]?.trim() ?? '';
-    const result = resultMatch?.[1]?.trim() ?? '';
-    const memo = memoMatch?.[1]?.trim() ?? '';
+  // ## [YYYYMMDD] 또는 ## YYYY-MM-DD 형식의 섹션 분리
+  // 헤더 패턴: ## [20260326] Directive 또는 ## 2026-03-25 또는 ### 2026-03-25
+  const sectionRegex = /^#{2,3}\s+(?:\[(\d{4})(\d{2})(\d{2})\][^\n]*|(\d{4}-\d{2}-\d{2})[^\n]*)/gm;
 
-    if (!decision && !body.trim()) continue;
+  const positions: Array<{ index: number; title: string; date: string }> = [];
+  let match: RegExpExecArray | null;
 
-    // 불릿 포인트 파싱 (간단히)
-    const parseLines = (text: string) =>
-      text
-        .split('\n')
-        .map((l) => l.replace(/^[-*]\s*/, '').trim())
-        .filter(Boolean);
+  while ((match = sectionRegex.exec(fileContent)) !== null) {
+    let date = '';
+    const title = match[0].replace(/^#+\s+/, '').trim();
 
-    const summary = `[${dateStr}] CEO 결정: ${parseLines(decision)[0] ?? '기록 없음'}`;
+    if (match[1] && match[2] && match[3]) {
+      // [YYYYMMDD] 형식
+      date = `${match[1]}-${match[2]}-${match[3]}`;
+    } else if (match[4]) {
+      // YYYY-MM-DD 형식
+      date = match[4];
+    }
+
+    if (date) {
+      positions.push({ index: match.index, title, date });
+    }
+  }
+
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i].index;
+    const end = positions[i + 1]?.index ?? fileContent.length;
+    const sectionContent = fileContent.slice(start, end).trim();
+
+    // 사용법/헤더 섹션 스킵
+    if (positions[i].title.includes('사용 방법')) continue;
+    // 내용이 너무 짧으면 스킵
+    if (sectionContent.length < 20) continue;
 
     entries.push({
-      summary,
-      details: {
-        date: dateStr,
-        decisions: parseLines(decision),
-        results: parseLines(result),
-        memo: parseLines(memo),
-        migrated_from: 'strategy-log.md',
-      },
-      occurred_at: date,
+      sectionTitle: positions[i].title,
+      content: sectionContent,
+      date: positions[i].date,
     });
   }
 
   return entries;
 }
 
-async function migrateStrategyLog(): Promise<number> {
+async function migrateStrategyLog(dryRun: boolean): Promise<number> {
   const filePath = path.join(MEMORY_DIR, 'strategy-log.md');
   if (!fs.existsSync(filePath)) {
-    console.log('  strategy-log.md 없음, 스킵');
+    log('  [1] strategy-log.md 없음, 스킵');
     return 0;
   }
 
@@ -90,7 +111,147 @@ async function migrateStrategyLog(): Promise<number> {
   const entries = parseStrategyLog(content);
 
   if (entries.length === 0) {
-    console.log('  strategy-log.md: 파싱된 항목 없음');
+    log('  [1] strategy-log.md: 파싱된 섹션 없음');
+    return 0;
+  }
+
+  log(`  [1] strategy-log.md: ${entries.length}개 섹션 파싱됨`);
+
+  if (dryRun) {
+    for (const e of entries) {
+      log(`      [DRY-RUN] agent_memories <- ${e.sectionTitle} (${e.date})`);
+    }
+    return entries.length;
+  }
+
+  // 멱등성: 이미 같은 source로 삽입된 기록이 있으면 스킵
+  const existingRows = await db
+    .select({ source: agentMemories.source })
+    .from(agentMemories)
+    .where(eq(agentMemories.source, 'strategy-log-migration'));
+
+  if (existingRows.length > 0) {
+    log(`  [1] strategy-log-migration: 이미 ${existingRows.length}개 존재, 스킵`);
+    return 0;
+  }
+
+  let inserted = 0;
+  for (const entry of entries) {
+    try {
+      await db.insert(agentMemories).values({
+        agent_id: 'minjun-ceo',
+        scope: 'global',
+        memory_type: 'decision',
+        content: entry.content,
+        importance: 0.8,
+        source: 'strategy-log-migration',
+      });
+      inserted++;
+      log(`      OK: ${entry.sectionTitle}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`      WARN: ${entry.sectionTitle} 삽입 실패 — ${msg}`);
+    }
+  }
+
+  log(`  [1] agent_memories 삽입: ${inserted}/${entries.length}개`);
+  return inserted;
+}
+
+// ─── 2. experiment-log.md → agent_episodes ──────────────────────────────────
+
+interface ExperimentEntry {
+  id: string;
+  hypothesis: string;
+  details: Record<string, unknown>;
+}
+
+function parseExperimentLog(fileContent: string): ExperimentEntry[] {
+  const entries: ExperimentEntry[] = [];
+
+  // ## EXP-YYYY-MM-DD-N 형식
+  const expRegex = /^##\s+(EXP-\d{4}-\d{2}-\d{2}-\d+)\s*$/gm;
+  const positions: Array<{ index: number; id: string }> = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = expRegex.exec(fileContent)) !== null) {
+    positions.push({ index: match.index, id: match[1] });
+  }
+
+  if (positions.length === 0) return entries;
+
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i].index;
+    const end = positions[i + 1]?.index ?? fileContent.length;
+    const body = fileContent.slice(start, end);
+
+    const hypothesisMatch = body.match(/###\s*가설\s*\n([\s\S]*?)(?=###|$)/);
+    const variablesMatch = body.match(/###\s*변수\s*\n([\s\S]*?)(?=###|$)/);
+    const resultMatch = body.match(/###\s*결과\s*\n([\s\S]*?)(?=###|$)/);
+    const verdictMatch = body.match(/###\s*Verdict\s*\n([\s\S]*?)(?=###|$)/);
+
+    const hypothesis = hypothesisMatch?.[1]?.trim() ?? '';
+    if (!hypothesis) continue;
+
+    const parseLines = (text: string): string[] =>
+      text
+        .split('\n')
+        .map((l) => l.replace(/^[-*]\s*/, '').trim())
+        .filter(Boolean);
+
+    entries.push({
+      id: positions[i].id,
+      hypothesis,
+      details: {
+        experiment_id: positions[i].id,
+        hypothesis,
+        variables: parseLines(variablesMatch?.[1] ?? ''),
+        results: parseLines(resultMatch?.[1] ?? ''),
+        verdict: parseLines(verdictMatch?.[1] ?? ''),
+        migrated_from: 'experiment-log.md',
+      },
+    });
+  }
+
+  return entries;
+}
+
+async function migrateExperimentLog(dryRun: boolean): Promise<number> {
+  const filePath = path.join(MEMORY_DIR, 'experiment-log.md');
+  if (!fs.existsSync(filePath)) {
+    log('  [2] experiment-log.md 없음, 스킵');
+    return 0;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const entries = parseExperimentLog(content);
+
+  if (entries.length === 0) {
+    log('  [2] experiment-log.md: 기록된 실험 없음 (템플릿만 존재), 스킵');
+    return 0;
+  }
+
+  log(`  [2] experiment-log.md: ${entries.length}개 실험 파싱됨`);
+
+  if (dryRun) {
+    for (const e of entries) {
+      log(`      [DRY-RUN] agent_episodes <- ${e.id}: ${e.hypothesis.slice(0, 60)}`);
+    }
+    return entries.length;
+  }
+
+  // 멱등성 체크
+  const existingRows = await db
+    .select({ event_type: agentEpisodes.event_type })
+    .from(agentEpisodes)
+    .where(eq(agentEpisodes.agent_id, 'system'));
+
+  const existingCount = existingRows.filter(
+    (r) => r.event_type === 'experiment',
+  ).length;
+
+  if (existingCount >= entries.length) {
+    log(`  [2] 이미 ${existingCount}개 존재, 스킵`);
     return 0;
   }
 
@@ -98,300 +259,189 @@ async function migrateStrategyLog(): Promise<number> {
   for (const entry of entries) {
     try {
       await db.insert(agentEpisodes).values({
-        agent_id: 'minjun-ceo',
-        event_type: 'decision',
-        summary: entry.summary,
-        details: entry.details,
-        occurred_at: entry.occurred_at,
-      });
-      inserted++;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`  strategy-log 항목 삽입 실패: ${msg}`);
-    }
-  }
-
-  console.log(`  strategy-log.md → agent_episodes: ${inserted}/${entries.length}개 삽입`);
-  return inserted;
-}
-
-// ─── 2. experiment-log.md → experiments (보강) ─────────────────────────────
-// 현재 실험 데이터 없음 — 파일 구조 확인 후 스킵 (빈 템플릿)
-
-async function migrateExperimentLog(): Promise<number> {
-  const filePath = path.join(MEMORY_DIR, 'experiment-log.md');
-  if (!fs.existsSync(filePath)) {
-    console.log('  experiment-log.md 없음, 스킵');
-    return 0;
-  }
-
-  const content = fs.readFileSync(filePath, 'utf-8');
-
-  // EXP-YYYY-MM-DD-N 형식의 실험 블록 찾기
-  const expBlockRegex = /^##\s+(EXP-\d{4}-\d{2}-\d{2}-\d+)\s*$/gm;
-  const expIds = [...content.matchAll(expBlockRegex)].map((m) => m[1]);
-
-  if (expIds.length === 0) {
-    console.log('  experiment-log.md: 기록된 실험 없음 (템플릿만 존재)');
-    return 0;
-  }
-
-  // 실제 실험 항목이 있는 경우 에피소드로 기록
-  let inserted = 0;
-  for (const expId of expIds) {
-    try {
-      await db.insert(agentEpisodes).values({
-        agent_id: 'minjun-ceo',
+        agent_id: 'system',
         event_type: 'experiment',
-        summary: `실험 기록 마이그레이션: ${expId}`,
-        details: { experiment_id: expId, migrated_from: 'experiment-log.md' },
+        summary: `${entry.id}: ${entry.hypothesis}`,
+        details: entry.details,
       });
       inserted++;
-    } catch (err: unknown) {
+      log(`      OK: ${entry.id}`);
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`  experiment-log 항목 삽입 실패: ${msg}`);
+      log(`      WARN: ${entry.id} 삽입 실패 — ${msg}`);
     }
   }
 
-  console.log(`  experiment-log.md → agent_episodes: ${inserted}/${expIds.length}개 삽입`);
+  log(`  [2] agent_episodes 삽입: ${inserted}/${entries.length}개`);
   return inserted;
 }
 
-// ─── 3. category-playbook/*.md → agent_memories ────────────────────────────
+// ─── 3. category-playbook/*.md → agent_memories ─────────────────────────────
 
-const CATEGORY_AGENT_MAP: Record<string, string> = {
-  'beauty.md': 'bini-beauty-creator',
-  'health.md': 'hana-health-editor',
-  'lifestyle.md': 'sora-lifestyle-curator',
-  'diet.md': 'jiwoo-diet-coach',
+const PLAYBOOK_AGENT_MAP: Record<string, { agentId: string; label: string }> = {
+  'beauty.md':    { agentId: 'bini-beauty',       label: 'beauty' },
+  'health.md':    { agentId: 'hana-health',        label: 'health' },
+  'lifestyle.md': { agentId: 'sora-lifestyle',     label: 'lifestyle' },
+  'diet.md':      { agentId: 'jiwoo-diet',         label: 'diet' },
 };
 
-function parseCategoryPlaybook(
-  content: string,
-  filename: string,
-): Array<{ content: string; importance: number }> {
-  const memories: Array<{ content: string; importance: number }> = [];
-
-  // "잘 되는 패턴" 섹션 추출
-  const goodPatternMatch = content.match(/##\s*잘 되는 패턴([\s\S]*?)(?=##|$)/);
-  if (goodPatternMatch?.[1]) {
-    const section = goodPatternMatch[1].trim();
-    // 테이블 행에서 실제 데이터 추출 (헤더 제외, "데이터 축적 중" 제외)
-    const tableRows = section
-      .split('\n')
-      .filter((l) => l.startsWith('|') && !l.includes('---') && !l.includes('데이터 축적'))
-      .slice(1); // 헤더 행 제외
-
-    for (const row of tableRows) {
-      const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
-      if (cells.length >= 2 && cells[0] && !cells[0].includes('---')) {
-        memories.push({
-          content: `[${filename.replace('.md', '')} 플레이북] 잘 되는 패턴: ${cells.join(' — ')}`,
-          importance: 0.7,
-        });
-      }
-    }
-  }
-
-  // "안 되는 패턴" 섹션 추출
-  const badPatternMatch = content.match(/##\s*안 되는 패턴([\s\S]*?)(?=##|$)/);
-  if (badPatternMatch?.[1]) {
-    const section = badPatternMatch[1].trim();
-    const tableRows = section
-      .split('\n')
-      .filter((l) => l.startsWith('|') && !l.includes('---') && !l.includes('데이터 축적'))
-      .slice(1);
-
-    for (const row of tableRows) {
-      const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
-      if (cells.length >= 2 && cells[0] && !cells[0].includes('---')) {
-        memories.push({
-          content: `[${filename.replace('.md', '')} 플레이북] 안 되는 패턴: ${cells.join(' — ')}`,
-          importance: 0.6,
-        });
-      }
-    }
-  }
-
-  return memories;
-}
-
-async function migrateCategoryPlaybooks(): Promise<number> {
+async function migrateCategoryPlaybooks(dryRun: boolean): Promise<number> {
   const playbookDir = path.join(MEMORY_DIR, 'category-playbook');
   if (!fs.existsSync(playbookDir)) {
-    console.log('  category-playbook/ 없음, 스킵');
+    log('  [3] category-playbook/ 없음, 스킵');
     return 0;
   }
 
   const files = fs.readdirSync(playbookDir).filter((f) => f.endsWith('.md'));
-  let inserted = 0;
+  let totalInserted = 0;
 
   for (const filename of files) {
-    const content = fs.readFileSync(path.join(playbookDir, filename), 'utf-8');
-    const memories = parseCategoryPlaybook(content, filename);
-    const agentId = CATEGORY_AGENT_MAP[filename] ?? 'system';
-
-    if (memories.length === 0) {
-      console.log(`  ${filename}: 파싱된 패턴 없음 (데이터 축적 중)`);
+    const info = PLAYBOOK_AGENT_MAP[filename];
+    if (!info) {
+      log(`  [3] ${filename}: 매핑 없음, 스킵`);
       continue;
     }
 
-    for (const mem of memories) {
-      try {
-        await db.insert(agentMemories).values({
-          agent_id: agentId,
-          scope: 'marketing',
-          memory_type: 'pattern',
-          content: mem.content,
-          importance: mem.importance,
-          source: `category-playbook/${filename}`,
-        });
-        inserted++;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`  ${filename} 패턴 삽입 실패: ${msg}`);
-      }
+    const filePath = path.join(playbookDir, filename);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const source = `playbook-${info.label}-migration`;
+
+    if (isTemplateOnly(content)) {
+      log(`  [3] ${filename}: 빈 파일(템플릿만), 스킵`);
+      continue;
     }
 
-    console.log(`  ${filename} → agent_memories: ${memories.length}개 삽입`);
-  }
+    log(`  [3] ${filename}: 데이터 있음 → 마이그레이션`);
 
-  return inserted;
-}
-
-// ─── 4. weekly-insights.md → agent_memories ────────────────────────────────
-
-function parseWeeklyInsights(
-  content: string,
-): Array<{ content: string; importance: number; occurred_at?: Date }> {
-  const insights: Array<{ content: string; importance: number; occurred_at?: Date }> = [];
-
-  // ## YYYY-WW 블록 파싱
-  const weekBlockRegex = /^##\s+(\d{4}-\d{2})\s+\([^)]+\)/gm;
-  const blocks = content.split(weekBlockRegex);
-
-  for (let i = 1; i < blocks.length; i += 2) {
-    const weekId = blocks[i]?.trim();
-    const body = blocks[i + 1] ?? '';
-
-    // 전략 제안 섹션
-    const strategyMatch = body.match(/###\s*다음\s*주\s*전략\s*제안([\s\S]*?)(?=###|$)/);
-    if (strategyMatch?.[1]) {
-      const lines = strategyMatch[1]
-        .split('\n')
-        .map((l) => l.replace(/^[-*\d.]\s*/, '').trim())
-        .filter((l) => l && !l.includes('데이터 축적'));
-
-      for (const line of lines) {
-        insights.push({
-          content: `[주간 인사이트 ${weekId}] 전략: ${line}`,
-          importance: 0.75,
-        });
-      }
+    if (dryRun) {
+      log(`      [DRY-RUN] agent_memories <- ${info.agentId} / scope=marketing / type=playbook`);
+      totalInserted++;
+      continue;
     }
 
-    // 패턴 분석 섹션
-    const patternMatch = body.match(/###\s*패턴\s*분석([\s\S]*?)(?=###|$)/);
-    if (patternMatch?.[1]) {
-      const lines = patternMatch[1]
-        .split('\n')
-        .map((l) => l.replace(/^[-*]\s*/, '').trim())
-        .filter((l) => l && !l.includes('데이터 축적'));
+    // 멱등성: 같은 source로 이미 삽입된 기록이 있으면 스킵
+    const existing = await db
+      .select({ id: agentMemories.id })
+      .from(agentMemories)
+      .where(eq(agentMemories.source, source));
 
-      for (const line of lines) {
-        insights.push({
-          content: `[주간 인사이트 ${weekId}] 패턴: ${line}`,
-          importance: 0.65,
-        });
-      }
+    if (existing.length > 0) {
+      log(`  [3] ${filename}: 이미 ${existing.length}개 존재(${source}), 스킵`);
+      continue;
     }
-  }
 
-  return insights;
-}
-
-async function migrateWeeklyInsights(): Promise<number> {
-  const filePath = path.join(MEMORY_DIR, 'weekly-insights.md');
-  if (!fs.existsSync(filePath)) {
-    console.log('  weekly-insights.md 없음, 스킵');
-    return 0;
-  }
-
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const insights = parseWeeklyInsights(content);
-
-  if (insights.length === 0) {
-    console.log('  weekly-insights.md: 파싱된 인사이트 없음 (데이터 축적 중)');
-    return 0;
-  }
-
-  let inserted = 0;
-  for (const insight of insights) {
     try {
       await db.insert(agentMemories).values({
-        agent_id: 'seoyeon-analyst',
-        scope: 'global',
-        memory_type: 'insight',
-        content: insight.content,
-        importance: insight.importance,
-        source: 'weekly-insights.md',
+        agent_id: info.agentId,
+        scope: 'marketing',
+        memory_type: 'playbook',
+        content,
+        importance: 0.7,
+        source,
       });
-      inserted++;
-    } catch (err: unknown) {
+      totalInserted++;
+      log(`      OK: ${filename} → agent_memories (${info.agentId})`);
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`  weekly-insights 항목 삽입 실패: ${msg}`);
+      log(`      WARN: ${filename} 삽입 실패 — ${msg}`);
     }
   }
 
-  console.log(`  weekly-insights.md → agent_memories: ${inserted}/${insights.length}개 삽입`);
-  return inserted;
+  log(`  [3] category-playbook 삽입: ${totalInserted}개`);
+  return totalInserted;
 }
 
-// ─── 5. agents/memory/ → agents/memory-archive/ 리네임 ────────────────────
+// ─── 4. system_state 마이그레이션 기록 ──────────────────────────────────────
 
-function archiveMemoryDir(): void {
-  if (!fs.existsSync(MEMORY_DIR)) {
-    console.log('  agents/memory/ 없음, 스킵');
-    return;
+async function checkAlreadyMigrated(): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ value: systemState.value })
+      .from(systemState)
+      .where(eq(systemState.key, MIGRATION_KEY));
+    return rows.length > 0;
+  } catch {
+    return false;
   }
-
-  if (fs.existsSync(ARCHIVE_DIR)) {
-    console.log('  agents/memory-archive/ 이미 존재, 스킵');
-    return;
-  }
-
-  fs.renameSync(MEMORY_DIR, ARCHIVE_DIR);
-  console.log('  agents/memory/ → agents/memory-archive/ 리네임 완료');
 }
 
-// ─── 메인 ──────────────────────────────────────────────────────────────────
+async function recordMigration(
+  filesMigrated: string[],
+  recordsCreated: number,
+): Promise<void> {
+  const value = {
+    completed_at: new Date().toISOString(),
+    files_migrated: filesMigrated,
+    records_created: recordsCreated,
+  };
+
+  try {
+    await db
+      .insert(systemState)
+      .values({
+        key: MIGRATION_KEY,
+        value,
+        updated_by: 'migrate-memory-to-db',
+      })
+      .onConflictDoUpdate({
+        target: systemState.key,
+        set: { value, updated_at: new Date(), updated_by: 'migrate-memory-to-db' },
+      });
+    log(`  [4] system_state['${MIGRATION_KEY}'] 기록 완료`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`  [4] system_state 기록 실패 — ${msg}`);
+  }
+}
+
+// ─── 메인 ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('=== BiniLab 파일→DB 마이그레이션 시작 ===\n');
+  if (DRY_RUN) {
+    log('=== [DRY-RUN] BiniLab 파일→DB 마이그레이션 (DB 쓰기 없음) ===\n');
+  } else {
+    log('=== BiniLab 파일→DB 마이그레이션 시작 ===\n');
+  }
 
   if (!fs.existsSync(MEMORY_DIR)) {
-    console.error(`ERROR: ${MEMORY_DIR} 디렉토리를 찾을 수 없습니다.`);
+    log(`ERROR: ${MEMORY_DIR} 디렉토리를 찾을 수 없습니다.`);
     process.exit(1);
   }
 
+  // 중복 실행 방지
+  if (!DRY_RUN) {
+    const alreadyDone = await checkAlreadyMigrated();
+    if (alreadyDone) {
+      log(`이미 마이그레이션 완료됨 (system_state['${MIGRATION_KEY}'] 존재). 스킵.`);
+      log('재실행하려면 system_state에서 해당 키를 삭제하세요.');
+      process.exit(0);
+    }
+  }
+
   let totalInserted = 0;
+  const filesMigrated: string[] = [];
 
-  console.log('[1/4] strategy-log.md → agent_episodes');
-  totalInserted += await migrateStrategyLog();
+  log('[1/3] strategy-log.md → agent_memories');
+  const n1 = await migrateStrategyLog(DRY_RUN);
+  if (n1 > 0) filesMigrated.push('strategy-log.md');
+  totalInserted += n1;
 
-  console.log('\n[2/4] experiment-log.md → agent_episodes');
-  totalInserted += await migrateExperimentLog();
+  log('\n[2/3] experiment-log.md → agent_episodes');
+  const n2 = await migrateExperimentLog(DRY_RUN);
+  if (n2 > 0) filesMigrated.push('experiment-log.md');
+  totalInserted += n2;
 
-  console.log('\n[3/4] category-playbook/*.md → agent_memories');
-  totalInserted += await migrateCategoryPlaybooks();
+  log('\n[3/3] category-playbook/*.md → agent_memories');
+  const n3 = await migrateCategoryPlaybooks(DRY_RUN);
+  if (n3 > 0) filesMigrated.push('category-playbook/');
+  totalInserted += n3;
 
-  console.log('\n[4/4] weekly-insights.md → agent_memories');
-  totalInserted += await migrateWeeklyInsights();
+  if (!DRY_RUN && totalInserted > 0) {
+    log('\n[4] system_state 기록');
+    await recordMigration(filesMigrated, totalInserted);
+  }
 
-  console.log('\n[5/5] agents/memory/ → agents/memory-archive/');
-  archiveMemoryDir();
-
-  console.log(`\n=== 마이그레이션 완료: 총 ${totalInserted}개 항목 삽입 ===`);
+  log(`\n=== 마이그레이션 ${DRY_RUN ? '[DRY-RUN] ' : ''}완료: 총 ${totalInserted}개 항목 처리 ===`);
   process.exit(0);
 }
 

@@ -171,6 +171,7 @@ async function main(): Promise<void> {
               and(
                 eq(trendKeywords.selected, true),
                 gte(trendKeywords.fetched_at, todayStart),
+                eq(trendKeywords.keyword, kw),
               )
             );
           log(`posts_collected 업데이트: "${kw}" → ${cnt}개`);

@@ -1499,6 +1499,24 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
               isOldPost = true;
               log(`  ${pid} — "${txt}" → ${sinceHours}h 초과`);
             }
+          } else {
+            const hourMatch = txt.match(/(\d+)\s*(시간|h)/);
+            if (hourMatch) {
+              const hours = parseInt(hourMatch[1], 10);
+              if (hours > sinceHours) {
+                isOldPost = true;
+                log(`  ${pid} — "${txt}" → ${sinceHours}h 초과`);
+              }
+            } else {
+              const weekMatch = txt.match(/(\d+)\s*(주|w)/);
+              if (weekMatch) {
+                const weeks = parseInt(weekMatch[1], 10);
+                if (weeks * 168 > sinceHours) {
+                  isOldPost = true;
+                  log(`  ${pid} — "${txt}" → ${sinceHours}h 초과`);
+                }
+              }
+            }
           }
         }
 

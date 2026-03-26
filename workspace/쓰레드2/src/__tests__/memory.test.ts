@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   task_id TEXT,
   room_id TEXT,
   reply_to TEXT,
+  payload JSONB,
   mentions JSONB DEFAULT '[]'
 );
 `;
@@ -318,7 +319,7 @@ describe('sendMessage() with roomId', () => {
 
     const msg = await sendMessage(
       'minjun-ceo', 'bini-beauty', 'meeting', '전략 토론',
-      undefined, undefined, undefined, 'standup-20260324', db,
+      undefined, undefined, undefined, 'standup-20260324', undefined, db,
     );
 
     expect(msg.room_id).toBe('standup-20260324');
@@ -327,7 +328,7 @@ describe('sendMessage() with roomId', () => {
   it('room_id is null when not provided', async () => {
     const { db } = await createTestDb();
 
-    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'hello', undefined, undefined, undefined, undefined, db);
+    const msg = await sendMessage('minjun-ceo', 'bini-beauty', 'standup', 'hello', undefined, undefined, undefined, undefined, undefined, db);
 
     expect(msg.room_id).toBeNull();
   });
@@ -337,9 +338,9 @@ describe('getMessagesByRoomId()', () => {
   it('returns all messages for a room_id', async () => {
     const { db } = await createTestDb();
 
-    await sendMessage('minjun-ceo', 'bini-beauty', 'meeting', 'msg1', undefined, undefined, undefined, 'room-A', db);
-    await sendMessage('bini-beauty', 'minjun-ceo', 'meeting', 'msg2', undefined, undefined, undefined, 'room-A', db);
-    await sendMessage('seoyeon', 'minjun-ceo', 'standup', 'msg3', undefined, undefined, undefined, 'room-B', db);
+    await sendMessage('minjun-ceo', 'bini-beauty', 'meeting', 'msg1', undefined, undefined, undefined, 'room-A', undefined, db);
+    await sendMessage('bini-beauty', 'minjun-ceo', 'meeting', 'msg2', undefined, undefined, undefined, 'room-A', undefined, db);
+    await sendMessage('seoyeon', 'minjun-ceo', 'standup', 'msg3', undefined, undefined, undefined, 'room-B', undefined, db);
 
     const msgs = await getMessagesByRoomId('room-A', db);
     expect(msgs).toHaveLength(2);

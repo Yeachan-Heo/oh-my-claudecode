@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   task_id TEXT,
   room_id TEXT,
   reply_to TEXT,
+  payload JSONB,
   mentions JSONB DEFAULT '[]'
 );
 `;

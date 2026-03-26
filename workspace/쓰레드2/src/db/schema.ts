@@ -901,13 +901,21 @@ export const agentMessages = pgTable(
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     read_by: jsonb('read_by').notNull().default([]),
     message_type: text('message_type').default('report'),
-    // 'report' | 'directive' | 'feedback' | 'handoff' | 'alert'
+    // 'report' | 'directive' | 'feedback' | 'handoff' | 'alert' | 'simulation'
+    // + 'task_assign' | 'task_result' | 'qa_request' | 'approval_request' | 'knowledge_update'
     task_id: text('task_id'),
     // 같은 daily-run 실행의 메시지를 묶는 ID (예: 'daily-20260323')
     room_id: text('room_id'),
     // 회의방 ID — 회의 메시지 그루핑 (v2 추가)
     reply_to: text('reply_to'),
     // 답장 대상 메시지 ID (Phase 4 chat)
+    payload: jsonb('payload'),
+    // 구조화된 데이터: {post_ids, scores, reasons, ...}
+    // message_type별 payload 스키마:
+    // 'task_assign': {task_id, priority, deadline}
+    // 'task_result': {task_id, status, output_data}
+    // 'qa_request': {post_id, issues}
+    // 'approval_request': {item_type, item_id}
     mentions: jsonb('mentions').$type<string[]>().default([]),
     // @멘션된 에이전트 ID 목록 (Phase 4 chat)
   },
@@ -1235,3 +1243,60 @@ export const chatParticipants = pgTable(
     index('idx_chat_participants_agent').on(table.agent_id),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Phase 2-A — 구조화된 업무 할당 + 프롬프트 버전 관리 + 시스템 상태
+// ---------------------------------------------------------------------------
+
+/**
+ * agent_tasks — 구조화된 업무 할당.
+ * status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+ */
+export const agentTasks = pgTable('agent_tasks', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  title: text('title').notNull(),
+  description: text('description'),
+  assigned_to: text('assigned_to').notNull(),
+  assigned_by: text('assigned_by').notNull(),
+  status: text('status').notNull().default('pending'),
+  priority: integer('priority').notNull().default(5),
+  input_data: jsonb('input_data'),
+  output_data: jsonb('output_data'),
+  depends_on: jsonb('depends_on').$type<string[]>().default([]),
+  deadline: timestamp('deadline', { withTimezone: true }),
+  started_at: timestamp('started_at', { withTimezone: true }),
+  completed_at: timestamp('completed_at', { withTimezone: true }),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('idx_agent_tasks_assigned').on(table.assigned_to),
+  index('idx_agent_tasks_status').on(table.status),
+]);
+
+/**
+ * agent_prompt_versions — 프롬프트 버전 관리.
+ * 에이전트별 프롬프트 이력 + 성과 스코어 + 활성 버전 관리.
+ */
+export const agentPromptVersions = pgTable('agent_prompt_versions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  agent_id: text('agent_id').notNull(),
+  version: integer('version').notNull(),
+  prompt_text: text('prompt_text').notNull(),
+  performance_score: real('performance_score'),
+  eval_data: jsonb('eval_data'),
+  is_active: boolean('is_active').notNull().default(false),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('idx_prompt_agent_version').on(table.agent_id, table.version),
+  index('idx_prompt_active').on(table.agent_id, table.is_active),
+]);
+
+/**
+ * system_state — 시스템 상태 key-value 스토어.
+ * 워밍업 상태, 파이프라인 플래그, 설정값 등을 저장.
+ */
+export const systemState = pgTable('system_state', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updated_by: text('updated_by'),
+});

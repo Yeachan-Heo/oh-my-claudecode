@@ -11,6 +11,7 @@ import { eq, and, gte, lt, desc } from 'drizzle-orm';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbLike = any;
+type AnyDb = DbLike;
 
 /**
  * 메시지 전송 — agent_messages 테이블에 저장.
@@ -24,7 +25,8 @@ export async function sendMessage(
   messageType?: string,
   taskId?: string,
   roomId?: string,
-  db: DbLike = defaultDb,
+  payload?: Record<string, unknown>,
+  db: AnyDb = defaultDb,
 ) {
   const id = crypto.randomUUID();
   const [row] = await db
@@ -40,6 +42,7 @@ export async function sendMessage(
       message_type: messageType ?? 'report',
       task_id: taskId ?? null,
       room_id: roomId ?? null,
+      payload: payload ?? null,
     })
     .returning();
   return row;
@@ -162,4 +165,36 @@ export async function getUnreadMessages(agentName: string, db: DbLike = defaultD
     const readBy = (r.read_by as string[]) ?? [];
     return !readBy.includes(agentName);
   });
+}
+
+/**
+ * 구조화 메시지 전송 — payload를 포함하는 타입 안전 헬퍼.
+ * messageType 기반으로 message 텍스트를 자동 생성할 수 있음.
+ */
+export async function sendStructuredMessage(
+  input: {
+    sender: string;
+    recipient: string;
+    channel: string;
+    messageType: string;
+    payload: Record<string, unknown>;
+    message?: string;
+    taskId?: string;
+    roomId?: string;
+  },
+  db: AnyDb = defaultDb,
+): Promise<void> {
+  const message = input.message ?? `[${input.messageType}]`;
+  await sendMessage(
+    input.sender,
+    input.recipient,
+    input.channel,
+    message,
+    undefined,
+    input.messageType,
+    input.taskId,
+    input.roomId,
+    input.payload,
+    db,
+  );
 }
