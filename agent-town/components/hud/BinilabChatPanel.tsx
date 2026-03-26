@@ -328,8 +328,12 @@ export default function BinilabChatPanel() {
       {/* Override flyout width for chat panel */}
       <style>{`
         .hud-flyout:has(> .hud-flyout__body > [data-chat-panel]) {
-          width: min(480px, calc(100vw - 60px)) !important;
-          max-height: 70vh !important;
+          overflow: visible !important;
+          width: auto !important;
+          max-height: none !important;
+        }
+        .hud-topright-flyout:has([data-chat-panel]) {
+          overflow: visible !important;
         }
       `}</style>
       <div
@@ -339,11 +343,18 @@ export default function BinilabChatPanel() {
           width: panelSize.width,
           height: panelSize.height,
           overflow: 'hidden',
-          position: 'relative',
+          position: 'fixed',
+          right: 8,
+          top: 56,
           minWidth: 320,
           minHeight: 350,
-          maxWidth: 800,
+          maxWidth: '90vw',
           maxHeight: '85vh',
+          background: 'rgba(10, 10, 20, 0.95)',
+          borderRadius: '8px',
+          border: '1px solid rgba(100, 200, 255, 0.15)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+          zIndex: 100,
         }}
       >
         {/* Left edge resize handle — 왼쪽으로 늘리기 */}
