@@ -14,6 +14,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { lspTools } from '../tools/lsp-tools.js';
 import { astTools } from '../tools/ast-tools.js';
 // IMPORTANT: Import from tool.js, NOT index.js!
@@ -36,6 +37,15 @@ interface ToolDef {
   schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>;
   handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
 }
+
+type StandaloneCallToolHandler = (
+  request: CallToolRequest,
+) => Promise<CallToolResult>;
+
+type StandaloneCallToolRequestRegistrar = (
+  schema: typeof CallToolRequestSchema,
+  handler: StandaloneCallToolHandler,
+) => void;
 
 // Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
 // Team runtime tools (omc_run_team_start, omc_run_team_status) live in the
@@ -162,7 +172,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+const setStandaloneCallToolRequestHandler =
+  server.setRequestHandler as unknown as StandaloneCallToolRequestRegistrar;
+
+setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   const tool = allTools.find(t => t.name === name);
