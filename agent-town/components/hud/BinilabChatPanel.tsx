@@ -49,21 +49,25 @@ export default function BinilabChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newRoomType, setNewRoomType] = useState<'dm' | 'meeting' | 'owner'>('dm');
+  const [selectedAgent, setSelectedAgent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  async function fetchRooms() {
+    try {
+      const res = await fetch('/api/chat/rooms');
+      if (!res.ok) return;
+      const json = await res.json();
+      setRooms(json.rooms ?? []);
+    } catch {
+      // ignore
+    }
+  }
 
   // Load rooms on mount
   useEffect(() => {
-    async function loadRooms() {
-      try {
-        const res = await fetch('/api/chat/rooms');
-        if (!res.ok) return;
-        const json = await res.json();
-        setRooms(json.rooms ?? []);
-      } catch {
-        // ignore
-      }
-    }
-    loadRooms();
+    fetchRooms();
   }, []);
 
   // Load messages when room is selected, auto-refresh every 5s
@@ -132,6 +136,30 @@ export default function BinilabChatPanel() {
     }
   }
 
+  async function handleCreateRoom() {
+    const participants =
+      newRoomType === 'dm'
+        ? ['sihun-owner', selectedAgent]
+        : ['sihun-owner'];
+
+    const res = await fetch('/api/chat/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: newRoomType,
+        name: newRoomType === 'dm' ? '' : `${newRoomType} 채팅방`,
+        participants,
+        created_by: 'sihun-owner',
+      }),
+    });
+
+    if (res.ok) {
+      setShowCreateForm(false);
+      setSelectedAgent('');
+      fetchRooms();
+    }
+  }
+
   return (
     <HudFlyout title="BiniLab 채팅" subtitle="에이전트 대화방">
       <div style={{ display: 'flex', height: 420, overflow: 'hidden' }}>
@@ -155,6 +183,119 @@ export default function BinilabChatPanel() {
           >
             채팅방
           </div>
+
+          {/* Create room button */}
+          <div style={{ padding: '0 6px 6px' }}>
+            <button
+              type="button"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              style={{
+                width: '100%',
+                padding: '6px',
+                background: 'rgba(78, 205, 196, 0.2)',
+                border: '1px solid rgba(78, 205, 196, 0.4)',
+                color: '#4ecdc4',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+              }}
+            >
+              + 새 채팅방
+            </button>
+
+            {showCreateForm && (
+              <div
+                style={{
+                  marginTop: '6px',
+                  padding: '8px',
+                  background: 'rgba(20,20,40,0.8)',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(100,200,255,0.15)',
+                }}
+              >
+                <select
+                  value={newRoomType}
+                  onChange={e => setNewRoomType(e.target.value as 'dm' | 'meeting' | 'owner')}
+                  style={{
+                    width: '100%',
+                    marginBottom: '6px',
+                    padding: '4px',
+                    background: '#1a1a2e',
+                    color: '#e0e8ff',
+                    border: '1px solid rgba(100,200,255,0.2)',
+                    borderRadius: '3px',
+                    fontSize: '11px',
+                  }}
+                >
+                  <option value="dm">1:1 DM</option>
+                  <option value="meeting">회의</option>
+                  <option value="owner">오너 채널</option>
+                </select>
+
+                {newRoomType === 'dm' && (
+                  <select
+                    value={selectedAgent}
+                    onChange={e => setSelectedAgent(e.target.value)}
+                    style={{
+                      width: '100%',
+                      marginBottom: '6px',
+                      padding: '4px',
+                      background: '#1a1a2e',
+                      color: '#e0e8ff',
+                      border: '1px solid rgba(100,200,255,0.2)',
+                      borderRadius: '3px',
+                      fontSize: '11px',
+                    }}
+                  >
+                    <option value="">에이전트 선택...</option>
+                    {BINILAB_AGENTS.filter(a => a.id !== 'sihun-owner').map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.role})
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={handleCreateRoom}
+                    disabled={newRoomType === 'dm' && !selectedAgent}
+                    style={{
+                      flex: 1,
+                      padding: '4px',
+                      background: '#4ecdc4',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: newRoomType === 'dm' && !selectedAgent ? 'not-allowed' : 'pointer',
+                      fontSize: '11px',
+                      opacity: newRoomType === 'dm' && !selectedAgent ? 0.5 : 1,
+                    }}
+                  >
+                    만들기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateForm(false)}
+                    style={{
+                      flex: 1,
+                      padding: '4px',
+                      background: 'rgba(255,255,255,0.1)',
+                      color: '#8090b0',
+                      border: '1px solid rgba(100,200,255,0.15)',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                    }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {rooms.length === 0 ? (
             <div style={{ padding: '8px', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
               채팅방 없음
