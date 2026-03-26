@@ -768,6 +768,7 @@ export default function BinilabChatPanel() {
                 ) : (
                   messages.map(msg => {
                     const isOwner = msg.sender === 'sihun-owner';
+                    const isDirective = msg.message_type === 'directive';
                     const color = getAgentColor(msg.sender);
                     return (
                       <div
@@ -776,13 +777,19 @@ export default function BinilabChatPanel() {
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: isOwner ? 'flex-end' : 'flex-start',
+                          ...(isDirective && {
+                            backgroundColor: '#e8f4fd',
+                            borderLeft: '3px solid #2196F3',
+                            padding: '8px 12px',
+                            borderRadius: '4px',
+                          }),
                         }}
                       >
                         {/* Sender label */}
                         <div
                           style={{
                             fontSize: 12,
-                            color: color,
+                            color: isDirective ? '#1565C0' : color,
                             marginBottom: 3,
                             fontWeight: 600,
                             display: 'flex',
@@ -802,6 +809,19 @@ export default function BinilabChatPanel() {
                               시뮬
                             </span>
                           )}
+                          {isDirective && (
+                            <span style={{
+                              fontSize: 10,
+                              color: '#1976D2',
+                              backgroundColor: '#BBDEFB',
+                              padding: '1px 6px',
+                              borderRadius: 3,
+                              marginLeft: 6,
+                              fontWeight: 'bold',
+                            }}>
+                              CEO 지시
+                            </span>
+                          )}
                         </div>
                         {/* Bubble */}
                         <div
@@ -809,12 +829,16 @@ export default function BinilabChatPanel() {
                             maxWidth: '80%',
                             padding: '11px 16px',
                             borderRadius: isOwner ? '8px 2px 8px 8px' : '2px 8px 8px 8px',
-                            background: isOwner
-                              ? 'rgba(255,215,0,0.2)'
-                              : 'rgba(255,255,255,0.08)',
-                            border: `1px solid ${isOwner ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.12)'}`,
-                            fontSize: 14,
-                            color: '#fff',
+                            background: isDirective
+                              ? 'rgba(33,150,243,0.12)'
+                              : isOwner
+                                ? 'rgba(255,215,0,0.2)'
+                                : 'rgba(255,255,255,0.08)',
+                            border: isDirective
+                              ? '1px solid rgba(33,150,243,0.35)'
+                              : `1px solid ${isOwner ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.12)'}`,
+                            fontSize: isDirective ? 15 : 14,
+                            color: isDirective ? '#e8f4fd' : '#fff',
                             lineHeight: 1.5,
                             wordBreak: 'break-word',
                           }}
