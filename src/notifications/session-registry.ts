@@ -267,11 +267,16 @@ function releaseRegistryLock(lock: RegistryLockHandle): void {
  * Execute critical section with registry lock, waiting up to cumulative deadline.
  * If the lock cannot be acquired within the deadline, proceeds best-effort without lock.
  */
-function withRegistryLockOrWait<T>(onLocked: () => T): T {
+function withRegistryLockOrWait<T>(onLocked: () => T, allowLockFree = false): T {
   const lock = acquireRegistryLockOrWait();
   if (lock === null) {
-    // Lock timed out (hung lock holder). Proceed best-effort without lock.
-    return onLocked();
+    if (allowLockFree) {
+      // Read-only operations can proceed best-effort without lock
+      return onLocked();
+    }
+    // Write operations must not proceed without lock — return silently
+    // to avoid data corruption from concurrent writers
+    return undefined as T;
   }
   try {
     return onLocked();

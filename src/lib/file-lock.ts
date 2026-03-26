@@ -105,40 +105,54 @@ function tryAcquireSync(
 ): FileLockHandle | null {
   ensureDirSync(path.dirname(lockPath));
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(
-        lockPath,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
-        0o600,
-      );
-      const payload = JSON.stringify({
-        pid: process.pid,
-        timestamp: Date.now(),
-      });
-      writeSync(fd, payload, null, "utf-8");
-      return { fd, path: lockPath };
-    } catch (err: unknown) {
-      if (
-        err &&
-        typeof err === "object" &&
-        "code" in err &&
-        (err as { code: string }).code === "EEXIST"
-      ) {
-        if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
-          try {
-            unlinkSync(lockPath);
-          } catch {
-            /* another process reaped it */
-          }
-          continue;
+  try {
+    const fd = openSync(
+      lockPath,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+      0o600,
+    );
+    const payload = JSON.stringify({
+      pid: process.pid,
+      timestamp: Date.now(),
+    });
+    writeSync(fd, payload, null, "utf-8");
+    return { fd, path: lockPath };
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "EEXIST"
+    ) {
+      // Lock file exists — check if stale
+      if (isLockStale(lockPath, staleLockMs)) {
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // Another process reaped it — fall through to retry
         }
-        return null;
+        // Immediately retry a single time after reaping stale lock
+        try {
+          const fd = openSync(
+            lockPath,
+            fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+            0o600,
+          );
+          const payload = JSON.stringify({
+            pid: process.pid,
+            timestamp: Date.now(),
+          });
+          writeSync(fd, payload, null, "utf-8");
+          return { fd, path: lockPath };
+        } catch {
+          // Another process won the race — lock is legitimately held
+          return null;
+        }
       }
-      throw err;
+      return null;
     }
+    throw err;
   }
-  return null;
 }
 
 /**
@@ -159,14 +173,13 @@ export function acquireFileLockSync(
   const handle = tryAcquireSync(lockPath, staleLockMs);
   if (handle || timeoutMs <= 0) return handle;
 
-  // Retry loop with busy-wait using Atomics (avoids blocking the event loop
-  // in a way that prevents signal handling, but is acceptable for short locks)
+  // Retry loop with Date.now() polling (Atomics.wait throws on the main thread)
   const deadline = Date.now() + timeoutMs;
-  const sharedBuf = new SharedArrayBuffer(4);
-  const sharedArr = new Int32Array(sharedBuf);
 
   while (Date.now() < deadline) {
-    Atomics.wait(sharedArr, 0, 0, Math.min(retryDelayMs, deadline - Date.now()));
+    // Synchronous spin-wait for retryDelayMs (acceptable for short lock waits)
+    const waitUntil = Math.min(Date.now() + retryDelayMs, deadline);
+    while (Date.now() < waitUntil) { /* spin */ }
     const retryHandle = tryAcquireSync(lockPath, staleLockMs);
     if (retryHandle) return retryHandle;
   }

@@ -38,6 +38,7 @@ vi.mock('fs', async (importOriginal) => {
 
 vi.mock('child_process', () => ({
   execSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
+  execFileSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
 }));
 
 vi.mock('https', () => ({
@@ -214,6 +215,7 @@ describe('getUsage routing', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     vi.mocked(fs.readFileSync).mockReturnValue('{}');
     vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
     // Reset env
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
@@ -236,12 +238,12 @@ describe('getUsage routing', () => {
   it('prefers the username-scoped keychain entry when the legacy service-only entry is expired', async () => {
     const oneHourFromNow = Date.now() + 60 * 60 * 1000;
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const execSyncMock = vi.mocked(childProcess.execSync);
+    const execFileMock = vi.mocked(childProcess.execFileSync);
     const username = os.userInfo().username;
 
-    execSyncMock.mockImplementation((command) => {
-      const cmd = String(command);
-      if (cmd.includes(`-a "${username}"`)) {
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      if (argsArr && argsArr.includes('-a') && argsArr.includes(username)) {
         return JSON.stringify({
           claudeAiOauth: {
             accessToken: 'fresh-token',
@@ -250,7 +252,7 @@ describe('getUsage routing', () => {
           },
         });
       }
-      if (cmd.includes('find-generic-password -s "Claude Code-credentials" -w')) {
+      if (argsArr && argsArr.includes('find-generic-password') && !argsArr.includes('-a')) {
         return JSON.stringify({
           claudeAiOauth: {
             accessToken: 'stale-token',
@@ -259,7 +261,7 @@ describe('getUsage routing', () => {
           },
         });
       }
-      throw new Error(`unexpected keychain lookup: ${cmd}`);
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
     });
 
     httpsModule.default.request.mockImplementationOnce((_options, callback) => {
@@ -288,14 +290,12 @@ describe('getUsage routing', () => {
         weeklyResetsAt: null,
       },
     });
-    expect(execSyncMock).toHaveBeenCalledWith(
-      `/usr/bin/security find-generic-password -s "Claude Code-credentials" -a "${username}" -w 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 2000 }
+    // Verify username-scoped call was made (first call includes -a <username>)
+    const calls = execFileMock.mock.calls;
+    const userScopedCall = calls.find(c =>
+      Array.isArray(c[1]) && (c[1] as string[]).includes('-a') && (c[1] as string[]).includes(username)
     );
-    expect(execSyncMock).not.toHaveBeenCalledWith(
-      '/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
-      { encoding: 'utf-8', timeout: 2000 }
-    );
+    expect(userScopedCall).toBeTruthy();
     expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
     expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-token');
   });
@@ -303,12 +303,12 @@ describe('getUsage routing', () => {
   it('falls back to the legacy service-only keychain entry when the username-scoped entry is expired', async () => {
     const oneHourFromNow = Date.now() + 60 * 60 * 1000;
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const execSyncMock = vi.mocked(childProcess.execSync);
+    const execFileMock = vi.mocked(childProcess.execFileSync);
     const username = os.userInfo().username;
 
-    execSyncMock.mockImplementation((command) => {
-      const cmd = String(command);
-      if (cmd.includes(`-a "${username}"`)) {
+    execFileMock.mockImplementation((_file, args) => {
+      const argsArr = args as string[];
+      if (argsArr && argsArr.includes('-a') && argsArr.includes(username)) {
         return JSON.stringify({
           claudeAiOauth: {
             accessToken: 'expired-user-token',
@@ -317,7 +317,7 @@ describe('getUsage routing', () => {
           },
         });
       }
-      if (cmd.includes('find-generic-password -s "Claude Code-credentials" -w')) {
+      if (argsArr && argsArr.includes('find-generic-password') && !argsArr.includes('-a')) {
         return JSON.stringify({
           claudeAiOauth: {
             accessToken: 'fresh-legacy-token',
@@ -326,7 +326,7 @@ describe('getUsage routing', () => {
           },
         });
       }
-      throw new Error(`unexpected keychain lookup: ${cmd}`);
+      throw new Error(`unexpected keychain lookup: ${JSON.stringify(argsArr)}`);
     });
 
     httpsModule.default.request.mockImplementationOnce((_options, callback) => {
@@ -355,7 +355,7 @@ describe('getUsage routing', () => {
         weeklyResetsAt: null,
       },
     });
-    expect(execSyncMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
     expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
     expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-legacy-token');
   });

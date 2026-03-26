@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'fs';
 import { getClaudeConfigDir } from '../utils/paths.js';
 import { join, dirname } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { userInfo } from 'os';
 import https from 'https';
@@ -314,11 +314,15 @@ function isCredentialExpired(creds: OAuthCredentials): boolean {
 
 function readKeychainCredential(serviceName: string, account?: string): OAuthCredentials | null {
   try {
-    const accountArg = account ? ` -a "${account}"` : '';
-    const result = execSync(
-      `/usr/bin/security find-generic-password -s "${serviceName}"${accountArg} -w 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 2000 }
-    ).trim();
+    const args = ['find-generic-password', '-s', serviceName, '-w'];
+    if (account) {
+      args.splice(2, 0, '-a', account);
+    }
+    const result = execFileSync('/usr/bin/security', args, {
+      encoding: 'utf-8',
+      timeout: 2000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
 
     if (!result) return null;
 

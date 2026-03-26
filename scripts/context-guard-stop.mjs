@@ -172,9 +172,16 @@ function estimateContextPercent(transcriptPath) {
  * Retry guard: track how many times we've blocked this transcript.
  * Prevents infinite block loops by capping at MAX_BLOCKS.
  */
+function getGuardFilePath(sessionId) {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+  const guardDir = join(configDir, 'projects', '.omc-guards');
+  mkdirSync(guardDir, { recursive: true, mode: 0o700 });
+  return join(guardDir, `context-guard-${sessionId}.json`);
+}
+
 function getBlockCount(sessionId) {
   if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return 0;
-  const guardFile = join(tmpdir(), `omc-context-guard-${sessionId}.json`);
+  const guardFile = getGuardFilePath(sessionId);
   try {
     if (existsSync(guardFile)) {
       const data = JSON.parse(readFileSync(guardFile, 'utf-8'));
@@ -186,14 +193,14 @@ function getBlockCount(sessionId) {
 
 function incrementBlockCount(sessionId) {
   if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) return;
-  const guardFile = join(tmpdir(), `omc-context-guard-${sessionId}.json`);
+  const guardFile = getGuardFilePath(sessionId);
   try {
     let count = 0;
     if (existsSync(guardFile)) {
       const data = JSON.parse(readFileSync(guardFile, 'utf-8'));
       count = data.blockCount || 0;
     }
-    writeFileSync(guardFile, JSON.stringify({ blockCount: count + 1 }));
+    writeFileSync(guardFile, JSON.stringify({ blockCount: count + 1 }), { mode: 0o600 });
   } catch { /* ignore */ }
 }
 

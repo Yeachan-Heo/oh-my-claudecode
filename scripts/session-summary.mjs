@@ -174,6 +174,13 @@ async function main() {
     process.exit(1);
   }
 
+  // Validate sessionId to prevent path traversal
+  const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$/;
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    console.error('[session-summary] invalid sessionId');
+    process.exit(1);
+  }
+
   log('transcript:', transcriptPath);
   log('stateDir:', stateDir);
   log('sessionId:', sessionId);
