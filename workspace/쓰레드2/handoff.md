@@ -1,121 +1,74 @@
-# BiniLab Handoff — 세션 18 (2026-03-25)
+# BiniLab Handoff — 세션 22 (2026-03-26)
 
-## 현재 상태: 학습 루프 진단 완료 + v3 계획서 작성 + 포스트 게시
+## 현재 상태: P0~P2 전체 구현 완료 → Phase 2 (DB 중심 에이전트 시스템) 진입 대기
 
-### 이번 세션(18) 핵심 작업
+### 이번 세션(22) 완료 작업
 
-1. **BiniLab 회사 구조 분석 + PDF 생성**
-   - 11명 에이전트 조직도, 일일 파이프라인, 검증/학습/자율진화 시스템 전체 분석
-   - `BiniLab_AI_Company_구조분석.pdf` 바탕화면 저장
+#### 1. P0 — 보안 + 수익 차단 해제 ✅
+- [x] **Shell injection 수정** — `agent-spawner.ts` 3개 함수 (buildMessageScript/buildContextReaderScript/buildPhaseContextQuery)
+  - heredoc 직접 보간 → `JSON.stringify()` + `process.argv` 패턴으로 전환
+  - `PROJECT_ROOT` 절대경로 → `process.cwd()` 동적화
+- [x] **계정명 상수 추출** — `duribeon231` 50+ 곳 → `src/constants/accounts.ts` 생성
+  - `PRIMARY_ACCOUNT_ID = 'binilab__'`, `WARMUP_TARGET = 20` 확정
+  - 소스 코드 전체 치환 + 테스트 파일 + 문서(.md) 반영
+- [x] **WARMUP_TARGET 정리** — 20 확정 (코드=20 유지, 제안서 100은 JSDoc 오류)
 
-2. **Daily Run 실행 (Phase 2~5)**
-   - Phase 2: 서연(애널리스트) 분석 → TOP5 기회점수 (모공13/카리나12/봄루틴11)
-   - Phase 3: 민준(CEO) 지시서 → 3슬롯 배분
-   - Phase 4: 빈이(뷰티 에디터) 2개 + 소라(생활 에디터) 1개 초안 제출
-   - Phase 4 QA: 도윤(QA) 3개 CONDITIONAL_PASS (7.7/7.6/6.8)
-   - **gate6 버그 수정**: 임계값 10→6 (`src/safety/gates.ts:137`) — QA 4축 스케일 불일치
-   - Phase 5: Safety Gate 3개 전원 통과 → content_lifecycle 등록
+#### 2. P1 — 안정성 ✅
+- [x] **파이프라인 중복 실행 방어** — `strategy_archive.version` uniqueIndex + upsert + 당일 `directive-{today}` 체크로 early return
+- [x] **시뮬레이션 [시뮬] 배지** — `simulateAgentReply()`의 `message_type: 'simulation'` + UI 배지 표시
+- [x] **enforceTagGate 개선** — `retryFn(attempt, reason)` 시그니처 + `attempt * 500ms` 백오프 + `{ output, quarantined }` 반환
 
-3. **포스트 게시 1건**
-   - 카리나 착장 복각 (생활) → `https://www.threads.com/@duribeon231/post/DWTNxQHkchR`
-   - content_lifecycle 업데이트 완료 (218e108e)
+#### 3. P2 — 코드 품질 ✅
+- [x] **EDITOR_MAP 중복 제거** — `daily-pipeline.ts` 로컬 정의 제거 → `agent-spawner.ts`의 EDITOR_MAP + AGENT_REGISTRY import
+- [x] **PROJECT_ROOT 동적화** — P0에서 완료
+- [x] **하단 바 KPI 교체** — BottomBar 개발자 메트릭 → 포스트/워밍업/승인 대기 3개 비즈니스 KPI (placeholder)
 
-4. **성과 수집 + 분석**
-   - track-performance.ts 실행 → 25개 포스트 스냅샷 수집
-   - TOP: 목이버섯 15K뷰 / 도시락 8.7K뷰 / 클렌징 2.5K뷰
+#### 4. 기존 에러 수정 ✅
+- [x] `collect.ts:1383` TS2322 — bare `return;` → `CollectionResult` 반환
+- [x] 22개 테스트 실패 — 3개 테스트 파일 DDL에 `reply_to`/`mentions` 컬럼 추가
 
-5. **학습 루프 진단 — 구조적 결함 발견**
-   - `processAgentOutput()` 프로덕션 호출 0곳 (테스트 파일 1개만)
-   - `/daily-run` 스킬에서 output-parser 호출이 주석으로만 존재
-   - `/analyze-performance` 스킬에 기억 저장 코드 전무
-   - **근본 원인**: 기억 읽기(loadAgentContext)는 자동, 기억 쓰기(processAgentOutput)는 수동
+---
 
-6. **CLAUDE.md 규칙 추가 2건**
-   - 에이전트 표기 규칙: 이름(직책) 형식 필수
-   - 에이전트 스폰 규칙: "애들 시켜서" = Agent() 스폰 필수, 스킬 직접 호출 금지
+### 다음 세션 할 일: Phase 2 (DB 중심 에이전트 시스템)
 
-7. **BiniLab v3 계획서 작성**
-   - claude-peers + Agent Teams + Pixel Agents 조사
-   - 3계층 에이전트 구조: 상주6 + 온디맨드5
-   - "업데이트 인식 못하는 문제" 3계층 해결 (RELOAD 훅 + 주기적 체크 + 해시 검증)
-   - `BiniLab_v3_Final_구현계획서.pdf` 바탕화면 저장
+#### Phase 2-A: 신규 테이블 3개
+- [ ] `agent_tasks` — 구조화된 업무 할당 (SELECT FOR UPDATE 포함)
+- [ ] `agent_prompt_versions` — 프롬프트 버전 관리 (AutoResearch 패턴)
+- [ ] `system_state` — 시스템 상태 key-value 저장
 
-### 미완료 — 다음 세션 필수
+#### Phase 2-B: md 기억 → DB 마이그레이션
+- [ ] `agents/memory/strategy-log.md` → `agent_memories` scope='global'
+- [ ] `agents/memory/experiment-log.md` → `agent_episodes` type='experiment'
+- [ ] `agents/memory/category-playbook-*.md` → `agent_memories` scope='department'
 
-#### 1순위: v3 구현 (학습 루프 + 상주 에이전트)
+#### Phase 2-C: agent_messages 확장
+- [ ] `payload` (jsonb) + `message_type` 확장 ('task_assign' | 'task_result' | 'qa_request' | 'approval_request')
+- [ ] 구조화된 JSON payload 규칙 적용
 
-**Phase 0: 기존 버그 정리** (즉시)
-- gate6 테스트 수정: `safety-gates.test.ts` gate6_qaPassCheck(9) → expect true (임계값 6 기준)
-- 현재 348개 테스트 중 1개 실패
+---
 
-**Phase 1: 학습 루프 B+C+D+E** (1세션)
-- B: `/analyze-performance` 스킬에 기억 저장 Step 추가
-- C: CLAUDE.md output-parser 규칙 (✅ 이미 추가)
-- D: `agent-spawner.ts`에 `saveAgentResponse()` 래퍼 — `processAgentOutput()` 래핑
-- E: PostToolUse 훅 — Agent() 응답 자동 파싱
+### 남은 버그
 
-**Phase 2: claude-peers 셋업** (1세션)
-- Bun 설치 (현재 미설치)
-- claude-peers MCP 등록
-- tmux 세션 구조 생성 (binilab:ceo/seoyeon/bini/doyun/junho/taeho)
-- 상주 에이전트 6명 시작
+| # | 심각도 | 요약 | 파일:라인 | 상태 |
+|---|--------|------|-----------|------|
+| 1 | HIGH | "시간" 단위 파싱 누락 → 최근 포스트 수집 실패 | `collect.ts:1485` | 미수정 |
+| 4 | MEDIUM | 트렌드 키워드 카운트 전체 덮어씀 | `run-trend-pipeline.ts:168` | 미수정 |
 
-**Phase 3: 변경 동기화** (1세션)
-- PostToolUse:Edit 훅 → peers RELOAD 메시지
-- 에이전트 프롬프트에 "작업 전 CLAUDE.md 재읽기" 규칙
-- config 해시 검증 (선택)
+---
 
-#### 2순위: 운영
+### 커밋 이력 (세션 22)
 
-- 나머지 포스트 2개 게시 (뷰티 모공케어 + 봄세안) — content_lifecycle에 등록 완료
-- 워밍업: 19/20 → 1개 더 게시하면 완료 → 제휴링크 시작
-- Pixel Agents VS Code 확장 설치 (시각화)
+| 커밋 | 설명 |
+|------|------|
+| `9989b64e` | P0 security + account constant, P1 stability improvements |
+| `9f6a4fef` | P2 code quality — deduplicate EDITOR_MAP, replace dev metrics with KPIs |
 
-#### 3순위: 기존 태스크
+### 빌드/테스트 상태
+- `npx tsc --noEmit` — 에러 0건
+- `npm test` — 382 passed, 0 failed
 
-- 게시글 자동 등록 AI 에이전트 추가
-- 쿠팡 파트너스 상품 등록 방식 설계 (high priority)
-- 포스트용 이미지/영상 소싱 방안 파악
-
-### 벤치마크 현황 (리밸런싱 후, 세션17에서 변경 없음)
-| 카테고리 | 수 | 변경 |
-|---------|-----|------|
-| 뷰티 | 8 | 유지 |
-| 건강 | 5+ | 유지 |
-| 생활 | 6 | 유지 |
-| 다이어트 | 4 | 유지 |
-| 식품 | 발굴 중 | 0→목표 5 |
-| 인테리어 | 발굴 중 | 0→목표 3 |
-
-### 기억 DB 현황
-- 민준(CEO): "뷰티 기회점수15 + 카테고리 경고 해소 원칙" (imp:0.9)
-- 서연(애널리스트): "YouTube+벤치마크 교차 검증 소재가 최고점" (imp:0.7)
-
-### 워밍업 상태
-- 19/20 완료 (content_lifecycle 기준)
-- 제휴링크/광고 금지 (워밍업 완료 전)
-
-### 브랜치
-- feat/threads-watch-p0
-
-### 자산 활용 현황 (미활용 자산 — Phase 2.5에서 해결)
-| 자산 | 수집량 | 활용 | 다음 액션 |
-|------|--------|------|----------|
-| youtube_videos | 85개 | 0% | 서연(애널리스트)이 소재로 활용 → 콘텐츠 기획 투입 |
-| brand_events | 7개 유효 (토리든/일동/샤오미/다이슨/무인양품) | 0% | 긴급도순 소재 선정 → 포스트 기획 |
-| trend_keywords | 847개 (selected 7) | 0% | selected 키워드 → collect-by-keyword.ts → 콘텐츠 전환 |
-| 벤치마크 포스트 | 1,215개 | 2.1% | 고성과 패턴 포스트 → 유사 주제 재생산 |
-
-### 생성된 PDF (바탕화면)
-- `BiniLab_AI_Company_구조분석.pdf` — 회사 구조/검증/학습 전체 분석
-- `BiniLab_v3.2_최종계획서.pdf` — **최종 계획서** (분석리포트+크리틱 반영)
-- `BiniLab_v3_Final_구현계획서.pdf` — 이전 버전 (v3.1)
-- `BiniLab_v3_구현계획서.pdf` — 초기 (v3.0)
-
-### v3.2 Phase별 구현 프롬프트
-- `docs/superpowers/plans/2026-03-25-binilab-v3.2-prompts.md`
-- 각 Phase를 새 세션에서 프롬프트 복사→붙여넣기로 즉시 실행 가능
-- Phase 0 → 0.5 → 1 → 2-A → 2-B → 2-C → 2.5 → 3 → 4 순서
-
-### 피드백 메모리 추가
-- `feedback_agent_spawn_required.md` — "애들 시켜서" = Agent() 스폰 필수
+### 인프라 상태
+- Agent Town 대시보드: `쓰레드2/agent-town/` (Phaser + Next.js, 동작 중)
+- 테스트: 23개 파일 (382 passed)
+- DB: 33 Drizzle 테이블 (agent_tasks/prompt_versions/system_state 미구현 → Phase 2에서 구현)
+- 브랜치: `feat/threads-watch-p0` → `fork` remote에 push 완료
