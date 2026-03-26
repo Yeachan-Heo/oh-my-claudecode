@@ -702,8 +702,10 @@ export async function spawnWorkerForTask(
     paneId = '';
   }
   if (!paneId) {
-    // Revert task to pending so it can be reassigned
-    await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
+    // Best-effort revert — don't let lock/FS errors change caller behavior
+    try {
+      await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
+    } catch { /* task will be picked up by watchdog if revert fails */ }
     return '';
   }
 
