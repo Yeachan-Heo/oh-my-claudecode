@@ -181,7 +181,17 @@ export async function queueInboxInstruction(params: QueueInboxParams): Promise<D
     };
   }
 
-  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  try {
+    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  } catch (inboxErr) {
+    await markImmediateDispatchFailure({
+      teamName: params.teamName,
+      request: queued.request,
+      reason: 'inbox_write_failed',
+      cwd: params.cwd,
+    });
+    throw inboxErr;
+  }
 
   const notifyOutcome = await Promise.resolve(params.notify(
     { workerName: params.workerName, workerIndex: params.workerIndex, paneId: params.paneId },
