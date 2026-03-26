@@ -35,6 +35,11 @@ function getAgentLabel(agentId: string): string {
   return `${agent.name} (${agent.role})`;
 }
 
+function getAgentName(id: string): string {
+  const agent = BINILAB_AGENTS.find(a => a.id === id);
+  return agent ? `${agent.name}(${agent.role})` : id;
+}
+
 function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
@@ -98,6 +103,59 @@ export default function BinilabChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  async function reloadMessages() {
+    if (!selectedRoom) return;
+    try {
+      const res = await fetch(`/api/chat/rooms/${selectedRoom.id}/messages`);
+      if (!res.ok) return;
+      const json = await res.json();
+      setMessages(json.messages ?? []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function simulateAgentReply(roomId: string, participants: string[]) {
+    const otherAgents = participants.filter(p => p !== 'sihun-owner');
+    if (otherAgents.length === 0) return;
+
+    const responder = otherAgents[0];
+    const agent = BINILAB_AGENTS.find(a => a.id === responder);
+    if (!agent) return;
+
+    await new Promise(r => setTimeout(r, 1500));
+
+    const replies: Record<string, string[]> = {
+      'CEO': ['네, 확인했습니다. 데이터 기반으로 판단하겠습니다.', '알겠습니다. 다음 스탠드업에서 논의하죠.'],
+      '분석팀장': ['데이터를 확인해볼게요. 잠시만요.', '분석 결과를 공유해드릴게요.'],
+      '뷰티 크리에이터': ['넹! 바로 확인할게요 ㅋㅋ', '오 좋은 아이디어에요! 반영해볼게요~'],
+      '품질검수관': ['QA 관점에서 확인해보겠습니다.', '체크리스트 기준으로 검토할게요.'],
+      '트렌드헌터': ['오 이거 재밌는 거 찾았어요!', '트렌드 데이터 확인해볼게요.'],
+      '엔지니어': ['기술적으로 확인해보겠습니다.', '시스템 상태 체크해볼게요.'],
+      '마케팅팀장': ['다들 의견 모아볼까요~', '마케팅 관점에서 검토할게요.'],
+      '건강 에디터': ['건강 카테고리로 확인해볼게요!', '관련 포스트 찾아볼게요.'],
+      '생활 에디터': ['생활 팁으로 풀어볼게요!', '네 바로 작업할게요~'],
+      '다이어트 에디터': ['다이어트 관련 소재 볼게요!', '확인했어요! 바로 할게요.'],
+    };
+
+    const roleReplies = replies[agent.role] || ['네, 확인했습니다.'];
+    const reply = roleReplies[Math.floor(Math.random() * roleReplies.length)];
+
+    await fetch('/api/chat/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        room_id: roomId,
+        sender: responder,
+        message: reply,
+        message_type: 'report',
+      }),
+    });
+
+    // Force refresh messages after agent reply
+    setTimeout(() => reloadMessages(), 500);
+  }
+
   async function handleSend() {
     const trimmed = newMessage.trim();
     if (!trimmed || !selectedRoom || sending) return;
@@ -122,6 +180,9 @@ export default function BinilabChatPanel() {
           const json = await msgRes.json();
           setMessages(json.messages ?? []);
         }
+        // Trigger auto-reply from participants
+        const participants = selectedRoom.participants || [];
+        simulateAgentReply(selectedRoom.id, participants);
       }
     } catch {
       // ignore
@@ -186,21 +247,29 @@ export default function BinilabChatPanel() {
 
   return (
     <HudFlyout title="BiniLab 채팅" subtitle="에이전트 대화방">
-      <div style={{ display: 'flex', height: 520, overflow: 'hidden', minWidth: 600 }}>
+      {/* Override flyout width for chat panel */}
+      <style>{`
+        .hud-flyout:has(> .hud-flyout__body > [data-chat-panel]) {
+          width: min(480px, calc(100vw - 60px)) !important;
+          max-height: 70vh !important;
+        }
+      `}</style>
+      <div data-chat-panel style={{ display: 'flex', height: 560, overflow: 'hidden', maxWidth: '480px', maxHeight: '70vh' }}>
         {/* Room list sidebar */}
         <div
           style={{
-            width: 180,
-            minWidth: 180,
+            width: 170,
+            minWidth: 170,
             borderRight: '1px solid rgba(255,255,255,0.1)',
             overflowY: 'auto',
+            overflowX: 'hidden',
             flexShrink: 0,
           }}
         >
           <div
             style={{
-              padding: '8px 10px',
-              fontSize: 11,
+              padding: '10px 12px',
+              fontSize: 12,
               color: 'rgba(255,255,255,0.4)',
               textTransform: 'uppercase',
               letterSpacing: 1,
@@ -210,19 +279,19 @@ export default function BinilabChatPanel() {
           </div>
 
           {/* Create room button */}
-          <div style={{ padding: '0 8px 8px' }}>
+          <div style={{ padding: '0 10px 10px' }}>
             <button
               type="button"
               onClick={() => setShowCreateForm(!showCreateForm)}
               style={{
                 width: '100%',
-                padding: '8px',
+                padding: '9px',
                 background: 'rgba(78, 205, 196, 0.2)',
                 border: '1px solid rgba(78, 205, 196, 0.4)',
                 color: '#4ecdc4',
                 borderRadius: '4px',
                 cursor: 'pointer',
-                fontSize: '13px',
+                fontSize: '14px',
               }}
             >
               + 새 채팅방
@@ -232,7 +301,7 @@ export default function BinilabChatPanel() {
               <div
                 style={{
                   marginTop: '6px',
-                  padding: '8px',
+                  padding: '10px',
                   background: 'rgba(20,20,40,0.8)',
                   borderRadius: '4px',
                   border: '1px solid rgba(100,200,255,0.15)',
@@ -244,12 +313,12 @@ export default function BinilabChatPanel() {
                   style={{
                     width: '100%',
                     marginBottom: '6px',
-                    padding: '5px',
+                    padding: '6px',
                     background: '#1a1a2e',
                     color: '#e0e8ff',
                     border: '1px solid rgba(100,200,255,0.2)',
                     borderRadius: '3px',
-                    fontSize: '12px',
+                    fontSize: '13px',
                   }}
                 >
                   <option value="dm">1:1 DM</option>
@@ -264,12 +333,12 @@ export default function BinilabChatPanel() {
                     style={{
                       width: '100%',
                       marginBottom: '6px',
-                      padding: '5px',
+                      padding: '6px',
                       background: '#1a1a2e',
                       color: '#e0e8ff',
                       border: '1px solid rgba(100,200,255,0.2)',
                       borderRadius: '3px',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     <option value="">에이전트 선택...</option>
@@ -288,13 +357,13 @@ export default function BinilabChatPanel() {
                     disabled={newRoomType === 'dm' && !selectedAgent}
                     style={{
                       flex: 1,
-                      padding: '5px',
+                      padding: '6px',
                       background: '#4ecdc4',
                       color: '#000',
                       border: 'none',
                       borderRadius: '3px',
                       cursor: newRoomType === 'dm' && !selectedAgent ? 'not-allowed' : 'pointer',
-                      fontSize: '12px',
+                      fontSize: '13px',
                       opacity: newRoomType === 'dm' && !selectedAgent ? 0.5 : 1,
                     }}
                   >
@@ -305,13 +374,13 @@ export default function BinilabChatPanel() {
                     onClick={() => setShowCreateForm(false)}
                     style={{
                       flex: 1,
-                      padding: '5px',
+                      padding: '6px',
                       background: 'rgba(255,255,255,0.1)',
                       color: '#8090b0',
                       border: '1px solid rgba(100,200,255,0.15)',
                       borderRadius: '3px',
                       cursor: 'pointer',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     취소
@@ -322,7 +391,7 @@ export default function BinilabChatPanel() {
           </div>
 
           {rooms.length === 0 ? (
-            <div style={{ padding: '10px', fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+            <div style={{ padding: '12px', fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>
               채팅방 없음
             </div>
           ) : (
@@ -335,13 +404,13 @@ export default function BinilabChatPanel() {
                   display: 'block',
                   width: '100%',
                   textAlign: 'left',
-                  padding: '10px 12px',
+                  padding: '12px 14px',
                   background: selectedRoom?.id === room.id ? 'rgba(255,255,255,0.1)' : 'transparent',
                   border: 'none',
                   borderLeft: selectedRoom?.id === room.id ? '2px solid #FFD700' : '2px solid transparent',
                   cursor: 'pointer',
                   color: selectedRoom?.id === room.id ? '#fff' : 'rgba(255,255,255,0.6)',
-                  fontSize: 13,
+                  fontSize: 14,
                   lineHeight: 1.3,
                 }}
               >
@@ -349,7 +418,7 @@ export default function BinilabChatPanel() {
                   {room.name}
                 </div>
                 {room.message_count > 0 && (
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
                     {room.message_count}개 메시지
                   </div>
                 )}
@@ -359,7 +428,7 @@ export default function BinilabChatPanel() {
         </div>
 
         {/* Message area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
           {!selectedRoom ? (
             <div
               style={{
@@ -368,7 +437,7 @@ export default function BinilabChatPanel() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: 'rgba(255,255,255,0.3)',
-                fontSize: 13,
+                fontSize: 14,
               }}
             >
               채팅방을 선택하세요
@@ -381,11 +450,12 @@ export default function BinilabChatPanel() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: '8px 12px',
+                  padding: '10px 14px',
                   borderBottom: '1px solid rgba(100,200,255,0.15)',
+                  flexShrink: 0,
                 }}
               >
-                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#fff' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '15px', color: '#fff' }}>
                   {selectedRoom.name}
                 </span>
                 <div style={{ display: 'flex', gap: '6px' }}>
@@ -393,13 +463,13 @@ export default function BinilabChatPanel() {
                     type="button"
                     onClick={() => setShowInvite(!showInvite)}
                     style={{
-                      padding: '4px 10px',
+                      padding: '5px 11px',
                       background: 'rgba(78,205,196,0.2)',
                       border: '1px solid rgba(78,205,196,0.4)',
                       color: '#4ecdc4',
                       borderRadius: '3px',
                       cursor: 'pointer',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     초대하기
@@ -408,13 +478,13 @@ export default function BinilabChatPanel() {
                     type="button"
                     onClick={handleDeleteRoom}
                     style={{
-                      padding: '4px 10px',
+                      padding: '5px 11px',
                       background: 'rgba(255,107,107,0.2)',
                       border: '1px solid rgba(255,107,107,0.4)',
                       color: '#ff6b6b',
                       borderRadius: '3px',
                       cursor: 'pointer',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     방 삭제
@@ -422,16 +492,24 @@ export default function BinilabChatPanel() {
                 </div>
               </div>
 
+              {/* Participants */}
+              {selectedRoom && (
+                <div style={{ padding: '5px 14px', fontSize: '12px', color: '#8090b0', borderBottom: '1px solid rgba(100,200,255,0.1)', flexShrink: 0 }}>
+                  참여자: {currentParticipants.map(p => getAgentName(p)).join(', ')}
+                </div>
+              )}
+
               {/* Invite inline form */}
               {showInvite && (
                 <div
                   style={{
-                    padding: '8px 12px',
+                    padding: '10px 14px',
                     background: 'rgba(20,20,40,0.8)',
                     borderBottom: '1px solid rgba(100,200,255,0.1)',
                     display: 'flex',
                     gap: '6px',
                     alignItems: 'center',
+                    flexShrink: 0,
                   }}
                 >
                   <select
@@ -439,12 +517,12 @@ export default function BinilabChatPanel() {
                     onChange={e => setInviteAgent(e.target.value)}
                     style={{
                       flex: 1,
-                      padding: '5px',
+                      padding: '6px',
                       background: '#1a1a2e',
                       color: '#e0e8ff',
                       border: '1px solid rgba(100,200,255,0.2)',
                       borderRadius: '3px',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     <option value="">에이전트 선택...</option>
@@ -461,13 +539,13 @@ export default function BinilabChatPanel() {
                     onClick={handleInvite}
                     disabled={!inviteAgent}
                     style={{
-                      padding: '5px 12px',
+                      padding: '6px 14px',
                       background: inviteAgent ? '#4ecdc4' : 'rgba(78,205,196,0.2)',
                       color: inviteAgent ? '#000' : '#4ecdc4',
                       border: '1px solid rgba(78,205,196,0.4)',
                       borderRadius: '3px',
                       cursor: inviteAgent ? 'pointer' : 'not-allowed',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     추가
@@ -476,13 +554,13 @@ export default function BinilabChatPanel() {
                     type="button"
                     onClick={() => setShowInvite(false)}
                     style={{
-                      padding: '5px 10px',
+                      padding: '6px 11px',
                       background: 'rgba(255,255,255,0.1)',
                       color: '#8090b0',
                       border: '1px solid rgba(100,200,255,0.15)',
                       borderRadius: '3px',
                       cursor: 'pointer',
-                      fontSize: '12px',
+                      fontSize: '13px',
                     }}
                   >
                     취소
@@ -495,14 +573,16 @@ export default function BinilabChatPanel() {
                 style={{
                   flex: 1,
                   overflowY: 'auto',
-                  padding: '12px 14px',
+                  overflowX: 'hidden',
+                  padding: '14px 16px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 10,
+                  gap: 11,
+                  minHeight: 0,
                 }}
               >
                 {messages.length === 0 ? (
-                  <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: 24 }}>
+                  <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: 24 }}>
                     메시지 없음
                   </div>
                 ) : (
@@ -521,7 +601,7 @@ export default function BinilabChatPanel() {
                         {/* Sender label */}
                         <div
                           style={{
-                            fontSize: 11,
+                            fontSize: 12,
                             color: color,
                             marginBottom: 3,
                             fontWeight: 600,
@@ -533,13 +613,13 @@ export default function BinilabChatPanel() {
                         <div
                           style={{
                             maxWidth: '80%',
-                            padding: '10px 14px',
+                            padding: '11px 16px',
                             borderRadius: isOwner ? '8px 2px 8px 8px' : '2px 8px 8px 8px',
                             background: isOwner
                               ? 'rgba(255,215,0,0.2)'
                               : 'rgba(255,255,255,0.08)',
                             border: `1px solid ${isOwner ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.12)'}`,
-                            fontSize: 13,
+                            fontSize: 14,
                             color: '#fff',
                             lineHeight: 1.5,
                             wordBreak: 'break-word',
@@ -563,14 +643,15 @@ export default function BinilabChatPanel() {
                 style={{
                   display: 'flex',
                   gap: 8,
-                  padding: '10px 14px',
+                  padding: '12px 16px',
                   borderTop: '1px solid rgba(255,255,255,0.1)',
+                  flexShrink: 0,
                 }}
               >
                 <input
                   type="text"
                   className="pixel-input"
-                  style={{ flex: 1, height: 40, padding: '0 12px', fontSize: 14 }}
+                  style={{ flex: 1, height: 44, padding: '0 14px', fontSize: 15 }}
                   placeholder="메시지 입력..."
                   value={newMessage}
                   onChange={e => setNewMessage(e.target.value)}
@@ -580,12 +661,12 @@ export default function BinilabChatPanel() {
                 <button
                   type="button"
                   className="pixel-icon-btn pixel-icon-btn--primary"
-                  style={{ width: 40, height: 40, minWidth: 40 }}
+                  style={{ width: 44, height: 44, minWidth: 44 }}
                   onClick={handleSend}
                   disabled={sending || !newMessage.trim()}
                   title="전송"
                 >
-                  <SendHorizontal size={16} />
+                  <SendHorizontal size={18} />
                 </button>
               </div>
             </>
