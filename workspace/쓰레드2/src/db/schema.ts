@@ -305,6 +305,20 @@ export const needs = pgTable(
     threads_fit_reason: text('threads_fit_reason').notNull().default(''),
     sample_post_ids: jsonb('sample_post_ids').$type<string[]>().default([]),
     extracted_at: timestamp('extracted_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // Structured need extraction (ontogpt SPIRES pattern)
+    structured_data: jsonb('structured_data').$type<{
+      symptom?: string;
+      concern?: string[];
+      urgency?: 'low' | 'medium' | 'high';
+      price_sensitivity?: 'low' | 'medium' | 'high';
+      season?: string;
+      target_demographic?: string;
+      hook_type?: string;
+      format?: string;
+      duration?: string;
+      emotion?: string;
+    }>(),
   },
   (table) => [
     index('idx_needs_category').on(table.category),
@@ -892,6 +906,10 @@ export const agentMessages = pgTable(
     // 같은 daily-run 실행의 메시지를 묶는 ID (예: 'daily-20260323')
     room_id: text('room_id'),
     // 회의방 ID — 회의 메시지 그루핑 (v2 추가)
+    reply_to: text('reply_to'),
+    // 답장 대상 메시지 ID (Phase 4 chat)
+    mentions: jsonb('mentions').$type<string[]>().default([]),
+    // @멘션된 에이전트 ID 목록 (Phase 4 chat)
   },
   (table) => [
     index('idx_agent_msg_date').on(table.created_at),
@@ -1056,6 +1074,7 @@ export const strategyArchive = pgTable(
   },
   (table) => [
     index('idx_archive_status').on(table.status, table.created_at),
+    uniqueIndex('idx_archive_version').on(table.version),
   ],
 );
 
@@ -1103,5 +1122,116 @@ export const pendingApprovals = pgTable(
   },
   (table) => [
     index('idx_approvals_status').on(table.status, table.created_at),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// 온톨로지 그래프 (OpenCrab 5-공간)
+// ---------------------------------------------------------------------------
+
+export const ontologySpaceEnum = pgEnum('ontology_space', [
+  'evidence', 'concept', 'resource', 'outcome', 'lever'
+]);
+
+/**
+ * ontology_nodes - 온톨로지 그래프 노드 (OpenCrab 5-공간).
+ * space: evidence(포스트), concept(니즈), resource(상품), outcome(성과), lever(실험변수)
+ */
+export const ontologyNodes = pgTable(
+  'ontology_nodes',
+  {
+    id: text('id').primaryKey(),                    // UUID
+    space: ontologySpaceEnum('space').notNull(),     // 5-공간 중 하나
+    node_type: text('node_type').notNull(),          // "Post", "Need", "Product", "KPI", "Variable"
+    label: text('label').notNull(),                  // 사람이 읽는 이름
+    properties: jsonb('properties').$type<Record<string, unknown>>().default({}),
+    status: text('status').notNull().default('active'), // active, archived
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    source_id: text('source_id'),                    // 원본 테이블의 ID (thread_posts.post_id 등)
+    source_table: text('source_table'),              // "thread_posts", "needs", "products" 등
+  },
+  (table) => [
+    index('idx_onto_nodes_space').on(table.space),
+    index('idx_onto_nodes_source').on(table.source_table, table.source_id),
+  ],
+);
+
+export const ontologyRelationEnum = pgEnum('ontology_relation', [
+  'mentions', 'supports', 'contradicts', 'solves',
+  'contributes_to', 'related_to', 'affects', 'measures'
+]);
+
+/**
+ * ontology_edges - 온톨로지 그래프 엣지 (관계).
+ * relation: mentions, supports, contradicts, solves, contributes_to, related_to, affects, measures
+ */
+export const ontologyEdges = pgTable(
+  'ontology_edges',
+  {
+    id: text('id').primaryKey(),                     // UUID
+    from_id: text('from_id').notNull(),              // ontology_nodes.id
+    relation: ontologyRelationEnum('relation').notNull(),
+    to_id: text('to_id').notNull(),                  // ontology_nodes.id
+    properties: jsonb('properties').$type<Record<string, unknown>>().default({}),
+    strength: real('strength').default(0.5),          // 0-1 관계 강도
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_onto_edges_from').on(table.from_id),
+    index('idx_onto_edges_to').on(table.to_id),
+    index('idx_onto_edges_relation').on(table.relation),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Chat System (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * chat_rooms - 채팅방 메타데이터 (DM, 회의, 공지, 오너, 팀).
+ * Phase 4 에이전트 간 자율 소통 인프라.
+ */
+export const chatRooms = pgTable(
+  'chat_rooms',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    // 'dm' | 'meeting' | 'announcement' | 'owner' | 'team'
+    status: text('status').notNull().default('active'),
+    // 'active' | 'archived'
+    created_by: text('created_by').notNull(),
+    meeting_id: text('meeting_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    last_message_at: timestamp('last_message_at', { withTimezone: true }),
+    message_count: integer('message_count').notNull().default(0),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    archived_at: timestamp('archived_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_chat_rooms_type').on(table.type),
+    index('idx_chat_rooms_status').on(table.status),
+    index('idx_chat_rooms_last_msg').on(table.last_message_at),
+  ],
+);
+
+/**
+ * chat_participants - 채팅방 참여자 목록.
+ * left_at이 NULL이면 현재 참여 중.
+ */
+export const chatParticipants = pgTable(
+  'chat_participants',
+  {
+    id: text('id').primaryKey(),
+    room_id: text('room_id').notNull(),
+    agent_id: text('agent_id').notNull(),
+    role: text('role').notNull().default('member'),
+    // 'owner' | 'admin' | 'member'
+    joined_at: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    left_at: timestamp('left_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_chat_participants_room').on(table.room_id),
+    index('idx_chat_participants_agent').on(table.agent_id),
   ],
 );

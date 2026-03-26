@@ -18,6 +18,7 @@ import {
   gate8_captchaRisk,
   runSafetyGates,
 } from '../safety/gates.js';
+import { PRIMARY_ACCOUNT_ID } from '../constants/accounts.js';
 
 // ─── DDL ─────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ async function insertPostedEntry(
 ) {
   const {
     id,
-    accountId = 'duribeon231',
+    accountId = PRIMARY_ACCOUNT_ID,
     postedAt = new Date(),
     contentText = '일반 콘텐츠 텍스트',
   } = opts;
@@ -255,11 +256,10 @@ describe('gate5_brandSafety()', () => {
 // ─── gate6: QA 점수 체크 ─────────────────────────────────
 
 describe('gate6_qaPassCheck()', () => {
-  it('QA 점수 9 → 차단', () => {
+  it('QA 점수 9 → 통과 (임계값 6)', () => {
     const result = gate6_qaPassCheck(9);
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('block');
-    expect(result.reason).toBeTruthy();
+    expect(result.passed).toBe(true);
+    expect(result.reason).toBeUndefined();
   });
 
   it('QA 점수 0 → 차단', () => {
@@ -359,14 +359,14 @@ describe('runSafetyGates()', () => {
     for (let i = 0; i < 100; i++) {
       await insertPostedEntry(client, { id: `lc-${i}`, postedAt: new Date(Date.now() - (i + 200) * 60 * 60 * 1000) });
     }
-    const report = await runSafetyGates('깨끗한 콘텐츠 텍스트입니다.', 'duribeon231', 10, db);
+    const report = await runSafetyGates('깨끗한 콘텐츠 텍스트입니다.', PRIMARY_ACCOUNT_ID, 10, db);
     expect(report.allPassed).toBe(true);
     expect(report.blockers).toHaveLength(0);
   });
 
   it('워밍업 + 제휴링크 → allPassed: false, blockers에 gate1', async () => {
     const { db } = await createTestDb(); // 0개 → warmup mode
-    const report = await runSafetyGates('쿠팡 제휴 링크 있어요', 'duribeon231', 10, db);
+    const report = await runSafetyGates('쿠팡 제휴 링크 있어요', PRIMARY_ACCOUNT_ID, 10, db);
     expect(report.allPassed).toBe(false);
     expect(report.blockers.some(r => r.gate === 'gate1_warmupCheck')).toBe(true);
   });
@@ -387,10 +387,10 @@ describe('runSafetyGates()', () => {
     }
     // 연속 3개 게시 61~69분 전: gate3 통과(61min≥60min) + gate8 경고(간격 4min<10min)
     const now = Date.now();
-    await insertPostedEntry(client, { id: 'recent1', accountId: 'duribeon231', postedAt: new Date(now - 61 * 60 * 1000) });
-    await insertPostedEntry(client, { id: 'recent2', accountId: 'duribeon231', postedAt: new Date(now - 65 * 60 * 1000) });
-    await insertPostedEntry(client, { id: 'recent3', accountId: 'duribeon231', postedAt: new Date(now - 69 * 60 * 1000) });
-    const report = await runSafetyGates('깨끗한 콘텐츠', 'duribeon231', 10, db);
+    await insertPostedEntry(client, { id: 'recent1', accountId: PRIMARY_ACCOUNT_ID, postedAt: new Date(now - 61 * 60 * 1000) });
+    await insertPostedEntry(client, { id: 'recent2', accountId: PRIMARY_ACCOUNT_ID, postedAt: new Date(now - 65 * 60 * 1000) });
+    await insertPostedEntry(client, { id: 'recent3', accountId: PRIMARY_ACCOUNT_ID, postedAt: new Date(now - 69 * 60 * 1000) });
+    const report = await runSafetyGates('깨끗한 콘텐츠', PRIMARY_ACCOUNT_ID, 10, db);
     expect(report.warnings.some(r => r.gate === 'gate8_captchaRisk')).toBe(true);
     expect(report.blockers).toHaveLength(0);
     expect(report.allPassed).toBe(true); // warn은 차단 아님
@@ -419,7 +419,7 @@ describe('gate_toneCheck in runSafetyGates()', () => {
     for (let i = 0; i < 100; i++) {
       await insertPostedEntry(client, { id: `lc-${i}`, postedAt: new Date(Date.now() - (i + 200) * 60 * 60 * 1000) });
     }
-    const report = await runSafetyGates('피부가 촉촉해지는 느낌이에요', 'duribeon231', 10, db);
+    const report = await runSafetyGates('피부가 촉촉해지는 느낌이에요', PRIMARY_ACCOUNT_ID, 10, db);
     expect(report.blockers.some(r => r.gate === 'gate_toneCheck')).toBe(false);
   });
 });

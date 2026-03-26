@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   read_by JSONB NOT NULL DEFAULT '[]',
   message_type TEXT DEFAULT 'report',
   task_id TEXT,
-  room_id TEXT
+  room_id TEXT,
+  reply_to TEXT,
+  mentions JSONB DEFAULT '[]'
 );
 `;
 

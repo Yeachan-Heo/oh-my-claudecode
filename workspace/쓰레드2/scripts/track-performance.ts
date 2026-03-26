@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 /**
- * track-performance.ts — @duribeon231 포스트 성과 추적 CLI
+ * track-performance.ts — @binilab__ 포스트 성과 추적 CLI
  *
  * 1. Chrome CDP 연결
- * 2. @duribeon231 프로필 방문 + GraphQL 인터셉터로 engagement 일괄 수집
+ * 2. @binilab__ 프로필 방문 + GraphQL 인터셉터로 engagement 일괄 수집
  * 3. thread_posts에 있는 우리 포스트를 content_lifecycle에 자동 등록
  * 4. 각 포스트 개별 방문 → view_count DOM 추출
  * 5. post_snapshots 저장 + content_lifecycle 업데이트
@@ -25,10 +25,11 @@ import { db } from '../src/db/index.js';
 import { postSnapshots, contentLifecycle, threadPosts } from '../src/db/schema.js';
 import type { GraphQLExtractedPost } from '../src/scraper/graphql-interceptor.js';
 import type { Page } from 'playwright';
+import { PRIMARY_ACCOUNT_ID } from '../src/constants/accounts.js';
 
 // ─── Constants ───────────────────────────────────────────
 
-const OUR_CHANNEL = 'duribeon231';
+const OUR_CHANNEL = PRIMARY_ACCOUNT_ID;
 const PROFILE_URL = `https://www.threads.net/@${OUR_CHANNEL}`;
 
 // ─── Logging ─────────────────────────────────────────────
@@ -635,7 +636,7 @@ async function main(): Promise<void> {
 
   // ─── Output Summary ────────────────────────────────────
 
-  console.log('\n== @duribeon231 성과 추적 결과 ==\n');
+  console.log(`\n== @${OUR_CHANNEL} 성과 추적 결과 ==\n`);
   console.log('| 포스트 | 조회수 | 좋아요 | 답글 | 리포스트 | 참여율 | 스냅샷 |');
   console.log('|--------|--------|--------|------|----------|--------|--------|');
 
@@ -669,7 +670,7 @@ async function main(): Promise<void> {
     const topViews = topPost.viewCount.toLocaleString();
     const topText = topPost.text.slice(0, 30);
     await sendAlert(
-      `✅ 성과 추적 완료\n\n@duribeon231 포스트 ${results.length}개\n새 스냅샷: ${snapshotCount}개\n\n최고 조회: "${topText}..." (${topViews}회)\n평균 참여율: ${avgEngagement}%`,
+      `✅ 성과 추적 완료\n\n@${OUR_CHANNEL} 포스트 ${results.length}개\n새 스냅샷: ${snapshotCount}개\n\n최고 조회: "${topText}..." (${topViews}회)\n평균 참여율: ${avgEngagement}%`,
     );
   } else {
     log('결과 없음 — 텔레그램 알림 건너뜀');

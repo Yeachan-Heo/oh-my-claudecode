@@ -7,7 +7,7 @@
 
 import { db as defaultDb } from './index.js';
 import { strategyArchive } from './schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDb = any;
@@ -68,6 +68,14 @@ export async function createStrategyVersion(
       strategy: input.strategy,
       performance: input.performance ?? null,
       status: 'active',
+    })
+    .onConflictDoUpdate({
+      target: strategyArchive.version,
+      set: {
+        strategy: sql`excluded.strategy`,
+        performance: sql`excluded.performance`,
+        evaluated_at: new Date(),
+      },
     })
     .returning();
 

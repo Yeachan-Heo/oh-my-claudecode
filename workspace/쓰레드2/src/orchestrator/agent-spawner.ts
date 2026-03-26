@@ -6,8 +6,9 @@
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
 import { loadAgentContext, formatMemoryForPrompt } from '../db/memory.js';
+import { processAgentOutput, ProcessResult } from './agent-output-parser.js';
 
-const PROJECT_ROOT = '/home/sihun92/projects/oh-my-claudecode/workspace/쓰레드2';
+const PROJECT_ROOT = process.cwd();
 
 // ─── Agent Registry ─────────────────────────────────────
 
@@ -288,26 +289,33 @@ export function buildMessageScript(
   channel: string,
   message: string,
 ): string {
+  const senderArg = JSON.stringify(sender);
+  const recipientArg = JSON.stringify(recipient);
+  const channelArg = JSON.stringify(channel);
+  const messageArg = JSON.stringify(message);
   return `cat > ${PROJECT_ROOT}/_msg.ts << 'SCRIPT'
 import 'dotenv/config';
 import { sendMessage } from './src/db/agent-messages.js';
 async function main() {
-  await sendMessage('${sender}', '${recipient}', '${channel}', \`${message.replace(/`/g, '\\`')}\`);
+  const [,, s, r, c, m] = process.argv;
+  await sendMessage(s, r, c, m);
   process.exit(0);
 }
 main().catch(e => { console.error(e); process.exit(1); });
 SCRIPT
-cd ${PROJECT_ROOT} && npx tsx _msg.ts && rm _msg.ts`;
+cd ${PROJECT_ROOT} && npx tsx _msg.ts ${senderArg} ${recipientArg} ${channelArg} ${messageArg} && rm _msg.ts`;
 }
 
 // ─── Context Reader ─────────────────────────────────────
 
 export function buildContextReaderScript(agentId: string): string {
+  const agentIdArg = JSON.stringify(agentId);
   return `cat > ${PROJECT_ROOT}/_read-context.ts << 'SCRIPT'
 import 'dotenv/config';
 import { getUnreadMessages } from './src/db/agent-messages.js';
 async function main() {
-  const msgs = await getUnreadMessages('${agentId}');
+  const [,, id] = process.argv;
+  const msgs = await getUnreadMessages(id);
   for (const m of msgs) {
     console.log(\`[\${m.sender}] \${m.message}\`);
   }
@@ -315,17 +323,19 @@ async function main() {
 }
 main().catch(e => { console.error(e); process.exit(1); });
 SCRIPT
-cd ${PROJECT_ROOT} && npx tsx _read-context.ts && rm _read-context.ts`;
+cd ${PROJECT_ROOT} && npx tsx _read-context.ts ${agentIdArg} && rm _read-context.ts`;
 }
 
 // ─── Phase Context Query ─────────────────────────────────
 
 export function buildPhaseContextQuery(agentId: string): string {
+  const agentIdArg = JSON.stringify(agentId);
   return `cat > ${PROJECT_ROOT}/_phase-context.ts << 'SCRIPT'
 import 'dotenv/config';
 import { getUnreadMessages } from './src/db/agent-messages.js';
 async function main() {
-  const msgs = await getUnreadMessages('${agentId}');
+  const [,, id] = process.argv;
+  const msgs = await getUnreadMessages(id);
   for (const m of msgs) {
     console.log(\`[\${m.sender} → \${m.recipient}] \${m.message}\`);
   }
@@ -333,7 +343,7 @@ async function main() {
 }
 main().catch(e => { console.error(e); process.exit(1); });
 SCRIPT
-cd ${PROJECT_ROOT} && npx tsx _phase-context.ts && rm _phase-context.ts`;
+cd ${PROJECT_ROOT} && npx tsx _phase-context.ts ${agentIdArg} && rm _phase-context.ts`;
 }
 
 // ─── Category File Name Helper ───────────────────────────
@@ -346,4 +356,17 @@ export function getCategoryFileName(category: string): string {
     '다이어트': 'diet',
   };
   return map[category] ?? category.toLowerCase();
+}
+
+// ─── Agent Response Processor ────────────────────────────
+
+/**
+ * 에이전트 출력을 파싱하여 기억/에피소드를 DB에 저장.
+ * processAgentOutput()의 래퍼 — agent-spawner에서 직접 호출 가능.
+ */
+export async function saveAgentResponse(
+  agentId: string,
+  output: string,
+): Promise<ProcessResult> {
+  return processAgentOutput(agentId, output);
 }

@@ -18,11 +18,12 @@
 
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
+import type { OrientResult, DirectiveResult } from './types.js';
 
 // ─── Types ────────────────────────────────────────────────────
 
 export interface ProcessResult {
-  status: 'ok' | 'missing_tags';
+  status: 'ok' | 'missing_tags' | 'quarantined';
   savedCount?: number;
   output?: string;
 }
@@ -151,30 +152,100 @@ export async function processAgentOutput(
   };
 }
 
+// ─── OODA Result Extractors ──────────────────────────────────
+
+/**
+ * [ORIENT_RESULT]...[/ORIENT_RESULT] 태그에서 OrientResult JSON 추출.
+ * JSON 파싱 실패 또는 필수 필드 누락 시 null 반환.
+ */
+export function extractOrientResult(output: string): OrientResult | null {
+  const matches = parseTag(output, /\[ORIENT_RESULT\]([\s\S]*?)\[\/ORIENT_RESULT\]/g);
+  if (matches.length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(matches[0]);
+    // 필수 필드 검증
+    if (
+      typeof parsed.bottleneck !== 'string' ||
+      typeof parsed.evidence !== 'string' ||
+      !Array.isArray(parsed.patterns) ||
+      !Array.isArray(parsed.recommendations) ||
+      typeof parsed.confidence !== 'number'
+    ) {
+      return null;
+    }
+    return parsed as OrientResult;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * [DIRECTIVE_RESULT]...[/DIRECTIVE_RESULT] 태그에서 DirectiveResult JSON 추출.
+ * JSON 파싱 실패 또는 필수 필드 누락 시 null 반환.
+ */
+export function extractDirectiveResult(output: string): DirectiveResult | null {
+  const matches = parseTag(output, /\[DIRECTIVE_RESULT\]([\s\S]*?)\[\/DIRECTIVE_RESULT\]/g);
+  if (matches.length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(matches[0]);
+    // 필수 필드 검증
+    if (
+      typeof parsed.total_posts !== 'number' ||
+      !Array.isArray(parsed.slots) ||
+      typeof parsed.rationale !== 'string'
+    ) {
+      return null;
+    }
+    // slots 내부 검증
+    for (const slot of parsed.slots) {
+      if (
+        typeof slot.category !== 'string' ||
+        typeof slot.format !== 'string' ||
+        typeof slot.hook !== 'string' ||
+        typeof slot.brief !== 'string'
+      ) {
+        return null;
+      }
+    }
+    return parsed as DirectiveResult;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Phase Gate ───────────────────────────────────────────────
+
+const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+const MISSING_TAGS_REASON = 'SAVE_MEMORY 또는 LOG_EPISODE 태그 누락';
 
 /**
  * Phase Gate: 태그 없으면 retryFn으로 2회 재시도.
+ * retryFn에 (attempt, reason)을 전달하여 재시도 맥락을 제공.
+ * 재시도 간 지수 백오프 (attempt * 500ms).
  * 3회 모두 실패 시 quarantine (logEpisode error + 기억 미저장).
- * 어떤 경우든 출력은 반환.
  */
 export async function enforceTagGate(
   agentId: string,
   output: string,
-  retryFn: () => Promise<string>,
-): Promise<string> {
+  retryFn: (attempt: number, reason: string) => Promise<string>,
+): Promise<{ output: string; quarantined: boolean }> {
   let result = await processAgentOutput(agentId, output);
-  if (result.status === 'ok') return output;
+  if (result.status === 'ok') return { output, quarantined: false };
 
   // 재시도 1회
-  const retry1 = await retryFn();
+  await delay(1 * 500);
+  const retry1 = await retryFn(1, MISSING_TAGS_REASON);
   result = await processAgentOutput(agentId, retry1);
-  if (result.status === 'ok') return retry1;
+  if (result.status === 'ok') return { output: retry1, quarantined: false };
 
   // 재시도 2회
-  const retry2 = await retryFn();
+  await delay(2 * 500);
+  const retry2 = await retryFn(2, MISSING_TAGS_REASON);
   result = await processAgentOutput(agentId, retry2);
-  if (result.status === 'ok') return retry2;
+  if (result.status === 'ok') return { output: retry2, quarantined: false };
 
   // quarantine — DB 기억 기록 없이 에러 에피소드만 남김
   await logEpisode({
@@ -184,5 +255,5 @@ export async function enforceTagGate(
     details: { agentId, attempts: 3 },
   });
 
-  return retry2;
+  return { output: retry2, quarantined: true };
 }

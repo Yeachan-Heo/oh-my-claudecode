@@ -1380,7 +1380,14 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
 
       if (feedStatus === 'inactive_recent') {
         log(`비활성 채널 — 최근 3일 이내 포스트 없음. 수집 중단.`);
-        return;
+        return {
+          threadUnits: [],
+          validCount: 0,
+          totalCount: 0,
+          channelInfo: { display_name: channelId, follower_count: 0, category: '기타' },
+          outputPath: '',
+          selectorCounts: { 'aria-label': 0, 'data-pressable': 0, 'fallback': 0 },
+        };
       }
       if (feedStatus === 'exhausted') {
         log(`채널이 소진되었지만 ${postIds.length}개로 계속 진행`);

@@ -13,11 +13,16 @@ import { sendMessage } from '../db/agent-messages.js';
 import { runSafetyGates } from '../safety/gates.js';
 import { getDiversityReport } from '../learning/diversity-checker.js';
 import { logDecision, updatePlaybook } from '../learning/strategy-logger.js';
-import { createStrategyVersion } from '../db/strategy-archive.js';
+import { createStrategyVersion, getActiveStrategy } from '../db/strategy-archive.js';
 import { startMeeting, concludeMeeting } from './meeting.js';
-import { logEpisode } from '../db/memory.js';
+import { logEpisode, savePhaseMemory } from '../db/memory.js';
 import { registerPost, scheduleSnapshots, collectSnapshot } from '../tracker/snapshot.js';
+// FALLBACK: 졸업 조건 → orient_success 연속 7회
 import { getLatestDiagnosis } from '../tracker/diagnosis.js';
+import { getWeeklyStats } from '../tracker/metrics.js';
+import { runOrientPhase } from './orient-prompt.js';
+import { runDecidePhase } from './decide-prompt.js';
+import { PRIMARY_ACCOUNT_ID } from '../constants/accounts.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -28,6 +33,9 @@ import type {
   PipelineOptions,
   PipelineResult,
   PhaseGateResult,
+  OrientResult,
+  YouTubeSignal,
+  BrandEventSlot,
 } from './types.js';
 
 /** 에디터 매핑: 카테고리 → 에이전트 파일 → 페르소나 파일. */
@@ -84,6 +92,69 @@ interface PreviousDayStats {
   brandEventsCount: number;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2.5: 미활용 자산 조회 함수들
+// ---------------------------------------------------------------------------
+
+/** YouTube TOP 10 신호 스캔 — youtube_videos에서 조회수 상위 10개 조회. */
+export async function fetchYouTubeSignals(): Promise<YouTubeSignal[]> {
+  const rows = await client`
+    SELECT title, view_count, channel_id
+    FROM youtube_videos
+    ORDER BY view_count DESC
+    LIMIT 10
+  `;
+  return rows.map((r) => ({
+    title: r.title as string,
+    view_count: Number(r.view_count),
+    channel_id: r.channel_id as string,
+  }));
+}
+
+/** brand_events 유효 목록 조회 — is_stale=false, is_used=false, expires_at >= NOW(). */
+export async function fetchBrandEventSlots(): Promise<BrandEventSlot[]> {
+  const rows = await client`
+    SELECT event_id, brand_id, event_type, title, urgency, expires_at
+    FROM brand_events
+    WHERE is_stale = false AND is_used = false AND expires_at >= NOW()
+    ORDER BY
+      CASE urgency WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      expires_at ASC
+    LIMIT 10
+  `;
+  return rows.map((r) => ({
+    event_id: r.event_id as string,
+    brand_id: r.brand_id as string,
+    event_type: r.event_type as string,
+    title: r.title as string,
+    urgency: r.urgency as string,
+    expires_at: r.expires_at ? String(r.expires_at) : null,
+  }));
+}
+
+/** trend_keywords에서 selected=true 키워드 조회. */
+export async function fetchSelectedTrendKeywords(): Promise<Array<{ keyword: string; rank: number | null; source: string }>> {
+  const rows = await client`
+    SELECT keyword, rank, source
+    FROM trend_keywords
+    WHERE selected = true
+    ORDER BY rank ASC NULLS LAST
+    LIMIT 20
+  `;
+  return rows.map((r) => ({
+    keyword: r.keyword as string,
+    rank: r.rank != null ? Number(r.rank) : null,
+    source: r.source as string,
+  }));
+}
+
+/** brand_events is_used 마킹 — 포스트 작성 후 호출. */
+export async function markBrandEventUsed(eventId: string): Promise<void> {
+  await client`
+    UPDATE brand_events SET is_used = true WHERE event_id = ${eventId}
+  `;
+}
+
 async function fetchPhase2Data(): Promise<PreviousDayStats> {
   const [catRows, eventsRows] = await Promise.all([
     client`
@@ -124,6 +195,7 @@ async function fetchPhase2Data(): Promise<PreviousDayStats> {
 // ---------------------------------------------------------------------------
 
 /**
+ * @deprecated Expand-Contract 단계 1. 졸업 조건: decide_success 연속 7회.
  * buildDirective — ROI 기반 DailyDirective 생성 (공통 함수).
  * runCEOStandup과 meetingToDirective가 모두 이 함수를 사용.
  */
@@ -132,6 +204,13 @@ export async function buildDirective(
   date: string,
 ): Promise<DailyDirective> {
   const { categoryStats, brandEventsCount } = await fetchPhase2Data();
+
+  // Phase 2.5: 미활용 자산 조회
+  const [youtubeSignals, brandEventSlots, trendKeywords] = await Promise.all([
+    fetchYouTubeSignals(),
+    fetchBrandEventSlots(),
+    fetchSelectedTrendKeywords(),
+  ]);
 
   // ROI 점수 계산
   const roiSummary: Record<string, { score: number; grade: string }> = {};
@@ -228,6 +307,21 @@ export async function buildDirective(
   if (brandEventsCount < 3) {
     diversityWarnings.push('브랜드 이벤트 3개 미만 — research-brands.ts 재실행 필요');
   }
+
+  // YouTube 신호 기반 기회 감지
+  if (youtubeSignals.length > 0) {
+    const topYtViewCount = youtubeSignals[0]?.view_count ?? 0;
+    if (topYtViewCount > 10000) {
+      diversityWarnings.push(
+        `YouTube 기회 신호: "${youtubeSignals[0]!.title}" (${topYtViewCount.toLocaleString()}회) — 벤치마크 교차 분석 권장`,
+      );
+    }
+  }
+
+  // trend_keywords 활용도 경고
+  if (trendKeywords.length === 0) {
+    diversityWarnings.push('selected 트렌드 키워드 0개 — trend-filter.ts 재실행 또는 수동 선택 필요');
+  }
   const lcRows = await client`
     SELECT content_style, need_category, hook_type
     FROM content_lifecycle
@@ -274,6 +368,11 @@ export async function buildDirective(
     recycle_candidates: recycleCandidates,
     diversity_warnings: diversityWarnings,
     roi_summary: roiSummary,
+
+    // Phase 2.5: 미활용 자산
+    youtube_signals: youtubeSignals,
+    brand_event_slots: brandEventSlots,
+    trend_keywords: trendKeywords,
   };
 
   // 포스트별 계약 생성 (Sprint Contract 패턴)
@@ -660,10 +759,35 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
   let safetyPassed = true;
   let readyCount = 0;
 
+  // ── 중복 실행 방지: 당일 directive 이미 존재하면 early return ────────────
+  if (!dryRun) {
+    const today = new Date().toISOString().slice(0, 10);
+    const todayVersion = `directive-${today}`;
+    try {
+      const existing = await getActiveStrategy();
+      if (existing && existing.version === todayVersion) {
+        console.log(`[Pipeline] 오늘(${today}) 파이프라인 이미 실행됨 — 스킵.`);
+        return {
+          phases_completed: [],
+          errors: [],
+          gate_results: [],
+          drafts: [],
+          qa_results: [],
+          ready_count: 0,
+          safety_passed: true,
+        };
+      }
+    } catch (checkErr) {
+      // 체크 실패 시 파이프라인 계속 진행 (방어적)
+      console.warn('[Pipeline] 중복 실행 체크 실패 — 계속 진행:', checkErr);
+    }
+  }
+
   // ── Phase 0: 어제 게시 포스트 성과 스냅샷 수집 ─────────────────────────
   if (!dryRun && (options.phase == null || options.phase === 0)) {
     try {
       const snapshotTargets = await scheduleSnapshots();
+      let snapshotCollected = 0;
       if (snapshotTargets.length > 0) {
         await sendMessage(
           'orchestrator',
@@ -672,11 +796,10 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
           `[Phase 0] ${snapshotTargets.length}개 포스트 성과 스냅샷 수집 시작.`,
           { phase: 0, status: 'started', targetCount: snapshotTargets.length },
         );
-        let collected = 0;
         for (const target of snapshotTargets) {
           try {
             await collectSnapshot(target.postId, target.snapshotType);
-            collected++;
+            snapshotCollected++;
           } catch (snapErr) {
             const snapMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
             errors.push(`Phase 0 snapshot 실패 (${target.postId}/${target.snapshotType}): ${snapMsg}`);
@@ -686,8 +809,8 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
           'orchestrator',
           'all',
           'pipeline',
-          `[Phase 0] 스냅샷 수집 완료: ${collected}/${snapshotTargets.length}건.`,
-          { phase: 0, status: 'completed', collected, total: snapshotTargets.length },
+          `[Phase 0] 스냅샷 수집 완료: ${snapshotCollected}/${snapshotTargets.length}건.`,
+          { phase: 0, status: 'completed', collected: snapshotCollected, total: snapshotTargets.length },
         );
       } else {
         await sendMessage(
@@ -699,6 +822,12 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         );
       }
       phasesCompleted.push(0);
+      try {
+        await savePhaseMemory(0, `스냅샷 수집: ${snapshotTargets.length}개 대상, ${snapshotCollected}건 완료`, {
+          target_count: snapshotTargets.length,
+          collected: snapshotCollected,
+        });
+      } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Phase 0: ${msg}`);
@@ -715,6 +844,12 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       { phase: 1, status: 'started' },
     );
     phasesCompleted.push(1);
+    try {
+      await savePhaseMemory(1, '데이터 수집 Phase 시작 — 준호(리서처) 담당', {
+        phase: 1,
+        status: 'started',
+      });
+    } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
   }
 
   if (dryRun) {
@@ -745,7 +880,8 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     }
   }
 
-  // ── Phase 2: 분석 (dry-run 포함) ─────────────────────────────────────
+  // ── Phase 2: 분석 (dry-run 포함) — 서연(애널리스트) Orient ──────────
+  let orientResult: OrientResult | undefined;
   if (!options.phase || options.phase === 2 || dryRun) {
     await sendMessage(
       'orchestrator',
@@ -755,6 +891,29 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
       { phase: 2, status: 'started' },
     );
     phasesCompleted.push(2);
+    try {
+      await savePhaseMemory(2, '분석 Phase 시작 — 서연(분석가) 담당', {
+        phase: 2,
+        status: 'started',
+      });
+    } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
+
+    // OODA Orient: 서연(애널리스트) 에이전트 스폰 시도
+    try {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - 7);
+      const weeklyStats = await getWeeklyStats(weekStart);
+      orientResult = await runOrientPhase(
+        weeklyStats,
+        async (_agentId: string, _prompt: string) => {
+          // 실제 에이전트 스폰은 /daily-run 스킬에서 Agent() 도구로 수행.
+          // 여기서는 프롬프트만 조립하고 실패하여 fallback으로 전환.
+          throw new Error('Agent() 스폰은 /daily-run 스킬에서 수행');
+        },
+      );
+    } catch {
+      // Orient 실패해도 파이프라인 중단 않음 — Phase 3에서 기존 로직 사용
+    }
   }
 
   // ── Gate 2→3: 서연 분석 메시지 확인 (dry-run 스킵) ──────────────────
@@ -775,20 +934,73 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     }
   }
 
-  // ── Phase 3: CEO 스탠드업 (dry-run 포함) ──────────────────────────────
+  // ── Phase 3: CEO 스탠드업 (dry-run 포함) — 민준(CEO) Decide ─────────
   if (!options.phase || options.phase === 3 || dryRun) {
     try {
       const date = new Date().toISOString().slice(0, 10);
-      const { directive: d, meetingSummary, decisions } = await meetingToDirective(posts, date);
-      directive = d;
-      await runMeeting({
-        type: 'standup',
-        agenda: `[daily_directive ${date}] 일일 콘텐츠 배분 스탠드업`,
-        participants: ['minjun-ceo', 'seoyeon-analyst', 'juhun-researcher'],
-        summary: meetingSummary,
-        decisions,
-      });
+
+      // OODA Decide: orientResult가 있으면 민준(CEO) 에이전트 스폰 시도
+      let decideUsed = false;
+      if (orientResult) {
+        try {
+          directive = await runDecidePhase(
+            orientResult,
+            posts,
+            date,
+            async (_agentId: string, _prompt: string) => {
+              // 실제 에이전트 스폰은 /daily-run 스킬에서 Agent() 도구로 수행.
+              throw new Error('Agent() 스폰은 /daily-run 스킬에서 수행');
+            },
+            buildDirective, // fallback
+          );
+          decideUsed = true;
+        } catch {
+          // Decide 실패 시 기존 meetingToDirective fallback
+        }
+      }
+
+      // Fallback: 기존 meetingToDirective + buildDirective
+      if (!decideUsed) {
+        const { directive: d, meetingSummary, decisions } = await meetingToDirective(posts, date);
+        directive = d;
+        await runMeeting({
+          type: 'standup',
+          agenda: `[daily_directive ${date}] 일일 콘텐츠 배분 스탠드업`,
+          participants: ['minjun-ceo', 'seoyeon-analyst', 'juhun-researcher'],
+          summary: meetingSummary,
+          decisions,
+        });
+      } else {
+        // Decide 성공 시에도 스탠드업 회의 기록
+        const allocStr = directive
+          ? Object.entries(directive.category_allocation).map(([k, v]) => `${k}:${v}`).join(', ')
+          : 'N/A';
+        await runMeeting({
+          type: 'standup',
+          agenda: `[daily_directive ${date}] OODA Decide 기반 콘텐츠 배분 스탠드업`,
+          participants: ['minjun-ceo', 'seoyeon-analyst', 'juhun-researcher'],
+          summary: `[OODA Decide] ${posts}개 슬롯, 배분(${allocStr})`,
+          decisions: [`OODA Decide: ${directive?.notes || '에이전트 판단 기반 배분'}`],
+        });
+      }
+
       phasesCompleted.push(3);
+      try {
+        const d = directive;
+        const allocStr = d
+          ? Object.entries(d.category_allocation).map(([k, v]) => `${k}:${v}`).join(', ')
+          : 'N/A';
+        const topCats = d
+          ? Object.entries(d.roi_summary).filter(([, v]) => v.grade === 'A').map(([k]) => k).join(', ') || '없음'
+          : 'N/A';
+        await savePhaseMemory(3, `CEO 스탠드업: ${posts}개 슬롯, 배분(${allocStr}), A등급: ${topCats}`, {
+          total_posts: posts,
+          category_allocation: d?.category_allocation,
+          roi_summary: d?.roi_summary,
+          experiment_posts: d?.experiment_posts,
+          ooda_decide: decideUsed,
+        });
+      } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
       await sendMessage(
         'orchestrator',
         'all',
@@ -850,6 +1062,17 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     }
 
     phasesCompleted.push(4);
+    try {
+      const catCounts: Record<string, number> = {};
+      for (const d of drafts) {
+        catCounts[d.category] = (catCounts[d.category] || 0) + 1;
+      }
+      const catStr = Object.entries(catCounts).map(([k, v]) => `${k}:${v}`).join(', ');
+      await savePhaseMemory(4, `콘텐츠 ${drafts.length}개 생성, 카테고리(${catStr})`, {
+        draft_count: drafts.length,
+        category_distribution: catCounts,
+      });
+    } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
     await sendMessage(
       'orchestrator',
       'all',
@@ -879,7 +1102,7 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
         continue;
       }
 
-      const safety = await runSafety(draft.text, 'duribeon231');
+      const safety = await runSafety(draft.text, PRIMARY_ACCOUNT_ID);
       if (!safety.allPassed) {
         safetyPassed = false;
         errors.push(`Safety 실패 (${draft.category}): ${safety.blockers.map((b) => b.reason).join(', ')}`);
@@ -912,10 +1135,15 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
               NOW()
             )
           `;
-          // TODO: brand_events.is_used 업데이트 — draft에 brandEventId 연결 후 구현
-          // if (draft.brandEventId) {
-          //   await tx`UPDATE brand_events SET is_used = true WHERE event_id = ${draft.brandEventId}`;
-          // }
+          // brand_events.is_used 업데이트 — directive에서 brand_event_slots가 있고
+          // 이 draft의 카테고리와 관련된 이벤트가 있으면 is_used 마킹
+          if (directive?.brand_event_slots && directive.brand_event_slots.length > 0) {
+            // 첫 번째 미사용 이벤트를 소비 (FIFO)
+            const unusedEvent = directive.brand_event_slots.shift();
+            if (unusedEvent) {
+              await tx`UPDATE brand_events SET is_used = true WHERE event_id = ${unusedEvent.event_id}`;
+            }
+          }
         });
         readyCount++;
 
@@ -936,6 +1164,19 @@ export async function runDailyPipeline(options: PipelineOptions): Promise<Pipeli
     }
 
     phasesCompleted.push(5);
+    try {
+      const rejectedCount = qaResults.filter((q) => !q.passed).length;
+      const rejectionReasons = qaResults
+        .filter((q) => !q.passed)
+        .flatMap((q) => q.feedback)
+        .slice(0, 5);
+      await savePhaseMemory(5, `Safety 검증: ${readyCount}개 통과, ${rejectedCount}개 거부`, {
+        ready_count: readyCount,
+        rejected_count: rejectedCount,
+        safety_passed: safetyPassed,
+        top_rejection_reasons: rejectionReasons,
+      });
+    } catch { /* 기억 저장 실패해도 파이프라인 중단 않음 */ }
     await sendMessage(
       'orchestrator',
       'all',

@@ -2,6 +2,27 @@
  * @file types.ts — daily-pipeline 오케스트레이터 타입 정의.
  */
 
+export type { BottleneckType } from '../tracker/diagnosis.js';
+
+export interface OrientResult {
+  bottleneck: import('../tracker/diagnosis.js').BottleneckType;
+  evidence: string;
+  patterns: string[];
+  recommendations: string[];
+  confidence: number;
+}
+
+export interface DirectiveResult {
+  total_posts: number;
+  slots: Array<{
+    category: string;
+    format: string;
+    hook: string;
+    brief: string;
+  }>;
+  rationale: string;
+}
+
 export interface TimeSlot {
   time: string;            // "08:00"
   category: string;        // "뷰티"
@@ -21,6 +42,21 @@ export interface PostContract {
   success_criteria: string;   // 한 줄 요약
 }
 
+export interface BrandEventSlot {
+  event_id: string;
+  brand_id: string;
+  event_type: string;       // 'new_product' | 'sale' | 'popup' | 'event' | 'collab'
+  title: string;
+  urgency: string;          // 'high' | 'medium' | 'low'
+  expires_at: string | null;
+}
+
+export interface YouTubeSignal {
+  title: string;
+  view_count: number;
+  channel_id: string;
+}
+
 export interface DailyDirective {
   date: string;
   total_posts: number;
@@ -34,6 +70,11 @@ export interface DailyDirective {
   roi_summary: Record<string, { score: number; grade: string }>;
   post_contracts?: PostContract[];
   notes?: string;
+
+  // Phase 2.5: 미활용 자산 연결
+  youtube_signals?: YouTubeSignal[];
+  brand_event_slots?: BrandEventSlot[];
+  trend_keywords?: Array<{ keyword: string; rank: number | null; source: string }>;
 }
 
 export interface ContentDraft {

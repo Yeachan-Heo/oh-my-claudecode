@@ -1,5 +1,6 @@
 import { db } from '../db/index.js';
 import { sql } from 'drizzle-orm';
+import { PRIMARY_ACCOUNT_ID } from '../constants/accounts.js';
 
 export interface RecycleCandidate {
   id: string;
@@ -16,7 +17,7 @@ export async function getCandidates(limit = 5): Promise<RecycleCandidate[]> {
     JOIN LATERAL (
       SELECT post_views FROM post_snapshots WHERE post_id = cl.id ORDER BY snapshot_at DESC LIMIT 1
     ) ps ON true
-    WHERE cl.posted_account_id = 'duribeon231'
+    WHERE cl.posted_account_id = ${PRIMARY_ACCOUNT_ID}
       AND cl.posted_at < NOW() - INTERVAL '14 days'
       AND ps.post_views IS NOT NULL
     ORDER BY ps.post_views DESC

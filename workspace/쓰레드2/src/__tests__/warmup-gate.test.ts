@@ -12,6 +12,7 @@ import {
   validateContent,
   getWarmupProgress,
 } from '../utils/warmup-gate.js';
+import { PRIMARY_ACCOUNT_ID } from '../constants/accounts.js';
 
 // ─── DDL ─────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ async function insertPostedEntry(client: PGlite, id: string, postedAt: Date | nu
        need_category, matched_product_id, content_text, content_style,
        hook_type, posted_account_id, posted_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [id, `src-${id}`, 'ch1', 'test need', '불편해소', 'prod-1', 'content', 'style', 'hook', 'duribeon231', postedAt]
+    [id, `src-${id}`, 'ch1', 'test need', '불편해소', 'prod-1', 'content', 'style', 'hook', PRIMARY_ACCOUNT_ID, postedAt]
   );
 }
 
@@ -112,33 +113,33 @@ describe('aff_contents.status column', () => {
 // ─── isWarmupMode() ──────────────────────────────────────
 
 describe('isWarmupMode()', () => {
-  it('returns true when posted count is 0 (< 100)', async () => {
+  it('returns true when posted count is 0 (< 20)', async () => {
     const { db } = await createTestDb();
     const result = await isWarmupMode(db);
     expect(result).toBe(true);
   });
 
-  it('returns true when posted count is 50 (< 100)', async () => {
+  it('returns true when posted count is 10 (< 20)', async () => {
     const { client, db } = await createTestDb();
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 10; i++) {
       await insertPostedEntry(client, `lc-${i}`);
     }
     const result = await isWarmupMode(db);
     expect(result).toBe(true);
   });
 
-  it('returns false when posted count is exactly 100', async () => {
+  it('returns false when posted count is exactly 20', async () => {
     const { client, db } = await createTestDb();
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 20; i++) {
       await insertPostedEntry(client, `lc-${i}`);
     }
     const result = await isWarmupMode(db);
     expect(result).toBe(false);
   });
 
-  it('returns false when posted count exceeds 100', async () => {
+  it('returns false when posted count exceeds 20', async () => {
     const { client, db } = await createTestDb();
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 25; i++) {
       await insertPostedEntry(client, `lc-${i}`);
     }
     const result = await isWarmupMode(db);
@@ -147,15 +148,15 @@ describe('isWarmupMode()', () => {
 
   it('ignores entries where posted_at IS NULL', async () => {
     const { client, db } = await createTestDb();
-    // Insert 99 entries without posted_at (not published)
-    for (let i = 0; i < 99; i++) {
+    // Insert 19 entries without posted_at (not published)
+    for (let i = 0; i < 19; i++) {
       await insertPostedEntry(client, `lc-${i}`, null);
     }
     const result = await isWarmupMode(db);
     expect(result).toBe(true);
   });
 
-  it('only counts entries for duribeon231 account', async () => {
+  it('only counts entries for PRIMARY_ACCOUNT_ID account', async () => {
     const { client, db } = await createTestDb();
     // Insert 200 entries for a different account
     for (let i = 0; i < 200; i++) {
@@ -169,7 +170,7 @@ describe('isWarmupMode()', () => {
       );
     }
     const result = await isWarmupMode(db);
-    expect(result).toBe(true); // duribeon231 still has 0
+    expect(result).toBe(true); // PRIMARY_ACCOUNT_ID still has 0
   });
 });
 
@@ -212,33 +213,33 @@ describe('validateContent()', () => {
 // ─── getWarmupProgress() ─────────────────────────────────
 
 describe('getWarmupProgress()', () => {
-  it('returns {current:0, target:100, remaining:100} when no posts', async () => {
+  it('returns {current:0, target:20, remaining:20} when no posts', async () => {
     const { db } = await createTestDb();
     const progress = await getWarmupProgress(db);
     expect(progress.current).toBe(0);
-    expect(progress.target).toBe(100);
-    expect(progress.remaining).toBe(100);
+    expect(progress.target).toBe(20);
+    expect(progress.remaining).toBe(20);
   });
 
-  it('returns correct values when 30 posts published', async () => {
+  it('returns correct values when 10 posts published', async () => {
     const { client, db } = await createTestDb();
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 10; i++) {
       await insertPostedEntry(client, `lc-${i}`);
     }
     const progress = await getWarmupProgress(db);
-    expect(progress.current).toBe(30);
-    expect(progress.target).toBe(100);
-    expect(progress.remaining).toBe(70);
+    expect(progress.current).toBe(10);
+    expect(progress.target).toBe(20);
+    expect(progress.remaining).toBe(10);
   });
 
   it('returns remaining=0 when target reached', async () => {
     const { client, db } = await createTestDb();
-    for (let i = 0; i < 110; i++) {
+    for (let i = 0; i < 25; i++) {
       await insertPostedEntry(client, `lc-${i}`);
     }
     const progress = await getWarmupProgress(db);
-    expect(progress.current).toBe(110);
-    expect(progress.target).toBe(100);
+    expect(progress.current).toBe(25);
+    expect(progress.target).toBe(20);
     expect(progress.remaining).toBe(0);
   });
 });

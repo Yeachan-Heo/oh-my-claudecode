@@ -30,7 +30,11 @@ function makeMockDb(store: Row[] = []) {
     insert: vi.fn().mockImplementation(() => ({
       values: vi.fn().mockImplementation((data: Row) => {
         rows.push({ ...data, id: data.id ?? crypto.randomUUID(), created_at: new Date() });
-        return { returning: vi.fn().mockResolvedValue([data]) };
+        const result = { returning: vi.fn().mockResolvedValue([data]) };
+        return {
+          ...result,
+          onConflictDoUpdate: vi.fn().mockImplementation(() => result),
+        };
       }),
     })),
 

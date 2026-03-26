@@ -1,7 +1,7 @@
 /**
  * @file warmup-gate — Warmup mode detection and content validation.
  *
- * isWarmupMode(): true while duribeon231 has fewer than 100 published posts.
+ * isWarmupMode(): true while binilab__ has fewer than WARMUP_TARGET published posts.
  * validateContent(): rejects affiliate/ad content during warmup.
  * getWarmupProgress(): returns {current, target, remaining} progress.
  */
@@ -9,12 +9,10 @@
 import { db as defaultDb } from '../db/index.js';
 import { contentLifecycle } from '../db/schema.js';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { PRIMARY_ACCOUNT_ID, WARMUP_TARGET } from '../constants/accounts.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDb = any;
-
-const WARMUP_TARGET = 100;
-const WARMUP_ACCOUNT = 'duribeon231';
 const AFFILIATE_PATTERNS = /쿠팡|coupang|제휴|광고/i;
 
 async function countPosted(db: AnyDb): Promise<number> {
@@ -23,7 +21,7 @@ async function countPosted(db: AnyDb): Promise<number> {
     .from(contentLifecycle)
     .where(
       and(
-        eq(contentLifecycle.posted_account_id, WARMUP_ACCOUNT),
+        eq(contentLifecycle.posted_account_id, PRIMARY_ACCOUNT_ID),
         isNotNull(contentLifecycle.posted_at),
       ),
     );

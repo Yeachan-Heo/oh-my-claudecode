@@ -198,7 +198,8 @@ describe('enforceTagGate', () => {
     const retryFn = vi.fn();
 
     const result = await enforceTagGate('bini', output, retryFn);
-    expect(result).toBe(output);
+    expect(result.output).toBe(output);
+    expect(result.quarantined).toBe(false);
     expect(retryFn).not.toHaveBeenCalled();
   });
 
@@ -209,7 +210,9 @@ describe('enforceTagGate', () => {
 
     const result = await enforceTagGate('bini', firstOutput, retryFn);
     expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(result).toBe(retryOutput);
+    expect(retryFn).toHaveBeenCalledWith(1, expect.any(String));
+    expect(result.output).toBe(retryOutput);
+    expect(result.quarantined).toBe(false);
   });
 
   it('2회 실패 후 재시도 2회 성공 — retryFn 2회 호출', async () => {
@@ -221,7 +224,10 @@ describe('enforceTagGate', () => {
 
     const result = await enforceTagGate('bini', noTag, retryFn);
     expect(retryFn).toHaveBeenCalledTimes(2);
-    expect(result).toBe(retryOutput);
+    expect(retryFn).toHaveBeenNthCalledWith(1, 1, expect.any(String));
+    expect(retryFn).toHaveBeenNthCalledWith(2, 2, expect.any(String));
+    expect(result.output).toBe(retryOutput);
+    expect(result.quarantined).toBe(false);
   });
 
   it('3회 모두 실패 — quarantine: logEpisode(system, error) 호출 후 마지막 출력 반환', async () => {
@@ -231,7 +237,8 @@ describe('enforceTagGate', () => {
 
     const result = await enforceTagGate('bini', noTag, retryFn);
     expect(retryFn).toHaveBeenCalledTimes(2);
-    expect(result).toBe(noTag); // 출력은 반환
+    expect(result.output).toBe(noTag); // 출력은 반환
+    expect(result.quarantined).toBe(true);
     // quarantine 에피소드 기록
     expect(logEpisode).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -248,7 +255,8 @@ describe('enforceTagGate', () => {
     const noTag = '태그 없음';
     const retryFn = vi.fn().mockResolvedValue(noTag);
 
-    await enforceTagGate('bini', noTag, retryFn);
+    const result = await enforceTagGate('bini', noTag, retryFn);
     expect(saveMemory).not.toHaveBeenCalled();
+    expect(result.quarantined).toBe(true);
   });
 });
