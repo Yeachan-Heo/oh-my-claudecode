@@ -115,45 +115,113 @@ export default function BinilabChatPanel() {
     }
   }
 
-  async function simulateAgentReply(roomId: string, participants: string[]) {
+  function generateContextualReply(agent: typeof BINILAB_AGENTS[0], userMessage: string, participantCount: number): string {
+    const msg = userMessage.toLowerCase();
+    const isMeeting = participantCount > 2;
+
+    const contextReplies: Record<string, Record<string, string[]>> = {
+      'minjun-ceo': {
+        _default: ['데이터 기반으로 결정합시다.', '서연한테 수치 확인 부탁합니다.', '다음 단계 논의하죠.'],
+        '분석|데이터|수치': ['서연, 관련 데이터 좀 공유해줘.', '수치로 봤을 때 어떤가요?'],
+        '포스트|콘텐츠': ['빈이, 이번 포스트 주제 어떻게 잡을 거야?', '카테고리 비율 확인하고 배정하겠습니다.'],
+        '전략|방향': ['현재 전략 기조를 유지하면서 세부 조정합시다.', '실험 데이터를 보고 판단하겠습니다.'],
+        '회의|스탠드업': ['좋습니다. 각자 의견 공유해주세요.', '오늘 안건부터 정리하죠.'],
+      },
+      'seoyeon-analyst': {
+        _default: ['데이터를 확인해볼게요.', '분석 결과를 공유해드릴게요.'],
+        '분석|데이터|수치': ['최근 7일 데이터 보면 조회수 평균이 약간 올랐어요.', '카테고리별 참여율 비교해볼게요.'],
+        '포스트|성과': ['이번 주 TOP 포스트는 뷰티 카테고리에서 나왔어요.', '성과 이상치 있는지 체크해볼게요.'],
+        '전략|방향': ['데이터로 보면 현재 방향이 맞는 것 같아요.', 'ROI 기준으로 카테고리 비율 제안해볼게요.'],
+      },
+      'bini-beauty-editor': {
+        _default: ['넹! 바로 확인할게요 ㅋㅋ', '오 좋은 아이디어에요~'],
+        '포스트|콘텐츠|글': ['이번 주제 재밌을 것 같아요! 바로 초안 잡을게요~', '훅을 좀 더 강하게 가볼까요?'],
+        '뷰티|화장품|피부': ['앗 이거 요즘 진짜 핫한 주제에요!', '모공이나 트러블 쪽이 반응 좋았어요~'],
+        '수정|피드백': ['앗 그 부분 바로 수정할게요! ㅋㅋ', '오 맞아요 그게 더 자연스럽겠다!'],
+      },
+      'doyun-qa': {
+        _default: ['QA 관점에서 확인해보겠습니다.', '체크리스트 기준으로 검토할게요.'],
+        '포스트|콘텐츠': ['톤 검사부터 해볼게요. 전문 용어 들어가면 안 돼요.', '글자수랑 이모지 개수 체크할게요.'],
+        '품질|검수': ['잠깐, 이건 좀 위험한데... 한번 더 확인해보죠.', '보수적으로 판단할게요. 확실하지 않으면 REJECT입니다.'],
+      },
+      'junho-researcher': {
+        _default: ['이거 재밌는 거 찾았어요!', '트렌드 데이터 확인해볼게요.'],
+        '트렌드|수집': ['X 트렌딩 확인해봤는데 관련 키워드가 떠요!', '벤치마크 채널에서 비슷한 주제 포스트 찾았어요.'],
+        '브랜드|이벤트': ['브랜드 이벤트 리서치 바로 할게요!', '신제품 출시 소식 있는지 볼게요.'],
+      },
+      'taeho-engineer': {
+        _default: ['기술적으로 확인해보겠습니다.', '시스템 상태 체크해볼게요.'],
+        '에러|버그|문제': ['로그 확인해볼게요. 원인 파악하겠습니다.', '인프라 쪽 이슈인지 체크해볼게요.'],
+        '시스템|서버': ['현재 시스템 정상 가동 중입니다.', 'DB 상태 양호합니다.'],
+      },
+      'jihyun-marketing-lead': {
+        _default: ['다들 의견 모아볼까요~', '마케팅 관점에서 검토할게요.'],
+        '전략|카테고리': ['카테고리 비율 조정이 필요할 수 있어요.', '에디터들 의견도 들어봐야 할 것 같아요.'],
+      },
+      'hana-health-editor': {
+        _default: ['건강 카테고리로 확인해볼게요!', '관련 소재 찾아볼게요.'],
+      },
+      'sora-lifestyle-editor': {
+        _default: ['생활 팁으로 풀어볼게요!', '네 바로 작업할게요~'],
+      },
+      'jiu-diet-editor': {
+        _default: ['다이어트 관련 소재 확인할게요!', '바로 해볼게요!'],
+      },
+    };
+
+    const agentReplies = contextReplies[agent.id] || { _default: ['네, 확인했습니다.'] };
+
+    // Try to match keywords
+    for (const [keywords, replies] of Object.entries(agentReplies)) {
+      if (keywords === '_default') continue;
+      const keywordList = keywords.split('|');
+      if (keywordList.some(k => msg.includes(k))) {
+        return replies[Math.floor(Math.random() * replies.length)];
+      }
+    }
+
+    // Meeting context: add conversational style
+    if (isMeeting) {
+      const meetingPrefixes = ['', '저도 한마디 하면, ', '추가로, '];
+      const prefix = meetingPrefixes[Math.floor(Math.random() * meetingPrefixes.length)];
+      const defaultReplies = agentReplies._default || ['네, 확인했습니다.'];
+      return prefix + defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+    }
+
+    const defaultReplies = agentReplies._default || ['네, 확인했습니다.'];
+    return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+  }
+
+  async function simulateAgentReply(roomId: string, participants: string[], userMessage: string) {
     const otherAgents = participants.filter(p => p !== 'sihun-owner');
     if (otherAgents.length === 0) return;
 
-    const responder = otherAgents[0];
-    const agent = BINILAB_AGENTS.find(a => a.id === responder);
-    if (!agent) return;
+    // ALL agents reply with staggered delays (1-4 seconds apart)
+    for (let i = 0; i < otherAgents.length; i++) {
+      const agentId = otherAgents[i];
+      const agent = BINILAB_AGENTS.find(a => a.id === agentId);
+      if (!agent) continue;
 
-    await new Promise(r => setTimeout(r, 1500));
+      const delay = 1000 + (i * 1500) + Math.random() * 1000; // 1s, 2.5s, 4s, etc.
 
-    const replies: Record<string, string[]> = {
-      'CEO': ['네, 확인했습니다. 데이터 기반으로 판단하겠습니다.', '알겠습니다. 다음 스탠드업에서 논의하죠.'],
-      '분석팀장': ['데이터를 확인해볼게요. 잠시만요.', '분석 결과를 공유해드릴게요.'],
-      '뷰티 크리에이터': ['넹! 바로 확인할게요 ㅋㅋ', '오 좋은 아이디어에요! 반영해볼게요~'],
-      '품질검수관': ['QA 관점에서 확인해보겠습니다.', '체크리스트 기준으로 검토할게요.'],
-      '트렌드헌터': ['오 이거 재밌는 거 찾았어요!', '트렌드 데이터 확인해볼게요.'],
-      '엔지니어': ['기술적으로 확인해보겠습니다.', '시스템 상태 체크해볼게요.'],
-      '마케팅팀장': ['다들 의견 모아볼까요~', '마케팅 관점에서 검토할게요.'],
-      '건강 에디터': ['건강 카테고리로 확인해볼게요!', '관련 포스트 찾아볼게요.'],
-      '생활 에디터': ['생활 팁으로 풀어볼게요!', '네 바로 작업할게요~'],
-      '다이어트 에디터': ['다이어트 관련 소재 볼게요!', '확인했어요! 바로 할게요.'],
-    };
+      setTimeout(async () => {
+        const reply = generateContextualReply(agent, userMessage, otherAgents.length);
 
-    const roleReplies = replies[agent.role] || ['네, 확인했습니다.'];
-    const reply = roleReplies[Math.floor(Math.random() * roleReplies.length)];
+        await fetch('/api/chat/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            room_id: roomId,
+            sender: agentId,
+            message: reply,
+            message_type: 'report',
+          }),
+        });
 
-    await fetch('/api/chat/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        room_id: roomId,
-        sender: responder,
-        message: reply,
-        message_type: 'report',
-      }),
-    });
-
-    // Force refresh messages after agent reply
-    setTimeout(() => reloadMessages(), 500);
+        // Refresh messages after each reply
+        reloadMessages();
+      }, delay);
+    }
   }
 
   async function handleSend() {
@@ -182,7 +250,7 @@ export default function BinilabChatPanel() {
         }
         // Trigger auto-reply from participants
         const participants = selectedRoom.participants || [];
-        simulateAgentReply(selectedRoom.id, participants);
+        simulateAgentReply(selectedRoom.id, participants, trimmed);
       }
     } catch {
       // ignore
@@ -233,14 +301,22 @@ export default function BinilabChatPanel() {
 
   async function handleInvite() {
     if (!selectedRoom || !inviteAgent) return;
-    await fetch(`/api/chat/rooms/${selectedRoom.id}/participants`, {
+    const res = await fetch(`/api/chat/rooms/${selectedRoom.id}/participants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: inviteAgent }),
     });
-    setInviteAgent('');
-    setShowInvite(false);
-    fetchRooms();
+    if (res.ok) {
+      // Update local state immediately so participant list refreshes
+      setSelectedRoom(prev => prev ? {
+        ...prev,
+        participants: [...(prev.participants || []), inviteAgent],
+      } : null);
+      setInviteAgent('');
+      setShowInvite(false);
+      // Also refresh rooms from server
+      fetchRooms();
+    }
   }
 
   const currentParticipants = selectedRoom?.participants ?? [];
