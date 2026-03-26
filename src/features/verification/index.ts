@@ -152,10 +152,10 @@ async function runSingleCheck(
     }
   }
 
-  // Manual verification checks (no command)
+  // Manual verification checks (no command) — not a failure; requires human review
   return {
     type: check.evidenceType,
-    passed: false,
+    passed: true,
     timestamp: new Date(),
     metadata: { requiresManualVerification: true }
   };

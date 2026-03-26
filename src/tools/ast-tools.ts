@@ -203,7 +203,12 @@ function getFilesForLanguage(
   }
 
   const resolvedPath = resolve(dirPath);
-  const stat = statSync(resolvedPath);
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(resolvedPath);
+  } catch (err) {
+    throw new Error(`Cannot access path "${resolvedPath}": ${(err as Error).message}`);
+  }
 
   if (stat.isFile()) {
     return [resolvedPath];

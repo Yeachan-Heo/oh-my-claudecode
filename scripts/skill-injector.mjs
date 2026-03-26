@@ -130,8 +130,9 @@ function findMatchingSkillsFallback(prompt, directory, sessionId) {
   const candidates = findSkillFilesFallback(directory);
   const matches = [];
 
-  // Get or create session cache
+  // Get or create session cache (cap size to prevent unbounded growth)
   if (!injectedCacheFallback.has(sessionId)) {
+    if (injectedCacheFallback.size > 500) injectedCacheFallback.clear();
     injectedCacheFallback.set(sessionId, new Set());
   }
   const alreadyInjected = injectedCacheFallback.get(sessionId);

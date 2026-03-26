@@ -25,12 +25,29 @@ import { join } from 'path';
 import { isJobDbInitialized, getJob, getActiveJobs as getActiveJobsFromDb, getJobsByStatus, updateJobStatus } from '../lib/job-state-db.js';
 
 /**
- * PID ownership check - codex/gemini MCP servers no longer spawn background
- * processes, so we accept any valid PID within a recorded job's status file.
- * The status file itself is the ownership proof.
+ * Set of PIDs spawned by this process. Used to verify ownership before
+ * sending signals. Falls back to accepting any PID recorded in a status file
+ * when the set is empty (e.g. after a server restart).
  */
-function isKnownPid(_pid: number): boolean {
-  return true;
+const spawnedPids = new Set<number>();
+
+/**
+ * Register a PID as spawned by this process.
+ */
+export function registerSpawnedPid(pid: number): void {
+  spawnedPids.add(pid);
+}
+
+/**
+ * PID ownership check. Returns true if the PID was spawned by this process
+ * or if no PIDs have been registered yet (status file is the ownership proof).
+ */
+function isKnownPid(pid: number): boolean {
+  if (spawnedPids.size === 0) {
+    // No PIDs registered (e.g. server restarted) — accept based on status file
+    return true;
+  }
+  return spawnedPids.has(pid);
 }
 
 /** Signals allowed for kill_job. SIGKILL excluded - too dangerous for process groups. */

@@ -49,8 +49,9 @@ export function createContinuationHook(): HookDefinition {
       // 2. Any explicitly stated completion criteria
       // 3. The conversation history for incomplete work
 
-      // Placeholder logic - in practice, integrate with actual todo tracking
-      const hasIncompleteTasks = false; // Would be dynamically determined
+      // TODO: integrate with actual todo tracking to dynamically determine incomplete tasks.
+      // This is a placeholder — always returns false until todo state is wired up.
+      const hasIncompleteTasks = false; // placeholder: real implementation reads todo state
 
       if (hasIncompleteTasks) {
         return {

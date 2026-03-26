@@ -216,7 +216,7 @@ function getRateLimitedBackoffMs(pollIntervalMs: number, count: number): number 
   const normalizedPollIntervalMs = sanitizePollIntervalMs(pollIntervalMs);
   return Math.min(
     normalizedPollIntervalMs * Math.pow(2, Math.max(0, count - 1)),
-    Math.max(MAX_RATE_LIMITED_BACKOFF_MS, normalizedPollIntervalMs),
+    MAX_RATE_LIMITED_BACKOFF_MS,
   );
 }
 

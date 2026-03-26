@@ -71,8 +71,8 @@ function findOrphanProcesses(filterTeam) {
       const output = execSync('ps aux', { encoding: 'utf-8', timeout: 10000 });
 
       for (const line of output.split('\n')) {
-        // Match claude/codex/gemini agent processes with team context
-        if ((line.includes('claude') || line.includes('codex') || line.includes('gemini') || line.includes('node'))) {
+        // Match OMC agent processes with team context (exclude bare 'node' to avoid over-matching)
+        if ((line.includes('claude') || line.includes('codex') || line.includes('gemini') || line.includes('omc') || line.includes('oh-my-claude'))) {
           // Restrict team name match to valid slug characters.
           // Support both native TeamDelete-style args and tmux worker env assignments.
           const match =

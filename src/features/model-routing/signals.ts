@@ -200,7 +200,7 @@ function detectCrossFileDependencies(prompt: string): boolean {
  */
 function detectTestRequirements(prompt: string): boolean {
   const testIndicators = [
-    /\btest/i,
+    /\btests?\b/i,
     /\bspec\b/i,
     /make sure.*work/i,
     /verify/i,

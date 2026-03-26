@@ -18,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -216,7 +217,9 @@ function updateModeAwaitingConfirmation(
         continue;
       }
 
-      writeFileSync(statePath, JSON.stringify(state, null, 2));
+      const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+      renameSync(tmpPath, statePath);
     } catch {
       // Best-effort state sync only.
     }

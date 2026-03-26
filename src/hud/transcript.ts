@@ -76,6 +76,7 @@ interface CachedTranscriptParse {
 }
 
 const transcriptCache = new Map<string, CachedTranscriptParse>();
+const TRANSCRIPT_CACHE_MAX_SIZE = 20;
 
 /**
  * Parse a Claude Code transcript JSONL file.
@@ -154,6 +155,9 @@ export async function parseTranscript(
           // Skip malformed lines
         }
       }
+      // Token totals from a tail-read are partial (we only saw the last MAX_TAIL_BYTES).
+      // Still surface them when token data was found so the HUD shows something useful.
+      sessionTotalsReliable = sessionTokenTotals.seenUsage;
     } else {
       const fileStream = createReadStream(transcriptPath);
       const rl = createInterface({
@@ -205,6 +209,9 @@ export async function parseTranscript(
   const pendingPermissions = Array.from(pendingPermissionMap.values()).map(clonePendingPermission);
   const finalized = finalizeTranscriptResult(result, options, pendingPermissions);
   if (cacheKey) {
+    if (transcriptCache.size >= TRANSCRIPT_CACHE_MAX_SIZE) {
+      transcriptCache.clear();
+    }
     transcriptCache.set(transcriptPath, {
       cacheKey,
       baseResult: cloneTranscriptData(finalized),
@@ -317,7 +324,10 @@ function readTailLines(
   const content = buffer.toString("utf8");
   const lines = content.split("\n");
 
-  // If we started mid-file, discard the potentially incomplete first line
+  // If we started mid-file, discard the potentially incomplete first line.
+  // This also handles UTF-8 multi-byte boundary splits: the first chunk may
+  // start in the middle of a multi-byte sequence, producing a garbled line.
+  // Discarding it is safe because every valid JSONL line ends with '\n'.
   if (startOffset > 0 && lines.length > 0) {
     lines.shift();
   }

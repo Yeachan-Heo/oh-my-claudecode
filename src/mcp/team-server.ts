@@ -12,6 +12,8 @@ import {
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import { join } from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';

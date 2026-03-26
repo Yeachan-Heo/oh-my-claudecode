@@ -259,10 +259,10 @@ THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTIN
 const ultraworkEnhancement: MagicKeyword = {
   triggers: ['ultrawork', 'ulw', 'uw'],
   description: 'Activates maximum performance mode with parallel agent orchestration',
-  action: (prompt: string) => {
+  action: (prompt: string, agentName?: string) => {
     // Remove the trigger word and add enhancement instructions
     const cleanPrompt = removeTriggerWords(prompt, ['ultrawork', 'ulw', 'uw']);
-    return getUltraworkMessage() + cleanPrompt;
+    return getUltraworkMessage(agentName) + cleanPrompt;
   }
 };
 
@@ -389,7 +389,7 @@ export const builtInMagicKeywords: MagicKeyword[] = [
 /**
  * Create a magic keyword processor with custom triggers
  */
-export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords']): (prompt: string) => string {
+export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords']): (prompt: string, agentName?: string) => string {
   const keywords = builtInMagicKeywords.map(k => ({ ...k, triggers: [...k.triggers] }));
 
   // Override triggers from config
@@ -420,7 +420,7 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
     }
   }
 
-  return (prompt: string): string => {
+  return (prompt: string, agentName?: string): string => {
     let result = prompt;
 
     for (const keyword of keywords) {
@@ -429,7 +429,7 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
       });
 
       if (hasKeyword) {
-        result = keyword.action(result);
+        result = keyword.action(result, agentName);
       }
     }
 

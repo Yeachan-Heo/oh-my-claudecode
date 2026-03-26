@@ -53,7 +53,12 @@ const SEVERITY_NAMES: Record<number, string> = {
  */
 export function uriToPath(uri: string): string {
   if (uri.startsWith('file://')) {
-    return decodeURIComponent(uri.slice(7));
+    try {
+      return decodeURIComponent(uri.slice(7));
+    } catch {
+      // Malformed percent-encoding — return the raw path segment
+      return uri.slice(7);
+    }
   }
   return uri;
 }
