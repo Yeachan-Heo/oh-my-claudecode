@@ -346,11 +346,11 @@ export default function BinilabChatPanel() {
           maxHeight: '85vh',
         }}
       >
-        {/* Right edge resize handle */}
+        {/* Left edge resize handle — 왼쪽으로 늘리기 */}
         <div
           style={{
             position: 'absolute',
-            right: -2,
+            left: -3,
             top: 0,
             width: 6,
             height: '100%',
@@ -362,7 +362,7 @@ export default function BinilabChatPanel() {
             const startX = e.clientX;
             const startW = panelSize.width;
             const onMove = (ev: MouseEvent) => {
-              setPanelSize(prev => ({ ...prev, width: Math.max(320, Math.min(800, startW + (ev.clientX - startX))) }));
+              setPanelSize(prev => ({ ...prev, width: Math.max(320, Math.min(800, startW - (ev.clientX - startX))) }));
             };
             const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
             document.addEventListener('mousemove', onMove);
@@ -373,7 +373,7 @@ export default function BinilabChatPanel() {
         <div
           style={{
             position: 'absolute',
-            bottom: -2,
+            bottom: -3,
             left: 0,
             width: '100%',
             height: 6,
@@ -392,18 +392,18 @@ export default function BinilabChatPanel() {
             document.addEventListener('mouseup', onUp);
           }}
         />
-        {/* Bottom-right corner resize handle */}
+        {/* Bottom-left corner resize handle — 왼쪽 아래 대각선 */}
         <div
           style={{
             position: 'absolute',
-            right: 0,
+            left: 0,
             bottom: 0,
             width: 16,
             height: 16,
-            cursor: 'nwse-resize',
+            cursor: 'nesw-resize',
             zIndex: 11,
-            background: 'linear-gradient(135deg, transparent 50%, rgba(100,200,255,0.3) 50%)',
-            borderRadius: '0 0 8px 0',
+            background: 'linear-gradient(225deg, transparent 50%, rgba(100,200,255,0.3) 50%)',
+            borderRadius: '0 0 0 8px',
           }}
           onMouseDown={(e) => {
             e.preventDefault();
@@ -412,7 +412,7 @@ export default function BinilabChatPanel() {
             const startW = panelSize.width;
             const startH = panelSize.height;
             const onMouseMove = (ev: MouseEvent) => {
-              const newW = Math.max(320, Math.min(800, startW + (ev.clientX - startX)));
+              const newW = Math.max(320, Math.min(800, startW - (ev.clientX - startX)));
               const newH = Math.max(350, Math.min(window.innerHeight * 0.85, startH + (ev.clientY - startY)));
               setPanelSize({ width: newW, height: newH });
             };
