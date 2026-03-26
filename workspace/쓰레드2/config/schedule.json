@@ -1,0 +1,25 @@
+{
+  "schedules": [
+    {
+      "name": "daily-morning",
+      "description": "일일 파이프라인 (CEO → 수집 → 분석 → 콘텐츠)",
+      "cron": "0 8 * * *",
+      "command": "npx tsx scripts/run-daily.ts --phase morning",
+      "enabled": true
+    },
+    {
+      "name": "daily-evening",
+      "description": "일일 성과 추적 + 보고",
+      "cron": "0 20 * * *",
+      "command": "npx tsx scripts/run-daily.ts --phase evening",
+      "enabled": true
+    },
+    {
+      "name": "weekly-retro",
+      "description": "주간 전략 회의",
+      "cron": "0 10 * * 1",
+      "command": "npx tsx scripts/run-daily.ts --phase retro",
+      "enabled": false
+    }
+  ]
+}

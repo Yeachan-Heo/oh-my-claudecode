@@ -32,6 +32,28 @@ export async function isWarmupMode(db: AnyDb = defaultDb): Promise<boolean> {
   return (await countPosted(db)) < WARMUP_TARGET;
 }
 
+/**
+ * 특정 계정의 워밍업 모드 확인.
+ * warmupTarget 미지정 시 WARMUP_TARGET 기본값 사용.
+ */
+export async function isAccountWarmupMode(
+  accountId: string,
+  warmupTarget?: number,
+  db: AnyDb = defaultDb,
+): Promise<boolean> {
+  const target = warmupTarget ?? WARMUP_TARGET;
+  const [result] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(contentLifecycle)
+    .where(
+      and(
+        eq(contentLifecycle.posted_account_id, accountId),
+        isNotNull(contentLifecycle.posted_at),
+      ),
+    );
+  return (result?.count ?? 0) < target;
+}
+
 export function validateContent(
   text: string,
   isWarmup: boolean,

@@ -405,6 +405,7 @@ export const affContents = pgTable(
 
 /**
  * accounts - Publishing account management (1 initially, up to 10 in Phase 3).
+ * Phase 4-C: category/assigned_editor/warmup_target/is_active 컬럼 추가.
  */
 export const accounts = pgTable(
   'accounts',
@@ -420,9 +421,18 @@ export const accounts = pgTable(
     post_count: integer('post_count').notNull().default(0),
     ban_count: integer('ban_count').notNull().default(0),
     health_score: integer('health_score').notNull().default(100), // 0-100
+
+    // Phase 4-C: 다중 계정 지원 컬럼
+    display_name: text('display_name'),
+    category: text('category'),                      // 주 담당 카테고리: 뷰티/건강/생활/다이어트
+    assigned_editor: text('assigned_editor'),         // 담당 에디터 agent_id
+    is_active: boolean('is_active').notNull().default(true),
+    warmup_target: integer('warmup_target').notNull().default(20),
   },
   (table) => [
     uniqueIndex('idx_accounts_username').on(table.username),
+    index('idx_accounts_active').on(table.is_active),
+    index('idx_accounts_category').on(table.category),
   ],
 );
 
