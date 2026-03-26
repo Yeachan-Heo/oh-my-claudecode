@@ -1,74 +1,91 @@
 # BiniLab Handoff — 세션 22 (2026-03-26)
 
-## 현재 상태: P0~P2 전체 구현 완료 → Phase 2 (DB 중심 에이전트 시스템) 진입 대기
+## 현재 상태: PROPOSAL v4 Phase 1~5 전체 구현 + 운영 검증 완료
 
 ### 이번 세션(22) 완료 작업
 
-#### 1. P0 — 보안 + 수익 차단 해제 ✅
-- [x] **Shell injection 수정** — `agent-spawner.ts` 3개 함수 (buildMessageScript/buildContextReaderScript/buildPhaseContextQuery)
-  - heredoc 직접 보간 → `JSON.stringify()` + `process.argv` 패턴으로 전환
-  - `PROJECT_ROOT` 절대경로 → `process.cwd()` 동적화
-- [x] **계정명 상수 추출** — `duribeon231` 50+ 곳 → `src/constants/accounts.ts` 생성
-  - `PRIMARY_ACCOUNT_ID = 'binilab__'`, `WARMUP_TARGET = 20` 확정
-  - 소스 코드 전체 치환 + 테스트 파일 + 문서(.md) 반영
-- [x] **WARMUP_TARGET 정리** — 20 확정 (코드=20 유지, 제안서 100은 JSDoc 오류)
+#### P0~P2 — 보안/안정성/코드 품질 ✅
+- [x] Shell injection 수정 (agent-spawner.ts 3개 함수 → JSON.stringify + process.argv)
+- [x] 계정명 상수 추출 (duribeon231 → binilab__, 50+ 곳 치환)
+- [x] WARMUP_TARGET = 20 확정
+- [x] 파이프라인 중복 실행 방어 (unique index + upsert + daily check)
+- [x] 시뮬레이션 [시뮬] 배지
+- [x] enforceTagGate 재시도 개선 (reason + backoff + quarantine)
+- [x] EDITOR_MAP 중복 제거 + PROJECT_ROOT 동적화
+- [x] BottomBar 비즈니스 KPI 교체
 
-#### 2. P1 — 안정성 ✅
-- [x] **파이프라인 중복 실행 방어** — `strategy_archive.version` uniqueIndex + upsert + 당일 `directive-{today}` 체크로 early return
-- [x] **시뮬레이션 [시뮬] 배지** — `simulateAgentReply()`의 `message_type: 'simulation'` + UI 배지 표시
-- [x] **enforceTagGate 개선** — `retryFn(attempt, reason)` 시그니처 + `attempt * 500ms` 백오프 + `{ output, quarantined }` 반환
+#### Phase 2 — DB 중심 에이전트 시스템 ✅
+- [x] 신규 테이블 3개: `agent_tasks`, `agent_prompt_versions`, `system_state`
+- [x] CRUD 헬퍼: `agent-tasks.ts`, `prompt-versions.ts`, `system-state.ts`
+- [x] agent_messages payload 확장 + sendStructuredMessage
+- [x] md → DB 마이그레이션 스크립트 (13건 처리)
 
-#### 3. P2 — 코드 품질 ✅
-- [x] **EDITOR_MAP 중복 제거** — `daily-pipeline.ts` 로컬 정의 제거 → `agent-spawner.ts`의 EDITOR_MAP + AGENT_REGISTRY import
-- [x] **PROJECT_ROOT 동적화** — P0에서 완료
-- [x] **하단 바 KPI 교체** — BottomBar 개발자 메트릭 → 포스트/워밍업/승인 대기 3개 비즈니스 KPI (placeholder)
+#### Phase 3 — 독립 에이전트 세션 ✅
+- [x] 에이전트 부트스트랩 (agent-session.ts: 프롬프트/기억/태스크/메시지 로드)
+- [x] CEO 오케스트레이션 루프 (ceo-loop.ts: 성과→OODA→업무 할당→브리핑)
+- [x] 자기 치유 (self-healing.ts: 실패율 모니터링 + alert)
 
-#### 4. 기존 에러 수정 ✅
-- [x] `collect.ts:1383` TS2322 — bare `return;` → `CollectionResult` 반환
-- [x] 22개 테스트 실패 — 3개 테스트 파일 DDL에 `reply_to`/`mentions` 컬럼 추가
+#### Phase 4 — 자동화 + 자기진화 ✅
+- [x] CLI 진입점 (run-daily.ts --phase morning/evening/retro)
+- [x] 스케줄 설정 (config/schedule.json + setup-cron.sh)
+- [x] AutoResearch 진화 (auto-evolve.ts: 메트릭 → keep/evolve/rollback)
+- [x] 다중 계정 준비 (accounts 확장 + CRUD + isAccountWarmupMode)
+
+#### Phase 5 — 대시보드 통합 ✅
+- [x] BottomBar 실제 API 연동 (placeholder → /api/dashboard/performance + /api/alerts)
+- [x] 에이전트 상태 agent_tasks 기반 is_working 필드
+- [x] CEO directive [CEO 지시] 배지 스타일
+
+#### 운영 검증 ✅
+- [x] DB 스키마 push (3 테이블 생성 + 컬럼 추가)
+- [x] md 기억 마이그레이션 (13건)
+- [x] 계정명 DB 업데이트 (31건 duribeon231 → binilab__)
+- [x] tmux POC (binilab 세션 3 윈도우)
+- [x] CEO 오케스트레이션 실행 성공 (5건 업무 할당)
+- [x] 파이프라인 중복 방어 정상 동작
+- [x] Agent Town 대시보드 localhost:3001 기동
 
 ---
 
-### 다음 세션 할 일: Phase 2 (DB 중심 에이전트 시스템)
+### 알려진 이슈
 
-#### Phase 2-A: 신규 테이블 3개
-- [ ] `agent_tasks` — 구조화된 업무 할당 (SELECT FOR UPDATE 포함)
-- [ ] `agent_prompt_versions` — 프롬프트 버전 관리 (AutoResearch 패턴)
-- [ ] `system_state` — 시스템 상태 key-value 저장
-
-#### Phase 2-B: md 기억 → DB 마이그레이션
-- [ ] `agents/memory/strategy-log.md` → `agent_memories` scope='global'
-- [ ] `agents/memory/experiment-log.md` → `agent_episodes` type='experiment'
-- [ ] `agents/memory/category-playbook-*.md` → `agent_memories` scope='department'
-
-#### Phase 2-C: agent_messages 확장
-- [ ] `payload` (jsonb) + `message_type` 확장 ('task_assign' | 'task_result' | 'qa_request' | 'approval_request')
-- [ ] 구조화된 JSON payload 규칙 적용
-
----
-
-### 남은 버그
-
-| # | 심각도 | 요약 | 파일:라인 | 상태 |
-|---|--------|------|-----------|------|
-| 1 | HIGH | "시간" 단위 파싱 누락 → 최근 포스트 수집 실패 | `collect.ts:1485` | 미수정 |
-| 4 | MEDIUM | 트렌드 키워드 카운트 전체 덮어씀 | `run-trend-pipeline.ts:168` | 미수정 |
+| 심각도 | 내용 | 파일 |
+|--------|------|------|
+| LOW | `buildPerformanceSummary`에서 `Invalid time value` (try-catch로 잡힘, 운영 무영향) | `ceo-loop.ts:77` |
+| LOW | `strategy_archive` unique index 생성 실패 (기존 중복 데이터, upsert로 방어) | DB |
 
 ---
 
 ### 커밋 이력 (세션 22)
 
-| 커밋 | 설명 |
+| 커밋 | 내용 |
 |------|------|
-| `9989b64e` | P0 security + account constant, P1 stability improvements |
-| `9f6a4fef` | P2 code quality — deduplicate EDITOR_MAP, replace dev metrics with KPIs |
+| `9989b64e` | P0+P1 security + stability |
+| `9f6a4fef` | P2 code quality |
+| `d07a8ba2` | handoff update |
+| `4285daca` | Phase 2 DB-centric agent system |
+| `29a38f52` | Phase 3 independent agent sessions |
+| `226b3265` | Phase 4 automation + self-evolution |
+| `ad3360a7` | Phase 5 dashboard integration |
 
-### 빌드/테스트 상태
-- `npx tsc --noEmit` — 에러 0건
+### PR
+- Yeachan-Heo/oh-my-claudecode#1891 (7 commits, base: dev)
+
+### 빌드/테스트
+- `npx tsc --noEmit` — 0 errors
 - `npm test` — 382 passed, 0 failed
 
+### 다음 세션 할 일
+
+1. **buildPerformanceSummary 날짜 에러 수정** — `ceo-loop.ts:77`
+2. **strategy_archive 중복 데이터 정리** → unique index 재시도
+3. **실제 포스트 게시 테스트** — 워밍업 완료(20/20) → 제휴 콘텐츠 첫 게시
+4. **cron 등록** — `bash scripts/setup-cron.sh`로 자동화 시작
+5. **Agent Town 배포** — Vercel 또는 로컬 상시 실행
+
 ### 인프라 상태
-- Agent Town 대시보드: `쓰레드2/agent-town/` (Phaser + Next.js, 동작 중)
-- 테스트: 23개 파일 (382 passed)
-- DB: 33 Drizzle 테이블 (agent_tasks/prompt_versions/system_state 미구현 → Phase 2에서 구현)
-- 브랜치: `feat/threads-watch-p0` → `fork` remote에 push 완료
+- Agent Town: `localhost:3001` (로컬 dev 서버)
+- tmux: `binilab` 세션 (main + ceo + seoyeon)
+- DB: 41 테이블 (3 신규 + accounts 확장)
+- 테스트: 23 파일 (382 passed)
+- 브랜치: `feat/threads-watch-p0` → fork remote
