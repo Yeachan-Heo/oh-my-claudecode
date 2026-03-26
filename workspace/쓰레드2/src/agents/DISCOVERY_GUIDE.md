@@ -31,9 +31,34 @@ Exa 검색 (mcp__exa__web_search_exa) 또는 Agent(general-purpose)에게 위임
 → 카테고리별 7개씩 후보 리스트 작성
 ```
 
-**Step 2: collect.ts로 검증 수집 (셸 루프)**
+**Step 2: 브라우저로 채널 직접 확인 (필수 — 생략 금지)**
 
-5개 이상 채널을 수집할 때는 항상 셸 루프를 사용한다. 새 스크립트를 만들지 않는다.
+collect.ts 실행 전에 반드시 Playwright로 채널을 방문하여 포스트를 직접 확인한다.
+
+```
+벤치마크 채널 선정 시:
+1. threads.net/@채널명 방문 (Playwright browser_navigate)
+2. 스크롤하여 10개 포스트 확인 (browser_snapshot 또는 스크롤)
+3. AI가 아래 기준으로 판단:
+   - 포스트 주제가 우리 카테고리(뷰티/건강/생활/다이어트/식품/인테리어)에 맞는가?
+   - 제품 추천/후기 콘텐츠가 30% 이상인가?
+   - 비전문가/친구 톤인가? (전문가 강의 톤 → 탈락)
+   - 최근 2주 이내 포스팅이 3개 이상인가?
+4. 기준 충족 → Step 3 수집 진행
+5. 기준 미충족 → 스킵 + 이유 기록
+
+일반 수집 시:
+1. threads.net/@채널명 방문
+2. 상위 5개 포스트 확인
+3. 오늘 기준 24시간 이내 포스트가 1개 이상 → 수집
+4. 24h 이내 포스트 없음 → 수집 스킵 (비활성)
+```
+
+**절대 금지**: collect.ts 맹목 실행 (브라우저 확인 없이)
+
+**Step 3: collect.ts로 수집 (셸 루프)**
+
+브라우저 확인을 통과한 채널만 수집한다. 5개 이상 채널 시 셸 루프 사용.
 
 ```bash
 # 셸 루프로 순차 수집 (채널당 30개 포스트)
@@ -41,7 +66,7 @@ CHANNELS="yaksamom alpaca_yaksa yak_secret ..."
 
 for ch in $CHANNELS; do
   echo "수집 중: @$ch"
-  npx tsx src/scraper/collect.ts "$ch" 30 2>&1 | tail -5
+  npx tsx src/scraper/collect.ts "$ch" 30 2>&1
   sleep $((RANDOM % 6 + 5))  # anti-bot 대기
 done
 ```
@@ -49,8 +74,9 @@ done
 - `collect.ts`가 GraphQL 인터셉터 + DOM 폴백 + DB 저장을 전부 처리
 - 새 검증/수집 스크립트를 작성하지 않는다
 - 수집 결과는 `thread_posts` 테이블에 자동 저장
+- **파이프 금지** — `| tail`, `| head` 걸지 마. `2>&1`만 사용
 
-**Step 3: DB 데이터로 검증 판단**
+**Step 4: DB 데이터로 검증 판단**
 
 수집 완료 후 DB 쿼리로 검증:
 ```sql
