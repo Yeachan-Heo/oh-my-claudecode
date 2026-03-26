@@ -21,6 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from './worktree-paths.js';
+import { withFileLockSync } from './file-lock.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,40 +158,51 @@ export function writeEntry(
   const filePath = getEntryPath(namespace, key, worktreeRoot);
   const now = new Date().toISOString();
 
-  let existingCreatedAt = now;
-  if (existsSync(filePath)) {
-    try {
-      const existing: SharedMemoryEntry = JSON.parse(readFileSync(filePath, 'utf-8'));
-      existingCreatedAt = existing.createdAt || now;
-    } catch {
-      // Corrupted file, treat as new
+  // Lock the read-modify-write to prevent concurrent writers from losing updates
+  const lockPath = filePath + '.lock';
+  const doWrite = () => {
+    let existingCreatedAt = now;
+    if (existsSync(filePath)) {
+      try {
+        const existing: SharedMemoryEntry = JSON.parse(readFileSync(filePath, 'utf-8'));
+        existingCreatedAt = existing.createdAt || now;
+      } catch {
+        // Corrupted file, treat as new
+      }
     }
-  }
 
-  const entry: SharedMemoryEntry = {
-    key,
-    value,
-    namespace,
-    createdAt: existingCreatedAt,
-    updatedAt: now,
+    const entry: SharedMemoryEntry = {
+      key,
+      value,
+      namespace,
+      createdAt: existingCreatedAt,
+      updatedAt: now,
+    };
+
+    if (ttl && ttl > 0) {
+      entry.ttl = ttl;
+      entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+    }
+
+    const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+    writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
+    renameSync(tmpPath, filePath);
+
+    // Clean up legacy .tmp file (old constant-suffix scheme) if it exists
+    try {
+      const legacyTmp = filePath + '.tmp';
+      if (existsSync(legacyTmp)) unlinkSync(legacyTmp);
+    } catch { /* best-effort cleanup */ }
+
+    return entry;
   };
 
-  if (ttl && ttl > 0) {
-    entry.ttl = ttl;
-    entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
-  }
-
-  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
-  renameSync(tmpPath, filePath);
-
-  // Clean up legacy .tmp file (old constant-suffix scheme) if it exists
+  // Try with lock; fall back to unlocked if lock fails (best-effort)
   try {
-    const legacyTmp = filePath + '.tmp';
-    if (existsSync(legacyTmp)) unlinkSync(legacyTmp);
-  } catch { /* best-effort cleanup */ }
-
-  return entry;
+    return withFileLockSync(lockPath, doWrite);
+  } catch {
+    return doWrite();
+  }
 }
 
 /**

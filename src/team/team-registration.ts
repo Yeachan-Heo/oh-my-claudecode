@@ -13,6 +13,7 @@ import { getClaudeConfigDir } from '../utils/paths.js';
 import type { McpWorkerMember, ConfigProbeResult } from './types.js';
 import { sanitizeName } from './tmux-session.js';
 import { atomicWriteJson, validateResolvedPath } from './fs-utils.js';
+import { withFileLockSync } from '../lib/file-lock.js';
 
 // --- Config paths ---
 
@@ -128,25 +129,28 @@ function registerInConfig(teamName: string, member: McpWorkerMember): void {
 
 function registerInShadow(workingDirectory: string, teamName: string, member: McpWorkerMember): void {
   const filePath = shadowRegistryPath(workingDirectory);
+  const lockPath = filePath + '.lock';
 
-  let registry: { teamName: string; workers: McpWorkerMember[] };
+  withFileLockSync(lockPath, () => {
+    let registry: { teamName: string; workers: McpWorkerMember[] };
 
-  if (existsSync(filePath)) {
-    try {
-      registry = JSON.parse(readFileSync(filePath, 'utf-8'));
-    } catch {
+    if (existsSync(filePath)) {
+      try {
+        registry = JSON.parse(readFileSync(filePath, 'utf-8'));
+      } catch {
+        registry = { teamName, workers: [] };
+      }
+    } else {
       registry = { teamName, workers: [] };
     }
-  } else {
-    registry = { teamName, workers: [] };
-  }
 
-  // Remove existing entry for this worker
-  registry.workers = (registry.workers || []).filter(w => w.name !== member.name);
-  registry.workers.push(member);
-  registry.teamName = teamName;
+    // Remove existing entry for this worker
+    registry.workers = (registry.workers || []).filter(w => w.name !== member.name);
+    registry.workers.push(member);
+    registry.teamName = teamName;
 
-  atomicWriteJson(filePath, registry);
+    atomicWriteJson(filePath, registry);
+  });
 }
 
 /**

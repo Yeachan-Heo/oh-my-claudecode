@@ -161,7 +161,9 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 function sanitizeTeamName(name: string): string {
-  return name.replace(/[^a-z0-9-]/g, '').slice(0, 30);
+  const sanitized = name.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30);
+  if (!sanitized) throw new Error(`Invalid team name: "${name}" produces empty slug after sanitization`);
+  return sanitized;
 }
 
 // ---------------------------------------------------------------------------
@@ -909,18 +911,25 @@ export async function requeueDeadWorkerTasks(
     await mkdir(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
     await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2), 'utf-8');
 
-    // Reset task to pending (clear owner and claim)
+    // Reset task to pending (locked to prevent race with concurrent claimTask)
     const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const raw = await import('fs/promises').then(fs => fs.readFile(taskPath, 'utf-8'));
-      const taskData = JSON.parse(raw);
-      taskData.status = 'pending';
-      taskData.owner = undefined;
-      taskData.claim = undefined;
-      await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
-      requeued.push(task.id);
+      const { readFileSync, writeFileSync } = await import('fs');
+      const { withFileLockSync } = await import('../lib/file-lock.js');
+      withFileLockSync(taskPath + '.lock', () => {
+        const raw = readFileSync(taskPath, 'utf-8');
+        const taskData = JSON.parse(raw);
+        // Only requeue if still in_progress — another worker may have already claimed it
+        if (taskData.status === 'in_progress') {
+          taskData.status = 'pending';
+          taskData.owner = undefined;
+          taskData.claim = undefined;
+          writeFileSync(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+          requeued.push(task.id);
+        }
+      });
     } catch {
-      // Task file may have been removed; skip
+      // Task file may have been removed or lock failed; skip
     }
 
     await appendTeamEvent(sanitized, {

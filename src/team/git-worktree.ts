@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteJson, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
 import { sanitizeName } from './tmux-session.js';
+import { withFileLockSync } from '../lib/file-lock.js';
 
 export interface WorktreeInfo {
   path: string;
@@ -43,7 +44,10 @@ function readMetadata(repoRoot: string, teamName: string): WorktreeInfo[] {
   if (!existsSync(metaPath)) return [];
   try {
     return JSON.parse(readFileSync(metaPath, 'utf-8'));
-  } catch {
+  } catch (err) {
+    // Log corruption instead of silently returning empty (which would lose all entries)
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[omc] warning: worktrees.json parse error: ${msg}\n`);
     return [];
   }
 }
@@ -107,11 +111,14 @@ export function createWorkerWorktree(
     createdAt: new Date().toISOString(),
   };
 
-  // Update metadata
-  const existing = readMetadata(repoRoot, teamName);
-  const updated = existing.filter(e => e.workerName !== workerName);
-  updated.push(info);
-  writeMetadata(repoRoot, teamName, updated);
+  // Update metadata (locked to prevent concurrent read-modify-write races)
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + '.lock';
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName);
+    const updated = existing.filter(e => e.workerName !== workerName);
+    updated.push(info);
+    writeMetadata(repoRoot, teamName, updated);
+  });
 
   return info;
 }

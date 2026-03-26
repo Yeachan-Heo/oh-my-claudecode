@@ -144,7 +144,7 @@ export async function transitionTaskStatus(
     const updated: TeamTaskV2 = {
       ...v,
       status: to,
-      completed_at: new Date().toISOString(),
+      completed_at: to === 'completed' ? new Date().toISOString() : v.completed_at,
       claim: undefined,
       version: v.version + 1,
     };

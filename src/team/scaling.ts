@@ -369,8 +369,7 @@ export async function scaleDown(
           targetWorkers.map(async (w) => {
             const status = await teamReadWorkerStatus(sanitized, w.name, leaderCwd);
             const alive = w.pane_id ? await isWorkerAlive(w.pane_id) : false;
-            return status.state === 'idle' || status.state === 'done' ||
-                   status.state === 'draining' || !alive;
+            return status.state === 'idle' || status.state === 'done' || !alive;
           }),
         );
         if (allDrained.every(Boolean)) break;

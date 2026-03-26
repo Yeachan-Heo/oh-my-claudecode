@@ -123,7 +123,7 @@ export function getTeamStatus(
 
     // Compute per-worker task stats
     const workerTasks = tasks.filter(t => t.owner === w.name);
-    const failed = workerTasks.filter(t => t.status === 'completed' && t.metadata?.permanentlyFailed === true).length;
+    const failed = workerTasks.filter(t => t.status === 'failed' || (t.status === 'completed' && t.metadata?.permanentlyFailed === true)).length;
     const taskStats = {
       completed: workerTasks.filter(t => t.status === 'completed').length - failed,
       failed,

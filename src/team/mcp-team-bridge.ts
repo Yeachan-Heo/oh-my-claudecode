@@ -666,7 +666,7 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
           type: "drain",
         });
 
-        // Write drain ack to outbox
+        // Write drain ack to outbox (only once — handleShutdown below skips its own ack)
         appendOutbox(teamName, workerName, {
           type: "shutdown_ack",
           requestId: drain.requestId,
@@ -676,12 +676,8 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
         // Clean up drain signal
         deleteDrainSignal(teamName, workerName);
 
-        // Use the same handleShutdown for cleanup
-        await handleShutdown(
-          config,
-          { requestId: drain.requestId, reason: `drain: ${drain.reason}` },
-          null,
-        );
+        // Drain ack already written above — break out of poll loop.
+        // Process cleanup happens naturally when the loop exits.
         break;
       }
 
