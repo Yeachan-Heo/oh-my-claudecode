@@ -248,6 +248,18 @@ export default function BinilabChatPanel() {
           const json = await msgRes.json();
           setMessages(json.messages ?? []);
         }
+        // 에이전트 디스패치 (실패해도 메시지 전송은 성공)
+        try {
+          await fetch('/api/chat/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              room_id: selectedRoom.id,
+              message: trimmed,
+              sender: 'sihun-owner',
+            }),
+          });
+        } catch {} // 디스패치 실패해도 메시지 전송은 성공
         // Trigger auto-reply from participants
         const participants = selectedRoom.participants || [];
         simulateAgentReply(selectedRoom.id, participants, trimmed);
