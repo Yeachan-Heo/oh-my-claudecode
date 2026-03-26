@@ -319,6 +319,8 @@ export default function BinilabChatPanel() {
     }
   }
 
+  const [panelSize, setPanelSize] = useState({ width: 440, height: 520 });
+
   const currentParticipants = selectedRoom?.participants ?? [];
 
   return (
@@ -330,7 +332,98 @@ export default function BinilabChatPanel() {
           max-height: 70vh !important;
         }
       `}</style>
-      <div data-chat-panel style={{ display: 'flex', height: 560, overflow: 'hidden', maxWidth: '480px', maxHeight: '70vh' }}>
+      <div
+        data-chat-panel
+        style={{
+          display: 'flex',
+          width: panelSize.width,
+          height: panelSize.height,
+          overflow: 'hidden',
+          position: 'relative',
+          minWidth: 320,
+          minHeight: 350,
+          maxWidth: 800,
+          maxHeight: '85vh',
+        }}
+      >
+        {/* Right edge resize handle */}
+        <div
+          style={{
+            position: 'absolute',
+            right: -2,
+            top: 0,
+            width: 6,
+            height: '100%',
+            cursor: 'ew-resize',
+            zIndex: 10,
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = panelSize.width;
+            const onMove = (ev: MouseEvent) => {
+              setPanelSize(prev => ({ ...prev, width: Math.max(320, Math.min(800, startW + (ev.clientX - startX))) }));
+            };
+            const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+        />
+        {/* Bottom edge resize handle */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: -2,
+            left: 0,
+            width: '100%',
+            height: 6,
+            cursor: 'ns-resize',
+            zIndex: 10,
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startY = e.clientY;
+            const startH = panelSize.height;
+            const onMove = (ev: MouseEvent) => {
+              setPanelSize(prev => ({ ...prev, height: Math.max(350, Math.min(window.innerHeight * 0.85, startH + (ev.clientY - startY))) }));
+            };
+            const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+        />
+        {/* Bottom-right corner resize handle */}
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: 16,
+            height: 16,
+            cursor: 'nwse-resize',
+            zIndex: 11,
+            background: 'linear-gradient(135deg, transparent 50%, rgba(100,200,255,0.3) 50%)',
+            borderRadius: '0 0 8px 0',
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startW = panelSize.width;
+            const startH = panelSize.height;
+            const onMouseMove = (ev: MouseEvent) => {
+              const newW = Math.max(320, Math.min(800, startW + (ev.clientX - startX)));
+              const newH = Math.max(350, Math.min(window.innerHeight * 0.85, startH + (ev.clientY - startY)));
+              setPanelSize({ width: newW, height: newH });
+            };
+            const onMouseUp = () => {
+              document.removeEventListener('mousemove', onMouseMove);
+              document.removeEventListener('mouseup', onMouseUp);
+            };
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+          }}
+        />
         {/* Room list sidebar */}
         <div
           style={{
