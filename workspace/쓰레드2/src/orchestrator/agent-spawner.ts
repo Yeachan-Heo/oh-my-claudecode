@@ -80,6 +80,12 @@ export const AGENT_REGISTRY: Record<string, AgentDefinition> = {
     phase: 0, role: 'engineer', department: 'engineering',
     ops: [],
   },
+  'jihyun-marketing-lead': {
+    id: 'jihyun-marketing-lead', name: '지현',
+    file: '.claude/agents/jihyun-marketing-lead.md',
+    phase: 3, role: 'analyst', department: 'marketing',
+    ops: ['ops/content-creation-ops.md'],
+  },
 };
 
 export function getAgentRegistry(): Record<string, AgentDefinition> {
@@ -225,21 +231,6 @@ export async function buildAgentPrompt(agentId: string, mission: string, context
     for (const op of agent.ops) {
       lines.push(`- Read ${resolve(PROJECT_ROOT, op)}`);
     }
-    lines.push('');
-  }
-
-  // Editor: playbook injection
-  if (agent.role === 'editor' && agent.category) {
-    const playbookFile = getCategoryFileName(agent.category);
-    lines.push(`== 카테고리 플레이북 ==`);
-    lines.push(`Read ${resolve(PROJECT_ROOT, `agents/memory/category-playbook/${playbookFile}.md`)} 를 읽어서 이 카테고리의 학습 내용을 파악해. (파일이 없으면 무시)`);
-    lines.push('');
-  }
-
-  // CEO: strategy-log injection
-  if (agent.role === 'ceo') {
-    lines.push(`== 전략 로그 ==`);
-    lines.push(`Read ${resolve(PROJECT_ROOT, 'agents/memory/strategy-log.md')} 를 읽어서 최근 전략 방향을 파악해. (파일이 없으면 무시)`);
     lines.push('');
   }
 

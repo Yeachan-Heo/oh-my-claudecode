@@ -12,6 +12,7 @@ import { getActiveStrategy } from '../db/strategy-archive.js';
 import { createTask } from '../db/agent-tasks.js';
 import { sendStructuredMessage } from '../db/agent-messages.js';
 import { logEpisode } from '../db/memory.js';
+import { sendAlert } from '../utils/telegram.js';
 import { desc, gte } from 'drizzle-orm';
 
 // ─── Types ───────────────────────────────────────────────
@@ -272,6 +273,11 @@ export async function runCeoMorningLoop(): Promise<DailyBriefing> {
   } catch (err) {
     console.error('[CEO] 에피소드 로그 실패:', err);
   }
+
+  // ── Step 8: 텔레그램 브리핑 전송 ────────────────────────
+  try {
+    await sendAlert(`[CEO 브리핑] ${today}\n${directiveSummary}\n업무: ${tasksCreated}건`);
+  } catch { /* 텔레그램 실패해도 무시 */ }
 
   return {
     date: today,
