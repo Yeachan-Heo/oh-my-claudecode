@@ -23,6 +23,7 @@ import { getWeeklyStats } from '../tracker/metrics.js';
 import { runOrientPhase } from './orient-prompt.js';
 import { runDecidePhase } from './decide-prompt.js';
 import { PRIMARY_ACCOUNT_ID } from '../constants/accounts.js';
+import { EDITOR_MAP, AGENT_REGISTRY } from './agent-spawner.js';
 import type {
   TimeSlot,
   DailyDirective,
@@ -38,16 +39,6 @@ import type {
   BrandEventSlot,
 } from './types.js';
 
-/** 에디터 매핑: 카테고리 → 에이전트 파일 → 페르소나 파일. */
-export const EDITOR_MAP: Record<string, { agent: string; persona?: string }> = {
-  '뷰티': {
-    agent: '.claude/agents/bini-beauty-editor.md',
-    persona: 'souls/bini-persona.md',
-  },
-  '건강': { agent: '.claude/agents/hana-health-editor.md' },
-  '생활': { agent: '.claude/agents/sora-lifestyle-editor.md' },
-  '다이어트': { agent: '.claude/agents/jiu-diet-editor.md' },
-};
 
 /** 기본 카테고리 비율 (성과 데이터 없을 때). */
 const DEFAULT_ALLOCATION: Record<string, number> = {
@@ -288,12 +279,13 @@ export async function buildDirective(
   const experimentSlotDate = date.replace(/-/g, '');
   let expIdx = 1;
   const timeSlots: TimeSlot[] = slots.map((s) => {
-    const editorInfo = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
+    const editorId = EDITOR_MAP[s.category] ?? EDITOR_MAP['뷰티'];
+    const editorDef = AGENT_REGISTRY[editorId!];
     const slot: TimeSlot = {
       time: s.time,
       category: s.category,
       type: s.type,
-      editor: editorInfo!.agent.replace('.claude/agents/', '').replace('.md', ''),
+      editor: editorDef!.file.replace('.claude/agents/', '').replace('.md', ''),
       brief: '',
     };
     if (s.type === 'experiment') {
@@ -505,8 +497,8 @@ export async function runCEOStandup(totalPosts = 10): Promise<DailyDirective> {
 
 /** 슬롯에 대한 ContentDraft 뼈대를 생성. 실제 텍스트는 Claude Code가 에디터 파일 참조해서 채움. */
 export function generateContent(slot: TimeSlot, _directive: DailyDirective): ContentDraft {
-  const editorKey = slot.category;
-  const editorInfo = EDITOR_MAP[editorKey] ?? EDITOR_MAP['뷰티'];
+  const editorId = EDITOR_MAP[slot.category] ?? EDITOR_MAP['뷰티'];
+  const editorDef = AGENT_REGISTRY[editorId!];
 
   return {
     text: '',     // Claude Code가 에디터 파일 읽고 채워야 함
@@ -514,8 +506,8 @@ export function generateContent(slot: TimeSlot, _directive: DailyDirective): Con
     format: '',   // 포맷 선택 (비교형/리스트형/스토리형 등)
     category: slot.category,
     editor: slot.editor,
-    agent_file: editorInfo.agent,
-    persona_file: editorInfo.persona,
+    agent_file: editorDef!.file,
+    persona_file: editorDef!.persona,
   };
 }
 
