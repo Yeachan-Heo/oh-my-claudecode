@@ -91,8 +91,6 @@ async function main() {
   const devPaths = [
     join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),
     join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),
-    join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),
-    join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),
   ];
 
   for (const devPath of devPaths) {

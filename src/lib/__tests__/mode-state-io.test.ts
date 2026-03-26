@@ -78,13 +78,12 @@ describe('mode-state-io', () => {
       const filePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
       writeFileSync(filePath + '.tmp', 'partial-garbage');
 
-      // A new write should overwrite the stale .tmp and succeed
+      // A new write should succeed despite the stale .tmp (uses unique temp names)
       writeModeState('ralph', { active: true, iteration: 2 }, tempDir);
 
       const state = readModeState<Record<string, unknown>>('ralph', tempDir);
       expect(state).not.toBeNull();
       expect(state!.iteration).toBe(2);
-      expect(existsSync(filePath + '.tmp')).toBe(false);
     });
   });
 

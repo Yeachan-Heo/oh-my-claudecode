@@ -690,13 +690,22 @@ export async function spawnWorkerForTask(
     ? runtime.leaderPaneId
     : runtime.workerPaneIds[runtime.workerPaneIds.length - 1];
   const splitType = runtime.workerPaneIds.length === 0 ? '-h' : '-v';
-  const splitResult = await execFileAsync('tmux', [
-    'split-window', splitType, '-t', splitTarget,
-    '-d', '-P', '-F', '#{pane_id}',
-    '-c', runtime.cwd,
-  ]);
-  const paneId = splitResult.stdout.split('\n')[0]?.trim();
-  if (!paneId) return '';
+  let paneId: string;
+  try {
+    const splitResult = await execFileAsync('tmux', [
+      'split-window', splitType, '-t', splitTarget,
+      '-d', '-P', '-F', '#{pane_id}',
+      '-c', runtime.cwd,
+    ]);
+    paneId = splitResult.stdout.split('\n')[0]?.trim() ?? '';
+  } catch {
+    paneId = '';
+  }
+  if (!paneId) {
+    // Revert task to pending so it can be reassigned
+    await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
+    return '';
+  }
 
   const workerIndex = parseWorkerIndex(workerNameValue);
   const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length]

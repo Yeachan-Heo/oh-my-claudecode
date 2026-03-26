@@ -156,7 +156,7 @@ export interface QueueInboxParams {
 }
 
 export async function queueInboxInstruction(params: QueueInboxParams): Promise<DispatchOutcome> {
-  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  // Check dedup BEFORE writing inbox to avoid overwriting with stale content
   const queued = await enqueueDispatchRequest(
     params.teamName,
     {
@@ -180,6 +180,8 @@ export async function queueInboxInstruction(params: QueueInboxParams): Promise<D
       request_id: queued.request.request_id,
     };
   }
+
+  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
 
   const notifyOutcome = await Promise.resolve(params.notify(
     { workerName: params.workerName, workerIndex: params.workerIndex, paneId: params.paneId },
