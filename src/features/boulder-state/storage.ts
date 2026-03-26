@@ -77,11 +77,13 @@ export function appendSessionId(
 
     if (!state.session_ids.includes(sessionId)) {
       state.session_ids.push(sessionId);
-      if (writeBoulderState(directory, state)) {
-        return state;
-      }
+      writeBoulderState(directory, state);
+      return state;
     }
 
+    // Session already present — refresh updatedAt to prevent stale detection
+    state.updatedAt = new Date().toISOString();
+    writeBoulderState(directory, state);
     return state;
   });
 }

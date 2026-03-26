@@ -351,7 +351,9 @@ export function startHardeningWave(
   }
 
   state.currentWave += 1;
-  writeRalphthonState(directory, state, sessionId);
+  if (!writeRalphthonState(directory, state, sessionId)) {
+    return null;
+  }
 
   if (onEvent) {
     onEvent({ type: 'hardening_wave_start', wave: state.currentWave });
@@ -384,7 +386,9 @@ export function endHardeningWave(
     state.consecutiveCleanWaves = 0;
   }
 
-  writeRalphthonState(directory, state, sessionId);
+  if (!writeRalphthonState(directory, state, sessionId)) {
+    return { shouldTerminate: true };
+  }
 
   if (onEvent) {
     onEvent({ type: 'hardening_wave_end', wave: state.currentWave, newIssues: newIssueCount });
