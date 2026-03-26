@@ -520,7 +520,8 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(server as any).setRequestHandler(CallToolRequestSchema, async (request: { params: { name: string; arguments?: Record<string, unknown> } }) => {
   const { name, arguments: args } = request.params;
   if (isDeprecatedTeamToolName(name)) {
     return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);

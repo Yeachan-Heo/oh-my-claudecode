@@ -158,7 +158,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(server as any).setRequestHandler(CallToolRequestSchema, async (request: { params: { name: string; arguments?: Record<string, unknown> } }) => {
   const { name, arguments: args } = request.params;
 
   const tool = allTools.find(t => t.name === name);
