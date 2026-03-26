@@ -7,6 +7,24 @@
 import { execSync } from 'node:child_process';
 import { dim, cyan } from '../colors.js';
 
+const CACHE_TTL_MS = 30_000;
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+const repoCache = new Map<string, CacheEntry<string | null>>();
+const branchCache = new Map<string, CacheEntry<string | null>>();
+
+/**
+ * Clear all git caches. Call in tests beforeEach to ensure a clean slate.
+ */
+export function resetGitCache(): void {
+  repoCache.clear();
+  branchCache.clear();
+}
+
 /**
  * Get git repository name from remote URL.
  * Extracts the repo name from URLs like:
@@ -17,6 +35,13 @@ import { dim, cyan } from '../colors.js';
  * @returns Repository name or null if not available
  */
 export function getGitRepoName(cwd?: string): string | null {
+  const key = cwd ?? '';
+  const cached = repoCache.get(key);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.value;
+  }
+
+  let result: string | null = null;
   try {
     const url = execSync('git remote get-url origin', {
       cwd,
@@ -26,15 +51,20 @@ export function getGitRepoName(cwd?: string): string | null {
       shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
     }).trim();
 
-    if (!url) return null;
-
-    // Extract repo name from URL
-    // Handles: https://github.com/user/repo.git, git@github.com:user/repo.git
-    const match = url.match(/\/([^/]+?)(?:\.git)?$/) || url.match(/:([^/]+?)(?:\.git)?$/);
-    return match ? match[1].replace(/\.git$/, '') : null;
+    if (!url) {
+      result = null;
+    } else {
+      // Extract repo name from URL
+      // Handles: https://github.com/user/repo.git, git@github.com:user/repo.git
+      const match = url.match(/\/([^/]+?)(?:\.git)?$/) || url.match(/:([^/]+?)(?:\.git)?$/);
+      result = match ? match[1].replace(/\.git$/, '') : null;
+    }
   } catch {
-    return null;
+    result = null;
   }
+
+  repoCache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  return result;
 }
 
 /**
@@ -44,6 +74,13 @@ export function getGitRepoName(cwd?: string): string | null {
  * @returns Branch name or null if not available
  */
 export function getGitBranch(cwd?: string): string | null {
+  const key = cwd ?? '';
+  const cached = branchCache.get(key);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.value;
+  }
+
+  let result: string | null = null;
   try {
     const branch = execSync('git branch --show-current', {
       cwd,
@@ -53,10 +90,13 @@ export function getGitBranch(cwd?: string): string | null {
       shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
     }).trim();
 
-    return branch || null;
+    result = branch || null;
   } catch {
-    return null;
+    result = null;
   }
+
+  branchCache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  return result;
 }
 
 /**

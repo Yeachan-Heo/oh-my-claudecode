@@ -73,10 +73,10 @@ export interface GitProvider {
   detectFromApi?(baseUrl: string): Promise<boolean>;
 
   /** Fetch PR/MR information */
-  viewPR(number: number, owner?: string, repo?: string): PRInfo | null;
+  viewPR(number: number, owner?: string, repo?: string): PRInfo | null | Promise<PRInfo | null>;
 
   /** Fetch issue/work-item information */
-  viewIssue(number: number, owner?: string, repo?: string): IssueInfo | null;
+  viewIssue(number: number, owner?: string, repo?: string): IssueInfo | null | Promise<IssueInfo | null>;
 
   /** Check if the provider's CLI is authenticated */
   checkAuth(): boolean;

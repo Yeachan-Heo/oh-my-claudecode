@@ -1,26 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(),
-}));
-
-import { execFileSync } from 'node:child_process';
 import { BitbucketProvider } from '../../providers/bitbucket.js';
-
-const mockExecFileSync = vi.mocked(execFileSync);
 
 describe('BitbucketProvider', () => {
   let provider: BitbucketProvider;
   let originalEnv: NodeJS.ProcessEnv;
+  let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     provider = new BitbucketProvider();
-    vi.clearAllMocks();
     originalEnv = { ...process.env };
+    mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.unstubAllGlobals();
   });
 
   describe('static properties', () => {
@@ -64,24 +59,28 @@ describe('BitbucketProvider', () => {
   });
 
   describe('viewPR', () => {
-    it('fetches PR via curl and parses response', () => {
+    it('fetches PR via fetch and parses response', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      const mockResponse = JSON.stringify({
+      const mockData = {
         title: 'Add feature',
         source: { branch: { name: 'feature/new' } },
         destination: { branch: { name: 'main' } },
         links: { html: { href: 'https://bitbucket.org/user/repo/pull-requests/5' } },
         description: 'Adds a new feature',
         author: { display_name: 'Test User' },
+      };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockData),
       });
-      mockExecFileSync.mockReturnValue(mockResponse);
 
-      const result = provider.viewPR(5, 'user', 'repo');
+      const result = await provider.viewPR(5, 'user', 'repo');
 
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'curl',
-        ['-sS', '-H', 'Authorization: Bearer test-token', 'https://api.bitbucket.org/2.0/repositories/user/repo/pullrequests/5'],
-        expect.objectContaining({ encoding: 'utf-8', timeout: 10000 }),
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.bitbucket.org/2.0/repositories/user/repo/pullrequests/5',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer test-token' },
+        }),
       );
       expect(result).toEqual({
         title: 'Add feature',
@@ -93,78 +92,91 @@ describe('BitbucketProvider', () => {
       });
     });
 
-    it('uses Basic auth when username and app password are set', () => {
+    it('uses Basic auth when username and app password are set', async () => {
       delete process.env.BITBUCKET_TOKEN;
       process.env.BITBUCKET_USERNAME = 'myuser';
       process.env.BITBUCKET_APP_PASSWORD = 'mypass';
-      mockExecFileSync.mockReturnValue(JSON.stringify({
-        title: 'PR',
-        source: { branch: { name: 'feat' } },
-        destination: { branch: { name: 'main' } },
-        links: { html: { href: '' } },
-        description: '',
-        author: { display_name: 'u' },
-      }));
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          title: 'PR',
+          source: { branch: { name: 'feat' } },
+          destination: { branch: { name: 'main' } },
+          links: { html: { href: '' } },
+          description: '',
+          author: { display_name: 'u' },
+        }),
+      });
 
-      provider.viewPR(1, 'owner', 'repo');
+      await provider.viewPR(1, 'owner', 'repo');
 
       const expectedAuth = `Basic ${Buffer.from('myuser:mypass').toString('base64')}`;
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'curl',
-        ['-sS', '-H', `Authorization: ${expectedAuth}`, expect.stringContaining('pullrequests/1')],
-        expect.any(Object),
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('pullrequests/1'),
+        expect.objectContaining({
+          headers: { Authorization: expectedAuth },
+        }),
       );
     });
 
-    it('returns null when owner or repo is missing', () => {
+    it('returns null when owner or repo is missing', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      expect(provider.viewPR(1)).toBeNull();
-      expect(provider.viewPR(1, 'owner')).toBeNull();
-      expect(mockExecFileSync).not.toHaveBeenCalled();
+      expect(await provider.viewPR(1)).toBeNull();
+      expect(await provider.viewPR(1, 'owner')).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('returns null when no auth is configured', () => {
+    it('returns null when no auth is configured', async () => {
       delete process.env.BITBUCKET_TOKEN;
       delete process.env.BITBUCKET_USERNAME;
       delete process.env.BITBUCKET_APP_PASSWORD;
 
-      expect(provider.viewPR(1, 'owner', 'repo')).toBeNull();
-      expect(mockExecFileSync).not.toHaveBeenCalled();
+      expect(await provider.viewPR(1, 'owner', 'repo')).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('returns null when curl throws', () => {
+    it('returns null when fetch throws', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      mockExecFileSync.mockImplementation(() => {
-        throw new Error('curl failed');
-      });
+      mockFetch.mockRejectedValue(new Error('network error'));
 
-      expect(provider.viewPR(1, 'owner', 'repo')).toBeNull();
+      expect(await provider.viewPR(1, 'owner', 'repo')).toBeNull();
     });
 
-    it('returns null for invalid number', () => {
-      expect(provider.viewPR(-1, 'owner', 'repo')).toBeNull();
-      expect(provider.viewPR(0, 'owner', 'repo')).toBeNull();
-      expect(provider.viewPR(1.5, 'owner', 'repo')).toBeNull();
-      expect(mockExecFileSync).not.toHaveBeenCalled();
+    it('returns null when response is not ok', async () => {
+      process.env.BITBUCKET_TOKEN = 'test-token';
+      mockFetch.mockResolvedValue({ ok: false });
+
+      expect(await provider.viewPR(1, 'owner', 'repo')).toBeNull();
+    });
+
+    it('returns null for invalid number', async () => {
+      expect(await provider.viewPR(-1, 'owner', 'repo')).toBeNull();
+      expect(await provider.viewPR(0, 'owner', 'repo')).toBeNull();
+      expect(await provider.viewPR(1.5, 'owner', 'repo')).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
   describe('viewIssue', () => {
-    it('fetches issue via curl and parses response', () => {
+    it('fetches issue via fetch and parses response', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      const mockResponse = JSON.stringify({
+      const mockData = {
         title: 'Bug report',
         content: { raw: 'Something is broken' },
         links: { html: { href: 'https://bitbucket.org/user/repo/issues/3' } },
+      };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockData),
       });
-      mockExecFileSync.mockReturnValue(mockResponse);
 
-      const result = provider.viewIssue(3, 'user', 'repo');
+      const result = await provider.viewIssue(3, 'user', 'repo');
 
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'curl',
-        ['-sS', '-H', 'Authorization: Bearer test-token', 'https://api.bitbucket.org/2.0/repositories/user/repo/issues/3'],
-        expect.objectContaining({ encoding: 'utf-8' }),
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.bitbucket.org/2.0/repositories/user/repo/issues/3',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer test-token' },
+        }),
       );
       expect(result).toEqual({
         title: 'Bug report',
@@ -173,25 +185,23 @@ describe('BitbucketProvider', () => {
       });
     });
 
-    it('returns null when owner or repo is missing', () => {
+    it('returns null when owner or repo is missing', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      expect(provider.viewIssue(1)).toBeNull();
-      expect(mockExecFileSync).not.toHaveBeenCalled();
+      expect(await provider.viewIssue(1)).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('returns null when curl throws', () => {
+    it('returns null when fetch throws', async () => {
       process.env.BITBUCKET_TOKEN = 'test-token';
-      mockExecFileSync.mockImplementation(() => {
-        throw new Error('curl failed');
-      });
+      mockFetch.mockRejectedValue(new Error('network error'));
 
-      expect(provider.viewIssue(1, 'owner', 'repo')).toBeNull();
+      expect(await provider.viewIssue(1, 'owner', 'repo')).toBeNull();
     });
 
-    it('returns null for invalid number', () => {
-      expect(provider.viewIssue(-1, 'owner', 'repo')).toBeNull();
-      expect(provider.viewIssue(0, 'owner', 'repo')).toBeNull();
-      expect(mockExecFileSync).not.toHaveBeenCalled();
+    it('returns null for invalid number', async () => {
+      expect(await provider.viewIssue(-1, 'owner', 'repo')).toBeNull();
+      expect(await provider.viewIssue(0, 'owner', 'repo')).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 

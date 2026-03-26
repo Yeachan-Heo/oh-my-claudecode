@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getGitRepoName, getGitBranch, renderGitRepo, renderGitBranch } from '../../hud/elements/git.js';
+import { getGitRepoName, getGitBranch, renderGitRepo, renderGitBranch, resetGitCache } from '../../hud/elements/git.js';
 
 // Mock child_process.execSync
 vi.mock('node:child_process', () => ({
@@ -12,6 +12,7 @@ const mockExecSync = vi.mocked(execSync);
 describe('git elements', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetGitCache();
   });
 
   describe('getGitRepoName', () => {

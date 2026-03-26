@@ -9,7 +9,7 @@
  * - Text inputs are sanitized to prevent command injection
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
 
 /**
@@ -102,7 +102,7 @@ export function listTmuxPanes(): TmuxPane[] {
   try {
     // Format: session_name:window_index.pane_index pane_id pane_active window_name pane_title
     const format = '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
-    const result = execSync(`tmux list-panes -a -F "${format}"`, {
+    const result = execFileSync('tmux', ['list-panes', '-a', '-F', format], {
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -159,7 +159,7 @@ export function capturePaneContent(paneId: string, lines = 15): string {
 
   try {
     // Capture the last N lines from the pane
-    const result = execSync(`tmux capture-pane -t "${paneId}" -p -S -${safeLines}`, {
+    const result = execFileSync('tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`], {
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -276,7 +276,7 @@ export function sendResumeSequence(paneId: string): boolean {
 
   try {
     // Send "1" to select the first option (typically "Continue" or similar)
-    execSync(`tmux send-keys -t '${paneId}' '1' Enter`, {
+    execFileSync('tmux', ['send-keys', '-t', paneId, '1', 'Enter'], {
       timeout: 2000,
     });
 
@@ -306,12 +306,12 @@ export function sendToPane(paneId: string, text: string, pressEnter = true): boo
   try {
     const sanitizedText = sanitizeForTmux(text);
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
-    execSync(`tmux send-keys -t '${paneId}' -l '${sanitizedText}'`, {
+    execFileSync('tmux', ['send-keys', '-t', paneId, '-l', sanitizedText], {
       timeout: 2000,
     });
     // Send Enter as a separate command so it is interpreted as a key press
     if (pressEnter) {
-      execSync(`tmux send-keys -t '${paneId}' Enter`, {
+      execFileSync('tmux', ['send-keys', '-t', paneId, 'Enter'], {
         timeout: 2000,
       });
     }

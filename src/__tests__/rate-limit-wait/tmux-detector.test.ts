@@ -14,11 +14,11 @@ import type { BlockedPane } from '../../features/rate-limit-wait/types.js';
 
 // Mock child_process
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
   spawnSync: vi.fn(),
 }));
 
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 describe('tmux-detector', () => {
   beforeEach(() => {
@@ -183,7 +183,7 @@ describe('tmux-detector', () => {
         output: [],
       });
 
-      vi.mocked(execSync).mockReturnValue(
+      vi.mocked(execFileSync).mockReturnValue(
         'main:0.0 %0 1 dev Claude\nmain:0.1 %1 0 dev Other\n'
       );
 
@@ -237,13 +237,14 @@ describe('tmux-detector', () => {
         output: [],
       });
 
-      vi.mocked(execSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
+      vi.mocked(execFileSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
 
       const content = capturePaneContent('%0', 3);
 
       expect(content).toBe('Line 1\nLine 2\nLine 3\n');
-      expect(execSync).toHaveBeenCalledWith(
-        'tmux capture-pane -t "%0" -p -S -3',
+      expect(execFileSync).toHaveBeenCalledWith(
+        'tmux',
+        ['capture-pane', '-t', '%0', '-p', '-S', '-3'],
         expect.any(Object)
       );
     });
@@ -276,7 +277,7 @@ describe('tmux-detector', () => {
       });
 
       // Valid pane ID should work
-      vi.mocked(execSync).mockReturnValue('content');
+      vi.mocked(execFileSync).mockReturnValue('content');
       const validResult = capturePaneContent('%0');
       expect(validResult).toBe('content');
 
@@ -292,7 +293,7 @@ describe('tmux-detector', () => {
       ];
 
       for (const invalidId of invalidIds) {
-        vi.mocked(execSync).mockClear();
+        vi.mocked(execFileSync).mockClear();
         const result = capturePaneContent(invalidId);
         expect(result).toBe('');
       }
@@ -308,20 +309,22 @@ describe('tmux-detector', () => {
         output: [],
       });
 
-      vi.mocked(execSync).mockReturnValue('content');
+      vi.mocked(execFileSync).mockReturnValue('content');
 
       // Should clamp negative to 1
       capturePaneContent('%0', -5);
-      expect(execSync).toHaveBeenCalledWith(
-        expect.stringContaining('-S -1'),
+      expect(execFileSync).toHaveBeenCalledWith(
+        'tmux',
+        expect.arrayContaining(['-S', '-1']),
         expect.any(Object)
       );
 
       // Should clamp excessive values to 100
-      vi.mocked(execSync).mockClear();
+      vi.mocked(execFileSync).mockClear();
       capturePaneContent('%0', 1000);
-      expect(execSync).toHaveBeenCalledWith(
-        expect.stringContaining('-S -100'),
+      expect(execFileSync).toHaveBeenCalledWith(
+        'tmux',
+        expect.arrayContaining(['-S', '-100']),
         expect.any(Object)
       );
     });
