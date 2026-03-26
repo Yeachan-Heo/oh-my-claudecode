@@ -892,6 +892,9 @@ export const agentMessages = pgTable(
     // 같은 daily-run 실행의 메시지를 묶는 ID (예: 'daily-20260323')
     room_id: text('room_id'),
     // 회의방 ID — 회의 메시지 그루핑 (v2 추가)
+    // Phase 4: 채팅 시스템 확장
+    reply_to: text('reply_to'),
+    mentions: jsonb('mentions').$type<string[]>().default([]),
   },
   (table) => [
     index('idx_agent_msg_date').on(table.created_at),
@@ -900,6 +903,57 @@ export const agentMessages = pgTable(
     index('idx_agent_messages_task_id').on(table.task_id),
     index('idx_agent_messages_type').on(table.message_type),
     index('idx_agent_messages_room').on(table.room_id),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Chat Rooms & Participants (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * chat_rooms - 채팅방 메타데이터 (Phase 4).
+ * type: 'dm' | 'meeting' | 'announcement' | 'owner' | 'team'
+ */
+export const chatRooms = pgTable(
+  'chat_rooms',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    status: text('status').notNull().default('active'),
+    created_by: text('created_by').notNull(),
+    meeting_id: text('meeting_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    last_message_at: timestamp('last_message_at', { withTimezone: true }),
+    message_count: integer('message_count').notNull().default(0),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    archived_at: timestamp('archived_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_chat_rooms_status').on(table.status),
+    index('idx_chat_rooms_type').on(table.type),
+    index('idx_chat_rooms_created_by').on(table.created_by),
+  ],
+);
+
+/**
+ * chat_participants - 채팅방 참여자 (Phase 4).
+ */
+export const chatParticipants = pgTable(
+  'chat_participants',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    room_id: text('room_id').notNull(),
+    agent_id: text('agent_id').notNull(),
+    role: text('role').notNull().default('member'),
+    joined_at: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    left_at: timestamp('left_at', { withTimezone: true }),
+    last_read_at: timestamp('last_read_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_chat_participants_room').on(table.room_id),
+    index('idx_chat_participants_agent').on(table.agent_id),
+    uniqueIndex('idx_chat_participants_unique').on(table.room_id, table.agent_id),
   ],
 );
 
@@ -985,6 +1039,11 @@ export const agents = pgTable(
     // 'idle' | 'active' | 'standby'
     agent_file: text('agent_file'),
     // 예: '.claude/agents/bini-beauty-editor.md'
+    // Phase 4: Agent Town 연동
+    last_active_at: timestamp('last_active_at', { withTimezone: true }),
+    current_task: text('current_task'),
+    location: text('location').default('desk'),
+    // 'desk' | 'meeting_room' | 'lounge' | 'owner_office' | 'analysis_room' | 'editor_room'
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
 );

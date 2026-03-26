@@ -1,0 +1,72 @@
+{
+  "name": "@geezerrrr/agent-town",
+  "version": "0.4.1",
+  "description": "Pixel-style AI Agent collaboration community — visualize your agents working in a pixel art office",
+  "license": "MIT",
+  "bin": {
+    "agent-town": "bin/agent-town.mjs"
+  },
+  "files": [
+    "bin/",
+    ".next/standalone/"
+  ],
+  "scripts": {
+    "dev": "tsx server.ts",
+    "dev:next": "next dev",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server.ts",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky",
+    "prepublishOnly": "next build && node scripts/prepare-package.mjs"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,js,mjs,css}": [
+      "prettier --write"
+    ]
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "pixel-art",
+    "collaboration",
+    "visualization",
+    "phaser",
+    "nextjs"
+  ],
+  "dependencies": {
+    "@supabase/supabase-js": "^2.100.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@tanstack/react-virtual": "^3.13.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "husky": "^9",
+    "lint-staged": "^15",
+    "lucide-react": "^0.576.0",
+    "next": "16.1.6",
+    "phaser": "^3.90.0",
+    "prettier": "^3",
+    "puppeteer": "^24.38.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^3"
+  },
+  "packageManager": "pnpm@10.20.0"
+}
