@@ -85,6 +85,30 @@ export const PRIORITY_HEADER = "## Priority Context";
 export const WORKING_MEMORY_HEADER = "## Working Memory";
 export const MANUAL_HEADER = "## MANUAL";
 
+interface SectionRegexSet {
+  extract: RegExp;
+  replace: RegExp;
+  comment: RegExp;
+}
+
+const SECTION_REGEXES: Record<string, SectionRegexSet> = {
+  [PRIORITY_HEADER]: createSectionRegexSet(PRIORITY_HEADER),
+  [WORKING_MEMORY_HEADER]: createSectionRegexSet(WORKING_MEMORY_HEADER),
+  [MANUAL_HEADER]: createSectionRegexSet(MANUAL_HEADER),
+};
+
+function createSectionRegexSet(header: string): SectionRegexSet {
+  return {
+    extract: new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`),
+    replace: new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`),
+    comment: new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
+  };
+}
+
+function getSectionRegexSet(header: string): SectionRegexSet {
+  return SECTION_REGEXES[header] ?? createSectionRegexSet(header);
+}
+
 // ============================================================================
 // File Operations
 // ============================================================================
@@ -158,8 +182,7 @@ export function readNotepad(directory: string): string | null {
 function extractSection(content: string, header: string): string | null {
   // Match from header to next section (## followed by space, at start of line)
   // We need to match ## at the start of a line, not ### which is a subsection
-  const regex = new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
-  const match = content.match(regex);
+  const match = content.match(getSectionRegexSet(header).extract);
   if (!match) {
     return null;
   }
@@ -179,15 +202,13 @@ function replaceSection(
   header: string,
   newContent: string,
 ): string {
-  const regex = new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`);
+  const { replace, comment: commentPattern } = getSectionRegexSet(header);
 
   // Preserve comment if it exists
-  const commentMatch = content.match(
-    new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
-  );
-  const comment = commentMatch ? commentMatch[1] + "\n" : "";
+  const commentMatch = content.match(commentPattern);
+  const preservedComment = commentMatch ? commentMatch[1] + "\n" : "";
 
-  return content.replace(regex, `$1${comment}${newContent}\n\n`);
+  return content.replace(replace, `$1${preservedComment}${newContent}\n\n`);
 }
 
 // ============================================================================

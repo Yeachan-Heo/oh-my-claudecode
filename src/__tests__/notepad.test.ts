@@ -114,6 +114,15 @@ describe('Notepad Module', () => {
       expect(result).toBeNull();
     });
 
+    it('should return consistent priority context across repeated reads', () => {
+      initNotepad(testDir);
+      setPriorityContext(testDir, 'Repeated content');
+
+      expect(getPriorityContext(testDir)).toBe('Repeated content');
+      expect(getPriorityContext(testDir)).toBe('Repeated content');
+      expect(getPriorityContext(testDir)).toBe('Repeated content');
+    });
+
     it('should exclude HTML comments from content', () => {
       initNotepad(testDir);
       const notepadPath = getNotepadPath(testDir);
@@ -170,6 +179,22 @@ describe('Notepad Module', () => {
       const context = getPriorityContext(testDir);
       expect(context).toBe('Second content');
       expect(context).not.toContain('First content');
+    });
+
+    it('should preserve section boundaries across repeated updates to known headers', () => {
+      setPriorityContext(testDir, 'Priority content');
+      addWorkingMemoryEntry(testDir, 'Working note');
+      addManualEntry(testDir, 'Manual note');
+
+      setPriorityContext(testDir, 'Updated priority');
+      addWorkingMemoryEntry(testDir, 'Second working note');
+      addManualEntry(testDir, 'Second manual note');
+
+      expect(getPriorityContext(testDir)).toBe('Updated priority');
+      expect(getWorkingMemory(testDir)).toContain('Working note');
+      expect(getWorkingMemory(testDir)).toContain('Second working note');
+      expect(getManualSection(testDir)).toContain('Manual note');
+      expect(getManualSection(testDir)).toContain('Second manual note');
     });
 
     it('should use custom config for max chars', () => {
