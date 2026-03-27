@@ -168,20 +168,35 @@ function levenshteinDistance(str1: string, str2: string): number {
 }
 
 /**
+ * Cache for compiled trigger regexes to avoid recompilation on every call.
+ * Key: original pattern string, Value: compiled RegExp or null (invalid).
+ */
+const triggerRegexCache = new Map<string, { regex: RegExp; score: number } | null>();
+
+/**
  * Pattern-based matching for regex-like triggers
  * Returns confidence score 0-100
  */
 function patternMatch(text: string, pattern: string): number {
+  let cached = triggerRegexCache.get(pattern);
+  if (cached === undefined) {
+    cached = compileTriggerRegex(pattern);
+    triggerRegexCache.set(pattern, cached);
+  }
+  if (cached && cached.regex.test(text)) {
+    return cached.score;
+  }
+  return 0;
+}
+
+function compileTriggerRegex(pattern: string): { regex: RegExp; score: number } | null {
   // Check for glob-like patterns
   if (pattern.includes('*')) {
     const regexPattern = pattern.replace(/\*/g, '.*');
     try {
-      const regex = new RegExp(regexPattern, 'i');
-      if (regex.test(text)) {
-        return 85; // High confidence for pattern match
-      }
+      return { regex: new RegExp(regexPattern, 'i'), score: 85 };
     } catch {
-      // Invalid regex, skip
+      return null;
     }
   }
 
@@ -191,17 +206,41 @@ function patternMatch(text: string, pattern: string): number {
   if (regexMatch) {
     try {
       const [, regexPattern, flags] = regexMatch;
-      const regex = new RegExp(regexPattern, flags || 'i');
-      if (regex.test(text)) {
-        return 90; // Very high confidence for explicit regex match
-      }
+      return { regex: new RegExp(regexPattern, flags || 'i'), score: 90 };
     } catch {
-      // Invalid regex, skip
+      return null;
     }
   }
 
-  return 0;
+  return null;
 }
+
+// Pre-compiled context detection patterns (module-level to avoid reallocation per call)
+const ERROR_PATTERNS = [
+  /\b(error|exception|failed|failure|crash|bug)\b/gi,
+  /\b([A-Z][a-z]+Error)\b/g, // TypeError, ReferenceError, etc.
+  /\b(ENOENT|EACCES|ECONNREFUSED)\b/g, // Node.js error codes
+  /at\s+.*\(.*:\d+:\d+\)/g, // Stack trace lines
+];
+
+const FILE_PATTERNS = [
+  /\b([a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.[a-z]{2,4}\b/g, // Relative paths
+  /\b\/[a-zA-Z0-9_\/-]+\.[a-z]{2,4}\b/g, // Absolute paths
+  /\bsrc\/[a-zA-Z0-9_\/-]+/g, // src/ paths
+];
+
+const CODE_PATTERNS = [
+  { pattern: /\basync\b.*\bawait\b/gi, name: 'async/await' },
+  { pattern: /\bpromise\b/gi, name: 'promise' },
+  { pattern: /\bcallback\b/gi, name: 'callback' },
+  { pattern: /\bregex\b|\bregular expression\b/gi, name: 'regex' },
+  { pattern: /\bapi\b/gi, name: 'api' },
+  { pattern: /\btest\b.*\b(unit|integration|e2e)\b/gi, name: 'testing' },
+  { pattern: /\b(typescript|ts)\b/gi, name: 'typescript' },
+  { pattern: /\b(javascript|js)\b/gi, name: 'javascript' },
+  { pattern: /\breact\b/gi, name: 'react' },
+  { pattern: /\bgit\b/gi, name: 'git' },
+];
 
 /**
  * Extract contextual information from the prompt
@@ -212,14 +251,8 @@ export function extractContext(prompt: string): MatchContext {
   const detectedPatterns: string[] = [];
 
   // Error detection
-  const errorPatterns = [
-    /\b(error|exception|failed|failure|crash|bug)\b/gi,
-    /\b([A-Z][a-z]+Error)\b/g, // TypeError, ReferenceError, etc.
-    /\b(ENOENT|EACCES|ECONNREFUSED)\b/g, // Node.js error codes
-    /at\s+.*\(.*:\d+:\d+\)/g, // Stack trace lines
-  ];
-
-  for (const pattern of errorPatterns) {
+  for (const pattern of ERROR_PATTERNS) {
+    pattern.lastIndex = 0; // Reset stateful regex
     const matches = prompt.match(pattern);
     if (matches) {
       detectedErrors.push(
@@ -229,13 +262,8 @@ export function extractContext(prompt: string): MatchContext {
   }
 
   // File detection
-  const filePatterns = [
-    /\b([a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.[a-z]{2,4}\b/g, // Relative paths
-    /\b\/[a-zA-Z0-9_\/-]+\.[a-z]{2,4}\b/g, // Absolute paths
-    /\bsrc\/[a-zA-Z0-9_\/-]+/g, // src/ paths
-  ];
-
-  for (const pattern of filePatterns) {
+  for (const pattern of FILE_PATTERNS) {
+    pattern.lastIndex = 0;
     const matches = prompt.match(pattern);
     if (matches) {
       detectedFiles.push(
@@ -245,20 +273,8 @@ export function extractContext(prompt: string): MatchContext {
   }
 
   // Pattern detection
-  const codePatterns = [
-    { pattern: /\basync\b.*\bawait\b/gi, name: 'async/await' },
-    { pattern: /\bpromise\b/gi, name: 'promise' },
-    { pattern: /\bcallback\b/gi, name: 'callback' },
-    { pattern: /\bregex\b|\bregular expression\b/gi, name: 'regex' },
-    { pattern: /\bapi\b/gi, name: 'api' },
-    { pattern: /\btest\b.*\b(unit|integration|e2e)\b/gi, name: 'testing' },
-    { pattern: /\b(typescript|ts)\b/gi, name: 'typescript' },
-    { pattern: /\b(javascript|js)\b/gi, name: 'javascript' },
-    { pattern: /\breact\b/gi, name: 'react' },
-    { pattern: /\bgit\b/gi, name: 'git' },
-  ];
-
-  for (const { pattern, name } of codePatterns) {
+  for (const { pattern, name } of CODE_PATTERNS) {
+    pattern.lastIndex = 0;
     if (pattern.test(prompt)) {
       detectedPatterns.push(name);
     }
