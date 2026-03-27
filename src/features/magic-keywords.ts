@@ -5,7 +5,8 @@
  * Patterns ported from oh-my-opencode.
  */
 
-import type { MagicKeyword, PluginConfig } from '../shared/types.js';
+import type { MagicKeyword, PluginConfig } from "../shared/types.js";
+import { escapeRegex } from "../utils/regex.js";
 
 /**
  * Code block pattern for stripping from detection
@@ -17,7 +18,7 @@ const INLINE_CODE_PATTERN = /`[^`]+`/g;
  * Remove code blocks from text for keyword detection
  */
 function removeCodeBlocks(text: string): string {
-  return text.replace(CODE_BLOCK_PATTERN, '').replace(INLINE_CODE_PATTERN, '');
+  return text.replace(CODE_BLOCK_PATTERN, "").replace(INLINE_CODE_PATTERN, "");
 }
 
 const INFORMATIONAL_INTENT_PATTERNS: RegExp[] = [
@@ -28,22 +29,22 @@ const INFORMATIONAL_INTENT_PATTERNS: RegExp[] = [
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 
-function isInformationalKeywordContext(text: string, position: number, keywordLength: number): boolean {
+function isInformationalKeywordContext(
+  text: string,
+  position: number,
+  keywordLength: number,
+): boolean {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
-  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(
+    text.length,
+    position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW,
+  );
   const context = text.slice(start, end);
-  return INFORMATIONAL_INTENT_PATTERNS.some(pattern => pattern.test(context));
-}
-
-/**
- * Escape regex metacharacters so a string matches literally inside new RegExp().
- */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return INFORMATIONAL_INTENT_PATTERNS.some((pattern) => pattern.test(context));
 }
 
 function hasActionableTrigger(text: string, trigger: string): boolean {
-  const pattern = new RegExp(`\\b${escapeRegExp(trigger)}\\b`, 'gi');
+  const pattern = new RegExp(`\\b${escapeRegex(trigger)}\\b`, "gi");
 
   for (const match of text.matchAll(pattern)) {
     if (match.index === undefined) {
@@ -120,7 +121,11 @@ You ARE the planner. Your job: create bulletproof work plans.
 function isPlannerAgent(agentName?: string): boolean {
   if (!agentName) return false;
   const lowerName = agentName.toLowerCase();
-  return lowerName.includes('planner') || lowerName.includes('planning') || lowerName === 'plan';
+  return (
+    lowerName.includes("planner") ||
+    lowerName.includes("planning") ||
+    lowerName === "plan"
+  );
 }
 
 /**
@@ -257,13 +262,14 @@ THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTIN
  * Activates maximum performance with parallel agent orchestration
  */
 const ultraworkEnhancement: MagicKeyword = {
-  triggers: ['ultrawork', 'ulw', 'uw'],
-  description: 'Activates maximum performance mode with parallel agent orchestration',
+  triggers: ["ultrawork", "ulw", "uw"],
+  description:
+    "Activates maximum performance mode with parallel agent orchestration",
   action: (prompt: string) => {
     // Remove the trigger word and add enhancement instructions
-    const cleanPrompt = removeTriggerWords(prompt, ['ultrawork', 'ulw', 'uw']);
+    const cleanPrompt = removeTriggerWords(prompt, ["ultrawork", "ulw", "uw"]);
     return getUltraworkMessage() + cleanPrompt;
-  }
+  },
 };
 
 /**
@@ -271,11 +277,29 @@ const ultraworkEnhancement: MagicKeyword = {
  * Maximizes search effort and thoroughness
  */
 const searchEnhancement: MagicKeyword = {
-  triggers: ['search', 'find', 'locate', 'lookup', 'explore', 'discover', 'scan', 'grep', 'query', 'browse', 'detect', 'trace', 'seek', 'track', 'pinpoint', 'hunt'],
-  description: 'Maximizes search effort and thoroughness',
+  triggers: [
+    "search",
+    "find",
+    "locate",
+    "lookup",
+    "explore",
+    "discover",
+    "scan",
+    "grep",
+    "query",
+    "browse",
+    "detect",
+    "trace",
+    "seek",
+    "track",
+    "pinpoint",
+    "hunt",
+  ],
+  description: "Maximizes search effort and thoroughness",
   action: (prompt: string) => {
     // Multi-language search pattern
-    const searchPattern = /\b(search|find|locate|lookup|look\s*up|explore|discover|scan|grep|query|browse|detect|trace|seek|track|pinpoint|hunt)\b|where\s+is|show\s+me|list\s+all|검색|찾아|탐색|조회|스캔|서치|뒤져|찾기|어디|추적|탐지|찾아봐|찾아내|보여줘|목록|検索|探して|見つけて|サーチ|探索|スキャン|どこ|発見|捜索|見つけ出す|一覧|搜索|查找|寻找|查询|检索|定位|扫描|发现|在哪里|找出来|列出|tìm kiếm|tra cứu|định vị|quét|phát hiện|truy tìm|tìm ra|ở đâu|liệt kê/i;
+    const searchPattern =
+      /\b(search|find|locate|lookup|look\s*up|explore|discover|scan|grep|query|browse|detect|trace|seek|track|pinpoint|hunt)\b|where\s+is|show\s+me|list\s+all|검색|찾아|탐색|조회|스캔|서치|뒤져|찾기|어디|추적|탐지|찾아봐|찾아내|보여줘|목록|検索|探して|見つけて|サーチ|探索|スキャン|どこ|発見|捜索|見つけ出す|一覧|搜索|查找|寻找|查询|检索|定位|扫描|发现|在哪里|找出来|列出|tìm kiếm|tra cứu|định vị|quét|phát hiện|truy tìm|tìm ra|ở đâu|liệt kê/i;
 
     const hasSearchCommand = searchPattern.test(removeCodeBlocks(prompt));
 
@@ -291,7 +315,7 @@ MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:
 - document-specialist agents (remote repos, official docs, GitHub examples)
 Plus direct tools: Grep, ripgrep (rg), ast-grep (sg)
 NEVER stop at first result - be exhaustive.`;
-  }
+  },
 };
 
 /**
@@ -299,11 +323,32 @@ NEVER stop at first result - be exhaustive.`;
  * Activates deep analysis and investigation mode
  */
 const analyzeEnhancement: MagicKeyword = {
-  triggers: ['analyze', 'analyse', 'investigate', 'examine', 'study', 'deep-dive', 'inspect', 'audit', 'evaluate', 'assess', 'review', 'diagnose', 'scrutinize', 'dissect', 'debug', 'comprehend', 'interpret', 'breakdown', 'understand'],
-  description: 'Activates deep analysis and investigation mode',
+  triggers: [
+    "analyze",
+    "analyse",
+    "investigate",
+    "examine",
+    "study",
+    "deep-dive",
+    "inspect",
+    "audit",
+    "evaluate",
+    "assess",
+    "review",
+    "diagnose",
+    "scrutinize",
+    "dissect",
+    "debug",
+    "comprehend",
+    "interpret",
+    "breakdown",
+    "understand",
+  ],
+  description: "Activates deep analysis and investigation mode",
   action: (prompt: string) => {
     // Multi-language analyze pattern
-    const analyzePattern = /\b(analyze|analyse|investigate|examine|study|deep[\s-]?dive|inspect|audit|evaluate|assess|review|diagnose|scrutinize|dissect|debug|comprehend|interpret|breakdown|understand)\b|why\s+is|how\s+does|how\s+to|분석|조사|파악|연구|검토|진단|이해|설명|원인|이유|뜯어봐|따져봐|평가|해석|디버깅|디버그|어떻게|왜|살펴|分析|調査|解析|検討|研究|診断|理解|説明|検証|精査|究明|デバッグ|なぜ|どう|仕組み|调查|检查|剖析|深入|诊断|解释|调试|为什么|原理|搞清楚|弄明白|phân tích|điều tra|nghiên cứu|kiểm tra|xem xét|chẩn đoán|giải thích|tìm hiểu|gỡ lỗi|tại sao/i;
+    const analyzePattern =
+      /\b(analyze|analyse|investigate|examine|study|deep[\s-]?dive|inspect|audit|evaluate|assess|review|diagnose|scrutinize|dissect|debug|comprehend|interpret|breakdown|understand)\b|why\s+is|how\s+does|how\s+to|분석|조사|파악|연구|검토|진단|이해|설명|원인|이유|뜯어봐|따져봐|평가|해석|디버깅|디버그|어떻게|왜|살펴|分析|調査|解析|検討|研究|診断|理解|説明|検証|精査|究明|デバッグ|なぜ|どう|仕組み|调查|检查|剖析|深入|诊断|解释|调试|为什么|原理|搞清楚|弄明白|phân tích|điều tra|nghiên cứu|kiểm tra|xem xét|chẩn đoán|giải thích|tìm hiểu|gỡ lỗi|tại sao/i;
 
     const hasAnalyzeCommand = analyzePattern.test(removeCodeBlocks(prompt));
 
@@ -325,7 +370,7 @@ IF COMPLEX (architecture, multi-system, debugging after 2+ failures):
 - Consult architect for strategic guidance
 
 SYNTHESIZE findings before proceeding.`;
-  }
+  },
 };
 
 /**
@@ -333,17 +378,24 @@ SYNTHESIZE findings before proceeding.`;
  * Activates extended thinking and deep reasoning
  */
 const ultrathinkEnhancement: MagicKeyword = {
-  triggers: ['ultrathink', 'think', 'reason', 'ponder'],
-  description: 'Activates extended thinking mode for deep reasoning',
+  triggers: ["ultrathink", "think", "reason", "ponder"],
+  description: "Activates extended thinking mode for deep reasoning",
   action: (prompt: string) => {
     // Check if ultrathink-related triggers are present
-    const hasThinkCommand = /\b(ultrathink|think|reason|ponder)\b/i.test(removeCodeBlocks(prompt));
+    const hasThinkCommand = /\b(ultrathink|think|reason|ponder)\b/i.test(
+      removeCodeBlocks(prompt),
+    );
 
     if (!hasThinkCommand) {
       return prompt;
     }
 
-    const cleanPrompt = removeTriggerWords(prompt, ['ultrathink', 'think', 'reason', 'ponder']);
+    const cleanPrompt = removeTriggerWords(prompt, [
+      "ultrathink",
+      "think",
+      "reason",
+      "ponder",
+    ]);
 
     return `[ULTRATHINK MODE - EXTENDED REASONING ACTIVATED]
 
@@ -361,7 +413,7 @@ ${cleanPrompt}
 
 IMPORTANT: Do not rush. Quality of reasoning matters more than speed.
 Use maximum cognitive effort before responding.`;
-  }
+  },
 };
 
 /**
@@ -370,8 +422,8 @@ Use maximum cognitive effort before responding.`;
 function removeTriggerWords(prompt: string, triggers: string[]): string {
   let result = prompt;
   for (const trigger of triggers) {
-    const regex = new RegExp(`\\b${escapeRegExp(trigger)}\\b`, 'gi');
-    result = result.replace(regex, '');
+    const regex = new RegExp(`\\b${escapeRegex(trigger)}\\b`, "gi");
+    result = result.replace(regex, "");
   }
   return result.trim();
 }
@@ -383,37 +435,44 @@ export const builtInMagicKeywords: MagicKeyword[] = [
   ultraworkEnhancement,
   searchEnhancement,
   analyzeEnhancement,
-  ultrathinkEnhancement
+  ultrathinkEnhancement,
 ];
 
 /**
  * Create a magic keyword processor with custom triggers
  */
-export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords']): (prompt: string) => string {
-  const keywords = builtInMagicKeywords.map(k => ({ ...k, triggers: [...k.triggers] }));
+export function createMagicKeywordProcessor(
+  config?: PluginConfig["magicKeywords"],
+): (prompt: string) => string {
+  const keywords = builtInMagicKeywords.map((k) => ({
+    ...k,
+    triggers: [...k.triggers],
+  }));
 
   // Override triggers from config
   if (config) {
     if (config.ultrawork) {
-      const ultrawork = keywords.find(k => k.triggers.includes('ultrawork'));
+      const ultrawork = keywords.find((k) => k.triggers.includes("ultrawork"));
       if (ultrawork) {
         ultrawork.triggers = config.ultrawork;
       }
     }
     if (config.search) {
-      const search = keywords.find(k => k.triggers.includes('search'));
+      const search = keywords.find((k) => k.triggers.includes("search"));
       if (search) {
         search.triggers = config.search;
       }
     }
     if (config.analyze) {
-      const analyze = keywords.find(k => k.triggers.includes('analyze'));
+      const analyze = keywords.find((k) => k.triggers.includes("analyze"));
       if (analyze) {
         analyze.triggers = config.analyze;
       }
     }
     if (config.ultrathink) {
-      const ultrathink = keywords.find(k => k.triggers.includes('ultrathink'));
+      const ultrathink = keywords.find((k) =>
+        k.triggers.includes("ultrathink"),
+      );
       if (ultrathink) {
         ultrathink.triggers = config.ultrathink;
       }
@@ -424,7 +483,7 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
     let result = prompt;
 
     for (const keyword of keywords) {
-      const hasKeyword = keyword.triggers.some(trigger => {
+      const hasKeyword = keyword.triggers.some((trigger) => {
         return hasActionableTrigger(removeCodeBlocks(result), trigger);
       });
 
@@ -440,27 +499,35 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
 /**
  * Check if a prompt contains any magic keywords
  */
-export function detectMagicKeywords(prompt: string, config?: PluginConfig['magicKeywords']): string[] {
+export function detectMagicKeywords(
+  prompt: string,
+  config?: PluginConfig["magicKeywords"],
+): string[] {
   const detected: string[] = [];
-  const keywords = builtInMagicKeywords.map(k => ({ ...k, triggers: [...k.triggers] }));
+  const keywords = builtInMagicKeywords.map((k) => ({
+    ...k,
+    triggers: [...k.triggers],
+  }));
   const cleanedPrompt = removeCodeBlocks(prompt);
 
   // Apply config overrides
   if (config) {
     if (config.ultrawork) {
-      const ultrawork = keywords.find(k => k.triggers.includes('ultrawork'));
+      const ultrawork = keywords.find((k) => k.triggers.includes("ultrawork"));
       if (ultrawork) ultrawork.triggers = config.ultrawork;
     }
     if (config.search) {
-      const search = keywords.find(k => k.triggers.includes('search'));
+      const search = keywords.find((k) => k.triggers.includes("search"));
       if (search) search.triggers = config.search;
     }
     if (config.analyze) {
-      const analyze = keywords.find(k => k.triggers.includes('analyze'));
+      const analyze = keywords.find((k) => k.triggers.includes("analyze"));
       if (analyze) analyze.triggers = config.analyze;
     }
     if (config.ultrathink) {
-      const ultrathink = keywords.find(k => k.triggers.includes('ultrathink'));
+      const ultrathink = keywords.find((k) =>
+        k.triggers.includes("ultrathink"),
+      );
       if (ultrathink) ultrathink.triggers = config.ultrathink;
     }
   }
@@ -480,9 +547,11 @@ export function detectMagicKeywords(prompt: string, config?: PluginConfig['magic
 /**
  * Extract prompt text from message parts (for hook usage)
  */
-export function extractPromptText(parts: Array<{ type: string; text?: string; [key: string]: unknown }>): string {
+export function extractPromptText(
+  parts: Array<{ type: string; text?: string; [key: string]: unknown }>,
+): string {
   return parts
-    .filter(p => p.type === 'text')
-    .map(p => p.text ?? '')
-    .join('\n');
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("\n");
 }
