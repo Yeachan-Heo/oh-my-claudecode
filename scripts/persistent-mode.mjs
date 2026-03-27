@@ -277,17 +277,19 @@ function isValidSessionId(sessionId) {
 }
 
 /**
- * Count incomplete Tasks from Claude Code's native Task system.
+ * Count Tasks from Claude Code's native Task system.
+ * Returns { total, incomplete } to support both progress tracking and continuation logic.
  */
-function countIncompleteTasks(sessionId) {
-  if (!sessionId || typeof sessionId !== "string") return 0;
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return 0;
+function countTasks(sessionId) {
+  if (!sessionId || typeof sessionId !== "string") return { total: 0, incomplete: 0 };
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return { total: 0, incomplete: 0 };
 
   const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
   const taskDir = join(cfgDir, "tasks", sessionId);
-  if (!existsSync(taskDir)) return 0;
+  if (!existsSync(taskDir)) return { total: 0, incomplete: 0 };
 
-  let count = 0;
+  let total = 0;
+  let incomplete = 0;
   try {
     const files = readdirSync(taskDir).filter(
       (f) => f.endsWith(".json") && f !== ".lock",
@@ -296,7 +298,8 @@ function countIncompleteTasks(sessionId) {
       try {
         const content = readFileSync(join(taskDir, file), "utf-8");
         const task = JSON.parse(content);
-        if (task.status === "pending" || task.status === "in_progress") count++;
+        total++;
+        if (task.status === "pending" || task.status === "in_progress") incomplete++;
       } catch {
         /* skip */
       }
@@ -304,11 +307,12 @@ function countIncompleteTasks(sessionId) {
   } catch {
     /* skip */
   }
-  return count;
+  return { total, incomplete };
 }
 
-function countIncompleteTodos(sessionId, projectDir) {
-  let count = 0;
+function countTodos(sessionId, projectDir) {
+  let total = 0;
+  let incomplete = 0;
 
   // Session-specific todos only (no global scan)
   if (
@@ -329,7 +333,8 @@ function countIncompleteTodos(sessionId, projectDir) {
         : Array.isArray(data?.todos)
           ? data.todos
           : [];
-      count += todos.filter(
+      total += todos.length;
+      incomplete += todos.filter(
         (t) => t.status !== "completed" && t.status !== "cancelled",
       ).length;
     } catch {
@@ -349,7 +354,8 @@ function countIncompleteTodos(sessionId, projectDir) {
         : Array.isArray(data?.todos)
           ? data.todos
           : [];
-      count += todos.filter(
+      total += todos.length;
+      incomplete += todos.filter(
         (t) => t.status !== "completed" && t.status !== "cancelled",
       ).length;
     } catch {
@@ -357,7 +363,7 @@ function countIncompleteTodos(sessionId, projectDir) {
     }
   }
 
-  return count;
+  return { total, incomplete };
 }
 
 /**
@@ -563,10 +569,11 @@ async function main() {
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
     const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
 
-    // Count incomplete items (session-specific + project-local only)
-    const taskCount = countIncompleteTasks(sessionId);
-    const todoCount = countIncompleteTodos(sessionId, directory);
-    const totalIncomplete = taskCount + todoCount;
+    // Count items (session-specific + project-local only)
+    const taskCounts = countTasks(sessionId);
+    const todoCounts = countTodos(sessionId, directory);
+    const totalIncomplete = taskCounts.incomplete + todoCounts.incomplete;
+    const totalAll = taskCounts.total + todoCounts.total;
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
@@ -593,12 +600,13 @@ async function main() {
           // Sync ralph progress to autopilot state for HUD display
           if (autopilot.state?.active && autopilot.path) {
             try {
+              const completedCount = totalAll - totalIncomplete;
               autopilot.state.execution = {
                 ...autopilot.state.execution,
                 ralph_iterations: iteration + 1,
                 ultrawork_active: !!ultrawork.state?.active,
-                tasks_completed: taskCount > 0 ? (taskCount + todoCount) - totalIncomplete : (autopilot.state.execution?.tasks_completed ?? 0),
-                tasks_total: (taskCount + todoCount) || (autopilot.state.execution?.tasks_total ?? 0),
+                tasks_completed: totalAll > 0 ? completedCount : (autopilot.state.execution?.tasks_completed ?? 0),
+                tasks_total: totalAll || (autopilot.state.execution?.tasks_total ?? 0),
               };
               writeJsonFile(autopilot.path, autopilot.state);
             } catch {
@@ -925,7 +933,7 @@ async function main() {
       let reason = `[ULTRAWORK #${newCount}/${maxReinforcements}] Mode active.`;
 
       if (totalIncomplete > 0) {
-        const itemType = taskCount > 0 ? "Tasks" : "todos";
+        const itemType = taskCounts.incomplete > 0 ? "Tasks" : "todos";
         reason += ` ${totalIncomplete} incomplete ${itemType} remain. Continue working.`;
       } else if (newCount >= 3) {
         // Only suggest cancel after minimum iterations (guard against no-tasks-created scenario)
