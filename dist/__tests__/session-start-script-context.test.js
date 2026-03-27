@@ -123,7 +123,9 @@ describe('session-start.mjs regression #1386', () => {
         expect(output.continue).toBe(true);
         expect(context).toContain('[PROJECT MEMORY]');
         expect(context).toContain('Preserve project memory directives at session start');
-        expect(context).toContain('[Project Environment] TypeScript | using pnpm | Build: pnpm build | Test: pnpm test');
+        expect(context).toContain('[Project Environment]');
+        expect(context).toContain('TypeScript | pkg:pnpm | node');
+        expect(context).toContain('build=pnpm build | test=pnpm test');
         expect(context).toContain('[env] Requires LOCAL_API_BASE for smoke tests');
     });
 });
