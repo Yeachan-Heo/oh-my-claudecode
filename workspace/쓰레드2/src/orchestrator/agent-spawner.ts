@@ -12,12 +12,15 @@ const PROJECT_ROOT = process.cwd();
 
 // ─── Agent Registry ─────────────────────────────────────
 
+export type AgentRank = 'owner' | 'executive' | 'lead' | 'member';
+
 export interface AgentDefinition {
   id: string;
   name: string;           // Korean name
   file: string;           // .claude/agents/ path
   phase: number;          // which Phase this agent runs in
   role: 'collector' | 'analyst' | 'ceo' | 'editor' | 'qa' | 'engineer';
+  rank: AgentRank;        // 권한 등급: owner > executive > lead > member
   department: string;     // for memory scoping: 'executive'|'marketing'|'analysis'|'qa'|'engineering'
   persona?: string;       // souls/ file path (optional)
   ops: string[];          // ops/ docs to reference
@@ -28,68 +31,105 @@ export const AGENT_REGISTRY: Record<string, AgentDefinition> = {
   'junho-researcher': {
     id: 'junho-researcher', name: '준호',
     file: '.claude/agents/junho-researcher.md',
-    phase: 1, role: 'collector', department: 'analysis',
+    phase: 1, role: 'collector', rank: 'member', department: 'analysis',
     ops: ['ops/naver-data-ops.md'],
   },
   'seoyeon-analyst': {
     id: 'seoyeon-analyst', name: '서연',
     file: '.claude/agents/seoyeon-analyst.md',
-    phase: 2, role: 'analyst', department: 'analysis',
+    phase: 2, role: 'analyst', rank: 'lead', department: 'analysis',
     ops: ['ops/performance-ops.md'],
   },
   'minjun-ceo': {
     id: 'minjun-ceo', name: '민준',
     file: '.claude/agents/minjun-ceo.md',
-    phase: 3, role: 'ceo', department: 'executive',
+    phase: 3, role: 'ceo', rank: 'executive', department: 'executive',
     ops: ['ops/daily-standup-ops.md', 'ops/weekly-retro-ops.md'],
   },
   'bini-beauty-editor': {
     id: 'bini-beauty-editor', name: '빈이',
     file: '.claude/agents/bini-beauty-editor.md',
-    phase: 4, role: 'editor', department: 'marketing', category: '뷰티',
+    phase: 4, role: 'editor', rank: 'member', department: 'marketing', category: '뷰티',
     persona: 'souls/bini-persona.md',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'hana-health-editor': {
     id: 'hana-health-editor', name: '하나',
     file: '.claude/agents/hana-health-editor.md',
-    phase: 4, role: 'editor', department: 'marketing', category: '건강',
+    phase: 4, role: 'editor', rank: 'member', department: 'marketing', category: '건강',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'sora-lifestyle-editor': {
     id: 'sora-lifestyle-editor', name: '소라',
     file: '.claude/agents/sora-lifestyle-editor.md',
-    phase: 4, role: 'editor', department: 'marketing', category: '생활',
+    phase: 4, role: 'editor', rank: 'member', department: 'marketing', category: '생활',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'jiu-diet-editor': {
     id: 'jiu-diet-editor', name: '지우',
     file: '.claude/agents/jiu-diet-editor.md',
-    phase: 4, role: 'editor', department: 'marketing', category: '다이어트',
+    phase: 4, role: 'editor', rank: 'member', department: 'marketing', category: '다이어트',
     ops: ['ops/content-creation-ops.md', 'ops/writing-guide-ops.md'],
   },
   'doyun-qa': {
     id: 'doyun-qa', name: '도윤',
     file: '.claude/agents/doyun-qa.md',
-    phase: 4, role: 'qa', department: 'qa',
+    phase: 4, role: 'qa', rank: 'member', department: 'qa',
     ops: ['ops/debate-ops.md'],
   },
   'taeho-engineer': {
     id: 'taeho-engineer', name: '태호',
     file: '.claude/agents/taeho-engineer.md',
-    phase: 0, role: 'engineer', department: 'engineering',
+    phase: 0, role: 'engineer', rank: 'member', department: 'engineering',
     ops: [],
   },
   'jihyun-marketing-lead': {
     id: 'jihyun-marketing-lead', name: '지현',
     file: '.claude/agents/jihyun-marketing-lead.md',
-    phase: 3, role: 'analyst', department: 'marketing',
+    phase: 3, role: 'analyst', rank: 'lead', department: 'marketing',
     ops: ['ops/content-creation-ops.md'],
   },
 };
 
 export function getAgentRegistry(): Record<string, AgentDefinition> {
   return AGENT_REGISTRY;
+}
+
+// ─── Permission Helpers ─────────────────────────────────
+
+/**
+ * 에이전트가 특정 타입의 채팅방을 생성할 수 있는지 검사.
+ *
+ * | rank      | dm | meeting | owner |
+ * |-----------|----|---------| ------|
+ * | owner     | O  | O       | O     |
+ * | executive | O  | O       | X     |
+ * | lead      | O  | O       | X     |
+ * | member    | O  | X       | X     |
+ */
+export function canCreateRoom(agentId: string, roomType: string): boolean {
+  if (agentId === 'sihun-owner') return true;
+  const agent = AGENT_REGISTRY[agentId];
+  if (!agent) return false;
+
+  switch (roomType) {
+    case 'dm':
+      return true; // 모든 에이전트 DM 가능
+    case 'meeting':
+      return agent.rank === 'executive' || agent.rank === 'lead';
+    case 'owner':
+      return false; // 오너만 가능 (위에서 처리)
+    default:
+      return agent.rank === 'executive' || agent.rank === 'lead';
+  }
+}
+
+/**
+ * 에이전트의 rank를 반환. 미등록이면 'member'.
+ */
+export function getAgentRank(agentId: string): AgentRank {
+  if (agentId === 'sihun-owner') return 'owner';
+  return AGENT_REGISTRY[agentId]?.rank ?? 'member';
 }
 
 // ─── Category → Editor mapping ──────────────────────────
@@ -251,6 +291,43 @@ export async function buildAgentPrompt(agentId: string, mission: string, context
     lines.push(EDITOR_SELF_CHECK);
     lines.push('');
   }
+
+  // P1: 자발적 행동 도구 안내
+  lines.push(`== 자발적 행동 도구 (P1) ==`);
+  lines.push(`너는 다른 에이전트에게 직접 메시지를 보내거나, CEO에게 보고하거나, 회의를 소집할 수 있다.`);
+  lines.push('');
+  lines.push('1. **에이전트 간 대화** — 다른 에이전트에게 메시지를 보내려면:');
+  lines.push('```bash');
+  lines.push(`npx tsx ${PROJECT_ROOT}/_dispatch.ts '${agent.id}' '{대상 에이전트 ID}' '{room_id}' '{메시지}'`);
+  lines.push('```');
+  lines.push('대상 에이전트 ID: minjun-ceo, seoyeon-analyst, bini-beauty-editor, hana-health-editor, sora-lifestyle-editor, jiu-diet-editor, junho-researcher, doyun-qa, taeho-engineer, jihyun-marketing-lead');
+  lines.push('');
+  lines.push('2. **CEO에게 보고** — 작업 완료 후 자동 보고:');
+  lines.push('출력에 아래 태그를 포함하면 자동으로 CEO에게 전달됨:');
+  lines.push('```');
+  lines.push('[REPORT_TO_CEO]');
+  lines.push('summary: 작업 결과 한 줄 요약');
+  lines.push('[/REPORT_TO_CEO]');
+  lines.push('```');
+
+  if (agent.role === 'ceo') {
+    lines.push('');
+    lines.push('3. **회의 소집** (CEO 전용) — 팀원을 모아 회의를 열려면:');
+    lines.push('```bash');
+    lines.push(`npx tsx ${PROJECT_ROOT}/_create-meeting.ts '${agent.id}' '{회의타입}' '{안건}' '{참여자1,참여자2,...}'`);
+    lines.push('```');
+    lines.push('회의 타입: standup | planning | review | emergency | weekly | free');
+    lines.push('또는 출력에 아래 태그를 포함:');
+    lines.push('```');
+    lines.push('[CREATE_MEETING]');
+    lines.push('type: planning');
+    lines.push('agenda: 이번 주 콘텐츠 전략 논의');
+    lines.push('participants: seoyeon-analyst,bini-beauty-editor,jihyun-marketing-lead');
+    lines.push('[/CREATE_MEETING]');
+    lines.push('```');
+  }
+
+  lines.push('');
 
   // agent_messages recording instruction
   lines.push(`== agent_messages 기록 (필수) ==`);

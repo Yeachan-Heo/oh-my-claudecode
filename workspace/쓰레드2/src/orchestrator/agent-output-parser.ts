@@ -18,6 +18,8 @@
 
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
+import { dispatchToAgent, createAgentMeeting, reportToCeo } from './agent-actions.js';
+import type { MeetingType } from './meeting.js';
 import type { OrientResult, DirectiveResult } from './types.js';
 
 // ─── Types ────────────────────────────────────────────────────
@@ -143,6 +145,55 @@ export async function processAgentOutput(
         parent_version: meta.parent_version as string | undefined,
         strategy: meta.strategy as Record<string, unknown>,
       });
+    }
+  }
+
+  // ─── P1: 자발적 행동 태그 처리 ─────────────────────────────
+  const meetingTags = parseTag(output, /\[CREATE_MEETING\]([\s\S]*?)\[\/CREATE_MEETING\]/g);
+  const messageTags = parseTag(output, /\[SEND_MESSAGE\]([\s\S]*?)\[\/SEND_MESSAGE\]/g);
+  const reportTags = parseTag(output, /\[REPORT_TO_CEO\]([\s\S]*?)\[\/REPORT_TO_CEO\]/g);
+
+  for (const raw of meetingTags) {
+    const meta = parseMeta(raw);
+    const type = (meta.type as string) || 'free';
+    const agenda = (meta.agenda as string) || '';
+    const participantsRaw = meta.participants;
+    const participants = Array.isArray(participantsRaw)
+      ? participantsRaw as string[]
+      : typeof participantsRaw === 'string'
+        ? participantsRaw.split(',').map(p => p.trim()).filter(Boolean)
+        : [];
+    if (agenda && participants.length > 0) {
+      await createAgentMeeting({
+        creator: agentId,
+        type: type as MeetingType,
+        agenda,
+        participants: participants.includes(agentId) ? participants : [agentId, ...participants],
+      });
+    }
+  }
+
+  for (const raw of messageTags) {
+    const meta = parseMeta(raw);
+    const to = (meta.to as string) || '';
+    const msg = (meta.message as string) || '';
+    if (to && msg) {
+      const dmRoomId = `dm-${agentId}-${to}-${Date.now()}`;
+      await dispatchToAgent({
+        sender: agentId,
+        target: to,
+        roomId: dmRoomId,
+        message: msg,
+        extra: { dmRoom: true, dmParticipants: [agentId, to] },
+      });
+    }
+  }
+
+  for (const raw of reportTags) {
+    const meta = parseMeta(raw);
+    const summary = (meta.summary as string) || raw;
+    if (summary) {
+      await reportToCeo({ sender: agentId, summary });
     }
   }
 

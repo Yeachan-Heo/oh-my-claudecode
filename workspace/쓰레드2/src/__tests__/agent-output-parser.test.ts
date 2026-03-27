@@ -21,6 +21,12 @@ vi.mock('../db/strategy-archive.js', () => ({
   createStrategyVersion: vi.fn().mockResolvedValue({ id: 'sv-1', version: 'v2.0' }),
 }));
 
+vi.mock('../orchestrator/agent-actions.js', () => ({
+  dispatchToAgent: vi.fn().mockResolvedValue('marker-123'),
+  createAgentMeeting: vi.fn().mockResolvedValue({ meetingId: 'meet-123', dispatched: ['seoyeon-analyst'] }),
+  reportToCeo: vi.fn().mockResolvedValue('report-marker-123'),
+}));
+
 import {
   parseTag,
   parseMeta,
@@ -29,6 +35,7 @@ import {
 } from '../orchestrator/agent-output-parser.js';
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
+import { dispatchToAgent, createAgentMeeting, reportToCeo } from '../orchestrator/agent-actions.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -257,5 +264,146 @@ describe('enforceTagGate', () => {
     const result = await enforceTagGate('bini', noTag, retryFn);
     expect(saveMemory).not.toHaveBeenCalled();
     expect(result.quarantined).toBe(true);
+  });
+});
+
+// ─── P1: 자발적 행동 태그 파싱 ──────────────────────────────────
+
+describe('P1: CREATE_MEETING 태그', () => {
+  it('[CREATE_MEETING] 태그 파싱 → createAgentMeeting 호출', async () => {
+    vi.mocked(createAgentMeeting).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: meeting
+summary: 회의 소집
+[/LOG_EPISODE]
+[CREATE_MEETING]
+type: planning
+agenda: 이번 주 콘텐츠 전략
+participants: seoyeon-analyst,bini-beauty-editor,jihyun-marketing-lead
+[/CREATE_MEETING]
+    `.trim();
+
+    const result = await processAgentOutput('minjun-ceo', output);
+    expect(result.status).toBe('ok');
+    expect(createAgentMeeting).toHaveBeenCalledTimes(1);
+    expect(createAgentMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creator: 'minjun-ceo',
+        type: 'planning',
+        agenda: '이번 주 콘텐츠 전략',
+        participants: expect.arrayContaining(['seoyeon-analyst', 'bini-beauty-editor']),
+      })
+    );
+  });
+
+  it('[CREATE_MEETING] agenda 없으면 호출 안 함', async () => {
+    vi.mocked(createAgentMeeting).mockClear();
+    const output = `
+[SAVE_MEMORY]
+scope: global
+memory_type: insight
+content: 테스트
+[/SAVE_MEMORY]
+[CREATE_MEETING]
+type: planning
+participants: seoyeon-analyst
+[/CREATE_MEETING]
+    `.trim();
+
+    await processAgentOutput('minjun-ceo', output);
+    expect(createAgentMeeting).not.toHaveBeenCalled();
+  });
+});
+
+describe('P1: SEND_MESSAGE 태그', () => {
+  it('[SEND_MESSAGE] 태그 파싱 → dispatchToAgent 호출', async () => {
+    vi.mocked(dispatchToAgent).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: chat
+summary: 메시지 전송
+[/LOG_EPISODE]
+[SEND_MESSAGE]
+to: bini-beauty-editor
+message: 오늘 뷰티 콘텐츠 3개 준비해주세요
+[/SEND_MESSAGE]
+    `.trim();
+
+    const result = await processAgentOutput('minjun-ceo', output);
+    expect(result.status).toBe('ok');
+    expect(dispatchToAgent).toHaveBeenCalledTimes(1);
+    expect(dispatchToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sender: 'minjun-ceo',
+        target: 'bini-beauty-editor',
+        message: '오늘 뷰티 콘텐츠 3개 준비해주세요',
+      })
+    );
+  });
+
+  it('[SEND_MESSAGE] to 없으면 호출 안 함', async () => {
+    vi.mocked(dispatchToAgent).mockClear();
+    const output = `
+[SAVE_MEMORY]
+scope: global
+memory_type: insight
+content: 테스트
+[/SAVE_MEMORY]
+[SEND_MESSAGE]
+message: 대상 없는 메시지
+[/SEND_MESSAGE]
+    `.trim();
+
+    await processAgentOutput('minjun-ceo', output);
+    expect(dispatchToAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe('P1: REPORT_TO_CEO 태그', () => {
+  it('[REPORT_TO_CEO] 태그 파싱 → reportToCeo 호출', async () => {
+    vi.mocked(reportToCeo).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: report
+summary: 분석 완료
+[/LOG_EPISODE]
+[REPORT_TO_CEO]
+summary: 오늘 수집 30건, 분석 완료. 뷰티 카테고리 조회수 평균 1200.
+[/REPORT_TO_CEO]
+    `.trim();
+
+    const result = await processAgentOutput('seoyeon-analyst', output);
+    expect(result.status).toBe('ok');
+    expect(reportToCeo).toHaveBeenCalledTimes(1);
+    expect(reportToCeo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sender: 'seoyeon-analyst',
+        summary: expect.stringContaining('수집 30건'),
+      })
+    );
+  });
+
+  it('다중 P1 태그 동시 처리', async () => {
+    vi.mocked(dispatchToAgent).mockClear();
+    vi.mocked(reportToCeo).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: pipeline_run
+summary: 파이프라인 완료
+[/LOG_EPISODE]
+[SEND_MESSAGE]
+to: jihyun-marketing-lead
+message: 콘텐츠 기획 데이터 준비됨
+[/SEND_MESSAGE]
+[REPORT_TO_CEO]
+summary: 파이프라인 Phase 1~2 완료
+[/REPORT_TO_CEO]
+    `.trim();
+
+    const result = await processAgentOutput('seoyeon-analyst', output);
+    expect(result.status).toBe('ok');
+    expect(dispatchToAgent).toHaveBeenCalledTimes(1);
+    expect(reportToCeo).toHaveBeenCalledTimes(1);
   });
 });
