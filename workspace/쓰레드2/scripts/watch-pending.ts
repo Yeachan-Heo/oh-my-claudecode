@@ -15,6 +15,7 @@
  */
 import 'dotenv/config';
 import { execSync } from 'child_process';
+import { writeFileSync, mkdirSync } from 'fs';
 import { db } from '../src/db/index.js';
 import { agentMessages } from '../src/db/schema.js';
 import { eq, and, like } from 'drizzle-orm';
@@ -50,10 +51,18 @@ function isAgentAlive(name: string): boolean {
   return resolveWindowName(name) !== null;
 }
 
+const PROMPT_DIR = `/tmp/binilab-prompts`;
+
 function sendToAgent(name: string, message: string): void {
   const windowName = resolveWindowName(name) ?? name;
-  // Escape special characters for tmux
-  const escaped = message.replace(/'/g, "'\\''");
+
+  // 긴 프롬프트를 파일에 저장하고, 짧은 Read 명령만 tmux로 전달
+  mkdirSync(PROMPT_DIR, { recursive: true });
+  const promptFile = `${PROMPT_DIR}/${name}.md`;
+  writeFileSync(promptFile, message, 'utf-8');
+
+  const shortCmd = `Read ${promptFile} and follow the instructions inside. Respond in Korean, 1-3 sentences, casual tone.`;
+  const escaped = shortCmd.replace(/'/g, "'\\''");
   execSync(`tmux send-keys -t "${TMUX_SESSION}:${windowName}" '${escaped}' Enter`, { stdio: 'pipe' });
 }
 
