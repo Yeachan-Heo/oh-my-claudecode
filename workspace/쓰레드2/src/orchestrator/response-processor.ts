@@ -204,6 +204,35 @@ export async function processOneResponse(pending: PendingResponse): Promise<stri
     );
   }
 
+  // 4.5. 파일 수정 권한 제한 (rank 기반)
+  const filePermSection = (() => {
+    if (agentId === 'sihun-owner') return ''; // 오너는 제한 없음
+    if (agent.role === 'engineer') {
+      return [
+        '',
+        '== 파일 수정 권한 (엔지니어) ==',
+        '- 코드 수정 가능 (src/, scripts/, agent-town/). 단, 오너 승인 후 커밋.',
+        '- `.claude/agents/taeho-engineer.md`, `agents/memory/*.md` 자유 수정.',
+      ].join('\n');
+    }
+    if (agent.rank === 'executive' || agent.rank === 'lead') {
+      return [
+        '',
+        '== 파일 수정 권한 (팀장급 이상) ==',
+        '- **수정 가능**: `.claude/agents/${agentId}.md` (자기 페르소나), `agents/memory/*.md`, `ops/*.md`',
+        '- **수정 금지**: `src/`, `scripts/`, `*.ts`, `*.tsx`, `*.js` — 코드 수정은 태호(엔지니어)에게 요청.',
+        '- Write/Edit 도구로 코드 파일을 수정하지 마라.',
+      ].join('\n');
+    }
+    return [
+      '',
+      '== 파일 수정 권한 (일반) ==',
+      '- **수정 가능**: `.claude/agents/${agentId}.md` (자기 페르소나)만 수정 가능.',
+      '- **수정 금지**: 그 외 모든 파일. 코드 수정은 태호(엔지니어)에게 요청.',
+      '- Write/Edit 도구 사용 금지 (Read/Grep/Glob만 허용).',
+    ].join('\n');
+  })();
+
   // 5. 지시형이면 행동 규칙 추가
   const actionRule = isDirective ? [
     '',
@@ -225,6 +254,7 @@ export async function processOneResponse(pending: PendingResponse): Promise<stri
     ...toolSection,
     '',
     contextSection,
+    filePermSection,
     '',
     missionSection,
     actionRule,
