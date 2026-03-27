@@ -183,6 +183,9 @@ function patternMatch(text: string, pattern: string): number {
     cached = compileTriggerRegex(pattern);
     triggerRegexCache.set(pattern, cached);
   }
+  if (cached) {
+    cached.regex.lastIndex = 0; // Reset stateful regex (g/y flags)
+  }
   if (cached && cached.regex.test(text)) {
     return cached.score;
   }
