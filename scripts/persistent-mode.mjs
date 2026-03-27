@@ -590,6 +590,22 @@ async function main() {
           ralph.state.last_checked_at = new Date().toISOString();
           writeJsonFile(ralph.path, ralph.state);
 
+          // Sync ralph progress to autopilot state for HUD display
+          if (autopilot.state?.active && autopilot.path) {
+            try {
+              autopilot.state.execution = {
+                ...autopilot.state.execution,
+                ralph_iterations: iteration + 1,
+                ultrawork_active: !!ultrawork.state?.active,
+                tasks_completed: taskCount > 0 ? (taskCount + todoCount) - totalIncomplete : (autopilot.state.execution?.tasks_completed ?? 0),
+                tasks_total: (taskCount + todoCount) || (autopilot.state.execution?.tasks_total ?? 0),
+              };
+              writeJsonFile(autopilot.path, autopilot.state);
+            } catch {
+              // Non-critical: don't break ralph if autopilot sync fails
+            }
+          }
+
           let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${ralph.state.prompt}` : ""}`;
           if (errorGuidance) {
             reason = errorGuidance + reason;

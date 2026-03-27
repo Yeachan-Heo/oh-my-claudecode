@@ -5,7 +5,7 @@
  * When ultrawork is activated and todos remain incomplete,
  * this module ensures the mode persists until all work is done.
  */
-import { readFileSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync } from "fs";
 import { writeModeState, readModeState } from "../../lib/mode-state-io.js";
 import { resolveStatePath, resolveSessionStatePath, } from "../../lib/worktree-paths.js";
 const _DEFAULT_STATE = {
@@ -121,9 +121,39 @@ export function incrementReinforcement(directory, sessionId) {
     state.reinforcement_count += 1;
     state.last_checked_at = new Date().toISOString();
     if (writeUltraworkState(state, directory, sessionId)) {
+        // Sync ultrawork activity to autopilot state when running inside autopilot
+        syncToAutopilotState(directory, state, sessionId);
         return state;
     }
     return null;
+}
+/**
+ * Sync ultrawork reinforcement progress to autopilot execution state.
+ * Uses direct file I/O to avoid circular dependency with autopilot/state.
+ * Only writes when autopilot is active to avoid side effects in standalone mode.
+ */
+function syncToAutopilotState(directory, ultraworkState, sessionId) {
+    try {
+        if (!directory) {
+            return;
+        }
+        const statePath = sessionId
+            ? resolveSessionStatePath("autopilot", sessionId, directory)
+            : resolveStatePath("autopilot", directory);
+        const content = readFileSync(statePath, "utf-8");
+        const autopilotState = JSON.parse(content);
+        if (!autopilotState || !autopilotState.active) {
+            return;
+        }
+        autopilotState.execution = {
+            ...autopilotState.execution,
+            ultrawork_active: ultraworkState.active,
+        };
+        writeFileSync(statePath, JSON.stringify(autopilotState, null, 2), "utf-8");
+    }
+    catch {
+        // Non-critical: don't break ultrawork if autopilot sync fails
+    }
 }
 /**
  * Check if ultrawork should be reinforced (active with pending todos)

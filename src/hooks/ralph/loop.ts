@@ -10,7 +10,7 @@
  * Ported from oh-my-opencode's ralph hook.
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   writeModeState,
@@ -38,6 +38,7 @@ import {
 } from "../ultrawork/index.js";
 import {
   resolveSessionStatePath,
+  resolveStatePath,
   getOmcRoot,
 } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
@@ -213,6 +214,8 @@ export function incrementRalphIteration(
   state.iteration += 1;
 
   if (writeRalphState(directory, state, sessionId)) {
+    // Sync iteration progress to autopilot state when running inside autopilot
+    syncToAutopilotState(directory, state, sessionId);
     return state;
   }
 
@@ -362,6 +365,40 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
     cancelLoop,
     getState,
   };
+}
+
+// ============================================================================
+// Autopilot State Sync
+// ============================================================================
+
+/**
+ * Sync Ralph iteration progress to autopilot execution state.
+ * Uses direct file I/O to avoid circular dependency with autopilot/state.
+ * Only writes when autopilot is active to avoid side effects in standalone mode.
+ */
+function syncToAutopilotState(
+  directory: string,
+  ralphState: RalphLoopState,
+  sessionId?: string,
+): void {
+  try {
+    const statePath = sessionId
+      ? resolveSessionStatePath("autopilot", sessionId, directory)
+      : resolveStatePath("autopilot", directory);
+    const content = readFileSync(statePath, "utf-8");
+    const autopilotState = JSON.parse(content);
+    if (!autopilotState || !autopilotState.active) {
+      return;
+    }
+    autopilotState.execution = {
+      ...autopilotState.execution,
+      ralph_iterations: ralphState.iteration,
+      ultrawork_active: !!ralphState.linked_ultrawork,
+    };
+    writeFileSync(statePath, JSON.stringify(autopilotState, null, 2), "utf-8");
+  } catch {
+    // Non-critical: don't break ralph if autopilot sync fails
+  }
 }
 
 // ============================================================================
