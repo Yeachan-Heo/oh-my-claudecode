@@ -26,7 +26,8 @@
     "daily:evening": "tsx scripts/run-daily.ts --phase evening",
     "daily:retro": "tsx scripts/run-daily.ts --phase retro",
     "track": "tsx scripts/track-performance.ts",
-    "trend": "tsx scripts/run-trend-pipeline.ts"
+    "trend": "tsx scripts/run-trend-pipeline.ts",
+    "watch:pending": "tsx scripts/watch-pending.ts"
   },
   "dependencies": {
     "apify-client": "^2.22.2",
