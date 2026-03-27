@@ -14,6 +14,11 @@
             "type": "command",
             "command": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/skill-injector.mjs",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/prompt-prerequisite-gate.mjs",
+            "timeout": 3
           }
         ]
       }
