@@ -512,6 +512,14 @@ export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
     await spawnWorkerForTask(runtime, workerName(i), taskIndex);
   }
 
+  // If all startup spawns failed and there are tasks to process, fail immediately
+  // rather than entering a silent deadlock where the watchdog no-ops forever.
+  if (runtime.activeWorkers.size === 0 && tasks.length > 0) {
+    throw new Error(
+      `[startTeam] all ${maxConcurrentWorkers} startup worker spawns failed — cannot proceed with ${tasks.length} pending tasks`,
+    );
+  }
+
   runtime.stopWatchdog = watchdogCliWorkers(runtime, 1000);
   return runtime;
 }
@@ -633,6 +641,8 @@ export function watchdogCliWorkers(
   let tickInFlight = false;
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
+  // Track consecutive ticks with zero workers but pending tasks (deadlock detection)
+  let consecutiveZeroWorkerTicks = 0;
   // Track consecutive unresponsive ticks per worker
   const unresponsiveCounts = new Map<string, number>();
   const UNRESPONSIVE_KILL_THRESHOLD = 3;
@@ -642,7 +652,39 @@ export function watchdogCliWorkers(
     tickInFlight = true;
     try {
       const workers = [...runtime.activeWorkers.entries()];
-      if (workers.length === 0) return;
+      if (workers.length === 0) {
+        // Check for pending tasks — if none, nothing to do
+        const hasPending = (await nextPendingTaskIndex(runtime)) != null;
+        if (!hasPending) return;
+
+        // Zero active workers but pending tasks exist — deadlock detection.
+        // Individual dead-pane handlers already attempt respawn; if those failed
+        // too, we track consecutive zero-worker ticks and signal terminal failure.
+        consecutiveZeroWorkerTicks++;
+        console.warn(
+          `[watchdog] zero active workers with pending tasks — tick ${consecutiveZeroWorkerTicks}/${MAX_CONSECUTIVE_FAILURES}`,
+        );
+
+        if (consecutiveZeroWorkerTicks >= MAX_CONSECUTIVE_FAILURES) {
+          console.warn(
+            `[watchdog] ${consecutiveZeroWorkerTicks} consecutive ticks with zero workers and pending tasks — marking team as failed`,
+          );
+          try {
+            const failRoot = stateRoot(runtime.cwd, runtime.teamName);
+            await writeJson(join(failRoot, "watchdog-failed.json"), {
+              failedAt: new Date().toISOString(),
+              reason: "zero-worker-deadlock",
+              consecutiveZeroWorkerTicks,
+            });
+          } catch {
+            // best-effort
+          }
+          clearInterval(intervalId);
+        }
+        return;
+      }
+      // Workers are present — reset zero-worker deadlock counter
+      consecutiveZeroWorkerTicks = 0;
 
       const root = stateRoot(runtime.cwd, runtime.teamName);
 
