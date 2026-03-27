@@ -408,6 +408,21 @@ OMC can optionally orchestrate external AI providers for cross-validation and de
 | --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------ |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | Design review, UI consistency (1M token context) |
 | [Codex CLI](https://github.com/openai/codex)              | `npm install -g @openai/codex`      | Architecture validation, code review cross-check |
+| [MiniMax](https://www.minimax.io)                         | Set `MINIMAX_API_KEY` env var       | Alternative LLM backend via Anthropic-compat API |
+
+**MiniMax setup** — Set `ANTHROPIC_BASE_URL` to MiniMax's Anthropic-compatible endpoint. OMC auto-detects and maps tiers to MiniMax models:
+
+```bash
+export ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+export ANTHROPIC_API_KEY=your_minimax_api_key
+```
+
+OMC maps its tier system to MiniMax models automatically:
+- **HIGH** (architecture, planning) → `MiniMax-M2.7`
+- **MEDIUM** (execution, review) → `MiniMax-M2.7`
+- **LOW** (search, documentation) → `MiniMax-M2.7-highspeed`
+
+Override tier models via `OMC_MODEL_HIGH`, `OMC_MODEL_MEDIUM`, `OMC_MODEL_LOW` env vars.
 
 **Cost:** 3 Pro plans (Claude + Gemini + ChatGPT) cover everything for ~$60/month.
 

@@ -16,6 +16,7 @@ import {
   getDefaultTierModels,
   BUILTIN_EXTERNAL_MODEL_DEFAULTS,
   isNonClaudeProvider,
+  isMiniMax,
 } from "./models.js";
 
 /**
@@ -326,7 +327,7 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 
   if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
-    if (provider === "codex" || provider === "gemini") {
+    if (provider === "codex" || provider === "gemini" || provider === "minimax") {
       externalModelsDefaults.provider = provider;
     }
   }
@@ -383,15 +384,61 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 
   if (process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER;
-    if (["claude", "codex", "gemini"].includes(provider)) {
+    if (["claude", "codex", "gemini", "minimax"].includes(provider)) {
       config.delegationRouting = {
         ...config.delegationRouting,
-        defaultProvider: provider as "claude" | "codex" | "gemini",
+        defaultProvider: provider as "claude" | "codex" | "gemini" | "minimax",
       };
     }
   }
 
   return config;
+}
+
+/**
+ * Auto-configure environment for MiniMax when MINIMAX_API_KEY is set.
+ *
+ * Sets ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY so the Claude Agent SDK
+ * routes requests to MiniMax's Anthropic-compatible endpoint. This is
+ * a convenience — users can also configure these env vars manually.
+ *
+ * Skips auto-configuration when:
+ * - ANTHROPIC_BASE_URL is already set (user has explicit URL)
+ * - Bedrock/Vertex is active (conflicting provider)
+ * - CLAUDE_MODEL/ANTHROPIC_MODEL is set to a non-MiniMax model
+ *
+ * Called once during loadConfig() before building defaults so that
+ * isMiniMax() detection and tier model resolution pick up the values.
+ */
+export function configureMiniMaxEnvironment(): void {
+  const minimaxKey = process.env.MINIMAX_API_KEY;
+  if (!minimaxKey) {
+    return;
+  }
+
+  // Don't auto-configure if ANTHROPIC_BASE_URL is already set
+  if (process.env.ANTHROPIC_BASE_URL) {
+    return;
+  }
+
+  // Don't auto-configure if other provider signals are present
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") return;
+  if (process.env.CLAUDE_CODE_USE_VERTEX === "1") return;
+
+  // Don't auto-configure if an explicit non-MiniMax model is set
+  const modelId =
+    process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || "";
+  if (modelId && !modelId.toLowerCase().startsWith("minimax")) {
+    return;
+  }
+
+  // Auto-set Anthropic-compatible base URL
+  process.env.ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic";
+
+  // Auto-set ANTHROPIC_API_KEY so the SDK authenticates with MiniMax
+  if (!process.env.ANTHROPIC_API_KEY) {
+    process.env.ANTHROPIC_API_KEY = minimaxKey;
+  }
 }
 
 /**
@@ -425,10 +472,14 @@ export function loadConfig(): PluginConfig {
   // ANTHROPIC_BASE_URL, AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1), and
   // Google Vertex AI (CLAUDE_CODE_USE_VERTEX=1). Passing Claude-specific
   // tier names (sonnet/opus/haiku) causes 400 errors on these platforms.
+  //
+  // Exception: MiniMax has proper tier model mapping (M2.7 / M2.7-highspeed)
+  // so it skips forceInherit and uses intelligent model routing instead.
   if (
     config.routing?.forceInherit !== true &&
     process.env.OMC_ROUTING_FORCE_INHERIT === undefined &&
-    isNonClaudeProvider()
+    isNonClaudeProvider() &&
+    !isMiniMax()
   ) {
     config.routing = {
       ...config.routing,
@@ -725,7 +776,7 @@ export function generateConfigSchema(): object {
             properties: {
               provider: {
                 type: "string",
-                enum: ["codex", "gemini"],
+                enum: ["codex", "gemini", "minimax"],
                 description: "Default external provider",
               },
               codexModel: {
@@ -738,6 +789,11 @@ export function generateConfigSchema(): object {
                 default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
                 description: "Default Gemini model",
               },
+              minimaxModel: {
+                type: "string",
+                default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.minimaxModel,
+                description: "Default MiniMax model",
+              },
             },
           },
           rolePreferences: {
@@ -746,7 +802,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["codex", "gemini"] },
+                provider: { type: "string", enum: ["codex", "gemini", "minimax"] },
                 model: { type: "string" },
               },
               required: ["provider", "model"],
@@ -758,7 +814,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["codex", "gemini"] },
+                provider: { type: "string", enum: ["codex", "gemini", "minimax"] },
                 model: { type: "string" },
               },
               required: ["provider", "model"],
@@ -781,7 +837,7 @@ export function generateConfigSchema(): object {
               },
               crossProviderOrder: {
                 type: "array",
-                items: { type: "string", enum: ["codex", "gemini"] },
+                items: { type: "string", enum: ["codex", "gemini", "minimax"] },
                 default: ["codex", "gemini"],
                 description: "Order of providers for cross-provider fallback",
               },
@@ -802,7 +858,7 @@ export function generateConfigSchema(): object {
           },
           defaultProvider: {
             type: "string",
-            enum: ["claude", "codex", "gemini"],
+            enum: ["claude", "codex", "gemini", "minimax"],
             default: "claude",
             description:
               "Default provider for delegation routing when no specific role mapping exists",
@@ -815,7 +871,7 @@ export function generateConfigSchema(): object {
               properties: {
                 provider: {
                   type: "string",
-                  enum: ["claude", "codex", "gemini"],
+                  enum: ["claude", "codex", "gemini", "minimax"],
                 },
                 tool: { type: "string", enum: ["Task"] },
                 model: { type: "string" },

@@ -45,10 +45,24 @@ export const CLAUDE_FAMILY_HIGH_VARIANTS: Record<ClaudeModelFamily, string> = {
   OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`,
 };
 
+/** MiniMax model defaults */
+export const MINIMAX_MODEL_DEFAULTS = {
+  M2_7: 'MiniMax-M2.7',
+  M2_7_HIGHSPEED: 'MiniMax-M2.7-highspeed',
+} as const;
+
+/** Tier defaults when running on MiniMax */
+export const MINIMAX_TIER_DEFAULTS: Record<ModelTier, string> = {
+  HIGH: MINIMAX_MODEL_DEFAULTS.M2_7,
+  MEDIUM: MINIMAX_MODEL_DEFAULTS.M2_7,
+  LOW: MINIMAX_MODEL_DEFAULTS.M2_7_HIGHSPEED,
+};
+
 /** Built-in defaults for external provider models */
 export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: 'gpt-5.3-codex',
   geminiModel: 'gemini-3.1-pro-preview',
+  minimaxModel: 'MiniMax-M2.7',
 } as const;
 
 /**
@@ -73,7 +87,8 @@ export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
  * 1. OMC tier env vars (OMC_MODEL_HIGH / OMC_MODEL_MEDIUM / OMC_MODEL_LOW)
  * 2. Claude Code provider env vars (for example Bedrock app-profile model IDs)
  * 3. Anthropic family-default env vars
- * 4. Built-in fallback
+ * 4. MiniMax built-in tier defaults (when MiniMax is detected)
+ * 5. Built-in fallback
  *
  * User/project config overrides are applied later by the config loader
  * via deepMerge, so they take precedence over these defaults.
@@ -84,6 +99,11 @@ function resolveTierModelFromEnv(tier: ModelTier): string | undefined {
     if (value) {
       return value;
     }
+  }
+
+  // When running on MiniMax, use MiniMax models as tier defaults
+  if (isMiniMax()) {
+    return MINIMAX_TIER_DEFAULTS[tier];
   }
 
   return undefined;
@@ -147,10 +167,28 @@ export function getClaudeHighVariantFromModel(modelId: string): string | null {
 }
 
 /** Get built-in default model for an external provider */
-export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini'): string {
+export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini' | 'minimax'): string {
+  if (provider === 'minimax') return BUILTIN_EXTERNAL_MODEL_DEFAULTS.minimaxModel;
   return provider === 'codex'
     ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel
     : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+}
+
+/**
+ * Detect whether OMC is running on MiniMax's Anthropic-compatible endpoint.
+ *
+ * Returns true only when ANTHROPIC_BASE_URL contains 'minimax.io'.
+ * Detection is URL-based to avoid false positives when MINIMAX_API_KEY
+ * is in the environment but the user is actually using a different provider.
+ *
+ * MiniMax provides an Anthropic-compatible API at https://api.minimax.io/anthropic
+ * that accepts requests in Anthropic format but routes to MiniMax models.
+ * Unlike generic non-Claude providers, MiniMax supports intelligent tier mapping:
+ *   HIGH/MEDIUM → MiniMax-M2.7, LOW → MiniMax-M2.7-highspeed
+ */
+export function isMiniMax(): boolean {
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  return baseUrl.includes('minimax.io');
 }
 
 /**
@@ -216,6 +254,10 @@ export function isProviderSpecificModelId(modelId: string): boolean {
   if (modelId.toLowerCase().startsWith('vertex_ai/')) {
     return true;
   }
+  // MiniMax model IDs (MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.)
+  if (/^minimax-/i.test(modelId)) {
+    return true;
+  }
   return false;
 }
 
@@ -252,6 +294,10 @@ export function isVertexAI(): boolean {
  * - Running on Google Vertex AI — needs full Vertex model paths
  * - A non-Claude model ID is detected (CC Switch, LiteLLM, etc.)
  * - A custom ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
+ *
+ * Note: MiniMax is handled downstream in loadConfig() — isNonClaudeProvider()
+ * returns true for MiniMax (non-anthropic URL), but loadConfig() skips
+ * forceInherit when MiniMax is detected, using tier model mapping instead.
  */
 export function isNonClaudeProvider(): boolean {
   // Explicit opt-in: user has already set forceInherit via env var

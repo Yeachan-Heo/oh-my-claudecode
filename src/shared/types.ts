@@ -244,7 +244,7 @@ export interface HookResult {
 /**
  * External model provider type
  */
-export type ExternalModelProvider = "codex" | "gemini";
+export type ExternalModelProvider = "codex" | "gemini" | "minimax";
 
 /**
  * External model configuration for a specific role or task
@@ -309,7 +309,9 @@ export type DelegationProvider =
   /** Use /team to coordinate Codex CLI workers in tmux panes. */
   | "codex"
   /** Use /team to coordinate Gemini CLI workers in tmux panes. */
-  | "gemini";
+  | "gemini"
+  /** MiniMax via Anthropic-compatible API (https://api.minimax.io/anthropic). */
+  | "minimax";
 
 /** Tool type for delegation routing — only Claude Task is supported. */
 export type DelegationTool = "Task";
