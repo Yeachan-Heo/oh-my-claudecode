@@ -654,7 +654,7 @@ async function main() {
         ? autopilot.state.session_id === sessionId
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
-        const phase = autopilot.state.phase || "unspecified";
+        const phase = autopilot.state.phase || autopilot.state.current_phase || "unspecified";
         if (phase !== "complete") {
           const newCount = (autopilot.state.reinforcement_count || 0) + 1;
           if (newCount <= 20) {

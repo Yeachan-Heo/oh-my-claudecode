@@ -214,7 +214,7 @@ export function readAutopilotStateForHud(directory, sessionId) {
         }
         return {
             active: state.active,
-            phase: state.phase,
+            phase: state.phase || state.current_phase || 'unknown',
             iteration: state.iteration,
             maxIterations: state.max_iterations,
             tasksCompleted: state.execution?.tasks_completed,
