@@ -85,6 +85,23 @@ export const PRIORITY_HEADER = "## Priority Context";
 export const WORKING_MEMORY_HEADER = "## Working Memory";
 export const MANUAL_HEADER = "## MANUAL";
 
+// Pre-compiled regexes for section parsing.
+// One helper builds all three regex types for a given header.
+function buildSectionRegexes(header: string) {
+  return {
+    extract: new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`),
+    replace: new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`),
+    comment: new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
+  };
+}
+
+// To add a new section: define a HEADER constant above, add an entry here.
+const SECTION_RE = {
+  [PRIORITY_HEADER]: buildSectionRegexes(PRIORITY_HEADER),
+  [WORKING_MEMORY_HEADER]: buildSectionRegexes(WORKING_MEMORY_HEADER),
+  [MANUAL_HEADER]: buildSectionRegexes(MANUAL_HEADER),
+};
+
 // ============================================================================
 // File Operations
 // ============================================================================
@@ -158,8 +175,8 @@ export function readNotepad(directory: string): string | null {
 function extractSection(content: string, header: string): string | null {
   // Match from header to next section (## followed by space, at start of line)
   // We need to match ## at the start of a line, not ### which is a subsection
-  const regex = new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
-  const match = content.match(regex);
+  const re = SECTION_RE[header as keyof typeof SECTION_RE];
+  const match = content.match(re ? re.extract : new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`));
   if (!match) {
     return null;
   }
@@ -179,12 +196,11 @@ function replaceSection(
   header: string,
   newContent: string,
 ): string {
-  const regex = new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`);
+  const re = SECTION_RE[header as keyof typeof SECTION_RE];
+  const regex = re ? re.replace : new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`);
 
   // Preserve comment if it exists
-  const commentMatch = content.match(
-    new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
-  );
+  const commentMatch = content.match(re ? re.comment : new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`));
   const comment = commentMatch ? commentMatch[1] + "\n" : "";
 
   return content.replace(regex, `$1${comment}${newContent}\n\n`);
