@@ -37,6 +37,13 @@ export function getReplayFilePath(directory, sessionId) {
  */
 function getSessionStartTime(sessionId) {
     if (!sessionStartTimes.has(sessionId)) {
+        // Prune if map grows too large (keep newest 250 entries)
+        if (sessionStartTimes.size > 500) {
+            const entries = [...sessionStartTimes.entries()].sort((a, b) => a[1] - b[1]);
+            for (let i = 0; i < entries.length - 250; i++) {
+                sessionStartTimes.delete(entries[i][0]);
+            }
+        }
         sessionStartTimes.set(sessionId, Date.now());
     }
     return sessionStartTimes.get(sessionId);

@@ -1109,6 +1109,8 @@ export async function assignTask(
           }
         : null;
       if (t) {
+        // Guard: prevent resurrection of terminal tasks
+        if (t.status === "completed" || t.status === "failed") return;
         t.owner = targetWorkerName;
         t.status = "in_progress";
         t.assignedAt = new Date().toISOString();

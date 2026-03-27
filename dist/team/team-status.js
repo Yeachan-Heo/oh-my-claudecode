@@ -70,9 +70,10 @@ export function getTeamStatus(teamName, workingDirectory, heartbeatMaxAgeMs = 30
         const recentMessages = peekRecentOutboxMessages(teamName, w.name);
         // Compute per-worker task stats
         const workerTasks = tasks.filter(t => t.owner === w.name);
-        const failed = workerTasks.filter(t => t.status === 'completed' && t.metadata?.permanentlyFailed === true).length;
+        const failed = workerTasks.filter(t => t.status === 'failed' || (t.status === 'completed' && t.metadata?.permanentlyFailed === true)).length;
+        const completedClean = workerTasks.filter(t => t.status === 'completed' && !t.metadata?.permanentlyFailed).length;
         const taskStats = {
-            completed: workerTasks.filter(t => t.status === 'completed').length - failed,
+            completed: completedClean,
             failed,
             pending: workerTasks.filter(t => t.status === 'pending').length,
             inProgress: workerTasks.filter(t => t.status === 'in_progress').length,

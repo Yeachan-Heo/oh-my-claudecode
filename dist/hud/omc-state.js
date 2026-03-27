@@ -34,11 +34,15 @@ function isStateFileStale(filePath) {
  * Returns the most recently modified matching path, or null if none found.
  * This ensures the HUD displays state from any active session (Issue #456).
  */
-function resolveStatePath(directory, filename) {
+function resolveStatePath(directory, filename, sessionId) {
+    const omcRoot = getOmcRoot(directory);
+    if (sessionId) {
+        const sessionPath = join(omcRoot, 'state', 'sessions', sessionId, filename);
+        return existsSync(sessionPath) ? sessionPath : null;
+    }
     let bestPath = null;
     let bestMtime = 0;
     // Check session-scoped paths first (most likely location after Issue #456 fix)
-    const omcRoot = getOmcRoot(directory);
     const sessionsDir = join(omcRoot, 'state', 'sessions');
     if (existsSync(sessionsDir)) {
         try {
@@ -100,8 +104,8 @@ function resolveStatePath(directory, filename) {
  * Read Ralph Loop state for HUD display.
  * Returns null if no state file exists or on error.
  */
-export function readRalphStateForHud(directory) {
-    const stateFile = resolveStatePath(directory, 'ralph-state.json');
+export function readRalphStateForHud(directory, sessionId) {
+    const stateFile = resolveStatePath(directory, 'ralph-state.json', sessionId);
     if (!stateFile) {
         return null;
     }
@@ -131,9 +135,9 @@ export function readRalphStateForHud(directory) {
  * Read Ultrawork state for HUD display.
  * Checks only local .omc/state location.
  */
-export function readUltraworkStateForHud(directory) {
+export function readUltraworkStateForHud(directory, sessionId) {
     // Check local state only (with new path fallback)
-    const localFile = resolveStatePath(directory, 'ultrawork-state.json');
+    const localFile = resolveStatePath(directory, 'ultrawork-state.json', sessionId);
     if (!localFile || isStateFileStale(localFile)) {
         return null;
     }
@@ -193,8 +197,8 @@ export function readPrdStateForHud(directory) {
  * Read Autopilot state for HUD display.
  * Returns shape matching AutopilotStateForHud from elements/autopilot.ts.
  */
-export function readAutopilotStateForHud(directory) {
-    const stateFile = resolveStatePath(directory, 'autopilot-state.json');
+export function readAutopilotStateForHud(directory, sessionId) {
+    const stateFile = resolveStatePath(directory, 'autopilot-state.json', sessionId);
     if (!stateFile) {
         return null;
     }
@@ -228,26 +232,26 @@ export function readAutopilotStateForHud(directory) {
 /**
  * Check if any OMC mode is currently active
  */
-export function isAnyModeActive(directory) {
-    const ralph = readRalphStateForHud(directory);
-    const ultrawork = readUltraworkStateForHud(directory);
-    const autopilot = readAutopilotStateForHud(directory);
+export function isAnyModeActive(directory, sessionId) {
+    const ralph = readRalphStateForHud(directory, sessionId);
+    const ultrawork = readUltraworkStateForHud(directory, sessionId);
+    const autopilot = readAutopilotStateForHud(directory, sessionId);
     return (ralph?.active ?? false) || (ultrawork?.active ?? false) || (autopilot?.active ?? false);
 }
 /**
  * Get active skill names for display
  */
-export function getActiveSkills(directory) {
+export function getActiveSkills(directory, sessionId) {
     const skills = [];
-    const autopilot = readAutopilotStateForHud(directory);
+    const autopilot = readAutopilotStateForHud(directory, sessionId);
     if (autopilot?.active) {
         skills.push('autopilot');
     }
-    const ralph = readRalphStateForHud(directory);
+    const ralph = readRalphStateForHud(directory, sessionId);
     if (ralph?.active) {
         skills.push('ralph');
     }
-    const ultrawork = readUltraworkStateForHud(directory);
+    const ultrawork = readUltraworkStateForHud(directory, sessionId);
     if (ultrawork?.active) {
         skills.push('ultrawork');
     }

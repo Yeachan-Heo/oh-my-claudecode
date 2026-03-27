@@ -4,7 +4,7 @@
  * Manages HUD state file for background task tracking.
  * Follows patterns from ultrawork-state.
  */
-import type { OmcHudState, BackgroundTask, HudConfig } from './types.js';
+import type { OmcHudState, BackgroundTask, HudConfig } from "./types.js";
 /**
  * Read HUD state from disk (checks new local and legacy local only)
  */
@@ -40,7 +40,7 @@ export declare function writeHudConfig(config: HudConfig): boolean;
 /**
  * Apply a preset to the configuration
  */
-export declare function applyPreset(preset: HudConfig['preset']): HudConfig;
+export declare function applyPreset(preset: HudConfig["preset"]): HudConfig;
 /**
  * Initialize HUD state with cleanup of stale/orphaned tasks.
  * Should be called on HUD startup.

@@ -6,6 +6,7 @@
  * Automatic rotation when log exceeds size threshold.
  */
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, renameSync, writeFileSync, lstatSync, unlinkSync } from 'node:fs';
 import { appendFileWithMode, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
 const DEFAULT_MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB
@@ -75,8 +76,8 @@ export function rotateAuditLog(workingDirectory, teamName, maxSizeBytes = DEFAUL
     // Keep the most recent half
     const keepFrom = Math.floor(lines.length / 2);
     const rotated = lines.slice(keepFrom).join('\n') + '\n';
-    // Atomic write: write to temp, then rename
-    const tmpPath = logPath + '.tmp';
+    // Atomic write: write to a process-unique temp file, then rename
+    const tmpPath = logPath + '.' + randomUUID() + '.tmp';
     const logsDir = join(workingDirectory, '.omc', 'logs');
     validateResolvedPath(tmpPath, logsDir);
     // Prevent symlink attacks: if tmp path exists as symlink, remove it

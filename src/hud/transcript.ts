@@ -53,11 +53,10 @@ const PERMISSION_TOOLS = [
 const PERMISSION_THRESHOLD_MS = 3000; // 3 seconds
 
 /**
- * Module-level map tracking pending permission-requiring tools.
- * Key: tool_use block id, Value: PendingPermission info
- * Cleared when tool_result is received for the corresponding tool_use.
+ * BUG FIX: pendingPermissionMap is now created as a local variable inside parseTranscript
+ * instead of module-level, to prevent shared state races between concurrent parse calls.
+ * See the local declaration in parseTranscript().
  */
-const pendingPermissionMap = new Map<string, PendingPermission>();
 
 /**
  * Content block types that indicate extended thinking mode.
@@ -92,7 +91,9 @@ export async function parseTranscript(
   transcriptPath: string | undefined,
   options?: ParseTranscriptOptions,
 ): Promise<TranscriptData> {
-  pendingPermissionMap.clear();
+  // BUG FIX: Create pendingPermissionMap as a local variable to prevent
+  // shared state races between concurrent parseTranscript calls
+  const pendingPermissionMap = new Map<string, PendingPermission>();
 
   const result: TranscriptData = {
     agents: [],
@@ -150,6 +151,7 @@ export async function parseTranscript(
             backgroundAgentMap,
             sessionTokenTotals,
             observedSessionIds,
+            pendingPermissionMap,
           );
         } catch {
           // Skip malformed lines
@@ -179,6 +181,7 @@ export async function parseTranscript(
             backgroundAgentMap,
             sessionTokenTotals,
             observedSessionIds,
+            pendingPermissionMap,
           );
         } catch {
           // Skip malformed lines
@@ -419,6 +422,7 @@ function processEntry(
     seenUsage: boolean;
   },
   observedSessionIds?: Set<string>,
+  pendingPermissionMap?: Map<string, PendingPermission>,
 ): void {
   const timestamp = entry.timestamp ? new Date(entry.timestamp) : new Date();
   if (entry.sessionId) {
@@ -523,7 +527,7 @@ function processEntry(
           block.name as (typeof PERMISSION_TOOLS)[number],
         )
       ) {
-        pendingPermissionMap.set(block.id, {
+        pendingPermissionMap?.set(block.id, {
           toolName: block.name.replace("proxy_", ""),
           targetSummary: extractTargetSummary(block.input, block.name),
           timestamp: timestamp,
@@ -534,7 +538,7 @@ function processEntry(
     // Track tool_result to mark agents as completed
     if (block.type === "tool_result" && block.tool_use_id) {
       // Clear from pending permissions when tool_result arrives
-      pendingPermissionMap.delete(block.tool_use_id);
+      pendingPermissionMap?.delete(block.tool_use_id);
 
       const agent = agentMap.get(block.tool_use_id);
       if (agent) {

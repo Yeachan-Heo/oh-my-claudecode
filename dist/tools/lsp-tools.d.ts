@@ -111,7 +111,40 @@ export declare const lspDiagnosticsDirectoryTool: ToolDefinition<{
  */
 export declare const lspTools: (ToolDefinition<{
     file: z.ZodString;
+    line: z.ZodNumber;
+    character: z.ZodNumber;
+}> | ToolDefinition<{
+    file: z.ZodString;
+    line: z.ZodNumber;
+    character: z.ZodNumber;
+    includeDeclaration: z.ZodOptional<z.ZodBoolean>;
+}> | ToolDefinition<{
+    file: z.ZodString;
+}> | ToolDefinition<{
+    query: z.ZodString;
+    file: z.ZodString;
+}> | ToolDefinition<{
+    file: z.ZodString;
+    severity: z.ZodOptional<z.ZodEnum<["error", "warning", "info", "hint"]>>;
 }> | ToolDefinition<Record<string, never>> | ToolDefinition<{
+    file: z.ZodString;
+    line: z.ZodNumber;
+    character: z.ZodNumber;
+    newName: z.ZodString;
+}> | ToolDefinition<{
+    file: z.ZodString;
+    startLine: z.ZodNumber;
+    startCharacter: z.ZodNumber;
+    endLine: z.ZodNumber;
+    endCharacter: z.ZodNumber;
+}> | ToolDefinition<{
+    file: z.ZodString;
+    startLine: z.ZodNumber;
+    startCharacter: z.ZodNumber;
+    endLine: z.ZodNumber;
+    endCharacter: z.ZodNumber;
+    actionIndex: z.ZodNumber;
+}> | ToolDefinition<{
     directory: z.ZodString;
     strategy: z.ZodOptional<z.ZodEnum<["tsc", "lsp", "auto"]>>;
 }>)[];

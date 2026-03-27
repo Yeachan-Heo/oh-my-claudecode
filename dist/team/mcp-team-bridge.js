@@ -448,12 +448,14 @@ async function handleShutdown(config, signal, activeChild) {
             activeChild.kill("SIGKILL");
         }
     }
-    // 2. Write shutdown ack to outbox
-    appendOutbox(teamName, workerName, {
-        type: "shutdown_ack",
-        requestId: signal.requestId,
-        timestamp: new Date().toISOString(),
-    });
+    // 2. Write shutdown ack to outbox (skip if already written by drain path)
+    if (!signal._ackAlreadyWritten) {
+        appendOutbox(teamName, workerName, {
+            type: "shutdown_ack",
+            requestId: signal.requestId,
+            timestamp: new Date().toISOString(),
+        });
+    }
     // 3. Unregister from config.json / shadow registry
     try {
         unregisterMcpWorker(teamName, workerName, workingDirectory);
@@ -520,7 +522,7 @@ export async function runBridge(config) {
                     reason: drain.reason,
                     type: "drain",
                 });
-                // Write drain ack to outbox
+                // Write drain ack to outbox (only once — handleShutdown below skips its own ack)
                 appendOutbox(teamName, workerName, {
                     type: "shutdown_ack",
                     requestId: drain.requestId,
@@ -528,8 +530,8 @@ export async function runBridge(config) {
                 });
                 // Clean up drain signal
                 deleteDrainSignal(teamName, workerName);
-                // Use the same handleShutdown for cleanup
-                await handleShutdown(config, { requestId: drain.requestId, reason: `drain: ${drain.reason}` }, null);
+                // Run full shutdown cleanup (unregister, heartbeat, etc.) but skip duplicate ack
+                await handleShutdown(config, { requestId: drain.requestId, reason: `drain: ${drain.reason}`, _ackAlreadyWritten: true }, null);
                 break;
             }
             // --- 2. Check self-quarantine ---
@@ -642,8 +644,10 @@ export async function runBridge(config) {
                                 })),
                                 mode: "enforce",
                             });
+                            // Fix: permanently failed tasks must use "failed" status, not "completed",
+                            // so the watchdog correctly reports them as failures.
                             updateTask(teamName, task.id, {
-                                status: "completed",
+                                status: "failed",
                                 metadata: {
                                     ...(task.metadata || {}),
                                     error: `Permission violations detected (enforce mode)`,
@@ -761,9 +765,10 @@ export async function runBridge(config) {
                     const attempt = failure.retryCount;
                     // Check if retries exhausted
                     if (attempt >= (config.maxRetries ?? 5)) {
-                        // Permanently fail: mark completed with error metadata
+                        // Fix: permanently failed tasks must use "failed" status, not "completed",
+                        // so the watchdog correctly reports them as failures.
                         updateTask(teamName, task.id, {
-                            status: "completed",
+                            status: "failed",
                             metadata: {
                                 ...(task.metadata || {}),
                                 error: errorMsg,

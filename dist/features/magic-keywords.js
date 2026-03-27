@@ -242,10 +242,10 @@ THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTIN
 const ultraworkEnhancement = {
     triggers: ['ultrawork', 'ulw', 'uw'],
     description: 'Activates maximum performance mode with parallel agent orchestration',
-    action: (prompt) => {
+    action: (prompt, agentName) => {
         // Remove the trigger word and add enhancement instructions
         const cleanPrompt = removeTriggerWords(prompt, ['ultrawork', 'ulw', 'uw']);
-        return getUltraworkMessage() + cleanPrompt;
+        return getUltraworkMessage(agentName) + cleanPrompt;
     }
 };
 /**
@@ -386,14 +386,14 @@ export function createMagicKeywordProcessor(config) {
             }
         }
     }
-    return (prompt) => {
+    return (prompt, agentName) => {
         let result = prompt;
         for (const keyword of keywords) {
             const hasKeyword = keyword.triggers.some(trigger => {
                 return hasActionableTrigger(removeCodeBlocks(result), trigger);
             });
             if (hasKeyword) {
-                result = keyword.action(result);
+                result = keyword.action(result, agentName);
             }
         }
         return result;

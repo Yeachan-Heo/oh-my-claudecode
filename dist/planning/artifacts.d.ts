@@ -3,7 +3,7 @@ export interface PlanningArtifacts {
     testSpecPaths: string[];
 }
 export interface ApprovedExecutionLaunchHint {
-    mode: 'team' | 'ralph';
+    mode: "team" | "ralph";
     command: string;
     task: string;
     workerCount?: number;
@@ -17,12 +17,13 @@ export interface ApprovedExecutionLaunchHint {
  */
 export declare function readPlanningArtifacts(cwd: string): PlanningArtifacts;
 /**
- * Returns true when both a PRD and a test spec are present.
+ * Returns true when the latest PRD and latest test spec contain
+ * the required non-empty quality-gate sections.
  */
 export declare function isPlanningComplete(artifacts: PlanningArtifacts): boolean;
 /**
  * Read the latest PRD file and extract an embedded launch hint for the given mode.
  * Returns null when no hint is found.
  */
-export declare function readApprovedExecutionLaunchHint(cwd: string, mode: 'team' | 'ralph'): ApprovedExecutionLaunchHint | null;
+export declare function readApprovedExecutionLaunchHint(cwd: string, mode: "team" | "ralph"): ApprovedExecutionLaunchHint | null;
 //# sourceMappingURL=artifacts.d.ts.map

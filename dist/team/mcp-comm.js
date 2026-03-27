@@ -62,7 +62,7 @@ async function markLeaderPaneMissingDeferred(params) {
     }, cwd).catch(() => { });
 }
 export async function queueInboxInstruction(params) {
-    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+    // Check dedup BEFORE writing inbox to avoid overwriting with stale content
     const queued = await enqueueDispatchRequest(params.teamName, {
         kind: 'inbox',
         to_worker: params.workerName,
@@ -80,6 +80,18 @@ export async function queueInboxInstruction(params) {
             reason: 'duplicate_pending_dispatch_request',
             request_id: queued.request.request_id,
         };
+    }
+    try {
+        await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+    }
+    catch (inboxErr) {
+        await markImmediateDispatchFailure({
+            teamName: params.teamName,
+            request: queued.request,
+            reason: 'inbox_write_failed',
+            cwd: params.cwd,
+        });
+        throw inboxErr;
     }
     const notifyOutcome = await Promise.resolve(params.notify({ workerName: params.workerName, workerIndex: params.workerIndex, paneId: params.paneId }, params.triggerMessage, { request: queued.request })).catch((error) => ({
         ok: false,

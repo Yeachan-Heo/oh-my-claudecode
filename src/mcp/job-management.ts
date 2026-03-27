@@ -453,14 +453,9 @@ export async function handleKillJob(
     );
   }
 
-  // Mark killedByUser before sending signal so the close handler can see it
-  const updated: JobStatus = {
-    ...status,
-    killedByUser: true,
-  };
-  writeJobStatus(updated);
-
   try {
+    // BUG FIX: Send signal BEFORE marking killedByUser to avoid marking
+    // status on a process we failed to actually signal
     // On POSIX, background jobs are spawned detached as process-group leaders.
     // Kill the whole process group so child processes also terminate.
     if (process.platform !== 'win32') {
@@ -468,6 +463,9 @@ export async function handleKillJob(
     } else {
       process.kill(status.pid, signal as NodeJS.Signals);
     }
+
+    // Only mark killedByUser after signal was successfully sent
+    const updated: JobStatus = { ...status, killedByUser: true };
 
     // Update status to failed
     writeJobStatus({
@@ -482,8 +480,9 @@ export async function handleKillJob(
     for (let attempt = 0; attempt < 3; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 50));
       const recheckStatus = readJobStatus(provider, found.slug, jobId);
-      if (!recheckStatus || recheckStatus.status === 'failed') {
-        break; // Our write stuck, or status is already what we want
+      // BUG FIX: Also break on 'completed' to avoid overwriting legitimate completion
+      if (!recheckStatus || recheckStatus.status === 'failed' || recheckStatus.status === 'completed') {
+        break; // Our write stuck OR job completed legitimately
       }
       // Background handler overwrote - write again
       writeJobStatus({
@@ -510,7 +509,7 @@ export async function handleKillJob(
         message = `Process ${status.pid} already exited.`;
         // Only mark as failed if not already completed
         writeJobStatus({
-          ...(currentStatus || updated),
+          ...(currentStatus || status),
           status: 'failed',
           killedByUser: true,
           completedAt: new Date().toISOString(),

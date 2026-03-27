@@ -14,6 +14,7 @@ import { dirname } from 'path';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath } from './state-paths.js';
 import { normalizeTeamManifest } from './governance.js';
+import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
 // ---------------------------------------------------------------------------
@@ -39,8 +40,52 @@ async function writeAtomic(filePath, data) {
 // ---------------------------------------------------------------------------
 // Config / Manifest readers
 // ---------------------------------------------------------------------------
+function configFromManifest(manifest) {
+    return {
+        name: manifest.name,
+        task: manifest.task,
+        agent_type: 'claude',
+        policy: manifest.policy,
+        governance: manifest.governance,
+        worker_launch_mode: manifest.policy.worker_launch_mode,
+        worker_count: manifest.worker_count,
+        max_workers: 20,
+        workers: manifest.workers,
+        created_at: manifest.created_at,
+        tmux_session: manifest.tmux_session,
+        next_task_id: manifest.next_task_id,
+        leader_cwd: manifest.leader_cwd,
+        team_state_root: manifest.team_state_root,
+        workspace_mode: manifest.workspace_mode,
+        leader_pane_id: manifest.leader_pane_id,
+        hud_pane_id: manifest.hud_pane_id,
+        resize_hook_name: manifest.resize_hook_name,
+        resize_hook_target: manifest.resize_hook_target,
+        next_worker_index: manifest.next_worker_index,
+    };
+}
 export async function readTeamConfig(teamName, cwd) {
-    return readJsonSafe(absPath(cwd, TeamPaths.config(teamName)));
+    const [config, manifest] = await Promise.all([
+        readJsonSafe(absPath(cwd, TeamPaths.config(teamName))),
+        readTeamManifest(teamName, cwd),
+    ]);
+    if (!config && !manifest)
+        return null;
+    if (!manifest)
+        return config ? canonicalizeTeamConfigWorkers(config) : null;
+    if (!config)
+        return canonicalizeTeamConfigWorkers(configFromManifest(manifest));
+    const result = canonicalizeTeamConfigWorkers({
+        ...configFromManifest(manifest),
+        ...config,
+        workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
+        worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
+        next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
+        max_workers: Math.max(config.max_workers ?? 0, 20),
+    });
+    // Ensure worker_count matches actual deduplicated workers array after canonicalization
+    result.worker_count = result.workers.length;
+    return result;
 }
 export async function readTeamManifest(teamName, cwd) {
     const manifest = await readJsonSafe(absPath(cwd, TeamPaths.manifest(teamName)));
@@ -274,9 +319,11 @@ export async function saveTeamConfig(config, cwd) {
 // ---------------------------------------------------------------------------
 // Scaling lock (file-based mutex for scale up/down)
 // ---------------------------------------------------------------------------
+// Stale lock threshold for scaling operations (longer than dispatch since scaling can take time)
+const SCALING_LOCK_STALE_MS = 60_000;
 export async function withScalingLock(teamName, cwd, fn, timeoutMs = 10_000) {
     const lockDir = absPath(cwd, TeamPaths.scalingLock(teamName));
-    const { mkdir: mkdirAsync, rm } = await import('fs/promises');
+    const { mkdir: mkdirAsync, rm, stat: statAsync } = await import('fs/promises');
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         try {
@@ -292,6 +339,17 @@ export async function withScalingLock(teamName, cwd, fn, timeoutMs = 10_000) {
             const code = error.code;
             if (code !== 'EEXIST')
                 throw error;
+            // Stale lock detection: remove lock if it's older than threshold
+            try {
+                const info = await statAsync(lockDir);
+                if (Date.now() - info.mtimeMs > SCALING_LOCK_STALE_MS) {
+                    await rm(lockDir, { recursive: true, force: true });
+                    continue;
+                }
+            }
+            catch {
+                // best effort — lock may have been released between check and stat
+            }
             await new Promise((r) => setTimeout(r, 100));
         }
     }

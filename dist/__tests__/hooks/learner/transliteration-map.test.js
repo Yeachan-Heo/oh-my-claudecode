@@ -90,17 +90,10 @@ describe("expandTriggers", () => {
             const result = expandTriggers(["deep-pipe"]);
             expect(result).toContain("딥파이프");
         });
-        it('expands "pipeline-cycle"', () => {
-            const result = expandTriggers(["pipeline-cycle"]);
-            expect(result).toContain("파이프라인 사이클");
-        });
-        it('expands "dev-pipeline"', () => {
-            const result = expandTriggers(["dev-pipeline"]);
-            expect(result).toContain("개발 파이프라인");
-        });
-        it('expands "dev-cycle"', () => {
-            const result = expandTriggers(["dev-cycle"]);
-            expect(result).toContain("개발 사이클");
+        it('does NOT expand generic dev-* triggers (native Korean, removed)', () => {
+            expect(expandTriggers(["pipeline-cycle"])).toEqual(["pipeline-cycle"]);
+            expect(expandTriggers(["dev-pipeline"])).toEqual(["dev-pipeline"]);
+            expect(expandTriggers(["dev-cycle"])).toEqual(["dev-cycle"]);
         });
     });
     // ---------------------------------------------------------------------------
@@ -176,8 +169,6 @@ describe("expandTriggers", () => {
                 "deep-pipeline",
                 "deep-pipe",
                 "pipeline-cycle",
-                "dev-pipeline",
-                "dev-cycle",
                 "unknown-trigger",
             ];
             const start = performance.now();

@@ -18,6 +18,8 @@ import {
   teamWriteWorkerIdentity,
   teamReadWorkerStatus,
   teamAppendEvent,
+  teamListTasks,
+  teamUpdateTask,
   writeAtomic,
   type WorkerInfo,
   type WorkerStatus,
@@ -374,6 +376,21 @@ export async function scaleDown(
         );
         if (allDrained.every(Boolean)) break;
         await new Promise(r => setTimeout(r, 2_000));
+      }
+    }
+
+    // Phase 2.5: Reset orphaned in-progress tasks owned by workers being killed.
+    // After drain timeout, workers may still own in-progress tasks — reset them
+    // to pending so they can be claimed by remaining workers (mirrors requeueDeadWorkerTasks pattern).
+    const removedNameSet = new Set(targetWorkers.map(w => w.name));
+    const allTasks = await teamListTasks(sanitized, leaderCwd);
+    for (const task of allTasks) {
+      if (task.status === 'in_progress' && task.owner && removedNameSet.has(task.owner)) {
+        await teamUpdateTask(sanitized, task.id, {
+          status: 'pending',
+          owner: null,
+          assigned_at: undefined,
+        }, leaderCwd);
       }
     }
 

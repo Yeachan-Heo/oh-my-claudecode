@@ -122,6 +122,12 @@ export class LspClient {
             }
             this.process = null;
             this.initialized = false;
+            // Wake diagnostic waiters to prevent resource leaks
+            for (const waiters of this.diagnosticWaiters.values()) {
+                for (const wake of waiters)
+                    wake();
+            }
+            this.diagnosticWaiters.clear();
         }
     }
     /**
@@ -148,6 +154,12 @@ export class LspClient {
             this.rejectPendingRequests(new Error('Client disconnected'));
             this.openDocuments.clear();
             this.diagnostics.clear();
+            // Wake all diagnostic waiters so their setTimeout closures can be GC'd
+            for (const waiters of this.diagnosticWaiters.values()) {
+                for (const wake of waiters)
+                    wake();
+            }
+            this.diagnosticWaiters.clear();
         }
     }
     /**

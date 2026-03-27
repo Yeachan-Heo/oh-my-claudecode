@@ -27,7 +27,7 @@ import {
   type UsageErrorReason,
 } from './types.js';
 import { readHudConfig } from './state.js';
-import { lockPathFor, withFileLock, type FileLockOptions } from '../lib/file-lock.js';
+import { lockPathFor, withFileLock, withFileLockSync, type FileLockOptions } from '../lib/file-lock.js';
 
 // Cache configuration
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for non-transient failures
@@ -626,45 +626,49 @@ function writeBackCredentials(creds: OAuthCredentials): void {
     const credPath = join(getClaudeConfigDir(), '.credentials.json');
     if (!existsSync(credPath)) return;
 
-    const content = readFileSync(credPath, 'utf-8');
-    const parsed = JSON.parse(content);
+    // BUG FIX: Wrap the entire read-modify-write in a file lock to prevent
+    // concurrent processes from racing on credential updates
+    withFileLockSync(lockPathFor(credPath), () => {
+      const content = readFileSync(credPath, 'utf-8');
+      const parsed = JSON.parse(content);
 
-    // Update the nested structure
-    if (parsed.claudeAiOauth) {
-      parsed.claudeAiOauth.accessToken = creds.accessToken;
-      if (creds.expiresAt != null) {
-        parsed.claudeAiOauth.expiresAt = creds.expiresAt;
-      }
-      if (creds.refreshToken) {
-        parsed.claudeAiOauth.refreshToken = creds.refreshToken;
-      }
-    } else {
-      // Flat structure
-      parsed.accessToken = creds.accessToken;
-      if (creds.expiresAt != null) {
-        parsed.expiresAt = creds.expiresAt;
-      }
-      if (creds.refreshToken) {
-        parsed.refreshToken = creds.refreshToken;
-      }
-    }
-
-    // Atomic write: write to tmp file, then rename (atomic on POSIX, best-effort on Windows)
-    const tmpPath = `${credPath}.tmp.${process.pid}`;
-    try {
-      writeFileSync(tmpPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
-      renameSync(tmpPath, credPath);
-    } catch (writeErr) {
-      // Clean up orphaned tmp file on failure
-      try {
-        if (existsSync(tmpPath)) {
-          unlinkSync(tmpPath);
+      // Update the nested structure
+      if (parsed.claudeAiOauth) {
+        parsed.claudeAiOauth.accessToken = creds.accessToken;
+        if (creds.expiresAt != null) {
+          parsed.claudeAiOauth.expiresAt = creds.expiresAt;
         }
-      } catch {
-        // Ignore cleanup errors
+        if (creds.refreshToken) {
+          parsed.claudeAiOauth.refreshToken = creds.refreshToken;
+        }
+      } else {
+        // Flat structure
+        parsed.accessToken = creds.accessToken;
+        if (creds.expiresAt != null) {
+          parsed.expiresAt = creds.expiresAt;
+        }
+        if (creds.refreshToken) {
+          parsed.refreshToken = creds.refreshToken;
+        }
       }
-      throw writeErr;
-    }
+
+      // Atomic write: write to tmp file, then rename (atomic on POSIX, best-effort on Windows)
+      const tmpPath = `${credPath}.tmp.${process.pid}`;
+      try {
+        writeFileSync(tmpPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+        renameSync(tmpPath, credPath);
+      } catch (writeErr) {
+        // Clean up orphaned tmp file on failure
+        try {
+          if (existsSync(tmpPath)) {
+            unlinkSync(tmpPath);
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw writeErr;
+      }
+    });
   } catch {
     // Silent failure - credential write-back is best-effort
     if (process.env.OMC_DEBUG) {

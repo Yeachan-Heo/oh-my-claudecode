@@ -3,7 +3,7 @@
  *
  * Composes statusline output from render context.
  */
-import type { HudRenderContext, HudConfig } from './types.js';
+import type { HudRenderContext, HudConfig } from "./types.js";
 /**
  * Truncate a single line to a maximum visual width, preserving ANSI escape codes.
  * When the visible content exceeds maxWidth columns, it is truncated with an ellipsis.

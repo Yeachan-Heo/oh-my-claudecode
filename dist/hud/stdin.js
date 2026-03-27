@@ -76,11 +76,14 @@ export async function readStdin() {
         return null;
     }
 }
+function getCurrentUsage(stdin) {
+    return stdin.context_window?.current_usage;
+}
 /**
  * Get total tokens from stdin context_window.current_usage
  */
 function getTotalTokens(stdin) {
-    const usage = stdin.context_window?.current_usage;
+    const usage = getCurrentUsage(stdin);
     return ((usage?.input_tokens ?? 0) +
         (usage?.cache_creation_input_tokens ?? 0) +
         (usage?.cache_read_input_tokens ?? 0));
@@ -130,13 +133,13 @@ export function stabilizeContextPercent(stdin, previousStdin) {
         ...stdin,
         context_window: {
             ...stdin.context_window,
-            used_percentage: previousStdin.context_window.used_percentage ?? previousNativePercent,
+            used_percentage: previousStdin.context_window?.used_percentage ?? previousNativePercent,
         },
     };
 }
 /**
  * Get context window usage percentage.
- * Prefers native percentage from Claude Code v2.1.6+, falls back to manual calculation.
+ * Prefers native percentage from Claude Code statusline stdin, falls back to manual calculation.
  */
 export function getContextPercent(stdin) {
     const nativePercent = getRoundedNativeContextPercent(stdin);
@@ -147,8 +150,9 @@ export function getContextPercent(stdin) {
 }
 /**
  * Get model display name from stdin.
+ * Prefer the official display name field, then fall back to the raw model id.
  */
 export function getModelName(stdin) {
-    return stdin.model?.id ?? stdin.model?.display_name ?? 'Unknown';
+    return stdin.model?.display_name ?? stdin.model?.id ?? 'Unknown';
 }
 //# sourceMappingURL=stdin.js.map

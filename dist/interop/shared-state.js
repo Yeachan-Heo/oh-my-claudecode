@@ -92,7 +92,7 @@ export function addSharedTask(cwd, task) {
     const interopDir = getInteropDir(cwd);
     const fullTask = {
         ...task,
-        id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: `task-${Date.now()}-${crypto.randomUUID().replace(/-/g, '').slice(0, 9)}`,
         createdAt: new Date().toISOString(),
         status: 'pending',
     };
@@ -175,7 +175,7 @@ export function addSharedMessage(cwd, message) {
     const interopDir = getInteropDir(cwd);
     const fullMessage = {
         ...message,
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: `msg-${Date.now()}-${crypto.randomUUID().replace(/-/g, '').slice(0, 9)}`,
         timestamp: new Date().toISOString(),
         read: false,
     };

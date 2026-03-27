@@ -168,7 +168,7 @@ function detectCrossFileDependencies(prompt) {
  */
 function detectTestRequirements(prompt) {
     const testIndicators = [
-        /\btest/i,
+        /\btests?\b/i,
         /\bspec\b/i,
         /make sure.*work/i,
         /verify/i,

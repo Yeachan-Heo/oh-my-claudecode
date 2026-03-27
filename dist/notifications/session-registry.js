@@ -207,7 +207,8 @@ function releaseRegistryLock(lock) {
 function withRegistryLockOrWait(onLocked) {
     const lock = acquireRegistryLockOrWait();
     if (lock === null) {
-        // Lock timed out (hung lock holder). Proceed best-effort without lock.
+        // Lock timed out — proceed best-effort. Write contention is mitigated
+        // by JSONL append-only format (each write appends a complete line).
         return onLocked();
     }
     try {

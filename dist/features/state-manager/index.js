@@ -588,7 +588,7 @@ function withFileLock(filePath, fn) {
             if (Date.now() >= deadline) {
                 throw new Error(`Timed out acquiring state lock: ${lockPath}`);
             }
-            // Brief busy-wait before retry
+            // Brief pause before retry (sync spin intentional — this is a sync lock function)
             const waitEnd = Date.now() + LOCK_POLL_MS;
             while (Date.now() < waitEnd) {
                 /* spin */

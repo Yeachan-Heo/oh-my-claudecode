@@ -50,6 +50,13 @@ describe('Tier-0 contract docs consistency', () => {
         expect(claudeDoc).toContain('Team orchestration is explicit via `/team`.');
         expect(referenceDoc).not.toContain('| `team`, `coordinated team`');
     });
+    it('keeps install and update guidance aligned on canonical setup entrypoints', () => {
+        const localPluginDoc = readProjectFile('docs', 'LOCAL_PLUGIN_INSTALL.md');
+        expect(claudeDoc).toContain('Say "setup omc" or run `/oh-my-claudecode:omc-setup`.');
+        expect(referenceDoc).toContain('/oh-my-claudecode:setup');
+        expect(localPluginDoc).toContain('/setup');
+        expect(localPluginDoc).toContain('git worktrees');
+    });
     it('keeps root AGENTS.md aligned with OMC branding and state paths', () => {
         const agentsDoc = readProjectFile('AGENTS.md');
         expect(agentsDoc).toContain('# oh-my-claudecode - Intelligent Multi-Agent Orchestration');

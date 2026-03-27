@@ -400,9 +400,9 @@ describe('extractDiscordFlag', () => {
 // extractOpenClawFlag
 // ---------------------------------------------------------------------------
 describe('extractOpenClawFlag', () => {
-    it('returns openclawEnabled=false with no --openclaw flag', () => {
+    it('returns openclawEnabled=undefined with no --openclaw flag', () => {
         const result = extractOpenClawFlag(['--madmax']);
-        expect(result.openclawEnabled).toBe(false);
+        expect(result.openclawEnabled).toBeUndefined();
         expect(result.remainingArgs).toEqual(['--madmax']);
     });
     it('enables openclaw with bare --openclaw flag', () => {
@@ -445,9 +445,9 @@ describe('extractOpenClawFlag', () => {
         const result = extractOpenClawFlag(['--openclaw=FALSE']);
         expect(result.openclawEnabled).toBe(false);
     });
-    it('returns openclawEnabled=false for empty args', () => {
+    it('returns openclawEnabled=undefined for empty args', () => {
         const result = extractOpenClawFlag([]);
-        expect(result.openclawEnabled).toBe(false);
+        expect(result.openclawEnabled).toBeUndefined();
         expect(result.remainingArgs).toEqual([]);
     });
     it('handles multiple flags correctly', () => {

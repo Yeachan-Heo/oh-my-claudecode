@@ -58,7 +58,7 @@ export interface OrchestratorOptions {
 /**
  * Initialize a new ralphthon orchestrator state
  */
-export declare function initOrchestrator(directory: string, tmuxSession: string, leaderPaneId: string, prdPath: string, sessionId?: string, config?: Partial<RalphthonConfig>): RalphthonState;
+export declare function initOrchestrator(directory: string, tmuxSession: string, leaderPaneId: string, prdPath: string, sessionId?: string, _config?: Partial<RalphthonConfig>): RalphthonState;
 /**
  * Determine the next action the orchestrator should take.
  * Returns a command string to inject, or null if no action needed.

@@ -33,8 +33,8 @@ export function inferPhase(tasks) {
         allFailed.length === 0) {
         return 'planning';
     }
-    // Rule 4: Mixed completed + pending (no in_progress) → executing
-    if (pending.length > 0 && genuinelyCompleted.length > 0 && inProgress.length === 0) {
+    // Rule 4: Mixed completed + pending (no in_progress, no failures) → executing
+    if (pending.length > 0 && genuinelyCompleted.length > 0 && inProgress.length === 0 && allFailed.length === 0) {
         return 'executing';
     }
     // Rules 6 & 7: Handle failures

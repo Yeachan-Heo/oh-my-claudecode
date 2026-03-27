@@ -287,6 +287,8 @@ export function formatOpenQuestions(topic, questions) {
 export function deepMerge(target, source) {
     const result = { ...target };
     for (const key of Object.keys(source)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype')
+            continue;
         const sourceValue = source[key];
         const targetValue = target[key];
         if (sourceValue &&

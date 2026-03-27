@@ -226,7 +226,11 @@ Do NOT skip this step. Do NOT move on without fixing the error.
  * Get or increment todo-continuation attempt counter
  */
 function trackTodoContinuationAttempt(sessionId: string): number {
-  if (todoContinuationAttempts.size > 200) todoContinuationAttempts.clear();
+  if (todoContinuationAttempts.size > 200) {
+    // Evict oldest half instead of nuclear clear (preserves active sessions' counters)
+    const toDelete = [...todoContinuationAttempts.keys()].slice(0, 100);
+    for (const key of toDelete) todoContinuationAttempts.delete(key);
+  }
   const current = todoContinuationAttempts.get(sessionId) || 0;
   const next = current + 1;
   todoContinuationAttempts.set(sessionId, next);

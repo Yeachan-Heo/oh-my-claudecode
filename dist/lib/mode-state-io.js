@@ -5,9 +5,10 @@
  * Centralises path resolution, ghost-legacy cleanup, directory creation,
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { getOmcRoot, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, } from './worktree-paths.js';
+import { getOmcRoot, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, } from './worktree-paths.js';
+import { atomicWriteJsonSync } from './atomic-write.js';
 export function getStateSessionOwner(state) {
     if (!state || typeof state !== 'object') {
         return undefined;
@@ -73,10 +74,16 @@ export function writeModeState(mode, state, directory, sessionId) {
             ensureOmcDir('state', baseDir);
         }
         const filePath = resolveFile(mode, directory, sessionId);
-        const envelope = { ...state, _meta: { written_at: new Date().toISOString(), mode } };
-        const tmpPath = filePath + '.tmp';
-        writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
-        renameSync(tmpPath, filePath);
+        // BUG 4 fix: include sessionId in _meta when provided
+        const envelope = {
+            ...state,
+            _meta: {
+                written_at: new Date().toISOString(),
+                mode,
+                ...(sessionId ? { sessionId } : {}),
+            },
+        };
+        atomicWriteJsonSync(filePath, envelope);
         return true;
     }
     catch {
@@ -125,13 +132,26 @@ export function readModeState(mode, directory, sessionId) {
  */
 export function clearModeStateFile(mode, directory, sessionId) {
     let success = true;
-    const filePath = resolveFile(mode, directory, sessionId);
-    if (existsSync(filePath)) {
+    const unlinkIfPresent = (filePath) => {
+        if (!existsSync(filePath)) {
+            return;
+        }
         try {
             unlinkSync(filePath);
         }
         catch {
             success = false;
+        }
+    };
+    if (sessionId) {
+        unlinkIfPresent(resolveFile(mode, directory, sessionId));
+    }
+    else {
+        for (const legacyPath of getLegacyStateCandidates(mode, directory)) {
+            unlinkIfPresent(legacyPath);
+        }
+        for (const sid of listSessionIds(directory)) {
+            unlinkIfPresent(resolveSessionStatePath(mode, sid, directory));
         }
     }
     // Ghost-legacy cleanup: if sessionId provided, also check legacy path

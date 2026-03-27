@@ -302,6 +302,11 @@ describe('Keyword Detector', () => {
                 expect(hasAnalyze).toBe(false);
             }
         });
+        it('should NOT trigger autopilot for "오토파일럿 설명" (bare 설명 is informational)', () => {
+            const detected = detectKeywordsWithType('오토파일럿 설명');
+            const hasAutopilot = detected.some(d => d.type === 'autopilot');
+            expect(hasAutopilot).toBe(false);
+        });
     });
     describe('hasKeyword', () => {
         it('should return true when keyword exists', () => {

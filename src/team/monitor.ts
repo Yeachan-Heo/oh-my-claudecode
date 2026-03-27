@@ -90,7 +90,7 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
   if (!config && !manifest) return null;
   if (!manifest) return config ? canonicalizeTeamConfigWorkers(config) : null;
   if (!config) return canonicalizeTeamConfigWorkers(configFromManifest(manifest));
-  return canonicalizeTeamConfigWorkers({
+  const result = canonicalizeTeamConfigWorkers({
     ...configFromManifest(manifest),
     ...config,
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
@@ -98,6 +98,9 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
     max_workers: Math.max(config.max_workers ?? 0, 20),
   });
+  // Ensure worker_count matches actual deduplicated workers array after canonicalization
+  result.worker_count = result.workers.length;
+  return result;
 }
 
 export async function readTeamManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null> {
@@ -405,6 +408,9 @@ export async function saveTeamConfig(config: TeamConfig, cwd: string): Promise<v
 // Scaling lock (file-based mutex for scale up/down)
 // ---------------------------------------------------------------------------
 
+// Stale lock threshold for scaling operations (longer than dispatch since scaling can take time)
+const SCALING_LOCK_STALE_MS = 60_000;
+
 export async function withScalingLock<T>(
   teamName: string,
   cwd: string,
@@ -412,7 +418,7 @@ export async function withScalingLock<T>(
   timeoutMs: number = 10_000,
 ): Promise<T> {
   const lockDir = absPath(cwd, TeamPaths.scalingLock(teamName));
-  const { mkdir: mkdirAsync, rm } = await import('fs/promises');
+  const { mkdir: mkdirAsync, rm, stat: statAsync } = await import('fs/promises');
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -426,6 +432,18 @@ export async function withScalingLock<T>(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
+
+      // Stale lock detection: remove lock if it's older than threshold
+      try {
+        const info = await statAsync(lockDir);
+        if (Date.now() - info.mtimeMs > SCALING_LOCK_STALE_MS) {
+          await rm(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        // best effort — lock may have been released between check and stat
+      }
+
       await new Promise((r) => setTimeout(r, 100));
     }
   }

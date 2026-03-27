@@ -63,6 +63,17 @@ function writeStopBreaker(tempDir, sessionId, name, count) {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, `${name}-stop-breaker.json`), JSON.stringify({ count, updated_at: new Date().toISOString() }, null, 2));
 }
+function writeSubagentTrackingState(tempDir, agents) {
+    const stateDir = join(tempDir, '.omc', 'state');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, 'subagent-tracking.json'), JSON.stringify({
+        agents,
+        total_spawned: agents.length,
+        total_completed: agents.filter((agent) => agent.status === 'completed').length,
+        total_failed: agents.filter((agent) => agent.status === 'failed').length,
+        last_updated: new Date().toISOString(),
+    }, null, 2));
+}
 // ===========================================================================
 // Team Pipeline Standalone Tests
 // ===========================================================================
@@ -351,6 +362,19 @@ describe('ralplan standalone stop enforcement', () => {
             rmSync(tempDir, { recursive: true, force: true });
         }
     });
+    it('ignores ralplan state that is still awaiting skill confirmation', async () => {
+        const sessionId = 'session-ralplan-awaiting-confirmation';
+        const tempDir = makeTempProject();
+        try {
+            writeRalplanState(tempDir, sessionId, { awaiting_confirmation: true });
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(false);
+            expect(result.mode).toBe('none');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
     it('respects session isolation', async () => {
         const sessionId = 'session-ralplan-iso-a';
         const tempDir = makeTempProject();
@@ -467,6 +491,56 @@ describe('ralplan standalone stop enforcement', () => {
             const result = await checkPersistentModes(sessionId, tempDir);
             expect(result.shouldBlock).toBe(false);
             expect(result.mode).toBe('ralplan');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it('allows orchestrator idle when ralplan is active but delegated subagents are still running', async () => {
+        const sessionId = 'session-ralplan-active-subagents';
+        const tempDir = makeTempProject();
+        try {
+            writeRalplanState(tempDir, sessionId);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: 'agent-1721-active',
+                    agent_type: 'explore',
+                    started_at: new Date().toISOString(),
+                    parent_mode: 'ralplan',
+                    status: 'running',
+                },
+            ]);
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(false);
+            expect(result.mode).toBe('ralplan');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it('does not consume ralplan breaker budget while subagents are active', async () => {
+        const sessionId = 'session-ralplan-subagent-breaker';
+        const tempDir = makeTempProject();
+        try {
+            writeRalplanState(tempDir, sessionId);
+            writeStopBreaker(tempDir, sessionId, 'ralplan', 30);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: 'agent-1721-breaker',
+                    agent_type: 'explore',
+                    started_at: new Date().toISOString(),
+                    parent_mode: 'ralplan',
+                    status: 'running',
+                },
+            ]);
+            const bypassResult = await checkPersistentModes(sessionId, tempDir);
+            expect(bypassResult.shouldBlock).toBe(false);
+            expect(bypassResult.mode).toBe('ralplan');
+            writeSubagentTrackingState(tempDir, []);
+            const resumedResult = await checkPersistentModes(sessionId, tempDir);
+            expect(resumedResult.shouldBlock).toBe(true);
+            expect(resumedResult.mode).toBe('ralplan');
+            expect(resumedResult.message).toContain('1/30');
         }
         finally {
             rmSync(tempDir, { recursive: true, force: true });

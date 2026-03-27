@@ -1352,10 +1352,15 @@ World`);
                 const match = result.find((r) => r.type === 'deep-interview');
                 expect(match).toBeDefined();
             });
-            it('should detect "딥 인터뷰" (spaced) as deep-interview', () => {
+            it('should NOT detect "딥 인터뷰" (spaced) as deep-interview', () => {
                 const result = detectKeywordsWithType('딥 인터뷰');
                 const match = result.find((r) => r.type === 'deep-interview');
-                expect(match).toBeDefined();
+                expect(match).toBeUndefined();
+            });
+            it('should NOT detect "고객 딥 인터뷰 질문지를 만들어줘" as deep-interview', () => {
+                const result = detectKeywordsWithType('고객 딥 인터뷰 질문지를 만들어줘');
+                const match = result.find((r) => r.type === 'deep-interview');
+                expect(match).toBeUndefined();
             });
             it('should detect "씨씨지" as ccg', () => {
                 const result = detectKeywordsWithType('씨씨지');

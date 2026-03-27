@@ -7,7 +7,7 @@
  * Dual trigger: idle detection (30s) + periodic poll (2min).
  * Terminates after N consecutive hardening waves with no new issues.
  */
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { writeModeState, readModeState, clearModeStateFile, } from '../lib/mode-state-io.js';
 import { readRalphthonPrd, getRalphthonPrdStatus, formatTaskPrompt, formatHardeningTaskPrompt, formatHardeningGenerationPrompt, } from './prd.js';
 import { RALPHTHON_DEFAULTS } from './types.js';
@@ -46,7 +46,7 @@ export function clearRalphthonState(directory, sessionId) {
  */
 export function isPaneIdle(paneId) {
     try {
-        const output = execSync(`tmux display-message -t '${paneId}' -p '#{pane_current_command}'`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        const output = execFileSync('tmux', ['display-message', '-t', paneId, '-p', '#{pane_current_command}'], { encoding: 'utf-8', timeout: 5000 }).trim();
         const shellNames = ['bash', 'zsh', 'fish', 'sh', 'dash'];
         return shellNames.includes(output);
     }
@@ -59,7 +59,7 @@ export function isPaneIdle(paneId) {
  */
 export function paneExists(paneId) {
     try {
-        execSync(`tmux has-session -t '${paneId}' 2>/dev/null`, { timeout: 5000 });
+        execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
         return true;
     }
     catch {
@@ -71,9 +71,7 @@ export function paneExists(paneId) {
  */
 export function sendKeysToPane(paneId, text) {
     try {
-        // Escape single quotes in the text for shell safety
-        const escaped = text.replace(/'/g, "'\\''");
-        execSync(`tmux send-keys -t '${paneId}' '${escaped}' Enter`, { timeout: 10000 });
+        execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
         return true;
     }
     catch {
@@ -85,7 +83,7 @@ export function sendKeysToPane(paneId, text) {
  */
 export function capturePaneContent(paneId, lines = 50) {
     try {
-        return execSync(`tmux capture-pane -t '${paneId}' -p -S -${lines}`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        return execFileSync('tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`], { encoding: 'utf-8', timeout: 5000 }).trim();
     }
     catch {
         return '';
@@ -131,7 +129,7 @@ export function detectCompletionSignal(paneId) {
 /**
  * Initialize a new ralphthon orchestrator state
  */
-export function initOrchestrator(directory, tmuxSession, leaderPaneId, prdPath, sessionId, config) {
+export function initOrchestrator(directory, tmuxSession, leaderPaneId, prdPath, sessionId, _config) {
     const state = {
         active: true,
         phase: 'execution',
@@ -241,7 +239,9 @@ export function startHardeningWave(directory, sessionId, onEvent) {
         state.phase = 'hardening';
     }
     state.currentWave += 1;
-    writeRalphthonState(directory, state, sessionId);
+    if (!writeRalphthonState(directory, state, sessionId)) {
+        return null;
+    }
     if (onEvent) {
         onEvent({ type: 'hardening_wave_start', wave: state.currentWave });
     }
@@ -266,7 +266,9 @@ export function endHardeningWave(directory, newIssueCount, sessionId, onEvent) {
     else {
         state.consecutiveCleanWaves = 0;
     }
-    writeRalphthonState(directory, state, sessionId);
+    if (!writeRalphthonState(directory, state, sessionId)) {
+        return { shouldTerminate: true };
+    }
     if (onEvent) {
         onEvent({ type: 'hardening_wave_end', wave: state.currentWave, newIssues: newIssueCount });
     }

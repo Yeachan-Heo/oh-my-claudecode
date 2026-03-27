@@ -48,7 +48,10 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
 // Helper: sanitize team name
 // ---------------------------------------------------------------------------
 function sanitizeTeamName(name) {
-    return name.replace(/[^a-z0-9-]/g, '').slice(0, 30);
+    const sanitized = name.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30);
+    if (!sanitized)
+        throw new Error(`Invalid team name: "${name}" produces empty slug after sanitization`);
+    return sanitized;
 }
 // ---------------------------------------------------------------------------
 // Helper: check worker liveness via tmux pane
@@ -185,6 +188,21 @@ async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd, a
     return false;
 }
 /**
+ * Kill a single tmux pane by ID. Best-effort — never throws.
+ * Used to clean up leaked panes on startup failure.
+ */
+async function killPaneBestEffort(paneId) {
+    try {
+        const { execFile: execFileCb } = await import('child_process');
+        const { promisify } = await import('util');
+        const execFileAsync = promisify(execFileCb);
+        await execFileAsync('tmux', ['kill-pane', '-t', paneId]);
+    }
+    catch {
+        // idempotent: pane may already be gone
+    }
+}
+/**
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
@@ -269,6 +287,8 @@ async function spawnV2Worker(opts) {
     if (!usePromptMode) {
         const paneReady = await waitForPaneReady(paneId);
         if (!paneReady) {
+            // Fix: kill leaked pane on startup failure to prevent tmux pane leak
+            await killPaneBestEffort(paneId);
             return {
                 paneId,
                 startupAssigned: false,
@@ -305,6 +325,8 @@ async function spawnV2Worker(opts) {
         },
     });
     if (!dispatchOutcome.ok) {
+        // Fix: kill leaked pane on dispatch failure to prevent tmux pane leak
+        await killPaneBestEffort(paneId);
         return {
             paneId,
             startupAssigned: false,
@@ -316,6 +338,8 @@ async function spawnV2Worker(opts) {
         if (!settled) {
             const renotified = await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
             if (!renotified.ok) {
+                // Fix: kill leaked pane on re-notification failure
+                await killPaneBestEffort(paneId);
                 return {
                     paneId,
                     startupAssigned: false,
@@ -324,6 +348,8 @@ async function spawnV2Worker(opts) {
             }
             const settledAfterRetry = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
             if (!settledAfterRetry) {
+                // Fix: kill leaked pane when claude startup evidence is missing
+                await killPaneBestEffort(paneId);
                 return {
                     paneId,
                     startupAssigned: false,
@@ -335,6 +361,8 @@ async function spawnV2Worker(opts) {
     if (usePromptMode) {
         const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
         if (!settled) {
+            // Fix: kill leaked pane when prompt-mode startup evidence is missing
+            await killPaneBestEffort(paneId);
             return {
                 paneId,
                 startupAssigned: false,
@@ -645,19 +673,29 @@ export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
         const { writeFile } = await import('fs/promises');
         await mkdir(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
         await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2), 'utf-8');
-        // Reset task to pending (clear owner and claim)
+        // Reset task to pending (async lock to avoid blocking the event loop)
         const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
         try {
-            const raw = await import('fs/promises').then(fs => fs.readFile(taskPath, 'utf-8'));
-            const taskData = JSON.parse(raw);
-            taskData.status = 'pending';
-            taskData.owner = undefined;
-            taskData.claim = undefined;
-            await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
-            requeued.push(task.id);
+            const { withFileLock } = await import('../lib/file-lock.js');
+            const { readFile: readFileAsync, writeFile: writeFileAsync, rename: renameAsync } = await import('fs/promises');
+            await withFileLock(taskPath + '.lock', async () => {
+                const raw = await readFileAsync(taskPath, 'utf-8');
+                const taskData = JSON.parse(raw);
+                // Only requeue if still in_progress — another worker may have already claimed it
+                if (taskData.status === 'in_progress') {
+                    taskData.status = 'pending';
+                    taskData.owner = undefined;
+                    taskData.claim = undefined;
+                    // Atomic write: write to temp file then rename to prevent partial writes
+                    const tmpPath = taskPath + '.tmp.' + process.pid;
+                    await writeFileAsync(tmpPath, JSON.stringify(taskData, null, 2), 'utf-8');
+                    await renameAsync(tmpPath, taskPath);
+                    requeued.push(task.id);
+                }
+            });
         }
         catch {
-            // Task file may have been removed; skip
+            // Task file may have been removed or lock failed; skip
         }
         await appendTeamEvent(sanitized, {
             type: 'team_leader_nudge',
@@ -849,6 +887,11 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         return;
     }
     // 1. Shutdown gate check
+    // TOCTOU note: There is an inherent race window between the gate check and
+    // the actual shutdown execution. A worker could create/claim a new task after
+    // the gate passes but before shutdown requests are sent. Perfect synchronization
+    // isn't possible without a global lock. We mitigate this with a best-effort
+    // re-check after sending shutdown requests (see step 2b below).
     if (!force) {
         const allTasks = await listTasksFromFiles(sanitized, cwd);
         const governance = getConfigGovernance(config);
@@ -909,6 +952,25 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         }
         catch (err) {
             process.stderr.write(`[team/runtime-v2] shutdown request failed for ${w.name}: ${err}\n`);
+        }
+    }
+    // 2b. TOCTOU mitigation: re-check task states after sending shutdown requests.
+    // If new non-terminal tasks appeared between the gate check and now, log a warning.
+    if (!force) {
+        try {
+            const postShutdownTasks = await listTasksFromFiles(sanitized, cwd);
+            const newNonTerminal = postShutdownTasks.filter((t) => t.status === 'pending' || t.status === 'blocked' || t.status === 'in_progress');
+            if (newNonTerminal.length > 0) {
+                process.stderr.write(`[team/runtime-v2] TOCTOU warning: ${newNonTerminal.length} non-terminal task(s) detected after shutdown gate passed\n`);
+                await appendTeamEvent(sanitized, {
+                    type: 'team_leader_nudge',
+                    worker: 'leader-fixed',
+                    reason: `toctou_warning:non_terminal_tasks=${newNonTerminal.length}`,
+                }, cwd).catch(() => { });
+            }
+        }
+        catch {
+            // Best-effort re-check — don't block shutdown if it fails
         }
     }
     // 3. Wait for ack or timeout

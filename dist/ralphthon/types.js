@@ -17,5 +17,5 @@ export const RALPHTHON_DEFAULTS = {
     maxRetries: 3,
     skipInterview: false,
 };
-export const PRD_FILENAME = 'ralphthon-prd.json';
+export const PRD_FILENAME = "ralphthon-prd.json";
 //# sourceMappingURL=types.js.map

@@ -218,6 +218,12 @@ export function readDaemonState(config?: DaemonConfig): DaemonState | null {
         state.rateLimitStatus.nextResetAt,
       );
     }
+    // BUG 1 fix: monthlyResetsAt was not deserialized to Date
+    if (state.rateLimitStatus?.monthlyResetsAt) {
+      state.rateLimitStatus.monthlyResetsAt = new Date(
+        state.rateLimitStatus.monthlyResetsAt,
+      );
+    }
 
     for (const pane of state.blockedPanes || []) {
       if (pane.firstDetectedAt)
@@ -621,8 +627,9 @@ export async function runDaemonForeground(
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // BUG 3 fix: use process.once to prevent duplicate signal handler accumulation
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   console.log("Rate Limit Wait daemon starting in foreground mode...");
   console.log("Press Ctrl+C to stop.\n");

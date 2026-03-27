@@ -9,6 +9,7 @@ import { readFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
 import { dirname, join, basename } from "path";
 import { BOULDER_DIR, BOULDER_FILE, PLANNER_PLANS_DIR, PLAN_EXTENSION, } from "./constants.js";
 import { atomicWriteSync } from "../../lib/atomic-write.js";
+import { withFileLockSync } from "../../lib/file-lock.js";
 /**
  * Get the full path to the boulder state file
  */
@@ -28,7 +29,7 @@ export function readBoulderState(directory) {
         if (error.code === "ENOENT") {
             return null;
         }
-        return null;
+        throw error;
     }
 }
 /**
@@ -50,16 +51,22 @@ export function writeBoulderState(directory, state) {
  * Append a session ID to the boulder state
  */
 export function appendSessionId(directory, sessionId) {
-    const state = readBoulderState(directory);
-    if (!state)
-        return null;
-    if (!state.session_ids.includes(sessionId)) {
-        state.session_ids.push(sessionId);
-        if (writeBoulderState(directory, state)) {
+    const filePath = getBoulderFilePath(directory);
+    const lockPath = filePath + '.lock';
+    return withFileLockSync(lockPath, () => {
+        const state = readBoulderState(directory);
+        if (!state)
+            return null;
+        if (!state.session_ids.includes(sessionId)) {
+            state.session_ids.push(sessionId);
+            writeBoulderState(directory, state);
             return state;
         }
-    }
-    return state;
+        // Session already present — refresh updatedAt to prevent stale detection
+        state.updatedAt = new Date().toISOString();
+        writeBoulderState(directory, state);
+        return state;
+    });
 }
 /**
  * Clear boulder state (delete the file)
@@ -108,9 +115,10 @@ export function findPlannerPlans(directory) {
 export function getPlanProgress(planPath) {
     try {
         const content = readFileSync(planPath, "utf-8");
-        // Match markdown checkboxes: - [ ] or - [x] or - [X]
-        const uncheckedMatches = content.match(/^[-*]\s*\[\s*\]/gm) || [];
-        const checkedMatches = content.match(/^[-*]\s*\[[xX]\]/gm) || [];
+        // Match markdown checkboxes: - [ ] or - [x] or - [X] (with optional leading whitespace)
+        // BUG 2 fix: allow optional leading whitespace for indented items
+        const uncheckedMatches = content.match(/^\s*[-*]\s*\[\s*\]/gm) || [];
+        const checkedMatches = content.match(/^\s*[-*]\s*\[[xX]\]/gm) || [];
         const total = uncheckedMatches.length + checkedMatches.length;
         const completed = checkedMatches.length;
         return {

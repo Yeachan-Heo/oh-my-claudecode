@@ -6,6 +6,10 @@
  */
 import type { ProviderName, RemoteUrlInfo, GitProvider } from './types.js';
 /**
+ * Reset the remote URL cache. Intended for use in tests.
+ */
+export declare function resetProviderCache(): void;
+/**
  * Detect provider from a git remote URL by matching known hostnames.
  */
 export declare function detectProvider(remoteUrl: string): ProviderName;

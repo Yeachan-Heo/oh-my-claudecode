@@ -34,11 +34,10 @@ const PERMISSION_TOOLS = [
  */
 const PERMISSION_THRESHOLD_MS = 3000; // 3 seconds
 /**
- * Module-level map tracking pending permission-requiring tools.
- * Key: tool_use block id, Value: PendingPermission info
- * Cleared when tool_result is received for the corresponding tool_use.
+ * BUG FIX: pendingPermissionMap is now created as a local variable inside parseTranscript
+ * instead of module-level, to prevent shared state races between concurrent parse calls.
+ * See the local declaration in parseTranscript().
  */
-const pendingPermissionMap = new Map();
 /**
  * Content block types that indicate extended thinking mode.
  */
@@ -47,10 +46,12 @@ const THINKING_PART_TYPES = ["thinking", "reasoning"];
  * Time threshold for considering thinking "active".
  */
 const THINKING_RECENCY_MS = 30_000; // 30 seconds
+const transcriptCache = new Map();
+const TRANSCRIPT_CACHE_MAX_SIZE = 20;
 export async function parseTranscript(transcriptPath, options) {
-    // IMPORTANT: Clear module-level state at the start of each parse
-    // to prevent stale data from previous HUD invocations
-    pendingPermissionMap.clear();
+    // BUG FIX: Create pendingPermissionMap as a local variable to prevent
+    // shared state races between concurrent parseTranscript calls
+    const pendingPermissionMap = new Map();
     const result = {
         agents: [],
         todos: [],
@@ -60,6 +61,18 @@ export async function parseTranscript(transcriptPath, options) {
         skillCallCount: 0,
     };
     if (!transcriptPath || !existsSync(transcriptPath)) {
+        return result;
+    }
+    let cacheKey = null;
+    try {
+        const stat = statSync(transcriptPath);
+        cacheKey = `${transcriptPath}:${stat.size}:${stat.mtimeMs}`;
+        const cached = transcriptCache.get(transcriptPath);
+        if (cached?.cacheKey === cacheKey) {
+            return finalizeTranscriptResult(cloneTranscriptData(cached.baseResult), options, cached.pendingPermissions);
+        }
+    }
+    catch {
         return result;
     }
     const agentMap = new Map();
@@ -73,26 +86,26 @@ export async function parseTranscript(transcriptPath, options) {
     let sessionTotalsReliable = false;
     const observedSessionIds = new Set();
     try {
-        // Check file size to determine parsing strategy
         const stat = statSync(transcriptPath);
         const fileSize = stat.size;
         if (fileSize > MAX_TAIL_BYTES) {
-            // Large file: use tail-based parsing
             const lines = readTailLines(transcriptPath, fileSize, MAX_TAIL_BYTES);
             for (const line of lines) {
                 if (!line.trim())
                     continue;
                 try {
                     const entry = JSON.parse(line);
-                    processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap, sessionTokenTotals, observedSessionIds);
+                    processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap, sessionTokenTotals, observedSessionIds, pendingPermissionMap);
                 }
                 catch {
                     // Skip malformed lines
                 }
             }
+            // Token totals from a tail-read are partial (we only saw the last MAX_TAIL_BYTES).
+            // Still surface them when token data was found so the HUD shows something useful.
+            sessionTotalsReliable = sessionTokenTotals.seenUsage;
         }
         else {
-            // Small file: stream entire file
             const fileStream = createReadStream(transcriptPath);
             const rl = createInterface({
                 input: fileStream,
@@ -103,7 +116,7 @@ export async function parseTranscript(transcriptPath, options) {
                     continue;
                 try {
                     const entry = JSON.parse(line);
-                    processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap, sessionTokenTotals, observedSessionIds);
+                    processEntry(entry, agentMap, latestTodos, result, MAX_AGENT_MAP_SIZE, backgroundAgentMap, sessionTokenTotals, observedSessionIds, pendingPermissionMap);
                 }
                 catch {
                     // Skip malformed lines
@@ -113,36 +126,8 @@ export async function parseTranscript(transcriptPath, options) {
         }
     }
     catch {
-        // Return partial results on error
+        return finalizeTranscriptResult(result, options, []);
     }
-    // Filter out stale agents (running for more than threshold minutes are likely abandoned)
-    const staleMinutes = options?.staleTaskThresholdMinutes ?? 30;
-    const STALE_AGENT_THRESHOLD_MS = staleMinutes * 60 * 1000;
-    const now = Date.now();
-    for (const agent of agentMap.values()) {
-        if (agent.status === "running") {
-            const runningTime = now - agent.startTime.getTime();
-            if (runningTime > STALE_AGENT_THRESHOLD_MS) {
-                // Mark as completed (stale)
-                agent.status = "completed";
-                agent.endTime = new Date(agent.startTime.getTime() + STALE_AGENT_THRESHOLD_MS);
-            }
-        }
-    }
-    // Check for pending permissions within threshold
-    for (const [_id, permission] of pendingPermissionMap) {
-        const age = now - permission.timestamp.getTime();
-        if (age <= PERMISSION_THRESHOLD_MS) {
-            result.pendingPermission = permission;
-            break; // Only show most recent
-        }
-    }
-    // Determine if thinking is currently active based on recency
-    if (result.thinkingState?.lastSeen) {
-        const age = now - result.thinkingState.lastSeen.getTime();
-        result.thinkingState.active = age <= THINKING_RECENCY_MS;
-    }
-    // Get running agents first, then recent completed (up to 10 total)
     const running = Array.from(agentMap.values()).filter((a) => a.status === "running");
     const completed = Array.from(agentMap.values()).filter((a) => a.status === "completed");
     result.agents = [
@@ -153,12 +138,90 @@ export async function parseTranscript(transcriptPath, options) {
     if (sessionTotalsReliable && sessionTokenTotals.seenUsage) {
         result.sessionTotalTokens = sessionTokenTotals.inputTokens + sessionTokenTotals.outputTokens;
     }
-    return result;
+    const pendingPermissions = Array.from(pendingPermissionMap.values()).map(clonePendingPermission);
+    const finalized = finalizeTranscriptResult(result, options, pendingPermissions);
+    if (cacheKey) {
+        if (transcriptCache.size >= TRANSCRIPT_CACHE_MAX_SIZE) {
+            transcriptCache.clear();
+        }
+        transcriptCache.set(transcriptPath, {
+            cacheKey,
+            baseResult: cloneTranscriptData(finalized),
+            pendingPermissions,
+        });
+    }
+    return finalized;
 }
 /**
  * Read the tail portion of a file and split into lines.
  * Handles partial first line (from mid-file start).
  */
+function cloneDate(value) {
+    return value ? new Date(value.getTime()) : undefined;
+}
+function clonePendingPermission(permission) {
+    return {
+        ...permission,
+        timestamp: new Date(permission.timestamp.getTime()),
+    };
+}
+function cloneTranscriptData(result) {
+    return {
+        ...result,
+        agents: result.agents.map((agent) => ({
+            ...agent,
+            startTime: new Date(agent.startTime.getTime()),
+            endTime: cloneDate(agent.endTime),
+        })),
+        todos: result.todos.map((todo) => ({ ...todo })),
+        sessionStart: cloneDate(result.sessionStart),
+        lastActivatedSkill: result.lastActivatedSkill
+            ? {
+                ...result.lastActivatedSkill,
+                timestamp: new Date(result.lastActivatedSkill.timestamp.getTime()),
+            }
+            : undefined,
+        pendingPermission: result.pendingPermission
+            ? clonePendingPermission(result.pendingPermission)
+            : undefined,
+        thinkingState: result.thinkingState
+            ? {
+                ...result.thinkingState,
+                lastSeen: cloneDate(result.thinkingState.lastSeen),
+            }
+            : undefined,
+        lastRequestTokenUsage: result.lastRequestTokenUsage
+            ? { ...result.lastRequestTokenUsage }
+            : undefined,
+    };
+}
+function finalizeTranscriptResult(result, options, pendingPermissions) {
+    const staleMinutes = options?.staleTaskThresholdMinutes ?? 30;
+    const staleAgentThresholdMs = staleMinutes * 60 * 1000;
+    const now = Date.now();
+    for (const agent of result.agents) {
+        if (agent.status === "running") {
+            const runningTime = now - agent.startTime.getTime();
+            if (runningTime > staleAgentThresholdMs) {
+                agent.status = "completed";
+                agent.endTime = new Date(agent.startTime.getTime() + staleAgentThresholdMs);
+            }
+        }
+    }
+    result.pendingPermission = undefined;
+    for (const permission of pendingPermissions) {
+        const age = now - permission.timestamp.getTime();
+        if (age <= PERMISSION_THRESHOLD_MS) {
+            result.pendingPermission = clonePendingPermission(permission);
+            break;
+        }
+    }
+    if (result.thinkingState?.lastSeen) {
+        const age = now - result.thinkingState.lastSeen.getTime();
+        result.thinkingState.active = age <= THINKING_RECENCY_MS;
+    }
+    return result;
+}
 function readTailLines(filePath, fileSize, maxBytes) {
     const startOffset = Math.max(0, fileSize - maxBytes);
     const bytesToRead = fileSize - startOffset;
@@ -172,7 +235,10 @@ function readTailLines(filePath, fileSize, maxBytes) {
     }
     const content = buffer.toString("utf8");
     const lines = content.split("\n");
-    // If we started mid-file, discard the potentially incomplete first line
+    // If we started mid-file, discard the potentially incomplete first line.
+    // This also handles UTF-8 multi-byte boundary splits: the first chunk may
+    // start in the middle of a multi-byte sequence, producing a garbled line.
+    // Discarding it is safe because every valid JSONL line ends with '\n'.
     if (startOffset > 0 && lines.length > 0) {
         lines.shift();
     }
@@ -232,7 +298,7 @@ function extractTargetSummary(input, toolName) {
 /**
  * Process a single transcript entry
  */
-function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50, backgroundAgentMap, sessionTokenTotals, observedSessionIds) {
+function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50, backgroundAgentMap, sessionTokenTotals, observedSessionIds, pendingPermissionMap) {
     const timestamp = entry.timestamp ? new Date(entry.timestamp) : new Date();
     if (entry.sessionId) {
         observedSessionIds?.add(entry.sessionId);
@@ -321,7 +387,7 @@ function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50
             }
             // Track tool_use for permission-requiring tools
             if (PERMISSION_TOOLS.includes(block.name)) {
-                pendingPermissionMap.set(block.id, {
+                pendingPermissionMap?.set(block.id, {
                     toolName: block.name.replace("proxy_", ""),
                     targetSummary: extractTargetSummary(block.input, block.name),
                     timestamp: timestamp,
@@ -331,7 +397,7 @@ function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50
         // Track tool_result to mark agents as completed
         if (block.type === "tool_result" && block.tool_use_id) {
             // Clear from pending permissions when tool_result arrives
-            pendingPermissionMap.delete(block.tool_use_id);
+            pendingPermissionMap?.delete(block.tool_use_id);
             const agent = agentMap.get(block.tool_use_id);
             if (agent) {
                 const blockContent = block.content;

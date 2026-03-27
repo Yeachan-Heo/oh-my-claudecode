@@ -99,7 +99,15 @@ export function writeModeState(
       ensureOmcDir('state', baseDir);
     }
     const filePath = resolveFile(mode, directory, sessionId);
-    const envelope = { ...state, _meta: { written_at: new Date().toISOString(), mode } };
+    // BUG 4 fix: include sessionId in _meta when provided
+    const envelope = {
+      ...state,
+      _meta: {
+        written_at: new Date().toISOString(),
+        mode,
+        ...(sessionId ? { sessionId } : {}),
+      },
+    };
     atomicWriteJsonSync(filePath, envelope);
     return true;
   } catch {

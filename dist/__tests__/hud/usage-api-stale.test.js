@@ -72,7 +72,8 @@ function setupMocks(fsModule, httpStatus, httpBody) {
     vi.doMock('../../utils/ssrf-guard.js', () => ({
         validateAnthropicBaseUrl: () => ({ allowed: true }),
     }));
-    vi.doMock('child_process', () => ({
+    vi.doMock('child_process', async () => ({
+        ...(await vi.importActual('child_process')),
         execSync: vi.fn(),
     }));
     vi.doMock('fs', () => fsModule);
@@ -204,7 +205,8 @@ describe('usage API stale data handling', () => {
         vi.doMock('../../utils/ssrf-guard.js', () => ({
             validateAnthropicBaseUrl: () => ({ allowed: true }),
         }));
-        vi.doMock('child_process', () => ({
+        vi.doMock('child_process', async () => ({
+            ...(await vi.importActual('child_process')),
             execSync: vi.fn(),
         }));
         vi.doMock('fs', () => fsModule);

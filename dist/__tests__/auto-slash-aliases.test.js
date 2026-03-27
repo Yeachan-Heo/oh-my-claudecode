@@ -41,6 +41,49 @@ describe('auto slash aliases + skill guidance', () => {
             process.env.PATH = originalPath;
         }
     });
+    it('renders process-first setup routing guidance without unresolved placeholder tokens', async () => {
+        mkdirSync(join(tempConfigDir, 'skills', 'setup'), { recursive: true });
+        writeFileSync(join(tempConfigDir, 'skills', 'setup', 'SKILL.md'), `---
+name: setup
+description: Setup router
+---
+
+## Routing
+
+- doctor -> /oh-my-claudecode:omc-doctor with remaining args
+- mcp -> /oh-my-claudecode:mcp-setup with remaining args
+- otherwise -> /oh-my-claudecode:omc-setup with remaining args`);
+        const { executeSlashCommand } = await loadExecutor();
+        const result = executeSlashCommand({
+            command: 'setup',
+            args: 'doctor --json',
+            raw: '/setup doctor --json',
+        });
+        expect(result.success).toBe(true);
+        expect(result.replacementText).toContain('doctor -> /oh-my-claudecode:omc-doctor with remaining args');
+        expect(result.replacementText).not.toContain('{{ARGUMENTS_AFTER_DOCTOR}}');
+        expect(result.replacementText).not.toContain('{{ARGUMENTS_AFTER_MCP}}');
+    });
+    it('renders worktree-first guidance for project session manager compatibility skill', async () => {
+        mkdirSync(join(tempConfigDir, 'skills', 'project-session-manager'), { recursive: true });
+        writeFileSync(join(tempConfigDir, 'skills', 'project-session-manager', 'SKILL.md'), `---
+name: project-session-manager
+description: Worktree-first manager
+aliases: [psm]
+---
+
+> **Quick Start (worktree-first):** Start with \`omc teleport\` before tmux sessions.`);
+        const { executeSlashCommand } = await loadExecutor();
+        const result = executeSlashCommand({
+            command: 'psm',
+            args: 'fix omc#42',
+            raw: '/psm fix omc#42',
+        });
+        expect(result.success).toBe(true);
+        expect(result.replacementText).toContain('Quick Start (worktree-first)');
+        expect(result.replacementText).toContain('`omc teleport`');
+        expect(result.replacementText).toContain('Deprecated Alias');
+    });
     it('renders provider-aware execution recommendations for deep-interview when codex is available', async () => {
         mkdirSync(join(tempConfigDir, 'skills', 'deep-interview'), { recursive: true });
         writeFileSync(join(tempConfigDir, 'skills', 'deep-interview', 'SKILL.md'), `---

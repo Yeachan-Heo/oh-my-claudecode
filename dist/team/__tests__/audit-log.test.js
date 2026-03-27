@@ -256,7 +256,6 @@ describe('audit-log', () => {
                 };
                 logAuditEvent(testDir, event);
             }
-            const logPath = join(testDir, '.omc', 'logs', 'team-bridge-team1.jsonl');
             // Force rotation by setting low threshold
             rotateAuditLog(testDir, 'team1', 100);
             const events = readAuditLog(testDir, 'team1');

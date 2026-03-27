@@ -1,4 +1,4 @@
-import type { CliAgentType } from './model-contract.js';
+import type { CliAgentType } from "./model-contract.js";
 export interface TeamConfig {
     teamName: string;
     workerCount: number;
@@ -60,7 +60,7 @@ export interface TeamSnapshot {
 export interface WatchdogCompletionEvent {
     workerName: string;
     taskId: string;
-    status: 'completed' | 'failed';
+    status: "completed" | "failed";
     summary: string;
 }
 export declare function allTasksTerminal(runtime: TeamRuntime): Promise<boolean>;

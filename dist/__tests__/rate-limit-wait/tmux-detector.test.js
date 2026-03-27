@@ -5,10 +5,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analyzePaneContent, isTmuxAvailable, listTmuxPanes, capturePaneContent, formatBlockedPanesSummary, } from '../../features/rate-limit-wait/tmux-detector.js';
 // Mock child_process
 vi.mock('child_process', () => ({
-    execSync: vi.fn(),
+    execFileSync: vi.fn(),
     spawnSync: vi.fn(),
 }));
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 describe('tmux-detector', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -141,7 +141,7 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execSync).mockReturnValue('main:0.0 %0 1 dev Claude\nmain:0.1 %1 0 dev Other\n');
+            vi.mocked(execFileSync).mockReturnValue('main:0.0 %0 1 dev Claude\nmain:0.1 %1 0 dev Other\n');
             const panes = listTmuxPanes();
             expect(panes).toHaveLength(2);
             expect(panes[0]).toEqual({
@@ -186,10 +186,10 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
+            vi.mocked(execFileSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
             const content = capturePaneContent('%0', 3);
             expect(content).toBe('Line 1\nLine 2\nLine 3\n');
-            expect(execSync).toHaveBeenCalledWith('tmux capture-pane -t "%0" -p -S -3', expect.any(Object));
+            expect(execFileSync).toHaveBeenCalledWith('tmux', ['capture-pane', '-t', '%0', '-p', '-S', '-3'], expect.any(Object));
         });
         it('should return empty string when tmux not available', () => {
             vi.mocked(spawnSync).mockReturnValue({
@@ -215,7 +215,7 @@ describe('tmux-detector', () => {
                 output: [],
             });
             // Valid pane ID should work
-            vi.mocked(execSync).mockReturnValue('content');
+            vi.mocked(execFileSync).mockReturnValue('content');
             const validResult = capturePaneContent('%0');
             expect(validResult).toBe('content');
             // Invalid pane IDs should return empty string (not execute command)
@@ -229,7 +229,7 @@ describe('tmux-detector', () => {
                 'abc',
             ];
             for (const invalidId of invalidIds) {
-                vi.mocked(execSync).mockClear();
+                vi.mocked(execFileSync).mockClear();
                 const result = capturePaneContent(invalidId);
                 expect(result).toBe('');
             }
@@ -243,14 +243,14 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execSync).mockReturnValue('content');
+            vi.mocked(execFileSync).mockReturnValue('content');
             // Should clamp negative to 1
             capturePaneContent('%0', -5);
-            expect(execSync).toHaveBeenCalledWith(expect.stringContaining('-S -1'), expect.any(Object));
+            expect(execFileSync).toHaveBeenCalledWith('tmux', expect.arrayContaining(['-S', '-1']), expect.any(Object));
             // Should clamp excessive values to 100
-            vi.mocked(execSync).mockClear();
+            vi.mocked(execFileSync).mockClear();
             capturePaneContent('%0', 1000);
-            expect(execSync).toHaveBeenCalledWith(expect.stringContaining('-S -100'), expect.any(Object));
+            expect(execFileSync).toHaveBeenCalledWith('tmux', expect.arrayContaining(['-S', '-100']), expect.any(Object));
         });
     });
     describe('formatBlockedPanesSummary', () => {

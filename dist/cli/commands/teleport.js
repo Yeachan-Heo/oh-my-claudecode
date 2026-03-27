@@ -185,12 +185,12 @@ function getCurrentRepo() {
 /**
  * Fetch issue/PR info via provider abstraction
  */
-function fetchProviderInfo(type, number, provider, owner, repo) {
+async function fetchProviderInfo(type, number, provider, owner, repo) {
     if (type === 'pr') {
-        const pr = provider.viewPR(number, owner, repo);
+        const pr = await provider.viewPR(number, owner, repo);
         return pr ? { title: pr.title, branch: pr.headBranch } : null;
     }
-    const issue = provider.viewIssue(number, owner, repo);
+    const issue = await provider.viewIssue(number, owner, repo);
     return issue ? { title: issue.title } : null;
 }
 /**
@@ -287,9 +287,9 @@ export async function teleportCommand(ref, options) {
             return { success: false, error };
         }
         // Try to detect if it's a PR or issue
-        const prInfo = fetchProviderInfo('pr', parsed.number, provider, resolvedOwner, resolvedRepo);
+        const prInfo = await fetchProviderInfo('pr', parsed.number, provider, resolvedOwner, resolvedRepo);
         const issueInfo = !prInfo
-            ? fetchProviderInfo('issue', parsed.number, provider, resolvedOwner, resolvedRepo)
+            ? await fetchProviderInfo('issue', parsed.number, provider, resolvedOwner, resolvedRepo)
             : null;
         const info = prInfo || issueInfo;
         const isPR = !!prInfo;

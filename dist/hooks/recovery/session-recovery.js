@@ -99,7 +99,7 @@ function extractToolUseIds(parts) {
 /**
  * Recover from missing tool results
  */
-async function recoverToolResultMissing(sessionID, failedAssistantMsg) {
+async function _recoverToolResultMissing(sessionID, failedAssistantMsg) {
     debugLog('recoverToolResultMissing', { sessionID, msgId: failedAssistantMsg.info?.id });
     // Try API parts first, fallback to filesystem if empty
     let parts = failedAssistantMsg.parts || [];
@@ -241,13 +241,16 @@ export async function handleSessionRecovery(sessionID, error, failedMessage, con
         };
     }
     debugLog('Detected recoverable error type', errorType);
+    // tool_result_missing recovery is not possible without SDK client access —
+    // return attempted: false so callers don't believe a recovery was tried.
+    if (errorType === 'tool_result_missing') {
+        debugLog('tool_result_missing recovery not possible without SDK client');
+        return { attempted: false, success: false, errorType };
+    }
     try {
         let success = false;
         const failedMsg = failedMessage || { info: {}, parts: [] };
         switch (errorType) {
-            case 'tool_result_missing':
-                success = await recoverToolResultMissing(sessionID, failedMsg);
-                break;
             case 'thinking_block_order':
                 success = await recoverThinkingBlockOrder(sessionID, failedMsg, error);
                 break;

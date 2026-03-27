@@ -21,9 +21,12 @@ function stripClaudeTempCwdErrors(output: string): string {
 
 function isNonZeroExitWithOutput(output: string): boolean {
   const cleaned = stripClaudeTempCwdErrors(output);
-  if (!CLAUDE_EXIT_CODE_PREFIX.test(cleaned)) return false;
+  // BUG FIX: Reset lastIndex BEFORE .test() to avoid stateful regex skipping matches
   CLAUDE_EXIT_CODE_PREFIX.lastIndex = 0;
+  if (!CLAUDE_EXIT_CODE_PREFIX.test(cleaned)) return false;
 
+  // Reset lastIndex before .replace() as well since .test() advanced it
+  CLAUDE_EXIT_CODE_PREFIX.lastIndex = 0;
   const remaining = cleaned.replace(CLAUDE_EXIT_CODE_PREFIX, "").trim();
   CLAUDE_EXIT_CODE_PREFIX.lastIndex = 0;
   if (!remaining) return false;

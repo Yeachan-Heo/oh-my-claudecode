@@ -31,9 +31,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/code.js
+// node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/code.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/code.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.regexpCode = exports2.getEsmExportName = exports2.getProperty = exports2.safeStringify = exports2.stringify = exports2.strConcat = exports2.addCodeArg = exports2.str = exports2._ = exports2.nil = exports2._Code = exports2.Name = exports2.IDENTIFIER = exports2._CodeOrName = void 0;
@@ -185,9 +185,9 @@ var require_code = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/scope.js
+// node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/scope.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/scope.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ValueScope = exports2.ValueScopeName = exports2.Scope = exports2.varKinds = exports2.UsedValueState = void 0;
@@ -330,9 +330,9 @@ var require_scope = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/index.js
+// node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/codegen/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.or = exports2.and = exports2.not = exports2.CodeGen = exports2.operators = exports2.varKinds = exports2.ValueScopeName = exports2.ValueScope = exports2.Scope = exports2.Name = exports2.regexpCode = exports2.stringify = exports2.getProperty = exports2.nil = exports2.strConcat = exports2.str = exports2._ = void 0;
@@ -1050,9 +1050,9 @@ var require_codegen = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/util.js
+// node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/util.js"(exports2) {
+  "node_modules/ajv/dist/compile/util.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.checkStrictMode = exports2.getErrorPath = exports2.Type = exports2.useFunc = exports2.setEvaluated = exports2.evaluatedPropsToName = exports2.mergeEvaluated = exports2.eachItem = exports2.unescapeJsonPointer = exports2.escapeJsonPointer = exports2.escapeFragment = exports2.unescapeFragment = exports2.schemaRefOrVal = exports2.schemaHasRulesButRef = exports2.schemaHasRules = exports2.checkUnknownRules = exports2.alwaysValidSchema = exports2.toHash = void 0;
@@ -1217,9 +1217,9 @@ var require_util = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/names.js
+// node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/names.js"(exports2) {
+  "node_modules/ajv/dist/compile/names.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -1256,9 +1256,9 @@ var require_names = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/errors.js
+// node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/errors.js"(exports2) {
+  "node_modules/ajv/dist/compile/errors.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.extendErrors = exports2.resetErrorsCount = exports2.reportExtraError = exports2.reportError = exports2.keyword$DataError = exports2.keywordError = void 0;
@@ -1378,9 +1378,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/boolSchema.js
+// node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/boolSchema.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.boolOrEmptySchema = exports2.topBoolOrEmptySchema = void 0;
@@ -1429,9 +1429,9 @@ var require_boolSchema = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/rules.js
+// node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/rules.js"(exports2) {
+  "node_modules/ajv/dist/compile/rules.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getRules = exports2.isJSONType = void 0;
@@ -1460,9 +1460,9 @@ var require_rules = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/applicability.js
+// node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/applicability.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/applicability.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.shouldUseRule = exports2.shouldUseGroup = exports2.schemaHasRulesForType = void 0;
@@ -1483,9 +1483,9 @@ var require_applicability = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/dataType.js
+// node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/dataType.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/dataType.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.reportTypeError = exports2.checkDataTypes = exports2.checkDataType = exports2.coerceAndCheckDataType = exports2.getJSONTypes = exports2.getSchemaTypes = exports2.DataType = void 0;
@@ -1667,9 +1667,9 @@ var require_dataType = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/defaults.js
+// node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/defaults.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/defaults.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.assignDefaults = void 0;
@@ -1704,9 +1704,9 @@ var require_defaults = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/code.js
+// node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/code.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/code.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateUnion = exports2.validateArray = exports2.usePattern = exports2.callValidateCode = exports2.schemaProperties = exports2.allSchemaProperties = exports2.noPropertyInData = exports2.propertyInData = exports2.isOwnProperty = exports2.hasPropFunc = exports2.reportMissingProp = exports2.checkMissingProp = exports2.checkReportMissingProp = void 0;
@@ -1837,9 +1837,9 @@ var require_code2 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/keyword.js
+// node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/keyword.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/keyword.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateKeywordUsage = exports2.validSchemaType = exports2.funcKeywordCode = exports2.macroKeywordCode = void 0;
@@ -1955,9 +1955,9 @@ var require_keyword = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/subschema.js
+// node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/subschema.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/subschema.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.extendSubschemaMode = exports2.extendSubschemaData = exports2.getSubschema = void 0;
@@ -2038,9 +2038,9 @@ var require_subschema = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/fast-deep-equal/index.js
+// node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/fast-deep-equal/index.js"(exports2, module2) {
+  "node_modules/fast-deep-equal/index.js"(exports2, module2) {
     "use strict";
     module2.exports = function equal(a, b) {
       if (a === b) return true;
@@ -2073,9 +2073,9 @@ var require_fast_deep_equal = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/json-schema-traverse/index.js
+// node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/json-schema-traverse/index.js"(exports2, module2) {
+  "node_modules/json-schema-traverse/index.js"(exports2, module2) {
     "use strict";
     var traverse = module2.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -2161,9 +2161,9 @@ var require_json_schema_traverse = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/resolve.js
+// node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/resolve.js"(exports2) {
+  "node_modules/ajv/dist/compile/resolve.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getSchemaRefs = exports2.resolveUrl = exports2.normalizeId = exports2._getFullPath = exports2.getFullPath = exports2.inlineRef = void 0;
@@ -2317,9 +2317,9 @@ var require_resolve = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/index.js
+// node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/validate/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getData = exports2.KeywordCxt = exports2.validateFunctionCode = void 0;
@@ -2825,9 +2825,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/validation_error.js
+// node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/validation_error.js"(exports2) {
+  "node_modules/ajv/dist/runtime/validation_error.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -2841,9 +2841,9 @@ var require_validation_error = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/ref_error.js
+// node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/ref_error.js"(exports2) {
+  "node_modules/ajv/dist/compile/ref_error.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var resolve_1 = require_resolve();
@@ -2858,9 +2858,9 @@ var require_ref_error = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/compile/index.js
+// node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/compile/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.resolveSchema = exports2.getCompilingSchema = exports2.resolveRef = exports2.compileSchema = exports2.SchemaEnv = void 0;
@@ -3082,9 +3082,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/refs/data.json
+// node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/refs/data.json"(exports2, module2) {
+  "node_modules/ajv/dist/refs/data.json"(exports2, module2) {
     module2.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -3101,9 +3101,9 @@ var require_data = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/fast-uri/lib/utils.js
+// node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/fast-uri/lib/utils.js"(exports2, module2) {
+  "node_modules/fast-uri/lib/utils.js"(exports2, module2) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -3224,8 +3224,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path) {
-      let input = path;
+    function removeDotSegments(path4) {
+      let input = path4;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3358,9 +3358,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/fast-uri/lib/schemes.js
+// node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/fast-uri/lib/schemes.js"(exports2, module2) {
+  "node_modules/fast-uri/lib/schemes.js"(exports2, module2) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -3424,8 +3424,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path && path !== "/" ? path : void 0;
+        const [path4, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3568,33 +3568,33 @@ var require_schemes = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/fast-uri/index.js
+// node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/fast-uri/index.js"(exports2, module2) {
+  "node_modules/fast-uri/index.js"(exports2, module2) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
     function normalize(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
-        serialize(parse3(uri, options), options);
+        serialize(parse4(uri, options), options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse3(serialize(uri, options), options);
+        parse4(serialize(uri, options), options);
       }
       return uri;
     }
     function resolve2(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
+      const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
     function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse3(serialize(base, options), options);
-        relative2 = parse3(serialize(relative2, options), options);
+        base = parse4(serialize(base, options), options);
+        relative2 = parse4(serialize(relative2, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative2.scheme) {
@@ -3646,13 +3646,13 @@ var require_fast_uri = __commonJS({
     function equal(uriA, uriB, options) {
       if (typeof uriA === "string") {
         uriA = unescape(uriA);
-        uriA = serialize(normalizeComponentEncoding(parse3(uriA, options), true), { ...options, skipEscape: true });
+        uriA = serialize(normalizeComponentEncoding(parse4(uriA, options), true), { ...options, skipEscape: true });
       } else if (typeof uriA === "object") {
         uriA = serialize(normalizeComponentEncoding(uriA, true), { ...options, skipEscape: true });
       }
       if (typeof uriB === "string") {
         uriB = unescape(uriB);
-        uriB = serialize(normalizeComponentEncoding(parse3(uriB, options), true), { ...options, skipEscape: true });
+        uriB = serialize(normalizeComponentEncoding(parse4(uriB, options), true), { ...options, skipEscape: true });
       } else if (typeof uriB === "object") {
         uriB = serialize(normalizeComponentEncoding(uriB, true), { ...options, skipEscape: true });
       }
@@ -3721,7 +3721,7 @@ var require_fast_uri = __commonJS({
       return uriTokens.join("");
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
-    function parse3(uri, opts) {
+    function parse4(uri, opts) {
       const options = Object.assign({}, opts);
       const parsed = {
         scheme: void 0,
@@ -3815,7 +3815,7 @@ var require_fast_uri = __commonJS({
       resolveComponent,
       equal,
       serialize,
-      parse: parse3
+      parse: parse4
     };
     module2.exports = fastUri;
     module2.exports.default = fastUri;
@@ -3823,9 +3823,9 @@ var require_fast_uri = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/uri.js
+// node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/uri.js"(exports2) {
+  "node_modules/ajv/dist/runtime/uri.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -3834,9 +3834,9 @@ var require_uri = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/core.js
+// node_modules/ajv/dist/core.js
 var require_core = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/core.js"(exports2) {
+  "node_modules/ajv/dist/core.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.CodeGen = exports2.Name = exports2.nil = exports2.stringify = exports2.str = exports2._ = exports2.KeywordCxt = void 0;
@@ -4445,9 +4445,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/id.js
+// node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/id.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/id.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var def = {
@@ -4460,9 +4460,9 @@ var require_id = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/ref.js
+// node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/ref.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/ref.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.callRef = exports2.getValidate = void 0;
@@ -4582,9 +4582,9 @@ var require_ref = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/index.js
+// node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/core/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var id_1 = require_id();
@@ -4603,9 +4603,9 @@ var require_core2 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4635,9 +4635,9 @@ var require_limitNumber = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4663,9 +4663,9 @@ var require_multipleOf = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/ucs2length.js
+// node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/ucs2length.js"(exports2) {
+  "node_modules/ajv/dist/runtime/ucs2length.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     function ucs2length(str) {
@@ -4689,9 +4689,9 @@ var require_ucs2length = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4721,12 +4721,13 @@ var require_limitLength = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/pattern.js
+// node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
+    var util_1 = require_util();
     var codegen_1 = require_codegen();
     var error2 = {
       message: ({ schemaCode }) => (0, codegen_1.str)`must match pattern "${schemaCode}"`,
@@ -4739,19 +4740,27 @@ var require_pattern = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { data, $data, schema, schemaCode, it } = cxt;
+        const { gen, data, $data, schema, schemaCode, it } = cxt;
         const u = it.opts.unicodeRegExp ? "u" : "";
-        const regExp = $data ? (0, codegen_1._)`(new RegExp(${schemaCode}, ${u}))` : (0, code_1.usePattern)(cxt, schema);
-        cxt.fail$data((0, codegen_1._)`!${regExp}.test(${data})`);
+        if ($data) {
+          const { regExp } = it.opts.code;
+          const regExpCode = regExp.code === "new RegExp" ? (0, codegen_1._)`new RegExp` : (0, util_1.useFunc)(gen, regExp);
+          const valid = gen.let("valid");
+          gen.try(() => gen.assign(valid, (0, codegen_1._)`${regExpCode}(${schemaCode}, ${u}).test(${data})`), () => gen.assign(valid, false));
+          cxt.fail$data((0, codegen_1._)`!${valid}`);
+        } else {
+          const regExp = (0, code_1.usePattern)(cxt, schema);
+          cxt.fail$data((0, codegen_1._)`!${regExp}.test(${data})`);
+        }
       }
     };
     exports2.default = def;
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4778,9 +4787,9 @@ var require_limitProperties = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/required.js
+// node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/required.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/required.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -4860,9 +4869,9 @@ var require_required = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4889,9 +4898,9 @@ var require_limitItems = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/equal.js
+// node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/runtime/equal.js"(exports2) {
+  "node_modules/ajv/dist/runtime/equal.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -4900,9 +4909,9 @@ var require_equal = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var dataType_1 = require_dataType();
@@ -4967,9 +4976,9 @@ var require_uniqueItems = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/const.js
+// node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/const.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/const.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4996,9 +5005,9 @@ var require_const = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/enum.js
+// node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/enum.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5045,9 +5054,9 @@ var require_enum = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/index.js
+// node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/validation/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber();
@@ -5083,9 +5092,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateAdditionalItems = void 0;
@@ -5136,9 +5145,9 @@ var require_additionalItems = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/items.js
+// node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/items.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateTuple = void 0;
@@ -5193,9 +5202,9 @@ var require_items = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var items_1 = require_items();
@@ -5210,9 +5219,9 @@ var require_prefixItems = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5245,9 +5254,9 @@ var require_items2020 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/contains.js
+// node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5339,9 +5348,9 @@ var require_contains = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateSchemaDeps = exports2.validatePropertyDeps = exports2.error = void 0;
@@ -5433,9 +5442,9 @@ var require_dependencies = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5476,9 +5485,9 @@ var require_propertyNames = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5582,9 +5591,9 @@ var require_additionalProperties = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/properties.js
+// node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var validate_1 = require_validate();
@@ -5640,9 +5649,9 @@ var require_properties = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5714,9 +5723,9 @@ var require_patternProperties = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/not.js
+// node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/not.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -5745,9 +5754,9 @@ var require_not = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5762,9 +5771,9 @@ var require_anyOf = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5820,9 +5829,9 @@ var require_oneOf = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -5847,9 +5856,9 @@ var require_allOf = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/if.js
+// node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/if.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5916,9 +5925,9 @@ var require_if = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -5934,9 +5943,9 @@ var require_thenElse = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/index.js
+// node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems();
@@ -5982,9 +5991,9 @@ var require_applicator = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/format/format.js
+// node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/format/format.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/format/format.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6072,9 +6081,9 @@ var require_format = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/format/index.js
+// node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/format/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/format/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var format_1 = require_format();
@@ -6083,9 +6092,9 @@ var require_format2 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/metadata.js
+// node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/metadata.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/metadata.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.contentVocabulary = exports2.metadataVocabulary = void 0;
@@ -6106,9 +6115,9 @@ var require_metadata = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/draft7.js
+// node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/draft7.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/draft7.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var core_1 = require_core2();
@@ -6128,9 +6137,9 @@ var require_draft7 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/discriminator/types.js
+// node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.DiscrError = void 0;
@@ -6142,9 +6151,9 @@ var require_types = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/discriminator/index.js
+// node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6247,9 +6256,9 @@ var require_discriminator = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/refs/json-schema-draft-07.json
+// node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports2, module2) {
+  "node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports2, module2) {
     module2.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -6404,9 +6413,9 @@ var require_json_schema_draft_07 = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv/dist/ajv.js
+// node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv/dist/ajv.js"(exports2, module2) {
+  "node_modules/ajv/dist/ajv.js"(exports2, module2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.MissingRefError = exports2.ValidationError = exports2.CodeGen = exports2.Name = exports2.nil = exports2.stringify = exports2.str = exports2._ = exports2.KeywordCxt = exports2.Ajv = void 0;
@@ -6474,9 +6483,9 @@ var require_ajv = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv-formats/dist/formats.js
+// node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv-formats/dist/formats.js"(exports2) {
+  "node_modules/ajv-formats/dist/formats.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.formatNames = exports2.fastFormats = exports2.fullFormats = void 0;
@@ -6677,9 +6686,9 @@ var require_formats = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv-formats/dist/limit.js
+// node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv-formats/dist/limit.js"(exports2) {
+  "node_modules/ajv-formats/dist/limit.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.formatLimitDefinition = void 0;
@@ -6749,9 +6758,9 @@ var require_limit = __commonJS({
   }
 });
 
-// ../launch-feat-refactor-skills/node_modules/ajv-formats/dist/index.js
+// node_modules/ajv-formats/dist/index.js
 var require_dist = __commonJS({
-  "../launch-feat-refactor-skills/node_modules/ajv-formats/dist/index.js"(exports2, module2) {
+  "node_modules/ajv-formats/dist/index.js"(exports2, module2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var formats_1 = require_formats();
@@ -6778,12 +6787,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs2, exportName) {
+    function addFormats(ajv, list, fs3, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs2[f]);
+        ajv.addFormat(f, fs3[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -6802,7 +6811,7 @@ __export(team_server_exports, {
 });
 module.exports = __toCommonJS(team_server_exports);
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -6914,7 +6923,7 @@ __export(external_exports, {
   void: () => voidType
 });
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {
@@ -7048,7 +7057,7 @@ var getParsedType = (data) => {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -7166,7 +7175,7 @@ ZodError.create = (issues) => {
   return error2;
 };
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap = (issue2, _ctx) => {
   let message;
   switch (issue2.code) {
@@ -7269,7 +7278,7 @@ var errorMap = (issue2, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -7278,10 +7287,10 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path, errorMaps, issueData } = params;
-  const fullPath = [...path, ...issueData.path || []];
+  const { data, path: path4, errorMaps, issueData } = params;
+  const fullPath = [...path4, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7388,20 +7397,20 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../launch-feat-refactor-skills/node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path, key) {
+  constructor(parent, value, path4, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path;
+    this._path = path4;
     this._key = key;
   }
   get path() {
@@ -10843,7 +10852,7 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/core.js
+// node_modules/zod/v4/core/core.js
 var NEVER2 = Object.freeze({
   status: "aborted"
 });
@@ -10902,7 +10911,7 @@ function config(newConfig) {
   return globalConfig;
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/util.js
+// node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -11038,10 +11047,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path) {
-  if (!path)
+function getElementAtPath(obj, path4) {
+  if (!path4)
     return obj;
-  return path.reduce((acc, key) => acc?.[key], obj);
+  return path4.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -11361,11 +11370,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path, issues) {
+function prefixIssues(path4, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path);
+    iss.path.unshift(path4);
     return iss;
   });
 }
@@ -11423,7 +11432,7 @@ var Class = class {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/errors.js
+// node_modules/zod/v4/core/errors.js
 var initializer = (inst, def) => {
   inst.name = "$ZodError";
   Object.defineProperty(inst, "_zod", {
@@ -11498,7 +11507,7 @@ function formatError(error2, _mapper) {
   return fieldErrors;
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/parse.js
+// node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
@@ -11548,7 +11557,7 @@ var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
 };
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/regexes.js
+// node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][^\s-]{8,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
@@ -11606,7 +11615,7 @@ var _null = /null/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/checks.js
+// node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a;
   inst._zod ?? (inst._zod = {});
@@ -11991,7 +12000,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/doc.js
+// node_modules/zod/v4/core/doc.js
 var Doc = class {
   constructor(args = []) {
     this.content = [];
@@ -12027,14 +12036,14 @@ var Doc = class {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/versions.js
+// node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 0,
   patch: 0
 };
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/schemas.js
+// node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a;
   inst ?? (inst = {});
@@ -13272,7 +13281,7 @@ function handleRefineResult(result, payload, input, inst) {
   }
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/locales/en.js
+// node_modules/zod/v4/locales/en.js
 var parsedType = (data) => {
   const t = typeof data;
   switch (t) {
@@ -13390,7 +13399,7 @@ function en_default2() {
   };
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/registries.js
+// node_modules/zod/v4/core/registries.js
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new Map();
@@ -13438,7 +13447,7 @@ function registry() {
 }
 var globalRegistry = /* @__PURE__ */ registry();
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/core/api.js
+// node_modules/zod/v4/core/api.js
 function _string(Class2, params) {
   return new Class2({
     type: "string",
@@ -13877,7 +13886,7 @@ function _refine(Class2, fn, _params) {
   return schema;
 }
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -13940,7 +13949,7 @@ function getLiteralValue(schema) {
   return void 0;
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/classic/iso.js
+// node_modules/zod/v4/classic/iso.js
 var iso_exports = {};
 __export(iso_exports, {
   ZodISODate: () => ZodISODate,
@@ -13981,7 +13990,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/classic/errors.js
+// node_modules/zod/v4/classic/errors.js
 var initializer2 = (inst, issues) => {
   $ZodError.init(inst, issues);
   inst.name = "ZodError";
@@ -14015,13 +14024,13 @@ var ZodRealError = $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/classic/parse.js
+// node_modules/zod/v4/classic/parse.js
 var parse2 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
 var safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/classic/schemas.js
+// node_modules/zod/v4/classic/schemas.js
 var ZodType2 = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   $ZodType.init(inst, def);
   inst.def = def;
@@ -14632,10 +14641,10 @@ function preprocess(fn, schema) {
   return pipe(transform(fn), schema);
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod/v4/classic/external.js
+// node_modules/zod/v4/classic/external.js
 config(en_default2());
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -16141,15 +16150,15 @@ var UrlElicitationRequiredError = class extends McpError {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-// ../launch-feat-refactor-skills/node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -16170,7 +16179,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 6e4;
 var Protocol = class {
   constructor(_options) {
@@ -17118,7 +17127,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -17186,7 +17195,7 @@ var AjvJsonSchemaValidator = class {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 var ExperimentalServerTasks = class {
   constructor(_server) {
     this._server = _server;
@@ -17258,7 +17267,7 @@ var ExperimentalServerTasks = class {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -17293,7 +17302,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 var Server = class extends Protocol {
   /**
    * Initializes this server with the given name and version information.
@@ -17673,10 +17682,10 @@ var Server = class extends Protocol {
   }
 };
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var import_node_process = __toESM(require("node:process"), 1);
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 var ReadBuffer = class {
   append(chunk) {
     this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
@@ -17704,7 +17713,7 @@ function serializeMessage(message) {
   return JSON.stringify(message) + "\n";
 }
 
-// ../launch-feat-refactor-skills/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var StdioServerTransport = class {
   constructor(_stdin = import_node_process.default.stdin, _stdout = import_node_process.default.stdout) {
     this._stdin = _stdin;
@@ -17766,9 +17775,10 @@ var StdioServerTransport = class {
 };
 
 // src/mcp/team-server.ts
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_path4 = require("path");
-var import_fs4 = require("fs");
+var import_url = require("url");
+var import_fs6 = require("fs");
 var import_promises2 = require("fs/promises");
 var import_os = require("os");
 
@@ -17814,9 +17824,9 @@ function sanitizeName(name) {
 function normalizeTmuxCapture(value) {
   return value.replace(/\r/g, "").replace(/\s+/g, " ").trim();
 }
-async function capturePaneAsync(paneId, execFileAsync) {
+async function capturePaneAsync(paneId, execFileAsync2) {
   try {
-    const result = await execFileAsync("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"]);
+    const result = await execFileAsync2("tmux", ["capture-pane", "-t", paneId, "-p", "-S", "-80"]);
     return result.stdout;
   } catch {
     return "";
@@ -17884,17 +17894,17 @@ async function sendToWorker(_sessionName, paneId, message) {
     return false;
   }
   try {
-    const { execFile: execFile3 } = await import("child_process");
-    const { promisify: promisify2 } = await import("util");
-    const execFileAsync = promisify2(execFile3);
+    const { execFile: execFile4 } = await import("child_process");
+    const { promisify: promisify3 } = await import("util");
+    const execFileAsync2 = promisify3(execFile4);
     const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
     const sendKey = async (key) => {
-      await execFileAsync("tmux", ["send-keys", "-t", paneId, key]);
+      await execFileAsync2("tmux", ["send-keys", "-t", paneId, key]);
     };
     if (await paneInCopyMode(paneId)) {
       return false;
     }
-    const initialCapture = await capturePaneAsync(paneId, execFileAsync);
+    const initialCapture = await capturePaneAsync(paneId, execFileAsync2);
     const paneBusy = paneHasActiveTask(initialCapture);
     if (paneHasTrustPrompt(initialCapture)) {
       await sendKey("C-m");
@@ -17902,7 +17912,7 @@ async function sendToWorker(_sessionName, paneId, message) {
       await sendKey("C-m");
       await sleep2(200);
     }
-    await execFileAsync("tmux", ["send-keys", "-t", paneId, "-l", "--", message]);
+    await execFileAsync2("tmux", ["send-keys", "-t", paneId, "-l", "--", message]);
     await sleep2(150);
     const submitRounds = 6;
     for (let round = 0; round < submitRounds; round++) {
@@ -17917,14 +17927,14 @@ async function sendToWorker(_sessionName, paneId, message) {
         await sendKey("C-m");
       }
       await sleep2(140);
-      const checkCapture = await capturePaneAsync(paneId, execFileAsync);
+      const checkCapture = await capturePaneAsync(paneId, execFileAsync2);
       if (!paneTailContainsLiteralLine(checkCapture, message)) return true;
       await sleep2(140);
     }
     if (await paneInCopyMode(paneId)) {
       return false;
     }
-    const finalCapture = await capturePaneAsync(paneId, execFileAsync);
+    const finalCapture = await capturePaneAsync(paneId, execFileAsync2);
     const paneModeBeforeAdaptiveRetry = await paneInCopyMode(paneId);
     if (shouldAttemptAdaptiveRetry({
       paneBusy,
@@ -17941,14 +17951,14 @@ async function sendToWorker(_sessionName, paneId, message) {
       if (await paneInCopyMode(paneId)) {
         return false;
       }
-      await execFileAsync("tmux", ["send-keys", "-t", paneId, "-l", "--", message]);
+      await execFileAsync2("tmux", ["send-keys", "-t", paneId, "-l", "--", message]);
       await sleep2(120);
       for (let round = 0; round < 4; round++) {
         await sendKey("C-m");
         await sleep2(180);
         await sendKey("C-m");
         await sleep2(140);
-        const retryCapture = await capturePaneAsync(paneId, execFileAsync);
+        const retryCapture = await capturePaneAsync(paneId, execFileAsync2);
         if (!paneTailContainsLiteralLine(retryCapture, message)) return true;
       }
     }
@@ -17989,28 +17999,28 @@ async function killWorkerPanes(opts) {
     }
   } catch {
   }
-  const { execFile: execFile3 } = await import("child_process");
-  const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile3);
+  const { execFile: execFile4 } = await import("child_process");
+  const { promisify: promisify3 } = await import("util");
+  const execFileAsync2 = promisify3(execFile4);
   for (const paneId of paneIds) {
     if (paneId === leaderPaneId) continue;
     try {
-      await execFileAsync("tmux", ["kill-pane", "-t", paneId]);
+      await execFileAsync2("tmux", ["kill-pane", "-t", paneId]);
     } catch {
     }
   }
 }
 async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options = {}) {
-  const { execFile: execFile3 } = await import("child_process");
-  const { promisify: promisify2 } = await import("util");
-  const execFileAsync = promisify2(execFile3);
+  const { execFile: execFile4 } = await import("child_process");
+  const { promisify: promisify3 } = await import("util");
+  const execFileAsync2 = promisify3(execFile4);
   const sessionMode = options.sessionMode ?? (sessionName.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
     if (!workerPaneIds?.length) return;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
-        await execFileAsync("tmux", ["kill-pane", "-t", id]);
+        await execFileAsync2("tmux", ["kill-pane", "-t", id]);
       } catch {
       }
     }
@@ -18018,7 +18028,7 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options
   }
   if (sessionMode === "dedicated-window") {
     try {
-      await execFileAsync("tmux", ["kill-window", "-t", sessionName]);
+      await execFileAsync2("tmux", ["kill-window", "-t", sessionName]);
     } catch {
     }
     return;
@@ -18035,7 +18045,7 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options
     }
   }
   try {
-    await execFileAsync("tmux", ["kill-session", "-t", sessionTarget]);
+    await execFileAsync2("tmux", ["kill-session", "-t", sessionTarget]);
   } catch {
   }
 }
@@ -18130,7 +18140,7 @@ var NudgeTracker = class {
 };
 
 // src/mcp/team-job-convergence.ts
-var import_fs3 = require("fs");
+var import_fs5 = require("fs");
 var import_path3 = require("path");
 
 // src/team/git-worktree.ts
@@ -18173,6 +18183,41 @@ function validateResolvedPath(resolvedPath, expectedBase) {
   }
 }
 
+// src/lib/file-lock.ts
+var import_fs4 = require("fs");
+var path3 = __toESM(require("path"), 1);
+
+// src/lib/atomic-write.ts
+var fs2 = __toESM(require("fs/promises"), 1);
+var fsSync = __toESM(require("fs"), 1);
+var path = __toESM(require("path"), 1);
+var crypto = __toESM(require("crypto"), 1);
+
+// src/platform/index.ts
+var path2 = __toESM(require("path"), 1);
+var import_fs3 = require("fs");
+
+// src/platform/process-utils.ts
+var import_child_process3 = require("child_process");
+var import_util6 = require("util");
+var fsPromises = __toESM(require("fs/promises"), 1);
+var execFileAsync = (0, import_util6.promisify)(import_child_process3.execFile);
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
+// src/platform/index.ts
+var PLATFORM = process.platform;
+
 // src/team/git-worktree.ts
 function getWorktreePath(repoRoot, teamName, workerName) {
   return (0, import_node_path.join)(repoRoot, ".omc", "worktrees", sanitizeName(teamName), sanitizeName(workerName));
@@ -18188,7 +18233,10 @@ function readMetadata(repoRoot, teamName) {
   if (!(0, import_node_fs.existsSync)(metaPath)) return [];
   try {
     return JSON.parse((0, import_node_fs.readFileSync)(metaPath, "utf-8"));
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[omc] warning: worktrees.json parse error: ${msg}
+`);
     return [];
   }
 }
@@ -18231,10 +18279,10 @@ function cleanupTeamWorktrees(teamName, repoRoot) {
 // src/mcp/team-job-convergence.ts
 function readResultArtifact(omcJobsDir, jobId) {
   const artifactPath = (0, import_path3.join)(omcJobsDir, `${jobId}-result.json`);
-  if (!(0, import_fs3.existsSync)(artifactPath)) return { kind: "none" };
+  if (!(0, import_fs5.existsSync)(artifactPath)) return { kind: "none" };
   let raw;
   try {
-    raw = (0, import_fs3.readFileSync)(artifactPath, "utf-8");
+    raw = (0, import_fs5.readFileSync)(artifactPath, "utf-8");
   } catch {
     return { kind: "none" };
   }
@@ -18287,14 +18335,6 @@ function convergeJobWithResultArtifact(job, jobId, omcJobsDir) {
 function isJobTerminal(job) {
   return job.status === "completed" || job.status === "failed" || job.status === "timeout";
 }
-function isPidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 function clearScopedTeamState(job) {
   if (!job.cwd || !job.teamName) {
     return "team state cleanup skipped (missing job cwd/teamName).";
@@ -18313,10 +18353,10 @@ function clearScopedTeamState(job) {
     worktreeMessage = `worktree cleanup skipped: ${error2 instanceof Error ? error2.message : String(error2)}`;
   }
   try {
-    if (!(0, import_fs3.existsSync)(stateDir)) {
+    if (!(0, import_fs5.existsSync)(stateDir)) {
       return `${worktreeMessage} team state dir not found at ${stateDir}.`;
     }
-    (0, import_fs3.rmSync)(stateDir, { recursive: true, force: true });
+    (0, import_fs5.rmSync)(stateDir, { recursive: true, force: true });
     return `${worktreeMessage} team state dir removed at ${stateDir}.`;
   } catch (error2) {
     return `${worktreeMessage} team state cleanup failed at ${stateDir}: ${error2 instanceof Error ? error2.message : String(error2)}`;
@@ -18324,6 +18364,8 @@ function clearScopedTeamState(job) {
 }
 
 // src/mcp/team-server.ts
+var import_meta = {};
+var __dirname = (0, import_url.fileURLToPath)(new URL(".", import_meta.url));
 var omcTeamJobs = /* @__PURE__ */ new Map();
 var OMC_JOBS_DIR = process.env.OMC_JOBS_DIR || (0, import_path4.join)((0, import_os.homedir)(), ".omc", "team-jobs");
 var DEPRECATION_CODE = "deprecated_cli_only";
@@ -18410,14 +18452,14 @@ function createDeprecatedCliOnlyEnvelopeWithArgs(toolName, args) {
 }
 function persistJob(jobId, job) {
   try {
-    if (!(0, import_fs4.existsSync)(OMC_JOBS_DIR)) (0, import_fs4.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
-    (0, import_fs4.writeFileSync)((0, import_path4.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
+    if (!(0, import_fs6.existsSync)(OMC_JOBS_DIR)) (0, import_fs6.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
+    (0, import_fs6.writeFileSync)((0, import_path4.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
   } catch {
   }
 }
 function loadJobFromDisk(jobId) {
   try {
-    return JSON.parse((0, import_fs4.readFileSync)((0, import_path4.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
+    return JSON.parse((0, import_fs6.readFileSync)((0, import_path4.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
   } catch {
     return void 0;
   }
@@ -18489,7 +18531,7 @@ async function handleStart(args) {
   const runtimeCliPath = (0, import_path4.join)(__dirname, "runtime-cli.cjs");
   const job = { status: "running", startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
-  const child = (0, import_child_process3.spawn)("node", [runtimeCliPath], {
+  const child = (0, import_child_process4.spawn)("node", [runtimeCliPath], {
     env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
     stdio: ["pipe", "pipe", "pipe"]
   });
@@ -18547,7 +18589,7 @@ async function handleStatus(args) {
   if (isJobTerminal(job)) {
     return makeJobResponse(job_id, job);
   }
-  if (job.pid != null && !isPidAlive(job.pid)) {
+  if (job.pid != null && !isProcessAlive(job.pid)) {
     job = saveJobState(job_id, {
       ...job,
       status: "failed",
@@ -18591,7 +18633,7 @@ async function handleWait(args) {
       }
       return out;
     }
-    if (job.pid != null && !isPidAlive(job.pid)) {
+    if (job.pid != null && !isProcessAlive(job.pid)) {
       job = saveJobState(job_id, {
         ...job,
         status: "failed",
@@ -18734,18 +18776,18 @@ var server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  if (isDeprecatedTeamToolName(name)) {
-    return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
-  }
   try {
     if (name === "omc_run_team_start") return await handleStart(args ?? {});
     if (name === "omc_run_team_status") return await handleStatus(args ?? {});
     if (name === "omc_run_team_wait") return await handleWait(args ?? {});
     if (name === "omc_run_team_cleanup") return await handleCleanup(args ?? {});
-    return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   } catch (error2) {
     return { content: [{ type: "text", text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
   }
+  if (isDeprecatedTeamToolName(name)) {
+    return createDeprecatedCliOnlyEnvelopeWithArgs(name, args);
+  }
+  return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
 });
 async function main() {
   const transport = new StdioServerTransport();

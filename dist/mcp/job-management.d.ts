@@ -11,6 +11,10 @@
  * passes it as the first argument. Schemas omit provider since it's implicit.
  */
 /**
+ * Register a PID as spawned by this process.
+ */
+export declare function registerSpawnedPid(pid: number): void;
+/**
  * Find the status file for a job by provider and jobId.
  * Scans .omc/prompts/ for files matching the naming convention.
  *

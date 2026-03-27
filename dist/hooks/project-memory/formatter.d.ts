@@ -2,12 +2,12 @@
  * Project Memory Formatter
  * Generates context strings for injection
  */
-import { ProjectMemory } from './types.js';
+import { ProjectMemory, ProjectMemoryContext } from "./types.js";
 /**
  * Format project memory as a concise summary
  * Used for context injection (includes directives for compaction resilience)
  */
-export declare function formatContextSummary(memory: ProjectMemory): string;
+export declare function formatContextSummary(memory: ProjectMemory, context?: ProjectMemoryContext): string;
 /**
  * Format project memory as full details (for debugging)
  */

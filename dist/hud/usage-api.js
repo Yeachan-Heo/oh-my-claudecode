@@ -14,14 +14,14 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'fs';
 import { getClaudeConfigDir } from '../utils/paths.js';
 import { join, dirname } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { userInfo } from 'os';
 import https from 'https';
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 import { DEFAULT_HUD_USAGE_POLL_INTERVAL_MS, } from './types.js';
 import { readHudConfig } from './state.js';
-import { lockPathFor, withFileLock } from '../lib/file-lock.js';
+import { lockPathFor, withFileLock, withFileLockSync } from '../lib/file-lock.js';
 // Cache configuration
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for non-transient failures
 const CACHE_TTL_TRANSIENT_NETWORK_MS = 2 * 60 * 1000; // 2 minutes to avoid hammering transient API failures
@@ -135,7 +135,7 @@ function getUsagePollIntervalMs() {
 }
 function getRateLimitedBackoffMs(pollIntervalMs, count) {
     const normalizedPollIntervalMs = sanitizePollIntervalMs(pollIntervalMs);
-    return Math.min(normalizedPollIntervalMs * Math.pow(2, Math.max(0, count - 1)), Math.max(MAX_RATE_LIMITED_BACKOFF_MS, normalizedPollIntervalMs));
+    return Math.min(normalizedPollIntervalMs * Math.pow(2, Math.max(0, count - 1)), MAX_RATE_LIMITED_BACKOFF_MS);
 }
 function getTransientNetworkBackoffMs(pollIntervalMs) {
     return Math.max(CACHE_TTL_TRANSIENT_NETWORK_MS, sanitizePollIntervalMs(pollIntervalMs));
@@ -212,8 +212,14 @@ function isCredentialExpired(creds) {
 }
 function readKeychainCredential(serviceName, account) {
     try {
-        const accountArg = account ? ` -a "${account}"` : '';
-        const result = execSync(`/usr/bin/security find-generic-password -s "${serviceName}"${accountArg} -w 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 }).trim();
+        const args = account
+            ? ['find-generic-password', '-s', serviceName, '-a', account, '-w']
+            : ['find-generic-password', '-s', serviceName, '-w'];
+        const result = execFileSync('/usr/bin/security', args, {
+            encoding: 'utf-8',
+            timeout: 2000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
         if (!result)
             return null;
         const parsed = JSON.parse(result);
@@ -484,46 +490,50 @@ function writeBackCredentials(creds) {
         const credPath = join(getClaudeConfigDir(), '.credentials.json');
         if (!existsSync(credPath))
             return;
-        const content = readFileSync(credPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        // Update the nested structure
-        if (parsed.claudeAiOauth) {
-            parsed.claudeAiOauth.accessToken = creds.accessToken;
-            if (creds.expiresAt != null) {
-                parsed.claudeAiOauth.expiresAt = creds.expiresAt;
-            }
-            if (creds.refreshToken) {
-                parsed.claudeAiOauth.refreshToken = creds.refreshToken;
-            }
-        }
-        else {
-            // Flat structure
-            parsed.accessToken = creds.accessToken;
-            if (creds.expiresAt != null) {
-                parsed.expiresAt = creds.expiresAt;
-            }
-            if (creds.refreshToken) {
-                parsed.refreshToken = creds.refreshToken;
-            }
-        }
-        // Atomic write: write to tmp file, then rename (atomic on POSIX, best-effort on Windows)
-        const tmpPath = `${credPath}.tmp.${process.pid}`;
-        try {
-            writeFileSync(tmpPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
-            renameSync(tmpPath, credPath);
-        }
-        catch (writeErr) {
-            // Clean up orphaned tmp file on failure
-            try {
-                if (existsSync(tmpPath)) {
-                    unlinkSync(tmpPath);
+        // BUG FIX: Wrap the entire read-modify-write in a file lock to prevent
+        // concurrent processes from racing on credential updates
+        withFileLockSync(lockPathFor(credPath), () => {
+            const content = readFileSync(credPath, 'utf-8');
+            const parsed = JSON.parse(content);
+            // Update the nested structure
+            if (parsed.claudeAiOauth) {
+                parsed.claudeAiOauth.accessToken = creds.accessToken;
+                if (creds.expiresAt != null) {
+                    parsed.claudeAiOauth.expiresAt = creds.expiresAt;
+                }
+                if (creds.refreshToken) {
+                    parsed.claudeAiOauth.refreshToken = creds.refreshToken;
                 }
             }
-            catch {
-                // Ignore cleanup errors
+            else {
+                // Flat structure
+                parsed.accessToken = creds.accessToken;
+                if (creds.expiresAt != null) {
+                    parsed.expiresAt = creds.expiresAt;
+                }
+                if (creds.refreshToken) {
+                    parsed.refreshToken = creds.refreshToken;
+                }
             }
-            throw writeErr;
-        }
+            // Atomic write: write to tmp file, then rename (atomic on POSIX, best-effort on Windows)
+            const tmpPath = `${credPath}.tmp.${process.pid}`;
+            try {
+                writeFileSync(tmpPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+                renameSync(tmpPath, credPath);
+            }
+            catch (writeErr) {
+                // Clean up orphaned tmp file on failure
+                try {
+                    if (existsSync(tmpPath)) {
+                        unlinkSync(tmpPath);
+                    }
+                }
+                catch {
+                    // Ignore cleanup errors
+                }
+                throw writeErr;
+            }
+        });
     }
     catch {
         // Silent failure - credential write-back is best-effort

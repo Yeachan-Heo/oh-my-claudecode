@@ -74,6 +74,7 @@ export function recordFailure(directory, failureDescription, sessionId) {
     if (recentFailures.length >= SAME_FAILURE_THRESHOLD) {
         const allSame = recentFailures.every(f => normalizeFailure(f) === normalizeFailure(recentFailures[0]));
         if (allSame) {
+            writeUltraQAState(directory, state, sessionId);
             return {
                 state,
                 shouldExit: true,

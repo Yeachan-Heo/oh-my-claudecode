@@ -4,7 +4,9 @@
  * Extended PRD schema with hardening support for the ralphthon lifecycle.
  * Handles read/write/status operations for ralphthon-prd.json.
  */
-import { type RalphthonPRD, type RalphthonStory, type RalphthonTask, type HardeningTask, type RalphthonConfig, type TaskStatus } from './types.js';
+import { type RalphthonPRD, type RalphthonStory, type RalphthonTask, type HardeningTask, type RalphthonConfig, type TaskStatus, type RalphthonPlanningContext } from "./types.js";
+export declare const DEFAULT_PLANNING_CONTEXT: RalphthonPlanningContext;
+export declare function normalizePlanningContext(context?: Partial<RalphthonPlanningContext> | null): RalphthonPlanningContext;
 /**
  * Get the path to the ralphthon PRD file in .omc
  */
@@ -81,15 +83,15 @@ export declare function incrementHardeningTaskRetry(directory: string, taskId: s
 /**
  * Add hardening tasks to the PRD for a new wave
  */
-export declare function addHardeningTasks(directory: string, tasks: Omit<HardeningTask, 'status' | 'retries'>[]): boolean;
+export declare function addHardeningTasks(directory: string, tasks: Omit<HardeningTask, "status" | "retries">[]): boolean;
 /**
  * Create a new RalphthonPRD from stories
  */
-export declare function createRalphthonPrd(project: string, branchName: string, description: string, stories: RalphthonStory[], config?: Partial<RalphthonConfig>): RalphthonPRD;
+export declare function createRalphthonPrd(project: string, branchName: string, description: string, stories: RalphthonStory[], config?: Partial<RalphthonConfig>, planningContext?: Partial<RalphthonPlanningContext>): RalphthonPRD;
 /**
  * Initialize a ralphthon PRD on disk
  */
-export declare function initRalphthonPrd(directory: string, project: string, branchName: string, description: string, stories: RalphthonStory[], config?: Partial<RalphthonConfig>): boolean;
+export declare function initRalphthonPrd(directory: string, project: string, branchName: string, description: string, stories: RalphthonStory[], config?: Partial<RalphthonConfig>, planningContext?: Partial<RalphthonPlanningContext>): boolean;
 /**
  * Format a task prompt for injection into the leader pane
  */

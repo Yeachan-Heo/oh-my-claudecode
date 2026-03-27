@@ -645,16 +645,19 @@ export async function drainPendingTeamDispatch(options: {
         }
 
         const result = await injector(request, config, resolve(cwd));
-        if (issueKey && issueCooldownMs > 0) {
-          issueCooldownByIssue[issueKey] = Date.now();
-          mutated = true;
-        }
-        if (triggerKey && triggerCooldownMs > 0) {
-          triggerCooldownByKey[triggerKey] = {
-            at: Date.now(),
-            last_request_id: safeString(request.request_id).trim(),
-          };
-          mutated = true;
+        // Only set cooldowns on successful dispatch (avoid blocking retries after failures)
+        if (result.ok) {
+          if (issueKey && issueCooldownMs > 0) {
+            issueCooldownByIssue[issueKey] = Date.now();
+            mutated = true;
+          }
+          if (triggerKey && triggerCooldownMs > 0) {
+            triggerCooldownByKey[triggerKey] = {
+              at: Date.now(),
+              last_request_id: safeString(request.request_id).trim(),
+            };
+            mutated = true;
+          }
         }
         const nowIso = new Date().toISOString();
         request.attempt_count = Number.isFinite(request.attempt_count) ? Math.max(0, request.attempt_count + 1) : 1;

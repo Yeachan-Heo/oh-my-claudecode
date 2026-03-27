@@ -23,6 +23,7 @@ import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import { isAutopilotActive } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 import { readTeamPipelineState } from '../team-pipeline/state.js';
+import { getActiveAgentCount } from '../subagent-tracker/index.js';
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
@@ -150,6 +151,12 @@ Do NOT skip this step. Do NOT move on without fixing the error.
  * Get or increment todo-continuation attempt counter
  */
 function trackTodoContinuationAttempt(sessionId) {
+    if (todoContinuationAttempts.size > 200) {
+        // Evict oldest half instead of nuclear clear (preserves active sessions' counters)
+        const toDelete = [...todoContinuationAttempts.keys()].slice(0, 100);
+        for (const key of toDelete)
+            todoContinuationAttempts.delete(key);
+    }
     const current = todoContinuationAttempts.get(sessionId) || 0;
     const next = current + 1;
     todoContinuationAttempts.set(sessionId, next);
@@ -279,6 +286,11 @@ function isCriticalContextStop(stopContext) {
     const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
     return estimateTranscriptContextPercent(transcriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT;
 }
+function isAwaitingConfirmation(state) {
+    return Boolean(state &&
+        typeof state === 'object' &&
+        state.awaiting_confirmation === true);
+}
 /**
  * Check for architect approval in session transcript
  */
@@ -342,6 +354,9 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     }
     // Strict session isolation: only process state for matching session
     if (state.session_id !== sessionId) {
+        return null;
+    }
+    if (isAwaitingConfirmation(state)) {
         return null;
     }
     // Explicit cancellation window: never re-arm Ralph internals while cancel is in progress.
@@ -707,6 +722,9 @@ async function checkRalplan(sessionId, directory, cancelInProgress) {
     if (sessionId && state.session_id && state.session_id !== sessionId) {
         return null;
     }
+    if (isAwaitingConfirmation(state)) {
+        return null;
+    }
     // Terminal phase detection — allow stop when ralplan has completed
     const currentPhase = state.current_phase;
     if (typeof currentPhase === 'string') {
@@ -722,6 +740,17 @@ async function checkRalplan(sessionId, directory, cancelInProgress) {
             shouldBlock: false,
             message: '',
             mode: 'ralplan'
+        };
+    }
+    // Orchestrators are allowed to go idle while delegated work is still active.
+    // Delegation waits are expected, so clear any accumulated breaker budget and
+    // let enforcement resume from a clean slate after the running subagents finish.
+    if (getActiveAgentCount(workingDir) > 0) {
+        writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
+        return {
+            shouldBlock: false,
+            message: '',
+            mode: 'ralplan',
         };
     }
     // Circuit breaker
@@ -764,6 +793,9 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
     }
     // Strict session isolation: only process state for matching session
     if (state.session_id !== sessionId) {
+        return null;
+    }
+    if (isAwaitingConfirmation(state)) {
         return null;
     }
     // Uses cached cancel signal from checkPersistentModes to avoid TOCTOU re-reads.

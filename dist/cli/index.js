@@ -12,8 +12,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { writeFileSync, existsSync } from 'fs';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { loadConfig, getConfigPaths, } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
 import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
@@ -31,7 +29,6 @@ import { askCommand, ASK_USAGE } from './ask.js';
 import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
 import { runHudWatchLoop } from './hud-watch.js';
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const version = getRuntimePackageVersion();
 const program = new Command();
 // Win32 platform warning - OMC requires tmux which is not available on native Windows

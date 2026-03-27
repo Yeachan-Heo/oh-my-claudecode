@@ -157,6 +157,7 @@ function clearLegacyStateCandidates(mode, root, sessionId) {
 export const stateReadTool = {
     name: 'state_read',
     description: 'Read the current state for a specific mode (ralph, ultrawork, autopilot, etc.). Returns the JSON state data or indicates if no state exists.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     schema: {
         mode: z.enum(STATE_TOOL_MODES).describe('The mode to read state for'),
         workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
@@ -264,6 +265,7 @@ export const stateReadTool = {
 export const stateWriteTool = {
     name: 'state_write',
     description: 'Write/update state for a specific mode. Creates the state file and directories if they do not exist. Common fields (active, iteration, phase, etc.) can be set directly as parameters. Additional custom fields can be passed via the optional `state` parameter. Note: swarm uses SQLite and cannot be written via this tool.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     schema: {
         mode: z.enum(STATE_TOOL_MODES).describe('The mode to write state for'),
         active: z.boolean().optional().describe('Whether the mode is currently active'),
@@ -376,6 +378,7 @@ export const stateWriteTool = {
 export const stateClearTool = {
     name: 'state_clear',
     description: 'Clear/delete state for a specific mode. Removes the state file and any associated marker files.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     schema: {
         mode: z.enum(STATE_TOOL_MODES).describe('The mode to clear state for'),
         workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
@@ -576,6 +579,7 @@ export const stateClearTool = {
 export const stateListActiveTool = {
     name: 'state_list_active',
     description: 'List all currently active modes. Returns which modes have active state files.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     schema: {
         workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
         session_id: z.string().optional().describe('Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).'),
@@ -708,6 +712,7 @@ export const stateListActiveTool = {
 export const stateGetStatusTool = {
     name: 'state_get_status',
     description: 'Get detailed status for a specific mode or all modes. Shows active status, file paths, and state contents.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     schema: {
         mode: z.enum(STATE_TOOL_MODES).optional().describe('Specific mode to check (omit for all modes)'),
         workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),

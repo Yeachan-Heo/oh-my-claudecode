@@ -7,11 +7,11 @@
  * terminates after N consecutive hardening waves with no new issues.
  */
 /** Priority levels for stories and tasks */
-export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
+export type TaskPriority = "critical" | "high" | "medium" | "low";
 /** Status of an individual task */
-export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed';
+export type TaskStatus = "pending" | "in_progress" | "done" | "skipped" | "failed";
 /** Phase of the ralphthon lifecycle */
-export type RalphthonPhase = 'interview' | 'execution' | 'hardening' | 'complete' | 'failed';
+export type RalphthonPhase = "interview" | "execution" | "hardening" | "complete" | "failed";
 /**
  * A single actionable task within a story
  */
@@ -57,7 +57,7 @@ export interface HardeningTask {
     /** What to harden (edge case, test, quality improvement) */
     description: string;
     /** Category of hardening */
-    category: 'edge_case' | 'test' | 'quality' | 'security' | 'performance';
+    category: "edge_case" | "test" | "quality" | "security" | "performance";
     /** Current status */
     status: TaskStatus;
     /** Which hardening wave generated this task */
@@ -66,6 +66,19 @@ export interface HardeningTask {
     retries: number;
     /** Optional notes */
     notes?: string;
+}
+/**
+ * Persisted planning/brownfield intake context.
+ */
+export interface RalphthonPlanningContext {
+    /** Whether this work targets an existing codebase / brownfield surface */
+    brownfield: boolean;
+    /** Whether assumptions are explicitly captured in planning */
+    assumptionsMode: "explicit" | "implicit";
+    /** Short persisted summary of the brownfield/codebase-map intake */
+    codebaseMapSummary: string;
+    /** Constraints captured during planning intake */
+    knownConstraints: string[];
 }
 /**
  * Configuration for the ralphthon run
@@ -100,6 +113,8 @@ export interface RalphthonPRD {
     hardening: HardeningTask[];
     /** Run configuration */
     config: RalphthonConfig;
+    /** Brownfield planning context */
+    planningContext?: RalphthonPlanningContext;
 }
 /**
  * Tracks the state of a running ralphthon session
@@ -140,40 +155,40 @@ export interface RalphthonState {
 }
 /** Events emitted by the orchestrator */
 export type OrchestratorEvent = {
-    type: 'task_injected';
+    type: "task_injected";
     taskId: string;
     taskTitle: string;
 } | {
-    type: 'task_completed';
+    type: "task_completed";
     taskId: string;
 } | {
-    type: 'task_failed';
+    type: "task_failed";
     taskId: string;
     retries: number;
 } | {
-    type: 'task_skipped';
+    type: "task_skipped";
     taskId: string;
     reason: string;
 } | {
-    type: 'phase_transition';
+    type: "phase_transition";
     from: RalphthonPhase;
     to: RalphthonPhase;
 } | {
-    type: 'hardening_wave_start';
+    type: "hardening_wave_start";
     wave: number;
 } | {
-    type: 'hardening_wave_end';
+    type: "hardening_wave_end";
     wave: number;
     newIssues: number;
 } | {
-    type: 'idle_detected';
+    type: "idle_detected";
     durationMs: number;
 } | {
-    type: 'session_complete';
+    type: "session_complete";
     tasksCompleted: number;
     tasksSkipped: number;
 } | {
-    type: 'error';
+    type: "error";
     message: string;
 };
 /** Callback for orchestrator events */

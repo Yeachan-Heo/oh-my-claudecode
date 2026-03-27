@@ -11,15 +11,15 @@
  *
  * Reference: https://github.com/EvanOman/cc-wait
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { homedir } from 'os';
-import { spawn } from 'child_process';
-import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
-import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from './rate-limit-monitor.js';
-import { isTmuxAvailable, scanForBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, } from './tmux-detector.js';
-import { isProcessAlive } from '../../platform/index.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync, } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { homedir } from "os";
+import { spawn } from "child_process";
+import { resolveDaemonModulePath } from "../../utils/daemon-module-path.js";
+import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from "./rate-limit-monitor.js";
+import { isTmuxAvailable, scanForBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, } from "./tmux-detector.js";
+import { isProcessAlive } from "../../platform/index.js";
 // ESM compatibility: __filename is not available in ES modules
 const __filename = fileURLToPath(import.meta.url);
 /** Default configuration */
@@ -27,9 +27,9 @@ const DEFAULT_CONFIG = {
     pollIntervalMs: 60 * 1000, // 1 minute
     paneLinesToCapture: 15,
     verbose: false,
-    stateFilePath: join(homedir(), '.omc', 'state', 'rate-limit-daemon.json'),
-    pidFilePath: join(homedir(), '.omc', 'state', 'rate-limit-daemon.pid'),
-    logFilePath: join(homedir(), '.omc', 'state', 'rate-limit-daemon.log'),
+    stateFilePath: join(homedir(), ".omc", "state", "rate-limit-daemon.json"),
+    pidFilePath: join(homedir(), ".omc", "state", "rate-limit-daemon.pid"),
+    logFilePath: join(homedir(), ".omc", "state", "rate-limit-daemon.log"),
 };
 /** Maximum log file size before rotation (1MB) */
 const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
@@ -41,25 +41,45 @@ const SECURE_FILE_MODE = 0o600;
  */
 const DAEMON_ENV_ALLOWLIST = [
     // Core system paths
-    'PATH', 'HOME', 'USERPROFILE',
+    "PATH",
+    "HOME",
+    "USERPROFILE",
     // User identification
-    'USER', 'USERNAME', 'LOGNAME',
+    "USER",
+    "USERNAME",
+    "LOGNAME",
     // Locale settings
-    'LANG', 'LC_ALL', 'LC_CTYPE',
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
     // Terminal/tmux (required for tmux integration)
-    'TERM', 'TMUX', 'TMUX_PANE',
+    "TERM",
+    "TMUX",
+    "TMUX_PANE",
     // Temp directories
-    'TMPDIR', 'TMP', 'TEMP',
+    "TMPDIR",
+    "TMP",
+    "TEMP",
     // XDG directories (Linux)
-    'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
+    "XDG_RUNTIME_DIR",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
     // Shell
-    'SHELL',
+    "SHELL",
     // Node.js
-    'NODE_ENV',
+    "NODE_ENV",
     // Proxy settings
-    'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy',
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
     // Windows system
-    'SystemRoot', 'SYSTEMROOT', 'windir', 'COMSPEC',
+    "SystemRoot",
+    "SYSTEMROOT",
+    "windir",
+    "COMSPEC",
 ];
 /**
  * Create a minimal environment for daemon child processes.
@@ -100,7 +120,7 @@ function writeSecureFile(filePath, content) {
     }
     catch (err) {
         // chmod is not supported on Windows; warn on other platforms
-        if (process.platform !== 'win32') {
+        if (process.platform !== "win32") {
             console.warn(`[RateLimitDaemon] Failed to set permissions on ${filePath}:`, err);
         }
     }
@@ -136,7 +156,7 @@ export function readDaemonState(config) {
         if (!existsSync(cfg.stateFilePath)) {
             return null;
         }
-        const content = readFileSync(cfg.stateFilePath, 'utf-8');
+        const content = readFileSync(cfg.stateFilePath, "utf-8");
         const state = JSON.parse(content);
         // Restore Date objects
         if (state.startedAt)
@@ -154,6 +174,10 @@ export function readDaemonState(config) {
         }
         if (state.rateLimitStatus?.nextResetAt) {
             state.rateLimitStatus.nextResetAt = new Date(state.rateLimitStatus.nextResetAt);
+        }
+        // BUG 1 fix: monthlyResetsAt was not deserialized to Date
+        if (state.rateLimitStatus?.monthlyResetsAt) {
+            state.rateLimitStatus.monthlyResetsAt = new Date(state.rateLimitStatus.monthlyResetsAt);
         }
         for (const pane of state.blockedPanes || []) {
             if (pane.firstDetectedAt)
@@ -181,7 +205,7 @@ function readPidFile(config) {
         if (!existsSync(config.pidFilePath)) {
             return null;
         }
-        const content = readFileSync(config.pidFilePath, 'utf-8');
+        const content = readFileSync(config.pidFilePath, "utf-8");
         return parseInt(content.trim(), 10);
     }
     catch {
@@ -281,9 +305,15 @@ function registerDaemonCleanup(config) {
             // Ignore cleanup errors
         }
     };
-    process.once('SIGINT', () => { cleanup(); process.exit(0); });
-    process.once('SIGTERM', () => { cleanup(); process.exit(0); });
-    process.once('exit', cleanup);
+    process.once("SIGINT", () => {
+        cleanup();
+        process.exit(0);
+    });
+    process.once("SIGTERM", () => {
+        cleanup();
+        process.exit(0);
+    });
+    process.once("exit", cleanup);
 }
 /**
  * Main daemon polling loop
@@ -294,15 +324,21 @@ async function pollLoop(config) {
     state.pid = process.pid;
     // Register cleanup handlers so PID/state files are cleaned up on exit
     registerDaemonCleanup(config);
-    log('Starting poll loop', config);
+    log("Starting poll loop", config);
     while (state.isRunning) {
         try {
             state.lastPollAt = new Date();
             // Check rate limit status with a 30s timeout to prevent poll loop stalls
+            let pollTimeoutId;
             const rateLimitStatus = await Promise.race([
                 checkRateLimitStatus(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('checkRateLimitStatus timed out after 30s')), 30_000)),
-            ]);
+                new Promise((_, reject) => {
+                    pollTimeoutId = setTimeout(() => reject(new Error("checkRateLimitStatus timed out after 30s")), 30_000);
+                }),
+            ]).finally(() => {
+                if (pollTimeoutId !== undefined)
+                    clearTimeout(pollTimeoutId);
+            });
             const wasLimited = shouldMonitorBlockedPanes(state.rateLimitStatus);
             const isNowLimited = shouldMonitorBlockedPanes(rateLimitStatus);
             state.rateLimitStatus = rateLimitStatus;
@@ -310,13 +346,13 @@ async function pollLoop(config) {
                 log(`Rate limit status: ${formatRateLimitStatus(rateLimitStatus)}`, config);
             }
             else {
-                log('Rate limit status unavailable (no OAuth credentials?)', config);
+                log("Rate limit status unavailable (no OAuth credentials?)", config);
             }
             // If currently rate limited, scan for blocked panes
             if (isNowLimited && isTmuxAvailable()) {
                 const scanReason = rateLimitStatus?.isLimited
-                    ? 'Rate limited - scanning for blocked panes'
-                    : 'Usage API degraded (429/stale cache) - scanning for blocked panes';
+                    ? "Rate limited - scanning for blocked panes"
+                    : "Usage API degraded (429/stale cache) - scanning for blocked panes";
                 log(scanReason, config);
                 const blockedPanes = scanForBlockedPanes(config.paneLinesToCapture);
                 // Add newly detected blocked panes
@@ -332,7 +368,7 @@ async function pollLoop(config) {
             }
             // If rate limit just cleared (was limited, now not), attempt resume
             if (wasLimited && !isNowLimited && state.blockedPanes.length > 0) {
-                log('Rate limit cleared! Attempting to resume blocked panes', config);
+                log("Rate limit cleared! Attempting to resume blocked panes", config);
                 for (const pane of state.blockedPanes) {
                     if (state.resumedPaneIds.includes(pane.id)) {
                         log(`Skipping already resumed pane: ${pane.id}`, config);
@@ -382,18 +418,22 @@ export function startDaemon(config) {
         const state = readDaemonState(cfg);
         return {
             success: false,
-            message: 'Daemon is already running',
+            message: "Daemon is already running",
             state: state ?? undefined,
         };
     }
     // Check for tmux
     if (!isTmuxAvailable()) {
-        console.warn('[RateLimitDaemon] tmux not available - resume functionality will be limited');
+        console.warn("[RateLimitDaemon] tmux not available - resume functionality will be limited");
     }
     ensureStateDir(cfg);
     // Fork a new process for the daemon using dynamic import() for ESM compatibility.
     // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
-    const modulePath = resolveDaemonModulePath(__filename, ['features', 'rate-limit-wait', 'daemon.js']);
+    const modulePath = resolveDaemonModulePath(__filename, [
+        "features",
+        "rate-limit-wait",
+        "daemon.js",
+    ]);
     // Write config to a temp file to avoid config injection via template string.
     // This prevents malicious config values from being interpreted as code.
     const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -402,7 +442,7 @@ export function startDaemon(config) {
         writeSecureFile(configPath, JSON.stringify(cfg));
     }
     catch {
-        return { success: false, message: 'Failed to write daemon config file' };
+        return { success: false, message: "Failed to write daemon config file" };
     }
     const daemonScript = `
     import('${modulePath}').then(async ({ pollLoopWithConfigFile }) => {
@@ -416,9 +456,9 @@ export function startDaemon(config) {
             ...createMinimalDaemonEnv(),
             OMC_DAEMON_CONFIG_FILE: configPath,
         };
-        const child = spawn('node', ['-e', daemonScript], {
+        const child = spawn("node", ["-e", daemonScript], {
             detached: true,
-            stdio: 'ignore',
+            stdio: "ignore",
             cwd: process.cwd(),
             env: daemonEnv,
         });
@@ -435,17 +475,19 @@ export function startDaemon(config) {
                 state,
             };
         }
-        return { success: false, message: 'Failed to start daemon process' };
+        return { success: false, message: "Failed to start daemon process" };
     }
     catch (error) {
         // Clean up config file on failure
         try {
             unlinkSync(configPath);
         }
-        catch { /* ignore cleanup errors */ }
+        catch {
+            /* ignore cleanup errors */
+        }
         return {
             success: false,
-            message: 'Failed to start daemon',
+            message: "Failed to start daemon",
             error: error instanceof Error ? error.message : String(error),
         };
     }
@@ -464,7 +506,7 @@ export async function runDaemonForeground(config) {
     writePidFile(process.pid, cfg);
     // Handle shutdown
     const shutdown = () => {
-        console.log('\nShutting down daemon...');
+        console.log("\nShutting down daemon...");
         removePidFile(cfg);
         const state = readDaemonState(cfg);
         if (state) {
@@ -473,10 +515,11 @@ export async function runDaemonForeground(config) {
         }
         process.exit(0);
     };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-    console.log('Rate Limit Wait daemon starting in foreground mode...');
-    console.log('Press Ctrl+C to stop.\n');
+    // BUG 3 fix: use process.once to prevent duplicate signal handler accumulation
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+    console.log("Rate Limit Wait daemon starting in foreground mode...");
+    console.log("Press Ctrl+C to stop.\n");
     // Run poll loop
     await pollLoop(cfg);
 }
@@ -489,18 +532,18 @@ export function stopDaemon(config) {
     if (pid === null) {
         return {
             success: true,
-            message: 'Daemon is not running',
+            message: "Daemon is not running",
         };
     }
     if (!isProcessAlive(pid)) {
         removePidFile(cfg);
         return {
             success: true,
-            message: 'Daemon was not running (cleaned up stale PID file)',
+            message: "Daemon was not running (cleaned up stale PID file)",
         };
     }
     try {
-        process.kill(pid, 'SIGTERM');
+        process.kill(pid, "SIGTERM");
         removePidFile(cfg);
         // Update state
         const state = readDaemonState(cfg);
@@ -518,7 +561,7 @@ export function stopDaemon(config) {
     catch (error) {
         return {
             success: false,
-            message: 'Failed to stop daemon',
+            message: "Failed to stop daemon",
             error: error instanceof Error ? error.message : String(error),
         };
     }
@@ -533,19 +576,19 @@ export function getDaemonStatus(config) {
     if (!running && !state) {
         return {
             success: true,
-            message: 'Daemon has never been started',
+            message: "Daemon has never been started",
         };
     }
     if (!running && state) {
         return {
             success: true,
-            message: 'Daemon is not running',
+            message: "Daemon is not running",
             state: { ...state, isRunning: false, pid: null },
         };
     }
     return {
         success: true,
-        message: 'Daemon is running',
+        message: "Daemon is running",
         state: state ?? undefined,
     };
 }
@@ -557,7 +600,7 @@ export async function detectBlockedPanes(config) {
     if (!isTmuxAvailable()) {
         return {
             success: false,
-            message: 'tmux is not available',
+            message: "tmux is not available",
         };
     }
     const rateLimitStatus = await checkRateLimitStatus();
@@ -589,7 +632,7 @@ export function formatDaemonState(state) {
         lines.push(`✓ Daemon running (PID: ${state.pid})`);
     }
     else {
-        lines.push('✗ Daemon not running');
+        lines.push("✗ Daemon not running");
     }
     // Timing info
     if (state.startedAt) {
@@ -599,33 +642,34 @@ export function formatDaemonState(state) {
         lines.push(`  Last poll: ${state.lastPollAt.toLocaleString()}`);
     }
     // Rate limit status
-    lines.push('');
+    lines.push("");
     if (state.rateLimitStatus) {
-        if (state.rateLimitStatus.isLimited || isRateLimitStatusDegraded(state.rateLimitStatus)) {
+        if (state.rateLimitStatus.isLimited ||
+            isRateLimitStatusDegraded(state.rateLimitStatus)) {
             lines.push(`⚠ ${formatRateLimitStatus(state.rateLimitStatus)}`);
         }
         else {
-            lines.push('✓ Not rate limited');
+            lines.push("✓ Not rate limited");
         }
     }
     else {
-        lines.push('? Rate limit status unavailable');
+        lines.push("? Rate limit status unavailable");
     }
     // Blocked panes
     if (state.blockedPanes.length > 0) {
-        lines.push('');
+        lines.push("");
         lines.push(formatBlockedPanesSummary(state.blockedPanes));
     }
     // Statistics
-    lines.push('');
-    lines.push('Statistics:');
+    lines.push("");
+    lines.push("Statistics:");
     lines.push(`  Resume attempts: ${state.totalResumeAttempts}`);
     lines.push(`  Successful: ${state.successfulResumes}`);
     lines.push(`  Errors: ${state.errorCount}`);
     if (state.lastError) {
         lines.push(`  Last error: ${state.lastError}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
 }
 // Export pollLoop for use by the daemon subprocess
 export { pollLoop };
@@ -634,11 +678,14 @@ export { pollLoop };
  * Reads config from file to avoid config injection via command line.
  */
 export async function pollLoopWithConfigFile(configPath) {
-    const configContent = readFileSync(configPath, 'utf-8');
+    const configContent = readFileSync(configPath, "utf-8");
     const config = JSON.parse(configContent);
-    // Restore Date objects from JSON
-    if (config.stateFilePath) {
-        // Config is valid, proceed with poll loop
+    // Clean up the temp config file now that we've read it
+    try {
+        unlinkSync(configPath);
+    }
+    catch {
+        /* ignore cleanup errors */
     }
     await pollLoop(config);
 }

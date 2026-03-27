@@ -121,5 +121,64 @@ describe('team api dispatch-aware messaging', () => {
         expect(requests[0]?.trigger_message).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/mailbox/worker-1.json');
         expect(requests[0]?.trigger_message).toContain('report progress');
     });
+    it('routes mailbox notifications using config workers when manifest workers are stale', async () => {
+        const base = join(cwd, '.omc', 'state', 'team', teamName);
+        await writeFile(join(base, 'manifest.json'), JSON.stringify({
+            schema_version: 2,
+            name: teamName,
+            task: 'dispatch',
+            worker_count: 0,
+            workers: [],
+            created_at: '2026-03-06T00:00:00.000Z',
+            team_state_root: base,
+        }, null, 2));
+        const sendResult = await executeTeamApiOperation('send-message', {
+            team_name: teamName,
+            from_worker: 'leader-fixed',
+            to_worker: 'worker-1',
+            body: 'Please continue',
+        }, cwd);
+        expect(sendResult.ok).toBe(true);
+        if (!sendResult.ok)
+            return;
+        const messageId = sendResult.data.message?.message_id;
+        expect(typeof messageId).toBe('string');
+        const requests = await listDispatchRequests(teamName, cwd, { kind: 'mailbox', to_worker: 'worker-1' });
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.message_id).toBe(messageId);
+    });
+    it('uses the canonical worker pane when duplicate worker records exist', async () => {
+        const configPath = join(cwd, '.omc', 'state', 'team', teamName, 'config.json');
+        await writeFile(configPath, JSON.stringify({
+            name: teamName,
+            task: 'dispatch',
+            agent_type: 'executor',
+            worker_count: 2,
+            max_workers: 20,
+            tmux_session: 'dispatch-session',
+            workers: [
+                { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+                { name: 'worker-1', index: 0, role: 'executor', assigned_tasks: [], pane_id: '%9' },
+            ],
+            created_at: '2026-03-06T00:00:00.000Z',
+            next_task_id: 2,
+            leader_pane_id: '%0',
+        }, null, 2));
+        const result = await executeTeamApiOperation('send-message', {
+            team_name: teamName,
+            from_worker: 'leader-fixed',
+            to_worker: 'worker-1',
+            body: 'Continue',
+        }, cwd);
+        expect(result.ok).toBe(true);
+        if (!result.ok)
+            return;
+        const messageId = result.data.message?.message_id;
+        expect(typeof messageId).toBe('string');
+        const requests = await listDispatchRequests(teamName, cwd, { kind: 'mailbox', to_worker: 'worker-1' });
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.message_id).toBe(messageId);
+        expect(requests[0]?.status).toBe('pending');
+    });
 });
 //# sourceMappingURL=api-interop.dispatch.test.js.map

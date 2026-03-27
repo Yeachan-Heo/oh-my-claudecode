@@ -2,10 +2,10 @@
  * Project Memory Learner
  * Incrementally learns from PostToolUse events
  */
-import { loadProjectMemory, saveProjectMemory, withProjectMemoryLock } from './storage.js';
-import { BUILD_COMMAND_PATTERNS, TEST_COMMAND_PATTERNS } from './constants.js';
-import { trackAccess } from './hot-path-tracker.js';
-import { detectDirectivesFromMessage, addDirective } from './directive-detector.js';
+import { loadProjectMemory, saveProjectMemory, withProjectMemoryLock, } from "./storage.js";
+import { BUILD_COMMAND_PATTERNS, TEST_COMMAND_PATTERNS } from "./constants.js";
+import { trackAccess } from "./hot-path-tracker.js";
+import { detectDirectivesFromMessage, addDirective, } from "./directive-detector.js";
 /**
  * Per-projectRoot async mutex to prevent concurrent load-modify-save races.
  * Maps projectRoot -> promise chain tail.
@@ -18,7 +18,7 @@ const writeMutexes = new Map();
  */
 function withMutex(projectRoot, fn) {
     const prev = writeMutexes.get(projectRoot) ?? Promise.resolve();
-    const next = prev.then(() => fn()).catch(() => fn());
+    const next = prev.catch(() => { }).then(() => fn());
     // Store the chain tail without the result so callers don't chain errors forward
     const tail = next.then(() => { }, () => { });
     writeMutexes.set(projectRoot, tail);
@@ -44,18 +44,18 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
             }
             let updated = false;
             // Track file accesses from Read/Edit/Write tools
-            if (toolName === 'Read' || toolName === 'Edit' || toolName === 'Write') {
+            if (toolName === "Read" || toolName === "Edit" || toolName === "Write") {
                 const filePath = toolInput?.file_path || toolInput?.filePath;
                 if (filePath) {
-                    memory.hotPaths = trackAccess(memory.hotPaths, filePath, projectRoot, 'file');
+                    memory.hotPaths = trackAccess(memory.hotPaths, filePath, projectRoot, "file");
                     updated = true;
                 }
             }
             // Track directory accesses from Glob/Grep
-            if (toolName === 'Glob' || toolName === 'Grep') {
+            if (toolName === "Glob" || toolName === "Grep") {
                 const dirPath = toolInput?.path;
                 if (dirPath) {
-                    memory.hotPaths = trackAccess(memory.hotPaths, dirPath, projectRoot, 'directory');
+                    memory.hotPaths = trackAccess(memory.hotPaths, dirPath, projectRoot, "directory");
                     updated = true;
                 }
             }
@@ -68,27 +68,29 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
                 }
             }
             // Learn from Bash commands
-            if (toolName !== 'Bash') {
+            if (toolName !== "Bash") {
                 if (updated) {
                     await saveProjectMemory(projectRoot, memory);
                 }
                 return;
             }
-            const command = toolInput?.command || '';
+            const command = toolInput?.command || "";
             if (!command) {
                 return;
             }
             try {
                 // Detect and store build commands
                 if (isBuildCommand(command)) {
-                    if (!memory.build.buildCommand || memory.build.buildCommand !== command) {
+                    if (!memory.build.buildCommand ||
+                        memory.build.buildCommand !== command) {
                         memory.build.buildCommand = command;
                         updated = true;
                     }
                 }
                 // Detect and store test commands
                 if (isTestCommand(command)) {
-                    if (!memory.build.testCommand || memory.build.testCommand !== command) {
+                    if (!memory.build.testCommand ||
+                        memory.build.testCommand !== command) {
                         memory.build.testCommand = command;
                         updated = true;
                     }
@@ -98,7 +100,7 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
                 if (hints.length > 0) {
                     for (const hint of hints) {
                         // Only add if not already present
-                        const exists = memory.customNotes.some(n => n.category === hint.category && n.content === hint.content);
+                        const exists = memory.customNotes.some((n) => n.category === hint.category && n.content === hint.content);
                         if (!exists) {
                             memory.customNotes.push(hint);
                             updated = true;
@@ -116,7 +118,7 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
             }
             catch (error) {
                 // Silently fail
-                console.error('Error learning from tool output:', error);
+                console.error("Error learning from tool output:", error);
             }
         });
     });
@@ -125,13 +127,13 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
  * Check if command is a build command
  */
 function isBuildCommand(command) {
-    return BUILD_COMMAND_PATTERNS.some(pattern => pattern.test(command));
+    return BUILD_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
 }
 /**
  * Check if command is a test command
  */
 function isTestCommand(command) {
-    return TEST_COMMAND_PATTERNS.some(pattern => pattern.test(command));
+    return TEST_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
 }
 /**
  * Extract environment hints from tool output
@@ -145,8 +147,8 @@ function extractEnvironmentHints(output) {
     if (nodeMatch) {
         hints.push({
             timestamp,
-            source: 'learned',
-            category: 'runtime',
+            source: "learned",
+            category: "runtime",
             content: `Node.js ${nodeMatch[1]}`,
         });
     }
@@ -155,8 +157,8 @@ function extractEnvironmentHints(output) {
     if (pythonMatch) {
         hints.push({
             timestamp,
-            source: 'learned',
-            category: 'runtime',
+            source: "learned",
+            category: "runtime",
             content: `Python ${pythonMatch[1]}`,
         });
     }
@@ -165,19 +167,20 @@ function extractEnvironmentHints(output) {
     if (rustMatch) {
         hints.push({
             timestamp,
-            source: 'learned',
-            category: 'runtime',
+            source: "learned",
+            category: "runtime",
             content: `Rust ${rustMatch[1]}`,
         });
     }
     // Detect missing dependencies (common error patterns)
-    if (output.includes('Cannot find module') || output.includes('ModuleNotFoundError')) {
+    if (output.includes("Cannot find module") ||
+        output.includes("ModuleNotFoundError")) {
         const moduleMatch = output.match(/Cannot find module ['"]([^'"]+)['"]/);
         if (moduleMatch) {
             hints.push({
                 timestamp,
-                source: 'learned',
-                category: 'dependency',
+                source: "learned",
+                category: "dependency",
                 content: `Missing dependency: ${moduleMatch[1]}`,
             });
         }
@@ -187,8 +190,8 @@ function extractEnvironmentHints(output) {
     if (envMatch) {
         hints.push({
             timestamp,
-            source: 'learned',
-            category: 'env',
+            source: "learned",
+            category: "env",
             content: `Requires env var: ${envMatch[1]}`,
         });
     }
@@ -212,7 +215,7 @@ export async function addCustomNote(projectRoot, category, content) {
                 }
                 memory.customNotes.push({
                     timestamp: Date.now(),
-                    source: 'manual',
+                    source: "manual",
                     category,
                     content,
                 });
@@ -223,7 +226,7 @@ export async function addCustomNote(projectRoot, category, content) {
                 await saveProjectMemory(projectRoot, memory);
             }
             catch (error) {
-                console.error('Error adding custom note:', error);
+                console.error("Error adding custom note:", error);
             }
         });
     });

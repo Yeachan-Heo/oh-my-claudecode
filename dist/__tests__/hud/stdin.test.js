@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getContextPercent, stabilizeContextPercent } from '../../hud/stdin.js';
+import { getContextPercent, getModelName, stabilizeContextPercent } from '../../hud/stdin.js';
 function makeStdin(overrides = {}) {
     return {
         cwd: '/tmp/worktree',
@@ -83,6 +83,26 @@ describe('HUD stdin context percent', () => {
             },
         });
         expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(20);
+    });
+});
+describe('HUD stdin model display', () => {
+    it('prefers the official display_name over the raw model id', () => {
+        expect(getModelName(makeStdin({
+            model: {
+                id: 'claude-sonnet-4-5-20250929',
+                display_name: 'Claude Sonnet 4.5',
+            },
+        }))).toBe('Claude Sonnet 4.5');
+    });
+    it('falls back to the raw model id when display_name is unavailable', () => {
+        expect(getModelName(makeStdin({
+            model: {
+                id: 'claude-sonnet-4-5-20250929',
+            },
+        }))).toBe('claude-sonnet-4-5-20250929');
+    });
+    it('returns Unknown when stdin omits the model block', () => {
+        expect(getModelName(makeStdin({ model: undefined }))).toBe('Unknown');
     });
 });
 //# sourceMappingURL=stdin.test.js.map

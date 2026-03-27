@@ -25,7 +25,7 @@ export declare function extractNotifyFlag(args: string[]): {
  * This flag is stripped before passing args to Claude CLI.
  */
 export declare function extractOpenClawFlag(args: string[]): {
-    openclawEnabled: boolean;
+    openclawEnabled: boolean | undefined;
     remainingArgs: string[];
 };
 /**

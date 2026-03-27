@@ -11,7 +11,7 @@
  *
  * Reference: https://github.com/EvanOman/cc-wait
  */
-import type { DaemonState, DaemonConfig, DaemonResponse } from './types.js';
+import type { DaemonState, DaemonConfig, DaemonResponse } from "./types.js";
 /**
  * Read daemon state from disk
  */

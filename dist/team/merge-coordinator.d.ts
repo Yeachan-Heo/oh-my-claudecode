@@ -7,7 +7,9 @@ export interface MergeResult {
 }
 /**
  * Check for merge conflicts between a worker branch and the base branch.
- * Does NOT actually merge -- uses git merge-tree for non-destructive check.
+ * Does NOT actually merge — uses `git merge-tree --write-tree` (Git 2.38+)
+ * for non-destructive three-way merge simulation.
+ * Falls back to file-overlap heuristic on older Git versions.
  * Returns list of conflicting file paths, empty if clean.
  */
 export declare function checkMergeConflicts(workerBranch: string, baseBranch: string, repoRoot: string): string[];

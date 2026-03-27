@@ -15,12 +15,27 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { isJobDbInitialized, getJob, getActiveJobs as getActiveJobsFromDb, getJobsByStatus, updateJobStatus } from '../lib/job-state-db.js';
 /**
- * PID ownership check - codex/gemini MCP servers no longer spawn background
- * processes, so we accept any valid PID within a recorded job's status file.
- * The status file itself is the ownership proof.
+ * Set of PIDs spawned by this process. Used to verify ownership before
+ * sending signals. Falls back to accepting any PID recorded in a status file
+ * when the set is empty (e.g. after a server restart).
  */
-function isKnownPid(_pid) {
-    return true;
+const spawnedPids = new Set();
+/**
+ * Register a PID as spawned by this process.
+ */
+export function registerSpawnedPid(pid) {
+    spawnedPids.add(pid);
+}
+/**
+ * PID ownership check. Returns true if the PID was spawned by this process
+ * or if no PIDs have been registered yet (status file is the ownership proof).
+ */
+function isKnownPid(pid) {
+    if (spawnedPids.size === 0) {
+        // No PIDs registered (e.g. server restarted) — accept based on status file
+        return true;
+    }
+    return spawnedPids.has(pid);
 }
 /** Signals allowed for kill_job. SIGKILL excluded - too dangerous for process groups. */
 const ALLOWED_SIGNALS = new Set(['SIGTERM', 'SIGINT']);
@@ -164,10 +179,15 @@ export async function handleWaitForJob(provider, jobId, timeoutMs = 3600000) {
         const jobDir = getJobWorkingDir(provider, jobId);
         const found = findJobStatusFile(provider, jobId, jobDir);
         if (!found) {
-            // Job may not be written yet (async SQLite init race) — retry with backoff
-            notFoundCount++;
-            if (notFoundCount >= 10) {
-                return textResult(`No job found with ID: ${jobId}`, true);
+            // When SQLite is initialized but the job isn't in the DB yet, this
+            // is likely a creation race — keep polling until the deadline rather
+            // than giving up early. When SQLite is NOT initialized, the JSON
+            // file path is the only source, so 10 retries is a reasonable limit.
+            if (!isJobDbInitialized()) {
+                notFoundCount++;
+                if (notFoundCount >= 10) {
+                    return textResult(`No job found with ID: ${jobId}`, true);
+                }
             }
             await new Promise(resolve => setTimeout(resolve, pollDelay));
             pollDelay = Math.min(pollDelay * 1.5, 2000);
@@ -346,13 +366,9 @@ export async function handleKillJob(provider, jobId, signal = 'SIGTERM') {
     if (!isKnownPid(status.pid)) {
         return textResult(`Job ${jobId} PID ${status.pid} was not spawned by this process. Refusing to send signal for safety.`, true);
     }
-    // Mark killedByUser before sending signal so the close handler can see it
-    const updated = {
-        ...status,
-        killedByUser: true,
-    };
-    writeJobStatus(updated);
     try {
+        // BUG FIX: Send signal BEFORE marking killedByUser to avoid marking
+        // status on a process we failed to actually signal
         // On POSIX, background jobs are spawned detached as process-group leaders.
         // Kill the whole process group so child processes also terminate.
         if (process.platform !== 'win32') {
@@ -361,6 +377,8 @@ export async function handleKillJob(provider, jobId, signal = 'SIGTERM') {
         else {
             process.kill(status.pid, signal);
         }
+        // Only mark killedByUser after signal was successfully sent
+        const updated = { ...status, killedByUser: true };
         // Update status to failed
         writeJobStatus({
             ...updated,
@@ -373,8 +391,9 @@ export async function handleKillJob(provider, jobId, signal = 'SIGTERM') {
         for (let attempt = 0; attempt < 3; attempt++) {
             await new Promise(resolve => setTimeout(resolve, 50));
             const recheckStatus = readJobStatus(provider, found.slug, jobId);
-            if (!recheckStatus || recheckStatus.status === 'failed') {
-                break; // Our write stuck, or status is already what we want
+            // BUG FIX: Also break on 'completed' to avoid overwriting legitimate completion
+            if (!recheckStatus || recheckStatus.status === 'failed' || recheckStatus.status === 'completed') {
+                break; // Our write stuck OR job completed legitimately
             }
             // Background handler overwrote - write again
             writeJobStatus({
@@ -399,7 +418,7 @@ export async function handleKillJob(provider, jobId, signal = 'SIGTERM') {
                 message = `Process ${status.pid} already exited.`;
                 // Only mark as failed if not already completed
                 writeJobStatus({
-                    ...(currentStatus || updated),
+                    ...(currentStatus || status),
                     status: 'failed',
                     killedByUser: true,
                     completedAt: new Date().toISOString(),

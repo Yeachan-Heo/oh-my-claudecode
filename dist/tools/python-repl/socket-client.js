@@ -85,6 +85,10 @@ export async function sendSocketRequest(socketPath, method, params, timeout = 60
         let socket;
         if (socketPath.startsWith('tcp:')) {
             const port = parseInt(socketPath.slice(4), 10);
+            if (isNaN(port) || port <= 0 || port > 65535) {
+                reject(new Error(`Invalid TCP port in socketPath: "${socketPath}"`));
+                return;
+            }
             socket = net.createConnection({ host: '127.0.0.1', port });
         }
         else {

@@ -2,112 +2,55 @@
  * Project Memory Formatter
  * Generates context strings for injection
  */
-import { formatDirectivesForContext } from './directive-detector.js';
-import { getTopHotPaths } from './hot-path-tracker.js';
+import path from "path";
+import { getTopHotPaths } from "./hot-path-tracker.js";
+const SUMMARY_CHAR_BUDGET = 650;
+const MAX_HOT_PATH_ITEMS = 3;
+const MAX_DIRECTIVE_ITEMS = 3;
+const MAX_LEARNING_ITEMS = 3;
 /**
  * Format project memory as a concise summary
  * Used for context injection (includes directives for compaction resilience)
  */
-export function formatContextSummary(memory) {
+export function formatContextSummary(memory, context = {}) {
     const lines = [];
-    // Always include user directives at the top (critical for compaction resilience)
-    if (memory.userDirectives.length > 0) {
-        const directivesText = formatDirectivesForContext(memory.userDirectives);
-        lines.push(directivesText);
-        lines.push('');
-    }
-    // Tech stack summary
-    const parts = [];
-    // Primary language
-    const primaryLang = memory.techStack.languages
-        .filter(l => l.confidence === 'high')
-        .sort((a, b) => b.markers.length - a.markers.length)[0];
-    if (primaryLang) {
-        parts.push(primaryLang.name);
-    }
-    // Primary framework (prefer frontend/fullstack)
-    const primaryFramework = getPrimaryFramework(memory.techStack.frameworks);
-    if (primaryFramework) {
-        parts.push(primaryFramework.name);
-    }
-    // Package manager
-    if (memory.techStack.packageManager) {
-        parts.push(`using ${memory.techStack.packageManager}`);
-    }
-    // Build command
-    if (memory.build.buildCommand) {
-        parts.push(`Build: ${memory.build.buildCommand}`);
-    }
-    // Test command
-    if (memory.build.testCommand) {
-        parts.push(`Test: ${memory.build.testCommand}`);
-    }
-    const techSummary = parts.join(' | ');
-    // Add tech summary
-    if (techSummary) {
-        lines.push(`[Project Environment] ${techSummary}`);
-    }
-    // Add hot paths if available
-    const topPaths = getTopHotPaths(memory.hotPaths, 5);
-    if (topPaths.length > 0) {
-        lines.push('');
-        lines.push('**Frequently Accessed:**');
-        for (const hp of topPaths) {
-            lines.push(`- ${hp.path} (${hp.accessCount}x)`);
-        }
-    }
-    // Add key directories
-    const keyDirs = Object.values(memory.directoryMap)
-        .filter(d => d.purpose)
-        .slice(0, 5);
-    if (keyDirs.length > 0) {
-        lines.push('');
-        lines.push('**Key Directories:**');
-        for (const dir of keyDirs) {
-            lines.push(`- ${dir.path}: ${dir.purpose}`);
-        }
-    }
-    // Add custom notes
-    if (memory.customNotes.length > 0) {
-        lines.push('');
-        lines.push('**Notes:**');
-        for (const note of memory.customNotes.slice(0, 5)) {
-            lines.push(`- [${note.category}] ${note.content}`);
-        }
-    }
-    return lines.join('\n');
+    const pushTier = createBoundedTierWriter(lines);
+    pushTier(formatEnvironmentTier(memory));
+    pushTier(formatHotPathsTier(memory, context));
+    pushTier(formatDirectivesTier(memory));
+    pushTier(formatLearningsTier(memory, context));
+    return trimToBudget(lines.join("\n"), SUMMARY_CHAR_BUDGET);
 }
 /**
  * Format project memory as full details (for debugging)
  */
 export function formatFullContext(memory) {
     const lines = [];
-    lines.push('<project-memory>');
-    lines.push('');
-    lines.push('## Project Environment');
-    lines.push('');
-    // Languages
+    lines.push("<project-memory>");
+    lines.push("");
+    lines.push("## Project Environment");
+    lines.push("");
     if (memory.techStack.languages.length > 0) {
-        lines.push('**Languages:**');
+        lines.push("**Languages:**");
         for (const lang of memory.techStack.languages) {
-            const version = lang.version ? ` (${lang.version})` : '';
+            const version = lang.version ? ` (${lang.version})` : "";
             lines.push(`- ${lang.name}${version}`);
         }
-        lines.push('');
+        lines.push("");
     }
-    // Frameworks
     if (memory.techStack.frameworks.length > 0) {
-        lines.push('**Frameworks:**');
+        lines.push("**Frameworks:**");
         for (const fw of memory.techStack.frameworks) {
-            const version = fw.version ? ` (${fw.version})` : '';
+            const version = fw.version ? ` (${fw.version})` : "";
             lines.push(`- ${fw.name}${version} [${fw.category}]`);
         }
-        lines.push('');
+        lines.push("");
     }
-    // Commands
-    const hasCommands = memory.build.buildCommand || memory.build.testCommand || memory.build.lintCommand;
+    const hasCommands = memory.build.buildCommand ||
+        memory.build.testCommand ||
+        memory.build.lintCommand;
     if (hasCommands) {
-        lines.push('**Commands:**');
+        lines.push("**Commands:**");
         if (memory.build.buildCommand) {
             lines.push(`- Build: \`${memory.build.buildCommand}\``);
         }
@@ -120,10 +63,11 @@ export function formatFullContext(memory) {
         if (memory.build.devCommand) {
             lines.push(`- Dev: \`${memory.build.devCommand}\``);
         }
-        lines.push('');
+        lines.push("");
     }
-    // Conventions
-    const hasConventions = memory.conventions.namingStyle || memory.conventions.importStyle || memory.conventions.testPattern;
+    const hasConventions = memory.conventions.namingStyle ||
+        memory.conventions.importStyle ||
+        memory.conventions.testPattern;
     if (hasConventions) {
         if (memory.conventions.namingStyle) {
             lines.push(`**Code Style:** ${memory.conventions.namingStyle}`);
@@ -134,26 +78,150 @@ export function formatFullContext(memory) {
         if (memory.conventions.testPattern) {
             lines.push(`**Test Pattern:** ${memory.conventions.testPattern}`);
         }
-        lines.push('');
+        lines.push("");
     }
-    // Structure
     if (memory.structure.isMonorepo) {
-        lines.push('**Structure:** Monorepo');
+        lines.push("**Structure:** Monorepo");
         if (memory.structure.workspaces.length > 0) {
-            lines.push(`- Workspaces: ${memory.structure.workspaces.slice(0, 3).join(', ')}`);
+            lines.push(`- Workspaces: ${memory.structure.workspaces.slice(0, 3).join(", ")}`);
         }
-        lines.push('');
+        lines.push("");
     }
-    // Custom notes
     if (memory.customNotes.length > 0) {
-        lines.push('**Custom Notes:**');
+        lines.push("**Custom Notes:**");
         for (const note of memory.customNotes.slice(0, 5)) {
             lines.push(`- [${note.category}] ${note.content}`);
         }
-        lines.push('');
+        lines.push("");
     }
-    lines.push('</project-memory>');
-    return lines.join('\n');
+    lines.push("</project-memory>");
+    return lines.join("\n");
+}
+function formatEnvironmentTier(memory) {
+    const lines = [];
+    const parts = [];
+    const primaryLang = memory.techStack.languages
+        .filter((l) => l.confidence === "high")
+        .sort((a, b) => b.markers.length - a.markers.length)[0] ??
+        memory.techStack.languages[0];
+    if (primaryLang) {
+        parts.push(primaryLang.name);
+    }
+    const primaryFramework = getPrimaryFramework(memory.techStack.frameworks);
+    if (primaryFramework) {
+        parts.push(primaryFramework.name);
+    }
+    if (memory.techStack.packageManager) {
+        parts.push(`pkg:${memory.techStack.packageManager}`);
+    }
+    if (memory.techStack.runtime) {
+        parts.push(memory.techStack.runtime);
+    }
+    if (parts.length === 0) {
+        return lines;
+    }
+    lines.push("[Project Environment]");
+    lines.push(`- ${parts.join(" | ")}`);
+    const commands = [];
+    if (memory.build.buildCommand)
+        commands.push(`build=${memory.build.buildCommand}`);
+    if (memory.build.testCommand)
+        commands.push(`test=${memory.build.testCommand}`);
+    if (memory.build.lintCommand)
+        commands.push(`lint=${memory.build.lintCommand}`);
+    if (commands.length > 0) {
+        lines.push(`- ${commands.join(" | ")}`);
+    }
+    return lines;
+}
+function formatHotPathsTier(memory, context) {
+    const topPaths = getTopHotPaths(memory.hotPaths, MAX_HOT_PATH_ITEMS, context);
+    if (topPaths.length === 0) {
+        return [];
+    }
+    const lines = ["[Hot Paths]"];
+    for (const hotPath of topPaths) {
+        lines.push(`- ${hotPath.path} (${hotPath.accessCount}x)`);
+    }
+    return lines;
+}
+function formatDirectivesTier(memory) {
+    const directives = [...memory.userDirectives]
+        .sort((a, b) => scoreDirective(b) - scoreDirective(a))
+        .slice(0, MAX_DIRECTIVE_ITEMS);
+    if (directives.length === 0) {
+        return [];
+    }
+    const lines = ["[Directives]"];
+    for (const directive of directives) {
+        const priority = directive.priority === "high" ? "critical" : "note";
+        lines.push(`- ${priority}: ${directive.directive}`);
+    }
+    return lines;
+}
+function formatLearningsTier(memory, context) {
+    const notes = [...memory.customNotes]
+        .sort((a, b) => scoreLearning(b, context) - scoreLearning(a, context))
+        .slice(0, MAX_LEARNING_ITEMS);
+    if (notes.length === 0) {
+        return [];
+    }
+    const lines = ["[Recent Learnings]"];
+    for (const note of notes) {
+        lines.push(`- [${note.category}] ${note.content}`);
+    }
+    return lines;
+}
+function createBoundedTierWriter(lines) {
+    return (tierLines) => {
+        if (tierLines.length === 0) {
+            return;
+        }
+        if (lines.length > 0) {
+            lines.push("");
+        }
+        lines.push(...tierLines);
+    };
+}
+function trimToBudget(summary, budget) {
+    if (summary.length <= budget) {
+        return summary;
+    }
+    return `${summary.slice(0, budget - 1).trimEnd()}…`;
+}
+function scoreDirective(directive) {
+    return ((directive.priority === "high" ? 1_000_000_000_000 : 0) +
+        directive.timestamp);
+}
+function scoreLearning(note, context) {
+    const categoryWeight = {
+        env: 60,
+        runtime: 50,
+        dependency: 40,
+        deploy: 30,
+        test: 20,
+    };
+    const now = context.now ?? Date.now();
+    const ageHours = Math.floor(Math.max(0, now - note.timestamp) / (60 * 60 * 1000));
+    const recencyWeight = Math.max(0, 100 - ageHours);
+    const scopePath = normalizeScopePath(context.workingDirectory);
+    const scopeBoost = scopePath && note.content.includes(scopePath.split("/").pop() ?? "")
+        ? 10
+        : 0;
+    return recencyWeight + (categoryWeight[note.category] ?? 10) + scopeBoost;
+}
+function normalizeScopePath(workingDirectory) {
+    if (!workingDirectory) {
+        return null;
+    }
+    const normalized = path
+        .normalize(workingDirectory)
+        .replace(/^\.[/\\]?/, "")
+        .replace(/\\/g, "/");
+    if (normalized === "" || normalized === ".") {
+        return null;
+    }
+    return normalized;
 }
 /**
  * Get the primary framework to highlight
@@ -162,10 +230,9 @@ export function formatFullContext(memory) {
 function getPrimaryFramework(frameworks) {
     if (frameworks.length === 0)
         return null;
-    // Priority order: fullstack > frontend > backend > testing > build
-    const priority = ['fullstack', 'frontend', 'backend', 'testing', 'build'];
+    const priority = ["fullstack", "frontend", "backend", "testing", "build"];
     for (const category of priority) {
-        const match = frameworks.find(f => f.category === category);
+        const match = frameworks.find((f) => f.category === category);
         if (match)
             return match;
     }

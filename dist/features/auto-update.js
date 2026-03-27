@@ -115,15 +115,13 @@ const PLUGIN_SYNC_PAYLOAD = [
     'LICENSE',
     'package.json',
 ];
-function syncActivePluginCache() {
-    const activeRoots = getInstalledOmcPluginRoots().filter(root => existsSync(root));
-    if (activeRoots.length === 0) {
+function copyPluginSyncPayload(sourceRoot, targetRoots) {
+    if (targetRoots.length === 0) {
         return { synced: false, errors: [] };
     }
-    const sourceRoot = getRuntimePackageRoot();
     let synced = false;
     const errors = [];
-    for (const targetRoot of activeRoots) {
+    for (const targetRoot of targetRoots) {
         let copiedToTarget = false;
         for (const entry of PLUGIN_SYNC_PAYLOAD) {
             const sourcePath = join(sourceRoot, entry);
@@ -144,10 +142,79 @@ function syncActivePluginCache() {
         }
         synced = synced || copiedToTarget;
     }
-    if (synced) {
+    return { synced, errors };
+}
+function syncActivePluginCache() {
+    const activeRoots = getInstalledOmcPluginRoots().filter(root => existsSync(root));
+    if (activeRoots.length === 0) {
+        return { synced: false, errors: [] };
+    }
+    const result = copyPluginSyncPayload(getRuntimePackageRoot(), activeRoots);
+    if (result.synced) {
         console.log('[omc update] Synced plugin cache');
     }
-    return { synced, errors };
+    return result;
+}
+export function shouldBlockStandaloneUpdateInCurrentSession() {
+    if (!isRunningAsPlugin()) {
+        return false;
+    }
+    const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT?.trim();
+    if (entrypoint) {
+        return true;
+    }
+    const sessionId = process.env.CLAUDE_SESSION_ID?.trim() || process.env.CLAUDECODE_SESSION_ID?.trim();
+    if (sessionId) {
+        return true;
+    }
+    return false;
+}
+export function syncPluginCache(verbose = false) {
+    const pluginCacheRoot = join(getConfigDir(), 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    if (!existsSync(pluginCacheRoot)) {
+        return { synced: false, skipped: true, errors: [] };
+    }
+    try {
+        const npmRoot = String(execSync('npm root -g', {
+            encoding: 'utf-8',
+            stdio: 'pipe',
+            timeout: 10000,
+            ...(process.platform === 'win32' ? { windowsHide: true } : {}),
+        }) ?? '').trim();
+        if (!npmRoot) {
+            throw new Error('npm root -g returned an empty path');
+        }
+        const sourceRoot = join(npmRoot, 'oh-my-claude-sisyphus');
+        const packageJsonPath = join(sourceRoot, 'package.json');
+        const packageJsonRaw = String(readFileSync(packageJsonPath, 'utf-8') ?? '');
+        const packageMetadata = JSON.parse(packageJsonRaw);
+        const version = typeof packageMetadata.version === 'string' ? packageMetadata.version.trim() : '';
+        if (!version) {
+            throw new Error(`Missing version in ${packageJsonPath}`);
+        }
+        const versionedPluginCacheRoot = join(pluginCacheRoot, version);
+        mkdirSync(versionedPluginCacheRoot, { recursive: true });
+        const result = copyPluginSyncPayload(sourceRoot, [versionedPluginCacheRoot]);
+        if (result.errors.length > 0) {
+            for (const error of result.errors) {
+                console.warn(`[omc update] Plugin cache sync warning: ${error}`);
+            }
+        }
+        if (result.synced) {
+            console.log('[omc update] Plugin cache synced');
+        }
+        return { ...result, skipped: false };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (verbose) {
+            console.warn(`[omc update] Plugin cache sync warning: ${message}`);
+        }
+        else {
+            console.warn('[omc update] Plugin cache sync warning:', message);
+        }
+        return { synced: false, skipped: false, errors: [message] };
+    }
 }
 /** Installation paths (respects CLAUDE_CONFIG_DIR env var) */
 export const CLAUDE_CONFIG_DIR = getConfigDir();
@@ -461,13 +528,14 @@ export async function performUpdate(options) {
     const installed = getInstalledVersion();
     const previousVersion = installed?.version ?? null;
     try {
-        // Check if running as plugin - prevent npm global update from corrupting plugin
-        if (isRunningAsPlugin() && !options?.standalone) {
+        // Block npm update only from active Claude Code/plugin sessions.
+        // Standalone terminals may inherit CLAUDE_PLUGIN_ROOT and should still update.
+        if (shouldBlockStandaloneUpdateInCurrentSession() && !options?.standalone) {
             return {
                 success: false,
                 previousVersion,
                 newVersion: 'unknown',
-                message: 'Running as a Claude Code plugin. Use "/plugin install oh-my-claudecode" to update, or pass --standalone to force npm update.',
+                message: 'Running inside an active Claude Code plugin session. Use "/plugin install oh-my-claudecode" to update, or pass --standalone to force npm update.',
             };
         }
         // Fetch the latest release to get the version
@@ -486,6 +554,7 @@ export async function performUpdate(options) {
             if (!marketplaceSync.ok && options?.verbose) {
                 console.warn(`[omc update] ${marketplaceSync.message}`);
             }
+            syncPluginCache(options?.verbose ?? false);
             // CRITICAL FIX: After npm updates the global package, the current process
             // still has OLD code loaded in memory. We must re-exec to run reconciliation
             // with the NEW code. Otherwise, installOmc() runs OLD logic against NEW files.

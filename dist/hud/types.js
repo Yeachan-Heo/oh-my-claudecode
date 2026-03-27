@@ -36,6 +36,8 @@ export const DEFAULT_HUD_CONFIG = {
         missionBoard: false, // Opt-in mission board for whole-run progress tracking
         promptTime: true, // Show last prompt time by default
         sessionHealth: true,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: false, // Disabled by default for backwards compatibility
         showCallCounts: true, // Show tool/agent/skill call counts by default (Issue #710)
@@ -88,6 +90,8 @@ export const PRESET_CONFIGS = {
         missionBoard: false,
         promptTime: false,
         sessionHealth: false,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: false,
         showCallCounts: false,
@@ -124,6 +128,8 @@ export const PRESET_CONFIGS = {
         missionBoard: false,
         promptTime: true,
         sessionHealth: true,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: true,
         showCallCounts: true,
@@ -160,6 +166,8 @@ export const PRESET_CONFIGS = {
         missionBoard: false,
         promptTime: true,
         sessionHealth: true,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: true,
         showCallCounts: true,
@@ -196,6 +204,8 @@ export const PRESET_CONFIGS = {
         missionBoard: false,
         promptTime: true,
         sessionHealth: true,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: false,
         showCallCounts: true,
@@ -232,6 +242,8 @@ export const PRESET_CONFIGS = {
         missionBoard: false,
         promptTime: true,
         sessionHealth: true,
+        showSessionDuration: true,
+        showHealthIndicator: true,
         showTokens: false,
         useBars: true,
         showCallCounts: true,

@@ -2,28 +2,8 @@
  * Project Memory Hook
  * Main orchestrator for auto-detecting and injecting project context
  */
-/**
- * Register project memory context for a session
- * Called from SessionStart hook
- *
- * @param sessionId - Current session ID
- * @param workingDirectory - Current working directory
- * @returns true if context was registered, false otherwise
- */
 export declare function registerProjectMemoryContext(sessionId: string, workingDirectory: string): Promise<boolean>;
-/**
- * Clear project memory session cache
- * Called when session ends
- *
- * @param sessionId - Session ID to clear
- */
 export declare function clearProjectMemorySession(sessionId: string): void;
-/**
- * Force rescan of project environment
- * Useful for manual refresh
- *
- * @param projectRoot - Project root directory
- */
 export declare function rescanProjectEnvironment(projectRoot: string): Promise<void>;
 export { loadProjectMemory, saveProjectMemory, withProjectMemoryLock, } from "./storage.js";
 export { detectProjectEnvironment } from "./detector.js";

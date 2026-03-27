@@ -176,7 +176,13 @@ function getFilesForLanguage(dirPath, language, maxFiles = 1000) {
         }
     }
     const resolvedPath = resolve(dirPath);
-    const stat = statSync(resolvedPath);
+    let stat;
+    try {
+        stat = statSync(resolvedPath);
+    }
+    catch (err) {
+        throw new Error(`Cannot access path "${resolvedPath}": ${err.message}`);
+    }
     if (stat.isFile()) {
         return [resolvedPath];
     }

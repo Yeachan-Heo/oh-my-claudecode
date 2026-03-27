@@ -128,6 +128,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             name: tool.name,
             description: tool.description,
             inputSchema: zodToJsonSchema(tool.schema),
+            ...(tool.annotations ? { annotations: tool.annotations } : {}),
         })),
     };
 });
@@ -145,7 +146,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await tool.handler((args ?? {}));
         return {
             content: result.content,
-            isError: false,
+            isError: result.isError ?? false,
         };
     }
     catch (error) {

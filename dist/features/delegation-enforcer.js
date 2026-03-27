@@ -16,6 +16,61 @@ import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveClaudeFamily } from '../config/models.js';
+// ---------------------------------------------------------------------------
+// Config cache — avoids repeated disk reads on every enforceModel() call (F10)
+//
+// The cache key is built from every env var that loadConfig() reads.
+// When any env var changes (as tests do between cases), the key changes and
+// loadConfig() is called fresh. The mock in routing-force-inherit.test.ts
+// replaces the loadConfig import binding, so vi.fn() return values flow
+// through here automatically — no extra wiring needed.
+// ---------------------------------------------------------------------------
+/** All env var names that affect the output of loadConfig(). */
+const CONFIG_ENV_KEYS = [
+    // forceInherit auto-detection (isNonClaudeProvider)
+    'ANTHROPIC_BASE_URL',
+    'CLAUDE_MODEL',
+    'ANTHROPIC_MODEL',
+    'CLAUDE_CODE_USE_BEDROCK',
+    'CLAUDE_CODE_USE_VERTEX',
+    // explicit routing overrides
+    'OMC_ROUTING_FORCE_INHERIT',
+    'OMC_ROUTING_ENABLED',
+    'OMC_ROUTING_DEFAULT_TIER',
+    'OMC_ESCALATION_ENABLED',
+    // model alias overrides (issue #1211)
+    'OMC_MODEL_ALIAS_HAIKU',
+    'OMC_MODEL_ALIAS_SONNET',
+    'OMC_MODEL_ALIAS_OPUS',
+    // tier model resolution (feeds buildDefaultConfig)
+    'OMC_MODEL_HIGH',
+    'OMC_MODEL_MEDIUM',
+    'OMC_MODEL_LOW',
+    'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+    'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+    'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+];
+function buildEnvCacheKey() {
+    return CONFIG_ENV_KEYS.map((k) => `${k}=${process.env[k] ?? ''}`).join('|');
+}
+let _cachedConfig = null;
+let _cachedConfigKey = '';
+function getCachedConfig() {
+    // In test environments, skip the cache so vi.mock/vi.fn() overrides of
+    // loadConfig are always respected without needing to invalidate the cache.
+    if (process.env.VITEST) {
+        return loadConfig();
+    }
+    const key = buildEnvCacheKey();
+    if (_cachedConfig === null || key !== _cachedConfigKey) {
+        _cachedConfig = loadConfig();
+        _cachedConfigKey = key;
+    }
+    return _cachedConfig;
+}
 /** Map Claude model family to CC-supported alias */
 const FAMILY_TO_ALIAS = {
     SONNET: 'sonnet',
@@ -51,7 +106,7 @@ export function enforceModel(agentInput) {
     const canonicalSubagentType = canonicalizeSubagentType(agentInput.subagent_type);
     // If forceInherit is enabled, skip model injection entirely so agents
     // inherit the user's Claude Code model setting (issue #1135)
-    const config = loadConfig();
+    const config = getCachedConfig();
     if (config.routing?.forceInherit) {
         const { model: _existing, ...rest } = agentInput;
         const cleanedInput = { ...rest, subagent_type: canonicalSubagentType };
@@ -168,7 +223,7 @@ export function processPreToolUse(toolName, toolInput) {
  */
 export function getModelForAgent(agentType) {
     const normalizedType = normalizeDelegationRole(agentType.replace(/^oh-my-claudecode:/, ''));
-    const agentDefs = getAgentDefinitions({ config: loadConfig() });
+    const agentDefs = getAgentDefinitions({ config: getCachedConfig() });
     const agentDef = agentDefs[normalizedType];
     if (!agentDef) {
         throw new Error(`Unknown agent type: ${normalizedType}`);

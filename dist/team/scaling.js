@@ -12,7 +12,7 @@
 import { resolve } from 'path';
 import { mkdir } from 'fs/promises';
 import { execFileSync, spawnSync } from 'child_process';
-import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, writeAtomic, } from './team-ops.js';
+import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, teamListTasks, teamUpdateTask, writeAtomic, } from './team-ops.js';
 import { withScalingLock, saveTeamConfig } from './monitor.js';
 import { sanitizeName, isWorkerAlive, killWorkerPanes, buildWorkerStartCommand, waitForPaneReady, } from './tmux-session.js';
 import { TeamPaths, absPath } from './state-paths.js';
@@ -90,6 +90,17 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
             const workerIndex = nextIndex;
             nextIndex++;
             const workerName = `worker-${workerIndex}`;
+            if (config.workers.some((worker) => worker.name === workerName)) {
+                await teamAppendEvent(sanitized, {
+                    type: 'team_leader_nudge',
+                    worker: 'leader-fixed',
+                    reason: `scale_up_duplicate_worker_blocked:${workerName}`,
+                }, leaderCwd);
+                return {
+                    ok: false,
+                    error: `Worker ${workerName} already exists in team ${sanitized}; refusing to spawn duplicate worker identity.`,
+                };
+            }
             // Create worker directory
             const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
             await mkdir(workerDirPath, { recursive: true });
@@ -261,12 +272,25 @@ export async function scaleDown(teamName, cwd, options = {}, env = process.env) 
                 const allDrained = await Promise.all(targetWorkers.map(async (w) => {
                     const status = await teamReadWorkerStatus(sanitized, w.name, leaderCwd);
                     const alive = w.pane_id ? await isWorkerAlive(w.pane_id) : false;
-                    return status.state === 'idle' || status.state === 'done' ||
-                        status.state === 'draining' || !alive;
+                    return status.state === 'idle' || status.state === 'done' || !alive;
                 }));
                 if (allDrained.every(Boolean))
                     break;
                 await new Promise(r => setTimeout(r, 2_000));
+            }
+        }
+        // Phase 2.5: Reset orphaned in-progress tasks owned by workers being killed.
+        // After drain timeout, workers may still own in-progress tasks — reset them
+        // to pending so they can be claimed by remaining workers (mirrors requeueDeadWorkerTasks pattern).
+        const removedNameSet = new Set(targetWorkers.map(w => w.name));
+        const allTasks = await teamListTasks(sanitized, leaderCwd);
+        for (const task of allTasks) {
+            if (task.status === 'in_progress' && task.owner && removedNameSet.has(task.owner)) {
+                await teamUpdateTask(sanitized, task.id, {
+                    status: 'pending',
+                    owner: null,
+                    assigned_at: undefined,
+                }, leaderCwd);
             }
         }
         // Phase 3: Kill tmux panes and remove from config

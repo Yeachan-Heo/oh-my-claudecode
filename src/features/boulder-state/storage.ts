@@ -138,9 +138,10 @@ export function getPlanProgress(planPath: string): PlanProgress {
   try {
     const content = readFileSync(planPath, "utf-8");
 
-    // Match markdown checkboxes: - [ ] or - [x] or - [X]
-    const uncheckedMatches = content.match(/^[-*]\s*\[\s*\]/gm) || [];
-    const checkedMatches = content.match(/^[-*]\s*\[[xX]\]/gm) || [];
+    // Match markdown checkboxes: - [ ] or - [x] or - [X] (with optional leading whitespace)
+    // BUG 2 fix: allow optional leading whitespace for indented items
+    const uncheckedMatches = content.match(/^\s*[-*]\s*\[\s*\]/gm) || [];
+    const checkedMatches = content.match(/^\s*[-*]\s*\[[xX]\]/gm) || [];
 
     const total = uncheckedMatches.length + checkedMatches.length;
     const completed = checkedMatches.length;

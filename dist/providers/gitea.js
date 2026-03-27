@@ -5,7 +5,9 @@ function validateGiteaUrl(raw) {
         if (u.protocol !== 'https:' && u.protocol !== 'http:')
             return null;
         const host = u.hostname.toLowerCase();
-        if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local'))
+        if (host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+            host === '0.0.0.0' || host === '::' ||
+            host.startsWith('169.254.') || host.endsWith('.local'))
             return null;
         return u.origin;
     }

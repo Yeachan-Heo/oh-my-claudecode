@@ -3,37 +3,37 @@
  *
  * Composes statusline output from render context.
  */
-import { DEFAULT_HUD_CONFIG } from './types.js';
-import { bold, dim } from './colors.js';
-import { stringWidth, getCharWidth } from '../utils/string-width.js';
-import { renderRalph } from './elements/ralph.js';
-import { renderAgentsByFormat, renderAgentsMultiLine } from './elements/agents.js';
-import { renderTodosWithCurrent } from './elements/todos.js';
-import { renderSkills, renderLastSkill } from './elements/skills.js';
-import { renderContext, renderContextWithBar } from './elements/context.js';
-import { renderBackground } from './elements/background.js';
-import { renderPrd } from './elements/prd.js';
-import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderCustomBuckets } from './elements/limits.js';
-import { renderPermission } from './elements/permission.js';
-import { renderThinking } from './elements/thinking.js';
-import { renderSession } from './elements/session.js';
-import { renderTokenUsage } from './elements/token-usage.js';
-import { renderPromptTime } from './elements/prompt-time.js';
-import { renderAutopilot } from './elements/autopilot.js';
-import { renderCwd } from './elements/cwd.js';
-import { renderGitRepo, renderGitBranch } from './elements/git.js';
-import { renderModel } from './elements/model.js';
-import { renderApiKeySource } from './elements/api-key-source.js';
-import { renderCallCounts } from './elements/call-counts.js';
-import { renderContextLimitWarning } from './elements/context-warning.js';
-import { renderMissionBoard } from './mission-board.js';
-import { renderSessionSummary } from './elements/session-summary.js';
+import { DEFAULT_HUD_CONFIG } from "./types.js";
+import { bold, dim } from "./colors.js";
+import { stringWidth, getCharWidth } from "../utils/string-width.js";
+import { renderRalph } from "./elements/ralph.js";
+import { renderAgentsByFormat, renderAgentsMultiLine, } from "./elements/agents.js";
+import { renderTodosWithCurrent } from "./elements/todos.js";
+import { renderSkills, renderLastSkill } from "./elements/skills.js";
+import { renderContext, renderContextWithBar } from "./elements/context.js";
+import { renderBackground } from "./elements/background.js";
+import { renderPrd } from "./elements/prd.js";
+import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderCustomBuckets, } from "./elements/limits.js";
+import { renderPermission } from "./elements/permission.js";
+import { renderThinking } from "./elements/thinking.js";
+import { renderSession } from "./elements/session.js";
+import { renderTokenUsage } from "./elements/token-usage.js";
+import { renderPromptTime } from "./elements/prompt-time.js";
+import { renderAutopilot } from "./elements/autopilot.js";
+import { renderCwd } from "./elements/cwd.js";
+import { renderGitRepo, renderGitBranch } from "./elements/git.js";
+import { renderModel } from "./elements/model.js";
+import { renderApiKeySource } from "./elements/api-key-source.js";
+import { renderCallCounts } from "./elements/call-counts.js";
+import { renderContextLimitWarning } from "./elements/context-warning.js";
+import { renderMissionBoard } from "./mission-board.js";
+import { renderSessionSummary } from "./elements/session-summary.js";
 /**
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
  * Used to skip escape codes when measuring/truncating visible width.
  */
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/;
-const PLAIN_SEPARATOR = ' | ';
+const PLAIN_SEPARATOR = " | ";
 const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
 /**
  * Truncate a single line to a maximum visual width, preserving ANSI escape codes.
@@ -45,14 +45,14 @@ const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
  */
 export function truncateLineToMaxWidth(line, maxWidth) {
     if (maxWidth <= 0)
-        return '';
+        return "";
     if (stringWidth(line) <= maxWidth)
         return line;
-    const ELLIPSIS = '...';
+    const ELLIPSIS = "...";
     const ellipsisWidth = 3;
     const targetWidth = Math.max(0, maxWidth - ellipsisWidth);
     let visibleWidth = 0;
-    let result = '';
+    let result = "";
     let hasAnsi = false;
     let i = 0;
     while (i < line.length) {
@@ -68,7 +68,7 @@ export function truncateLineToMaxWidth(line, maxWidth) {
         }
         // Read the full code point (handles surrogate pairs for astral-plane chars like emoji)
         const codePoint = line.codePointAt(i);
-        const codeUnits = codePoint > 0xFFFF ? 2 : 1;
+        const codeUnits = codePoint > 0xffff ? 2 : 1;
         const char = line.slice(i, i + codeUnits);
         const charWidth = getCharWidth(char);
         if (visibleWidth + charWidth > targetWidth)
@@ -79,7 +79,7 @@ export function truncateLineToMaxWidth(line, maxWidth) {
     }
     // Append ANSI reset before ellipsis if any escape codes were seen,
     // to prevent color/style bleed into subsequent terminal output
-    const reset = hasAnsi ? '\x1b[0m' : '';
+    const reset = hasAnsi ? "\x1b[0m" : "";
     return result + reset + ELLIPSIS;
 }
 /**
@@ -92,7 +92,7 @@ export function truncateLineToMaxWidth(line, maxWidth) {
  */
 function wrapLineToMaxWidth(line, maxWidth) {
     if (maxWidth <= 0)
-        return [''];
+        return [""];
     if (stringWidth(line) <= maxWidth)
         return [line];
     const separator = line.includes(DIM_SEPARATOR)
@@ -108,9 +108,9 @@ function wrapLineToMaxWidth(line, maxWidth) {
         return [truncateLineToMaxWidth(line, maxWidth)];
     }
     const wrapped = [];
-    let current = segments[0] ?? '';
+    let current = segments[0] ?? "";
     for (let i = 1; i < segments.length; i += 1) {
-        const nextSegment = segments[i] ?? '';
+        const nextSegment = segments[i] ?? "";
         const candidate = `${current}${separator}${nextSegment}`;
         if (stringWidth(candidate) <= maxWidth) {
             current = candidate;
@@ -138,10 +138,10 @@ function wrapLineToMaxWidth(line, maxWidth) {
 function applyMaxWidthByMode(lines, maxWidth, wrapMode) {
     if (!maxWidth || maxWidth <= 0)
         return lines;
-    if (wrapMode === 'wrap') {
-        return lines.flatMap(line => wrapLineToMaxWidth(line, maxWidth));
+    if (wrapMode === "wrap") {
+        return lines.flatMap((line) => wrapLineToMaxWidth(line, maxWidth));
     }
-    return lines.map(line => truncateLineToMaxWidth(line, maxWidth));
+    return lines.map((line) => truncateLineToMaxWidth(line, maxWidth));
 }
 /**
  * Limit output lines to prevent input field shrinkage (Issue #222).
@@ -170,7 +170,7 @@ export async function render(context, config) {
     const gitElements = [];
     // Working directory
     if (enabledElements.cwd) {
-        const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || 'relative');
+        const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || "relative");
         if (cwdElement)
             gitElements.push(cwdElement);
     }
@@ -204,7 +204,7 @@ export async function render(context, config) {
     }
     // [OMC#X.Y.Z] label with optional update notification
     if (enabledElements.omcLabel) {
-        const versionTag = context.omcVersion ? `#${context.omcVersion}` : '';
+        const versionTag = context.omcVersion ? `#${context.omcVersion}` : "";
         if (context.updateAvailable) {
             elements.push(bold(`[OMC${versionTag}] -> ${context.updateAvailable} omc update`));
         }
@@ -245,7 +245,7 @@ export async function render(context, config) {
     }
     // Extended thinking indicator
     if (enabledElements.thinking && context.thinkingState) {
-        const thinking = renderThinking(context.thinkingState, enabledElements.thinkingFormat || 'text');
+        const thinking = renderThinking(context.thinkingState, enabledElements.thinkingFormat);
         if (thinking)
             elements.push(thinking);
     }
@@ -259,7 +259,7 @@ export async function render(context, config) {
     if (enabledElements.sessionHealth && context.sessionHealth) {
         // Session duration display (session:19m)
         // If showSessionDuration is explicitly set, use it; otherwise default to true (backward compat)
-        const showDuration = enabledElements.showSessionDuration ?? true;
+        const showDuration = enabledElements.showSessionDuration;
         if (showDuration) {
             const session = renderSession(context.sessionHealth);
             if (session)
@@ -304,15 +304,15 @@ export async function render(context, config) {
     // Context window
     if (enabledElements.contextBar) {
         const ctx = enabledElements.useBars
-            ? renderContextWithBar(context.contextPercent, config.thresholds)
-            : renderContext(context.contextPercent, config.thresholds);
+            ? renderContextWithBar(context.contextPercent, config.thresholds, 10, context.contextDisplayScope)
+            : renderContext(context.contextPercent, config.thresholds, context.contextDisplayScope);
         if (ctx)
             elements.push(ctx);
     }
     // Active agents - handle multi-line format specially
     if (enabledElements.agents) {
-        const format = enabledElements.agentsFormat || 'codes';
-        if (format === 'multiline') {
+        const format = enabledElements.agentsFormat || "codes";
+        if (format === "multiline") {
             // Multi-line mode: get header part and detail lines
             const maxLines = enabledElements.agentsMaxLines || 5;
             const result = renderAgentsMultiLine(context.activeAgents, maxLines);
@@ -354,19 +354,20 @@ export async function render(context, config) {
     // Compose output
     const outputLines = [];
     const gitInfoLine = gitElements.length > 0 ? gitElements.join(dim(PLAIN_SEPARATOR)) : null;
-    const headerLine = elements.join(dim(PLAIN_SEPARATOR));
-    // Position git info based on config (default: above for backward compatibility)
-    const gitPosition = config.elements.gitInfoPosition ?? 'above';
-    if (gitPosition === 'above') {
-        // Git info line above HUD header (traditional layout)
+    const headerLine = elements.length > 0 ? elements.join(dim(PLAIN_SEPARATOR)) : null;
+    const gitPosition = config.elements.gitInfoPosition ?? "above";
+    if (gitPosition === "above") {
         if (gitInfoLine) {
             outputLines.push(gitInfoLine);
         }
-        outputLines.push(headerLine);
+        if (headerLine) {
+            outputLines.push(headerLine);
+        }
     }
     else {
-        // Git info line below HUD header
-        outputLines.push(headerLine);
+        if (headerLine) {
+            outputLines.push(headerLine);
+        }
         if (gitInfoLine) {
             outputLines.push(gitInfoLine);
         }
@@ -377,7 +378,8 @@ export async function render(context, config) {
         if (todos)
             detailLines.push(todos);
     }
-    if (context.missionBoard && (config.missionBoard?.enabled ?? config.elements.missionBoard ?? false)) {
+    if (context.missionBoard &&
+        (config.missionBoard?.enabled ?? config.elements.missionBoard ?? false)) {
         detailLines.unshift(...renderMissionBoard(context.missionBoard, config.missionBoard));
     }
     const widthAdjustedLines = applyMaxWidthByMode([...outputLines, ...detailLines], config.maxWidth, config.wrapMode);
@@ -385,8 +387,8 @@ export async function render(context, config) {
     const limitedLines = limitOutputLines(widthAdjustedLines, config.elements.maxOutputLines);
     // Ensure line-limit indicator and all other lines still respect maxWidth.
     const finalLines = config.maxWidth && config.maxWidth > 0
-        ? limitedLines.map(line => truncateLineToMaxWidth(line, config.maxWidth))
+        ? limitedLines.map((line) => truncateLineToMaxWidth(line, config.maxWidth))
         : limitedLines;
-    return finalLines.join('\n');
+    return finalLines.join("\n");
 }
 //# sourceMappingURL=render.js.map

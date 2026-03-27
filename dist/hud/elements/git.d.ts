@@ -4,6 +4,10 @@
  * Renders git repository name and branch information.
  */
 /**
+ * Clear all git caches. Call in tests beforeEach to ensure a clean slate.
+ */
+export declare function resetGitCache(): void;
+/**
  * Get git repository name from remote URL.
  * Extracts the repo name from URLs like:
  * - https://github.com/user/repo.git

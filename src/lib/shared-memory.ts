@@ -200,7 +200,11 @@ export function writeEntry(
   // Try with lock; fall back to unlocked if lock fails (best-effort)
   try {
     return withFileLockSync(lockPath, doWrite);
-  } catch {
+  } catch (_lockErr) {
+    // BUG 6 fix: log warning when falling back to unlocked write
+    if (typeof process !== 'undefined' && process.stderr) {
+      process.stderr.write(`[shared-memory] lock failed for ${lockPath}, proceeding unlocked\n`);
+    }
     return doWrite();
   }
 }

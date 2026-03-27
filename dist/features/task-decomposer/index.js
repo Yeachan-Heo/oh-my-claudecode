@@ -390,13 +390,15 @@ const fullstackStrategy = {
         const components = [];
         // Frontend component
         if (analysis.areas.includes('frontend') || analysis.areas.includes('ui')) {
+            // Only depend on backend if a backend component is also being created
+            const frontendDeps = (analysis.areas.includes('backend') || analysis.areas.includes('api')) ? ['backend'] : [];
             components.push({
                 id: 'frontend',
                 name: 'Frontend',
                 role: 'frontend',
                 description: 'Frontend UI and components',
                 canParallelize: true,
-                dependencies: ['backend'],
+                dependencies: frontendDeps,
                 effort: 0.4,
                 technologies: analysis.technologies.filter((t) => ['react', 'vue', 'angular', 'next'].includes(t))
             });

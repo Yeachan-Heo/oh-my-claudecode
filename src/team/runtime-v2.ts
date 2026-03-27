@@ -386,6 +386,21 @@ async function waitForWorkerStartupEvidence(
 }
 
 /**
+ * Kill a single tmux pane by ID. Best-effort — never throws.
+ * Used to clean up leaked panes on startup failure.
+ */
+async function killPaneBestEffort(paneId: string): Promise<void> {
+  try {
+    const { execFile: execFileCb } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFileCb);
+    await execFileAsync('tmux', ['kill-pane', '-t', paneId]);
+  } catch {
+    // idempotent: pane may already be gone
+  }
+}
+
+/**
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
@@ -483,6 +498,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   if (!usePromptMode) {
     const paneReady = await waitForPaneReady(paneId);
     if (!paneReady) {
+      // Fix: kill leaked pane on startup failure to prevent tmux pane leak
+      await killPaneBestEffort(paneId);
       return {
         paneId,
         startupAssigned: false,
@@ -520,6 +537,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     },
   });
   if (!dispatchOutcome.ok) {
+    // Fix: kill leaked pane on dispatch failure to prevent tmux pane leak
+    await killPaneBestEffort(paneId);
     return {
       paneId,
       startupAssigned: false,
@@ -537,6 +556,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     if (!settled) {
       const renotified = await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
       if (!renotified.ok) {
+        // Fix: kill leaked pane on re-notification failure
+        await killPaneBestEffort(paneId);
         return {
           paneId,
           startupAssigned: false,
@@ -550,6 +571,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
         opts.cwd,
       );
       if (!settledAfterRetry) {
+        // Fix: kill leaked pane when claude startup evidence is missing
+        await killPaneBestEffort(paneId);
         return {
           paneId,
           startupAssigned: false,
@@ -567,6 +590,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       opts.cwd,
     );
     if (!settled) {
+      // Fix: kill leaked pane when prompt-mode startup evidence is missing
+      await killPaneBestEffort(paneId);
       return {
         paneId,
         startupAssigned: false,
@@ -911,20 +936,23 @@ export async function requeueDeadWorkerTasks(
     await mkdir(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
     await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2), 'utf-8');
 
-    // Reset task to pending (locked to prevent race with concurrent claimTask)
+    // Reset task to pending (async lock to avoid blocking the event loop)
     const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync, writeFileSync } = await import('fs');
-      const { withFileLockSync } = await import('../lib/file-lock.js');
-      withFileLockSync(taskPath + '.lock', () => {
-        const raw = readFileSync(taskPath, 'utf-8');
+      const { withFileLock } = await import('../lib/file-lock.js');
+      const { readFile: readFileAsync, writeFile: writeFileAsync, rename: renameAsync } = await import('fs/promises');
+      await withFileLock(taskPath + '.lock', async () => {
+        const raw = await readFileAsync(taskPath, 'utf-8');
         const taskData = JSON.parse(raw);
         // Only requeue if still in_progress — another worker may have already claimed it
         if (taskData.status === 'in_progress') {
           taskData.status = 'pending';
           taskData.owner = undefined;
           taskData.claim = undefined;
-          writeFileSync(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+          // Atomic write: write to temp file then rename to prevent partial writes
+          const tmpPath = taskPath + '.tmp.' + process.pid;
+          await writeFileAsync(tmpPath, JSON.stringify(taskData, null, 2), 'utf-8');
+          await renameAsync(tmpPath, taskPath);
           requeued.push(task.id);
         }
       });
@@ -1156,6 +1184,11 @@ export async function shutdownTeamV2(
   }
 
   // 1. Shutdown gate check
+  // TOCTOU note: There is an inherent race window between the gate check and
+  // the actual shutdown execution. A worker could create/claim a new task after
+  // the gate passes but before shutdown requests are sent. Perfect synchronization
+  // isn't possible without a global lock. We mitigate this with a best-effort
+  // re-check after sending shutdown requests (see step 2b below).
   if (!force) {
     const allTasks = await listTasksFromFiles(sanitized, cwd);
     const governance = getConfigGovernance(config);
@@ -1219,6 +1252,29 @@ export async function shutdownTeamV2(
       await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);
     } catch (err) {
       process.stderr.write(`[team/runtime-v2] shutdown request failed for ${w.name}: ${err}\n`);
+    }
+  }
+
+  // 2b. TOCTOU mitigation: re-check task states after sending shutdown requests.
+  // If new non-terminal tasks appeared between the gate check and now, log a warning.
+  if (!force) {
+    try {
+      const postShutdownTasks = await listTasksFromFiles(sanitized, cwd);
+      const newNonTerminal = postShutdownTasks.filter(
+        (t) => t.status === 'pending' || t.status === 'blocked' || t.status === 'in_progress',
+      );
+      if (newNonTerminal.length > 0) {
+        process.stderr.write(
+          `[team/runtime-v2] TOCTOU warning: ${newNonTerminal.length} non-terminal task(s) detected after shutdown gate passed\n`,
+        );
+        await appendTeamEvent(sanitized, {
+          type: 'team_leader_nudge',
+          worker: 'leader-fixed',
+          reason: `toctou_warning:non_terminal_tasks=${newNonTerminal.length}`,
+        }, cwd).catch(() => {});
+      }
+    } catch {
+      // Best-effort re-check — don't block shutdown if it fails
     }
   }
 

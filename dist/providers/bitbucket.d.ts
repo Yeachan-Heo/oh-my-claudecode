@@ -5,8 +5,8 @@ export declare class BitbucketProvider implements GitProvider {
     readonly prTerminology: "PR";
     readonly prRefspec: null;
     detectFromRemote(url: string): boolean;
-    viewPR(number: number, owner?: string, repo?: string): PRInfo | null;
-    viewIssue(number: number, owner?: string, repo?: string): IssueInfo | null;
+    viewPR(number: number, owner?: string, repo?: string): Promise<PRInfo | null>;
+    viewIssue(number: number, owner?: string, repo?: string): Promise<IssueInfo | null>;
     checkAuth(): boolean;
     getRequiredCLI(): string | null;
 }

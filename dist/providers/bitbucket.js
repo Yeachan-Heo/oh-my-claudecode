@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 const API_BASE = 'https://api.bitbucket.org/2.0/repositories';
 function getAuthHeader() {
     const token = process.env.BITBUCKET_TOKEN;
@@ -12,18 +11,18 @@ function getAuthHeader() {
     }
     return null;
 }
-function fetchApi(url) {
+async function fetchApi(url) {
     const auth = getAuthHeader();
     if (!auth)
         return null;
     try {
-        const args = ['-sS', '-H', `Authorization: ${auth}`, url];
-        const raw = execFileSync('curl', args, {
-            encoding: 'utf-8',
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
+        const response = await fetch(url, {
+            headers: { Authorization: auth },
+            signal: AbortSignal.timeout(10000),
         });
-        return JSON.parse(raw);
+        if (!response.ok)
+            return null;
+        return (await response.json());
     }
     catch {
         return null;
@@ -37,12 +36,12 @@ export class BitbucketProvider {
     detectFromRemote(url) {
         return url.includes('bitbucket.org');
     }
-    viewPR(number, owner, repo) {
+    async viewPR(number, owner, repo) {
         if (!Number.isInteger(number) || number < 1)
             return null;
         if (!owner || !repo)
             return null;
-        const data = fetchApi(`${API_BASE}/${owner}/${repo}/pullrequests/${number}`);
+        const data = await fetchApi(`${API_BASE}/${owner}/${repo}/pullrequests/${number}`);
         if (!data)
             return null;
         const source = data.source;
@@ -61,12 +60,12 @@ export class BitbucketProvider {
             author: author?.display_name,
         };
     }
-    viewIssue(number, owner, repo) {
+    async viewIssue(number, owner, repo) {
         if (!Number.isInteger(number) || number < 1)
             return null;
         if (!owner || !repo)
             return null;
-        const data = fetchApi(`${API_BASE}/${owner}/${repo}/issues/${number}`);
+        const data = await fetchApi(`${API_BASE}/${owner}/${repo}/issues/${number}`);
         if (!data)
             return null;
         const content = data.content;

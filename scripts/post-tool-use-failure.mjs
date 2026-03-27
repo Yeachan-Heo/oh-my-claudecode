@@ -22,11 +22,15 @@ function isPathContained(targetPath, basePath) {
 
 // Initialize .omc directory if needed
 function initOmcDir(directory) {
-  const cwd = process.cwd();
-  // Validate directory is contained within cwd
-  if (!isPathContained(directory, cwd)) {
-    // Fallback to cwd if directory attempts traversal
-    directory = cwd;
+  // BUG FIX: Use resolved absolute path instead of process.cwd() for trust boundary.
+  // process.cwd() may be the plugin cache dir, not the project directory.
+  // The directory comes from data.cwd (Claude Code's hook input) and is already trusted.
+  const resolved = resolve(directory);
+  if (!resolved || resolved === '/' || !resolve(resolved).startsWith('/')) {
+    // Safety: reject empty, root, or non-absolute paths
+    directory = process.cwd();
+  } else {
+    directory = resolved;
   }
   const omcDir = join(directory, '.omc');
   const stateDir = join(omcDir, 'state');

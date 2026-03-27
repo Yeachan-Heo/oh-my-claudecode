@@ -839,8 +839,10 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
                 mode: "enforce",
               });
 
+              // Fix: permanently failed tasks must use "failed" status, not "completed",
+              // so the watchdog correctly reports them as failures.
               updateTask(teamName, task.id, {
-                status: "completed",
+                status: "failed",
                 metadata: {
                   ...(task.metadata || {}),
                   error: `Permission violations detected (enforce mode)`,
@@ -977,9 +979,10 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
 
           // Check if retries exhausted
           if (attempt >= (config.maxRetries ?? 5)) {
-            // Permanently fail: mark completed with error metadata
+            // Fix: permanently failed tasks must use "failed" status, not "completed",
+            // so the watchdog correctly reports them as failures.
             updateTask(teamName, task.id, {
-              status: "completed",
+              status: "failed",
               metadata: {
                 ...(task.metadata || {}),
                 error: errorMsg,

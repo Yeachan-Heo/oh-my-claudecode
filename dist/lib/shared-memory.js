@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from './worktree-paths.js';
+import { withFileLockSync } from './file-lock.js';
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -113,31 +114,53 @@ export function writeEntry(namespace, key, value, ttl, worktreeRoot) {
     ensureNamespaceDir(namespace, worktreeRoot);
     const filePath = getEntryPath(namespace, key, worktreeRoot);
     const now = new Date().toISOString();
-    let existingCreatedAt = now;
-    if (existsSync(filePath)) {
+    // Lock the read-modify-write to prevent concurrent writers from losing updates
+    const lockPath = filePath + '.lock';
+    const doWrite = () => {
+        let existingCreatedAt = now;
+        if (existsSync(filePath)) {
+            try {
+                const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
+                existingCreatedAt = existing.createdAt || now;
+            }
+            catch {
+                // Corrupted file, treat as new
+            }
+        }
+        const entry = {
+            key,
+            value,
+            namespace,
+            createdAt: existingCreatedAt,
+            updatedAt: now,
+        };
+        if (ttl && ttl > 0) {
+            entry.ttl = ttl;
+            entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+        }
+        const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+        writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
+        renameSync(tmpPath, filePath);
+        // Clean up legacy .tmp file (old constant-suffix scheme) if it exists
         try {
-            const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
-            existingCreatedAt = existing.createdAt || now;
+            const legacyTmp = filePath + '.tmp';
+            if (existsSync(legacyTmp))
+                unlinkSync(legacyTmp);
         }
-        catch {
-            // Corrupted file, treat as new
-        }
-    }
-    const entry = {
-        key,
-        value,
-        namespace,
-        createdAt: existingCreatedAt,
-        updatedAt: now,
+        catch { /* best-effort cleanup */ }
+        return entry;
     };
-    if (ttl && ttl > 0) {
-        entry.ttl = ttl;
-        entry.expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+    // Try with lock; fall back to unlocked if lock fails (best-effort)
+    try {
+        return withFileLockSync(lockPath, doWrite);
     }
-    const tmpPath = filePath + '.tmp';
-    writeFileSync(tmpPath, JSON.stringify(entry, null, 2), 'utf-8');
-    renameSync(tmpPath, filePath);
-    return entry;
+    catch (_lockErr) {
+        // BUG 6 fix: log warning when falling back to unlocked write
+        if (typeof process !== 'undefined' && process.stderr) {
+            process.stderr.write(`[shared-memory] lock failed for ${lockPath}, proceeding unlocked\n`);
+        }
+        return doWrite();
+    }
 }
 /**
  * Read a key from shared memory.
