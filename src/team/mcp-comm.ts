@@ -156,7 +156,7 @@ export interface QueueInboxParams {
 }
 
 export async function queueInboxInstruction(params: QueueInboxParams): Promise<DispatchOutcome> {
-  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  // Check dedup BEFORE writing inbox to avoid overwriting with stale content
   const queued = await enqueueDispatchRequest(
     params.teamName,
     {
@@ -179,6 +179,18 @@ export async function queueInboxInstruction(params: QueueInboxParams): Promise<D
       reason: 'duplicate_pending_dispatch_request',
       request_id: queued.request.request_id,
     };
+  }
+
+  try {
+    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  } catch (inboxErr) {
+    await markImmediateDispatchFailure({
+      teamName: params.teamName,
+      request: queued.request,
+      reason: 'inbox_write_failed',
+      cwd: params.cwd,
+    });
+    throw inboxErr;
   }
 
   const notifyOutcome = await Promise.resolve(params.notify(

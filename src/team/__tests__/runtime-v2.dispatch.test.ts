@@ -212,7 +212,7 @@ describe('runtime v2 startup inbox dispatch', () => {
   });
 
 
-  it('does not auto-kill a worker pane when startup readiness fails', async () => {
+  it('auto-kills the worker pane when startup readiness fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-ready-'));
     mocks.waitForPaneReady.mockResolvedValue(false);
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -225,12 +225,11 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd,
     });
 
-    expect(runtime.config.workers[0]?.pane_id).toBe('%2');
+    expect(runtime.config.workers[0]?.pane_id).toBeUndefined();
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
-    expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
   });
 
-  it('does not auto-kill a worker pane when startup notification fails', async () => {
+  it('auto-kills the worker pane when startup notification fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-notify-'));
     mocks.sendToWorker.mockResolvedValue(false);
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -243,9 +242,8 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd,
     });
 
-    expect(runtime.config.workers[0]?.pane_id).toBe('%2');
+    expect(runtime.config.workers[0]?.pane_id).toBeUndefined();
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
-    expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
 
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests).toHaveLength(1);
@@ -265,7 +263,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd,
     });
 
-    expect(runtime.config.workers[0]?.pane_id).toBe('%2');
+    expect(runtime.config.workers[0]?.pane_id).toBeUndefined();
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(2);
 

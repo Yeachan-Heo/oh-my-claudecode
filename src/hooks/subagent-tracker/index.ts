@@ -709,8 +709,9 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
 
     // Record to session replay JSONL for /trace
     // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
+    // Re-locate agent after eviction (index may have shifted)
+    const trackedAgent = state.agents.find(a => a.agent_id === input.agent_id);
     try {
-      const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
       const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
       recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
     } catch { /* best-effort */ }
@@ -720,8 +721,8 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
         sessionId: input.session_id,
         agentId: input.agent_id,
         success: succeeded,
-        outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
-        at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
+        outputSummary: trackedAgent?.output_summary || input.output,
+        at: trackedAgent?.completed_at || new Date().toISOString(),
       });
     } catch { /* best-effort */ }
 

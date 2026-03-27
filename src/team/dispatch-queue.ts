@@ -15,7 +15,7 @@ import { existsSync } from 'fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { TeamPaths, absPath } from './state-paths.js';
-import { atomicWriteJson, ensureDirWithMode } from './fs-utils.js';
+// atomicWriteJson and ensureDirWithMode removed — replaced with async equivalents in writeDispatchRequestsToFile
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -179,8 +179,13 @@ async function readDispatchRequestsFromFile(teamName: string, cwd: string): Prom
 async function writeDispatchRequestsToFile(teamName: string, requests: TeamDispatchRequest[], cwd: string): Promise<void> {
   const path = absPath(cwd, TeamPaths.dispatchRequests(teamName));
   const dir = dirname(path);
-  ensureDirWithMode(dir);
-  atomicWriteJson(path, requests);
+  // Fix: use async mkdir instead of sync ensureDirWithMode to avoid blocking the event loop
+  await mkdir(dir, { recursive: true });
+  // Fix: use async atomic write (write to temp + rename) instead of sync atomicWriteJson
+  const tmpPath = path + '.tmp.' + process.pid;
+  await writeFile(tmpPath, JSON.stringify(requests, null, 2), 'utf-8');
+  const { rename } = await import('fs/promises');
+  await rename(tmpPath, path);
 }
 
 // ── Normalization ──────────────────────────────────────────────────────────

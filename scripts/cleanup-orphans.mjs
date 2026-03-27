@@ -144,7 +144,7 @@ function killProcess(pid) {
       process.kill(pid, 'SIGTERM');
 
       // Wait 5s, then SIGKILL if still alive
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         try {
           process.kill(pid, 0); // Check if still running
           process.kill(pid, 'SIGKILL');
@@ -152,6 +152,8 @@ function killProcess(pid) {
           // Process already exited
         }
       }, 5000);
+      // BUG FIX: unref() so this timer doesn't keep the process alive
+      timer.unref();
     }
     return true;
   } catch {

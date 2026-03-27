@@ -44,8 +44,6 @@
     "build:cli": "node scripts/build-cli.mjs",
     "build:runtime-cli": "node scripts/build-runtime-cli.mjs",
     "build:team-server": "node scripts/build-team-server.mjs",
-    "ask:codex": "./scripts/ask-codex.sh",
-    "ask:gemini": "./scripts/ask-gemini.sh",
     "compose-docs": "node scripts/compose-docs.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",

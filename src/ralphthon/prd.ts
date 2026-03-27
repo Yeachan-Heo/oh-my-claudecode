@@ -5,7 +5,7 @@
  * Handles read/write/status operations for ralphthon-prd.json.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { join } from "path";
 import { getOmcRoot } from "../lib/worktree-paths.js";
 import {
@@ -115,7 +115,10 @@ export function writeRalphthonPrd(
       ...prd,
       planningContext: normalizePlanningContext(prd.planningContext),
     };
-    writeFileSync(prdPath, JSON.stringify(normalizedPrd, null, 2));
+    // BUG 5 fix: use atomic write (temp file + rename) to prevent partial writes
+    const tmpPath = `${prdPath}.tmp.${process.pid}`;
+    writeFileSync(tmpPath, JSON.stringify(normalizedPrd, null, 2));
+    renameSync(tmpPath, prdPath);
     return true;
   } catch {
     return false;

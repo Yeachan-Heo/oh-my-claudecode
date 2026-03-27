@@ -601,7 +601,8 @@ async function main() {
     } catch {}
 
     const directory = data.cwd || data.directory || process.cwd();
-    const sessionId = data.session_id || data.sessionId || "";
+    // BUG FIX: Match .mjs field priority order — sessionId first, then snake_case, then lowercase
+    const sessionId = data.sessionId || data.session_id || data.sessionid || "";
     const stateDir = join(directory, ".omc", "state");
 
     // CRITICAL: Never block context-limit stops.
