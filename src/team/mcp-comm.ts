@@ -19,6 +19,7 @@ import {
   type TeamDispatchRequest,
   type TeamDispatchRequestInput,
 } from './dispatch-queue.js';
+import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,9 @@ async function markImmediateDispatchFailure(params: {
 }): Promise<void> {
   const { teamName, request, reason, messageId, cwd } = params;
   if (request.transport_preference === 'hook_preferred_with_fallback') return;
+  const logTransitionFailure = createSwallowedErrorLogger(
+    'team.mcp-comm.markImmediateDispatchFailure transitionDispatchRequest failed',
+  );
 
   const current = await readDispatchRequest(teamName, request.request_id, cwd);
   if (!current) return;
@@ -111,7 +115,7 @@ async function markImmediateDispatchFailure(params: {
       last_reason: reason,
     },
     cwd,
-  ).catch(() => {});
+  ).catch(logTransitionFailure);
 }
 
 async function markLeaderPaneMissingDeferred(params: {
@@ -121,6 +125,9 @@ async function markLeaderPaneMissingDeferred(params: {
   messageId?: string;
 }): Promise<void> {
   const { teamName, request, cwd, messageId } = params;
+  const logTransitionFailure = createSwallowedErrorLogger(
+    'team.mcp-comm.markLeaderPaneMissingDeferred transitionDispatchRequest failed',
+  );
   const current = await readDispatchRequest(teamName, request.request_id, cwd);
   if (!current) return;
   if (current.status !== 'pending') return;
@@ -135,7 +142,7 @@ async function markLeaderPaneMissingDeferred(params: {
       last_reason: 'leader_pane_missing_deferred',
     },
     cwd,
-  ).catch(() => {});
+  ).catch(logTransitionFailure);
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────

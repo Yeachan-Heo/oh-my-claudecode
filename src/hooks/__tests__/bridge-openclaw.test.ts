@@ -37,6 +37,30 @@ describe("_openclaw.wake", () => {
     vi.doUnmock("../../openclaw/index.js");
   });
 
+  it("logs when wakeOpenClaw rejects but does not throw", async () => {
+    vi.stubEnv("OMC_OPENCLAW", "1");
+    vi.resetModules();
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.doMock("../../openclaw/index.js", () => ({
+      wakeOpenClaw: vi.fn().mockRejectedValue(new Error('gateway down')),
+    }));
+
+    const { _openclaw: freshOpenClaw } = await import("../bridge.js");
+
+    expect(() => {
+      freshOpenClaw.wake("session-start", { sessionId: "sid-1" });
+    }).not.toThrow();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[omc] hooks.bridge openclaw wake failed for session-start: gateway down',
+    );
+
+    vi.doUnmock("../../openclaw/index.js");
+  });
+
   it("does not throw when OMC_OPENCLAW === '1' and import fails", async () => {
     vi.stubEnv("OMC_OPENCLAW", "1");
 

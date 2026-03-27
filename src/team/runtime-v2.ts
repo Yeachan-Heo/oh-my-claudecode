@@ -73,6 +73,7 @@ import {
 import { queueInboxInstruction, type DispatchOutcome } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
+import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
 // ---------------------------------------------------------------------------
 // Feature flag
@@ -889,6 +890,9 @@ export async function requeueDeadWorkerTasks(
   deadWorkerNames: string[],
   cwd: string,
 ): Promise<string[]> {
+  const logEventFailure = createSwallowedErrorLogger(
+    'team.runtime-v2.requeueDeadWorkerTasks appendTeamEvent failed',
+  );
   const sanitized = sanitizeTeamName(teamName);
   const tasks = await listTasksFromFiles(sanitized, cwd);
   const requeued: string[] = [];
@@ -937,7 +941,7 @@ export async function requeueDeadWorkerTasks(
       worker: 'leader-fixed',
       task_id: task.id,
       reason: `requeue_dead_worker:${task.owner}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(logEventFailure);
   }
 
   return requeued;
@@ -1142,6 +1146,9 @@ export async function shutdownTeamV2(
   cwd: string,
   options: ShutdownOptionsV2 = {},
 ): Promise<void> {
+  const logEventFailure = createSwallowedErrorLogger(
+    'team.runtime-v2.shutdownTeamV2 appendTeamEvent failed',
+  );
   const force = options.force === true;
   const ralph = options.ralph === true;
   const timeoutMs = options.timeoutMs ?? 15_000;
@@ -1174,7 +1181,7 @@ export async function shutdownTeamV2(
       type: 'shutdown_gate',
       worker: 'leader-fixed',
       reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(logEventFailure);
 
     if (!gate.allowed) {
       const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
@@ -1183,14 +1190,14 @@ export async function shutdownTeamV2(
           type: 'team_leader_nudge',
           worker: 'leader-fixed',
           reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-        }, cwd).catch(() => {});
+        }, cwd).catch(logEventFailure);
       } else if (ralph && !hasActiveWork) {
         // Ralph policy: bypass on failure-only scenarios
         await appendTeamEvent(sanitized, {
           type: 'team_leader_nudge',
           worker: 'leader-fixed',
           reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-        }, cwd).catch(() => {});
+        }, cwd).catch(logEventFailure);
       } else {
         throw new Error(
           `shutdown_gate_blocked:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
@@ -1204,7 +1211,7 @@ export async function shutdownTeamV2(
       type: 'shutdown_gate_forced',
       worker: 'leader-fixed',
       reason: 'force_bypass',
-    }, cwd).catch(() => {});
+    }, cwd).catch(logEventFailure);
   }
 
   // 2. Send shutdown request to each worker
@@ -1237,7 +1244,7 @@ export async function shutdownTeamV2(
           type: 'shutdown_ack',
           worker: w.name,
           reason: ack.status === 'reject' ? `reject:${ack.reason || 'no_reason'}` : 'accept',
-        }, cwd).catch(() => {});
+        }, cwd).catch(logEventFailure);
         if (ack.status === 'reject') {
           rejected.push({ worker: w.name, reason: ack.reason || 'no_reason' });
         }
@@ -1301,7 +1308,7 @@ export async function shutdownTeamV2(
       type: 'team_leader_nudge',
       worker: 'leader-fixed',
       reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(logEventFailure);
   }
 
   // 6. Clean up state

@@ -48,6 +48,7 @@ import { listDispatchRequests, markDispatchRequestDelivered, markDispatchRequest
 import { generateMailboxTriggerMessage } from './worker-bootstrap.js';
 import { shutdownTeam } from './runtime.js';
 import { shutdownTeamV2 } from './runtime-v2.js';
+import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
 const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change']);
 const TEAM_UPDATE_TASK_REQUEST_FIELDS = new Set(['team_name', 'task_id', 'workingDirectory', ...TEAM_UPDATE_TASK_MUTABLE_FIELDS]);
@@ -428,6 +429,9 @@ async function syncMailboxDispatchNotified(
   messageId: string,
   cwd: string,
 ): Promise<void> {
+  const logDispatchSyncFailure = createSwallowedErrorLogger(
+    'team.api-interop syncMailboxDispatchNotified dispatch state sync failed',
+  );
   const requestId = await findMailboxDispatchRequestId(teamName, workerName, messageId, cwd);
   if (!requestId) return;
   await markDispatchRequestNotified(
@@ -435,7 +439,7 @@ async function syncMailboxDispatchNotified(
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_notified' },
     cwd,
-  ).catch(() => {});
+  ).catch(logDispatchSyncFailure);
 }
 
 async function syncMailboxDispatchDelivered(
@@ -444,6 +448,9 @@ async function syncMailboxDispatchDelivered(
   messageId: string,
   cwd: string,
 ): Promise<void> {
+  const logDispatchSyncFailure = createSwallowedErrorLogger(
+    'team.api-interop syncMailboxDispatchDelivered dispatch state sync failed',
+  );
   const requestId = await findMailboxDispatchRequestId(teamName, workerName, messageId, cwd);
   if (!requestId) return;
 
@@ -452,13 +459,13 @@ async function syncMailboxDispatchDelivered(
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_delivered' },
     cwd,
-  ).catch(() => {});
+  ).catch(logDispatchSyncFailure);
   await markDispatchRequestDelivered(
     teamName,
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_delivered' },
     cwd,
-  ).catch(() => {});
+  ).catch(logDispatchSyncFailure);
 }
 
 function validateCommonFields(args: Record<string, unknown>): void {

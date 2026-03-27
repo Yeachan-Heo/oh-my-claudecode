@@ -16,6 +16,7 @@ import { deriveTeamLeaderGuidance } from './leader-nudge-guidance.js';
 import { waitForSentinelReadiness } from './sentinel-gate.js';
 import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2 } from './runtime-v2.js';
 import type { TeamSnapshotV2 } from './runtime-v2.js';
+import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
 interface CliInput {
   teamName: string;
@@ -170,6 +171,9 @@ function collectTaskResults(stateRoot: string): TaskResult[] {
 
 async function main(): Promise<void> {
   const startTime = Date.now();
+  const logLeaderNudgeEventFailure = createSwallowedErrorLogger(
+    'team.runtime-cli main appendTeamEvent failed',
+  );
 
   // Read stdin
   const chunks: Buffer[] = [];
@@ -399,7 +403,7 @@ async function main(): Promise<void> {
           reason: leaderGuidance.reason,
           next_action: leaderGuidance.nextAction,
           message: leaderGuidance.message,
-        }, cwd).catch(() => {});
+        }, cwd).catch(logLeaderNudgeEventFailure);
         lastLeaderNudgeReason = leaderGuidance.reason;
       }
 

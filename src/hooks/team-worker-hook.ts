@@ -16,6 +16,7 @@
 import { readFile, writeFile, mkdir, appendFile, rename, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
 // ── Env helpers ────────────────────────────────────────────────────────────
 
@@ -333,6 +334,9 @@ export async function maybeNotifyLeaderWorkerIdle(params: {
   if (currentTaskId) parts.push(`task: ${currentTaskId}`);
   if (currentReason) parts.push(`reason: ${currentReason}`);
   const message = `${parts.join('. ')}. ${DEFAULT_MARKER}`;
+  const logWorkerIdlePersistenceFailure = createSwallowedErrorLogger(
+    'hooks.team-worker maybeNotifyLeaderWorkerIdle persistence failed',
+  );
 
   try {
     await tmux.sendKeys(leaderPaneId, message, true);
@@ -346,7 +350,7 @@ export async function maybeNotifyLeaderWorkerIdle(params: {
       last_notified_at_ms: nowMs,
       last_notified_at: nowIso,
       prev_state: prevState,
-    }).catch(() => {});
+    }).catch(logWorkerIdlePersistenceFailure);
 
     // Append event
     const eventsDir = join(stateDir, 'team', teamName, 'events');
@@ -414,6 +418,9 @@ export async function maybeNotifyLeaderAllWorkersIdle(params: {
 
   const N = workers.length;
   const message = `[OMC] All ${N} worker${N === 1 ? '' : 's'} idle. Ready for next instructions. ${DEFAULT_MARKER}`;
+  const logAllWorkersIdlePersistenceFailure = createSwallowedErrorLogger(
+    'hooks.team-worker maybeNotifyLeaderAllWorkersIdle persistence failed',
+  );
 
   try {
     await tmux.sendKeys(leaderPaneId, message, true);
@@ -427,7 +434,7 @@ export async function maybeNotifyLeaderAllWorkersIdle(params: {
       last_notified_at_ms: nowMs,
       last_notified_at: nowIso,
       worker_count: N,
-    }).catch(() => {});
+    }).catch(logAllWorkersIdlePersistenceFailure);
 
     // Append event
     const eventsDir = join(stateDir, 'team', teamName, 'events');
