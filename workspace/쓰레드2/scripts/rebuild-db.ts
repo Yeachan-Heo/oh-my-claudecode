@@ -49,7 +49,7 @@ async function main() {
           is_active: true,
         }).onConflictDoNothing().returning({ channel_id: schema.channels.channel_id });
         if (rows.length > 0) inserted++;
-      } catch {}
+      } catch { /* ignored */ }
     }
     console.log(`[rebuild] Channels imported: ${inserted}`);
   }
@@ -61,7 +61,7 @@ async function main() {
   ]) {
     try {
       await db.insert(schema.channels).values({ ...ch, bio: '', is_active: true }).onConflictDoNothing();
-    } catch {}
+    } catch { /* ignored */ }
   }
 
   // 3. Import posts from thread_units
@@ -119,7 +119,7 @@ async function main() {
           conversion_rate: u.conversion_rate ?? null,
         }).onConflictDoNothing().returning({ post_id: schema.threadPosts.post_id });
         if (rows.length > 0) fileInserted++;
-      } catch (e) {
+      } catch {
         // skip
       }
     }
@@ -149,7 +149,7 @@ async function main() {
           is_active: true,
         }).onConflictDoNothing().returning({ product_id: schema.products.product_id });
         if (rows.length > 0) pInserted++;
-      } catch {}
+      } catch { /* ignored */ }
     }
     console.log(`[rebuild] Products imported: ${pInserted}/${productList.length}`);
   }

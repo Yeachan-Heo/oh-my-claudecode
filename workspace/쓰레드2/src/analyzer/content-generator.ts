@@ -9,8 +9,7 @@
 
 import type { PositionFormat } from '../types.js';
 import { db } from '../db/index.js';
-import { affContents, contentLifecycle, accounts } from '../db/schema.js';
-import { generateId } from '../utils/id.js';
+import { accounts } from '../db/schema.js';
 // LLM 호출 제거됨 — 콘텐츠 생성은 Claude Code가 /threads-pipeline 스킬로 직접 수행
 // 이 파일은 유틸 함수(포맷 선택, 워밍업 감지, 훅 새니타이징)만 제공
 
@@ -42,7 +41,7 @@ export interface ProductMatch {
 
 // ─── Types ──────────────────────────────────────────────
 
-interface ProductInfo {
+interface _ProductInfo {
   product_id: string;
   name: string;
   category: string;

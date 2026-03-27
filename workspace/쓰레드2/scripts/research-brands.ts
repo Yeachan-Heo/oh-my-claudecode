@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '../src/db/index.js';
 import { brands } from '../src/db/schema.js';
-import { eq, and, isNull, lt, or, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 // ─── Constants ───────────────────────────────────────────
 

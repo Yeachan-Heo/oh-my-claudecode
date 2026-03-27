@@ -106,7 +106,7 @@ async function main(): Promise<void> {
 
   let totalCollected = 0;
   let totalInserted = 0;
-  const allResults: Array<{
+  const _allResults: Array<{
     cafe: string;
     title: string;
     views: number;

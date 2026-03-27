@@ -84,6 +84,47 @@ export async function logEpisode(input: LogEpisodeInput, db: DbLike = defaultDb)
   return row;
 }
 
+// ─── Phase Memory ────────────────────────────────────────
+
+/** Phase별 기본 importance 값. */
+const PHASE_IMPORTANCE: Record<number, number> = {
+  0: 0.3,
+  1: 0.5,
+  2: 0.7,
+  3: 0.9,
+  4: 0.6,
+  5: 0.8,
+};
+
+/**
+ * Phase 완료 후 자동 기억 저장.
+ * claude-memory-mcp의 memory_store 패턴 차용:
+ * - 자동 요약 (content 200자 제한)
+ * - importance 스코어링 (Phase별 기본값)
+ * - source 태깅 ("phase-{N}-auto")
+ */
+export async function savePhaseMemory(
+  phase: number,
+  summary: string,
+  details: Record<string, unknown>,
+  db: DbLike = defaultDb,
+): Promise<void> {
+  const detailsStr = JSON.stringify(details);
+  const fullContent = `${summary} | ${detailsStr}`;
+  const truncatedContent = fullContent.length > 200
+    ? fullContent.slice(0, 197) + '...'
+    : fullContent;
+
+  await saveMemory({
+    agentId: 'system-orchestrator',
+    scope: 'global',
+    memoryType: 'insight',
+    content: truncatedContent,
+    importance: PHASE_IMPORTANCE[phase] ?? 0.5,
+    source: `phase-${phase}-auto`,
+  }, db);
+}
+
 // ─── Sub-query helpers ────────────────────────────────────
 
 /**
@@ -95,9 +136,11 @@ async function getTopKMemories(
   agentId: string | null,
   k: number,
   db: DbLike,
+  options?: { memoryType?: string },
 ): Promise<unknown[]> {
   const conditions = [eq(agentMemories.scope, scope)];
   if (agentId) conditions.push(eq(agentMemories.agent_id, agentId));
+  if (options?.memoryType) conditions.push(eq(agentMemories.memory_type, options.memoryType));
 
   const rows = await db
     .select()

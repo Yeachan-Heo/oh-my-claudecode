@@ -9,14 +9,13 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { chromium } from 'playwright';
 import type { Browser, Page } from 'playwright';
 import { db } from '../db/index.js';
 import { products } from '../db/schema.js';
 import type { DetectedNeed } from './content-generator.js';
 import { sendProductRequest } from '../utils/telegram.js';
 import type { NeedInfo, CoupangProduct } from '../utils/telegram.js';
-import { CDP_URL, connectBrowser } from '../utils/browser.js';
+import { connectBrowser } from '../utils/browser.js';
 
 // ─── Types ──────────────────────────────────────────────
 

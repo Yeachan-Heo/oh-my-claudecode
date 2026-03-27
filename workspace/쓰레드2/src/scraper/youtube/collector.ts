@@ -16,7 +16,7 @@ import {
   getCommentReplies,
   getVideoTranscript,
 } from './api.js';
-import { SEED_CHANNELS, SEARCH_KEYWORDS, HIGH_NEED_KEYWORDS } from './channels.js';
+import { SEED_CHANNELS, SEARCH_KEYWORDS } from './channels.js';
 import type {
   YouTubeChannel,
   YouTubeVideoItem,
@@ -178,7 +178,7 @@ async function collectFromChannel(
       if (transcript) {
         log(`    대본 ${transcript.length}자 수집`);
       }
-    } catch {}
+    } catch { /* ignored */ }
 
     // 6. Save
     const isNew = await saveToDb(video, comments, channel.handle, transcript);
@@ -267,7 +267,7 @@ async function collectFromSearch(
       if (transcript) {
         log(`    대본 ${transcript.length}자 수집`);
       }
-    } catch {}
+    } catch { /* ignored */ }
 
     const handle = video.channelTitle.replace(/\s+/g, '_');
     const isNew = await saveToDb(video, comments, handle, transcript);

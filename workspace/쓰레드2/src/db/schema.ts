@@ -754,41 +754,6 @@ export const dailyPerformanceReports = pgTable(
   },
 );
 
-/**
- * source_performance - 소스별 성과 집계 (주기적 스냅샷).
- */
-export const sourcePerformance = pgTable(
-  'source_performance',
-  {
-    id: text('id').primaryKey(),
-    period_start: timestamp('period_start', { withTimezone: true }).notNull(),
-    period_end: timestamp('period_end', { withTimezone: true }).notNull(),
-    source: postSourceEnum('source').notNull(),
-    brand_id: text('brand_id'),                          // brand 소스인 경우
-
-    // 퍼널 지표
-    posts_collected: integer('posts_collected').notNull().default(0),
-    posts_analyzed: integer('posts_analyzed').notNull().default(0),
-    needs_detected: integer('needs_detected').notNull().default(0),
-    contents_generated: integer('contents_generated').notNull().default(0),
-    contents_posted: integer('contents_posted').notNull().default(0),
-
-    // 성과 지표
-    avg_likes: real('avg_likes').notNull().default(0),
-    avg_replies: real('avg_replies').notNull().default(0),
-    avg_views: real('avg_views').notNull().default(0),
-    avg_engagement_rate: real('avg_engagement_rate').notNull().default(0),
-    total_clicks: integer('total_clicks').notNull().default(0),
-    total_revenue: real('total_revenue').notNull().default(0),
-
-    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index('idx_source_perf_source').on(table.source),
-    index('idx_source_perf_period').on(table.period_start),
-  ],
-);
-
 // ---------------------------------------------------------------------------
 // YouTube Channels & Videos
 // ---------------------------------------------------------------------------

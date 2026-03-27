@@ -87,7 +87,7 @@ vi.mock('../tracker/diagnosis.js', () => ({
   getLatestDiagnosis: mockGetLatestDiagnosis,
 }));
 
-import { buildDirective, gatePhase2, gatePhase3, runQA, runQAWithRetry, runDailyPipeline } from '../orchestrator/daily-pipeline.js';
+import { buildDirective, gatePhase2, gatePhase3, runQA, runQAWithRetry, runDailyPipeline, fetchYouTubeSignals, fetchBrandEventSlots, fetchSelectedTrendKeywords, markBrandEventUsed } from '../orchestrator/daily-pipeline.js';
 import type { ContentDraft } from '../orchestrator/types.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -107,6 +107,9 @@ import type { ContentDraft } from '../orchestrator/types.js';
 function setupMockClient(overrides?: {
   categoryStats?: Array<{ category: string; avg_views: number; engagement_rate: number }>;
   brandEventsCount?: number;
+  youtubeSignals?: Array<{ title: string; view_count: number; channel_id: string }>;
+  brandEventSlots?: Array<{ event_id: string; brand_id: string; event_type: string; title: string; urgency: string; expires_at: string | null }>;
+  trendKeywords?: Array<{ keyword: string; rank: number | null; source: string }>;
 }) {
   const categoryStats = overrides?.categoryStats ?? [
     { category: '뷰티', avg_views: 5000, engagement_rate: 0.05 },
@@ -115,12 +118,21 @@ function setupMockClient(overrides?: {
     { category: '다이어트', avg_views: 1000, engagement_rate: 0.01 },
   ];
   const brandEventsCount = overrides?.brandEventsCount ?? 5;
+  const youtubeSignals = overrides?.youtubeSignals ?? [];
+  const brandEventSlots = overrides?.brandEventSlots ?? [];
+  const trendKeywords = overrides?.trendKeywords ?? [];
 
   mockClient
     // fetchPhase2Data — category stats query
     .mockResolvedValueOnce(categoryStats)
     // fetchPhase2Data — brand events count query
     .mockResolvedValueOnce([{ cnt: brandEventsCount }])
+    // fetchYouTubeSignals — youtube_videos TOP 10
+    .mockResolvedValueOnce(youtubeSignals)
+    // fetchBrandEventSlots — brand_events valid list
+    .mockResolvedValueOnce(brandEventSlots)
+    // fetchSelectedTrendKeywords — trend_keywords selected=true
+    .mockResolvedValueOnce(trendKeywords)
     // diversity check — content_lifecycle query
     .mockResolvedValueOnce([])
     // recycle candidates query
@@ -597,7 +609,7 @@ describe('Phase 0: snapshot collection wiring', () => {
     // dry-run: Phase 2~3 only, needs buildDirective mocks
     setupMockClient();
 
-    const result = await runDailyPipeline({
+    const _result = await runDailyPipeline({
       dryRun: true,
       autonomous: false,
       posts: 10,
@@ -734,5 +746,233 @@ describe('buildDirective diagnosis feedback', () => {
     }
     // Total always equals totalPosts
     expect(Object.values(directive.category_allocation).reduce((a: number, b: number) => a + b, 0)).toBe(10);
+  });
+});
+
+// =============================================================================
+// Phase 2.5: 미활용 자산 연결 테스트
+// =============================================================================
+
+// ─── Step 1: YouTube 데이터 활용 ─────────────────────────────────────────────
+
+describe('fetchYouTubeSignals', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return top 10 youtube_videos ordered by view_count', async () => {
+    const mockVideos = [
+      { title: '피부관리 루틴', view_count: 50000, channel_id: 'ch-001' },
+      { title: '선크림 비교', view_count: 30000, channel_id: 'ch-002' },
+    ];
+    mockClient.mockResolvedValueOnce(mockVideos);
+
+    const result = await fetchYouTubeSignals();
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ title: '피부관리 루틴', view_count: 50000, channel_id: 'ch-001' });
+  });
+
+  it('should return empty array when no youtube_videos exist', async () => {
+    mockClient.mockResolvedValueOnce([]);
+
+    const result = await fetchYouTubeSignals();
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('buildDirective youtube_signals', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should include youtube_signals in directive when data exists', async () => {
+    setupMockClient({
+      youtubeSignals: [
+        { title: '피부관리 루틴', view_count: 50000, channel_id: 'ch-001' },
+      ],
+    });
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.youtube_signals).toBeDefined();
+    expect(directive.youtube_signals).toHaveLength(1);
+    expect(directive.youtube_signals![0]!.title).toBe('피부관리 루틴');
+  });
+
+  it('should set youtube_signals to empty array when no data', async () => {
+    setupMockClient();
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.youtube_signals).toEqual([]);
+  });
+});
+
+// ─── Step 2: brand_events 활용 ───────────────────────────────────────────────
+
+describe('fetchBrandEventSlots', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return valid brand events sorted by urgency', async () => {
+    const mockEvents = [
+      { event_id: 'ev-001', brand_id: 'brand-001', event_type: 'sale', title: '아누아 40% 할인', urgency: 'high', expires_at: '2026-04-01' },
+      { event_id: 'ev-002', brand_id: 'brand-002', event_type: 'new_product', title: '라운드랩 신제품', urgency: 'medium', expires_at: '2026-04-10' },
+    ];
+    mockClient.mockResolvedValueOnce(mockEvents);
+
+    const result = await fetchBrandEventSlots();
+
+    expect(result).toHaveLength(2);
+    expect(result[0]!.event_id).toBe('ev-001');
+    expect(result[0]!.urgency).toBe('high');
+  });
+
+  it('should return empty array when no valid brand events', async () => {
+    mockClient.mockResolvedValueOnce([]);
+
+    const result = await fetchBrandEventSlots();
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('markBrandEventUsed', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should update brand_events is_used to true', async () => {
+    mockClient.mockResolvedValueOnce([{ event_id: 'ev-001' }]);
+
+    await markBrandEventUsed('ev-001');
+
+    expect(mockClient).toHaveBeenCalledOnce();
+  });
+});
+
+describe('buildDirective brand_event_slots', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should include brand_event_slots in directive', async () => {
+    setupMockClient({
+      brandEventSlots: [
+        { event_id: 'ev-001', brand_id: 'brand-001', event_type: 'sale', title: '할인 이벤트', urgency: 'high', expires_at: '2026-04-01' },
+      ],
+    });
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.brand_event_slots).toBeDefined();
+    expect(directive.brand_event_slots).toHaveLength(1);
+    expect(directive.brand_event_slots![0]!.event_id).toBe('ev-001');
+  });
+});
+
+// ─── Step 3: trend_keywords 활용 ─────────────────────────────────────────────
+
+describe('fetchSelectedTrendKeywords', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return selected trend keywords', async () => {
+    const mockKeywords = [
+      { keyword: '선크림', rank: 3, source: 'x_trending' },
+      { keyword: '여름 피부', rank: 12, source: 'x_trending' },
+    ];
+    mockClient.mockResolvedValueOnce(mockKeywords);
+
+    const result = await fetchSelectedTrendKeywords();
+
+    expect(result).toHaveLength(2);
+    expect(result[0]!.keyword).toBe('선크림');
+  });
+
+  it('should return empty array when no selected keywords', async () => {
+    mockClient.mockResolvedValueOnce([]);
+
+    const result = await fetchSelectedTrendKeywords();
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('buildDirective trend_keywords', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should include trend_keywords in directive when selected exists', async () => {
+    setupMockClient({
+      trendKeywords: [
+        { keyword: '선크림', rank: 3, source: 'x_trending' },
+      ],
+    });
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.trend_keywords).toBeDefined();
+    expect(directive.trend_keywords).toHaveLength(1);
+    expect(directive.trend_keywords![0]!.keyword).toBe('선크림');
+  });
+});
+
+// ─── Step 4: 리사이클 시스템 연결 ────────────────────────────────────────────
+
+describe('buildDirective recycle_candidates with 14-day check', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should include recycle_candidates from 14+ day old posts', async () => {
+    mockClient
+      .mockResolvedValueOnce([  // fetchPhase2Data: category stats
+        { category: '뷰티', avg_views: 5000, engagement_rate: 0.05 },
+        { category: '건강', avg_views: 3000, engagement_rate: 0.03 },
+        { category: '생활', avg_views: 2000, engagement_rate: 0.02 },
+        { category: '다이어트', avg_views: 1000, engagement_rate: 0.01 },
+      ])
+      .mockResolvedValueOnce([{ cnt: 5 }])   // fetchPhase2Data: brand events count
+      .mockResolvedValueOnce([])              // fetchYouTubeSignals
+      .mockResolvedValueOnce([])              // fetchBrandEventSlots
+      .mockResolvedValueOnce([])              // fetchSelectedTrendKeywords
+      .mockResolvedValueOnce([])              // diversity check
+      .mockResolvedValueOnce([                // recycle candidates
+        { post_id: 'post-old-001' },
+        { post_id: 'post-old-002' },
+      ]);
+    mockGetLatestDiagnosis.mockResolvedValue(null);
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.recycle_candidates).toContain('post-old-001');
+    expect(directive.recycle_candidates).toContain('post-old-002');
+  });
+
+  it('should return empty recycle_candidates when no old posts exist', async () => {
+    mockClient
+      .mockResolvedValueOnce([  // fetchPhase2Data: category stats
+        { category: '뷰티', avg_views: 5000, engagement_rate: 0.05 },
+        { category: '건강', avg_views: 3000, engagement_rate: 0.03 },
+        { category: '생활', avg_views: 2000, engagement_rate: 0.02 },
+        { category: '다이어트', avg_views: 1000, engagement_rate: 0.01 },
+      ])
+      .mockResolvedValueOnce([{ cnt: 5 }])   // fetchPhase2Data: brand events count
+      .mockResolvedValueOnce([])              // fetchYouTubeSignals
+      .mockResolvedValueOnce([])              // fetchBrandEventSlots
+      .mockResolvedValueOnce([])              // fetchSelectedTrendKeywords
+      .mockResolvedValueOnce([])              // diversity check
+      .mockResolvedValueOnce([]);             // recycle candidates (empty)
+    mockGetLatestDiagnosis.mockResolvedValue(null);
+
+    const directive = await buildDirective(10, '2026-03-25');
+
+    expect(directive.recycle_candidates).toEqual([]);
   });
 });

@@ -102,7 +102,7 @@ describe('TAG_MAP', () => {
       '디지털', '육아', '인테리어', '패션', '식품', '문구', '향수', '기타',
     ];
 
-    for (const [tag, category] of Object.entries(TAG_MAP)) {
+    for (const [_tag, category] of Object.entries(TAG_MAP)) {
       expect(validCategories).toContain(category);
     }
   });

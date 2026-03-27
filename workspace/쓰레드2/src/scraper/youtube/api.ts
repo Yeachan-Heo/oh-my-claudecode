@@ -363,7 +363,7 @@ export async function getVideoTranscript(videoId: string): Promise<string> {
     // Clean up temp files
     try {
       fs.unlinkSync(srtPath);
-    } catch {}
+    } catch { /* ignored */ }
 
     const fullText = textLines.join(' ');
     return summarizeTranscript(fullText);

@@ -9,7 +9,7 @@
 
 import { db } from '../db/index.js';
 import { agentTasks, agentEpisodes, agentPromptVersions } from '../db/schema.js';
-import { createPromptVersion, getActivePrompt, activateVersion } from '../db/prompt-versions.js';
+import { createPromptVersion, activateVersion } from '../db/prompt-versions.js';
 import { logEpisode } from '../db/memory.js';
 import { setState } from '../db/system-state.js';
 import { AGENT_REGISTRY } from './agent-spawner.js';

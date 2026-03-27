@@ -16,7 +16,7 @@ import type { TopicCategory } from '../types.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const VALID_CATEGORIES: TopicCategory[] = [
+const _VALID_CATEGORIES: TopicCategory[] = [
   '건강', '뷰티', '다이어트', '운동', '생활', '주방',
   '디지털', '육아', '인테리어', '패션', '식품', '문구', '향수', '기타',
 ];

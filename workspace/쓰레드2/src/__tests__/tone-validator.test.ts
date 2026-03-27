@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateTone, ToneValidationResult } from '../safety/tone-validator.js';
+import { validateTone } from '../safety/tone-validator.js';
 
 describe('validateTone', () => {
   // ─── 통과 케이스 ─────────────────────────────────────────

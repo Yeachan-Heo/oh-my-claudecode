@@ -20,9 +20,8 @@ import { execSync } from 'child_process';
 import path from 'path';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { db } from '../src/db/index.js';
-import { trendKeywords, threadPosts } from '../src/db/schema.js';
+import { trendKeywords } from '../src/db/schema.js';
 import { fetchTrends } from '../src/scraper/trend-fetcher.js';
-import { getTodayTrends } from '../src/scraper/trend-filter.js';
 import { sendAlert } from '../src/utils/telegram.js';
 
 // ─── Config ──────────────────────────────────────────────

@@ -6,7 +6,7 @@
  * See plan.md section 6 (Post Maturity Model) and section 7 (Sampling Strategy).
  */
 
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
+import { and, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { contentLifecycle, postSnapshots } from '../db/schema.js';
 import type { ContentLifecycle, WeeklyCohort } from '../types.js';

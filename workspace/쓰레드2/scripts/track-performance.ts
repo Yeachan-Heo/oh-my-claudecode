@@ -640,7 +640,7 @@ async function main(): Promise<void> {
   console.log('| 포스트 | 조회수 | 좋아요 | 답글 | 리포스트 | 참여율 | 스냅샷 |');
   console.log('|--------|--------|--------|------|----------|--------|--------|');
 
-  let totalViews = 0;
+  let _totalViews = 0;
   let totalEngagement = 0;
   let topPost: TrackResult | null = null;
 
@@ -650,7 +650,7 @@ async function main(): Promise<void> {
     const engagement = r.engagementRate.toFixed(2);
     console.log(`| "${textPreview}..." | ${views} | ${r.likes} | ${r.comments} | ${r.shares} | ${engagement}% | ${r.snapshotType} |`);
 
-    totalViews += r.viewCount;
+    _totalViews += r.viewCount;
     totalEngagement += r.engagementRate;
     if (!topPost || r.viewCount > topPost.viewCount) {
       topPost = r;

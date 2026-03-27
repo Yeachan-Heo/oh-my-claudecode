@@ -20,7 +20,6 @@
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { trendKeywords } from '../db/schema.js';
-import type { TrendItem } from './trend-fetcher.js';
 import { fetchTrends } from './trend-fetcher.js';
 
 // ─── Types ───────────────────────────────────────────────

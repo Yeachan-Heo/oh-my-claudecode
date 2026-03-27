@@ -15,7 +15,7 @@ import { db } from '../db/index.js';
 import { agentEpisodes, agentPromptVersions } from '../db/schema.js';
 import { logEpisode } from '../db/memory.js';
 import { sendMessage } from '../db/agent-messages.js';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 // ─── Types ────────────────────────────────────────────────
 

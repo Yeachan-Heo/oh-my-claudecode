@@ -101,8 +101,8 @@ function buildPattern(terms: string[], flags = ''): RegExp {
   return new RegExp(escaped.join('|'), flags);
 }
 
-const KO_PATTERN = buildPattern([...KO_INGREDIENTS, ...KO_MEDICAL]);
-const EN_PATTERN = buildPattern(EN_INGREDIENTS, 'gi');
+const _KO_PATTERN = buildPattern([...KO_INGREDIENTS, ...KO_MEDICAL]);
+const _EN_PATTERN = buildPattern(EN_INGREDIENTS, 'gi');
 
 // ─── 핵심 함수 ────────────────────────────────────────────────
 

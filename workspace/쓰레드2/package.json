@@ -2,6 +2,7 @@
   "name": "threads-affiliate",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Threads affiliate marketing automation system",
   "scripts": {
     "test": "vitest run",
@@ -18,7 +19,14 @@
     "collect:theqoo": "tsx scripts/collect-theqoo.ts",
     "collect:instiz": "tsx scripts/collect-instiz.ts",
     "research:brands": "tsx scripts/research-brands.ts",
-    "collect:youtube": "tsx scripts/collect-youtube-comments.ts"
+    "collect:youtube": "tsx scripts/collect-youtube-comments.ts",
+    "lint": "eslint src/ scripts/",
+    "lint:fix": "eslint src/ scripts/ --fix",
+    "daily:morning": "tsx scripts/run-daily.ts --phase morning",
+    "daily:evening": "tsx scripts/run-daily.ts --phase evening",
+    "daily:retro": "tsx scripts/run-daily.ts --phase retro",
+    "track": "tsx scripts/track-performance.ts",
+    "trend": "tsx scripts/run-trend-pipeline.ts"
   },
   "dependencies": {
     "apify-client": "^2.22.2",
@@ -30,10 +38,13 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.16",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.31.9",
+    "eslint": "^10.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.2",
     "vitest": "^4.1.0"
   }
 }

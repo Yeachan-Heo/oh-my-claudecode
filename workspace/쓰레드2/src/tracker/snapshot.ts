@@ -66,7 +66,7 @@ async function extractViewCount(page: Page): Promise<number> {
     // English: "N views", "N.NK views"
     const enMatch = bodyText.match(/([\d,.]+(?:\.\d+)?)\s*[KkMm]?\s*views/i);
     if (enMatch) {
-      let v = enMatch[1].replace(/,/g, '');
+      const v = enMatch[1].replace(/,/g, '');
       const full = enMatch[0].toLowerCase();
       if (full.includes('k')) return Math.round(parseFloat(v) * 1000);
       if (full.includes('m')) return Math.round(parseFloat(v) * 1000000);
@@ -449,7 +449,6 @@ export interface SnapshotTarget {
  * - posted_at + 7d elapsed & no 'final' snapshot   -> final target
  */
 export async function scheduleSnapshots(): Promise<SnapshotTarget[]> {
-  const now = new Date();
   const targets: SnapshotTarget[] = [];
 
   // Get all lifecycle entries with a posted_at timestamp

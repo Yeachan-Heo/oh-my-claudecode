@@ -49,11 +49,11 @@ export async function bootstrapAgent(agentId: string): Promise<AgentBootstrap> {
   const department = agentDef?.department ?? 'general';
 
   // 1. system_state 체크 — guides_version 변경 감지
-  let guidesVersion: string | null = null;
+  let _guidesVersion: string | null;
   try {
-    guidesVersion = await getState('guides_version');
-    if (guidesVersion) {
-      systemUpdates.push(`guides_version 업데이트: ${guidesVersion}`);
+    _guidesVersion = await getState('guides_version');
+    if (_guidesVersion) {
+      systemUpdates.push(`guides_version 업데이트: ${_guidesVersion}`);
     }
   } catch {
     // system_state 접근 실패 시 무시

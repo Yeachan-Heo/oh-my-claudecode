@@ -64,7 +64,7 @@ export interface MeetingResult {
 
 // ─── 상수 ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_TOKEN_BUDGET: Record<MeetingType, number> = {
+const _DEFAULT_TOKEN_BUDGET: Record<MeetingType, number> = {
   standup:   100_000,
   planning:   80_000,
   review:     50_000,

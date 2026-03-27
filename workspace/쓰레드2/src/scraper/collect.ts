@@ -339,7 +339,7 @@ async function healthGate(): Promise<void> {
       req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
     });
     log('CDP 연결 확인 완료');
-  } catch (e) {
+  } catch {
     log(`CDP 연결 실패 — Chrome 자동 실행 시도...`);
     try {
       execSync('cmd.exe /c start "" "C:\\Users\\campu\\OneDrive\\Desktop\\Chrome (Claude).lnk"', {
@@ -366,7 +366,7 @@ async function healthGate(): Promise<void> {
           break;
         } catch { /* retry */ }
       }
-      if (!connected) throw new Error('Chrome started but CDP not responding after 20s');
+      if (!connected) throw new Error('Chrome started but CDP not responding after 20s', { cause: 'cdp_timeout' });
       log('Chrome 자동 실행 + CDP 연결 확인 완료');
     } catch (launchErr) {
       console.error(`Chrome 자동 실행 실패: ${(launchErr as Error).message}`);
@@ -501,7 +501,8 @@ async function extractHookPageData(page: Page, channelId: string): Promise<HookP
           const realUrl = url.searchParams.get('u');
           if (realUrl) return decodeURIComponent(realUrl);
         }
-      } catch (e) {}
+      } catch { // ignored
+      }
       return href;
     };
 
@@ -510,7 +511,7 @@ async function extractHookPageData(page: Page, channelId: string): Promise<HookP
       const affDomains = ['coupang.com','coupa.ng','link.coupang.com','musinsa.com','smartstore.naver.com','ali.ski','bit.ly','han.gl'];
       const links: string[] = [];
       container.querySelectorAll('a[href]').forEach(a => {
-        let realHref = decodeThreadsRedirect((a as HTMLAnchorElement).href);
+        const realHref = decodeThreadsRedirect((a as HTMLAnchorElement).href);
         for (const d of affDomains) {
           if (realHref.includes(d)) {
             links.push(realHref);
@@ -618,7 +619,7 @@ async function extractHookPageData(page: Page, channelId: string): Promise<HookP
       if (viewCount <= 0) {
         const vmEn = allText.match(/([\d,.]+(?:\.\d+)?[KkMm]?)\s*views?/i);
         if (vmEn) {
-          let v = vmEn[1].replace(/,/g,'');
+          const v = vmEn[1].replace(/,/g,'');
           if (/[Kk]$/.test(v)) viewCount = Math.round(parseFloat(v)*1000);
           else if (/[Mm]$/.test(v)) viewCount = Math.round(parseFloat(v)*1000000);
           else viewCount = parseInt(v, 10);
@@ -899,7 +900,7 @@ async function extractReplyViewCount(page: Page): Promise<number> {
       if (viewCount <= 0) {
         const vmEn = allText.match(/([\d,.]+(?:\.\d+)?[KkMm]?)\s*views?/i);
         if (vmEn) {
-          let v = vmEn[1].replace(/,/g,'');
+          const v = vmEn[1].replace(/,/g,'');
           if (/[Kk]$/.test(v)) viewCount = Math.round(parseFloat(v)*1000);
           else if (/[Mm]$/.test(v)) viewCount = Math.round(parseFloat(v)*1000000);
           else viewCount = parseInt(v, 10);
@@ -1148,7 +1149,7 @@ async function trackedGoto(page: Page, url: string, options: { waitUntil: 'domco
 
 // ─── B-Stage: 10-Post Health Check ──────────────────────
 
-async function healthCheckAt10(page: Page, processedCount: number, globalMode: boolean): Promise<boolean> {
+async function healthCheckAt10(page: Page, processedCount: number, _globalMode: boolean): Promise<boolean> {
   if (processedCount === 0 || processedCount % 10 !== 0) return true;
   log(`  10포스트 주기 헬스 체크 (${processedCount}번째)`);
 
@@ -1174,7 +1175,7 @@ async function healthCheckAt10(page: Page, processedCount: number, globalMode: b
     }
 
     // Check login status
-    let loginOk = false;
+    let loginOk: boolean;
     try {
       loginOk = await checkLoginStatus(page);
     } catch { loginOk = false; }
@@ -1226,7 +1227,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
     const tax = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'data', 'taxonomy.json'), 'utf-8'));
     taxonomyVersion = tax.version || '0.0';
     log(`taxonomy v${taxonomyVersion} 로드`);
-  } catch (e) {
+  } catch {
     log('taxonomy.json 로드 실패 — 기본값 사용');
   }
 
@@ -1238,7 +1239,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
     loggedIn = await checkLoginStatus(page);
   } catch { loggedIn = false; }
 
-  let cp: Checkpoint = isResume ? loadCheckpoint(channelId, runId)
+  const cp: Checkpoint = isResume ? loadCheckpoint(channelId, runId)
     : { runId, channelId, completedHooks: [], postIds: [], threadUnits: [] };
 
   // Patch #5: validity tracking
@@ -1261,7 +1262,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
   // GraphQL interceptor: register before any navigation so profile feed responses are captured
   const gqlInterceptor: GraphQLInterceptor = createGraphQLInterceptor(page);
   // Map of post_id -> GraphQL post data, populated after feed scroll
-  let gqlPostMap = new Map<string, GraphQLExtractedPost>();
+  const gqlPostMap = new Map<string, GraphQLExtractedPost>();
 
   try {
     // Step 1: Collect post IDs from feed
@@ -1712,7 +1713,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
         let followers = 0;
         const fm = allText.match(/팔로워\s*([\d,.]+(?:\.\d+)?[만천]?)\s*명/);
         if (fm) {
-          let v = fm[1];
+          const v = fm[1];
           if (v.includes('만')) followers = Math.round(parseFloat(v.replace('만',''))*10000);
           else if (v.includes('천')) followers = Math.round(parseFloat(v.replace('천',''))*1000);
           else followers = parseInt(v.replace(/,/g,''), 10);
@@ -1720,7 +1721,7 @@ async function runCollection({ channelId, postCount, isResume, runId, page, goto
         if (followers === 0) {
           const fmEn = allText.match(/([\d,.]+[KkMm]?)\s*followers?/i);
           if (fmEn) {
-            let v = fmEn[1].replace(/,/g,'');
+            const v = fmEn[1].replace(/,/g,'');
             if (/[Kk]$/.test(v)) followers = Math.round(parseFloat(v)*1000);
             else if (/[Mm]$/.test(v)) followers = Math.round(parseFloat(v)*1000000);
             else followers = parseInt(v, 10);
@@ -1994,7 +1995,7 @@ async function main(): Promise<void> {
       // Append to existing file or create new
       let runs: unknown[] = [];
       if (fs.existsSync(telPath)) {
-        try { runs = JSON.parse(fs.readFileSync(telPath, 'utf-8')); } catch {}
+        try { runs = JSON.parse(fs.readFileSync(telPath, 'utf-8')); } catch { /* ignored */ }
       }
       runs.push(telData);
       atomicWriteJSON(telPath, runs);

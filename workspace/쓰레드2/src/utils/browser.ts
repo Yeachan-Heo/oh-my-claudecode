@@ -8,12 +8,12 @@
 import { chromium } from 'playwright';
 import type { Browser } from 'playwright';
 import http from 'http';
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 
 /** CDP endpoint URL — 환경변수로 오버라이드 가능 */
 export const CDP_URL = process.env.CDP_URL ?? 'http://127.0.0.1:9223';
 
-const CDP_PORT = parseInt(new URL(CDP_URL).port, 10) || 9223;
+const _CDP_PORT = parseInt(new URL(CDP_URL).port, 10) || 9223;
 
 /**
  * CDP 엔드포인트 가용 여부를 확인한다.
@@ -21,8 +21,7 @@ const CDP_PORT = parseInt(new URL(CDP_URL).port, 10) || 9223;
 export async function checkCDP(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get(`${CDP_URL}/json/version`, { timeout: 5000 }, (res) => {
-      let body = '';
-      res.on('data', (chunk: Buffer) => { body += chunk; });
+      res.on('data', () => { /* ignored */ });
       res.on('end', () => resolve(res.statusCode === 200));
     });
     req.on('error', () => resolve(false));

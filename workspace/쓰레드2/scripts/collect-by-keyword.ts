@@ -692,7 +692,7 @@ async function main(): Promise<void> {
               crawl_at: new Date(),
             }).onConflictDoNothing();
             savedCount++;
-          } catch {}
+          } catch { /* ignored */ }
         }
 
         log(`  저장: ${savedCount}개 댓글`);
