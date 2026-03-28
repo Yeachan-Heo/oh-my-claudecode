@@ -32,6 +32,7 @@ import { getUsage } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { detectApiKeySource } from "./elements/api-key-source.js";
+import { calculateCost } from "./elements/cost.js";
 import { refreshMissionBoardState } from "./mission-board.js";
 import { sanitizeOutput } from "./sanitize.js";
 import type {
@@ -378,6 +379,17 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       : null;
     const contextPercent = getContextPercent(stdin);
 
+    // Calculate request and session cost estimates
+    const _modelId = getModelName(stdin);
+    const _reqUsage = transcriptData.lastRequestTokenUsage;
+    const requestCostUsd = _reqUsage
+      ? calculateCost(_modelId, _reqUsage.inputTokens, _reqUsage.outputTokens)
+      : null;
+    const sessionCostUsd =
+      transcriptData.sessionInputTokens != null && transcriptData.sessionOutputTokens != null
+        ? calculateCost(_modelId, transcriptData.sessionInputTokens, transcriptData.sessionOutputTokens)
+        : null;
+
     // Build render context
     const context: HudRenderContext = {
       contextPercent,
@@ -415,6 +427,8 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         ? basename(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "")
         : null,
       sessionSummary,
+      requestCostUsd,
+      sessionCostUsd,
     };
 
     // Debug: log data if OMC_DEBUG is set

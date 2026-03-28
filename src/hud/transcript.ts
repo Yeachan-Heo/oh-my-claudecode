@@ -204,6 +204,8 @@ export async function parseTranscript(
   result.todos = latestTodos;
   if (sessionTotalsReliable && sessionTokenTotals.seenUsage) {
     result.sessionTotalTokens = sessionTokenTotals.inputTokens + sessionTokenTotals.outputTokens;
+    result.sessionInputTokens = sessionTokenTotals.inputTokens;
+    result.sessionOutputTokens = sessionTokenTotals.outputTokens;
   }
 
   const pendingPermissions = Array.from(pendingPermissionMap.values()).map(clonePendingPermission);

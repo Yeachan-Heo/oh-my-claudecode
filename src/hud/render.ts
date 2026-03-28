@@ -38,6 +38,7 @@ import { renderCallCounts } from "./elements/call-counts.js";
 import { renderContextLimitWarning } from "./elements/context-warning.js";
 import { renderMissionBoard } from "./mission-board.js";
 import { renderSessionSummary } from "./elements/session-summary.js";
+import { renderCost } from "./elements/cost.js";
 
 /**
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
@@ -414,6 +415,11 @@ export async function render(
       context.skillCallCount,
     );
     if (counts) elements.push(counts);
+  }
+
+  if (enabledElements.showCost === true) {
+    const cost = renderCost(context.requestCostUsd, context.sessionCostUsd);
+    if (cost) elements.push(cost);
   }
 
   // Session summary (AI-generated label)
