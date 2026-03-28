@@ -1,0 +1,51 @@
+{
+  "milestone": "data-integrity",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "npx vitest run",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "npx tsc --noEmit",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "npm run lint",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Register a `bugfix-worker` skill (or replace feature `skillName` values with an existing skill) so implementation workers can follow assigned procedures without immediate skill resolution failures.",
+      "evidence": "Review report for fix-data-integrity-bugs cites transcript evidence that `Skill(\"bugfix-worker\")` failed because the skill was not found.",
+      "isSystemic": true
+    },
+    {
+      "target": "scrutiny-validator skill / mission scaffolding",
+      "suggestion": "Define required behavior when `.factory/services.yaml` and `.factory/library/` are absent (either provide those artifacts in mission setup or explicitly document fallback validator-discovery behavior).",
+      "evidence": "Reviewer and validator setup both observed missing `.factory/services.yaml` and `.factory/library/` paths in this repository.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Create `.factory/services.yaml` automatically in-repo during scrutiny runs when missing.",
+      "reason": "ambiguous: service manifest schema/content for this project is not present, so generating one here risks adding incorrect operational commands."
+    }
+  ],
+  "previousRound": null
+}

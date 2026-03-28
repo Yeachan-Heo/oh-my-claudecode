@@ -1,0 +1,35 @@
+{
+  "featureId": "fix-data-integrity-bugs",
+  "reviewedAt": "2026-03-28T18:42:27Z",
+  "commitId": "87a2f95b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation in commit 87a2f95b correctly addresses VAL-DATA-001..006: $-escaping in AST replacement, corrupted-marker recovery in mergeClaudeMd, 4KB tail-reading in persistent-mode, session field preservation in clearBackgroundTasks, stale-running task failure marking in cleanupStaleBackgroundTasks, and ralph prompt field alignment in template keyword-detector.",
+    "issues": [
+      {
+        "file": "src/__tests__/tools/ast-tools.test.ts",
+        "line": 16,
+        "severity": "non_blocking",
+        "confidence": "high",
+        "description": "The new VAL-DATA-001 regression tests validate manual string replacement behavior but do not exercise astGrepReplaceTool's replacement execution path directly; a future regression inside the handler could bypass this test suite.",
+        "actionableFix": "Add at least one test that executes astGrepReplaceTool replacement flow (or extract and unit-test the exact replacement helper used by the handler) with captured text containing $&, $', and $` tokens."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The feature specifies skillName=bugfix-worker, but the skill is not registered; worker had to deviate and proceed manually.",
+      "evidence": "worker-transcripts.jsonl (session 19fd9988-2399-4ce4-82d3-c3797af9a9d5) contains: \"Error: Skill \\\"bugfix-worker\\\" not found\"; handoff.skillFeedback.followedProcedure=false with suggested change to register bugfix-worker skill."
+    },
+    {
+      "area": "services",
+      "observation": "Mission guidance expects .factory/services.yaml and .factory/library context, but these shared-state artifacts are missing in this repository, causing lookup failures during worker setup.",
+      "evidence": "Read /home/paul/oh-my-claudecode/.factory/services.yaml -> ENOENT; LS /home/paul/oh-my-claudecode/.factory/library -> directory does not exist; transcript skeleton also shows worker attempted the same paths."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature fix-data-integrity-bugs from worker session 19fd9988-2399-4ce4-82d3-c3797af9a9d5. Commit 87a2f95b satisfies VAL-DATA-001..006 by code inspection and targeted regression tests; one non-blocking test-fidelity gap was noted for AST replacement path coverage."
+}
