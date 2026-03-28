@@ -1,0 +1,33 @@
+{
+  "featureId": "fix-minor-bugs",
+  "reviewedAt": "2026-03-28T19:18:37Z",
+  "commitId": "b0189fa8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature addresses 7/8 fixes cleanly, but BUG 1 is only partially mitigated. The HUD guard is time-window based and does not track/liveness-check an existing spawned process, so detached process accumulation can still occur when session-summary runs longer than the fixed window.",
+    "issues": [
+      {
+        "file": "src/hud/index.ts",
+        "line": 106,
+        "severity": "blocking",
+        "description": "The duplicate-spawn prevention uses only a 120s timestamp window (`now - lastSummarySpawnTimestamp < 120_000`) instead of tracking the spawned process and checking if it is still alive. If `session-summary.mjs` hangs or runs >120s, new detached processes will still be spawned every 120s, so accumulation remains unbounded."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Feature metadata requires `bugfix-worker`, but that skill is missing from the repository skill set; worker had to deviate from the prescribed procedure.",
+      "evidence": "Mission feature entry (`features.json`) sets `skillName: \"bugfix-worker\"`; no matching skill exists under `skills/` or `.factory/skills/`; handoff `skillFeedback.followedProcedure=false` cites missing skill."
+    },
+    {
+      "area": "services",
+      "observation": "Mission review instructions assume shared-state artifacts (`.factory/services.yaml`, `.factory/library/`) that are not present in this repo, reducing reviewer ability to validate service/knowledge documentation gaps.",
+      "evidence": "Paths `/home/paul/oh-my-claudecode/.factory/services.yaml` and `/home/paul/oh-my-claudecode/.factory/library` are absent (ENOENT during review)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to one blocking gap in BUG 1: the session-summary spawn fix is timestamp-throttled but not process-liveness-aware, so it does not fully eliminate unbounded detached process accumulation for long-running/hung summary jobs."
+}
