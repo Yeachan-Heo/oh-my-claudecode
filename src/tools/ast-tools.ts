@@ -508,9 +508,12 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
                 const varName = metaVar.replace(/^\$+/, "");
                 const captured = match.getMatch(varName);
                 if (captured) {
+                  // Escape $ in captured text to prevent JS replacement patterns
+                  // ($&, $', $`, $$) from being interpreted by replaceAll
+                  const safeText = captured.text().replace(/\$/g, '$$$$');
                   finalReplacement = finalReplacement.replaceAll(
                     metaVar,
-                    captured.text(),
+                    safeText,
                   );
                 }
               }

@@ -16,6 +16,10 @@ import {
   mkdirSync,
   unlinkSync,
   renameSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
 } from "fs";
 import { join, dirname, resolve, normalize } from "path";
 import { homedir } from "os";
@@ -401,8 +405,20 @@ const CRITICAL_CONTEXT_STOP_PERCENT = 95;
 
 function estimateContextPercent(transcriptPath) {
   if (!transcriptPath || !existsSync(transcriptPath)) return 0;
+  let fd = -1;
   try {
-    const content = readFileSync(transcriptPath, "utf-8");
+    const size = statSync(transcriptPath).size;
+    if (size === 0) return 0;
+
+    // Read only the last 4KB to avoid OOM on large transcripts (10-100MB)
+    const readSize = Math.min(4096, size);
+    const buf = Buffer.alloc(readSize);
+    fd = openSync(transcriptPath, "r");
+    readSync(fd, buf, 0, readSize, size - readSize);
+    closeSync(fd);
+    fd = -1;
+
+    const content = buf.toString("utf-8");
     const windowMatch = content.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
     const inputMatch = content.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
     if (!windowMatch || !inputMatch) return 0;
@@ -412,6 +428,7 @@ function estimateContextPercent(transcriptPath) {
     if (!Number.isFinite(lastWindow) || lastWindow <= 0 || !Number.isFinite(lastInput)) return 0;
     return Math.round((lastInput / lastWindow) * 100);
   } catch {
+    if (fd !== -1) try { closeSync(fd); } catch { /* best-effort */ }
     return 0;
   }
 }

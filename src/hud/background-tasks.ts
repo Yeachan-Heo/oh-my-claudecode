@@ -244,7 +244,13 @@ export function getRunningTaskCount(directory?: string): number {
  */
 export function clearBackgroundTasks(directory?: string): boolean {
   try {
+    // Read existing state to preserve session fields (sessionStartTimestamp, sessionId)
+    const existing = readHudState(directory);
     const state = createEmptyHudState();
+    if (existing) {
+      state.sessionStartTimestamp = existing.sessionStartTimestamp;
+      state.sessionId = existing.sessionId;
+    }
     return writeHudState(state, directory);
   } catch {
     return false;

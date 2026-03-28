@@ -27,6 +27,20 @@ export async function cleanupStaleBackgroundTasks(
 
   const now = Date.now();
   const originalCount = state.backgroundTasks.length;
+  let statusChanged = false;
+
+  // Mark stale running tasks as failed before filtering (consistent with cleanupTasks()
+  // in background-tasks.ts) — prevents silently dropping running tasks
+  for (const task of state.backgroundTasks) {
+    if (task.status === 'running') {
+      const taskAge = now - new Date(task.startedAt).getTime();
+      if (taskAge >= thresholdMs) {
+        task.status = 'failed';
+        task.completedAt = new Date().toISOString();
+        statusChanged = true;
+      }
+    }
+  }
 
   // Filter out stale tasks
   state.backgroundTasks = state.backgroundTasks.filter(task => {
@@ -34,9 +48,9 @@ export async function cleanupStaleBackgroundTasks(
     const taskAge = now - new Date(task.startedAt).getTime();
 
     // Keep if:
-    // - Task is completed (for history)
+    // - Task is completed or failed (for history)
     // - Task is recent (within threshold)
-    return task.status === 'completed' || taskAge < thresholdMs;
+    return task.status === 'completed' || task.status === 'failed' || taskAge < thresholdMs;
   });
 
   // Limit history to 20 most recent
@@ -46,7 +60,7 @@ export async function cleanupStaleBackgroundTasks(
 
   const removedCount = originalCount - state.backgroundTasks.length;
 
-  if (removedCount > 0) {
+  if (removedCount > 0 || statusChanged) {
     writeHudState(state);
   }
 

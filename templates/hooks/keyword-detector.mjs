@@ -178,15 +178,32 @@ function hasActionableKeyword(text, pattern) {
 
 // Create state file for a mode
 function activateState(directory, prompt, stateName, sessionId) {
-  const state = {
-    active: true,
-    started_at: new Date().toISOString(),
-    original_prompt: prompt,
-    session_id: sessionId || undefined,
-    reinforcement_count: 0,
-    awaiting_confirmation: true,
-    last_checked_at: new Date().toISOString()
-  };
+  let state;
+
+  if (stateName === 'ralph') {
+    // Ralph needs 'prompt' field (not 'original_prompt') — persistent-mode.mjs reads ralph.state.prompt
+    state = {
+      active: true,
+      iteration: 1,
+      max_iterations: 100,
+      started_at: new Date().toISOString(),
+      prompt: prompt,
+      session_id: sessionId || undefined,
+      reinforcement_count: 0,
+      awaiting_confirmation: true,
+      last_checked_at: new Date().toISOString()
+    };
+  } else {
+    state = {
+      active: true,
+      started_at: new Date().toISOString(),
+      original_prompt: prompt,
+      session_id: sessionId || undefined,
+      reinforcement_count: 0,
+      awaiting_confirmation: true,
+      last_checked_at: new Date().toISOString()
+    };
+  }
 
   // Write to local .omc/state directory
   const localDir = join(directory, '.omc', 'state');
