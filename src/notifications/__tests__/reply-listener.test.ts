@@ -560,11 +560,18 @@ describe("reply-listener", () => {
       expect(authorizedSlackUserIds.includes(authorizedUser)).toBe(true);
     });
 
-    it("allows all users when authorizedSlackUserIds is empty", () => {
+    it("rejects all users when authorizedSlackUserIds is empty (fail-closed)", () => {
       const authorizedSlackUserIds: string[] = [];
-      // When empty, authorization check should be skipped (all users allowed)
-      const shouldSkipAuth = authorizedSlackUserIds.length === 0;
-      expect(shouldSkipAuth).toBe(true);
+      // When empty, ALL messages should be rejected (fail-closed, matching Discord behavior)
+      const shouldReject = !authorizedSlackUserIds || authorizedSlackUserIds.length === 0;
+      expect(shouldReject).toBe(true);
+    });
+
+    it("rejects all users when authorizedSlackUserIds is undefined (fail-closed)", () => {
+      const authorizedSlackUserIds: string[] | undefined = undefined;
+      // When undefined, ALL messages should be rejected (fail-closed)
+      const shouldReject = !authorizedSlackUserIds;
+      expect(shouldReject).toBe(true);
     });
 
     it("source code checks event.user against authorizedSlackUserIds before injection", () => {
@@ -579,6 +586,21 @@ describe("reply-listener", () => {
       expect(source).toContain("authorizedSlackUserIds");
       expect(source).toContain("event.user");
       expect(source).toContain("REJECTED Slack message from unauthorized user");
+    });
+
+    it("source code uses fail-closed pattern: empty authorizedSlackUserIds rejects all messages", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Verify fail-closed: when list is empty/undefined, reject all
+      expect(source).toContain("rejecting all messages (fail-closed)");
+      expect(source).toContain("authorizedSlackUserIds.length === 0");
+      // Should NOT have the old fail-open pattern
+      expect(source).not.toContain("authorizedSlackUserIds.length > 0");
     });
 
     it("config type includes authorizedSlackUserIds field", () => {
