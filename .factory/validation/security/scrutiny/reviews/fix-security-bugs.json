@@ -1,0 +1,107 @@
+{
+  "featureId": "fix-security-bugs",
+  "milestone": "security",
+  "reviewedAt": "2026-03-28T09:24:00Z",
+  "commitId": "08b1e4ba2979657920e7c822527067a1bb313158",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "blockingIssues": [
+    {
+      "file": "src/notifications/reply-listener.ts",
+      "line": 777,
+      "description": "VAL-SEC-002 is not fully satisfied: Slack authorization is only enforced when `authorizedSlackUserIds.length > 0`. When the list is empty (the default from config parsing), messages from any Slack user are still accepted for injection, so the original trust-boundary issue remains for default/misconfigured setups.",
+      "evidence": [
+        "src/notifications/reply-listener.ts:777-780 uses conditional enforcement (`if (config.authorizedSlackUserIds.length > 0) { ... includes(event.user) ... }`).",
+        "src/notifications/config.ts:890-893 parses `authorizedSlackUserIds`; parser returns `[]` when unset/invalid.",
+        "validation-contract.md:10-13 requires author ID verification against an authorized list, matching Discord's authorization pattern."
+      ],
+      "mapsToValidation": [
+        "VAL-SEC-002"
+      ]
+    }
+  ],
+  "nonBlockingIssues": [
+    {
+      "file": "src/notifications/__tests__/reply-listener.test.ts",
+      "line": 551,
+      "description": "Most newly added Slack authorization tests are implementation-string checks or array behavior checks rather than end-to-end listener behavior tests. This weakens regression confidence and allowed the conditional-bypass behavior to pass tests.",
+      "evidence": [
+        "Tests at ~551+ assert `includes` behavior and `source` string contains checks, not actual message-processing outcomes through the listener path."
+      ]
+    }
+  ],
+  "codeReview": {
+    "summary": "VAL-SEC-001 and VAL-SEC-003 are correctly implemented with clear code changes and regression tests. VAL-SEC-002 remains incomplete because authorization is optional at runtime (empty list allows all users), which does not fully close the reported security gap.",
+    "issues": [
+      {
+        "file": "src/notifications/reply-listener.ts",
+        "line": 777,
+        "severity": "blocking",
+        "description": "Conditional Slack authorization (`length > 0`) leaves unrestricted injection path when no authorized list is configured."
+      },
+      {
+        "file": "src/notifications/__tests__/reply-listener.test.ts",
+        "line": 551,
+        "severity": "non_blocking",
+        "description": "Regression tests are largely static/source assertions and do not verify runtime reject/accept behavior in the Slack listener pipeline."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "Expected shared service registry file is missing.",
+      "evidence": "Read /home/paul/oh-my-claudecode/.factory/services.yaml -> ENOENT"
+    },
+    {
+      "area": "knowledge",
+      "observation": "Expected shared architecture/library directory is missing, which limits standardized architecture-reference checks during scrutiny.",
+      "evidence": "LS /home/paul/oh-my-claudecode/.factory shows only `research/`; no `.factory/library/` present."
+    },
+    {
+      "area": "skills",
+      "observation": "Feature references `skillName: bugfix-worker`, but no corresponding skill definition file is discoverable in the repository or user skill directories, reducing auditable traceability of procedure compliance.",
+      "evidence": "features.json lists `skillName: bugfix-worker`; Glob for `**/bugfix-worker/SKILL.md` under /home/paul and /home/paul/.factory returned no matches."
+    }
+  ],
+  "evidence": {
+    "files": [
+      "src/lib/project-memory-merge.ts",
+      "src/notifications/config.ts",
+      "src/notifications/reply-listener.ts",
+      "src/providers/gitea.ts",
+      "src/__tests__/project-memory-merge.test.ts",
+      "src/notifications/__tests__/reply-listener.test.ts",
+      "src/__tests__/providers/gitea.test.ts",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/validation-contract.md",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/handoffs/2026-03-28T07-05-52-713Z__fix-security-bugs__a65ef2cc-04d3-4f41-bb62-6954531cfe59.json",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/worker-transcripts.jsonl"
+    ],
+    "tests": [
+      {
+        "command": "npx vitest run --grep \"project-memory-merge\"",
+        "source": "handoff.verification.commandsRun",
+        "result": "reported pass"
+      },
+      {
+        "command": "npx vitest run --grep \"reply-listener\"",
+        "source": "handoff.verification.commandsRun",
+        "result": "reported pass"
+      },
+      {
+        "command": "npx vitest run --grep \"gitea\"",
+        "source": "handoff.verification.commandsRun",
+        "result": "reported pass"
+      }
+    ],
+    "commands": [
+      "git show --stat 08b1e4ba",
+      "git show 08b1e4ba",
+      "jq -s --arg sid \"a65ef2cc-04d3-4f41-bb62-6954531cfe59\" '[.[] | select(.workerSessionId == $sid)] | first' /home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/worker-transcripts.jsonl",
+      "Grep checks for VAL-SEC implementation lines in target files"
+    ]
+  },
+  "addressesFailureFrom": null,
+  "summary": "Review failed on VAL-SEC-002 due to conditional Slack auth enforcement that still permits unrestricted injection when no authorized user list is configured. VAL-SEC-001 and VAL-SEC-003 appear correctly implemented."
+}
