@@ -1,7 +1,7 @@
 {
   "milestone": "minor-fixes",
-  "round": 2,
-  "status": "pass",
+  "round": 1,
+  "status": "fail",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -21,26 +21,34 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 1,
-    "failed": 0,
-    "failedFeatures": []
+    "passed": 0,
+    "failed": 1,
+    "failedFeatures": [
+      "fix-minor-bugs"
+    ]
   },
-  "blockingIssues": [],
+  "blockingIssues": [
+    {
+      "featureId": "fix-minor-bugs",
+      "severity": "blocking",
+      "description": "src/hud/index.ts duplicate summary-process prevention uses only a 120s timestamp throttle and does not track/check process liveness, so detached process accumulation can still occur when session-summary runs longer than the window."
+    }
+  ],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
       "suggestion": "Ensure feature metadata references only existing skills (or define missing ones) before mission execution.",
-      "evidence": "Both `fix-minor-bugs` and `fix-summary-spawn-pid-tracking` reference `bugfix-worker` in `features.json`, but no matching skill exists; worker transcript/handoff recorded procedure deviation due missing skill.",
+      "evidence": "Feature metadata for implemented bugfix work references `bugfix-worker`, but no such skill exists in the repo skill set; worker handoff explicitly reported procedural deviation due missing skill.",
       "isSystemic": true
     },
     {
       "target": "AGENTS.md",
       "suggestion": "Align mission assumptions with repository state for shared artifacts (for example, `.factory/services.yaml` and `.factory/library/`) or mark them optional with fallback behavior.",
-      "evidence": "During this scrutiny run, `/home/paul/oh-my-claudecode/.factory/services.yaml` and `/home/paul/oh-my-claudecode/.factory/library` were absent, limiting application of expected shared-state updates.",
+      "evidence": "Scrutiny review noted missing `.factory/services.yaml` and `.factory/library/`, which reduced ability to apply expected shared-state updates.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [],
-  "previousRound": ".factory/validation/minor-fixes/scrutiny/synthesis.round1.json"
+  "previousRound": null
 }

@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-summary-spawn-pid-tracking",
+  "reviewedAt": "2026-03-28T19:31:16Z",
+  "commitId": "34f0a4f7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit directly addresses the prior blocking gap by adding module-level PID tracking and process-liveness checks before spawning session-summary. The updated HUD logic now blocks duplicate spawns while a tracked process is alive, clears stale PID state when the process is dead, and still keeps the timestamp throttle as secondary protection.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The assigned skill `bugfix-worker` is referenced by feature metadata but not available to workers, causing repeated procedure deviations during both original and fix implementations.",
+      "evidence": "features.json sets `skillName: \"bugfix-worker\"` for `fix-minor-bugs` and `fix-summary-spawn-pid-tracking`; transcript skeleton for worker `f4000d7b-f2a7-4f5b-8e40-f912f2a55906` contains `Error: Skill \"bugfix-worker\" not found`; handoff skillFeedback reports followedProcedure=false for this reason."
+    },
+    {
+      "area": "services",
+      "observation": "Expected shared-state service/library artifacts are missing from repo root, reducing reviewers' ability to validate service-command and architecture knowledge capture against mission guidance.",
+      "evidence": "`/home/paul/oh-my-claudecode/.factory/services.yaml` returns ENOENT, and `/home/paul/oh-my-claudecode/.factory/library` does not exist during this review."
+    }
+  ],
+  "addressesFailureFrom": "fix-minor-bugs",
+  "summary": "Pass. I reviewed transcript skeleton + both commits (`b0189fa8`, `34f0a4f7`) and confirmed the rerun fix resolves the prior blocking issue: session-summary spawn prevention is now process-liveness-aware via tracked PID checks (`process.kill(pid, 0)`), preventing duplicate detached spawns while allowing respawn after process death."
+}
