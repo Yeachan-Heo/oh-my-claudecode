@@ -1,0 +1,206 @@
+{
+  "groupId": "core-flow",
+  "testedAt": "2026-03-28T18:52:39Z",
+  "milestone": "data-integrity",
+  "isolation": {
+    "surface": "vitest-shell",
+    "repo": "/home/paul/oh-my-claudecode",
+    "missionDir": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c",
+    "concurrencyLimit": 1,
+    "assignedAssertions": [
+      "VAL-DATA-001",
+      "VAL-DATA-002",
+      "VAL-DATA-003",
+      "VAL-DATA-004",
+      "VAL-DATA-005",
+      "VAL-DATA-006"
+    ]
+  },
+  "toolsUsed": [
+    "vitest",
+    "shell",
+    "code-inspection"
+  ],
+  "commands": [
+    {
+      "command": "vitest run --root /home/paul/oh-my-claudecode --grep ast-tools",
+      "exitCode": 1,
+      "observation": "Vitest 4.0.18 rejects --grep (Unknown option).",
+      "evidence": "data-integrity/core-flow/FLOW-FRICTION-vitest-grep-unsupported.txt"
+    },
+    {
+      "command": "vitest run --root /home/paul/oh-my-claudecode src/__tests__/tools/ast-tools.test.ts",
+      "exitCode": 0,
+      "observation": "1 file passed, 8 tests passed.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-001-vitest.txt"
+    },
+    {
+      "command": "vitest run --root /home/paul/oh-my-claudecode src/installer/__tests__/claude-md-merge.test.ts",
+      "exitCode": 0,
+      "observation": "1 file passed, 27 tests passed.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-002-vitest.txt"
+    },
+    {
+      "command": "python snippet extraction scripts/persistent-mode.mjs lines 403-423",
+      "exitCode": 0,
+      "observation": "estimateContextPercent reads last 4KB via openSync/readSync with offset size-readSize.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-003-code-inspection.txt"
+    },
+    {
+      "command": "vitest run --root /home/paul/oh-my-claudecode src/__tests__/hud/background-tasks.test.ts",
+      "exitCode": 0,
+      "observation": "1 file passed, 4 tests passed.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-004-vitest.txt"
+    },
+    {
+      "command": "vitest run --root /home/paul/oh-my-claudecode src/__tests__/hud/background-cleanup.test.ts",
+      "exitCode": 0,
+      "observation": "1 file passed, 5 tests passed.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-005-vitest.txt"
+    },
+    {
+      "command": "python snippet extraction templates/hooks/keyword-detector.mjs lines 180-202",
+      "exitCode": 0,
+      "observation": "activateState uses prompt field for ralph state and original_prompt for non-ralph states.",
+      "evidence": "data-integrity/core-flow/VAL-DATA-006-code-inspection.txt"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "VAL-DATA-001",
+      "title": "AST replace tool handles $ patterns in captured text",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ast-tools regression tests",
+          "expected": "Regression cases for $&, $`, $' and $$ pass without replacement pattern corruption.",
+          "observed": "ast-tools test file passed (8/8); replacement pattern escaping suite passed."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-001-vitest.txt"
+        ],
+        "consoleErrors": "n/a (CLI test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DATA-002",
+      "title": "mergeClaudeMd does not grow unboundedly on corrupted markers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run claude-md merge regression tests",
+          "expected": "Corrupted marker idempotency tests pass, including unbounded growth prevention.",
+          "observed": "claude-md-merge test file passed (27/27), including repeated corrupted-marker growth guard test."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-002-vitest.txt"
+        ],
+        "consoleErrors": "n/a (CLI test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DATA-003",
+      "title": "persistent-mode uses tail-reading for transcript estimation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect estimateContextPercent in scripts/persistent-mode.mjs",
+          "expected": "Function reads only file tail (4KB) using offset reads, not entire file.",
+          "observed": "Function computes readSize=min(4096,size), then openSync/readSync(..., size-readSize); confirms tail-read pattern."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-003-code-inspection.txt"
+        ],
+        "consoleErrors": "n/a (CLI/code inspection surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DATA-004",
+      "title": "clearBackgroundTasks preserves session start time",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run background-tasks regression tests",
+          "expected": "clearBackgroundTasks keeps sessionStartTimestamp and sessionId while clearing tasks.",
+          "observed": "background-tasks test file passed (4/4), including explicit preservation assertions."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-004-vitest.txt"
+        ],
+        "consoleErrors": "n/a (CLI test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DATA-005",
+      "title": "cleanupStaleBackgroundTasks marks stale running tasks as failed",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run background-cleanup regression tests",
+          "expected": "Stale running tasks are marked failed with completedAt instead of being silently removed.",
+          "observed": "background-cleanup test file passed (5/5), including stale-running -> failed assertions."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-005-vitest.txt"
+        ],
+        "consoleErrors": "n/a (CLI test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DATA-006",
+      "title": "Template keyword-detector uses correct field name for ralph prompt",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect activateState in templates/hooks/keyword-detector.mjs",
+          "expected": "Ralph state uses prompt field (not original_prompt) to match persistent-mode consumer.",
+          "observed": "Ralph branch sets prompt: prompt; non-ralph branch sets original_prompt: prompt, matching contract."
+        }
+      ],
+      "evidence": {
+        "logs": [
+          "data-integrity/core-flow/VAL-DATA-006-code-inspection.txt"
+        ],
+        "consoleErrors": "n/a (CLI/code inspection surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [
+    {
+      "description": "Guidance-suggested vitest --grep flag is unsupported in current Vitest (4.0.18).",
+      "resolved": true,
+      "resolution": "Switched to targeted test-file execution for each assertion.",
+      "affectedAssertions": [
+        "VAL-DATA-001",
+        "VAL-DATA-002",
+        "VAL-DATA-004",
+        "VAL-DATA-005"
+      ],
+      "evidence": "data-integrity/core-flow/FLOW-FRICTION-vitest-grep-unsupported.txt"
+    }
+  ],
+  "blockers": [],
+  "summary": "Validated 6/6 assigned data-integrity assertions: all passed. One tooling friction (unsupported --grep) was resolved by using targeted vitest file runs."
+}

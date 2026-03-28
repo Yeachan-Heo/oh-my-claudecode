@@ -1,0 +1,34 @@
+{
+  "milestone": "data-integrity",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-DATA-001",
+    "VAL-DATA-002",
+    "VAL-DATA-003",
+    "VAL-DATA-004",
+    "VAL-DATA-005",
+    "VAL-DATA-006"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Created baseline testing guidance for this repo and added concurrency/isolation rules for vitest-shell surface.",
+      "source": "setup"
+    },
+    {
+      "target": "user-testing.md",
+      "description": "Updated assertion command guidance to file-targeted vitest runs because Vitest 4.0.18 does not support --grep.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}
