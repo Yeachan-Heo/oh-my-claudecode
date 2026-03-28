@@ -84,9 +84,23 @@ function readSessionSummary(
  */
 let lastSummarySpawnTimestamp = 0;
 
+/**
+ * Track the PID of the spawned session-summary child process.
+ * Before spawning a new process, we check if this PID is still alive
+ * using process.kill(pid, 0). This prevents process accumulation even
+ * when summarization runs longer than the timestamp-based throttle window.
+ */
+let summaryProcessPid: number | null = null;
+
 /** @internal Reset spawn guard — used by tests only. */
 export function _resetSummarySpawnTimestamp(): void {
   lastSummarySpawnTimestamp = 0;
+  summaryProcessPid = null;
+}
+
+/** @internal Get the tracked summary process PID — used by tests only. */
+export function _getSummaryProcessPid(): number | null {
+  return summaryProcessPid;
 }
 
 /**
@@ -99,9 +113,21 @@ function spawnSessionSummaryScript(
   stateDir: string,
   sessionId: string,
 ): void {
-  // Prevent spawning a new process if one was recently spawned (within 120s).
-  // This guards against unbounded process accumulation when summarization
-  // takes longer than the 60s debounce window in the caller.
+  // Check if a previously spawned summary process is still alive.
+  // This prevents accumulation of detached processes when summarization
+  // takes longer than the timestamp-based throttle window.
+  if (summaryProcessPid !== null) {
+    try {
+      process.kill(summaryProcessPid, 0);
+      // Process is still alive — skip spawning a new one
+      return;
+    } catch {
+      // Process is dead (ESRCH) — clear PID and allow respawn
+      summaryProcessPid = null;
+    }
+  }
+
+  // Secondary guard: prevent rapid re-spawns via timestamp (within 120s).
   const now = Date.now();
   if (now - lastSummarySpawnTimestamp < 120_000) {
     return;
@@ -135,8 +161,10 @@ function spawnSessionSummaryScript(
         env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "session-summary" },
       },
     );
+    summaryProcessPid = child.pid ?? null;
     child.unref();
   } catch (error) {
+    summaryProcessPid = null;
     if (process.env.OMC_DEBUG) {
       console.error(
         "[HUD] Failed to spawn session-summary:",
