@@ -1,0 +1,32 @@
+{
+  "milestone": "race-conditions",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-RACE-001",
+    "VAL-RACE-002",
+    "VAL-RACE-003",
+    "VAL-RACE-004"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Created user-testing guidance with setup, concurrency limit, and flow-validator isolation rules for vitest-cli surface.",
+      "source": "setup"
+    },
+    {
+      "target": "user-testing.md",
+      "description": "Documented vitest `--grep` discovery friction and file-targeted fallback command pattern from flow report evidence.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

@@ -1,0 +1,84 @@
+{
+  "groupId": "group-race",
+  "milestone": "race-conditions",
+  "testedAt": "2026-03-28T18:22:07Z",
+  "surface": "vitest-cli",
+  "assertions": [
+    {
+      "id": "VAL-RACE-001",
+      "status": "pass",
+      "evidence": {
+        "vitestLog": "race-conditions/group-race/VAL-RACE-001-vitest-targeted.log",
+        "fallbackVitestLog": "race-conditions/group-race/VAL-RACE-001-vitest-fallback.log",
+        "initialGrepAttemptLog": "race-conditions/group-race/VAL-RACE-001-vitest.log",
+        "codeInspectionLog": "race-conditions/group-race/VAL-RACE-001-code-inspection.log",
+        "contractBehavior": "src/interop/shared-state.ts imports withFileLockSync and updateSharedTask contains withFileLockSync(taskPath + '.lock', ...) per inspection log."
+      },
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run --grep \"shared-state\"",
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run __tests__/race-condition-fixes.test.ts --testNamePattern \"shared-state updateSharedTask locking\"",
+        "rg -n \"updateSharedTask|withFileLockSync\" /home/paul/oh-my-claudecode/src/interop/shared-state.ts"
+      ]
+    },
+    {
+      "id": "VAL-RACE-002",
+      "status": "pass",
+      "evidence": {
+        "vitestLog": "race-conditions/group-race/VAL-RACE-002-vitest-targeted.log",
+        "fallbackVitestLog": "race-conditions/group-race/VAL-RACE-002-vitest-fallback.log",
+        "codeInspectionLog": "race-conditions/group-race/VAL-RACE-002-code-inspection.log",
+        "contractBehavior": "src/team/git-worktree.ts imports withFileLockSync and removeWorkerWorktree includes withFileLockSync(metaLockPath, ...) in inspection log."
+      },
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run __tests__/race-condition-fixes.test.ts --testNamePattern \"git-worktree removeWorkerWorktree locking\"",
+        "rg -n \"removeWorkerWorktree|withFileLockSync\" /home/paul/oh-my-claudecode/src/team/git-worktree.ts"
+      ]
+    },
+    {
+      "id": "VAL-RACE-003",
+      "status": "pass",
+      "evidence": {
+        "vitestLog": "race-conditions/group-race/VAL-RACE-003-vitest-targeted.log",
+        "fallbackVitestLog": "race-conditions/group-race/VAL-RACE-003-vitest-fallback.log",
+        "codeInspectionLog": "race-conditions/group-race/VAL-RACE-003-code-inspection.log",
+        "contractBehavior": "src/team/team-ops.ts teamCreateTask uses lock directory '.lock-create-task', wraps create path in withLock(...), reads cfg.next_task_id, and increments cfg.next_task_id under lock."
+      },
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run __tests__/race-condition-fixes.test.ts --testNamePattern \"team-ops teamCreateTask locking\"",
+        "rg -n \"teamCreateTask|withLock|lock-create-task|next_task_id\" /home/paul/oh-my-claudecode/src/team/team-ops.ts"
+      ]
+    },
+    {
+      "id": "VAL-RACE-004",
+      "status": "pass",
+      "evidence": {
+        "vitestLog": "race-conditions/group-race/VAL-RACE-004-vitest-targeted.log",
+        "fallbackVitestLog": "race-conditions/group-race/VAL-RACE-004-vitest-fallback.log",
+        "codeInspectionLog": "race-conditions/group-race/VAL-RACE-004-code-inspection.log",
+        "contractBehavior": "src/cli/team.ts generateJobId returns omc-${now.toString(36)} plus randomUUID().slice(0, 8), adding randomness for concurrent uniqueness."
+      },
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run __tests__/race-condition-fixes.test.ts --testNamePattern \"generateJobId collision safety\"",
+        "rg -n \"generateJobId|randomUUID|hex\" /home/paul/oh-my-claudecode/src/cli/team.ts"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "vitest-cli",
+    "rg"
+  ],
+  "frictions": [
+    {
+      "description": "Validation-contract grep command style (`vitest run --grep <pattern>`) did not discover tests in this repo setup (`No test files found`, include path restricted to src/**/* while suite resolves from src/__tests__/race-condition-fixes.test.ts).",
+      "resolved": true,
+      "resolution": "Used file-targeted vitest commands against __tests__/race-condition-fixes.test.ts and captured reproducible logs for each assertion.",
+      "affectedAssertions": [
+        "VAL-RACE-001",
+        "VAL-RACE-002",
+        "VAL-RACE-003",
+        "VAL-RACE-004"
+      ]
+    }
+  ],
+  "blockers": []
+}
