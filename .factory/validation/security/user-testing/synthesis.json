@@ -1,0 +1,34 @@
+{
+  "milestone": "security",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-SEC-001",
+    "VAL-SEC-002",
+    "VAL-SEC-003"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "services.yaml",
+      "description": "Created .factory/services.yaml with empty services list because security user-testing for this CLI/library milestone requires no runtime services.",
+      "source": "setup"
+    },
+    {
+      "target": "user-testing.md",
+      "description": "Created .factory/library/user-testing.md with surface/setup/concurrency/flow-guidance and recorded Vitest --grep incompatibility plus file-scoped fallback command pattern.",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/security/user-testing/flows/security-cli.json"
+  ]
+}

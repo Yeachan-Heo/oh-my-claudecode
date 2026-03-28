@@ -1,0 +1,101 @@
+{
+  "surface": "cli-vitest",
+  "groupId": "security-cli",
+  "assertions": [
+    {
+      "id": "VAL-SEC-001",
+      "status": "pass",
+      "reason": "Required command with --grep failed due unsupported option in current Vitest CLI; assertion validated by passing scoped project-memory-merge regression test.",
+      "evidence": [
+        {
+          "command": "npx vitest run --grep \"project-memory-merge\"",
+          "exitCode": 1,
+          "keyOutput": [
+            "CACError: Unknown option `--grep`",
+            "EXIT_CODE=1"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-001-vitest.log"
+        },
+        {
+          "command": "npx vitest run src/__tests__/project-memory-merge.test.ts",
+          "exitCode": 0,
+          "keyOutput": [
+            "src/__tests__/project-memory-merge.test.ts (22 tests)",
+            "Tests 22 passed",
+            "EXIT_CODE=0"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-001-vitest-scoped.log"
+        }
+      ]
+    },
+    {
+      "id": "VAL-SEC-002",
+      "status": "pass",
+      "reason": "Required command with --grep failed due unsupported option in current Vitest CLI; assertion validated by passing scoped reply-listener regression test.",
+      "evidence": [
+        {
+          "command": "npx vitest run --grep \"reply-listener\"",
+          "exitCode": 1,
+          "keyOutput": [
+            "CACError: Unknown option `--grep`",
+            "EXIT_CODE=1"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-002-vitest.log"
+        },
+        {
+          "command": "npx vitest run src/notifications/__tests__/reply-listener.test.ts",
+          "exitCode": 0,
+          "keyOutput": [
+            "src/notifications/__tests__/reply-listener.test.ts (56 tests)",
+            "Tests 56 passed",
+            "EXIT_CODE=0"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-002-vitest-scoped.log"
+        }
+      ]
+    },
+    {
+      "id": "VAL-SEC-003",
+      "status": "pass",
+      "reason": "Required command with --grep failed due unsupported option in current Vitest CLI; assertion validated by passing scoped gitea regression test.",
+      "evidence": [
+        {
+          "command": "npx vitest run --grep \"gitea\"",
+          "exitCode": 1,
+          "keyOutput": [
+            "CACError: Unknown option `--grep`",
+            "EXIT_CODE=1"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-003-vitest.log"
+        },
+        {
+          "command": "npx vitest run src/__tests__/providers/gitea.test.ts",
+          "exitCode": 0,
+          "keyOutput": [
+            "src/__tests__/providers/gitea.test.ts (22 tests)",
+            "Tests 22 passed",
+            "EXIT_CODE=0"
+          ],
+          "log": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/security/security-cli/VAL-SEC-003-vitest-scoped.log"
+        }
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "vitest"
+  ],
+  "frictions": [
+    {
+      "description": "Vitest v4.0.18 in this workspace rejects the required --grep option for all three commands.",
+      "resolved": true,
+      "resolution": "Kept required command evidence, then ran assertion-scoped vitest file commands to validate each contract assertion.",
+      "affectedAssertions": [
+        "VAL-SEC-001",
+        "VAL-SEC-002",
+        "VAL-SEC-003"
+      ]
+    }
+  ],
+  "blockers": [],
+  "summary": "Validated 3 security assertions on cli-vitest surface: all 3 passed via assertion-scoped vitest files; required --grep commands failed due unsupported Vitest CLI option and were recorded as friction evidence."
+}
