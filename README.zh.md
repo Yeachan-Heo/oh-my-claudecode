@@ -15,24 +15,28 @@
 
 *无需学习 Claude Code，直接使用 OMC。*
 
-[快速开始](#快速开始) • [文档](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI 参考](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [工作流](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [迁移指南](docs/MIGRATION.md)
+[快速开始](#快速开始) • [文档](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI 参考](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [工作流](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [迁移指南](docs/MIGRATION.md) • [Discord](https://discord.gg/qRJw62Gvh7)
 
 ---
 
 ## 快速开始
 
 **第一步：安装**
+
 ```bash
 /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
 /plugin install oh-my-claudecode
 ```
 
 **第二步：配置**
+
 ```bash
+/setup
 /omc-setup
 ```
 
 **第三步：开始构建**
+
 ```
 autopilot: build a REST API for managing tasks
 ```
@@ -51,7 +55,7 @@ autopilot: build a REST API for managing tasks
 
 ## Team 模式（推荐）
 
-从 **v4.1.7** 开始，**Team** 是 OMC 的标准编排方式。**swarm** 和 **ultrapilot** 等旧版入口仍受支持，但现在**在底层路由到 Team**。
+从 **v4.1.7** 开始，**Team** 是 OMC 的标准编排方式。旧版 `swarm` 关键词/技能已被移除；请直接使用 `team`。
 
 ```bash
 /team 3:executor "fix all TypeScript errors"
@@ -75,32 +79,46 @@ Team 按阶段化流水线运行：
 
 ### tmux CLI 工作者 — Codex & Gemini (v4.4.0+)
 
-**v4.4.0 移除了 Codex/Gemini MCP 服务器**（`x`、`g` 提供商）。请改用 `/omc-teams` 在 tmux 分屏中启动真实的 CLI 进程：
+**v4.4.0 移除了 Codex/Gemini MCP 服务器**（`x`、`g` 提供商）。请改用 CLI 优先的 Team 运行时（`omc team ...`）在 tmux 分屏中启动真实的工作者窗格：
 
 ```bash
-/omc-teams 2:codex   "review auth module for security issues"
-/omc-teams 2:gemini  "redesign UI components for accessibility"
-/omc-teams 1:claude  "implement the payment flow"
+omc team 2:codex "review auth module for security issues"
+omc team 2:gemini "redesign UI components for accessibility"
+omc team 1:claude "implement the payment flow"
+omc team status auth-review
+omc team shutdown auth-review
 ```
 
-如需在一个命令中混合使用 Codex + Gemini，请使用 **`/ccg`** 技能：
+`/omc-teams` 作为旧版兼容技能仍然保留，现在会路由到 `omc team ...`。
+
+如需在一个命令中混合使用 Codex + Gemini，请使用 **`/ccg`** 技能（通过 `/ask codex` + `/ask gemini` 路由，然后由 Claude 合成）：
 
 ```bash
 /ccg Review this PR — architecture (Codex) and UI components (Gemini)
 ```
 
-| 技能 | 工作者 | 最适合 |
-|-------|---------|----------|
-| `/omc-teams N:codex` | N 个 Codex CLI 窗格 | 代码审查、安全分析、架构 |
-| `/omc-teams N:gemini` | N 个 Gemini CLI 窗格 | UI/UX 设计、文档、大上下文任务 |
-| `/omc-teams N:claude` | N 个 Claude CLI 窗格 | 通过 tmux 中的 Claude CLI 处理通用任务 |
-| `/ccg` | 1 个 Codex + 1 个 Gemini | 并行三模型编排 |
+| 调用方式 | 工作者 | 最适合 |
+|---------|--------|--------|
+| `omc team N:codex "..."` | N 个 Codex CLI 窗格 | 代码审查、安全分析、架构 |
+| `omc team N:gemini "..."` | N 个 Gemini CLI 窗格 | UI/UX 设计、文档、大上下文任务 |
+| `omc team N:claude "..."` | N 个 Claude CLI 窗格 | 通过 tmux 中的 Claude CLI 处理通用任务 |
+| `/ccg` | /ask codex + /ask gemini | 三模型顾问合成 |
 
 工作者按需生成，任务完成后自动退出 — 无空闲资源浪费。需要安装 `codex` / `gemini` CLI 并有活跃的 tmux 会话。
 
-> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g oh-my-claude-sisyphus`。
+> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装或升级 CLI 工具时，请使用 `npm i -g oh-my-claude-sisyphus@latest`。
 
 ### 更新
+
+如果你通过 npm 安装了 OMC，使用已发布的包名进行升级：
+
+```bash
+npm i -g oh-my-claude-sisyphus@latest
+```
+
+> **包命名说明：** 仓库、插件和命令品牌名为 **oh-my-claudecode**，但已发布的 npm 包名仍为 `oh-my-claude-sisyphus`。
+
+如果你通过 Claude Code marketplace/插件方式安装了 OMC，使用以下命令更新：
 
 ```bash
 # 1. 更新 marketplace 克隆
@@ -129,7 +147,7 @@ Team 按阶段化流水线运行：
 ## 为什么选择 oh-my-claudecode？
 
 - **无需配置** - 开箱即用，智能默认设置
-- **Team 优先编排** - Team 是标准的多智能体界面（swarm/ultrapilot 是兼容性外观）
+- **Team 优先编排** - Team 是标准的多智能体界面
 - **自然语言交互** - 无需记忆命令，只需描述你的需求
 - **自动并行化** - 复杂任务自动分配给专业智能体
 - **持久执行** - 不会半途而废，直到任务验证完成
@@ -142,18 +160,19 @@ Team 按阶段化流水线运行：
 ## 功能特性
 
 ### 执行模式
-针对不同场景的多种策略 - 从全自动构建到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+
+针对不同场景的多种策略 — 从 Team 支持的编排到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
 
 | 模式 | 特点 | 适用场景 |
-|------|---------|---------|
-| **Team（推荐）** | 阶段化流水线 | 在共享任务列表上协作的 Claude 智能体 |
-| **omc-teams** | tmux CLI 工作者 | Codex/Gemini CLI 任务；按需生成，完成后退出 |
-| **ccg** | 三模型并行 | Codex（分析）+ Gemini（设计），Claude 合成 |
-| **Autopilot** | 自主执行 | 最小化繁琐配置的端到端功能开发 |
-| **Ultrawork** | 最大并行 | 不需要 Team 的并行修复/重构 |
-| **Ralph** | 持久模式 | 必须完整完成的任务 |
-| **Pipeline** | 顺序处理 | 需要严格顺序的多阶段转换 |
-| **Swarm / Ultrapilot（旧版）** | 路由到 Team | 现有工作流和旧文档 |
+|------|------|---------|
+| **Team（推荐）** | 标准阶段化流水线（`team-plan → team-prd → team-exec → team-verify → team-fix`） | 在共享任务列表上协作的 Claude 智能体 |
+| **omc team (CLI)** | tmux CLI 工作者 — 在分屏中运行真实的 `claude`/`codex`/`gemini` 进程 | Codex/Gemini CLI 任务；按需生成，完成后退出 |
+| **ccg** | 三模型顾问，通过 `/ask codex` + `/ask gemini`，由 Claude 合成 | 同时需要 Codex 和 Gemini 的混合后端+UI 工作 |
+| **Autopilot** | 自主执行（单个主导智能体） | 最小化繁琐配置的端到端功能开发 |
+| **Ultrawork** | 最大并行化（非 Team） | 不需要 Team 的并行修复/重构 |
+| **Ralph** | 带验证/修复循环的持久模式 | 必须完整完成的任务（无静默部分完成） |
+| **Pipeline** | 顺序分阶段处理 | 需要严格顺序的多阶段转换 |
+| **Ultrapilot（旧版）** | 已弃用的兼容模式（autopilot pipeline 别名） | 现有工作流和旧文档 |
 
 ### 智能编排
 
@@ -163,7 +182,7 @@ Team 按阶段化流水线运行：
 
 ### 开发者体验
 
-- **魔法关键词** - `ralph`、`ulw`、`plan` 提供显式控制
+- **魔法关键词** - `ralph`、`ulw`、`ralplan`；Team 通过 `/team` 显式调用
 - **HUD 状态栏** - 状态栏实时显示编排指标
 - **技能学习** - 从会话中提取可复用模式
 - **分析与成本追踪** - 了解所有会话的 token 使用情况
@@ -199,29 +218,47 @@ source: extracted
 
 ## 魔法关键词
 
-为高级用户提供的可选快捷方式。不用它们，自然语言也能很好地工作。
+为高级用户提供的可选快捷方式。不用它们，自然语言也能很好地工作。Team 模式是显式的：使用 `/team ...` 或 `omc team ...` 而非关键词触发。
 
 | 关键词 | 效果 | 示例 |
-|---------|--------|---------|
+|---------|------|------|
 | `team` | 标准 Team 编排 | `/team 3:executor "fix all TypeScript errors"` |
-| `omc-teams` | tmux CLI 工作者 (codex/gemini/claude) | `/omc-teams 2:codex "security review"` |
-| `ccg` | 三模型 Codex+Gemini 编排 | `/ccg review this PR` |
+| `omc team` | tmux CLI 工作者 (codex/gemini/claude) | `omc team 2:codex "security review"` |
+| `ccg` | `/ask codex` + `/ask gemini` 合成 | `/ccg review this PR` |
 | `autopilot` | 全自动执行 | `autopilot: build a todo app` |
 | `ralph` | 持久模式 | `ralph: refactor auth` |
 | `ulw` | 最大并行化 | `ulw fix all errors` |
-| `plan` | 规划访谈 | `plan the API` |
 | `ralplan` | 迭代规划共识 | `ralplan this feature` |
 | `deep-interview` | 苏格拉底式需求澄清 | `deep-interview "vague idea"` |
-| `swarm` | **已弃用** — 请使用 `team` | `swarm 5 agents: fix lint errors` |
-| `ultrapilot` | **已弃用** — 请使用 `team` | `ultrapilot: build a fullstack app` |
+| `deepsearch` | 代码库聚焦搜索路由 | `deepsearch for auth middleware` |
+| `ultrathink` | 深度推理模式 | `ultrathink about this architecture` |
+| `cancelomc`, `stopomc` | 停止活跃的 OMC 模式 | `stopomc` |
 
 **注意：**
-- **ralph 包含 ultrawork：** 激活 ralph 模式时，会自动包含 ultrawork 的并行执行。无需组合关键词。
-- `swarm N agents` 语法仍可被识别用于提取智能体数量，但运行时在 v4.1.7+ 中由 Team 支持。
 
----
+- **ralph 包含 ultrawork：** 激活 ralph 模式时，会自动包含 ultrawork 的并行执行。
+- `swarm` 兼容别名已被移除；请将现有提示词迁移到 `/team` 语法。
+- `plan this` / `plan the` 关键词触发已被移除；请使用 `ralplan` 或显式 `/oh-my-claudecode:omc-plan`。
 
 ## 实用工具
+
+### 提供商顾问 (`omc ask`)
+
+运行本地提供商 CLI 并将 markdown 产物保存到 `.omc/artifacts/ask/`：
+
+```bash
+omc ask claude "review this migration plan"
+omc ask codex --prompt "identify architecture risks"
+omc ask gemini --prompt "propose UI polish ideas"
+omc ask claude --agent-prompt executor --prompt "draft implementation steps"
+```
+
+标准环境变量：
+
+- `OMC_ASK_ADVISOR_SCRIPT`
+- `OMC_ASK_ORIGINAL_TASK`
+
+Phase-1 别名 `OMX_ASK_ADVISOR_SCRIPT` 和 `OMX_ASK_ORIGINAL_TASK` 仍然接受，但会显示弃用警告。
 
 ### 速率限制等待
 
@@ -234,6 +271,15 @@ omc wait --stop   # 禁用守护进程
 ```
 
 **需要：** tmux（用于会话检测）
+
+### 监控与可观测性
+
+使用 HUD 进行实时可观测性，使用当前会话/回放产物进行会话后检查：
+
+- HUD 预设：`/oh-my-claudecode:hud setup`，然后使用支持的预设如 `"omcHud": { "preset": "focused" }`
+- 会话摘要：`.omc/sessions/*.json`
+- 回放日志：`.omc/state/agent-replay-*.jsonl`
+- 实时 HUD 渲染：`omc hud`
 
 ### 通知标签配置 (Telegram/Discord/Slack)
 
@@ -252,6 +298,7 @@ omc config-stop-callback discord --clear-tags
 ```
 
 标签规则：
+
 - Telegram：`alice` 会规范化为 `@alice`
 - Discord：支持 `@here`、`@everyone`、纯数字用户 ID、`role:<id>`
 - Slack：支持 `<@MEMBER_ID>`、`<!channel>`、`<!here>`、`<!everyone>`、`<!subteam^GROUP_ID>`
@@ -338,6 +385,21 @@ omc config-stop-callback discord --clear-tags
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro 订阅 或 Anthropic API 密钥
 
+### 平台与 tmux
+
+OMC 的 `omc team` 和速率限制检测等功能需要 **tmux**：
+
+| 平台 | tmux 提供方 | 安装方式 |
+|------|------------|---------|
+| macOS | [tmux](https://github.com/tmux/tmux) | `brew install tmux` |
+| Ubuntu/Debian | tmux | `sudo apt install tmux` |
+| Fedora | tmux | `sudo dnf install tmux` |
+| Arch | tmux | `sudo pacman -S tmux` |
+| Windows | [psmux](https://github.com/marlocarlo/psmux)（原生） | `winget install psmux` |
+| Windows (WSL2) | tmux（WSL 内） | `sudo apt install tmux` |
+
+> **Windows 用户：** [psmux](https://github.com/marlocarlo/psmux) 为 Windows 提供原生 `tmux` 二进制文件，支持 76 个 tmux 兼容命令。无需 WSL。
+
 ### 可选：多 AI 编排
 
 OMC 可以选择性地调用外部 AI 提供商进行交叉验证和设计一致性检查。**非必需** — 没有它们 OMC 也能完整运行。
@@ -364,6 +426,24 @@ MIT
 **零学习曲线。最强大能。**
 
 </div>
+
+<!-- OMC:FEATURED-CONTRIBUTORS:START -->
+## OMC 贡献者精选
+
+来自所有 OMC 贡献者的顶级个人非 fork、非归档仓库（100+ GitHub 星标）。
+
+- [@Yeachan-Heo](https://github.com/Yeachan-Heo) — [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (⭐ 11k)
+- [@junhoyeo](https://github.com/junhoyeo) — [tokscale](https://github.com/junhoyeo/tokscale) (⭐ 1.3k)
+- [@psmux](https://github.com/psmux) — [psmux](https://github.com/psmux/psmux) (⭐ 695)
+- [@BowTiedSwan](https://github.com/BowTiedSwan) — [buildflow](https://github.com/BowTiedSwan/buildflow) (⭐ 284)
+- [@alohays](https://github.com/alohays) — [awesome-visual-representation-learning-with-transformers](https://github.com/alohays/awesome-visual-representation-learning-with-transformers) (⭐ 268)
+- [@jcwleo](https://github.com/jcwleo) — [random-network-distillation-pytorch](https://github.com/jcwleo/random-network-distillation-pytorch) (⭐ 260)
+- [@emgeee](https://github.com/emgeee) — [mean-tutorial](https://github.com/emgeee/mean-tutorial) (⭐ 200)
+- [@anduinnn](https://github.com/anduinnn) — [HiFiNi-Auto-CheckIn](https://github.com/anduinnn/HiFiNi-Auto-CheckIn) (⭐ 172)
+- [@Znuff](https://github.com/Znuff) — [consolas-powerline](https://github.com/Znuff/consolas-powerline) (⭐ 145)
+- [@shaun0927](https://github.com/shaun0927) — [openchrome](https://github.com/shaun0927/openchrome) (⭐ 144)
+
+<!-- OMC:FEATURED-CONTRIBUTORS:END -->
 
 ## Star 历史
 
