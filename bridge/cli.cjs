@@ -66455,10 +66455,27 @@ init_context_injector();
 var import_fs81 = require("fs");
 var import_path96 = require("path");
 var import_url12 = require("url");
-var __filename3 = (0, import_url12.fileURLToPath)(importMetaUrl);
-var __dirname2 = (0, import_path96.dirname)(__filename3);
-var PROJECT_ROOT = (0, import_path96.join)(__dirname2, "..", "..", "..");
-var SKILLS_DIR2 = (0, import_path96.join)(PROJECT_ROOT, "skills");
+function getPackageDir5() {
+  if (typeof __dirname !== "undefined" && __dirname) {
+    const currentDirName = (0, import_path96.basename)(__dirname);
+    const parentDirName = (0, import_path96.basename)((0, import_path96.dirname)(__dirname));
+    const grandparentDirName = (0, import_path96.basename)((0, import_path96.dirname)((0, import_path96.dirname)(__dirname)));
+    if (currentDirName === "bridge") {
+      return (0, import_path96.join)(__dirname, "..");
+    }
+    if (currentDirName === "builtin-skills" && parentDirName === "features" && (grandparentDirName === "src" || grandparentDirName === "dist")) {
+      return (0, import_path96.join)(__dirname, "..", "..", "..");
+    }
+  }
+  try {
+    const __filename3 = (0, import_url12.fileURLToPath)(importMetaUrl);
+    const __dirname2 = (0, import_path96.dirname)(__filename3);
+    return (0, import_path96.join)(__dirname2, "..", "..", "..");
+  } catch {
+    return process.cwd();
+  }
+}
+var SKILLS_DIR2 = (0, import_path96.join)(getPackageDir5(), "skills");
 var CC_NATIVE_COMMANDS = /* @__PURE__ */ new Set([
   "review",
   "plan",

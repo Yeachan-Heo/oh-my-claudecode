@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import type { BuiltinSkill } from './types.js';
 import { parseFrontmatter, parseFrontmatterAliases } from '../../utils/frontmatter.js';
@@ -19,11 +19,35 @@ import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../u
 import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from './runtime-guidance.js';
 
-// Get the project root directory (go up from src/features/builtin-skills/)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = join(__dirname, '..', '..', '..');
-const SKILLS_DIR = join(PROJECT_ROOT, 'skills');
+function getPackageDir(): string {
+  if (typeof __dirname !== 'undefined' && __dirname) {
+    const currentDirName = basename(__dirname);
+    const parentDirName = basename(dirname(__dirname));
+    const grandparentDirName = basename(dirname(dirname(__dirname)));
+
+    if (currentDirName === 'bridge') {
+      return join(__dirname, '..');
+    }
+
+    if (
+      currentDirName === 'builtin-skills'
+      && parentDirName === 'features'
+      && (grandparentDirName === 'src' || grandparentDirName === 'dist')
+    ) {
+      return join(__dirname, '..', '..', '..');
+    }
+  }
+
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    return join(__dirname, '..', '..', '..');
+  } catch {
+    return process.cwd();
+  }
+}
+
+const SKILLS_DIR = join(getPackageDir(), 'skills');
 
 /**
  * Claude Code native commands that must not be shadowed by OMC skill short names.
