@@ -157,6 +157,19 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     // Read configuration (before transcript parsing so we can use staleTaskThresholdMinutes)
     const config = readHudConfig();
 
+    // Auto-detect terminal width if maxWidth not explicitly configured (#1726)
+    if (!config.maxWidth) {
+      const cols =
+        parseInt(process.env.COLUMNS ?? "0", 10) ||
+        process.stderr.columns ||
+        process.stdout.columns ||
+        0;
+      if (cols > 0) {
+        config.maxWidth = cols;
+        if (!config.wrapMode) config.wrapMode = "wrap";
+      }
+    }
+
     // Resolve worktree-mismatched transcript paths (issue #1094)
     const resolvedTranscriptPath = resolveTranscriptPath(stdin.transcript_path, cwd);
 
@@ -385,6 +398,16 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
 
 // Export for programmatic use (e.g., omc hud --watch loop)
 export { main };
+
+// Listen for terminal resize events so column values stay current in --watch mode (#1726)
+if (process.stdout.isTTY) {
+  process.stdout.on("resize", () => {
+    // No-op: process.stdout.columns is updated automatically by Node.js on resize.
+    // This listener ensures the 'resize' event is observed, which triggers
+    // Node's internal columns update. The next main() invocation will read
+    // the fresh value via the auto-detect fallback chain.
+  });
+}
 
 // Auto-run (unconditional so dynamic import() via omc-hud.mjs wrapper works correctly)
 main();
