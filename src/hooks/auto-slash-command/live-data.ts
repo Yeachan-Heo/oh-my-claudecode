@@ -173,6 +173,7 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
         if (!safe(pat)) {
           // Unsafe regex in deny list: block the command to fail closed.
           // A ReDoS-capable pattern is treated as a blanket deny.
+          console.warn(`[live-data] Unsafe denied_pattern skipped (possible ReDoS): ${pat}`);
           return { allowed: false, reason: `unsafe regex rejected: ${pat}` };
         }
         if (new RegExp(pat).test(command)) {
@@ -218,6 +219,7 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
           // Unsafe regex in allow list: skip to fail closed.
           // The pattern cannot grant access — remaining patterns
           // or allowed_commands may still match.
+          console.warn(`[live-data] Unsafe allowed_pattern skipped (possible ReDoS): ${pat}`);
           continue;
         }
         if (new RegExp(pat).test(command)) {
