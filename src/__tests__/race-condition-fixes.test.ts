@@ -238,18 +238,7 @@ describe('generateJobId collision safety', () => {
   });
 
   it('100 rapid calls produce 100 unique IDs', async () => {
-    // We can't easily call generateJobId directly since it's not exported,
-    // but we can test via source inspection + verify the pattern
-    const sourcePath = join(__dirname, '..', 'cli', 'team.ts');
-    const source = readFileSync(sourcePath, 'utf-8');
-
-    const fnMatch = source.match(/function generateJobId[\s\S]*?\n}/);
-    expect(fnMatch).toBeTruthy();
-
-    // Evaluate the function logic in isolation to verify uniqueness
-    const { randomUUID } = await import('crypto');
-    const generateJobId = (now = Date.now()) =>
-      `omc-${now.toString(36)}${randomUUID().slice(0, 4)}`;
+    const { generateJobId } = await import('../cli/team.js');
 
     const ids = new Set<string>();
     const fixedTime = Date.now();
@@ -261,15 +250,24 @@ describe('generateJobId collision safety', () => {
   });
 
   it('generated IDs match the updated JOB_ID_PATTERN', async () => {
-    const { randomUUID } = await import('crypto');
+    const { generateJobId } = await import('../cli/team.js');
     const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
-
-    const generateJobId = (now = Date.now()) =>
-      `omc-${now.toString(36)}${randomUUID().slice(0, 4)}`;
 
     for (let i = 0; i < 50; i++) {
       const id = generateJobId();
       expect(JOB_ID_PATTERN.test(id)).toBe(true);
     }
+  });
+
+  it('generateJobId uses 8+ hex chars of randomness', async () => {
+    const { generateJobId } = await import('../cli/team.js');
+
+    const fixedTime = Date.now();
+    const id = generateJobId(fixedTime);
+    const prefix = `omc-${fixedTime.toString(36)}`;
+    const randomPart = id.slice(prefix.length);
+
+    // Must have at least 8 chars of randomness
+    expect(randomPart.length).toBeGreaterThanOrEqual(8);
   });
 });

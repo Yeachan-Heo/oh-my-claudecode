@@ -255,8 +255,8 @@ function buildStatus(jobId: string, job: TeamJobRecord): TeamJobStatus {
   };
 }
 
-function generateJobId(now = Date.now()): string {
-  return `omc-${now.toString(36)}${randomUUID().slice(0, 4)}`;
+export function generateJobId(now = Date.now()): string {
+  return `omc-${now.toString(36)}${randomUUID().slice(0, 8)}`;
 }
 
 function convergeWithResultArtifact(jobId: string, job: TeamJobRecord, jobsDir: string): TeamJobRecord {
