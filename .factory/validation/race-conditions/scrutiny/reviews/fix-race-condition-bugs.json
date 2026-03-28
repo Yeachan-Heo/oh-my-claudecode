@@ -1,0 +1,50 @@
+{
+  "featureId": "fix-race-condition-bugs",
+  "reviewedAt": "2026-03-28T18:01:40Z",
+  "commitId": "f531b909",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The locking fixes for shared-state, git-worktree, and teamCreateTask are implemented as required, but the generateJobId collision fix is incomplete because it keeps only 16 bits of randomness, leaving practical same-millisecond collision risk under burst creation.",
+    "issues": [
+      {
+        "file": "src/cli/team.ts",
+        "line": 259,
+        "severity": "blocking",
+        "description": "generateJobId appends randomUUID().slice(0, 4), which provides only 16 bits of entropy. This does not make ID generation collision-safe for burst same-millisecond calls (birthday collisions remain realistic), so BUG 4 is not fully resolved."
+      },
+      {
+        "file": "src/__tests__/race-condition-fixes.test.ts",
+        "line": 240,
+        "severity": "non_blocking",
+        "description": "The uniqueness regression test is probabilistic and can be flaky because it asserts 100/100 uniqueness while using only randomUUID().slice(0, 4) entropy in a same-timestamp loop; it also validates a reimplemented local function rather than invoking production generateJobId directly."
+      },
+      {
+        "file": ".factory/validation/critical-logic/user-testing/flows/group-a.json",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "Commit includes unrelated critical-logic validation artifacts (and .factory/services.yaml), which are outside this race-condition feature scope and add avoidable review/cherry-pick noise."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Feature metadata requires skillName 'bugfix-worker', but that skill is absent, forcing ad-hoc execution and procedure deviation.",
+      "evidence": "Transcript skeleton shows `## Tool: Skill { \"skill\": \"bugfix-worker\" }` followed by `Error: Skill \"bugfix-worker\" not found`; handoff.skillFeedback.followedProcedure=false with suggested change to create/remove bugfix-worker reference."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission AGENTS.md says to commit only bug-fix code and regression tests, but this feature commit also added unrelated .factory validation artifacts for another milestone.",
+      "evidence": "Mission AGENTS.md: 'Only commit bug fix code + regression tests'; `git show --stat f531b909` includes .factory/validation/critical-logic/user-testing/flows/group-a.json and group-b.json plus .factory/services.yaml."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Expected shared library documentation surface is missing in this repo state, reducing reusable project context for workers.",
+      "evidence": "Task guidance references `.factory/library/` (including architecture.md), but `LS /home/paul/oh-my-claudecode/.factory` shows no `library/` directory (only research, services.yaml, validation)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review fails on BUG 4 completeness: generateJobId still has insufficient entropy for collision-safe burst generation. The other three race-condition fixes are implemented with appropriate locking, but ID uniqueness fix should increase entropy (e.g., >=8 hex chars or full UUID segment) to fully satisfy milestone intent."
+}
