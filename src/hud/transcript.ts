@@ -428,6 +428,7 @@ function processEntry(
   const usage = extractLastRequestTokenUsage(entry.message?.usage);
   if (usage) {
     result.lastRequestTokenUsage = usage;
+    result.lastAssistantTimestamp = timestamp;
     if (sessionTokenTotals) {
       sessionTokenTotals.inputTokens += usage.inputTokens;
       sessionTokenTotals.outputTokens += usage.outputTokens;

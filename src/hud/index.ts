@@ -378,6 +378,18 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       : null;
     const contextPercent = getContextPercent(stdin);
 
+    // Calculate token speed (outputTokens / elapsed_seconds)
+    const _promptTime = hudState?.lastPromptTimestamp ? new Date(hudState.lastPromptTimestamp) : null;
+    const _lastAssistantTs = transcriptData.lastAssistantTimestamp;
+    const _outputTokens = transcriptData.lastRequestTokenUsage?.outputTokens;
+    let tokenSpeed: number | null = null;
+    if (_promptTime && _lastAssistantTs && _outputTokens && _outputTokens > 0) {
+      const _durationMs = _lastAssistantTs.getTime() - _promptTime.getTime();
+      if (_durationMs > 500) {
+        tokenSpeed = _outputTokens / (_durationMs / 1000);
+      }
+    }
+
     // Build render context
     const context: HudRenderContext = {
       contextPercent,
@@ -415,6 +427,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         ? basename(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "")
         : null,
       sessionSummary,
+      tokenSpeed,
     };
 
     // Debug: log data if OMC_DEBUG is set

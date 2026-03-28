@@ -29,6 +29,7 @@ import { renderThinking } from "./elements/thinking.js";
 import { renderSession } from "./elements/session.js";
 import { renderTokenUsage } from "./elements/token-usage.js";
 import { renderPromptTime } from "./elements/prompt-time.js";
+import { renderTokenSpeed } from "./elements/token-speed.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
 import { renderGitRepo, renderGitBranch } from "./elements/git.js";
@@ -328,6 +329,11 @@ export async function render(
       context.sessionTotalTokens,
     );
     if (tokenUsage) elements.push(tokenUsage);
+  }
+
+  if (enabledElements.showTokenSpeed === true) {
+    const speed = renderTokenSpeed(context.tokenSpeed);
+    if (speed) elements.push(speed);
   }
 
   // Ralph loop state

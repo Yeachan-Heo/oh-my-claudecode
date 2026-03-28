@@ -129,6 +129,8 @@ export interface TranscriptData {
   toolCallCount: number;
   agentCallCount: number;
   skillCallCount: number;
+  /** Timestamp of the last assistant message with token usage (for speed calculation) */
+  lastAssistantTimestamp?: Date;
 }
 
 // ============================================================================
@@ -357,6 +359,9 @@ export interface HudRenderContext {
   /** Last prompt submission time (from HUD state) */
   promptTime: Date | null;
 
+  /** Token output speed for the last response (tokens/second), null if unavailable */
+  tokenSpeed: number | null;
+
   /** API key source: 'project', 'global', or 'env' */
   apiKeySource: ApiKeySource | null;
 
@@ -442,6 +447,7 @@ export interface HudElementConfig {
   showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
   showHealthIndicator?: boolean;  // Show 🟢/🟡/🔴 health indicator (default: true if sessionHealth is true)
   showTokens?: boolean;           // Show last-request token usage when enabled (tok:i1.2k/o340)
+  showTokenSpeed?: boolean;       // Show token output speed from last response (⚡23tok/s)
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
   showCallCounts?: boolean;   // Show tool/agent/skill call counts on the right of the status line (default: true)
   sessionSummary: boolean;    // Show AI-generated session summary (<20 chars) - generated every 10 turns via claude -p
@@ -522,6 +528,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: false,  // Disabled by default for backwards compatibility
     showCallCounts: true,  // Show tool/agent/skill call counts by default (Issue #710)
     sessionSummary: false, // Disabled by default - opt-in AI-generated session summary
@@ -577,6 +584,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: false,
     showCallCounts: false,
     sessionSummary: false,
@@ -615,6 +623,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: true,
     showCallCounts: true,
     sessionSummary: false, // Opt-in: sends transcript to claude -p
@@ -653,6 +662,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: true,
     showCallCounts: true,
     sessionSummary: false, // Opt-in: sends transcript to claude -p
@@ -691,6 +701,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: false,
     showCallCounts: true,
     sessionSummary: false,
@@ -729,6 +740,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
+    showTokenSpeed: false,
     useBars: true,
     showCallCounts: true,
     sessionSummary: false, // Opt-in: sends transcript to claude -p
