@@ -25704,7 +25704,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     }))
   };
 });
-var setStandaloneCallToolRequestHandler = server.setRequestHandler;
+var setStandaloneCallToolRequestHandler = server.setRequestHandler.bind(server);
 setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const tool = allTools.find((t) => t.name === name);

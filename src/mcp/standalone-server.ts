@@ -173,7 +173,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle tool calls
 const setStandaloneCallToolRequestHandler =
-  server.setRequestHandler as unknown as StandaloneCallToolRequestRegistrar;
+  (server.setRequestHandler as unknown as StandaloneCallToolRequestRegistrar).bind(server);
 
 setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
