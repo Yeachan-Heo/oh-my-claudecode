@@ -1,59 +1,55 @@
 {
   "milestone": "critical-logic",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
-      "command": "cd \"/home/paul/oh-my-claudecode\" && npx vitest run",
+      "command": "npm --prefix \"/home/paul/oh-my-claudecode\" run test:run",
       "exitCode": 0
     },
     "typecheck": {
       "passed": true,
-      "command": "cd \"/home/paul/oh-my-claudecode\" && npx tsc --noEmit",
+      "command": "npm --prefix \"/home/paul/oh-my-claudecode\" exec -- tsc --noEmit",
       "exitCode": 0
     },
     "lint": {
       "passed": true,
-      "command": "cd \"/home/paul/oh-my-claudecode\" && npm run lint",
+      "command": "npm --prefix \"/home/paul/oh-my-claudecode\" run lint",
       "exitCode": 0
     }
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": [
-      "fix-critical-logic-bugs"
-    ]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "fix-critical-logic-bugs",
-      "severity": "blocking",
-      "description": "src/hud/index.ts calls initializeHUDState() before resolving cwd and without passing the resolved project directory, so HUD cleanup can still target process.cwd() instead of the intended worktree path."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
       "suggestion": "Ensure mission feature metadata references only installed skills (or ship required mission-specific skills like `bugfix-worker` before scheduling workers).",
-      "evidence": "Worker transcript for feature fix-critical-logic-bugs reports `Error: Skill \"bugfix-worker\" not found`, and the worker handoff explicitly documents procedure deviation due to missing skill.",
+      "evidence": "Both critical-logic feature workers recorded `Error: Skill \"bugfix-worker\" not found` in transcripts/handoffs, forcing procedural deviations.",
       "isSystemic": true
     },
     {
       "target": "AGENTS.md",
       "suggestion": "Align feature-level `verificationSteps` with mission-level CI policy by always including lint when mission AGENTS mandates lint.",
-      "evidence": "Mission AGENTS requires lint in CI gates, but fix-critical-logic-bugs verificationSteps in features.json list only vitest, tsc, and build.",
+      "evidence": "Mission AGENTS mandates lint in CI gates, but critical-logic implementation feature verification steps/handoffs omitted lint.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Expected repo-local `.factory/services.yaml` and `.factory/library/` are missing.",
-      "reason": "ambiguous - no repository-local schema or baseline content was available in this branch, so adding files directly risked introducing incorrect shared-state format."
+      "observation": "Repository-level `.factory/services.yaml` is absent while mission guidance references it.",
+      "reason": "ambiguous - no repository-local schema or baseline manifest was provided, so creating one here could introduce incorrect shared-state conventions."
+    },
+    {
+      "observation": "Repository-level `.factory/library/` is absent while mission guidance references it.",
+      "reason": "ambiguous - no baseline library structure was present, so adding ad-hoc artifacts in this pass risks polluting shared knowledge format."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/critical-logic/scrutiny/synthesis.round1.json"
 }

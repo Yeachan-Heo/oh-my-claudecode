@@ -1,0 +1,50 @@
+{
+  "featureId": "fix-hud-init-callsite",
+  "milestone": "critical-logic",
+  "status": "pass",
+  "summary": "Pass. The fix commit (217576e0) directly addresses the prior blocking issue from fix-critical-logic-bugs by moving HUD initialization to occur after cwd resolution and passing the resolved cwd into initializeHUDState(cwd). The added regression test in watch-mode-init verifies the callsite now receives the resolved directory. Review included both the original feature diff (bf83e9d6) and the fix diff (217576e0).",
+  "blockingIssues": [],
+  "nonBlockingIssues": [],
+  "sharedStateObservations": [
+    {
+      "target": "skills",
+      "observation": "Feature metadata requires skillName 'bugfix-worker', but no corresponding skill file exists in the repository.",
+      "rationale": "Glob search found no .factory/skills/bugfix-worker/SKILL.md, and both worker transcript skeleton and handoff.skillFeedback record 'Skill \"bugfix-worker\" not found', forcing procedural deviation."
+    },
+    {
+      "target": "services.yaml",
+      "observation": "Repository-level .factory/services.yaml is absent even though mission review guidance references it for shared-state checks.",
+      "rationale": "Reading /home/paul/oh-my-claudecode/.factory/services.yaml returned ENOENT, so service conventions cannot be documented/validated there during scrutiny."
+    },
+    {
+      "target": "library",
+      "observation": "Repository-level .factory/library directory is absent despite mission guidance expecting library-based shared knowledge.",
+      "rationale": "Listing /home/paul/oh-my-claudecode/.factory/library failed because the directory does not exist, indicating no local shared library artifacts for this mission."
+    },
+    {
+      "target": "AGENTS.md",
+      "observation": "Mission-level CI requirements and feature-level verification expectations are not fully aligned on lint execution.",
+      "rationale": "Mission AGENTS.md requires lint as part of must-pass CI, while this feature's verification steps and handoff command list include vitest/tsc/build but no lint command."
+    }
+  ],
+  "evidence": {
+    "filesInspected": [
+      "/home/paul/oh-my-claudecode/README.md",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/mission.md",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/features.json",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/AGENTS.md",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/handoffs/2026-03-28T17-08-42-648Z__fix-critical-logic-bugs__f4f76764-0484-4424-a9f0-a250c2a8141a.json",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/handoffs/2026-03-28T17-23-55-162Z__fix-hud-init-callsite__5a9b0373-5aeb-46d3-98b5-6e455cd7aa37.json",
+      "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/worker-transcripts.jsonl",
+      "/home/paul/oh-my-claudecode/.factory/validation/critical-logic/scrutiny/reviews/fix-critical-logic-bugs.json",
+      "/home/paul/oh-my-claudecode/src/hud/index.ts",
+      "/home/paul/oh-my-claudecode/src/__tests__/hud/watch-mode-init.test.ts"
+    ],
+    "commandsRun": [
+      "git -C /home/paul/oh-my-claudecode show --stat 217576e0",
+      "git -C /home/paul/oh-my-claudecode show 217576e0 -- src/hud/index.ts src/__tests__/hud/watch-mode-init.test.ts",
+      "git -C /home/paul/oh-my-claudecode show --stat bf83e9d6",
+      "git -C /home/paul/oh-my-claudecode show bf83e9d6 -- src/hud/index.ts src/hud/state.ts src/hud/background-cleanup.ts src/__tests__/background-cleanup-directory.test.ts"
+    ]
+  }
+}
