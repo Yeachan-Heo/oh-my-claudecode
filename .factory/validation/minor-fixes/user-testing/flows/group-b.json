@@ -1,0 +1,62 @@
+{
+  "groupId": "group-b",
+  "milestone": "minor-fixes",
+  "surface": "vitest",
+  "testedAt": "2026-03-28T19:39:13Z",
+  "assertions": [
+    {
+      "id": "VAL-MINOR-005",
+      "status": "pass",
+      "reason": "BUG 5 tests for extractRepoSlug dot-containing repositories passed in verbose targeted Vitest run."
+    },
+    {
+      "id": "VAL-MINOR-006",
+      "status": "pass",
+      "reason": "BUG 6 tests for tmux/mcp provider prefix stripping and provider union typing passed."
+    },
+    {
+      "id": "VAL-MINOR-007",
+      "status": "pass",
+      "reason": "BUG 7 tests confirmed outbox-reader ignores partial trailing lines and handles newline-delimited chunks correctly."
+    },
+    {
+      "id": "VAL-MINOR-008",
+      "status": "pass",
+      "reason": "BUG 8 tests confirmed detectPipelineSignal escapes regex metacharacters and avoids unintended matches."
+    }
+  ],
+  "commands": [
+    {
+      "command": "npx vitest run src/__tests__/minor-bugs-regression.test.ts --grep \"BUG 5|BUG 6|BUG 7|BUG 8\"",
+      "exitCode": 1,
+      "evidence": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/minor-fixes/group-b/vitest-bug5-8.log"
+    },
+    {
+      "command": "npx vitest run src/__tests__/minor-bugs-regression.test.ts -t \"BUG 5|BUG 6|BUG 7|BUG 8\"",
+      "exitCode": 0,
+      "evidence": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/minor-fixes/group-b/vitest-bug5-8-fallback.log"
+    },
+    {
+      "command": "npx vitest run src/__tests__/minor-bugs-regression.test.ts --reporter verbose -t \"BUG 5|BUG 6|BUG 7|BUG 8\"",
+      "exitCode": 0,
+      "evidence": "/home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/minor-fixes/group-b/vitest-bug5-8-verbose.log"
+    }
+  ],
+  "toolsUsed": [
+    "vitest"
+  ],
+  "frictions": [
+    {
+      "description": "Vitest v4 in this repo does not support --grep (Unknown option).",
+      "resolved": true,
+      "resolution": "Used equivalent targeted filter via -t and reran with --reporter verbose for per-assertion evidence.",
+      "affectedAssertions": [
+        "VAL-MINOR-005",
+        "VAL-MINOR-006",
+        "VAL-MINOR-007",
+        "VAL-MINOR-008"
+      ]
+    }
+  ],
+  "blockers": []
+}

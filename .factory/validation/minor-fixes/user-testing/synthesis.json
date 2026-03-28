@@ -1,0 +1,41 @@
+{
+  "milestone": "minor-fixes",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-MINOR-001",
+    "VAL-MINOR-002",
+    "VAL-MINOR-003",
+    "VAL-MINOR-004",
+    "VAL-MINOR-005",
+    "VAL-MINOR-006",
+    "VAL-MINOR-007",
+    "VAL-MINOR-008"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": ".factory/library/user-testing.md",
+      "description": "Created shared user-testing guidance for this repository, including setup expectations and flow-validator isolation boundaries.",
+      "source": "setup"
+    },
+    {
+      "target": ".factory/services.yaml",
+      "description": "Added explicit empty service catalog documenting that no long-running services are required for minor-fixes user-testing.",
+      "source": "setup"
+    },
+    {
+      "target": ".factory/library/user-testing.md",
+      "description": "Recorded Vitest CLI friction: `--grep` unsupported on v4.0.18; use `-t` for targeted assertion filtering.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

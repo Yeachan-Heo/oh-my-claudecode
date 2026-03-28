@@ -1,0 +1,4 @@
+version: 1
+services: []
+notes:
+  - "No long-running local services are required for milestone minor-fixes user-testing validation."

@@ -1,0 +1,56 @@
+{
+  "groupId": "group-a",
+  "milestone": "minor-fixes",
+  "surface": "vitest",
+  "assertions": [
+    {
+      "id": "VAL-MINOR-001",
+      "status": "pass",
+      "reason": "BUG 1 targeted regression tests passed (session summary spawn guard/PID tracking)."
+    },
+    {
+      "id": "VAL-MINOR-002",
+      "status": "pass",
+      "reason": "BUG 2 targeted regression test passed (Slack fallback removal for unrelated sessions)."
+    },
+    {
+      "id": "VAL-MINOR-003",
+      "status": "pass",
+      "reason": "BUG 3 targeted regression test passed (dispatcher timeout cleared in finally)."
+    },
+    {
+      "id": "VAL-MINOR-004",
+      "status": "pass",
+      "reason": "BUG 4 targeted regression tests passed (session-start timeout cleared in finally)."
+    }
+  ],
+  "commands": [
+    {
+      "command": "npx vitest run src/__tests__/minor-bugs-regression.test.ts --grep \"BUG 1|BUG 2|BUG 3|BUG 4\"",
+      "exitCode": 1,
+      "evidence": "minor-fixes/group-a/vitest-bug1-4.log"
+    },
+    {
+      "command": "npx vitest run src/__tests__/minor-bugs-regression.test.ts -t \"BUG 1|BUG 2|BUG 3|BUG 4\"",
+      "exitCode": 0,
+      "evidence": "minor-fixes/group-a/vitest-bug1-4-workaround.log"
+    }
+  ],
+  "toolsUsed": [
+    "vitest"
+  ],
+  "frictions": [
+    {
+      "description": "Vitest v4.0.18 here rejects --grep (unknown option), so the exact assigned command failed.",
+      "resolved": true,
+      "resolution": "Used equivalent targeted filter via -t with the same BUG 1-4 regex.",
+      "affectedAssertions": [
+        "VAL-MINOR-001",
+        "VAL-MINOR-002",
+        "VAL-MINOR-003",
+        "VAL-MINOR-004"
+      ]
+    }
+  ],
+  "blockers": []
+}
