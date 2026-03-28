@@ -10,11 +10,11 @@ triggers:
 
 # Configure Obsidian Integration
 
-Set up Obsidian vault integration so OMC agents can read, write, and search notes in your Obsidian vault. Requires Obsidian 1.12.4+ with CLI enabled.
+Set up Obsidian vault integration so OMC agents can read, write, and search notes in your Obsidian vault via the CLI. Requires Obsidian 1.12.4+ with CLI enabled.
 
 ## How This Skill Works
 
-This is an interactive configuration skill. Walk the user through setup by asking questions with AskUserQuestion. The result is stored as environment variables or in `~/.claude/.omc-config.json`.
+This is an interactive configuration skill. Walk the user through setup by asking questions with AskUserQuestion. The result is stored in `~/.claude/.omc-config.json`.
 
 ## Step 1: Detect Obsidian CLI
 
@@ -39,7 +39,7 @@ Obsidian CLI not found. To enable it:
 4. Restart your terminal
 ```
 
-Then stop — do not proceed without CLI.
+Then stop -- do not proceed without CLI.
 
 ## Step 2: Discover Vaults
 
@@ -76,25 +76,13 @@ If tests fail, report the error and suggest:
 **Question via AskUserQuestion:** "Should OMC agents be restricted to specific folders in your vault? (Recommended: yes)"
 
 If yes, ask which folders. Suggest defaults:
-- `OMC/` — Agent-generated content
-- `Projects/` — Project-specific notes
-- `Research/` — Analysis and research reports
+- `OMC/` -- Agent-generated content
+- `Projects/` -- Project-specific notes
+- `Research/` -- Analysis and research reports
 
 ## Step 5: Save Configuration
 
-### Option A: Environment Variable (Simple)
-
-```bash
-# Add to shell profile — vault path for auto-discovery
-echo 'export OMC_OBSIDIAN_VAULT="<vault-path>"' >> ~/.zshrc
-
-# Optional: explicit vault name (used for CLI vault= parameter)
-echo 'export OMC_OBSIDIAN_VAULT_NAME="<vault-name>"' >> ~/.zshrc
-```
-
-### Option B: Config File (Full)
-
-Write to `~/.claude/.omc-config.json` (this is what the configure skill writes):
+Write to `~/.claude/.omc-config.json`:
 
 ```bash
 CONFIG_FILE="$HOME/.claude/.omc-config.json"
@@ -126,10 +114,12 @@ The runtime resolves vault configuration in this order:
 
 ### Disabling
 
-To disable Obsidian tools without removing configuration:
-```bash
-export OMC_DISABLE_TOOLS=obsidian
-```
+To disable Obsidian integration:
+1. Set `enabled: false` in `~/.claude/.omc-config.json`
+2. (Optional hardening) Add deny patterns to `settings.json` if desired:
+   ```json
+   { "permissions": { "deny": ["Bash(obsidian *)"] } }
+   ```
 
 ## Step 6: Test Integration
 
@@ -145,59 +135,38 @@ obsidian read file="OMC/OMC-Integration-Test.md" vault="<vault>"
 # Search for it
 obsidian search query="OMC-Integration-Test" vault="<vault>"
 
-# Clean up (manual — delete is not exposed to agents for safety)
+# Clean up (manual -- delete is not exposed to agents for safety)
 # Delete the test note via Obsidian UI or CLI directly
 ```
 
 If all steps succeed, show:
 
 ```
-✓ Obsidian integration configured successfully!
+Obsidian integration configured successfully!
 
 Vault: <vault-name> (<vault-path>)
 Version: <version>
-Tools available: obsidian_search, obsidian_read, obsidian_create, obsidian_append,
-                 obsidian_daily_read, obsidian_daily_append, obsidian_property_set,
-                 obsidian_backlinks
+
+Obsidian CLI is ready for use via the obsidian skill.
 
 Environment variable alternative (add to ~/.zshrc):
   export OMC_OBSIDIAN_VAULT="<vault-path>"
-
-Agents can now use Obsidian tools via mcp__t__obsidian_*
 ```
 
-## Step 7: Install Content Authorship Skills (Optional)
+## Step 7: Install Content Authorship Skill (Optional)
 
-kepano (Obsidian CEO) provides official skills that teach Claude how to write proper Obsidian content. These complement the MCP tools by adding knowledge of Obsidian-specific syntax.
+**Ask via AskUserQuestion:** "Would you like to also enable the obsidian-markdown skill? It teaches agents proper wikilink syntax, callout formatting, and Obsidian-specific markdown. (Recommended: yes)"
 
-**Ask via AskUserQuestion:** "Would you like to install Obsidian content authorship skills? These teach Claude proper wikilink syntax, callout formatting, Bases queries, and Canvas diagrams. (Recommended: yes)"
-
-If yes, install the following skills (NOT obsidian-cli — it conflicts with the MCP tools):
-
-```bash
-# Install content authorship skills from kepano/obsidian-skills
-# Note: obsidian-cli SKILL.md is excluded — MCP tools handle CLI operations
-claude mcp add-skill kepano/obsidian-skills/obsidian-markdown
-claude mcp add-skill kepano/obsidian-skills/obsidian-bases
-claude mcp add-skill kepano/obsidian-skills/json-canvas
-```
-
-If the marketplace approach is available:
-```bash
-/plugin marketplace add kepano/obsidian-skills
-```
-
-Then selectively enable only content skills (NOT obsidian-cli):
-- obsidian-markdown ✓ (wikilinks, callouts, properties, embeds)
-- obsidian-bases ✓ (DB views, filters, formulas)
-- json-canvas ✓ (visual diagrams)
-- obsidian-cli ✗ (excluded — MCP tools provide this with security guardrails)
-- defuddle ✗ (optional, separate from Obsidian integration)
+The obsidian-markdown skill is bundled with OMC and provides knowledge of:
+- Wikilinks `[[Note Name]]` for internal references
+- Callouts `> [!info]` for highlighted information
+- Properties (YAML frontmatter) with `tags`, `created`, `status`
+- Embeds, comments, highlights, and other Obsidian extensions
 
 If the user declines, note:
 ```
-Skipped. You can install content skills later:
-  /plugin marketplace add kepano/obsidian-skills
+Skipped. The obsidian-markdown skill is always available via:
+  /oh-my-claudecode:obsidian-markdown
 See: https://github.com/kepano/obsidian-skills
 ```
 
@@ -209,26 +178,19 @@ After successful configuration, display:
 ## Quick Start
 
 ### Search your vault
-Agents can search notes: `obsidian_search(query="architecture")`
+obsidian search query="architecture" vault="<vault>"
 
 ### Create notes from agents
-Scientist reports can be saved: `obsidian_create(name="Research Report", content="...")`
+obsidian create name="Research Report" content="..." vault="<vault>" silent
 
 ### Daily notes
-Append to daily note: `obsidian_daily_append(content="- Completed feature X")`
-
-### Content Skills
-If not installed during setup, add content authorship skills:
-  /plugin marketplace add kepano/obsidian-skills
-Note: Only obsidian-markdown, obsidian-bases, and json-canvas are recommended.
-The obsidian-cli skill is not needed when MCP tools are active.
+obsidian daily:append content="- Completed feature X" vault="<vault>"
 
 ### Write Obsidian-native content
-If content skills are installed, agents will use:
+Agents will use:
 - Wikilinks `[[Note Name]]` for internal references (not markdown links)
 - Callouts `> [!info]` for highlighted information
 - Properties (YAML frontmatter) with `tags`, `created`, `status`
-- Bases views for data aggregation
 ```
 
 ## Troubleshooting

@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { omcToolsServer, omcToolNames, getOmcToolNames } from '../mcp/omc-tools-server.js';
 
 const interopEnabled = process.env.OMC_INTEROP_TOOLS_ENABLED === '1';
-const totalTools = interopEnabled ? 59 : 51;
-const withoutLsp = interopEnabled ? 47 : 39;
-const withoutAst = interopEnabled ? 57 : 49;
-const withoutPython = interopEnabled ? 58 : 50;
-const withoutSkills = interopEnabled ? 56 : 48;
+const totalTools = interopEnabled ? 50 : 42;
+const withoutLsp = interopEnabled ? 38 : 30;
+const withoutAst = interopEnabled ? 48 : 40;
+const withoutPython = interopEnabled ? 49 : 41;
+const withoutSkills = interopEnabled ? 47 : 39;
 
 describe('omc-tools-server', () => {
   describe('omcToolNames', () => {
