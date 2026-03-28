@@ -307,7 +307,7 @@ export async function render(
 
   // Prompt submission time
   if (enabledElements.promptTime) {
-    const prompt = renderPromptTime(context.promptTime);
+    const prompt = renderPromptTime(context.promptTime, new Date());
     if (prompt) elements.push(prompt);
   }
 
