@@ -413,6 +413,7 @@ export type ModelFormat = 'short' | 'versioned' | 'full';
 export interface HudElementConfig {
   cwd: boolean;              // Show working directory
   cwdFormat: CwdFormat;      // Path display format
+  useHyperlinks?: boolean;   // Wrap cwd/paths in OSC 8 terminal hyperlinks (clickable in supported terminals)
   gitRepo: boolean;          // Show git repository name
   gitBranch: boolean;        // Show git branch
   gitInfoPosition: 'above' | 'below';  // Position of git info relative to main HUD line
@@ -493,6 +494,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
   elements: {
     cwd: false,               // Disabled by default for backward compatibility
     cwdFormat: 'relative',
+    useHyperlinks: false,
     gitRepo: false,           // Disabled by default for backward compatibility
     gitBranch: false,         // Disabled by default for backward compatibility
     gitInfoPosition: 'above',  // Git info above main HUD line (backward compatible)
@@ -548,6 +550,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   minimal: {
     cwd: false,
     cwdFormat: 'folder',
+    useHyperlinks: false,
     gitRepo: false,
     gitBranch: false,
     gitInfoPosition: 'above',
@@ -586,6 +589,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   focused: {
     cwd: false,
     cwdFormat: 'relative',
+    useHyperlinks: false,
     gitRepo: false,
     gitBranch: true,
     gitInfoPosition: 'above',
@@ -624,6 +628,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   full: {
     cwd: false,
     cwdFormat: 'relative',
+    useHyperlinks: false,
     gitRepo: true,
     gitBranch: true,
     gitInfoPosition: 'above',
@@ -662,6 +667,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   opencode: {
     cwd: false,
     cwdFormat: 'relative',
+    useHyperlinks: false,
     gitRepo: false,
     gitBranch: true,
     gitInfoPosition: 'above',
@@ -700,6 +706,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
   dense: {
     cwd: false,
     cwdFormat: 'relative',
+    useHyperlinks: false,
     gitRepo: true,
     gitBranch: true,
     gitInfoPosition: 'above',

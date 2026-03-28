@@ -2,6 +2,7 @@
  * OMC HUD - CWD Element
  *
  * Renders current working directory with configurable format.
+ * Supports OSC 8 terminal hyperlinks for supported terminals (iTerm2, WezTerm, etc.)
  */
 
 import { homedir } from 'node:os';
@@ -10,15 +11,40 @@ import { dim } from '../colors.js';
 import type { CwdFormat } from '../types.js';
 
 /**
+ * Wrap text in an OSC 8 terminal hyperlink.
+ * Supported by: iTerm2, WezTerm, Kitty, Hyper, Windows Terminal, VTE-based terminals.
+ * Format: ESC]8;;URL ESC\ TEXT ESC]8;; ESC\
+ */
+function osc8Link(url: string, text: string): string {
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
+/**
+ * Convert an absolute filesystem path to a file:// URL.
+ * Handles Windows paths (C:\path -> file:///C:/path).
+ */
+function pathToFileUrl(absPath: string): string {
+  // Normalize backslashes on Windows
+  const normalized = absPath.replace(/\\/g, '/');
+  // Windows absolute path (e.g. C:/...)
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  return `file://${normalized}`;
+}
+
+/**
  * Render current working directory based on format.
  *
  * @param cwd - Absolute path to current working directory
  * @param format - Display format (relative, absolute, folder)
+ * @param useHyperlinks - Wrap in OSC 8 hyperlink (file:// URL)
  * @returns Formatted path string or null if empty
  */
 export function renderCwd(
   cwd: string | undefined,
-  format: CwdFormat = 'relative'
+  format: CwdFormat = 'relative',
+  useHyperlinks = false
 ): string | null {
   if (!cwd) return null;
 
@@ -42,5 +68,12 @@ export function renderCwd(
       displayPath = cwd;
   }
 
-  return `${dim(displayPath)}`;
+  const rendered = `${dim(displayPath)}`;
+
+  if (useHyperlinks) {
+    const url = pathToFileUrl(cwd);
+    return osc8Link(url, rendered);
+  }
+
+  return rendered;
 }

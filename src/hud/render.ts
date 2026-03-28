@@ -214,6 +214,7 @@ export async function render(
     const cwdElement = renderCwd(
       context.cwd,
       enabledElements.cwdFormat || "relative",
+      enabledElements.useHyperlinks ?? false,
     );
     if (cwdElement) gitElements.push(cwdElement);
   }
