@@ -1,0 +1,44 @@
+{
+  "featureId": "fix-critical-logic-bugs",
+  "reviewedAt": "2026-03-28T17:15:58Z",
+  "commitId": "bf83e9d6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Three fixes are implemented correctly (ESM import replacement, failed count arithmetic, and ralplan mode map updates), but the HUD directory propagation fix is incomplete in runtime wiring, so VAL-LOGIC-003 is not fully satisfied.",
+    "issues": [
+      {
+        "file": "src/hud/index.ts",
+        "line": 152,
+        "severity": "blocking",
+        "description": "initializeHUDState is still called without the resolved project directory (`await initializeHUDState();`). The directory is resolved later at line 177 (`const cwd = resolveToWorktreeRoot(...)`), so startup cleanup can still read/write HUD state from process.cwd() instead of the intended project/worktree directory."
+      },
+      {
+        "file": "src/__tests__/background-cleanup-directory.test.ts",
+        "line": 18,
+        "severity": "non_blocking",
+        "description": "Regression tests validate directory forwarding inside cleanup helpers, but do not cover initializeHUDState or its call site in hud/index.ts. This allowed the integration gap above to pass tests while the runtime path remained incorrect."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Feature metadata requires `bugfix-worker`, but that skill is not available in this environment.",
+      "evidence": "worker-transcripts.jsonl (workerSessionId f4f76764-0484-4424-a9f0-a250c2a8141a) records `Error: Skill \"bugfix-worker\" not found`; handoff.skillFeedback.followedProcedure=false cites this missing skill."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission-level CI requirements and feature-level verification steps are inconsistent on lint coverage.",
+      "evidence": "Mission AGENTS.md requires `npm run lint` (lines 39-44), but fix-critical-logic-bugs verificationSteps list only vitest/tsc/build in features.json."
+    },
+    {
+      "area": "services",
+      "observation": "Expected shared-state files referenced by worker flow are missing in repo-local `.factory/`.",
+      "evidence": "Paths `/home/paul/oh-my-claudecode/.factory/services.yaml` and `/home/paul/oh-my-claudecode/.factory/library/` are absent during review despite being referenced in mission guidance and worker transcript flow."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to one blocking correctness gap: HUD startup still invokes initializeHUDState without passing the resolved project directory, so the targeted directory-propagation bug is not fully fixed end-to-end."
+}
