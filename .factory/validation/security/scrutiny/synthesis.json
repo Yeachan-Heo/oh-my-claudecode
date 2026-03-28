@@ -1,11 +1,11 @@
 {
   "milestone": "security",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
-      "command": "npm --prefix \"/home/paul/oh-my-claudecode\" exec vitest run",
+      "command": "npm --prefix \"/home/paul/oh-my-claudecode\" run test:run",
       "exitCode": 0
     },
     "typecheck": {
@@ -21,25 +21,17 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": [
-      "fix-security-bugs"
-    ]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "fix-security-bugs",
-      "severity": "blocking",
-      "description": "Slack authorization in reply listener is only enforced when authorizedSlackUserIds is non-empty, leaving unrestricted injection when list is unset/empty (does not fully satisfy VAL-SEC-002)."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
       "suggestion": "Define and version-control the `bugfix-worker` skill (or stop referencing it in mission features) so scrutiny can audit expected worker procedure against an actual skill definition.",
-      "evidence": "Mission features reference `skillName: bugfix-worker`, while reviewer observation reports no discoverable `bugfix-worker` skill definition file.",
+      "evidence": "The fix feature still references `skillName: bugfix-worker`, and scrutiny review confirms no discoverable `bugfix-worker` skill definition file.",
       "isSystemic": true
     }
   ],
@@ -53,5 +45,5 @@
       "reason": "already-noted infrastructure gap without concrete, verified knowledge entry to apply now"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/security/scrutiny/synthesis.json (round 1)"
 }
