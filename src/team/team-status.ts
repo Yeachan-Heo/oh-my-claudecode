@@ -157,10 +157,12 @@ export function getTeamStatus(
   }
 
   // Build team summary
-  const totalFailed = tasks.filter(t => t.status === 'completed' && t.metadata?.permanentlyFailed === true).length;
+  const permanentlyFailed = tasks.filter(t => t.status === 'completed' && t.metadata?.permanentlyFailed === true).length;
+  const statusFailed = tasks.filter(t => t.status === 'failed').length;
+  const totalFailed = permanentlyFailed + statusFailed;
   const taskSummary = {
     total: tasks.length,
-    completed: tasks.filter(t => t.status === 'completed').length - totalFailed,
+    completed: tasks.filter(t => t.status === 'completed').length - permanentlyFailed,
     failed: totalFailed,
     pending: tasks.filter(t => t.status === 'pending').length,
     inProgress: tasks.filter(t => t.status === 'in_progress').length,

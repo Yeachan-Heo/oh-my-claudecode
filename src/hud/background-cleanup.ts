@@ -17,9 +17,10 @@ const STALE_TASK_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes default
  * @returns Number of tasks removed
  */
 export async function cleanupStaleBackgroundTasks(
-  thresholdMs: number = STALE_TASK_THRESHOLD_MS
+  thresholdMs: number = STALE_TASK_THRESHOLD_MS,
+  directory?: string
 ): Promise<number> {
-  const state = readHudState();
+  const state = readHudState(directory);
 
   if (!state || !state.backgroundTasks) {
     return 0;
@@ -47,7 +48,7 @@ export async function cleanupStaleBackgroundTasks(
   const removedCount = originalCount - state.backgroundTasks.length;
 
   if (removedCount > 0) {
-    writeHudState(state);
+    writeHudState(state, directory);
   }
 
   return removedCount;
@@ -59,8 +60,8 @@ export async function cleanupStaleBackgroundTasks(
  *
  * @returns Array of orphaned tasks
  */
-export async function detectOrphanedTasks(): Promise<BackgroundTask[]> {
-  const state = readHudState();
+export async function detectOrphanedTasks(directory?: string): Promise<BackgroundTask[]> {
+  const state = readHudState(directory);
 
   if (!state || !state.backgroundTasks) {
     return [];
@@ -91,14 +92,14 @@ export async function detectOrphanedTasks(): Promise<BackgroundTask[]> {
  *
  * @returns Number of tasks marked
  */
-export async function markOrphanedTasksAsStale(): Promise<number> {
-  const state = readHudState();
+export async function markOrphanedTasksAsStale(directory?: string): Promise<number> {
+  const state = readHudState(directory);
 
   if (!state || !state.backgroundTasks) {
     return 0;
   }
 
-  const orphaned = await detectOrphanedTasks();
+  const orphaned = await detectOrphanedTasks(directory);
   let marked = 0;
 
   for (const orphanedTask of orphaned) {
@@ -110,7 +111,7 @@ export async function markOrphanedTasksAsStale(): Promise<number> {
   }
 
   if (marked > 0) {
-    writeHudState(state);
+    writeHudState(state, directory);
   }
 
   return marked;

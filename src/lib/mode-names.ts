@@ -13,6 +13,7 @@ export const MODE_NAMES = {
   RALPH: 'ralph',
   ULTRAWORK: 'ultrawork',
   ULTRAQA: 'ultraqa',
+  RALPLAN: 'ralplan',
 } as const;
 
 /**
@@ -38,6 +39,7 @@ export const ALL_MODE_NAMES: readonly ModeName[] = [
   MODE_NAMES.RALPH,
   MODE_NAMES.ULTRAWORK,
   MODE_NAMES.ULTRAQA,
+  MODE_NAMES.RALPLAN,
 ] as const;
 
 /**
@@ -50,6 +52,7 @@ export const MODE_STATE_FILE_MAP: Readonly<Record<ModeName, string>> = {
   [MODE_NAMES.RALPH]: 'ralph-state.json',
   [MODE_NAMES.ULTRAWORK]: 'ultrawork-state.json',
   [MODE_NAMES.ULTRAQA]: 'ultraqa-state.json',
+  [MODE_NAMES.RALPLAN]: 'ralplan-state.json',
 };
 
 /**
@@ -62,6 +65,7 @@ export const SESSION_END_MODE_STATE_FILES: readonly { file: string; mode: string
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
   { file: 'skill-active-state.json', mode: 'skill-active' },
 ];
 
@@ -72,4 +76,5 @@ export const SESSION_METRICS_MODE_FILES: readonly { file: string; mode: string }
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
 ];
