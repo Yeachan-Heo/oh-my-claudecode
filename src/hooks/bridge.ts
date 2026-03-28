@@ -954,9 +954,9 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
                 sessionId,
                 projectPath: directory,
                 profileName: process.env.OMC_NOTIFY_PROFILE,
-              }).catch(() => {}),
+              }).catch(err => console.debug('Failed to send session-idle notification:', err)),
             )
-            .catch(() => {});
+            .catch(err => console.debug('Failed to import notifications module:', err));
         }
       }
 
@@ -1046,9 +1046,9 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
           sessionId,
           projectPath: directory,
           profileName: process.env.OMC_NOTIFY_PROFILE,
-        }).catch(() => {}),
+        }).catch(err => console.debug('Failed to send session-start notification:', err)),
       )
-      .catch(() => {});
+      .catch(err => console.debug('Failed to import notifications module:', err));
     // Wake OpenClaw gateway for session-start (non-blocking)
     _openclaw.wake("session-start", { sessionId, projectPath: directory });
   }
@@ -1078,7 +1078,7 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
           });
         },
       )
-      .catch(() => {});
+      .catch(err => console.debug('Failed to start reply listener:', err));
   }
 
   const messages: string[] = [];
@@ -1281,9 +1281,9 @@ export function dispatchAskUserQuestionNotification(
         projectPath: directory,
         question: questionText,
         profileName: process.env.OMC_NOTIFY_PROFILE,
-      }).catch(() => {}),
+      }).catch(err => console.debug('Failed to send ask-user-question notification:', err)),
     )
-    .catch(() => {});
+    .catch(err => console.debug('Failed to import notifications module:', err));
 }
 
 /** @internal Object wrapper so tests can spy on the dispatch call. */
@@ -1306,8 +1306,8 @@ export const _openclaw = {
   ) => {
     if (process.env.OMC_OPENCLAW !== "1") return;
     import("../openclaw/index.js")
-      .then(({ wakeOpenClaw }) => wakeOpenClaw(event, context).catch(() => {}))
-      .catch(() => {});
+      .then(({ wakeOpenClaw }) => wakeOpenClaw(event, context).catch(err => console.debug('Failed to wake OpenClaw:', err)))
+      .catch(err => console.debug('Failed to import OpenClaw module:', err));
   },
 };
 
@@ -1522,9 +1522,9 @@ function processPreToolUse(input: HookInput): HookOutput {
           agentName,
           agentType,
           profileName: process.env.OMC_NOTIFY_PROFILE,
-        }).catch(() => {}),
+        }).catch(err => console.debug('Failed to send agent-call notification:', err)),
       )
-      .catch(() => {});
+      .catch(err => console.debug('Failed to import notifications module:', err));
   }
 
   // Warn about pkill -f self-termination risk (issue #210)

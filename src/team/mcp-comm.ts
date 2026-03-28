@@ -111,7 +111,7 @@ async function markImmediateDispatchFailure(params: {
       last_reason: reason,
     },
     cwd,
-  ).catch(() => {});
+  ).catch(err => console.debug('Failed to transition dispatch request:', err));
 }
 
 async function markLeaderPaneMissingDeferred(params: {
@@ -135,7 +135,7 @@ async function markLeaderPaneMissingDeferred(params: {
       last_reason: 'leader_pane_missing_deferred',
     },
     cwd,
-  ).catch(() => {});
+  ).catch(err => console.debug('Failed to transition dispatch request:', err));
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────

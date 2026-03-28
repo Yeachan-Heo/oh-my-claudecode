@@ -86,7 +86,7 @@ export async function atomicWriteJson(
   } finally {
     // Clean up temp file on error
     if (!success) {
-      await fs.unlink(tempPath).catch(() => {});
+      await fs.unlink(tempPath).catch(err => console.debug('Failed to clean up temp file:', tempPath, err));
     }
   }
 }

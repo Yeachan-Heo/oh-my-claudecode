@@ -928,7 +928,7 @@ export async function requeueDeadWorkerTasks(
       worker: 'leader-fixed',
       task_id: task.id,
       reason: `requeue_dead_worker:${task.owner}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(err => console.debug('Failed to append team event:', err));
   }
 
   return requeued;
@@ -1165,7 +1165,7 @@ export async function shutdownTeamV2(
       type: 'shutdown_gate',
       worker: 'leader-fixed',
       reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(err => console.debug('Failed to append team event:', err));
 
     if (!gate.allowed) {
       const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
@@ -1174,14 +1174,14 @@ export async function shutdownTeamV2(
           type: 'team_leader_nudge',
           worker: 'leader-fixed',
           reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-        }, cwd).catch(() => {});
+        }, cwd).catch(err => console.debug('Failed to append team event:', err));
       } else if (ralph && !hasActiveWork) {
         // Ralph policy: bypass on failure-only scenarios
         await appendTeamEvent(sanitized, {
           type: 'team_leader_nudge',
           worker: 'leader-fixed',
           reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-        }, cwd).catch(() => {});
+        }, cwd).catch(err => console.debug('Failed to append team event:', err));
       } else {
         throw new Error(
           `shutdown_gate_blocked:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
@@ -1195,7 +1195,7 @@ export async function shutdownTeamV2(
       type: 'shutdown_gate_forced',
       worker: 'leader-fixed',
       reason: 'force_bypass',
-    }, cwd).catch(() => {});
+    }, cwd).catch(err => console.debug('Failed to append team event:', err));
   }
 
   // 2. Send shutdown request to each worker
@@ -1228,7 +1228,7 @@ export async function shutdownTeamV2(
           type: 'shutdown_ack',
           worker: w.name,
           reason: ack.status === 'reject' ? `reject:${ack.reason || 'no_reason'}` : 'accept',
-        }, cwd).catch(() => {});
+        }, cwd).catch(err => console.debug('Failed to append team event:', err));
         if (ack.status === 'reject') {
           rejected.push({ worker: w.name, reason: ack.reason || 'no_reason' });
         }
@@ -1292,7 +1292,7 @@ export async function shutdownTeamV2(
       type: 'team_leader_nudge',
       worker: 'leader-fixed',
       reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
-    }, cwd).catch(() => {});
+    }, cwd).catch(err => console.debug('Failed to append team event:', err));
   }
 
   // 6. Clean up state

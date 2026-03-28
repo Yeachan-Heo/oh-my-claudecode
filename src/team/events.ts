@@ -106,7 +106,7 @@ export async function emitMonitorDerivedEvents(
         worker: 'leader-fixed',
         task_id: task.id,
         reason: `status_transition:${prevStatus}->${task.status}`,
-      }, cwd).catch(() => {});
+      }, cwd).catch(err => console.debug('Failed to append team event:', err));
       completedEventTaskIds[task.id] = true;
     } else if (task.status === 'failed') {
       await appendTeamEvent(teamName, {
@@ -114,7 +114,7 @@ export async function emitMonitorDerivedEvents(
         worker: 'leader-fixed',
         task_id: task.id,
         reason: `status_transition:${prevStatus}->${task.status}`,
-      }, cwd).catch(() => {});
+      }, cwd).catch(err => console.debug('Failed to append team event:', err));
     }
   }
 
@@ -128,7 +128,7 @@ export async function emitMonitorDerivedEvents(
         type: 'worker_stopped',
         worker: worker.name,
         reason: 'pane_exited',
-      }, cwd).catch(() => {});
+      }, cwd).catch(err => console.debug('Failed to append team event:', err));
     }
 
     if (prevState === 'working' && worker.status.state === 'idle') {
@@ -136,7 +136,7 @@ export async function emitMonitorDerivedEvents(
         type: 'worker_idle',
         worker: worker.name,
         reason: `state_transition:${prevState}->${worker.status.state}`,
-      }, cwd).catch(() => {});
+      }, cwd).catch(err => console.debug('Failed to append team event:', err));
     }
   }
 }

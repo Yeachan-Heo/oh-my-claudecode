@@ -434,7 +434,7 @@ async function syncMailboxDispatchNotified(
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_notified' },
     cwd,
-  ).catch(() => {});
+  ).catch(err => console.debug('Failed to mark dispatch request notified:', err));
 }
 
 async function syncMailboxDispatchDelivered(
@@ -451,13 +451,13 @@ async function syncMailboxDispatchDelivered(
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_delivered' },
     cwd,
-  ).catch(() => {});
+  ).catch(err => console.debug('Failed to mark dispatch request notified:', err));
   await markDispatchRequestDelivered(
     teamName,
     requestId,
     { message_id: messageId, last_reason: 'mailbox_mark_delivered' },
     cwd,
-  ).catch(() => {});
+  ).catch(err => console.debug('Failed to mark dispatch request delivered:', err));
 }
 
 function validateCommonFields(args: Record<string, unknown>): void {

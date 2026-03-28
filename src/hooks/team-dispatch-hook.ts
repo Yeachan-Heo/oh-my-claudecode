@@ -389,7 +389,7 @@ async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cw
   const shouldTypePrompt = attemptCountAtStart === 0 || !preCaptureHasTrigger;
   if (shouldTypePrompt) {
     if (attemptCountAtStart >= 1) {
-      await runProcess('tmux', ['send-keys', '-t', paneTarget, 'C-u'], 1000).catch(() => {});
+      await runProcess('tmux', ['send-keys', '-t', paneTarget, 'C-u'], 1000).catch(err => console.debug('Failed to send tmux C-u:', err));
       await new Promise((r) => setTimeout(r, 50));
     }
     await runProcess('tmux', ['send-keys', '-t', paneTarget, '-l', request.trigger_message], 3000);
@@ -423,7 +423,7 @@ async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cw
     } catch { /* capture failed; retry */ }
 
     for (let i = 0; i < submitKeyPresses; i++) {
-      await runProcess('tmux', ['send-keys', '-t', paneTarget, 'C-m'], 3000).catch(() => {});
+      await runProcess('tmux', ['send-keys', '-t', paneTarget, 'C-m'], 3000).catch(err => console.debug('Failed to send tmux C-m:', err));
     }
   }
 
@@ -492,8 +492,8 @@ async function updateMailboxNotified(stateDir: string, teamName: string, workerN
 
 async function appendDispatchLog(logsDir: string, event: Record<string, unknown>): Promise<void> {
   const path = join(logsDir, `team-dispatch-${new Date().toISOString().slice(0, 10)}.jsonl`);
-  await mkdir(logsDir, { recursive: true }).catch(() => {});
-  await appendFile(path, `${JSON.stringify({ timestamp: new Date().toISOString(), ...event })}\n`).catch(() => {});
+  await mkdir(logsDir, { recursive: true }).catch(err => console.debug('Failed to create dispatch logs directory:', err));
+  await appendFile(path, `${JSON.stringify({ timestamp: new Date().toISOString(), ...event })}\n`).catch(err => console.debug('Failed to append dispatch log entry:', err));
 }
 
 async function appendLeaderNotificationDeferredEvent(params: {
@@ -516,8 +516,8 @@ async function appendLeaderNotificationDeferredEvent(params: {
     request_id: params.request.request_id,
     ...(params.request.message_id ? { message_id: params.request.message_id } : {}),
   };
-  await mkdir(eventsDir, { recursive: true }).catch(() => {});
-  await appendFile(eventsPath, JSON.stringify(event) + '\n').catch(() => {});
+  await mkdir(eventsDir, { recursive: true }).catch(err => console.debug('Failed to create events directory:', err));
+  await appendFile(eventsPath, JSON.stringify(event) + '\n').catch(err => console.debug('Failed to append leader notification deferred event:', err));
 }
 
 // ── Main export ────────────────────────────────────────────────────────────
@@ -697,7 +697,7 @@ export async function drainPendingTeamDispatch(options: {
           request.notified_at = nowIso;
           request.last_reason = result.reason;
           if (request.kind === 'mailbox' && request.message_id) {
-            await updateMailboxNotified(stateDir, teamName, request.to_worker, request.message_id).catch(() => {});
+            await updateMailboxNotified(stateDir, teamName, request.to_worker, request.message_id).catch(err => console.debug('Failed to update mailbox notified status:', err));
           }
           processed += 1;
           mutated = true;

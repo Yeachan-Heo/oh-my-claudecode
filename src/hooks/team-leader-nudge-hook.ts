@@ -44,7 +44,7 @@ async function readJsonSafe<T>(path: string, fallback: T): Promise<T> {
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const dir = join(path, '..');
-  await mkdir(dir, { recursive: true }).catch(() => {});
+  await mkdir(dir, { recursive: true }).catch(err => console.debug('Failed to create directory for atomic write:', err));
   const tmpPath = `${path}.tmp.${process.pid}.${Date.now()}`;
   await writeFile(tmpPath, JSON.stringify(value, null, 2));
   await rename(tmpPath, path);
@@ -354,14 +354,14 @@ export async function maybeNudgeLeader(params: {
       nudge_count: nudgeState.nudge_count + 1,
       last_nudge_at_ms: nowMs,
       last_nudge_at: nowIso,
-    }).catch(() => {});
+    }).catch(err => console.debug('Failed to write nudge state:', err));
     await appendTeamEvent(teamName, {
       type: 'team_leader_nudge',
       worker: 'leader-fixed',
       reason: guidance.reason,
       next_action: guidance.nextAction,
       message: guidance.message,
-    }, params.cwd).catch(() => {});
+    }, params.cwd).catch(err => console.debug('Failed to append team leader nudge event:', err));
 
     return { nudged: true, reason: guidance.reason };
   } catch {

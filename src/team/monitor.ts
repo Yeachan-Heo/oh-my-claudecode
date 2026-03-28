@@ -383,7 +383,7 @@ export async function withScalingLock<T>(
       try {
         return await fn();
       } finally {
-        await rm(lockDir, { recursive: true, force: true }).catch(() => {});
+        await rm(lockDir, { recursive: true, force: true }).catch(err => console.debug('Failed to remove lock directory:', lockDir, err));
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

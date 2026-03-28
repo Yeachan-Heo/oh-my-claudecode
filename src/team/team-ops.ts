@@ -162,7 +162,7 @@ async function withLock<T>(lockDir: string, fn: () => Promise<T>): Promise<{ ok:
     const result = await fn();
     return { ok: true, value: result };
   } finally {
-    await rm(lockDir, { recursive: true, force: true }).catch(() => {});
+    await rm(lockDir, { recursive: true, force: true }).catch(err => console.debug('Failed to remove lock directory:', lockDir, err));
   }
 }
 

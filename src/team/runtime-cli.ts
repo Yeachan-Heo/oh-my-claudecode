@@ -399,7 +399,7 @@ async function main(): Promise<void> {
           reason: leaderGuidance.reason,
           next_action: leaderGuidance.nextAction,
           message: leaderGuidance.message,
-        }, cwd).catch(() => {});
+        }, cwd).catch(err => console.debug('Failed to append team leader nudge event:', err));
         lastLeaderNudgeReason = leaderGuidance.reason;
       }
 

@@ -105,7 +105,7 @@ async function readJsonIfExists<T>(path: string, fallback: T): Promise<T> {
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const dir = join(path, '..');
-  await mkdir(dir, { recursive: true }).catch(() => {});
+  await mkdir(dir, { recursive: true }).catch(err => console.debug('Failed to create directory for atomic write:', err));
   const tmpPath = `${path}.tmp.${process.pid}.${Date.now()}`;
   await writeFile(tmpPath, JSON.stringify(value, null, 2));
   await rename(tmpPath, path);
@@ -238,7 +238,7 @@ export async function updateWorkerHeartbeat(
     turn_count: turnCount + 1,
     alive: true,
   };
-  await mkdir(join(stateDir, 'team', teamName, 'workers', workerName), { recursive: true }).catch(() => {});
+  await mkdir(join(stateDir, 'team', teamName, 'workers', workerName), { recursive: true }).catch(err => console.debug('Failed to create worker heartbeat directory:', err));
   await writeJsonAtomic(heartbeatPath, heartbeat);
 }
 
@@ -346,7 +346,7 @@ export async function maybeNotifyLeaderWorkerIdle(params: {
       last_notified_at_ms: nowMs,
       last_notified_at: nowIso,
       prev_state: prevState,
-    }).catch(() => {});
+    }).catch(err => console.debug('Failed to write idle cooldown state:', err));
 
     // Append event
     const eventsDir = join(stateDir, 'team', teamName, 'events');
@@ -427,7 +427,7 @@ export async function maybeNotifyLeaderAllWorkersIdle(params: {
       last_notified_at_ms: nowMs,
       last_notified_at: nowIso,
       worker_count: N,
-    }).catch(() => {});
+    }).catch(err => console.debug('Failed to write idle state:', err));
 
     // Append event
     const eventsDir = join(stateDir, 'team', teamName, 'events');
