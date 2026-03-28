@@ -415,6 +415,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         ? basename(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "")
         : null,
       sessionSummary,
+      lastToolName: transcriptData.lastToolName,
     };
 
     // Debug: log data if OMC_DEBUG is set
