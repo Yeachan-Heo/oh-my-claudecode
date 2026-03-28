@@ -1,0 +1,59 @@
+{
+  "groupId": "group-recheck",
+  "milestone": "critical-logic",
+  "testedAt": "2026-03-28T17:44:03Z",
+  "surface": "vitest-cli",
+  "assertions": [
+    {
+      "id": "VAL-LOGIC-001",
+      "status": "pass",
+      "evidence": "Targeted vitest file passed (3/3 tests) in evidence/critical-logic/group-recheck/VAL-LOGIC-001-vitest.log. Supporting rg evidence in evidence/critical-logic/group-recheck/VAL-LOGIC-001-rg.log shows routeAndAdaptTask is present and require() has no matches in src/features/model-routing/index.ts.",
+      "commands": [
+        "npx vitest run --grep \"model-routing\"",
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/model-routing-esm.test.ts",
+        "rg -n \"routeAndAdaptTask\" /home/paul/oh-my-claudecode/src/features/model-routing/index.ts",
+        "rg -n \"require\\(\" /home/paul/oh-my-claudecode/src/features/model-routing/index.ts"
+      ]
+    },
+    {
+      "id": "VAL-LOGIC-002",
+      "status": "pass",
+      "evidence": "Targeted vitest file passed (3/3 tests) in evidence/critical-logic/group-recheck/VAL-LOGIC-002-vitest.log. Supporting rg evidence in evidence/critical-logic/group-recheck/VAL-LOGIC-002-rg.log shows failed counting includes both status === 'failed' and completed + permanentlyFailed branches in src/team/team-status.ts.",
+      "commands": [
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/team-status-failed-count.test.ts",
+        "rg -n \"status === 'failed'|permanentlyFailed|taskSummary\" /home/paul/oh-my-claudecode/src/team/team-status.ts"
+      ]
+    },
+    {
+      "id": "VAL-LOGIC-003",
+      "status": "pass",
+      "evidence": "Targeted vitest file passed (5/5 tests) in evidence/critical-logic/group-recheck/VAL-LOGIC-003-vitest.log. Supporting rg evidence in evidence/critical-logic/group-recheck/VAL-LOGIC-003-rg.log shows cleanup functions call readHudState(directory) and writeHudState(state, directory) in src/hud/background-cleanup.ts.",
+      "commands": [
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/background-cleanup-directory.test.ts",
+        "rg -n \"cleanupStaleBackgroundTasks|markOrphanedTasksAsStale|readHudState\\(|writeHudState\\(\" /home/paul/oh-my-claudecode/src/hud/background-cleanup.ts"
+      ]
+    },
+    {
+      "id": "VAL-LOGIC-004",
+      "status": "pass",
+      "evidence": "Targeted vitest file passed (6/6 tests) in evidence/critical-logic/group-recheck/VAL-LOGIC-004-vitest.log. Supporting rg evidence in evidence/critical-logic/group-recheck/VAL-LOGIC-004-rg.log shows RALPLAN entries across MODE_NAMES, ALL_MODE_NAMES, MODE_STATE_FILE_MAP, SESSION_END_MODE_STATE_FILES, and SESSION_METRICS_MODE_FILES in src/lib/mode-names.ts.",
+      "commands": [
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/mode-names-ralplan.test.ts",
+        "rg -n \"RALPLAN|ralplan|MODE_STATE_FILE_MAP|ALL_MODE_NAMES|SESSION_END_MODE_STATE_FILES|SESSION_METRICS_MODE_FILES\" /home/paul/oh-my-claudecode/src/lib/mode-names.ts"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "vitest",
+    "rg"
+  ],
+  "frictions": [
+    {
+      "description": "Validation contract command pattern used --grep, but this vitest entrypoint returned CACError: Unknown option `--grep`.",
+      "resolved": true,
+      "resolution": "Switched to targeted test-file execution per assertion and captured the failed --grep attempt in evidence/critical-logic/group-recheck/val-logic-001-grep-attempt.log."
+    }
+  ],
+  "blockers": [],
+  "summary": "Validated 4 assertions: 4 passed, 0 failed, 0 blocked."
+}

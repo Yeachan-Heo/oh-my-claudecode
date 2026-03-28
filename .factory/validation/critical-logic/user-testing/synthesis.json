@@ -1,0 +1,27 @@
+{
+  "milestone": "critical-logic",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-LOGIC-001",
+    "VAL-LOGIC-002",
+    "VAL-LOGIC-003",
+    "VAL-LOGIC-004"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Vitest invocation guidance noting that `npx vitest run --grep` may fail in this repo and recommending targeted test-file runs (or npm exec path when supported).",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}
