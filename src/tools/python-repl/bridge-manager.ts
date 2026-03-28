@@ -20,6 +20,7 @@ import { BridgeMeta, PythonEnvInfo } from './types.js';
 import { getRuntimeDir, getSessionDir, getBridgeSocketPath, getBridgeMetaPath, getBridgePortPath, getSessionLockPath } from './paths.js';
 import { atomicWriteJson, safeReadJson, ensureDirSync } from '../../lib/atomic-write.js';
 import { getProcessStartTime, isProcessAlive } from '../../platform/index.js';
+import { trackChildProcess } from '../../platform/child-process-tracker.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -395,6 +396,9 @@ export async function spawnBridgeServer(
   });
 
   proc.unref();
+
+  // Track for cleanup on parent exit (#1724)
+  trackChildProcess(proc, `gyoshu_bridge[${sessionId}]`);
 
   // Capture stderr for error reporting (capped at 64KB)
   const MAX_STDERR_CHARS = 64 * 1024;

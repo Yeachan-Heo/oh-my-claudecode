@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
+import { trackChildProcess } from '../../platform/child-process-tracker.js';
 import {
   checkRateLimitStatus,
   formatRateLimitStatus,
@@ -501,6 +502,8 @@ export function startDaemon(config?: DaemonConfig): DaemonResponse {
     });
 
     child.unref();
+    // Track for cleanup on parent exit (#1724)
+    trackChildProcess(child, 'rate-limit-wait-daemon');
 
     const pid = child.pid;
     if (pid) {

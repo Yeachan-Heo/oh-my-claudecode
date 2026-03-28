@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { trackChildProcess } from '../platform/child-process-tracker.js';
 import { readFile, rm } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
@@ -384,6 +385,8 @@ export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResu
   child.stdin?.write(JSON.stringify(payload));
   child.stdin?.end();
   child.unref();
+  // Track for cleanup on parent exit (#1724)
+  trackChildProcess(child, `team-runtime[${input.teamName}]`);
 
   if (child.pid != null) {
     job.pid = child.pid;

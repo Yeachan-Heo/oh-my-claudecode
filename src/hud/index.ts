@@ -49,6 +49,7 @@ import { homedir } from "os";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
+import { trackChildProcess } from "../platform/child-process-tracker.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -97,6 +98,8 @@ function spawnSessionSummaryScript(transcriptPath: string, stateDir: string, ses
       env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'session-summary' },
     });
     child.unref();
+    // Track for cleanup on parent exit (#1724)
+    trackChildProcess(child, `session-summary[${sessionId}]`);
   } catch (error) {
     if (process.env.OMC_DEBUG) {
       console.error('[HUD] Failed to spawn session-summary:', error instanceof Error ? error.message : error);

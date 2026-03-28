@@ -23,6 +23,7 @@ import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
 import { resolveDaemonModulePath } from '../utils/daemon-module-path.js';
+import { trackChildProcess } from '../platform/child-process-tracker.js';
 import {
   capturePaneContent,
   sendToPane,
@@ -956,6 +957,8 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
     });
 
     child.unref();
+    // Track for cleanup on parent exit (#1724)
+    trackChildProcess(child, 'reply-listener-daemon');
 
     const pid = child.pid;
     if (pid) {

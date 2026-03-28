@@ -51,3 +51,4 @@ export function isWSL(): boolean {
 
 // Re-exports
 export * from './process-utils.js';
+export * from './child-process-tracker.js';

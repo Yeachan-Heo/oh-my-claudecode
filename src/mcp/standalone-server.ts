@@ -192,6 +192,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // The MCP server process owns the LSP child processes (spawned via
 // child_process.spawn in LspClient.connect), so cleanup must happen here.
 import { disconnectAll as disconnectAllLsp } from '../tools/lsp/index.js';
+import { killAllTrackedProcesses } from '../platform/child-process-tracker.js';
 
 async function gracefulShutdown(signal: string): Promise<void> {
   // Hard deadline: exit even if cleanup hangs (e.g. unresponsive LSP server)
@@ -200,6 +201,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   console.error(`OMC MCP Server: received ${signal}, disconnecting LSP servers...`);
 
+  // Kill all tracked child processes first (#1724)
+  try {
+    killAllTrackedProcesses();
+  } catch {
+    // Best-effort
+  }
   try {
     await cleanupOwnedBridgeSessions();
   } catch {
