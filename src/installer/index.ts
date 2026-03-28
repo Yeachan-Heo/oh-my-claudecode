@@ -623,7 +623,13 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
   // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
   if (hasResidualStartMarker || hasResidualEndMarker) {
     // Handle corrupted state - backup will be created by caller
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+    // Strip unmatched OMC markers from recovered content to prevent unbounded
+    // growth on repeated calls (each call would re-detect corruption and append again)
+    const recoveredContent = strippedExistingContent
+      .replace(markerStartRegex, '')
+      .replace(markerEndRegex, '')
+      .trim();
+    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
   }
 
   const preservedUserContent = trimClaudeUserContent(

@@ -133,6 +133,35 @@ describe('mergeClaudeMd', () => {
       expect(result).toContain(omcContent);
       expect(result).toContain(USER_CUSTOMIZATIONS_RECOVERED);
     });
+
+    it('does not grow unboundedly when called repeatedly with corrupted markers', () => {
+      // Regression: corrupted markers caused existingContent (including corrupted markers)
+      // to be appended as-is. Next call re-detected corruption, appended again → unbounded growth.
+      const corruptedContent = `${START_MARKER}\nUser stuff\nMore user stuff`;
+      const firstResult = mergeClaudeMd(corruptedContent, omcContent);
+
+      // Call again with the output of the first call
+      const secondResult = mergeClaudeMd(firstResult, omcContent);
+
+      // The file should NOT grow unboundedly — second call should produce
+      // similar or equal length output as the first call
+      expect(secondResult.length).toBeLessThanOrEqual(firstResult.length * 1.1);
+
+      // The corrupted markers should be stripped from recovered content
+      // so re-processing doesn't re-detect corruption and re-append
+      const thirdResult = mergeClaudeMd(secondResult, omcContent);
+      expect(thirdResult.length).toBeLessThanOrEqual(secondResult.length * 1.1);
+    });
+
+    it('strips unmatched OMC markers from recovered content', () => {
+      const corruptedContent = `${START_MARKER}\nUser custom config`;
+      const result = mergeClaudeMd(corruptedContent, omcContent);
+
+      // The recovered section should not contain bare OMC markers
+      // Count occurrences of START_MARKER: should only appear once (in the OMC block)
+      const startMarkerCount = (result.match(new RegExp(START_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      expect(startMarkerCount).toBe(1);
+    });
   });
 
   describe('Edge cases', () => {
