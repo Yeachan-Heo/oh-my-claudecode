@@ -1,7 +1,7 @@
 {
   "milestone": "race-conditions",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -21,39 +21,31 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": [
-      "fix-race-condition-bugs"
-    ]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
+  "blockingIssues": [],
+  "appliedUpdates": [
     {
-      "featureId": "fix-race-condition-bugs",
-      "severity": "blocking",
-      "description": "generateJobId appends randomUUID().slice(0, 4), providing only 16 bits of entropy; this remains collision-prone for burst same-millisecond generation and does not fully satisfy collision-safe ID requirements."
+      "target": "library",
+      "description": "Added scrutiny rerun operational context to .factory/library/race-conditions-scrutiny-notes.md.",
+      "sourceFeature": "scrutiny-validator-race-conditions"
     }
   ],
-  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
       "suggestion": "Either add a `bugfix-worker` skill or stop assigning `skillName: bugfix-worker` in mission features to avoid mandatory-skill failures.",
-      "evidence": "Review evidence from fix-race-condition-bugs shows Skill invocation failed with `Skill \"bugfix-worker\" not found`, forcing procedure deviation.",
+      "evidence": "fix-jobid-entropy review confirms implementation features still reference `bugfix-worker`, and the original worker transcript recorded `Skill \"bugfix-worker\" not found`.",
       "isSystemic": true
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Reinforce milestone-scope commit boundaries so bugfix feature commits do not include unrelated `.factory/validation` artifacts from other milestones.",
-      "evidence": "Review for fix-race-condition-bugs found commit f531b909 included critical-logic user-testing artifacts and `.factory/services.yaml`, outside race-condition fix scope.",
-      "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Expected `.factory/library/` surface is missing.",
-      "reason": "ambiguous: reviewer could not establish this as a correctness issue for race-conditions scrutiny output."
+      "observation": "Expected shared architecture knowledge directory was missing.",
+      "reason": "addressed by creating .factory/library and adding race-conditions scrutiny notes."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/race-conditions/scrutiny/synthesis.round1.json"
 }
