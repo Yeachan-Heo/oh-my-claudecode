@@ -30,7 +30,6 @@ import {
 } from '../features/rate-limit-wait/tmux-detector.js';
 import {
   lookupByMessageId,
-  loadAllMappings,
   removeMessagesByPane,
   pruneStale,
 } from './session-registry.js';
@@ -789,13 +788,8 @@ async function pollLoop(): Promise<void> {
               }
             }
 
-            // No thread match: use most recent registered pane
-            if (!targetPaneId) {
-              const mappings = loadAllMappings();
-              if (mappings.length > 0) {
-                targetPaneId = mappings[mappings.length - 1].tmuxPaneId;
-              }
-            }
+            // No thread match: skip injection to avoid sending to an unrelated session.
+            // Discord and Telegram already skip when no match is found.
 
             if (!targetPaneId) {
               log('WARN: No target pane found for Slack message, skipping');

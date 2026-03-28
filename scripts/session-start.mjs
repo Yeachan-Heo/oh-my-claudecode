@@ -256,13 +256,12 @@ async function checkNpmUpdate(currentVersion) {
   } catch {}
 
   // Fetch from npm registry with 2s timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
     const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
       signal: controller.signal
     });
-    clearTimeout(timeoutId);
     if (!response.ok) return null;
 
     const data = await response.json();
@@ -277,7 +276,7 @@ async function checkNpmUpdate(currentVersion) {
     } catch {}
 
     return updateAvailable ? { currentVersion, latestVersion } : null;
-  } catch { return null; }
+  } catch { return null; } finally { clearTimeout(timeoutId); }
 }
 
 // Check if HUD is properly installed (with retry for race conditions)

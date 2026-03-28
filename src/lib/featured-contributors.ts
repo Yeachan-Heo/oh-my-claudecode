@@ -167,7 +167,7 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
 }
 
 export function extractRepoSlug(repositoryUrl: string): string {
-  const match = repositoryUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
+  const match = repositoryUrl.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/i);
   if (!match?.[1]) {
     throw new Error(`Could not determine GitHub repository slug from: ${repositoryUrl}`);
   }

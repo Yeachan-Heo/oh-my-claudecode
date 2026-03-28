@@ -79,14 +79,34 @@ function readSessionSummary(
 }
 
 /**
+ * Track the timestamp of the last spawned session-summary process to prevent
+ * unbounded accumulation of detached processes when summarization takes >60s.
+ */
+let lastSummarySpawnTimestamp = 0;
+
+/** @internal Reset spawn guard — used by tests only. */
+export function _resetSummarySpawnTimestamp(): void {
+  lastSummarySpawnTimestamp = 0;
+}
+
+/**
  * Spawn the session-summary script in the background to generate/update summary.
  * Fire-and-forget: does not block HUD rendering.
+ * Guards against duplicate spawns by tracking the last spawn timestamp.
  */
 function spawnSessionSummaryScript(
   transcriptPath: string,
   stateDir: string,
   sessionId: string,
 ): void {
+  // Prevent spawning a new process if one was recently spawned (within 120s).
+  // This guards against unbounded process accumulation when summarization
+  // takes longer than the 60s debounce window in the caller.
+  const now = Date.now();
+  if (now - lastSummarySpawnTimestamp < 120_000) {
+    return;
+  }
+  lastSummarySpawnTimestamp = now;
   // Resolve the script path relative to this file's location
   // In compiled output: dist/hud/index.js -> ../../scripts/session-summary.mjs
   const thisDir = dirname(fileURLToPath(import.meta.url));

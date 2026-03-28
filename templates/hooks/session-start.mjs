@@ -65,14 +65,12 @@ async function checkForUpdates(currentVersion) {
   }
 
   // Fetch latest version from npm
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-
     const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
       signal: controller.signal
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error('Network response was not ok');
@@ -96,6 +94,8 @@ async function checkForUpdates(currentVersion) {
   } catch (error) {
     // Silent fail - network unavailable or timeout
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
