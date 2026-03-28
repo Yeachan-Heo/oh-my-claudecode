@@ -590,6 +590,16 @@ function extractLastRequestTokenUsage(usage: TranscriptUsage | undefined): LastR
     normalized.reasoningTokens = Math.max(0, Math.round(reasoningTokens));
   }
 
+  const cacheReadTokens = getNumericUsageValue(usage.cache_read_input_tokens);
+  if (cacheReadTokens != null && cacheReadTokens > 0) {
+    normalized.cacheReadTokens = Math.max(0, Math.round(cacheReadTokens));
+  }
+
+  const cacheCreationTokens = getNumericUsageValue(usage.cache_creation_input_tokens);
+  if (cacheCreationTokens != null && cacheCreationTokens > 0) {
+    normalized.cacheCreationTokens = Math.max(0, Math.round(cacheCreationTokens));
+  }
+
   return normalized;
 }
 

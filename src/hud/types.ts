@@ -115,6 +115,8 @@ export interface LastRequestTokenUsage {
   inputTokens: number;
   outputTokens: number;
   reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
 }
 
 export interface TranscriptData {
@@ -278,6 +280,9 @@ export interface CustomProviderResult {
 export interface HudRenderContext {
   /** Context window percentage (0-100) */
   contextPercent: number;
+
+  /** Stable display scope for context smoothing (e.g. session/worktree key) */
+  contextDisplayScope?: string | null;
 
   /** Model display name */
   modelName: string;
