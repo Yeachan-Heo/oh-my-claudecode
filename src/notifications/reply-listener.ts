@@ -111,6 +111,8 @@ export interface ReplyListenerDaemonConfig extends ReplyConfig {
   slackChannelId?: string;
   /** Slack signing secret for verifying incoming WebSocket messages */
   slackSigningSecret?: string;
+  /** Authorized Slack user IDs for reply injection (empty = all channel users allowed) */
+  authorizedSlackUserIds: string[];
 }
 
 /** Response from daemon operations */
@@ -771,6 +773,16 @@ async function pollLoop(): Promise<void> {
             channelId: slackChannelId,
           },
           async (event) => {
+            // Authorization: fail-closed — reject when no authorized users configured
+            if (!config.authorizedSlackUserIds || config.authorizedSlackUserIds.length === 0) {
+              log('WARN: No authorized Slack user IDs configured, rejecting all messages (fail-closed)');
+              return;
+            }
+            if (!config.authorizedSlackUserIds.includes(event.user)) {
+              log(`REJECTED Slack message from unauthorized user ${event.user}`);
+              return;
+            }
+
             // Rate limiting
             if (!rateLimiter.canProceed()) {
               log(`WARN: Rate limit exceeded, dropping Slack message ${event.ts}`);
