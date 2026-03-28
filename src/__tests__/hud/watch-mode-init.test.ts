@@ -156,6 +156,16 @@ describe('HUD watch mode initialization', () => {
     expect(initializeHUDState).toHaveBeenCalledTimes(1);
   });
 
+  it('passes resolved cwd to initializeHUDState instead of defaulting to process.cwd()', async () => {
+    const hud = await importHudModule();
+    initializeHUDState.mockClear();
+
+    await hud.main(true, false);
+
+    // initializeHUDState must receive the resolved cwd from stdin, not undefined/process.cwd()
+    expect(initializeHUDState).toHaveBeenCalledWith('/tmp/worktree');
+  });
+
   it('passes the current session id to OMC state readers', async () => {
     const hud = await importHudModule();
     fakeStdin.transcript_path = '/tmp/worktree/transcripts/123e4567-e89b-12d3-a456-426614174000.jsonl';
