@@ -59,7 +59,7 @@ function formatResetTime(date: Date | null | undefined): string | null {
 /**
  * Render rate limits display.
  *
- * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h)
+ * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
  */
 export function renderRateLimits(limits: RateLimits | null, stale?: boolean): string | null {
   if (!limits) return null;
@@ -101,13 +101,37 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     parts.push(monthlyPart);
   }
 
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
+
+    const sonnetPart = sonnetReset
+      ? `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
+      : `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
+
+    parts.push(sonnetPart);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    const opusReset = formatResetTime(limits.opusWeeklyResetsAt);
+
+    const opusPart = opusReset
+      ? `${DIM}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}${DIM}(${resetPrefix}${opusReset})${RESET}`
+      : `${DIM}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}`;
+
+    parts.push(opusPart);
+  }
+
   return parts.join(' ');
 }
 
 /**
  * Render compact rate limits (just percentages).
  *
- * Format: 45%/12% or 45%/12%/8% (with monthly)
+ * Format: 45%/12% or 45%/12%/8%/20%/5% (5h/wk/mo/sn/op)
  */
 export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boolean): string | null {
   if (!limits) return null;
@@ -129,6 +153,18 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
     parts.push(`${monthlyColor}${monthly}%${RESET}`);
   }
 
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    parts.push(`${sonnetColor}${sonnet}%${RESET}`);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    parts.push(`${opusColor}${opus}%${RESET}`);
+  }
+
   const result = parts.join('/');
   return stale ? `${result}${DIM}*${RESET}` : result;
 }
@@ -136,7 +172,7 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
 /**
  * Render rate limits with visual progress bars.
  *
- * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
+ * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h) sn:[██░░░░░░░░]20%(1d2h) op:[░░░░░░░░░░]5%(1d2h)
  */
 export function renderRateLimitsWithBar(
   limits: RateLimits | null,
@@ -189,6 +225,36 @@ export function renderRateLimitsWithBar(
       : `${DIM}mo:${RESET}[${monthlyBar}]${monthlyColor}${monthly}%${RESET}${staleMarker}`;
 
     parts.push(monthlyPart);
+  }
+
+  if (limits.sonnetWeeklyPercent != null) {
+    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
+    const sonnetColor = getColor(sonnet);
+    const sonnetFilled = Math.round((sonnet / 100) * barWidth);
+    const sonnetEmpty = barWidth - sonnetFilled;
+    const sonnetBar = `${sonnetColor}${'█'.repeat(sonnetFilled)}${DIM}${'░'.repeat(sonnetEmpty)}${RESET}`;
+    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
+
+    const sonnetPart = sonnetReset
+      ? `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
+      : `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
+
+    parts.push(sonnetPart);
+  }
+
+  if (limits.opusWeeklyPercent != null) {
+    const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
+    const opusColor = getColor(opus);
+    const opusFilled = Math.round((opus / 100) * barWidth);
+    const opusEmpty = barWidth - opusFilled;
+    const opusBar = `${opusColor}${'█'.repeat(opusFilled)}${DIM}${'░'.repeat(opusEmpty)}${RESET}`;
+    const opusReset = formatResetTime(limits.opusWeeklyResetsAt);
+
+    const opusPart = opusReset
+      ? `${DIM}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}${DIM}(${resetPrefix}${opusReset})${RESET}`
+      : `${DIM}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}`;
+
+    parts.push(opusPart);
   }
 
   return parts.join(' ');
