@@ -1,0 +1,37 @@
+{
+  "groupId": "group-a",
+  "milestone": "critical-logic",
+  "surface": "vitest-cli",
+  "assertions": [
+    {
+      "id": "VAL-LOGIC-001",
+      "status": "pass",
+      "evidence": "Vitest targeted regression passed (3/3 tests) with EXIT_CODE:0 in evidence/critical-logic/group-a/VAL-LOGIC-001-vitest.log; contract mapping captured in evidence/critical-logic/group-a/assertion-contract-extract.txt; code scan confirms no require() usage in src/features/model-routing/index.ts (evidence/critical-logic/group-a/VAL-LOGIC-001-require-scan.txt = NO_REQUIRE_MATCH) and shows ESM imports in evidence/critical-logic/group-a/VAL-LOGIC-001-code-inspection.txt.",
+      "commands": [
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/model-routing-esm.test.ts",
+        "rg -n \"from '|from \\\"|require\\(|routeAndAdaptTask|setWorkerModelByProvider\" /home/paul/oh-my-claudecode/src/features/model-routing/index.ts",
+        "rg -n \"require\\(\" /home/paul/oh-my-claudecode/src/features/model-routing/index.ts"
+      ]
+    },
+    {
+      "id": "VAL-LOGIC-004",
+      "status": "pass",
+      "evidence": "Vitest targeted regression passed (6/6 tests) with EXIT_CODE:0 in evidence/critical-logic/group-a/VAL-LOGIC-004-vitest.log; code scan in evidence/critical-logic/group-a/VAL-LOGIC-004-code-inspection.txt shows MODE_NAMES.RALPLAN and corresponding entries in ALL_MODE_NAMES, MODE_STATE_FILE_MAP, SESSION_END_MODE_STATE_FILES, and SESSION_METRICS_MODE_FILES.",
+      "commands": [
+        "npx vitest run /home/paul/oh-my-claudecode/src/__tests__/mode-names-ralplan.test.ts",
+        "rg -n \"RALPLAN|MODE_NAMES|MODE_STATE_FILE_MAP|ALL_MODE_NAMES|SESSION_END_MODE_STATE_FILES|SESSION_METRICS_MODE_FILES\" /home/paul/oh-my-claudecode/src/lib/mode-names.ts"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "vitest"
+  ],
+  "frictions": [
+    {
+      "description": "Validation contract suggested `npx vitest run --grep ...`, but this Vitest version does not support `--grep` (CACError: Unknown option `--grep`).",
+      "resolved": true,
+      "resolution": "Used equivalent targeted test file execution for each assertion and preserved failed command output as evidence in VAL-LOGIC-001-vitest.log."
+    }
+  ],
+  "blockers": []
+}

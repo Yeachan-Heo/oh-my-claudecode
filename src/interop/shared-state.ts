@@ -11,6 +11,7 @@ import { join } from 'path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
 import { z } from 'zod';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
+import { withFileLockSync } from '../lib/file-lock.js';
 
 export interface InteropConfig {
   sessionId: string;
@@ -220,27 +221,29 @@ export function updateSharedTask(
   }
 
   try {
-    const content = readFileSync(taskPath, 'utf-8');
-    const parsed = SharedTaskSchema.safeParse(JSON.parse(content));
-    if (!parsed.success) return null;
-    const task = parsed.data;
+    return withFileLockSync(taskPath + '.lock', () => {
+      const content = readFileSync(taskPath, 'utf-8');
+      const parsed = SharedTaskSchema.safeParse(JSON.parse(content));
+      if (!parsed.success) return null;
+      const task = parsed.data;
 
-    const updatedTask: SharedTask = {
-      ...task,
-      ...updates,
-    };
+      const updatedTask: SharedTask = {
+        ...task,
+        ...updates,
+      };
 
-    // Set completedAt if status changed to completed/failed
-    if (
-      (updates.status === 'completed' || updates.status === 'failed') &&
-      !updatedTask.completedAt
-    ) {
-      updatedTask.completedAt = new Date().toISOString();
-    }
+      // Set completedAt if status changed to completed/failed
+      if (
+        (updates.status === 'completed' || updates.status === 'failed') &&
+        !updatedTask.completedAt
+      ) {
+        updatedTask.completedAt = new Date().toISOString();
+      }
 
-    atomicWriteJsonSync(taskPath, updatedTask);
+      atomicWriteJsonSync(taskPath, updatedTask);
 
-    return updatedTask;
+      return updatedTask;
+    });
   } catch {
     return null;
   }

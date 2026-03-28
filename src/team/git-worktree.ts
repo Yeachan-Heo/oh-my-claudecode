@@ -149,10 +149,13 @@ export function removeWorkerWorktree(
     execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
   } catch { /* branch may not exist */ }
 
-  // Update metadata
-  const existing = readMetadata(repoRoot, teamName);
-  const updated = existing.filter(e => e.workerName !== workerName);
-  writeMetadata(repoRoot, teamName, updated);
+  // Update metadata (locked to prevent concurrent read-modify-write races)
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + '.lock';
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName);
+    const updated = existing.filter(e => e.workerName !== workerName);
+    writeMetadata(repoRoot, teamName, updated);
+  });
 }
 
 /**

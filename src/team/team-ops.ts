@@ -312,28 +312,42 @@ export async function teamCreateTask(
   task: Omit<TeamTask, 'id' | 'created_at'>,
   cwd: string,
 ): Promise<TeamTaskV2> {
-  const cfg = await teamReadConfig(teamName, cwd);
-  if (!cfg) throw new Error(`Team ${teamName} not found`);
+  const lockDir = join(teamDir(teamName, cwd), '.lock-create-task');
+  const timeoutMs = 5_000;
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 20;
 
-  const nextId = String(cfg.next_task_id ?? 1);
+  while (Date.now() < deadline) {
+    const result = await withLock(lockDir, async () => {
+      const cfg = await teamReadConfig(teamName, cwd);
+      if (!cfg) throw new Error(`Team ${teamName} not found`);
 
-  const created: TeamTaskV2 = {
-    ...task,
-    id: nextId,
-    status: task.status ?? 'pending',
-    depends_on: task.depends_on ?? task.blocked_by ?? [],
-    version: 1,
-    created_at: new Date().toISOString(),
-  };
+      const nextId = String(cfg.next_task_id ?? 1);
 
-  const taskPath = absPath(cwd, TeamPaths.tasks(teamName));
-  await mkdir(taskPath, { recursive: true });
-  await writeAtomic(join(taskPath, `task-${nextId}.json`), JSON.stringify(created, null, 2));
+      const created: TeamTaskV2 = {
+        ...task,
+        id: nextId,
+        status: task.status ?? 'pending',
+        depends_on: task.depends_on ?? task.blocked_by ?? [],
+        version: 1,
+        created_at: new Date().toISOString(),
+      };
 
-  // Advance counter
-  cfg.next_task_id = Number(nextId) + 1;
-  await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
-  return created;
+      const taskPath = absPath(cwd, TeamPaths.tasks(teamName));
+      await mkdir(taskPath, { recursive: true });
+      await writeAtomic(join(taskPath, `task-${nextId}.json`), JSON.stringify(created, null, 2));
+
+      // Advance counter
+      cfg.next_task_id = Number(nextId) + 1;
+      await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
+      return created;
+    });
+    if (result.ok) return result.value;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs * 2, 200);
+  }
+
+  throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
 }
 
 export async function teamReadTask(teamName: string, taskId: string, cwd: string): Promise<TeamTask | null> {

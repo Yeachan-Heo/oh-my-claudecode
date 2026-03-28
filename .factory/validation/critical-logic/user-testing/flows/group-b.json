@@ -1,0 +1,30 @@
+{
+  "groupId": "group-b",
+  "milestone": "critical-logic",
+  "surface": "vitest-cli",
+  "assertions": [
+    {
+      "id": "VAL-LOGIC-002",
+      "status": "pass",
+      "evidence": "Command exited 0: npm --prefix /home/paul/oh-my-claudecode exec vitest run --grep \"team-status\". Log: /home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/critical-logic/group-b/VAL-LOGIC-002-team-status-vitest.log. Output confirms src/__tests__/team-status-failed-count.test.ts (3 tests) and src/team/__tests__/team-status.test.ts (7 tests) passed. Source mapping check: src/team/team-status.ts lines 126 and 160-162 count both status === 'failed' and completed + metadata.permanentlyFailed.",
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run --grep \"team-status\"",
+        "rg -n \"taskSummary\\.failed|permanentlyFailed|status === 'failed'\" /home/paul/oh-my-claudecode/src/team/team-status.ts"
+      ]
+    },
+    {
+      "id": "VAL-LOGIC-003",
+      "status": "pass",
+      "evidence": "Command exited 0: npm --prefix /home/paul/oh-my-claudecode exec vitest run --grep \"background-cleanup\". Log: /home/paul/.factory/missions/5e80e9fa-ddca-4b4b-a19c-13a029424c2c/evidence/critical-logic/group-b/VAL-LOGIC-003-background-cleanup-vitest.log. Output confirms src/__tests__/background-cleanup-directory.test.ts (5 tests) passed. Source mapping check: src/hud/background-cleanup.ts propagates directory via readHudState(directory)/writeHudState(state, directory) in cleanup and orphaned-task paths (lines 19-23, 51, 95-96, 102, 114).",
+      "commands": [
+        "npm --prefix /home/paul/oh-my-claudecode exec vitest run --grep \"background-cleanup\"",
+        "rg -n \"initializeHUDState|cleanupStaleBackgroundTasks|markOrphanedTasksAsStale|directory\" /home/paul/oh-my-claudecode/src/hud/background-cleanup.ts"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "vitest"
+  ],
+  "frictions": [],
+  "blockers": []
+}

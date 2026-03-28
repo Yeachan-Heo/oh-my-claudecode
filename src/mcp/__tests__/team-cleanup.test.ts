@@ -157,10 +157,10 @@ describe('killTeamSession', () => {
 
 // ─── validateJobId regex ──────────────────────────────────────────────────────
 
-// Re-test the regex rule from team-server.ts (spec: /^omc-[a-z0-9]{1,12}$/)
-const JOB_ID_RE = /^omc-[a-z0-9]{1,12}$/;
+// Re-test the regex rule from team-server.ts (spec: /^omc-[a-z0-9]{1,16}$/)
+const JOB_ID_RE = /^omc-[a-z0-9]{1,16}$/;
 
-describe('validateJobId regex (/^omc-[a-z0-9]{1,12}$/)', () => {
+describe('validateJobId regex (/^omc-[a-z0-9]{1,16}$/)', () => {
   it('accepts valid job IDs', () => {
     expect(JOB_ID_RE.test('omc-abc123')).toBe(true);
     expect(JOB_ID_RE.test('omc-a')).toBe(true);
@@ -178,8 +178,8 @@ describe('validateJobId regex (/^omc-[a-z0-9]{1,12}$/)', () => {
     expect(JOB_ID_RE.test('job-abc123')).toBe(false);
   });
 
-  it('rejects IDs longer than 12 chars after prefix', () => {
-    expect(JOB_ID_RE.test('omc-' + 'a'.repeat(13))).toBe(false);
+  it('rejects IDs longer than 16 chars after prefix', () => {
+    expect(JOB_ID_RE.test('omc-' + 'a'.repeat(17))).toBe(false);
   });
 
   it('rejects empty suffix', () => {

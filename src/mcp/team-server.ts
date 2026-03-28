@@ -178,8 +178,8 @@ async function loadPaneIds(jobId: string): Promise<{ paneIds: string[]; leaderPa
 }
 
 function validateJobId(job_id: string): void {
-  if (!/^omc-[a-z0-9]{1,12}$/.test(job_id)) {
-    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
+  if (!/^omc-[a-z0-9]{1,16}$/.test(job_id)) {
+    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,16}$/`);
   }
 }
 

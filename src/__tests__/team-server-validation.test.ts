@@ -48,11 +48,11 @@ vi.mock('../team/tmux-session.js', () => ({
 // re-exporting internals.
 // ---------------------------------------------------------------------------
 
-const VALID_JOB_ID_RE = /^omc-[a-z0-9]{1,12}$/;
+const VALID_JOB_ID_RE = /^omc-[a-z0-9]{1,16}$/;
 
 function validateJobId(job_id: string): void {
   if (!VALID_JOB_ID_RE.test(job_id)) {
-    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
+    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,16}$/`);
   }
 }
 
@@ -69,7 +69,7 @@ describe('validateJobId', () => {
       'omc-',
       'omc-UPPERCASE',
       'omc-has spaces',
-      'omc-' + 'a'.repeat(13), // 13 chars — exceeds 12-char limit
+      'omc-' + 'a'.repeat(17), // 17 chars — exceeds 16-char limit
       'notprefixed',
       'omc_underscore',
       'omc-abc!@#',
@@ -86,9 +86,10 @@ describe('validateJobId', () => {
     const validIds = [
       'omc-abc123',
       'omc-a',
-      'omc-123456789012', // exactly 12 chars
+      'omc-123456789012', // 12 chars
       'omc-1',
       'omc-abcdefghijkl', // 12 lowercase letters
+      'omc-abcdefghijklmnop', // exactly 16 chars
     ];
 
     for (const id of validIds) {
@@ -111,7 +112,7 @@ describe('team-server handler validation integration', () => {
   it('production validateJobId regex matches test regex', async () => {
     const nodeFs = (await vi.importActual('fs')) as typeof import('fs');
     const src = nodeFs.readFileSync(SOURCE_PATH, 'utf-8');
-    expect(src).toContain('/^omc-[a-z0-9]{1,12}$/');
+    expect(src).toContain('/^omc-[a-z0-9]{1,16}$/');
   });
 
   it('handleStatus and handleWait both call validateJobId before disk access', async () => {

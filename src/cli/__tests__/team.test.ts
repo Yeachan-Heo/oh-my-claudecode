@@ -98,7 +98,7 @@ describe('team cli', () => {
     });
 
     expect(result.status).toBe('running');
-    expect(result.jobId).toMatch(/^omc-[a-z0-9]{1,12}$/);
+    expect(result.jobId).toMatch(/^omc-[a-z0-9]{1,16}$/);
     expect(result.pid).toBe(4242);
 
     expect(mocks.spawn).toHaveBeenCalledWith(
@@ -155,7 +155,7 @@ describe('team cli', () => {
       status: string;
       pid: number;
     };
-    expect(output.jobId).toMatch(/^omc-[a-z0-9]{1,12}$/);
+    expect(output.jobId).toMatch(/^omc-[a-z0-9]{1,16}$/);
     expect(output.status).toBe('running');
     expect(output.pid).toBe(7777);
 
