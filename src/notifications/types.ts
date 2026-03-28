@@ -239,6 +239,8 @@ export interface ReplyConfig {
   includePrefix: boolean;
   /** Authorized Discord user IDs (REQUIRED for Discord, empty = Discord disabled) */
   authorizedDiscordUserIds: string[];
+  /** Authorized Slack user IDs (empty = all channel users allowed) */
+  authorizedSlackUserIds: string[];
 }
 
 // ============================================================================

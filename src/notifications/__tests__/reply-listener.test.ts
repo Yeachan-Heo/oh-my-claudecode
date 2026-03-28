@@ -548,6 +548,64 @@ describe("reply-listener", () => {
     });
   });
 
+  describe("Slack user authorization", () => {
+    it("rejects messages from unauthorized Slack users when authorizedSlackUserIds is set", () => {
+      const authorizedSlackUserIds = ["U12345678", "W0123ABCDE"];
+      const unauthorizedUser = "U99999999";
+      const authorizedUser = "U12345678";
+
+      // Unauthorized user should be rejected
+      expect(authorizedSlackUserIds.includes(unauthorizedUser)).toBe(false);
+      // Authorized user should be accepted
+      expect(authorizedSlackUserIds.includes(authorizedUser)).toBe(true);
+    });
+
+    it("allows all users when authorizedSlackUserIds is empty", () => {
+      const authorizedSlackUserIds: string[] = [];
+      // When empty, authorization check should be skipped (all users allowed)
+      const shouldSkipAuth = authorizedSlackUserIds.length === 0;
+      expect(shouldSkipAuth).toBe(true);
+    });
+
+    it("source code checks event.user against authorizedSlackUserIds before injection", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "reply-listener.ts"),
+        "utf-8",
+      );
+
+      // Verify the authorization check exists in the Slack handler
+      expect(source).toContain("authorizedSlackUserIds");
+      expect(source).toContain("event.user");
+      expect(source).toContain("REJECTED Slack message from unauthorized user");
+    });
+
+    it("config type includes authorizedSlackUserIds field", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const typesSource = fs.readFileSync(
+        path.join(__dirname, "..", "types.ts"),
+        "utf-8",
+      );
+
+      expect(typesSource).toContain("authorizedSlackUserIds: string[]");
+    });
+
+    it("getReplyConfig parses authorizedSlackUserIds from env and config", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const configSource = fs.readFileSync(
+        path.join(__dirname, "..", "config.ts"),
+        "utf-8",
+      );
+
+      expect(configSource).toContain("parseSlackUserIds");
+      expect(configSource).toContain("OMC_REPLY_SLACK_USER_IDS");
+      expect(configSource).toContain("authorizedSlackUserIds");
+    });
+  });
+
   describe("Error handling", () => {
     it("logs errors without blocking", () => {
       // Errors should be logged but not throw

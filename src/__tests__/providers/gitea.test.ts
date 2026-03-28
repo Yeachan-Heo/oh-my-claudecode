@@ -253,6 +253,58 @@ describe('GiteaProvider', () => {
       expect(provider.viewIssue(0)).toBeNull();
       expect(mockExecFileSync).not.toHaveBeenCalled();
     });
+
+    it('includes Authorization header in REST fallback when GITEA_TOKEN is set', () => {
+      process.env.GITEA_URL = 'https://gitea.example.com';
+      process.env.GITEA_TOKEN = 'test-token';
+
+      mockExecFileSync.mockImplementationOnce(() => {
+        throw new Error('tea: not found');
+      });
+      mockExecFileSync.mockReturnValueOnce(JSON.stringify({
+        title: 'Auth Issue',
+        body: 'With auth',
+        html_url: 'https://gitea.example.com/user/repo/issues/42',
+        labels: [],
+      }));
+
+      const result = provider.viewIssue(42, 'user', 'repo');
+
+      expect(mockExecFileSync).toHaveBeenNthCalledWith(2,
+        'curl',
+        ['-sS', '-H', 'Authorization: token test-token', 'https://gitea.example.com/api/v1/repos/user/repo/issues/42'],
+        expect.any(Object),
+      );
+      expect(result).toEqual({
+        title: 'Auth Issue',
+        body: 'With auth',
+        url: 'https://gitea.example.com/user/repo/issues/42',
+        labels: [],
+      });
+    });
+
+    it('omits Authorization header in REST fallback when GITEA_TOKEN is not set', () => {
+      process.env.GITEA_URL = 'https://gitea.example.com';
+      delete process.env.GITEA_TOKEN;
+
+      mockExecFileSync.mockImplementationOnce(() => {
+        throw new Error('tea: not found');
+      });
+      mockExecFileSync.mockReturnValueOnce(JSON.stringify({
+        title: 'No Auth Issue',
+        body: 'Without auth',
+        html_url: 'https://gitea.example.com/user/repo/issues/1',
+        labels: [],
+      }));
+
+      provider.viewIssue(1, 'user', 'repo');
+
+      expect(mockExecFileSync).toHaveBeenNthCalledWith(2,
+        'curl',
+        ['-sS', 'https://gitea.example.com/api/v1/repos/user/repo/issues/1'],
+        expect.any(Object),
+      );
+    });
   });
 
   describe('checkAuth', () => {

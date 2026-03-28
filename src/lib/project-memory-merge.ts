@@ -46,6 +46,7 @@ export function deepMerge<T extends Record<string, unknown>>(
   const result: Record<string, unknown> = { ...base };
 
   for (const key of Object.keys(incoming)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     const baseVal = (base as Record<string, unknown>)[key];
     const incomingVal = (incoming as Record<string, unknown>)[key];
 

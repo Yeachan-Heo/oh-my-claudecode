@@ -107,6 +107,25 @@ describe('deepMerge', () => {
     );
     expect(result.items).toEqual([1, 2, 3, 4, 5]);
   });
+
+  it('should skip __proto__ keys to prevent prototype pollution', () => {
+    const base = { a: 1 } as Record<string, unknown>;
+    const malicious = JSON.parse('{"__proto__": {"polluted": true}, "b": 2}');
+    const result = deepMerge(base, malicious);
+    expect(result.b).toBe(2);
+    expect(result).not.toHaveProperty('__proto__', { polluted: true });
+    // Ensure Object.prototype was not polluted
+    expect(({} as any).polluted).toBeUndefined();
+  });
+
+  it('should skip constructor and prototype keys', () => {
+    const base = { a: 1 } as Record<string, unknown>;
+    const malicious = { constructor: { polluted: true }, prototype: { evil: true }, b: 2 } as Record<string, unknown>;
+    const result = deepMerge(base, malicious);
+    expect(result.b).toBe(2);
+    expect(result).not.toHaveProperty('constructor');
+    expect(result).not.toHaveProperty('prototype');
+  });
 });
 
 // ===========================================================================
