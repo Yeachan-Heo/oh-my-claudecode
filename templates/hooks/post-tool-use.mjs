@@ -56,18 +56,26 @@ function getInvokedSkillName(toolInput) {
     : normalized.toLowerCase();
 }
 
-function activateState(directory, stateName, state, sessionId) {
-  const localDir = join(directory, '.omc', 'state');
-  if (!existsSync(localDir)) {
-    try { mkdirSync(localDir, { recursive: true }); } catch {}
-  }
-  try { writeFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 
+function activateState(directory, stateName, state, sessionId) {
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const targetDir = safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId)
+    : stateDir;
+
+  try {
+    if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+    atomicWriteFileSync(join(targetDir, `${stateName}-state.json`), JSON.stringify(state, null, 2));
+  } catch {}
+
+  // Also write to global fallback
   const globalDir = join(homedir(), '.omc', 'state');
-  if (!existsSync(globalDir)) {
-    try { mkdirSync(globalDir, { recursive: true }); } catch {}
-  }
-  try { writeFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+  try {
+    if (!existsSync(globalDir)) mkdirSync(globalDir, { recursive: true });
+    atomicWriteFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2));
+  } catch {}
 }
 
 // Set priority context
@@ -151,7 +159,7 @@ async function main() {
         activateState(directory, 'ralph', {
           active: true,
           iteration: 1,
-          max_iterations: 10,
+          max_iterations: 100,
           started_at: now,
           prompt: promptText,
           session_id: sessionId || undefined,

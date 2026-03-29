@@ -33,6 +33,7 @@ const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module (use pathToFileURL for Windows compatibility, #524)
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+const { atomicWriteFileSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
 
 const ULTRATHINK_MESSAGE = `<think-mode>
 
@@ -177,6 +178,8 @@ function hasActionableKeyword(text, pattern) {
 }
 
 // Create state file for a mode
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
 function activateState(directory, prompt, stateName, sessionId) {
   let state;
 
@@ -189,6 +192,7 @@ function activateState(directory, prompt, stateName, sessionId) {
       started_at: new Date().toISOString(),
       prompt: prompt,
       session_id: sessionId || undefined,
+      project_path: directory,
       reinforcement_count: 0,
       awaiting_confirmation: true,
       last_checked_at: new Date().toISOString()
@@ -199,25 +203,31 @@ function activateState(directory, prompt, stateName, sessionId) {
       started_at: new Date().toISOString(),
       original_prompt: prompt,
       session_id: sessionId || undefined,
+      project_path: directory,
       reinforcement_count: 0,
       awaiting_confirmation: true,
       last_checked_at: new Date().toISOString()
     };
   }
 
-  // Write to local .omc/state directory
-  const localDir = join(directory, '.omc', 'state');
-  if (!existsSync(localDir)) {
-    try { mkdirSync(localDir, { recursive: true }); } catch {}
-  }
-  try { writeFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+  // Write to session-scoped local path when sessionId is available (must match persistent-mode.mjs reads)
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const targetDir = safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId)
+    : stateDir;
 
-  // Write to global .omc/state directory
+  try {
+    if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+    atomicWriteFileSync(join(targetDir, `${stateName}-state.json`), JSON.stringify(state, null, 2));
+  } catch {}
+
+  // Also write to global fallback
   const globalDir = join(homedir(), '.omc', 'state');
-  if (!existsSync(globalDir)) {
-    try { mkdirSync(globalDir, { recursive: true }); } catch {}
-  }
-  try { writeFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+  try {
+    if (!existsSync(globalDir)) mkdirSync(globalDir, { recursive: true });
+    atomicWriteFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2));
+  } catch {}
 }
 
 /**
