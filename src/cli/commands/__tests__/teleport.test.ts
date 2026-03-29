@@ -8,6 +8,7 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     existsSync: vi.fn(),
     mkdirSync: vi.fn(),
+    symlinkSync: vi.fn(),
   };
 });
 
@@ -26,7 +27,8 @@ vi.mock('../../../providers/index.js', () => ({
   getProvider: vi.fn(),
 }));
 
-import { existsSync } from 'fs';
+import { existsSync, symlinkSync } from 'fs';
+import { execSync } from 'child_process';
 import { teleportCommand } from '../teleport.js';
 
 describe('createWorktree — no shell injection via execFileSync', () => {
@@ -122,5 +124,83 @@ describe('createWorktree — no shell injection via execFileSync', () => {
       );
     });
     expect(gitShellCalls).toHaveLength(0);
+  });
+});
+
+describe('symlinkNodeModules — node_modules symlink after worktree creation', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+  });
+
+  const setupProviderMocks = async () => {
+    const { parseRemoteUrl, getProvider } = await import('../../../providers/index.js');
+    (parseRemoteUrl as ReturnType<typeof vi.fn>).mockReturnValue({
+      owner: 'owner',
+      repo: 'repo',
+      provider: 'github',
+    });
+    (getProvider as ReturnType<typeof vi.fn>).mockReturnValue({
+      displayName: 'GitHub',
+      getRequiredCLI: () => 'gh',
+      viewPR: () => null,
+      viewIssue: () => ({ title: 'test issue' }),
+      prRefspec: null,
+    });
+    // getCurrentRepo() uses execSync for git rev-parse and remote get-url
+    (execSync as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+      if (cmd.includes('rev-parse --show-toplevel')) return '/repo/root';
+      if (cmd.includes('remote get-url')) return 'https://github.com/owner/repo.git';
+      return '';
+    });
+  };
+
+  it('symlinks node_modules from repo root when source exists and target does not', async () => {
+    await setupProviderMocks();
+
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: unknown) => {
+      if (typeof p !== 'string') return false;
+      if (p.includes('issue')) return false;           // worktree path does not exist yet
+      if (p.endsWith('node_modules')) return true;     // source node_modules exists in repo root
+      return true;                                      // parent dirs exist
+    });
+
+    await teleportCommand('#3', { base: 'main' });
+
+    expect(symlinkSync).toHaveBeenCalledOnce();
+    const [src, dest] = (symlinkSync as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(src).toMatch(/node_modules$/);
+    expect(dest).toMatch(/node_modules$/);
+    expect(src).not.toBe(dest);
+  });
+
+  it('skips symlink when source node_modules does not exist', async () => {
+    await setupProviderMocks();
+
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: unknown) => {
+      if (typeof p !== 'string') return false;
+      if (p.includes('issue')) return false;
+      if (p.endsWith('node_modules')) return false;    // no node_modules in repo root
+      return true;
+    });
+
+    await teleportCommand('#4', { base: 'main' });
+
+    expect(symlinkSync).not.toHaveBeenCalled();
+  });
+
+  it('skips symlink when target node_modules already exists in worktree', async () => {
+    await setupProviderMocks();
+
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: unknown) => {
+      if (typeof p !== 'string') return false;
+      if (p.endsWith('node_modules')) return true;     // both source and target exist
+      if (p.includes('issue')) return false;
+      return true;
+    });
+
+    await teleportCommand('#5', { base: 'main' });
+
+    expect(symlinkSync).not.toHaveBeenCalled();
   });
 });
