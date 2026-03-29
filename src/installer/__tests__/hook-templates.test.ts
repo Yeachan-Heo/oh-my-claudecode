@@ -99,7 +99,7 @@ describe('keyword-detector packaged artifacts', () => {
     const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-home-'));
     try {
       for (const [scriptPath, statePath] of [
-        [templatePath, join(tempDir, '.omc', 'state', 'ralph-state.json')],
+        [templatePath, join(tempDir, '.omc', 'state', 'sessions', 'hook-session', 'ralph-state.json')],
         [pluginPath, join(tempDir, '.omc', 'state', 'sessions', 'hook-session', 'ralph-state.json')],
       ] as const) {
         execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
