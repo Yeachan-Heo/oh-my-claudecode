@@ -369,7 +369,7 @@ export interface HudRenderContext {
   sessionSummary: SessionSummaryState | null;
 
   /** Name of the last tool called in this session */
-  lastToolName: string | null;
+  lastToolName?: string | null;
 }
 
 // ============================================================================

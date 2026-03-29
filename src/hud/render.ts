@@ -418,7 +418,7 @@ export async function render(
   }
 
   if (enabledElements.showLastTool === true) {
-    const tool = renderLastTool(context.lastToolName);
+    const tool = renderLastTool(context.lastToolName ?? null);
     if (tool) elements.push(tool);
   }
 
