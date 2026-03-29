@@ -132,13 +132,15 @@ async function processOne(pending: PendingResponse): Promise<boolean> {
   console.log(`[watcher] → ${agentId} 프롬프트 전달`);
   sendToAgent(agentId, promptFile);
 
-  // 프롬프트 파일 rename — 에이전트가 같은 파일을 2번 읽는 것을 방지
+  // 프롬프트 파일 rename — 에이전트가 읽을 시간(30초) 확보 후 비동기 rename
   const doneFile = `${PROMPT_DIR}/${agentId}.done.md`;
-  try {
-    renameSync(promptFile, doneFile);
-  } catch {
-    // rename 실패해도 처리 자체는 계속 진행
-  }
+  setTimeout(() => {
+    try {
+      renameSync(promptFile, doneFile);
+    } catch {
+      // rename 실패해도 처리 자체는 계속 진행
+    }
+  }, 30_000);
 
   await markAsProcessed(pending.id);
   console.log(`[watcher] ✓ ${agent.name} 프롬프트 전달 완료 (응답은 에이전트가 직접 저장)`);

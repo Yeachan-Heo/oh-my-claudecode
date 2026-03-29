@@ -242,28 +242,33 @@ export async function processOneResponse(pending: PendingResponse): Promise<stri
     '- 행동 후 결과를 _respond.ts로 보고하라.',
   ].join('\n') : '';
 
-  // 6. 프롬프트 구성
+  // 6. 프롬프트 구성 — 지시를 최상단에 배치하여 CEO가 먼저 인지
   const prompt = [
     `너는 BiniLab ${agent.name}이다. 역할: ${agent.role}`,
+    '',
+    // ── 지시(mission)를 최상단에 배치 ──
+    missionSection,
+    actionRule,
+    '',
+    // ── 행동 도구 안내 (지시 바로 다음) ──
+    ...toolSection,
+    '',
+    // ── 응답 저장 방법 ──
+    '== 응답 저장 (필수) ==',
+    '응답을 생성한 후, 반드시 아래 Bash 명령으로 DB에 저장하세요:',
+    '```bash',
+    `npx tsx ${PROJECT_ROOT}/_respond.ts '${payload.roomId}' '${agentId}' '여기에 응답 텍스트'`,
+    '```',
+    '',
+    // ── 참조 자료 (하단) ──
     `Read ${PROJECT_ROOT}/COMPANY.md`,
     `Read ${PROJECT_ROOT}/${agent.file}`,
     '',
     '== 에이전트 기억 ==',
     bootstrap.memories || '(없음)',
     '',
-    ...toolSection,
-    '',
     contextSection,
     filePermSection,
-    '',
-    missionSection,
-    actionRule,
-    '',
-    '== 응답 저장 (필수) ==',
-    '응답을 생성한 후, 반드시 아래 Bash 명령으로 DB에 저장하세요:',
-    '```bash',
-    `npx tsx ${PROJECT_ROOT}/_respond.ts '${payload.roomId}' '${agentId}' '여기에 응답 텍스트'`,
-    '```',
     '',
     '[SAVE_MEMORY]',
     'scope: global',
