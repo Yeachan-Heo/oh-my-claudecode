@@ -15,6 +15,7 @@ import {
   processPreToolUse,
   type AgentInput,
 } from '../features/delegation-enforcer.js';
+import { getAgentDefinitions } from '../agents/definitions.js';
 
 // Mock loadConfig to control forceInherit
 vi.mock('../config/loader.js', async (importOriginal) => {
@@ -278,5 +279,83 @@ describe('routing.forceInherit (issue #1135)', () => {
 
       expect(result.modifiedInput).toEqual(toolInput);
     });
+  });
+});
+
+describe('getAgentDefinitions with forceInherit (issue #1989)', () => {
+  let originalClaudeModel: string | undefined;
+  let originalAnthropicModel: string | undefined;
+
+  beforeEach(() => {
+    originalClaudeModel = process.env.CLAUDE_MODEL;
+    originalAnthropicModel = process.env.ANTHROPIC_MODEL;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (originalClaudeModel === undefined) delete process.env.CLAUDE_MODEL;
+    else process.env.CLAUDE_MODEL = originalClaudeModel;
+
+    if (originalAnthropicModel === undefined) delete process.env.ANTHROPIC_MODEL;
+    else process.env.ANTHROPIC_MODEL = originalAnthropicModel;
+  });
+
+  it('uses parent CLAUDE_MODEL for all agents when forceInherit is true', () => {
+    process.env.CLAUDE_MODEL = 'accounts/fireworks/routers/kimi-k2p5-turbo';
+    mockedLoadConfig.mockReturnValue({
+      ...DEFAULT_CONFIG,
+      routing: { ...DEFAULT_CONFIG.routing, forceInherit: true },
+    } as ReturnType<typeof loadConfig>);
+
+    const defs = getAgentDefinitions();
+
+    // Every agent should use the parent model, not its hardcoded default
+    for (const [name, def] of Object.entries(defs)) {
+      expect(def.model, `agent "${name}" should inherit parent model`).toBe(
+        'accounts/fireworks/routers/kimi-k2p5-turbo'
+      );
+    }
+  });
+
+  it('falls back to ANTHROPIC_MODEL when CLAUDE_MODEL is unset and forceInherit is true', () => {
+    delete process.env.CLAUDE_MODEL;
+    process.env.ANTHROPIC_MODEL = 'claude-opus-4-6';
+    mockedLoadConfig.mockReturnValue({
+      ...DEFAULT_CONFIG,
+      routing: { ...DEFAULT_CONFIG.routing, forceInherit: true },
+    } as ReturnType<typeof loadConfig>);
+
+    const defs = getAgentDefinitions();
+    for (const def of Object.values(defs)) {
+      expect(def.model).toBe('claude-opus-4-6');
+    }
+  });
+
+  it('uses hardcoded agent defaults when forceInherit is false', () => {
+    process.env.CLAUDE_MODEL = 'accounts/fireworks/routers/kimi-k2p5-turbo';
+    mockedLoadConfig.mockReturnValue({
+      ...DEFAULT_CONFIG,
+      routing: { ...DEFAULT_CONFIG.routing, forceInherit: false },
+    } as ReturnType<typeof loadConfig>);
+
+    const defs = getAgentDefinitions();
+
+    // At least some agents should NOT use the env model (they have their own defaults)
+    const modelsUsed = new Set(Object.values(defs).map(d => d.model));
+    expect(modelsUsed.has('accounts/fireworks/routers/kimi-k2p5-turbo')).toBe(false);
+  });
+
+  it('explicit override model still wins over forceInherit', () => {
+    process.env.CLAUDE_MODEL = 'accounts/fireworks/routers/kimi-k2p5-turbo';
+    mockedLoadConfig.mockReturnValue({
+      ...DEFAULT_CONFIG,
+      routing: { ...DEFAULT_CONFIG.routing, forceInherit: true },
+    } as ReturnType<typeof loadConfig>);
+
+    const defs = getAgentDefinitions({
+      overrides: { executor: { model: 'claude-haiku-4-5-20251001' } },
+    });
+
+    expect(defs.executor?.model).toBe('claude-haiku-4-5-20251001');
   });
 });
