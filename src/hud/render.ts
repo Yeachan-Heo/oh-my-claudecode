@@ -418,7 +418,7 @@ export async function render(
   }
 
   if (enabledElements.showCost === true) {
-    const cost = renderCost(context.requestCostUsd, context.sessionCostUsd);
+    const cost = renderCost(context.requestCostUsd ?? null, context.sessionCostUsd ?? null);
     if (cost) elements.push(cost);
   }
 

@@ -371,9 +371,9 @@ export interface HudRenderContext {
   sessionSummary: SessionSummaryState | null;
 
   /** Estimated cost of the last request in USD */
-  requestCostUsd: number | null;
+  requestCostUsd?: number | null;
   /** Estimated session total cost in USD */
-  sessionCostUsd: number | null;
+  sessionCostUsd?: number | null;
 }
 
 // ============================================================================
