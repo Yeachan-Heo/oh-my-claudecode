@@ -369,7 +369,7 @@ export interface HudRenderContext {
   sessionSummary: SessionSummaryState | null;
 
   /** Number of assistant turns in the current session */
-  turnCount: number;
+  turnCount?: number;
 }
 
 // ============================================================================

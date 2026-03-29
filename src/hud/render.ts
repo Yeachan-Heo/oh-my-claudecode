@@ -418,7 +418,7 @@ export async function render(
   }
 
   if (enabledElements.showTurnCount === true) {
-    const turns = renderTurnCount(context.turnCount);
+    const turns = context.turnCount != null ? renderTurnCount(context.turnCount) : null;
     if (turns) elements.push(turns);
   }
 
