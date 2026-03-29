@@ -27,15 +27,21 @@ vi.mock('../orchestrator/agent-actions.js', () => ({
   reportToCeo: vi.fn().mockResolvedValue('report-marker-123'),
 }));
 
+vi.mock('../db/agent-tasks.js', () => ({
+  createTask: vi.fn().mockResolvedValue({ id: 'task-1', title: 'mock', status: 'pending' }),
+}));
+
 import {
   parseTag,
   parseMeta,
   processAgentOutput,
   enforceTagGate,
+  mapPriorityToNumber,
 } from '../orchestrator/agent-output-parser.js';
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
 import { dispatchToAgent, createAgentMeeting, reportToCeo } from '../orchestrator/agent-actions.js';
+import { createTask } from '../db/agent-tasks.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -405,5 +411,119 @@ summary: 파이프라인 Phase 1~2 완료
     expect(result.status).toBe('ok');
     expect(dispatchToAgent).toHaveBeenCalledTimes(1);
     expect(reportToCeo).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── P2: ACTION_ITEM 태그 파싱 ──────────────────────────────────
+
+describe('mapPriorityToNumber', () => {
+  it('urgent → 1, high → 2, medium → 5, low → 8', () => {
+    expect(mapPriorityToNumber('urgent')).toBe(1);
+    expect(mapPriorityToNumber('high')).toBe(2);
+    expect(mapPriorityToNumber('medium')).toBe(5);
+    expect(mapPriorityToNumber('low')).toBe(8);
+  });
+
+  it('unknown/undefined → 기본값 5', () => {
+    expect(mapPriorityToNumber(undefined)).toBe(5);
+    expect(mapPriorityToNumber('whatever')).toBe(5);
+  });
+});
+
+describe('P2: ACTION_ITEM 태그', () => {
+  it('[ACTION_ITEM] 기본 파싱 → createTask 호출', async () => {
+    vi.mocked(createTask).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: meeting
+summary: 회의 합의 도달
+[/LOG_EPISODE]
+[ACTION_ITEM]
+title: 뷰티 카테고리 벤치마크 채널 5개 추가 발굴
+assignee: junho-researcher
+priority: high
+description: 현재 뷰티 벤치마크 3개 → 8개로 확대. 팔로워 5k+ 조건.
+[/ACTION_ITEM]
+    `.trim();
+
+    const result = await processAgentOutput('minjun-ceo', output);
+    expect(result.status).toBe('ok');
+    expect(createTask).toHaveBeenCalledTimes(1);
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '뷰티 카테고리 벤치마크 채널 5개 추가 발굴',
+        assigned_to: 'junho-researcher',
+        assigned_by: 'minjun-ceo',
+        priority: 2, // high → 2
+        description: expect.stringContaining('8개로 확대'),
+      })
+    );
+  });
+
+  it('복수 [ACTION_ITEM] → createTask 복수 호출', async () => {
+    vi.mocked(createTask).mockClear();
+    const output = `
+[SAVE_MEMORY]
+scope: global
+memory_type: insight
+content: 회의 결과 정리
+[/SAVE_MEMORY]
+[ACTION_ITEM]
+title: 건강 카테고리 콘텐츠 3개 작성
+assignee: hana-health-editor
+priority: medium
+description: 이번 주 건강 콘텐츠 부족
+[/ACTION_ITEM]
+[ACTION_ITEM]
+title: 다이어트 키워드 수집
+assignee: jiu-diet-editor
+priority: low
+description: 다이어트 관련 키워드 30개 수집
+[/ACTION_ITEM]
+    `.trim();
+
+    const result = await processAgentOutput('minjun-ceo', output);
+    expect(result.status).toBe('ok');
+    expect(createTask).toHaveBeenCalledTimes(2);
+    expect(createTask).toHaveBeenNthCalledWith(1,
+      expect.objectContaining({
+        title: '건강 카테고리 콘텐츠 3개 작성',
+        assigned_to: 'hana-health-editor',
+        priority: 5, // medium → 5
+      })
+    );
+    expect(createTask).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({
+        title: '다이어트 키워드 수집',
+        assigned_to: 'jiu-diet-editor',
+        priority: 8, // low → 8
+      })
+    );
+  });
+
+  it('필수 필드(title/assignee) 누락 시 createTask 미호출', async () => {
+    vi.mocked(createTask).mockClear();
+    const output = `
+[LOG_EPISODE]
+event_type: decision
+summary: 태스크 생성 시도
+[/LOG_EPISODE]
+[ACTION_ITEM]
+priority: high
+description: title과 assignee 없음
+[/ACTION_ITEM]
+[ACTION_ITEM]
+title: assignee 없는 태스크
+priority: medium
+[/ACTION_ITEM]
+[ACTION_ITEM]
+assignee: bini-beauty-editor
+priority: low
+[/ACTION_ITEM]
+    `.trim();
+
+    const result = await processAgentOutput('minjun-ceo', output);
+    expect(result.status).toBe('ok');
+    expect(createTask).not.toHaveBeenCalled();
   });
 });

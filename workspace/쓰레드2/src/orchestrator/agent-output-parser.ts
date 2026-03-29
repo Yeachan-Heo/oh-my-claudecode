@@ -8,6 +8,7 @@
  *   [SAVE_MEMORY] ... [/SAVE_MEMORY]           — 의미 기억 저장
  *   [LOG_EPISODE] ... [/LOG_EPISODE]            — 에피소드 기록
  *   [CREATE_STRATEGY_VERSION] ... [/...]        — 전략 버전 생성 (CEO 전용)
+ *   [ACTION_ITEM] ... [/ACTION_ITEM]            — 태스크 생성 (agent_tasks INSERT)
  *
  * 태그 내부 포맷 (key: value, JSON, 숫자 지원):
  *   scope: global
@@ -19,6 +20,7 @@
 import { saveMemory, logEpisode } from '../db/memory.js';
 import { createStrategyVersion } from '../db/strategy-archive.js';
 import { dispatchToAgent, createAgentMeeting, reportToCeo } from './agent-actions.js';
+import { createTask } from '../db/agent-tasks.js';
 import type { MeetingType } from './meeting.js';
 import type { OrientResult, DirectiveResult } from './types.js';
 
@@ -91,6 +93,19 @@ export function parseMeta(content: string): Record<string, unknown> {
   }
 
   return result;
+}
+
+// ─── Priority Mapping ────────────────────────────────────────
+
+/** 텍스트 우선순위를 agent_tasks.priority 정수로 변환. */
+export function mapPriorityToNumber(p: string | undefined): number {
+  switch (p?.toLowerCase()) {
+    case 'urgent': return 1;
+    case 'high': return 2;
+    case 'medium': return 5;
+    case 'low': return 8;
+    default: return 5;
+  }
 }
 
 // ─── Core ─────────────────────────────────────────────────────
@@ -195,6 +210,24 @@ export async function processAgentOutput(
     if (summary) {
       await reportToCeo({ sender: agentId, summary });
     }
+  }
+
+  // ─── P2: ACTION_ITEM 태그 → agent_tasks 생성 ────────────────
+  const actionItemTags = parseTag(output, /\[ACTION_ITEM\]([\s\S]*?)\[\/ACTION_ITEM\]/g);
+
+  for (const raw of actionItemTags) {
+    const meta = parseMeta(raw);
+    const title = meta.title as string | undefined;
+    const assignee = meta.assignee as string | undefined;
+    if (!title || !assignee) continue; // 필수 필드 누락 시 스킵
+
+    await createTask({
+      title,
+      description: (meta.description as string) ?? undefined,
+      assigned_to: assignee,
+      assigned_by: agentId,
+      priority: mapPriorityToNumber(meta.priority as string | undefined),
+    });
   }
 
   return {

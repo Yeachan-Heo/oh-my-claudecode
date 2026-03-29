@@ -1,122 +1,97 @@
-# BiniLab Handoff — 세션 25 완료 (2026-03-27)
+# BiniLab Handoff — 세션 26 완료 (2026-03-29)
 
-## 현재 상태: P1 에이전트 자발적 행동 + 권한 체계 완성
+## 현재 상태: P1~P3 전체 구현 + E2E 검증 완료
 
-### 세션 25 성과
+### 세션 26 성과
 
 | 항목 | 내용 |
 |------|------|
-| P1 회의 소집 | `_create-meeting.ts` CLI + `[CREATE_MEETING]` 태그 |
-| P1 에이전트 간 대화 | `_dispatch.ts` CLI + `[SEND_MESSAGE]` 태그 |
-| P1 자발적 보고 | `[REPORT_TO_CEO]` 태그 |
-| Supabase Realtime | 5초 polling → WebSocket 실시간 (30초 fallback) |
-| 대시보드 연동 | 회의/DM/보고 시 chat_rooms 자동 생성 |
-| 권한 체계 | rank 기반 (owner/executive/lead/member) |
-| 파일 수정 제한 | 코드는 엔지니어만, 나머지는 페르소나 .md만 |
-| directive 감지 | 지시형 메시지 → 행동 실행 프롬프트 자동 전환 |
+| P1.5 E2E 검증 | binilab 재스폰 + CEO directive 성공 + watcher 버그 수정 |
+| P2 ACTION_ITEM | output-parser에 [ACTION_ITEM] 태그 파싱 추가, 기존 agent_tasks 재사용 |
+| 회의 중복 방지 | 5분 idempotency 체크 + 프롬프트 파일 .done.md 리네임 |
+| P3 CEO 자율 루프 | ceo-daily-loop.ts — DB 브리핑 수집 → CEO dispatch, --dry-run 지원 |
 
 ### 빌드/테스트
 - tsc: 0 errors
-- npm test: 388 passed, 0 failed
-- 커밋: `ee395daa` (P1 전체) + `4050457e` (파일 권한)
+- npm test: 406 passed, 0 failed
+- 커밋: 세션 26 전체
 
 ---
 
-## 아키텍처 (P1 완료 후)
+## 아키텍처 (P3 완료 후)
 
 ```
-에이전트 자발적 행동 흐름:
+에이전트 자율 행동 전체 흐름:
 
-1. 대시보드 채팅 (P0 — 정상 동작):
+1. 대시보드 채팅 (P0):
    사용자 → dispatch API → PENDING_RESPONSE → watcher → tmux agent
-   → _respond.ts → DB → Supabase Realtime → 대시보드 즉시 표시
+   → _respond.ts → DB → Supabase Realtime → 대시보드
 
 2. 회의 소집 (P1):
    CEO → _create-meeting.ts → meetings + chat_rooms + PENDING_RESPONSE
    → watcher → 참여자에게 회의 프롬프트 전달
+   * 중복 방지: 5분 이내 같은 안건이면 스킵
 
-3. 에이전트 간 DM (P1):
-   에이전트A → _dispatch.ts 또는 [SEND_MESSAGE] 태그
-   → PENDING_RESPONSE + chat_rooms → watcher → 에이전트B
+3. ACTION_ITEM → agent_tasks (P2):
+   회의 대화 → [ACTION_ITEM] 태그 → output-parser → agent_tasks DB 생성
+   → 해당 에이전트에 태스크 배정
 
-4. CEO 보고 (P1):
-   에이전트 출력에 [REPORT_TO_CEO] → reportToCeo()
-   → PENDING_RESPONSE + chat_rooms → watcher → CEO
+4. CEO 자율 루프 (P3):
+   cron/수동 → ceo-daily-loop.ts → DB 상태 수집 (포스트/성과/태스크/회의)
+   → CEO에게 브리핑 dispatch → CEO가 판단하여 회의 소집/태스크 배정
 
-5. directive 감지:
-   "회의 소집해" 등 지시형 메시지 → processOneResponse()가
-   행동 실행 프롬프트 생성 (채팅 응답 대신 Bash 실행 지시)
+5. watcher 개선:
+   - DB payload에서 originalMessage/sender 직접 읽기 (기존 버그 수정)
+   - 프롬프트 전달 후 .done.md로 리네임 (중복 읽기 방지)
 ```
-
-### 권한 체계
-
-| rank | 에이전트 | 채팅방 생성 | 파일 수정 |
-|------|---------|-----------|----------|
-| owner | 시훈 | 모든 타입 | 모든 파일 |
-| executive | 민준(CEO) | DM + 회의 | 페르소나 .md + ops .md |
-| lead | 서연, 지현 | DM + 회의 | 페르소나 .md + ops .md |
-| member | 빈이 외 7명 | DM만 | 자기 페르소나 .md만 |
 
 ---
 
 ## 다음 세션 할 일
 
-### 🔴 P1.5 E2E 검증 (최우선)
-- CEO에게 "회의 소집해" 지시 → CEO가 실제로 `_create-meeting.ts` 실행하는지 확인
-- 서연/지현이 회의에 참여하여 대화하는지 확인
-- 대시보드에서 에이전트 간 대화가 실시간으로 보이는지 확인
-- **지금 안 되는 것**: CEO가 directive를 받아도 채팅 응답만 하고 행동을 안 할 수 있음
-  - 원인: 프롬프트에 도구 + directive 규칙은 추가했지만, CEO 에이전트의 기존 컨텍스트가 방해할 수 있음
-  - 해결책: CEO tmux 세션을 새로 시작하면 새 프롬프트가 적용됨
+### 🟡 대시보드 실시간 확인
+- agent-town 대시보드에서 에이전트 간 대화가 실시간으로 표시되는지 확인
+- Supabase Realtime 구독이 정상 동작하는지 브라우저에서 검증
 
-### 🟡 P2: 회의 결론 → 실행
-- 회의 대화에서 `[ACTION_ITEM]` 태그 파싱 → `agent_tasks` 생성
-- 태스크를 해당 에이전트에 배정 → 실제 작업 실행
+### 🟡 CEO 자율 루프 E2E 테스트
+- `npx tsx scripts/ceo-daily-loop.ts` 실행 → CEO가 브리핑을 받고 실제 행동하는지 확인
+- watcher + CEO 에이전트 + 브리핑 → 회의 소집 또는 태스크 배정까지 E2E
 
-### 🟢 P3: CEO 자율 루프
-- 매일 아침 상태 확인 → 회의 소집 → 전략 조정 → 실행 지시
+### 🟢 운영 자동화
+- ceo-daily-loop.ts를 cron으로 매일 아침 자동 실행
+- 텔레그램 알림 연동 (CEO 보고 시 알림)
 
 ---
 
-## 변경 파일 목록 (세션 25)
+## 변경 파일 목록 (세션 26)
 
 | 파일 | 변경 |
 |------|------|
-| `src/orchestrator/agent-actions.ts` (신규) | dispatchToAgent, createAgentMeeting, reportToCeo + ensureChatRoom + 권한 검증 |
-| `_dispatch.ts` (신규) | 에이전트 간 메시지 CLI |
-| `_create-meeting.ts` (신규) | CEO 회의 소집 CLI |
-| `src/orchestrator/agent-output-parser.ts` | [CREATE_MEETING], [SEND_MESSAGE], [REPORT_TO_CEO] 태그 |
-| `src/orchestrator/response-processor.ts` | P1 도구 안내 + directive 감지 + 파일 권한 규칙 |
-| `src/orchestrator/agent-spawner.ts` | rank 필드 + canCreateRoom() + getAgentRank() |
-| `scripts/watch-pending.ts` | roomId 정규식 확장 |
-| `agent-town/components/hud/BinilabChatPanel.tsx` | Supabase Realtime 구독 |
-| `agent-town/app/api/chat/rooms/route.ts` | 권한 검증 (403) |
-| `src/__tests__/agent-output-parser.test.ts` | P1 태그 파싱 테스트 6개 |
-| `src/__tests__/schema-v2.test.ts` | PGlite text[] 호환성 수정 |
+| `scripts/watch-pending.ts` | DB payload 직접 읽기 + 프롬프트 .done.md 리네임 |
+| `src/orchestrator/agent-output-parser.ts` | [ACTION_ITEM] 태그 파싱 + mapPriorityToNumber() |
+| `src/orchestrator/agent-actions.ts` | createAgentMeeting 5분 중복 방지 체크 |
+| `scripts/ceo-daily-loop.ts` (신규) | CEO 일일 브리핑 루프 + --dry-run |
+| `src/__tests__/agent-output-parser.test.ts` | ACTION_ITEM 테스트 6개 추가 |
+| `src/__tests__/agent-actions.test.ts` (신규) | 중복 방지 테스트 3개 |
+| `src/__tests__/ceo-daily-loop.test.ts` (신규) | 브리핑 포맷/dispatch 테스트 10개 |
 
 ---
 
 ## 기술적 발견사항
 
-### response-processor가 프롬프트의 핵심
-- `buildAgentPrompt()` (daily-run용)과 `processOneResponse()` (watcher 채팅용)는 별개
-- P1 도구를 `buildAgentPrompt()`에만 넣으면 채팅 모드에서 에이전트가 행동을 못 함
-- 두 곳 모두 도구 안내를 포함해야 에이전트가 일관되게 동작
+### watch-pending.ts payload 버그
+- `getPendings()`가 DB의 `payload` 컬럼을 무시하고 `originalMessage: ''`로 하드코딩
+- directive 감지 정규식이 빈 문자열에 매칭 실패 → 행동 규칙 섹션 누락
+- 수정: `payload` 컬럼에서 직접 `originalMessage`, `sender`, `meetingId`, `reportFrom` 추출
 
-### directive 감지 방식
-- 정규식으로 "회의 소집해", "~해줘" 등 지시형 메시지 패턴 매칭
-- 매칭 시 "행동 규칙" 섹션을 프롬프트에 추가 (Bash 실행 지시)
-- 미매칭 시 기존 채팅 응답 규칙 유지
+### 회의 중복 소집
+- CEO가 프롬프트 파일을 2번 읽어서 `_create-meeting.ts`를 2번 실행
+- 해결 1: 프롬프트 전달 후 `.done.md`로 리네임 (읽기 1회 보장)
+- 해결 2: `createAgentMeeting()`에 5분 이내 동일 안건 체크 (DB 레벨 idempotency)
 
-### PGlite text[] 비호환
-- 실제 Supabase DB에서는 `text[]` INSERT 정상 동작
-- PGlite 테스트 환경에서는 `text[]`를 jsonb로 해석하려 해서 에러
-- 테스트에서 participants 삽입을 제거하여 우회
-
-### Supabase Realtime 적용
-- `supabase.channel().on('postgres_changes', ...)` 구독
-- room별 필터: `filter: 'room_id=eq.{roomId}'`
-- chat_rooms 변경도 구독하여 새 방 자동 표시
+### agent-mux MCP 제한
+- `create_project`는 레지스트리만 생성하고 실제 tmux 세션을 만들지 않음
+- 수동 `tmux new-session`으로 우회 필요
 
 ---
 

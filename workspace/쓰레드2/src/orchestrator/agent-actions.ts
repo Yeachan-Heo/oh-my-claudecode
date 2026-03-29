@@ -11,11 +11,14 @@
  */
 
 import { db } from '../db/index.js';
-import { agentMessages, chatRooms, chatParticipants } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { agentMessages, chatRooms, chatParticipants, meetings } from '../db/schema.js';
+import { eq, and, gt } from 'drizzle-orm';
 import { startMeeting } from './meeting.js';
 import { canCreateRoom } from './agent-spawner.js';
 import type { MeetingType } from './meeting.js';
+
+/** 중복 회의 방지 윈도우 (5분) */
+const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
 // ─── dispatchToAgent ─────────────────────────────────────────
 
@@ -92,6 +95,24 @@ export async function createAgentMeeting(
   // 0. 권한 검증
   if (!canCreateRoom(opts.creator, 'meeting')) {
     throw new Error(`[agent-actions] ${opts.creator}은(는) 회의 생성 권한이 없습니다 (rank: member). executive 또는 lead만 가능.`);
+  }
+
+  // 0.5. 중복 회의 방지 — 같은 creator + 같은 agenda로 최근 5분 이내 회의가 있으면 스킵
+  const cutoff = new Date(Date.now() - DEDUP_WINDOW_MS);
+  const recentDuplicates = await db.select({ id: meetings.id })
+    .from(meetings)
+    .where(
+      and(
+        eq(meetings.created_by, opts.creator),
+        eq(meetings.agenda, opts.agenda),
+        gt(meetings.created_at, cutoff),
+      ),
+    )
+    .limit(1);
+
+  if (recentDuplicates.length > 0) {
+    console.log(`[agent-actions] 중복 회의 감지 — creator=${opts.creator}, agenda="${opts.agenda}", existing=${recentDuplicates[0]!.id}. 스킵.`);
+    return { meetingId: recentDuplicates[0]!.id, dispatched: [] };
   }
 
   // 1. meetings 테이블에 생성
