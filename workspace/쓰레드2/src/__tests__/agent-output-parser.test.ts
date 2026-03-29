@@ -273,6 +273,61 @@ describe('enforceTagGate', () => {
   });
 });
 
+// ─── enforceTagGate diagnostic feedback ──────────────────────
+
+describe('enforceTagGate with diagnostic feedback', () => {
+  it('should pass diagnostic with [SAVE_MEMORY] and [LOG_EPISODE] bracket format to retryFn', async () => {
+    const retryFn = vi.fn().mockResolvedValue(
+      '[SAVE_MEMORY]\nscope: global\ncontent: "fixed"\n[/SAVE_MEMORY]\n[LOG_EPISODE]\nevent_type: retry_success\nsummary: "recovered"\n[/LOG_EPISODE]'
+    );
+
+    const output = 'no tags here';
+    const result = await enforceTagGate('test-agent', output, retryFn);
+
+    // retryFn should receive diagnostic with bracketed tag names (not just plain text)
+    expect(retryFn).toHaveBeenCalledTimes(1);
+    const reason = retryFn.mock.calls[0][1] as string;
+    // Must contain [SAVE_MEMORY] and [LOG_EPISODE] in bracket format to distinguish
+    // from the old generic MISSING_TAGS_REASON constant
+    expect(reason).toContain('[SAVE_MEMORY]');
+    expect(reason).toContain('[LOG_EPISODE]');
+    expect(result.quarantined).toBe(false);
+  });
+
+  it('should identify only the missing tag when one is present', async () => {
+    // Has SAVE_MEMORY but no LOG_EPISODE — first attempt passes since at least one tag exists
+    const output = '[SAVE_MEMORY]\nscope: global\ncontent: "partial"\n[/SAVE_MEMORY]';
+    const retryFn = vi.fn();
+
+    const result = await enforceTagGate('test-agent', output, retryFn);
+    expect(result.quarantined).toBe(false);
+    // No retry needed — having at least one required tag is sufficient
+    expect(retryFn).not.toHaveBeenCalled();
+  });
+
+  it('should build diagnostic from retry 1 output for retry 2', async () => {
+    const retryFn = vi.fn()
+      .mockResolvedValueOnce('still no tags') // retry 1 fails
+      .mockResolvedValueOnce(                  // retry 2 succeeds
+        '[SAVE_MEMORY]\nscope: global\ncontent: "ok"\n[/SAVE_MEMORY]\n[LOG_EPISODE]\nevent_type: test\nsummary: "ok"\n[/LOG_EPISODE]'
+      );
+
+    const output = 'no tags';
+    const result = await enforceTagGate('test-agent', output, retryFn);
+
+    expect(retryFn).toHaveBeenCalledTimes(2);
+    // Retry 1: diagnostic based on original output
+    const reason1 = retryFn.mock.calls[0][1] as string;
+    expect(reason1).toContain('[SAVE_MEMORY]');
+    expect(reason1).toContain('[LOG_EPISODE]');
+    // Retry 2: diagnostic based on retry 1 output (still both missing)
+    const reason2 = retryFn.mock.calls[1][1] as string;
+    expect(reason2).toContain('[SAVE_MEMORY]');
+    expect(reason2).toContain('[LOG_EPISODE]');
+    expect(result.quarantined).toBe(false);
+  });
+});
+
 // ─── P1: 자발적 행동 태그 파싱 ──────────────────────────────────
 
 describe('P1: CREATE_MEETING 태그', () => {

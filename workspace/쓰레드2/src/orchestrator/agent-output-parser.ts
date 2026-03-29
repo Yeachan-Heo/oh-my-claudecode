@@ -303,11 +303,24 @@ export function extractDirectiveResult(output: string): DirectiveResult | null {
 
 const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-const MISSING_TAGS_REASON = 'SAVE_MEMORY 또는 LOG_EPISODE 태그 누락';
+/**
+ * 출력에서 누락된 필수 태그를 분석하여 구체적 피드백 문자열 생성.
+ * AgentScope의 "Model-Resolvable" 패턴: 에이전트가 무엇을 빠뜨렸는지 알 수 있도록
+ * 누락된 태그명을 명시적으로 전달.
+ */
+export function buildTagDiagnostic(output: string): string {
+  const hasMemory = /\[SAVE_MEMORY\]/i.test(output);
+  const hasEpisode = /\[LOG_EPISODE\]/i.test(output);
+  const missing: string[] = [];
+  if (!hasMemory) missing.push('[SAVE_MEMORY]');
+  if (!hasEpisode) missing.push('[LOG_EPISODE]');
+  return `필수 태그 누락: ${missing.join(', ')}. 출력 끝에 반드시 추가하세요. 형식: [SAVE_MEMORY]\\nscope: global\\ncontent: "내용"\\n[/SAVE_MEMORY]`;
+}
 
 /**
  * Phase Gate: 태그 없으면 retryFn으로 2회 재시도.
  * retryFn에 (attempt, reason)을 전달하여 재시도 맥락을 제공.
+ * reason은 buildTagDiagnostic()으로 생성 — 누락된 태그명을 구체적으로 전달.
  * 재시도 간 지수 백오프 (attempt * 500ms).
  * 3회 모두 실패 시 quarantine (logEpisode error + 기억 미저장).
  */
@@ -319,15 +332,15 @@ export async function enforceTagGate(
   let result = await processAgentOutput(agentId, output);
   if (result.status === 'ok') return { output, quarantined: false };
 
-  // 재시도 1회
+  // 재시도 1회 — 원본 출력 기반 진단
   await delay(1 * 500);
-  const retry1 = await retryFn(1, MISSING_TAGS_REASON);
+  const retry1 = await retryFn(1, buildTagDiagnostic(output));
   result = await processAgentOutput(agentId, retry1);
   if (result.status === 'ok') return { output: retry1, quarantined: false };
 
-  // 재시도 2회
+  // 재시도 2회 — retry1 출력 기반 진단
   await delay(2 * 500);
-  const retry2 = await retryFn(2, MISSING_TAGS_REASON);
+  const retry2 = await retryFn(2, buildTagDiagnostic(retry1));
   result = await processAgentOutput(agentId, retry2);
   if (result.status === 'ok') return { output: retry2, quarantined: false };
 
