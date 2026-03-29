@@ -32,6 +32,7 @@ import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
 import { renderGitRepo, renderGitBranch } from "./elements/git.js";
+import { renderWorktree } from "./elements/worktree.js";
 import { renderModel } from "./elements/model.js";
 import { renderApiKeySource } from "./elements/api-key-source.js";
 import { renderCallCounts } from "./elements/call-counts.js";
@@ -228,6 +229,12 @@ export async function render(
   if (enabledElements.gitBranch) {
     const gitBranchElement = renderGitBranch(context.cwd);
     if (gitBranchElement) gitElements.push(gitBranchElement);
+  }
+
+  // Worktree indicator
+  if (enabledElements.worktree) {
+    const worktreeElement = renderWorktree(context.cwd);
+    if (worktreeElement) gitElements.push(worktreeElement);
   }
 
   // Model name

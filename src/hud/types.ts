@@ -415,6 +415,7 @@ export interface HudElementConfig {
   cwdFormat: CwdFormat;      // Path display format
   gitRepo: boolean;          // Show git repository name
   gitBranch: boolean;        // Show git branch
+  worktree: boolean;         // Show current worktree name (wt:<name>) when inside a linked worktree
   gitInfoPosition: 'above' | 'below';  // Position of git info relative to main HUD line
   model: boolean;            // Show current model name
   modelFormat: ModelFormat;   // Model name verbosity level
@@ -495,6 +496,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     cwdFormat: 'relative',
     gitRepo: false,           // Disabled by default for backward compatibility
     gitBranch: false,         // Disabled by default for backward compatibility
+    worktree: false,          // Disabled by default for backward compatibility
     gitInfoPosition: 'above',  // Git info above main HUD line (backward compatible)
     model: false,             // Disabled by default for backward compatibility
     modelFormat: 'short',     // Short names by default for backward compatibility
@@ -550,6 +552,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'folder',
     gitRepo: false,
     gitBranch: false,
+    worktree: false,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -588,6 +591,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: true,
+    worktree: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -626,6 +630,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: true,
     gitBranch: true,
+    worktree: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -664,6 +669,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: false,
     gitBranch: true,
+    worktree: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -702,6 +708,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwdFormat: 'relative',
     gitRepo: true,
     gitBranch: true,
+    worktree: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
