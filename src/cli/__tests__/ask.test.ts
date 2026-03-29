@@ -37,7 +37,7 @@ function buildChildEnv(
 }
 
 function runCli(
-  args: string[],
+  args: readonly string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
   options: RunOptions = {},
@@ -57,7 +57,7 @@ function runCli(
 }
 
 function runAdvisorScript(
-  args: string[],
+  args: readonly string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
   options: RunOptions = {},
@@ -78,7 +78,7 @@ function runAdvisorScript(
 
 function runAdvisorScriptWithPrelude(
   preludePath: string,
-  args: string[],
+  args: readonly string[],
   cwd: string,
   envOverrides: Record<string, string> = {},
   options: RunOptions = {},
@@ -155,6 +155,14 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "      encoding: options.encoding ?? null,",
       "      stdio: options.stdio ?? null,",
       "      input: options.input ?? null,",
+      '      env: {',
+      "        CLAUDECODE: options.env?.CLAUDECODE ?? null,",
+      "        CLAUDE_SESSION_ID: options.env?.CLAUDE_SESSION_ID ?? null,",
+      "        CLAUDECODE_SESSION_ID: options.env?.CLAUDECODE_SESSION_ID ?? null,",
+      "        CLAUDE_CODE_ENTRYPOINT: options.env?.CLAUDE_CODE_ENTRYPOINT ?? null,",
+      "        RUST_LOG: options.env?.RUST_LOG ?? null,",
+      "        RUST_BACKTRACE: options.env?.RUST_BACKTRACE ?? null,",
+      '      },',
       '    },',
       '  });',
       "  if (mode === 'missing' && command === 'where') {",
@@ -422,6 +430,58 @@ describe('run-provider-advisor script contract', () => {
       const artifactPath = result.stdout.trim();
       const artifact = readFileSync(artifactPath, 'utf8');
       expect(artifact).toContain('## Original task\n\nlegacy original task');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['claude', ['claude', '--prompt', 'nested claude prompt']],
+    ['codex', ['codex', '--prompt', 'nested codex prompt']],
+    ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
+  ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
+    const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        args,
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          CLAUDECODE: '1',
+          CLAUDE_SESSION_ID: 'session-123',
+          CLAUDECODE_SESSION_ID: 'session-legacy',
+          CLAUDE_CODE_ENTRYPOINT: 'plugin',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: {
+          shell: boolean;
+          encoding: string | null;
+          stdio: string | null;
+          input: string | null;
+          env: Record<string, string | null>;
+        };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      for (const call of calls) {
+        expect(call.options.env).toMatchObject({
+          CLAUDECODE: null,
+          CLAUDE_SESSION_ID: null,
+          CLAUDECODE_SESSION_ID: null,
+          CLAUDE_CODE_ENTRYPOINT: null,
+        });
+      }
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

@@ -79,15 +79,22 @@ function parseArgs(argv) {
   return { provider, prompt: rest.join(' ').trim() };
 }
 
+// Strip Claude session markers so provider advisors do not detect or inherit the active Claude Code session.
+const CLAUDE_SESSION_STRIPPED_ENV_VARS = new Set([
+  'CLAUDECODE',
+  'CLAUDE_SESSION_ID',
+  'CLAUDECODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+]);
 const CODEX_STRIPPED_ENV_VARS = new Set(['RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE']);
 
 function buildProviderEnv(provider, env = process.env) {
-  if (provider !== 'codex') {
-    return env;
-  }
+  const strippedEnvVars = provider === 'codex'
+    ? new Set([...CLAUDE_SESSION_STRIPPED_ENV_VARS, ...CODEX_STRIPPED_ENV_VARS])
+    : CLAUDE_SESSION_STRIPPED_ENV_VARS;
 
   return Object.fromEntries(
-    Object.entries(env).filter(([key]) => !CODEX_STRIPPED_ENV_VARS.has(key)),
+    Object.entries(env).filter(([key]) => !strippedEnvVars.has(key)),
   );
 }
 
