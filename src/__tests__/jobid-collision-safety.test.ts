@@ -7,11 +7,9 @@
  * BUG 4: generateJobId not collision-safe
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
 
 // ---------------------------------------------------------------------------
 describe('generateJobId collision safety', () => {

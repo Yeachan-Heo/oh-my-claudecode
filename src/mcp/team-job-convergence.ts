@@ -2,7 +2,6 @@ import { existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { cleanupTeamWorktrees } from '../team/git-worktree.js';
 import { validateTeamName } from '../team/team-name.js';
-import { isProcessAlive } from '../platform/index.js';
 
 export interface OmcTeamJob {
   status: 'running' | 'completed' | 'failed' | 'timeout';
