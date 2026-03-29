@@ -7,7 +7,7 @@
 
 import chalk from 'chalk';
 import { execSync, execFileSync } from 'child_process';
-import { existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readdirSync, statSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join, basename, isAbsolute, relative } from 'path';
 import { parseRemoteUrl, getProvider } from '../../providers/index.js';
@@ -293,6 +293,24 @@ function createWorktree(
 }
 
 /**
+ * Symlink node_modules from the parent repo into a newly created worktree.
+ * Avoids a full `npm install` in the worktree when the parent already has dependencies installed.
+ */
+function symlinkNodeModules(repoRoot: string, worktreePath: string): void {
+  const sourceNodeModules = join(repoRoot, 'node_modules');
+  const targetNodeModules = join(worktreePath, 'node_modules');
+  if (!existsSync(sourceNodeModules) || existsSync(targetNodeModules)) {
+    return;
+  }
+  try {
+    const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+    symlinkSync(sourceNodeModules, targetNodeModules, symlinkType);
+  } catch {
+    // Non-fatal: user can still run npm install manually
+  }
+}
+
+/**
  * Main teleport command
  */
 export async function teleportCommand(
@@ -437,6 +455,8 @@ export async function teleportCommand(
     }
     return { success: false, error: result.error };
   }
+
+  symlinkNodeModules(repoRoot, worktreePath);
 
   if (!options.json) {
     console.log('');
