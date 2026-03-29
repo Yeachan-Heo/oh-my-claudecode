@@ -1,29 +1,30 @@
 /**
- * @file parallel-spawn.ts — 에디터 병렬 스폰 유틸.
- * Promise.allSettled로 한 에디터 실패가 전체를 중단시키지 않음.
+ * @file parallel-spawn.ts — 에이전트 병렬 스폰 유틸.
+ * Promise.allSettled로 한 에이전트 실패가 전체를 중단시키지 않음.
  * maxConcurrency로 동시 실행 수 제한 가능.
  */
 
-export interface EditorTask {
-  editorId: string;
-  slot: { category: string; time: string; [k: string]: unknown };
+export interface AgentTask {
+  agentId: string;
+  role: string;
+  input: Record<string, unknown>;
 }
 
 export interface SpawnResult {
-  editorId: string;
+  agentId: string;
   status: 'ok' | 'failed';
   draft?: string;
   error?: string;
 }
 
-type SpawnFn = (task: EditorTask) => Promise<{ draft: string; status: 'ok' }>;
+type SpawnFn = (task: AgentTask) => Promise<{ draft: string; status: 'ok' }>;
 
 /**
- * 에디터를 병렬로 스폰하되 maxConcurrency로 동시 실행 수를 제한.
- * Promise.allSettled로 한 에디터 실패가 전체를 중단시키지 않음.
+ * 에이전트를 병렬로 스폰하되 maxConcurrency로 동시 실행 수를 제한.
+ * Promise.allSettled로 한 에이전트 실패가 전체를 중단시키지 않음.
  */
-export async function spawnEditorsParallel(
-  tasks: EditorTask[],
+export async function spawnAgentsParallel(
+  tasks: AgentTask[],
   spawnFn: SpawnFn,
   opts?: { maxConcurrency?: number },
 ): Promise<SpawnResult[]> {
@@ -36,9 +37,9 @@ export async function spawnEditorsParallel(
     );
     return settled.map((result, i) => {
       if (result.status === 'fulfilled') {
-        return { editorId: tasks[i].editorId, status: 'ok' as const, draft: result.value.draft };
+        return { agentId: tasks[i].agentId, status: 'ok' as const, draft: result.value.draft };
       }
-      return { editorId: tasks[i].editorId, status: 'failed' as const, error: String(result.reason) };
+      return { agentId: tasks[i].agentId, status: 'failed' as const, error: String(result.reason) };
     });
   }
 
@@ -59,10 +60,10 @@ export async function spawnEditorsParallel(
         running++;
         spawnFn(task)
           .then(res => {
-            results[taskIdx] = { editorId: task.editorId, status: 'ok', draft: res.draft };
+            results[taskIdx] = { agentId: task.agentId, status: 'ok', draft: res.draft };
           })
           .catch(err => {
-            results[taskIdx] = { editorId: task.editorId, status: 'failed', error: String(err) };
+            results[taskIdx] = { agentId: task.agentId, status: 'failed', error: String(err) };
           })
           .finally(() => {
             running--;
