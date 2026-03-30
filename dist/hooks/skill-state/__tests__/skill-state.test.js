@@ -406,6 +406,46 @@ describe('skill-state', () => {
             expect(result.shouldBlock).toBe(true);
             expect(result.skillName).toBe('plan');
         });
+        it('nesting-aware clear: child completion preserves parent state, parent completion clears it', () => {
+            // Simulates the full omc-setup → mcp-setup lifecycle including
+            // the PostToolUse nesting-aware clear logic from bridge.ts:1828-1840.
+            //
+            // This is the direct verification for the PR test plan item:
+            // "Verify stop hook no longer blocks after omc-setup completes with nested mcp-setup"
+            // 1. Parent skill (omc-setup) starts
+            writeSkillActiveState(tempDir, 'omc-setup', 'session-1');
+            expect(readSkillActiveState(tempDir, 'session-1').skill_name).toBe('omc-setup');
+            // 2. Child skill (mcp-setup) starts — nesting guard blocks write
+            const childWrite = writeSkillActiveState(tempDir, 'mcp-setup', 'session-1');
+            expect(childWrite).toBeNull();
+            // 3. Child skill completes — simulate PostToolUse nesting-aware clear
+            //    bridge.ts logic: only clear if completing skill owns the state
+            const stateAfterChildDone = readSkillActiveState(tempDir, 'session-1');
+            const completingChild = 'mcp-setup';
+            if (!stateAfterChildDone || !stateAfterChildDone.active || stateAfterChildDone.skill_name === completingChild) {
+                clearSkillActiveState(tempDir, 'session-1');
+            }
+            // Parent state must survive — child does not own it
+            const parentState = readSkillActiveState(tempDir, 'session-1');
+            expect(parentState).not.toBeNull();
+            expect(parentState.skill_name).toBe('omc-setup');
+            expect(parentState.active).toBe(true);
+            // 4. Stop hook still blocks (parent is still active)
+            const stopCheck = checkSkillActiveState(tempDir, 'session-1');
+            expect(stopCheck.shouldBlock).toBe(true);
+            expect(stopCheck.skillName).toBe('omc-setup');
+            // 5. Parent skill completes — simulate PostToolUse nesting-aware clear
+            const stateAfterParentDone = readSkillActiveState(tempDir, 'session-1');
+            const completingParent = 'omc-setup';
+            if (!stateAfterParentDone || !stateAfterParentDone.active || stateAfterParentDone.skill_name === completingParent) {
+                clearSkillActiveState(tempDir, 'session-1');
+            }
+            // State must be cleared now
+            expect(readSkillActiveState(tempDir, 'session-1')).toBeNull();
+            // 6. Stop hook no longer blocks
+            const finalCheck = checkSkillActiveState(tempDir, 'session-1');
+            expect(finalCheck.shouldBlock).toBe(false);
+        });
     });
 });
 //# sourceMappingURL=skill-state.test.js.map
