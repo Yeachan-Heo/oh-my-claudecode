@@ -7,6 +7,15 @@
  * - Support for 25+ programming languages
  */
 import { z } from "zod";
+/**
+ * Validate that a tool path is within the project root boundary.
+ * Only enforced when OMC_RESTRICT_TOOL_PATHS=true.
+ *
+ * @param inputPath - The path parameter from tool invocation
+ * @returns The resolved absolute path
+ * @throws Error if path is outside project root when restriction is enabled
+ */
+export declare function validateToolPath(inputPath: string): string;
 export interface AstToolDefinition<T extends z.ZodRawShape> {
     name: string;
     description: string;
