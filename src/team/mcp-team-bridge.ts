@@ -165,9 +165,9 @@ function validateModelName(model: string | undefined): void {
 
 /** Validate provider is one of allowed values */
 function validateProvider(provider: string): void {
-  if (provider !== "codex" && provider !== "gemini") {
+  if (provider !== "codex" && provider !== "gemini" && provider !== "kiro") {
     throw new Error(
-      `Invalid provider: ${provider}. Must be 'codex' or 'gemini'`,
+      `Invalid provider: ${provider}. Must be 'codex', 'gemini', or 'kiro'`,
     );
   }
 }
@@ -381,7 +381,7 @@ export function recordTaskCompletionUsage(args: {
   taskId: string;
   promptFile: string;
   outputFile: string;
-  provider: "codex" | "gemini";
+  provider: "codex" | "gemini" | "kiro";
   startedAt: number;
   startedAtIso: string;
 }): void {
@@ -461,7 +461,7 @@ function parseCodexOutput(output: string): string {
  * This allows the bridge to kill the child on shutdown while still awaiting the result.
  */
 function spawnCliProcess(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "kiro",
   prompt: string,
   model: string | undefined,
   cwd: string,
@@ -484,6 +484,10 @@ function spawnCliProcess(
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check",
     ];
+  } else if (provider === "kiro") {
+    cmd = "kiro-cli";
+    args = ["chat", "--trust-all-tools", "--no-interactive"];
+    if (model) args.push("--model", model);
   } else {
     cmd = "gemini";
     args = ["--approval-mode", "yolo"];
@@ -522,7 +526,7 @@ function spawnCliProcess(
         clearTimeout(timeoutHandle);
         if (code === 0) {
           const response =
-            provider === "codex" ? parseCodexOutput(stdout) : stdout.trim();
+            provider === "codex" ? parseCodexOutput(stdout) : stdout.trim(); // gemini and kiro output plain text
           resolve(response);
         } else {
           const detail = stderr || stdout.trim() || "No output";

@@ -4,7 +4,7 @@ import { validateTeamName } from './team-name.js';
 import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'kiro';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -217,6 +217,21 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       return rawOutput.trim();
     },
   },
+  kiro: {
+    agentType: 'kiro',
+    binary: 'kiro-cli',
+    installInstructions: 'Install Kiro CLI: https://kiro.dev/downloads',
+    supportsPromptMode: true,
+    // Kiro CLI uses positional prompt: kiro-cli chat [OPTIONS] [INPUT]
+    buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
+      const args = ['chat', '--trust-all-tools', '--no-interactive'];
+      if (model) args.push('--model', model);
+      return [...args, ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
 };
 
 export function getContract(agentType: CliAgentType): CliAgentContract {
@@ -331,6 +346,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
   'OMC_CODEX_DEFAULT_MODEL',
   'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
   'OMC_GEMINI_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_KIRO_MODEL',
+  'OMC_KIRO_DEFAULT_MODEL',
 ] as const;
 
 export function getWorkerEnv(

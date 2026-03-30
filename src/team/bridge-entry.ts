@@ -129,8 +129,8 @@ function main(): void {
   config.workerName = sanitizeName(config.workerName);
 
   // Validate provider
-  if (config.provider !== 'codex' && config.provider !== 'gemini') {
-    console.error(`Invalid provider: ${config.provider}. Must be 'codex' or 'gemini'.`);
+  if (config.provider !== 'codex' && config.provider !== 'gemini' && config.provider !== 'kiro') {
+    console.error(`Invalid provider: ${config.provider}. Must be 'codex', 'gemini', or 'kiro'.`);
     process.exit(1);
   }
 

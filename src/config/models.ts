@@ -49,6 +49,7 @@ export const CLAUDE_FAMILY_HIGH_VARIANTS: Record<ClaudeModelFamily, string> = {
 export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: 'gpt-5.3-codex',
   geminiModel: 'gemini-3.1-pro-preview',
+  kiroModel: 'auto',
 } as const;
 
 /**
@@ -147,10 +148,10 @@ export function getClaudeHighVariantFromModel(modelId: string): string | null {
 }
 
 /** Get built-in default model for an external provider */
-export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini'): string {
-  return provider === 'codex'
-    ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel
-    : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini' | 'kiro'): string {
+  if (provider === 'codex') return BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+  if (provider === 'kiro') return BUILTIN_EXTERNAL_MODEL_DEFAULTS.kiroModel;
+  return BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 
 /**

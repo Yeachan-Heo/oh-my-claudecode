@@ -144,7 +144,7 @@ export function synthesizeBridgeConfig(
     workerName: worker.name,
     teamName,
     workingDirectory: worker.cwd,
-    provider: worker.agentType.replace('mcp-', '') as 'codex' | 'gemini',
+    provider: worker.agentType.replace('mcp-', '') as 'codex' | 'gemini' | 'kiro',
     model: worker.model,
     pollIntervalMs: 3000,
     taskTimeoutMs: 600000,
