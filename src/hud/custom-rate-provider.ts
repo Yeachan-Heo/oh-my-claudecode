@@ -83,11 +83,20 @@ function isCacheValid(cache: CustomProviderCache): boolean {
  */
 function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const [executable, ...args] = Array.isArray(cmd)
-      ? cmd
-      : (['sh', '-c', cmd] as string[]);
-
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // For array commands, use directly (safe). For string commands, reject dangerous
+    // shell metacharacters then use sh -c to preserve quoted arguments.
+    const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\0\\{}]/;
+    let child;
+    if (Array.isArray(cmd)) {
+      const [executable, ...args] = cmd;
+      child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } else {
+      if (DANGEROUS_SHELL_CHARS.test(cmd)) {
+        reject(new Error('Command rejected: contains dangerous shell metacharacters'));
+        return;
+      }
+      child = spawn('sh', ['-c', cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
+    }
 
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => {

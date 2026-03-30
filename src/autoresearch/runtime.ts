@@ -519,6 +519,20 @@ export async function runAutoresearchEvaluator(
   latestEvaluatorFile?: string,
 ): Promise<AutoresearchEvaluationRecord> {
   const ran_at = nowIso();
+  // Reject commands containing shell metacharacters that enable chaining/injection
+  // (semicolons, pipes, backticks, $() substitution, etc.)
+  // Quoted arguments and simple commands are still allowed via shell: true.
+  const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\0\\{}]/;
+  if (DANGEROUS_SHELL_CHARS.test(contract.sandbox.evaluator.command)) {
+    return {
+      command: contract.sandbox.evaluator.command,
+      ran_at,
+      status: 'error' as const,
+      exit_code: null,
+      stdout: '',
+      stderr: 'Evaluator command rejected: contains dangerous shell metacharacters',
+    };
+  }
   const result = spawnSync(contract.sandbox.evaluator.command, {
     cwd: worktreePath,
     encoding: 'utf-8',

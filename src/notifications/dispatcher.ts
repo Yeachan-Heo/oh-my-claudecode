@@ -7,6 +7,7 @@
  */
 
 import { request as httpsRequest } from "https";
+import { validateUrlForSSRF } from "../utils/ssrf-guard.js";
 import type {
   DiscordNotificationConfig,
   DiscordBotNotificationConfig,
@@ -122,12 +123,29 @@ function validateSlackUrl(webhookUrl: string): boolean {
 }
 
 /**
- * Validate generic webhook URL. Must be HTTPS.
+ * Validate generic webhook URL. Must be HTTPS and pass SSRF checks.
  */
 function validateWebhookUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:";
+    if (parsed.protocol !== "https:") return false;
+  } catch {
+    return false;
+  }
+  return validateUrlForSSRF(url).allowed;
+}
+
+/**
+ * Check if a custom webhook URL is safe. Passes SSRF guard but also
+ * allows localhost/127.0.0.1/::1 for local development receivers.
+ * Note: new URL().hostname returns bracketed IPv6 (e.g. "[::1]").
+ */
+function isWebhookUrlSafe(url: string): boolean {
+  const ssrf = validateUrlForSSRF(url);
+  if (ssrf.allowed) return true;
+  try {
+    const h = new URL(url).hostname;
+    return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
   } catch {
     return false;
   }
@@ -746,18 +764,24 @@ export async function sendCustomWebhook(
   try {
     // Interpolate template variables
     const url = interpolateTemplate(config.url, payload);
+
+    // SSRF guard: block internal IPs except localhost (for local dev webhooks)
+    if (!isWebhookUrlSafe(url)) {
+      return { platform: "webhook", success: false, error: "URL blocked by SSRF guard" };
+    }
+
     const body = interpolateTemplate(config.bodyTemplate, payload);
-    
+
     // Prepare headers
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(config.headers)) {
       headers[key] = interpolateTemplate(value, payload);
     }
-    
+
     // Use native fetch (Node.js 18+)
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.timeout);
-    
+
     try {
       const response = await fetch(url, {
         method: config.method,
