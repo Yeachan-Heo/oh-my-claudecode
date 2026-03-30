@@ -125,6 +125,44 @@ describe('processHook - Routing Matrix', () => {
       expect(result.message).toContain('[SECURITY REVIEW MODE ACTIVATED]');
     });
 
+    it('injects prompt prerequisite reminder and state for execution prompts with declared sections', async () => {
+      const tempDir = process.cwd();
+      try {
+        const sessionId = 'keyword-prereq-session';
+
+        const result = await processHook('keyword-detector', {
+          sessionId,
+          prompt: `ralph fix the parser
+
+# MÉMOIRE
+Use notepad_read and project_memory_read first.
+
+# VERIFY-FIRST
+Read src/hooks/bridge.ts before editing.`,
+          directory: tempDir,
+        });
+
+        expect(result.continue).toBe(true);
+        expect(result.message).toContain('[BLOCKING PREREQUISITE GATE]');
+        expect(result.message).toContain('notepad_read');
+        expect(result.message).toContain('src/hooks/bridge.ts');
+
+        const prereqStatePath = join(process.cwd(), '.omc', 'state', 'sessions', sessionId, 'prompt-prerequisites-state.json');
+        expect(existsSync(prereqStatePath)).toBe(true);
+
+        const prereqState = JSON.parse(readFileSync(prereqStatePath, 'utf-8')) as {
+          active?: boolean;
+          required_tool_calls?: string[];
+          required_file_paths?: string[];
+        };
+        expect(prereqState.active).toBe(true);
+        expect(prereqState.required_tool_calls).toEqual(['notepad_read', 'project_memory_read']);
+        expect(prereqState.required_file_paths).toEqual(['src/hooks/bridge.ts']);
+      } finally {
+        rmSync(join(process.cwd(), '.omc', 'state', 'sessions', 'keyword-prereq-session'), { recursive: true, force: true });
+      }
+    });
+
     it('should handle keyword-detector with no keyword prompt', async () => {
       const input: HookInput = {
         sessionId: 'test-session',
@@ -136,6 +174,66 @@ describe('processHook - Routing Matrix', () => {
       expect(result.continue).toBe(true);
       // No keyword detected, so no message
       expect(result.message).toBeUndefined();
+    });
+
+    it('denies Edit until prompt prerequisites are completed, then unblocks after reads', async () => {
+      const tempDir = process.cwd();
+      try {
+        const sessionId = 'prereq-pretool-session';
+
+        await processHook('keyword-detector', {
+          sessionId,
+          prompt: `ultrawork fix it
+
+# MÉMOIRE
+Use notepad_read first.
+
+# CONTEXT
+Read src/hooks/bridge.ts first.`,
+          directory: tempDir,
+        });
+
+        const denied = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Edit',
+          toolInput: { file_path: 'src/hooks/bridge.ts' },
+          directory: tempDir,
+        });
+
+        expect(denied.continue).toBe(true);
+        expect((denied as unknown as Record<string, unknown>).hookSpecificOutput).toBeDefined();
+        const denyHook = (denied as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
+        expect(denyHook.permissionDecision).toBe('deny');
+        expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+
+        const readStep = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Read',
+          toolInput: { file_path: 'src/hooks/bridge.ts' },
+          directory: tempDir,
+        });
+        expect(readStep.continue).toBe(true);
+
+        const toolStep = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'mcp__omx_notepad__notepad_read',
+          toolInput: {},
+          directory: tempDir,
+        });
+        expect(toolStep.continue).toBe(true);
+        expect(String(toolStep.message ?? '')).toContain('PROMPT PREREQUISITES COMPLETE');
+
+        const allowed = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Edit',
+          toolInput: { file_path: 'src/hooks/bridge.ts' },
+          directory: tempDir,
+        });
+        expect(allowed.continue).toBe(true);
+        expect((allowed as unknown as Record<string, unknown>).hookSpecificOutput).toBeUndefined();
+      } finally {
+        rmSync(join(process.cwd(), '.omc', 'state', 'sessions', 'prereq-pretool-session'), { recursive: true, force: true });
+      }
     });
 
     it('should handle pre-tool-use with Bash tool input', async () => {

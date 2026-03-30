@@ -184,6 +184,23 @@ export interface PluginConfig {
     /** Suppress heavy orchestration modes (ralph/autopilot/team/ultrawork) for small tasks. Default: true */
     suppressHeavyModesForSmallTasks?: boolean;
   };
+
+  // Prompt prerequisite gating for execution modes (issue #1859)
+  promptPrerequisites?: {
+    /** Enable parsing + blocking gate injection for prerequisite sections. Default: true */
+    enabled?: boolean;
+    /** Extensible heading aliases grouped by semantic section kind. */
+    sectionNames?: {
+      memory?: string[];
+      skills?: string[];
+      verifyFirst?: string[];
+      context?: string[];
+    };
+    /** Tool names denied until prerequisites are satisfied. */
+    blockingTools?: string[];
+    /** Execution keywords that activate the gate. */
+    executionKeywords?: string[];
+  };
 }
 
 export interface SessionState {

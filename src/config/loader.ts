@@ -161,6 +161,17 @@ export function buildDefaultConfig(): PluginConfig {
       largeWordLimit: 200,
       suppressHeavyModesForSmallTasks: true,
     },
+    promptPrerequisites: {
+      enabled: true,
+      sectionNames: {
+        memory: ["MÉMOIRE", "MEMOIRE", "MEMORY"],
+        skills: ["SKILLS"],
+        verifyFirst: ["VERIFY-FIRST", "VERIFY FIRST", "VERIFY_FIRST"],
+        context: ["CONTEXT"],
+      },
+      blockingTools: ["Edit", "MultiEdit", "Write", "Agent", "Task"],
+      executionKeywords: ["ralph", "ultrawork", "autopilot"],
+    },
   };
 }
 

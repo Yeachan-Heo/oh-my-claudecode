@@ -52,6 +52,18 @@ import {
 import { readHudState, writeHudState } from "../hud/state.js";
 import { compactOmcStartupGuidance, loadConfig } from "../config/loader.js";
 import {
+  activatePromptPrerequisiteState,
+  buildPromptPrerequisiteDenyReason,
+  buildPromptPrerequisiteReminder,
+  clearPromptPrerequisiteState,
+  getPromptPrerequisiteConfig,
+  isPromptPrerequisiteBlockingTool,
+  parsePromptPrerequisiteSections,
+  readPromptPrerequisiteState,
+  recordPromptPrerequisiteProgress,
+  shouldEnforcePromptPrerequisites,
+} from "./prompt-prerequisites/index.js";
+import {
   resolveAutopilotPlanPath,
   resolveOpenQuestionsPlanPath,
 } from "../config/plan-output.js";
@@ -71,7 +83,6 @@ import {
 import { getAgentDashboard } from "./subagent-tracker/index.js";
 // Session replay recordFileTouch is used in pre-tool-use hot path
 import { recordFileTouch } from "./subagent-tracker/session-replay.js";
-
 // Type-only imports for lazy-loaded modules (zero runtime cost)
 import type {
   SubagentStartInput,
@@ -687,6 +698,7 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
   // Load config for task-size detection settings
   const config = loadConfig();
   const taskSizeConfig = config.taskSizeDetection ?? {};
+  const promptPrerequisiteConfig = getPromptPrerequisiteConfig(config);
 
   // Get all keywords with optional task-size filtering (issue #790)
   const sizeCheckResult = getAllKeywordsWithSizeCheck(cleanedText, {
@@ -738,6 +750,24 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
           `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`,
       );
     }
+  }
+
+  const promptPrerequisiteParse = parsePromptPrerequisiteSections(promptText, promptPrerequisiteConfig);
+  const executionKeywords = fullKeywords.filter((keywordType) =>
+    promptPrerequisiteConfig.executionKeywords.includes(keywordType),
+  );
+  if (shouldEnforcePromptPrerequisites(executionKeywords, promptPrerequisiteParse, promptPrerequisiteConfig)) {
+    const state = activatePromptPrerequisiteState(
+      directory,
+      sessionId,
+      executionKeywords,
+      promptPrerequisiteParse,
+    );
+    if (state) {
+      messages.push(buildPromptPrerequisiteReminder(state));
+    }
+  } else if (executionKeywords.length > 0) {
+    clearPromptPrerequisiteState(directory, sessionId);
   }
 
   const sanitizedText = sanitizeForKeywordDetection(cleanedText);
@@ -1386,6 +1416,7 @@ export const _openclaw = {
 function processPreToolUse(input: HookInput): HookOutput {
   const directory = resolveToWorktreeRoot(input.directory);
   const teamWorkerIdentity = teamWorkerIdentityFromEnv();
+  const promptPrerequisiteConfig = getPromptPrerequisiteConfig(loadConfig());
 
   if (teamWorkerIdentity) {
     if (input.toolName === "Task") {
@@ -1440,6 +1471,34 @@ function processPreToolUse(input: HookInput): HookOutput {
     ? [enforcementResult.message]
     : [];
   let modifiedToolInput: Record<string, unknown> | undefined;
+
+  const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(
+    directory,
+    input.sessionId,
+    input.toolName,
+    input.toolInput,
+  );
+
+  if (promptPrerequisiteProgress?.isComplete) {
+    preToolMessages.push(
+      "[PROMPT PREREQUISITES COMPLETE] Required context tools/files were read. Editing and agent delegation are unblocked.",
+    );
+  }
+
+  const promptPrerequisiteState = readPromptPrerequisiteState(directory, input.sessionId);
+  if (
+    promptPrerequisiteState?.active
+    && isPromptPrerequisiteBlockingTool(input.toolName, promptPrerequisiteConfig)
+  ) {
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
+      },
+    } as HookOutput & { hookSpecificOutput: Record<string, unknown> };
+  }
 
   // Force-inherit: deny Task/Agent calls that carry a `model` parameter when
   // forceInherit is enabled (Bedrock, Vertex, CC Switch, etc.).
