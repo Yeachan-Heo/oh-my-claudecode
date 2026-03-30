@@ -11,6 +11,7 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, extname, resolve, normalize, relative, isAbsolute } from "path";
 import { createRequire } from "module";
 import { getWorktreeRoot } from "../lib/worktree-paths.js";
+import { isToolPathRestricted } from "../lib/security-config.js";
 // Dynamic import for @ast-grep/napi
 // Graceful degradation: if the module is not available (e.g., in bundled/plugin context),
 // tools will return a helpful error message instead of crashing
@@ -56,7 +57,7 @@ async function getSgModule() {
  */
 export function validateToolPath(inputPath) {
     const resolved = resolve(inputPath);
-    if (process.env.OMC_RESTRICT_TOOL_PATHS !== "true") {
+    if (!isToolPathRestricted()) {
         return resolved;
     }
     const projectRoot = getWorktreeRoot() || process.cwd();
@@ -65,7 +66,7 @@ export function validateToolPath(inputPath) {
     const rel = relative(normalizedRoot, normalizedPath);
     if (rel.startsWith("..") || isAbsolute(rel)) {
         throw new Error(`Path restricted: '${inputPath}' is outside the project root '${projectRoot}'. ` +
-            `Set OMC_RESTRICT_TOOL_PATHS=false to allow unrestricted paths.`);
+            `Disable via security.restrictToolPaths in .claude/omc.jsonc or unset OMC_SECURITY.`);
     }
     return resolved;
 }
