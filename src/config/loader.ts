@@ -150,6 +150,9 @@ export function buildDefaultConfig(): PluginConfig {
       directory: ".omc/plans",
       filenameTemplate: "{{name}}.md",
     },
+    teleport: {
+      symlinkNodeModules: true,
+    },
     startupCodebaseMap: {
       enabled: true,
       maxFiles: 200,
@@ -690,6 +693,17 @@ export function generateConfigSchema(): object {
           search: { type: "array", items: { type: "string" } },
           analyze: { type: "array", items: { type: "string" } },
           ultrathink: { type: "array", items: { type: "string" } },
+        },
+      },
+      teleport: {
+        type: "object",
+        description: "Teleport worktree bootstrap settings",
+        properties: {
+          symlinkNodeModules: {
+            type: "boolean",
+            default: true,
+            description: "Symlink node_modules from the parent repo when teleport-created worktrees have a matching package.json",
+          },
         },
       },
       routing: {

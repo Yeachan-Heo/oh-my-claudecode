@@ -219,6 +219,13 @@ describe("plan output configuration", () => {
     });
   });
 
+  it("includes teleport defaults", () => {
+    const config = loadConfig();
+    expect(config.teleport).toEqual({
+      symlinkNodeModules: true,
+    });
+  });
+
   it("loads plan output overrides from project config", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "omc-plan-output-"));
 

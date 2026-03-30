@@ -173,6 +173,12 @@ export interface PluginConfig {
     };
   };
 
+  // Teleport worktree bootstrap configuration
+  teleport?: {
+    /** Reuse parent repo node_modules via symlink when package.json matches. Default: true */
+    symlinkNodeModules?: boolean;
+  };
+
   // Task size detection configuration (issue #790)
   taskSizeDetection?: {
     /** Enable task-size detection to prevent over-orchestration for small tasks. Default: true */
