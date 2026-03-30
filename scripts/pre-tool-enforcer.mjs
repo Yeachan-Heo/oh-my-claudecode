@@ -433,15 +433,20 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
     : stateDir;
   const targetPath = join(targetDir, 'skill-active-state.json');
 
-  // Nesting guard: if another skill is already active, don't overwrite it.
-  // The parent skill's protection already covers the session. Overwriting
-  // causes the inner skill's state to persist after the outer skill completes,
-  // leading to spurious stop-hook blocks (see issue #XXXX).
+  // Nesting guard: when a skill (e.g. omc-setup) invokes a child skill
+  // (e.g. mcp-setup), the child must not overwrite the parent's active state.
+  // If a DIFFERENT skill is already active in this session, skip writing —
+  // the parent's stop-hook protection already covers the session.
+  // If the SAME skill is re-invoked, allow the overwrite (idempotent refresh).
+  //
+  // NOTE: This read-check-write sequence has a TOCTOU race condition
+  // (non-atomic), but this is acceptable because Claude Code sessions are
+  // single-threaded — only one tool call executes at a time within a session.
   try {
     if (existsSync(targetPath)) {
       const existing = JSON.parse(readFileSync(targetPath, 'utf-8'));
       if (existing.active && existing.skill_name && existing.skill_name !== normalized) {
-        return; // Parent skill already protects this session
+        return; // A different skill already owns the active state — do not overwrite.
       }
     }
   } catch {

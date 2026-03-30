@@ -90,7 +90,13 @@ cmd_complete() {
   # Clear skill-active-state left over from nested skill invocations (e.g. mcp-setup
   # invoked inside omc-setup). Without this, the stop hook blocks with "skill still
   # executing" even though setup has finished.
-  find .omc/state -name "skill-active-state.json" -delete 2>/dev/null || true
+  local sid="${CLAUDE_SESSION_ID:-${CLAUDECODE_SESSION_ID:-}}"
+  if [ -n "$sid" ]; then
+    rm -f ".omc/state/sessions/${sid}/skill-active-state.json" 2>/dev/null || true
+  else
+    # No session ID: fall back to cleaning all (legacy/safety-net)
+    find .omc/state -name "skill-active-state.json" -delete 2>/dev/null || true
+  fi
 
   # Mark setup as completed in persistent config
   mkdir -p "$(dirname "$CONFIG_FILE")"

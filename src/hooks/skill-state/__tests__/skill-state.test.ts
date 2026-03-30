@@ -215,13 +215,34 @@ describe('skill-state', () => {
       expect(state!.max_reinforcements).toBe(5);
     });
 
-    it('overwrites existing state when new skill is invoked', () => {
+    it('does not overwrite when a different skill is already active (nesting guard)', () => {
       writeSkillActiveState(tempDir, 'plan', 'session-1');
       const state2 = writeSkillActiveState(tempDir, 'external-context', 'session-1');
-      expect(state2!.skill_name).toBe('external-context');
+      expect(state2).toBeNull();
 
       const readBack = readSkillActiveState(tempDir, 'session-1');
-      expect(readBack!.skill_name).toBe('external-context');
+      expect(readBack!.skill_name).toBe('plan');
+    });
+
+    it('allows re-invocation of the same skill', () => {
+      const state1 = writeSkillActiveState(tempDir, 'plan', 'session-1');
+      expect(state1).not.toBeNull();
+      expect(state1!.skill_name).toBe('plan');
+
+      const state2 = writeSkillActiveState(tempDir, 'plan', 'session-1');
+      expect(state2).not.toBeNull();
+      expect(state2!.skill_name).toBe('plan');
+
+      const readBack = readSkillActiveState(tempDir, 'session-1');
+      expect(readBack!.skill_name).toBe('plan');
+    });
+
+    it('allows write when no prior state exists', () => {
+      // Fresh tempDir — no state has been written yet
+      const state = writeSkillActiveState(tempDir, 'plan', 'session-1');
+      expect(state).not.toBeNull();
+      expect(state!.active).toBe(true);
+      expect(state!.skill_name).toBe('plan');
     });
   });
 
