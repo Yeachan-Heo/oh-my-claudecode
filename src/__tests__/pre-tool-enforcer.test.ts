@@ -494,6 +494,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
   });
 
+
   it('still blocks bare Anthropic model ID even when OMC_SUBAGENT_MODEL is set', () => {
     const output = runPreToolEnforcerWithEnv(
       {
