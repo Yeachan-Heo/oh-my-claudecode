@@ -13,24 +13,34 @@ import type {
   OpenClawPayload,
   OpenClawResult,
 } from "./types.js";
+import { validateUrlForSSRF } from "../utils/ssrf-guard.js";
 
 /** Default per-request timeout */
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
- * Validate gateway URL. Must be HTTPS, except localhost/127.0.0.1
- * which allows HTTP for local development.
+ * Validate gateway URL using SSRF guard for HTTPS URLs.
+ * HTTP is only allowed to localhost/127.0.0.1/::1 for local development.
+ * All other private/internal addresses are blocked via SSRF validation.
  */
 function validateGatewayUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === "https:") return true;
-    if (
-      parsed.protocol === "http:" &&
-      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1")
-    ) {
-      return true;
+
+    // Allow HTTP only to localhost
+    if (parsed.protocol === "http:") {
+      return (
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "::1"
+      );
     }
+
+    // HTTPS URLs must pass full SSRF validation (blocks private IPs, metadata, etc.)
+    if (parsed.protocol === "https:") {
+      return validateUrlForSSRF(url).allowed;
+    }
+
     return false;
   } catch {
     return false;
