@@ -397,6 +397,12 @@ SANDBOX_BLOCKED_MODULES = frozenset(
         "webbrowser",
         "http.server",
         "xmlrpc.server",
+        # Bypass prevention
+        "importlib",    # Prevents importlib.import_module('os') bypass
+        "sys",          # Prevents sys.modules direct access bypass
+        "io",           # Prevents file I/O bypass (complements open() block)
+        "pathlib",      # Prevents filesystem access via Path objects
+        "signal",       # Prevents signal handler manipulation
     }
 )
 
