@@ -1,4 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => '{}'),
+  };
+});
+
+import { existsSync, readFileSync } from 'fs';
 import {
   getSecurityConfig,
   clearSecurityConfigCache,
@@ -10,6 +21,9 @@ import {
   isRemoteMcpDisabled,
   isExternalLLMDisabled,
 } from '../lib/security-config.js';
+
+const mockedExistsSync = vi.mocked(existsSync);
+const mockedReadFileSync = vi.mocked(readFileSync);
 
 describe('security-config', () => {
   const originalSecurity = process.env.OMC_SECURITY;
@@ -121,41 +135,67 @@ describe('security-config', () => {
   });
 
   describe('strict mode override protection', () => {
-    it('strict mode: boolean security flags cannot be relaxed by file overrides', () => {
-      // This test verifies that in strict mode, security cannot be weakened.
-      // We test the logic directly by checking that strict base values are true
-      // and the || operator ensures file overrides of false cannot override them.
+    it('strict mode: config file with false overrides cannot relax security', () => {
       process.env.OMC_SECURITY = 'strict';
+      // Simulate a malicious config file that tries to disable all security
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({
+        security: {
+          restrictToolPaths: false,
+          pythonSandbox: false,
+          disableProjectSkills: false,
+          disableAutoUpdate: false,
+          disableRemoteMcp: false,
+          disableExternalLLM: false,
+          hardMaxIterations: 9999,
+        },
+      }));
       clearSecurityConfigCache();
 
       const config = getSecurityConfig();
-      // In strict mode all boolean security flags must be true regardless
+      // All boolean flags must remain true despite file overrides
       expect(config.restrictToolPaths).toBe(true);
       expect(config.pythonSandbox).toBe(true);
       expect(config.disableProjectSkills).toBe(true);
       expect(config.disableAutoUpdate).toBe(true);
       expect(config.disableRemoteMcp).toBe(true);
       expect(config.disableExternalLLM).toBe(true);
+      // hardMaxIterations: Math.min(200, 9999) = 200
+      expect(config.hardMaxIterations).toBe(200);
     });
 
-    it('strict mode: hardMaxIterations only decreases from base', () => {
+    it('strict mode: config file can tighten hardMaxIterations below 200', () => {
       process.env.OMC_SECURITY = 'strict';
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({
+        security: { hardMaxIterations: 50 },
+      }));
       clearSecurityConfigCache();
 
       const config = getSecurityConfig();
-      // Without file overrides, strict base is 200
-      expect(config.hardMaxIterations).toBe(200);
+      // Math.min(200, 50) = 50 — tightening is allowed
+      expect(config.hardMaxIterations).toBe(50);
     });
 
     it('non-strict mode: config file overrides work normally', () => {
       delete process.env.OMC_SECURITY;
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({
+        security: {
+          restrictToolPaths: true,
+          disableRemoteMcp: true,
+          hardMaxIterations: 100,
+        },
+      }));
       clearSecurityConfigCache();
 
-      // Verify default values can be overridden in non-strict mode
-      // (We can't test file loading in unit tests easily, but we verify
-      // the defaults are the non-strict ones)
       const config = getSecurityConfig();
-      expect(config.disableRemoteMcp).toBe(false);
+      // File overrides are applied in non-strict mode
+      expect(config.restrictToolPaths).toBe(true);
+      expect(config.disableRemoteMcp).toBe(true);
+      expect(config.hardMaxIterations).toBe(100);
+      // Unset fields keep defaults
+      expect(config.pythonSandbox).toBe(false);
       expect(config.disableExternalLLM).toBe(false);
     });
   });
