@@ -87,6 +87,11 @@ cmd_complete() {
   # Clear temporary state
   rm -f "$STATE_FILE"
 
+  # Clear skill-active-state left over from nested skill invocations (e.g. mcp-setup
+  # invoked inside omc-setup). Without this, the stop hook blocks with "skill still
+  # executing" even though setup has finished.
+  find .omc/state -name "skill-active-state.json" -delete 2>/dev/null || true
+
   # Mark setup as completed in persistent config
   mkdir -p "$(dirname "$CONFIG_FILE")"
 

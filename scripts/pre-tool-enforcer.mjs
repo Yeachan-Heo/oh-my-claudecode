@@ -426,6 +426,28 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
   const now = new Date().toISOString();
   const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
 
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+  const targetDir = safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId)
+    : stateDir;
+  const targetPath = join(targetDir, 'skill-active-state.json');
+
+  // Nesting guard: if another skill is already active, don't overwrite it.
+  // The parent skill's protection already covers the session. Overwriting
+  // causes the inner skill's state to persist after the outer skill completes,
+  // leading to spurious stop-hook blocks (see issue #XXXX).
+  try {
+    if (existsSync(targetPath)) {
+      const existing = JSON.parse(readFileSync(targetPath, 'utf-8'));
+      if (existing.active && existing.skill_name && existing.skill_name !== normalized) {
+        return; // Parent skill already protects this session
+      }
+    }
+  } catch {
+    // If read fails, proceed with write
+  }
+
   const state = {
     active: true,
     skill_name: normalized,
@@ -436,13 +458,6 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
     max_reinforcements: config.maxReinforcements,
     stale_ttl_ms: config.staleTtlMs,
   };
-
-  const stateDir = join(directory, '.omc', 'state');
-  const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
-  const targetDir = safeSessionId
-    ? join(stateDir, 'sessions', safeSessionId)
-    : stateDir;
-  const targetPath = join(targetDir, 'skill-active-state.json');
 
   try {
     if (!existsSync(targetDir)) {
