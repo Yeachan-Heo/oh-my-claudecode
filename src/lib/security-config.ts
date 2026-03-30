@@ -40,7 +40,7 @@ const DEFAULTS: SecurityConfig = {
   restrictToolPaths: false,
   pythonSandbox: false,
   disableProjectSkills: false,
-  disableAutoUpdate: true,
+  disableAutoUpdate: false,
   hardMaxIterations: 500,
   disableRemoteMcp: false,
   disableExternalLLM: false,

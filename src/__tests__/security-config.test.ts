@@ -34,8 +34,8 @@ describe('security-config', () => {
       expect(config.restrictToolPaths).toBe(false);
       expect(config.pythonSandbox).toBe(false);
       expect(config.disableProjectSkills).toBe(false);
-      // Secure-by-default: auto-update off, hard max set
-      expect(config.disableAutoUpdate).toBe(true);
+      // Auto-update controlled by OMCConfig; security-config only overrides in strict
+      expect(config.disableAutoUpdate).toBe(false);
       expect(config.hardMaxIterations).toBe(500);
       // New fields default to false
       expect(config.disableRemoteMcp).toBe(false);
@@ -46,7 +46,7 @@ describe('security-config', () => {
       expect(isToolPathRestricted()).toBe(false);
       expect(isPythonSandboxEnabled()).toBe(false);
       expect(isProjectSkillsDisabled()).toBe(false);
-      expect(isAutoUpdateDisabled()).toBe(true);
+      expect(isAutoUpdateDisabled()).toBe(false);
       expect(getHardMaxIterations()).toBe(500);
       expect(isRemoteMcpDisabled()).toBe(false);
       expect(isExternalLLMDisabled()).toBe(false);
