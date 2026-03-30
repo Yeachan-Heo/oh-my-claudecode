@@ -116,6 +116,24 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
 
   // === Heavy protection (long-running, 10 reinforcements) ===
   deepinit: 'heavy',
+
+  // === Mastery lifecycle skills (added for full developer lifecycle coverage) ===
+  'context-doctor': 'light',   // Quick audit utility
+  'cost-report': 'light',      // Quick cost analysis utility
+  'ci-pipeline': 'medium',     // Multi-step workflow generation
+  'security-audit': 'medium',  // Multi-check scanning workflow
+  onboard: 'medium',           // Multi-agent codebase analysis
+  'prompt-library': 'light',   // Quick template lookup
+  'perf-audit': 'medium',      // Multi-step profiling workflow
+  'meta-debug': 'medium',      // Multi-step AI debugging workflow
+  'team-conventions': 'medium', // Multi-document generation
+  'data-analyze': 'medium',    // Data analysis with python_repl
+  'hooks-guide': 'light',      // Hook authoring utility
+  'workflow-automation': 'medium', // Workflow generation
+  'think-plan': 'light',       // Quick guidance utility
+  'claude-md-templates': 'light', // Template generation
+  'visual-context': 'light',   // Visual input guidance
+  'headless-mode': 'light',    // Headless mode guidance
 };
 
 // ---------------------------------------------------------------------------
