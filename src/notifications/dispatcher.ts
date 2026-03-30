@@ -7,6 +7,7 @@
  */
 
 import { request as httpsRequest } from "https";
+import { validateUrlForSSRF } from "../utils/ssrf-guard.js";
 import type {
   DiscordNotificationConfig,
   DiscordBotNotificationConfig,
@@ -122,15 +123,16 @@ function validateSlackUrl(webhookUrl: string): boolean {
 }
 
 /**
- * Validate generic webhook URL. Must be HTTPS.
+ * Validate generic webhook URL. Must be HTTPS and pass SSRF checks.
  */
 function validateWebhookUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:";
+    if (parsed.protocol !== "https:") return false;
   } catch {
     return false;
   }
+  return validateUrlForSSRF(url).allowed;
 }
 
 /**
@@ -746,18 +748,29 @@ export async function sendCustomWebhook(
   try {
     // Interpolate template variables
     const url = interpolateTemplate(config.url, payload);
+
+    // Validate URL against SSRF before making the request
+    const ssrfCheck = validateUrlForSSRF(url);
+    if (!ssrfCheck.allowed) {
+      return {
+        platform: "webhook",
+        success: false,
+        error: `URL blocked by SSRF guard: ${ssrfCheck.reason}`,
+      };
+    }
+
     const body = interpolateTemplate(config.bodyTemplate, payload);
-    
+
     // Prepare headers
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(config.headers)) {
       headers[key] = interpolateTemplate(value, payload);
     }
-    
+
     // Use native fetch (Node.js 18+)
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.timeout);
-    
+
     try {
       const response = await fetch(url, {
         method: config.method,

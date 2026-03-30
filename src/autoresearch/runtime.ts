@@ -519,10 +519,13 @@ export async function runAutoresearchEvaluator(
   latestEvaluatorFile?: string,
 ): Promise<AutoresearchEvaluationRecord> {
   const ran_at = nowIso();
-  const result = spawnSync(contract.sandbox.evaluator.command, {
+  // Split command string into executable + args to avoid shell injection (shell: false)
+  const cmdParts = contract.sandbox.evaluator.command.split(/\s+/).filter(Boolean);
+  const [executable, ...cmdArgs] = cmdParts;
+  const result = spawnSync(executable, cmdArgs, {
     cwd: worktreePath,
     encoding: 'utf-8',
-    shell: true,
+    shell: false,
     maxBuffer: 1024 * 1024,
   });
   const stdout = result.stdout?.trim() || '';

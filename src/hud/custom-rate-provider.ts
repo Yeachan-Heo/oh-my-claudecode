@@ -83,9 +83,10 @@ function isCacheValid(cache: CustomProviderCache): boolean {
  */
 function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Split string commands into executable + args to avoid shell injection via sh -c
     const [executable, ...args] = Array.isArray(cmd)
       ? cmd
-      : (['sh', '-c', cmd] as string[]);
+      : cmd.split(/\s+/).filter(Boolean);
 
     const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
