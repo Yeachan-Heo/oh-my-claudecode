@@ -101,4 +101,48 @@ describe('python-repl sandbox blocked modules (bypass prevention)', () => {
     const result = executePythonInSandbox('import signal');
     expect(result).toContain('blocked in sandbox mode');
   });
+
+  it('should block "from importlib import import_module" bypass', () => {
+    const result = executePythonInSandbox('from importlib import import_module');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+
+  it('should block __import__("os") bypass via builtins removal', () => {
+    // __import__ is replaced with _sandbox_import in the sandbox namespace,
+    // so __import__("os") goes through the blocking hook
+    const result = executePythonInSandbox('__import__("os")');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+});
+
+describe('python-repl sandbox bridge startup integration', () => {
+  it('should load bridge with OMC_PYTHON_SANDBOX=1 and block os in sandbox namespace', () => {
+    const bridgePath = new URL('../../../../bridge/gyoshu_bridge.py', import.meta.url).pathname;
+    const tmpScript = join(tmpdir(), `omc-sandbox-bridge-${Date.now()}.py`);
+    const escapedPath = JSON.stringify(bridgePath);
+    // Load bridge as a module (not exec) with sandbox enabled,
+    // then verify code in sandbox namespace can't import os
+    const script = [
+      'import os, importlib.util',
+      'os.environ["OMC_PYTHON_SANDBOX"] = "1"',
+      `spec = importlib.util.spec_from_file_location("gyoshu_bridge", ${escapedPath})`,
+      'mod = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(mod)',
+      '# Verify sandbox namespace blocks dangerous imports',
+      'ns = mod.get_sandbox_namespace()',
+      'try:',
+      '    exec("import os", ns)',
+      '    print("FAIL: os imported in sandbox")',
+      'except ImportError as e:',
+      '    print(f"PASS: {e}")',
+    ].join('\n');
+    writeFileSync(tmpScript, script, 'utf-8');
+    try {
+      const result = execSync(`python3 ${tmpScript} 2>&1`, { timeout: 10000 }).toString().trim();
+      expect(result).toContain('PASS:');
+      expect(result).toContain('blocked in sandbox mode');
+    } finally {
+      try { unlinkSync(tmpScript); } catch { /* ignore */ }
+    }
+  });
 });
