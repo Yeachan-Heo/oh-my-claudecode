@@ -109,6 +109,60 @@ describe('model-contract', () => {
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
+
+    it('blocks codex when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('codex')).toThrow('disabled by security policy');
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
+
+    it('blocks gemini when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('gemini')).toThrow('disabled by security policy');
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
+
+    it('allows claude even when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('claude')).not.toThrow();
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
   });
 
   describe('buildLaunchArgs', () => {

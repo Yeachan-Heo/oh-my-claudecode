@@ -3,6 +3,7 @@ import { isAbsolute, normalize, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
 import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
+import { isExternalLLMDisabled } from '../lib/security-config.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
 
@@ -220,6 +221,12 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
 };
 
 export function getContract(agentType: CliAgentType): CliAgentContract {
+  if (agentType !== 'claude' && isExternalLLMDisabled()) {
+    throw new Error(
+      `External LLM provider "${agentType}" is disabled by security policy. ` +
+      `Set OMC_SECURITY to a non-strict value or configure security.disableExternalLLM=false to allow.`
+    );
+  }
   const contract = CONTRACTS[agentType];
   if (!contract) {
     throw new Error(`Unknown agent type: ${agentType}. Supported: ${Object.keys(CONTRACTS).join(', ')}`);
