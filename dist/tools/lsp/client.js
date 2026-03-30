@@ -48,6 +48,8 @@ export class LspClient {
     serverConfig;
     devContainerContext;
     initialized = false;
+    _serverCapabilities = null;
+    _supportsPullDiagnostics = false;
     constructor(workspaceRoot, serverConfig, devContainerContext = null) {
         this.workspaceRoot = resolve(workspaceRoot);
         this.serverConfig = serverConfig;
@@ -303,7 +305,7 @@ export class LspClient {
      * Initialize the LSP connection
      */
     async initialize() {
-        await this.request('initialize', {
+        const initResult = await this.request('initialize', {
             processId: process.pid,
             rootUri: this.getWorkspaceRootUri(),
             rootPath: this.getServerWorkspaceRoot(),
@@ -314,7 +316,11 @@ export class LspClient {
                     references: {},
                     documentSymbol: { hierarchicalDocumentSymbolSupport: true },
                     codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } },
-                    rename: { prepareSupport: true }
+                    rename: { prepareSupport: true },
+                    publishDiagnostics: {
+                        relatedInformation: true,
+                        tagSupport: { valueSet: [1, 2] }
+                    }
                 },
                 workspace: {
                     symbol: {},
@@ -323,6 +329,8 @@ export class LspClient {
             },
             initializationOptions: this.serverConfig.initializationOptions || {}
         }, getLspRequestTimeout(this.serverConfig, 'initialize'));
+        this._serverCapabilities = initResult?.capabilities ?? null;
+        this._supportsPullDiagnostics = !!this._serverCapabilities?.diagnosticProvider;
         this.notify('initialized', {});
     }
     /**
@@ -476,6 +484,27 @@ export class LspClient {
     getDiagnostics(filePath) {
         const uri = fileUri(filePath);
         return this.diagnostics.get(uri) || [];
+    }
+    /**
+     * Whether the server supports LSP 3.17 pull diagnostics (textDocument/diagnostic).
+     */
+    get supportsPullDiagnostics() {
+        return this._supportsPullDiagnostics;
+    }
+    /**
+     * Request diagnostics via the LSP 3.17 pull model (textDocument/diagnostic).
+     * Only call when supportsPullDiagnostics is true.
+     */
+    async pullDiagnostics(filePath) {
+        const uri = this.toServerUri(fileUri(filePath));
+        const result = await this.request('textDocument/diagnostic', { textDocument: { uri } });
+        return ((result?.items) || []).map((d) => ({
+            range: d.range,
+            message: d.message,
+            severity: d.severity,
+            source: d.source,
+            code: d.code,
+        }));
     }
     /**
      * Wait for the server to publish diagnostics for a file.
@@ -743,7 +772,11 @@ export class LspClientManager {
      */
     findWorkspaceRoot(filePath) {
         let dir = dirname(resolve(filePath));
-        const markers = ['package.json', 'tsconfig.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', '.git'];
+        const markers = [
+            'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts',
+            'pom.xml', 'package.json', 'tsconfig.json', 'pyproject.toml', 'Cargo.toml',
+            'go.mod', '.git'
+        ];
         // Cross-platform root detection
         while (true) {
             const parsed = parse(dir);

@@ -99,6 +99,8 @@ export declare class LspClient {
     private serverConfig;
     private devContainerContext;
     private initialized;
+    private _serverCapabilities;
+    private _supportsPullDiagnostics;
     constructor(workspaceRoot: string, serverConfig: LspServerConfig, devContainerContext?: DevContainerContext | null);
     /**
      * Start the LSP server and initialize the connection
@@ -182,6 +184,15 @@ export declare class LspClient {
      * Get diagnostics for a file
      */
     getDiagnostics(filePath: string): Diagnostic[];
+    /**
+     * Whether the server supports LSP 3.17 pull diagnostics (textDocument/diagnostic).
+     */
+    get supportsPullDiagnostics(): boolean;
+    /**
+     * Request diagnostics via the LSP 3.17 pull model (textDocument/diagnostic).
+     * Only call when supportsPullDiagnostics is true.
+     */
+    pullDiagnostics(filePath: string): Promise<Diagnostic[]>;
     /**
      * Wait for the server to publish diagnostics for a file.
      * Resolves as soon as textDocument/publishDiagnostics fires for the URI,

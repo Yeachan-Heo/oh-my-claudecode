@@ -2245,8 +2245,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize3) {
-      if (normalize3 !== false)
+    function getFullPath(resolver, id = "", normalize4) {
+      if (normalize4 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -3586,7 +3586,7 @@ var require_fast_uri = __commonJS({
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
-    function normalize3(uri, options) {
+    function normalize4(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         serialize(parse6(uri, options), options);
@@ -3602,49 +3602,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative4, options, skipNormalization) {
+    function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse6(serialize(base, options), options);
-        relative4 = parse6(serialize(relative4, options), options);
+        relative5 = parse6(serialize(relative5, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative4.scheme) {
-        target.scheme = relative4.scheme;
-        target.userinfo = relative4.userinfo;
-        target.host = relative4.host;
-        target.port = relative4.port;
-        target.path = removeDotSegments(relative4.path || "");
-        target.query = relative4.query;
+      if (!options.tolerant && relative5.scheme) {
+        target.scheme = relative5.scheme;
+        target.userinfo = relative5.userinfo;
+        target.host = relative5.host;
+        target.port = relative5.port;
+        target.path = removeDotSegments(relative5.path || "");
+        target.query = relative5.query;
       } else {
-        if (relative4.userinfo !== void 0 || relative4.host !== void 0 || relative4.port !== void 0) {
-          target.userinfo = relative4.userinfo;
-          target.host = relative4.host;
-          target.port = relative4.port;
-          target.path = removeDotSegments(relative4.path || "");
-          target.query = relative4.query;
+        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
+          target.userinfo = relative5.userinfo;
+          target.host = relative5.host;
+          target.port = relative5.port;
+          target.path = removeDotSegments(relative5.path || "");
+          target.query = relative5.query;
         } else {
-          if (!relative4.path) {
+          if (!relative5.path) {
             target.path = base.path;
-            if (relative4.query !== void 0) {
-              target.query = relative4.query;
+            if (relative5.query !== void 0) {
+              target.query = relative5.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative4.path[0] === "/") {
-              target.path = removeDotSegments(relative4.path);
+            if (relative5.path[0] === "/") {
+              target.path = removeDotSegments(relative5.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative4.path;
+                target.path = "/" + relative5.path;
               } else if (!base.path) {
-                target.path = relative4.path;
+                target.path = relative5.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative4.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative4.query;
+            target.query = relative5.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3652,7 +3652,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative4.fragment;
+      target.fragment = relative5.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3822,7 +3822,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize: normalize3,
+      normalize: normalize4,
       resolve: resolve7,
       resolveComponent,
       equal,
@@ -18293,6 +18293,8 @@ var LspClient = class _LspClient {
   serverConfig;
   devContainerContext;
   initialized = false;
+  _serverCapabilities = null;
+  _supportsPullDiagnostics = false;
   constructor(workspaceRoot, serverConfig, devContainerContext = null) {
     this.workspaceRoot = (0, import_path4.resolve)(workspaceRoot);
     this.serverConfig = serverConfig;
@@ -18516,7 +18518,7 @@ ${content}`;
    * Initialize the LSP connection
    */
   async initialize() {
-    await this.request("initialize", {
+    const initResult = await this.request("initialize", {
       processId: process.pid,
       rootUri: this.getWorkspaceRootUri(),
       rootPath: this.getServerWorkspaceRoot(),
@@ -18527,7 +18529,11 @@ ${content}`;
           references: {},
           documentSymbol: { hierarchicalDocumentSymbolSupport: true },
           codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } },
-          rename: { prepareSupport: true }
+          rename: { prepareSupport: true },
+          publishDiagnostics: {
+            relatedInformation: true,
+            tagSupport: { valueSet: [1, 2] }
+          }
         },
         workspace: {
           symbol: {},
@@ -18536,6 +18542,8 @@ ${content}`;
       },
       initializationOptions: this.serverConfig.initializationOptions || {}
     }, getLspRequestTimeout(this.serverConfig, "initialize"));
+    this._serverCapabilities = initResult?.capabilities ?? null;
+    this._supportsPullDiagnostics = !!this._serverCapabilities?.diagnosticProvider;
     this.notify("initialized", {});
   }
   /**
@@ -18684,6 +18692,30 @@ ${content}`;
   getDiagnostics(filePath) {
     const uri = fileUri(filePath);
     return this.diagnostics.get(uri) || [];
+  }
+  /**
+   * Whether the server supports LSP 3.17 pull diagnostics (textDocument/diagnostic).
+   */
+  get supportsPullDiagnostics() {
+    return this._supportsPullDiagnostics;
+  }
+  /**
+   * Request diagnostics via the LSP 3.17 pull model (textDocument/diagnostic).
+   * Only call when supportsPullDiagnostics is true.
+   */
+  async pullDiagnostics(filePath) {
+    const uri = this.toServerUri(fileUri(filePath));
+    const result = await this.request(
+      "textDocument/diagnostic",
+      { textDocument: { uri } }
+    );
+    return (result?.items || []).map((d) => ({
+      range: d.range,
+      message: d.message,
+      severity: d.severity,
+      source: d.source,
+      code: d.code
+    }));
   }
   /**
    * Wait for the server to publish diagnostics for a file.
@@ -18931,7 +18963,19 @@ var LspClientManager = class {
    */
   findWorkspaceRoot(filePath) {
     let dir = (0, import_path4.dirname)((0, import_path4.resolve)(filePath));
-    const markers = ["package.json", "tsconfig.json", "pyproject.toml", "Cargo.toml", "go.mod", ".git"];
+    const markers = [
+      "build.gradle",
+      "build.gradle.kts",
+      "settings.gradle",
+      "settings.gradle.kts",
+      "pom.xml",
+      "package.json",
+      "tsconfig.json",
+      "pyproject.toml",
+      "Cargo.toml",
+      "go.mod",
+      ".git"
+    ];
     while (true) {
       const parsed = (0, import_path4.parse)(dir);
       if (parsed.root === dir) {
@@ -19583,8 +19627,13 @@ var lspDiagnosticsTool = {
     const { file, severity } = args;
     return withLspClient(file, "diagnostics", async (client) => {
       await client.openDocument(file);
-      await new Promise((resolve7) => setTimeout(resolve7, LSP_DIAGNOSTICS_WAIT_MS));
-      let diagnostics = client.getDiagnostics(file);
+      let diagnostics;
+      if (client.supportsPullDiagnostics) {
+        diagnostics = await client.pullDiagnostics(file);
+      } else {
+        await client.waitForDiagnostics(file, 3e4);
+        diagnostics = client.getDiagnostics(file);
+      }
       if (severity) {
         const severityMap = {
           "error": 1,
@@ -19812,9 +19861,229 @@ var lspTools = [
 ];
 
 // src/tools/ast-tools.ts
-var import_fs7 = require("fs");
-var import_path8 = require("path");
+var import_fs8 = require("fs");
+var import_path9 = require("path");
 var import_module = require("module");
+
+// src/lib/worktree-paths.ts
+var import_crypto = require("crypto");
+var import_child_process5 = require("child_process");
+var import_fs7 = require("fs");
+var import_os = require("os");
+var import_path8 = require("path");
+var OmcPaths = {
+  ROOT: ".omc",
+  STATE: ".omc/state",
+  SESSIONS: ".omc/state/sessions",
+  PLANS: ".omc/plans",
+  RESEARCH: ".omc/research",
+  NOTEPAD: ".omc/notepad.md",
+  PROJECT_MEMORY: ".omc/project-memory.json",
+  DRAFTS: ".omc/drafts",
+  NOTEPADS: ".omc/notepads",
+  LOGS: ".omc/logs",
+  SCIENTIST: ".omc/scientist",
+  AUTOPILOT: ".omc/autopilot",
+  SKILLS: ".omc/skills",
+  SHARED_MEMORY: ".omc/state/shared-memory",
+  DEEPINIT_MANIFEST: ".omc/deepinit-manifest.json"
+};
+var MAX_WORKTREE_CACHE_SIZE = 8;
+var worktreeCacheMap = /* @__PURE__ */ new Map();
+function getWorktreeRoot(cwd) {
+  const effectiveCwd = cwd || process.cwd();
+  if (worktreeCacheMap.has(effectiveCwd)) {
+    const root = worktreeCacheMap.get(effectiveCwd);
+    worktreeCacheMap.delete(effectiveCwd);
+    worktreeCacheMap.set(effectiveCwd, root);
+    return root || null;
+  }
+  try {
+    const root = (0, import_child_process5.execSync)("git rev-parse --show-toplevel", {
+      cwd: effectiveCwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5e3
+    }).trim();
+    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = worktreeCacheMap.keys().next().value;
+      if (oldest !== void 0) {
+        worktreeCacheMap.delete(oldest);
+      }
+    }
+    worktreeCacheMap.set(effectiveCwd, root);
+    return root;
+  } catch {
+    return null;
+  }
+}
+function validatePath(inputPath) {
+  if (inputPath.includes("..")) {
+    throw new Error(`Invalid path: path traversal not allowed (${inputPath})`);
+  }
+  if (inputPath.startsWith("~") || (0, import_path8.isAbsolute)(inputPath)) {
+    throw new Error(`Invalid path: absolute paths not allowed (${inputPath})`);
+  }
+}
+var dualDirWarnings = /* @__PURE__ */ new Set();
+function getProjectIdentifier(worktreeRoot) {
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  let source;
+  try {
+    const remoteUrl = (0, import_child_process5.execSync)("git remote get-url origin", {
+      cwd: root,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    source = remoteUrl || root;
+  } catch {
+    source = root;
+  }
+  const hash = (0, import_crypto.createHash)("sha256").update(source).digest("hex").slice(0, 16);
+  const dirName = (0, import_path8.basename)(root).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${dirName}-${hash}`;
+}
+function getOmcRoot(worktreeRoot) {
+  const customDir = process.env.OMC_STATE_DIR;
+  if (customDir) {
+    const root2 = worktreeRoot || getWorktreeRoot() || process.cwd();
+    const projectId = getProjectIdentifier(root2);
+    const centralizedPath = (0, import_path8.join)(customDir, projectId);
+    const legacyPath = (0, import_path8.join)(root2, OmcPaths.ROOT);
+    const warningKey = `${legacyPath}:${centralizedPath}`;
+    if (!dualDirWarnings.has(warningKey) && (0, import_fs7.existsSync)(legacyPath) && (0, import_fs7.existsSync)(centralizedPath)) {
+      dualDirWarnings.add(warningKey);
+      console.warn(
+        `[omc] Both legacy state dir (${legacyPath}) and centralized state dir (${centralizedPath}) exist. Using centralized dir. Consider migrating data from the legacy dir and removing it.`
+      );
+    }
+    return centralizedPath;
+  }
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  return (0, import_path8.join)(root, OmcPaths.ROOT);
+}
+function resolveOmcPath(relativePath, worktreeRoot) {
+  validatePath(relativePath);
+  const omcDir = getOmcRoot(worktreeRoot);
+  const fullPath = (0, import_path8.normalize)((0, import_path8.resolve)(omcDir, relativePath));
+  const relativeToOmc = (0, import_path8.relative)(omcDir, fullPath);
+  if (relativeToOmc.startsWith("..") || relativeToOmc.startsWith(import_path8.sep + "..")) {
+    throw new Error(`Path escapes omc boundary: ${relativePath}`);
+  }
+  return fullPath;
+}
+function resolveStatePath(stateName, worktreeRoot) {
+  const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
+  return resolveOmcPath(`state/${normalizedName}.json`, worktreeRoot);
+}
+function ensureOmcDir(relativePath, worktreeRoot) {
+  const fullPath = resolveOmcPath(relativePath, worktreeRoot);
+  if (!(0, import_fs7.existsSync)(fullPath)) {
+    (0, import_fs7.mkdirSync)(fullPath, { recursive: true });
+  }
+  return fullPath;
+}
+function getWorktreeNotepadPath(worktreeRoot) {
+  return (0, import_path8.join)(getOmcRoot(worktreeRoot), "notepad.md");
+}
+function getWorktreeProjectMemoryPath(worktreeRoot) {
+  return (0, import_path8.join)(getOmcRoot(worktreeRoot), "project-memory.json");
+}
+var SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+function validateSessionId(sessionId) {
+  if (!sessionId) {
+    throw new Error("Session ID cannot be empty");
+  }
+  if (sessionId.includes("..") || sessionId.includes("/") || sessionId.includes("\\")) {
+    throw new Error(`Invalid session ID: path traversal not allowed (${sessionId})`);
+  }
+  if (!SESSION_ID_REGEX.test(sessionId)) {
+    throw new Error(`Invalid session ID: must be alphanumeric with hyphens/underscores, max 256 chars (${sessionId})`);
+  }
+}
+function resolveSessionStatePath(stateName, sessionId, worktreeRoot) {
+  validateSessionId(sessionId);
+  const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
+  return resolveOmcPath(`state/sessions/${sessionId}/${normalizedName}.json`, worktreeRoot);
+}
+function getSessionStateDir(sessionId, worktreeRoot) {
+  validateSessionId(sessionId);
+  return (0, import_path8.join)(getOmcRoot(worktreeRoot), "state", "sessions", sessionId);
+}
+function listSessionIds(worktreeRoot) {
+  const sessionsDir = (0, import_path8.join)(getOmcRoot(worktreeRoot), "state", "sessions");
+  if (!(0, import_fs7.existsSync)(sessionsDir)) {
+    return [];
+  }
+  try {
+    const entries = (0, import_fs7.readdirSync)(sessionsDir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory() && SESSION_ID_REGEX.test(entry.name)).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+function ensureSessionStateDir(sessionId, worktreeRoot) {
+  const sessionDir = getSessionStateDir(sessionId, worktreeRoot);
+  if (!(0, import_fs7.existsSync)(sessionDir)) {
+    (0, import_fs7.mkdirSync)(sessionDir, { recursive: true });
+  }
+  return sessionDir;
+}
+function resolveToWorktreeRoot(directory) {
+  if (directory) {
+    const resolved = (0, import_path8.resolve)(directory);
+    const root = getWorktreeRoot(resolved);
+    if (root) return root;
+    console.error("[worktree] non-git directory provided, falling back to process root", {
+      directory: resolved
+    });
+  }
+  return getWorktreeRoot(process.cwd()) || process.cwd();
+}
+function validateWorkingDirectory(workingDirectory) {
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  if (!workingDirectory) {
+    return trustedRoot;
+  }
+  const resolved = (0, import_path8.resolve)(workingDirectory);
+  let trustedRootReal;
+  try {
+    trustedRootReal = (0, import_fs7.realpathSync)(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+  const providedRoot = getWorktreeRoot(resolved);
+  if (providedRoot) {
+    let providedRootReal;
+    try {
+      providedRootReal = (0, import_fs7.realpathSync)(providedRoot);
+    } catch {
+      throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+    }
+    if (providedRootReal !== trustedRootReal) {
+      console.error("[worktree] workingDirectory resolved to different git worktree root, using trusted root", {
+        workingDirectory: resolved,
+        providedRoot: providedRootReal,
+        trustedRoot: trustedRootReal
+      });
+      return trustedRoot;
+    }
+    return providedRoot;
+  }
+  let resolvedReal;
+  try {
+    resolvedReal = (0, import_fs7.realpathSync)(resolved);
+  } catch {
+    throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+  }
+  const rel = (0, import_path8.relative)(trustedRootReal, resolvedReal);
+  if (rel.startsWith("..") || (0, import_path8.isAbsolute)(rel)) {
+    throw new Error(`workingDirectory '${workingDirectory}' is outside the trusted worktree root '${trustedRoot}'.`);
+  }
+  return trustedRoot;
+}
+
+// src/tools/ast-tools.ts
 var import_meta = {};
 var sgModule = null;
 var sgLoadFailed = false;
@@ -19838,6 +20107,22 @@ async function getSgModule() {
     }
   }
   return sgModule;
+}
+function validateToolPath(inputPath) {
+  const resolved = (0, import_path9.resolve)(inputPath);
+  if (process.env.OMC_RESTRICT_TOOL_PATHS !== "true") {
+    return resolved;
+  }
+  const projectRoot = getWorktreeRoot() || process.cwd();
+  const normalizedRoot = (0, import_path9.normalize)(projectRoot);
+  const normalizedPath = (0, import_path9.normalize)(resolved);
+  const rel = (0, import_path9.relative)(normalizedRoot, normalizedPath);
+  if (rel.startsWith("..") || (0, import_path9.isAbsolute)(rel)) {
+    throw new Error(
+      `Path restricted: '${inputPath}' is outside the project root '${projectRoot}'. Set OMC_RESTRICT_TOOL_PATHS=false to allow unrestricted paths.`
+    );
+  }
+  return resolved;
 }
 function toLangEnum(sg, language) {
   const langMap = {
@@ -19921,10 +20206,10 @@ function getFilesForLanguage(dirPath, language, maxFiles = 1e3) {
   function walk(dir) {
     if (files.length >= maxFiles) return;
     try {
-      const entries = (0, import_fs7.readdirSync)(dir, { withFileTypes: true });
+      const entries = (0, import_fs8.readdirSync)(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (files.length >= maxFiles) return;
-        const fullPath = (0, import_path8.join)(dir, entry.name);
+        const fullPath = (0, import_path9.join)(dir, entry.name);
         if (entry.isDirectory()) {
           if (![
             "node_modules",
@@ -19938,7 +20223,7 @@ function getFilesForLanguage(dirPath, language, maxFiles = 1e3) {
             walk(fullPath);
           }
         } else if (entry.isFile()) {
-          const ext = (0, import_path8.extname)(entry.name).toLowerCase();
+          const ext = (0, import_path9.extname)(entry.name).toLowerCase();
           if (extensions.includes(ext)) {
             files.push(fullPath);
           }
@@ -19947,10 +20232,10 @@ function getFilesForLanguage(dirPath, language, maxFiles = 1e3) {
     } catch {
     }
   }
-  const resolvedPath = (0, import_path8.resolve)(dirPath);
+  const resolvedPath = (0, import_path9.resolve)(dirPath);
   let stat;
   try {
-    stat = (0, import_fs7.statSync)(resolvedPath);
+    stat = (0, import_fs8.statSync)(resolvedPath);
   } catch (err) {
     throw new Error(`Cannot access path "${resolvedPath}": ${err.message}`);
   }
@@ -20006,6 +20291,7 @@ Note: Patterns must be valid AST nodes for the language.`,
       maxResults = 20
     } = args;
     try {
+      const validatedPath = validateToolPath(path13);
       const sg = await getSgModule();
       if (!sg) {
         return {
@@ -20018,7 +20304,7 @@ Error: ${sgLoadError}`
           ]
         };
       }
-      const files = getFilesForLanguage(path13, language);
+      const files = getFilesForLanguage(validatedPath, language);
       if (files.length === 0) {
         return {
           content: [
@@ -20034,7 +20320,7 @@ Error: ${sgLoadError}`
       for (const filePath of files) {
         if (totalMatches >= maxResults) break;
         try {
-          const content = (0, import_fs7.readFileSync)(filePath, "utf-8");
+          const content = (0, import_fs8.readFileSync)(filePath, "utf-8");
           const root = sg.parse(toLangEnum(sg, language), content).root();
           const matches = root.findAll(pattern);
           for (const match of matches) {
@@ -20126,6 +20412,7 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
   handler: async (args) => {
     const { pattern, replacement, language, path: path13 = ".", dryRun = true } = args;
     try {
+      const validatedPath = validateToolPath(path13);
       const sg = await getSgModule();
       if (!sg) {
         return {
@@ -20138,7 +20425,7 @@ Error: ${sgLoadError}`
           ]
         };
       }
-      const files = getFilesForLanguage(path13, language);
+      const files = getFilesForLanguage(validatedPath, language);
       if (files.length === 0) {
         return {
           content: [
@@ -20153,7 +20440,7 @@ Error: ${sgLoadError}`
       let totalReplacements = 0;
       for (const filePath of files) {
         try {
-          const content = (0, import_fs7.readFileSync)(filePath, "utf-8");
+          const content = (0, import_fs8.readFileSync)(filePath, "utf-8");
           const root = sg.parse(toLangEnum(sg, language), content).root();
           const matches = root.findAll(pattern);
           if (matches.length === 0) continue;
@@ -20170,9 +20457,10 @@ Error: ${sgLoadError}`
                 const varName = metaVar.replace(/^\$+/, "");
                 const captured = match.getMatch(varName);
                 if (captured) {
+                  const safeText = captured.text().replace(/\$/g, "$$$$");
                   finalReplacement = finalReplacement.replaceAll(
                     metaVar,
-                    captured.text()
+                    safeText
                   );
                 }
               }
@@ -20200,7 +20488,7 @@ Error: ${sgLoadError}`
             totalReplacements++;
           }
           if (!dryRun && edits.length > 0) {
-            (0, import_fs7.writeFileSync)(filePath, newContent, "utf-8");
+            (0, import_fs8.writeFileSync)(filePath, newContent, "utf-8");
           }
         } catch {
         }
@@ -20364,7 +20652,7 @@ var fsSync2 = __toESM(require("fs"), 1);
 var path4 = __toESM(require("path"), 1);
 var os2 = __toESM(require("os"), 1);
 var crypto3 = __toESM(require("crypto"), 1);
-var import_child_process6 = require("child_process");
+var import_child_process7 = require("child_process");
 var import_util6 = require("util");
 
 // src/lib/atomic-write.ts
@@ -20477,13 +20765,13 @@ async function safeReadJson(filePath) {
 
 // src/platform/index.ts
 var path3 = __toESM(require("path"), 1);
-var import_fs8 = require("fs");
+var import_fs9 = require("fs");
 
 // src/platform/process-utils.ts
-var import_child_process5 = require("child_process");
+var import_child_process6 = require("child_process");
 var import_util5 = require("util");
 var fsPromises = __toESM(require("fs/promises"), 1);
-var execFileAsync = (0, import_util5.promisify)(import_child_process5.execFile);
+var execFileAsync = (0, import_util5.promisify)(import_child_process6.execFile);
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -20612,7 +20900,7 @@ async function getProcessStartTimeLinux(pid) {
 var PLATFORM = process.platform;
 
 // src/tools/python-repl/session-lock.ts
-var execFileAsync2 = (0, import_util6.promisify)(import_child_process6.execFile);
+var execFileAsync2 = (0, import_util6.promisify)(import_child_process7.execFile);
 var STALE_LOCK_AGE_MS = 6e4;
 var DEFAULT_ACQUIRE_TIMEOUT_MS = 3e4;
 var LOCK_RETRY_INTERVAL_MS = 100;
@@ -20923,7 +21211,7 @@ function sleep(ms) {
 
 // src/tools/python-repl/socket-client.ts
 var net = __toESM(require("net"), 1);
-var import_crypto = require("crypto");
+var import_crypto2 = require("crypto");
 var SocketConnectionError = class extends Error {
   constructor(message, socketPath, originalError) {
     super(message);
@@ -20949,7 +21237,7 @@ var JsonRpcError = class extends Error {
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
   return new Promise((resolve7, reject) => {
-    const id = (0, import_crypto.randomUUID)();
+    const id = (0, import_crypto2.randomUUID)();
     const request = {
       jsonrpc: "2.0",
       id,
@@ -21094,15 +21382,15 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
 }
 
 // src/tools/python-repl/bridge-manager.ts
-var import_child_process7 = require("child_process");
+var import_child_process8 = require("child_process");
 var fs4 = __toESM(require("fs"), 1);
 var fsPromises2 = __toESM(require("fs/promises"), 1);
 var path5 = __toESM(require("path"), 1);
 var import_url3 = require("url");
-var import_child_process8 = require("child_process");
+var import_child_process9 = require("child_process");
 var import_util7 = require("util");
 var import_meta2 = {};
-var execFileAsync3 = (0, import_util7.promisify)(import_child_process8.execFile);
+var execFileAsync3 = (0, import_util7.promisify)(import_child_process9.execFile);
 var BRIDGE_SPAWN_TIMEOUT_MS = 3e4;
 var DEFAULT_GRACE_PERIOD_MS = 5e3;
 var SIGTERM_GRACE_MS = 2500;
@@ -21238,7 +21526,7 @@ function killProcessGroup(pid, signal) {
     try {
       const force = signal === "SIGKILL";
       const args = force ? "/F /T" : "/T";
-      (0, import_child_process7.execSync)(
+      (0, import_child_process8.execSync)(
         `taskkill ${args} /PID ${pid}`,
         { stdio: "ignore", timeout: 5e3, windowsHide: true }
       );
@@ -21275,7 +21563,7 @@ async function spawnBridgeServer(sessionId, projectDir) {
   const effectiveProjectDir = projectDir || process.cwd();
   const pythonEnv = await ensurePythonEnvironment(effectiveProjectDir);
   const bridgeArgs = [bridgePath, socketPath];
-  const proc = (0, import_child_process7.spawn)(pythonEnv.pythonPath, bridgeArgs, {
+  const proc = (0, import_child_process8.spawn)(pythonEnv.pythonPath, bridgeArgs, {
     stdio: ["ignore", "ignore", "pipe"],
     cwd: effectiveProjectDir,
     env: {
@@ -21941,224 +22229,6 @@ var pythonReplTool = {
 var import_fs12 = require("fs");
 var import_path12 = require("path");
 
-// src/lib/worktree-paths.ts
-var import_crypto2 = require("crypto");
-var import_child_process9 = require("child_process");
-var import_fs9 = require("fs");
-var import_os = require("os");
-var import_path9 = require("path");
-var OmcPaths = {
-  ROOT: ".omc",
-  STATE: ".omc/state",
-  SESSIONS: ".omc/state/sessions",
-  PLANS: ".omc/plans",
-  RESEARCH: ".omc/research",
-  NOTEPAD: ".omc/notepad.md",
-  PROJECT_MEMORY: ".omc/project-memory.json",
-  DRAFTS: ".omc/drafts",
-  NOTEPADS: ".omc/notepads",
-  LOGS: ".omc/logs",
-  SCIENTIST: ".omc/scientist",
-  AUTOPILOT: ".omc/autopilot",
-  SKILLS: ".omc/skills",
-  SHARED_MEMORY: ".omc/state/shared-memory",
-  DEEPINIT_MANIFEST: ".omc/deepinit-manifest.json"
-};
-var MAX_WORKTREE_CACHE_SIZE = 8;
-var worktreeCacheMap = /* @__PURE__ */ new Map();
-function getWorktreeRoot(cwd) {
-  const effectiveCwd = cwd || process.cwd();
-  if (worktreeCacheMap.has(effectiveCwd)) {
-    const root = worktreeCacheMap.get(effectiveCwd);
-    worktreeCacheMap.delete(effectiveCwd);
-    worktreeCacheMap.set(effectiveCwd, root);
-    return root || null;
-  }
-  try {
-    const root = (0, import_child_process9.execSync)("git rev-parse --show-toplevel", {
-      cwd: effectiveCwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 5e3
-    }).trim();
-    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-      const oldest = worktreeCacheMap.keys().next().value;
-      if (oldest !== void 0) {
-        worktreeCacheMap.delete(oldest);
-      }
-    }
-    worktreeCacheMap.set(effectiveCwd, root);
-    return root;
-  } catch {
-    return null;
-  }
-}
-function validatePath(inputPath) {
-  if (inputPath.includes("..")) {
-    throw new Error(`Invalid path: path traversal not allowed (${inputPath})`);
-  }
-  if (inputPath.startsWith("~") || (0, import_path9.isAbsolute)(inputPath)) {
-    throw new Error(`Invalid path: absolute paths not allowed (${inputPath})`);
-  }
-}
-var dualDirWarnings = /* @__PURE__ */ new Set();
-function getProjectIdentifier(worktreeRoot) {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  let source;
-  try {
-    const remoteUrl = (0, import_child_process9.execSync)("git remote get-url origin", {
-      cwd: root,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    source = remoteUrl || root;
-  } catch {
-    source = root;
-  }
-  const hash = (0, import_crypto2.createHash)("sha256").update(source).digest("hex").slice(0, 16);
-  const dirName = (0, import_path9.basename)(root).replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `${dirName}-${hash}`;
-}
-function getOmcRoot(worktreeRoot) {
-  const customDir = process.env.OMC_STATE_DIR;
-  if (customDir) {
-    const root2 = worktreeRoot || getWorktreeRoot() || process.cwd();
-    const projectId = getProjectIdentifier(root2);
-    const centralizedPath = (0, import_path9.join)(customDir, projectId);
-    const legacyPath = (0, import_path9.join)(root2, OmcPaths.ROOT);
-    const warningKey = `${legacyPath}:${centralizedPath}`;
-    if (!dualDirWarnings.has(warningKey) && (0, import_fs9.existsSync)(legacyPath) && (0, import_fs9.existsSync)(centralizedPath)) {
-      dualDirWarnings.add(warningKey);
-      console.warn(
-        `[omc] Both legacy state dir (${legacyPath}) and centralized state dir (${centralizedPath}) exist. Using centralized dir. Consider migrating data from the legacy dir and removing it.`
-      );
-    }
-    return centralizedPath;
-  }
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
-  return (0, import_path9.join)(root, OmcPaths.ROOT);
-}
-function resolveOmcPath(relativePath, worktreeRoot) {
-  validatePath(relativePath);
-  const omcDir = getOmcRoot(worktreeRoot);
-  const fullPath = (0, import_path9.normalize)((0, import_path9.resolve)(omcDir, relativePath));
-  const relativeToOmc = (0, import_path9.relative)(omcDir, fullPath);
-  if (relativeToOmc.startsWith("..") || relativeToOmc.startsWith(import_path9.sep + "..")) {
-    throw new Error(`Path escapes omc boundary: ${relativePath}`);
-  }
-  return fullPath;
-}
-function resolveStatePath(stateName, worktreeRoot) {
-  const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
-  return resolveOmcPath(`state/${normalizedName}.json`, worktreeRoot);
-}
-function ensureOmcDir(relativePath, worktreeRoot) {
-  const fullPath = resolveOmcPath(relativePath, worktreeRoot);
-  if (!(0, import_fs9.existsSync)(fullPath)) {
-    (0, import_fs9.mkdirSync)(fullPath, { recursive: true });
-  }
-  return fullPath;
-}
-function getWorktreeNotepadPath(worktreeRoot) {
-  return (0, import_path9.join)(getOmcRoot(worktreeRoot), "notepad.md");
-}
-function getWorktreeProjectMemoryPath(worktreeRoot) {
-  return (0, import_path9.join)(getOmcRoot(worktreeRoot), "project-memory.json");
-}
-var SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
-function validateSessionId(sessionId) {
-  if (!sessionId) {
-    throw new Error("Session ID cannot be empty");
-  }
-  if (sessionId.includes("..") || sessionId.includes("/") || sessionId.includes("\\")) {
-    throw new Error(`Invalid session ID: path traversal not allowed (${sessionId})`);
-  }
-  if (!SESSION_ID_REGEX.test(sessionId)) {
-    throw new Error(`Invalid session ID: must be alphanumeric with hyphens/underscores, max 256 chars (${sessionId})`);
-  }
-}
-function resolveSessionStatePath(stateName, sessionId, worktreeRoot) {
-  validateSessionId(sessionId);
-  const normalizedName = stateName.endsWith("-state") ? stateName : `${stateName}-state`;
-  return resolveOmcPath(`state/sessions/${sessionId}/${normalizedName}.json`, worktreeRoot);
-}
-function getSessionStateDir(sessionId, worktreeRoot) {
-  validateSessionId(sessionId);
-  return (0, import_path9.join)(getOmcRoot(worktreeRoot), "state", "sessions", sessionId);
-}
-function listSessionIds(worktreeRoot) {
-  const sessionsDir = (0, import_path9.join)(getOmcRoot(worktreeRoot), "state", "sessions");
-  if (!(0, import_fs9.existsSync)(sessionsDir)) {
-    return [];
-  }
-  try {
-    const entries = (0, import_fs9.readdirSync)(sessionsDir, { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory() && SESSION_ID_REGEX.test(entry.name)).map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-}
-function ensureSessionStateDir(sessionId, worktreeRoot) {
-  const sessionDir = getSessionStateDir(sessionId, worktreeRoot);
-  if (!(0, import_fs9.existsSync)(sessionDir)) {
-    (0, import_fs9.mkdirSync)(sessionDir, { recursive: true });
-  }
-  return sessionDir;
-}
-function resolveToWorktreeRoot(directory) {
-  if (directory) {
-    const resolved = (0, import_path9.resolve)(directory);
-    const root = getWorktreeRoot(resolved);
-    if (root) return root;
-    console.error("[worktree] non-git directory provided, falling back to process root", {
-      directory: resolved
-    });
-  }
-  return getWorktreeRoot(process.cwd()) || process.cwd();
-}
-function validateWorkingDirectory(workingDirectory) {
-  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
-  if (!workingDirectory) {
-    return trustedRoot;
-  }
-  const resolved = (0, import_path9.resolve)(workingDirectory);
-  let trustedRootReal;
-  try {
-    trustedRootReal = (0, import_fs9.realpathSync)(trustedRoot);
-  } catch {
-    trustedRootReal = trustedRoot;
-  }
-  const providedRoot = getWorktreeRoot(resolved);
-  if (providedRoot) {
-    let providedRootReal;
-    try {
-      providedRootReal = (0, import_fs9.realpathSync)(providedRoot);
-    } catch {
-      throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
-    }
-    if (providedRootReal !== trustedRootReal) {
-      console.error("[worktree] workingDirectory resolved to different git worktree root, using trusted root", {
-        workingDirectory: resolved,
-        providedRoot: providedRootReal,
-        trustedRoot: trustedRootReal
-      });
-      return trustedRoot;
-    }
-    return providedRoot;
-  }
-  let resolvedReal;
-  try {
-    resolvedReal = (0, import_fs9.realpathSync)(resolved);
-  } catch {
-    throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
-  }
-  const rel = (0, import_path9.relative)(trustedRootReal, resolvedReal);
-  if (rel.startsWith("..") || (0, import_path9.isAbsolute)(rel)) {
-    throw new Error(`workingDirectory '${workingDirectory}' is outside the trusted worktree root '${trustedRoot}'.`);
-  }
-  return trustedRoot;
-}
-
 // src/lib/payload-limits.ts
 var DEFAULT_PAYLOAD_LIMITS = {
   maxPayloadBytes: 1048576,
@@ -22248,21 +22318,24 @@ var MODE_NAMES = {
   TEAM: "team",
   RALPH: "ralph",
   ULTRAWORK: "ultrawork",
-  ULTRAQA: "ultraqa"
+  ULTRAQA: "ultraqa",
+  RALPLAN: "ralplan"
 };
 var ALL_MODE_NAMES = [
   MODE_NAMES.AUTOPILOT,
   MODE_NAMES.TEAM,
   MODE_NAMES.RALPH,
   MODE_NAMES.ULTRAWORK,
-  MODE_NAMES.ULTRAQA
+  MODE_NAMES.ULTRAQA,
+  MODE_NAMES.RALPLAN
 ];
 var MODE_STATE_FILE_MAP = {
   [MODE_NAMES.AUTOPILOT]: "autopilot-state.json",
   [MODE_NAMES.TEAM]: "team-state.json",
   [MODE_NAMES.RALPH]: "ralph-state.json",
   [MODE_NAMES.ULTRAWORK]: "ultrawork-state.json",
-  [MODE_NAMES.ULTRAQA]: "ultraqa-state.json"
+  [MODE_NAMES.ULTRAQA]: "ultraqa-state.json",
+  [MODE_NAMES.RALPLAN]: "ralplan-state.json"
 };
 var SESSION_END_MODE_STATE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
@@ -22270,12 +22343,14 @@ var SESSION_END_MODE_STATE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
   { file: "skill-active-state.json", mode: "skill-active" }
 ];
 var SESSION_METRICS_MODE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK }
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
+  { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN }
 ];
 
 // src/hooks/mode-registry/index.ts
@@ -24233,6 +24308,7 @@ function isPlainObject3(value) {
 function deepMerge(base, incoming) {
   const result = { ...base };
   for (const key of Object.keys(incoming)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     const baseVal = base[key];
     const incomingVal = incoming[key];
     if (incomingVal === null || incomingVal === void 0) {

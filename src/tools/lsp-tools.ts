@@ -25,7 +25,7 @@ import {
   formatWorkspaceEdit,
   countEdits
 } from './lsp/index.js';
-import { runDirectoryDiagnostics, LSP_DIAGNOSTICS_WAIT_MS } from './diagnostics/index.js';
+import { runDirectoryDiagnostics } from './diagnostics/index.js';
 import { ToolDefinition } from './types.js';
 
 /**
@@ -220,12 +220,15 @@ export const lspDiagnosticsTool: ToolDefinition<{
   handler: async (args) => {
     const { file, severity } = args;
     return withLspClient(file, 'diagnostics', async (client) => {
-      // Open the document to trigger diagnostics
       await client!.openDocument(file);
-      // Wait a bit for diagnostics to be published
-      await new Promise(resolve => setTimeout(resolve, LSP_DIAGNOSTICS_WAIT_MS));
 
-      let diagnostics = client!.getDiagnostics(file);
+      let diagnostics;
+      if (client!.supportsPullDiagnostics) {
+        diagnostics = await client!.pullDiagnostics(file);
+      } else {
+        await client!.waitForDiagnostics(file, 30_000);
+        diagnostics = client!.getDiagnostics(file);
+      }
 
       if (severity) {
         const severityMap: Record<string, number> = {
