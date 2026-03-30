@@ -9,6 +9,8 @@
  * - Memory: Persistent knowledge graph
  */
 
+import { isRemoteMcpDisabled } from '../lib/security-config.js';
+
 export interface McpServerConfig {
   command: string;
   args: string[];
@@ -89,12 +91,13 @@ export function getDefaultMcpServers(options?: {
   enableMemory?: boolean;
 }): McpServersConfig {
   const servers: McpServersConfig = {};
+  const remoteMcpDisabled = isRemoteMcpDisabled();
 
-  if (options?.enableExa !== false) {
+  if (!remoteMcpDisabled && options?.enableExa !== false) {
     servers.exa = createExaServer(options?.exaApiKey);
   }
 
-  if (options?.enableContext7 !== false) {
+  if (!remoteMcpDisabled && options?.enableContext7 !== false) {
     servers.context7 = createContext7Server();
   }
 
