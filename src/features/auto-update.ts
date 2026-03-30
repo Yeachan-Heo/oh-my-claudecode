@@ -25,6 +25,7 @@ import {
 import { getConfigDir } from '../utils/config-dir.js';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 import type { NotificationConfig } from '../notifications/types.js';
+import { isAutoUpdateDisabled } from '../lib/security-config.js';
 
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
@@ -400,6 +401,7 @@ export function getOMCConfig(): OMCConfig {
  * Check if silent auto-updates are enabled
  */
 export function isSilentAutoUpdateEnabled(): boolean {
+  if (isAutoUpdateDisabled()) return false;
   return getOMCConfig().silentAutoUpdate;
 }
 
