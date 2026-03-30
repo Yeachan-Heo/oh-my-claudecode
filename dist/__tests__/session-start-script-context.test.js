@@ -121,12 +121,14 @@ describe('session-start.mjs regression #1386', () => {
         const output = JSON.parse(raw);
         const context = output.hookSpecificOutput?.additionalContext || '';
         expect(output.continue).toBe(true);
+        expect(context).toContain('<project-memory-context>');
         expect(context).toContain('[PROJECT MEMORY]');
         expect(context).toContain('Preserve project memory directives at session start');
         expect(context).toContain('[Project Environment]');
-        expect(context).toContain('TypeScript | pkg:pnpm | node');
-        expect(context).toContain('build=pnpm build | test=pnpm test');
+        expect(context).toContain('- TypeScript | pkg:pnpm | node');
+        expect(context).toContain('- build=pnpm build | test=pnpm test');
         expect(context).toContain('[env] Requires LOCAL_API_BASE for smoke tests');
+        expect(context).toContain('</project-memory-context>');
     });
 });
 //# sourceMappingURL=session-start-script-context.test.js.map

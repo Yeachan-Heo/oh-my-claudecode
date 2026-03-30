@@ -55,7 +55,7 @@ const DAEMON_ENV_ALLOWLIST = [
     // Shell
     'SHELL',
     // Node.js
-    'NODE_ENV',
+    'NODE_ENV', 'NODE_EXTRA_CA_CERTS',
     // Proxy settings
     'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy',
     // Windows system

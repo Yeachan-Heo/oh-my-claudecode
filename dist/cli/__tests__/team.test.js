@@ -85,7 +85,7 @@ describe('team cli', () => {
             cwd: '/tmp/project',
         });
         expect(result.status).toBe('running');
-        expect(result.jobId).toMatch(/^omc-[a-z0-9]{1,12}$/);
+        expect(result.jobId).toMatch(/^omc-[a-z0-9]{1,16}$/);
         expect(result.pid).toBe(4242);
         expect(mocks.spawn).toHaveBeenCalledWith('node', ['/tmp/runtime-cli.cjs'], expect.objectContaining({
             detached: true,
@@ -122,7 +122,7 @@ describe('team cli', () => {
         // Verify --json causes structured JSON output
         expect(logSpy).toHaveBeenCalledTimes(1);
         const output = JSON.parse(logSpy.mock.calls[0][0]);
-        expect(output.jobId).toMatch(/^omc-[a-z0-9]{1,12}$/);
+        expect(output.jobId).toMatch(/^omc-[a-z0-9]{1,16}$/);
         expect(output.status).toBe('running');
         expect(output.pid).toBe(7777);
         logSpy.mockRestore();

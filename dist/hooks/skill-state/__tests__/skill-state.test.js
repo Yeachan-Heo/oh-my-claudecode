@@ -165,12 +165,47 @@ describe('skill-state', () => {
             expect(state.skill_name).toBe('plan');
             expect(state.max_reinforcements).toBe(5);
         });
-        it('overwrites existing state when new skill is invoked', () => {
+        it('does not overwrite when a different skill is already active (nesting guard)', () => {
             writeSkillActiveState(tempDir, 'plan', 'session-1');
             const state2 = writeSkillActiveState(tempDir, 'external-context', 'session-1');
-            expect(state2.skill_name).toBe('external-context');
+            expect(state2).toBeNull();
             const readBack = readSkillActiveState(tempDir, 'session-1');
-            expect(readBack.skill_name).toBe('external-context');
+            expect(readBack.skill_name).toBe('plan');
+        });
+        it('allows re-invocation of the same skill', () => {
+            const state1 = writeSkillActiveState(tempDir, 'plan', 'session-1');
+            expect(state1).not.toBeNull();
+            expect(state1.skill_name).toBe('plan');
+            const state2 = writeSkillActiveState(tempDir, 'plan', 'session-1');
+            expect(state2).not.toBeNull();
+            expect(state2.skill_name).toBe('plan');
+            const readBack = readSkillActiveState(tempDir, 'session-1');
+            expect(readBack.skill_name).toBe('plan');
+        });
+        it('does not overwrite when mcp-setup is invoked inside omc-setup (canonical nesting scenario)', () => {
+            writeSkillActiveState(tempDir, 'omc-setup', 'session-1');
+            const child = writeSkillActiveState(tempDir, 'mcp-setup', 'session-1');
+            expect(child).toBeNull();
+            expect(readSkillActiveState(tempDir, 'session-1').skill_name).toBe('omc-setup');
+        });
+        it('blocks triple nesting: third child cannot overwrite grandparent', () => {
+            writeSkillActiveState(tempDir, 'omc-setup', 'session-1');
+            writeSkillActiveState(tempDir, 'mcp-setup', 'session-1'); // blocked
+            const grandchild = writeSkillActiveState(tempDir, 'plan', 'session-1');
+            expect(grandchild).toBeNull();
+            expect(readSkillActiveState(tempDir, 'session-1').skill_name).toBe('omc-setup');
+        });
+        it('re-invocation resets reinforcement count', () => {
+            writeSkillActiveState(tempDir, 'plan', 'session-1');
+            // Simulate some reinforcement checks
+            checkSkillActiveState(tempDir, 'session-1');
+            checkSkillActiveState(tempDir, 'session-1');
+            const stateBeforeRefresh = readSkillActiveState(tempDir, 'session-1');
+            expect(stateBeforeRefresh.reinforcement_count).toBe(2);
+            // Re-invoke same skill
+            writeSkillActiveState(tempDir, 'plan', 'session-1');
+            const stateAfterRefresh = readSkillActiveState(tempDir, 'session-1');
+            expect(stateAfterRefresh.reinforcement_count).toBe(0);
         });
     });
     // -----------------------------------------------------------------------
@@ -363,6 +398,13 @@ describe('skill-state', () => {
             const result = checkSkillActiveState(tempDir);
             expect(result.shouldBlock).toBe(true);
             expect(result.skillName).toBe('skill');
+        });
+        it('still blocks stop after a nested skill invocation was rejected', () => {
+            writeSkillActiveState(tempDir, 'plan', 'session-1');
+            writeSkillActiveState(tempDir, 'external-context', 'session-1'); // blocked
+            const result = checkSkillActiveState(tempDir, 'session-1');
+            expect(result.shouldBlock).toBe(true);
+            expect(result.skillName).toBe('plan');
         });
     });
 });

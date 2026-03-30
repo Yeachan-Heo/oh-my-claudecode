@@ -5,9 +5,10 @@
  * Centralises path resolution, ghost-legacy cleanup, directory creation,
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, } from './worktree-paths.js';
+import { atomicWriteJsonSync } from './atomic-write.js';
 export function getStateSessionOwner(state) {
     if (!state || typeof state !== 'object') {
         return undefined;
@@ -73,10 +74,11 @@ export function writeModeState(mode, state, directory, sessionId) {
             ensureOmcDir('state', baseDir);
         }
         const filePath = resolveFile(mode, directory, sessionId);
-        const envelope = { ...state, _meta: { written_at: new Date().toISOString(), mode } };
-        const tmpPath = filePath + '.tmp';
-        writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
-        renameSync(tmpPath, filePath);
+        const envelope = {
+            ...state,
+            _meta: { written_at: new Date().toISOString(), mode, ...(sessionId ? { sessionId } : {}) },
+        };
+        atomicWriteJsonSync(filePath, envelope);
         return true;
     }
     catch {

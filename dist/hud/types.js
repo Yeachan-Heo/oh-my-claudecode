@@ -10,6 +10,7 @@ export const DEFAULT_HUD_CONFIG = {
     elements: {
         cwd: false, // Disabled by default for backward compatibility
         cwdFormat: 'relative',
+        useHyperlinks: false,
         gitRepo: false, // Disabled by default for backward compatibility
         gitBranch: false, // Disabled by default for backward compatibility
         gitInfoPosition: 'above', // Git info above main HUD line (backward compatible)
@@ -41,6 +42,7 @@ export const DEFAULT_HUD_CONFIG = {
         showTokens: false,
         useBars: false, // Disabled by default for backwards compatibility
         showCallCounts: true, // Show tool/agent/skill call counts by default (Issue #710)
+        showLastTool: false,
         sessionSummary: false, // Disabled by default - opt-in AI-generated session summary
         maxOutputLines: 4,
         safeMode: true, // Enabled by default to prevent terminal rendering corruption (Issue #346)
@@ -64,6 +66,7 @@ export const PRESET_CONFIGS = {
     minimal: {
         cwd: false,
         cwdFormat: 'folder',
+        useHyperlinks: false,
         gitRepo: false,
         gitBranch: false,
         gitInfoPosition: 'above',
@@ -95,6 +98,7 @@ export const PRESET_CONFIGS = {
         showTokens: false,
         useBars: false,
         showCallCounts: false,
+        showLastTool: false,
         sessionSummary: false,
         maxOutputLines: 2,
         safeMode: true,
@@ -102,6 +106,7 @@ export const PRESET_CONFIGS = {
     focused: {
         cwd: false,
         cwdFormat: 'relative',
+        useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
         gitInfoPosition: 'above',
@@ -133,6 +138,7 @@ export const PRESET_CONFIGS = {
         showTokens: false,
         useBars: true,
         showCallCounts: true,
+        showLastTool: false,
         sessionSummary: false, // Opt-in: sends transcript to claude -p
         maxOutputLines: 4,
         safeMode: true,
@@ -140,6 +146,7 @@ export const PRESET_CONFIGS = {
     full: {
         cwd: false,
         cwdFormat: 'relative',
+        useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
         gitInfoPosition: 'above',
@@ -171,6 +178,7 @@ export const PRESET_CONFIGS = {
         showTokens: false,
         useBars: true,
         showCallCounts: true,
+        showLastTool: false,
         sessionSummary: false, // Opt-in: sends transcript to claude -p
         maxOutputLines: 12,
         safeMode: true,
@@ -178,6 +186,7 @@ export const PRESET_CONFIGS = {
     opencode: {
         cwd: false,
         cwdFormat: 'relative',
+        useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
         gitInfoPosition: 'above',
@@ -209,6 +218,7 @@ export const PRESET_CONFIGS = {
         showTokens: false,
         useBars: false,
         showCallCounts: true,
+        showLastTool: false,
         sessionSummary: false,
         maxOutputLines: 4,
         safeMode: true,
@@ -216,6 +226,7 @@ export const PRESET_CONFIGS = {
     dense: {
         cwd: false,
         cwdFormat: 'relative',
+        useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
         gitInfoPosition: 'above',
@@ -247,6 +258,7 @@ export const PRESET_CONFIGS = {
         showTokens: false,
         useBars: true,
         showCallCounts: true,
+        showLastTool: false,
         sessionSummary: false, // Opt-in: sends transcript to claude -p
         maxOutputLines: 6,
         safeMode: true,

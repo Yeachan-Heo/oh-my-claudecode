@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { readFile, rm } from 'fs/promises';
@@ -11,7 +12,7 @@ import { monitorTeam, resumeTeam, shutdownTeam } from '../team/runtime.js';
 import { readTeamConfig } from '../team/monitor.js';
 import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
-const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,12}$/;
+const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 const SUBCOMMANDS = new Set(['start', 'status', 'wait', 'cleanup', 'resume', 'shutdown', 'api', 'help', '--help', '-h']);
 const SUPPORTED_API_OPERATIONS = new Set([
@@ -134,8 +135,8 @@ function buildStatus(jobId, job) {
         stderr: job.stderr,
     };
 }
-function generateJobId(now = Date.now()) {
-    return `omc-${now.toString(36)}`;
+export function generateJobId(now = Date.now()) {
+    return `omc-${now.toString(36)}${randomUUID().slice(0, 8)}`;
 }
 function convergeWithResultArtifact(jobId, job, jobsDir) {
     try {

@@ -1,13 +1,14 @@
 /**
  * OMC HUD - Prompt Time Element
  *
- * Renders the timestamp of the last user prompt submission.
+ * Renders elapsed time since the last user prompt submission.
  * Recorded by the keyword-detector hook on UserPromptSubmit.
  */
 /**
- * Render prompt submission time.
+ * Render elapsed time since prompt submission.
  *
- * Format: prompt:HH:MM:SS
+ * Format: ⏱13s  or  ⏱1m23s  or  ⏱2h3m
+ * Falls back to HH:MM:SS timestamp if now is not provided.
  */
-export declare function renderPromptTime(promptTime: Date | null): string | null;
+export declare function renderPromptTime(promptTime: Date | null, now?: Date): string | null;
 //# sourceMappingURL=prompt-time.d.ts.map

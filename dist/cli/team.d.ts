@@ -45,6 +45,7 @@ export interface TeamCleanupResult {
     jobId: string;
     message: string;
 }
+export declare function generateJobId(now?: number): string;
 export declare function startTeamJob(input: TeamStartInput): Promise<TeamStartResult>;
 export declare function getTeamJobStatus(jobId: string): Promise<TeamJobStatus>;
 export declare function waitForTeamJob(jobId: string, options?: TeamWaitOptions): Promise<TeamWaitResult>;

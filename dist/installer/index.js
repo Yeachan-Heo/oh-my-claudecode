@@ -516,7 +516,13 @@ export function mergeClaudeMd(existingContent, omcContent, version) {
     // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
     if (hasResidualStartMarker || hasResidualEndMarker) {
         // Handle corrupted state - backup will be created by caller
-        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${existingContent}`;
+        // Strip unmatched OMC markers from recovered content to prevent unbounded
+        // growth on repeated calls (each call would re-detect corruption and append again)
+        const recoveredContent = strippedExistingContent
+            .replace(markerStartRegex, '')
+            .replace(markerEndRegex, '')
+            .trim();
+        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
     }
     const preservedUserContent = trimClaudeUserContent(stripGeneratedUserCustomizationHeaders(strippedExistingContent));
     if (!preservedUserContent) {
@@ -684,7 +690,20 @@ export function install(options = {}) {
                     log('  Installed omc-reference/SKILL.md');
                 }
             }
-            // Install CLAUDE.md with merge support
+            // Note: hook scripts are no longer installed to ~/.claude/hooks/.
+            // All hooks are delivered via the plugin's hooks/hooks.json + scripts/.
+            // Legacy hook entries are cleaned up from settings.json below.
+            result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+        }
+        else {
+            log('Skipping agent/command/hook files (managed by plugin system)');
+        }
+        // Install CLAUDE.md with merge support.
+        // This runs regardless of plugin context so that `omc update` (which re-execs
+        // as `update-reconcile` with CLAUDE_PLUGIN_ROOT still set) always keeps the
+        // version marker and OMC instructions in ~/.claude/CLAUDE.md up to date.
+        // Skipped only for project-scoped plugins to avoid mutating global config.
+        if (!projectScoped) {
             const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
             const homeMdPath = join(homedir(), 'CLAUDE.md');
             if (!existsSync(homeMdPath)) {
@@ -714,13 +733,6 @@ export function install(options = {}) {
             else {
                 log('CLAUDE.md exists in home directory, skipping');
             }
-            // Note: hook scripts are no longer installed to ~/.claude/hooks/.
-            // All hooks are delivered via the plugin's hooks/hooks.json + scripts/.
-            // Legacy hook entries are cleaned up from settings.json below.
-            result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
-        }
-        else {
-            log('Skipping agent/command/hook files (managed by plugin system)');
         }
         // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)
         let hudScriptPath = null;

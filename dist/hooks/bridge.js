@@ -1333,8 +1333,17 @@ async function processPostToolUse(input) {
         }
         // Clear skill-active state on skill completion to prevent false-blocking.
         // Without this, every non-'none' skill falsely blocks stops until TTL expires.
-        const { clearSkillActiveState } = await import("./skill-state/index.js");
-        clearSkillActiveState(directory, input.sessionId);
+        // Guard: only clear if the completing skill owns the active state.
+        // When a parent skill (e.g. omc-setup) invokes a child skill (e.g. mcp-setup),
+        // the child's PostToolUse fires first — we must not delete the parent's state.
+        const { clearSkillActiveState, readSkillActiveState } = await import("./skill-state/index.js");
+        const currentState = readSkillActiveState(directory, input.sessionId);
+        const completingSkill = (getInvokedSkillName(input.toolInput) ?? "")
+            .toLowerCase()
+            .replace(/^oh-my-claudecode:/, "");
+        if (!currentState || !currentState.active || currentState.skill_name === completingSkill) {
+            clearSkillActiveState(directory, input.sessionId);
+        }
     }
     // Run orchestrator post-tool processing (remember tags, verification reminders, etc.)
     const orchestratorResult = processOrchestratorPostTool({

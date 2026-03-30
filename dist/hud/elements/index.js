@@ -22,4 +22,5 @@ export { renderPromptTime } from './prompt-time.js';
 export { detectApiKeySource, renderApiKeySource } from './api-key-source.js';
 export { renderMissionBoard } from './mission-board.js';
 export { renderSessionSummary } from './session-summary.js';
+export { renderLastTool } from './last-tool.js';
 //# sourceMappingURL=index.js.map

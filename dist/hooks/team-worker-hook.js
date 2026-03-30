@@ -157,7 +157,7 @@ async function readWorkerHeartbeatSnapshot(stateDir, teamName, workerName, nowMs
     const heartbeatPath = join(stateDir, 'team', teamName, 'workers', workerName, 'heartbeat.json');
     try {
         if (!existsSync(heartbeatPath))
-            return { last_turn_at: null, fresh: true, missing: true };
+            return { last_turn_at: null, fresh: false, missing: true };
         const raw = await readFile(heartbeatPath, 'utf-8');
         const parsed = JSON.parse(raw);
         const lastTurnAt = parsed && typeof parsed.last_turn_at === 'string' ? parsed.last_turn_at : null;

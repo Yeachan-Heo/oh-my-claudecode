@@ -297,10 +297,10 @@ export function applyPreset(preset) {
  * Initialize HUD state with cleanup of stale/orphaned tasks.
  * Should be called on HUD startup.
  */
-export async function initializeHUDState() {
+export async function initializeHUDState(directory) {
     // Clean up stale background tasks from previous sessions
-    const removedStale = await cleanupStaleBackgroundTasks();
-    const markedOrphaned = await markOrphanedTasksAsStale();
+    const removedStale = await cleanupStaleBackgroundTasks(undefined, directory);
+    const markedOrphaned = await markOrphanedTasksAsStale(directory);
     if (removedStale > 0 || markedOrphaned > 0) {
         console.error(`HUD cleanup: removed ${removedStale} stale tasks, marked ${markedOrphaned} orphaned tasks`);
     }

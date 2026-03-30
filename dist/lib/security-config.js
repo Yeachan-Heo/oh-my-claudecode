@@ -21,8 +21,8 @@ const DEFAULTS = {
     restrictToolPaths: false,
     pythonSandbox: false,
     disableProjectSkills: false,
-    disableAutoUpdate: false,
-    hardMaxIterations: 0,
+    disableAutoUpdate: true,
+    hardMaxIterations: 500,
 };
 const STRICT_OVERRIDES = {
     restrictToolPaths: true,

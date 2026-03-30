@@ -8,19 +8,19 @@ import type { RateLimits, CustomProviderResult, UsageResult } from '../types.js'
 /**
  * Render rate limits display.
  *
- * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h)
+ * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
  */
 export declare function renderRateLimits(limits: RateLimits | null, stale?: boolean): string | null;
 /**
  * Render compact rate limits (just percentages).
  *
- * Format: 45%/12% or 45%/12%/8% (with monthly)
+ * Format: 45%/12% or 45%/12%/8%/20%/5% (5h/wk/mo/sn/op)
  */
 export declare function renderRateLimitsCompact(limits: RateLimits | null, stale?: boolean): string | null;
 /**
  * Render rate limits with visual progress bars.
  *
- * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h)
+ * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h) sn:[██░░░░░░░░]20%(1d2h) op:[░░░░░░░░░░]5%(1d2h)
  */
 export declare function renderRateLimitsWithBar(limits: RateLimits | null, barWidth?: number, stale?: boolean): string | null;
 /**

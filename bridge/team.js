@@ -637,23 +637,35 @@ async function teamWriteWorkerInbox(teamName, workerName, prompt, cwd) {
   await writeAtomic(p, prompt);
 }
 async function teamCreateTask(teamName, task, cwd) {
-  const cfg = await teamReadConfig(teamName, cwd);
-  if (!cfg) throw new Error(`Team ${teamName} not found`);
-  const nextId = String(cfg.next_task_id ?? 1);
-  const created = {
-    ...task,
-    id: nextId,
-    status: task.status ?? "pending",
-    depends_on: task.depends_on ?? task.blocked_by ?? [],
-    version: 1,
-    created_at: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  const taskPath2 = absPath(cwd, TeamPaths.tasks(teamName));
-  await mkdir(taskPath2, { recursive: true });
-  await writeAtomic(join3(taskPath2, `task-${nextId}.json`), JSON.stringify(created, null, 2));
-  cfg.next_task_id = Number(nextId) + 1;
-  await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
-  return created;
+  const lockDir = join3(teamDir(teamName, cwd), ".lock-create-task");
+  const timeoutMs = 5e3;
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 20;
+  while (Date.now() < deadline) {
+    const result = await withLock(lockDir, async () => {
+      const cfg = await teamReadConfig(teamName, cwd);
+      if (!cfg) throw new Error(`Team ${teamName} not found`);
+      const nextId = String(cfg.next_task_id ?? 1);
+      const created = {
+        ...task,
+        id: nextId,
+        status: task.status ?? "pending",
+        depends_on: task.depends_on ?? task.blocked_by ?? [],
+        version: 1,
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      const taskPath2 = absPath(cwd, TeamPaths.tasks(teamName));
+      await mkdir(taskPath2, { recursive: true });
+      await writeAtomic(join3(taskPath2, `task-${nextId}.json`), JSON.stringify(created, null, 2));
+      cfg.next_task_id = Number(nextId) + 1;
+      await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
+      return created;
+    });
+    if (result.ok) return result.value;
+    await new Promise((resolve4) => setTimeout(resolve4, delayMs));
+    delayMs = Math.min(delayMs * 2, 200);
+  }
+  throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
 }
 async function teamReadTask(teamName, taskId, cwd) {
   for (const candidate of taskFileCandidates(teamName, taskId, cwd)) {
@@ -1328,7 +1340,6 @@ async function markLeaderPaneMissingDeferred(params) {
   ).catch(logTransitionFailure);
 }
 async function queueInboxInstruction(params) {
-  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
   const queued = await enqueueDispatchRequest(
     params.teamName,
     {
@@ -1350,6 +1361,17 @@ async function queueInboxInstruction(params) {
       reason: "duplicate_pending_dispatch_request",
       request_id: queued.request.request_id
     };
+  }
+  try {
+    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  } catch (error) {
+    await markImmediateDispatchFailure({
+      teamName: params.teamName,
+      request: queued.request,
+      reason: "inbox_write_failed",
+      cwd: params.cwd
+    });
+    throw error;
   }
   const notifyOutcome = await Promise.resolve(params.notify(
     { workerName: params.workerName, workerIndex: params.workerIndex, paneId: params.paneId },
@@ -4112,9 +4134,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     execFileSync3("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
   } catch {
   }
-  const existing = readMetadata(repoRoot, teamName);
-  const updated = existing.filter((e) => e.workerName !== workerName);
-  writeMetadata(repoRoot, teamName, updated);
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName);
+    const updated = existing.filter((e) => e.workerName !== workerName);
+    writeMetadata(repoRoot, teamName, updated);
+  });
 }
 function cleanupTeamWorktrees(teamName, repoRoot) {
   const entries = readMetadata(repoRoot, teamName);
@@ -5445,6 +5470,7 @@ var init_runtime_v2 = __esm({
 });
 
 // src/cli/team.ts
+import { randomUUID as randomUUID6 } from "crypto";
 import { spawn } from "child_process";
 import { existsSync as existsSync16, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync2 } from "fs";
 import { readFile as readFile10, rm as rm4 } from "fs/promises";
@@ -6398,7 +6424,7 @@ init_team_name();
 init_monitor();
 init_platform();
 init_paths();
-var JOB_ID_PATTERN = /^omc-[a-z0-9]{1,12}$/;
+var JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 var VALID_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
 var SUBCOMMANDS = /* @__PURE__ */ new Set(["start", "status", "wait", "cleanup", "resume", "shutdown", "api", "help", "--help", "-h"]);
 var SUPPORTED_API_OPERATIONS = /* @__PURE__ */ new Set([
@@ -6524,7 +6550,7 @@ function buildStatus(jobId, job) {
   };
 }
 function generateJobId(now = Date.now()) {
-  return `omc-${now.toString(36)}`;
+  return `omc-${now.toString(36)}${randomUUID6().slice(0, 8)}`;
 }
 function convergeWithResultArtifact(jobId, job, jobsDir) {
   try {
@@ -7338,6 +7364,7 @@ export {
   TEAM_USAGE,
   cleanupTeamJob,
   executeTeamApiOperation2 as executeTeamApiOperation,
+  generateJobId,
   getTeamJobStatus,
   main,
   startTeamJob,

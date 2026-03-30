@@ -784,6 +784,19 @@ var init_tmux_session = __esm({
 });
 
 // src/lib/atomic-write.ts
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
 var fs2, fsSync, path, crypto;
 var init_atomic_write = __esm({
   "src/lib/atomic-write.ts"() {
@@ -832,7 +845,109 @@ var init_platform = __esm({
 });
 
 // src/lib/file-lock.ts
-var import_fs8, path3;
+function isLockStale(lockPath, staleLockMs) {
+  try {
+    const stat2 = (0, import_fs8.statSync)(lockPath);
+    const ageMs = Date.now() - stat2.mtimeMs;
+    if (ageMs < staleLockMs) return false;
+    try {
+      const raw = (0, import_fs8.readFileSync)(lockPath, "utf-8");
+      const payload = JSON.parse(raw);
+      if (payload.pid && isProcessAlive(payload.pid)) return false;
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function tryAcquireSync(lockPath, staleLockMs) {
+  ensureDirSync(path3.dirname(lockPath));
+  try {
+    const fd = (0, import_fs8.openSync)(
+      lockPath,
+      import_fs8.constants.O_CREAT | import_fs8.constants.O_EXCL | import_fs8.constants.O_WRONLY,
+      384
+    );
+    const payload = JSON.stringify({
+      pid: process.pid,
+      timestamp: Date.now()
+    });
+    (0, import_fs8.writeSync)(fd, payload, null, "utf-8");
+    return { fd, path: lockPath };
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+      if (isLockStale(lockPath, staleLockMs)) {
+        try {
+          (0, import_fs8.unlinkSync)(lockPath);
+        } catch {
+        }
+        try {
+          const fd = (0, import_fs8.openSync)(
+            lockPath,
+            import_fs8.constants.O_CREAT | import_fs8.constants.O_EXCL | import_fs8.constants.O_WRONLY,
+            384
+          );
+          const payload = JSON.stringify({
+            pid: process.pid,
+            timestamp: Date.now()
+          });
+          (0, import_fs8.writeSync)(fd, payload, null, "utf-8");
+          return { fd, path: lockPath };
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+    throw err;
+  }
+}
+function acquireFileLockSync(lockPath, opts) {
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const timeoutMs = opts?.timeoutMs ?? 0;
+  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const handle = tryAcquireSync(lockPath, staleLockMs);
+  if (handle || timeoutMs <= 0) return handle;
+  const deadline = Date.now() + timeoutMs;
+  const sharedBuf = new SharedArrayBuffer(4);
+  const sharedArr = new Int32Array(sharedBuf);
+  while (Date.now() < deadline) {
+    const waitMs = Math.min(retryDelayMs, deadline - Date.now());
+    try {
+      Atomics.wait(sharedArr, 0, 0, waitMs);
+    } catch {
+      const waitUntil = Date.now() + waitMs;
+      while (Date.now() < waitUntil) {
+      }
+    }
+    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
+    if (retryHandle) return retryHandle;
+  }
+  return null;
+}
+function releaseFileLockSync(handle) {
+  try {
+    (0, import_fs8.closeSync)(handle.fd);
+  } catch {
+  }
+  try {
+    (0, import_fs8.unlinkSync)(handle.path);
+  } catch {
+  }
+}
+function withFileLockSync(lockPath, fn, opts) {
+  const handle = acquireFileLockSync(lockPath, opts);
+  if (!handle) {
+    throw new Error(`Failed to acquire file lock: ${lockPath}`);
+  }
+  try {
+    return fn();
+  } finally {
+    releaseFileLockSync(handle);
+  }
+}
+var import_fs8, path3, DEFAULT_STALE_LOCK_MS, DEFAULT_RETRY_DELAY_MS;
 var init_file_lock = __esm({
   "src/lib/file-lock.ts"() {
     "use strict";
@@ -840,6 +955,8 @@ var init_file_lock = __esm({
     path3 = __toESM(require("path"), 1);
     init_atomic_write();
     init_platform();
+    DEFAULT_STALE_LOCK_MS = 3e4;
+    DEFAULT_RETRY_DELAY_MS = 50;
   }
 });
 
@@ -2639,9 +2756,12 @@ function removeWorkerWorktree(teamName, workerName2, repoRoot) {
     (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
   } catch {
   }
-  const existing = readMetadata(repoRoot, teamName);
-  const updated = existing.filter((e) => e.workerName !== workerName2);
-  writeMetadata(repoRoot, teamName, updated);
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName);
+    const updated = existing.filter((e) => e.workerName !== workerName2);
+    writeMetadata(repoRoot, teamName, updated);
+  });
 }
 function cleanupTeamWorktrees(teamName, repoRoot) {
   const entries = readMetadata(repoRoot, teamName);
@@ -2713,9 +2833,9 @@ function getTaskStoragePath(cwd, teamName, taskId) {
 }
 
 // src/team/task-file-ops.ts
-var DEFAULT_STALE_LOCK_MS = 3e4;
+var DEFAULT_STALE_LOCK_MS2 = 3e4;
 function acquireTaskLock(teamName, taskId, opts) {
-  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS2;
   const dir = canonicalTasksDir(teamName, opts?.cwd);
   ensureDirWithMode(dir);
   const lockPath = (0, import_path10.join)(dir, `${sanitizeTaskId(taskId)}.lock`);
@@ -2731,7 +2851,7 @@ function acquireTaskLock(teamName, taskId, opts) {
       return { fd, path: lockPath };
     } catch (err) {
       if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
-        if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
+        if (attempt === 0 && isLockStale2(lockPath, staleLockMs)) {
           try {
             (0, import_fs9.unlinkSync)(lockPath);
           } catch {
@@ -2764,7 +2884,7 @@ async function withTaskLock(teamName, taskId, fn, opts) {
     releaseTaskLock(handle);
   }
 }
-function isLockStale(lockPath, staleLockMs) {
+function isLockStale2(lockPath, staleLockMs) {
   try {
     const stat2 = (0, import_fs9.statSync)(lockPath);
     const ageMs = Date.now() - stat2.mtimeMs;
@@ -3286,7 +3406,13 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     runtime.cwd
   ]);
   const paneId = splitResult.stdout.split("\n")[0]?.trim();
-  if (!paneId) return "";
+  if (!paneId) {
+    try {
+      await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
+    } catch {
+    }
+    return "";
+  }
   const workerIndex = parseWorkerIndex(workerNameValue);
   const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length] ?? runtime.config.agentTypes[0] ?? "claude";
   const usePromptMode = isPromptModeAgent(agentType);
@@ -4745,7 +4871,6 @@ async function markImmediateDispatchFailure(params) {
   ).catch(logTransitionFailure);
 }
 async function queueInboxInstruction(params) {
-  await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
   const queued = await enqueueDispatchRequest(
     params.teamName,
     {
@@ -4767,6 +4892,17 @@ async function queueInboxInstruction(params) {
       reason: "duplicate_pending_dispatch_request",
       request_id: queued.request.request_id
     };
+  }
+  try {
+    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+  } catch (error) {
+    await markImmediateDispatchFailure({
+      teamName: params.teamName,
+      request: queued.request,
+      reason: "inbox_write_failed",
+      cwd: params.cwd
+    });
+    throw error;
   }
   const notifyOutcome = await Promise.resolve(params.notify(
     { workerName: params.workerName, workerIndex: params.workerIndex, paneId: params.paneId },

@@ -55,22 +55,25 @@ export function readNewOutboxMessages(teamName, workerName) {
         closeSync(fd);
     }
     const chunk = buf.toString('utf-8');
-    const lines = chunk.split('\n').filter(l => l.trim());
+    // Only parse complete lines (up to the last newline) so that a partial
+    // trailing line is not delivered prematurely and then re-delivered on
+    // the next read when the cursor backtracks.
+    let consumed = bytesToRead;
+    let completePortion = chunk;
+    if (!chunk.endsWith('\n')) {
+        const lastNewline = chunk.lastIndexOf('\n');
+        consumed = lastNewline >= 0
+            ? Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf-8')
+            : 0;
+        completePortion = lastNewline >= 0 ? chunk.slice(0, lastNewline + 1) : '';
+    }
+    const lines = completePortion.split('\n').filter(l => l.trim());
     const messages = [];
     for (const line of lines) {
         try {
             messages.push(JSON.parse(line));
         }
         catch { /* skip malformed lines */ }
-    }
-    // If the buffer ends mid-line (no trailing newline), backtrack the cursor
-    // to the start of that partial line so it is retried on the next read.
-    let consumed = bytesToRead;
-    if (!chunk.endsWith('\n')) {
-        const lastNewline = chunk.lastIndexOf('\n');
-        consumed = lastNewline >= 0
-            ? Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf-8')
-            : 0;
     }
     // Update cursor atomically to prevent corruption on crash
     const newCursor = { bytesRead: cursor.bytesRead + consumed };

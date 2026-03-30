@@ -18191,6 +18191,19 @@ var fs2 = __toESM(require("fs/promises"), 1);
 var fsSync = __toESM(require("fs"), 1);
 var path = __toESM(require("path"), 1);
 var crypto = __toESM(require("crypto"), 1);
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
 
 // src/platform/index.ts
 var path2 = __toESM(require("path"), 1);
@@ -18216,6 +18229,112 @@ function isProcessAlive(pid) {
 
 // src/platform/index.ts
 var PLATFORM = process.platform;
+
+// src/lib/file-lock.ts
+var DEFAULT_STALE_LOCK_MS = 3e4;
+var DEFAULT_RETRY_DELAY_MS = 50;
+function isLockStale(lockPath, staleLockMs) {
+  try {
+    const stat = (0, import_fs4.statSync)(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < staleLockMs) return false;
+    try {
+      const raw = (0, import_fs4.readFileSync)(lockPath, "utf-8");
+      const payload = JSON.parse(raw);
+      if (payload.pid && isProcessAlive(payload.pid)) return false;
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function tryAcquireSync(lockPath, staleLockMs) {
+  ensureDirSync(path3.dirname(lockPath));
+  try {
+    const fd = (0, import_fs4.openSync)(
+      lockPath,
+      import_fs4.constants.O_CREAT | import_fs4.constants.O_EXCL | import_fs4.constants.O_WRONLY,
+      384
+    );
+    const payload = JSON.stringify({
+      pid: process.pid,
+      timestamp: Date.now()
+    });
+    (0, import_fs4.writeSync)(fd, payload, null, "utf-8");
+    return { fd, path: lockPath };
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+      if (isLockStale(lockPath, staleLockMs)) {
+        try {
+          (0, import_fs4.unlinkSync)(lockPath);
+        } catch {
+        }
+        try {
+          const fd = (0, import_fs4.openSync)(
+            lockPath,
+            import_fs4.constants.O_CREAT | import_fs4.constants.O_EXCL | import_fs4.constants.O_WRONLY,
+            384
+          );
+          const payload = JSON.stringify({
+            pid: process.pid,
+            timestamp: Date.now()
+          });
+          (0, import_fs4.writeSync)(fd, payload, null, "utf-8");
+          return { fd, path: lockPath };
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+    throw err;
+  }
+}
+function acquireFileLockSync(lockPath, opts) {
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const timeoutMs = opts?.timeoutMs ?? 0;
+  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const handle = tryAcquireSync(lockPath, staleLockMs);
+  if (handle || timeoutMs <= 0) return handle;
+  const deadline = Date.now() + timeoutMs;
+  const sharedBuf = new SharedArrayBuffer(4);
+  const sharedArr = new Int32Array(sharedBuf);
+  while (Date.now() < deadline) {
+    const waitMs = Math.min(retryDelayMs, deadline - Date.now());
+    try {
+      Atomics.wait(sharedArr, 0, 0, waitMs);
+    } catch {
+      const waitUntil = Date.now() + waitMs;
+      while (Date.now() < waitUntil) {
+      }
+    }
+    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
+    if (retryHandle) return retryHandle;
+  }
+  return null;
+}
+function releaseFileLockSync(handle) {
+  try {
+    (0, import_fs4.closeSync)(handle.fd);
+  } catch {
+  }
+  try {
+    (0, import_fs4.unlinkSync)(handle.path);
+  } catch {
+  }
+}
+function withFileLockSync(lockPath, fn, opts) {
+  const handle = acquireFileLockSync(lockPath, opts);
+  if (!handle) {
+    throw new Error(`Failed to acquire file lock: ${lockPath}`);
+  }
+  try {
+    return fn();
+  } finally {
+    releaseFileLockSync(handle);
+  }
+}
 
 // src/team/git-worktree.ts
 function getWorktreePath(repoRoot, teamName, workerName) {
@@ -18261,9 +18380,12 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
   } catch {
   }
-  const existing = readMetadata(repoRoot, teamName);
-  const updated = existing.filter((e) => e.workerName !== workerName);
-  writeMetadata(repoRoot, teamName, updated);
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName);
+    const updated = existing.filter((e) => e.workerName !== workerName);
+    writeMetadata(repoRoot, teamName, updated);
+  });
 }
 function cleanupTeamWorktrees(teamName, repoRoot) {
   const entries = readMetadata(repoRoot, teamName);
@@ -18401,7 +18523,14 @@ var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
 
 // src/mcp/team-server.ts
 var import_meta = {};
-var __dirname = (0, import_url.fileURLToPath)(new URL(".", import_meta.url));
+var __ownDir = (() => {
+  if (typeof __dirname !== "undefined" && __dirname) return __dirname;
+  try {
+    return (0, import_url.fileURLToPath)(new URL(".", import_meta.url));
+  } catch {
+    return process.cwd();
+  }
+})();
 var omcTeamJobs = /* @__PURE__ */ new Map();
 var OMC_JOBS_DIR = process.env.OMC_JOBS_DIR || getGlobalOmcStatePath("team-jobs");
 var DEPRECATION_CODE = "deprecated_cli_only";
@@ -18509,8 +18638,8 @@ async function loadPaneIds(jobId) {
   }
 }
 function validateJobId(job_id) {
-  if (!/^omc-[a-z0-9]{1,12}$/.test(job_id)) {
-    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
+  if (!/^omc-[a-z0-9]{1,16}$/.test(job_id)) {
+    throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,16}$/`);
   }
 }
 function saveJobState(jobId, job) {
@@ -18564,7 +18693,7 @@ async function handleStart(args) {
   const input = startSchema.parse(args);
   validateTeamName(input.teamName);
   const jobId = `omc-${Date.now().toString(36)}`;
-  const runtimeCliPath = (0, import_path5.join)(__dirname, "runtime-cli.cjs");
+  const runtimeCliPath = (0, import_path5.join)(__ownDir, "runtime-cli.cjs");
   const job = { status: "running", startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
   const child = (0, import_child_process4.spawn)("node", [runtimeCliPath], {

@@ -9,7 +9,18 @@ import { z } from 'zod';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const __ownDir = (() => {
+    // CJS bundle: __dirname is reliable and takes precedence
+    if (typeof __dirname !== 'undefined' && __dirname)
+        return __dirname;
+    // ESM: derive from import.meta.url
+    try {
+        return fileURLToPath(new URL('.', import.meta.url));
+    }
+    catch {
+        return process.cwd();
+    }
+})();
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { killWorkerPanes, killTeamSession } from '../team/tmux-session.js';
@@ -144,8 +155,8 @@ async function loadPaneIds(jobId) {
     }
 }
 function validateJobId(job_id) {
-    if (!/^omc-[a-z0-9]{1,12}$/.test(job_id)) {
-        throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,12}$/`);
+    if (!/^omc-[a-z0-9]{1,16}$/.test(job_id)) {
+        throw new Error(`Invalid job_id: "${job_id}". Must match /^omc-[a-z0-9]{1,16}$/`);
     }
 }
 function saveJobState(jobId, job) {
@@ -201,7 +212,7 @@ async function handleStart(args) {
     const input = startSchema.parse(args);
     validateTeamName(input.teamName);
     const jobId = `omc-${Date.now().toString(36)}`;
-    const runtimeCliPath = join(__dirname, 'runtime-cli.cjs');
+    const runtimeCliPath = join(__ownDir, 'runtime-cli.cjs');
     const job = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
     omcTeamJobs.set(jobId, job);
     const child = spawn('node', [runtimeCliPath], {

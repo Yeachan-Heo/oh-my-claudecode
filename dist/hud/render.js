@@ -28,6 +28,7 @@ import { renderCallCounts } from "./elements/call-counts.js";
 import { renderContextLimitWarning } from "./elements/context-warning.js";
 import { renderMissionBoard } from "./mission-board.js";
 import { renderSessionSummary } from "./elements/session-summary.js";
+import { renderLastTool } from "./elements/last-tool.js";
 /**
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
  * Used to skip escape codes when measuring/truncating visible width.
@@ -170,7 +171,7 @@ export async function render(context, config) {
     const gitElements = [];
     // Working directory
     if (enabledElements.cwd) {
-        const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || "relative");
+        const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || "relative", enabledElements.useHyperlinks ?? false);
         if (cwdElement)
             gitElements.push(cwdElement);
     }
@@ -251,7 +252,7 @@ export async function render(context, config) {
     }
     // Prompt submission time
     if (enabledElements.promptTime) {
-        const prompt = renderPromptTime(context.promptTime);
+        const prompt = renderPromptTime(context.promptTime, new Date());
         if (prompt)
             elements.push(prompt);
     }
@@ -340,6 +341,11 @@ export async function render(context, config) {
         const counts = renderCallCounts(context.toolCallCount, context.agentCallCount, context.skillCallCount);
         if (counts)
             elements.push(counts);
+    }
+    if (enabledElements.showLastTool === true) {
+        const tool = renderLastTool(context.lastToolName ?? null);
+        if (tool)
+            elements.push(tool);
     }
     // Session summary (AI-generated label)
     if (enabledElements.sessionSummary && context.sessionSummary) {

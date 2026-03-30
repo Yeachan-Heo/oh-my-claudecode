@@ -397,7 +397,8 @@ function detectPipelineSignal(sessionId, signal) {
         join(claudeDir, "sessions", sessionId, "messages.json"),
         join(claudeDir, "transcripts", `${sessionId}.md`),
     ];
-    const pattern = new RegExp(signal, "i");
+    const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, "i");
     for (const transcriptPath of possiblePaths) {
         if (existsSync(transcriptPath)) {
             try {

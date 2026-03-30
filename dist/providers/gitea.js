@@ -125,10 +125,14 @@ export class GiteaProvider {
     }
     viewIssueviaRest(number, owner, repo) {
         const baseUrl = validateGiteaUrl(process.env.GITEA_URL ?? '');
+        const token = process.env.GITEA_TOKEN;
         if (!baseUrl || !owner || !repo)
             return null;
         try {
-            const args = ['-sS', `${baseUrl}/api/v1/repos/${owner}/${repo}/issues/${number}`];
+            const args = ['-sS'];
+            if (token)
+                args.push('-H', `Authorization: token ${token}`);
+            args.push(`${baseUrl}/api/v1/repos/${owner}/${repo}/issues/${number}`);
             const raw = execFileSync('curl', args, {
                 encoding: 'utf-8',
                 timeout: 10000,

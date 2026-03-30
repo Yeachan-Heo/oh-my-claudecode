@@ -48,23 +48,37 @@ describe('mode-state-io', () => {
             // 0o600 = owner read+write only (on Linux the file mode bits are in the lower 12 bits)
             expect(mode & 0o777).toBe(0o600);
         });
-        it('should not leave temp file after successful write', () => {
+        it('should not leave shared .tmp file after successful write (uses atomic write with unique temp)', () => {
             writeModeState('ralph', { active: true }, tempDir);
             const filePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
             expect(existsSync(filePath)).toBe(true);
+            // atomicWriteJsonSync uses random UUID-based temp files, not shared .tmp suffix
             expect(existsSync(filePath + '.tmp')).toBe(false);
         });
-        it('should preserve original file when a leftover .tmp exists from a prior crash', () => {
-            // Simulate: a previous write crashed, leaving a .tmp file
-            writeModeState('ralph', { active: true, iteration: 1 }, tempDir);
+        it('should include sessionId in _meta when sessionId is provided', () => {
+            writeModeState('ralph', { active: true }, tempDir, 'pid-session-42');
+            const filePath = join(tempDir, '.omc', 'state', 'sessions', 'pid-session-42', 'ralph-state.json');
+            expect(existsSync(filePath)).toBe(true);
+            const written = JSON.parse(readFileSync(filePath, 'utf-8'));
+            expect(written._meta.sessionId).toBe('pid-session-42');
+        });
+        it('should not include sessionId in _meta when sessionId is not provided', () => {
+            writeModeState('ralph', { active: true }, tempDir);
             const filePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
-            writeFileSync(filePath + '.tmp', 'partial-garbage');
-            // A new write should overwrite the stale .tmp and succeed
-            writeModeState('ralph', { active: true, iteration: 2 }, tempDir);
+            const written = JSON.parse(readFileSync(filePath, 'utf-8'));
+            expect(written._meta.sessionId).toBeUndefined();
+        });
+        it('should use atomic write preventing race conditions from shared .tmp path', () => {
+            // Two concurrent writes should not collide on temp file paths
+            // (atomicWriteJsonSync uses crypto.randomUUID() for temp file names)
+            const result1 = writeModeState('ralph', { active: true, iteration: 1 }, tempDir);
+            const result2 = writeModeState('ralph', { active: true, iteration: 2 }, tempDir);
+            expect(result1).toBe(true);
+            expect(result2).toBe(true);
+            // The last write should win
             const state = readModeState('ralph', tempDir);
             expect(state).not.toBeNull();
             expect(state.iteration).toBe(2);
-            expect(existsSync(filePath + '.tmp')).toBe(false);
         });
     });
     // -----------------------------------------------------------------------

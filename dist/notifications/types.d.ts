@@ -200,6 +200,8 @@ export interface ReplyConfig {
     includePrefix: boolean;
     /** Authorized Discord user IDs (REQUIRED for Discord, empty = Discord disabled) */
     authorizedDiscordUserIds: string[];
+    /** Authorized Slack user IDs (empty = all channel users allowed) */
+    authorizedSlackUserIds: string[];
 }
 /** Type of custom integration */
 export type CustomIntegrationType = 'webhook' | 'cli';

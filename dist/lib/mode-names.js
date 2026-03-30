@@ -12,6 +12,7 @@ export const MODE_NAMES = {
     RALPH: 'ralph',
     ULTRAWORK: 'ultrawork',
     ULTRAQA: 'ultraqa',
+    RALPLAN: 'ralplan',
 };
 /**
  * Deprecated mode names removed in #1131 (pipeline unification).
@@ -32,6 +33,7 @@ export const ALL_MODE_NAMES = [
     MODE_NAMES.RALPH,
     MODE_NAMES.ULTRAWORK,
     MODE_NAMES.ULTRAQA,
+    MODE_NAMES.RALPLAN,
 ];
 /**
  * Mode state file mapping — the canonical filename for each mode's state file
@@ -43,6 +45,7 @@ export const MODE_STATE_FILE_MAP = {
     [MODE_NAMES.RALPH]: 'ralph-state.json',
     [MODE_NAMES.ULTRAWORK]: 'ultrawork-state.json',
     [MODE_NAMES.ULTRAQA]: 'ultraqa-state.json',
+    [MODE_NAMES.RALPLAN]: 'ralplan-state.json',
 };
 /**
  * Mode state files used by session-end cleanup.
@@ -54,6 +57,7 @@ export const SESSION_END_MODE_STATE_FILES = [
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA], mode: MODE_NAMES.ULTRAQA },
+    { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
     { file: 'skill-active-state.json', mode: 'skill-active' },
 ];
 /**
@@ -63,5 +67,6 @@ export const SESSION_METRICS_MODE_FILES = [
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT], mode: MODE_NAMES.AUTOPILOT },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
+    { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
 ];
 //# sourceMappingURL=mode-names.js.map

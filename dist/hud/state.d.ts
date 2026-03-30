@@ -45,5 +45,5 @@ export declare function applyPreset(preset: HudConfig["preset"]): HudConfig;
  * Initialize HUD state with cleanup of stale/orphaned tasks.
  * Should be called on HUD startup.
  */
-export declare function initializeHUDState(): Promise<void>;
+export declare function initializeHUDState(directory?: string): Promise<void>;
 //# sourceMappingURL=state.d.ts.map

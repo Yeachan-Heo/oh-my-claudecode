@@ -45,6 +45,8 @@ export interface ReplyListenerDaemonConfig extends ReplyConfig {
     slackChannelId?: string;
     /** Slack signing secret for verifying incoming WebSocket messages */
     slackSigningSecret?: string;
+    /** Authorized Slack user IDs for reply injection (empty = all channel users allowed) */
+    authorizedSlackUserIds: string[];
 }
 /** Response from daemon operations */
 export interface DaemonResponse {

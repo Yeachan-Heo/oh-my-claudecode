@@ -643,6 +643,30 @@ export function getReplyListenerPlatformConfig(config) {
     };
 }
 /**
+ * Parse Slack user IDs from environment variable or config array.
+ * Slack user IDs match pattern U or W followed by alphanumeric chars (e.g. U12345678, W0123ABCDE).
+ * Returns empty array if neither is valid.
+ */
+function parseSlackUserIds(envValue, configValue) {
+    // Try env var first (comma-separated list)
+    if (envValue) {
+        const ids = envValue
+            .split(",")
+            .map((id) => id.trim())
+            .filter((id) => /^[UW][A-Z0-9]{8,11}$/.test(id));
+        if (ids.length > 0)
+            return ids;
+    }
+    // Try config array
+    if (Array.isArray(configValue)) {
+        const ids = configValue
+            .filter((id) => typeof id === "string" && /^[UW][A-Z0-9]{8,11}$/.test(id));
+        if (ids.length > 0)
+            return ids;
+    }
+    return [];
+}
+/**
  * Parse Discord user IDs from environment variable or config array.
  * Returns empty array if neither is valid.
  */
@@ -713,6 +737,7 @@ export function getReplyConfig() {
         console.warn("[notifications] Discord reply listening disabled: authorizedDiscordUserIds is empty. " +
             "Set OMC_REPLY_DISCORD_USER_IDS or add to .omc-config.json notifications.reply.authorizedDiscordUserIds");
     }
+    const authorizedSlackUserIds = parseSlackUserIds(process.env.OMC_REPLY_SLACK_USER_IDS, replyRaw?.authorizedSlackUserIds);
     return {
         enabled: true,
         pollIntervalMs: parseIntSafe(process.env.OMC_REPLY_POLL_INTERVAL_MS) ?? replyRaw?.pollIntervalMs ?? 3000,
@@ -720,6 +745,7 @@ export function getReplyConfig() {
         rateLimitPerMinute: parseIntSafe(process.env.OMC_REPLY_RATE_LIMIT) ?? replyRaw?.rateLimitPerMinute ?? 10,
         includePrefix: process.env.OMC_REPLY_INCLUDE_PREFIX !== "false" && (replyRaw?.includePrefix !== false),
         authorizedDiscordUserIds,
+        authorizedSlackUserIds,
     };
 }
 import { validateCustomIntegration, checkDuplicateIds } from "./validation.js";

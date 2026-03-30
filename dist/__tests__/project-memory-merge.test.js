@@ -79,6 +79,23 @@ describe('deepMerge', () => {
         const result = deepMerge({ items: [1, 2, 3] }, { items: [3, 4, 5] });
         expect(result.items).toEqual([1, 2, 3, 4, 5]);
     });
+    it('should skip __proto__ keys to prevent prototype pollution', () => {
+        const base = { a: 1 };
+        const malicious = JSON.parse('{"__proto__": {"polluted": true}, "b": 2}');
+        const result = deepMerge(base, malicious);
+        expect(result.b).toBe(2);
+        expect(result).not.toHaveProperty('__proto__', { polluted: true });
+        // Ensure Object.prototype was not polluted
+        expect({}.polluted).toBeUndefined();
+    });
+    it('should skip constructor and prototype keys', () => {
+        const base = { a: 1 };
+        const malicious = { constructor: { polluted: true }, prototype: { evil: true }, b: 2 };
+        const result = deepMerge(base, malicious);
+        expect(result.b).toBe(2);
+        expect(result).not.toHaveProperty('constructor');
+        expect(result).not.toHaveProperty('prototype');
+    });
 });
 // ===========================================================================
 // mergeProjectMemory

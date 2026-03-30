@@ -44,7 +44,7 @@ describe('persistent-mode ralph hard max iterations', () => {
             rmSync(tempDir, { recursive: true, force: true });
         }
     });
-    it('still extends normally when no hard max is set', async () => {
+    it('still extends normally when below hard max (default 500)', async () => {
         delete process.env.OMC_SECURITY;
         clearSecurityConfigCache();
         const tempDir = mkdtempSync(join(tmpdir(), 'ralph-no-hardmax-'));

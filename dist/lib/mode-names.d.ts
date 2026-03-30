@@ -12,6 +12,7 @@ export declare const MODE_NAMES: {
     readonly RALPH: "ralph";
     readonly ULTRAWORK: "ultrawork";
     readonly ULTRAQA: "ultraqa";
+    readonly RALPLAN: "ralplan";
 };
 /**
  * Deprecated mode names removed in #1131 (pipeline unification).

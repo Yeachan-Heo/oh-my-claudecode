@@ -92,10 +92,13 @@ cmd_complete() {
   # executing" even though setup has finished.
   local sid="${CLAUDE_SESSION_ID:-${CLAUDECODE_SESSION_ID:-}}"
   if [ -n "$sid" ]; then
-    rm -f ".omc/state/sessions/${sid}/skill-active-state.json" 2>/dev/null || true
+    # Validate session ID: alphanumeric, hyphens, underscores only (matches TS SESSION_ID_REGEX)
+    if [[ "$sid" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$ ]]; then
+      rm -f ".omc/state/sessions/${sid}/skill-active-state.json" 2>/dev/null || true
+    fi
   else
-    # No session ID: fall back to cleaning all (legacy/safety-net)
-    find .omc/state -name "skill-active-state.json" -delete 2>/dev/null || true
+    # No session ID: fall back to cleaning stale files only (>30min, matching heavy TTL)
+    find .omc/state -name "skill-active-state.json" -mmin +30 -delete 2>/dev/null || true
   fi
 
   # Mark setup as completed in persistent config

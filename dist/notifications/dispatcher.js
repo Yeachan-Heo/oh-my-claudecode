@@ -584,24 +584,28 @@ export async function sendCustomWebhook(integration, payload) {
         // Use native fetch (Node.js 18+)
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), config.timeout);
-        const response = await fetch(url, {
-            method: config.method,
-            headers,
-            body: config.method !== 'GET' ? body : undefined,
-            signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (!response.ok) {
+        try {
+            const response = await fetch(url, {
+                method: config.method,
+                headers,
+                body: config.method !== 'GET' ? body : undefined,
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                return {
+                    platform: "webhook",
+                    success: false,
+                    error: `HTTP ${response.status}: ${response.statusText}`,
+                };
+            }
             return {
                 platform: "webhook",
-                success: false,
-                error: `HTTP ${response.status}: ${response.statusText}`,
+                success: true,
             };
         }
-        return {
-            platform: "webhook",
-            success: true,
-        };
+        finally {
+            clearTimeout(timeout);
+        }
     }
     catch (error) {
         return {
