@@ -262,7 +262,8 @@ export function readPrdStateForHud(directory: string): PrdStateForHud | null {
 
 interface AutopilotStateFile {
   active: boolean;
-  phase: string;
+  phase?: string;
+  current_phase?: string;
   iteration: number;
   max_iterations: number;
   execution?: {
@@ -296,9 +297,14 @@ export function readAutopilotStateForHud(directory: string, sessionId?: string):
       return null;
     }
 
+    const phase = state.phase ?? state.current_phase;
+    if (!phase) {
+      return null;
+    }
+
     return {
       active: state.active,
-      phase: state.phase,
+      phase,
       iteration: state.iteration,
       maxIterations: state.max_iterations,
       tasksCompleted: state.execution?.tasks_completed,

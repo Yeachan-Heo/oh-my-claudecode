@@ -116,6 +116,30 @@ describe('hud omc state session scoping', () => {
     expect(readAutopilotStateForHud(worktree, 'session-a')).toBeNull();
   });
 
+
+  it('reads current_phase when phase is missing for autopilot HUD state', () => {
+    const worktree = createWorktree();
+    const omcRoot = join(worktree, '.omc');
+
+    writeJson(join(omcRoot, 'state', 'autopilot-state.json'), {
+      active: true,
+      current_phase: 'execution',
+      iteration: 3,
+      max_iterations: 10,
+      execution: { tasks_completed: 2, tasks_total: 4, files_created: ['a.ts'] },
+    });
+
+    expect(readAutopilotStateForHud(worktree)).toMatchObject({
+      active: true,
+      phase: 'execution',
+      iteration: 3,
+      maxIterations: 10,
+      tasksCompleted: 2,
+      tasksTotal: 4,
+      filesCreated: 1,
+    });
+  });
+
   it('applies session scoping to combined mode helpers', () => {
     const worktree = createWorktree();
     const omcRoot = join(worktree, '.omc');
