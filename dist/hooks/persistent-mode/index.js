@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
+import { getHardMaxIterations } from '../../lib/security-config.js';
 import { getClaudeConfigDir, getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { readUltraworkState, writeUltraworkState, incrementReinforcement, deactivateUltrawork, getUltraworkPersistenceMessage } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
@@ -496,7 +497,18 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     }
     // Check max iterations (cancel already checked at function entry via cached flag)
     if (state.iteration >= state.max_iterations) {
-        // Do not silently stop Ralph with unfinished work.
+        const hardMax = getHardMaxIterations();
+        if (hardMax > 0 && state.max_iterations >= hardMax) {
+            // Hard limit reached — auto-disable to prevent unbounded execution
+            state.active = false;
+            writeRalphState(workingDir, state, sessionId);
+            return {
+                shouldBlock: true,
+                message: `[RALPH - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+                mode: 'ralph',
+                metadata: { iteration: state.iteration, maxIterations: state.max_iterations }
+            };
+        }
         // Extend the limit and continue enforcement so user-visible cancellation
         // remains the only explicit termination path.
         state.max_iterations += 10;

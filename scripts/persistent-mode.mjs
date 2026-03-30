@@ -42,6 +42,47 @@ function readJsonFile(path) {
   }
 }
 
+/**
+ * Get hard max iterations from OMC_SECURITY / config file.
+ * Returns 0 if unlimited (default).
+ */
+function getHardMaxIterations() {
+  // OMC_SECURITY=strict → default hard max 200
+  if (process.env.OMC_SECURITY === "strict") {
+    // Check config file for override
+    const configOverride = readSecurityConfigValue("hardMaxIterations");
+    return typeof configOverride === "number" ? configOverride : 200;
+  }
+  // Check config file only
+  const configValue = readSecurityConfigValue("hardMaxIterations");
+  return typeof configValue === "number" ? configValue : 0;
+}
+
+/**
+ * Read a single value from the security section of omc config files.
+ */
+function readSecurityConfigValue(key) {
+  const paths = [
+    join(process.cwd(), ".claude", "omc.jsonc"),
+    join(homedir(), ".config", "claude-omc", "config.jsonc"),
+  ];
+  for (const p of paths) {
+    try {
+      if (!existsSync(p)) continue;
+      const raw = readFileSync(p, "utf-8");
+      // Strip JSONC comments (// and /* */)
+      const json = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const parsed = JSON.parse(json);
+      if (parsed?.security && parsed.security[key] !== undefined) {
+        return parsed.security[key];
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
 function writeJsonFile(path, data) {
   try {
     // Ensure directory exists
@@ -624,7 +665,23 @@ async function main() {
           return;
         }
 
-        // Do not silently stop Ralph once it hits max iterations; extend and keep going.
+        // Check hard max before extending
+        const hardMax = getHardMaxIterations();
+        if (hardMax > 0 && maxIter >= hardMax) {
+          ralph.state.active = false;
+          ralph.state.last_checked_at = new Date().toISOString();
+          writeJsonFile(ralph.path, ralph.state);
+
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+            }),
+          );
+          return;
+        }
+
+        // Extend and keep going.
         ralph.state.max_iterations = maxIter + 10;
         ralph.state.last_checked_at = new Date().toISOString();
         writeJsonFile(ralph.path, ralph.state);
