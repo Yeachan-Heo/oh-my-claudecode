@@ -92,7 +92,7 @@ import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
 const WORKER_BLOCKED_TMUX_PATTERN =
-  /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+  /\btmux\s+(split-window|new-session|new-window|join-pane|send-keys)\b/i;
 const WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
 const WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 
