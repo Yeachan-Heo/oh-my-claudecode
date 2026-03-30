@@ -49,7 +49,7 @@ function executePythonInSandbox(code: string): string {
     '            if _n in ("SANDBOX_BLOCKED_MODULES", "SANDBOX_BLOCKED_BUILTINS", "_original_import"):',
     '                exec(compile(ast.Module(body=[_node], type_ignores=[]), "<bridge>", "exec"), _globals)',
     '    elif isinstance(_node, ast.FunctionDef):',
-    '        if _node.name in ("_sandbox_import", "get_sandbox_namespace"):',
+    '        if _node.name == "_sandbox_import":',
     '            exec(compile(ast.Module(body=[_node], type_ignores=[]), "<bridge>", "exec"), _globals)',
     '_sandbox_import = _globals["_sandbox_import"]',
     '_blocked = _globals["SANDBOX_BLOCKED_BUILTINS"]',
