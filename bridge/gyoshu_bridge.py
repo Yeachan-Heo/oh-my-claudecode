@@ -320,6 +320,9 @@ class ExecutionState:
             "clean_memory": clean_memory,
             "get_memory": get_memory_usage,
         }
+        # Apply sandbox restrictions if enabled
+        if _sandbox_enabled:
+            self._namespace.update(get_sandbox_namespace())
 
     def reset(self) -> Dict[str, Any]:
         """Clear namespace and reset state."""
@@ -376,6 +379,59 @@ class ExecutionTimeoutError(Exception):
     """Raised when code execution exceeds timeout."""
 
     pass
+
+
+# =============================================================================
+# SANDBOX MODE
+# =============================================================================
+
+# Modules blocked in sandbox mode (system access, process spawning, networking)
+SANDBOX_BLOCKED_MODULES = frozenset(
+    {
+        "os",
+        "subprocess",
+        "shutil",
+        "socket",
+        "ctypes",
+        "multiprocessing",
+        "webbrowser",
+        "http.server",
+        "xmlrpc.server",
+    }
+)
+
+# Builtins removed in sandbox mode
+SANDBOX_BLOCKED_BUILTINS = frozenset(
+    {"exec", "eval", "compile", "__import__", "open", "breakpoint"}
+)
+
+_sandbox_enabled = os.environ.get("OMC_PYTHON_SANDBOX") == "1"
+_original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+
+
+def _sandbox_import(name, *args, **kwargs):
+    """Import hook that blocks dangerous modules in sandbox mode."""
+    top_level = name.split(".")[0]
+    if top_level in SANDBOX_BLOCKED_MODULES:
+        raise ImportError(
+            f"Module '{name}' is blocked in sandbox mode. "
+            f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
+        )
+    return _original_import(name, *args, **kwargs)
+
+
+def get_sandbox_namespace() -> Dict[str, Any]:
+    """Build a restricted builtins dict for sandbox mode."""
+    import builtins as _builtins_mod
+
+    safe_builtins = {
+        k: v
+        for k, v in vars(_builtins_mod).items()
+        if k not in SANDBOX_BLOCKED_BUILTINS
+    }
+    # Replace __import__ with the blocking version
+    safe_builtins["__import__"] = _sandbox_import
+    return {"__builtins__": safe_builtins}
 
 
 def _timeout_handler(signum, frame):

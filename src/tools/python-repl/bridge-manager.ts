@@ -18,6 +18,7 @@ import { promisify } from 'util';
 
 import { BridgeMeta, PythonEnvInfo } from './types.js';
 import { getRuntimeDir, getSessionDir, getBridgeSocketPath, getBridgeMetaPath, getBridgePortPath, getSessionLockPath } from './paths.js';
+import { isPythonSandboxEnabled } from '../../lib/security-config.js';
 import { atomicWriteJson, safeReadJson, ensureDirSync } from '../../lib/atomic-write.js';
 import { getProcessStartTime, isProcessAlive } from '../../platform/index.js';
 
@@ -390,6 +391,7 @@ export async function spawnBridgeServer(
       ...process.env,
       PYTHONUNBUFFERED: '1',
       OMC_PARENT_PID: String(process.pid),
+      ...(isPythonSandboxEnabled() ? { OMC_PYTHON_SANDBOX: '1' } : {}),
     },
     detached: true,
   });
