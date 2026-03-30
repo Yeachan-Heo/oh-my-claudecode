@@ -10,6 +10,14 @@
 
 set -euo pipefail
 
+sedi() {
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    sed -i "" "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-$(node -p "require('$ROOT/package.json').version")}"
 
@@ -18,21 +26,21 @@ echo "🔄 Syncing version $VERSION to satellite files..."
 # 1. .claude-plugin/plugin.json
 PLUGIN="$ROOT/.claude-plugin/plugin.json"
 if [ -f "$PLUGIN" ]; then
-  sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN"
+  sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN"
   echo "  ✓ plugin.json → $VERSION"
 fi
 
 # 2. .claude-plugin/marketplace.json (has 2 version fields)
 MARKET="$ROOT/.claude-plugin/marketplace.json"
 if [ -f "$MARKET" ]; then
-  sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/g" "$MARKET"
+  sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/g" "$MARKET"
   echo "  ✓ marketplace.json → $VERSION"
 fi
 
 # 3. docs/CLAUDE.md version marker
 CLAUDE_MD="$ROOT/docs/CLAUDE.md"
 if [ -f "$CLAUDE_MD" ]; then
-  sed -i "s/<!-- OMC:VERSION:[^ ]* -->/<!-- OMC:VERSION:$VERSION -->/" "$CLAUDE_MD"
+  sedi "s/<!-- OMC:VERSION:[^ ]* -->/<!-- OMC:VERSION:$VERSION -->/" "$CLAUDE_MD"
   echo "  ✓ docs/CLAUDE.md → $VERSION"
 fi
 
