@@ -221,15 +221,15 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
 };
 
 export function getContract(agentType: CliAgentType): CliAgentContract {
-  if (agentType !== 'claude' && isExternalLLMDisabled()) {
-    throw new Error(
-      `External LLM provider "${agentType}" is disabled by security policy. ` +
-      `Set OMC_SECURITY to a non-strict value or configure security.disableExternalLLM=false to allow.`
-    );
-  }
   const contract = CONTRACTS[agentType];
   if (!contract) {
     throw new Error(`Unknown agent type: ${agentType}. Supported: ${Object.keys(CONTRACTS).join(', ')}`);
+  }
+  if (agentType !== 'claude' && isExternalLLMDisabled()) {
+    throw new Error(
+      `External LLM provider "${agentType}" is blocked by security policy (disableExternalLLM). ` +
+      `Only Claude workers are allowed in the current security configuration.`
+    );
   }
   return contract;
 }

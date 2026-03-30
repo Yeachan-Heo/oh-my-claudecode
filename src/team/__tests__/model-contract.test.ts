@@ -116,7 +116,7 @@ describe('model-contract', () => {
       try {
         const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
         clearSecurityConfigCache();
-        expect(() => getContract('codex')).toThrow('disabled by security policy');
+        expect(() => getContract('codex')).toThrow('blocked by security policy');
       } finally {
         if (origSecurity === undefined) {
           delete process.env.OMC_SECURITY;
@@ -134,7 +134,7 @@ describe('model-contract', () => {
       try {
         const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
         clearSecurityConfigCache();
-        expect(() => getContract('gemini')).toThrow('disabled by security policy');
+        expect(() => getContract('gemini')).toThrow('blocked by security policy');
       } finally {
         if (origSecurity === undefined) {
           delete process.env.OMC_SECURITY;
