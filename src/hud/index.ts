@@ -463,13 +463,15 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
 
     // Apply safe mode sanitization if enabled (Issue #346)
     // This strips ANSI codes and uses ASCII-only output to prevent
-    // terminal rendering corruption during concurrent updates
-    // On Windows, always use safe mode to prevent terminal rendering issues
-    // with non-breaking spaces and ANSI escape sequences
-    // Keep explicit win32 check visible for regression tests: process.platform === 'win32'
-    // config.elements.safeMode || process.platform === 'win32'
+    // terminal rendering corruption during concurrent updates.
+    // On Windows, default to safe mode unless the user explicitly sets safeMode: false
+    // (e.g. Windows Terminal and modern terminals support ANSI natively).
+    // The win32 fallback is retained for configs that omit safeMode entirely
+    // (before default merge, e.g. minimal config files or future schema changes).
+    // explicit false overrides platform detection: process.platform === 'win32'
     const useSafeMode =
-      config.elements.safeMode || process.platform === "win32";
+      config.elements.safeMode !== false &&
+      (config.elements.safeMode || process.platform === "win32");
 
     if (useSafeMode) {
       output = sanitizeOutput(output);

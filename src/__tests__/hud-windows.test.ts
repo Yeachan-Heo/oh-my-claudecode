@@ -125,6 +125,29 @@ describe('HUD Windows Compatibility', () => {
     });
   });
 
+  describe('safeMode override (#346)', () => {
+    it('safeMode logic: explicit false overrides platform detection', () => {
+      // Simulate the logic from src/hud/index.ts
+      const resolveSafeMode = (safeMode: boolean, isWin32: boolean) =>
+        safeMode !== false && (safeMode || isWin32);
+
+      // explicit false: disabled even on Windows
+      expect(resolveSafeMode(false, true)).toBe(false);
+      expect(resolveSafeMode(false, false)).toBe(false);
+      // explicit true: always enabled
+      expect(resolveSafeMode(true, false)).toBe(true);
+      expect(resolveSafeMode(true, true)).toBe(true);
+      // default true on Windows: enabled
+      expect(resolveSafeMode(true, true)).toBe(true);
+    });
+
+    it('hud index.ts should use explicit-false override for safeMode', () => {
+      const indexPath = join(packageRoot, 'src', 'hud', 'index.ts');
+      const content = readFileSync(indexPath, 'utf-8');
+      expect(content).toContain('config.elements.safeMode !== false');
+    });
+  });
+
   describe('Cross-Platform Plugin Cache Path (#670)', () => {
     it('getPluginCacheBase should return path with correct segments', () => {
       const cachePath = getPluginCacheBase();

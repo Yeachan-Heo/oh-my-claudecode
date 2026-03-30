@@ -36,7 +36,7 @@ function getShellOption(platform: string): string | undefined {
 }
 
 function getSafeMode(configSafeMode: boolean, platform: string): boolean {
-  return configSafeMode || isWin32(platform);
+  return configSafeMode !== false && (configSafeMode || isWin32(platform));
 }
 
 describe('Windows HUD Platform Fixes (#739)', () => {
@@ -204,15 +204,15 @@ describe('Windows HUD Platform Fixes (#739)', () => {
         'utf-8',
       );
       expect(content).toContain("process.platform === 'win32'");
-      expect(content).toMatch(/config\.elements\.safeMode \|\| process\.platform === 'win32'/);
+      expect(content).toContain('config.elements.safeMode !== false');
     });
 
     it('safe mode logic: config=false on Mac -> disabled', () => {
       expect(getSafeMode(false, 'darwin')).toBe(false);
     });
 
-    it('safe mode logic: config=false on Windows -> auto-enabled', () => {
-      expect(getSafeMode(false, 'win32')).toBe(true);
+    it('safe mode logic: config=false on Windows -> disabled (explicit override)', () => {
+      expect(getSafeMode(false, 'win32')).toBe(false);
     });
 
     it('safe mode logic: config=true on Mac -> enabled', () => {

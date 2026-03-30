@@ -446,7 +446,8 @@ export interface HudElementConfig {
   showCallCounts?: boolean;   // Show tool/agent/skill call counts on the right of the status line (default: true)
   sessionSummary: boolean;    // Show AI-generated session summary (<20 chars) - generated every 10 turns via claude -p
   maxOutputLines: number;     // Max total output lines to prevent input field shrinkage
-  safeMode: boolean;          // Strip ANSI codes and use ASCII-only output to prevent terminal rendering corruption (Issue #346)
+  safeMode: boolean;          // Strip ANSI codes and use ASCII-only output to prevent terminal rendering corruption (Issue #346).
+                              // Default true. Set to false to explicitly disable even on Windows (e.g. Windows Terminal with ANSI support).
 }
 
 export interface HudThresholds {
