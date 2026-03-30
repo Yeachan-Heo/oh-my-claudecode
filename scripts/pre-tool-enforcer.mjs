@@ -27,6 +27,10 @@ function hasExtendedContextSuffix(modelId) {
 function isSubagentSafeModelId(modelId) {
   return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
 }
+const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
+function isTierAlias(modelId) {
+  return TIER_ALIASES.has((modelId || '').toLowerCase());
+}
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const MODE_STATE_FILES = [
@@ -625,10 +629,14 @@ async function main() {
             : claudeModel || anthropicModel;
 
         if (toolModel) {
-          // Allow explicit valid provider-specific IDs (full Bedrock/Vertex format) without a
-          // [1m] suffix — blocking these leaves no escape hatch when the inherited session model
-          // is itself invalid. Reject tier names (sonnet/opus/haiku) and [1m]-suffixed IDs.
-          if (!isSubagentSafeModelId(toolModel)) {
+          // Allow tier aliases (sonnet/opus/haiku) when OMC_SUBAGENT_MODEL is configured.
+          // The Agent tool schema only accepts these short aliases — full Bedrock/Vertex model
+          // IDs are rejected by the tool schema, leaving no valid escape hatch otherwise.
+          // The routing layer maps tier aliases through OMC_SUBAGENT_MODEL at call time.
+          const subagentModelForAlias = process.env.OMC_SUBAGENT_MODEL || '';
+          if (isTierAlias(toolModel) && subagentModelForAlias) {
+            // fall through to continue — tier alias is safe when OMC_SUBAGENT_MODEL routes it
+          } else if (!isSubagentSafeModelId(toolModel)) {
             const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
             const guidance = subagentModel
               ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL value).`

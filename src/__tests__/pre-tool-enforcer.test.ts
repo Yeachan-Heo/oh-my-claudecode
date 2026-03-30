@@ -419,6 +419,63 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     ).toBeUndefined();
   });
 
+  // === Model routing / forceInherit tests (issue #1868 catch-22) ===
+
+  it('allows tier alias "sonnet" through when OMC_SUBAGENT_MODEL is set and forceInherit is enabled', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:architect', model: 'sonnet' },
+        cwd: tempDir,
+        session_id: 'session-tier-alias',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    // Tier alias + OMC_SUBAGENT_MODEL configured → allow through; Agent tool routes via OMC_SUBAGENT_MODEL
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('blocks tier alias "sonnet" when OMC_SUBAGENT_MODEL is NOT set in forceInherit mode', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:architect', model: 'sonnet' },
+        cwd: tempDir,
+        session_id: 'session-tier-alias-no-subagent',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: '',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+  });
+
+  it('still blocks bare Anthropic model ID even when OMC_SUBAGENT_MODEL is set', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'claude-sonnet-4-6' },
+        cwd: tempDir,
+        session_id: 'session-bare-anthropic',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+  });
+
   it('does not write skill-active-state for unknown custom skills', () => {
     const sessionId = 'session-1581';
 
