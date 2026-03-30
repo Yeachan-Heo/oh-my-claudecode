@@ -634,8 +634,8 @@ async function main() {
           // IDs are rejected by the tool schema, leaving no valid escape hatch otherwise.
           // The routing layer maps tier aliases through OMC_SUBAGENT_MODEL at call time.
           const subagentModelForAlias = process.env.OMC_SUBAGENT_MODEL || '';
-          if (isTierAlias(toolModel) && subagentModelForAlias) {
-            // fall through to continue — tier alias is safe when OMC_SUBAGENT_MODEL routes it
+          if (isTierAlias(toolModel) && isSubagentSafeModelId(subagentModelForAlias)) {
+            // fall through to continue — tier alias is safe when OMC_SUBAGENT_MODEL is a valid provider-specific ID
           } else if (!isSubagentSafeModelId(toolModel)) {
             const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
             const guidance = subagentModel

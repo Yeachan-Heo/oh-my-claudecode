@@ -458,6 +458,42 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
   });
 
+  it('blocks tier alias when OMC_SUBAGENT_MODEL is itself a bare Anthropic model ID', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+        cwd: tempDir,
+        session_id: 'session-tier-alias-bare',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'claude-sonnet-4-6',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+  });
+
+  it('blocks tier alias when OMC_SUBAGENT_MODEL has a [1m] extended-context suffix', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'opus' },
+        cwd: tempDir,
+        session_id: 'session-tier-alias-lm',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+  });
+
   it('still blocks bare Anthropic model ID even when OMC_SUBAGENT_MODEL is set', () => {
     const output = runPreToolEnforcerWithEnv(
       {
