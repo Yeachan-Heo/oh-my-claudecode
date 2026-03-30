@@ -54,7 +54,7 @@ describe('persistent-mode ralph hard max iterations', () => {
     }
   });
 
-  it('still extends normally when no hard max is set', async () => {
+  it('still extends normally when below hard max (default 500)', async () => {
     delete process.env.OMC_SECURITY;
     clearSecurityConfigCache();
 

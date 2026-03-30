@@ -27,21 +27,22 @@ describe('security-config', () => {
       clearSecurityConfigCache();
     });
 
-    it('all features disabled by default', () => {
+    it('secure defaults for safe features, opt-in for others', () => {
       const config = getSecurityConfig();
       expect(config.restrictToolPaths).toBe(false);
       expect(config.pythonSandbox).toBe(false);
       expect(config.disableProjectSkills).toBe(false);
-      expect(config.disableAutoUpdate).toBe(false);
-      expect(config.hardMaxIterations).toBe(0);
+      // Secure-by-default: auto-update off, hard max set
+      expect(config.disableAutoUpdate).toBe(true);
+      expect(config.hardMaxIterations).toBe(500);
     });
 
-    it('convenience functions return false/0', () => {
+    it('convenience functions reflect defaults', () => {
       expect(isToolPathRestricted()).toBe(false);
       expect(isPythonSandboxEnabled()).toBe(false);
       expect(isProjectSkillsDisabled()).toBe(false);
-      expect(isAutoUpdateDisabled()).toBe(false);
-      expect(getHardMaxIterations()).toBe(0);
+      expect(isAutoUpdateDisabled()).toBe(true);
+      expect(getHardMaxIterations()).toBe(500);
     });
   });
 
