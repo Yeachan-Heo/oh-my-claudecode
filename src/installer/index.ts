@@ -814,7 +814,20 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
       }
 
-      // Install CLAUDE.md with merge support
+      // Note: hook scripts are no longer installed to ~/.claude/hooks/.
+      // All hooks are delivered via the plugin's hooks/hooks.json + scripts/.
+      // Legacy hook entries are cleaned up from settings.json below.
+      result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+    } else {
+      log('Skipping agent/command/hook files (managed by plugin system)');
+    }
+
+    // Install CLAUDE.md with merge support.
+    // This runs regardless of plugin context so that `omc update` (which re-execs
+    // as `update-reconcile` with CLAUDE_PLUGIN_ROOT still set) always keeps the
+    // version marker and OMC instructions in ~/.claude/CLAUDE.md up to date.
+    // Skipped only for project-scoped plugins to avoid mutating global config.
+    if (!projectScoped) {
       const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
       const homeMdPath = join(homedir(), 'CLAUDE.md');
 
@@ -847,13 +860,6 @@ export function install(options: InstallOptions = {}): InstallResult {
       } else {
         log('CLAUDE.md exists in home directory, skipping');
       }
-
-      // Note: hook scripts are no longer installed to ~/.claude/hooks/.
-      // All hooks are delivered via the plugin's hooks/hooks.json + scripts/.
-      // Legacy hook entries are cleaned up from settings.json below.
-      result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
-    } else {
-      log('Skipping agent/command/hook files (managed by plugin system)');
     }
 
     // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)
