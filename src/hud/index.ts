@@ -301,8 +301,21 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     }
 
     // Fetch rate limits from OAuth API (if available)
+    // Use .catch() to degrade gracefully when getUsage() throws (e.g., file lock
+    // contention from concurrent HUD processes). The HUD continues rendering
+    // without rate limit data instead of crashing with "HUD error - check stderr".
     const rateLimitsResult =
-      config.elements.rateLimits !== false ? await getUsage() : null;
+      config.elements.rateLimits !== false
+        ? await getUsage().catch((error: unknown) => {
+            if (process.env.OMC_DEBUG) {
+              console.error(
+                "[HUD] Rate limits fetch failed:",
+                error instanceof Error ? error.message : error,
+              );
+            }
+            return null;
+          })
+        : null;
 
     // Fetch custom rate limit buckets (if configured)
     const customBuckets =
