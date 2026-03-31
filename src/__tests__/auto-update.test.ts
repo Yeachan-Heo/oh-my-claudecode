@@ -112,8 +112,8 @@ describe('auto-update reconciliation', () => {
       force: true,
       verbose: false,
       skipClaudeCheck: true,
-      forceHooks: true,
-      refreshHooksInPlugin: true,
+      forceHooks: false,
+      refreshHooksInPlugin: false,
     });
   });
 
@@ -128,7 +128,7 @@ describe('auto-update reconciliation', () => {
       force: true,
       verbose: false,
       skipClaudeCheck: true,
-      forceHooks: true,
+      forceHooks: false,
       refreshHooksInPlugin: false,
     });
   });
@@ -143,15 +143,15 @@ describe('auto-update reconciliation', () => {
       force: true,
       verbose: false,
       skipClaudeCheck: true,
-      forceHooks: true,
-      refreshHooksInPlugin: true,
+      forceHooks: false,
+      refreshHooksInPlugin: false,
     });
     expect(mockedInstall).toHaveBeenNthCalledWith(2, {
       force: true,
       verbose: false,
       skipClaudeCheck: true,
-      forceHooks: true,
-      refreshHooksInPlugin: true,
+      forceHooks: false,
+      refreshHooksInPlugin: false,
     });
   });
 
@@ -844,6 +844,28 @@ describe('auto-update reconciliation', () => {
       env: expect.objectContaining({ OMC_UPDATE_RECONCILE: '1' }),
     }));
     expect(mockedWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it('uses standalone reconciliation flags outside plugin runtime', () => {
+    mockedExistsSync.mockReturnValue(false);
+
+    const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+
+    const result = reconcileUpdateRuntime({ verbose: false });
+
+    if (originalPluginRoot !== undefined) {
+      process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+
+    expect(result.success).toBe(true);
+    expect(mockedInstall).toHaveBeenCalledWith({
+      force: true,
+      verbose: false,
+      skipClaudeCheck: true,
+      forceHooks: false,
+      refreshHooksInPlugin: false,
+    });
   });
 
   it('preserves non-OMC hooks when refreshing plugin hooks during reconciliation', () => {

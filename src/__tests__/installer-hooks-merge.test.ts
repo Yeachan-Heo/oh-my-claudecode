@@ -114,6 +114,10 @@ describe('isOmcHook()', () => {
     expect(isOmcHook('node "$HOME/.claude/hooks/persistent-mode.mjs"')).toBe(true);
   });
 
+  it('recognises OMC code-simplifier command', () => {
+    expect(isOmcHook('node "$HOME/.claude/hooks/code-simplifier.mjs"')).toBe(true);
+  });
+
   it('recognises Windows-style OMC path', () => {
     expect(isOmcHook('node "%USERPROFILE%\\.claude\\hooks\\keyword-detector.mjs"')).toBe(true);
   });

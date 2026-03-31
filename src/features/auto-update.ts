@@ -648,7 +648,10 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGracePeriod?: boolean }): UpdateReconcileResult {
   const errors: string[] = [];
 
+  const runningAsPlugin = isRunningAsPlugin();
   const projectScopedPlugin = isProjectScopedPlugin();
+  const shouldRefreshPluginHooks = runningAsPlugin && !projectScopedPlugin;
+
   if (!projectScopedPlugin) {
     try {
       if (!existsSync(HOOKS_DIR)) {
@@ -665,8 +668,8 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
       force: true,
       verbose: options?.verbose ?? false,
       skipClaudeCheck: true,
-      forceHooks: true,
-      refreshHooksInPlugin: !projectScopedPlugin,
+      forceHooks: shouldRefreshPluginHooks,
+      refreshHooksInPlugin: shouldRefreshPluginHooks,
     });
 
     if (!installResult.success) {
