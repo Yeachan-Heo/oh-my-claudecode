@@ -294,4 +294,18 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.denied).toBe(true);
     expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
   });
+
+  it('denies no-model call when CLAUDE_MODEL is provider-specific[1m] but ANTHROPIC_MODEL is bare[1m]', () => {
+    // Mixed case: CLAUDE_MODEL strips safely, but ANTHROPIC_MODEL strips to a bare Anthropic ID.
+    // The runtime (resolveClaudeWorkerModel) may pick ANTHROPIC_MODEL, so both must be safe.
+    const result = runHook(
+      {},
+      {
+        CLAUDE_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
+        ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]',
+      },
+    );
+    expect(result.denied).toBe(true);
+    expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+  });
 });

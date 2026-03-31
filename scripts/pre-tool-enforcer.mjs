@@ -653,14 +653,17 @@ async function main() {
           }
           // else: valid provider-specific model ID — fall through to continue.
         } else if (sessionHasLmSuffix) {
-          // No model param, but the session model has a [1m] context-window suffix.
-          // Check if stripping the suffix yields a valid provider-specific ID — if so,
-          // the sub-agent will inherit that stripped ID cleanly (e.g.
-          // global.anthropic.claude-sonnet-4-6[1m] → global.anthropic.claude-sonnet-4-6).
-          const strippedSessionModel = sessionModel.replace(/\[\d+[mk]\]$/i, '');
-          if (!isProviderSpecificModelId(strippedSessionModel)) {
-            // Stripped ID would be a bare Anthropic ID (e.g. claude-sonnet-4-6) which
-            // is invalid on Bedrock. Block and guide the user.
+          // No model param, but at least one session model env var has a [1m] suffix.
+          // Validate EVERY suffixed var: the runtime may pick any of them (e.g.
+          // resolveClaudeWorkerModel prefers ANTHROPIC_MODEL), so a safe CLAUDE_MODEL
+          // cannot vouch for an unsafe ANTHROPIC_MODEL in the same session.
+          // Only allow when ALL stripped values are valid provider-specific IDs.
+          const unsafeVar = [claudeModel, anthropicModel]
+            .filter(v => hasExtendedContextSuffix(v))
+            .find(v => !isProviderSpecificModelId(v.replace(/\[\d+[mk]\]$/i, '')));
+          if (unsafeVar) {
+            // At least one var strips to a bare Anthropic ID (e.g. claude-sonnet-4-6)
+            // which is invalid on Bedrock. Block and guide the user.
             const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
             const suggestion = subagentModel
               ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly on this ${toolName} call.`
@@ -675,8 +678,7 @@ async function main() {
             }));
             return;
           }
-          // else: stripping [1m] gives a valid provider-specific ID (e.g.
-          // global.anthropic.claude-sonnet-4-6) — inheritance is safe, fall through.
+          // else: all suffixed vars strip to valid provider-specific IDs — inheritance is safe.
         }
         // else: no model param and no [1m] on session model → normal forceInherit,
         // agents inherit the parent session's model cleanly.
