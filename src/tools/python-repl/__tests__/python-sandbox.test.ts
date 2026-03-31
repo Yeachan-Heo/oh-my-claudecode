@@ -113,6 +113,21 @@ describe('python-repl sandbox blocked modules (bypass prevention)', () => {
     const result = executePythonInSandbox('__import__("os")');
     expect(result).toContain('blocked in sandbox mode');
   });
+
+  it('should block dotted submodule imports (http.server)', () => {
+    const result = executePythonInSandbox('import http.server');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+
+  it('should block "from http.server import HTTPServer" bypass', () => {
+    const result = executePythonInSandbox('from http.server import HTTPServer');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+
+  it('should block xmlrpc.server submodule import', () => {
+    const result = executePythonInSandbox('import xmlrpc.server');
+    expect(result).toContain('blocked in sandbox mode');
+  });
 });
 
 describe('python-repl sandbox bridge startup integration', () => {

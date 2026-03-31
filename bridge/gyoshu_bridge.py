@@ -336,7 +336,7 @@ _original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__"
 def _sandbox_import(name, *args, **kwargs):
     """Import hook that blocks dangerous modules in sandbox mode."""
     top_level = name.split(".")[0]
-    if top_level in SANDBOX_BLOCKED_MODULES:
+    if top_level in SANDBOX_BLOCKED_MODULES or name in SANDBOX_BLOCKED_MODULES:
         raise ImportError(
             f"Module '{name}' is blocked in sandbox mode. "
             f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
