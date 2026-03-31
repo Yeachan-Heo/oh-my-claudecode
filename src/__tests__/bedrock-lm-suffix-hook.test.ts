@@ -12,7 +12,13 @@
  *     ANTHROPIC_MODEL='global.anthropic.claude-sonnet-4-6[1m]' \
  *     OMC_ROUTING_FORCE_INHERIT=true \
  *     node scripts/pre-tool-enforcer.mjs
- *   → expect: deny with [1m] suffix guidance and OMC_SUBAGENT_MODEL mention
+ *   → expect: continue (stripped ID is provider-specific — inheritance is safe)
+ *
+ *   echo '{"tool_name":"Agent","toolInput":{},"cwd":"/tmp"}' | \
+ *     ANTHROPIC_MODEL='claude-sonnet-4-6[1m]' \
+ *     OMC_ROUTING_FORCE_INHERIT=true \
+ *     node scripts/pre-tool-enforcer.mjs
+ *   → expect: deny (stripped ID is a bare Anthropic model ID, invalid on Bedrock)
  *
  *   echo '{"tool_name":"Agent","toolInput":{"model":"us.anthropic.claude-sonnet-4-5-20250929-v1:0"},"cwd":"/tmp"}' | \
  *     ANTHROPIC_MODEL='global.anthropic.claude-sonnet-4-6[1m]' \
@@ -232,17 +238,17 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.denied).toBe(false);
   });
 
-  it('denies no-model call when session model has [1m] suffix and guides to OMC_SUBAGENT_MODEL', () => {
+  it('allows no-model call when session model has [1m] but stripped ID is provider-specific', () => {
+    // global.anthropic.claude-sonnet-4-6[1m] → strip → global.anthropic.claude-sonnet-4-6
+    // That is a valid provider-specific ID, so sub-agent can safely inherit it.
     const result = runHook(
       {},
       { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]' },
     );
-    expect(result.denied).toBe(true);
-    expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
-    expect(result.reason).toMatch(/global\.anthropic\.claude-sonnet-4-6\[1m\]/);
+    expect(result.denied).toBe(false);
   });
 
-  it('includes configured OMC_SUBAGENT_MODEL value in guidance when set', () => {
+  it('allows no-model call when OMC_SUBAGENT_MODEL is set and stripped ID is provider-specific', () => {
     const result = runHook(
       {},
       {
@@ -250,12 +256,12 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
         OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
       },
     );
-    expect(result.denied).toBe(true);
-    expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
+    expect(result.denied).toBe(false);
   });
 
-  it('denies no-model call when only ANTHROPIC_MODEL has [1m] and CLAUDE_MODEL is clean', () => {
-    // Verifies the dual-check: CLAUDE_MODEL || ANTHROPIC_MODEL alone would miss this case.
+  it('allows no-model call when only ANTHROPIC_MODEL has [1m] but stripped ID is provider-specific', () => {
+    // Dual-check: CLAUDE_MODEL is clean, ANTHROPIC_MODEL carries [1m].
+    // Stripping [1m] from the ANTHROPIC_MODEL still gives a valid provider-specific ID.
     const result = runHook(
       {},
       {
@@ -263,7 +269,29 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
         ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
       },
     );
+    expect(result.denied).toBe(false);
+  });
+
+  it('denies no-model call when session model is a bare Anthropic ID with [1m] suffix', () => {
+    // claude-sonnet-4-6[1m] → strip → claude-sonnet-4-6 (bare, invalid on Bedrock) → deny
+    const result = runHook(
+      {},
+      { ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]' },
+    );
     expect(result.denied).toBe(true);
     expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+    expect(result.reason).toMatch(/claude-sonnet-4-6\[1m\]/);
+  });
+
+  it('includes configured OMC_SUBAGENT_MODEL value in guidance for bare-ID deny', () => {
+    const result = runHook(
+      {},
+      {
+        ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]',
+        OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      },
+    );
+    expect(result.denied).toBe(true);
+    expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
   });
 });
