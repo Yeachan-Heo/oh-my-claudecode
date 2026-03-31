@@ -654,21 +654,29 @@ async function main() {
           // else: valid provider-specific model ID — fall through to continue.
         } else if (sessionHasLmSuffix) {
           // No model param, but the session model has a [1m] context-window suffix.
-          // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
-          // Anthropic model ID (e.g. claude-sonnet-4-6) which is invalid on Bedrock.
-          const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
-          const suggestion = subagentModel
-            ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly on this ${toolName} call.`
-            : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> in your environment (use the model ID from the 400 error message, e.g. "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), then pass that value as the model parameter.`;
-          console.log(JSON.stringify({
-            continue: true,
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`
-            }
-          }));
-          return;
+          // Check if stripping the suffix yields a valid provider-specific ID — if so,
+          // the sub-agent will inherit that stripped ID cleanly (e.g.
+          // global.anthropic.claude-sonnet-4-6[1m] → global.anthropic.claude-sonnet-4-6).
+          const strippedSessionModel = sessionModel.replace(/\[\d+[mk]\]$/i, '');
+          if (!isProviderSpecificModelId(strippedSessionModel)) {
+            // Stripped ID would be a bare Anthropic ID (e.g. claude-sonnet-4-6) which
+            // is invalid on Bedrock. Block and guide the user.
+            const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
+            const suggestion = subagentModel
+              ? `Pass model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly on this ${toolName} call.`
+              : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> in your environment (use the model ID from the 400 error message, e.g. "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), then pass that value as the model parameter.`;
+            console.log(JSON.stringify({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: `[MODEL ROUTING] Your session model "${sessionModel}" has a context-window suffix ([1m]) that sub-agents cannot inherit — the runtime strips it to a bare Anthropic model ID which is invalid on Bedrock. ${suggestion}`
+              }
+            }));
+            return;
+          }
+          // else: stripping [1m] gives a valid provider-specific ID (e.g.
+          // global.anthropic.claude-sonnet-4-6) — inheritance is safe, fall through.
         }
         // else: no model param and no [1m] on session model → normal forceInherit,
         // agents inherit the parent session's model cleanly.
