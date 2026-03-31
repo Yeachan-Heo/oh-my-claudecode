@@ -307,5 +307,18 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     );
     expect(result.denied).toBe(true);
     expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+    expect(result.reason).toMatch(/claude-sonnet-4-6\[1m\]/);
+  });
+
+  it('includes configured OMC_SUBAGENT_MODEL value in guidance for bare-ID deny', () => {
+    const result = runHook(
+      {},
+      {
+        ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]',
+        OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      },
+    );
+    expect(result.denied).toBe(true);
+    expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
   });
 });
