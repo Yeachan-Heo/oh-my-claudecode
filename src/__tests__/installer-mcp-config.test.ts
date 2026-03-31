@@ -109,6 +109,14 @@ describe('installer MCP config ownership (issue #1802)', () => {
         type: 'command',
         command: 'node hud.mjs',
       },
+      hooks: {
+        PostToolUse: [],
+        PostToolUseFailure: [],
+        PreToolUse: [],
+        SessionStart: [],
+        Stop: [],
+        UserPromptSubmit: [],
+      },
     });
     expect(settings).not.toHaveProperty('mcpServers');
 
