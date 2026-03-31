@@ -341,6 +341,16 @@ def _sandbox_import(name, *args, **kwargs):
             f"Module '{name}' is blocked in sandbox mode. "
             f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
         )
+    # Check fromlist for dotted-module blocklist entries (e.g. "from http import server")
+    # __import__ signature: __import__(name, globals, locals, fromlist, level)
+    fromlist = (args[2] if len(args) > 2 else kwargs.get("fromlist")) or ()
+    for attr in fromlist:
+        qualified = f"{name}.{attr}"
+        if qualified in SANDBOX_BLOCKED_MODULES:
+            raise ImportError(
+                f"Module '{qualified}' is blocked in sandbox mode. "
+                f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
+            )
     return _original_import(name, *args, **kwargs)
 
 

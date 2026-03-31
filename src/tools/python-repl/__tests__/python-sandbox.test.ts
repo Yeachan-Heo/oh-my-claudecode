@@ -128,6 +128,21 @@ describe('python-repl sandbox blocked modules (bypass prevention)', () => {
     const result = executePythonInSandbox('import xmlrpc.server');
     expect(result).toContain('blocked in sandbox mode');
   });
+
+  it('should block "from http import server" fromlist bypass', () => {
+    const result = executePythonInSandbox('from http import server');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+
+  it('should block "from xmlrpc import server" fromlist bypass', () => {
+    const result = executePythonInSandbox('from xmlrpc import server');
+    expect(result).toContain('blocked in sandbox mode');
+  });
+
+  it('should allow non-blocked submodules (http.client)', () => {
+    const result = executePythonInSandbox('import http.client');
+    expect(result).toBe('ok');
+  });
 });
 
 describe('python-repl sandbox bridge startup integration', () => {
