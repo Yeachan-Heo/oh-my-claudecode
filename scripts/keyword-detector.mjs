@@ -45,6 +45,17 @@ Use your extended thinking capabilities to provide the most thorough and well-re
 ---
 `;
 
+const SEARCH_MESSAGE = `<search-mode>
+MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:
+- explore agents (codebase patterns, file structures)
+- document-specialist agents (remote repos, official docs, GitHub examples)
+Plus direct tools: Grep, Glob
+NEVER stop at first result - be exhaustive.
+</search-mode>
+
+---
+`;
+
 const ANALYZE_MESSAGE = `<analyze-mode>
 ANALYSIS MODE. Gather context before diving deep:
 - Search relevant code paths first
@@ -78,6 +89,15 @@ Perform a focused security review of the relevant changes or target area. Check 
 
 ---
 `;
+
+const MODE_MESSAGE_KEYWORDS = new Map([
+  ['ultrathink', ULTRATHINK_MESSAGE],
+  ['deepsearch', SEARCH_MESSAGE],
+  ['analyze', ANALYZE_MESSAGE],
+  ['tdd', TDD_MESSAGE],
+  ['code-review', CODE_REVIEW_MESSAGE],
+  ['security-review', SECURITY_REVIEW_MESSAGE],
+]);
 
 // Extract prompt from various JSON structures
 function extractPrompt(input) {
@@ -611,13 +631,7 @@ async function main() {
     }
 
     const additionalContextParts = [];
-    for (const [keywordName, message] of [
-      ['ultrathink', ULTRATHINK_MESSAGE],
-      ['analyze', ANALYZE_MESSAGE],
-      ['tdd', TDD_MESSAGE],
-      ['code-review', CODE_REVIEW_MESSAGE],
-      ['security-review', SECURITY_REVIEW_MESSAGE],
-    ]) {
+    for (const [keywordName, message] of MODE_MESSAGE_KEYWORDS) {
       const index = resolved.findIndex(m => m.name === keywordName);
       if (index !== -1) {
         resolved.splice(index, 1);
