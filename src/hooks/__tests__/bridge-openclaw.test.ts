@@ -52,7 +52,9 @@ describe("_openclaw.wake", () => {
       freshOpenClaw.wake("session-start", { sessionId: "sid-1" });
     }).not.toThrow();
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 20 && warnSpy.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
     expect(warnSpy).toHaveBeenCalledWith(
       '[omc] hooks.bridge openclaw wake failed for session-start: gateway down',

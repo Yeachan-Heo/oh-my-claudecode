@@ -91,4 +91,54 @@ describe('HUD marketplace resolution', () => {
 
     expect(readFileSync(sentinelPath, 'utf-8')).toBe('marketplace-loaded');
   });
+
+  it('omc-hud.mjs loads the published npm package name before the branded fallback', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-npm-package-'));
+    tempDirs.push(configDir);
+
+    const fakeHome = join(configDir, 'home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const sentinelPath = join(configDir, 'npm-package-loaded.txt');
+    const npmPackageRoot = join(configDir, 'node_modules', 'oh-my-claude-sisyphus');
+    const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
+    mkdirSync(npmHudDir, { recursive: true });
+    writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(
+      join(npmHudDir, 'index.js'),
+      `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(sentinelPath)}, 'npm-package-loaded');\n`
+    );
+
+    execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+      },
+      stdio: 'pipe',
+    });
+
+    const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+    expect(existsSync(hudScriptPath)).toBe(true);
+
+    const content = readFileSync(hudScriptPath, 'utf-8');
+    expect(content).toContain('"oh-my-claude-sisyphus/dist/hud/index.js"');
+    expect(content).toContain('"oh-my-claudecode/dist/hud/index.js"');
+    expect(content.indexOf('"oh-my-claude-sisyphus/dist/hud/index.js"')).toBeLessThan(
+      content.indexOf('"oh-my-claudecode/dist/hud/index.js"')
+    );
+
+    execFileSync(process.execPath, [hudScriptPath], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+      },
+      stdio: 'pipe',
+    });
+
+    expect(readFileSync(sentinelPath, 'utf-8')).toBe('npm-package-loaded');
+  });
 });
