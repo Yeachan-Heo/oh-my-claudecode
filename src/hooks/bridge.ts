@@ -213,8 +213,10 @@ function updateModeAwaitingConfirmation(
 
       if (awaitingConfirmation) {
         state.awaiting_confirmation = true;
+        state.awaiting_confirmation_set_at = new Date().toISOString();
       } else if (state.awaiting_confirmation === true) {
         delete state.awaiting_confirmation;
+        delete state.awaiting_confirmation_set_at;
       } else {
         continue;
       }

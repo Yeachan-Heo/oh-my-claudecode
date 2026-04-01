@@ -149,12 +149,34 @@ export function detectAnySignal(sessionId: string): AutopilotSignal | null {
 // ENFORCEMENT
 // ============================================================================
 
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
 function isAwaitingConfirmation(state: unknown): boolean {
-  return Boolean(
-    state &&
-    typeof state === 'object' &&
-    (state as Record<string, unknown>).awaiting_confirmation === true
-  );
+  if (!state || typeof state !== 'object') {
+    return false;
+  }
+
+  const stateRecord = state as Record<string, unknown>;
+  if (stateRecord.awaiting_confirmation !== true) {
+    return false;
+  }
+
+  const setAt =
+    (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
+    (typeof stateRecord.last_checked_at === 'string' && stateRecord.last_checked_at) ||
+    (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+    null;
+
+  if (!setAt) {
+    return false;
+  }
+
+  const setAtMs = new Date(setAt).getTime();
+  if (!Number.isFinite(setAtMs)) {
+    return false;
+  }
+
+  return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
 /**
