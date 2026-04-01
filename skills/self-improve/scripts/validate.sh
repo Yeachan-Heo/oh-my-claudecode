@@ -82,8 +82,15 @@ check_sealed_files() {
 
     local modified_files_str=""
     if [[ -n "${WORKTREE_PATH}" ]]; then
+        # Find the correct baseline: the improvement branch this experiment branched from.
+        # Try improve/* branches first, then fall back to main/master.
         local base_commit
-        base_commit=$(git -C "${GIT_DIR}" merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
+        local improve_branch
+        improve_branch=$(git -C "${GIT_DIR}" branch -a --list 'improve/*' 2>/dev/null | head -1 | tr -d ' *' || true)
+        if [[ -z "${improve_branch}" ]]; then
+            improve_branch=$(git -C "${GIT_DIR}" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+        fi
+        base_commit=$(git -C "${GIT_DIR}" merge-base HEAD "${improve_branch}" 2>/dev/null || echo "HEAD~1")
         modified_files_str=$(git -C "${GIT_DIR}" diff --name-only "${base_commit}" 2>/dev/null || true)
         local uncommitted
         uncommitted=$(git -C "${GIT_DIR}" diff --name-only 2>/dev/null || true)
