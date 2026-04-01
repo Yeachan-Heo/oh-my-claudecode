@@ -1,6 +1,7 @@
 ---
 name: autopilot
 description: Full autonomous execution from idea to working code
+argument-hint: "<product idea or task description>"
 level: 4
 ---
 

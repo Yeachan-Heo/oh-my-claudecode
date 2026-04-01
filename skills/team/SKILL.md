@@ -1,6 +1,7 @@
 ---
 name: team
 description: N coordinated agents on shared task list using Claude Code native teams
+argument-hint: "[N:agent-type] [ralph] <task description>"
 aliases: []
 level: 4
 ---
