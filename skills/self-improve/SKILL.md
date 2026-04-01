@@ -234,7 +234,7 @@ SKILL.md does this directly (not delegated):
 2. **Filter** to `status: "success"` only. If zero candidates, skip to Step 9 (Record & Visualize).
 3. **Rank** by `benchmark_score` (respecting `benchmark_direction`)
 4. **Ranked-candidate loop** — for each candidate in rank order (best first):
-   a. **No-regression check**: candidate score must be >= current `best_score`
+   a. **No-regression check**: candidate score must improve or hold even vs `best_score`, respecting `benchmark_direction` (`higher_is_better`: score >= best_score; `lower_is_better`: score <= best_score)
    b. **Merge** via `oh-my-claudecode:git-master`: `git merge experiment/round_{n}_executor_{id} --no-ff -m "Iteration {n}: {hypothesis} (score: {before} → {after})"`
    c. **Re-benchmark** on merged state to confirm improvement
    d. If re-benchmark **confirms** improvement: **accept winner**, break loop
