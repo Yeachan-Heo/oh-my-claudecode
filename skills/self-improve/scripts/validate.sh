@@ -12,7 +12,6 @@ SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Settings path must be provided or discovered from .omc/self-improve/config/
 SETTINGS=""
-VALID_APPROACH_FAMILIES="architecture training_config data infrastructure optimization testing documentation other"
 
 # Parse arguments
 WORKTREE_PATH=""
@@ -163,20 +162,8 @@ check_plan_schema() {
     fi
     ok "Plan contains all required fields."
 
-    # Validate approach_family
-    approach=$(jq -r '.approach_family' "${plan_file}")
-    local valid=0
-    for family in ${VALID_APPROACH_FAMILIES}; do
-        if [[ "${approach}" == "${family}" ]]; then
-            valid=1
-            break
-        fi
-    done
-    if [[ ${valid} -eq 0 ]]; then
-        err "approach_family '${approach}' is not valid. Must be one of: ${VALID_APPROACH_FAMILIES}"
-        exit 1
-    fi
-    ok "Approach family '${approach}' is valid."
+    # approach_family validation is handled by the critic (supports custom families
+    # from harness.md). validate.sh only checks structural schema, not taxonomy.
 
     # Validate hypothesis is a single string
     hypothesis_type=$(jq -r '.hypothesis | type' "${plan_file}" 2>/dev/null)

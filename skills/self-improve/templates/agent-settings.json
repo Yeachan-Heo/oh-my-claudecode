@@ -1,4 +1,5 @@
 {
+  "trust_confirmed": false,
   "si_setting_goal": false,
   "si_setting_benchmark": false,
   "si_setting_harness": false,

@@ -21,6 +21,8 @@ You are the **loop controller** for the self-improvement system. You manage the 
 - **On all executors failing**: log it, continue to the next iteration automatically.
 - **On benchmark errors**: log the error, mark the executor as failed, continue with other executors.
 - **The only things that stop the loop** are the stop conditions in Step 11.
+- **Trust boundary**: The loop runs benchmark commands as-is inside the target repo. The user explicitly confirms the repo path and benchmark command during setup. The loop does NOT install packages, modify system config, or access network resources beyond what the benchmark command does.
+- **Sealed files**: validate.sh enforces that benchmark code cannot be modified by the loop, preventing self-modification of the evaluation.
 
 ---
 
@@ -96,18 +98,27 @@ Read these files at startup and at the beginning of each iteration:
 1. Check if target repo path exists. If not configured, ask user for the path to the repository to improve.
 2. Create `.omc/self-improve/` directory structure by copying from `templates/` in this skill directory.
 3. Read `.omc/self-improve/state/agent-settings.json`. Check `si_setting_goal`, `si_setting_benchmark`, `si_setting_harness`.
-4. If goal not set → read `si-goal-clarifier.md` from this skill directory and run the 4-dimension Socratic interview directly in this context (Objective, Metric, Target, Scope). Write result to `.omc/self-improve/config/goal.md`.
-5. If benchmark not set → read `si-benchmark-builder.md` from this skill directory, spawn a custom Agent(model=opus) with its content as prompt. The agent surveys the repo, creates or wraps a benchmark, validates 3x, and records baseline.
-6. If harness not set → confirm default harness rules (H001/H002/H003) with user or customize.
-7. **Gate**: All of `si_setting_goal`, `si_setting_benchmark`, `si_setting_harness` must be true.
-8. **Create improvement branch** (if it does not exist):
+4. **Trust confirmation** (mandatory, cannot be skipped):
+   a. If `trust_confirmed` is already `true` in agent-settings.json, skip to step 5 (resume path).
+   b. Display the target repo path and ask user to confirm:
+      `"Self-improve will run benchmark commands inside {repo_path}. This executes arbitrary code in that repository. Confirm? [yes/no]"`
+   c. If user declines: abort setup and exit. Do NOT proceed.
+   d. Record consent: set `trust_confirmed: true` in agent-settings.json.
+5. If goal not set → read `si-goal-clarifier.md` from this skill directory and run the 4-dimension Socratic interview directly in this context (Objective, Metric, Target, Scope). Write result to `.omc/self-improve/config/goal.md`.
+6. If benchmark not set → read `si-benchmark-builder.md` from this skill directory, spawn a custom Agent(model=opus) with its content as prompt. The agent surveys the repo, creates or wraps a benchmark, validates 3x, and records baseline.
+   After benchmark is set, confirm the benchmark command with user:
+   `"Benchmark command: {benchmark_command}. This will be run repeatedly during the loop. Confirm? [yes/no]"`
+   If user declines: abort setup and exit.
+7. If harness not set → confirm default harness rules (H001/H002/H003) with user or customize.
+8. **Gate**: All of `si_setting_goal`, `si_setting_benchmark`, `si_setting_harness`, `trust_confirmed` must be true.
+9. **Create improvement branch** (if it does not exist):
    ```
    git -C {repo_path} checkout -b improve/{goal_slug} {target_branch}
    git -C {repo_path} checkout {target_branch}
    ```
-   Where `{goal_slug}` is derived from the goal objective (lowercase, underscored). If the branch already exists, skip creation.
-9. **Mode exclusivity**: Call `state_list_active`. If autopilot, ralph, or ultrawork is active, refuse to start.
-10. Write initial state: `state_write(mode='self-improve', active=true, iteration=0, started_at=<now>)`
+   Where `{goal_slug}` is derived from the goal objective (lowercase, underscored). If the branch already exists, skip creation. Persist `goal_slug` in agent-settings.json.
+10. **Mode exclusivity**: Call `state_list_active`. If autopilot, ralph, or ultrawork is active, refuse to start.
+11. Write initial state: `state_write(mode='self-improve', active=true, iteration=0, started_at=<now>)`
 
 ---
 
@@ -138,13 +149,29 @@ All git operations happen inside the target repo, NOT in the OMC project root.
 
 Update `state_write(mode='self-improve', active=true, status="running")`.
 
+### Step 0 — Stale Worktree Cleanup (mandatory, runs every iteration)
+
+**PREREQUISITE**: This step MUST run to completion before any other step, including resume logic. It is idempotent and safe to run multiple times.
+
+1. List all worktrees in the target repo: `git -C {repo_path} worktree list`
+2. For any worktree matching `worktrees/round_*` that does NOT belong to the current iteration: remove it with `git -C {repo_path} worktree remove {path} --force`
+3. Run `git -C {repo_path} worktree prune` to clean up stale references
+4. This handles crash recovery — orphaned worktrees from interrupted iterations are cleaned before the new iteration starts
+
 ### Step 1 — Refresh State
 
 `state_write(mode='self-improve', active=true, iteration=N)` to reset 30min TTL.
 
 ### Step 2 — Check Stop Request
 
-`state_read(mode='self-improve')` — if state is cleared or status is `user_stopped`, exit gracefully.
+Read state via `state_read(mode='self-improve')`.
+
+If state is cleared (cancel was invoked) OR status is `user_stopped`:
+  a. Set `status: "user_stopped"` in `.omc/self-improve/state/agent-settings.json`
+  b. Update `iteration_state.json`: set `status: "interrupted"`, record `current_step`
+  c. Clean up any active worktrees for the current round (Step 0 logic)
+  d. Log: `"Self-improve stopped by user at iteration {N}, step {current_step}"`
+  e. Exit gracefully — do NOT invoke /cancel again (already cancelled)
 
 ### Step 3 — Check User Ideas
 
@@ -240,7 +267,8 @@ SKILL.md does this directly (not delegated):
    d. If re-benchmark **confirms** improvement: **accept winner**, break loop
    e. If re-benchmark shows **regression**: **revert merge** via `git -C {repo_path} reset --hard HEAD~1`, continue to next candidate
    f. If merge **conflicts**: `git -C {repo_path} merge --abort`, continue to next candidate
-5. If a winner was accepted: **Push** improvement branch: `git push origin improve/{goal_slug}` (non-blocking)
+5. If a winner was accepted AND `auto_push` is `true` in settings: **Push** improvement branch: `git -C {repo_path} push origin improve/{goal_slug}` (non-blocking).
+   If `auto_push` is `false` (default): skip push. Log: `"Push skipped (auto_push: false). Run manually: git -C {repo_path} push origin improve/{goal_slug}"`
 6. **Archive** all non-winner branches via git-master: tag + delete
 7. If no candidate survived the loop: no merge this round. Improvement branch stays at prior state.
 8. **Write Merge Report** JSON to `.omc/self-improve/state/merge_reports/round_{n}.json` (schema: data_contracts.md Section 9).
@@ -285,12 +313,21 @@ If NO stop condition: immediately go back to Step 1.
 
 ## Resumability
 
-On session restart, read `.omc/self-improve/state/iteration_state.json`:
+**PREREQUISITE**: Step 0 (stale worktree cleanup) MUST run to completion before any resume logic executes, regardless of prior state.
 
-- `status: "in_progress"` → resume from `current_step`, skip completed sub-steps
-- `status: "completed"` → start next iteration
-- `status: "failed"` → complete recording step if needed, start next iteration
-- File missing → start from iteration 1
+On invocation, before entering the loop:
+
+1. **Always run Step 0** (stale worktree cleanup) — even on fresh start
+2. Read `.omc/self-improve/state/agent-settings.json`:
+   - If `status: "user_stopped"`: ask user `"Previous run was stopped at iteration {N}. Resume? [yes/no]"`. If no, exit. If yes, continue.
+   - If `status: "running"`: session crashed — resume automatically (no user prompt)
+   - If `status: "idle"`: fresh start
+3. Re-confirm trust gate only if `trust_confirmed` is `false` in agent-settings.json
+4. Read `.omc/self-improve/state/iteration_state.json`:
+   - `status: "in_progress"` → resume from `current_step`, skip completed sub-steps
+   - `status: "completed"` → start next iteration
+   - `status: "failed"` → complete recording step if needed, start next iteration
+   - File missing → start from iteration 1
 
 ---
 
@@ -299,7 +336,8 @@ On session restart, read `.omc/self-improve/state/iteration_state.json`:
 When the loop exits:
 
 1. Update agent-settings.json with final status
-2. If `target_reached`: spawn git-master to create PR from `improve/{goal_slug}` to upstream
+2. If `target_reached` AND `auto_pr` is `true` in settings: spawn git-master to create PR from `improve/{goal_slug}` to upstream.
+   If `auto_pr` is `false` (default): skip PR creation. Log: `"PR creation skipped (auto_pr: false). Run manually: gh pr create --head improve/{goal_slug} --base {target_branch}"`
 3. Run plot_progress.py one final time
 4. Print summary report:
    ```
