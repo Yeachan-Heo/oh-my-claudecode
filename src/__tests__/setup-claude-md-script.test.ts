@@ -395,4 +395,76 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).toContain('<!-- OMC:VERSION:4.9.0 -->');
     expect(installed).not.toContain('<!-- OMC:VERSION:4.8.2 -->');
   });
+
+  it('respects CLAUDE_CONFIG_DIR for global mode installation (issue #2084)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-config-dir-test-'));
+    tempRoots.push(root);
+
+    const homeRoot = join(root, 'home');
+    const customConfigDir = join(root, 'custom-claude-config');
+    const cacheBase = join(customConfigDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pluginVersion = join(cacheBase, '4.9.3');
+
+    // Create plugin with CLAUDE.md
+    mkdirSync(join(pluginVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(pluginVersion, 'docs'), { recursive: true });
+    mkdirSync(join(pluginVersion, 'skills', 'omc-reference'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(pluginVersion, 'scripts', 'setup-claude-md.sh'));
+    writeFileSync(
+      join(pluginVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.3 -->\n\n# Custom Config Test\n<!-- OMC:END -->\n`,
+    );
+    writeFileSync(
+      join(pluginVersion, 'skills', 'omc-reference', 'SKILL.md'),
+      `---\nname: omc-reference\ndescription: Test fixture\n---\n\n# Test Reference`,
+    );
+
+    // Create installed_plugins.json pointing to the plugin
+    mkdirSync(join(customConfigDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(customConfigDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        'oh-my-claudecode@omc': [
+          {
+            installPath: pluginVersion,
+            version: '4.9.3',
+          },
+        ],
+      }),
+    );
+
+    // Create settings.json for plugin verification
+    writeFileSync(
+      join(customConfigDir, 'settings.json'),
+      JSON.stringify({ plugins: ['oh-my-claudecode'] }),
+    );
+
+    const result = spawnSync(
+      'bash',
+      [join(pluginVersion, 'scripts', 'setup-claude-md.sh'), 'global'],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          HOME: homeRoot,
+          CLAUDE_CONFIG_DIR: customConfigDir,
+        },
+        encoding: 'utf-8',
+      },
+    );
+
+    expect(result.status).toBe(0);
+
+    // CLAUDE.md should be installed to the custom config dir, not ~/.claude
+    const installedPath = join(customConfigDir, 'CLAUDE.md');
+    expect(existsSync(installedPath)).toBe(true);
+    expect(readFileSync(installedPath, 'utf-8')).toContain('# Custom Config Test');
+
+    // Skill should also be installed to custom config dir
+    const skillPath = join(customConfigDir, 'skills', 'omc-reference', 'SKILL.md');
+    expect(existsSync(skillPath)).toBe(true);
+
+    // Verify it was NOT installed to the default ~/.claude location
+    expect(existsSync(join(homeRoot, '.claude', 'CLAUDE.md'))).toBe(false);
+  });
 });

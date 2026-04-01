@@ -1054,10 +1054,10 @@ export function install(options: InstallOptions = {}): InstallResult {
             const findNodeDest = join(HUD_DIR, 'find-node.sh');
             copyFileSync(findNodeSrc, findNodeDest);
             chmodSync(findNodeDest, 0o755);
-            statusLineCommand = 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = 'sh "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"';
           } catch {
             // Fallback to bare node if find-node.sh copy fails
-            statusLineCommand = 'node $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"';
           }
         }
         // Auto-migrate legacy string format (pre-v4.5) to object format

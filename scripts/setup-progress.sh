@@ -9,7 +9,8 @@
 set -euo pipefail
 
 STATE_FILE=".omc/state/setup-state.json"
-CONFIG_FILE="$HOME/.claude/.omc-config.json"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+CONFIG_FILE="$CONFIG_DIR/.omc-config.json"
 
 # Cross-platform ISO date to epoch conversion
 iso_to_epoch() {
