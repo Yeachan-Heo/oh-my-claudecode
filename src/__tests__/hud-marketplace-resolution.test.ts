@@ -39,6 +39,12 @@ describe('HUD marketplace resolution', () => {
     const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
     expect(existsSync(hudScriptPath)).toBe(true);
 
+    const settings = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8')) as {
+      statusLine?: { command?: string };
+    };
+    expect(settings.statusLine?.command).toContain(`${join(configDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
+    expect(existsSync(join(configDir, '.omc-config.json'))).toBe(true);
+
     const content = readFileSync(hudScriptPath, 'utf-8');
     expect(content).toContain('import { pathToFileURL } from "node:url"');
     expect(content).toContain('await import(pathToFileURL(pluginPath).href);');

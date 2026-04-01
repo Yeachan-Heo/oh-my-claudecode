@@ -87,14 +87,15 @@ EOF
 }
 
 # Determine target path
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 if [ "$MODE" = "local" ]; then
   mkdir -p .claude/skills/omc-reference
   TARGET_PATH=".claude/CLAUDE.md"
   SKILL_TARGET_PATH=".claude/skills/omc-reference/SKILL.md"
 elif [ "$MODE" = "global" ]; then
-  mkdir -p "$HOME/.claude/skills/omc-reference"
-  TARGET_PATH="$HOME/.claude/CLAUDE.md"
-  SKILL_TARGET_PATH="$HOME/.claude/skills/omc-reference/SKILL.md"
+  mkdir -p "$CONFIG_DIR/skills/omc-reference"
+  TARGET_PATH="$CONFIG_DIR/CLAUDE.md"
+  SKILL_TARGET_PATH="$CONFIG_DIR/skills/omc-reference/SKILL.md"
 else
   echo "ERROR: Invalid mode '$MODE'. Use 'local' or 'global'." >&2
   exit 1
@@ -274,23 +275,27 @@ fi
 
 # Legacy hooks cleanup (global mode only)
 if [ "$MODE" = "global" ]; then
-  rm -f ~/.claude/hooks/keyword-detector.sh
-  rm -f ~/.claude/hooks/stop-continuation.sh
-  rm -f ~/.claude/hooks/persistent-mode.sh
-  rm -f ~/.claude/hooks/session-start.sh
+  rm -f "$CONFIG_DIR/hooks/keyword-detector.sh"
+  rm -f "$CONFIG_DIR/hooks/stop-continuation.sh"
+  rm -f "$CONFIG_DIR/hooks/persistent-mode.sh"
+  rm -f "$CONFIG_DIR/hooks/session-start.sh"
   echo "Legacy hooks cleaned"
 
   # Check for manual hook entries in settings.json
-  SETTINGS_FILE="$HOME/.claude/settings.json"
+  SETTINGS_FILE="$CONFIG_DIR/settings.json"
   if [ -f "$SETTINGS_FILE" ]; then
     if jq -e '.hooks' "$SETTINGS_FILE" > /dev/null 2>&1; then
       echo ""
       echo "NOTE: Found legacy hooks in settings.json. These should be removed since"
       echo "the plugin now provides hooks automatically. Remove the \"hooks\" section"
-      echo "from ~/.claude/settings.json to prevent duplicate hook execution."
+      echo "from $SETTINGS_FILE to prevent duplicate hook execution."
     fi
   fi
 fi
 
 # Verify plugin installation
-grep -q "oh-my-claudecode" ~/.claude/settings.json && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+if [ -f "$CONFIG_DIR/settings.json" ] && grep -q "oh-my-claudecode" "$CONFIG_DIR/settings.json"; then
+  echo "Plugin verified"
+else
+  echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+fi

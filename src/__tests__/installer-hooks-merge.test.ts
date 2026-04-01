@@ -122,6 +122,10 @@ describe('isOmcHook()', () => {
     expect(isOmcHook('node "%USERPROFILE%\\.claude\\hooks\\keyword-detector.mjs"')).toBe(true);
   });
 
+  it('recognises custom-profile hook paths by known filename', () => {
+    expect(isOmcHook('node "/tmp/custom-claude/hooks/keyword-detector.mjs"')).toBe(true);
+  });
+
   it('recognises oh-my-claudecode in command path', () => {
     expect(isOmcHook('/path/to/oh-my-claudecode/hook.mjs')).toBe(true);
   });

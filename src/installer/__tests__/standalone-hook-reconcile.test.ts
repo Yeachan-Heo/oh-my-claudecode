@@ -64,10 +64,13 @@ describe('install() standalone hook reconciliation', () => {
     expect(result.success).toBe(true);
     expect(result.hooksConfigured).toBe(true);
     expect(writtenSettings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command).toBe(
-      'node "$HOME/.claude/hooks/keyword-detector.mjs"',
+      `node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`,
     );
     expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
-      'node "$HOME/.claude/hooks/session-start.mjs"',
+      `node "${join(testClaudeDir, 'hooks', 'session-start.mjs').replace(/\\/g, '/')}"`,
+    );
+    expect((writtenSettings as { statusLine?: { command?: string } }).statusLine?.command).toContain(
+      `${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`,
     );
     expect(readFileSync(join(testClaudeDir, 'hooks', 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'pre-tool-use.mjs'), 'utf-8')).toContain('PreToolUse');
@@ -105,6 +108,8 @@ describe('install() standalone hook reconciliation', () => {
 
     expect(result.success).toBe(true);
     expect(commands).toContain('node $HOME/.claude/hooks/other-plugin.mjs');
-    expect(commands).toContain('node "$HOME/.claude/hooks/keyword-detector.mjs"');
+    expect(commands).toContain(
+      `node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`,
+    );
   });
 });

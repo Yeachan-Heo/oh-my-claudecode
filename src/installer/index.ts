@@ -146,6 +146,39 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function isDefaultClaudeConfigDirPath(configDir: string): boolean {
+  return normalizePath(configDir) === normalizePath(join(homedir(), '.claude'));
+}
+
+function quoteShellArg(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function buildStatusLineCommand(nodeBin: string, hudScriptPath: string, findNodePath?: string): string {
+  if (isWindows()) {
+    return `${quoteShellArg(nodeBin)} ${quoteShellArg(hudScriptPath)}`;
+  }
+
+  if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+    if (findNodePath) {
+      return 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+    }
+
+    return 'node $HOME/.claude/hud/omc-hud.mjs';
+  }
+
+  const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, '/');
+  if (findNodePath) {
+    return `sh ${quoteShellArg(findNodePath.replace(/\\/g, '/'))} ${quoteShellArg(normalizedHudScriptPath)}`;
+  }
+
+  return `node ${quoteShellArg(normalizedHudScriptPath)}`;
+}
+
 function createLineAnchoredMarkerRegex(marker: string, flags: string = 'gm'): RegExp {
   return new RegExp(`^${escapeRegex(marker)}$`, flags);
 }
@@ -273,8 +306,9 @@ export function isOmcHook(command: string): boolean {
   }
   // Check for known OMC hook filenames in .claude/hooks/ path.
   // Handles both Unix (.claude/hooks/) and Windows (.claude\hooks\) paths.
-  const hookPathMatch = lowerCommand.match(/\.claude[/\\]hooks[/\\]([a-z0-9-]+\.mjs)/);
-  if (hookPathMatch && OMC_HOOK_FILENAMES.has(hookPathMatch[1])) {
+  const containsHooksDir = /hooks[/\\]/.test(lowerCommand);
+  const hookFilenameMatch = lowerCommand.match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+  if (containsHooksDir && hookFilenameMatch && OMC_HOOK_FILENAMES.has(hookFilenameMatch[1])) {
     return true;
   }
   return false;
@@ -1185,11 +1219,13 @@ export function install(options: InstallOptions = {}): InstallResult {
             const findNodeDest = join(HUD_DIR, 'find-node.sh');
             copyFileSync(findNodeSrc, findNodeDest);
             chmodSync(findNodeDest, 0o755);
-            statusLineCommand = 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = buildStatusLineCommand(nodeBin, hudScriptPath.replace(/\\/g, '/'), findNodeDest);
           } catch {
             // Fallback to bare node if find-node.sh copy fails
-            statusLineCommand = 'node $HOME/.claude/hud/omc-hud.mjs';
+            statusLineCommand = buildStatusLineCommand(nodeBin, hudScriptPath.replace(/\\/g, '/'));
           }
+        } else {
+          statusLineCommand = buildStatusLineCommand(nodeBin, hudScriptPath);
         }
         // Auto-migrate legacy string format (pre-v4.5) to object format
         const needsMigration = typeof existingSettings.statusLine === 'string'

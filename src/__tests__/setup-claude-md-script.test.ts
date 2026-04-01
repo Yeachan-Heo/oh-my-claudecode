@@ -197,6 +197,37 @@ Use the real docs file.
     const excludeContents = readFileSync(join(fixture.projectRoot, '.git', 'info', 'exclude'), 'utf-8');
     expect(excludeContents.match(/# BEGIN OMC local artifacts/g)).toHaveLength(1);
   });
+
+  it('uses CLAUDE_CONFIG_DIR for global setup targets and plugin verification', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    mkdirSync(join(configDir, 'hooks'), { recursive: true });
+    writeFileSync(join(configDir, 'hooks', 'keyword-detector.sh'), 'legacy');
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: configDir,
+      },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(configDir, 'skills', 'omc-reference', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(configDir, 'hooks', 'keyword-detector.sh'))).toBe(false);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Plugin verified');
+  });
 });
 
 describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
