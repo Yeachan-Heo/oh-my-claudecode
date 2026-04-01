@@ -170,6 +170,29 @@ describe("Stop Hook Blocking Contract", () => {
       expect(result.mode).toBe("ultrawork");
     });
 
+
+    it("does not use fresh last_checked_at as fallback for stale awaiting_confirmation", async () => {
+      const sessionId = "ultrawork-fresh-last-checked-still-stale-confirmation";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          awaiting_confirmation: true,
+          started_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          original_prompt: "Test task",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(true);
+      expect(result.mode).toBe("ultrawork");
+    });
+
     it("blocks stop for active ultrawork (shouldBlock: true -> continue: false)", async () => {
       const sessionId = "test-session-block";
       activateUltrawork("Fix the bug", sessionId, tempDir);

@@ -252,7 +252,6 @@ function isAwaitingConfirmation(state) {
 
   const setAt =
     state.awaiting_confirmation_set_at ||
-    state.last_checked_at ||
     state.started_at ||
     null;
 

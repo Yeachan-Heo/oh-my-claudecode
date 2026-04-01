@@ -163,7 +163,6 @@ function isAwaitingConfirmation(state: unknown): boolean {
 
   const setAt =
     (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
-    (typeof stateRecord.last_checked_at === 'string' && stateRecord.last_checked_at) ||
     (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
     null;
 
