@@ -8,6 +8,7 @@ const PROVIDER_BINARIES = {
   claude: 'claude',
   codex: 'codex',
   gemini: 'gemini',
+  qwen: 'qwen',
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
@@ -15,28 +16,32 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
  * Build CLI args for a given provider.
  * - claude: `claude -p <prompt>`
  * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
- * - gemini: `gemini -p <prompt> --yolo`
+ * - gemini: `gemini -p <prompt> --approval-mode yolo`
+ * - qwen: `qwen -p <prompt> --auto-approve`
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
     return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
   }
   if (provider === 'gemini') {
-    return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+    return pipePromptViaStdin ? ['--approval-mode', 'yolo'] : ['-p', prompt, '--approval-mode', 'yolo'];
+  }
+  if (provider === 'qwen') {
+    return pipePromptViaStdin ? ['--auto-approve'] : ['-p', prompt, '--auto-approve'];
   }
   return ['-p', prompt];
 }
 
 function shouldPipePromptViaStdin(provider) {
-  return SHOULD_USE_WINDOWS_SHELL && (provider === 'codex' || provider === 'gemini');
+  return SHOULD_USE_WINDOWS_SHELL && (provider === 'codex' || provider === 'gemini' || provider === 'qwen');
 }
 
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
 const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
-  console.error('Usage: omc ask <claude|codex|gemini> "<prompt>"');
-  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini> <prompt...>');
+  console.error('Usage: omc ask <claude|codex|gemini|qwen> "<prompt>"');
+  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|qwen> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
 }

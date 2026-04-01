@@ -133,11 +133,12 @@ export function buildDefaultConfig(): PluginConfig {
       defaults: {
         codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
         geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
+        qwenModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.qwenModel,
       },
       fallbackPolicy: {
         onModelFailure: "provider_chain",
         allowCrossProvider: false,
-        crossProviderOrder: ["codex", "gemini"],
+        crossProviderOrder: ["codex", "gemini", "qwen"],
       },
     },
     // Delegation routing configuration (opt-in feature for external model routing)
@@ -340,7 +341,7 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 
   if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
-    if (provider === "codex" || provider === "gemini") {
+    if (provider === "codex" || provider === "gemini" || provider === "qwen") {
       externalModelsDefaults.provider = provider;
     }
   }
@@ -359,6 +360,14 @@ export function loadEnvConfig(): Partial<PluginConfig> {
   } else if (process.env.OMC_GEMINI_DEFAULT_MODEL) {
     // Legacy fallback
     externalModelsDefaults.geminiModel = process.env.OMC_GEMINI_DEFAULT_MODEL;
+  }
+
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_QWEN_MODEL) {
+    externalModelsDefaults.qwenModel =
+      process.env.OMC_EXTERNAL_MODELS_DEFAULT_QWEN_MODEL;
+  } else if (process.env.OMC_QWEN_DEFAULT_MODEL) {
+    // Legacy fallback
+    externalModelsDefaults.qwenModel = process.env.OMC_QWEN_DEFAULT_MODEL;
   }
 
   const externalModelsFallback: ExternalModelsConfig["fallbackPolicy"] = {
@@ -397,10 +406,10 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 
   if (process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER;
-    if (["claude", "codex", "gemini"].includes(provider)) {
+    if (["claude", "codex", "gemini", "qwen"].includes(provider)) {
       config.delegationRouting = {
         ...config.delegationRouting,
-        defaultProvider: provider as "claude" | "codex" | "gemini",
+        defaultProvider: provider as "claude" | "codex" | "gemini" | "qwen",
       };
     }
   }
@@ -742,7 +751,7 @@ export function generateConfigSchema(): object {
       },
       externalModels: {
         type: "object",
-        description: "External model provider configuration (Codex, Gemini)",
+        description: "External model provider configuration (Codex, Gemini, Qwen)",
         properties: {
           defaults: {
             type: "object",
@@ -750,7 +759,7 @@ export function generateConfigSchema(): object {
             properties: {
               provider: {
                 type: "string",
-                enum: ["codex", "gemini"],
+                enum: ["codex", "gemini", "qwen"],
                 description: "Default external provider",
               },
               codexModel: {
@@ -763,6 +772,11 @@ export function generateConfigSchema(): object {
                 default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
                 description: "Default Gemini model",
               },
+              qwenModel: {
+                type: "string",
+                default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.qwenModel,
+                description: "Default Qwen model",
+              },
             },
           },
           rolePreferences: {
@@ -771,7 +785,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["codex", "gemini"] },
+                provider: { type: "string", enum: ["codex", "gemini", "qwen"] },
                 model: { type: "string" },
               },
               required: ["provider", "model"],
@@ -783,7 +797,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["codex", "gemini"] },
+                provider: { type: "string", enum: ["codex", "gemini", "qwen"] },
                 model: { type: "string" },
               },
               required: ["provider", "model"],
@@ -806,8 +820,8 @@ export function generateConfigSchema(): object {
               },
               crossProviderOrder: {
                 type: "array",
-                items: { type: "string", enum: ["codex", "gemini"] },
-                default: ["codex", "gemini"],
+                items: { type: "string", enum: ["codex", "gemini", "qwen"] },
+                default: ["codex", "gemini", "qwen"],
                 description: "Order of providers for cross-provider fallback",
               },
             },
@@ -823,11 +837,11 @@ export function generateConfigSchema(): object {
             type: "boolean",
             default: false,
             description:
-              "Enable delegation routing to external providers (Codex, Gemini)",
+              "Enable delegation routing to external providers (Codex, Gemini, Qwen)",
           },
           defaultProvider: {
             type: "string",
-            enum: ["claude", "codex", "gemini"],
+            enum: ["claude", "codex", "gemini", "qwen"],
             default: "claude",
             description:
               "Default provider for delegation routing when no specific role mapping exists",
@@ -840,7 +854,7 @@ export function generateConfigSchema(): object {
               properties: {
                 provider: {
                   type: "string",
-                  enum: ["claude", "codex", "gemini"],
+                  enum: ["claude", "codex", "gemini", "qwen"],
                 },
                 tool: { type: "string", enum: ["Task"] },
                 model: { type: "string" },

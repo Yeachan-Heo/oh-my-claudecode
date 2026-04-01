@@ -4,10 +4,11 @@ const availability = vi.hoisted(() => ({
   claude: true,
   codex: false,
   gemini: false,
+  qwen: false,
 }));
 
 vi.mock('../team/model-contract.js', () => ({
-  isCliAvailable: (agentType: 'claude' | 'codex' | 'gemini') => availability[agentType],
+  isCliAvailable: (agentType: 'claude' | 'codex' | 'gemini' | 'qwen') => availability[agentType],
 }));
 
 import { clearSkillsCache, getBuiltinSkill } from '../features/builtin-skills/skills.js';

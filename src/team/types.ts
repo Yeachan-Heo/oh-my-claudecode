@@ -14,7 +14,7 @@ import type { TeamLeaderNextAction } from './leader-nudge-guidance.js';
 export interface BridgeConfig {
   teamName: string;
   workerName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'qwen';
   model?: string;
   workingDirectory: string;
   pollIntervalMs: number;       // default: 3000
@@ -89,7 +89,7 @@ export interface DrainSignal {
 export interface McpWorkerMember {
   agentId: string;          // "{workerName}@{teamName}"
   name: string;             // workerName
-  agentType: string;        // "mcp-codex" | "mcp-gemini"
+  agentType: string;        // "mcp-codex" | "mcp-gemini" | "mcp-qwen"
   model: string;
   joinedAt: number;         // Date.now()
   tmuxPaneId: string;       // tmux session name
@@ -102,7 +102,7 @@ export interface McpWorkerMember {
 export interface HeartbeatData {
   workerName: string;
   teamName: string;
-  provider: 'codex' | 'gemini' | 'claude';
+  provider: 'codex' | 'gemini' | 'qwen' | 'claude';
   pid: number;
   lastPollAt: string;       // ISO timestamp of last poll cycle
   currentTaskId?: string;   // task being executed, if any
@@ -125,7 +125,7 @@ export interface ConfigProbeResult {
 /** Sidecar mapping task IDs to execution modes */
 export interface TaskModeMap {
   teamName: string;
-  taskModes: Record<string, 'mcp_codex' | 'mcp_gemini' | 'claude_worker'>;
+  taskModes: Record<string, 'mcp_codex' | 'mcp_gemini' | 'mcp_qwen' | 'claude_worker'>;
 }
 
 /** Failure sidecar for a task */
@@ -137,7 +137,7 @@ export interface TaskFailureSidecar {
 }
 
 /** Worker backend type */
-export type WorkerBackend = 'claude-native' | 'mcp-codex' | 'mcp-gemini' | 'tmux-claude' | 'tmux-codex' | 'tmux-gemini';
+export type WorkerBackend = 'claude-native' | 'mcp-codex' | 'mcp-gemini' | 'mcp-qwen' | 'tmux-claude' | 'tmux-codex' | 'tmux-gemini' | 'tmux-qwen';
 
 /** Worker capability tag */
 export type WorkerCapability =

@@ -62,6 +62,13 @@ function agentTypeGuidance(agentType: CliAgentType): string {
         '- Keep commit-sized changes scoped to assigned files only; no broad refactors.',
         `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`,
       ].join('\n');
+    case 'qwen':
+      return [
+        '### Agent-Type Guidance (qwen)',
+        '- Execute task work in small, verifiable increments and report each milestone to leader-fixed.',
+        '- Keep changes scoped to assigned files only; no broad refactors.',
+        `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`,
+      ].join('\n');
     case 'claude':
     default:
       return [

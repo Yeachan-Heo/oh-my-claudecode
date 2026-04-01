@@ -124,7 +124,7 @@ export interface PluginConfig {
     simplificationKeywords?: string[];
   };
 
-  // External models configuration (Codex, Gemini)
+  // External models configuration (Codex, Gemini, Qwen)
   externalModels?: ExternalModelsConfig;
 
   // Delegation routing configuration
@@ -267,7 +267,7 @@ export interface HookResult {
 /**
  * External model provider type
  */
-export type ExternalModelProvider = "codex" | "gemini";
+export type ExternalModelProvider = "codex" | "gemini" | "qwen";
 
 /**
  * External model configuration for a specific role or task
@@ -284,6 +284,7 @@ export interface ExternalModelsDefaults {
   provider?: ExternalModelProvider;
   codexModel?: string;
   geminiModel?: string;
+  qwenModel?: string;
 }
 
 /**
@@ -332,7 +333,9 @@ export type DelegationProvider =
   /** Use /team to coordinate Codex CLI workers in tmux panes. */
   | "codex"
   /** Use /team to coordinate Gemini CLI workers in tmux panes. */
-  | "gemini";
+  | "gemini"
+  /** Use /team to coordinate Qwen CLI workers in tmux panes. */
+  | "qwen";
 
 /** Tool type for delegation routing — only Claude Task is supported. */
 export type DelegationTool = "Task";

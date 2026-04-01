@@ -106,6 +106,11 @@ describe('model-contract', () => {
       expect(c.agentType).toBe('gemini');
       expect(c.binary).toBe('gemini');
     });
+    it('returns contract for qwen', () => {
+      const c = getContract('qwen');
+      expect(c.agentType).toBe('qwen');
+      expect(c.binary).toBe('qwen');
+    });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
@@ -181,6 +186,10 @@ describe('model-contract', () => {
       expect(args).toContain('yolo');
       expect(args).not.toContain('-i');
     });
+    it('qwen includes --auto-approve', () => {
+      const args = buildLaunchArgs('qwen', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+      expect(args).toContain('--auto-approve');
+    });
     it('passes model flag when specified', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });
       expect(args).toContain('--model');
@@ -241,6 +250,7 @@ describe('model-contract', () => {
         OMC_MODEL_LOW: 'claude-haiku-4-5-override',
         OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL: 'gpt-5',
         OMC_GEMINI_DEFAULT_MODEL: 'gemini-2.5-pro',
+        OMC_QWEN_DEFAULT_MODEL: 'qwen2.5-coder-32b',
         ANTHROPIC_API_KEY: 'should-not-be-forwarded',
       });
 
@@ -259,6 +269,7 @@ describe('model-contract', () => {
       expect(env.OMC_MODEL_LOW).toBe('claude-haiku-4-5-override');
       expect(env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL).toBe('gpt-5');
       expect(env.OMC_GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-pro');
+      expect(env.OMC_QWEN_DEFAULT_MODEL).toBe('qwen2.5-coder-32b');
       expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     });
 
@@ -389,6 +400,18 @@ describe('model-contract', () => {
     it('getPromptModeArgs returns instruction only (positional) for codex', () => {
       const args = getPromptModeArgs('codex', 'Read inbox');
       expect(args).toEqual(['Read inbox']);
+    });
+
+    it('qwen supports prompt mode with --prompt flag', () => {
+      expect(isPromptModeAgent('qwen')).toBe(true);
+      const c = getContract('qwen');
+      expect(c.supportsPromptMode).toBe(true);
+      expect(c.promptModeFlag).toBe('--prompt');
+    });
+
+    it('getPromptModeArgs returns flag + instruction for qwen', () => {
+      const args = getPromptModeArgs('qwen', 'Read inbox');
+      expect(args).toEqual(['--prompt', 'Read inbox']);
     });
 
     it('getPromptModeArgs returns empty array for non-prompt-mode agents', () => {

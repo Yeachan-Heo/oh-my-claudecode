@@ -84,7 +84,7 @@ function ensureStateDir(cwd: string): void {
  */
 function rowToJobStatus(row: Record<string, unknown>): JobStatus {
   return {
-    provider: row.provider as "codex" | "gemini",
+    provider: row.provider as "codex" | "gemini" | "qwen",
     jobId: row.job_id as string,
     slug: row.slug as string,
     status: row.status as JobStatus["status"],
@@ -336,7 +336,7 @@ export function upsertJob(status: JobStatus, cwd?: string): boolean {
  * @returns The JobStatus if found, null otherwise
  */
 export function getJob(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "qwen",
   jobId: string,
   cwd?: string,
 ): JobStatus | null {
@@ -365,7 +365,7 @@ export function getJob(
  * @returns Array of matching JobStatus objects, empty array on failure
  */
 export function getJobsByStatus(
-  provider: "codex" | "gemini" | undefined,
+  provider: "codex" | "gemini" | "qwen" | undefined,
   status: string,
   cwd?: string,
 ): JobStatus[] {
@@ -402,7 +402,7 @@ export function getJobsByStatus(
  * @returns Array of active JobStatus objects, empty array on failure
  */
 export function getActiveJobs(
-  provider?: "codex" | "gemini",
+  provider?: "codex" | "gemini" | "qwen",
   cwd?: string,
 ): JobStatus[] {
   const db = getDb(cwd);
@@ -440,7 +440,7 @@ export function getActiveJobs(
  * @returns Array of recent JobStatus objects, empty array on failure
  */
 export function getRecentJobs(
-  provider?: "codex" | "gemini",
+  provider?: "codex" | "gemini" | "qwen",
   withinMs: number = 60 * 60 * 1000,
   cwd?: string,
 ): JobStatus[] {
@@ -481,7 +481,7 @@ export function getRecentJobs(
  * @returns true if the update succeeded, false on failure
  */
 export function updateJobStatus(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "qwen",
   jobId: string,
   updates: Partial<JobStatus>,
   cwd?: string,
@@ -557,7 +557,7 @@ export function updateJobStatus(
  * @returns true if deletion succeeded, false on failure
  */
 export function deleteJob(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "qwen",
   jobId: string,
   cwd?: string,
 ): boolean {

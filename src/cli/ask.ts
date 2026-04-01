@@ -6,15 +6,15 @@ import { basename, dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
 
 export const ASK_USAGE = [
-  'Usage: omc ask <claude|codex|gemini> <question or task>',
-  '   or: omc ask <claude|codex|gemini> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --agent-prompt=<role> --prompt "<prompt>"',
+  'Usage: omc ask <claude|codex|gemini|qwen> <question or task>',
+  '   or: omc ask <claude|codex|gemini|qwen> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|qwen> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|qwen> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|qwen> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|qwen> --agent-prompt=<role> --prompt "<prompt>"',
 ].join('\n');
 
-const ASK_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
+const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'qwen'] as const;
 export type AskProvider = (typeof ASK_PROVIDERS)[number];
 const ASK_PROVIDER_SET = new Set<string>(ASK_PROVIDERS);
 
