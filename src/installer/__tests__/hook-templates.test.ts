@@ -51,8 +51,8 @@ describe('keyword-detector packaged artifacts', () => {
     for (const [prompt, expected] of [
       ['tdd implement password validation', '[TDD MODE ACTIVATED]'],
       ['deep-analyze the test failure', 'ANALYSIS MODE'],
-      ['deep interview me about requirements', 'oh-my-claudecode:deep-interview'],
-      ['deslop this module with duplicate dead code', 'oh-my-claudecode:ai-slop-cleaner'],
+      ['deep interview me about requirements', '[MAGIC KEYWORD: DEEP-INTERVIEW]'],
+      ['deslop this module with duplicate dead code', '[MAGIC KEYWORD: AI-SLOP-CLEANER]'],
     ] as const) {
       const templateResult = JSON.stringify(runKeywordHook(templatePath, prompt));
       const pluginResult = JSON.stringify(runKeywordHook(pluginPath, prompt));
@@ -73,8 +73,8 @@ describe('keyword-detector packaged artifacts', () => {
     const templateNegative = runKeywordHook(templatePath, negativePrompt);
     const pluginNegative = runKeywordHook(pluginPath, negativePrompt);
 
-    expect(templatePositive).toContain('oh-my-claudecode:ai-slop-cleaner');
-    expect(pluginPositive).toContain('oh-my-claudecode:ai-slop-cleaner');
+    expect(templatePositive).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
+    expect(pluginPositive).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
     expect(templateNegative).toEqual({ continue: true, suppressOutput: true });
     expect(pluginNegative).toEqual({ continue: true, suppressOutput: true });
   });

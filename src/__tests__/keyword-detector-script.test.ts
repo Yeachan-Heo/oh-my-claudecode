@@ -64,6 +64,6 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     const context = output.hookSpecificOutput?.additionalContext ?? '';
 
     expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
-    expect(context).toContain('Skill: oh-my-claudecode:ralplan');
+    expect(context).toContain('name: ralplan');
   });
 });
