@@ -20104,15 +20104,19 @@ var DEFAULTS = {
   restrictToolPaths: false,
   pythonSandbox: false,
   disableProjectSkills: false,
-  disableAutoUpdate: true,
-  hardMaxIterations: 500
+  disableAutoUpdate: false,
+  hardMaxIterations: 500,
+  disableRemoteMcp: false,
+  disableExternalLLM: false
 };
 var STRICT_OVERRIDES = {
   restrictToolPaths: true,
   pythonSandbox: true,
   disableProjectSkills: true,
   disableAutoUpdate: true,
-  hardMaxIterations: 200
+  hardMaxIterations: 200,
+  disableRemoteMcp: true,
+  disableExternalLLM: true
 };
 var cachedConfig = null;
 function loadSecurityFromConfigFiles() {
@@ -20138,13 +20142,27 @@ function getSecurityConfig() {
   const isStrict = process.env.OMC_SECURITY === "strict";
   const base = isStrict ? { ...STRICT_OVERRIDES } : { ...DEFAULTS };
   const fileOverrides = loadSecurityFromConfigFiles();
-  cachedConfig = {
-    restrictToolPaths: fileOverrides.restrictToolPaths ?? base.restrictToolPaths,
-    pythonSandbox: fileOverrides.pythonSandbox ?? base.pythonSandbox,
-    disableProjectSkills: fileOverrides.disableProjectSkills ?? base.disableProjectSkills,
-    disableAutoUpdate: fileOverrides.disableAutoUpdate ?? base.disableAutoUpdate,
-    hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations
-  };
+  if (isStrict) {
+    cachedConfig = {
+      restrictToolPaths: base.restrictToolPaths || (fileOverrides.restrictToolPaths ?? false),
+      pythonSandbox: base.pythonSandbox || (fileOverrides.pythonSandbox ?? false),
+      disableProjectSkills: base.disableProjectSkills || (fileOverrides.disableProjectSkills ?? false),
+      disableAutoUpdate: base.disableAutoUpdate || (fileOverrides.disableAutoUpdate ?? false),
+      disableRemoteMcp: base.disableRemoteMcp || (fileOverrides.disableRemoteMcp ?? false),
+      disableExternalLLM: base.disableExternalLLM || (fileOverrides.disableExternalLLM ?? false),
+      hardMaxIterations: Math.min(base.hardMaxIterations, fileOverrides.hardMaxIterations ?? base.hardMaxIterations)
+    };
+  } else {
+    cachedConfig = {
+      restrictToolPaths: fileOverrides.restrictToolPaths ?? base.restrictToolPaths,
+      pythonSandbox: fileOverrides.pythonSandbox ?? base.pythonSandbox,
+      disableProjectSkills: fileOverrides.disableProjectSkills ?? base.disableProjectSkills,
+      disableAutoUpdate: fileOverrides.disableAutoUpdate ?? base.disableAutoUpdate,
+      disableRemoteMcp: fileOverrides.disableRemoteMcp ?? base.disableRemoteMcp,
+      disableExternalLLM: fileOverrides.disableExternalLLM ?? base.disableExternalLLM,
+      hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations
+    };
+  }
   return cachedConfig;
 }
 function isToolPathRestricted() {
@@ -22379,6 +22397,27 @@ function canClearStateForSession(state, sessionId) {
   const ownerSessionId = getStateSessionOwner(state);
   return !ownerSessionId || ownerSessionId === sessionId;
 }
+function findSessionOwnedStateFiles(mode, sessionId, directory) {
+  const matches = /* @__PURE__ */ new Set();
+  const expectedPath = resolveSessionStatePath(mode, sessionId, directory);
+  if ((0, import_fs12.existsSync)(expectedPath)) {
+    matches.add(expectedPath);
+  }
+  for (const sid of listSessionIds(directory)) {
+    const candidatePath = resolveSessionStatePath(mode, sid, directory);
+    if (!(0, import_fs12.existsSync)(candidatePath)) {
+      continue;
+    }
+    try {
+      const raw = JSON.parse((0, import_fs12.readFileSync)(candidatePath, "utf-8"));
+      if (getStateSessionOwner(raw) === sessionId) {
+        matches.add(candidatePath);
+      }
+    } catch {
+    }
+  }
+  return [...matches];
+}
 
 // src/hooks/mode-registry/index.ts
 var import_fs13 = require("fs");
@@ -22643,9 +22682,10 @@ var STATE_TOOL_MODES = [
   ...EXECUTION_MODES,
   "ralplan",
   "omc-teams",
-  "deep-interview"
+  "deep-interview",
+  "self-improve"
 ];
-var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "deep-interview"];
+var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "deep-interview", "self-improve"];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs14.existsSync)(statePath)) return [];
@@ -22742,6 +22782,20 @@ function clearLegacyStateCandidates(mode, root, sessionId) {
     }
   }
   return { cleared, hadFailure };
+}
+function clearSessionOwnedStateCandidates(mode, root, sessionId) {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = findSessionOwnedStateFiles(mode, sessionId, root);
+  for (const statePath of paths) {
+    try {
+      (0, import_fs14.unlinkSync)(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+  return { cleared, hadFailure, paths };
 }
 var stateReadTool = {
   name: "state_read",
@@ -23007,8 +23061,9 @@ var stateClearTool = {
       };
       if (sessionId) {
         validateSessionId(sessionId);
-        collectTeamNamesForCleanup(resolveSessionStatePath("team", sessionId, root));
-        collectTeamNamesForCleanup(getStateFilePath(root, "team", sessionId));
+        for (const teamStatePath of findSessionOwnedStateFiles("team", sessionId, root)) {
+          collectTeamNamesForCleanup(teamStatePath);
+        }
         const now = Date.now();
         const cancelSignalPath = resolveSessionStatePath("cancel-signal", sessionId, root);
         atomicWriteJsonSync(cancelSignalPath, {
@@ -23020,8 +23075,16 @@ var stateClearTool = {
         });
         if (MODE_CONFIGS[mode]) {
           const success = clearModeState(mode, root, sessionId);
+          const sessionCleanup2 = clearSessionOwnedStateCandidates(mode, root, sessionId);
           const legacyCleanup2 = clearLegacyStateCandidates(mode, root, sessionId);
-          const ghostNote2 = legacyCleanup2.cleared > 0 ? " (ghost legacy file also removed)" : "";
+          const ghostNoteParts2 = [];
+          if (legacyCleanup2.cleared > 0) {
+            ghostNoteParts2.push("ghost legacy file also removed");
+          }
+          if (sessionCleanup2.cleared > 0) {
+            ghostNoteParts2.push(`removed ${sessionCleanup2.cleared} recovered session file${sessionCleanup2.cleared === 1 ? "" : "s"}`);
+          }
+          const ghostNote2 = ghostNoteParts2.length > 0 ? ` (${ghostNoteParts2.join(", ")})` : "";
           const runtimeCleanupNote2 = (() => {
             if (mode !== "team") return "";
             const teamNames = [...cleanedTeamNames];
@@ -23032,7 +23095,7 @@ var stateClearTool = {
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
-          if (success && !legacyCleanup2.hadFailure) {
+          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -23048,12 +23111,16 @@ var stateClearTool = {
             };
           }
         }
-        const statePath = resolveSessionStatePath(mode, sessionId, root);
-        if ((0, import_fs14.existsSync)(statePath)) {
-          (0, import_fs14.unlinkSync)(statePath);
-        }
+        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
         const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
-        const ghostNote = legacyCleanup.cleared > 0 ? " (ghost legacy file also removed)" : "";
+        const ghostNoteParts = [];
+        if (legacyCleanup.cleared > 0) {
+          ghostNoteParts.push("ghost legacy file also removed");
+        }
+        if (sessionCleanup.cleared > 0) {
+          ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? "" : "s"}`);
+        }
+        const ghostNote = ghostNoteParts.length > 0 ? ` (${ghostNoteParts.join(", ")})` : "";
         const runtimeCleanupNote = (() => {
           if (mode !== "team") return "";
           const teamNames = [...cleanedTeamNames];
@@ -23067,7 +23134,7 @@ var stateClearTool = {
         return {
           content: [{
             type: "text",
-            text: `${legacyCleanup.hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
           }]
         };
       }

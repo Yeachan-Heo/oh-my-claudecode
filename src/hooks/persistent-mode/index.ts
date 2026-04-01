@@ -23,7 +23,7 @@ import {
   getUltraworkPersistenceMessage,
   type UltraworkState
 } from '../ultrawork/index.js';
-import { resolveToWorktreeRoot, resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { readModeState } from '../../lib/mode-state-io.js';
 import {
   readRalphState,
@@ -86,6 +86,10 @@ const CANCEL_SIGNAL_TTL_MS = 30_000;
 
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
+
+export function shouldWriteStateBack(statePath: string | null | undefined): boolean {
+  return Boolean(statePath && existsSync(statePath));
+}
 
 /**
  * Check whether this session is in an explicit cancel window.
@@ -436,6 +440,9 @@ async function checkRalphLoop(
 ): Promise<PersistentModeResult | null> {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
+  const ralphStatePath = sessionId
+    ? resolveSessionStatePath('ralph', sessionId, workingDir)
+    : resolveStatePath('ralph', workingDir);
 
   if (!state || !state.active) {
     return null;
@@ -611,6 +618,13 @@ async function checkRalphLoop(
     if (hardMax > 0 && state.max_iterations >= hardMax) {
       // Hard limit reached — auto-disable to prevent unbounded execution
       state.active = false;
+      if (!shouldWriteStateBack(ralphStatePath)) {
+        return {
+          shouldBlock: false,
+          message: '',
+          mode: 'none'
+        };
+      }
       writeRalphState(workingDir, state, sessionId);
       return {
         shouldBlock: true,
@@ -622,6 +636,13 @@ async function checkRalphLoop(
     // Extend the limit and continue enforcement so user-visible cancellation
     // remains the only explicit termination path.
     state.max_iterations += 10;
+    if (!shouldWriteStateBack(ralphStatePath)) {
+      return {
+        shouldBlock: false,
+        message: '',
+        mode: 'none'
+      };
+    }
     writeRalphState(workingDir, state, sessionId);
   }
 

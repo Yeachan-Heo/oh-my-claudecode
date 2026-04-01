@@ -258,6 +258,33 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       expect(output.decision).toBe("block");
     });
 
+    it("should allow stop when cancel signal only includes requested_at", () => {
+      const sessionId = "session-cancel-requested-at";
+      createUltraworkState(tempDir, sessionId, "Task being cancelled");
+
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writeFileSync(
+        join(sessionDir, "cancel-signal-state.json"),
+        JSON.stringify(
+          {
+            active: true,
+            requested_at: new Date().toISOString(),
+            source: "test"
+          },
+          null,
+          2,
+        ),
+      );
+
+      const output = runPersistentModeScript({
+        directory: tempDir,
+        sessionId,
+      });
+
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+    });
+
     it("should NOT block for legacy autopilot state when sessionId is provided", () => {
       const stateDir = join(tempDir, ".omc", "state");
       mkdirSync(stateDir, { recursive: true });

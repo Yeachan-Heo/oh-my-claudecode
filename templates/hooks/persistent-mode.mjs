@@ -51,6 +51,10 @@ function writeJsonFile(path, data) {
   } catch { return false; }
 }
 
+function shouldWriteStateBack(path) {
+  return Boolean(path && existsSync(path));
+}
+
 /**
  * Read last tool error from state directory.
  * Returns null if file doesn't exist or error is stale (>60 seconds old).
@@ -228,30 +232,42 @@ function isStaleSkillState(state) {
  */
 function isSessionCancelInProgress(stateDir, sessionId) {
   const CANCEL_SIGNAL_TTL_MS = 30000; // 30 seconds
+  const isActiveSignal = (signalPath) => {
+    const signal = readJsonFile(signalPath);
+    if (!signal) {
+      return false;
+    }
+
+    const now = Date.now();
+    const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
+    const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
+    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
+
+    if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
+      return true;
+    }
+
+    if (existsSync(signalPath)) {
+      try {
+        unlinkSync(signalPath);
+      } catch {
+        // best effort cleanup
+      }
+    }
+    return false;
+  };
 
   // Try session-scoped path first
   if (sessionId) {
     const sessionSignalPath = join(stateDir, 'sessions', sessionId, 'cancel-signal-state.json');
-    const signal = readJsonFile(sessionSignalPath);
-    if (signal && signal.expires_at) {
-      const expiresAt = new Date(signal.expires_at).getTime();
-      if (Date.now() < expiresAt) {
-        return true;
-      }
-    }
-  }
-
-  // Fall back to legacy path
-  const legacySignalPath = join(stateDir, 'cancel-signal-state.json');
-  const signal = readJsonFile(legacySignalPath);
-  if (signal && signal.expires_at) {
-    const expiresAt = new Date(signal.expires_at).getTime();
-    if (Date.now() < expiresAt) {
+    if (isActiveSignal(sessionSignalPath)) {
       return true;
     }
   }
 
-  return false;
+  // Fall back to legacy path
+  return isActiveSignal(join(stateDir, 'cancel-signal-state.json'));
 }
 
 /**
@@ -337,8 +353,8 @@ function isValidSessionId(sessionId) {
 
 /**
  * Read state file with session-scoped path support.
- * If sessionId is provided, ONLY reads the session-scoped path.
- * Falls back to legacy local/global paths when sessionId is not provided.
+ * If sessionId is provided, prefers the session-scoped path, then scans other
+ * session directories and legacy state for matching ownership.
  */
 
 function readStateFileWithSession(stateDir, globalStateDir, filename, sessionId) {
@@ -347,7 +363,32 @@ function readStateFileWithSession(stateDir, globalStateDir, filename, sessionId)
     const sessionsDir = join(stateDir, "sessions", safeSessionId);
     const sessionPath = join(sessionsDir, filename);
     const state = readJsonFile(sessionPath);
-    return { state, path: sessionPath, isGlobal: false };
+    if (state) {
+      return { state, path: sessionPath, isGlobal: false };
+    }
+
+    try {
+      const allSessionsDir = join(stateDir, "sessions");
+      if (existsSync(allSessionsDir)) {
+        const dirs = readdirSync(allSessionsDir).filter((dir) => SESSION_ID_ALLOWLIST.test(dir));
+        for (const dir of dirs) {
+          const candidatePath = join(allSessionsDir, dir, filename);
+          const candidateState = readJsonFile(candidatePath);
+          if (candidateState && candidateState.session_id === safeSessionId) {
+            return { state: candidateState, path: candidatePath, isGlobal: false };
+          }
+        }
+      }
+    } catch {
+      // ignore scan failures
+    }
+
+    const legacyResult = readStateFile(stateDir, globalStateDir, filename);
+    if (legacyResult.state && legacyResult.state.session_id === safeSessionId) {
+      return legacyResult;
+    }
+
+    return { state: null, path: sessionPath, isGlobal: false };
   }
 
   return readStateFile(stateDir, globalStateDir, filename);
@@ -661,6 +702,10 @@ async function main() {
 
           ralph.state.iteration = iteration + 1;
           ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
           writeJsonFile(ralph.path, ralph.state);
 
           let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${ralph.state.prompt}` : ""}`;
@@ -682,6 +727,10 @@ async function main() {
         // This prevents abrupt stops in long-running loops where the model hasn't finished.
         ralph.state.max_iterations = maxIter + 10;
         ralph.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ralph.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
         writeJsonFile(ralph.path, ralph.state);
 
         console.log(

@@ -63,6 +63,10 @@ function writeJsonFile(path, data) {
   }
 }
 
+function shouldWriteStateBack(path) {
+  return Boolean(path && existsSync(path));
+}
+
 /**
  * Read the session-idle notification cooldown in seconds from ~/.omc/config.json.
  * Default: 60. 0 = disabled.
@@ -257,30 +261,41 @@ function writeStopBreaker(stateDir, name, count, sessionId) {
  */
 function isSessionCancelInProgress(stateDir, sessionId) {
   const CANCEL_SIGNAL_TTL_MS = 30000; // 30 seconds
+  const isActiveSignal = (signalPath) => {
+    const signal = readJsonFile(signalPath);
+    if (!signal) {
+      return false;
+    }
+
+    const now = Date.now();
+    const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
+    const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
+    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
+
+    if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
+      return true;
+    }
+
+    if (existsSync(signalPath)) {
+      try {
+        unlinkSync(signalPath);
+      } catch {}
+    }
+    return false;
+  };
 
   // Try session-scoped path first
   if (sessionId) {
     const sessionSignalPath = join(stateDir, 'sessions', sessionId, 'cancel-signal-state.json');
-    const signal = readJsonFile(sessionSignalPath);
-    if (signal && signal.expires_at) {
-      const expiresAt = new Date(signal.expires_at).getTime();
-      if (Date.now() < expiresAt) {
-        return true;
-      }
+    if (isActiveSignal(sessionSignalPath)) {
+      return true;
     }
   }
 
   // Fall back to legacy path
   const legacySignalPath = join(stateDir, 'cancel-signal-state.json');
-  const signal = readJsonFile(legacySignalPath);
-  if (signal && signal.expires_at) {
-    const expiresAt = new Date(signal.expires_at).getTime();
-    if (Date.now() < expiresAt) {
-      return true;
-    }
-  }
-
-  return false;
+  return isActiveSignal(legacySignalPath);
 }
 
 /**
@@ -667,6 +682,10 @@ async function main() {
       if (iteration < maxIter) {
         ralph.state.iteration = iteration + 1;
         ralph.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ralph.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
         writeJsonFile(ralph.path, ralph.state);
 
         // Fire-and-forget notification
@@ -685,6 +704,10 @@ async function main() {
         ralph.state.max_iterations = maxIter + 10;
         ralph.state.iteration = maxIter + 1;
         ralph.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ralph.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
         writeJsonFile(ralph.path, ralph.state);
         const extendReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
         console.log(JSON.stringify({ decision: "block", reason: extendReason }));

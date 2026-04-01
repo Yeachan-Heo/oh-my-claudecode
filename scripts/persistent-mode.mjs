@@ -180,6 +180,7 @@ Do NOT skip this step. Do NOT move on without fixing the error.
  * from causing the stop hook to malfunction in new sessions.
  */
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CANCEL_SIGNAL_TTL_MS = 30_000;
 const TEAM_TERMINAL_PHASES = new Set([
   "completed",
   "complete",
@@ -305,8 +306,8 @@ function sanitizeSessionId(sessionId) {
 
 /**
  * Read state file with session-scoped path support.
- * If sessionId is provided, ONLY reads the session-scoped path.
- * Falls back to legacy path when sessionId is not provided.
+ * If sessionId is provided, prefers the session-scoped path, then scans other
+ * session directories and legacy state for matching ownership.
  */
 function readStateFileWithSession(stateDir, globalStateDir, filename, sessionId) {
   const safeSessionId = sanitizeSessionId(sessionId);
@@ -314,10 +315,76 @@ function readStateFileWithSession(stateDir, globalStateDir, filename, sessionId)
     const sessionsDir = join(stateDir, "sessions", safeSessionId);
     const sessionPath = join(sessionsDir, filename);
     const state = readJsonFile(sessionPath);
-    return { state, path: sessionPath, isGlobal: false };
+    if (state) {
+      return { state, path: sessionPath, isGlobal: false };
+    }
+
+    try {
+      const allSessionsDir = join(stateDir, "sessions");
+      if (existsSync(allSessionsDir)) {
+        const dirs = readdirSync(allSessionsDir).filter((dir) => SESSION_ID_ALLOWLIST.test(dir));
+        for (const dir of dirs) {
+          const candidatePath = join(allSessionsDir, dir, filename);
+          const candidateState = readJsonFile(candidatePath);
+          if (candidateState && candidateState.session_id === safeSessionId) {
+            return { state: candidateState, path: candidatePath, isGlobal: false };
+          }
+        }
+      }
+    } catch {
+      // ignore scan failures
+    }
+
+    const legacyResult = readStateFile(stateDir, globalStateDir, filename);
+    if (legacyResult.state && legacyResult.state.session_id === safeSessionId) {
+      return legacyResult;
+    }
+
+    return { state: null, path: sessionPath, isGlobal: false };
   }
 
   return readStateFile(stateDir, globalStateDir, filename);
+}
+
+function isSessionCancelInProgress(stateDir, sessionId) {
+  const isActiveSignal = (signalPath) => {
+    const signal = readJsonFile(signalPath);
+    if (!signal) {
+      return false;
+    }
+
+    const now = Date.now();
+    const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
+    const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
+    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
+
+    if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
+      return true;
+    }
+
+    if (existsSync(signalPath)) {
+      try {
+        unlinkSync(signalPath);
+      } catch {
+        // best effort cleanup
+      }
+    }
+    return false;
+  };
+
+  if (sessionId) {
+    const sessionSignalPath = join(stateDir, "sessions", sessionId, "cancel-signal-state.json");
+    if (isActiveSignal(sessionSignalPath)) {
+      return true;
+    }
+  }
+
+  return isActiveSignal(join(stateDir, "cancel-signal-state.json"));
+}
+
+function shouldWriteStateBack(path) {
+  return Boolean(path && existsSync(path));
 }
 
 function isValidSessionId(sessionId) {
@@ -620,6 +687,11 @@ async function main() {
       sessionId,
     );
 
+    if (isSessionCancelInProgress(stateDir, sessionId)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
     // Swarm uses swarm-summary.json (not swarm-state.json) + marker file
     const swarmMarker = existsSync(join(stateDir, "swarm-active.marker"));
     const swarmSummary = readJsonFile(join(stateDir, "swarm-summary.json"));
@@ -649,6 +721,10 @@ async function main() {
 
           ralph.state.iteration = iteration + 1;
           ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
           writeJsonFile(ralph.path, ralph.state);
 
           let reason = `[RALPH LOOP - ITERATION ${iteration + 1}/${maxIter}] Work is NOT done. Continue working.\nWhen FULLY complete (after Architect verification), run /oh-my-claudecode:cancel to cleanly exit ralph mode and clean up all state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.\n${ralph.state.prompt ? `Task: ${ralph.state.prompt}` : ""}`;
@@ -670,6 +746,10 @@ async function main() {
         if (hardMax > 0 && maxIter >= hardMax) {
           ralph.state.active = false;
           ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
           writeJsonFile(ralph.path, ralph.state);
 
           console.log(
@@ -684,6 +764,10 @@ async function main() {
         // Extend and keep going.
         ralph.state.max_iterations = maxIter + 10;
         ralph.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ralph.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
         writeJsonFile(ralph.path, ralph.state);
 
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;

@@ -3664,6 +3664,9 @@ function buildDefaultConfig() {
       directory: ".omc/plans",
       filenameTemplate: "{{name}}.md"
     },
+    teleport: {
+      symlinkNodeModules: true
+    },
     startupCodebaseMap: {
       enabled: true,
       maxFiles: 200,
@@ -3674,6 +3677,17 @@ function buildDefaultConfig() {
       smallWordLimit: 50,
       largeWordLimit: 200,
       suppressHeavyModesForSmallTasks: true
+    },
+    promptPrerequisites: {
+      enabled: true,
+      sectionNames: {
+        memory: ["M\xC9MOIRE", "MEMOIRE", "MEMORY"],
+        skills: ["SKILLS"],
+        verifyFirst: ["VERIFY-FIRST", "VERIFY FIRST", "VERIFY_FIRST"],
+        context: ["CONTEXT"]
+      },
+      blockingTools: ["Edit", "MultiEdit", "Write", "Agent", "Task"],
+      executionKeywords: ["ralph", "ultrawork", "autopilot"]
     }
   };
 }
@@ -4167,6 +4181,52 @@ var init_utils = __esm({
     import_path3 = require("path");
     import_url = require("url");
     OPEN_QUESTIONS_PATH = ".omc/plans/open-questions.md";
+  }
+});
+
+// src/utils/skininthegamebros-user.ts
+function isSkininthegamebrosUser() {
+  return process.env.USER_TYPE === "ant";
+}
+var init_skininthegamebros_user = __esm({
+  "src/utils/skininthegamebros-user.ts"() {
+    "use strict";
+  }
+});
+
+// src/agents/skininthegamebros-guidance.ts
+function renderSkininthegamebrosGuidance(surface) {
+  if (!isSkininthegamebrosUser()) {
+    return "";
+  }
+  return [SKININTHEGAMEBROS_GUIDANCE_HEADER[surface], ...SKININTHEGAMEBROS_GUIDANCE_LINES].join(
+    "\n"
+  );
+}
+function appendSkininthegamebrosGuidance(basePrompt, surface) {
+  const guidance = renderSkininthegamebrosGuidance(surface);
+  if (!guidance) {
+    return basePrompt;
+  }
+  return `${basePrompt}
+
+${guidance}`;
+}
+var SKININTHEGAMEBROS_GUIDANCE_HEADER, SKININTHEGAMEBROS_GUIDANCE_LINES;
+var init_skininthegamebros_guidance = __esm({
+  "src/agents/skininthegamebros-guidance.ts"() {
+    "use strict";
+    init_skininthegamebros_user();
+    SKININTHEGAMEBROS_GUIDANCE_HEADER = {
+      system: "## Skininthegamebros Execution Guidance",
+      agent: "## Skininthegamebros Guidance"
+    };
+    SKININTHEGAMEBROS_GUIDANCE_LINES = [
+      "- Default to writing no comments unless the why is genuinely non-obvious.",
+      "- Before reporting completion, verify the result with tests, commands, or observable output whenever possible.",
+      "- If the user is operating on a misconception, or you notice an adjacent bug worth flagging, say so directly.",
+      "- Report outcomes faithfully: do not imply checks passed if you did not run them, and do not hide failing verification."
+    ];
   }
 });
 
@@ -4738,7 +4798,10 @@ function getAgentDefinitions(options) {
     const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
     result[name] = {
       description: override?.description ?? agentConfig.description,
-      prompt: override?.prompt ?? agentConfig.prompt,
+      prompt: appendSkininthegamebrosGuidance(
+        override?.prompt ?? agentConfig.prompt,
+        "agent"
+      ),
       tools: override?.tools ?? agentConfig.tools,
       disallowedTools,
       model: resolvedModel,
@@ -4753,6 +4816,7 @@ var init_definitions = __esm({
     "use strict";
     init_utils();
     init_loader();
+    init_skininthegamebros_guidance();
     init_architect();
     init_designer();
     init_writer();
@@ -5297,13 +5361,27 @@ function getSecurityConfig() {
   const isStrict = process.env.OMC_SECURITY === "strict";
   const base = isStrict ? { ...STRICT_OVERRIDES } : { ...DEFAULTS };
   const fileOverrides = loadSecurityFromConfigFiles();
-  cachedConfig = {
-    restrictToolPaths: fileOverrides.restrictToolPaths ?? base.restrictToolPaths,
-    pythonSandbox: fileOverrides.pythonSandbox ?? base.pythonSandbox,
-    disableProjectSkills: fileOverrides.disableProjectSkills ?? base.disableProjectSkills,
-    disableAutoUpdate: fileOverrides.disableAutoUpdate ?? base.disableAutoUpdate,
-    hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations
-  };
+  if (isStrict) {
+    cachedConfig = {
+      restrictToolPaths: base.restrictToolPaths || (fileOverrides.restrictToolPaths ?? false),
+      pythonSandbox: base.pythonSandbox || (fileOverrides.pythonSandbox ?? false),
+      disableProjectSkills: base.disableProjectSkills || (fileOverrides.disableProjectSkills ?? false),
+      disableAutoUpdate: base.disableAutoUpdate || (fileOverrides.disableAutoUpdate ?? false),
+      disableRemoteMcp: base.disableRemoteMcp || (fileOverrides.disableRemoteMcp ?? false),
+      disableExternalLLM: base.disableExternalLLM || (fileOverrides.disableExternalLLM ?? false),
+      hardMaxIterations: Math.min(base.hardMaxIterations, fileOverrides.hardMaxIterations ?? base.hardMaxIterations)
+    };
+  } else {
+    cachedConfig = {
+      restrictToolPaths: fileOverrides.restrictToolPaths ?? base.restrictToolPaths,
+      pythonSandbox: fileOverrides.pythonSandbox ?? base.pythonSandbox,
+      disableProjectSkills: fileOverrides.disableProjectSkills ?? base.disableProjectSkills,
+      disableAutoUpdate: fileOverrides.disableAutoUpdate ?? base.disableAutoUpdate,
+      disableRemoteMcp: fileOverrides.disableRemoteMcp ?? base.disableRemoteMcp,
+      disableExternalLLM: fileOverrides.disableExternalLLM ?? base.disableExternalLLM,
+      hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations
+    };
+  }
   return cachedConfig;
 }
 function isToolPathRestricted() {
@@ -5312,8 +5390,14 @@ function isToolPathRestricted() {
 function isPythonSandboxEnabled() {
   return getSecurityConfig().pythonSandbox;
 }
+function isAutoUpdateDisabled() {
+  return getSecurityConfig().disableAutoUpdate;
+}
 function getHardMaxIterations() {
   return getSecurityConfig().hardMaxIterations;
+}
+function isExternalLLMDisabled() {
+  return getSecurityConfig().disableExternalLLM;
 }
 var import_fs13, import_path17, DEFAULTS, STRICT_OVERRIDES, cachedConfig;
 var init_security_config = __esm({
@@ -5327,15 +5411,19 @@ var init_security_config = __esm({
       restrictToolPaths: false,
       pythonSandbox: false,
       disableProjectSkills: false,
-      disableAutoUpdate: true,
-      hardMaxIterations: 500
+      disableAutoUpdate: false,
+      hardMaxIterations: 500,
+      disableRemoteMcp: false,
+      disableExternalLLM: false
     };
     STRICT_OVERRIDES = {
       restrictToolPaths: true,
       pythonSandbox: true,
       disableProjectSkills: true,
       disableAutoUpdate: true,
-      hardMaxIterations: 200
+      hardMaxIterations: 200,
+      disableRemoteMcp: true,
+      disableExternalLLM: true
     };
     cachedConfig = null;
   }
@@ -6492,6 +6580,27 @@ function getLegacyStateCandidates(mode, directory) {
     (0, import_path23.join)(getOmcRoot(baseDir), `${normalizedName}.json`)
   ];
 }
+function findSessionOwnedStateFiles(mode, sessionId, directory) {
+  const matches = /* @__PURE__ */ new Set();
+  const expectedPath = resolveSessionStatePath(mode, sessionId, directory);
+  if ((0, import_fs18.existsSync)(expectedPath)) {
+    matches.add(expectedPath);
+  }
+  for (const sid of listSessionIds(directory)) {
+    const candidatePath = resolveSessionStatePath(mode, sid, directory);
+    if (!(0, import_fs18.existsSync)(candidatePath)) {
+      continue;
+    }
+    try {
+      const raw = JSON.parse((0, import_fs18.readFileSync)(candidatePath, "utf-8"));
+      if (getStateSessionOwner(raw) === sessionId) {
+        matches.add(candidatePath);
+      }
+    } catch {
+    }
+  }
+  return [...matches];
+}
 function writeModeState(mode, state, directory, sessionId) {
   try {
     const baseDir = directory || process.cwd();
@@ -7413,6 +7522,9 @@ function loadTemplate(filename) {
 }
 function isWindows() {
   return process.platform === "win32";
+}
+function getHooksSettingsConfig() {
+  return HOOKS_SETTINGS_CONFIG_NODE;
 }
 var import_path41, import_fs30, import_url7, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
 var init_hooks = __esm({
@@ -8385,6 +8497,59 @@ function isProjectScopedPlugin() {
   const normalizedGlobalBase = globalPluginBase.replace(/\\/g, "/").replace(/\/$/, "");
   return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
+function ensureStandaloneHookScripts(log3) {
+  const packageDir = getPackageDir3();
+  const templatesDir = (0, import_path45.join)(packageDir, "templates", "hooks");
+  if (!(0, import_fs34.existsSync)(HOOKS_DIR)) {
+    (0, import_fs34.mkdirSync)(HOOKS_DIR, { recursive: true });
+  }
+  for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
+    const sourcePath = (0, import_path45.join)(templatesDir, filename);
+    const targetPath = (0, import_path45.join)(HOOKS_DIR, filename);
+    (0, import_fs34.copyFileSync)(sourcePath, targetPath);
+    if (!isWindows()) {
+      (0, import_fs34.chmodSync)(targetPath, 493);
+    }
+  }
+  if (!isWindows()) {
+    const findNodeSrc = (0, import_path45.join)(packageDir, "scripts", "find-node.sh");
+    const findNodeDest = (0, import_path45.join)(HOOKS_DIR, "find-node.sh");
+    (0, import_fs34.copyFileSync)(findNodeSrc, findNodeDest);
+    (0, import_fs34.chmodSync)(findNodeDest, 493);
+  }
+  log3("  Installed standalone hook scripts");
+}
+function mergeHookGroups(eventType, existingGroups, newOmcGroups, options, log3, result) {
+  const nonOmcGroups = existingGroups.filter(
+    (group) => group.hooks.some((h) => h.type === "command" && !isOmcHook(h.command))
+  );
+  const hasNonOmcHook = nonOmcGroups.length > 0;
+  const nonOmcCommand = hasNonOmcHook ? nonOmcGroups[0].hooks.find((h) => h.type === "command" && !isOmcHook(h.command))?.command ?? "" : "";
+  if (options.forceHooks && !options.allowPluginHookRefresh) {
+    if (hasNonOmcHook) {
+      log3(`  Warning: Overwriting non-OMC ${eventType} hook with --force-hooks: ${nonOmcCommand}`);
+      result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
+    }
+    log3(`  Updated ${eventType} hook (--force-hooks)`);
+    return newOmcGroups;
+  }
+  if (options.force) {
+    if (hasNonOmcHook) {
+      log3(`  Merged ${eventType} hooks (updated OMC hooks, preserved non-OMC hook: ${nonOmcCommand})`);
+      result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
+    } else {
+      log3(`  Updated ${eventType} hook (--force)`);
+    }
+    return [...nonOmcGroups, ...newOmcGroups];
+  }
+  if (hasNonOmcHook) {
+    log3(`  Warning: ${eventType} hook has non-OMC hook. Skipping. Use --force-hooks to override.`);
+    result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
+  } else {
+    log3(`  ${eventType} hook already configured, skipping`);
+  }
+  return existingGroups;
+}
 function directoryHasMarkdownFiles(directory) {
   if (!(0, import_fs34.existsSync)(directory)) {
     return false;
@@ -8428,13 +8593,26 @@ function hasPluginProvidedAgentFiles() {
   );
 }
 function getPackageDir3() {
+  const resolveFromDir = (baseDir) => {
+    const candidates = [
+      (0, import_path45.join)(baseDir, ".."),
+      (0, import_path45.join)(baseDir, "..", ".."),
+      (0, import_path45.join)(baseDir, "..", "..", "..")
+    ];
+    for (const candidate of candidates) {
+      if ((0, import_fs34.existsSync)((0, import_path45.join)(candidate, "package.json"))) {
+        return candidate;
+      }
+    }
+    return candidates[0];
+  };
   if (typeof __dirname !== "undefined") {
-    return (0, import_path45.join)(__dirname, "..");
+    return resolveFromDir(__dirname);
   }
   try {
     const __filename4 = (0, import_url9.fileURLToPath)(importMetaUrl);
-    const __dirname2 = (0, import_path45.dirname)(__filename4);
-    return (0, import_path45.join)(__dirname2, "..", "..");
+    const currentDir = (0, import_path45.dirname)(__filename4);
+    return resolveFromDir(currentDir);
   } catch {
     return process.cwd();
   }
@@ -8708,6 +8886,7 @@ function install(options = {}) {
           log3("  Installed omc-reference/SKILL.md");
         }
       }
+      ensureStandaloneHookScripts(log3);
       result.hooksConfigured = true;
     } else {
       log3("Skipping agent/command/hook files (managed by plugin system)");
@@ -8833,10 +9012,16 @@ function install(options = {}) {
         "  }",
         "  ",
         "  // 4. npm package (global or local install)",
-        "  try {",
-        '    await import("oh-my-claudecode/dist/hud/index.js");',
-        "    return;",
-        "  } catch { /* continue */ }",
+        "  const npmHudPackages = [",
+        '    "oh-my-claude-sisyphus/dist/hud/index.js",',
+        '    "oh-my-claudecode/dist/hud/index.js",',
+        "  ];",
+        "  for (const hudPackage of npmHudPackages) {",
+        "    try {",
+        "      await import(hudPackage);",
+        "      return;",
+        "    } catch { /* continue */ }",
+        "  }",
         "  ",
         "  // 5. Fallback: provide detailed error message with fix instructions",
         "  if (pluginCacheDir && existsSync(pluginCacheDir)) {",
@@ -8880,13 +9065,13 @@ function install(options = {}) {
         existingSettings = JSON.parse(settingsContent);
       }
       {
-        const existingHooks = existingSettings.hooks || {};
+        const existingHooks = { ...existingSettings.hooks || {} };
         let legacyRemoved = 0;
         for (const [eventType, groups] of Object.entries(existingHooks)) {
           const groupList = groups;
           const filtered = groupList.filter((group) => {
             const isLegacy = group.hooks.every(
-              (h) => h.type === "command" && h.command.includes("/.claude/hooks/")
+              (h) => h.type === "command" && (h.command.includes("/.claude/hooks/") || h.command.includes("\\.claude\\hooks\\")) && isOmcHook(h.command)
             );
             if (isLegacy) legacyRemoved++;
             return !isLegacy;
@@ -8899,6 +9084,21 @@ function install(options = {}) {
         }
         if (legacyRemoved > 0) {
           log3(`  Cleaned up ${legacyRemoved} legacy hook entries from settings.json`);
+        }
+        const shouldConfigureSettingsHooks = !runningAsPlugin || allowPluginHookRefresh;
+        if (shouldConfigureSettingsHooks) {
+          const desiredHooks = getHooksSettingsConfig().hooks;
+          for (const [eventType, newOmcGroups] of Object.entries(desiredHooks)) {
+            const currentGroups = existingHooks[eventType] ?? [];
+            existingHooks[eventType] = mergeHookGroups(
+              eventType,
+              currentGroups,
+              newOmcGroups,
+              options,
+              log3,
+              result
+            );
+          }
         }
         existingSettings.hooks = Object.keys(existingHooks).length > 0 ? existingHooks : void 0;
         result.hooksConfigured = true;
@@ -8994,7 +9194,7 @@ function install(options = {}) {
       log3(`  Warning: Could not refresh setupVersion metadata (non-fatal): ${message}`);
     }
     result.success = true;
-    result.message = `Successfully installed ${result.installedAgents.length} agents, ${result.installedCommands.length} commands, ${result.installedSkills.length} skills (hooks delivered via plugin)`;
+    result.message = `Successfully installed ${result.installedAgents.length} agents, ${result.installedCommands.length} commands, ${result.installedSkills.length} skills`;
   } catch (error2) {
     const errorMessage = error2 instanceof Error ? error2.message : String(error2);
     result.errors.push(errorMessage);
@@ -9021,7 +9221,7 @@ function getInstallInfo() {
     return null;
   }
 }
-var import_fs34, import_path45, import_url9, import_os10, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, OMC_HOOK_FILENAMES;
+var import_fs34, import_path45, import_url9, import_os10, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, OMC_HOOK_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES;
 var init_installer = __esm({
   "src/installer/index.ts"() {
     "use strict";
@@ -9053,8 +9253,18 @@ var init_installer = __esm({
       "post-tool-use.mjs",
       "post-tool-use-failure.mjs",
       "persistent-mode.mjs",
+      "code-simplifier.mjs",
       "stop-continuation.mjs"
     ]);
+    STANDALONE_HOOK_TEMPLATE_FILES = [
+      "keyword-detector.mjs",
+      "session-start.mjs",
+      "pre-tool-use.mjs",
+      "post-tool-use.mjs",
+      "post-tool-use-failure.mjs",
+      "persistent-mode.mjs",
+      "code-simplifier.mjs"
+    ];
   }
 });
 
@@ -9290,6 +9500,7 @@ function getOMCConfig() {
   }
 }
 function isSilentAutoUpdateEnabled() {
+  if (isAutoUpdateDisabled()) return false;
   return getOMCConfig().silentAutoUpdate;
 }
 function isAutoUpgradePromptEnabled() {
@@ -9415,7 +9626,9 @@ async function checkForUpdates() {
 }
 function reconcileUpdateRuntime(options) {
   const errors = [];
+  const runningAsPlugin = isRunningAsPlugin();
   const projectScopedPlugin = isProjectScopedPlugin();
+  const shouldRefreshPluginHooks = runningAsPlugin && !projectScopedPlugin;
   if (!projectScopedPlugin) {
     try {
       if (!(0, import_fs35.existsSync)(HOOKS_DIR)) {
@@ -9431,8 +9644,8 @@ function reconcileUpdateRuntime(options) {
       force: true,
       verbose: options?.verbose ?? false,
       skipClaudeCheck: true,
-      forceHooks: true,
-      refreshHooksInPlugin: !projectScopedPlugin
+      forceHooks: shouldRefreshPluginHooks,
+      refreshHooksInPlugin: shouldRefreshPluginHooks
     });
     if (!installResult.success) {
       errors.push(...installResult.errors);
@@ -9808,6 +10021,7 @@ var init_auto_update = __esm({
     init_installer();
     init_config_dir();
     init_paths();
+    init_security_config();
     REPO_OWNER = "Yeachan-Heo";
     REPO_NAME = "oh-my-claudecode";
     GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
@@ -13769,7 +13983,8 @@ var init_skill_state = __esm({
       release: "medium",
       ccg: "medium",
       // === Heavy protection (long-running, 10 reinforcements) ===
-      deepinit: "heavy"
+      deepinit: "heavy",
+      "self-improve": "heavy"
     };
   }
 });
@@ -14108,6 +14323,7 @@ var init_prompt_helpers = __esm({
     import_path56 = require("path");
     import_url10 = require("url");
     init_utils();
+    init_skininthegamebros_guidance();
     _cachedRoles = null;
     VALID_AGENT_ROLES = getValidAgentRoles();
   }
@@ -16493,8 +16709,12 @@ __export(persistent_mode_exports, {
   readLastToolError: () => readLastToolError,
   recordIdleNotificationSent: () => recordIdleNotificationSent,
   resetTodoContinuationAttempts: () => resetTodoContinuationAttempts,
-  shouldSendIdleNotification: () => shouldSendIdleNotification
+  shouldSendIdleNotification: () => shouldSendIdleNotification,
+  shouldWriteStateBack: () => shouldWriteStateBack
 });
+function shouldWriteStateBack(statePath) {
+  return Boolean(statePath && (0, import_fs50.existsSync)(statePath));
+}
 function isSessionCancelInProgress(directory, sessionId) {
   if (!sessionId) return false;
   let cancelSignalPath;
@@ -16733,6 +16953,7 @@ function checkArchitectRejectionInTranscript(sessionId) {
 async function checkRalphLoop(sessionId, directory, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
+  const ralphStatePath = sessionId ? resolveSessionStatePath("ralph", sessionId, workingDir) : resolveStatePath("ralph", workingDir);
   if (!state || !state.active) {
     return null;
   }
@@ -16868,6 +17089,13 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     const hardMax = getHardMaxIterations();
     if (hardMax > 0 && state.max_iterations >= hardMax) {
       state.active = false;
+      if (!shouldWriteStateBack(ralphStatePath)) {
+        return {
+          shouldBlock: false,
+          message: "",
+          mode: "none"
+        };
+      }
       writeRalphState(workingDir, state, sessionId);
       return {
         shouldBlock: true,
@@ -16877,6 +17105,13 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
       };
     }
     state.max_iterations += 10;
+    if (!shouldWriteStateBack(ralphStatePath)) {
+      return {
+        shouldBlock: false,
+        message: "",
+        mode: "none"
+      };
+    }
     writeRalphState(workingDir, state, sessionId);
   }
   const toolError = readLastToolError(workingDir);
@@ -23656,6 +23891,11 @@ function getContract(agentType) {
   if (!contract) {
     throw new Error(`Unknown agent type: ${agentType}. Supported: ${Object.keys(CONTRACTS).join(", ")}`);
   }
+  if (agentType !== "claude" && isExternalLLMDisabled()) {
+    throw new Error(
+      `External LLM provider "${agentType}" is blocked by security policy (disableExternalLLM). Only Claude workers are allowed in the current security configuration.`
+    );
+  }
   return contract;
 }
 function validateBinaryRef(binary) {
@@ -23769,6 +24009,7 @@ var init_model_contract = __esm({
     init_team_name();
     init_delegation_enforcer();
     init_models();
+    init_security_config();
     resolvedPathCache = /* @__PURE__ */ new Map();
     UNTRUSTED_PATH_PATTERNS = [
       /^\/tmp(\/|$)/,
@@ -25955,10 +26196,10 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
     await writeFile9(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync81, writeFileSync: writeFileSync34 } = await import("fs");
+      const { readFileSync: readFileSync82, writeFileSync: writeFileSync34 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
-        const raw = readFileSync81(taskPath2, "utf-8");
+        const raw = readFileSync82(taskPath2, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status === "in_progress") {
           taskData.status = "pending";
@@ -35874,9 +36115,13 @@ function readAutopilotStateForHud(directory, sessionId) {
     if (!state.active) {
       return null;
     }
+    const phase = state.phase ?? state.current_phase;
+    if (!phase) {
+      return null;
+    }
     return {
       active: state.active,
-      phase: state.phase,
+      phase,
       iteration: state.iteration,
       maxIterations: state.max_iterations,
       tasksCompleted: state.execution?.tasks_completed,
@@ -37952,7 +38197,7 @@ async function main2(watchMode = false, skipInit = false) {
       }
     }
     let output = await render(context, config2);
-    const useSafeMode = config2.elements.safeMode || process.platform === "win32";
+    const useSafeMode = config2.elements.safeMode !== false && (config2.elements.safeMode || process.platform === "win32");
     if (useSafeMode) {
       output = sanitizeOutput(output);
       console.log(output);
@@ -65871,9 +66116,10 @@ var STATE_TOOL_MODES = [
   ...EXECUTION_MODES,
   "ralplan",
   "omc-teams",
-  "deep-interview"
+  "deep-interview",
+  "self-improve"
 ];
-var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "deep-interview"];
+var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "deep-interview", "self-improve"];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs20.existsSync)(statePath)) return [];
@@ -65970,6 +66216,20 @@ function clearLegacyStateCandidates(mode, root2, sessionId) {
     }
   }
   return { cleared, hadFailure };
+}
+function clearSessionOwnedStateCandidates(mode, root2, sessionId) {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = findSessionOwnedStateFiles(mode, sessionId, root2);
+  for (const statePath of paths) {
+    try {
+      (0, import_fs20.unlinkSync)(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+  return { cleared, hadFailure, paths };
 }
 var stateReadTool = {
   name: "state_read",
@@ -66235,8 +66495,9 @@ var stateClearTool = {
       };
       if (sessionId) {
         validateSessionId(sessionId);
-        collectTeamNamesForCleanup(resolveSessionStatePath("team", sessionId, root2));
-        collectTeamNamesForCleanup(getStateFilePath(root2, "team", sessionId));
+        for (const teamStatePath of findSessionOwnedStateFiles("team", sessionId, root2)) {
+          collectTeamNamesForCleanup(teamStatePath);
+        }
         const now = Date.now();
         const cancelSignalPath = resolveSessionStatePath("cancel-signal", sessionId, root2);
         atomicWriteJsonSync(cancelSignalPath, {
@@ -66248,8 +66509,16 @@ var stateClearTool = {
         });
         if (MODE_CONFIGS[mode]) {
           const success = clearModeState(mode, root2, sessionId);
+          const sessionCleanup2 = clearSessionOwnedStateCandidates(mode, root2, sessionId);
           const legacyCleanup2 = clearLegacyStateCandidates(mode, root2, sessionId);
-          const ghostNote2 = legacyCleanup2.cleared > 0 ? " (ghost legacy file also removed)" : "";
+          const ghostNoteParts2 = [];
+          if (legacyCleanup2.cleared > 0) {
+            ghostNoteParts2.push("ghost legacy file also removed");
+          }
+          if (sessionCleanup2.cleared > 0) {
+            ghostNoteParts2.push(`removed ${sessionCleanup2.cleared} recovered session file${sessionCleanup2.cleared === 1 ? "" : "s"}`);
+          }
+          const ghostNote2 = ghostNoteParts2.length > 0 ? ` (${ghostNoteParts2.join(", ")})` : "";
           const runtimeCleanupNote2 = (() => {
             if (mode !== "team") return "";
             const teamNames = [...cleanedTeamNames];
@@ -66260,7 +66529,7 @@ var stateClearTool = {
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
-          if (success && !legacyCleanup2.hadFailure) {
+          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -66276,12 +66545,16 @@ var stateClearTool = {
             };
           }
         }
-        const statePath = resolveSessionStatePath(mode, sessionId, root2);
-        if ((0, import_fs20.existsSync)(statePath)) {
-          (0, import_fs20.unlinkSync)(statePath);
-        }
+        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root2, sessionId);
         const legacyCleanup = clearLegacyStateCandidates(mode, root2, sessionId);
-        const ghostNote = legacyCleanup.cleared > 0 ? " (ghost legacy file also removed)" : "";
+        const ghostNoteParts = [];
+        if (legacyCleanup.cleared > 0) {
+          ghostNoteParts.push("ghost legacy file also removed");
+        }
+        if (sessionCleanup.cleared > 0) {
+          ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? "" : "s"}`);
+        }
+        const ghostNote = ghostNoteParts.length > 0 ? ` (${ghostNoteParts.join(", ")})` : "";
         const runtimeCleanupNote = (() => {
           if (mode !== "team") return "";
           const teamNames = [...cleanedTeamNames];
@@ -66295,7 +66568,7 @@ var stateClearTool = {
         return {
           content: [{
             type: "text",
-            text: `${legacyCleanup.hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
           }]
         };
       }
@@ -70855,6 +71128,9 @@ The boulder stops at the summit, or not at all."
 ${getBackgroundTaskGuidance(DEFAULT_MAX_BACKGROUND_TASKS)}
 `;
 
+// src/index.ts
+init_skininthegamebros_guidance();
+
 // src/tools/index.ts
 var allCustomTools = [
   ...lspTools,
@@ -72064,6 +72340,254 @@ function getRunningTaskCount(directory) {
 // src/hooks/bridge.ts
 init_state2();
 init_loader();
+
+// src/hooks/prompt-prerequisites/index.ts
+init_mode_state_io();
+var STATE_MODE = "prompt-prerequisites";
+var DEFAULT_SECTION_NAMES = {
+  memory: ["M\xC9MOIRE", "MEMOIRE", "MEMORY"],
+  skills: ["SKILLS"],
+  verifyFirst: ["VERIFY-FIRST", "VERIFY FIRST", "VERIFY_FIRST"],
+  context: ["CONTEXT"]
+};
+var DEFAULT_BLOCKING_TOOLS = ["Edit", "MultiEdit", "Write", "Agent", "Task"];
+var DEFAULT_EXECUTION_KEYWORDS = ["ralph", "ultrawork", "autopilot"];
+var HEADING_PATTERN = /^#{1,6}\s+(.+?)\s*$/gm;
+var FILE_PATH_PATTERN = /(?:(?:^|\s|["'`(]))(\.{1,2}\/[^\s"'`)<>\]]+|\/[^\s"'`)<>\]]+|(?:[A-Za-z0-9_.-]+\/){1,}[A-Za-z0-9_.-]+)(?=$|\s|["'`),:;\]])/gm;
+function normalizeHeading(value) {
+  return value.normalize("NFD").replace(new RegExp("\\p{M}+", "gu"), "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+function dedupe(values) {
+  return [...new Set(values)];
+}
+function normalizePath(value) {
+  return value.trim().replace(/^[("'`]+|[)"'`]+$/g, "");
+}
+function isLikelyPath(value) {
+  if (!value) return false;
+  if (/^https?:\/\//i.test(value)) return false;
+  if (value.startsWith("#")) return false;
+  if (value.includes("://")) return false;
+  return value.includes("/") || value.startsWith("./") || value.startsWith("../");
+}
+function getPromptPrerequisiteConfig(config2) {
+  const raw = config2?.promptPrerequisites;
+  return {
+    enabled: raw?.enabled !== false,
+    sectionNames: {
+      memory: dedupe([...raw?.sectionNames?.memory ?? [], ...DEFAULT_SECTION_NAMES.memory]),
+      skills: dedupe([...raw?.sectionNames?.skills ?? [], ...DEFAULT_SECTION_NAMES.skills]),
+      verifyFirst: dedupe([
+        ...raw?.sectionNames?.verifyFirst ?? [],
+        ...DEFAULT_SECTION_NAMES.verifyFirst
+      ]),
+      context: dedupe([...raw?.sectionNames?.context ?? [], ...DEFAULT_SECTION_NAMES.context])
+    },
+    blockingTools: dedupe(raw?.blockingTools?.length ? raw.blockingTools : DEFAULT_BLOCKING_TOOLS),
+    executionKeywords: dedupe(
+      raw?.executionKeywords?.length ? raw.executionKeywords : DEFAULT_EXECUTION_KEYWORDS
+    )
+  };
+}
+function getSectionKind(heading, config2) {
+  const normalized = normalizeHeading(heading);
+  for (const [kind, aliases] of Object.entries(config2.sectionNames)) {
+    if (aliases.some((alias) => normalizeHeading(alias) === normalized)) {
+      return kind;
+    }
+  }
+  return null;
+}
+function parsePromptPrerequisiteSections(promptText, config2) {
+  const sections = [];
+  const matches = [...promptText.matchAll(HEADING_PATTERN)];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const heading = match[1]?.trim() ?? "";
+    const kind = getSectionKind(heading, config2);
+    if (!kind || match.index === void 0) {
+      continue;
+    }
+    const start = match.index + match[0].length;
+    const end = index + 1 < matches.length && matches[index + 1].index !== void 0 ? matches[index + 1].index : promptText.length;
+    const content = promptText.slice(start, end).trim();
+    if (!content) {
+      continue;
+    }
+    sections.push({ kind, heading, content });
+  }
+  const requiredToolCalls = dedupe(sections.flatMap((section) => extractRequiredToolCalls(section.content)));
+  const requiredFilePaths = dedupe(sections.flatMap((section) => extractFilePaths(section.content)));
+  return {
+    sections,
+    requiredToolCalls,
+    requiredFilePaths
+  };
+}
+function extractRequiredToolCalls(content) {
+  const required2 = [];
+  if (/\bnotepad_read\b/i.test(content)) {
+    required2.push("notepad_read");
+  }
+  if (/\bproject_memory_read\b/i.test(content)) {
+    required2.push("project_memory_read");
+  }
+  if (/\bsupermemory(?:\s+|_)?search\b|\bmcp__supermemory__search\b/i.test(content)) {
+    required2.push("supermemory.search");
+  }
+  return required2;
+}
+function extractFilePaths(content) {
+  const paths = [];
+  for (const match of content.matchAll(FILE_PATH_PATTERN)) {
+    const candidate = normalizePath(match[1] ?? "");
+    if (isLikelyPath(candidate)) {
+      paths.push(candidate);
+    }
+  }
+  return dedupe(paths);
+}
+function shouldEnforcePromptPrerequisites(keywords, parseResult, config2) {
+  if (!config2.enabled) {
+    return false;
+  }
+  if (!keywords.some((keyword) => config2.executionKeywords.includes(keyword))) {
+    return false;
+  }
+  return parseResult.requiredToolCalls.length > 0 || parseResult.requiredFilePaths.length > 0;
+}
+function readPromptPrerequisiteState(directory, sessionId) {
+  return readModeState(STATE_MODE, directory, sessionId);
+}
+function clearPromptPrerequisiteState(directory, sessionId) {
+  return clearModeStateFile(STATE_MODE, directory, sessionId);
+}
+function activatePromptPrerequisiteState(directory, sessionId, executionKeywords, parseResult) {
+  if (parseResult.requiredToolCalls.length === 0 && parseResult.requiredFilePaths.length === 0) {
+    clearPromptPrerequisiteState(directory, sessionId);
+    return null;
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const state = {
+    active: true,
+    session_id: sessionId,
+    execution_keywords: executionKeywords,
+    required_tool_calls: parseResult.requiredToolCalls,
+    required_file_paths: parseResult.requiredFilePaths,
+    completed_tool_calls: [],
+    completed_file_paths: [],
+    created_at: now,
+    updated_at: now
+  };
+  return writeModeState(STATE_MODE, state, directory, sessionId) ? state : null;
+}
+function buildPromptPrerequisiteReminder(state) {
+  const toolList = state.required_tool_calls.length > 0 ? state.required_tool_calls.map((tool2) => `- Call \`${tool2}\``).join("\n") : "";
+  const fileList = state.required_file_paths.length > 0 ? state.required_file_paths.map((path22) => `- Read \`${path22}\``).join("\n") : "";
+  return `<system-reminder>
+[BLOCKING PREREQUISITE GATE]
+This prompt declared prerequisite context. Before any Edit/Write/Agent/Task tool use, you MUST satisfy every prerequisite below.
+
+Required MCP/tool calls:
+${toolList || "- None"}
+
+Required file reads:
+${fileList || "- None"}
+
+Do the prerequisite reads first. Do not edit files. Do not spawn/delegate agents until the list is complete.
+</system-reminder>`;
+}
+function isPromptPrerequisiteBlockingTool(toolName, config2) {
+  return Boolean(toolName && config2.blockingTools.includes(toolName));
+}
+function matchesToolRequirement(toolName, requiredTool) {
+  if (!toolName) {
+    return false;
+  }
+  const normalizedTool = toolName.toLowerCase();
+  switch (requiredTool) {
+    case "notepad_read":
+      return normalizedTool === "notepad_read" || normalizedTool.endsWith("__notepad_read");
+    case "project_memory_read":
+      return normalizedTool === "project_memory_read" || normalizedTool.endsWith("__project_memory_read");
+    case "supermemory.search":
+      return normalizedTool === "supermemory_search" || normalizedTool === "supermemory.search" || /supermemory.*search/i.test(toolName);
+    default:
+      return normalizedTool === requiredTool.toLowerCase();
+  }
+}
+function extractReadFilePath(toolName, toolInput) {
+  if ((toolName || "").toLowerCase() !== "read") {
+    return null;
+  }
+  if (!toolInput || typeof toolInput !== "object") {
+    return null;
+  }
+  const input = toolInput;
+  const filePath = input.file_path ?? input.path;
+  return typeof filePath === "string" && filePath.trim().length > 0 ? filePath.trim() : null;
+}
+function recordPromptPrerequisiteProgress(directory, sessionId, toolName, toolInput) {
+  const state = readPromptPrerequisiteState(directory, sessionId);
+  if (!state?.active) {
+    return null;
+  }
+  let toolSatisfied = null;
+  let fileSatisfied = null;
+  for (const requiredTool of state.required_tool_calls) {
+    if (!state.completed_tool_calls.includes(requiredTool) && matchesToolRequirement(toolName, requiredTool)) {
+      state.completed_tool_calls = dedupe([...state.completed_tool_calls, requiredTool]);
+      toolSatisfied = requiredTool;
+    }
+  }
+  const readPath = extractReadFilePath(toolName, toolInput);
+  if (readPath) {
+    for (const requiredPath of state.required_file_paths) {
+      if (!state.completed_file_paths.includes(requiredPath) && normalizePath(readPath) === requiredPath) {
+        state.completed_file_paths = dedupe([...state.completed_file_paths, requiredPath]);
+        fileSatisfied = requiredPath;
+      }
+    }
+  }
+  const remainingToolCalls = state.required_tool_calls.filter(
+    (requiredTool) => !state.completed_tool_calls.includes(requiredTool)
+  );
+  const remainingFilePaths = state.required_file_paths.filter(
+    (requiredPath) => !state.completed_file_paths.includes(requiredPath)
+  );
+  const isComplete = remainingToolCalls.length === 0 && remainingFilePaths.length === 0;
+  if (isComplete) {
+    clearPromptPrerequisiteState(directory, sessionId);
+  } else if (toolSatisfied || fileSatisfied) {
+    state.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+    writeModeState(STATE_MODE, state, directory, sessionId);
+  }
+  return {
+    toolSatisfied,
+    fileSatisfied,
+    remainingToolCalls,
+    remainingFilePaths,
+    isComplete
+  };
+}
+function getRemainingPromptPrerequisites(state) {
+  return {
+    remainingToolCalls: state.required_tool_calls.filter(
+      (requiredTool) => !state.completed_tool_calls.includes(requiredTool)
+    ),
+    remainingFilePaths: state.required_file_paths.filter(
+      (requiredPath) => !state.completed_file_paths.includes(requiredPath)
+    )
+  };
+}
+function buildPromptPrerequisiteDenyReason(state, toolName) {
+  const remaining = getRemainingPromptPrerequisites(state);
+  const toolBits = remaining.remainingToolCalls.length > 0 ? `Missing tool calls: ${remaining.remainingToolCalls.join(", ")}.` : "";
+  const fileBits = remaining.remainingFilePaths.length > 0 ? `Missing file reads: ${remaining.remainingFilePaths.join(", ")}.` : "";
+  return `[PROMPT PREREQUISITES] Blocking ${toolName || "tool"} until prompt prerequisites are completed. ${toolBits} ${fileBits}`.trim();
+}
+
+// src/hooks/bridge.ts
 init_plan_output();
 init_skill_state();
 init_hooks();
@@ -72073,7 +72597,7 @@ init_permission_handler();
 init_prompt_helpers();
 var PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 var PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
-var WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane)\b/i;
+var WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane|send-keys)\b/i;
 var WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
 var WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 var TEAM_TERMINAL_VALUES = /* @__PURE__ */ new Set([
@@ -72439,6 +72963,7 @@ async function processKeywordDetector(input) {
   }
   const config2 = loadConfig();
   const taskSizeConfig = config2.taskSizeDetection ?? {};
+  const promptPrerequisiteConfig = getPromptPrerequisiteConfig(config2);
   const sizeCheckResult = getAllKeywordsWithSizeCheck(cleanedText, {
     enabled: taskSizeConfig.enabled !== false,
     smallWordLimit: taskSizeConfig.smallWordLimit ?? 50,
@@ -72473,6 +72998,23 @@ Reason: ${reason}
 Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:\`, or \`tiny:\` to always use lightweight mode. Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`
       );
     }
+  }
+  const promptPrerequisiteParse = parsePromptPrerequisiteSections(promptText, promptPrerequisiteConfig);
+  const executionKeywords = fullKeywords.filter(
+    (keywordType) => promptPrerequisiteConfig.executionKeywords.includes(keywordType)
+  );
+  if (shouldEnforcePromptPrerequisites(executionKeywords, promptPrerequisiteParse, promptPrerequisiteConfig)) {
+    const state = activatePromptPrerequisiteState(
+      directory,
+      sessionId,
+      executionKeywords,
+      promptPrerequisiteParse
+    );
+    if (state) {
+      messages.push(buildPromptPrerequisiteReminder(state));
+    }
+  } else if (executionKeywords.length > 0) {
+    clearPromptPrerequisiteState(directory, sessionId);
   }
   const sanitizedText = sanitizeForKeywordDetection(cleanedText);
   if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
@@ -72927,6 +73469,7 @@ var _openclaw = {
 function processPreToolUse(input) {
   const directory = resolveToWorktreeRoot(input.directory);
   const teamWorkerIdentity = teamWorkerIdentityFromEnv();
+  const promptPrerequisiteConfig = getPromptPrerequisiteConfig(loadConfig());
   if (teamWorkerIdentity) {
     if (input.toolName === "Task") {
       return {
@@ -72971,6 +73514,28 @@ Command blocked: ${command}`
   }
   const preToolMessages = enforcementResult.message ? [enforcementResult.message] : [];
   let modifiedToolInput;
+  const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(
+    directory,
+    input.sessionId,
+    input.toolName,
+    input.toolInput
+  );
+  if (promptPrerequisiteProgress?.isComplete) {
+    preToolMessages.push(
+      "[PROMPT PREREQUISITES COMPLETE] Required context tools/files were read. Editing and agent delegation are unblocked."
+    );
+  }
+  const promptPrerequisiteState = readPromptPrerequisiteState(directory, input.sessionId);
+  if (promptPrerequisiteState?.active && isPromptPrerequisiteBlockingTool(input.toolName, promptPrerequisiteConfig)) {
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName)
+      }
+    };
+  }
   if (isDelegationToolName2(input.toolName)) {
     const originalInput = input.toolInput;
     const inputModel = originalInput?.model;
@@ -73939,6 +74504,7 @@ var import_fs76 = require("fs");
 var import_path93 = require("path");
 var import_url13 = require("url");
 init_omc_cli_rendering();
+init_skininthegamebros_user();
 function getPackageDir5() {
   if (typeof __dirname !== "undefined" && __dirname) {
     const currentDirName = (0, import_path93.basename)(__dirname);
@@ -73971,6 +74537,12 @@ var CC_NATIVE_COMMANDS = /* @__PURE__ */ new Set([
   "clear",
   "compact",
   "memory"
+]);
+var SKININTHEGAMEBROS_ONLY_SKILLS = /* @__PURE__ */ new Set([
+  "remember",
+  "verify",
+  "debug",
+  "skillify"
 ]);
 function toSafeSkillName(name) {
   const normalized = name.trim();
@@ -74032,6 +74604,9 @@ function loadSkillsFromDirectory() {
     const entries = (0, import_fs76.readdirSync)(SKILLS_DIR2, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name) && !isSkininthegamebrosUser()) {
+        continue;
+      }
       const skillPath = (0, import_path93.join)(SKILLS_DIR2, entry.name, "SKILL.md");
       if ((0, import_fs76.existsSync)(skillPath)) {
         const skillEntries = loadSkillFromFile(skillPath, entry.name);
@@ -74338,7 +74913,7 @@ function createOmcSession(options) {
 ${loadContextFromFiles(contextFiles)}`;
     }
   }
-  let systemPrompt = omcSystemPrompt;
+  let systemPrompt = appendSkininthegamebrosGuidance(omcSystemPrompt, "system");
   if (config2.features?.continuationEnforcement !== false) {
     systemPrompt += continuationSystemPromptAddition;
   }
@@ -77891,6 +78466,7 @@ var import_child_process32 = require("child_process");
 var import_fs91 = require("fs");
 var import_os19 = require("os");
 var import_path108 = require("path");
+init_loader();
 
 // src/providers/github.ts
 var import_node_child_process2 = require("node:child_process");
@@ -78468,6 +79044,97 @@ function getProvider(name) {
 
 // src/cli/commands/teleport.ts
 var DEFAULT_WORKTREE_ROOT = (0, import_path108.join)((0, import_os19.homedir)(), "Workspace", "omc-worktrees");
+var PACKAGE_JSON_NAME = "package.json";
+var PACKAGE_MANAGER_LOCKFILES = {
+  pnpm: "pnpm-lock.yaml",
+  yarn: "yarn.lock",
+  npm: "package-lock.json"
+};
+function readPackageJsonText(directory) {
+  try {
+    return (0, import_fs91.readFileSync)((0, import_path108.join)(directory, PACKAGE_JSON_NAME), "utf-8");
+  } catch {
+    return null;
+  }
+}
+function detectPackageManager(parentRepoRoot, worktreePath) {
+  for (const [manager, lockfile] of Object.entries(PACKAGE_MANAGER_LOCKFILES)) {
+    if ((0, import_fs91.existsSync)((0, import_path108.join)(worktreePath, lockfile)) || (0, import_fs91.existsSync)((0, import_path108.join)(parentRepoRoot, lockfile))) {
+      return manager;
+    }
+  }
+  for (const directory of [worktreePath, parentRepoRoot]) {
+    const packageJsonText = readPackageJsonText(directory);
+    if (!packageJsonText) continue;
+    try {
+      const parsed = JSON.parse(packageJsonText);
+      const packageManager = parsed.packageManager?.split("@")[0];
+      if (packageManager === "pnpm" || packageManager === "yarn" || packageManager === "npm") {
+        return packageManager;
+      }
+    } catch {
+    }
+  }
+  return "npm";
+}
+function symlinkNodeModules(parentRepoRoot, worktreePath) {
+  const sourceNodeModules = (0, import_path108.join)(parentRepoRoot, "node_modules");
+  const targetNodeModules = (0, import_path108.join)(worktreePath, "node_modules");
+  if (!(0, import_fs91.existsSync)(sourceNodeModules) || (0, import_fs91.existsSync)(targetNodeModules)) {
+    return false;
+  }
+  (0, import_fs91.symlinkSync)(sourceNodeModules, targetNodeModules, process.platform === "win32" ? "junction" : "dir");
+  return true;
+}
+function installDependencies(worktreePath, packageManager) {
+  const argsByManager = {
+    npm: ["install"],
+    pnpm: ["install"],
+    yarn: ["install"]
+  };
+  (0, import_child_process32.execFileSync)(packageManager, argsByManager[packageManager], {
+    cwd: worktreePath,
+    stdio: "inherit"
+  });
+}
+function warnTeleportDependencyFallback(message, json) {
+  if (json) return;
+  console.warn(source_default.yellow(message));
+}
+function bootstrapTeleportDependencies(parentRepoRoot, worktreePath, options) {
+  const packageManager = detectPackageManager(parentRepoRoot, worktreePath);
+  if (!options.symlinkNodeModules) {
+    installDependencies(worktreePath, packageManager);
+    return { mode: "install", packageManager };
+  }
+  const parentPackageJson = readPackageJsonText(parentRepoRoot);
+  const worktreePackageJson = readPackageJsonText(worktreePath);
+  if (!parentPackageJson || !worktreePackageJson) {
+    warnTeleportDependencyFallback(
+      "Warning: could not read package.json for teleport dependency reuse; running full install instead.",
+      options.json
+    );
+    installDependencies(worktreePath, packageManager);
+    return { mode: "install", packageManager };
+  }
+  if (parentPackageJson !== worktreePackageJson) {
+    warnTeleportDependencyFallback(
+      "Warning: worktree package.json differs from parent repo; running full install instead of symlinking node_modules.",
+      options.json
+    );
+    installDependencies(worktreePath, packageManager);
+    return { mode: "install", packageManager };
+  }
+  if (symlinkNodeModules(parentRepoRoot, worktreePath)) {
+    return { mode: "symlink", packageManager };
+  }
+  warnTeleportDependencyFallback(
+    "Warning: parent node_modules is unavailable for teleport symlink reuse; running full install instead.",
+    options.json
+  );
+  installDependencies(worktreePath, packageManager);
+  return { mode: "install", packageManager };
+}
 function parseRef(ref) {
   const ghPrUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[?#].*)?$/);
   if (ghPrUrlMatch) {
@@ -78665,6 +79332,8 @@ async function teleportCommand(ref, options) {
   }
   const { owner, repo, root: repoRoot } = currentRepo;
   const repoName = (0, import_path108.basename)(repoRoot);
+  const config2 = loadConfig();
+  const shouldSymlinkNodeModules = config2.teleport?.symlinkNodeModules ?? true;
   const effectiveProviderName = parsed.provider || currentRepo.provider;
   const provider = getProvider(effectiveProviderName);
   let branchName;
@@ -78754,6 +79423,18 @@ async function teleportCommand(ref, options) {
       console.error(source_default.red(`Failed to create worktree: ${result.error}`));
     }
     return { success: false, error: result.error };
+  }
+  try {
+    bootstrapTeleportDependencies(repoRoot, worktreePath, {
+      json: options.json,
+      symlinkNodeModules: shouldSymlinkNodeModules
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!options.json) {
+      console.error(source_default.red(`Failed to bootstrap worktree dependencies: ${message}`));
+    }
+    return { success: false, error: message };
   }
   if (!options.json) {
     console.log("");

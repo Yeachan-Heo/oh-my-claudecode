@@ -446,6 +446,25 @@ describe('state-tools', () => {
       // Legacy file should remain (belongs to different session)
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'ralph-state.json'))).toBe(true);
     });
+
+    it('should clear recovered session-owned state stranded under another session directory', async () => {
+      const sessionId = 'continued-session';
+      const strandedDir = join(TEST_DIR, '.omc', 'state', 'sessions', 'stale-session-dir');
+      mkdirSync(strandedDir, { recursive: true });
+      writeFileSync(
+        join(strandedDir, 'ralph-state.json'),
+        JSON.stringify({ active: true, session_id: sessionId, source: 'recovered-session-state' })
+      );
+
+      const result = await stateClearTool.handler({
+        mode: 'ralph',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('recovered session file');
+      expect(existsSync(join(strandedDir, 'ralph-state.json'))).toBe(false);
+    });
   });
 
   describe('session-scoped behavior', () => {
