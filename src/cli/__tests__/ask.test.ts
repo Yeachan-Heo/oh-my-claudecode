@@ -581,7 +581,7 @@ describe('run-provider-advisor script contract', () => {
       });
       expect(calls[1]).toMatchObject({
         command: 'gemini',
-        args: ['--yolo'],
+        args: ['--approval-mode', 'yolo'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
       });
     } finally {
