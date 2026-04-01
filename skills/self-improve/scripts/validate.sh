@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# validate.sh — Sealed file enforcement + plan schema validation for self-improvement loop.
+# Usage:
+#   ./validate.sh --worktree /path plan.json    # worktree mode + plan validation
+#   ./validate.sh plan.json                     # plan schema validation only
+#   ./validate.sh                               # sealed file check only
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Settings path must be provided or discovered from .omc/self-improve/config/
+SETTINGS=""
+VALID_APPROACH_FAMILIES="architecture training_config data infrastructure optimization testing documentation other"
+
+# Parse arguments
+WORKTREE_PATH=""
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --worktree)
+            WORKTREE_PATH="$2"
+            shift 2
+            ;;
+        --settings)
+            SETTINGS="$2"
+            shift 2
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${POSITIONAL_ARGS[@]+"${POSITIONAL_ARGS[@]}"}"
+
+# Auto-discover settings if not provided
+if [[ -z "${SETTINGS}" ]]; then
+    # Walk up from worktree or CWD to find .omc/self-improve/config/settings.json
+    SEARCH_DIR="${WORKTREE_PATH:-$(pwd)}"
+    while [[ "${SEARCH_DIR}" != "/" ]]; do
+        if [[ -f "${SEARCH_DIR}/.omc/self-improve/config/settings.json" ]]; then
+            SETTINGS="${SEARCH_DIR}/.omc/self-improve/config/settings.json"
+            break
+        fi
+        SEARCH_DIR="$(dirname "${SEARCH_DIR}")"
+    done
+fi
+
+GIT_DIR="${WORKTREE_PATH:-$(pwd)}"
+
+err() { echo "ERROR: $*" >&2; }
+ok()  { echo "OK: $*"; }
+
+require_jq() {
+    if ! command -v jq &>/dev/null; then
+        err "jq is not installed. Install with: brew install jq (macOS) or apt-get install jq (Linux)"
+        exit 1
+    fi
+}
+
+check_sealed_files() {
+    require_jq
+
+    if [[ -z "${SETTINGS}" || ! -f "${SETTINGS}" ]]; then
+        ok "No settings file found — skipping sealed file check."
+        return 0
+    fi
+
+    has_sealed=$(jq -r 'if (.sealed_files | type) == "array" and (.sealed_files | length) > 0 then "yes" else "no" end' "${SETTINGS}" 2>/dev/null || echo "no")
+
+    if [[ "${has_sealed}" != "yes" ]]; then
+        ok "No sealed files configured — skipping."
+        return 0
+    fi
+
+    if ! git -C "${GIT_DIR}" rev-parse --git-dir &>/dev/null 2>&1; then
+        ok "Not a git repository — skipping sealed file check."
+        return 0
+    fi
+
+    local modified_files_str=""
+    if [[ -n "${WORKTREE_PATH}" ]]; then
+        local base_commit
+        base_commit=$(git -C "${GIT_DIR}" merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
+        modified_files_str=$(git -C "${GIT_DIR}" diff --name-only "${base_commit}" 2>/dev/null || true)
+        local uncommitted
+        uncommitted=$(git -C "${GIT_DIR}" diff --name-only 2>/dev/null || true)
+        if [[ -n "${uncommitted}" ]]; then
+            modified_files_str="${modified_files_str}"$'\n'"${uncommitted}"
+        fi
+    else
+        modified_files_str=$(git -C "${GIT_DIR}" diff --name-only HEAD 2>/dev/null || true)
+        local staged
+        staged=$(git -C "${GIT_DIR}" diff --name-only --cached 2>/dev/null || true)
+        if [[ -n "${staged}" ]]; then
+            modified_files_str="${modified_files_str}"$'\n'"${staged}"
+        fi
+    fi
+
+    if [[ -n "${modified_files_str}" ]]; then
+        modified_files_str=$(echo "${modified_files_str}" | sort -u)
+    fi
+
+    if [[ -z "${modified_files_str}" ]]; then
+        ok "No modified files detected."
+        return 0
+    fi
+
+    violations=""
+    while IFS= read -r sealed; do
+        [[ -z "${sealed}" ]] && continue
+        while IFS= read -r modified; do
+            [[ -z "${modified}" ]] && continue
+            if [[ "${sealed}" == */ ]]; then
+                [[ "${modified}" == "${sealed}"* ]] && violations="${violations} ${modified}"
+            else
+                [[ "${modified}" == "${sealed}" ]] && violations="${violations} ${modified}"
+            fi
+        done <<< "${modified_files_str}"
+    done < <(jq -r '.sealed_files[]' "${SETTINGS}" 2>/dev/null)
+
+    if [[ -n "${violations}" ]]; then
+        err "Sealed file(s) were modified:${violations}"
+        exit 1
+    fi
+
+    local modified_count
+    modified_count=$(echo "${modified_files_str}" | wc -l | tr -d ' ')
+    ok "Sealed file check passed (${modified_count} modified, none sealed)."
+}
+
+check_plan_schema() {
+    local plan_file="$1"
+    require_jq
+
+    if [[ ! -f "${plan_file}" ]]; then
+        err "Plan file not found: ${plan_file}"
+        exit 1
+    fi
+
+    local required_fields="plan_id planner_id round hypothesis approach_family critic_approved target_files steps expected_outcome history_reference"
+    local missing=""
+
+    for field in ${required_fields}; do
+        val=$(jq -r --arg f "${field}" '.[$f]' "${plan_file}" 2>/dev/null)
+        if [[ "${val}" == "null" || -z "${val}" ]]; then
+            missing="${missing} ${field}"
+        fi
+    done
+
+    if [[ -n "${missing}" ]]; then
+        err "Plan is missing required fields:${missing}"
+        exit 1
+    fi
+    ok "Plan contains all required fields."
+
+    # Validate approach_family
+    approach=$(jq -r '.approach_family' "${plan_file}")
+    local valid=0
+    for family in ${VALID_APPROACH_FAMILIES}; do
+        if [[ "${approach}" == "${family}" ]]; then
+            valid=1
+            break
+        fi
+    done
+    if [[ ${valid} -eq 0 ]]; then
+        err "approach_family '${approach}' is not valid. Must be one of: ${VALID_APPROACH_FAMILIES}"
+        exit 1
+    fi
+    ok "Approach family '${approach}' is valid."
+
+    # Validate hypothesis is a single string
+    hypothesis_type=$(jq -r '.hypothesis | type' "${plan_file}" 2>/dev/null)
+    if [[ "${hypothesis_type}" != "string" ]]; then
+        err "hypothesis must be a string (got ${hypothesis_type})"
+        exit 1
+    fi
+    ok "One-hypothesis check passed."
+
+    # Validate steps non-empty
+    steps_len=$(jq '.steps | length' "${plan_file}" 2>/dev/null || echo "0")
+    if [[ "${steps_len}" -eq 0 ]]; then
+        err "steps must be a non-empty array"
+        exit 1
+    fi
+    ok "Steps validated (${steps_len} step(s))."
+}
+
+check_result_schema() {
+    local result_file="$1"
+    require_jq
+
+    if [[ ! -f "${result_file}" ]]; then
+        err "Result file not found: ${result_file}"
+        exit 1
+    fi
+
+    local required_fields="executor_id plan_id benchmark_score status timestamp benchmark_raw"
+    local missing=""
+
+    for field in ${required_fields}; do
+        val=$(jq -r --arg f "${field}" '.[$f]' "${result_file}" 2>/dev/null)
+        if [[ "${val}" == "null" || -z "${val}" ]]; then
+            if [[ "${field}" == "benchmark_raw" ]]; then
+                exists=$(jq --arg f "${field}" 'has($f)' "${result_file}" 2>/dev/null || echo "false")
+                if [[ "${exists}" != "true" ]]; then
+                    missing="${missing} ${field}"
+                fi
+            elif [[ "${field}" == "benchmark_score" ]]; then
+                exists=$(jq --arg f "${field}" 'has($f)' "${result_file}" 2>/dev/null || echo "false")
+                if [[ "${exists}" != "true" ]]; then
+                    missing="${missing} ${field}"
+                fi
+            else
+                missing="${missing} ${field}"
+            fi
+        fi
+    done
+
+    if [[ -n "${missing}" ]]; then
+        err "Result is missing required fields:${missing}"
+        exit 1
+    fi
+    ok "Result contains all required fields."
+
+    # Validate status enum
+    local status
+    status=$(jq -r '.status' "${result_file}" 2>/dev/null)
+    case "${status}" in
+        success|regression|error|timeout) ;;
+        *)
+            err "Invalid status '${status}'. Must be one of: success, regression, error, timeout"
+            exit 1
+            ;;
+    esac
+    ok "Status '${status}' is valid."
+
+    # Check failure_analysis on non-success status
+    if [[ "${status}" != "success" ]]; then
+        local fa_type
+        fa_type=$(jq -r '.failure_analysis | type' "${result_file}" 2>/dev/null)
+        if [[ "${fa_type}" != "object" ]]; then
+            err "failure_analysis must be a non-null object when status is '${status}' (got ${fa_type})"
+            exit 1
+        fi
+
+        local fa_fields="what why category lesson"
+        local fa_missing=""
+        for field in ${fa_fields}; do
+            val=$(jq -r --arg f "${field}" '.failure_analysis[$f]' "${result_file}" 2>/dev/null)
+            if [[ "${val}" == "null" || -z "${val}" ]]; then
+                fa_missing="${fa_missing} ${field}"
+            fi
+        done
+
+        if [[ -n "${fa_missing}" ]]; then
+            err "failure_analysis is missing required fields:${fa_missing}"
+            exit 1
+        fi
+        ok "failure_analysis is complete for non-success status."
+
+        # Validate failure category enum
+        local fa_category
+        fa_category=$(jq -r '.failure_analysis.category' "${result_file}" 2>/dev/null)
+        local valid_categories="oom timeout regression logic_error scope_error infrastructure benchmark_parse_error sealed_file_violation"
+        local cat_valid=0
+        for cat in ${valid_categories}; do
+            if [[ "${fa_category}" == "${cat}" ]]; then
+                cat_valid=1
+                break
+            fi
+        done
+
+        if [[ ${cat_valid} -eq 0 ]]; then
+            err "failure_analysis.category '${fa_category}' is not valid. Must be one of: ${valid_categories}"
+            exit 1
+        fi
+        ok "failure_analysis.category '${fa_category}' is valid."
+    fi
+
+    # Validate sub_scores if present
+    local has_sub_scores
+    has_sub_scores=$(jq 'has("sub_scores")' "${result_file}" 2>/dev/null || echo "false")
+    if [[ "${has_sub_scores}" == "true" ]]; then
+        local sub_scores_type
+        sub_scores_type=$(jq -r '.sub_scores | type' "${result_file}" 2>/dev/null)
+        if [[ "${sub_scores_type}" == "object" ]]; then
+            local invalid_values
+            invalid_values=$(jq -r '.sub_scores | to_entries[] | select(.value != null and (.value | type) != "number") | .key' "${result_file}" 2>/dev/null)
+            if [[ -n "${invalid_values}" ]]; then
+                err "sub_scores contains non-numeric values for keys: ${invalid_values}"
+                exit 1
+            fi
+            local sub_scores_count
+            sub_scores_count=$(jq '.sub_scores | length' "${result_file}" 2>/dev/null)
+            ok "sub_scores is a valid object (${sub_scores_count} dimension(s))."
+        elif [[ "${sub_scores_type}" != "null" ]]; then
+            err "sub_scores must be an object or null (got ${sub_scores_type})"
+            exit 1
+        fi
+    fi
+}
+
+main() {
+    echo "=== self-improve validate.sh ==="
+    check_sealed_files
+
+    if [[ ${#POSITIONAL_ARGS[@]} -ge 1 ]]; then
+        check_plan_schema "${POSITIONAL_ARGS[0]}"
+    fi
+
+    if [[ ${#POSITIONAL_ARGS[@]} -ge 2 ]]; then
+        check_result_schema "${POSITIONAL_ARGS[1]}"
+    fi
+
+    echo "=== All checks passed ==="
+}
+
+main
