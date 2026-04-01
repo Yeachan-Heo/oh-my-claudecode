@@ -4,6 +4,7 @@ import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkill
 describe('Builtin Skills', () => {
   const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   const originalPath = process.env.PATH;
+  const originalUserType = process.env.USER_TYPE;
 
   // Clear cache before each test to ensure fresh loads
   beforeEach(() => {
@@ -16,6 +17,11 @@ describe('Builtin Skills', () => {
       delete process.env.PATH;
     } else {
       process.env.PATH = originalPath;
+    }
+    if (originalUserType === undefined) {
+      delete process.env.USER_TYPE;
+    } else {
+      process.env.USER_TYPE = originalUserType;
     }
     clearSkillsCache();
   });
@@ -30,6 +36,11 @@ describe('Builtin Skills', () => {
       delete process.env.PATH;
     } else {
       process.env.PATH = originalPath;
+    }
+    if (originalUserType === undefined) {
+      delete process.env.USER_TYPE;
+    } else {
+      process.env.USER_TYPE = originalUserType;
     }
     clearSkillsCache();
   });
@@ -391,6 +402,29 @@ describe('Builtin Skills', () => {
 
     it('should not return a skill for "clear" via getBuiltinSkill', () => {
       expect(getBuiltinSkill('clear')).toBeUndefined();
+    });
+  });
+
+  describe('skininthegamebros-only builtin skills', () => {
+    it('keeps skininthegamebros-only skills hidden by default', () => {
+      const names = listBuiltinSkillNames({ includeAliases: true });
+      expect(names).not.toContain('remember');
+      expect(names).not.toContain('verify');
+      expect(names).not.toContain('debug');
+      expect(names).not.toContain('skillify');
+    });
+
+    it('surfaces skininthegamebros-only skills when USER_TYPE=ant', () => {
+      process.env.USER_TYPE = 'ant';
+      clearSkillsCache();
+
+      const names = listBuiltinSkillNames({ includeAliases: true });
+      expect(names).toContain('remember');
+      expect(names).toContain('verify');
+      expect(names).toContain('debug');
+      expect(names).toContain('skillify');
+      expect(names).not.toContain('stuck');
+      expect(names).not.toContain('lorem-ipsum');
     });
   });
 

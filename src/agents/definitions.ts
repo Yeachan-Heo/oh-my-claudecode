@@ -11,6 +11,7 @@
 import type { AgentConfig, PluginConfig } from '../shared/types.js';
 import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
 import { loadConfig } from '../config/loader.js';
+import { appendSkininthegamebrosGuidance } from './skininthegamebros-guidance.js';
 
 // Re-export base agents from individual files (rebranded names)
 export { architectAgent } from './architect.js';
@@ -264,7 +265,10 @@ export function getAgentDefinitions(options?: {
 
     result[name] = {
       description: override?.description ?? agentConfig.description,
-      prompt: override?.prompt ?? agentConfig.prompt,
+      prompt: appendSkininthegamebrosGuidance(
+        override?.prompt ?? agentConfig.prompt,
+        'agent',
+      ),
       tools: override?.tools ?? agentConfig.tools,
       disallowedTools,
       model: resolvedModel,
