@@ -24,9 +24,27 @@
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { fileURLToPath } from 'url';
 import { readStdin } from './lib/stdin.mjs';
+
+// Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
+const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT ||
+  join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Load skill content directly from SKILL.md on disk.
+ * Works for both npm installs and plugin marketplace installs.
+ * Returns null if the skill file is not found.
+ */
+function loadSkillContent(skillName) {
+  const skillPath = join(_omcRoot, 'skills', skillName, 'SKILL.md');
+  if (existsSync(skillPath)) {
+    try { return readFileSync(skillPath, 'utf8'); } catch { /* fall through */ }
+  }
+  return null;
+}
 
 const ULTRATHINK_MESSAGE = `<think-mode>
 
@@ -298,10 +316,16 @@ function isTeamEnabled() {
 }
 
 /**
- * Create a skill invocation message that tells Claude to use the Skill tool
+ * Create a skill invocation message.
+ * Prefers direct SKILL.md content injection (works for npm and plugin installs).
+ * Falls back to Skill tool invocation (requires plugin marketplace install).
  */
 function createSkillInvocation(skillName, originalPrompt, args = '') {
   const argsSection = args ? `\nArguments: ${args}` : '';
+  const skillContent = loadSkillContent(skillName);
+  if (skillContent) {
+    return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]\n\n${skillContent}\n\n---\nUser request:\n${originalPrompt}${argsSection}`;
+  }
   return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]
 
 You MUST invoke the skill using the Skill tool:
@@ -325,20 +349,24 @@ function createMultiSkillInvocation(skills, originalPrompt) {
 
   const skillBlocks = skills.map((s, i) => {
     const argsSection = s.args ? `\nArguments: ${s.args}` : '';
-    return `### Skill ${i + 1}: ${s.name.toUpperCase()}
-Skill: oh-my-claudecode:${s.name}${argsSection}`;
+    const content = loadSkillContent(s.name);
+    if (content) {
+      return `### Skill ${i + 1}: ${s.name.toUpperCase()}\n\n${content}${argsSection}`;
+    }
+    return `### Skill ${i + 1}: ${s.name.toUpperCase()}\nSkill: oh-my-claudecode:${s.name}${argsSection}`;
   }).join('\n\n');
 
+  const hasDirectContent = skills.some(s => loadSkillContent(s.name));
   return `[MAGIC KEYWORDS DETECTED: ${skills.map(s => s.name.toUpperCase()).join(', ')}]
 
-You MUST invoke ALL of the following skills using the Skill tool, in order:
+${hasDirectContent ? 'Execute ALL of the following skills in order:' : 'You MUST invoke ALL of the following skills using the Skill tool, in order:'}
 
 ${skillBlocks}
 
 User request:
 ${originalPrompt}
 
-IMPORTANT: Invoke ALL skills listed above. Start with the first skill IMMEDIATELY. After it completes, invoke the next skill in order. Do not skip any skill.`;
+IMPORTANT: Complete ALL skills listed above in order. Start with the first skill IMMEDIATELY.`;
 }
 
 /**
