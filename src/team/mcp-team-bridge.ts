@@ -381,7 +381,7 @@ export function recordTaskCompletionUsage(args: {
   taskId: string;
   promptFile: string;
   outputFile: string;
-  provider: "codex" | "gemini";
+  provider: "codex" | "gemini" | "qwen";
   startedAt: number;
   startedAtIso: string;
 }): void {
@@ -461,7 +461,7 @@ function parseCodexOutput(output: string): string {
  * This allows the bridge to kill the child on shutdown while still awaiting the result.
  */
 function spawnCliProcess(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "qwen",
   prompt: string,
   model: string | undefined,
   cwd: string,

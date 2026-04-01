@@ -48,6 +48,22 @@ describe('capabilities', () => {
       expect(caps).toContain('research');
     });
 
+    it('returns capabilities for mcp-qwen', () => {
+      const caps = getDefaultCapabilities('mcp-qwen');
+      expect(caps).toContain('code-edit');
+      expect(caps).toContain('refactoring');
+      expect(caps).toContain('general');
+      expect(caps).toContain('research');
+    });
+
+    it('returns capabilities for tmux-qwen', () => {
+      const caps = getDefaultCapabilities('tmux-qwen');
+      expect(caps).toContain('code-edit');
+      expect(caps).toContain('refactoring');
+      expect(caps).toContain('general');
+      expect(caps).toContain('research');
+    });
+
     it('returns a copy, not a reference', () => {
       const caps1 = getDefaultCapabilities('claude-native');
       const caps2 = getDefaultCapabilities('claude-native');

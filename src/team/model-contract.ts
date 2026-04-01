@@ -4,7 +4,7 @@ import { validateTeamName } from './team-name.js';
 import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'qwen';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -217,6 +217,21 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       return rawOutput.trim();
     },
   },
+  qwen: {
+    agentType: 'qwen',
+    binary: 'qwen',
+    installInstructions: 'Install Qwen CLI: npm install -g @anthropic-ai/qwen-cli (or pip install qwen-agent)',
+    supportsPromptMode: true,
+    promptModeFlag: '--prompt',
+    buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
+      const args = ['--auto-approve'];
+      if (model) args.push('--model', model);
+      return [...args, ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
 };
 
 export function getContract(agentType: CliAgentType): CliAgentContract {
@@ -331,6 +346,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
   'OMC_CODEX_DEFAULT_MODEL',
   'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
   'OMC_GEMINI_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_QWEN_MODEL',
+  'OMC_QWEN_DEFAULT_MODEL',
 ] as const;
 
 export function getWorkerEnv(

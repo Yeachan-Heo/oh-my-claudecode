@@ -135,6 +135,27 @@ describe("loadConfig() — auto-forceInherit for non-standard providers", () => 
   });
 });
 
+describe("loadConfig() — external model defaults include qwen", () => {
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = saveAndClear(ALL_KEYS);
+  });
+  afterEach(() => {
+    restore(saved);
+  });
+
+  it("includes qwenModel in external models defaults", () => {
+    const config = loadConfig();
+    expect(config.externalModels?.defaults?.qwenModel).toBe("qwen2.5-coder-32b");
+  });
+
+  it("includes qwen in cross-provider fallback order", () => {
+    const config = loadConfig();
+    expect(config.externalModels?.fallbackPolicy?.crossProviderOrder).toContain("qwen");
+  });
+});
+
 describe("startup context compaction", () => {
   it("compacts only OMC-style guidance in loadContextFromFiles while preserving key sections", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "omc-loader-context-"));

@@ -85,13 +85,14 @@ Enable Claude Code native teams in `~/.claude/settings.json`:
 
 > If teams are disabled, OMC will warn you and fall back to non-team execution where possible.
 
-### tmux CLI Workers — Codex & Gemini (v4.4.0+)
+### tmux CLI Workers — Codex, Gemini & Qwen (v4.4.0+)
 
 **v4.4.0 removes the Codex/Gemini MCP servers** (`x`, `g` providers). Use the CLI-first Team runtime (`omc team ...`) to spawn real tmux worker panes:
 
 ```bash
 omc team 2:codex "review auth module for security issues"
 omc team 2:gemini "redesign UI components for accessibility"
+omc team 2:qwen "optimize algorithm implementations"
 omc team 1:claude "implement the payment flow"
 omc team status auth-review
 omc team shutdown auth-review
@@ -99,20 +100,21 @@ omc team shutdown auth-review
 
 `/omc-teams` remains as a legacy compatibility skill and now routes to `omc team ...`.
 
-For mixed Codex + Gemini work in one command, use the **`/ccg`** skill (routes via `/ask codex` + `/ask gemini`, then Claude synthesizes):
+For mixed multi-provider work in one command, use the **`/ccg`** skill (routes via `/ask codex` + `/ask gemini` + optionally `/ask qwen`, then Claude synthesizes):
 
 ```bash
-/ccg Review this PR — architecture (Codex) and UI components (Gemini)
+/ccg Review this PR — architecture (Codex), UI components (Gemini), and code optimization (Qwen)
 ```
 
 | Surface                   | Workers            | Best For                                     |
 | ------------------------- | ------------------ | -------------------------------------------- |
 | `omc team N:codex "..."`  | N Codex CLI panes  | Code review, security analysis, architecture |
 | `omc team N:gemini "..."` | N Gemini CLI panes | UI/UX design, docs, large-context tasks      |
+| `omc team N:qwen "..."`   | N Qwen CLI panes   | Code generation, optimization, multilingual  |
 | `omc team N:claude "..."` | N Claude CLI panes | General tasks via Claude CLI in tmux         |
-| `/ccg`                    | /ask codex + /ask gemini | Tri-model advisor synthesis           |
+| `/ccg`                    | /ask codex + /ask gemini + /ask qwen | Multi-model advisor synthesis |
 
-Workers spawn on-demand and die when their task completes — no idle resource usage. Requires `codex` / `gemini` CLIs installed and an active tmux session.
+Workers spawn on-demand and die when their task completes — no idle resource usage. Requires `codex` / `gemini` / `qwen` CLIs installed and an active tmux session.
 
 > **Note: Package naming** — The project is branded as **oh-my-claudecode** (repo, plugin, commands), but the npm package is published as [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). If you install or upgrade the CLI tools via npm/bun, use `npm i -g oh-my-claude-sisyphus@latest`.
 
@@ -176,8 +178,8 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 | Mode                    | What it is                                                                              | Use For                                                |
 | ----------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | **Team (recommended)**  | Canonical staged pipeline (`team-plan → team-prd → team-exec → team-verify → team-fix`) | Coordinated Claude agents on a shared task list        |
-| **omc team (CLI)**      | tmux CLI workers — real `claude`/`codex`/`gemini` processes in split-panes              | Codex/Gemini CLI tasks; on-demand spawn, die when done |
-| **ccg**                 | Tri-model advisors via `/ask codex` + `/ask gemini`, Claude synthesizes                   | Mixed backend+UI work needing both Codex and Gemini    |
+| **omc team (CLI)**      | tmux CLI workers — real `claude`/`codex`/`gemini`/`qwen` processes in split-panes       | Codex/Gemini/Qwen CLI tasks; on-demand spawn, die when done |
+| **ccg**                 | Multi-model advisors via `/ask codex` + `/ask gemini` + `/ask qwen`, Claude synthesizes | Mixed work needing Codex, Gemini, and/or Qwen perspectives  |
 | **Autopilot**           | Autonomous execution (single lead agent)                                                | End-to-end feature work with minimal ceremony          |
 | **Ultrawork**           | Maximum parallelism (non-team)                                                          | Burst parallel fixes/refactors where Team isn't needed |
 | **Ralph**               | Persistent mode with verify/fix loops                                                   | Tasks that must complete fully (no silent partials)    |
@@ -418,8 +420,9 @@ OMC can optionally orchestrate external AI providers for cross-validation and de
 | --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------ |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | Design review, UI consistency (1M token context) |
 | [Codex CLI](https://github.com/openai/codex)              | `npm install -g @openai/codex`      | Architecture validation, code review cross-check |
+| [Qwen CLI](https://github.com/QwenLM/Qwen-Agent)         | `pip install qwen-agent`            | Code generation, optimization, multilingual support |
 
-**Cost:** 3 Pro plans (Claude + Gemini + ChatGPT) cover everything for ~$60/month.
+**Cost:** 3-4 Pro plans (Claude + Gemini + ChatGPT + optionally Qwen) cover everything.
 
 ---
 
