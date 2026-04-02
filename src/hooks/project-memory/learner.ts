@@ -168,6 +168,7 @@ function isTestCommand(command: string): boolean {
  * Returns custom notes to add to project memory
  */
 function extractEnvironmentHints(output: string): CustomNote[] {
+  if (typeof output !== 'string') return [];
   const hints: CustomNote[] = [];
   const timestamp = Date.now();
 

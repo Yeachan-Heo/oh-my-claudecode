@@ -53,11 +53,17 @@ async function main() {
     const projectRoot = findProjectRoot(directory);
 
     if (projectRoot) {
+      // tool_response may be string or object — normalize to string
+      const rawOutput = data.tool_response || data.toolOutput || '';
+      const toolOutput = typeof rawOutput === 'string'
+        ? rawOutput
+        : (typeof rawOutput?.stdout === 'string' ? rawOutput.stdout : JSON.stringify(rawOutput));
+
       // Learn from tool output
       await learnFromToolOutput(
         data.tool_name || data.toolName || '',
         data.tool_input || data.toolInput || {},
-        data.tool_response || data.toolOutput || '',
+        toolOutput,
         projectRoot
       );
     }
