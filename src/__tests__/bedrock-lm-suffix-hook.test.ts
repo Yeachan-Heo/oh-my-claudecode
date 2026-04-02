@@ -263,9 +263,9 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.reason).toMatch(/model="sonnet"/);
   });
 
-  it('allows no-model call when only ANTHROPIC_MODEL has [1m] but stripped ID is provider-specific', () => {
-    // Dual-check: CLAUDE_MODEL is clean, ANTHROPIC_MODEL carries [1m].
-    // Stripping [1m] from the ANTHROPIC_MODEL still gives a valid provider-specific ID.
+  it('denies no-model call when only ANTHROPIC_MODEL has [1m] suffix (any [1m] triggers deny)', () => {
+    // Our policy: any [1m] suffix in session model vars triggers deny and tier-alias guidance.
+    // Even if stripped ID would be provider-specific, we always guide to tier alias for safety.
     const result = runHook(
       {},
       {
@@ -273,21 +273,23 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
         ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
       },
     );
-    expect(result.denied).toBe(false);
+    expect(result.denied).toBe(true);
+    expect(result.reason).toMatch(/model="sonnet"/);
   });
 
   it('denies no-model call when session model is a bare Anthropic ID with [1m] suffix', () => {
-    // claude-sonnet-4-6[1m] → strip → claude-sonnet-4-6 (bare, invalid on Bedrock) → deny
+    // claude-sonnet-4-6[1m] → session has [1m] → deny with tier alias guidance
     const result = runHook(
       {},
       { ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]' },
     );
     expect(result.denied).toBe(true);
-    expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+    expect(result.reason).toMatch(/model="sonnet"/);
     expect(result.reason).toMatch(/claude-sonnet-4-6\[1m\]/);
   });
 
-  it('includes configured OMC_SUBAGENT_MODEL value in guidance for bare-ID deny', () => {
+  it('derives tier alias from OMC_SUBAGENT_MODEL for guidance in [1m] deny', () => {
+    // normalizeToCcAlias('us.anthropic.claude-sonnet-4-5-20250929-v1:0') → 'sonnet'
     const result = runHook(
       {},
       {
@@ -296,7 +298,7 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
       },
     );
     expect(result.denied).toBe(true);
-    expect(result.reason).toMatch(/us\.anthropic\.claude-sonnet-4-5-20250929-v1:0/);
+    expect(result.reason).toMatch(/model="sonnet"/);
   });
 
   it('denies no-model call when CLAUDE_MODEL is provider-specific[1m] but ANTHROPIC_MODEL is bare[1m]', () => {
