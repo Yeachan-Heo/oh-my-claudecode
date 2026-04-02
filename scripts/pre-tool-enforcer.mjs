@@ -45,14 +45,19 @@ function normalizeToCcAlias(model) {
  * Returns the raw model string (e.g. "claude-opus-4-6") or null if not found.
  */
 function readAgentDefinitionModel(subagentType) {
-  const agentType = (subagentType || '').replace(/^oh-my-claudecode:/, '');
+  // Guard: subagent_type must be a string — non-string payloads would throw on .replace()
+  // and the catch block would silently return {continue:true}, bypassing enforcement.
+  const agentType = (typeof subagentType === 'string' ? subagentType : '').replace(/^oh-my-claudecode:/, '');
   if (!agentType) return null;
-  // Resolve agents/ directory: prefer CLAUDE_PLUGIN_ROOT (installed), fall back to
-  // sibling of this script's directory (dev / test environments).
+  // Reject path traversal: agent names are simple identifiers; no path separators allowed.
+  if (!/^[a-zA-Z0-9_-]+$/.test(agentType)) return null;
+  // Resolve agents/ directory: prefer CLAUDE_PLUGIN_ROOT when set AND the sub-directory
+  // actually exists; fall back to the script-relative path for dev/test environments and
+  // for update scenarios where CLAUDE_PLUGIN_ROOT still points at an old removed install.
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  const agentsDir = pluginRoot
-    ? join(pluginRoot, 'agents')
-    : join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  const pluginAgentsDir = pluginRoot ? join(pluginRoot, 'agents') : null;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  const agentsDir = (pluginAgentsDir && existsSync(pluginAgentsDir)) ? pluginAgentsDir : scriptAgentsDir;
   const agentFile = join(agentsDir, `${agentType}.md`);
   try {
     if (!existsSync(agentFile)) return null;

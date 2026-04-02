@@ -667,6 +667,77 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
+  it('does not throw or deny when subagent_type is a non-string value', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 42 as unknown as string,
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-non-string-subagent-type',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('treats path-traversal subagent_type as unknown agent and does not deny', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:../docs/CLAUDE',
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-path-traversal',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('falls back to script-relative agents dir when CLAUDE_PLUGIN_ROOT points to a non-existent path', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-stale-plugin-root',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: '/nonexistent/path/that/does/not/exist',
+      },
+    );
+
+    // Despite stale CLAUDE_PLUGIN_ROOT, falls back to script-relative agents dir and detects bare model
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
+  });
+
   it('does NOT deny Agent call without subagent_type in forceInherit mode (normal inheritance unchanged)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
