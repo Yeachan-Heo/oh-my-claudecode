@@ -31,6 +31,39 @@ const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
 function isTierAlias(modelId) {
   return TIER_ALIASES.has((modelId || '').toLowerCase());
 }
+/** Map a bare Anthropic model ID to its CC tier alias (sonnet/opus/haiku), or null if unrecognised. */
+function normalizeToCcAlias(model) {
+  if (!model) return null;
+  const lower = model.toLowerCase();
+  if (lower.includes('opus'))   return 'opus';
+  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('haiku'))  return 'haiku';
+  return null;
+}
+/**
+ * Read the `model:` field from an OMC agent definition's YAML frontmatter.
+ * Returns the raw model string (e.g. "claude-opus-4-6") or null if not found.
+ */
+function readAgentDefinitionModel(subagentType) {
+  const agentType = (subagentType || '').replace(/^oh-my-claudecode:/, '');
+  if (!agentType) return null;
+  // Resolve agents/ directory: prefer CLAUDE_PLUGIN_ROOT (installed), fall back to
+  // sibling of this script's directory (dev / test environments).
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const agentsDir = pluginRoot
+    ? join(pluginRoot, 'agents')
+    : join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  const agentFile = join(agentsDir, `${agentType}.md`);
+  try {
+    if (!existsSync(agentFile)) return null;
+    const content = readFileSync(agentFile, 'utf-8');
+    // Extract model from YAML frontmatter (between leading --- delimiters)
+    const match = content.match(/^---[\s\S]*?^model:\s*(\S+)/m);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const MODE_STATE_FILES = [
@@ -629,10 +662,10 @@ async function main() {
             : claudeModel || anthropicModel;
 
         if (toolModel) {
-          // Allow tier aliases (sonnet/opus/haiku) when OMC_SUBAGENT_MODEL is configured.
-          // The Agent tool schema only accepts these short aliases — full Bedrock/Vertex model
-          // IDs are rejected by the tool schema, leaving no valid escape hatch otherwise.
-          // The routing layer maps tier aliases through OMC_SUBAGENT_MODEL at call time.
+          // Allow tier aliases (sonnet/opus/haiku) when OMC_SUBAGENT_MODEL is a valid
+          // provider-specific ID. The Agent tool schema only accepts these short aliases —
+          // full Bedrock/Vertex IDs are rejected by the tool schema, so tier aliases + routing
+          // via OMC_SUBAGENT_MODEL is the only viable explicit-model escape hatch.
           const subagentModelForAlias = process.env.OMC_SUBAGENT_MODEL || '';
           if (isTierAlias(toolModel) && isSubagentSafeModelId(subagentModelForAlias)) {
             // fall through to continue — tier alias is safe when OMC_SUBAGENT_MODEL is a valid provider-specific ID
@@ -679,6 +712,39 @@ async function main() {
             return;
           }
           // else: all suffixed vars strip to valid provider-specific IDs — inheritance is safe.
+        }
+        // Agent-definition model check: runs for any no-model call with a subagent_type,
+        // independent of the sessionHasLmSuffix branch above (which may have matched and
+        // fallen through safely). Claude Code reads the agent definition's `model:` field
+        // AFTER this hook and injects it — if that's a bare Anthropic ID, Bedrock rejects
+        // with 400. Detect it here and deny with guidance to retry with an explicit tier alias.
+        if (!toolModel && toolInput.subagent_type) {
+          const agentDefModel = readAgentDefinitionModel(toolInput.subagent_type);
+          const subagentModel = process.env.OMC_SUBAGENT_MODEL || '';
+          // Only deny when OMC_SUBAGENT_MODEL is configured as a valid provider-specific ID.
+          // Without a routing target the tier-alias escape hatch doesn't exist, so blocking
+          // would strand Claude in a retry loop with no viable path forward.
+          if (agentDefModel && !isSubagentSafeModelId(agentDefModel) && !isTierAlias(agentDefModel)
+              && isSubagentSafeModelId(subagentModel)) {
+            const tierAlias = normalizeToCcAlias(agentDefModel);
+            const guidance = tierAlias
+              ? (subagentModel
+                  ? `Add model="${tierAlias}" to this ${toolName} call — OMC will route it through OMC_SUBAGENT_MODEL (${subagentModel}).`
+                  : `Add model="${tierAlias}" to this ${toolName} call and set OMC_SUBAGENT_MODEL=<valid-bedrock-id>.`)
+              : (subagentModel
+                  ? `Add model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly to this ${toolName} call.`
+                  : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> and add it as the model parameter on this ${toolName} call.`);
+            const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
+            console.log(JSON.stringify({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: `[MODEL ROUTING] Agent type "${agentType}" has model "${agentDefModel}" in its definition, which is not valid for this Bedrock/Vertex/proxy environment. ${guidance}`
+              }
+            }));
+            return;
+          }
         }
         // else: no model param and no [1m] on session model → normal forceInherit,
         // agents inherit the parent session's model cleanly.

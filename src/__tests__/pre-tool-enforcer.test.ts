@@ -18,7 +18,17 @@ function runPreToolEnforcerWithEnv(
     input: JSON.stringify(input),
     encoding: 'utf-8',
     timeout: 5000,
-    env: { ...process.env, NODE_ENV: 'test', ...env },
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      // Reset Bedrock/routing env vars so tests are isolated from the host environment.
+      // Tests that exercise Bedrock model-routing behaviour set these explicitly via `env`.
+      OMC_ROUTING_FORCE_INHERIT: '',
+      OMC_SUBAGENT_MODEL: '',
+      CLAUDE_MODEL: '',
+      ANTHROPIC_MODEL: '',
+      ...env,
+    },
   });
 
   return JSON.parse(stdout.trim()) as Record<string, unknown>;
@@ -513,7 +523,193 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
   });
 
-  it('does not write skill-active-state for unknown custom skills', () => {
+  // === Agent definition model routing (issue: subagent_type bare-model-id on Bedrock) ===
+
+  it('denies Agent call with subagent_type whose definition has a bare Anthropic model ID when forceInherit is enabled', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-agent-def-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
+  });
+
+  it('denies Task call with subagent_type whose definition has a bare Anthropic model ID when forceInherit is enabled', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Task',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:executor',
+          description: 'Implement feature',
+          prompt: 'Do the thing',
+        },
+        cwd: tempDir,
+        session_id: 'session-task-def-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+  });
+
+  it('deny message includes the bare model from the definition and suggests the tier alias', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-deny-message',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    const reason = (output.hookSpecificOutput as Record<string, unknown>).permissionDecisionReason as string;
+    expect(reason).toContain('claude-opus-4-6');
+    expect(reason).toContain('opus'); // tier alias suggestion
+    expect(reason).toContain('global.anthropic.claude-sonnet-4-6'); // OMC_SUBAGENT_MODEL routing
+  });
+
+  it('allows tier alias with OMC_SUBAGENT_MODEL set (escape hatch for denied subagent_type calls)', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          model: 'opus',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-tier-alias-escape',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('still blocks tier alias when OMC_SUBAGENT_MODEL is not configured', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          model: 'opus',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-tier-alias-no-subagent-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: '',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecision as string).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+  });
+
+  it('does NOT deny subagent_type call when forceInherit is disabled', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-no-force-inherit',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'false',
+        OMC_SUBAGENT_MODEL: '',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('does NOT deny Agent call without subagent_type in forceInherit mode (normal inheritance unchanged)', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-no-subagent-type',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('does NOT deny when subagent_type refers to an unknown agent (no definition file)', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:nonexistent-agent-xyz',
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-unknown-agent',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+    it('does not write skill-active-state for unknown custom skills', () => {
     const sessionId = 'session-1581';
 
     const output = runPreToolEnforcer({
