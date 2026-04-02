@@ -632,6 +632,39 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.decision).toBeUndefined();
     });
 
+    it("returns decision: block when autopilot awaiting_confirmation is stale in cjs script", () => {
+      const sessionId = "autopilot-stale-awaiting-confirmation-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          phase: "execution",
+          iteration: 1,
+          max_iterations: 10,
+          awaiting_confirmation: true,
+          awaiting_confirmation_set_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          originalIdea: "test",
+          expansion: { analyst_complete: false, architect_complete: false, spec_path: null, requirements_summary: "", tech_stack: [] },
+          planning: { plan_path: null, architect_iterations: 0, approved: false },
+          execution: { ralph_iterations: 0, ultrawork_active: false, tasks_completed: 0, tasks_total: 0, files_created: [], files_modified: [] },
+          qa: { ultraqa_cycles: 0, build_status: "pending", lint_status: "pending", test_status: "pending" },
+          validation: { architects_spawned: 0, verdicts: [], all_approved: false, validation_rounds: 0 },
+          started_at: new Date().toISOString(),
+          completed_at: null,
+          phase_durations: {},
+          total_agents_spawned: 0,
+          wisdom_entries: 0,
+          session_id: sessionId,
+          project_path: tempDir,
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.decision).toBe("block");
+    });
+
     it("returns continue: true for authentication error stop", () => {
       const sessionId = "auth-error-mjs";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);

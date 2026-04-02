@@ -208,8 +208,28 @@ function getSafeReinforcementCount(value) {
     : 0;
 }
 
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
 function isAwaitingConfirmation(state) {
-  return state?.awaiting_confirmation === true;
+  if (!state || state.awaiting_confirmation !== true) {
+    return false;
+  }
+
+  const setAt =
+    state.awaiting_confirmation_set_at ||
+    state.started_at ||
+    null;
+
+  if (!setAt) {
+    return false;
+  }
+
+  const setAtMs = new Date(setAt).getTime();
+  if (!Number.isFinite(setAtMs)) {
+    return false;
+  }
+
+  return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
 // ---------------------------------------------------------------------------
