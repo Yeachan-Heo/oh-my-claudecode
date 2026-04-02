@@ -238,17 +238,19 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.denied).toBe(false);
   });
 
-  it('allows no-model call when session model has [1m] but stripped ID is provider-specific', () => {
-    // global.anthropic.claude-sonnet-4-6[1m] → strip → global.anthropic.claude-sonnet-4-6
-    // That is a valid provider-specific ID, so sub-agent can safely inherit it.
+  it('denies no-model call when session model has [1m] suffix and guides to tier alias', () => {
     const result = runHook(
       {},
       { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]' },
     );
-    expect(result.denied).toBe(false);
+    expect(result.denied).toBe(true);
+    // Guidance must recommend a tier alias (sonnet/haiku/opus), not a raw Bedrock ID.
+    // Agent tool schema only accepts tier aliases for the model param.
+    expect(result.reason).toMatch(/model="sonnet"/);
+    expect(result.reason).toMatch(/global\.anthropic\.claude-sonnet-4-6\[1m\]/);
   });
 
-  it('allows no-model call when OMC_SUBAGENT_MODEL is set and stripped ID is provider-specific', () => {
+  it('derives tier alias from OMC_SUBAGENT_MODEL when set', () => {
     const result = runHook(
       {},
       {
@@ -256,7 +258,9 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
         OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
       },
     );
-    expect(result.denied).toBe(false);
+    expect(result.denied).toBe(true);
+    // normalizeToCcAlias('us.anthropic.claude-sonnet-4-5-...') → 'sonnet'
+    expect(result.reason).toMatch(/model="sonnet"/);
   });
 
   it('allows no-model call when only ANTHROPIC_MODEL has [1m] but stripped ID is provider-specific', () => {
@@ -306,6 +310,6 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
       },
     );
     expect(result.denied).toBe(true);
-    expect(result.reason).toMatch(/OMC_SUBAGENT_MODEL/);
+    expect(result.reason).toMatch(/model="sonnet"/);
   });
 });
