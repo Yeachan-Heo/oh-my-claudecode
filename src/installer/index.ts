@@ -933,19 +933,39 @@ export function install(options: InstallOptions = {}): InstallResult {
       // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
       // to avoid duplicate entries in Claude Code's available skills list
 
-      const omcReferenceSkillContent = loadBundledSkillContent('omc-reference');
-      if (omcReferenceSkillContent) {
-        const omcReferenceDir = join(SKILLS_DIR, 'omc-reference');
-        const omcReferencePath = join(omcReferenceDir, 'SKILL.md');
-        if (!existsSync(omcReferenceDir)) {
-          mkdirSync(omcReferenceDir, { recursive: true });
+      // Core skills installed to ~/.claude/skills/ so they are accessible as slash commands
+      // (/team, /autopilot, etc.) in both CLI and VS Code extension without requiring the
+      // plugin marketplace. omc-reference is always included.
+      const CORE_SKILLS = [
+        'omc-reference',
+        'team',
+        'autopilot',
+        'ralph',
+        'ultrawork',
+        'ralplan',
+        'deep-interview',
+        'ccg',
+        'cancel',
+      ];
+
+      log('Installing core skills...');
+      for (const skillName of CORE_SKILLS) {
+        const skillContent = loadBundledSkillContent(skillName);
+        if (!skillContent) {
+          log(`  Skipping ${skillName}/SKILL.md (not found in package)`);
+          continue;
         }
-        if (existsSync(omcReferencePath) && !options.force) {
-          log('  Skipping omc-reference/SKILL.md (already exists)');
+        const skillDir = join(SKILLS_DIR, skillName);
+        const skillPath = join(skillDir, 'SKILL.md');
+        if (!existsSync(skillDir)) {
+          mkdirSync(skillDir, { recursive: true });
+        }
+        if (existsSync(skillPath) && !options.force) {
+          log(`  Skipping ${skillName}/SKILL.md (already exists)`);
         } else {
-          writeFileSync(omcReferencePath, omcReferenceSkillContent);
-          result.installedSkills.push('omc-reference/SKILL.md');
-          log('  Installed omc-reference/SKILL.md');
+          writeFileSync(skillPath, skillContent);
+          result.installedSkills.push(`${skillName}/SKILL.md`);
+          log(`  Installed ${skillName}/SKILL.md`);
         }
       }
 
