@@ -62,11 +62,15 @@ function readAgentDefinitionModel(subagentType) {
   try {
     if (!existsSync(agentFile)) return null;
     const content = readFileSync(agentFile, 'utf-8');
-    // Extract model from YAML frontmatter (between leading --- delimiters).
+    // Extract the YAML frontmatter block (content between the opening and closing ---).
+    // Searching the whole file would match `model:` lines in the body/prompt text, causing
+    // false denies for agents whose prompt happens to contain that word.
+    const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/m);
+    if (!fmMatch) return null;
     // Strip surrounding quotes so `model: "global.anthropic.claude-sonnet-4-6"` and
     // `model: global.anthropic.claude-sonnet-4-6` are treated identically.
-    const match = content.match(/^---[\s\S]*?^model:\s*(\S+)/m);
-    return match ? match[1].trim().replace(/^["']|["']$/g, '') : null;
+    const modelMatch = fmMatch[1].match(/^model:\s*(\S+)/m);
+    return modelMatch ? modelMatch[1].trim().replace(/^["']|["']$/g, '') : null;
   } catch {
     return null;
   }

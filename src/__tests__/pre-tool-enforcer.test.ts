@@ -738,6 +738,39 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
   });
 
+  it('does not deny when model: appears only in the agent body (not frontmatter)', () => {
+    // Frontmatter has no model key; body text contains "model: claude-opus-4-6"
+    const pluginRoot = join(tempDir, 'fake-plugin-body');
+    const agentsDir = join(pluginRoot, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, 'body-model-agent.md'),
+      '---\nname: body-model-agent\n---\nThis agent can spawn sub-agents.\nmodel: claude-opus-4-6 is sometimes used in the body text.',
+    );
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:body-model-agent',
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-body-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    // model: in the body must not trigger a deny — frontmatter has no model field
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
   it('strips surrounding quotes from quoted YAML model values and still denies bare Anthropic IDs', () => {
     // Create a temporary agent definition with a quoted model scalar
     const pluginRoot = join(tempDir, 'fake-plugin');
