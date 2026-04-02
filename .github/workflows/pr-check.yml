@@ -63,6 +63,22 @@ jobs:
 
             console.log(`PR Stats: +${additions} -${deletions} (${changedFiles} files) → ${sizeLabel}`);
 
+  base-branch-check:
+    name: Base Branch Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require dev base branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const base = context.payload.pull_request.base.ref;
+            if (base !== 'dev') {
+              core.setFailed(
+                `PRs must target the \`dev\` branch, not \`${base}\`. ` +
+                `Fix with: gh pr edit ${context.issue.number} --base dev`
+              );
+            }
+
   draft-check:
     name: Draft PR Check
     runs-on: ubuntu-latest
