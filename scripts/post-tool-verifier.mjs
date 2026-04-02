@@ -15,6 +15,7 @@ import { readStdin } from './lib/stdin.mjs';
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
 const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
 const QUIET_LEVEL = getQuietLevel();
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 
 function getQuietLevel() {
   const parsed = Number.parseInt(process.env.OMC_QUIET || '0', 10);
@@ -214,6 +215,53 @@ function detectBackgroundOperation(output) {
   ];
 
   return bgPatterns.some(pattern => pattern.test(output));
+}
+
+function getInvokedSkillName(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSkill =
+    toolInput.skill ||
+    toolInput.skill_name ||
+    toolInput.skillName ||
+    toolInput.command ||
+    null;
+  if (typeof rawSkill !== 'string' || !rawSkill.trim()) return null;
+  const normalized = rawSkill.trim();
+  return normalized.includes(':')
+    ? normalized.split(':').at(-1).toLowerCase()
+    : normalized.toLowerCase();
+}
+
+function getSkillActiveStatePaths(directory, sessionId) {
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  return [
+    safeSessionId ? join(stateDir, 'sessions', safeSessionId, 'skill-active-state.json') : null,
+    join(stateDir, 'skill-active-state.json'),
+  ].filter(Boolean);
+}
+
+function readSkillActiveState(directory, sessionId) {
+  for (const statePath of getSkillActiveStatePaths(directory, sessionId)) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (state && typeof state === 'object') return state;
+    } catch {
+      // Ignore malformed or unreadable state; cleanup remains best-effort
+    }
+  }
+  return null;
+}
+
+function clearSkillActiveState(directory, sessionId) {
+  for (const statePath of getSkillActiveStatePaths(directory, sessionId)) {
+    try {
+      unlinkSync(statePath);
+    } catch {
+      // Best-effort cleanup; never fail the hook
+    }
+  }
 }
 
 export function summarizeAgentResult(output, maxChars = AGENT_OUTPUT_SUMMARY_LIMIT) {
@@ -466,6 +514,17 @@ async function main() {
       toolName === 'TaskUpdate'
     ) {
       processRememberTags(clippedToolOutput, directory);
+    }
+
+    if (toolName === 'Skill' || toolName === 'skill') {
+      const toolInput = data.tool_input || data.toolInput || {};
+      const currentState = readSkillActiveState(directory, sessionId);
+      const completingSkill = (getInvokedSkillName(toolInput) ?? '')
+        .toLowerCase()
+        .replace(/^oh-my-claudecode:/, '');
+      if (!currentState || !currentState.active || currentState.skill_name === completingSkill) {
+        clearSkillActiveState(directory, sessionId);
+      }
     }
 
     // Generate contextual message

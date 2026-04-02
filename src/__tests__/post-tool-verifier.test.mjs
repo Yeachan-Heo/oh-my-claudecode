@@ -6,15 +6,20 @@
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import process from 'process';
 import { detectBashFailure, detectWriteFailure, isNonZeroExitWithOutput, summarizeAgentResult } from '../../scripts/post-tool-verifier.mjs';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'post-tool-verifier.mjs');
+const TEMPLATE_HOOK_PATH = join(process.cwd(), 'templates', 'hooks', 'post-tool-use.mjs');
 
 function runPostToolVerifier(input, env = {}) {
-  const stdout = execSync(`node "${SCRIPT_PATH}"`, {
+  return runHookScript(SCRIPT_PATH, input, env);
+}
+
+function runHookScript(scriptPath, input, env = {}) {
+  const stdout = execSync(`node "${scriptPath}"`, {
     input: JSON.stringify(input),
     encoding: 'utf-8',
     timeout: 5000,
@@ -30,6 +35,39 @@ function withTempDir(fn) {
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+function skillStatePath(tempDir, sessionId) {
+  return join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+}
+
+function legacySkillStatePath(tempDir) {
+  return join(tempDir, '.omc', 'state', 'skill-active-state.json');
+}
+
+function writeSkillStateFixtures(tempDir, sessionId, skillName = 'plan') {
+  mkdirSync(join(tempDir, '.omc', 'state', 'sessions', sessionId), { recursive: true });
+  writeFileSync(
+    skillStatePath(tempDir, sessionId),
+    JSON.stringify({
+      active: true,
+      skill_name: skillName,
+      session_id: sessionId,
+      started_at: '2026-04-01T00:00:00.000Z',
+      last_checked_at: '2026-04-01T00:00:00.000Z',
+      reinforcement_count: 0,
+      max_reinforcements: 5,
+      stale_ttl_ms: 900000,
+    }),
+  );
+  mkdirSync(join(tempDir, '.omc', 'state'), { recursive: true });
+  writeFileSync(
+    legacySkillStatePath(tempDir),
+    JSON.stringify({
+      active: true,
+      skill_name: skillName,
+    }),
+  );
 }
 
 describe('detectBashFailure', () => {
@@ -400,5 +438,64 @@ describe('OMC_QUIET hook message suppression (issue #1646)', () => {
     });
 
     expect(taskSummary).toEqual({ continue: true, suppressOutput: true });
+  });
+});
+
+describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
+  it('clears session and legacy skill-active-state files for Skill completion in post-tool-verifier', () => {
+    withTempDir((tempDir) => {
+      const sessionId = 'skill-clear-script';
+      writeSkillStateFixtures(tempDir, sessionId, 'plan');
+
+      const out = runPostToolVerifier({
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:plan' },
+        tool_response: { ok: true },
+        session_id: sessionId,
+        cwd: tempDir,
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(skillStatePath(tempDir, sessionId))).toBe(false);
+      expect(existsSync(legacySkillStatePath(tempDir))).toBe(false);
+    });
+  });
+
+  it('does not clear parent-owned skill-active-state for nested child Skill completion in post-tool-verifier', () => {
+    withTempDir((tempDir) => {
+      const sessionId = 'skill-nested-script';
+      writeSkillStateFixtures(tempDir, sessionId, 'omc-setup');
+
+      const out = runPostToolVerifier({
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:mcp-setup' },
+        tool_response: { ok: true },
+        session_id: sessionId,
+        cwd: tempDir,
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(skillStatePath(tempDir, sessionId))).toBe(true);
+      expect(existsSync(legacySkillStatePath(tempDir))).toBe(true);
+    });
+  });
+
+  it('clears session and legacy skill-active-state files for the template post-tool hook path', () => {
+    withTempDir((tempDir) => {
+      const sessionId = 'skill-clear-template';
+      writeSkillStateFixtures(tempDir, sessionId, 'plan');
+
+      const out = runHookScript(TEMPLATE_HOOK_PATH, {
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:plan' },
+        tool_response: { ok: true },
+        session_id: sessionId,
+        cwd: tempDir,
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+      expect(existsSync(skillStatePath(tempDir, sessionId))).toBe(false);
+      expect(existsSync(legacySkillStatePath(tempDir))).toBe(false);
+    });
   });
 });

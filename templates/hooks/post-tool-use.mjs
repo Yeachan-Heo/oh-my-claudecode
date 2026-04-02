@@ -3,7 +3,7 @@
 // Processes <remember> tags from Task agent output
 // Saves to .omc/notepad.md for compaction-resilient memory
 
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -57,6 +57,34 @@ function getInvokedSkillName(toolInput) {
 }
 
 const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
+function getSkillActiveStatePaths(directory, sessionId) {
+  const stateDir = join(directory, '.omc', 'state');
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  return [
+    safeSessionId ? join(stateDir, 'sessions', safeSessionId, 'skill-active-state.json') : null,
+    join(stateDir, 'skill-active-state.json'),
+  ].filter(Boolean);
+}
+
+function readSkillActiveState(directory, sessionId) {
+  for (const statePath of getSkillActiveStatePaths(directory, sessionId)) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (state && typeof state === 'object') return state;
+    } catch {}
+  }
+  return null;
+}
+
+function clearSkillActiveState(directory, sessionId) {
+  for (const statePath of getSkillActiveStatePaths(directory, sessionId)) {
+    try {
+      unlinkSync(statePath);
+    } catch {}
+  }
+}
 
 function activateState(directory, stateName, state, sessionId) {
   const stateDir = join(directory, '.omc', 'state');
@@ -153,6 +181,11 @@ async function main() {
     // Handle Skill("...:ralph") invocations so ralph handoffs activate persistent states.
     if (String(toolName).toLowerCase() === 'skill') {
       const skillName = getInvokedSkillName(toolInput);
+      const currentState = readSkillActiveState(directory, sessionId);
+      const completingSkill = (skillName || '').replace(/^oh-my-claudecode:/, '');
+      if (!currentState || !currentState.active || currentState.skill_name === completingSkill) {
+        clearSkillActiveState(directory, sessionId);
+      }
       if (skillName === 'ralph') {
         const now = new Date().toISOString();
         const promptText = data.prompt || data.message || 'Ralph loop activated via Skill tool';
