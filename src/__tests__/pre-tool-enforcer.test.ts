@@ -738,6 +738,74 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
   });
 
+  it('strips surrounding quotes from quoted YAML model values and still denies bare Anthropic IDs', () => {
+    // Create a temporary agent definition with a quoted model scalar
+    const pluginRoot = join(tempDir, 'fake-plugin');
+    const agentsDir = join(pluginRoot, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, 'quoted-model-agent.md'),
+      '---\nname: quoted-model-agent\nmodel: "claude-opus-4-6"\n---\nAgent body.',
+    );
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:quoted-model-agent',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-quoted-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    // Quoted model "claude-opus-4-6" must be stripped of quotes before the safety check
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
+  });
+
+  it('allows a valid provider-specific model ID written with YAML quotes', () => {
+    // Same setup but model is a valid Bedrock ID — should NOT be denied
+    const pluginRoot = join(tempDir, 'fake-plugin-2');
+    const agentsDir = join(pluginRoot, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, 'bedrock-quoted-agent.md'),
+      '---\nname: bedrock-quoted-agent\nmodel: "global.anthropic.claude-sonnet-4-6"\n---\nAgent body.',
+    );
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:bedrock-quoted-agent',
+          description: 'Do something',
+          prompt: 'Do it',
+        },
+        cwd: tempDir,
+        session_id: 'session-bedrock-quoted',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
   it('does NOT deny Agent call without subagent_type in forceInherit mode (normal inheritance unchanged)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
