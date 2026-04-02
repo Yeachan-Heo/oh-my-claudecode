@@ -310,6 +310,18 @@ Clear directly: `state_clear(mode="ultraqa", session_id)`
 
 Report: "No active OMC modes detected. Use --force to clear all state files anyway."
 
+#### Always: Clear Skill-Active State
+
+Regardless of which mode was active (or none), always clear any residual
+skill-active state as the final cleanup step:
+
+```
+state_clear(mode="skill-active", session_id)
+```
+
+This ensures the stop hook does not keep firing skill-protection reinforcements
+after cancel due to a stale `skill-active-state.json`. See issue #2118.
+
 ## Implementation Notes
 
 The cancel skill runs as follows:

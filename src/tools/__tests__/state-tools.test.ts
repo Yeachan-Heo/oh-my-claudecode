@@ -277,6 +277,52 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain('Locations cleared: 1');
       expect(result.content[0].text).not.toContain('Errors:');
     });
+
+    it('should clear skill-active state with session_id (fix for #2118)', async () => {
+      const sessionId = 'test-skill-active-clear';
+
+      await stateWriteTool.handler({
+        mode: 'skill-active',
+        active: true,
+        state: { skill_name: 'sciomc', reinforcement_count: 2 },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      const clearResult = await stateClearTool.handler({
+        mode: 'skill-active',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(clearResult.content[0].text).toMatch(/cleared|Successfully/i);
+
+      const readResult = await stateReadTool.handler({
+        mode: 'skill-active',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      expect(readResult.content[0].text).toContain('No state found');
+    });
+
+    it('should list skill-active as active when state file is present', async () => {
+      const sessionId = 'skill-active-list-test';
+
+      await stateWriteTool.handler({
+        mode: 'skill-active',
+        active: true,
+        state: { skill_name: 'learner' },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      const result = await stateListActiveTool.handler({
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('skill-active');
+    });
   });
 
   describe('state_list_active', () => {

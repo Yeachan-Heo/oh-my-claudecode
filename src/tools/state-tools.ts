@@ -44,9 +44,10 @@ const STATE_TOOL_MODES: [string, ...string[]] = [
   'ralplan',
   'omc-teams',
   'deep-interview',
-  'self-improve'
+  'self-improve',
+  'skill-active'
 ];
-const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'deep-interview', 'self-improve'] as const;
+const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'deep-interview', 'self-improve', 'skill-active'] as const;
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
 
