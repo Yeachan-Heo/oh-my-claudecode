@@ -20,31 +20,43 @@ import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from './runtime-guidance.js';
 
 function getPackageDir(): string {
+  // Strategy 1: Walk up from the current file to find the package root.
+  // Works for both src/ and dist/ layouts, and handles npm global installs,
+  // symlinks, and pnpm node_modules structures.
+  try {
+    const currentUrl = import.meta.url;
+    const currentPath = currentUrl.startsWith('file://')
+      ? fileURLToPath(currentUrl)
+      : currentUrl;
+    // currentPath is: <root>/[src|dist]/features/builtin-skills/skills.ts
+    const thisDir = dirname(currentPath);
+    // Walk up: builtin-skills -> features -> [src|dist] -> root
+    const root = dirname(dirname(dirname(thisDir)));
+
+    // Verify the root looks correct by checking for known markers
+    if (existsSync(join(root, 'skills')) || existsSync(join(root, 'package.json'))) {
+      return root;
+    }
+  } catch {
+    // Fall through
+  }
+
+  // Strategy 2: Legacy __dirname check for CJS compatibility
   if (typeof __dirname !== 'undefined' && __dirname) {
     const currentDirName = basename(__dirname);
     const parentDirName = basename(dirname(__dirname));
-    const grandparentDirName = basename(dirname(dirname(__dirname)));
 
     if (currentDirName === 'bridge') {
       return join(__dirname, '..');
     }
 
-    if (
-      currentDirName === 'builtin-skills'
-      && parentDirName === 'features'
-      && (grandparentDirName === 'src' || grandparentDirName === 'dist')
-    ) {
+    if (currentDirName === 'builtin-skills' && parentDirName === 'features') {
       return join(__dirname, '..', '..', '..');
     }
   }
 
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    return join(__dirname, '..', '..', '..');
-  } catch {
-    return process.cwd();
-  }
+  // Strategy 3: Last resort — use cwd (will likely fail to find skills)
+  return process.cwd();
 }
 
 const SKILLS_DIR = join(getPackageDir(), 'skills');
@@ -138,6 +150,12 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
  */
 function loadSkillsFromDirectory(): BuiltinSkill[] {
   if (!existsSync(SKILLS_DIR)) {
+    // Log diagnostic info to help debug npm/pnpm install path issues
+    console.warn(
+      `[omc] Skills directory not found at ${SKILLS_DIR}. ` +
+      `Package dir resolved to: ${getPackageDir()}. ` +
+      `Skills may not load correctly. Try running 'omc doctor' to diagnose.`
+    );
     return [];
   }
 
