@@ -51,16 +51,19 @@ function readAgentDefinitionModel(subagentType) {
   if (!agentType) return null;
   // Reject path traversal: agent names are simple identifiers; no path separators allowed.
   if (!/^[a-zA-Z0-9_-]+$/.test(agentType)) return null;
-  // Resolve agents/ directory: prefer CLAUDE_PLUGIN_ROOT when set AND the sub-directory
-  // actually exists; fall back to the script-relative path for dev/test environments and
-  // for update scenarios where CLAUDE_PLUGIN_ROOT still points at an old removed install.
+  // Build a prioritised list of agents/ directories to search.
+  // CLAUDE_PLUGIN_ROOT is tried first when set; the script-relative path is always the
+  // final fallback. Checking per-file (not just per-directory) means a partially-populated
+  // plugin install doesn't hide agents that exist in the script-relative tree.
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  const pluginAgentsDir = pluginRoot ? join(pluginRoot, 'agents') : null;
   const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
-  const agentsDir = (pluginAgentsDir && existsSync(pluginAgentsDir)) ? pluginAgentsDir : scriptAgentsDir;
-  const agentFile = join(agentsDir, `${agentType}.md`);
+  const candidateDirs = [
+    ...(pluginRoot ? [join(pluginRoot, 'agents')] : []),
+    scriptAgentsDir,
+  ];
+  const agentFile = candidateDirs.map(d => join(d, `${agentType}.md`)).find(f => existsSync(f)) ?? null;
   try {
-    if (!existsSync(agentFile)) return null;
+    if (!agentFile) return null;
     const content = readFileSync(agentFile, 'utf-8');
     // Extract the YAML frontmatter block (content between the opening and closing ---).
     // Searching the whole file would match `model:` lines in the body/prompt text, causing

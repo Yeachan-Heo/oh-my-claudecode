@@ -738,6 +738,40 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
   });
 
+  it('falls back to script-relative agents dir when CLAUDE_PLUGIN_ROOT/agents exists but lacks the specific agent file', () => {
+    // CLAUDE_PLUGIN_ROOT/agents/ exists (non-empty check passes) but does not contain critic.md
+    const pluginRoot = join(tempDir, 'partial-plugin');
+    const pluginAgentsDir = join(pluginRoot, 'agents');
+    mkdirSync(pluginAgentsDir, { recursive: true });
+    // Write a different agent file so the dir exists but critic.md is absent
+    writeFileSync(join(pluginAgentsDir, 'other-agent.md'), '---\nname: other\n---\nBody.');
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:critic',
+          description: 'Review spec',
+          prompt: 'Review this spec',
+        },
+        cwd: tempDir,
+        session_id: 'session-partial-plugin',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    // Should fall back to script-relative agents/, find critic.md, and deny on bare model ID
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
+  });
+
   it('does not deny when model: appears inside a body --- block (not real frontmatter)', () => {
     // File starts with normal text, then a horizontal-rule --- section containing model:
     const pluginRoot = join(tempDir, 'fake-plugin-body-hr');
