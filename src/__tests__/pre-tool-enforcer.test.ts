@@ -738,6 +738,39 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookOutput.permissionDecisionReason as string).toContain('claude-opus-4-6');
   });
 
+  it('does not deny when model: appears inside a body --- block (not real frontmatter)', () => {
+    // File starts with normal text, then a horizontal-rule --- section containing model:
+    const pluginRoot = join(tempDir, 'fake-plugin-body-hr');
+    const agentsDir = join(pluginRoot, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, 'body-hr-agent.md'),
+      'Some introductory text.\n\n---\nmodel: claude-opus-4-6\n---\n\nMore body text.',
+    );
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:body-hr-agent',
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+        cwd: tempDir,
+        session_id: 'session-body-hr-model',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    // A mid-body --- block is not frontmatter; must not trigger a deny
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
   it('does not deny when model: appears only in the agent body (not frontmatter)', () => {
     // Frontmatter has no model key; body text contains "model: claude-opus-4-6"
     const pluginRoot = join(tempDir, 'fake-plugin-body');
