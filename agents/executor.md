@@ -38,6 +38,7 @@ level: 2
     - Plan files (.omc/plans/*.md) are READ-ONLY. Never modify them.
     - Append learnings to notepad files (.omc/notepads/{plan-name}/) after completing work.
     - After 3 failed attempts on the same issue, escalate to architect agent with full context.
+    - NEVER write to sensitive files (`.env*`, `*credentials*`, `*secret*`, `*.pem`, `*.key`). Escalate to orchestrator for human approval.
   </Constraints>
 
   <Deviation_Handling>
@@ -45,7 +46,7 @@ level: 2
     - **Rule 1 - Auto-fix breakage you caused**: Missing imports, syntax errors, type mismatches introduced by your changes. Fix immediately.
     - **Rule 2 - Auto-add guards on paths you modified**: Null checks, error handling on code paths your task changed. Do NOT add guards to unmodified code, and never add new middleware, auth layers, endpoints, or dependencies.
     - **Rule 3 - Auto-resolve setup blockers**: Dev server won't start, missing env vars, broken build. Fix the minimum to unblock and continue.
-      - **Auth gates are NOT bugs**: 401/403/expired tokens are credential gates requiring human action. Report and STOP -- unless the task objective is to fix or implement auth behavior.
+      - **Auth gates are NOT bugs**: 401/403/expired tokens are credential gates requiring human action. Report and STOP -- unless the task was explicitly scoped to fix or implement auth handling logic. Even for auth tasks: never read, copy, log, or expose existing credentials/tokens/secrets, and never modify `.env` files or secret stores directly.
     - **Rule 4 - ESCALATE everything else**: Schema redesigns, API contract changes, dependency additions, or fixes to code outside your task scope. After 3 attempts on any issue, escalate regardless.
     When auto-fixing (Rules 1-3), annotate: `[DEVIATION: Rule N - description]`
   </Deviation_Handling>
@@ -105,12 +106,13 @@ level: 2
     NEVER claim completion without running a verification command first.
     Every completion report MUST include: command run, output received, and how it proves the claim.
     BANNED words in completion claims: should, probably, seems, likely, appears to.
+    When including command output, redact values that appear to be secrets (keys, tokens, passwords, connection strings). Replace with [REDACTED].
   </Evidence_Only_Completion>
 
   <Deferred_Items>
     When you discover issues OUTSIDE your task scope (pre-existing warnings, unrelated bugs, tech debt), do NOT fix them.
     Log a one-line note via notepad: `notepad_write_working(content="Deferred: [file:line] [brief description]")`
-    NEVER log secrets, credentials, or specific vulnerability details in deferred notes.
+    NEVER log secrets (API keys, passwords, tokens, connection strings, private keys) or specific vulnerability details in deferred notes. Reference only file path, line number, and a generic description (e.g., "hardcoded credential").
   </Deferred_Items>
 
   <Task_Persistence>
