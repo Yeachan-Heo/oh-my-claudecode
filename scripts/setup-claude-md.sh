@@ -3,7 +3,7 @@
 # Usage: setup-claude-md.sh <local|global>
 #
 # Handles: version extraction, backup, download, marker stripping, merge, version reporting.
-# For global mode, also cleans up legacy hooks.
+# For global mode, preserves existing base CLAUDE.md via a companion import when possible.
 
 set -euo pipefail
 
@@ -141,6 +141,7 @@ if [ -z "$OLD_VERSION" ]; then
 fi
 
 # Backup existing
+BACKUP_DATE=""
 if [ -f "$TARGET_PATH" ]; then
   BACKUP_DATE=$(date +%Y-%m-%d_%H%M%S)
   BACKUP_PATH="${TARGET_PATH}.backup.${BACKUP_DATE}"
@@ -151,6 +152,45 @@ fi
 # Load canonical OMC content to temp file
 TEMP_OMC=$(mktemp /tmp/omc-claude-XXXXXX.md)
 trap 'rm -f "$TEMP_OMC"' EXIT
+
+OMC_IMPORT_START='<!-- OMC:IMPORT:START -->'
+OMC_IMPORT_END='<!-- OMC:IMPORT:END -->'
+COMPANION_FILENAME='CLAUDE-omc.md'
+
+write_wrapped_omc_file() {
+  local destination="$1"
+  mkdir -p "$(dirname "$destination")"
+  {
+    echo '<!-- OMC:START -->'
+    cat "$TEMP_OMC"
+    echo '<!-- OMC:END -->'
+  } > "$destination"
+}
+
+ensure_managed_companion_import() {
+  local target_path="$1"
+  local companion_name="$2"
+  local import_block
+  import_block=$(cat <<EOF
+$OMC_IMPORT_START
+@${companion_name}
+$OMC_IMPORT_END
+EOF
+)
+
+  if grep -Fq "$OMC_IMPORT_START" "$target_path"; then
+    perl -0pe 's/^<!-- OMC:IMPORT:START -->\R[\s\S]*?^<!-- OMC:IMPORT:END -->(?:\R)?//msg' "$target_path" > "${target_path}.importless"
+    mv "${target_path}.importless" "$target_path"
+  fi
+
+  if [ -s "$target_path" ]; then
+    printf '\n\n%s\n' "$import_block" >> "$target_path"
+  else
+    printf '%s\n' "$import_block" > "$target_path"
+  fi
+}
+
+VALIDATION_PATH="$TARGET_PATH"
 
 SOURCE_LABEL=""
 if [ -f "$CANONICAL_CLAUDE_MD" ]; then
@@ -186,11 +226,7 @@ fi
 
 if [ ! -f "$TARGET_PATH" ]; then
   # Fresh install: wrap in markers
-  {
-    echo '<!-- OMC:START -->'
-    cat "$TEMP_OMC"
-    echo '<!-- OMC:END -->'
-  } > "$TARGET_PATH"
+  write_wrapped_omc_file "$TARGET_PATH"
   rm -f "$TEMP_OMC"
   echo "Installed CLAUDE.md (fresh)"
 else
@@ -229,6 +265,16 @@ else
     mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
     rm -f "${TARGET_PATH}.preserved"
     echo "Updated OMC section (user customizations preserved)"
+  elif [ "$MODE" = "global" ]; then
+    COMPANION_TARGET_PATH="$CONFIG_DIR/$COMPANION_FILENAME"
+    if [ -f "$COMPANION_TARGET_PATH" ] && [ -n "$BACKUP_DATE" ]; then
+      cp "$COMPANION_TARGET_PATH" "${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
+      echo "Backed up existing companion CLAUDE.md to ${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
+    fi
+    write_wrapped_omc_file "$COMPANION_TARGET_PATH"
+    ensure_managed_companion_import "$TARGET_PATH" "$COMPANION_FILENAME"
+    VALIDATION_PATH="$COMPANION_TARGET_PATH"
+    echo "Installed OMC companion file and preserved existing CLAUDE.md"
   else
     # No markers: wrap new content in markers, append old content as user section
     OLD_CONTENT=$(cat "$TARGET_PATH")
@@ -246,8 +292,8 @@ else
   rm -f "$TEMP_OMC"
 fi
 
-if ! grep -q '<!-- OMC:START -->' "$TARGET_PATH" || ! grep -q '<!-- OMC:END -->' "$TARGET_PATH"; then
-  echo "ERROR: Installed CLAUDE.md is missing required OMC markers: $TARGET_PATH" >&2
+if ! grep -q '<!-- OMC:START -->' "$VALIDATION_PATH" || ! grep -q '<!-- OMC:END -->' "$VALIDATION_PATH"; then
+  echo "ERROR: Installed CLAUDE.md is missing required OMC markers: $VALIDATION_PATH" >&2
   exit 1
 fi
 
@@ -258,7 +304,7 @@ if [ "$MODE" = "local" ]; then
 fi
 
 # Extract new version and report
-NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$VALIDATION_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
 if [ -z "$NEW_VERSION" ]; then
   NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
 fi

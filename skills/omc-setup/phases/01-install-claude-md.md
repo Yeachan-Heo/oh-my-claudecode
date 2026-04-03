@@ -40,7 +40,7 @@ https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.
 
 **Note**: The downloaded CLAUDE.md includes Context Persistence instructions with `<remember>` tags for surviving conversation compaction.
 
-**Note**: If an existing CLAUDE.md is found, it will be backed up before downloading the new version.
+**Note**: If an existing global `CLAUDE.md` is user-authored (no OMC markers), setup preserves it and installs OMC into a companion `CLAUDE-omc.md` with a small managed import block for easier revert/vanilla fallback.
 
 ## Report Success
 
@@ -61,7 +61,8 @@ Note: This configuration is project-specific and won't affect other projects or 
 If `CONFIG_TARGET` is `global`:
 ```
 OMC Global Configuration Complete
-- CLAUDE.md: Updated with latest configuration from GitHub at ~/.claude/CLAUDE.md
+- CLAUDE.md: Updated or preserved safely at ~/.claude/CLAUDE.md
+- Companion: May install ~/.claude/CLAUDE-omc.md when preserving an existing base config
 - Backup: Previous CLAUDE.md backed up (if existed)
 - Scope: GLOBAL - applies to all Claude Code sessions
 - Hooks: Provided by plugin (no manual installation needed)
