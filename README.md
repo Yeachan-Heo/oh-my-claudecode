@@ -166,66 +166,6 @@ npm i -g oh-my-claude-sisyphus@latest
 
 OMC is built on four interlocking systems that work together seamlessly:
 
-```mermaid
-graph TB
-    subgraph INPUT["User Input"]
-        CLI["CLI / omc command"]
-        MAGIC["Magic Keywords"]
-        SLASH["Slash Commands"]
-    end
-
-    subgraph HOOKS["Hook System · 20 Hooks"]
-        PRE["PreToolUse Hooks"]
-        POST["PostToolUse Hooks"]
-        STOP["Stop Hooks"]
-        KW["Keyword Detector"]
-        PERSIST["Persistent Mode Enforcer"]
-    end
-
-    subgraph SKILLS["Skill Engine · 31+ Skills"]
-        AUTO["Autopilot"]
-        RALPH["Ralph Loop"]
-        TEAM["Team Orchestration"]
-        ULW["Ultrawork"]
-        PLAN["Planning"]
-        CCG["CCG Tri-Model"]
-    end
-
-    subgraph AGENTS["Agent Tier System · 19 Agents"]
-        direction LR
-        HAIKU["Tier 1: Haiku\nexplore, writer"]
-        SONNET["Tier 2: Sonnet\nexecutor, designer,\ndebugger, git-master"]
-        OPUS["Tier 3: Opus\narchitect, analyst,\nplanner, critic"]
-    end
-
-    subgraph INFRA["Infrastructure"]
-        MCP["MCP Server\n(Tool Bridge)"]
-        LSP["LSP Integration\n(Diagnostics)"]
-        AST["AST-grep\n(Code Search)"]
-        BRIDGE["CLI Bridge"]
-    end
-
-    subgraph STATE["State Management"]
-        OMC_DIR[".omc/ Directory"]
-        NOTEPAD["notepad.md"]
-        MEMORY["project-memory.json"]
-        PLANS["plans/"]
-    end
-
-    CLI --> HOOKS
-    MAGIC --> KW
-    SLASH --> SKILLS
-    HOOKS --> SKILLS
-    KW --> SKILLS
-    SKILLS --> AGENTS
-    AGENTS --> MCP
-    AGENTS --> LSP
-    AGENTS --> AST
-    MCP --> BRIDGE
-    AGENTS --> STATE
-    PERSIST --> STOP
-```
-
 <p align="center">
   <img src="assets/diagrams/architecture-diagram.jpg" alt="OMC Architecture Diagram" width="750"/>
 </p>
@@ -241,30 +181,6 @@ graph TB
 
 ### How Delegation Works
 
-```mermaid
-flowchart TD
-    START(["Incoming Task"]) --> CLASSIFY{"Classify\nComplexity"}
-
-    CLASSIFY -->|"Simple"| DIRECT["Handle Directly"]
-    CLASSIFY -->|"Standard"| ROUTE_MED{"Route by\nDomain"}
-    CLASSIFY -->|"Complex"| ROUTE_HIGH{"Route by\nExpertise"}
-
-    ROUTE_MED -->|"Code"| EXECUTOR["executor · Sonnet"]
-    ROUTE_MED -->|"UI"| DESIGNER["designer · Sonnet"]
-    ROUTE_MED -->|"Bugs"| DEBUGGER["debugger · Sonnet"]
-    ROUTE_MED -->|"Search"| EXPLORE["explore · Haiku"]
-
-    ROUTE_HIGH -->|"Architecture"| ARCHITECT["architect · Opus"]
-    ROUTE_HIGH -->|"Requirements"| ANALYST["analyst · Opus"]
-    ROUTE_HIGH -->|"Security"| SECURITY["security-reviewer · Opus"]
-    ROUTE_HIGH -->|"Review"| CRITIC["critic · Opus"]
-
-    EXECUTOR --> VERIFY{"Verification?"}
-    VERIFY -->|"Yes"| VERIFIER["verifier · Opus"]
-    VERIFY -->|"No"| DONE(["Task Complete"])
-    VERIFIER --> DONE
-```
-
 <p align="center">
   <img src="assets/diagrams/agent-delegation-diagram.jpg" alt="Agent Delegation Flow Diagram" width="750"/>
 </p>
@@ -278,30 +194,6 @@ OMC provides 8 execution modes for different scenarios. Use the decision tree be
 <p align="center">
   <img src="assets/diagrams/modes-infographic.jpg" alt="OMC Execution Modes" width="800"/>
 </p>
-
-```mermaid
-flowchart TD
-    START(["What kind of task?"]) --> Q1{"Need\nplanning first?"}
-
-    Q1 -->|"Yes"| Q1A{"High-stakes?"}
-    Q1A -->|"Yes"| RALPLAN["ralplan\nConsensus planning"]
-    Q1A -->|"No"| PLAN["plan\nStructured planning"]
-
-    Q1 -->|"No, execute now"| Q2{"How many\nparallel tasks?"}
-
-    Q2 -->|"1 focused task"| Q3{"Persist until done?"}
-    Q3 -->|"Yes"| RALPH["ralph\nVerification loop"]
-    Q3 -->|"No"| DIRECT["Direct execution"]
-
-    Q2 -->|"2+ parallel"| Q4{"Need coordination?"}
-    Q4 -->|"Yes"| TEAM["team\n5-stage pipeline"]
-    Q4 -->|"No"| ULTRAWORK["ultrawork\nMax parallelism"]
-
-    Q2 -->|"Full project"| AUTOPILOT["autopilot\nEnd-to-end"]
-
-    START --> Q5{"Multiple AI\nperspectives?"}
-    Q5 -->|"Yes"| CCG["ccg\nTri-model synthesis"]
-```
 
 <p align="center">
   <img src="assets/diagrams/mode-selection-diagram.jpg" alt="Execution Mode Selection Diagram" width="750"/>
@@ -457,33 +349,6 @@ Wrap handler at server.py:42 in try/except ClientDisconnectedError...
 **Auto-inject:** Matching skills load into context automatically
 
 ### Skill Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant CC as Claude Code
-    participant SK as Skill Engine
-    participant HK as Hook System
-    participant AG as Agent
-    participant ST as State
-
-    U->>CC: Input (keyword / command / task)
-    CC->>HK: keyword-detector hook fires
-    HK->>SK: Match trigger pattern
-    SK->>CC: Inject skill into context
-    CC->>ST: Write state (mode=active)
-
-    loop Execution Loop
-        CC->>AG: Delegate to agent(s)
-        AG-->>CC: Return results
-        CC->>ST: Update progress
-        CC->>HK: persistent-mode enforces continuation
-    end
-
-    CC->>CC: Verify acceptance criteria
-    CC->>ST: Clear state
-    CC-->>U: Present results
-```
 
 <p align="center">
   <img src="assets/diagrams/skill-lifecycle-diagram.jpg" alt="Skill Lifecycle Diagram" width="750"/>
