@@ -303,6 +303,18 @@ Autopilot handles its own cleanup including linked ralph and ultraqa.
 
 Clear directly: `state_clear(mode="ultraqa", session_id)`
 
+#### Clear Skill Active State (always, as final step)
+
+After all mode-specific cleanup, always clear `skill-active` state to unblock the stop hook:
+
+```
+state_clear(mode="skill-active", session_id)
+```
+
+This removes `skill-active-state.json` for the current session. If `skill-active` is not in the active modes list, the call is still safe — it is a no-op when no state file exists.
+
+This step is required because `skill-active-state.json` is written when the cancel skill itself is invoked (protection level `none` so it is not written, but skills like `sciomc`, `learner`, and `release` that triggered the cancel may have left stale state). Without this step the stop hook keeps firing reinforcements until the 15-minute TTL expires.
+
 #### No Active Modes
 
 Report: "No active OMC modes detected. Use --force to clear all state files anyway."
