@@ -407,6 +407,18 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
     mkdirSync(HOOKS_DIR, { recursive: true });
   }
 
+  // Copy shared lib modules (stdin.mjs, atomic-write.mjs) required by hook scripts
+  const libSourceDir = join(templatesDir, 'lib');
+  const libTargetDir = join(HOOKS_DIR, 'lib');
+  if (existsSync(libSourceDir)) {
+    if (!existsSync(libTargetDir)) {
+      mkdirSync(libTargetDir, { recursive: true });
+    }
+    for (const libFile of readdirSync(libSourceDir)) {
+      copyFileSync(join(libSourceDir, libFile), join(libTargetDir, libFile));
+    }
+  }
+
   for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
     const sourcePath = join(templatesDir, filename);
     const targetPath = join(HOOKS_DIR, filename);
