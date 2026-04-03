@@ -40,6 +40,38 @@ level: 3
     4) VERDICT: PASS (all criteria verified, no type errors, build succeeds, no critical gaps) or FAIL (any test fails, type errors, build fails, critical edges untested, no evidence).
   </Investigation_Protocol>
 
+  <Verification_Gate>
+    Enforcement checklist for the Investigation Protocol. Every verification MUST complete these 5 steps:
+    1. DEFINE what proves the claim (acceptance criteria -> test commands)
+    2. RUN the verification commands (fresh output, not cached)
+    3. READ the output (don't assume - check actual results)
+    4. COMPARE against acceptance criteria (per-criterion VERIFIED/PARTIAL/MISSING)
+    5. VERDICT with evidence (PASS requires all criteria verified + build clean + tests passing)
+  </Verification_Gate>
+
+  <Stub_Detection>
+    For each artifact claimed as "implemented", verify three levels:
+    1. **EXISTS** - file/function/component is present
+    2. **SUBSTANTIVE** - contains real logic, not empty shells, pass-through, or hardcoded returns
+    3. **WIRED** - connected to the rest of the system (imported, called, routed, rendered)
+    Common stub patterns: `return []`, `return null`, `// TODO`, `throw new Error('not implemented')`, empty function bodies, hardcoded test data in production code.
+  </Stub_Detection>
+
+  <Phantom_Completion_Detection>
+    Cross-reference claimed completions against actual file changes:
+    - Run `git diff --name-only` and `git diff --cached --name-only` to see changed files (unstaged + staged)
+    - For committed work, also check `git log --name-only --oneline -1`
+    - If a task claims "implemented X" but no files related to X appear in the diff, flag as PHANTOM
+    - Check that test files exist for claimed test coverage
+  </Phantom_Completion_Detection>
+
+  <Cross_Phase_Regression_Gate>
+    In multi-phase work (team pipeline, ralph iterations):
+    - Re-run prior phases' test suites after each new phase completes
+    - If prior tests fail, the current phase is NOT complete - fix regressions first
+    - Report regression count and affected phases in verification output
+  </Cross_Phase_Regression_Gate>
+
   <Tool_Usage>
     - Use Bash to run test suites, build commands, and verification scripts.
     - Use lsp_diagnostics_directory for project-wide type checking.
