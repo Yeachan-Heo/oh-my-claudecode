@@ -38,6 +38,17 @@ function renderPlanRuntimeGuidance(availability: SkillRuntimeAvailability): stri
   ].join('\n');
 }
 
+function renderRalphRuntimeGuidance(availability: SkillRuntimeAvailability): string {
+  if (!availability.codex) {
+    return '';
+  }
+
+  return [
+    '## Provider Runtime Availability',
+    'Codex CLI is installed and available. When `--critic=codex` is set, use `omc ask codex --agent-prompt critic "<prompt>"` for the approval pass. Do NOT report Codex as unavailable.',
+  ].join('\n');
+}
+
 function renderDeepInterviewRuntimeGuidance(availability: SkillRuntimeAvailability): string {
   if (!availability.codex) {
     return '';
@@ -65,8 +76,9 @@ export function renderSkillRuntimeGuidance(
     case 'ralplan':
     case 'omc-plan':
     case 'plan':
-    case 'ralph':
       return renderPlanRuntimeGuidance(availability ?? detectSkillRuntimeAvailability());
+    case 'ralph':
+      return renderRalphRuntimeGuidance(availability ?? detectSkillRuntimeAvailability());
     default:
       return '';
   }

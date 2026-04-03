@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const availability = vi.hoisted(() => ({
   claude: true,
@@ -23,7 +23,7 @@ describe('runtime-guidance: ralplan/plan/ralph Codex availability', () => {
   });
 
   describe('renderSkillRuntimeGuidance for plan-family skills', () => {
-    const planSkills = ['ralplan', 'omc-plan', 'plan', 'ralph'] as const;
+    const planSkills = ['ralplan', 'omc-plan', 'plan'] as const;
 
     it.each(planSkills)(
       'injects Codex availability guidance for "%s" when Codex is available',
@@ -33,6 +33,8 @@ describe('runtime-guidance: ralplan/plan/ralph Codex availability', () => {
         expect(guidance).toContain('## Provider Runtime Availability');
         expect(guidance).toContain('Codex CLI is installed and available');
         expect(guidance).toContain('Do NOT report Codex as unavailable');
+        expect(guidance).toContain('--architect codex');
+        expect(guidance).toContain('--critic codex');
       },
     );
 
@@ -44,8 +46,26 @@ describe('runtime-guidance: ralplan/plan/ralph Codex availability', () => {
         expect(guidance).toBe('');
       },
     );
+  });
 
-    it('does not affect unrelated skills', () => {
+  describe('renderSkillRuntimeGuidance for ralph', () => {
+    it('injects critic-only guidance when Codex is available', () => {
+      availability.codex = true;
+      const guidance = renderSkillRuntimeGuidance('ralph');
+      expect(guidance).toContain('## Provider Runtime Availability');
+      expect(guidance).toContain('Codex CLI is installed and available');
+      expect(guidance).toContain('--critic=codex');
+      expect(guidance).not.toContain('--architect codex');
+    });
+
+    it('renders no guidance when Codex is unavailable', () => {
+      availability.codex = false;
+      expect(renderSkillRuntimeGuidance('ralph')).toBe('');
+    });
+  });
+
+  describe('unrelated skills are not affected', () => {
+    it('does not inject guidance for skills without Codex support', () => {
       availability.codex = true;
       expect(renderSkillRuntimeGuidance('autopilot')).toBe('');
       expect(renderSkillRuntimeGuidance('ultrawork')).toBe('');
