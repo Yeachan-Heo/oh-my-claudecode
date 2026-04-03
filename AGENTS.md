@@ -297,6 +297,12 @@ Sizing guidance:
 Verification loop: identify what proves the claim, run the verification, read the output, then report with evidence. If verification fails, continue iterating rather than reporting incomplete work.
 </verification>
 
+<evidence_only_protocol>
+Never claim completion without running a verification command first.
+BANNED words in completion claims: should, probably, seems, likely, appears to.
+Every completion claim must cite: command run, output received, and how output proves the claim.
+</evidence_only_protocol>
+
 <execution_protocols>
 Broad Request Detection:
   A request is broad when it uses vague verbs without targets, names no specific file or function, touches 3+ areas, or is a single sentence without a clear deliverable. When detected: explore first, optionally consult architect, then plan.
@@ -325,6 +331,12 @@ Continuation:
 Ralph planning gate:
   If ralph is active, verify PRD + test spec artifacts exist before any implementation work/tool execution. If missing, stay in planning and create them first (ralplan-first).
 </execution_protocols>
+
+<context_pressure_protocol>
+When context usage exceeds 80%, trigger autocompact. When exceeds 90%, halt new complex work.
+Ralph/ultrawork exemption: compact and save state instead of halting.
+Read-only agents (explore, analyst) are exempt from pressure limits.
+</context_pressure_protocol>
 
 <cancellation>
 Use the `cancel` skill to end execution modes. This clears state files and stops active loops.
@@ -405,3 +417,16 @@ Run `omc setup` to install all components. Run `omc doctor` to verify installati
 - Configuration changes must be backward-compatible or include migration notes.
 - MCP tool definitions must validate inputs and handle timeouts gracefully.
 - Agent orchestration changes: verify state machine transitions are complete and recoverable.
+
+<forbidden_files>
+Never read, write, or commit these file patterns:
+- `.env`, `.env.*` (secrets)
+- `*.pem`, `*.key`, `*.p12` (certificates)
+- `credentials.json`, `serviceaccount.json` (service accounts)
+- `*.sqlite`, `*.db` (local databases)
+- `.npmrc`, `.pypirc`, `.netrc` (package manager credentials)
+- `id_rsa`, `id_ed25519` (SSH private keys)
+- `*.pfx`, `*.jks`, `*.keystore` (certificate stores)
+- `.git-credentials` (Git credential store)
+Exception: `security-reviewer` agent may read (not write) these for audit purposes.
+</forbidden_files>
