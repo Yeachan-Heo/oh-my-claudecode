@@ -1,0 +1,90 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#ff4444', 'primaryTextColor': '#fff', 'primaryBorderColor': '#ff6666', 'lineColor': '#ff8888', 'secondaryColor': '#1a1a2e', 'tertiaryColor': '#16213e'}}}%%
+graph TB
+    subgraph INPUT["🎯 User Input"]
+        CLI["CLI / omc command"]
+        MAGIC["Magic Keywords"]
+        SLASH["Slash Commands"]
+    end
+
+    subgraph HOOKS["⚡ Hook System (20 Hooks)"]
+        PRE["PreToolUse Hooks"]
+        POST["PostToolUse Hooks"]
+        STOP["Stop Hooks"]
+        KW["Keyword Detector"]
+        PERSIST["Persistent Mode Enforcer"]
+    end
+
+    subgraph SKILLS["🧠 Skill Engine (31+ Skills)"]
+        AUTO["Autopilot"]
+        RALPH["Ralph Loop"]
+        TEAM["Team Orchestration"]
+        ULW["Ultrawork"]
+        PLAN["Planning"]
+        CCG["CCG Tri-Model"]
+    end
+
+    subgraph AGENTS["🤖 Agent Tier System (19 Agents)"]
+        direction LR
+        HAIKU["⚡ Tier 1: Haiku\nexplore, writer"]
+        SONNET["🔧 Tier 2: Sonnet\nexecutor, designer,\ndebugger, git-master"]
+        OPUS["🧠 Tier 3: Opus\narchitect, analyst,\nplanner, critic"]
+    end
+
+    subgraph INFRA["🏗️ Infrastructure"]
+        MCP["MCP Server\n(Tool Bridge)"]
+        LSP["LSP Integration\n(Diagnostics, Symbols)"]
+        AST["AST-grep\n(Code Search)"]
+        BRIDGE["CLI Bridge\n(Node.js)"]
+    end
+
+    subgraph STATE["💾 State Management"]
+        OMC_DIR[".omc/ Directory"]
+        NOTEPAD["notepad.md\n(Compaction-resistant)"]
+        MEMORY["project-memory.json"]
+        PLANS["plans/"]
+        SESSIONS["sessions/"]
+    end
+
+    subgraph OUTPUT["📤 Output"]
+        HUD["HUD Status Bar"]
+        NOTIFY["Notifications\n(Telegram/Discord/Slack)"]
+        CODE["Code Changes"]
+        DOCS["Documentation"]
+    end
+
+    CLI --> HOOKS
+    MAGIC --> KW
+    SLASH --> SKILLS
+
+    HOOKS --> SKILLS
+    KW --> SKILLS
+    PRE --> AGENTS
+    POST --> STATE
+
+    SKILLS --> AGENTS
+    AGENTS --> MCP
+    AGENTS --> LSP
+    AGENTS --> AST
+    MCP --> BRIDGE
+
+    AGENTS --> STATE
+    AGENTS --> OUTPUT
+    STATE --> AGENTS
+
+    PERSIST --> STOP
+
+    classDef input fill:#ff4444,stroke:#ff6666,color:#fff
+    classDef hooks fill:#e67e22,stroke:#f39c12,color:#fff
+    classDef skills fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef agents fill:#2980b9,stroke:#3498db,color:#fff
+    classDef infra fill:#1a1a2e,stroke:#ff4444,color:#fff
+    classDef state fill:#27ae60,stroke:#2ecc71,color:#fff
+    classDef output fill:#16213e,stroke:#ff4444,color:#fff
+
+    class CLI,MAGIC,SLASH input
+    class PRE,POST,STOP,KW,PERSIST hooks
+    class AUTO,RALPH,TEAM,ULW,PLAN,CCG skills
+    class HAIKU,SONNET,OPUS agents
+    class MCP,LSP,AST,BRIDGE infra
+    class OMC_DIR,NOTEPAD,MEMORY,PLANS,SESSIONS state
+    class HUD,NOTIFY,CODE,DOCS output
