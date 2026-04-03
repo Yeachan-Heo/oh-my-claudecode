@@ -20,6 +20,17 @@ function normalizeSkillName(skillName: string): string {
   return skillName.trim().toLowerCase();
 }
 
+function renderPlanRuntimeGuidance(availability: SkillRuntimeAvailability): string {
+  if (!availability.codex) {
+    return '';
+  }
+
+  return [
+    '## Provider Runtime Availability',
+    'Codex CLI is installed and available. When `--architect codex` or `--critic codex` flags are present, use `omc ask codex --agent-prompt <role> "<prompt>"` for those passes. Do NOT report Codex as unavailable.',
+  ].join('\n');
+}
+
 function renderDeepInterviewRuntimeGuidance(availability: SkillRuntimeAvailability): string {
   if (!availability.codex) {
     return '';
@@ -44,6 +55,11 @@ export function renderSkillRuntimeGuidance(
   switch (normalizeSkillName(skillName)) {
     case 'deep-interview':
       return renderDeepInterviewRuntimeGuidance(availability ?? detectSkillRuntimeAvailability());
+    case 'ralplan':
+    case 'omc-plan':
+    case 'plan':
+    case 'ralph':
+      return renderPlanRuntimeGuidance(availability ?? detectSkillRuntimeAvailability());
     default:
       return '';
   }
