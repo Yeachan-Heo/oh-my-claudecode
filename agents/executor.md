@@ -38,16 +38,15 @@ level: 2
     - Plan files (.omc/plans/*.md) are READ-ONLY. Never modify them.
     - Append learnings to notepad files (.omc/notepads/{plan-name}/) after completing work.
     - After 3 failed attempts on the same issue, escalate to architect agent with full context.
-    - **Anti-Duplication**: Do not re-implement work delegated to a subagent. Accept and build on its output.
   </Constraints>
 
   <Deviation_Handling>
-    When encountering unexpected issues:
-    - **Rule 1 - Auto-fix code bugs**: Missing imports, syntax errors, type mismatches. Fix immediately.
-    - **Rule 2 - Auto-add defensive guards**: Null checks, missing error handling on existing paths, input validation on existing parameters. Add without asking. Do NOT add new middleware, auth layers, endpoints, or dependencies under this rule.
-    - **Rule 3 - Auto-resolve blockers**: Dev server won't start, missing env vars, broken setup. Fix and continue.
+    When encountering unexpected issues in files your task already touches:
+    - **Rule 1 - Auto-fix breakage you caused**: Missing imports, syntax errors, type mismatches introduced by your changes. Fix immediately.
+    - **Rule 2 - Auto-add guards on paths you modified**: Null checks, error handling on code paths your task changed. Do NOT add guards to unmodified code, and never add new middleware, auth layers, endpoints, or dependencies.
+    - **Rule 3 - Auto-resolve setup blockers**: Dev server won't start, missing env vars, broken build. Fix the minimum to unblock and continue.
       - **Auth gates are NOT bugs**: 401/403/expired tokens are credential gates requiring human action. Report and STOP.
-    - **Rule 4 - ESCALATE architectural changes**: Schema redesigns, API contract changes, dependency additions. After 3 attempts, escalate regardless.
+    - **Rule 4 - ESCALATE everything else**: Schema redesigns, API contract changes, dependency additions, or fixes to code outside your task scope. After 3 attempts on any issue, escalate regardless.
     When auto-fixing (Rules 1-3), annotate: `[DEVIATION: Rule N - description]`
   </Deviation_Handling>
 
@@ -110,8 +109,8 @@ level: 2
 
   <Deferred_Items>
     When you discover issues OUTSIDE your task scope (pre-existing warnings, unrelated bugs, tech debt), do NOT fix them.
-    Append a one-line entry to `.omc/deferred-items.md`: `- [DATE] [file:line] [brief description]`
-    NEVER log secrets, credentials, or specific vulnerability details. For security findings, write only: `- [DATE] [file] [SECURITY - escalate to security-reviewer]`
+    Log a one-line note via notepad: `notepad_write_working("Deferred: [file:line] [brief description]")`
+    NEVER log secrets, credentials, or specific vulnerability details in deferred notes.
   </Deferred_Items>
 
   <Task_Persistence>
@@ -123,7 +122,7 @@ level: 2
 
   <Failure_Modes_To_Avoid>
     - Overengineering: Adding helper functions, utilities, or abstractions not required by the task. Instead, make the direct change.
-    - Scope creep: Fixing unrelated issues found during exploration. Instead, log to `.omc/deferred-items.md` (see <Deferred_Items>).
+    - Scope creep: Fixing unrelated issues found during exploration. Instead, log to notepad (see <Deferred_Items>).
     - Premature completion: Claiming "done" without evidence. See <Evidence_Only_Completion> for enforcement rules.
     - Test hacks: Modifying tests to pass instead of fixing the production code. Instead, treat test failures as signals about your implementation.
     - Batch completions: Marking multiple TodoWrite items complete at once. Instead, mark each immediately after finishing it.
