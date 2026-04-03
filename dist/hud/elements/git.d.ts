@@ -5,7 +5,7 @@
  */
 export interface WorktreeDetection {
     isWorktree: boolean;
-    baseBranch: string | null;
+    worktreeName: string | null;
 }
 /**
  * Clear all git caches. Call in tests beforeEach to ensure a clean slate.
@@ -31,7 +31,7 @@ export declare function getGitBranch(cwd?: string): string | null;
 /**
  * Detect if the current directory is inside a git linked worktree.
  * Compares --git-dir with --git-common-dir; they differ in linked worktrees.
- * When in a worktree, reads the main repo's HEAD to determine the base branch.
+ * When in a worktree, extracts the worktree name from the git-dir path.
  *
  * @param cwd - Working directory
  * @returns Worktree detection result (cached for CACHE_TTL_MS)
@@ -46,8 +46,8 @@ export declare function getWorktreeInfo(cwd?: string): WorktreeDetection;
 export declare function renderGitRepo(cwd?: string): string | null;
 /**
  * Render git branch element.
- * When inside a linked worktree, appends the main repo's branch as suffix:
- *   branch:feature-x (wt:main)
+ * When inside a linked worktree, appends the worktree name as suffix:
+ *   branch:feature-x (wt:my-wt)
  *
  * @param cwd - Working directory
  * @returns Formatted branch name or null

@@ -37490,7 +37490,7 @@ function getWorktreeInfo(cwd2) {
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32" ? "cmd.exe" : void 0
   };
-  let result = { isWorktree: false, baseBranch: null };
+  let result = { isWorktree: false, worktreeName: null };
   try {
     const gitDir = (0, import_node_child_process6.execSync)("git rev-parse --git-dir", execOpts).trim();
     const gitCommonDir = (0, import_node_child_process6.execSync)("git rev-parse --git-common-dir", execOpts).trim();
@@ -37505,13 +37505,7 @@ function getWorktreeInfo(cwd2) {
     } catch {
     }
     if (resolvedGitDir !== resolvedCommonDir) {
-      result = { isWorktree: true, baseBranch: null };
-      try {
-        const headContent = (0, import_node_fs7.readFileSync)((0, import_node_path12.join)(resolvedCommonDir, "HEAD"), "utf-8").trim();
-        const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
-        result.baseBranch = match ? match[1] : null;
-      } catch {
-      }
+      result = { isWorktree: true, worktreeName: require("node:path").basename(resolvedGitDir) };
     }
   } catch {
   }
@@ -37527,8 +37521,8 @@ function renderGitBranch(cwd2) {
   const branch = getGitBranch(cwd2);
   if (!branch) return null;
   const wtInfo = getWorktreeInfo(cwd2);
-  if (wtInfo.isWorktree && wtInfo.baseBranch) {
-    return `${dim("branch:")}${cyan(branch)} ${dim("(wt:")}${cyan(wtInfo.baseBranch)}${dim(")")}`;
+  if (wtInfo.isWorktree && wtInfo.worktreeName) {
+    return `${dim("branch:")}${cyan(branch)} ${dim("(wt:")}${cyan(wtInfo.worktreeName)}${dim(")")}`;
   }
   return `${dim("branch:")}${cyan(branch)}`;
 }

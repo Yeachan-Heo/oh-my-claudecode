@@ -5,8 +5,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve, basename } from 'node:path';
 import { dim, cyan } from '../colors.js';
 
 const CACHE_TTL_MS = 30_000;
@@ -18,7 +18,7 @@ interface CacheEntry<T> {
 
 export interface WorktreeDetection {
   isWorktree: boolean;
-  baseBranch: string | null;
+  worktreeName: string | null;
 }
 
 const repoCache = new Map<string, CacheEntry<string | null>>();
@@ -111,7 +111,7 @@ export function getGitBranch(cwd?: string): string | null {
 /**
  * Detect if the current directory is inside a git linked worktree.
  * Compares --git-dir with --git-common-dir; they differ in linked worktrees.
- * When in a worktree, reads the main repo's HEAD to determine the base branch.
+ * When in a worktree, extracts the worktree name from the git-dir path.
  *
  * @param cwd - Working directory
  * @returns Worktree detection result (cached for CACHE_TTL_MS)
@@ -131,7 +131,7 @@ export function getWorktreeInfo(cwd?: string): WorktreeDetection {
     shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
   };
 
-  let result: WorktreeDetection = { isWorktree: false, baseBranch: null };
+  let result: WorktreeDetection = { isWorktree: false, worktreeName: null };
   try {
     const gitDir = (execSync('git rev-parse --git-dir', execOpts) as string).trim();
     const gitCommonDir = (execSync('git rev-parse --git-common-dir', execOpts) as string).trim();
@@ -143,14 +143,8 @@ export function getWorktreeInfo(cwd?: string): WorktreeDetection {
     try { resolvedCommonDir = realpathSync(resolvedCommonDir); } catch { /* use resolved */ }
 
     if (resolvedGitDir !== resolvedCommonDir) {
-      result = { isWorktree: true, baseBranch: null };
-      try {
-        const headContent = readFileSync(join(resolvedCommonDir, 'HEAD'), 'utf-8').trim();
-        const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
-        result.baseBranch = match ? match[1] : null;
-      } catch {
-        // Can't read HEAD — mark as worktree without base branch
-      }
+      // Extract worktree name from gitDir path (e.g. /repo/.git/worktrees/my-wt → my-wt)
+      result = { isWorktree: true, worktreeName: basename(resolvedGitDir) };
     }
   } catch {
     // Not in a git repo or command failed
@@ -174,8 +168,8 @@ export function renderGitRepo(cwd?: string): string | null {
 
 /**
  * Render git branch element.
- * When inside a linked worktree, appends the main repo's branch as suffix:
- *   branch:feature-x (wt:main)
+ * When inside a linked worktree, appends the worktree name as suffix:
+ *   branch:feature-x (wt:my-wt)
  *
  * @param cwd - Working directory
  * @returns Formatted branch name or null
@@ -185,8 +179,8 @@ export function renderGitBranch(cwd?: string): string | null {
   if (!branch) return null;
 
   const wtInfo = getWorktreeInfo(cwd);
-  if (wtInfo.isWorktree && wtInfo.baseBranch) {
-    return `${dim('branch:')}${cyan(branch)} ${dim('(wt:')}${cyan(wtInfo.baseBranch)}${dim(')')}`;
+  if (wtInfo.isWorktree && wtInfo.worktreeName) {
+    return `${dim('branch:')}${cyan(branch)} ${dim('(wt:')}${cyan(wtInfo.worktreeName)}${dim(')')}`;
   }
 
   return `${dim('branch:')}${cyan(branch)}`;

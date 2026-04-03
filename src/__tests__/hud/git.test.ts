@@ -6,16 +6,8 @@ vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
 }));
 
-// Mock node:fs for worktree HEAD reading
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  return { ...actual, readFileSync: vi.fn() };
-});
-
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 const mockExecSync = vi.mocked(execSync);
-const mockReadFileSync = vi.mocked(readFileSync);
 
 describe('git elements', () => {
   beforeEach(() => {
@@ -123,7 +115,6 @@ describe('git elements', () => {
 
   describe('getWorktreeInfo', () => {
     it('returns isWorktree false for normal repo', () => {
-      // In a normal repo, --git-dir and --git-common-dir resolve to the same path
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git rev-parse --git-dir') return '.git\n';
         if (cmd === 'git rev-parse --git-common-dir') return '.git\n';
@@ -131,48 +122,31 @@ describe('git elements', () => {
       });
       const result = getWorktreeInfo('/some/repo');
       expect(result.isWorktree).toBe(false);
-      expect(result.baseBranch).toBeNull();
+      expect(result.worktreeName).toBeNull();
     });
 
-    it('detects linked worktree when git-dir differs from git-common-dir', () => {
+    it('detects linked worktree and extracts worktree name from git-dir', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git rev-parse --git-dir') return '/main-repo/.git/worktrees/my-wt\n';
         if (cmd === 'git rev-parse --git-common-dir') return '/main-repo/.git\n';
         return '';
       });
-      mockReadFileSync.mockReturnValue('ref: refs/heads/main\n');
 
       const result = getWorktreeInfo('/some/worktree');
       expect(result.isWorktree).toBe(true);
-      expect(result.baseBranch).toBe('main');
+      expect(result.worktreeName).toBe('my-wt');
     });
 
-    it('returns null baseBranch when HEAD is detached', () => {
+    it('extracts worktree name with nested path segments', () => {
       mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd === 'git rev-parse --git-dir') return '/main-repo/.git/worktrees/my-wt\n';
-        if (cmd === 'git rev-parse --git-common-dir') return '/main-repo/.git\n';
+        if (cmd === 'git rev-parse --git-dir') return '/repo/.git/worktrees/feature-NAVERCAFE-12345\n';
+        if (cmd === 'git rev-parse --git-common-dir') return '/repo/.git\n';
         return '';
-      });
-      mockReadFileSync.mockReturnValue('abc123def456\n');
-
-      const result = getWorktreeInfo('/some/worktree');
-      expect(result.isWorktree).toBe(true);
-      expect(result.baseBranch).toBeNull();
-    });
-
-    it('returns isWorktree true with null baseBranch when HEAD read fails', () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd === 'git rev-parse --git-dir') return '/main-repo/.git/worktrees/my-wt\n';
-        if (cmd === 'git rev-parse --git-common-dir') return '/main-repo/.git\n';
-        return '';
-      });
-      mockReadFileSync.mockImplementation(() => {
-        throw new Error('EACCES: permission denied');
       });
 
       const result = getWorktreeInfo('/some/worktree');
       expect(result.isWorktree).toBe(true);
-      expect(result.baseBranch).toBeNull();
+      expect(result.worktreeName).toBe('feature-NAVERCAFE-12345');
     });
 
     it('returns not a worktree when git commands fail', () => {
@@ -181,7 +155,7 @@ describe('git elements', () => {
       });
       const result = getWorktreeInfo();
       expect(result.isWorktree).toBe(false);
-      expect(result.baseBranch).toBeNull();
+      expect(result.worktreeName).toBeNull();
     });
 
     it('caches result for same cwd', () => {
@@ -194,7 +168,6 @@ describe('git elements', () => {
       getWorktreeInfo('/cached/path');
       getWorktreeInfo('/cached/path');
 
-      // Should only call git commands once per unique command (2 calls total, not 4)
       const gitDirCalls = mockExecSync.mock.calls.filter(c => c[0] === 'git rev-parse --git-dir');
       expect(gitDirCalls).toHaveLength(1);
     });
@@ -221,20 +194,19 @@ describe('git elements', () => {
       expect(result).toContain('\x1b['); // contains ANSI escape codes
     });
 
-    it('shows worktree suffix when in a linked worktree', () => {
+    it('shows worktree suffix with worktree name when in a linked worktree', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git branch --show-current') return 'feature-x\n';
-        if (cmd === 'git rev-parse --git-dir') return '/main/.git/worktrees/wt\n';
+        if (cmd === 'git rev-parse --git-dir') return '/main/.git/worktrees/my-wt\n';
         if (cmd === 'git rev-parse --git-common-dir') return '/main/.git\n';
         return '';
       });
-      mockReadFileSync.mockReturnValue('ref: refs/heads/main\n');
 
       const result = renderGitBranch('/some/worktree');
       expect(result).toContain('branch:');
       expect(result).toContain('feature-x');
       expect(result).toContain('wt:');
-      expect(result).toContain('main');
+      expect(result).toContain('my-wt');
     });
 
     it('does not show worktree suffix in normal repo', () => {
@@ -248,22 +220,6 @@ describe('git elements', () => {
       const result = renderGitBranch('/some/repo');
       expect(result).toContain('branch:');
       expect(result).toContain('main');
-      expect(result).not.toContain('wt:');
-    });
-
-    it('does not show worktree suffix when baseBranch is null (detached HEAD in main)', () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd === 'git branch --show-current') return 'feature-y\n';
-        if (cmd === 'git rev-parse --git-dir') return '/main/.git/worktrees/wt\n';
-        if (cmd === 'git rev-parse --git-common-dir') return '/main/.git\n';
-        return '';
-      });
-      // Detached HEAD — no ref: prefix
-      mockReadFileSync.mockReturnValue('abc123def456789\n');
-
-      const result = renderGitBranch('/some/worktree');
-      expect(result).toContain('branch:');
-      expect(result).toContain('feature-y');
       expect(result).not.toContain('wt:');
     });
   });

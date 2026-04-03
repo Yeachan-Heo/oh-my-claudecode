@@ -4,8 +4,8 @@
  * Renders git repository name and branch information.
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve, basename } from 'node:path';
 import { dim, cyan } from '../colors.js';
 const CACHE_TTL_MS = 30_000;
 const repoCache = new Map();
@@ -109,7 +109,7 @@ export function getWorktreeInfo(cwd) {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
     };
-    let result = { isWorktree: false, baseBranch: null };
+    let result = { isWorktree: false, worktreeName: null };
     try {
         const gitDir = execSync('git rev-parse --git-dir', execOpts).trim();
         const gitCommonDir = execSync('git rev-parse --git-common-dir', execOpts).trim();
@@ -125,15 +125,8 @@ export function getWorktreeInfo(cwd) {
         }
         catch { /* use resolved */ }
         if (resolvedGitDir !== resolvedCommonDir) {
-            result = { isWorktree: true, baseBranch: null };
-            try {
-                const headContent = readFileSync(join(resolvedCommonDir, 'HEAD'), 'utf-8').trim();
-                const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
-                result.baseBranch = match ? match[1] : null;
-            }
-            catch {
-                // Can't read HEAD — mark as worktree without base branch
-            }
+            // Extract worktree name from gitDir path (e.g. /repo/.git/worktrees/my-wt → my-wt)
+            result = { isWorktree: true, worktreeName: basename(resolvedGitDir) };
         }
     }
     catch {
@@ -167,8 +160,8 @@ export function renderGitBranch(cwd) {
     if (!branch)
         return null;
     const wtInfo = getWorktreeInfo(cwd);
-    if (wtInfo.isWorktree && wtInfo.baseBranch) {
-        return `${dim('branch:')}${cyan(branch)} ${dim('(wt:')}${cyan(wtInfo.baseBranch)}${dim(')')}`;
+    if (wtInfo.isWorktree && wtInfo.worktreeName) {
+        return `${dim('branch:')}${cyan(branch)} ${dim('(wt:')}${cyan(wtInfo.worktreeName)}${dim(')')}`;
     }
     return `${dim('branch:')}${cyan(branch)}`;
 }
