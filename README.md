@@ -42,6 +42,8 @@ English | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](READM
 - [Execution Modes](#execution-modes)
 - [Agent Catalog](#agent-catalog)
 - [Skills System](#skills-system)
+- [Hook Event Pipeline](#hook-event-pipeline)
+- [State Management](#state-management)
 - [Magic Keywords](#magic-keywords)
 - [Configuration & Tooling](#configuration--tooling)
 - [Requirements](#requirements)
@@ -224,6 +226,10 @@ graph TB
     PERSIST --> STOP
 ```
 
+<p align="center">
+  <img src="assets/diagrams/architecture-diagram.jpg" alt="OMC Architecture Diagram" width="750"/>
+</p>
+
 ### The Four Systems
 
 | System | Count | Role |
@@ -259,6 +265,10 @@ flowchart TD
     VERIFIER --> DONE
 ```
 
+<p align="center">
+  <img src="assets/diagrams/agent-delegation-diagram.jpg" alt="Agent Delegation Flow Diagram" width="750"/>
+</p>
+
 ---
 
 ## Execution Modes
@@ -292,6 +302,10 @@ flowchart TD
     START --> Q5{"Multiple AI\nperspectives?"}
     Q5 -->|"Yes"| CCG["ccg\nTri-model synthesis"]
 ```
+
+<p align="center">
+  <img src="assets/diagrams/mode-selection-diagram.jpg" alt="Execution Mode Selection Diagram" width="750"/>
+</p>
 
 ### Mode Comparison
 
@@ -470,6 +484,30 @@ sequenceDiagram
     CC->>ST: Clear state
     CC-->>U: Present results
 ```
+
+<p align="center">
+  <img src="assets/diagrams/skill-lifecycle-diagram.jpg" alt="Skill Lifecycle Diagram" width="750"/>
+</p>
+
+---
+
+## Hook Event Pipeline
+
+The hook system intercepts lifecycle events and injects context into the conversation via `<system-reminder>` tags:
+
+<p align="center">
+  <img src="assets/diagrams/hook-pipeline-diagram.jpg" alt="Hook Event Pipeline Diagram" width="800"/>
+</p>
+
+---
+
+## State Management
+
+OMC persists state across sessions in the `.omc/` directory:
+
+<p align="center">
+  <img src="assets/diagrams/state-management-diagram.jpg" alt="State Management Diagram" width="800"/>
+</p>
 
 ---
 
