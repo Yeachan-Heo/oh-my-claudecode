@@ -3,6 +3,7 @@ import { readFileSync, mkdtempSync } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
 import { loadAgentPrompt } from '../agents/utils.js';
 import { clearSkillsCache, getBuiltinSkill, getSkillsDir } from '../features/builtin-skills/skills.js';
 
@@ -87,6 +88,17 @@ describe('package dir resolution regression (#1322, #1324)', () => {
     );
   });
 
+  it('bridge/team.js keeps import.meta package-dir resolution bridge-aware', () => {
+    const source = readFileSync(join(REPO_ROOT, 'bridge', 'team.js'), 'utf-8');
+    const snippet = getSnippetByMarker(source, 'function getPackageDir() {');
+
+    expect(snippet).toContain('fileURLToPath(import.meta.url)');
+    expect(snippet).toContain('currentDirName === "bridge"');
+    expect(snippet.indexOf('fileURLToPath(import.meta.url)')).toBeLessThan(
+      snippet.indexOf('return join6(__dirname2, "..", "..")'),
+    );
+  });
+
   it('loadAgentPrompt resolves prompts even when cwd is unrelated', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'omc-agents-path-resolution-'));
     process.chdir(sandboxDir);
@@ -120,5 +132,20 @@ describe('package dir resolution regression (#1322, #1324)', () => {
     expect(roles).toContain('architect');
     expect(roles).toContain('executor');
     expect(roles).toContain('planner');
+  });
+
+  it('bridge/team.js imports cleanly from an unrelated cwd without agents ENOENT', () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), 'omc-bridge-team-import-'));
+    const command = `import(${JSON.stringify(`file://${join(REPO_ROOT, 'bridge', 'team.js')}`)})`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', command], {
+      cwd: sandboxDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('ENOENT');
+    expect(result.stderr).not.toContain('Prompt unavailable');
+
+    expect(result.stdout).toBe('');
   });
 });

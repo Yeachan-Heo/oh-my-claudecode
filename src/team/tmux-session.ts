@@ -55,6 +55,32 @@ async function tmuxAsync(args: string[]): Promise<{ stdout: string; stderr: stri
   return promisifiedExecFile('tmux', args);
 }
 
+export async function applyMainVerticalLayout(teamTarget: string): Promise<void> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+
+  try {
+    await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
+  } catch {
+    // Layout may not apply if only 1 pane; ignore.
+  }
+
+  try {
+    const widthResult = await tmuxAsync([
+      'display-message', '-p', '-t', teamTarget, '#{window_width}',
+    ]);
+    const width = parseInt(widthResult.stdout.trim(), 10);
+    if (Number.isFinite(width) && width >= 40) {
+      const half = String(Math.floor(width / 2));
+      await execFileAsync('tmux', ['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
+      await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
+    }
+  } catch {
+    /* ignore layout sizing errors */
+  }
+}
+
 export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
 
 export interface TeamSession {
@@ -551,23 +577,7 @@ export async function createTeamSession(
     }
   }
 
-  try {
-    await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
-  } catch {
-    // Layout may not apply if only 1 pane; ignore.
-  }
-
-  try {
-    const widthResult = await tmuxAsync([
-      'display-message', '-p', '-t', teamTarget, '#{window_width}',
-    ]);
-    const width = parseInt(widthResult.stdout.trim(), 10);
-    if (Number.isFinite(width) && width >= 40) {
-      const half = String(Math.floor(width / 2));
-      await execFileAsync('tmux', ['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
-      await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
-    }
-  } catch { /* ignore layout sizing errors */ }
+  await applyMainVerticalLayout(teamTarget);
 
   try {
     await execFileAsync('tmux', ['set-option', '-t', resolvedSessionName, 'mouse', 'on']);

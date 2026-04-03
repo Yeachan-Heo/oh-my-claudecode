@@ -5,6 +5,7 @@ export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): T
  * Tmux panes run bash in this environment, not cmd.exe.
  */
 export declare function isUnixLikeOnWindows(): boolean;
+export declare function applyMainVerticalLayout(teamTarget: string): Promise<void>;
 export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
 export interface TeamSession {
     sessionName: string;

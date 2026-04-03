@@ -6,7 +6,7 @@ import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWo
 import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady,
+  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
@@ -771,11 +771,7 @@ export async function spawnWorkerForTask(
   runtime.workerPaneIds.push(paneId);
   runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
 
-  try {
-    await execFileAsync('tmux', ['select-layout', '-t', runtime.sessionName, 'main-vertical']);
-  } catch {
-    // layout update is best-effort
-  }
+  await applyMainVerticalLayout(runtime.sessionName);
 
   try {
     await writePanesTrackingFileIfPresent(runtime);

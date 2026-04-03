@@ -62,7 +62,7 @@ import {
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, type WorkerPaneConfig,
+  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -474,11 +474,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
 
   // Apply layout
-  try {
-    await execFileAsync('tmux', [
-      'select-layout', '-t', opts.sessionName, 'main-vertical',
-    ]);
-  } catch { /* layout is best-effort */ }
+  await applyMainVerticalLayout(opts.sessionName);
 
   // For interactive agents, wait for pane readiness before dispatching startup inbox.
   if (!usePromptMode) {

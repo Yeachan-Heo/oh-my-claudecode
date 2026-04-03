@@ -56,6 +56,10 @@ function getPackageDir(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
+    const currentDirName = basename(__dirname);
+    if (currentDirName === 'bridge') {
+      return join(__dirname, '..');
+    }
     // From src/agents/ or dist/agents/ go up to package root
     return join(__dirname, '..', '..');
   } catch {

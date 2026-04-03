@@ -1564,6 +1564,7 @@ var init_team_name = __esm({
 // src/team/tmux-session.ts
 var tmux_session_exports = {};
 __export(tmux_session_exports, {
+  applyMainVerticalLayout: () => applyMainVerticalLayout,
   buildWorkerLaunchSpec: () => buildWorkerLaunchSpec,
   buildWorkerStartCommand: () => buildWorkerStartCommand,
   createSession: () => createSession,
@@ -1611,6 +1612,31 @@ async function tmuxAsync(args) {
     return promisifiedExec(`tmux ${escaped}`);
   }
   return promisifiedExecFile("tmux", args);
+}
+async function applyMainVerticalLayout(teamTarget) {
+  const { execFile: execFile4 } = await import("child_process");
+  const { promisify: promisify3 } = await import("util");
+  const execFileAsync2 = promisify3(execFile4);
+  try {
+    await execFileAsync2("tmux", ["select-layout", "-t", teamTarget, "main-vertical"]);
+  } catch {
+  }
+  try {
+    const widthResult = await tmuxAsync([
+      "display-message",
+      "-p",
+      "-t",
+      teamTarget,
+      "#{window_width}"
+    ]);
+    const width = parseInt(widthResult.stdout.trim(), 10);
+    if (Number.isFinite(width) && width >= 40) {
+      const half = String(Math.floor(width / 2));
+      await execFileAsync2("tmux", ["set-window-option", "-t", teamTarget, "main-pane-width", half]);
+      await execFileAsync2("tmux", ["select-layout", "-t", teamTarget, "main-vertical"]);
+    }
+  } catch {
+  }
 }
 function getDefaultShell() {
   if (process.platform === "win32" && !isUnixLikeOnWindows()) {
@@ -1944,26 +1970,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       workerPaneIds.push(paneId);
     }
   }
-  try {
-    await execFileAsync2("tmux", ["select-layout", "-t", teamTarget, "main-vertical"]);
-  } catch {
-  }
-  try {
-    const widthResult = await tmuxAsync([
-      "display-message",
-      "-p",
-      "-t",
-      teamTarget,
-      "#{window_width}"
-    ]);
-    const width = parseInt(widthResult.stdout.trim(), 10);
-    if (Number.isFinite(width) && width >= 40) {
-      const half = String(Math.floor(width / 2));
-      await execFileAsync2("tmux", ["set-window-option", "-t", teamTarget, "main-pane-width", half]);
-      await execFileAsync2("tmux", ["select-layout", "-t", teamTarget, "main-vertical"]);
-    }
-  } catch {
-  }
+  await applyMainVerticalLayout(teamTarget);
   try {
     await execFileAsync2("tmux", ["set-option", "-t", resolvedSessionName, "mouse", "on"]);
   } catch {
@@ -2315,6 +2322,10 @@ function getPackageDir() {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname2 = dirname4(__filename);
+    const currentDirName = basename3(__dirname2);
+    if (currentDirName === "bridge") {
+      return join6(__dirname2, "..");
+    }
     return join6(__dirname2, "..", "..");
   } catch {
   }
@@ -2393,6 +2404,10 @@ function getPackageDir2() {
   try {
     const __filename = fileURLToPath2(import.meta.url);
     const __dirname2 = dirname5(__filename);
+    const currentDirName = basename4(__dirname2);
+    if (currentDirName === "bridge") {
+      return join7(__dirname2, "..");
+    }
     return join7(__dirname2, "..", "..");
   } catch {
   }
@@ -4903,15 +4918,7 @@ async function spawnV2Worker(opts) {
     cwd: opts.cwd
   };
   await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
-  try {
-    await execFileAsync2("tmux", [
-      "select-layout",
-      "-t",
-      opts.sessionName,
-      "main-vertical"
-    ]);
-  } catch {
-  }
+  await applyMainVerticalLayout(opts.sessionName);
   if (!usePromptMode) {
     const paneReady = await waitForPaneReady(paneId);
     if (!paneReady) {

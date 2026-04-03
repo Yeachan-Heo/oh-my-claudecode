@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   spawnWorkerInPane: vi.fn(),
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
+  applyMainVerticalLayout: vi.fn(),
   execFile: vi.fn(),
   spawnSync: vi.fn(() => ({ status: 0 })),
 }));
@@ -42,6 +43,7 @@ vi.mock('../tmux-session.js', () => ({
   spawnWorkerInPane: mocks.spawnWorkerInPane,
   sendToWorker: mocks.sendToWorker,
   waitForPaneReady: mocks.waitForPaneReady,
+  applyMainVerticalLayout: mocks.applyMainVerticalLayout,
 }));
 
 describe('runtime v2 startup inbox dispatch', () => {
@@ -53,6 +55,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockReset();
     mocks.sendToWorker.mockReset();
     mocks.waitForPaneReady.mockReset();
+    mocks.applyMainVerticalLayout.mockReset();
     mocks.execFile.mockReset();
     mocks.spawnSync.mockReset();
     modelContractMocks.buildWorkerArgv.mockReset();
@@ -70,6 +73,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockResolvedValue(undefined);
     mocks.waitForPaneReady.mockResolvedValue(true);
     mocks.sendToWorker.mockResolvedValue(true);
+    mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
     mocks.spawnSync.mockReturnValue({ status: 0 });
     modelContractMocks.buildWorkerArgv.mockImplementation((agentType?: string) => [`/usr/bin/${agentType ?? 'claude'}`]);
     modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => `/usr/bin/${agentType ?? 'claude'}`);
@@ -143,6 +147,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         }),
       }),
     );
+    expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session');
   });
 
 

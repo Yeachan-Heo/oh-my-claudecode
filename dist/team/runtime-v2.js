@@ -28,7 +28,7 @@ import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovern
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, } from './model-contract.js';
-import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForPaneReady, paneHasActiveTask, paneLooksReady, } from './tmux-session.js';
+import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
@@ -263,12 +263,7 @@ async function spawnV2Worker(opts) {
     };
     await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
     // Apply layout
-    try {
-        await execFileAsync('tmux', [
-            'select-layout', '-t', opts.sessionName, 'main-vertical',
-        ]);
-    }
-    catch { /* layout is best-effort */ }
+    await applyMainVerticalLayout(opts.sessionName);
     // For interactive agents, wait for pane readiness before dispatching startup inbox.
     if (!usePromptMode) {
         const paneReady = await waitForPaneReady(paneId);

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     spawnWorkerInPane: vi.fn(),
     sendToWorker: vi.fn(),
     waitForPaneReady: vi.fn(),
+    applyMainVerticalLayout: vi.fn(),
     execFile: vi.fn(),
     spawnSync: vi.fn(() => ({ status: 0 })),
 }));
@@ -36,6 +37,7 @@ vi.mock('../tmux-session.js', () => ({
     spawnWorkerInPane: mocks.spawnWorkerInPane,
     sendToWorker: mocks.sendToWorker,
     waitForPaneReady: mocks.waitForPaneReady,
+    applyMainVerticalLayout: mocks.applyMainVerticalLayout,
 }));
 describe('runtime v2 startup inbox dispatch', () => {
     let cwd;
@@ -45,6 +47,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.spawnWorkerInPane.mockReset();
         mocks.sendToWorker.mockReset();
         mocks.waitForPaneReady.mockReset();
+        mocks.applyMainVerticalLayout.mockReset();
         mocks.execFile.mockReset();
         mocks.spawnSync.mockReset();
         modelContractMocks.buildWorkerArgv.mockReset();
@@ -61,6 +64,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.spawnWorkerInPane.mockResolvedValue(undefined);
         mocks.waitForPaneReady.mockResolvedValue(true);
         mocks.sendToWorker.mockResolvedValue(true);
+        mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
         mocks.spawnSync.mockReturnValue({ status: 0 });
         modelContractMocks.buildWorkerArgv.mockImplementation((agentType) => [`/usr/bin/${agentType ?? 'claude'}`]);
         modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType) => `/usr/bin/${agentType ?? 'claude'}`);
@@ -121,6 +125,7 @@ describe('runtime v2 startup inbox dispatch', () => {
                 OMC_TEAM_LEADER_CWD: cwd,
             }),
         }));
+        expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session');
     });
     it('uses owner-aware startup allocation when task owners are provided', async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-owner-startup-'));
