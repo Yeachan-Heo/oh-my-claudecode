@@ -52,6 +52,7 @@ import { homedir } from "os";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
+import { getClaudeConfigDir } from "../utils/paths.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -190,6 +191,44 @@ async function calculateSessionHealth(
 }
 
 /**
+ * Show installation diagnostic when called from CLI without stdin.
+ * Helps users verify HUD setup after omc-setup.
+ */
+function showDiagnostic(): void {
+  const version = getRuntimePackageVersion();
+  const configDir = getClaudeConfigDir();
+  const hudScript = join(configDir, "hud", "omc-hud.mjs");
+  const settingsFile = join(configDir, "settings.json");
+
+  const hudExists = existsSync(hudScript);
+  let statusLineOk = false;
+  try {
+    const settings = JSON.parse(readFileSync(settingsFile, "utf-8"));
+    const sl = settings.statusLine;
+    if (sl && typeof sl === "object" && typeof (sl as Record<string, unknown>).command === "string") {
+      statusLineOk = ((sl as Record<string, unknown>).command as string).includes("omc-hud");
+    } else if (typeof sl === "string") {
+      statusLineOk = sl.includes("omc-hud");
+    }
+  } catch {
+    /* settings.json missing or invalid */
+  }
+
+  const config = readHudConfig();
+  const preset = config.preset ?? "focused";
+
+  console.log(`[OMC] HUD v${version} | preset: ${preset}`);
+  console.log(`  HUD script:  ${hudExists ? "installed" : "MISSING"}`);
+  console.log(`  statusLine:  ${statusLineOk ? "configured" : "NOT configured"}`);
+
+  if (!hudExists || !statusLineOk) {
+    console.log("  Run /oh-my-claudecode:hud setup to fix.");
+  } else {
+    console.log("  HUD renders automatically inside Claude Code sessions.");
+  }
+}
+
+/**
  * Main HUD entry point
  * @param watchMode - true when called from the --watch polling loop (stdin is TTY)
  */
@@ -212,8 +251,8 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         return;
       }
     } else {
-      // Non-watch invocation with no stdin - suggest setup
-      console.log("[OMC] run /omc-setup to install properly");
+      // CLI invocation (TTY, no stdin) — show installation diagnostic
+      showDiagnostic();
       return;
     }
 
