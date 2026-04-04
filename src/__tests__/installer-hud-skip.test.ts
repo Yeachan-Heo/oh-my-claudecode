@@ -154,4 +154,18 @@ describe('isOmcStatusLine', () => {
       command: 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs'
     })).toBe(true);
   });
+
+  it('should recognize CLAUDE_CONFIG_DIR-aware statusLine as OMC', () => {
+    expect(isOmcStatusLine({
+      type: 'command',
+      command: 'node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs'
+    })).toBe(true);
+  });
+
+  it('should recognize CLAUDE_CONFIG_DIR-aware find-node.sh statusLine as OMC', () => {
+    expect(isOmcStatusLine({
+      type: 'command',
+      command: 'sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs'
+    })).toBe(true);
+  });
 });
