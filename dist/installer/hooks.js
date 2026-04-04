@@ -94,7 +94,7 @@ function buildHookCommand(filename) {
         return `node ${quoteCommandPath(join(getClaudeConfigDir(), 'hooks', filename))}`;
     }
     if (isDefaultClaudeConfigDir()) {
-        return `node "$HOME/.claude/hooks/${filename}"`;
+        return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
     }
     return `node ${quoteCommandPath(join(getClaudeConfigDir(), 'hooks', filename).replace(/\\/g, '/'))}`;
 }

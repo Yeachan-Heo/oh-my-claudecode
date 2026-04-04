@@ -167,7 +167,7 @@ Then set the `statusLine` field. On Unix it should stay portable and look like:
 {
   "statusLine": {
     "type": "command",
-    "command": "node $HOME/.claude/hud/omc-hud.mjs"
+    "command": "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"
   }
 }
 ```
@@ -329,7 +329,7 @@ If the HUD is not showing:
 {
   "statusLine": {
     "type": "command",
-    "command": "node $HOME/.claude/hud/omc-hud.mjs"
+    "command": "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs"
   }
 }
 ```

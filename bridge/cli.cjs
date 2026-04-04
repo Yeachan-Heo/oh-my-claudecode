@@ -7547,7 +7547,7 @@ function buildHookCommand(filename) {
     return `node ${quoteCommandPath((0, import_path41.join)(getClaudeConfigDir3(), "hooks", filename))}`;
   }
   if (isDefaultClaudeConfigDir()) {
-    return `node "$HOME/.claude/hooks/${filename}"`;
+    return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
   }
   return `node ${quoteCommandPath((0, import_path41.join)(getClaudeConfigDir3(), "hooks", filename).replace(/\\/g, "/"))}`;
 }
@@ -8455,9 +8455,9 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath) {
   }
   if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
-      return "sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs";
+      return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
-    return "node $HOME/.claude/hud/omc-hud.mjs";
+    return "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
   }
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (findNodePath) {

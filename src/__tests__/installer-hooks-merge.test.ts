@@ -126,6 +126,11 @@ describe('isOmcHook()', () => {
     expect(isOmcHook('node "/tmp/custom-claude/hooks/keyword-detector.mjs"')).toBe(true);
   });
 
+  it('recognises CLAUDE_CONFIG_DIR-aware hook commands', () => {
+    expect(isOmcHook('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/keyword-detector.mjs"')).toBe(true);
+    expect(isOmcHook('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"')).toBe(true);
+  });
+
   it('recognises oh-my-claudecode in command path', () => {
     expect(isOmcHook('/path/to/oh-my-claudecode/hook.mjs')).toBe(true);
   });
