@@ -44,7 +44,7 @@ Invoke via `/oh-my-claudecode:<name>`. Trigger patterns auto-detect keywords.
 
 Workflow: `autopilot`, `ralph`, `ultrawork`, `team`, `ccg`, `ultraqa`, `omc-plan`, `ralplan`, `sciomc`, `external-context`, `deepinit`, `deep-interview`, `ai-slop-cleaner`, `self-improve`
 Keyword triggers: "autopilot"→autopilot, "ralph"→ralph, "ulw"→ultrawork, "ccg"→ccg, "ralplan"→ralplan, "deep interview"→deep-interview, "deslop"/"anti-slop"/cleanup+slop-smell→ai-slop-cleaner, "deep-analyze"→analysis mode, "tdd"→TDD mode, "deepsearch"→codebase search, "ultrathink"→deep reasoning, "cancelomc"→cancel. Team orchestration is explicit via `/team`.
-Utilities: `ask-codex`, `ask-gemini`, `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `ralph-init`, `configure-notifications`, `learn-about-omc` (`trace` is the evidence-driven tracing lane)
+Utilities: `ask-codex`, `ask-gemini`, `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `ralph-init`, `configure-notifications`, `learn-about-omc`, `contribute` (`trace` is the evidence-driven tracing lane)
 </skills>
 
 <team_pipeline>
@@ -107,6 +107,13 @@ Kill switches: `DISABLE_OMC`, `OMC_SKIP_HOOKS` (comma-separated).
 <worktree_paths>
 State: `.omc/state/`, `.omc/state/sessions/{sessionId}/`, `.omc/notepad.md`, `.omc/project-memory.json`, `.omc/plans/`, `.omc/research/`, `.omc/logs/`
 </worktree_paths>
+
+<contribution_guide>
+All PRs must target `dev` branch (NEVER `main`). Run CI before PR: `npm run build && npm test -- --run && npm run lint`.
+Commit format: `type(scope): description` (conventional commits). PR must include `## Summary` and `## Test plan` sections.
+Keep PRs focused: < 1000 lines diff, one concern per PR. See CONTRIBUTING.md for full guidelines.
+Use `/contribute` to run the compliance checklist before submitting.
+</contribution_guide>
 
 ## Setup
 

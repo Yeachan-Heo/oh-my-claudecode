@@ -557,6 +557,25 @@ ${cleanContent}
       }
     }
 
+    // Inject contribution guide context for OMC project
+    // Activates only when working inside the OMC repo itself (checked via plugin.json)
+    try {
+      const pluginJsonPath = join(directory, '.claude-plugin', 'plugin.json');
+      if (existsSync(pluginJsonPath)) {
+        const pluginJson = readJsonFile(pluginJsonPath);
+        if (pluginJson?.name === 'oh-my-claudecode') {
+          messages.push(`<system-reminder>
+[CONTRIBUTION GUIDE ACTIVE]
+All PRs must target \`dev\` branch (not main). Run \`npm run build && npm test -- --run && npm run lint\` before creating PRs.
+Commit format: type(scope): description (conventional commits). See CONTRIBUTING.md for full guidelines.
+Use /contribute to run the compliance checklist before submitting.
+</system-reminder>`);
+        }
+      }
+    } catch {
+      // Contribution guide is additive; never break session start
+    }
+
     // Cleanup old plugin cache versions (keep latest 2, symlink the rest)
     // Instead of deleting old versions, replace them with symlinks to the latest.
     // This prevents "Cannot find module" errors for sessions started before a

@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
+import { checkContributionGuard } from './lib/contribution-guard.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -757,6 +758,31 @@ async function main() {
       }
     }
 
+    // Contribution guide enforcement (P0 deny / P1 warn)
+    let contributionWarning = null;
+    try {
+      const ctToolInput = data.toolInput || data.tool_input || {};
+      const guardResult = checkContributionGuard(toolName, ctToolInput, directory);
+      if (guardResult) {
+        if (guardResult.type === 'deny') {
+          console.log(JSON.stringify({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: guardResult.reason
+            }
+          }));
+          return;
+        }
+        if (guardResult.type === 'warn') {
+          contributionWarning = guardResult.message;
+        }
+      }
+    } catch {
+      // Contribution guard is additive; never break the hook chain
+    }
+
     // Send notification when AskUserQuestion is about to execute (user input needed)
     // Fires in PreToolUse so users get notified BEFORE the tool blocks for input (#597)
     if (toolName === 'AskUserQuestion') {
@@ -806,7 +832,8 @@ async function main() {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
 
-    if (!message) {
+    const finalMessage = [message, contributionWarning].filter(Boolean).join('\n');
+    if (!finalMessage) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -815,7 +842,7 @@ async function main() {
       continue: true,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        additionalContext: message
+        additionalContext: finalMessage
       }
     }, null, 2));
   } catch (error) {
