@@ -15,7 +15,7 @@ import { execSync, execFileSync } from 'child_process';
 import { install as installOmc, HOOKS_DIR, isProjectScopedPlugin, isRunningAsPlugin, getInstalledOmcPluginRoots, getRuntimePackageRoot, } from '../installer/index.js';
 import { getConfigDir } from '../utils/config-dir.js';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
-import { isAutoUpdateDisabled } from '../lib/security-config.js';
+import { isAutoUpdateDisabled, getMinimumReleaseAge } from '../lib/security-config.js';
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
 export const REPO_NAME = 'oh-my-claudecode';
@@ -383,6 +383,53 @@ export async function fetchLatestRelease() {
     return await response.json();
 }
 /**
+ * Fetch recent releases from GitHub (non-draft, non-prerelease).
+ * Returns empty array on error — callers decide fallback behavior.
+ */
+export async function fetchReleases(perPage = 30) {
+    const response = await fetch(`${GITHUB_API_URL}/releases?per_page=${perPage}`, {
+        headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'oh-my-claudecode-updater',
+        },
+    });
+    if (!response.ok) {
+        return [];
+    }
+    const releases = (await response.json());
+    return releases.filter((r) => !r.prerelease && !r.draft);
+}
+/**
+ * Filter releases by minimum age and return the latest eligible one.
+ * No side effects, no I/O.
+ *
+ * @param releases - Available releases (any order)
+ * @param currentVersion - Currently installed version (null = fresh install)
+ * @param minimumReleaseAgeDays - Minimum age in days (0 = no filtering)
+ * @param nowMs - Current timestamp in ms (default: Date.now()). Accept as param for testability.
+ */
+export function filterEligibleRelease(releases, currentVersion, minimumReleaseAgeDays, nowMs = Date.now()) {
+    const heldBack = [];
+    // Sort by version descending (newest first)
+    const sorted = [...releases].sort((a, b) => compareVersions(b.tag_name, a.tag_name));
+    // Filter to versions newer than current
+    const newer = currentVersion
+        ? sorted.filter((r) => compareVersions(r.tag_name, currentVersion) > 0)
+        : sorted;
+    if (minimumReleaseAgeDays <= 0) {
+        return { eligible: newer[0] ?? null, heldBack: [] };
+    }
+    const thresholdMs = minimumReleaseAgeDays * 24 * 60 * 60 * 1000;
+    for (const release of newer) {
+        const ageMs = nowMs - new Date(release.published_at).getTime();
+        if (ageMs >= thresholdMs) {
+            return { eligible: release, heldBack };
+        }
+        heldBack.push(release);
+    }
+    return { eligible: null, heldBack };
+}
+/**
  * Compare semantic versions
  * Returns: -1 if a < b, 0 if a == b, 1 if a > b
  */
@@ -408,18 +455,61 @@ export function compareVersions(a, b) {
  */
 export async function checkForUpdates() {
     const installed = getInstalledVersion();
-    const release = await fetchLatestRelease();
     const currentVersion = installed?.version ?? null;
+    const minimumReleaseAge = getMinimumReleaseAge();
+    let release;
+    let heldBack = [];
+    if (minimumReleaseAge > 0) {
+        const releases = await fetchReleases();
+        if (releases.length === 0) {
+            // FAIL-CLOSED: When age gating is active and we can't fetch releases,
+            // do NOT fall back to fetchLatestRelease() — that would bypass the gate.
+            updateLastCheckTime();
+            return {
+                currentVersion,
+                latestVersion: currentVersion ?? '0.0.0',
+                updateAvailable: false,
+                releaseInfo: {
+                    tag_name: currentVersion ? `v${currentVersion}` : 'v0.0.0',
+                    name: 'Unknown',
+                    published_at: new Date().toISOString(),
+                    html_url: `https://github.com/${REPO_OWNER}/${REPO_NAME}`,
+                    body: '',
+                    prerelease: false,
+                    draft: false,
+                },
+                releaseNotes: 'Could not fetch releases for age verification. No update performed.',
+                heldBack: [],
+            };
+        }
+        const result = filterEligibleRelease(releases, currentVersion, minimumReleaseAge);
+        if (!result.eligible) {
+            updateLastCheckTime();
+            return {
+                currentVersion,
+                latestVersion: currentVersion ?? '0.0.0',
+                updateAvailable: false,
+                releaseInfo: releases[0],
+                releaseNotes: 'No eligible update (all newer versions held back by minimumReleaseAge).',
+                heldBack: result.heldBack,
+            };
+        }
+        release = result.eligible;
+        heldBack = result.heldBack;
+    }
+    else {
+        release = await fetchLatestRelease();
+    }
     const latestVersion = release.tag_name.replace(/^v/, '');
     const updateAvailable = currentVersion === null || compareVersions(currentVersion, latestVersion) < 0;
-    // Update last check time
     updateLastCheckTime();
     return {
         currentVersion,
         latestVersion,
         updateAvailable,
         releaseInfo: release,
-        releaseNotes: release.body || 'No release notes available.'
+        releaseNotes: release.body || 'No release notes available.',
+        heldBack,
     };
 }
 /**
@@ -543,12 +633,16 @@ export async function performUpdate(options) {
                 message: 'Running inside an active Claude Code plugin session. Use "/plugin install oh-my-claudecode" to update, or pass --standalone to force npm update.',
             };
         }
-        // Fetch the latest release to get the version
-        const release = await fetchLatestRelease();
+        // Use pre-resolved release if provided, otherwise fetch latest
+        const release = options?.targetRelease ?? await fetchLatestRelease();
         const newVersion = release.tag_name.replace(/^v/, '');
+        // Install specific version instead of @latest when we have a target
+        const installTarget = options?.targetRelease
+            ? `oh-my-claude-sisyphus@${newVersion}`
+            : 'oh-my-claude-sisyphus@latest';
         // Use npm for updates on all platforms (install.sh was removed)
         try {
-            execSync('npm install -g oh-my-claude-sisyphus@latest', {
+            execSync(`npm install -g ${installTarget}`, {
                 encoding: 'utf-8',
                 stdio: options?.verbose ? 'inherit' : 'pipe',
                 timeout: 120000, // 2 minute timeout for npm
@@ -623,7 +717,7 @@ export async function performUpdate(options) {
         }
         catch (npmError) {
             throw new Error('Auto-update via npm failed. Please run manually:\n' +
-                '  npm install -g oh-my-claude-sisyphus@latest\n' +
+                `  npm install -g ${installTarget}\n` +
                 'Or use: /plugin install oh-my-claudecode\n' +
                 `Error: ${npmError instanceof Error ? npmError.message : npmError}`);
         }
@@ -721,7 +815,10 @@ export async function interactiveUpdate() {
         }
         console.log(formatUpdateNotification(checkResult));
         console.log('Starting update...\n');
-        const result = await performUpdate({ verbose: true });
+        const result = await performUpdate({
+            verbose: true,
+            targetRelease: checkResult.releaseInfo,
+        });
         if (result.success) {
             console.log(`\n✓ ${result.message}`);
             console.log('\nPlease restart your Claude Code session to use the new version.');
@@ -836,6 +933,11 @@ export async function silentAutoUpdate(config = {}) {
             return null;
         }
         silentLog(`Update available: ${checkResult.currentVersion} -> ${checkResult.latestVersion}`, logFile);
+        // Log held-back info per spec requirement
+        if (checkResult.heldBack?.length) {
+            const heldVersions = checkResult.heldBack.map((r) => r.tag_name).join(', ');
+            silentLog(`Versions held back by minimumReleaseAge (${getMinimumReleaseAge()}d): ${heldVersions}`, logFile);
+        }
         if (!autoApply) {
             silentLog('Auto-apply disabled, skipping installation', logFile);
             return null;
@@ -843,7 +945,8 @@ export async function silentAutoUpdate(config = {}) {
         // Perform the update silently
         const result = await performUpdate({
             skipConfirmation: true,
-            verbose: false
+            verbose: false,
+            targetRelease: checkResult.releaseInfo,
         });
         if (result.success) {
             silentLog(`Update successful: ${result.previousVersion} -> ${result.newVersion}`, logFile);

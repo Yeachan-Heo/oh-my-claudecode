@@ -25,6 +25,7 @@ const DEFAULTS = {
     hardMaxIterations: 500,
     disableRemoteMcp: false,
     disableExternalLLM: false,
+    minimumReleaseAge: 0,
 };
 const STRICT_OVERRIDES = {
     restrictToolPaths: true,
@@ -34,6 +35,7 @@ const STRICT_OVERRIDES = {
     hardMaxIterations: 200,
     disableRemoteMcp: true,
     disableExternalLLM: true,
+    minimumReleaseAge: 7,
 };
 /** Cached config to avoid re-reading files on every call */
 let cachedConfig = null;
@@ -82,7 +84,13 @@ export function getSecurityConfig() {
             disableRemoteMcp: base.disableRemoteMcp || (fileOverrides.disableRemoteMcp ?? false),
             disableExternalLLM: base.disableExternalLLM || (fileOverrides.disableExternalLLM ?? false),
             hardMaxIterations: Math.min(base.hardMaxIterations, fileOverrides.hardMaxIterations ?? base.hardMaxIterations),
+            minimumReleaseAge: Math.max(base.minimumReleaseAge, fileOverrides.minimumReleaseAge ?? base.minimumReleaseAge),
         };
+        // When minimumReleaseAge is active in strict mode, re-enable auto-update.
+        // Age-gated updates are safer than no updates (missing security patches).
+        if (cachedConfig.minimumReleaseAge > 0) {
+            cachedConfig.disableAutoUpdate = false;
+        }
     }
     else {
         cachedConfig = {
@@ -93,6 +101,7 @@ export function getSecurityConfig() {
             disableRemoteMcp: fileOverrides.disableRemoteMcp ?? base.disableRemoteMcp,
             disableExternalLLM: fileOverrides.disableExternalLLM ?? base.disableExternalLLM,
             hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations,
+            minimumReleaseAge: fileOverrides.minimumReleaseAge ?? base.minimumReleaseAge,
         };
     }
     return cachedConfig;
@@ -128,5 +137,9 @@ export function isRemoteMcpDisabled() {
 /** Convenience: are external LLM providers disabled? */
 export function isExternalLLMDisabled() {
     return getSecurityConfig().disableExternalLLM;
+}
+/** Convenience: get minimum release age in days (0 = disabled, higher = stricter) */
+export function getMinimumReleaseAge() {
+    return getSecurityConfig().minimumReleaseAge;
 }
 //# sourceMappingURL=security-config.js.map

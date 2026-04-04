@@ -49,6 +49,7 @@ export {
   type ReleaseInfo,
   type UpdateCheckResult,
   type UpdateResult,
+  type EligibleReleaseResult,
   // Auto-update constants
   REPO_OWNER,
   REPO_NAME,
@@ -63,8 +64,10 @@ export {
   formatUpdateNotification,
   shouldCheckForUpdates,
   backgroundUpdateCheck,
-  compareVersions
+  compareVersions,
+  filterEligibleRelease
 } from './features/auto-update.js';
+export { getMinimumReleaseAge } from './lib/security-config.js';
 export * from './shared/types.js';
 
 // Hooks module exports

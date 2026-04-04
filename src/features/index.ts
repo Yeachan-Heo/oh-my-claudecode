@@ -22,6 +22,7 @@ export {
   type UpdateCheckResult,
   type UpdateResult,
   type SilentUpdateConfig,
+  type EligibleReleaseResult,
   // Constants
   REPO_OWNER,
   REPO_NAME,
@@ -41,6 +42,7 @@ export {
   shouldCheckForUpdates,
   backgroundUpdateCheck,
   interactiveUpdate,
+  filterEligibleRelease,
   // Silent auto-update
   silentAutoUpdate,
   hasPendingUpdateRestart,

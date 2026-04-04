@@ -28,6 +28,9 @@ export interface SecurityConfig {
     disableRemoteMcp: boolean;
     /** Disable external LLM providers (Codex, Gemini) in team mode */
     disableExternalLLM: boolean;
+    /** Minimum release age in days for auto-updates (0 = disabled).
+     *  Higher = stricter (strict mode can only increase this value). */
+    minimumReleaseAge: number;
 }
 /**
  * Resolve the full security configuration.
@@ -50,4 +53,6 @@ export declare function getHardMaxIterations(): number;
 export declare function isRemoteMcpDisabled(): boolean;
 /** Convenience: are external LLM providers disabled? */
 export declare function isExternalLLMDisabled(): boolean;
+/** Convenience: get minimum release age in days (0 = disabled, higher = stricter) */
+export declare function getMinimumReleaseAge(): number;
 //# sourceMappingURL=security-config.d.ts.map

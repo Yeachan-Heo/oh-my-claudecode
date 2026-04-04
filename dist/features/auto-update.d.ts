@@ -170,6 +170,8 @@ export interface UpdateCheckResult {
     updateAvailable: boolean;
     releaseInfo: ReleaseInfo;
     releaseNotes: string;
+    /** Versions newer than eligible but held back by minimumReleaseAge */
+    heldBack?: ReleaseInfo[];
 }
 /**
  * Update result
@@ -203,6 +205,25 @@ export declare function updateLastCheckTime(): void;
  */
 export declare function fetchLatestRelease(): Promise<ReleaseInfo>;
 /**
+ * Fetch recent releases from GitHub (non-draft, non-prerelease).
+ * Returns empty array on error — callers decide fallback behavior.
+ */
+export declare function fetchReleases(perPage?: number): Promise<ReleaseInfo[]>;
+export interface EligibleReleaseResult {
+    eligible: ReleaseInfo | null;
+    heldBack: ReleaseInfo[];
+}
+/**
+ * Filter releases by minimum age and return the latest eligible one.
+ * No side effects, no I/O.
+ *
+ * @param releases - Available releases (any order)
+ * @param currentVersion - Currently installed version (null = fresh install)
+ * @param minimumReleaseAgeDays - Minimum age in days (0 = no filtering)
+ * @param nowMs - Current timestamp in ms (default: Date.now()). Accept as param for testability.
+ */
+export declare function filterEligibleRelease(releases: ReleaseInfo[], currentVersion: string | null, minimumReleaseAgeDays: number, nowMs?: number): EligibleReleaseResult;
+/**
  * Compare semantic versions
  * Returns: -1 if a < b, 0 if a == b, 1 if a > b
  */
@@ -229,6 +250,8 @@ export declare function performUpdate(options?: {
     verbose?: boolean;
     standalone?: boolean;
     clean?: boolean;
+    /** Pre-resolved release to install. When provided, skips internal fetchLatestRelease(). */
+    targetRelease?: ReleaseInfo;
 }): Promise<UpdateResult>;
 /**
  * Get a formatted update notification message

@@ -19,9 +19,11 @@ import {
   getConfigPaths,
 } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
+import { getMinimumReleaseAge } from '../lib/security-config.js';
 import {
   checkForUpdates,
   performUpdate,
+  fetchLatestRelease,
   formatUpdateNotification,
   getInstalledVersion,
   getOMCConfig,
@@ -729,6 +731,24 @@ Examples:
 
       const checkResult = await checkForUpdates();
 
+      // Show held-back info if minimumReleaseAge is active
+      const releaseAgeDays = (r: { published_at: string }) =>
+        Math.round((Date.now() - new Date(r.published_at).getTime()) / (24 * 60 * 60 * 1000));
+      const minAgeDays = getMinimumReleaseAge();
+
+      if (checkResult.heldBack?.length && !options.quiet) {
+        const count = checkResult.heldBack.length;
+        console.log(chalk.yellow(
+          `  ${count} newer version${count === 1 ? '' : 's'} held back by minimumReleaseAge (${minAgeDays}d)`
+        ));
+        if (checkResult.updateAvailable) {
+          console.log(chalk.gray(
+            `  Updating to latest eligible: ${checkResult.latestVersion}`
+          ));
+        }
+        console.log('');
+      }
+
       if (!checkResult.updateAvailable && !options.force) {
         if (!options.quiet) {
           console.log(chalk.green(`\n✓ You are running the latest version (${checkResult.currentVersion})`));
@@ -753,7 +773,30 @@ Examples:
         console.log(chalk.blue('\nStarting update...\n'));
       }
 
-      const result = await performUpdate({ verbose: !options.quiet, standalone: options.standalone, clean: options.clean });
+      let result;
+      if (options.force && minAgeDays > 0) {
+        // Force mode: fetch absolute latest, bypass age gate with warning
+        const latestRelease = await fetchLatestRelease();
+        const ageDays = releaseAgeDays(latestRelease);
+        if (ageDays < minAgeDays) {
+          console.log(chalk.yellow(
+            `\u26a0 Bypassing minimumReleaseAge: ${latestRelease.tag_name} is ${ageDays}d old (threshold: ${minAgeDays}d)`
+          ));
+        }
+        result = await performUpdate({
+          verbose: !options.quiet,
+          standalone: options.standalone,
+          clean: options.clean,
+          targetRelease: latestRelease,
+        });
+      } else {
+        result = await performUpdate({
+          verbose: !options.quiet,
+          standalone: options.standalone,
+          clean: options.clean,
+          targetRelease: checkResult.releaseInfo,
+        });
+      }
 
       if (result.success) {
         if (!options.quiet) {

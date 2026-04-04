@@ -30,7 +30,8 @@ export {
 // Auto-update constants
 REPO_OWNER, REPO_NAME, GITHUB_API_URL, CLAUDE_CONFIG_DIR, VERSION_FILE, 
 // Auto-update functions
-getInstalledVersion, saveVersionMetadata, checkForUpdates, performUpdate, formatUpdateNotification, shouldCheckForUpdates, backgroundUpdateCheck, compareVersions } from './features/auto-update.js';
+getInstalledVersion, saveVersionMetadata, checkForUpdates, performUpdate, formatUpdateNotification, shouldCheckForUpdates, backgroundUpdateCheck, compareVersions, filterEligibleRelease } from './features/auto-update.js';
+export { getMinimumReleaseAge } from './lib/security-config.js';
 export * from './shared/types.js';
 // Hooks module exports
 export * from './hooks/index.js';

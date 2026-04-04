@@ -34,6 +34,9 @@ export interface SecurityConfig {
   disableRemoteMcp: boolean;
   /** Disable external LLM providers (Codex, Gemini) in team mode */
   disableExternalLLM: boolean;
+  /** Minimum release age in days for auto-updates (0 = disabled).
+   *  Higher = stricter (strict mode can only increase this value). */
+  minimumReleaseAge: number;
 }
 
 const DEFAULTS: SecurityConfig = {
@@ -44,6 +47,7 @@ const DEFAULTS: SecurityConfig = {
   hardMaxIterations: 500,
   disableRemoteMcp: false,
   disableExternalLLM: false,
+  minimumReleaseAge: 0,
 };
 
 const STRICT_OVERRIDES: SecurityConfig = {
@@ -54,6 +58,7 @@ const STRICT_OVERRIDES: SecurityConfig = {
   hardMaxIterations: 200,
   disableRemoteMcp: true,
   disableExternalLLM: true,
+  minimumReleaseAge: 7,
 };
 
 /** Cached config to avoid re-reading files on every call */
@@ -106,7 +111,13 @@ export function getSecurityConfig(): SecurityConfig {
       disableRemoteMcp: base.disableRemoteMcp || (fileOverrides.disableRemoteMcp ?? false),
       disableExternalLLM: base.disableExternalLLM || (fileOverrides.disableExternalLLM ?? false),
       hardMaxIterations: Math.min(base.hardMaxIterations, fileOverrides.hardMaxIterations ?? base.hardMaxIterations),
+      minimumReleaseAge: Math.max(base.minimumReleaseAge, fileOverrides.minimumReleaseAge ?? base.minimumReleaseAge),
     };
+    // When minimumReleaseAge is active in strict mode, re-enable auto-update.
+    // Age-gated updates are safer than no updates (missing security patches).
+    if (cachedConfig.minimumReleaseAge > 0) {
+      cachedConfig.disableAutoUpdate = false;
+    }
   } else {
     cachedConfig = {
       restrictToolPaths: fileOverrides.restrictToolPaths ?? base.restrictToolPaths,
@@ -116,6 +127,7 @@ export function getSecurityConfig(): SecurityConfig {
       disableRemoteMcp: fileOverrides.disableRemoteMcp ?? base.disableRemoteMcp,
       disableExternalLLM: fileOverrides.disableExternalLLM ?? base.disableExternalLLM,
       hardMaxIterations: fileOverrides.hardMaxIterations ?? base.hardMaxIterations,
+      minimumReleaseAge: fileOverrides.minimumReleaseAge ?? base.minimumReleaseAge,
     };
   }
 
@@ -160,4 +172,9 @@ export function isRemoteMcpDisabled(): boolean {
 /** Convenience: are external LLM providers disabled? */
 export function isExternalLLMDisabled(): boolean {
   return getSecurityConfig().disableExternalLLM;
+}
+
+/** Convenience: get minimum release age in days (0 = disabled, higher = stricter) */
+export function getMinimumReleaseAge(): number {
+  return getSecurityConfig().minimumReleaseAge;
 }
