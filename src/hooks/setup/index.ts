@@ -7,7 +7,7 @@
  * - maintenance: Prune old state files, cleanup orphaned state, vacuum SQLite
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, lstatSync, unlinkSync, readFileSync, readlinkSync, writeFileSync, appendFileSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, lstatSync, unlinkSync, readFileSync, readlinkSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import os from 'os';
 
@@ -223,9 +223,7 @@ export function ensureStdinSymlink(pluginRoot: string): void {
 
   try {
     // Create new symlink with temp name first
-    // Use require to allow test mocking of fs module
-    const { symlinkSync: fsSymlinkSync } = require('fs');
-    fsSymlinkSync(stdinSrc, tmpDst);
+    symlinkSync(stdinSrc, tmpDst);
 
     // New symlink created successfully - now atomically replace the old one
     // On POSIX rename is atomic. On Windows we just unlink+rename which is still safer
@@ -236,7 +234,6 @@ export function ensureStdinSymlink(pluginRoot: string): void {
       // Ignore if didn't exist
     }
     // Use rename for atomic replacement
-    const { renameSync } = require('fs');
     renameSync(tmpDst, stdinDst);
   } catch {
     // Symlink creation failed (platform may not support symlinks, e.g. some Windows configs)
