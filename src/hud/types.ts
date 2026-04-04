@@ -415,6 +415,8 @@ export type CwdFormat = 'relative' | 'absolute' | 'folder';
  */
 export type ModelFormat = 'short' | 'versioned' | 'full';
 
+export type CallCountsFormat = 'auto' | 'emoji' | 'ascii';
+
 export interface HudElementConfig {
   cwd: boolean;              // Show working directory
   cwdFormat: CwdFormat;      // Path display format
@@ -450,6 +452,7 @@ export interface HudElementConfig {
   showTokens?: boolean;           // Show last-request token usage when enabled (tok:i1.2k/o340)
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
   showCallCounts?: boolean;   // Show tool/agent/skill call counts on the right of the status line (default: true)
+  callCountsFormat?: CallCountsFormat; // Controls call count icon rendering: auto (platform default), emoji, or ascii
   showLastTool?: boolean;      // Show name of last tool called (tool:Read)
   sessionSummary: boolean;    // Show AI-generated session summary (<20 chars) - generated every 10 turns via claude -p
   maxOutputLines: number;     // Max total output lines to prevent input field shrinkage
@@ -569,6 +572,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     showTokens: false,
     useBars: false,  // Disabled by default for backwards compatibility
     showCallCounts: true,  // Show tool/agent/skill call counts by default (Issue #710)
+    callCountsFormat: 'auto',  // Preserve platform-based emoji/ASCII defaults unless explicitly overridden
     showLastTool: false,
     sessionSummary: false, // Disabled by default - opt-in AI-generated session summary
     maxOutputLines: 4,

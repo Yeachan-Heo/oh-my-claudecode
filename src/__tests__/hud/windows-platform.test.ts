@@ -138,7 +138,7 @@ describe('Windows HUD Platform Fixes (#739)', () => {
       expect(result).toContain('\u26A1');    // zap
     });
 
-    it('should use ASCII icons on Windows', async () => {
+    it('should use ASCII icons on Windows by default', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
       vi.resetModules();
 
@@ -148,6 +148,24 @@ describe('Windows HUD Platform Fixes (#739)', () => {
       expect(result).not.toContain('\u{1F527}');
       expect(result).not.toContain('\u{1F916}');
       expect(result).not.toContain('\u26A1');
+    });
+
+    it('should allow emoji icons on Windows when explicitly configured', async () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      vi.resetModules();
+
+      const mod = await import('../../hud/elements/call-counts.js');
+      const result = mod.renderCallCounts(42, 7, 3, 'emoji');
+      expect(result).toBe('🔧42 🤖7 ⚡3');
+    });
+
+    it('should allow ASCII icons on Unix when explicitly configured', async () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      vi.resetModules();
+
+      const mod = await import('../../hud/elements/call-counts.js');
+      const result = mod.renderCallCounts(42, 7, 3, 'ascii');
+      expect(result).toBe('T:42 A:7 S:3');
     });
 
     it('should return null for zero counts on Windows', async () => {

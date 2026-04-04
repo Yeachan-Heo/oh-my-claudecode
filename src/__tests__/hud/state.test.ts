@@ -62,6 +62,28 @@ describe("readHudConfig", () => {
       expect(config.elements.gitBranch).toBe(true);
     });
 
+    it("reads callCountsFormat from settings.json", () => {
+      mockExistsSync.mockImplementation((path) => {
+        const s = String(path);
+        return /[\/]Users[\/]testuser[\/]\.claude[\/]settings\.json$/.test(
+          s,
+        );
+      });
+      mockReadFileSync.mockReturnValue(
+        JSON.stringify({
+          omcHud: {
+            elements: {
+              callCountsFormat: "emoji",
+            },
+          },
+        }),
+      );
+
+      const config = readHudConfig();
+
+      expect(config.elements.callCountsFormat).toBe("emoji");
+    });
+
     it("falls back to legacy hud-config.json when settings.json has no omcHud", () => {
       mockExistsSync.mockImplementation((path) => {
         const s = String(path);

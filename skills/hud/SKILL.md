@@ -278,6 +278,7 @@ You can manually edit the config file. Each option can be set individually - any
     "sessionHealth": true,
     "useBars": true,
     "showCallCounts": true,
+    "callCountsFormat": "auto",
     "safeMode": true,
     "maxOutputLines": 4
   },
@@ -294,6 +295,13 @@ You can manually edit the config file. Each option can be set individually - any
   }
 }
 ```
+
+### callCountsFormat
+
+Controls the call-count badge icon style:
+- `"auto"` (default): emoji on macOS/Linux, ASCII on Windows/WSL
+- `"emoji"`: force `🔧 🤖 ⚡`
+- `"ascii"`: force `T: A: S:`
 
 ### safeMode
 

@@ -395,6 +395,7 @@ export async function render(
       context.toolCallCount,
       context.agentCallCount,
       context.skillCallCount,
+      enabledElements.callCountsFormat ?? 'auto',
     );
     if (counts) rendered.set("callCounts", counts);
   }
