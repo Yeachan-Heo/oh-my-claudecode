@@ -80208,9 +80208,29 @@ function runClaudeInsideTmux(cwd2, args) {
     process.exit(typeof err.status === "number" ? err.status : 1);
   }
 }
+var TMUX_ENV_FORWARD = [
+  "CLAUDE_CONFIG_DIR",
+  "OMC_NOTIFY",
+  "OMC_OPENCLAW",
+  "OMC_TELEGRAM",
+  "OMC_DISCORD",
+  "OMC_SLACK",
+  "OMC_WEBHOOK"
+];
+function buildEnvExportPrefix(vars) {
+  const parts = [];
+  for (const name of vars) {
+    const value = process.env[name];
+    if (value !== void 0) {
+      parts.push(`export ${name}=${quoteShellArg2(value)}`);
+    }
+  }
+  return parts.length > 0 ? parts.join("; ") + "; " : "";
+}
 function runClaudeOutsideTmux(cwd2, args, _sessionId) {
   const rawClaudeCmd = buildTmuxShellCommand("claude", args);
-  const claudeCmd = wrapWithLoginShell(`sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
+  const envPrefix = buildEnvExportPrefix(TMUX_ENV_FORWARD);
+  const claudeCmd = wrapWithLoginShell(`${envPrefix}sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
   const sessionName2 = buildTmuxSessionName(cwd2);
   const tmuxArgs = [
     "new-session",
