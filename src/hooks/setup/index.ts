@@ -240,26 +240,22 @@ export function ensureStdinSymlink(pluginRoot: string): void {
   } catch {
     // Symlink creation failed (platform may not support symlinks, e.g. some Windows configs)
     // Use lstatSync to detect dangling symlinks (existsSync returns false for broken symlinks)
-    let shouldCopy = false;
     try {
       const dstStat = lstatSync(stdinDst);
       if (dstStat.isSymbolicLink()) {
-        // Dangling symlink - remove it and copy fresh
+        // Remove dangling symlink and copy fresh
         unlinkSync(stdinDst);
-        shouldCopy = true;
       }
-      // else: regular file exists, leave it alone (don't overwrite)
+      // else: regular file - fall through to overwrite (user can re-symlink if needed)
     } catch {
       // Destination doesn't exist - safe to copy
-      shouldCopy = true;
     }
 
-    if (shouldCopy) {
-      try {
-        copyFileSync(stdinSrc, stdinDst);
-      } catch {
-        // Non-fatal: older setups may have different permissions/structures
-      }
+    // Always copy when symlink is unavailable (user hasn't chosen symlink over copy)
+    try {
+      copyFileSync(stdinSrc, stdinDst);
+    } catch {
+      // Non-fatal: older setups may have different permissions/structures
     }
   }
 }

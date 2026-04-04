@@ -94,25 +94,24 @@ describe('ensureStdinSymlink', () => {
     });
   });
 
-  it('does not remove old stdin.mjs when symlink creation fails (safe replace)', () => {
+  it('always copies when symlink creation fails (refresh outdated regular file)', () => {
     withMockedHomedir(homeDir, () => {
       // Create directory and a regular file (not symlink)
       mkdirSync(hooksLibDir, { recursive: true });
       const stdinDst = join(hooksLibDir, 'stdin.mjs');
-      writeFileSync(stdinDst, '// existing file content\n');
-      const originalContent = readFileSync(stdinDst, 'utf-8');
+      writeFileSync(stdinDst, '// existing stale file content\n');
 
       // Spy on symlinkSync and make it fail
       vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
         throw new Error('symlink not supported');
       });
 
-      // Run the function - should NOT remove the existing file
+      // Run the function - should update the stale file
       ensureStdinSymlink(pluginRoot);
 
-      // File should still exist with original content
+      // File should be updated with fresh content from source
       expect(existsSync(stdinDst)).toBe(true);
-      expect(readFileSync(stdinDst, 'utf-8')).toBe(originalContent);
+      expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
     });
   });
 
