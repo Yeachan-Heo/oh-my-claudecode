@@ -450,7 +450,7 @@ export function processOrchestratorPostTool(
 
   // Handle write/edit tools
   if (isWriteEditTool(toolName)) {
-    const filePath = (toolInput?.filePath ?? toolInput?.path ?? toolInput?.file) as string | undefined;
+    const filePath = (toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path ?? toolInput?.file ?? toolInput?.notebook_path) as string | undefined;
 
     if (filePath && !isAllowedPath(filePath, workDir)) {
       return {
