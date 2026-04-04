@@ -12455,7 +12455,7 @@ var init_types2 = __esm({
     "use strict";
     init_mission_board();
     DEFAULT_ELEMENT_ORDER = {
-      line1: ["cwd", "gitRepo", "gitBranch", "model", "apiKeySource", "profile"],
+      line1: ["cwd", "gitRepo", "gitBranch", "gitStatus", "model", "apiKeySource", "profile"],
       main: [
         "omcLabel",
         "rateLimits",
@@ -12490,6 +12490,8 @@ var init_types2 = __esm({
         gitRepo: false,
         // Disabled by default for backward compatibility
         gitBranch: false,
+        // Disabled by default for backward compatibility
+        gitStatus: false,
         // Disabled by default for backward compatibility
         gitInfoPosition: "above",
         // Git info above main HUD line (backward compatible)
@@ -12565,6 +12567,7 @@ var init_types2 = __esm({
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: false,
+        gitStatus: false,
         gitInfoPosition: "above",
         model: false,
         modelFormat: "short",
@@ -12605,6 +12608,7 @@ var init_types2 = __esm({
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: "above",
         model: false,
         modelFormat: "short",
@@ -12646,6 +12650,7 @@ var init_types2 = __esm({
         useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: "above",
         model: false,
         modelFormat: "short",
@@ -12687,6 +12692,7 @@ var init_types2 = __esm({
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
+        gitStatus: false,
         gitInfoPosition: "above",
         model: false,
         modelFormat: "short",
@@ -12727,6 +12733,7 @@ var init_types2 = __esm({
         useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: "above",
         model: false,
         modelFormat: "short",
@@ -36431,6 +36438,12 @@ var init_custom_rate_provider = __esm({
 });
 
 // src/hud/colors.ts
+function green(text) {
+  return `${GREEN}${text}${RESET}`;
+}
+function red(text) {
+  return `${RED}${text}${RESET}`;
+}
 function cyan(text) {
   return `${CYAN}${text}${RESET}`;
 }
@@ -37601,7 +37614,65 @@ function renderGitBranch(cwd2) {
   }
   return `${dim("branch:")}${cyan(branch)}`;
 }
-var import_node_child_process6, import_node_fs7, import_node_path12, CACHE_TTL_MS3, repoCache, branchCache, worktreeCache;
+function getGitStatusCounts(cwd2) {
+  const key = cwd2 ? (0, import_node_path12.resolve)(cwd2) : process.cwd();
+  const cached2 = statusCache.get(key);
+  if (cached2 && Date.now() < cached2.expiresAt) {
+    return cached2.value;
+  }
+  let result = null;
+  try {
+    const output = (0, import_node_child_process6.execSync)("git status --porcelain -b", {
+      cwd: cwd2,
+      encoding: "utf-8",
+      timeout: 1e3,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: process.platform === "win32" ? "cmd.exe" : void 0
+    }).trim();
+    let staged = 0, modified = 0, untracked = 0, ahead = 0, behind = 0;
+    if (output) {
+      const lines = output.split("\n");
+      const branchLine = lines[0];
+      const aheadMatch = branchLine.match(/\bahead (\d+)/);
+      const behindMatch = branchLine.match(/\bbehind (\d+)/);
+      if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
+      if (behindMatch) behind = parseInt(behindMatch[1], 10);
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line || line.length < 2) continue;
+        const idx = line[0];
+        const wt = line[1];
+        if (idx === "?") {
+          untracked++;
+        } else {
+          if (idx !== " " && idx !== "?") staged++;
+          if (wt === "M" || wt === "D") modified++;
+        }
+      }
+    }
+    result = { staged, modified, untracked, ahead, behind };
+  } catch {
+    result = null;
+  }
+  statusCache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS3 });
+  return result;
+}
+function renderGitStatus(cwd2) {
+  const counts = getGitStatusCounts(cwd2);
+  if (!counts) return null;
+  const { staged, modified, untracked, ahead, behind } = counts;
+  if (staged === 0 && modified === 0 && untracked === 0 && ahead === 0 && behind === 0) {
+    return null;
+  }
+  const parts = [];
+  if (staged > 0) parts.push(`${green("+")}${staged}`);
+  if (modified > 0) parts.push(`${red("!")}${modified}`);
+  if (untracked > 0) parts.push(`${cyan("?")}${untracked}`);
+  if (ahead > 0) parts.push(`${green("\u21E1")}${ahead}`);
+  if (behind > 0) parts.push(`${red("\u21E3")}${behind}`);
+  return parts.join(" ");
+}
+var import_node_child_process6, import_node_fs7, import_node_path12, CACHE_TTL_MS3, repoCache, branchCache, worktreeCache, statusCache;
 var init_git = __esm({
   "src/hud/elements/git.ts"() {
     "use strict";
@@ -37613,6 +37684,7 @@ var init_git = __esm({
     repoCache = /* @__PURE__ */ new Map();
     branchCache = /* @__PURE__ */ new Map();
     worktreeCache = /* @__PURE__ */ new Map();
+    statusCache = /* @__PURE__ */ new Map();
   }
 });
 
@@ -37879,6 +37951,10 @@ async function render(context, config2) {
   if (enabledElements.gitBranch) {
     const gitBranchElement = renderGitBranch(context.cwd);
     if (gitBranchElement) rendered.set("gitBranch", gitBranchElement);
+  }
+  if (enabledElements.gitStatus) {
+    const gitStatusElement = renderGitStatus(context.cwd);
+    if (gitStatusElement) rendered.set("gitStatus", gitStatusElement);
   }
   if (enabledElements.model && context.modelName) {
     const modelElement = renderModel(
@@ -38536,7 +38612,7 @@ var {
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
 var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
-var wrapAnsi16m = (offset = 0) => (red, green, blue) => `\x1B[${38 + offset};2;${red};${green};${blue}m`;
+var wrapAnsi16m = (offset = 0) => (red2, green2, blue) => `\x1B[${38 + offset};2;${red2};${green2};${blue}m`;
 var styles = {
   modifier: {
     reset: [0, 0],
@@ -38631,17 +38707,17 @@ function assembleStyles() {
   styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
   Object.defineProperties(styles, {
     rgbToAnsi256: {
-      value(red, green, blue) {
-        if (red === green && green === blue) {
-          if (red < 8) {
+      value(red2, green2, blue) {
+        if (red2 === green2 && green2 === blue) {
+          if (red2 < 8) {
             return 16;
           }
-          if (red > 248) {
+          if (red2 > 248) {
             return 231;
           }
-          return Math.round((red - 8) / 247 * 24) + 232;
+          return Math.round((red2 - 8) / 247 * 24) + 232;
         }
-        return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
+        return 16 + 36 * Math.round(red2 / 255 * 5) + 6 * Math.round(green2 / 255 * 5) + Math.round(blue / 255 * 5);
       },
       enumerable: false
     },
@@ -38678,25 +38754,25 @@ function assembleStyles() {
         if (code < 16) {
           return 90 + (code - 8);
         }
-        let red;
-        let green;
+        let red2;
+        let green2;
         let blue;
         if (code >= 232) {
-          red = ((code - 232) * 10 + 8) / 255;
-          green = red;
-          blue = red;
+          red2 = ((code - 232) * 10 + 8) / 255;
+          green2 = red2;
+          blue = red2;
         } else {
           code -= 16;
           const remainder = code % 36;
-          red = Math.floor(code / 36) / 5;
-          green = Math.floor(remainder / 6) / 5;
+          red2 = Math.floor(code / 36) / 5;
+          green2 = Math.floor(remainder / 6) / 5;
           blue = remainder % 6 / 5;
         }
-        const value = Math.max(red, green, blue) * 2;
+        const value = Math.max(red2, green2, blue) * 2;
         if (value === 0) {
           return 30;
         }
-        let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
+        let result = 30 + (Math.round(blue) << 2 | Math.round(green2) << 1 | Math.round(red2));
         if (value === 2) {
           result += 60;
         }
@@ -38705,7 +38781,7 @@ function assembleStyles() {
       enumerable: false
     },
     rgbToAnsi: {
-      value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
+      value: (red2, green2, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red2, green2, blue)),
       enumerable: false
     },
     hexToAnsi: {

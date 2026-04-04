@@ -321,6 +321,7 @@ export interface HudElementConfig {
     useHyperlinks?: boolean;
     gitRepo: boolean;
     gitBranch: boolean;
+    gitStatus: boolean;
     gitInfoPosition: 'above' | 'below';
     model: boolean;
     modelFormat: ModelFormat;

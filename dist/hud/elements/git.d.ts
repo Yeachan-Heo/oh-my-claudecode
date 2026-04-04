@@ -7,6 +7,13 @@ export interface WorktreeDetection {
     isWorktree: boolean;
     worktreeName: string | null;
 }
+export interface GitStatusCounts {
+    staged: number;
+    modified: number;
+    untracked: number;
+    ahead: number;
+    behind: number;
+}
 /**
  * Clear all git caches. Call in tests beforeEach to ensure a clean slate.
  */
@@ -53,4 +60,21 @@ export declare function renderGitRepo(cwd?: string): string | null;
  * @returns Formatted branch name or null
  */
 export declare function renderGitBranch(cwd?: string): string | null;
+/**
+ * Get git working tree status counts.
+ * Parses `git status --porcelain -b` for staged, modified, untracked,
+ * ahead, and behind counts.
+ *
+ * @param cwd - Working directory
+ * @returns Status counts or null if not in a git repo
+ */
+export declare function getGitStatusCounts(cwd?: string): GitStatusCounts | null;
+/**
+ * Render git working tree status element.
+ * Format: +2 !3 ?1 ⇡1 ⇣2
+ *
+ * @param cwd - Working directory
+ * @returns Formatted status or null if clean or not in a git repo
+ */
+export declare function renderGitStatus(cwd?: string): string | null;
 //# sourceMappingURL=git.d.ts.map
