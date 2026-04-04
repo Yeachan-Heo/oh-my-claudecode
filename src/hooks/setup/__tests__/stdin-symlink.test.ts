@@ -5,10 +5,20 @@
  * when OMC upgrades to a new version. Uses safe replace strategy:
  * only removes old destination AFTER successfully creating new symlink.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync, unlinkSync, symlinkSync, copyFileSync, readlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import * as fs from 'fs';
+
+// We need to test the actual behavior, so we mock at the module level
+vi.mock('fs', async () => {
+  const actual = await vi.importActual('fs');
+  return {
+    ...actual as object,
+  };
+});
+
 import { ensureStdinSymlink } from '../index.js';
 
 describe('ensureStdinSymlink', () => {
@@ -35,6 +45,7 @@ describe('ensureStdinSymlink', () => {
   afterEach(() => {
     rmSync(pluginRoot, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   // Helper to mock os.homedir
@@ -91,20 +102,17 @@ describe('ensureStdinSymlink', () => {
       writeFileSync(stdinDst, '// existing file content\n');
       const originalContent = readFileSync(stdinDst, 'utf-8');
 
-      // Mock symlinkSync to fail
-      const originalSymlinkSync = require('fs').symlinkSync;
-      require('fs').symlinkSync = () => { throw new Error('symlink not supported'); };
+      // Spy on symlinkSync and make it fail
+      vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+        throw new Error('symlink not supported');
+      });
 
-      try {
-        // Run the function - should NOT remove the existing file
-        ensureStdinSymlink(pluginRoot);
+      // Run the function - should NOT remove the existing file
+      ensureStdinSymlink(pluginRoot);
 
-        // File should still exist with original content
-        expect(existsSync(stdinDst)).toBe(true);
-        expect(readFileSync(stdinDst, 'utf-8')).toBe(originalContent);
-      } finally {
-        require('fs').symlinkSync = originalSymlinkSync;
-      }
+      // File should still exist with original content
+      expect(existsSync(stdinDst)).toBe(true);
+      expect(readFileSync(stdinDst, 'utf-8')).toBe(originalContent);
     });
   });
 
@@ -113,19 +121,16 @@ describe('ensureStdinSymlink', () => {
       mkdirSync(hooksLibDir, { recursive: true });
       const stdinDst = join(hooksLibDir, 'stdin.mjs');
 
-      // Mock symlinkSync to fail but copyFileSync to work
-      const originalSymlinkSync = require('fs').symlinkSync;
-      require('fs').symlinkSync = () => { throw new Error('symlink not supported'); };
+      // Spy on symlinkSync and make it fail
+      vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+        throw new Error('symlink not supported');
+      });
 
-      try {
-        ensureStdinSymlink(pluginRoot);
+      ensureStdinSymlink(pluginRoot);
 
-        // Should fall back to copy
-        expect(existsSync(stdinDst)).toBe(true);
-        expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
-      } finally {
-        require('fs').symlinkSync = originalSymlinkSync;
-      }
+      // Should fall back to copy
+      expect(existsSync(stdinDst)).toBe(true);
+      expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
     });
   });
 
@@ -142,19 +147,16 @@ describe('ensureStdinSymlink', () => {
       expect(existsSync(stdinDst)).toBe(false); // existsSync returns false for dangling
       expect(lstatSync(stdinDst).isSymbolicLink()).toBe(true);
 
-      // Mock symlinkSync to fail
-      const originalSymlinkSync = require('fs').symlinkSync;
-      require('fs').symlinkSync = () => { throw new Error('symlink not supported'); };
+      // Spy on symlinkSync and make it fail
+      vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+        throw new Error('symlink not supported');
+      });
 
-      try {
-        ensureStdinSymlink(pluginRoot);
+      ensureStdinSymlink(pluginRoot);
 
-        // Should have removed dangling symlink and copied the file
-        expect(existsSync(stdinDst)).toBe(true);
-        expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
-      } finally {
-        require('fs').symlinkSync = originalSymlinkSync;
-      }
+      // Should have removed dangling symlink and copied the file
+      expect(existsSync(stdinDst)).toBe(true);
+      expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
     });
   });
 
