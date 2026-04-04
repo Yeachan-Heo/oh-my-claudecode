@@ -2,11 +2,11 @@
  * Tests for ensureStdinSymlink (issue #2152)
  *
  * Verifies that the stdin.mjs symlink is correctly created and healed
- * when OMC upgrades to a new version. The symlink should always point
- * to the current plugin version's templates/hooks/lib/stdin.mjs.
+ * when OMC upgrades to a new version. Uses safe replace strategy:
+ * only removes old destination AFTER successfully creating new symlink.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync, unlinkSync, symlinkSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync, unlinkSync, symlinkSync, copyFileSync, readlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ensureStdinSymlink } from '../index.js';
@@ -27,7 +27,7 @@ describe('ensureStdinSymlink', () => {
     stdinSrcPath = join(templatesDir, 'stdin.mjs');
     writeFileSync(stdinSrcPath, '// fake stdin.mjs content\n');
 
-    // Mock os.homedir() by temporarily replacing it
+    // Create a fake home directory
     homeDir = mkdtempSync(join(tmpdir(), 'omc-home-'));
     hooksLibDir = join(homeDir, '.claude/hooks/lib');
   });
@@ -37,79 +37,122 @@ describe('ensureStdinSymlink', () => {
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('creates the destination directory if it does not exist', () => {
-    // Mock the homedir to use our temp directory
+  // Helper to mock os.homedir
+  const withMockedHomedir = (mockHome: string, fn: () => void) => {
     const originalHomedir = require('os').homedir;
-    require('os').homedir = () => homeDir;
-
+    require('os').homedir = () => mockHome;
     try {
-      ensureStdinSymlink(pluginRoot);
-      expect(existsSync(hooksLibDir)).toBe(true);
+      fn();
     } finally {
       require('os').homedir = originalHomedir;
     }
+  };
+
+  it('creates the destination directory if it does not exist', () => {
+    withMockedHomedir(homeDir, () => {
+      ensureStdinSymlink(pluginRoot);
+      expect(existsSync(hooksLibDir)).toBe(true);
+    });
   });
 
   it('creates a symlink from ~/.claude/hooks/lib/stdin.mjs to the plugin source', () => {
-    const originalHomedir = require('os').homedir;
-    require('os').homedir = () => homeDir;
-
-    try {
+    withMockedHomedir(homeDir, () => {
       ensureStdinSymlink(pluginRoot);
       const stdinDst = join(hooksLibDir, 'stdin.mjs');
       expect(existsSync(stdinDst)).toBe(true);
       expect(lstatSync(stdinDst).isSymbolicLink()).toBe(true);
-    } finally {
-      require('os').homedir = originalHomedir;
-    }
+      expect(readlinkSync(stdinDst)).toBe(stdinSrcPath);
+    });
   });
 
   it('heals an existing symlink that points to a different location', () => {
-    const originalHomedir = require('os').homedir;
-    require('os').homedir = () => homeDir;
-
-    try {
+    withMockedHomedir(homeDir, () => {
       // Create the directory and a stale symlink pointing elsewhere
       mkdirSync(hooksLibDir, { recursive: true });
-      const staleTarget = join(tmpdir(), 'stale-stdin');
-      mkdirSync(staleTarget, { recursive: true });
-      writeFileSync(join(staleTarget, 'stdin.mjs'), '// stale');
+      const staleTarget = mkdtempSync(join(tmpdir(), 'stale-stdin-'));
+      const staleFile = join(staleTarget, 'stdin.mjs');
+      writeFileSync(staleFile, '// stale content\n');
       const stdinDst = join(hooksLibDir, 'stdin.mjs');
-      symlinkSync(join(staleTarget, 'stdin.mjs'), stdinDst);
+      symlinkSync(staleFile, stdinDst);
 
       // Run the healing function
       ensureStdinSymlink(pluginRoot);
 
       // The symlink should now point to the new source
-      const linkTarget = readFileSync(stdinDst, 'utf-8');
-      expect(linkTarget).toBe('// fake stdin.mjs content\n');
-    } finally {
-      require('os').homedir = originalHomedir;
-    }
+      expect(readlinkSync(stdinDst)).toBe(stdinSrcPath);
+    });
+  });
+
+  it('does not remove old stdin.mjs when symlink creation fails (safe replace)', () => {
+    withMockedHomedir(homeDir, () => {
+      // Create directory and a regular file (not symlink)
+      mkdirSync(hooksLibDir, { recursive: true });
+      const stdinDst = join(hooksLibDir, 'stdin.mjs');
+      writeFileSync(stdinDst, '// existing file content\n');
+      const originalContent = readFileSync(stdinDst, 'utf-8');
+
+      // Mock symlinkSync to fail
+      const originalSymlinkSync = require('fs').symlinkSync;
+      require('fs').symlinkSync = () => { throw new Error('symlink not supported'); };
+
+      try {
+        // Run the function - should NOT remove the existing file
+        ensureStdinSymlink(pluginRoot);
+
+        // File should still exist with original content
+        expect(existsSync(stdinDst)).toBe(true);
+        expect(readFileSync(stdinDst, 'utf-8')).toBe(originalContent);
+      } finally {
+        require('fs').symlinkSync = originalSymlinkSync;
+      }
+    });
+  });
+
+  it('falls back to copy when symlink is not supported', () => {
+    withMockedHomedir(homeDir, () => {
+      mkdirSync(hooksLibDir, { recursive: true });
+      const stdinDst = join(hooksLibDir, 'stdin.mjs');
+
+      // Mock symlinkSync to fail but copyFileSync to work
+      const originalSymlinkSync = require('fs').symlinkSync;
+      require('fs').symlinkSync = () => { throw new Error('symlink not supported'); };
+
+      try {
+        ensureStdinSymlink(pluginRoot);
+
+        // Should fall back to copy
+        expect(existsSync(stdinDst)).toBe(true);
+        expect(readFileSync(stdinDst, 'utf-8')).toBe('// fake stdin.mjs content\n');
+      } finally {
+        require('fs').symlinkSync = originalSymlinkSync;
+      }
+    });
   });
 
   it('is idempotent — calling twice does not throw', () => {
-    const originalHomedir = require('os').homedir;
-    require('os').homedir = () => homeDir;
-
-    try {
+    withMockedHomedir(homeDir, () => {
       ensureStdinSymlink(pluginRoot);
       expect(() => ensureStdinSymlink(pluginRoot)).not.toThrow();
-    } finally {
-      require('os').homedir = originalHomedir;
-    }
+    });
   });
 
   it('is a no-op when pluginRoot does not exist', () => {
-    const originalHomedir = require('os').homedir;
-    require('os').homedir = () => homeDir;
-
-    try {
+    withMockedHomedir(homeDir, () => {
       expect(() =>
         ensureStdinSymlink(join(tmpdir(), 'nonexistent-plugin-root-xyz'))
       ).not.toThrow();
-    } finally {
-      require('os').homedir = originalHomedir;
-    }
+    });
+  });
+
+  it('is a no-op when stdin.mjs source does not exist', () => {
+    withMockedHomedir(homeDir, () => {
+      // Remove the source file
+      unlinkSync(stdinSrcPath);
+
+      // Should not throw and should not create anything
+      expect(() => ensureStdinSymlink(pluginRoot)).not.toThrow();
+      const stdinDst = join(hooksLibDir, 'stdin.mjs');
+      expect(existsSync(stdinDst)).toBe(false);
+    });
   });
 });

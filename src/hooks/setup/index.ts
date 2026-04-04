@@ -7,7 +7,7 @@
  * - maintenance: Prune old state files, cleanup orphaned state, vacuum SQLite
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, symlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, lstatSync, unlinkSync, readFileSync, readlinkSync, writeFileSync, appendFileSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import os from 'os';
 
@@ -181,12 +181,16 @@ export function patchHooksJsonForWindows(pluginRoot: string): void {
 }
 
 /**
- * Ensure ~/.claude/hooks/lib/stdin.mjs symlink points to the current plugin version.
+ * Ensure ~/.claude/hooks/lib/stdin.mjs points to the current plugin version.
  *
  * This fixes a silent breakage that occurs when OMC upgrades to a new version:
  * the symlink stays pointing at the old version's cache dir, so hooks that
  * import stdin.mjs fail with ERR_MODULE_NOT_FOUND.  Rebuilding the symlink on
  * every init keeps it in sync automatically.
+ *
+ * Safe replace strategy: we only remove the old destination AFTER successfully
+ * creating the new symlink, so we never leave the setup in a broken state.
+ * Falls back to copy if symlink is unavailable on the platform.
  */
 export function ensureStdinSymlink(pluginRoot: string): void {
   const libDstDir = join(os.homedir(), '.claude/hooks/lib');
@@ -194,17 +198,57 @@ export function ensureStdinSymlink(pluginRoot: string): void {
   const stdinSrc = join(libSrc, 'stdin.mjs');
   const stdinDst = join(libDstDir, 'stdin.mjs');
 
+  // Ensure destination directory exists
   if (!existsSync(libDstDir)) {
     mkdirSync(libDstDir, { recursive: true });
   }
 
-  // Always recreate so upgrade always heals the symlink
-  try { unlinkSync(stdinDst); } catch { /* ignore if didn't exist */ }
+  // Verify source exists before doing anything destructive
+  if (!existsSync(stdinSrc)) {
+    return; // Nothing to link or copy
+  }
+
+  // Check if already correct symlink using readlinkSync
+  try {
+    const currentTarget = readlinkSync(stdinDst);
+    if (currentTarget === stdinSrc) {
+      return; // Already pointing to correct source
+    }
+  } catch {
+    // stdinDst doesn't exist or isn't a symlink - proceed to fix
+  }
+
+  // Safe replace: try to create a new symlink first, only remove old after success
+  const tmpDst = stdinDst + '.tmp';
 
   try {
-    symlinkSync(stdinSrc, stdinDst);
+    // Create new symlink with temp name first
+    // Use require to allow test mocking of fs module
+    const { symlinkSync: fsSymlinkSync } = require('fs');
+    fsSymlinkSync(stdinSrc, tmpDst);
+
+    // New symlink created successfully - now atomically replace the old one
+    // On POSIX rename is atomic. On Windows we just unlink+rename which is still safer
+    // than deleting before creating.
+    try {
+      unlinkSync(stdinDst); // Remove old symlink or file
+    } catch {
+      // Ignore if didn't exist
+    }
+    // Use rename for atomic replacement
+    const { renameSync } = require('fs');
+    renameSync(tmpDst, stdinDst);
   } catch {
-    // Non-fatal: older setups may have copied the file instead
+    // Symlink creation failed (platform may not support symlinks, e.g. some Windows configs)
+    // Only copy if destination doesn't exist; never overwrite a working file
+    if (!existsSync(stdinDst)) {
+      try {
+        copyFileSync(stdinSrc, stdinDst);
+      } catch {
+        // Non-fatal: older setups may have different permissions/structures
+      }
+    }
+    // If stdinDst existed but symlink failed, leave the working file intact
   }
 }
 
