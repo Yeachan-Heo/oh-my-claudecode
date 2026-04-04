@@ -102,6 +102,13 @@ function getGlobalNodeModuleRoots() {
 
 async function importHudPackage(hudPackage) {
   try {
+    const wrapperRequire = createRequire(import.meta.url);
+    const resolvedHudPath = wrapperRequire.resolve(hudPackage);
+    await import(pathToFileURL(resolvedHudPath).href);
+    return true;
+  } catch { /* continue */ }
+
+  try {
     const cwdRequire = createRequire(join(process.cwd(), '__omc_hud__.cjs'));
     const resolvedHudPath = cwdRequire.resolve(hudPackage);
     await import(pathToFileURL(resolvedHudPath).href);
