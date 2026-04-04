@@ -6,9 +6,10 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,9 +34,11 @@ const hudScript = `#!/usr/bin/env node
  * Wrapper that imports from plugin cache or development paths
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Semantic version comparison: returns negative if a < b, positive if a > b, 0 if equal
@@ -54,6 +57,67 @@ function semverCompare(a, b) {
   if (aHasPre && !bHasPre) return -1;
   if (!aHasPre && bHasPre) return 1;
   return 0;
+}
+
+function uniquePaths(paths) {
+  return [...new Set(paths.filter(Boolean).map(candidate => resolve(candidate)))];
+}
+
+function getGlobalNodeModuleRoots() {
+  const roots = [];
+  const addPrefixRoots = (prefix) => {
+    if (!prefix) return;
+    if (process.platform === 'win32') {
+      roots.push(join(prefix, 'node_modules'));
+      return;
+    }
+    roots.push(join(prefix, 'lib', 'node_modules'));
+    roots.push(join(prefix, 'node_modules'));
+  };
+
+  addPrefixRoots(process.env.npm_config_prefix);
+  addPrefixRoots(process.env.PREFIX);
+
+  const nodeBinDir = dirname(process.execPath);
+  roots.push(join(nodeBinDir, 'node_modules'));
+  roots.push(join(nodeBinDir, '..', 'node_modules'));
+  roots.push(join(nodeBinDir, '..', 'lib', 'node_modules'));
+
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    roots.push(join(process.env.APPDATA, 'npm', 'node_modules'));
+  }
+
+  try {
+    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const npmRoot = String(execFileSync(npmCommand, ['root', '-g'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 1500,
+    })).trim();
+    if (npmRoot) roots.unshift(npmRoot);
+  } catch { /* continue */ }
+
+  return uniquePaths(roots);
+}
+
+async function importHudPackage(hudPackage) {
+  try {
+    const cwdRequire = createRequire(join(process.cwd(), '__omc_hud__.cjs'));
+    const resolvedHudPath = cwdRequire.resolve(hudPackage);
+    await import(pathToFileURL(resolvedHudPath).href);
+    return true;
+  } catch { /* continue */ }
+
+  for (const nodeModulesRoot of getGlobalNodeModuleRoots()) {
+    const resolvedHudPath = join(nodeModulesRoot, hudPackage);
+    if (!existsSync(resolvedHudPath)) continue;
+    try {
+      await import(pathToFileURL(resolvedHudPath).href);
+      return true;
+    } catch { /* continue */ }
+  }
+
+  return false;
 }
 
 async function main() {
@@ -111,16 +175,15 @@ async function main() {
     } catch { /* continue */ }
   }
 
-  // 4. npm package (global or local install)
+  // 4. npm package (current project, global install, or branded fallback)
   const npmHudPackages = [
     "oh-my-claude-sisyphus/dist/hud/index.js",
     "oh-my-claudecode/dist/hud/index.js",
   ];
   for (const hudPackage of npmHudPackages) {
-    try {
-      await import(hudPackage);
+    if (await importHudPackage(hudPackage)) {
       return;
-    } catch { /* continue */ }
+    }
   }
 
   // 5. Fallback: provide targeted repair guidance

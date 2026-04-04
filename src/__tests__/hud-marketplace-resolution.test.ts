@@ -98,6 +98,56 @@ describe('HUD marketplace resolution', () => {
     expect(readFileSync(sentinelPath, 'utf-8')).toBe('marketplace-loaded');
   });
 
+  it('omc-hud.mjs loads a global npm install outside a Node project via npm prefix resolution', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-global-prefix-'));
+    tempDirs.push(configDir);
+
+    const fakeHome = join(configDir, 'home');
+    const outsideCwd = join(configDir, 'outside-cwd');
+    const npmPrefix = join(configDir, 'global-prefix');
+    mkdirSync(fakeHome, { recursive: true });
+    mkdirSync(outsideCwd, { recursive: true });
+
+    const sentinelPath = join(configDir, 'global-prefix-loaded.txt');
+    const npmRoot = process.platform === 'win32'
+      ? join(npmPrefix, 'node_modules')
+      : join(npmPrefix, 'lib', 'node_modules');
+    const npmPackageRoot = join(npmRoot, 'oh-my-claude-sisyphus');
+    const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
+    mkdirSync(npmHudDir, { recursive: true });
+    writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(
+      join(npmHudDir, 'index.js'),
+      `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(sentinelPath)}, 'global-prefix-loaded');\n`
+    );
+
+    execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+      },
+      stdio: 'pipe',
+    });
+
+    const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+    expect(existsSync(hudScriptPath)).toBe(true);
+
+    execFileSync(process.execPath, [hudScriptPath], {
+      cwd: outsideCwd,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+        npm_config_prefix: npmPrefix,
+      },
+      stdio: 'pipe',
+    });
+
+    expect(readFileSync(sentinelPath, 'utf-8')).toBe('global-prefix-loaded');
+  });
+
   it('omc-hud.mjs loads the published npm package name before the branded fallback', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-npm-package-'));
     tempDirs.push(configDir);
