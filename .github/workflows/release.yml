@@ -60,12 +60,13 @@ jobs:
             echo "npm install -g oh-my-claude-sisyphus@${VERSION}" >> release-notes.md
             echo '```' >> release-notes.md
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           body_path: release-notes.md
-          generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
