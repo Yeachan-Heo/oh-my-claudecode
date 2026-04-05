@@ -402,6 +402,8 @@ const STANDALONE_HOOK_TEMPLATE_FILES = [
 function ensureStandaloneHookScripts(log: (msg: string) => void): void {
   const packageDir = getPackageDir();
   const templatesDir = join(packageDir, 'templates', 'hooks');
+  const templatesLibDir = join(templatesDir, 'lib');
+  const hooksLibDir = join(HOOKS_DIR, 'lib');
 
   if (!existsSync(HOOKS_DIR)) {
     mkdirSync(HOOKS_DIR, { recursive: true });
@@ -413,6 +415,25 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
     copyFileSync(sourcePath, targetPath);
     if (!isWindows()) {
       chmodSync(targetPath, 0o755);
+    }
+  }
+
+  if (existsSync(templatesLibDir)) {
+    if (!existsSync(hooksLibDir)) {
+      mkdirSync(hooksLibDir, { recursive: true });
+    }
+
+    for (const filename of readdirSync(templatesLibDir)) {
+      if (!filename.endsWith('.mjs')) {
+        continue;
+      }
+
+      const sourcePath = join(templatesLibDir, filename);
+      const targetPath = join(hooksLibDir, filename);
+      copyFileSync(sourcePath, targetPath);
+      if (!isWindows()) {
+        chmodSync(targetPath, 0o755);
+      }
     }
   }
 
