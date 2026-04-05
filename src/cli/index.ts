@@ -1172,12 +1172,14 @@ program
   .description('Run OMC setup to sync all components (hooks, agents, skills)')
   .option('-f, --force', 'Force reinstall even if already up to date')
   .option('-q, --quiet', 'Suppress output except for errors')
+  .option('--no-plugin', 'Install bundled skills from the current package instead of relying on plugin-provided skills')
   .option('--skip-hooks', 'Skip hook installation')
   .option('--force-hooks', 'Force reinstall hooks even if unchanged')
   .addHelpText('after', `
 Examples:
   $ omc setup                     Sync all OMC components
   $ omc setup --force             Force reinstall everything
+  $ omc setup --no-plugin         Force local bundled skill installation
   $ omc setup --quiet             Silent setup for scripts
   $ omc setup --skip-hooks        Install without hooks
   $ omc setup --force-hooks       Force reinstall hooks`)
@@ -1196,6 +1198,7 @@ Examples:
       verbose: !options.quiet,
       skipClaudeCheck: true,
       forceHooks: !!options.forceHooks,
+      noPlugin: !!options.noPlugin,
     });
 
     if (!result.success) {

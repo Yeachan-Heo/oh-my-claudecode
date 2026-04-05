@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -50,7 +50,28 @@ async function loadInstallerWithEnv(claudeConfigDir: string, homeDir: string) {
   return import('../installer/index.js');
 }
 
-describe('installer omc-reference legacy skill sync (issue #1812)', () => {
+function writeInstalledPluginRegistry(claudeConfigDir: string, pluginRoot: string): void {
+  const pluginsDir = join(claudeConfigDir, 'plugins');
+  mkdirSync(pluginsDir, { recursive: true });
+  writeFileSync(
+    join(pluginsDir, 'installed_plugins.json'),
+    JSON.stringify({
+      'oh-my-claudecode': [
+        { installPath: pluginRoot },
+      ],
+    }, null, 2)
+  );
+}
+
+function getBundledSkillNames(): string[] {
+  return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .filter(name => existsSync(join(process.cwd(), 'skills', name, 'SKILL.md')))
+    .sort();
+}
+
+describe('installer bundled skill sync (issue #2193)', () => {
   let tempRoot: string;
   let homeDir: string;
   let claudeConfigDir: string;
@@ -85,7 +106,7 @@ describe('installer omc-reference legacy skill sync (issue #1812)', () => {
     vi.resetModules();
   });
 
-  it('installs only the omc-reference skill during legacy install', async () => {
+  it('installs bundled skills when no OMC plugin provides them', async () => {
     const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
     const result = installer.install({
       skipClaudeCheck: true,
@@ -93,10 +114,51 @@ describe('installer omc-reference legacy skill sync (issue #1812)', () => {
     });
 
     expect(result.success).toBe(true);
+    const bundledSkillNames = getBundledSkillNames();
+    expect(result.installedSkills.length).toBe(bundledSkillNames.length);
     expect(result.installedSkills).toContain('omc-reference/SKILL.md');
+    expect(result.installedSkills).toContain('ralph/SKILL.md');
 
-    const installedSkillPath = join(claudeConfigDir, 'skills', 'omc-reference', 'SKILL.md');
-    expect(existsSync(installedSkillPath)).toBe(true);
-    expect(readFileSync(installedSkillPath, 'utf-8')).toContain('name: omc-reference');
+    for (const skillName of ['omc-reference', 'ralph', 'team']) {
+      const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
+      expect(existsSync(installedSkillPath)).toBe(true);
+      expect(readFileSync(installedSkillPath, 'utf-8')).toContain(`name: ${skillName}`);
+    }
+  });
+
+  it('skips bundled skill sync when an installed plugin already provides skills', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.installedSkills).toEqual([]);
+    expect(existsSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'))).toBe(false);
+  });
+
+  it('forces bundled skill sync with noPlugin even when plugin skills exist', async () => {
+    const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+    mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
+    writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+      noPlugin: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.installedSkills).toContain('ralph/SKILL.md');
+    expect(existsSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'))).toBe(true);
+    expect(readFileSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'), 'utf-8')).toContain('name: ralph');
   });
 });
