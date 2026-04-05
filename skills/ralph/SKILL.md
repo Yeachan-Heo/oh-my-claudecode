@@ -95,7 +95,11 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
    - Standard changes: STANDARD tier (architect-medium / Sonnet)
    - >20 files or security/architectural changes: THOROUGH tier (architect / Opus)
    - If `--critic=critic`, use the Claude `critic` agent for the approval pass
-   - If `--critic=codex`, run `omc ask codex --agent-prompt critic "..."` for the approval pass
+   - If `--critic=codex`, run `omc ask codex --agent-prompt critic "..."` for the approval pass. The Codex critic prompt MUST include:
+     1. The full list of acceptance criteria from prd.json for verification
+     2. A directive to evaluate whether the implementation is **OPTIMAL** — not just correct, but whether there exists a meaningfully better approach (simpler, faster, more maintainable) that the implementation missed
+     3. A directive to review **all code related to the changes** (callers, callees, shared types, adjacent modules), not only the files directly modified
+     4. The list of files changed during the ralph session for context
    - Ralph floor: always at least STANDARD, even for small changes
    - The selected reviewer verifies against the SPECIFIC acceptance criteria from prd.json, not vague "is it done?"
 
@@ -118,7 +122,7 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 <Tool_Usage>
 - Use `Task(subagent_type="oh-my-claudecode:architect", ...)` for architect verification cross-checks when changes are security-sensitive, architectural, or involve complex multi-system integration
 - Use `Task(subagent_type="oh-my-claudecode:critic", ...)` when `--critic=critic`
-- Use `omc ask codex --agent-prompt critic "..."` when `--critic=codex`
+- Use `omc ask codex --agent-prompt critic "..."` when `--critic=codex`. Construct the prompt to include: (a) prd.json acceptance criteria, (b) files changed + related files, (c) explicit optimality question: "Is there a meaningfully simpler, faster, or more maintainable approach that achieves the same acceptance criteria?"
 - Skip architect consultation for simple feature additions, well-tested changes, or time-critical verification
 - Proceed with architect agent verification alone -- never block on unavailable tools
 - Use `state_write` / `state_read` for ralph mode state persistence between iterations
