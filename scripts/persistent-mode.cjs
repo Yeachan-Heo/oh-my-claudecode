@@ -22,6 +22,7 @@ const {
   statSync,
 } = require("fs");
 const { join, dirname, resolve, normalize } = require("path");
+const { homedir } = require("os");
 const { getClaudeConfigDir } = require("./lib/config-dir.cjs");
 
 async function readStdin(timeoutMs = 2000) {
