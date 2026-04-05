@@ -6,11 +6,12 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -90,8 +91,6 @@ const MODE_STATE_FILES = [
   'team-state.json',
   'omc-teams-state.json',
 ];
-const AGENT_HEAVY_TOOLS = new Set(['Task', 'TaskCreate', 'TaskUpdate']);
-const PREFLIGHT_CONTEXT_THRESHOLD = parseInt(process.env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD || '72', 10);
 const QUIET_LEVEL = getQuietLevel();
 
 function getQuietLevel() {
@@ -153,46 +152,6 @@ function resolveTranscriptPath(transcriptPath, cwd) {
   } catch { /* best-effort fallback */ }
 
   return transcriptPath;
-}
-
-function estimateContextPercent(transcriptPath) {
-  if (!transcriptPath) return 0;
-
-  let fd = -1;
-  try {
-    const stat = statSync(transcriptPath);
-    if (stat.size === 0) return 0;
-
-    fd = openSync(transcriptPath, 'r');
-    const readSize = Math.min(4096, stat.size);
-    const buf = Buffer.alloc(readSize);
-    readSync(fd, buf, 0, readSize, stat.size - readSize);
-    closeSync(fd);
-    fd = -1;
-
-    const tail = buf.toString('utf-8');
-    const windowMatch = tail.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
-    const inputMatch = tail.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
-
-    if (!windowMatch || !inputMatch) return 0;
-
-    const lastWindow = parseInt(windowMatch[windowMatch.length - 1].match(/(\d+)/)[1], 10);
-    const lastInput = parseInt(inputMatch[inputMatch.length - 1].match(/(\d+)/)[1], 10);
-
-    if (lastWindow === 0) return 0;
-    return Math.round((lastInput / lastWindow) * 100);
-  } catch {
-    return 0;
-  } finally {
-    if (fd !== -1) try { closeSync(fd); } catch { /* ignore */ }
-  }
-}
-
-function buildPreflightRecoveryAdvice(contextPercent) {
-  return `[OMC] Preflight context guard: ${contextPercent}% used ` +
-    `(threshold: ${PREFLIGHT_CONTEXT_THRESHOLD}%). Avoid spawning additional agent-heavy tasks ` +
-    `until context is reduced. Safe recovery: (1) pause new Task fan-out, (2) run /compact now, ` +
-    `(3) if compact fails, open a fresh session and continue from .omc/state + .omc/notepad.md.`;
 }
 
 // Simple JSON field extraction
@@ -785,20 +744,15 @@ async function main() {
 
     const todoStatus = getTodoStatus(directory);
 
-    if (AGENT_HEAVY_TOOLS.has(toolName)) {
+    if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
       const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
       const transcriptPath = resolveTranscriptPath(rawTranscriptPath, directory);
-      const contextPercent = estimateContextPercent(transcriptPath);
-
-      if (contextPercent >= PREFLIGHT_CONTEXT_THRESHOLD) {
-        console.log(JSON.stringify({
-          continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: buildPreflightRecoveryAdvice(contextPercent),
-          }
-        }));
+      const preflightBlock = evaluateAgentHeavyPreflight({
+        toolName,
+        transcriptPath,
+      });
+      if (preflightBlock) {
+        console.log(JSON.stringify(preflightBlock));
         return;
       }
     }

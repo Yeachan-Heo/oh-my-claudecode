@@ -9,6 +9,23 @@ interface HooksConfig {
 
 const hooksJsonPath = join(__dirname, '..', '..', 'hooks', 'hooks.json');
 
+function expandHookCommandArgv(command: string, pluginRoot: string): string[] {
+  const shellScript =
+    `eval "set -- $HOOK_COMMAND"; ` +
+    `node -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- "$@"`;
+
+  return JSON.parse(
+    execFileSync('bash', ['-lc', shellScript], {
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOOK_COMMAND: command,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    }).trim()
+  ) as string[];
+}
+
 function getHookCommands(): string[] {
   const raw = JSON.parse(readFileSync(hooksJsonPath, 'utf-8')) as HooksConfig;
   return Object.values(raw.hooks ?? {})
@@ -31,24 +48,13 @@ describe('hooks.json command escaping', () => {
     const pluginRoot = '/c/Users/First Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10';
 
     for (const command of getHookCommands()) {
-      const argv = JSON.parse(
-        execFileSync(
-          'bash',
-          ['-lc', command.replace(/^node\b/, `node -e "console.log(JSON.stringify(process.argv.slice(1)))"`)],
-          {
-            encoding: 'utf-8',
-            env: {
-              ...process.env,
-              CLAUDE_PLUGIN_ROOT: pluginRoot,
-            },
-          }
-        ).trim()
-      ) as string[];
+      const argv = expandHookCommandArgv(command, pluginRoot);
 
-      expect(argv[0]).toBe(`${pluginRoot}/scripts/run.cjs`);
-      expect(argv[1]).toContain(`${pluginRoot}/scripts/`);
-      expect(argv[0]).toContain('First Last');
+      expect(argv[0]).toMatch(/(^|[/\\])node(?:\.exe)?$/);
+      expect(argv[1]).toBe(`${pluginRoot}/scripts/run.cjs`);
+      expect(argv[2]).toContain(`${pluginRoot}/scripts/`);
       expect(argv[1]).toContain('First Last');
+      expect(argv[2]).toContain('First Last');
       expect(argv).not.toContain('/c/Users/First');
       expect(argv).not.toContain('Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10/scripts/run.cjs');
     }
