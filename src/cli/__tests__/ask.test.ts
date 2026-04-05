@@ -133,7 +133,7 @@ function writeFakeProviderBinary(dir: string, provider: 'claude' | 'gemini'): st
   return binDir;
 }
 
-function writeSpawnSyncCapturePrelude(dir: string): string {
+function writeSpawnSyncCapturePrelude(dir: string, { platform = 'win32' }: { platform?: string } = {}): string {
   const preludePath = join(dir, 'spawn-sync-capture-prelude.mjs');
   writeFileSync(
     preludePath,
@@ -142,7 +142,7 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "import { writeFileSync } from 'node:fs';",
       "import { syncBuiltinESMExports } from 'node:module';",
       '',
-      "Object.defineProperty(process, 'platform', { value: 'win32' });",
+      `Object.defineProperty(process, 'platform', { value: '${platform}' });`,
       'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
       "const mode = process.env.SPAWN_CAPTURE_MODE || 'success';",
       'const calls = [];',
@@ -546,6 +546,44 @@ describe('run-provider-advisor script contract', () => {
         command: 'codex',
         args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'windows cmd support 你好' },
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('pipes codex prompts over stdin on non-Windows to avoid YAML frontmatter arg parsing errors', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-unix-stdin-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd, { platform: 'darwin' });
+      const yamlPrompt = '---\nname: critic\n---\n\nReview this code';
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', yamlPrompt],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        command: 'codex',
+        args: ['--version'],
+        options: { shell: false, encoding: 'utf8', stdio: 'ignore', input: null },
+      });
+      expect(calls[1]).toMatchObject({
+        command: 'codex',
+        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        options: { shell: false, encoding: 'utf8', stdio: null, input: yamlPrompt },
       });
     } finally {
       rmSync(wd, { recursive: true, force: true });

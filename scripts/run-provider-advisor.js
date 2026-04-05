@@ -28,7 +28,11 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
 }
 
 function shouldPipePromptViaStdin(provider) {
-  return SHOULD_USE_WINDOWS_SHELL && (provider === 'codex' || provider === 'gemini');
+  // Always pipe for codex — complex prompts (e.g. agent prompts with YAML
+  // frontmatter starting with "---") are misinterpreted as CLI flags when
+  // passed as positional arguments.
+  if (provider === 'codex') return true;
+  return SHOULD_USE_WINDOWS_SHELL && provider === 'gemini';
 }
 
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
