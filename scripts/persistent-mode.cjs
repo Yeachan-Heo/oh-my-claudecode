@@ -408,7 +408,7 @@ function readStateFileWithSession(stateDir, filename, sessionId) {
     if (legacyResult.state && legacyResult.state.session_id === sessionId) {
       return legacyResult;
     }
-    return { state: null, path: null, isGlobal: false };
+    return { state: null, path: sessionPath, isGlobal: false };
   }
   // No sessionId: fall back to legacy path (backward compat)
   return readStateFile(stateDir, filename);
