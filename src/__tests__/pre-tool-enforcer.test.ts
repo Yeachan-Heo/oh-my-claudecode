@@ -372,9 +372,11 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       session_id: 'session-1373',
     });
 
-    expect(output.decision).toBe('block');
-    expect(String(output.reason)).toContain('Preflight context guard');
-    expect(String(output.reason)).toContain('Safe recovery');
+    expect(output.continue).toBe(true);
+    const hso = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hso.permissionDecision).toBe('deny');
+    expect(String(hso.permissionDecisionReason)).toContain('Preflight context guard');
+    expect(String(hso.permissionDecisionReason)).toContain('Safe recovery');
   });
 
   it('allows non-agent-heavy tools even when transcript context is high', () => {
