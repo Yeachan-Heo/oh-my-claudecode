@@ -1193,12 +1193,16 @@ Examples:
       console.log(chalk.gray('Syncing OMC components...'));
     }
 
+    // Commander exposes negated flags like `--no-plugin` as `options.plugin === false`
+    // rather than `options.noPlugin`. Keep the installer API explicit.
+    const useLocalBundledSkills = options.plugin === false;
+
     const result = installOmc({
       force: !!options.force,
       verbose: !options.quiet,
       skipClaudeCheck: true,
       forceHooks: !!options.forceHooks,
-      noPlugin: !!options.noPlugin,
+      noPlugin: useLocalBundledSkills,
     });
 
     if (!result.success) {

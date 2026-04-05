@@ -10,7 +10,8 @@ describe('omc setup --no-plugin flag wiring', () => {
     expect(cliSource).toContain('Force local bundled skill installation');
   });
 
-  it('passes noPlugin through to installOmc()', () => {
-    expect(cliSource).toContain('noPlugin: !!options.noPlugin');
+  it('maps commander negated option state to installer noPlugin', () => {
+    expect(cliSource).toContain('const useLocalBundledSkills = options.plugin === false;');
+    expect(cliSource).toContain('noPlugin: useLocalBundledSkills');
   });
 });
