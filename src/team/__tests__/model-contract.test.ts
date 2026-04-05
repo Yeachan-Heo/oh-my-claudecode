@@ -166,9 +166,12 @@ describe('model-contract', () => {
   });
 
   describe('buildLaunchArgs', () => {
-    it('claude includes --dangerously-skip-permissions', () => {
+    it('claude includes --permission-mode bypassPermissions', () => {
       const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
-      expect(args).toContain('--dangerously-skip-permissions');
+      expect(args).toContain('--permission-mode');
+      expect(args).toContain('bypassPermissions');
+      // Ensure old flag is no longer used
+      expect(args).not.toContain('--dangerously-skip-permissions');
     });
     it('codex includes --dangerously-bypass-approvals-and-sandbox', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp' });

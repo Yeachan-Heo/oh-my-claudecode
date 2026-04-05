@@ -157,7 +157,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     binary: 'claude',
     installInstructions: 'Install Claude CLI: https://claude.ai/download',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
-      const args = ['--dangerously-skip-permissions'];
+      const args = ['--permission-mode', 'bypassPermissions'];
       if (model) {
         // Provider-specific model IDs (Bedrock, Vertex) must be passed as-is.
         // Normalizing them to aliases like "sonnet" causes Claude Code to expand
