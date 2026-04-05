@@ -62,17 +62,40 @@ npm i -g oh-my-claude-sisyphus@latest
 **Step 2: Setup**
 
 ```bash
+# Inside a Claude Code / OMC session
 /setup
 /omc-setup
+
+# From your terminal
+omc setup
 ```
 
 **Step 3: Build something**
 
-```
+```bash
+# Inside a Claude Code / OMC session
+/autopilot "build a REST API for managing tasks"
+
+# Natural-language in-session shortcut
 autopilot: build a REST API for managing tasks
 ```
 
 That's it. Everything else is automatic.
+
+### CLI Commands vs In-Session Skills
+
+OMC exposes two different surfaces:
+
+- **Terminal CLI commands**: run `omc ...` from your shell after installing the npm/runtime path (`npm i -g oh-my-claude-sisyphus@latest`) or from a local checkout.
+- **In-session skills**: run `/...` inside a Claude Code session after installing the plugin/setup flow.
+
+| Feature | Terminal CLI | In-session skill | Notes |
+| --- | --- | --- | --- |
+| Setup | `omc setup` | `/setup` or `/omc-setup` | Both are real entrypoints. `/setup` is the easiest plugin-first path. |
+| Ask providers | `omc ask codex "review this patch"` | `/ask codex "review this patch"` | Both route through the same advisor flow. |
+| Team orchestration | `omc team 2:codex "review auth flow"` | `/team 3:executor "fix all TypeScript errors"` | Both exist, but they are different runtimes: `omc team` launches tmux CLI workers; `/team` runs the in-session native team workflow. |
+| Autopilot / Ralph / Ultrawork / Deep Interview | — | `/autopilot ...`, `/ralph ...`, `/ultrawork ...`, `/deep-interview ...` | These are in-session skills. There is no `omc autopilot` / `omc ralph` / `omc ultrawork` CLI subcommand in this repo. |
+| Autoresearch | `omc autoresearch ...` | `/deep-interview --autoresearch ...` | `omc autoresearch` is the real CLI command. The in-session path is the setup/interview lane that helps you launch it. |
 
 ### Not Sure Where to Start?
 
@@ -91,6 +114,8 @@ Starting in **v4.1.7**, **Team** is the canonical orchestration surface in OMC. 
 ```bash
 /team 3:executor "fix all TypeScript errors"
 ```
+
+Use `/team ...` when you want Claude Code's in-session native team workflow. Use `omc team ...` when you want terminal-launched tmux CLI workers (`claude` / `codex` / `gemini` panes).
 
 Team runs as a staged pipeline:
 
@@ -249,23 +274,22 @@ Wrap handler at server.py:42 in try/except ClientDisconnectedError...
 
 ---
 
-## Magic Keywords
+## In-session shortcuts
 
-Optional shortcuts for power users. Natural language works fine without them. Team mode is explicit: use `/team ...` or `omc team ...` rather than a keyword trigger.
+These shortcuts run **inside a Claude Code / OMC session**, not as terminal CLI commands. For shell commands, use the `omc ...` forms shown above.
 
-| Keyword                | Effect                                 | Example                                        |
-| ---------------------- | -------------------------------------- | ---------------------------------------------- |
-| `team`                 | Canonical Team orchestration           | `/team 3:executor "fix all TypeScript errors"` |
-| `omc team`             | tmux CLI workers (codex/gemini/claude) | `omc team 2:codex "security review"`           |
-| `ccg`                  | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                          |
-| `autopilot`            | Full autonomous execution              | `autopilot: build a todo app`                  |
-| `ralph`                | Persistence mode                       | `ralph: refactor auth`                         |
-| `ulw`                  | Maximum parallelism                    | `ulw fix all errors`                           |
-| `ralplan`              | Iterative planning consensus           | `ralplan this feature`                         |
-| `deep-interview`       | Socratic requirements clarification    | `deep-interview "vague idea"`                  |
-| `deepsearch`           | Codebase-focused search routing        | `deepsearch for auth middleware`               |
-| `ultrathink`           | Deep reasoning mode                    | `ultrathink about this architecture`           |
-| `cancelomc`, `stopomc` | Stop active OMC modes                  | `stopomc`                                      |
+| Shortcut               | Effect                              | Example                                        |
+| ---------------------- | ----------------------------------- | ---------------------------------------------- |
+| `/team`                | Canonical Team orchestration        | `/team 3:executor "fix all TypeScript errors"` |
+| `/ccg`                 | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                       |
+| `autopilot`            | Full autonomous execution           | `autopilot: build a todo app`                  |
+| `ralph`                | Persistence mode                    | `ralph: refactor auth`                         |
+| `ulw`                  | Maximum parallelism                 | `ulw fix all errors`                           |
+| `ralplan`              | Iterative planning consensus        | `ralplan this feature`                         |
+| `deep-interview`       | Socratic requirements clarification | `deep-interview "vague idea"`                  |
+| `deepsearch`           | Codebase-focused search routing     | `deepsearch for auth middleware`               |
+| `ultrathink`           | Deep reasoning mode                 | `ultrathink about this architecture`           |
+| `cancelomc`, `stopomc` | Stop active OMC modes               | `stopomc`                                      |
 
 **Notes:**
 
@@ -275,15 +299,20 @@ Optional shortcuts for power users. Natural language works fine without them. Te
 
 ## Utilities
 
-### Provider Advisor (`omc ask`)
+### Provider Advisor (`omc ask` / `/ask`)
 
-Run local provider CLIs and save a markdown artifact under `.omc/artifacts/ask/`:
+Run local provider CLIs and save a markdown artifact under `.omc/artifacts/ask/`.
 
 ```bash
+# Terminal CLI
 omc ask claude "review this migration plan"
 omc ask codex --prompt "identify architecture risks"
 omc ask gemini --prompt "propose UI polish ideas"
 omc ask claude --agent-prompt executor --prompt "draft implementation steps"
+
+# Inside a Claude Code / OMC session
+/ask claude "review this migration plan"
+/ask codex "identify architecture risks"
 ```
 
 Canonical env vars:
@@ -292,6 +321,24 @@ Canonical env vars:
 - `OMC_ASK_ORIGINAL_TASK`
 
 Phase-1 aliases `OMX_ASK_ADVISOR_SCRIPT` and `OMX_ASK_ORIGINAL_TASK` are accepted with deprecation warnings.
+
+### Autoresearch (`omc autoresearch`)
+
+`omc autoresearch` is a real CLI command for the thin-supervisor autoresearch runtime:
+
+```bash
+omc autoresearch
+omc autoresearch --mission "improve startup performance" --eval "npm test -- --run src/cli/__tests__/autoresearch.test.ts"
+omc autoresearch init --topic "benchmark onboarding flow"
+```
+
+If you want Claude to help define the mission/evaluator first, start inside the session with:
+
+```bash
+/deep-interview --autoresearch improve startup performance
+```
+
+That in-session interview lane prepares and launches `omc autoresearch ...`; it is not a separate `autoresearch` slash skill.
 
 ### Rate Limit Wait
 
