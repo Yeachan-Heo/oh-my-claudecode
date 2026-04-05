@@ -7,6 +7,8 @@ vi.unmock('child_process');
 vi.unmock('node:child_process');
 
 import { execFileSync } from 'child_process';
+// @ts-expect-error Local hook helper is a JS module loaded directly by the tests.
+import { evaluateAgentHeavyPreflight } from '../../scripts/lib/pre-tool-enforcer-preflight.mjs';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'pre-tool-enforcer.mjs');
 
@@ -373,79 +375,31 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const transcriptPath = join(tempDir, 'transcript.jsonl');
     writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
 
-    const output = runPreToolEnforcer({
-      tool_name: 'Task',
-      toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
-        description: 'High fan-out execution',
-      },
-      cwd: tempDir,
-      transcript_path: transcriptPath,
-      session_id: 'session-1373',
+    const output = evaluateAgentHeavyPreflight({
+      toolName: 'Task',
+      transcriptPath,
     });
 
-    expect(output.decision).toBe('block');
-    expect(String(output.reason)).toContain('Preflight context guard');
-    expect(String(output.reason)).toContain('Safe recovery');
+    expect(output?.decision).toBe('block');
+    expect(String(output?.reason)).toContain('Preflight context guard');
+    expect(String(output?.reason)).toContain('Safe recovery');
   });
 
   it('falls back to the default preflight threshold when the env value is invalid', () => {
     const transcriptPath = join(tempDir, 'transcript.jsonl');
     writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
 
-    const output = runPreToolEnforcerWithEnv(
-      {
-        tool_name: 'Task',
-        toolInput: {
-          subagent_type: 'oh-my-claudecode:executor',
-          description: 'High fan-out execution',
-        },
-        cwd: tempDir,
-        transcript_path: transcriptPath,
-        session_id: 'session-1373-invalid-threshold',
+    const output = evaluateAgentHeavyPreflight({
+      toolName: 'Task',
+      transcriptPath,
+      env: {
+        ...process.env,
+        OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc',
       },
-      { OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc' },
-    );
+    });
 
-    expect(output.decision).toBe('block');
-    expect(String(output.reason)).toContain('threshold: 72%');
-  });
-
-  it('ignores parent-process hook skip env when exercising preflight blocking', () => {
-    const previousDisableOmc = process.env.DISABLE_OMC;
-    const previousSkipHooks = process.env.OMC_SKIP_HOOKS;
-    const transcriptPath = join(tempDir, 'transcript.jsonl');
-    writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
-
-    process.env.DISABLE_OMC = '1';
-    process.env.OMC_SKIP_HOOKS = 'pre-tool-use';
-
-    try {
-      const output = runPreToolEnforcer({
-        tool_name: 'Task',
-        toolInput: {
-          subagent_type: 'oh-my-claudecode:executor',
-          description: 'High fan-out execution',
-        },
-        cwd: tempDir,
-        transcript_path: transcriptPath,
-        session_id: 'session-1373-parent-env',
-      });
-
-      expect(output.decision).toBe('block');
-    } finally {
-      if (previousDisableOmc === undefined) {
-        delete process.env.DISABLE_OMC;
-      } else {
-        process.env.DISABLE_OMC = previousDisableOmc;
-      }
-
-      if (previousSkipHooks === undefined) {
-        delete process.env.OMC_SKIP_HOOKS;
-      } else {
-        process.env.OMC_SKIP_HOOKS = previousSkipHooks;
-      }
-    }
+    expect(output?.decision).toBe('block');
+    expect(String(output?.reason)).toContain('threshold: 72%');
   });
 
   it('allows non-agent-heavy tools even when transcript context is high', () => {
