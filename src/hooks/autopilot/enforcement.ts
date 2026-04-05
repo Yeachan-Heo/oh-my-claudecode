@@ -273,7 +273,7 @@ export async function checkAutopilot(
         const result = transitionRalphToUltraQA(workingDir, sessionId);
         if (!result.success) {
           // Transition failed, continue in current phase
-          return generateContinuationPrompt(state, workingDir);
+          return generateContinuationPrompt(state, workingDir, sessionId);
         }
       } else if (state.phase === "qa" && nextPhase === "validation") {
         const result = transitionUltraQAToValidation(workingDir, sessionId);
