@@ -276,20 +276,20 @@ Wrap handler at server.py:42 in try/except ClientDisconnectedError...
 
 ## In-session shortcuts
 
-These shortcuts run **inside a Claude Code / OMC session**, not as terminal CLI commands. For shell commands, use the `omc ...` forms shown above.
+These shortcuts run **inside a Claude Code / OMC session**, not as terminal CLI commands. For shell commands, use the `omc ...` forms shown above. Team mode is explicit: use `/team ...` in-session or `omc team ...` from your shell rather than expecting a bare `team` keyword trigger.
 
-| Shortcut               | Effect                              | Example                                        |
-| ---------------------- | ----------------------------------- | ---------------------------------------------- |
-| `/team`                | Canonical Team orchestration        | `/team 3:executor "fix all TypeScript errors"` |
-| `/ccg`                 | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                       |
-| `autopilot`            | Full autonomous execution           | `autopilot: build a todo app`                  |
-| `ralph`                | Persistence mode                    | `ralph: refactor auth`                         |
-| `ulw`                  | Maximum parallelism                 | `ulw fix all errors`                           |
-| `ralplan`              | Iterative planning consensus        | `ralplan this feature`                         |
-| `deep-interview`       | Socratic requirements clarification | `deep-interview "vague idea"`                  |
-| `deepsearch`           | Codebase-focused search routing     | `deepsearch for auth middleware`               |
-| `ultrathink`           | Deep reasoning mode                 | `ultrathink about this architecture`           |
-| `cancelomc`, `stopomc` | Stop active OMC modes               | `stopomc`                                      |
+| In-session form        | Kind                  | Effect                              | Example                                        |
+| ---------------------- | --------------------- | ----------------------------------- | ---------------------------------------------- |
+| `/team`                | Slash skill           | Canonical Team orchestration        | `/team 3:executor "fix all TypeScript errors"` |
+| `/ccg`                 | Slash skill           | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                       |
+| `/autopilot` / `autopilot` | Skill / prompt trigger | Full autonomous execution       | `/autopilot "build a todo app"`                |
+| `/ralph` / `ralph`     | Skill / prompt trigger | Persistence mode                   | `/ralph "refactor auth"`                       |
+| `/ultrawork` / `ulw`   | Skill / prompt trigger | Maximum parallelism                | `/ultrawork "fix all errors"`                  |
+| `/ralplan` / `ralplan` | Skill / prompt trigger | Iterative planning consensus       | `/ralplan "plan this feature"`                 |
+| `/deep-interview`      | Slash skill           | Socratic requirements clarification | `/deep-interview "vague idea"`                 |
+| `deepsearch`           | Prompt trigger        | Codebase-focused search routing     | `deepsearch for auth middleware`               |
+| `ultrathink`           | Prompt trigger        | Deep reasoning mode                 | `ultrathink about this architecture`           |
+| `cancelomc`, `stopomc` | Prompt trigger        | Stop active OMC modes               | `stopomc`                                      |
 
 **Notes:**
 
