@@ -621,4 +621,36 @@ describe('Installer Constants', () => {
       }
     });
   });
+
+  describe('Hook Scripts Installation (#2185 regression)', () => {
+    it('should have all required lib files in templates/hooks/lib', () => {
+      const templatesLibDir = join(getPackageDir(), 'templates', 'hooks', 'lib');
+      expect(existsSync(templatesLibDir)).toBe(true);
+
+      const libFiles = readdirSync(templatesLibDir);
+
+      // Required lib files that must be present
+      const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs'];
+      for (const file of requiredFiles) {
+        expect(libFiles).toContain(file);
+      }
+    });
+
+    it('should have all standalone hook template files present', () => {
+      const templatesDir = join(getPackageDir(), 'templates', 'hooks');
+      const hookFiles = [
+        'keyword-detector.mjs',
+        'session-start.mjs',
+        'pre-tool-use.mjs',
+        'post-tool-use.mjs',
+        'post-tool-use-failure.mjs',
+        'persistent-mode.mjs',
+        'code-simplifier.mjs',
+      ];
+
+      for (const file of hookFiles) {
+        expect(existsSync(join(templatesDir, file))).toBe(true);
+      }
+    });
+  });
 });
