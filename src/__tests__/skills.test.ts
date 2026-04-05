@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache } from '../features/builtin-skills/skills.js';
 
 describe('Builtin Skills', () => {
   const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   const originalPath = process.env.PATH;
   const originalUserType = process.env.USER_TYPE;
+  const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalCwd = process.cwd();
+  let tempDirs: string[] = [];
 
   // Clear cache before each test to ensure fresh loads
   beforeEach(() => {
@@ -23,6 +29,13 @@ describe('Builtin Skills', () => {
     } else {
       process.env.USER_TYPE = originalUserType;
     }
+    if (originalClaudeConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+    process.chdir(originalCwd);
+    tempDirs = [];
     clearSkillsCache();
   });
 
@@ -42,6 +55,16 @@ describe('Builtin Skills', () => {
     } else {
       process.env.USER_TYPE = originalUserType;
     }
+    if (originalClaudeConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+    process.chdir(originalCwd);
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs = [];
     clearSkillsCache();
   });
 
@@ -257,6 +280,37 @@ describe('Builtin Skills', () => {
       expect(skill?.argumentHint).toContain('--autoresearch');
       expect(skill?.template).toContain('zero-learning-curve setup lane for `omc autoresearch`');
       expect(skill?.template).toContain('autoresearch --mission "<mission>" --eval "<evaluator>"');
+    });
+
+    it('loads deep-interview ambiguityThreshold from settings before state init and updates the announcement copy', () => {
+      const profileDir = mkdtempSync(join(tmpdir(), 'omc-skill-profile-'));
+      const projectDir = mkdtempSync(join(tmpdir(), 'omc-skill-project-'));
+      tempDirs.push(profileDir, projectDir);
+
+      process.env.CLAUDE_CONFIG_DIR = profileDir;
+      writeFileSync(
+        join(profileDir, 'settings.json'),
+        JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.15 } } }),
+      );
+
+      mkdirSync(join(projectDir, '.claude'), { recursive: true });
+      writeFileSync(
+        join(projectDir, '.claude', 'settings.json'),
+        JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.12 } } }),
+      );
+
+      process.chdir(projectDir);
+      clearSkillsCache();
+
+      const skill = getBuiltinSkill('deep-interview');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('Load runtime settings');
+      expect(skill?.template).toContain('ambiguityThreshold = 0.12');
+      expect(skill?.template).toContain('"threshold": 0.12,');
+      expect(skill?.template).toContain('drops below 12%.');
+      expect(skill?.template?.indexOf('Load runtime settings')).toBeLessThan(
+        skill?.template?.indexOf('Initialize state') ?? Number.POSITIVE_INFINITY,
+      );
     });
 
     it('rewrites built-in skill command examples to plugin-safe bridge invocations when omc is unavailable', () => {
