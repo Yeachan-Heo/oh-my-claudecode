@@ -8553,6 +8553,8 @@ function isProjectScopedPlugin() {
 function ensureStandaloneHookScripts(log3) {
   const packageDir = getPackageDir3();
   const templatesDir = (0, import_path45.join)(packageDir, "templates", "hooks");
+  const templatesLibDir = (0, import_path45.join)(templatesDir, "lib");
+  const hooksLibDir = (0, import_path45.join)(HOOKS_DIR, "lib");
   if (!(0, import_fs34.existsSync)(HOOKS_DIR)) {
     (0, import_fs34.mkdirSync)(HOOKS_DIR, { recursive: true });
   }
@@ -8562,6 +8564,22 @@ function ensureStandaloneHookScripts(log3) {
     (0, import_fs34.copyFileSync)(sourcePath, targetPath);
     if (!isWindows()) {
       (0, import_fs34.chmodSync)(targetPath, 493);
+    }
+  }
+  if ((0, import_fs34.existsSync)(templatesLibDir)) {
+    if (!(0, import_fs34.existsSync)(hooksLibDir)) {
+      (0, import_fs34.mkdirSync)(hooksLibDir, { recursive: true });
+    }
+    for (const filename of (0, import_fs34.readdirSync)(templatesLibDir)) {
+      if (!filename.endsWith(".mjs")) {
+        continue;
+      }
+      const sourcePath = (0, import_path45.join)(templatesLibDir, filename);
+      const targetPath = (0, import_path45.join)(hooksLibDir, filename);
+      (0, import_fs34.copyFileSync)(sourcePath, targetPath);
+      if (!isWindows()) {
+        (0, import_fs34.chmodSync)(targetPath, 493);
+      }
     }
   }
   if (!isWindows()) {

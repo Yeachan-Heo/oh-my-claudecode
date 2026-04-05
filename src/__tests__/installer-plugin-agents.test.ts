@@ -132,6 +132,8 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(result.installedAgents.length).toBeGreaterThan(0);
     expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(true);
     expect(readdirSync(join(claudeConfigDir, 'agents')).some(file => file.endsWith('.md'))).toBe(true);
+    expect(existsSync(join(claudeConfigDir, 'hooks', 'lib', 'stdin.mjs'))).toBe(true);
+    expect(existsSync(join(claudeConfigDir, 'hooks', 'lib', 'atomic-write.mjs'))).toBe(true);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(false);
     expect(installer.isInstalled()).toBe(true);
   });
