@@ -21,6 +21,8 @@ import {
 import { getRuntimePackageVersion } from '../lib/version.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { resolveNodeBinary } from '../utils/resolve-node.js';
+import { parseFrontmatter } from '../utils/frontmatter.js';
+import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 
 /** Claude Code configuration directory */
@@ -44,6 +46,26 @@ export const CORE_COMMANDS: string[] = [];
 export const VERSION = getRuntimePackageVersion();
 
 const OMC_VERSION_MARKER_PATTERN = /<!-- OMC:VERSION:([^\s]+) -->/;
+
+const CC_NATIVE_COMMANDS = new Set([
+  'review',
+  'plan',
+  'security-review',
+  'init',
+  'doctor',
+  'help',
+  'config',
+  'clear',
+  'compact',
+  'memory',
+]);
+
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
+  'remember',
+  'verify',
+  'debug',
+  'skillify',
+]);
 
 /**
  * Detects the newest installed OMC version from persistent metadata or
@@ -697,7 +719,14 @@ function loadCommandDefinitions(): Record<string, string> {
   return definitions;
 }
 
-function syncBundledSkillDefinitions(log: (msg: string) => void): string[] {
+function toSafeStandaloneSkillName(name: string): string {
+  const normalized = name.trim();
+  return CC_NATIVE_COMMANDS.has(normalized.toLowerCase())
+    ? `omc-${normalized}`
+    : normalized;
+}
+
+function syncBundledSkillDefinitions(log: (msg: string) => void, options?: { safeStandaloneNames?: boolean }): string[] {
   const skillsDir = join(getPackageDir(), 'skills');
   const installedSkills: string[] = [];
 
@@ -705,15 +734,34 @@ function syncBundledSkillDefinitions(log: (msg: string) => void): string[] {
     return installedSkills;
   }
 
+  const seenTargetDirs = new Set<string>();
+
   for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name) && !isSkininthegamebrosUser()) {
+      continue;
+    }
 
-    const relativePath = join(entry.name, 'SKILL.md');
     const sourceDir = join(skillsDir, entry.name);
     const sourceSkillPath = join(sourceDir, 'SKILL.md');
     if (!existsSync(sourceSkillPath)) continue;
 
-    const targetDir = join(SKILLS_DIR, entry.name);
+    let targetDirName = entry.name;
+    if (options?.safeStandaloneNames) {
+      const content = readFileSync(sourceSkillPath, 'utf-8');
+      const { metadata } = parseFrontmatter(content);
+      const rawName = typeof metadata.name === 'string' && metadata.name.trim().length > 0
+        ? metadata.name
+        : entry.name;
+      targetDirName = toSafeStandaloneSkillName(rawName);
+    }
+
+    const dedupeKey = targetDirName.toLowerCase();
+    if (seenTargetDirs.has(dedupeKey)) continue;
+    seenTargetDirs.add(dedupeKey);
+
+    const relativePath = join(targetDirName, 'SKILL.md');
+    const targetDir = join(SKILLS_DIR, targetDirName);
     cpSync(sourceDir, targetDir, { recursive: true, force: true });
     installedSkills.push(relativePath.replace(/\\/g, '/'));
     log(`  Synced ${relativePath}`);
@@ -1046,7 +1094,9 @@ export function install(options: InstallOptions = {}): InstallResult {
         : !enabledOmcPlugin
           ? 'Installing bundled skills from local package (no enabled OMC plugin detected)...'
           : 'Installing bundled skills from local package (enabled plugin skill files not found)...');
-      result.installedSkills.push(...syncBundledSkillDefinitions(log));
+      result.installedSkills.push(...syncBundledSkillDefinitions(log, {
+        safeStandaloneNames: !enabledOmcPlugin || options.noPlugin === true,
+      }));
     } else if (pluginProvidesSkillFiles) {
       log('Skipping bundled skill installation (plugin-provided skills are available). Use --no-plugin to force local skill sync.');
     } else if (runningAsPlugin) {

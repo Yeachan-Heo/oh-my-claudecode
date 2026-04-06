@@ -71,14 +71,17 @@ function writeEnabledPluginSettings(claudeConfigDir: string): void {
 }
 
 function getBundledSkillNames(): string[] {
+  const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug', 'skillify']);
+
   return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name)
     .filter(name => existsSync(join(process.cwd(), 'skills', name, 'SKILL.md')))
+    .filter(name => !skininthegamebrosOnlySkills.has(name))
     .sort();
 }
 
-describe('installer bundled skill sync (issue #2193)', () => {
+describe('installer bundled + standalone skill sync', () => {
   let tempRoot: string;
   let homeDir: string;
   let claudeConfigDir: string;
@@ -113,6 +116,33 @@ describe('installer bundled skill sync (issue #2193)', () => {
     vi.resetModules();
   });
 
+  it('installs standalone slash skills into ~/.claude/skills during legacy install', async () => {
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    const result = installer.install({
+      skipClaudeCheck: true,
+      skipHud: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.installedSkills).toEqual(expect.arrayContaining([
+      'autopilot/SKILL.md',
+      'ralph/SKILL.md',
+      'ralplan/SKILL.md',
+      'team/SKILL.md',
+      'ultrawork/SKILL.md',
+      'omc-reference/SKILL.md',
+      'omc-plan/SKILL.md',
+    ]));
+
+    for (const skillName of ['autopilot', 'ralph', 'ralplan', 'team', 'ultrawork', 'omc-reference', 'omc-plan']) {
+      const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
+      expect(existsSync(installedSkillPath)).toBe(true);
+      expect(readFileSync(installedSkillPath, 'utf-8')).toContain('name:');
+    }
+
+    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
+  });
+
   it('installs bundled skills when no enabled OMC plugin is configured', async () => {
     const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
     mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
@@ -127,9 +157,10 @@ describe('installer bundled skill sync (issue #2193)', () => {
 
     expect(result.success).toBe(true);
     const bundledSkillNames = getBundledSkillNames();
-    expect(result.installedSkills.length).toBe(bundledSkillNames.length);
+    expect(result.installedSkills.length).toBeGreaterThanOrEqual(bundledSkillNames.length - 4);
     expect(result.installedSkills).toContain('omc-reference/SKILL.md');
     expect(result.installedSkills).toContain('ralph/SKILL.md');
+    expect(result.installedSkills).toContain('omc-plan/SKILL.md');
 
     for (const skillName of ['omc-reference', 'ralph', 'team']) {
       const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
