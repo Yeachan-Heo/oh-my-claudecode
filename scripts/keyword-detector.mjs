@@ -567,6 +567,11 @@ async function main() {
       matches.push({ name: 'analyze', args: '' });
     }
 
+    // Wiki keywords
+    if (hasActionableKeyword(cleanPrompt, /\b(wiki(?:\s+(?:this|add|lint|query))?)\b/i)) {
+      matches.push({ name: 'wiki', args: '' });
+    }
+
     // No matches - pass through
     if (matches.length === 0) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
