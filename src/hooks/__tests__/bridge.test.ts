@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { processHook, resetSkipHooksCache, type HookInput, type HookType } from '../bridge.js';
+import {
+  processHook,
+  resetSkipHooksCache,
+  sanitizeHookOutputForSerialization,
+  type HookInput,
+  type HookType,
+} from '../bridge.js';
 
 describe('processHook - Environment Kill-Switches', () => {
   const originalEnv = process.env;
@@ -363,6 +369,56 @@ describe('processHook - Environment Kill-Switches', () => {
       expect(result.continue).toBe(true);
       expect(result.message).toContain('MANDATORY VERIFICATION - SUBAGENTS LIE');
       expect(result.message).toContain('done');
+    });
+  });
+
+  describe('sanitizeHookOutputForSerialization', () => {
+    it('drops empty top-level message fields', () => {
+      expect(
+        sanitizeHookOutputForSerialization({
+          continue: true,
+          message: '   ',
+        }),
+      ).toEqual({ continue: true });
+    });
+
+    it('drops empty hook additionalContext and systemMessage fields', () => {
+      expect(
+        sanitizeHookOutputForSerialization({
+          continue: true,
+          systemMessage: '\n\t',
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext: '   ',
+          },
+        }),
+      ).toEqual({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+        },
+      });
+    });
+
+    it('preserves non-text hook metadata while stripping empty injected text', () => {
+      expect(
+        sanitizeHookOutputForSerialization({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            additionalContext: '',
+            permissionDecision: 'deny',
+            permissionDecisionReason: 'Need confirmation',
+          },
+        }),
+      ).toEqual({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'Need confirmation',
+        },
+      });
     });
   });
 });

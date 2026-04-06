@@ -615,6 +615,58 @@ export interface HookOutput {
   modifiedInput?: unknown;
 }
 
+type SerializableHookOutput = HookOutput & {
+  suppressOutput?: boolean;
+  systemMessage?: string;
+  hookSpecificOutput?: Record<string, unknown>;
+};
+
+function hasInjectableText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Strip empty hook text fields before serializing to Claude Code.
+ *
+ * Some hook handlers use empty strings as internal sentinels. Passing those
+ * through to the shell hook protocol can create empty system-message/context
+ * injections on the next turn, which is especially risky after Task/Agent
+ * completion when Claude is deciding whether to continue.
+ */
+export function sanitizeHookOutputForSerialization(
+  output: SerializableHookOutput,
+): SerializableHookOutput {
+  const sanitized: SerializableHookOutput = { ...output };
+
+  if (!hasInjectableText(sanitized.message)) {
+    delete sanitized.message;
+  }
+
+  if (!hasInjectableText(sanitized.systemMessage)) {
+    delete sanitized.systemMessage;
+  }
+
+  const hookSpecificOutput = sanitized.hookSpecificOutput;
+  if (hookSpecificOutput && typeof hookSpecificOutput === "object") {
+    const nextHookSpecificOutput = { ...hookSpecificOutput };
+
+    if (!hasInjectableText(nextHookSpecificOutput.additionalContext)) {
+      delete nextHookSpecificOutput.additionalContext;
+    }
+
+    sanitized.hookSpecificOutput =
+      Object.keys(nextHookSpecificOutput).length > 0
+        ? nextHookSpecificOutput
+        : undefined;
+
+    if (!sanitized.hookSpecificOutput) {
+      delete sanitized.hookSpecificOutput;
+    }
+  }
+
+  return sanitized;
+}
+
 function isDelegationToolName(toolName: string | undefined): boolean {
   const normalizedToolName = (toolName || "").toLowerCase();
   return normalizedToolName === "task" || normalizedToolName === "agent";
@@ -2346,7 +2398,7 @@ export async function main(): Promise<void> {
   const output = await processHook(hookType, input);
 
   // Write output to stdout
-  console.log(JSON.stringify(output));
+  console.log(JSON.stringify(sanitizeHookOutputForSerialization(output)));
 }
 
 // Run if called directly (works in both ESM and bundled CJS)
