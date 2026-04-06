@@ -74,9 +74,18 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
     expect(commands).not.toContain(
       'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/preemptive-compaction.mjs',
     );
-    expect(commands).toContain(
-      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-verifier.mjs',
-    );
+    expect(
+      commands.some(
+        command =>
+          command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs') &&
+          command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-verifier.mjs'),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(command =>
+        command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/preemptive-compaction.mjs'),
+      ),
+    ).toBe(false);
   });
 
   it('warns when transcript usage crosses the configured threshold', () => {
