@@ -423,6 +423,7 @@ export interface HudElementConfig {
   useHyperlinks?: boolean;   // Wrap cwd/paths in OSC 8 terminal hyperlinks (clickable in supported terminals)
   gitRepo: boolean;          // Show git repository name
   gitBranch: boolean;        // Show git branch
+  gitStatus: boolean;        // Show git working tree status (+staged !modified ?untracked ⇡ahead ⇣behind)
   gitInfoPosition: 'above' | 'below';  // Position of git info relative to main HUD line
   model: boolean;            // Show current model name
   modelFormat: ModelFormat;   // Model name verbosity level
@@ -504,7 +505,7 @@ export interface LayoutConfig {
  * Used as fallback when no layout is configured.
  */
 export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
-  line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'model', 'apiKeySource', 'profile'],
+  line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'model', 'apiKeySource', 'profile'],
   main: [
     'omcLabel', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
@@ -544,6 +545,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     useHyperlinks: false,
     gitRepo: false,           // Disabled by default for backward compatibility
     gitBranch: false,         // Disabled by default for backward compatibility
+    gitStatus: false,         // Disabled by default for backward compatibility
     gitInfoPosition: 'above',  // Git info above main HUD line (backward compatible)
     model: false,             // Disabled by default for backward compatibility
     modelFormat: 'short',     // Short names by default for backward compatibility
@@ -603,6 +605,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useHyperlinks: false,
     gitRepo: false,
     gitBranch: false,
+    gitStatus: false,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -644,6 +647,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useHyperlinks: false,
     gitRepo: false,
     gitBranch: true,
+    gitStatus: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -685,6 +689,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useHyperlinks: false,
     gitRepo: true,
     gitBranch: true,
+    gitStatus: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -726,6 +731,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useHyperlinks: false,
     gitRepo: false,
     gitBranch: true,
+    gitStatus: false,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',
@@ -767,6 +773,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     useHyperlinks: false,
     gitRepo: true,
     gitBranch: true,
+    gitStatus: true,
     gitInfoPosition: 'above',
     model: false,
     modelFormat: 'short',

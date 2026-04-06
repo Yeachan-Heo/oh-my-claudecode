@@ -32,7 +32,7 @@ import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
 import { renderHostname } from "./elements/hostname.js";
-import { renderGitRepo, renderGitBranch } from "./elements/git.js";
+import { renderGitRepo, renderGitBranch, renderGitStatus } from "./elements/git.js";
 import { renderModel } from "./elements/model.js";
 import { renderApiKeySource } from "./elements/api-key-source.js";
 import { renderCallCounts } from "./elements/call-counts.js";
@@ -236,6 +236,11 @@ export async function render(
   if (enabledElements.gitBranch) {
     const gitBranchElement = renderGitBranch(context.cwd);
     if (gitBranchElement) rendered.set("gitBranch", gitBranchElement);
+  }
+
+  if (enabledElements.gitStatus) {
+    const gitStatusElement = renderGitStatus(context.cwd);
+    if (gitStatusElement) rendered.set("gitStatus", gitStatusElement);
   }
 
   if (enabledElements.model && context.modelName) {
