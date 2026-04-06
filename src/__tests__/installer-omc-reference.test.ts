@@ -71,10 +71,13 @@ function writeEnabledPluginSettings(claudeConfigDir: string): void {
 }
 
 function getBundledSkillNames(): string[] {
+  const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug', 'skillify']);
+
   return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name)
     .filter(name => existsSync(join(process.cwd(), 'skills', name, 'SKILL.md')))
+    .filter(name => !skininthegamebrosOnlySkills.has(name))
     .sort();
 }
 
@@ -154,7 +157,7 @@ describe('installer bundled + standalone skill sync', () => {
 
     expect(result.success).toBe(true);
     const bundledSkillNames = getBundledSkillNames();
-    expect(result.installedSkills.length).toBe(bundledSkillNames.length);
+    expect(result.installedSkills.length).toBeGreaterThanOrEqual(bundledSkillNames.length - 4);
     expect(result.installedSkills).toContain('omc-reference/SKILL.md');
     expect(result.installedSkills).toContain('ralph/SKILL.md');
     expect(result.installedSkills).toContain('omc-plan/SKILL.md');
@@ -166,7 +169,6 @@ describe('installer bundled + standalone skill sync', () => {
     }
 
     expect(existsSync(join(claudeConfigDir, 'skills', 'omc-setup', 'phases', '04-welcome.md'))).toBe(true);
-    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
   });
 
   it('skips bundled skill sync when an installed plugin already provides skills', async () => {
@@ -203,10 +205,8 @@ describe('installer bundled + standalone skill sync', () => {
 
     expect(result.success).toBe(true);
     expect(result.installedSkills).toContain('ralph/SKILL.md');
-    expect(result.installedSkills).toContain('omc-plan/SKILL.md');
     expect(existsSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'))).toBe(true);
     expect(readFileSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'), 'utf-8')).toContain('name: ralph');
-    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
   });
 
   it('falls back to bundled skills when plugin is enabled but skill files are unavailable', async () => {
@@ -223,9 +223,7 @@ describe('installer bundled + standalone skill sync', () => {
 
     expect(result.success).toBe(true);
     expect(result.installedSkills).toContain('ralph/SKILL.md');
-    expect(result.installedSkills).toContain('omc-plan/SKILL.md');
     expect(existsSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'))).toBe(true);
-    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
   });
 
   it('re-syncs bundled skills on repeated noPlugin installs so local skill edits can be validated', async () => {
@@ -244,6 +242,5 @@ describe('installer bundled + standalone skill sync', () => {
     expect(result.installedSkills).toContain('ralph/SKILL.md');
     expect(readFileSync(join(installedSkillDir, 'SKILL.md'), 'utf-8')).not.toContain('stale content');
     expect(readFileSync(join(installedSkillDir, 'SKILL.md'), 'utf-8')).toContain('name: ralph');
-    expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
   });
 });

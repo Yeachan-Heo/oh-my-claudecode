@@ -8,11 +8,7 @@
  * Bash hook scripts were removed in v3.9.0.
  */
 
-<<<<<<< HEAD
 import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync } from 'fs';
-=======
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, rmSync } from 'fs';
->>>>>>> d741a4c7 (Restore standalone slash skills for npm installs)
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
