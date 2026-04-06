@@ -6,8 +6,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir, homedir } from 'os';
+import { tmpdir } from 'os';
 import { runChecks } from '../index.js';
+import { getClaudeConfigDir } from '../../../utils/config-dir.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -16,7 +17,7 @@ function defaultPolicy() {
         enabled: true,
         mode: 'quick',
         strict_project_patterns: [],
-        forbidden_path_prefixes: [join(homedir(), '.claude/plugins/cache/omc/')],
+        forbidden_path_prefixes: [join(getClaudeConfigDir(), 'plugins/cache/omc/')],
         forbidden_path_substrings: ['/.omc/', '.omc-config.json'],
         readonly_command_prefixes: [
             'ls ', 'cat ', 'find ', 'grep ', 'head ', 'tail ', 'stat ', 'echo ', 'wc ',
@@ -87,7 +88,7 @@ describe('Factcheck Guard (issue #1155)', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
         claims.files_created = [
-            join(homedir(), '.claude/plugins/cache/omc/touched.txt'),
+            join(getClaudeConfigDir(), 'plugins/cache/omc/touched.txt'),
         ];
         const result = runChecks(claims, 'declared', policy, '/tmp/original');
         expect(result.verdict).toBe('FAIL');
@@ -117,7 +118,7 @@ describe('Factcheck Guard (issue #1155)', () => {
     it('forbidden command in mutating context is FAIL', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
-        const forbiddenPath = join(homedir(), '.claude/plugins/cache/omc/');
+        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/omc/');
         claims.commands_executed = [
             `rm -rf ${forbiddenPath}data`,
         ];
@@ -128,7 +129,7 @@ describe('Factcheck Guard (issue #1155)', () => {
     it('readonly command in forbidden path is allowed', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
-        const forbiddenPath = join(homedir(), '.claude/plugins/cache/omc/');
+        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/omc/');
         claims.commands_executed = [
             `ls ${forbiddenPath}`,
             `cat ${forbiddenPath}file.txt`,

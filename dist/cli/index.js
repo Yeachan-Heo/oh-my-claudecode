@@ -11,7 +11,9 @@
  */
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { join } from 'path';
 import { writeFileSync, existsSync } from 'fs';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { loadConfig, getConfigPaths, } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
 import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
@@ -191,7 +193,7 @@ Profile types (use with --profile):
   webhook      Generic webhook (POST with JSON body)
 
 Examples:
-  $ omc config-stop-callback file --enable --path ~/.claude/logs/{date}.md
+  $ omc config-stop-callback file --enable --path ${join(getClaudeConfigDir(), 'logs/{date}.md')}
   $ omc config-stop-callback telegram --enable --token <token> --chat <id>
   $ omc config-stop-callback discord --enable --webhook <url>
   $ omc config-stop-callback file --disable
@@ -398,7 +400,7 @@ Examples:
             const current = config.stopHookCallbacks.file;
             config.stopHookCallbacks.file = {
                 enabled: enabled ?? current?.enabled ?? false,
-                path: options.path ?? current?.path ?? '~/.claude/session-logs/{session_id}.md',
+                path: options.path ?? current?.path ?? join(getClaudeConfigDir(), 'session-logs/{session_id}.md'),
                 format: options.format ?? current?.format ?? 'markdown',
             };
             break;
@@ -748,19 +750,20 @@ Examples:
     console.log(chalk.gray('\nTo check for updates, run: oh-my-claudecode update --check'));
 });
 /**
- * Install command - Install agents and commands to ~/.claude/
+ * Install command - Install agents and commands (default: ~/.claude/)
  */
 program
     .command('install')
-    .description('Install OMC agents and commands to Claude Code config (~/.claude/)')
+    .description('Install OMC agents and commands to Claude Code config directory (default: ~/.claude/)')
     .option('-f, --force', 'Overwrite existing files')
     .option('-q, --quiet', 'Suppress output except for errors')
     .option('--skip-claude-check', 'Skip checking if Claude Code is installed')
     .addHelpText('after', `
 Examples:
-  $ omc install                  Install to ~/.claude/
+  $ omc install                  Install to config directory (default: ~/.claude/)
   $ omc install --force          Reinstall, overwriting existing files
-  $ omc install --quiet          Silent install for scripts`)
+  $ omc install --quiet          Silent install for scripts
+  $ CLAUDE_CONFIG_DIR=$HOME/.claude-isolated-workspace omc install  Isolated config directory`)
     .action(async (options) => {
     if (!options.quiet) {
         console.log(chalk.blue('╔═══════════════════════════════════════════════════════════╗'));
@@ -795,7 +798,7 @@ Examples:
             console.log(chalk.green('║         Installation Complete!                            ║'));
             console.log(chalk.green('╚═══════════════════════════════════════════════════════════╝'));
             console.log('');
-            console.log(chalk.gray(`Installed to: ~/.claude/`));
+            console.log(chalk.gray(`Installed to: ${getClaudeConfigDir()}`));
             console.log('');
             console.log(chalk.yellow('Usage:'));
             console.log('  claude                        # Start Claude Code normally');
@@ -1060,12 +1063,14 @@ program
     .description('Run OMC setup to sync all components (hooks, agents, skills)')
     .option('-f, --force', 'Force reinstall even if already up to date')
     .option('-q, --quiet', 'Suppress output except for errors')
+    .option('--no-plugin', 'Install bundled skills from the current package instead of relying on plugin-provided skills')
     .option('--skip-hooks', 'Skip hook installation')
     .option('--force-hooks', 'Force reinstall hooks even if unchanged')
     .addHelpText('after', `
 Examples:
   $ omc setup                     Sync all OMC components
   $ omc setup --force             Force reinstall everything
+  $ omc setup --no-plugin         Force local bundled skill installation
   $ omc setup --quiet             Silent setup for scripts
   $ omc setup --skip-hooks        Install without hooks
   $ omc setup --force-hooks       Force reinstall hooks`)
@@ -1077,11 +1082,15 @@ Examples:
     if (!options.quiet) {
         console.log(chalk.gray('Syncing OMC components...'));
     }
+    // Commander exposes negated flags like `--no-plugin` as `options.plugin === false`
+    // rather than `options.noPlugin`. Keep the installer API explicit.
+    const useLocalBundledSkills = options.plugin === false;
     const result = installOmc({
         force: !!options.force,
         verbose: !options.quiet,
         skipClaudeCheck: true,
         forceHooks: !!options.forceHooks,
+        noPlugin: useLocalBundledSkills,
     });
     if (!result.success) {
         console.error(chalk.red(`Setup failed: ${result.message}`));

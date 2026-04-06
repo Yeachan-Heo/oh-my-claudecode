@@ -21,6 +21,7 @@ import { renderTokenUsage } from "./elements/token-usage.js";
 import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
+import { renderHostname } from "./elements/hostname.js";
 import { renderGitRepo, renderGitBranch } from "./elements/git.js";
 import { renderModel } from "./elements/model.js";
 import { renderApiKeySource } from "./elements/api-key-source.js";
@@ -171,6 +172,11 @@ export async function render(context, config) {
     const rendered = new Map();
     const renderedDetail = new Map();
     // -- line1-group elements (default: git info line) --
+    if (enabledElements.hostname) {
+        const hostnameElement = renderHostname();
+        if (hostnameElement)
+            rendered.set("hostname", hostnameElement);
+    }
     if (enabledElements.cwd) {
         const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || "relative", enabledElements.useHyperlinks ?? false);
         if (cwdElement)

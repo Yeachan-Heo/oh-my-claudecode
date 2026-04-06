@@ -23,4 +23,5 @@ export { detectApiKeySource, renderApiKeySource } from './api-key-source.js';
 export { renderMissionBoard } from './mission-board.js';
 export { renderSessionSummary } from './session-summary.js';
 export { renderLastTool } from './last-tool.js';
+export { renderHostname } from './hostname.js';
 //# sourceMappingURL=index.js.map

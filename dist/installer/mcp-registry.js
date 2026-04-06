@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { getConfigDir } from '../utils/config-dir.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { getGlobalOmcConfigPath, getGlobalOmcConfigCandidates, getGlobalOmcStatePath, getGlobalOmcStateCandidates, } from '../utils/paths.js';
 const MANAGED_START = '# BEGIN OMC MANAGED MCP REGISTRY';
 const MANAGED_END = '# END OMC MANAGED MCP REGISTRY';
@@ -24,7 +24,7 @@ export function getClaudeMcpConfigPath() {
     if (process.env.CLAUDE_MCP_CONFIG_PATH?.trim()) {
         return process.env.CLAUDE_MCP_CONFIG_PATH.trim();
     }
-    return join(dirname(getConfigDir()), '.claude.json');
+    return join(dirname(getClaudeConfigDir()), '.claude.json');
 }
 export function getCodexConfigPath() {
     const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex');

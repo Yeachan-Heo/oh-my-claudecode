@@ -56,6 +56,20 @@ export interface HookOutput {
     /** Modified tool input (for pre-tool hooks) */
     modifiedInput?: unknown;
 }
+type SerializableHookOutput = HookOutput & {
+    suppressOutput?: boolean;
+    systemMessage?: string;
+    hookSpecificOutput?: Record<string, unknown>;
+};
+/**
+ * Strip empty hook text fields before serializing to Claude Code.
+ *
+ * Some hook handlers use empty strings as internal sentinels. Passing those
+ * through to the shell hook protocol can create empty system-message/context
+ * injections on the next turn, which is especially risky after Task/Agent
+ * completion when Claude is deciding whether to continue.
+ */
+export declare function sanitizeHookOutputForSerialization(output: SerializableHookOutput): SerializableHookOutput;
 /**
  * Hook types that can be processed
  */
@@ -95,4 +109,5 @@ export declare function processHook(hookType: HookType, rawInput: HookInput): Pr
  * Reads JSON from stdin, processes hook, writes JSON to stdout
  */
 export declare function main(): Promise<void>;
+export {};
 //# sourceMappingURL=bridge.d.ts.map

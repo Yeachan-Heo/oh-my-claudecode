@@ -341,6 +341,7 @@ export interface HudElementConfig {
     thinking: boolean;
     thinkingFormat: ThinkingFormat;
     apiKeySource: boolean;
+    hostname: boolean;
     profile: boolean;
     missionBoard?: boolean;
     promptTime: boolean;

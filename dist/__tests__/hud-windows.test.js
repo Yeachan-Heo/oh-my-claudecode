@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getPluginCacheBase, getClaudeConfigDir } from '../utils/paths.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
+import { getPluginCacheBase } from '../utils/paths.js';
 /**
  * HUD Windows Compatibility Tests
  *
@@ -39,7 +40,7 @@ describe('HUD Windows Compatibility', () => {
             const installerPath = join(packageRoot, 'src', 'installer', 'index.ts');
             const content = readFileSync(installerPath, 'utf-8');
             // Should have pathToFileURL import in the generated script
-            expect(content).toContain('import { pathToFileURL } from "node:url"');
+            expect(content).toContain('pathToFileURL } from "node:url"');
         });
         it('installer HUD script should use pathToFileURL for dev path import', () => {
             const installerPath = join(packageRoot, 'src', 'installer', 'index.ts');
@@ -133,15 +134,15 @@ describe('HUD Windows Compatibility', () => {
             const setupPath = join(packageRoot, 'scripts', 'plugin-setup.mjs');
             const content = readFileSync(setupPath, 'utf-8');
             // Should import pathToFileURL
-            expect(content).toContain('import { pathToFileURL } from "node:url"');
+            expect(content).toContain('pathToFileURL } from "node:url"');
             // Should use pathToFileURL for the dynamic import
             expect(content).toContain('pathToFileURL(pluginPath).href');
         });
         it('plugin-setup.mjs should respect CLAUDE_CONFIG_DIR for plugin cache base', () => {
             const setupPath = join(packageRoot, 'scripts', 'plugin-setup.mjs');
             const content = readFileSync(setupPath, 'utf-8');
-            // Should use CLAUDE_CONFIG_DIR env var for cross-platform compat (#897)
-            expect(content).toContain('process.env.CLAUDE_CONFIG_DIR');
+            // Should use getClaudeConfigDir() which reads CLAUDE_CONFIG_DIR internally (#897)
+            expect(content).toContain('getClaudeConfigDir()');
             // Should use join() with configDir for path construction
             expect(content).toContain('join(configDir,');
         });
@@ -155,7 +156,7 @@ describe('HUD Windows Compatibility', () => {
             // Should use path.join for constructing paths
             expect(content).toContain("p.join(d,'plugins','cache','omc','oh-my-claudecode')");
             expect(content).not.toContain('ls ~/.claude/CLAUDE-*.md');
-            expect(content).toContain("find \"$HOME/.claude\" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null");
+            expect(content).toContain("find \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null");
         });
         it('hud skill should use cross-platform Node.js commands for plugin detection', () => {
             const hudPath = join(packageRoot, 'skills', 'hud', 'SKILL.md');

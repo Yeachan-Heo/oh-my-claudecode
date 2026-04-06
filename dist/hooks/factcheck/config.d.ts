@@ -7,14 +7,14 @@
 import type { GuardsConfig } from './types.js';
 export declare const DEFAULT_GUARDS_CONFIG: GuardsConfig;
 /**
- * Expand ${HOME} and ${WORKSPACE} tokens in a string.
+ * Expand ${HOME}, ${WORKSPACE}, and ${CLAUDE_CONFIG_DIR} tokens in a string.
  */
 export declare function expandTokens(value: string, workspace?: string): string;
 /**
  * Load guards config from the OMC config system.
  *
  * Reads the `guards` key from the merged OMC config, deep-merges over
- * defaults, and expands ${HOME}/${WORKSPACE} tokens.
+ * defaults, and expands ${HOME}/${WORKSPACE}/${CLAUDE_CONFIG_DIR} tokens.
  */
 export declare function loadGuardsConfig(workspace?: string): GuardsConfig;
 /**

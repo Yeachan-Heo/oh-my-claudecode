@@ -86,11 +86,38 @@ export function getDefaultShell() {
 }
 const ZSH_CANDIDATES = ['/bin/zsh', '/usr/bin/zsh', '/usr/local/bin/zsh', '/opt/homebrew/bin/zsh'];
 const BASH_CANDIDATES = ['/bin/bash', '/usr/bin/bash'];
-/** Try a list of shell paths; return first that exists with its rcFile, or null */
+function pathEntries(envPath) {
+    return (envPath ?? '')
+        .split(process.platform === 'win32' ? ';' : ':')
+        .map(entry => entry.trim())
+        .filter(Boolean);
+}
+function pathCandidateNames(candidatePath) {
+    const base = basename(candidatePath.replace(/\\/g, '/'));
+    const bare = base.replace(/\.(exe|cmd|bat)$/i, '');
+    if (process.platform === 'win32') {
+        return Array.from(new Set([`${bare}.exe`, `${bare}.cmd`, `${bare}.bat`, bare]));
+    }
+    return Array.from(new Set([base, bare]));
+}
+function resolveShellFromPath(candidatePath) {
+    for (const dir of pathEntries(process.env.PATH)) {
+        for (const name of pathCandidateNames(candidatePath)) {
+            const full = join(dir, name);
+            if (existsSync(full))
+                return full;
+        }
+    }
+    return null;
+}
+/** Try a list of shell paths; return first existing path or PATH-discovered binary with its rcFile, or null */
 export function resolveShellFromCandidates(paths, rcFile) {
     for (const p of paths) {
         if (existsSync(p))
             return { shell: p, rcFile };
+        const resolvedFromPath = resolveShellFromPath(p);
+        if (resolvedFromPath)
+            return { shell: resolvedFromPath, rcFile };
     }
     return null;
 }
@@ -580,7 +607,7 @@ export async function waitForPaneReady(paneId, opts = {}) {
     const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
     const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
         ? Number(opts.timeoutMs)
-        : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 10_000);
+        : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
     const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
         ? Number(opts.pollIntervalMs)
         : 250;
@@ -724,11 +751,19 @@ export async function sendToWorker(_sessionName, paneId, message) {
         if (await paneInCopyMode(paneId)) {
             return false;
         }
-        // Fail-open: one last nudge, then continue regardless.
+        // Fail-closed: one final submit attempt, then report failure so
+        // callers can surface startup dispatch problems explicitly.
         await sendKey('C-m');
         await sleep(120);
         await sendKey('C-m');
-        return true;
+        await sleep(140);
+        const finalCheckCapture = await capturePaneAsync(paneId, execFileAsync);
+        // Empty capture means tmux capture failed or returned indeterminate output.
+        // Treat this as delivery failure to keep dispatch behavior fail-closed.
+        if (!finalCheckCapture || finalCheckCapture.trim() === '') {
+            return false;
+        }
+        return !paneTailContainsLiteralLine(finalCheckCapture, message);
     }
     catch {
         return false;

@@ -234,8 +234,10 @@ Read src/hooks/bridge.ts first.`,
                 const ultraworkState = JSON.parse(readFileSync(join(sessionDir, 'ultrawork-state.json'), 'utf-8'));
                 expect(ralphState.active).toBe(true);
                 expect(ralphState.awaiting_confirmation).toBe(true);
+                expect(typeof ralphState.awaiting_confirmation_set_at).toBe('string');
                 expect(ultraworkState.active).toBe(true);
                 expect(ultraworkState.awaiting_confirmation).toBe(true);
+                expect(typeof ultraworkState.awaiting_confirmation_set_at).toBe('string');
                 const stopResult = await processHook('persistent-mode', {
                     sessionId,
                     directory: tempDir,
@@ -312,7 +314,9 @@ Read src/hooks/bridge.ts first.`,
                 const ralphState = JSON.parse(readFileSync(join(sessionDir, 'ralph-state.json'), 'utf-8'));
                 const ultraworkState = JSON.parse(readFileSync(join(sessionDir, 'ultrawork-state.json'), 'utf-8'));
                 expect(ralphState.awaiting_confirmation).toBeUndefined();
+                expect(ralphState.awaiting_confirmation_set_at).toBeUndefined();
                 expect(ultraworkState.awaiting_confirmation).toBeUndefined();
+                expect(ultraworkState.awaiting_confirmation_set_at).toBeUndefined();
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });

@@ -35,15 +35,21 @@ __export(bridge_exports, {
 });
 module.exports = __toCommonJS(bridge_exports);
 var import_fs2 = require("fs");
-var import_path2 = require("path");
-var import_os2 = require("os");
+var import_path3 = require("path");
+var import_os3 = require("os");
 
 // src/lib/worktree-paths.ts
 var import_crypto = require("crypto");
 var import_child_process = require("child_process");
 var import_fs = require("fs");
-var import_os = require("os");
+var import_os2 = require("os");
+var import_path2 = require("path");
+
+// src/utils/config-dir.ts
 var import_path = require("path");
+var import_os = require("os");
+
+// src/lib/worktree-paths.ts
 var OmcPaths = {
   ROOT: ".omc",
   STATE: ".omc/state",
@@ -86,15 +92,15 @@ function expandTriggers(triggersLower) {
 }
 
 // src/hooks/learner/bridge.ts
-var USER_SKILLS_DIR = (0, import_path2.join)(
-  (0, import_os2.homedir)(),
+var USER_SKILLS_DIR = (0, import_path3.join)(
+  (0, import_os3.homedir)(),
   ".claude",
   "skills",
   "omc-learned"
 );
-var GLOBAL_SKILLS_DIR = (0, import_path2.join)((0, import_os2.homedir)(), ".omc", "skills");
+var GLOBAL_SKILLS_DIR = (0, import_path3.join)((0, import_os3.homedir)(), ".omc", "skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
-var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path2.join)(".agents", "skills");
+var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path3.join)(".agents", "skills");
 var SKILL_EXTENSION = ".md";
 var SESSION_TTL_MS = 60 * 60 * 1e3;
 var MAX_RECURSION_DEPTH = 10;
@@ -139,7 +145,7 @@ function getSkillMetadataCache(projectRoot) {
       if (!parsed) continue;
       const triggers = parsed.metadata.triggers ?? [];
       if (triggers.length === 0) continue;
-      const name = parsed.metadata.name || (0, import_path2.basename)(candidate.path, SKILL_EXTENSION);
+      const name = parsed.metadata.name || (0, import_path3.basename)(candidate.path, SKILL_EXTENSION);
       skills.push({
         path: candidate.path,
         name,
@@ -167,7 +173,7 @@ function clearLevenshteinCache() {
 }
 var STATE_FILE = `${OmcPaths.STATE}/skill-sessions.json`;
 function getStateFilePath(projectRoot) {
-  return (0, import_path2.join)(projectRoot, STATE_FILE);
+  return (0, import_path3.join)(projectRoot, STATE_FILE);
 }
 function readSessionState(projectRoot) {
   const stateFile = getStateFilePath(projectRoot);
@@ -183,7 +189,7 @@ function readSessionState(projectRoot) {
 function writeSessionState(projectRoot, state) {
   const stateFile = getStateFilePath(projectRoot);
   try {
-    (0, import_fs2.mkdirSync)((0, import_path2.dirname)(stateFile), { recursive: true });
+    (0, import_fs2.mkdirSync)((0, import_path3.dirname)(stateFile), { recursive: true });
     (0, import_fs2.writeFileSync)(stateFile, JSON.stringify(state, null, 2), "utf-8");
   } catch {
   }
@@ -218,7 +224,7 @@ function findSkillFilesRecursive(dir, results, depth = 0) {
   try {
     const entries = (0, import_fs2.readdirSync)(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = (0, import_path2.join)(dir, entry.name);
+      const fullPath = (0, import_path3.join)(dir, entry.name);
       if (entry.isDirectory()) {
         findSkillFilesRecursive(fullPath, results, depth + 1);
       } else if (entry.isFile() && entry.name.endsWith(SKILL_EXTENSION)) {
@@ -246,8 +252,8 @@ function findSkillFiles(projectRoot, options) {
   const scope = options?.scope ?? "all";
   if (scope === "project" || scope === "all") {
     const projectSkillDirs = [
-      (0, import_path2.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
-      (0, import_path2.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
+      (0, import_path3.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
+      (0, import_path3.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
     ];
     for (const projectSkillsDir of projectSkillDirs) {
       const projectFiles = [];

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { homedir, tmpdir } from 'os';
+import { basename, join } from 'path';
 import { parseSinceSpec, searchSessionHistory, } from '../features/session-history-search/index.js';
 function encodeProjectPath(projectPath) {
     return projectPath.replace(/[\\/]/g, '-');
@@ -12,13 +12,16 @@ function writeTranscript(filePath, entries) {
 }
 describe('session history search', () => {
     const repoRoot = process.cwd();
+    const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
     let tempRoot;
     let claudeDir;
     let otherProject;
+    let tildeClaudeDir;
     beforeEach(() => {
         tempRoot = mkdtempSync(join(tmpdir(), 'omc-session-search-'));
         claudeDir = join(tempRoot, 'claude');
         otherProject = join(tempRoot, 'other-project');
+        tildeClaudeDir = join(homedir(), `.omc-session-search-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         process.env.CLAUDE_CONFIG_DIR = claudeDir;
         process.env.OMC_STATE_DIR = join(tempRoot, 'omc-state');
         const currentProjectDir = join(claudeDir, 'projects', encodeProjectPath(repoRoot));
@@ -59,9 +62,15 @@ describe('session history search', () => {
         ]);
     });
     afterEach(() => {
-        delete process.env.CLAUDE_CONFIG_DIR;
+        if (originalConfigDir === undefined) {
+            delete process.env.CLAUDE_CONFIG_DIR;
+        }
+        else {
+            process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+        }
         delete process.env.OMC_STATE_DIR;
         rmSync(tempRoot, { recursive: true, force: true });
+        rmSync(tildeClaudeDir, { recursive: true, force: true });
     });
     it('searches the current project by default and returns structured snippets', async () => {
         const report = await searchSessionHistory({
@@ -104,6 +113,25 @@ describe('session history search', () => {
         expect(report.totalMatches).toBe(3);
         expect(report.results).toHaveLength(1);
         expect(report.results[0].sessionId).toBe('session-current');
+    });
+    it('uses a ~-prefixed CLAUDE_CONFIG_DIR for transcript discovery', async () => {
+        process.env.CLAUDE_CONFIG_DIR = `~/${basename(tildeClaudeDir)}`;
+        const tildeProjectDir = join(tildeClaudeDir, 'projects', encodeProjectPath(repoRoot));
+        writeTranscript(join(tildeProjectDir, 'session-tilde.jsonl'), [
+            {
+                sessionId: 'session-tilde',
+                cwd: repoRoot,
+                type: 'assistant',
+                timestamp: '2026-03-10T10:00:00.000Z',
+                message: { role: 'assistant', content: [{ type: 'text', text: 'tilde config dir search hit' }] },
+            },
+        ]);
+        const report = await searchSessionHistory({
+            query: 'tilde config dir search hit',
+            workingDirectory: repoRoot,
+        });
+        expect(report.totalMatches).toBe(1);
+        expect(report.results[0].sessionId).toBe('session-tilde');
     });
     it('parses relative and absolute since values', () => {
         const relative = parseSinceSpec('7d');

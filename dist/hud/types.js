@@ -9,7 +9,7 @@ import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
  * Used as fallback when no layout is configured.
  */
 export const DEFAULT_ELEMENT_ORDER = {
-    line1: ['cwd', 'gitRepo', 'gitBranch', 'model', 'apiKeySource', 'profile'],
+    line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'model', 'apiKeySource', 'profile'],
     main: [
         'omcLabel', 'rateLimits', 'customBuckets', 'permission', 'thinking',
         'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
@@ -47,6 +47,7 @@ export const DEFAULT_HUD_CONFIG = {
         thinking: true,
         thinkingFormat: 'text', // Text format for backward compatibility
         apiKeySource: false, // Disabled by default
+        hostname: false,
         profile: true, // Show profile name when CLAUDE_CONFIG_DIR is set
         missionBoard: false, // Opt-in mission board for whole-run progress tracking
         promptTime: true, // Show last prompt time by default
@@ -104,6 +105,7 @@ export const PRESET_CONFIGS = {
         thinking: false,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: false,
@@ -144,6 +146,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -184,6 +187,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: true,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -224,6 +228,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -264,6 +269,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: true,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,

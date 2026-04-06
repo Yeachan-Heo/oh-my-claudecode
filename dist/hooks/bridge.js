@@ -138,9 +138,11 @@ function updateModeAwaitingConfirmation(directory, modeName, sessionId, awaiting
             }
             if (awaitingConfirmation) {
                 state.awaiting_confirmation = true;
+                state.awaiting_confirmation_set_at = new Date().toISOString();
             }
             else if (state.awaiting_confirmation === true) {
                 delete state.awaiting_confirmation;
+                delete state.awaiting_confirmation_set_at;
             }
             else {
                 continue;
@@ -388,6 +390,41 @@ function validateHookInput(input, requiredFields, hookType) {
         return false;
     }
     return true;
+}
+function hasInjectableText(value) {
+    return typeof value === "string" && value.trim().length > 0;
+}
+/**
+ * Strip empty hook text fields before serializing to Claude Code.
+ *
+ * Some hook handlers use empty strings as internal sentinels. Passing those
+ * through to the shell hook protocol can create empty system-message/context
+ * injections on the next turn, which is especially risky after Task/Agent
+ * completion when Claude is deciding whether to continue.
+ */
+export function sanitizeHookOutputForSerialization(output) {
+    const sanitized = { ...output };
+    if (!hasInjectableText(sanitized.message)) {
+        delete sanitized.message;
+    }
+    if (!hasInjectableText(sanitized.systemMessage)) {
+        delete sanitized.systemMessage;
+    }
+    const hookSpecificOutput = sanitized.hookSpecificOutput;
+    if (hookSpecificOutput && typeof hookSpecificOutput === "object") {
+        const nextHookSpecificOutput = { ...hookSpecificOutput };
+        if (!hasInjectableText(nextHookSpecificOutput.additionalContext)) {
+            delete nextHookSpecificOutput.additionalContext;
+        }
+        sanitized.hookSpecificOutput =
+            Object.keys(nextHookSpecificOutput).length > 0
+                ? nextHookSpecificOutput
+                : undefined;
+        if (!sanitized.hookSpecificOutput) {
+            delete sanitized.hookSpecificOutput;
+        }
+    }
+    return sanitized;
 }
 function isDelegationToolName(toolName) {
     const normalizedToolName = (toolName || "").toLowerCase();
@@ -1710,7 +1747,7 @@ export async function main() {
     // Process hook
     const output = await processHook(hookType, input);
     // Write output to stdout
-    console.log(JSON.stringify(output));
+    console.log(JSON.stringify(sanitizeHookOutputForSerialization(output)));
 }
 // Run if called directly (works in both ESM and bundled CJS)
 // In CJS bundle, check if this is the main module by comparing with process.argv[1]

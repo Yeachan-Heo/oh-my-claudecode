@@ -10,8 +10,8 @@ vi.mock('fs', () => ({
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
 }));
-// Mock paths utility
-vi.mock('../utils/paths.js', () => ({
+// Mock config-dir utility
+vi.mock('../utils/config-dir.js', () => ({
     getClaudeConfigDir: vi.fn(() => '/home/user/.claude'),
 }));
 import { existsSync, readFileSync } from 'fs';

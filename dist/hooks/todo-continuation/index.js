@@ -25,7 +25,7 @@ function debugLog(message, ...args) {
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 /**
  * Validates that a session ID is safe to use in file paths.
  * Session IDs should be alphanumeric with optional hyphens and underscores.

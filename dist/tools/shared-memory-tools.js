@@ -13,11 +13,12 @@
  */
 import { z } from 'zod';
 import { validateWorkingDirectory } from '../lib/worktree-paths.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { isSharedMemoryEnabled, writeEntry, readEntry, listEntries, deleteEntry, cleanupExpired, listNamespaces, } from '../lib/shared-memory.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-const DISABLED_MSG = 'Shared memory is disabled. Set agents.sharedMemory.enabled = true in ~/.claude/.omc-config.json to enable.';
+const DISABLED_MSG = `Shared memory is disabled. Set agents.sharedMemory.enabled = true in ${getClaudeConfigDir()}/.omc-config.json to enable.`;
 function disabledResponse() {
     return {
         content: [{ type: 'text', text: DISABLED_MSG }],
