@@ -31,6 +31,7 @@ export const TOOL_CATEGORIES = {
   GEMINI: 'gemini',
   SHARED_MEMORY: 'shared-memory',
   DEEPINIT: 'deepinit',
+  WIKI: 'wiki',
 } as const;
 export type ToolCategory = typeof TOOL_CATEGORIES[keyof typeof TOOL_CATEGORIES];
 
