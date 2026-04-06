@@ -258,7 +258,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(requests[0]?.last_reason).toBe('worker_notify_failed');
   });
 
-  it('requires Claude startup evidence beyond the initial notify and retries once before failing', async () => {
+  it('requires Claude startup evidence without resending the startup inbox', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-missing-'));
     const { startTeamV2 } = await import('../runtime-v2.js');
 
@@ -272,14 +272,14 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(runtime.config.workers[0]?.pane_id).toBe('%2');
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
-    expect(mocks.sendToWorker).toHaveBeenCalledTimes(2);
+    expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
 
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.status).toBe('notified');
   });
 
-  it('does not treat ACK-only mailbox replies as Claude startup evidence', async () => {
+  it('does not treat ACK-only mailbox replies as Claude startup evidence or resend the startup inbox', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-ack-'));
 
     mocks.sendToWorker.mockImplementation(async () => {
@@ -309,7 +309,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
 
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
-    expect(mocks.sendToWorker).toHaveBeenCalledTimes(2);
+    expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
   it('accepts Claude startup once the worker claims the task', async () => {
