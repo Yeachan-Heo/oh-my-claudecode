@@ -6,7 +6,7 @@
  */
 
 import { homedir } from 'node:os';
-import { basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { dim } from '../colors.js';
 import type { CwdFormat } from '../types.js';
 
@@ -61,9 +61,14 @@ export function renderCwd(
     case 'absolute':
       displayPath = cwd;
       break;
-    case 'folder':
-      displayPath = basename(cwd);
+    case 'folder': {
+      // Show "parent/leaf" instead of just "leaf" to disambiguate common
+      // directory names like src/, test/, docs/, packages/core, apps/web.
+      const parent = basename(dirname(cwd));
+      const folder = basename(cwd);
+      displayPath = parent ? join(parent, folder) : folder;
       break;
+    }
     default:
       displayPath = cwd;
   }
