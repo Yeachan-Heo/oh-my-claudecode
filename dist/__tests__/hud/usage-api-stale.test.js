@@ -66,7 +66,7 @@ function createFsMock(initialFiles) {
     };
 }
 function setupMocks(fsModule, httpStatus, httpBody) {
-    vi.doMock('../../utils/paths.js', () => ({
+    vi.doMock('../../utils/config-dir.js', () => ({
         getClaudeConfigDir: () => CLAUDE_CONFIG_DIR,
     }));
     vi.doMock('../../utils/ssrf-guard.js', () => ({
@@ -107,7 +107,7 @@ describe('usage API stale data handling', () => {
     });
     afterEach(() => {
         process.env = { ...originalEnv };
-        vi.unmock('../../utils/paths.js');
+        vi.unmock('../../utils/config-dir.js');
         vi.unmock('../../utils/ssrf-guard.js');
         vi.unmock('fs');
         vi.unmock('child_process');

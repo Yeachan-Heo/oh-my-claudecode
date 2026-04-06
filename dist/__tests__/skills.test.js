@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache } from '../features/builtin-skills/skills.js';
 describe('Builtin Skills', () => {
     const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     const originalPath = process.env.PATH;
     const originalUserType = process.env.USER_TYPE;
+    const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    const originalCwd = process.cwd();
+    let tempDirs = [];
     // Clear cache before each test to ensure fresh loads
     beforeEach(() => {
         if (originalPluginRoot === undefined) {
@@ -24,6 +30,14 @@ describe('Builtin Skills', () => {
         else {
             process.env.USER_TYPE = originalUserType;
         }
+        if (originalClaudeConfigDir === undefined) {
+            delete process.env.CLAUDE_CONFIG_DIR;
+        }
+        else {
+            process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+        }
+        process.chdir(originalCwd);
+        tempDirs = [];
         clearSkillsCache();
     });
     afterEach(() => {
@@ -45,13 +59,24 @@ describe('Builtin Skills', () => {
         else {
             process.env.USER_TYPE = originalUserType;
         }
+        if (originalClaudeConfigDir === undefined) {
+            delete process.env.CLAUDE_CONFIG_DIR;
+        }
+        else {
+            process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+        }
+        process.chdir(originalCwd);
+        for (const dir of tempDirs) {
+            rmSync(dir, { recursive: true, force: true });
+        }
+        tempDirs = [];
         clearSkillsCache();
     });
     describe('createBuiltinSkills()', () => {
-        it('should return correct number of skills (32 canonical + 1 alias)', () => {
+        it('should return correct number of skills (33 canonical + 1 alias)', () => {
             const skills = createBuiltinSkills();
-            // 33 entries: 32 canonical skills + 1 deprecated alias (psm)
-            expect(skills).toHaveLength(33);
+            // 34 entries: 33 canonical skills + 1 deprecated alias (psm)
+            expect(skills).toHaveLength(34);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -126,6 +151,7 @@ describe('Builtin Skills', () => {
                 'ultraqa',
                 'ultrawork',
                 'visual-verdict',
+                'wiki',
                 'writer-memory',
             ];
             const actualSkillNames = skills.map((s) => s.name);
@@ -241,6 +267,24 @@ describe('Builtin Skills', () => {
             expect(skill?.template).toContain('zero-learning-curve setup lane for `omc autoresearch`');
             expect(skill?.template).toContain('autoresearch --mission "<mission>" --eval "<evaluator>"');
         });
+        it('loads deep-interview ambiguityThreshold from settings before state init and updates the announcement copy', () => {
+            const profileDir = mkdtempSync(join(tmpdir(), 'omc-skill-profile-'));
+            const projectDir = mkdtempSync(join(tmpdir(), 'omc-skill-project-'));
+            tempDirs.push(profileDir, projectDir);
+            process.env.CLAUDE_CONFIG_DIR = profileDir;
+            writeFileSync(join(profileDir, 'settings.json'), JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.15 } } }));
+            mkdirSync(join(projectDir, '.claude'), { recursive: true });
+            writeFileSync(join(projectDir, '.claude', 'settings.json'), JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.12 } } }));
+            process.chdir(projectDir);
+            clearSkillsCache();
+            const skill = getBuiltinSkill('deep-interview');
+            expect(skill).toBeDefined();
+            expect(skill?.template).toContain('Load runtime settings');
+            expect(skill?.template).toContain('ambiguityThreshold = 0.12');
+            expect(skill?.template).toContain('"threshold": 0.12,');
+            expect(skill?.template).toContain('drops below 12%.');
+            expect(skill?.template?.indexOf('Load runtime settings')).toBeLessThan(skill?.template?.indexOf('Initialize state') ?? Number.POSITIVE_INFINITY);
+        });
         it('rewrites built-in skill command examples to plugin-safe bridge invocations when omc is unavailable', () => {
             process.env.CLAUDE_PLUGIN_ROOT = '/plugin-root';
             process.env.PATH = '';
@@ -311,7 +355,7 @@ describe('Builtin Skills', () => {
     describe('listBuiltinSkillNames()', () => {
         it('should return canonical skill names by default', () => {
             const names = listBuiltinSkillNames();
-            expect(names).toHaveLength(32);
+            expect(names).toHaveLength(33);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('ask');
             expect(names).toContain('autopilot');
@@ -342,7 +386,7 @@ describe('Builtin Skills', () => {
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
             // swarm alias removed in #1131, psm still exists
-            expect(names).toHaveLength(33);
+            expect(names).toHaveLength(34);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('trace');
             expect(names).toContain('visual-verdict');

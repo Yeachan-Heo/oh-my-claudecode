@@ -1,7 +1,7 @@
 /**
  * Rules Finder
  *
- * Finds rule files in project directories and user home.
+ * Finds rule files in project directories and [$CLAUDE_CONFIG_DIR|~/.claude].
  *
  * Ported from oh-my-opencode's rules-injector hook.
  */
@@ -18,7 +18,7 @@ export declare function calculateDistance(rulePath: string, currentFile: string,
 /**
  * Find all rule files for a given context.
  * Searches from currentFile upward to projectRoot for rule directories,
- * then user-level directory (~/.claude/rules).
+ * then [$CLAUDE_CONFIG_DIR|~/.claude]/rules.
  */
-export declare function findRuleFiles(projectRoot: string | null, homeDir: string, currentFile: string): RuleFileCandidate[];
+export declare function findRuleFiles(projectRoot: string | null, currentFile: string): RuleFileCandidate[];
 //# sourceMappingURL=finder.d.ts.map

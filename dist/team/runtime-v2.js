@@ -311,24 +311,13 @@ async function spawnV2Worker(opts) {
         };
     }
     if (opts.agentType === 'claude') {
-        const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
+        const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, 6);
         if (!settled) {
-            const renotified = await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
-            if (!renotified.ok) {
-                return {
-                    paneId,
-                    startupAssigned: false,
-                    startupFailureReason: `${renotified.reason}:startup_evidence_missing`,
-                };
-            }
-            const settledAfterRetry = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
-            if (!settledAfterRetry) {
-                return {
-                    paneId,
-                    startupAssigned: false,
-                    startupFailureReason: 'claude_startup_evidence_missing',
-                };
-            }
+            return {
+                paneId,
+                startupAssigned: false,
+                startupFailureReason: 'claude_startup_evidence_missing',
+            };
         }
     }
     if (usePromptMode) {

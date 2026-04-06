@@ -6,10 +6,14 @@ vi.mock('fs', async (importOriginal) => {
 });
 import { existsSync } from 'fs';
 const mockExistsSync = existsSync;
+const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
 afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     mockExistsSync.mockReset();
+    if (originalPlatformDescriptor) {
+        Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+    }
 });
 describe('resolveShellFromCandidates', () => {
     it('returns first existing candidate', () => {
@@ -20,6 +24,18 @@ describe('resolveShellFromCandidates', () => {
     it('returns null when no candidates exist', () => {
         mockExistsSync.mockReturnValue(false);
         expect(resolveShellFromCandidates(['/bin/zsh', '/usr/bin/zsh'], '/home/user/.zshrc')).toBeNull();
+    });
+    it('resolves bash.exe from PATH on Windows when fixed Unix candidates do not exist', () => {
+        const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        vi.stubEnv('PATH', 'C:\\Windows\\System32;D:\\SoftWare\\Git\\bin');
+        mockExistsSync.mockImplementation((p) => p.replace(/\\/g, '/').replace(/\/+/g, '/') === 'D:/SoftWare/Git/bin/bash.exe');
+        const result = resolveShellFromCandidates(['/bin/bash', '/usr/bin/bash'], 'C:/Users/test/.bashrc');
+        expect(result?.rcFile).toBe('C:/Users/test/.bashrc');
+        expect(result?.shell.replace(/\\/g, '/')).toBe('D:/SoftWare/Git/bin/bash.exe');
+        if (originalDescriptor) {
+            Object.defineProperty(process, 'platform', originalDescriptor);
+        }
     });
 });
 describe('resolveSupportedShellAffinity', () => {

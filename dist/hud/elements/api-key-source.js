@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { dim, cyan } from '../colors.js';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 /**
  * Check whether a settings file defines ANTHROPIC_API_KEY in its env block.
  */

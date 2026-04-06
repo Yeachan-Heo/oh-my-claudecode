@@ -58,6 +58,19 @@ export declare function setEnvironmentVariables(): string[];
  */
 export declare function patchHooksJsonForWindows(pluginRoot: string): void;
 /**
+ * Ensure ~/.claude/hooks/lib/stdin.mjs points to the current plugin version.
+ *
+ * This fixes a silent breakage that occurs when OMC upgrades to a new version:
+ * the symlink stays pointing at the old version's cache dir, so hooks that
+ * import stdin.mjs fail with ERR_MODULE_NOT_FOUND.  Rebuilding the symlink on
+ * every init keeps it in sync automatically.
+ *
+ * Safe replace strategy: we only remove the old destination AFTER successfully
+ * creating the new symlink, so we never leave the setup in a broken state.
+ * Falls back to copy if symlink is unavailable on the platform.
+ */
+export declare function ensureStdinSymlink(pluginRoot: string): void;
+/**
  * Process setup init trigger
  */
 export declare function processSetupInit(input: SetupInput): Promise<HookOutput>;

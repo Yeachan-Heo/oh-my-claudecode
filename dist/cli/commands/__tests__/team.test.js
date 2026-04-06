@@ -223,6 +223,17 @@ describe('teamCommand api operations', () => {
     });
 });
 describe('parseTeamArgs comma-separated multi-type specs', () => {
+    it('treats role-only shorthand as claude workers plus a shared role', () => {
+        const parsed = parseTeamArgs(['2:executor', 'fix the bug']);
+        expect(parsed.workerCount).toBe(2);
+        expect(parsed.agentTypes).toEqual(['claude', 'claude']);
+        expect(parsed.workerSpecs).toEqual([
+            { agentType: 'claude', role: 'executor' },
+            { agentType: 'claude', role: 'executor' },
+        ]);
+        expect(parsed.role).toBe('executor');
+        expect(parsed.task).toBe('fix the bug');
+    });
     it('parses 1:codex,1:gemini into heterogeneous agentTypes', () => {
         const parsed = parseTeamArgs(['1:codex,1:gemini', 'do the task']);
         expect(parsed.workerCount).toBe(2);
@@ -252,6 +263,16 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
             { agentType: 'gemini', role: 'executor' },
         ]);
         expect(parsed.role).toBe('executor');
+    });
+    it('supports mixed explicit cli types and role-only shorthand in comma specs', () => {
+        const parsed = parseTeamArgs(['1:executor,1:codex:architect', 'run tasks']);
+        expect(parsed.workerCount).toBe(2);
+        expect(parsed.agentTypes).toEqual(['claude', 'codex']);
+        expect(parsed.workerSpecs).toEqual([
+            { agentType: 'claude', role: 'executor' },
+            { agentType: 'codex', role: 'architect' },
+        ]);
+        expect(parsed.role).toBeUndefined();
     });
     it('still parses single-type spec 3:codex into uniform agentTypes', () => {
         const parsed = parseTeamArgs(['3:codex', 'fix tests']);

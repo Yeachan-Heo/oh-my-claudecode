@@ -6,6 +6,7 @@
  */
 import { homedir } from 'os';
 import { loadConfig } from '../../config/loader.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -13,7 +14,7 @@ const DEFAULT_FACTCHECK_POLICY = {
     enabled: false,
     mode: 'quick',
     strict_project_patterns: [],
-    forbidden_path_prefixes: ['${HOME}/.claude/plugins/cache/omc/'],
+    forbidden_path_prefixes: ['${CLAUDE_CONFIG_DIR}/plugins/cache/omc/'],
     forbidden_path_substrings: ['/.omc/', '.omc-config.json'],
     readonly_command_prefixes: [
         'ls ', 'cat ', 'find ', 'grep ', 'head ', 'tail ', 'stat ', 'echo ', 'wc ',
@@ -40,14 +41,15 @@ export const DEFAULT_GUARDS_CONFIG = {
 // Token expansion
 // ---------------------------------------------------------------------------
 /**
- * Expand ${HOME} and ${WORKSPACE} tokens in a string.
+ * Expand ${HOME}, ${WORKSPACE}, and ${CLAUDE_CONFIG_DIR} tokens in a string.
  */
 export function expandTokens(value, workspace) {
     const home = homedir();
     const ws = workspace ?? process.env.OMC_WORKSPACE ?? process.cwd();
     return value
         .replace(/\$\{HOME\}/g, home)
-        .replace(/\$\{WORKSPACE\}/g, ws);
+        .replace(/\$\{WORKSPACE\}/g, ws)
+        .replace(/\$\{CLAUDE_CONFIG_DIR\}/g, getClaudeConfigDir());
 }
 /**
  * Recursively expand tokens in string values within an object or array.
@@ -95,7 +97,7 @@ function deepMergeGuards(target, source) {
  * Load guards config from the OMC config system.
  *
  * Reads the `guards` key from the merged OMC config, deep-merges over
- * defaults, and expands ${HOME}/${WORKSPACE} tokens.
+ * defaults, and expands ${HOME}/${WORKSPACE}/${CLAUDE_CONFIG_DIR} tokens.
  */
 export function loadGuardsConfig(workspace) {
     try {

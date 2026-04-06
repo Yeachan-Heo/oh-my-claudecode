@@ -370,25 +370,33 @@ function runClaudeOutsideTmux(cwd, args, _sessionId) {
     // Wrap in login shell so .bashrc/.zshrc are sourced (PATH, nvm, etc.)
     const claudeCmd = wrapWithLoginShell(`sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
     const sessionName = buildTmuxSessionName(cwd);
-    const tmuxArgs = [
-        'new-session', '-d', '-s', sessionName, '-c', cwd,
-        claudeCmd,
-        ';', 'set-option', '-t', sessionName, 'mouse', 'on',
-    ];
-    // Attach to session
-    tmuxArgs.push(';', 'attach-session', '-t', sessionName);
     try {
-        execFileSync('tmux', tmuxArgs, { stdio: 'inherit' });
+        execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stdio: 'inherit' });
     }
     catch {
-        // tmux attach failed — kill the orphaned detached session that
-        // new-session -d just created so they don't accumulate.
-        try {
-            execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
-        }
-        catch { /* session may already be gone */ }
-        // fall back to direct launch
         runClaudeDirect(cwd, args);
+        return;
+    }
+    try {
+        execFileSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+    }
+    catch {
+        /* non-fatal — user's tmux may not support these options */
+    }
+    try {
+        execFileSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
+    }
+    catch {
+        // If the detached session still exists, preserve it so interrupted
+        // attach paths (SSH disconnect, terminal drop, etc.) do not kill or
+        // duplicate a valid Claude session.
+        try {
+            execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
+            return;
+        }
+        catch {
+            runClaudeDirect(cwd, args);
+        }
     }
 }
 /**

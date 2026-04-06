@@ -13,7 +13,8 @@ import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, clo
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
 import { getHardMaxIterations } from '../../lib/security-config.js';
-import { getClaudeConfigDir, getGlobalOmcConfigCandidates } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { readUltraworkState, writeUltraworkState, incrementReinforcement, deactivateUltrawork, getUltraworkPersistenceMessage } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { readModeState } from '../../lib/mode-state-io.js';
@@ -287,10 +288,26 @@ function isCriticalContextStop(stopContext) {
     const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
     return estimateTranscriptContextPercent(transcriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT;
 }
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 function isAwaitingConfirmation(state) {
-    return Boolean(state &&
-        typeof state === 'object' &&
-        state.awaiting_confirmation === true);
+    if (!state || typeof state !== 'object') {
+        return false;
+    }
+    const stateRecord = state;
+    if (stateRecord.awaiting_confirmation !== true) {
+        return false;
+    }
+    const setAt = (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
+        (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+        null;
+    if (!setAt) {
+        return false;
+    }
+    const setAtMs = new Date(setAt).getTime();
+    if (!Number.isFinite(setAtMs)) {
+        return false;
+    }
+    return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 /**
  * Check for architect approval in session transcript

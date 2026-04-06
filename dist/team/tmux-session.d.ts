@@ -32,7 +32,7 @@ export interface WorkerLaunchSpec {
     shell: string;
     rcFile: string | null;
 }
-/** Try a list of shell paths; return first that exists with its rcFile, or null */
+/** Try a list of shell paths; return first existing path or PATH-discovered binary with its rcFile, or null */
 export declare function resolveShellFromCandidates(paths: string[], rcFile: string): WorkerLaunchSpec | null;
 /** Check if shellPath is a supported shell (zsh/bash) that exists on disk */
 export declare function resolveSupportedShellAffinity(shellPath?: string): WorkerLaunchSpec | null;

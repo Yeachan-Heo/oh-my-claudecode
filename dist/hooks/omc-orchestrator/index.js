@@ -9,15 +9,14 @@
  */
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getOmcRoot, getWorktreeRoot } from '../../lib/worktree-paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { toForwardSlash } from '../../utils/paths.js';
 import { existsSync, readFileSync } from 'fs';
 import { HOOK_NAME, ALLOWED_PATH_PATTERNS, WARNED_EXTENSIONS, WRITE_EDIT_TOOLS, DIRECT_WORK_REMINDER, ORCHESTRATOR_DELEGATION_REQUIRED, BOULDER_CONTINUATION_PROMPT, VERIFICATION_REMINDER, SINGLE_TASK_DIRECTIVE, } from './constants.js';
 import { readBoulderState, getPlanProgress, } from '../../features/boulder-state/index.js';
 import { addWorkingMemoryEntry, setPriorityContext, } from '../notepad/index.js';
 import { logAuditEntry } from './audit.js';
-import { getWorktreeRoot } from '../../lib/worktree-paths.js';
-import { toForwardSlash } from '../../utils/paths.js';
 // Re-export constants
 export * from './constants.js';
 // Config caching (30s TTL)
@@ -31,8 +30,8 @@ export function clearEnforcementCache() {
     enforcementCache = null;
 }
 /**
- * Read enforcement level from config
- * Checks: .omc/config.json → ~/.claude/.omc-config.json → default (warn)
+ * Read enforcement level from config.
+ * Checks: .omc/config.json → [$CLAUDE_CONFIG_DIR|~/.claude]/.omc-config.json → default (warn)
  */
 function getEnforcementLevel(directory) {
     const now = Date.now();
@@ -82,6 +81,10 @@ export function isAllowedPath(filePath, directory) {
         return true;
     // Absolute path: strip worktree root, then re-check
     if (path.isAbsolute(filePath)) {
+        const relToConfigDir = path.relative(getClaudeConfigDir(), filePath);
+        if (!relToConfigDir || (!relToConfigDir.startsWith('..') && !path.isAbsolute(relToConfigDir))) {
+            return true;
+        }
         const root = directory ? getWorktreeRoot(directory) : getWorktreeRoot();
         if (root) {
             const rel = toForwardSlash(path.relative(root, filePath));
@@ -352,7 +355,7 @@ export function processOrchestratorPostTool(input, output) {
     const workDir = directory || process.cwd();
     // Handle write/edit tools
     if (isWriteEditTool(toolName)) {
-        const filePath = (toolInput?.filePath ?? toolInput?.path ?? toolInput?.file);
+        const filePath = (toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path ?? toolInput?.file ?? toolInput?.notebook_path);
         if (filePath && !isAllowedPath(filePath, workDir)) {
             return {
                 continue: true,

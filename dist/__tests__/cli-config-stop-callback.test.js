@@ -128,5 +128,31 @@ describe('omc config-stop-callback tag options', () => {
         expect(show.stdout).toContain('"webhookUrl"');
         expect(show.stdout).toContain('"tagList"');
     });
+    it('uses CLAUDE_CONFIG_DIR for the default file callback path', () => {
+        const homeDir = mkdtempSync(join(tmpdir(), 'omc-cli-stop-callback-home-'));
+        const claudeConfigDir = join(homeDir, '.claude-isolated-workspace');
+        const configPath = join(claudeConfigDir, '.omc-config.json');
+        mkdirSync(claudeConfigDir, { recursive: true });
+        writeFileSync(configPath, JSON.stringify({
+            silentAutoUpdate: false,
+            stopHookCallbacks: {},
+        }, null, 2));
+        const result = spawnSync(process.execPath, ['--import', 'tsx', CLI_ENTRY, 'config-stop-callback', 'file', '--enable'], {
+            cwd: REPO_ROOT,
+            env: {
+                ...process.env,
+                HOME: homeDir,
+                CLAUDE_CONFIG_DIR: claudeConfigDir,
+            },
+            encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        const config = readConfig(configPath);
+        expect(config.stopHookCallbacks?.file).toEqual({
+            enabled: true,
+            path: join(claudeConfigDir, 'session-logs/{session_id}.md'),
+            format: 'markdown',
+        });
+    });
 });
 //# sourceMappingURL=cli-config-stop-callback.test.js.map

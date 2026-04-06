@@ -31,8 +31,6 @@ export const PROJECT_RULE_FILES = [
 ];
 /** Pattern for GitHub instructions files */
 export const GITHUB_INSTRUCTIONS_PATTERN = /\.instructions\.md$/;
-/** User-level rule directory */
-export const USER_RULE_DIR = '.claude/rules';
 /** Valid rule file extensions */
 export const RULE_EXTENSIONS = ['.md', '.mdc'];
 /** Tools that trigger rule injection */

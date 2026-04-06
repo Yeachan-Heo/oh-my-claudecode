@@ -6,9 +6,10 @@
  * - init: Create directory structure, validate configs, set environment
  * - maintenance: Prune old state files, cleanup orphaned state, vacuum SQLite
  */
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, lstatSync, unlinkSync, readFileSync, readlinkSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import { registerBeadsContext } from '../beads-context/index.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -132,6 +133,93 @@ export function patchHooksJsonForWindows(pluginRoot) {
     }
 }
 /**
+ * Ensure ~/.claude/hooks/lib/stdin.mjs points to the current plugin version.
+ *
+ * This fixes a silent breakage that occurs when OMC upgrades to a new version:
+ * the symlink stays pointing at the old version's cache dir, so hooks that
+ * import stdin.mjs fail with ERR_MODULE_NOT_FOUND.  Rebuilding the symlink on
+ * every init keeps it in sync automatically.
+ *
+ * Safe replace strategy: we only remove the old destination AFTER successfully
+ * creating the new symlink, so we never leave the setup in a broken state.
+ * Falls back to copy if symlink is unavailable on the platform.
+ */
+export function ensureStdinSymlink(pluginRoot) {
+    const libDstDir = join(getClaudeConfigDir(), 'hooks/lib');
+    const libSrc = join(pluginRoot, 'templates/hooks/lib');
+    const stdinSrc = join(libSrc, 'stdin.mjs');
+    const stdinDst = join(libDstDir, 'stdin.mjs');
+    // Ensure destination directory exists
+    if (!existsSync(libDstDir)) {
+        mkdirSync(libDstDir, { recursive: true });
+    }
+    // Verify source exists before doing anything destructive
+    if (!existsSync(stdinSrc)) {
+        return; // Nothing to link or copy
+    }
+    // Check if already correct symlink using readlinkSync
+    try {
+        const currentTarget = readlinkSync(stdinDst);
+        if (currentTarget === stdinSrc) {
+            // Verify the target actually exists (not a dangling symlink)
+            try {
+                statSync(currentTarget);
+                return; // Already pointing to correct source and target exists
+            }
+            catch {
+                // Target doesn't exist - dangling symlink, proceed to fix
+            }
+        }
+    }
+    catch {
+        // stdinDst doesn't exist or isn't a symlink - proceed to fix
+    }
+    // Safe replace: try to create a new symlink first, only remove old after success
+    const tmpDst = stdinDst + '.tmp';
+    try {
+        // Remove any stale temp file first (e.g. from crash or failed previous run)
+        try {
+            unlinkSync(tmpDst);
+        }
+        catch { /* ignore if didn't exist */ }
+        // Create new symlink with temp name first
+        symlinkSync(stdinSrc, tmpDst);
+        // New symlink created successfully - now atomically replace the old one
+        // On POSIX rename is atomic. On Windows we just unlink+rename which is still safer
+        // than deleting before creating.
+        try {
+            unlinkSync(stdinDst); // Remove old symlink or file
+        }
+        catch {
+            // Ignore if didn't exist
+        }
+        // Use rename for atomic replacement
+        renameSync(tmpDst, stdinDst);
+    }
+    catch {
+        // Symlink creation failed (platform may not support symlinks, e.g. some Windows configs)
+        // Use lstatSync to detect dangling symlinks (existsSync returns false for broken symlinks)
+        try {
+            const dstStat = lstatSync(stdinDst);
+            if (dstStat.isSymbolicLink()) {
+                // Remove dangling symlink and copy fresh
+                unlinkSync(stdinDst);
+            }
+            // else: regular file - fall through to overwrite (user can re-symlink if needed)
+        }
+        catch {
+            // Destination doesn't exist - safe to copy
+        }
+        // Always copy when symlink is unavailable (user hasn't chosen symlink over copy)
+        try {
+            copyFileSync(stdinSrc, stdinDst);
+        }
+        catch {
+            // Non-fatal: older setups may have different permissions/structures
+        }
+    }
+}
+/**
  * Process setup init trigger
  */
 export async function processSetupInit(input) {
@@ -145,10 +233,20 @@ export async function processSetupInit(input) {
     // The sh->find-node.sh->node chain triggers Claude Code UI bug #17088 on
     // MSYS2/Git Bash, mislabeling every successful hook as an error (issue #899).
     // find-node.sh is only needed on Unix for nvm/fnm PATH discovery.
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     if (process.platform === 'win32') {
-        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
         if (pluginRoot) {
             patchHooksJsonForWindows(pluginRoot);
+        }
+    }
+    // Always heal the stdin.mjs symlink so upgrades don't break hooks
+    // Best-effort: non-fatal, don't block init if this fails
+    if (pluginRoot) {
+        try {
+            ensureStdinSymlink(pluginRoot);
+        }
+        catch {
+            // Non-fatal: stdin symlink healing is best-effort maintenance
         }
     }
     try {

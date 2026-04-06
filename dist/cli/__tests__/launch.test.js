@@ -195,11 +195,9 @@ describe('runClaude OMC HUD behavior', () => {
     it('does not add split-window HUD pane args when launching outside tmux', () => {
         resolveLaunchPolicy.mockReturnValue('outside-tmux');
         runClaude('/tmp/cwd', [], 'test-session');
-        const calls = vi.mocked(execFileSync).mock.calls;
-        const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
-        expect(tmuxCall).toBeDefined();
-        const tmuxArgs = tmuxCall[1];
-        expect(tmuxArgs).not.toContain('split-window');
+        const tmuxCalls = vi.mocked(execFileSync).mock.calls.filter(([cmd]) => cmd === 'tmux');
+        expect(tmuxCalls.length).toBeGreaterThan(0);
+        expect(tmuxCalls.every(([, tmuxArgs]) => !tmuxArgs.includes('split-window'))).toBe(true);
     });
 });
 // ---------------------------------------------------------------------------
@@ -218,8 +216,8 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     });
     it('uses session-targeted mouse option instead of global (-t sessionName, not -g)', () => {
         runClaude('/tmp', [], 'sid');
-        const calls = vi.mocked(execFileSync).mock.calls;
-        const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+        const tmuxCalls = vi.mocked(execFileSync).mock.calls.filter(([cmd]) => cmd === 'tmux');
+        const tmuxCall = tmuxCalls.find(([, args]) => args[0] === 'set-option');
         expect(tmuxCall).toBeDefined();
         const tmuxArgs = tmuxCall[1];
         // Must use -t <sessionName> targeting, not -g (global)
@@ -234,22 +232,58 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     });
     it('does not set terminal-overrides in tmux args', () => {
         runClaude('/tmp', [], 'sid');
-        const calls = vi.mocked(execFileSync).mock.calls;
-        const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
+        const tmuxCalls = vi.mocked(execFileSync).mock.calls.filter(([cmd]) => cmd === 'tmux');
+        const tmuxCall = tmuxCalls.find(([, args]) => args[0] === 'new-session');
+        expect(tmuxCall).toBeDefined();
         const tmuxArgs = tmuxCall[1];
         expect(tmuxArgs).not.toContain('terminal-overrides');
         expect(tmuxArgs).not.toContain('*:smcup@:rmcup@');
     });
     it('places mouse mode setup before attach-session', () => {
         runClaude('/tmp', [], 'sid');
-        const calls = vi.mocked(execFileSync).mock.calls;
-        const tmuxCall = calls.find(([cmd]) => cmd === 'tmux');
-        const tmuxArgs = tmuxCall[1];
-        const mouseIdx = tmuxArgs.indexOf('mouse');
-        const attachIdx = tmuxArgs.indexOf('attach-session');
+        const tmuxCalls = vi.mocked(execFileSync).mock.calls
+            .map(([cmd, tmuxArgs]) => ({ cmd, tmuxArgs: tmuxArgs }))
+            .filter(({ cmd }) => cmd === 'tmux');
+        const mouseIdx = tmuxCalls.findIndex(({ tmuxArgs }) => tmuxArgs[0] === 'set-option');
+        const attachIdx = tmuxCalls.findIndex(({ tmuxArgs }) => tmuxArgs[0] === 'attach-session');
         expect(mouseIdx).toBeGreaterThanOrEqual(0);
         expect(attachIdx).toBeGreaterThanOrEqual(0);
         expect(mouseIdx).toBeLessThan(attachIdx);
+    });
+    it('preserves a valid detached session when attach-session is interrupted', () => {
+        execFileSync.mockImplementation((cmd, args) => {
+            if (cmd !== 'tmux')
+                return Buffer.from('');
+            if (args[0] === 'attach-session') {
+                throw new Error('attach interrupted');
+            }
+            return Buffer.from('');
+        });
+        runClaude('/tmp', [], 'sid');
+        const tmuxCalls = vi.mocked(execFileSync).mock.calls
+            .filter(([cmd]) => cmd === 'tmux')
+            .map(([, tmuxArgs]) => tmuxArgs);
+        expect(tmuxCalls.map((tmuxArgs) => tmuxArgs[0])).toEqual([
+            'new-session',
+            'set-option',
+            'attach-session',
+            'has-session',
+        ]);
+        expect(tmuxCalls.some((tmuxArgs) => tmuxArgs[0] === 'kill-session')).toBe(false);
+        expect(vi.mocked(execFileSync).mock.calls.find(([cmd]) => cmd === 'claude')).toBeUndefined();
+        expect(processExitSpy).not.toHaveBeenCalled();
+    });
+    it('falls back to direct launch when detached session creation fails', () => {
+        execFileSync.mockImplementation((cmd, args) => {
+            if (cmd === 'tmux' && args[0] === 'new-session') {
+                throw new Error('tmux launch failed');
+            }
+            return Buffer.from('');
+        });
+        runClaude('/tmp', ['--dangerously-skip-permissions'], 'sid');
+        const calls = vi.mocked(execFileSync).mock.calls;
+        expect(calls.filter(([cmd]) => cmd === 'tmux')).toHaveLength(1);
+        expect(calls.find(([cmd, args]) => cmd === 'claude' && args[0] === '--dangerously-skip-permissions')).toBeDefined();
     });
 });
 // ---------------------------------------------------------------------------
