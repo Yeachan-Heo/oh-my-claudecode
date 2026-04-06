@@ -21,6 +21,13 @@ const SETTINGS_FILE = join(CLAUDE_DIR, 'settings.json');
 
 console.log('[OMC] Running post-install setup...');
 
+// Resolve absolute node binary path at module level so both the
+// settings.json block and the hooks.json patching block can reference it.
+// Previously declared inside the settings.json try-block, making it
+// inaccessible to the hooks.json try-block (ReferenceError: nodeBin is
+// not defined) and silently skipping the hooks.json patch. Fixes #2165.
+const nodeBin = process.execPath || 'node';
+
 // 1. Create HUD directory
 if (!existsSync(HUD_DIR)) {
   mkdirSync(HUD_DIR, { recursive: true });
@@ -226,7 +233,6 @@ try {
 
   // Use the absolute node binary path so nvm/fnm users don't get
   // "node not found" errors in non-interactive shells (issue #892).
-  const nodeBin = process.execPath || 'node';
   settings.statusLine = {
     type: 'command',
     command: `"${nodeBin}" "${hudScriptPath.replace(/\\/g, "/")}"`
