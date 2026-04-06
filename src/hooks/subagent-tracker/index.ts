@@ -134,7 +134,9 @@ export const DEADLOCK_CHECK_THRESHOLD = 3;
 const STATE_FILE = "subagent-tracking.json";
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 const MAX_COMPLETED_AGENTS = 100;
-const LOCK_TIMEOUT_MS = 5000;
+// Keep lock timeout short to reduce event-loop blocking under bursty
+// concurrent worker starts while still allowing brief contention retries.
+const LOCK_TIMEOUT_MS = 500;
 const LOCK_RETRY_MS = 50;
 const WRITE_DEBOUNCE_MS = 100;
 const MAX_FLUSH_RETRIES = 3;

@@ -689,7 +689,7 @@ export async function waitForPaneReady(
   const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
   const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
     ? Number(opts.timeoutMs)
-    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 10_000);
+    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
     ? Number(opts.pollIntervalMs)
     : 250;
@@ -855,12 +855,14 @@ export async function sendToWorker(
       return false;
     }
 
-    // Fail-open: one last nudge, then continue regardless.
+    // Fail-closed: one final submit attempt, then report failure so
+    // callers can surface startup dispatch problems explicitly.
     await sendKey('C-m');
     await sleep(120);
     await sendKey('C-m');
-
-    return true;
+    await sleep(140);
+    const finalCheckCapture = await capturePaneAsync(paneId, execFileAsync as never);
+    return !paneTailContainsLiteralLine(finalCheckCapture, message);
   } catch {
     return false;
   }
