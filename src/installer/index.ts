@@ -187,10 +187,10 @@ function buildStatusLineCommand(nodeBin: string, hudScriptPath: string, findNode
 
   if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
-      return 'sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs';
+      return 'sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs';
     }
 
-    return 'node $HOME/.claude/hud/omc-hud.mjs';
+    return 'node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs';
   }
 
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, '/');

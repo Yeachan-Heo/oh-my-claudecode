@@ -7568,7 +7568,7 @@ function buildHookCommand(filename) {
     return `node ${quoteCommandPath((0, import_path42.join)(getClaudeConfigDir(), "hooks", filename))}`;
   }
   if (isDefaultClaudeConfigDir()) {
-    return `node "$HOME/.claude/hooks/${filename}"`;
+    return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
   }
   return `node ${quoteCommandPath((0, import_path42.join)(getClaudeConfigDir(), "hooks", filename).replace(/\\/g, "/"))}`;
 }
@@ -8476,9 +8476,9 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath) {
   }
   if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
-      return "sh $HOME/.claude/hud/find-node.sh $HOME/.claude/hud/omc-hud.mjs";
+      return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
     }
-    return "node $HOME/.claude/hud/omc-hud.mjs";
+    return "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
   }
   const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (findNodePath) {
@@ -80465,9 +80465,29 @@ function runClaudeInsideTmux(cwd2, args) {
     process.exit(typeof err.status === "number" ? err.status : 1);
   }
 }
+var TMUX_ENV_FORWARD = [
+  "CLAUDE_CONFIG_DIR",
+  "OMC_NOTIFY",
+  "OMC_OPENCLAW",
+  "OMC_TELEGRAM",
+  "OMC_DISCORD",
+  "OMC_SLACK",
+  "OMC_WEBHOOK"
+];
+function buildEnvExportPrefix(vars) {
+  const parts = [];
+  for (const name of vars) {
+    const value = process.env[name];
+    if (value !== void 0) {
+      parts.push(`export ${name}=${quoteShellArg2(value)}`);
+    }
+  }
+  return parts.length > 0 ? parts.join("; ") + "; " : "";
+}
 function runClaudeOutsideTmux(cwd2, args, _sessionId) {
   const rawClaudeCmd = buildTmuxShellCommand("claude", args);
-  const claudeCmd = wrapWithLoginShell(`sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
+  const envPrefix = buildEnvExportPrefix(TMUX_ENV_FORWARD);
+  const claudeCmd = wrapWithLoginShell(`${envPrefix}sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
   const sessionName2 = buildTmuxSessionName(cwd2);
   const tmuxArgs = [
     "new-session",

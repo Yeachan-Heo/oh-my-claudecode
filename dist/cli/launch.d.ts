@@ -124,6 +124,16 @@ export declare function isPrintMode(args: string[]): boolean;
  */
 export declare function runClaude(cwd: string, args: string[], sessionId: string): void;
 /**
+ * Env vars that must be forwarded into tmux sessions.
+ * tmux new-session inherits the *server's* environment, not the calling
+ * process's, so vars set on process.env (e.g. CLAUDE_CONFIG_DIR at launch)
+ * are silently lost.  We inject them as `export` statements into the shell
+ * command that runs inside the tmux pane, *after* .zshrc/.bashrc sourcing
+ * so our values take precedence.
+ */
+export declare const TMUX_ENV_FORWARD: string[];
+export declare function buildEnvExportPrefix(vars: string[]): string;
+/**
  * postLaunch: Cleanup after Claude exits
  * Currently a placeholder - can be extended for:
  * - Session cleanup
