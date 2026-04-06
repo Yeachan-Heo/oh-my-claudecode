@@ -19,6 +19,7 @@ import type { CliAgentType } from '../../team/model-contract.js';
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
+const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 
 const TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] "<task description>"
@@ -239,6 +240,12 @@ export interface ParsedTeamArgs {
   newWindow: boolean;
 }
 
+interface NormalizedWorkerSpecSegment {
+  count: number;
+  agentType: string;
+  role?: string;
+}
+
 function getTeamWorkerIdentityFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
   const omc = typeof env.OMC_TEAM_WORKER === 'string' ? env.OMC_TEAM_WORKER.trim() : '';
   if (omc) return omc;
@@ -284,6 +291,29 @@ export async function assertTeamSpawnAllowed(cwd: string, env: NodeJS.ProcessEnv
 /** Regex for a single worker spec segment: N[:type[:role]] */
 const SINGLE_SPEC_RE = /^(\d+)(?::([a-z][a-z0-9-]*)(?::([a-z][a-z0-9-]*))?)?$/i;
 
+function normalizeWorkerSpecSegment(match: RegExpMatchArray): NormalizedWorkerSpecSegment {
+  const count = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(count) || count < MIN_WORKER_COUNT || count > MAX_WORKER_COUNT) {
+    throw new Error(`Invalid worker count "${match[1]}". Expected ${MIN_WORKER_COUNT}-${MAX_WORKER_COUNT}.`);
+  }
+
+  const token = match[2]?.toLowerCase();
+  const explicitRole = match[3]?.toLowerCase();
+  if (!token) {
+    return { count, agentType: 'claude' };
+  }
+
+  if (explicitRole) {
+    return { count, agentType: token, role: explicitRole };
+  }
+
+  if (VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
+    return { count, agentType: token };
+  }
+
+  return { count, agentType: 'claude', role: token };
+}
+
 /** @internal Exported for testing */
 export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
   const args = [...tokens];
@@ -313,17 +343,13 @@ export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
 
   if (first.includes(',')) {
     const segments = first.split(',');
-    const parsedSegments: Array<{ count: number; type: string; role?: string }> = [];
+    const parsedSegments: NormalizedWorkerSpecSegment[] = [];
     let allValid = true;
 
     for (const seg of segments) {
       const m = seg.match(SINGLE_SPEC_RE);
       if (!m) { allValid = false; break; }
-      const count = Number.parseInt(m[1], 10);
-      if (!Number.isFinite(count) || count < MIN_WORKER_COUNT || count > MAX_WORKER_COUNT) {
-        throw new Error(`Invalid worker count "${m[1]}". Expected ${MIN_WORKER_COUNT}-${MAX_WORKER_COUNT}.`);
-      }
-      parsedSegments.push({ count, type: m[2] || 'claude', role: m[3] });
+      parsedSegments.push(normalizeWorkerSpecSegment(m));
     }
 
     if (allValid && parsedSegments.length > 0) {
@@ -331,8 +357,8 @@ export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
       for (const seg of parsedSegments) {
         workerCount += seg.count;
         for (let i = 0; i < seg.count; i++) {
-          agentTypes.push(seg.type);
-          workerSpecs.push({ agentType: seg.type, ...(seg.role ? { role: seg.role } : {}) });
+          agentTypes.push(seg.agentType);
+          workerSpecs.push({ agentType: seg.agentType, ...(seg.role ? { role: seg.role } : {}) });
         }
       }
       if (workerCount > MAX_WORKER_COUNT) {
@@ -351,15 +377,14 @@ export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
   if (!specMatched) {
     const match = first.match(SINGLE_SPEC_RE);
     if (match) {
-      const count = Number.parseInt(match[1], 10);
-      if (!Number.isFinite(count) || count < MIN_WORKER_COUNT || count > MAX_WORKER_COUNT) {
-        throw new Error(`Invalid worker count "${match[1]}". Expected ${MIN_WORKER_COUNT}-${MAX_WORKER_COUNT}.`);
-      }
-      workerCount = count;
-      const type = match[2] || 'claude';
-      if (match[3]) role = match[3];
-      agentTypes = Array.from({ length: workerCount }, () => type);
-      workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: type, ...(role ? { role } : {}) }));
+      const normalized = normalizeWorkerSpecSegment(match);
+      workerCount = normalized.count;
+      role = normalized.role;
+      agentTypes = Array.from({ length: workerCount }, () => normalized.agentType);
+      workerSpecs = Array.from({ length: workerCount }, () => ({
+        agentType: normalized.agentType,
+        ...(role ? { role } : {}),
+      }));
       filteredArgs.shift();
     }
   }
