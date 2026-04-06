@@ -6,15 +6,23 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
+import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, renameSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
+import { closeSync, openSync, readSync, statSync } from 'fs';
+import { basename, join, dirname, resolve } from 'path';
+import { homedir, tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
 const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
+const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
+const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT || '90', 10);
+const PREEMPTIVE_COOLDOWN_MS = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS || '60000', 10);
+const PREEMPTIVE_TRANSCRIPT_TAIL_BYTES = 4096;
+const PREEMPTIVE_LARGE_OUTPUT_TOOLS = new Set(['read', 'grep', 'glob', 'bash', 'webfetch', 'task', 'taskcreate', 'taskupdate', 'taskoutput']);
 const QUIET_LEVEL = getQuietLevel();
 const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 
@@ -22,6 +30,19 @@ function getQuietLevel() {
   const parsed = Number.parseInt(process.env.OMC_QUIET || '0', 10);
   if (Number.isNaN(parsed)) return 0;
   return Math.max(0, parsed);
+}
+
+function clampPercent(percent, fallback) {
+  if (!Number.isFinite(percent)) return fallback;
+  return Math.min(100, Math.max(1, percent));
+}
+
+function getPreemptiveWarningThreshold() {
+  return clampPercent(PREEMPTIVE_WARNING_THRESHOLD_PERCENT, 70);
+}
+
+function getPreemptiveCriticalThreshold() {
+  return clampPercent(PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT, 90);
 }
 
 // Get the directory of this script to resolve the dist module
@@ -216,6 +237,170 @@ function detectBackgroundOperation(output) {
   ];
 
   return bgPatterns.some(pattern => pattern.test(output));
+}
+
+function resolveTranscriptPath(transcriptPath, cwd) {
+  if (!transcriptPath) return undefined;
+
+  try {
+    if (existsSync(transcriptPath)) return transcriptPath;
+  } catch {}
+
+  const worktreePattern = /--claude-worktrees-[^/\\]+/;
+  if (worktreePattern.test(transcriptPath)) {
+    const resolvedPath = transcriptPath.replace(worktreePattern, '');
+    try {
+      if (existsSync(resolvedPath)) return resolvedPath;
+    } catch {}
+  }
+
+  const effectiveCwd = cwd || process.cwd();
+  try {
+    const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    const mainRepoRoot = dirname(resolve(effectiveCwd, gitCommonDir));
+    const worktreeTop = execSync('git rev-parse --show-toplevel', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (mainRepoRoot !== worktreeTop) {
+      const sessionFile = basename(transcriptPath);
+      if (sessionFile) {
+        const projectsDir = join(getClaudeConfigDir(), 'projects');
+        if (existsSync(projectsDir)) {
+          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const resolvedPath = join(projectsDir, encodedMain, sessionFile);
+          if (existsSync(resolvedPath)) return resolvedPath;
+        }
+      }
+    }
+  } catch {}
+
+  return transcriptPath;
+}
+
+function readTranscriptUsage(transcriptPath) {
+  if (!transcriptPath) return null;
+
+  let fd = -1;
+  try {
+    const stat = statSync(transcriptPath);
+    if (stat.size === 0) return null;
+
+    fd = openSync(transcriptPath, 'r');
+    const readSize = Math.min(PREEMPTIVE_TRANSCRIPT_TAIL_BYTES, stat.size);
+    const buffer = Buffer.alloc(readSize);
+    readSync(fd, buffer, 0, readSize, stat.size - readSize);
+    closeSync(fd);
+    fd = -1;
+
+    const tail = buffer.toString('utf-8');
+    const windowMatches = tail.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
+    const inputMatches = tail.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
+    if (!windowMatches || !inputMatches) return null;
+
+    const lastWindow = Number.parseInt(
+      windowMatches[windowMatches.length - 1].match(/(\d+)/)?.[1] || '0',
+      10,
+    );
+    const lastInput = Number.parseInt(
+      inputMatches[inputMatches.length - 1].match(/(\d+)/)?.[1] || '0',
+      10,
+    );
+    if (!Number.isFinite(lastWindow) || lastWindow <= 0) return null;
+    if (!Number.isFinite(lastInput) || lastInput < 0) return null;
+
+    return Math.round((lastInput / lastWindow) * 100);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== -1) {
+      try { closeSync(fd); } catch {}
+    }
+  }
+}
+
+function getPreemptiveCooldownFilePath(directory, sessionId) {
+  const cooldownScope =
+    sessionId && sessionId !== 'unknown'
+      ? `${directory || process.cwd()}::${sessionId}`
+      : directory || process.cwd();
+  const hash = createHash('sha1').update(cooldownScope).digest('hex');
+  const cooldownDir = join(tmpdir(), 'omc-preemptive-compaction');
+  mkdirSync(cooldownDir, { recursive: true });
+  return join(cooldownDir, `${hash}.json`);
+}
+
+function readPreemptiveCooldownState(directory, sessionId) {
+  try {
+    const filePath = getPreemptiveCooldownFilePath(directory, sessionId);
+    if (!existsSync(filePath)) return null;
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+    if (!data || typeof data !== 'object') return null;
+    return {
+      lastWarningTime:
+        typeof data.lastWarningTime === 'number' ? data.lastWarningTime : 0,
+      severity: data.severity === 'critical' ? 'critical' : 'warning',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePreemptiveCooldownState(directory, sessionId, severity, now) {
+  writeFileSync(
+    getPreemptiveCooldownFilePath(directory, sessionId),
+    JSON.stringify({ lastWarningTime: now, severity }),
+    { mode: 0o600 },
+  );
+}
+
+function shouldSuppressPreemptiveWarning(directory, sessionId, severity, now) {
+  const cooldownState = readPreemptiveCooldownState(directory, sessionId);
+  if (!cooldownState) return false;
+  if (now - cooldownState.lastWarningTime >= PREEMPTIVE_COOLDOWN_MS) return false;
+  return !(cooldownState.severity === 'warning' && severity === 'critical');
+}
+
+function buildPreemptiveContextMessage(percentUsed, severity) {
+  if (severity === 'critical') {
+    return `[OMC CRITICAL] Context at ${percentUsed}% (critical threshold: ${getPreemptiveCriticalThreshold()}%). Run /compact now before continuing with more tools or agent fan-out.`;
+  }
+
+  return `[OMC WARNING] Context at ${percentUsed}% (warning threshold: ${getPreemptiveWarningThreshold()}%). Plan a /compact soon to preserve room for the next large tool output.`;
+}
+
+function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) {
+  if (!PREEMPTIVE_LARGE_OUTPUT_TOOLS.has(String(toolName || '').toLowerCase())) {
+    return '';
+  }
+
+  const percentUsed = readTranscriptUsage(
+    resolveTranscriptPath(data.transcript_path || data.transcriptPath, directory),
+  );
+  const warningThreshold = getPreemptiveWarningThreshold();
+  const criticalThreshold = getPreemptiveCriticalThreshold();
+
+  if (percentUsed === null || percentUsed < warningThreshold) {
+    return '';
+  }
+
+  const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
+  const now = Date.now();
+  const sessionId = data.session_id || data.sessionId || 'unknown';
+
+  if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
+    return '';
+  }
+
+  writePreemptiveCooldownState(directory, sessionId, severity, now);
+  return buildPreemptiveContextMessage(percentUsed, severity);
 }
 
 function getInvokedSkillName(toolInput) {
@@ -478,6 +663,10 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
   return message;
 }
 
+function combineMessages(...messages) {
+  return messages.filter(Boolean).join(' | ');
+}
+
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
   const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -529,10 +718,13 @@ async function main() {
     }
 
     // Generate contextual message
-    const message = generateMessage(toolName, clippedToolOutput, sessionId, toolCount, directory, {
-      wasTruncated,
-      rawLength: toolOutput.length,
-    });
+    const message = combineMessages(
+      generateMessage(toolName, clippedToolOutput, sessionId, toolCount, directory, {
+        wasTruncated,
+        rawLength: toolOutput.length,
+      }),
+      maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
+    );
 
     // Build response - use hookSpecificOutput.additionalContext for PostToolUse
     const response = { continue: true };
