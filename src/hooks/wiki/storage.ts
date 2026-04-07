@@ -368,11 +368,18 @@ export function appendLog(root: string, entry: WikiLogEntry): void {
 // Slug Utilities
 // ============================================================================
 
-/** Convert a title to a filename slug. */
+/** Convert a title to a filename slug. Non-ASCII titles use a hash-based fallback. */
 export function titleToSlug(title: string): string {
-  return title
+  const base = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, 64) + '.md';
+    .slice(0, 64);
+  if (base) return base + '.md';
+  // Hash fallback for non-ASCII titles (CJK, Hangul, emoji, etc.)
+  let hash = 0;
+  for (let i = 0; i < title.length; i++) {
+    hash = ((hash << 5) - hash + title.charCodeAt(i)) | 0;
+  }
+  return 'page-' + (hash >>> 0).toString(16).padStart(8, '0') + '.md';
 }
