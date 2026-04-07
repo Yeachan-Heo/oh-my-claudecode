@@ -25,7 +25,7 @@
 const CSI_NON_SGR_REGEX = /\x1b\[\??[0-9;]*[A-LN-Za-ln-z]/g;
 
 // Matches OSC sequences (ESC]...BEL) - operating system commands
-const OSC_REGEX = /\x1b\][^\x07]*\x07/g;
+const OSC_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // Matches simple escape sequences (ESC + single char, but not [ or ])
 const SIMPLE_ESC_REGEX = /\x1b[^[\]]/g;
