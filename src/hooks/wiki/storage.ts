@@ -22,8 +22,12 @@ import {
   type WikiPage,
   type WikiPageFrontmatter,
   type WikiLogEntry,
+  type WikiScope,
   WIKI_SCHEMA_VERSION,
+  COMPACTION_THRESHOLD,
+  COMPACTION_KEEP_RECENT,
 } from './types.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 
 // ============================================================================
 // Constants
@@ -38,9 +42,23 @@ const RESERVED_FILES = new Set([INDEX_FILE, LOG_FILE]);
 // Path helpers
 // ============================================================================
 
-/** Get the wiki directory path. */
+/** Get the local wiki directory path. */
 export function getWikiDir(root: string): string {
   return join(getOmcRoot(root), WIKI_DIR);
+}
+
+/** Get the global wiki directory path (~/.claude/.omc/wiki/). */
+export function getGlobalWikiDir(): string {
+  return join(getClaudeConfigDir(), '.omc', WIKI_DIR);
+}
+
+/** Ensure a wiki directory exists. For local wikis, also ensures git-ignore. */
+export function ensureGlobalWikiDir(): string {
+  const globalDir = getGlobalWikiDir();
+  if (!existsSync(globalDir)) {
+    mkdirSync(globalDir, { recursive: true });
+  }
+  return globalDir;
 }
 
 /** Ensure wiki directory exists and is git-ignored. */
@@ -99,6 +117,7 @@ export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatte
 
   try {
     const fm = parseSimpleYaml(yamlBlock);
+    const ttlVal = fm.ttl ? Number(fm.ttl) : undefined;
     const frontmatter: WikiPageFrontmatter = {
       title: String(fm.title || ''),
       tags: parseYamlArray(fm.tags),
@@ -109,6 +128,10 @@ export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatte
       category: (fm.category || 'reference') as WikiPageFrontmatter['category'],
       confidence: (fm.confidence || 'medium') as WikiPageFrontmatter['confidence'],
       schemaVersion: Number(fm.schemaVersion) || WIKI_SCHEMA_VERSION,
+      ...(ttlVal ? { ttl: ttlVal } : {}),
+      ...(fm.expiresAt ? { expiresAt: String(fm.expiresAt) } : {}),
+      ...(fm.compactedAt ? { compactedAt: String(fm.compactedAt) } : {}),
+      ...(fm.scope ? { scope: String(fm.scope) as WikiScope } : {}),
     };
     return { frontmatter, content };
   } catch {
@@ -158,7 +181,7 @@ function escapeYaml(s: string): string {
  */
 export function serializePage(page: WikiPage): string {
   const fm = page.frontmatter;
-  const yaml = [
+  const lines = [
     `title: "${escapeYaml(fm.title)}"`,
     `tags: [${fm.tags.map(t => `"${escapeYaml(t)}"`).join(', ')}]`,
     `created: ${fm.created}`,
@@ -168,9 +191,15 @@ export function serializePage(page: WikiPage): string {
     `category: ${fm.category}`,
     `confidence: ${fm.confidence}`,
     `schemaVersion: ${fm.schemaVersion}`,
-  ].join('\n');
+  ];
 
-  return `---\n${yaml}\n---\n${page.content}`;
+  // Optional fields — only serialize when present
+  if (fm.ttl) lines.push(`ttl: ${fm.ttl}`);
+  if (fm.expiresAt) lines.push(`expiresAt: ${fm.expiresAt}`);
+  if (fm.compactedAt) lines.push(`compactedAt: ${fm.compactedAt}`);
+  if (fm.scope) lines.push(`scope: ${fm.scope}`);
+
+  return `---\n${lines.join('\n')}\n---\n${page.content}`;
 }
 
 // ============================================================================
@@ -362,6 +391,176 @@ export function appendLog(root: string, entry: WikiLogEntry): void {
   withWikiLock(root, () => {
     appendLogUnsafe(root, entry);
   });
+}
+
+// ============================================================================
+// Global Wiki Operations
+// ============================================================================
+
+/** Read all pages from the global wiki tier. */
+export function readAllGlobalPages(): WikiPage[] {
+  const globalDir = getGlobalWikiDir();
+  if (!existsSync(globalDir)) return [];
+
+  return readdirSync(globalDir)
+    .filter(f => f.endsWith('.md') && !RESERVED_FILES.has(f))
+    .sort()
+    .map(f => readPageFromDir(globalDir, f))
+    .filter((p): p is WikiPage => p !== null);
+}
+
+/** Read a single page from a specific directory. */
+function readPageFromDir(dir: string, filename: string): WikiPage | null {
+  const filePath = safeWikiPath(dir, filename);
+  if (!filePath || !existsSync(filePath)) return null;
+
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const parsed = parseFrontmatter(raw);
+    if (!parsed) return null;
+    return { filename, frontmatter: parsed.frontmatter, content: parsed.content };
+  } catch {
+    return null;
+  }
+}
+
+/** Write a page to the global wiki. */
+export function writeGlobalPage(page: WikiPage): void {
+  const globalDir = ensureGlobalWikiDir();
+  const filePath = safeWikiPath(globalDir, page.filename);
+  if (!filePath) throw new Error(`Invalid wiki page filename: ${page.filename}`);
+  atomicWriteFileSync(filePath, serializePage(page));
+}
+
+/** Delete a page from the global wiki. Returns true if deleted. */
+export function deleteGlobalPage(filename: string): boolean {
+  const globalDir = getGlobalWikiDir();
+  const filePath = safeWikiPath(globalDir, filename);
+  if (!filePath || !existsSync(filePath)) return false;
+  unlinkSync(filePath);
+  return true;
+}
+
+// ============================================================================
+// TTL & Garbage Collection
+// ============================================================================
+
+/** Check if a wiki page has expired based on its TTL. */
+export function isPageExpired(page: WikiPage): boolean {
+  if (!page.frontmatter.expiresAt) return false;
+  return new Date(page.frontmatter.expiresAt).getTime() <= Date.now();
+}
+
+/**
+ * Remove expired pages from a wiki directory.
+ * Returns the count of pages removed.
+ */
+export function cleanupExpiredPages(root: string): { removed: number; filenames: string[] } {
+  const removed: string[] = [];
+
+  withWikiLock(root, () => {
+    const pages = readAllPages(root);
+    for (const page of pages) {
+      if (isPageExpired(page)) {
+        deletePageUnsafe(root, page.filename);
+        removed.push(page.filename);
+      }
+    }
+    if (removed.length > 0) {
+      updateIndexUnsafe(root);
+      appendLogUnsafe(root, {
+        timestamp: new Date().toISOString(),
+        operation: 'delete',
+        pagesAffected: removed,
+        summary: `Auto-GC: removed ${removed.length} expired page(s)`,
+      });
+    }
+  });
+
+  return { removed: removed.length, filenames: removed };
+}
+
+// ============================================================================
+// Compaction
+// ============================================================================
+
+/**
+ * Count the number of append sections in a page's content.
+ * Sections are delimited by `---\n\n## Update (` pattern.
+ */
+export function countAppendSections(content: string): number {
+  const matches = content.match(/\n---\n\n## Update \(/g);
+  return matches ? matches.length : 0;
+}
+
+/**
+ * Compact a page by keeping only the most recent N append sections.
+ * Older sections are replaced with a summary line.
+ *
+ * Returns the compacted page, or null if no compaction needed.
+ */
+export function compactPage(page: WikiPage): WikiPage | null {
+  const sectionCount = countAppendSections(page.content);
+  if (sectionCount < COMPACTION_THRESHOLD) return null;
+
+  // Split content into original + append sections
+  const sectionPattern = /\n---\n\n## Update \(/;
+  const parts = page.content.split(sectionPattern);
+
+  // parts[0] = original content, parts[1..] = append sections (without the delimiter prefix)
+  const originalContent = parts[0];
+  const appendSections = parts.slice(1);
+
+  const sectionsToRemove = appendSections.length - COMPACTION_KEEP_RECENT;
+  if (sectionsToRemove <= 0) return null;
+
+  const keptSections = appendSections.slice(sectionsToRemove);
+  const now = new Date().toISOString();
+
+  // Rebuild content: original + compaction notice + kept sections
+  const compactedContent = originalContent.trimEnd() +
+    `\n\n---\n\n> **Compacted:** ${sectionsToRemove} older section(s) removed on ${now}\n` +
+    keptSections.map(s => `\n---\n\n## Update (${s}`).join('');
+
+  return {
+    filename: page.filename,
+    frontmatter: {
+      ...page.frontmatter,
+      updated: now,
+      compactedAt: now,
+    },
+    content: compactedContent,
+  };
+}
+
+/**
+ * Run compaction on all pages in a wiki directory.
+ * Returns count of pages compacted.
+ */
+export function compactAllPages(root: string): { compacted: number; filenames: string[] } {
+  const compacted: string[] = [];
+
+  withWikiLock(root, () => {
+    const pages = readAllPages(root);
+    for (const page of pages) {
+      const result = compactPage(page);
+      if (result) {
+        writePageUnsafe(root, result);
+        compacted.push(page.filename);
+      }
+    }
+    if (compacted.length > 0) {
+      updateIndexUnsafe(root);
+      appendLogUnsafe(root, {
+        timestamp: new Date().toISOString(),
+        operation: 'ingest',
+        pagesAffected: compacted,
+        summary: `Auto-compaction: compacted ${compacted.length} page(s)`,
+      });
+    }
+  });
+
+  return { compacted: compacted.length, filenames: compacted };
 }
 
 // ============================================================================

@@ -18,26 +18,46 @@ export type {
   WikiLintReport,
   WikiCategory,
   WikiConfig,
+  WikiScope,
 } from './types.js';
 
-export { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from './types.js';
+export {
+  WIKI_SCHEMA_VERSION,
+  DEFAULT_WIKI_CONFIG,
+  CATEGORY_DEFAULT_TTL,
+  COMPACTION_THRESHOLD,
+  COMPACTION_KEEP_RECENT,
+  GLOBAL_SCOPE_CATEGORIES,
+} from './types.js';
 
 // Storage
 export {
   getWikiDir,
+  getGlobalWikiDir,
   ensureWikiDir,
+  ensureGlobalWikiDir,
   withWikiLock,
   readPage,
   listPages,
   readAllPages,
+  readAllGlobalPages,
   readIndex,
   readLog,
   writePage,
   deletePage,
+  writeGlobalPage,
+  deleteGlobalPage,
   appendLog,
   titleToSlug,
   parseFrontmatter,
   serializePage,
+  // TTL & GC
+  isPageExpired,
+  cleanupExpiredPages,
+  // Compaction
+  countAppendSections,
+  compactPage,
+  compactAllPages,
   // Unsafe variants (for use inside withWikiLock)
   writePageUnsafe,
   deletePageUnsafe,
@@ -47,5 +67,5 @@ export {
 
 // Operations
 export { ingestKnowledge } from './ingest.js';
-export { queryWiki } from './query.js';
+export { queryWiki, tokenize } from './query.js';
 export { lintWiki } from './lint.js';

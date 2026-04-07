@@ -21,8 +21,10 @@ import {
   writePageUnsafe,
   updateIndexUnsafe,
   appendLogUnsafe,
+  cleanupExpiredPages,
+  compactAllPages,
 } from './storage.js';
-import { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from './types.js';
+import { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG, CATEGORY_DEFAULT_TTL } from './types.js';
 import type { WikiConfig } from './types.js';
 
 /**
@@ -65,6 +67,8 @@ export function onSessionStart(data: { cwd?: string }): { additionalContext?: st
       return {}; // No wiki yet, nothing to inject
     }
 
+    const config = loadWikiConfig(root);
+
     // Lazy index rebuild
     const pages = listPages(root);
     if (pages.length > 0) {
@@ -72,6 +76,24 @@ export function onSessionStart(data: { cwd?: string }): { additionalContext?: st
       if (!indexContent) {
         // Index missing — rebuild
         withWikiLock(root, () => { updateIndexUnsafe(root); });
+      }
+    }
+
+    // Auto-GC: remove expired pages (e.g., old session-logs with TTL)
+    if (config.autoGC && pages.length > 0) {
+      try {
+        cleanupExpiredPages(root);
+      } catch {
+        // GC failure should not block session start
+      }
+    }
+
+    // Auto-compaction: compact pages with too many append sections
+    if (config.autoCompaction && pages.length > 0) {
+      try {
+        compactAllPages(root);
+      } catch {
+        // Compaction failure should not block session start
       }
     }
 
@@ -126,6 +148,12 @@ export function onSessionEnd(data: { cwd?: string; session_id?: string }): { con
     const dateSlug = now.split('T')[0]; // YYYY-MM-DD
     const filename = `session-log-${dateSlug}-${sessionId.slice(-8)}.md`;
 
+    // Apply TTL for session-log category
+    const sessionLogTtl = CATEGORY_DEFAULT_TTL['session-log'];
+    const expiresAt = sessionLogTtl
+      ? new Date(Date.now() + sessionLogTtl * 1000).toISOString()
+      : undefined;
+
     withWikiLock(root, () => {
       // Time check inside lock
       if (Date.now() - startTime > TIMEOUT_MS) return;
@@ -142,6 +170,9 @@ export function onSessionEnd(data: { cwd?: string; session_id?: string }): { con
           category: 'session-log',
           confidence: 'medium',
           schemaVersion: WIKI_SCHEMA_VERSION,
+          ...(sessionLogTtl ? { ttl: sessionLogTtl } : {}),
+          ...(expiresAt ? { expiresAt } : {}),
+          scope: 'local',
         },
         content: `\n# Session Log ${dateSlug}\n\nAuto-captured session metadata.\nSession ID: ${sessionId}\n\nReview and promote significant findings to curated wiki pages via \`wiki_ingest\`.\n`,
       });

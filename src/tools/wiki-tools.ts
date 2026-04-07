@@ -20,7 +20,8 @@ import {
 import { ingestKnowledge } from '../hooks/wiki/ingest.js';
 import { queryWiki } from '../hooks/wiki/query.js';
 import { lintWiki } from '../hooks/wiki/lint.js';
-import type { WikiCategory } from '../hooks/wiki/types.js';
+import type { WikiCategory, WikiScope } from '../hooks/wiki/types.js';
+import { GLOBAL_SCOPE_CATEGORIES } from '../hooks/wiki/types.js';
 import { ToolDefinition } from './types.js';
 
 const WIKI_CATEGORIES: [string, ...string[]] = [
@@ -32,6 +33,8 @@ const WIKI_CATEGORIES: [string, ...string[]] = [
 // wiki_ingest
 // ============================================================================
 
+const WIKI_SCOPES: [string, ...string[]] = ['local', 'global'];
+
 export const wikiIngestTool: ToolDefinition<{
   title: z.ZodString;
   content: z.ZodString;
@@ -39,10 +42,11 @@ export const wikiIngestTool: ToolDefinition<{
   category: z.ZodEnum<typeof WIKI_CATEGORIES>;
   sources: z.ZodOptional<z.ZodArray<z.ZodString>>;
   confidence: z.ZodOptional<z.ZodEnum<['high', 'medium', 'low']>>;
+  scope: z.ZodOptional<z.ZodEnum<typeof WIKI_SCOPES>>;
   workingDirectory: z.ZodOptional<z.ZodString>;
 }> = {
   name: 'wiki_ingest',
-  description: 'Process knowledge into wiki pages. Creates new pages or merges into existing ones (append strategy — never replaces). A single ingest can update multiple pages via cross-references.',
+  description: 'Process knowledge into wiki pages. Creates new pages or merges into existing ones (append strategy — never replaces). Use scope "global" for cross-repo knowledge (conventions, references) or "local" for repo-specific knowledge. Default: auto-detected from category.',
   schema: {
     title: z.string().max(200).describe('Page title (used to generate filename slug, max 200 chars)'),
     content: z.string().max(50_000).describe('Markdown content to ingest (max 50KB)'),
@@ -50,11 +54,16 @@ export const wikiIngestTool: ToolDefinition<{
     category: z.enum(WIKI_CATEGORIES).describe('Page category'),
     sources: z.array(z.string().max(100)).max(10).optional().describe('Source identifiers (e.g., session IDs)'),
     confidence: z.enum(['high', 'medium', 'low']).optional().describe('Confidence level (default: medium)'),
+    scope: z.enum(WIKI_SCOPES).optional().describe('Storage scope: "local" (repo-specific) or "global" (cross-repo). Default: auto from category'),
     workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
   },
   handler: async (args) => {
     try {
       const root = validateWorkingDirectory(args.workingDirectory);
+
+      // Auto-detect scope at tools layer: explicit > category-based > local
+      const resolvedScope: WikiScope = (args.scope as WikiScope | undefined)
+        ?? (GLOBAL_SCOPE_CATEGORIES.has(args.category as WikiCategory) ? 'global' : 'local');
 
       const result = ingestKnowledge(root, {
         title: args.title,
@@ -63,6 +72,7 @@ export const wikiIngestTool: ToolDefinition<{
         category: args.category as WikiCategory,
         sources: args.sources,
         confidence: args.confidence as 'high' | 'medium' | 'low' | undefined,
+        scope: resolvedScope,
       });
 
       return {
@@ -208,15 +218,17 @@ export const wikiAddTool: ToolDefinition<{
   content: z.ZodString;
   tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
   category: z.ZodOptional<z.ZodEnum<typeof WIKI_CATEGORIES>>;
+  scope: z.ZodOptional<z.ZodEnum<typeof WIKI_SCOPES>>;
   workingDirectory: z.ZodOptional<z.ZodString>;
 }> = {
   name: 'wiki_add',
-  description: 'Quick-add a wiki page. Simpler than wiki_ingest — creates a single page directly.',
+  description: 'Quick-add a wiki page. Simpler than wiki_ingest — creates a single page directly. Use scope "global" for cross-repo knowledge.',
   schema: {
     title: z.string().max(200).describe('Page title (max 200 chars)'),
     content: z.string().max(50_000).describe('Page content in markdown (max 50KB)'),
     tags: z.array(z.string().max(50)).max(20).optional().describe('Tags (default: [])'),
     category: z.enum(WIKI_CATEGORIES).optional().describe('Category (default: reference)'),
+    scope: z.enum(WIKI_SCOPES).optional().describe('Storage scope: "local" or "global". Default: auto from category'),
     workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
   },
   handler: async (args) => {
@@ -235,12 +247,18 @@ export const wikiAddTool: ToolDefinition<{
         };
       }
 
+      // Auto-detect scope at tools layer
+      const cat = (args.category || 'reference') as WikiCategory;
+      const resolvedScope: WikiScope = (args.scope as WikiScope | undefined)
+        ?? (GLOBAL_SCOPE_CATEGORIES.has(cat) ? 'global' : 'local');
+
       // Delegate to ingest for consistent page creation
       const result = ingestKnowledge(root, {
         title: args.title,
         content: args.content,
         tags: args.tags || [],
-        category: (args.category || 'reference') as WikiCategory,
+        category: cat,
+        scope: resolvedScope,
       });
 
       return {

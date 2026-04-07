@@ -33,6 +33,14 @@ export interface WikiPageFrontmatter {
   confidence: 'high' | 'medium' | 'low';
   /** Schema version for future migration support */
   schemaVersion: number;
+  /** Time-to-live in seconds. 0 or omitted means no expiry. */
+  ttl?: number;
+  /** ISO timestamp when this page expires (computed from ttl on write). */
+  expiresAt?: string;
+  /** ISO timestamp of last compaction. */
+  compactedAt?: string;
+  /** Storage scope: local (repo-specific) or global (cross-repo). */
+  scope?: WikiScope;
 }
 
 /** Supported page categories. */
@@ -45,6 +53,23 @@ export type WikiCategory =
   | 'session-log'
   | 'reference'
   | 'convention';
+
+/** Storage scope for wiki pages. */
+export type WikiScope = 'local' | 'global';
+
+/**
+ * Default TTL (in seconds) per category.
+ * Categories not listed here have no automatic expiry.
+ */
+export const CATEGORY_DEFAULT_TTL: Partial<Record<WikiCategory, number>> = {
+  'session-log': 7 * 24 * 60 * 60, // 7 days
+};
+
+/** Maximum number of append sections before compaction triggers. */
+export const COMPACTION_THRESHOLD = 5;
+
+/** Number of most-recent sections to keep during compaction. */
+export const COMPACTION_KEEP_RECENT = 3;
 
 /** A wiki page: frontmatter + markdown content + filename. */
 export interface WikiPage {
@@ -86,6 +111,10 @@ export interface WikiIngestInput {
   sources?: string[];
   /** Confidence level */
   confidence?: 'high' | 'medium' | 'low';
+  /** Storage scope (default: auto-detected from category) */
+  scope?: WikiScope;
+  /** Custom TTL in seconds (overrides category default) */
+  ttl?: number;
 }
 
 /** Result of an ingest operation. */
@@ -174,6 +203,12 @@ export interface WikiConfig {
   staleDays: number;
   /** Maximum page content size in bytes before lint warns (default: 10240) */
   maxPageSize: number;
+  /** Whether to enable global (cross-repo) wiki tier (default: true) */
+  enableGlobalTier: boolean;
+  /** Whether to run auto-GC on session start (default: true) */
+  autoGC: boolean;
+  /** Whether to run auto-compaction on session start (default: true) */
+  autoCompaction: boolean;
 }
 
 /** Default wiki configuration. */
@@ -181,4 +216,16 @@ export const DEFAULT_WIKI_CONFIG: WikiConfig = {
   autoCapture: true,
   staleDays: 30,
   maxPageSize: 10_240, // 10KB
+  enableGlobalTier: true,
+  autoGC: true,
+  autoCompaction: true,
 };
+
+/**
+ * Categories that default to global scope when scope is not specified.
+ * All other categories default to local scope.
+ */
+export const GLOBAL_SCOPE_CATEGORIES: Set<WikiCategory> = new Set([
+  'convention',
+  'reference',
+]);

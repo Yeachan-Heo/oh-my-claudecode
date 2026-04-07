@@ -8,8 +8,11 @@ import path from 'path';
 import os from 'os';
 import { queryWiki } from '../query.js';
 import { writePage, ensureWikiDir } from '../storage.js';
-import { WIKI_SCHEMA_VERSION } from '../types.js';
-import type { WikiPage } from '../types.js';
+import { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from '../types.js';
+import type { WikiPage, WikiConfig } from '../types.js';
+
+/** Config that disables global tier for isolated testing. */
+const LOCAL_ONLY_CONFIG: WikiConfig = { ...DEFAULT_WIKI_CONFIG, enableGlobalTier: false };
 
 function makePage(filename: string, opts: {
   title?: string;
@@ -48,7 +51,7 @@ describe('Wiki Query', () => {
   });
 
   it('should return empty for empty wiki', () => {
-    const results = queryWiki(tempDir, 'anything');
+    const results = queryWiki(tempDir, 'anything', {}, LOCAL_ONLY_CONFIG);
     expect(results).toEqual([]);
   });
 
@@ -56,7 +59,7 @@ describe('Wiki Query', () => {
     writePage(tempDir, makePage('auth.md', { title: 'Authentication Flow', tags: ['auth'] }));
     writePage(tempDir, makePage('db.md', { title: 'Database Schema', tags: ['db'] }));
 
-    const results = queryWiki(tempDir, 'authentication');
+    const results = queryWiki(tempDir, 'authentication', {}, LOCAL_ONLY_CONFIG);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].page.filename).toBe('auth.md');
   });
@@ -67,7 +70,7 @@ describe('Wiki Query', () => {
       content: '\n# Something\n\nThis page describes JWT token validation.\n',
     }));
 
-    const results = queryWiki(tempDir, 'JWT');
+    const results = queryWiki(tempDir, 'JWT', {}, LOCAL_ONLY_CONFIG);
     expect(results.length).toBe(1);
     expect(results[0].snippet).toContain('JWT');
   });
@@ -76,7 +79,7 @@ describe('Wiki Query', () => {
     writePage(tempDir, makePage('tagged.md', { title: 'Tagged Page', tags: ['security', 'auth'] }));
     writePage(tempDir, makePage('untagged.md', { title: 'Untagged' }));
 
-    const results = queryWiki(tempDir, 'anything', { tags: ['security'] });
+    const results = queryWiki(tempDir, 'anything', { tags: ['security'] }, LOCAL_ONLY_CONFIG);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].page.filename).toBe('tagged.md');
   });
@@ -85,7 +88,7 @@ describe('Wiki Query', () => {
     writePage(tempDir, makePage('arch.md', { title: 'Architecture', category: 'architecture' }));
     writePage(tempDir, makePage('debug.md', { title: 'Debug Info', category: 'debugging' }));
 
-    const results = queryWiki(tempDir, 'info', { category: 'debugging' });
+    const results = queryWiki(tempDir, 'info', { category: 'debugging' }, LOCAL_ONLY_CONFIG);
     // Should only return debugging category
     for (const r of results) {
       expect(r.page.frontmatter.category).toBe('debugging');
@@ -101,7 +104,7 @@ describe('Wiki Query', () => {
       }));
     }
 
-    const results = queryWiki(tempDir, 'common', { limit: 2 });
+    const results = queryWiki(tempDir, 'common', { limit: 2 }, LOCAL_ONLY_CONFIG);
     expect(results.length).toBe(2);
   });
 
@@ -116,7 +119,7 @@ describe('Wiki Query', () => {
       content: '\n# Auth\n\nFull auth documentation.\n',
     }));
 
-    const results = queryWiki(tempDir, 'auth');
+    const results = queryWiki(tempDir, 'auth', {}, LOCAL_ONLY_CONFIG);
     expect(results.length).toBe(2);
     expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
     expect(results[0].page.filename).toBe('high.md');
@@ -128,7 +131,7 @@ describe('Wiki Query', () => {
       content: '\n# Snippet\n\nSome text before the keyword. Important keyword here with context after.\n',
     }));
 
-    const results = queryWiki(tempDir, 'keyword');
+    const results = queryWiki(tempDir, 'keyword', {}, LOCAL_ONLY_CONFIG);
     expect(results.length).toBe(1);
     expect(results[0].snippet.length).toBeGreaterThan(0);
   });
@@ -140,7 +143,7 @@ describe('Wiki Query', () => {
       content: '\n# Nothing\n\nNo query terms in content.\n',
     }));
 
-    const results = queryWiki(tempDir, 'authentication');
+    const results = queryWiki(tempDir, 'authentication', {}, LOCAL_ONLY_CONFIG);
     expect(results.length).toBe(1);
     expect(results[0].score).toBeGreaterThan(0);
   });

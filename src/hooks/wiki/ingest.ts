@@ -11,6 +11,7 @@ import {
   type WikiPage,
   type WikiPageFrontmatter,
   WIKI_SCHEMA_VERSION,
+  CATEGORY_DEFAULT_TTL,
 } from './types.js';
 import {
   withWikiLock,
@@ -19,6 +20,7 @@ import {
   updateIndexUnsafe,
   appendLogUnsafe,
   titleToSlug,
+  writeGlobalPage,
 } from './storage.js';
 
 /**
@@ -37,32 +39,43 @@ export function ingestKnowledge(root: string, input: WikiIngestInput): WikiInges
   const now = new Date().toISOString();
   const result: WikiIngestResult = { created: [], updated: [], totalAffected: 0 };
 
-  withWikiLock(root, () => {
-    const existing = readPage(root, slug);
+  // Determine target scope: explicit only — auto-detection is opt-in via tools layer
+  const scope = input.scope ?? 'local';
 
-    if (existing) {
-      // Merge into existing page
-      const merged = mergePage(existing, input, now);
-      writePageUnsafe(root, merged);
-      result.updated.push(slug);
-    } else {
-      // Create new page
-      const page = createPage(slug, input, now);
-      writePageUnsafe(root, page);
-      result.created.push(slug);
-    }
+  if (scope === 'global') {
+    // Global tier: no wiki-wide lock needed (separate directory)
+    const page = createPage(slug, input, now);
+    writeGlobalPage(page);
+    result.created.push(slug);
+  } else {
+    // Local tier: use wiki lock
+    withWikiLock(root, () => {
+      const existing = readPage(root, slug);
 
-    updateIndexUnsafe(root);
+      if (existing) {
+        // Merge into existing page
+        const merged = mergePage(existing, input, now);
+        writePageUnsafe(root, merged);
+        result.updated.push(slug);
+      } else {
+        // Create new page
+        const page = createPage(slug, input, now);
+        writePageUnsafe(root, page);
+        result.created.push(slug);
+      }
 
-    appendLogUnsafe(root, {
-      timestamp: now,
-      operation: 'ingest',
-      pagesAffected: [...result.created, ...result.updated],
-      summary: existing
-        ? `Updated "${input.title}" with new content`
-        : `Created new page "${input.title}"`,
+      updateIndexUnsafe(root);
+
+      appendLogUnsafe(root, {
+        timestamp: now,
+        operation: 'ingest',
+        pagesAffected: [...result.created, ...result.updated],
+        summary: existing
+          ? `Updated "${input.title}" with new content`
+          : `Created new page "${input.title}"`,
+      });
     });
-  });
+  }
 
   result.totalAffected = result.created.length + result.updated.length;
   return result;
@@ -70,6 +83,13 @@ export function ingestKnowledge(root: string, input: WikiIngestInput): WikiInges
 
 /** Create a new wiki page from ingest input. */
 function createPage(slug: string, input: WikiIngestInput, now: string): WikiPage {
+  // Resolve TTL: explicit > category default > none
+  const ttl = input.ttl ?? CATEGORY_DEFAULT_TTL[input.category];
+  const expiresAt = ttl ? new Date(Date.now() + ttl * 1000).toISOString() : undefined;
+
+  // Resolve scope: explicit only — defaults to local for backward compat
+  const scope = input.scope ?? 'local';
+
   const frontmatter: WikiPageFrontmatter = {
     title: input.title,
     tags: [...new Set(input.tags)],
@@ -80,6 +100,9 @@ function createPage(slug: string, input: WikiIngestInput, now: string): WikiPage
     category: input.category,
     confidence: input.confidence || 'medium',
     schemaVersion: WIKI_SCHEMA_VERSION,
+    ...(ttl ? { ttl } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+    scope,
   };
 
   return {
