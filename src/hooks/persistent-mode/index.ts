@@ -644,29 +644,32 @@ async function checkRalphLoop(
     };
   }
 
-  // Check max iterations (cancel already checked at function entry via cached flag)
-  if (state.iteration >= state.max_iterations) {
-    const hardMax = getHardMaxIterations();
-    if (hardMax > 0 && state.max_iterations >= hardMax) {
-      // Hard limit reached — auto-disable to prevent unbounded execution
-      state.active = false;
-      if (!shouldWriteStateBack(ralphStatePath)) {
-        return {
-          shouldBlock: false,
-          message: '',
-          mode: 'none'
-        };
-      }
-      writeRalphState(workingDir, state, sessionId);
+  // Hard max: check iteration count directly against the security limit,
+  // independent of max_iterations, so it cannot be bypassed by a high
+  // initial max_iterations value.
+  const hardMax = getHardMaxIterations();
+  if (hardMax > 0 && state.iteration >= hardMax) {
+    // Hard limit reached — auto-disable to prevent unbounded execution
+    state.active = false;
+    if (!shouldWriteStateBack(ralphStatePath)) {
       return {
-        shouldBlock: true,
-        message: `[RALPH - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
-        mode: 'ralph',
-        metadata: { iteration: state.iteration, maxIterations: state.max_iterations }
+        shouldBlock: false,
+        message: '',
+        mode: 'none'
       };
     }
-    // Extend the limit and continue enforcement so user-visible cancellation
-    // remains the only explicit termination path.
+    writeRalphState(workingDir, state, sessionId);
+    return {
+      shouldBlock: true,
+      message: `[RALPH - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+      mode: 'ralph',
+      metadata: { iteration: state.iteration, maxIterations: state.max_iterations }
+    };
+  }
+
+  // Check max iterations — extend limit so user-visible cancellation
+  // remains the only explicit termination path.
+  if (state.iteration >= state.max_iterations) {
     state.max_iterations += 10;
     if (!shouldWriteStateBack(ralphStatePath)) {
       return {
