@@ -56,12 +56,8 @@ async function tmuxAsync(args: string[]): Promise<{ stdout: string; stderr: stri
 }
 
 export async function applyMainVerticalLayout(teamTarget: string): Promise<void> {
-  const { execFile } = await import('child_process');
-  const { promisify } = await import('util');
-  const execFileAsync = promisify(execFile);
-
   try {
-    await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
+    await promisifiedExecFile('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
   } catch {
     // Layout may not apply if only 1 pane; ignore.
   }
@@ -73,8 +69,8 @@ export async function applyMainVerticalLayout(teamTarget: string): Promise<void>
     const width = parseInt(widthResult.stdout.trim(), 10);
     if (Number.isFinite(width) && width >= 40) {
       const half = String(Math.floor(width / 2));
-      await execFileAsync('tmux', ['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
-      await execFileAsync('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
+      await promisifiedExecFile('tmux', ['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
+      await promisifiedExecFile('tmux', ['select-layout', '-t', teamTarget, 'main-vertical']);
     }
   } catch {
     /* ignore layout sizing errors */
