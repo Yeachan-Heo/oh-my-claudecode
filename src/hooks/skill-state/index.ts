@@ -17,7 +17,7 @@
  */
 
 import { writeModeState, readModeState, clearModeStateFile } from '../../lib/mode-state-io.js';
-import { getActiveAgentCount } from '../subagent-tracker/index.js';
+import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -288,7 +288,14 @@ export function checkSkillActiveState(
   // Orchestrators are allowed to go idle while delegated work is still active.
   // Do not consume a reinforcement here; the skill is still active and should
   // resume enforcement only after the running subagents finish.
-  if (getActiveAgentCount(directory) > 0) {
+  // Use a recency window to avoid trusting stale tracking data (same pattern
+  // as RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS in persistent-mode/index.ts).
+  const ACTIVE_AGENT_RECENCY_MS = 5_000;
+  const agentSnapshot = getActiveAgentSnapshot(directory);
+  const agentStateAge = agentSnapshot.lastUpdatedAt
+    ? Date.now() - new Date(agentSnapshot.lastUpdatedAt).getTime()
+    : Infinity;
+  if (agentSnapshot.count > 0 && agentStateAge <= ACTIVE_AGENT_RECENCY_MS) {
     return { shouldBlock: false, message: '', skillName: state.skill_name };
   }
 
