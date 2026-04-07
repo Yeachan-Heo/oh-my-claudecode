@@ -91,10 +91,12 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CON
     'hud',
     'plugins',
     'projects',
+    'rules',
     'skills',
     '.omc-config.json',
     '.omc-version.json',
     '.omc-silent-update.json',
+    'keybindings.json',
     'settings.json',
     'settings.local.json',
   ]) {

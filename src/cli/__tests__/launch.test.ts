@@ -893,6 +893,20 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect(existsSync(join(runtimeDir, 'settings.json'))).toBe(true);
   });
 
+
+  it('mirrors keybindings.json and rules/ into the runtime config dir', () => {
+    const configDir = join(tempRoot!, '.claude');
+    mkdirSync(join(configDir, 'rules'), { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+    writeFileSync(join(configDir, 'keybindings.json'), '{"bindings":[]}');
+    writeFileSync(join(configDir, 'rules', 'my-rule.md'), '# Rule');
+
+    const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+    expect(runtimeDir).not.toBe(configDir);
+    expect(existsSync(join(runtimeDir, 'keybindings.json'))).toBe(true);
+    expect(existsSync(join(runtimeDir, 'rules'))).toBe(true);
+  });
+
   it('leaves CLAUDE_CONFIG_DIR unchanged when no preserved companion exists', () => {
     const configDir = join(tempRoot!, '.claude');
     mkdirSync(configDir, { recursive: true });
