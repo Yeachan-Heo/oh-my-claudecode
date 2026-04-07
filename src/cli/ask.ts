@@ -4,6 +4,7 @@ import { readFile, readdir } from 'fs/promises';
 import { constants as osConstants } from 'os';
 import { basename, dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
+import { isExternalLLMDisabled } from '../lib/security-config.js';
 
 export const ASK_USAGE = [
   'Usage: omc ask <claude|codex|gemini> <question or task>',
@@ -210,6 +211,14 @@ function resolveSignalExitCode(signal: NodeJS.Signals | null): number {
 
 export async function askCommand(args: string[]): Promise<void> {
   const parsed = parseAskArgs(args);
+
+  if (parsed.provider !== 'claude' && isExternalLLMDisabled()) {
+    throw new Error(
+      `[ask] External LLM provider "${parsed.provider}" is blocked by security policy ` +
+      `(disableExternalLLM). Only "claude" is allowed in the current security configuration.`,
+    );
+  }
+
   const packageRoot = getPackageRoot();
   const advisorScriptPath = resolveAskAdvisorScriptPath(packageRoot);
   const promptsDir = resolveAskPromptsDir(process.cwd(), packageRoot, process.env);
