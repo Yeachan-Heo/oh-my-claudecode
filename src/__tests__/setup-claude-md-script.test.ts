@@ -585,6 +585,129 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).not.toContain('<!-- OMC:VERSION:4.10.0 -->');
   });
 
+  it('resolves prerelease version from cache when no stable version is present and installed_plugins.json is unavailable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-prerelease-only-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const scriptVersion = join(cacheBase, '4.10.0-beta.1');
+    const newerPrerelease = join(cacheBase, '4.11.0-beta.1');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+
+    // Script lives in 4.10.0-beta.1
+    mkdirSync(join(scriptVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(scriptVersion, 'docs'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(scriptVersion, 'scripts', 'setup-claude-md.sh'));
+    mkdirSync(join(scriptVersion, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(CONFIG_DIR_HELPER, join(scriptVersion, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(
+      join(scriptVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.10.0-beta.1 -->\n\n# Old\n<!-- OMC:END -->\n`,
+    );
+
+    // Newer prerelease in cache
+    mkdirSync(join(newerPrerelease, 'docs'), { recursive: true });
+    writeFileSync(
+      join(newerPrerelease, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.11.0-beta.1 -->\n\n# New\n<!-- OMC:END -->\n`,
+    );
+
+    // No installed_plugins.json — fallback to cache scan
+    mkdirSync(join(homeRoot, '.claude'), { recursive: true });
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'settings.json'),
+      JSON.stringify({ plugins: ['oh-my-claudecode'] }),
+    );
+
+    const result = spawnSync(
+      'bash',
+      [join(scriptVersion, 'scripts', 'setup-claude-md.sh'), 'local'],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          HOME: homeRoot,
+          CLAUDE_CONFIG_DIR: join(homeRoot, '.claude'),
+        },
+        encoding: 'utf-8',
+      },
+    );
+
+    expect(result.status).toBe(0);
+
+    const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+    expect(installed).toContain('<!-- OMC:VERSION:4.11.0-beta.1 -->');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.10.0-beta.1 -->');
+  });
+
+  it('prefers stable version over newer prerelease when both are present in cache and installed_plugins.json is unavailable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-stable-over-prerelease-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const scriptVersion = join(cacheBase, '4.9.0');
+    const stableVersion = join(cacheBase, '4.10.0');
+    const prereleaseVersion = join(cacheBase, '4.11.0-beta.1');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+
+    // Script lives in 4.9.0
+    mkdirSync(join(scriptVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(scriptVersion, 'docs'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(scriptVersion, 'scripts', 'setup-claude-md.sh'));
+    mkdirSync(join(scriptVersion, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(CONFIG_DIR_HELPER, join(scriptVersion, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(
+      join(scriptVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# Old\n<!-- OMC:END -->\n`,
+    );
+
+    // Stable version in cache
+    mkdirSync(join(stableVersion, 'docs'), { recursive: true });
+    writeFileSync(
+      join(stableVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.10.0 -->\n\n# Stable\n<!-- OMC:END -->\n`,
+    );
+
+    // Newer prerelease also in cache
+    mkdirSync(join(prereleaseVersion, 'docs'), { recursive: true });
+    writeFileSync(
+      join(prereleaseVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.11.0-beta.1 -->\n\n# Prerelease\n<!-- OMC:END -->\n`,
+    );
+
+    // No installed_plugins.json — fallback to cache scan
+    mkdirSync(join(homeRoot, '.claude'), { recursive: true });
+    mkdirSync(projectRoot, { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'settings.json'),
+      JSON.stringify({ plugins: ['oh-my-claudecode'] }),
+    );
+
+    const result = spawnSync(
+      'bash',
+      [join(scriptVersion, 'scripts', 'setup-claude-md.sh'), 'local'],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          HOME: homeRoot,
+          CLAUDE_CONFIG_DIR: join(homeRoot, '.claude'),
+        },
+        encoding: 'utf-8',
+      },
+    );
+
+    expect(result.status).toBe(0);
+
+    const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+    // Stable 4.10.0 wins over prerelease 4.11.0-beta.1
+    expect(installed).toContain('<!-- OMC:VERSION:4.10.0 -->');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0-beta.1 -->');
+  });
+
   it('returns json_root when json_version equals the latest cached version (tie-breaking)', () => {
     // Both JSON and cache point to 4.11.0 — json_root (original path) should be returned
     const root = mkdtempSync(join(tmpdir(), 'omc-tie-break-'));
