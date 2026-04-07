@@ -455,6 +455,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         : null,
       sessionSummary,
       lastToolName: transcriptData.lastToolName,
+      sessionId: currentSessionId || null,
     };
 
     // Debug: log data if OMC_DEBUG is set

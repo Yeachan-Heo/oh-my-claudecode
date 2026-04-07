@@ -9,5 +9,5 @@ import type { SessionHealth } from '../types.js';
  *
  * Format: session:45m or session:45m (healthy)
  */
-export declare function renderSession(session: SessionHealth | null): string | null;
+export declare function renderSession(session: SessionHealth | null, sessionId?: string | null): string | null;
 //# sourceMappingURL=session.d.ts.map

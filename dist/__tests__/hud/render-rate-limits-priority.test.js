@@ -42,6 +42,7 @@ function makeContext(overrides = {}) {
         apiKeySource: null,
         profileName: null,
         sessionSummary: null,
+        sessionId: null,
         ...overrides,
     };
 }

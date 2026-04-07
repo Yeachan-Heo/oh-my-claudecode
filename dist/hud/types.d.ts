@@ -279,6 +279,8 @@ export interface HudRenderContext {
     sessionSummary: SessionSummaryState | null;
     /** Name of the last tool called in this session */
     lastToolName?: string | null;
+    /** Current session ID (UUID extracted from transcript path) */
+    sessionId: string | null;
 }
 export type HudPreset = 'minimal' | 'focused' | 'full' | 'opencode' | 'dense';
 /**

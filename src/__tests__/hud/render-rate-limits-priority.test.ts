@@ -48,6 +48,7 @@ function makeContext(overrides: Partial<HudRenderContext> = {}): HudRenderContex
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
     ...overrides,
   };
 }

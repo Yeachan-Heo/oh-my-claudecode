@@ -370,6 +370,9 @@ export interface HudRenderContext {
 
   /** Name of the last tool called in this session */
   lastToolName?: string | null;
+
+  /** Current session ID (UUID extracted from transcript path) */
+  sessionId: string | null;
 }
 
 // ============================================================================
