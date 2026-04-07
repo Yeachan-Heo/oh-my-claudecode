@@ -92,7 +92,9 @@ export function withWikiLock<T>(root: string, fn: () => T): T {
  * Expects content starting with `---\n...\n---\n`.
  */
 export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatter; content: string } | null {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  // Normalize CRLF to LF so files edited on Windows are still parseable
+  const normalized = raw.replace(/\r\n/g, '\n');
+  const match = normalized.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
 
   const yamlBlock = match[1];
