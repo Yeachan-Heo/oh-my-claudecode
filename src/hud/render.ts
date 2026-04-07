@@ -309,7 +309,7 @@ export async function render(
   if (enabledElements.sessionHealth && context.sessionHealth) {
     const showDuration = enabledElements.showSessionDuration ?? true;
     if (showDuration) {
-      const session = renderSession(context.sessionHealth);
+      const session = renderSession(context.sessionHealth, context.sessionId);
       if (session) rendered.set("session", session);
     }
   }

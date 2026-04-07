@@ -30,6 +30,7 @@ function createMinimalContext(overrides: Partial<HudRenderContext> = {}): HudRen
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
     ...overrides,
   };
 }

@@ -199,6 +199,7 @@ describe('gitInfoPosition configuration', () => {
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
   });
 
   const createMockConfig = (gitInfoPosition: 'above' | 'below'): HudConfig => ({
@@ -383,6 +384,7 @@ describe('maxWidth wrapMode behavior', () => {
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
   });
 
   const createWrapConfig = (
@@ -500,6 +502,7 @@ describe('token usage rendering', () => {
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
   });
 
   const createTokenConfig = (showTokens?: boolean): HudConfig => ({
@@ -571,6 +574,7 @@ describe('layout element ordering', () => {
     apiKeySource: null,
     profileName: null,
     sessionSummary: null,
+    sessionId: null,
   });
 
   const createLayoutConfig = (layout?: HudConfig['layout']): HudConfig => ({
@@ -746,6 +750,7 @@ describe('optional HUD line defaults', () => {
       apiKeySource: null,
       profileName: null,
       sessionSummary: null,
+    sessionId: null,
     };
 
     const config: HudConfig = {
