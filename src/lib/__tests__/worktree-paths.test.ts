@@ -397,6 +397,46 @@ describe('worktree-paths', () => {
         rmSync(specialDir, { recursive: true, force: true });
       }
     });
+
+    it('should produce identical identifiers for linked worktrees of the same repo', () => {
+      const primaryDir = mkdtempSync('/tmp/worktree-paths-primary-');
+      const worktreeDir = `${primaryDir}-linked`;
+      try {
+        // Set up a primary repo with a commit so worktree creation works
+        execSync('git init', { cwd: primaryDir, stdio: 'pipe' });
+        execSync('git remote add origin https://github.com/test/worktree-id-test.git', {
+          cwd: primaryDir,
+          stdio: 'pipe',
+        });
+        execSync('git commit --allow-empty -m "init"', {
+          cwd: primaryDir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+        });
+
+        // Create a linked worktree (sibling directory, different basename)
+        execSync(`git worktree add "${worktreeDir}" -b linked-branch`, {
+          cwd: primaryDir,
+          stdio: 'pipe',
+        });
+        clearWorktreeCache();
+
+        const primaryId = getProjectIdentifier(primaryDir);
+        const worktreeId = getProjectIdentifier(worktreeDir);
+
+        // Both should produce the same identifier — same repo, same remote
+        expect(primaryId).toBe(worktreeId);
+      } finally {
+        try {
+          execSync(`git worktree remove "${worktreeDir}" --force`, {
+            cwd: primaryDir,
+            stdio: 'pipe',
+          });
+        } catch { /* may not exist */ }
+        rmSync(primaryDir, { recursive: true, force: true });
+        rmSync(worktreeDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('getOmcRoot with OMC_STATE_DIR (Issue #1014)', () => {
