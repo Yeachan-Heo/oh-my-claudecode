@@ -1426,7 +1426,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         const nodeBin = resolveNodeBinary();
         const absoluteCommand = '"' + nodeBin + '" "' + hudScriptPath.replace(/\\/g, '/') + '"';
         try {
-          const configDirHelperMjsSrc = join(__dirname, '..', '..', 'scripts', 'lib', 'config-dir.mjs');
+          const configDirHelperMjsSrc = join(getPackageDir(), 'scripts', 'lib', 'config-dir.mjs');
           const hudLibDir = join(HUD_DIR, 'lib');
           const configDirHelperMjsDest = join(hudLibDir, 'config-dir.mjs');
           if (!existsSync(hudLibDir)) {
@@ -1444,9 +1444,9 @@ export function install(options: InstallOptions = {}): InstallResult {
         let statusLineCommand = absoluteCommand;
         if (!isWindows()) {
           try {
-            const findNodeSrc = join(__dirname, '..', '..', 'scripts', 'find-node.sh');
+            const findNodeSrc = join(getPackageDir(), 'scripts', 'find-node.sh');
             const findNodeDest = join(HUD_DIR, 'find-node.sh');
-            const configDirHelperSrc = join(__dirname, '..', '..', 'scripts', 'lib', 'config-dir.sh');
+            const configDirHelperSrc = join(getPackageDir(), 'scripts', 'lib', 'config-dir.sh');
             const hudLibDir = join(HUD_DIR, 'lib');
             const configDirHelperDest = join(hudLibDir, 'config-dir.sh');
             if (!existsSync(hudLibDir)) {
