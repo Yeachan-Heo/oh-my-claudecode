@@ -638,8 +638,8 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).toContain('# Active Version');
   });
 
-  it('falls back to latest cached release when installed_plugins.json installPath is non-semver (e.g. dev)', () => {
-    // json_root basename is "dev" — not a semver — so cache version should win
+  it('prefers non-semver json_root over cache when installed_plugins.json installPath is non-semver (e.g. dev)', () => {
+    // json_root basename is "dev-install" — non-semver but complete — json_root should win
     const root = mkdtempSync(join(tmpdir(), 'omc-non-semver-json-'));
     tempRoots.push(root);
 
@@ -695,14 +695,16 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
 
     expect(result.status).toBe(0);
     const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
-    // non-semver json_root → should fall back to latest cached release
-    expect(installed).toContain('<!-- OMC:VERSION:4.11.0 -->');
-    expect(installed).toContain('# Latest Release');
-    expect(installed).not.toContain('<!-- OMC:VERSION:dev -->');
+    // non-semver json_root is complete → json_root wins over cache
+    expect(installed).toContain('<!-- OMC:VERSION:dev -->');
+    expect(installed).toContain('# Dev Version');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0 -->');
   });
 
-  it('prefers cache version over stale installed_plugins.json after /plugin update', () => {
-    // Core bug scenario: JSON still points to 4.10.0, but /plugin update downloaded 4.11.0 to cache
+  it('uses json_root even when cache has a newer version (json is authoritative; post-/plugin-update staleness resolves on session restart)', () => {
+    // json_root (4.10.0, complete) wins over cache (4.11.0) because the two scenarios
+    // (stale post-update vs intentional pin) are indistinguishable — trusting json is safer.
+    // Known limitation: after /plugin update, CLAUDE.md may be stale until next session restart.
     const root = mkdtempSync(join(tmpdir(), 'omc-stale-json-newer-cache-'));
     tempRoots.push(root);
 
@@ -751,7 +753,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       JSON.stringify({ plugins: ['oh-my-claudecode'] }),
     );
 
-    // Run the stale script — it should detect 4.11.0 in cache and use it
+    // Run the script — json_root (4.10.0) is complete, so it wins over the newer cache
     const result = spawnSync(
       'bash',
       [join(staleVersion, 'scripts', 'setup-claude-md.sh'), 'local'],
@@ -769,9 +771,67 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(result.status).toBe(0);
 
     const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
-    expect(installed).toContain('<!-- OMC:VERSION:4.11.0 -->');
-    expect(installed).toContain('# Latest Version');
-    expect(installed).not.toContain('<!-- OMC:VERSION:4.10.0 -->');
+    // json_root is authoritative — 4.10.0 wins even though 4.11.0 is in cache
+    expect(installed).toContain('<!-- OMC:VERSION:4.10.0 -->');
+    expect(installed).toContain('# Stale Version');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0 -->');
+  });
+
+  it('uses json_root when intentionally pinned to an older version even if cache has a higher version', () => {
+    // Scenario: user deliberately rolled back to 4.10.0 (/plugin install oh-my-claudecode@4.10.0)
+    // installed_plugins.json → 4.10.0 (intentional), cache still has 4.11.0 (leftover)
+    // json_root is authoritative — intentional pins must be respected
+    const root = mkdtempSync(join(tmpdir(), 'omc-intentional-pin-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pinnedVersion = join(cacheBase, '4.10.0');
+    const leftoverVersion = join(cacheBase, '4.11.0');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+
+    // Script lives at 4.10.0 (the pinned version — user intentionally installed this)
+    mkdirSync(join(pinnedVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(pinnedVersion, 'docs'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(pinnedVersion, 'scripts', 'setup-claude-md.sh'));
+    mkdirSync(join(pinnedVersion, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(CONFIG_DIR_HELPER, join(pinnedVersion, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(
+      join(pinnedVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.10.0 -->\n\n# Pinned Version\n<!-- OMC:END -->\n`,
+    );
+
+    // 4.11.0 leftover in cache from a previous install (user rolled back from this)
+    mkdirSync(join(leftoverVersion, 'docs'), { recursive: true });
+    writeFileSync(
+      join(leftoverVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.11.0 -->\n\n# Leftover Version\n<!-- OMC:END -->\n`,
+    );
+
+    // installed_plugins.json intentionally points to 4.10.0
+    mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        'oh-my-claudecode@omc': [{ installPath: pinnedVersion, version: '4.10.0' }],
+      }),
+    );
+
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(homeRoot, '.claude'), { recursive: true });
+    writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+
+    const result = spawnSync('bash', [join(pinnedVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
+      cwd: projectRoot,
+      env: { ...process.env, HOME: homeRoot, CLAUDE_CONFIG_DIR: join(homeRoot, '.claude') },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+    // Intentional pin — should use 4.10.0, not leftover 4.11.0
+    expect(installed).toContain('<!-- OMC:VERSION:4.10.0 -->');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0 -->');
   });
 
   it('falls back to json_root when newer cached version directory is incomplete (missing docs/CLAUDE.md)', () => {
