@@ -341,7 +341,7 @@ export function recordPromptPrerequisiteProgress(
   const readPath = extractReadFilePath(toolName, toolInput);
   if (readPath) {
     for (const requiredPath of state.required_file_paths) {
-      if (!state.completed_file_paths.includes(requiredPath) && normalizePath(readPath) === requiredPath) {
+      if (!state.completed_file_paths.includes(requiredPath) && (normalizePath(readPath) === requiredPath || normalizePath(readPath).endsWith("/" + requiredPath))) {
         state.completed_file_paths = dedupe([...state.completed_file_paths, requiredPath]);
         fileSatisfied = requiredPath;
       }
