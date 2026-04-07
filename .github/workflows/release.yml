@@ -45,9 +45,10 @@ jobs:
       - name: Generate release notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # Run release.ts in dry-run to generate fresh release-body.md
-          # without modifying any files (version already bumped)
-          npx tsx scripts/release.ts "$VERSION" --dry-run 2>/dev/null || true
+          # Run release.ts normally so it writes .github/release-body.md in the
+          # ephemeral CI workspace. The tag version is already set before this
+          # workflow runs, so the generated file can be consumed directly.
+          npx tsx scripts/release.ts "$VERSION" 2>/dev/null || true
           if [ -f .github/release-body.md ]; then
             echo "Using freshly generated release-body.md"
             cp .github/release-body.md release-notes.md
