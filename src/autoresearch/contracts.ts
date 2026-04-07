@@ -57,12 +57,19 @@ function readGit(repoPath: string, args: string[]): string {
 }
 
 export function slugifyMissionName(value: string): string {
-  return value
+  const base = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, 48) || 'mission';
+    .slice(0, 48);
+  if (base) return base;
+  // Hash fallback for non-ASCII names (CJK, Hangul, emoji, etc.)
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+  }
+  return 'mission-' + (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function ensurePathInside(parentPath: string, childPath: string): void {

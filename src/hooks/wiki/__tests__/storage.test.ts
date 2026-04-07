@@ -119,6 +119,23 @@ describe('Wiki Storage', () => {
     it('should strip leading/trailing hyphens', () => {
       expect(titleToSlug('---test---')).toBe('test.md');
     });
+
+    it('should produce unique hash-based slugs for non-ASCII titles', () => {
+      const slug1 = titleToSlug('한글 테스트');
+      const slug2 = titleToSlug('环境配置');
+      const slug3 = titleToSlug('テスト');
+      // Should not produce bare ".md"
+      expect(slug1).toMatch(/^page-[0-9a-f]{8}\.md$/);
+      expect(slug2).toMatch(/^page-[0-9a-f]{8}\.md$/);
+      expect(slug3).toMatch(/^page-[0-9a-f]{8}\.md$/);
+      // Different titles must produce different slugs
+      expect(slug1).not.toBe(slug2);
+      expect(slug1).not.toBe(slug3);
+    });
+
+    it('should use ASCII base when available in mixed titles', () => {
+      expect(titleToSlug('React 한글 Guide')).toBe('react-guide.md');
+    });
   });
 
   describe('parseFrontmatter', () => {
