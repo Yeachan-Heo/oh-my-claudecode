@@ -67,7 +67,7 @@ function parseSinceSpec(since?: string): number | undefined {
 }
 
 function encodeProjectPath(projectPath: string): string {
-  return projectPath.replace(/[\\/]/g, '-');
+  return projectPath.replace(/[\\/\\.]/g, '-');
 }
 
 function getMainRepoRoot(projectRoot: string): string | null {

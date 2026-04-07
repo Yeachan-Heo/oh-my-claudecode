@@ -565,7 +565,7 @@ export function resolveToWorktreeRoot(directory?: string): string {
  * But the actual transcript lives at the original project's path:
  *   ~/.claude/projects/-path-to-project/<session>.jsonl
  *
- * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * Claude Code encodes `/` and `.` as `-`. The `.claude/worktrees/`
  * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
  * separator, yielding the distinctive `--claude-worktrees-` pattern in the
  * encoded directory name.
@@ -616,7 +616,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       if (existsSync(projectsDir)) {
         // Encode the main project root the same way Claude Code does:
         // replace path separators with `-`, replace dots with `-`.
-        const encodedMain = mainProjectRoot.replace(/[/\\]/g, '-');
+        const encodedMain = mainProjectRoot.replace(/[/\\.]/g, '-');
         const resolvedPath = join(projectsDir, encodedMain, sessionFile);
         if (existsSync(resolvedPath)) return resolvedPath;
       }
@@ -650,7 +650,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       if (sessionFile) {
         const projectsDir = join(getClaudeConfigDir(), 'projects');
         if (existsSync(projectsDir)) {
-          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const encodedMain = mainRepoRoot.replace(/[/\\.]/g, '-');
           const resolvedPath = join(projectsDir, encodedMain, sessionFile);
           if (existsSync(resolvedPath)) return resolvedPath;
         }
