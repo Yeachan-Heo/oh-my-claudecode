@@ -89,10 +89,10 @@ export function withWikiLock<T>(root: string, fn: () => T): T {
 
 /**
  * Parse YAML frontmatter from markdown content.
- * Expects content starting with `---\n...\n---\n`.
+ * Expects content starting with `---\n...\n---\n`. Tolerates CRLF line endings.
  */
 export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatter; content: string } | null {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return null;
 
   const yamlBlock = match[1];
