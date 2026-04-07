@@ -111,11 +111,14 @@ function tryAcquireSync(
       fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
       0o600,
     );
-    const payload = JSON.stringify({
-      pid: process.pid,
-      timestamp: Date.now(),
-    });
-    writeSync(fd, payload, null, "utf-8");
+    try {
+      const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+      writeSync(fd, payload, null, "utf-8");
+    } catch (writeErr) {
+      try { closeSync(fd); } catch { /* already closed */ }
+      try { unlinkSync(lockPath); } catch { /* best effort */ }
+      throw writeErr;
+    }
     return { fd, path: lockPath };
   } catch (err: unknown) {
     if (
@@ -138,11 +141,14 @@ function tryAcquireSync(
             fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
             0o600,
           );
-          const payload = JSON.stringify({
-            pid: process.pid,
-            timestamp: Date.now(),
-          });
-          writeSync(fd, payload, null, "utf-8");
+          try {
+            const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+            writeSync(fd, payload, null, "utf-8");
+          } catch (writeErr) {
+            try { closeSync(fd); } catch { /* already closed */ }
+            try { unlinkSync(lockPath); } catch { /* best effort */ }
+            throw writeErr;
+          }
           return { fd, path: lockPath };
         } catch {
           // Another process won the race — lock is legitimately held
