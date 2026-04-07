@@ -65,7 +65,7 @@ function readAgentDefinitionModel(subagentType) {
   const agentFile = candidateDirs.map(d => join(d, `${agentType}.md`)).find(f => existsSync(f)) ?? null;
   try {
     if (!agentFile) return null;
-    const content = readFileSync(agentFile, 'utf-8');
+    const content = readFileSync(agentFile, 'utf-8').replace(/^\uFEFF/, '');
     // Extract the YAML frontmatter block (content between the opening and closing ---).
     // Searching the whole file would match `model:` lines in the body/prompt text, causing
     // false denies for agents whose prompt happens to contain that word.

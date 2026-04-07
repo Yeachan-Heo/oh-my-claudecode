@@ -930,6 +930,43 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
+  it('strips UTF-8 BOM before frontmatter parsing so agent-definition model check still fires', () => {
+    const pluginRoot = join(tempDir, 'fake-plugin-bom');
+    const agentsDir = join(pluginRoot, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    // Write agent file with BOM prefix (\uFEFF)
+    writeFileSync(
+      join(agentsDir, 'bom-agent.md'),
+      '\uFEFF---\nname: bom-agent\nmodel: claude-opus-4-6\n---\nAgent body with BOM.',
+    );
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:bom-agent',
+          description: 'BOM test',
+          prompt: 'Test BOM handling',
+        },
+        cwd: tempDir,
+        session_id: 'session-bom-test',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+      },
+    );
+
+    // BOM must be stripped so the frontmatter regex matches and the bare
+    // Anthropic model ID triggers a deny — not silently bypassed.
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[MODEL ROUTING]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('bom-agent');
+  });
+
   it('does NOT deny Agent call without subagent_type in forceInherit mode (normal inheritance unchanged)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
