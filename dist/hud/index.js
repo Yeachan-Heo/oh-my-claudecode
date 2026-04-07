@@ -358,6 +358,7 @@ async function main(watchMode = false, skipInit = false) {
                 : null,
             sessionSummary,
             lastToolName: transcriptData.lastToolName,
+            sessionId: currentSessionId || null,
         };
         // Debug: log data if OMC_DEBUG is set
         if (process.env.OMC_DEBUG) {

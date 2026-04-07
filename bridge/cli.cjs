@@ -37533,10 +37533,11 @@ var init_thinking = __esm({
 });
 
 // src/hud/elements/session.ts
-function renderSession(session) {
+function renderSession(session, sessionId) {
   if (!session) return null;
   const color = session.health === "critical" ? RED5 : session.health === "warning" ? YELLOW8 : GREEN8;
-  return `session:${color}${session.durationMinutes}m${RESET}`;
+  const idSuffix = sessionId ? `[${sessionId}]` : "";
+  return `session:${color}${session.durationMinutes}m${RESET}${idSuffix}`;
 }
 var GREEN8, YELLOW8, RED5;
 var init_session = __esm({
@@ -38156,7 +38157,7 @@ async function render(context, config2) {
   if (enabledElements.sessionHealth && context.sessionHealth) {
     const showDuration = enabledElements.showSessionDuration ?? true;
     if (showDuration) {
-      const session = renderSession(context.sessionHealth);
+      const session = renderSession(context.sessionHealth, context.sessionId);
       if (session) rendered.set("session", session);
     }
   }
@@ -38642,7 +38643,8 @@ async function main2(watchMode = false, skipInit = false) {
       apiKeySource: config2.elements.apiKeySource ? detectApiKeySource(cwd2) : null,
       profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path122.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary,
-      lastToolName: transcriptData.lastToolName
+      lastToolName: transcriptData.lastToolName,
+      sessionId: currentSessionId || null
     };
     if (process.env.OMC_DEBUG) {
       console.error(

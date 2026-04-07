@@ -174,6 +174,7 @@ describe('gitInfoPosition configuration', () => {
         apiKeySource: null,
         profileName: null,
         sessionSummary: null,
+        sessionId: null,
     });
     const createMockConfig = (gitInfoPosition) => ({
         preset: 'focused',
@@ -334,6 +335,7 @@ describe('maxWidth wrapMode behavior', () => {
         apiKeySource: null,
         profileName: null,
         sessionSummary: null,
+        sessionId: null,
     });
     const createWrapConfig = (wrapMode, maxWidth, maxOutputLines = 6) => ({
         preset: 'focused',
@@ -434,6 +436,7 @@ describe('token usage rendering', () => {
         apiKeySource: null,
         profileName: null,
         sessionSummary: null,
+        sessionId: null,
     });
     const createTokenConfig = (showTokens) => ({
         preset: 'focused',
@@ -498,6 +501,7 @@ describe('layout element ordering', () => {
         apiKeySource: null,
         profileName: null,
         sessionSummary: null,
+        sessionId: null,
     });
     const createLayoutConfig = (layout) => ({
         preset: 'focused',
@@ -647,6 +651,7 @@ describe('optional HUD line defaults', () => {
             apiKeySource: null,
             profileName: null,
             sessionSummary: null,
+            sessionId: null,
         };
         const config = {
             ...DEFAULT_HUD_CONFIG,
