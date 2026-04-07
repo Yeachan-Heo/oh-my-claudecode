@@ -1057,6 +1057,18 @@ async function checkUltrawork(
     };
   }
 
+  // Enforce hard max iterations for ultrawork (mirrors ralph enforcement).
+  const hardMax = getHardMaxIterations();
+  if (hardMax > 0 && state.reinforcement_count >= hardMax) {
+    deactivateUltrawork(workingDir, sessionId);
+    return {
+      shouldBlock: true,
+      message: '[ULTRAWORK - HARD LIMIT] Reached hard max iterations (' + hardMax + '). Mode auto-disabled. Restart with /oh-my-claudecode:ultrawork if needed.',
+      mode: 'ultrawork',
+      metadata: { reinforcementCount: state.reinforcement_count }
+    };
+  }
+
   // Reinforce ultrawork mode - ALWAYS continue while active.
   // This prevents false stops from bash errors, transient failures, etc.
   const newState = incrementReinforcement(workingDir, sessionId);
