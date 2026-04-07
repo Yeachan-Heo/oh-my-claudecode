@@ -20,7 +20,7 @@ export type {
   WikiConfig,
 } from './types.js';
 
-export { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from './types.js';
+export { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG, CATEGORY_DEFAULT_TTL } from './types.js';
 
 // Storage
 export {
@@ -38,6 +38,8 @@ export {
   titleToSlug,
   parseFrontmatter,
   serializePage,
+  isPageExpired,
+  cleanupExpiredPages,
   // Unsafe variants (for use inside withWikiLock)
   writePageUnsafe,
   deletePageUnsafe,

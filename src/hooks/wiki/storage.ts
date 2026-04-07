@@ -99,6 +99,7 @@ export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatte
 
   try {
     const fm = parseSimpleYaml(yamlBlock);
+    const ttlVal = fm.ttl ? Number(fm.ttl) : undefined;
     const frontmatter: WikiPageFrontmatter = {
       title: String(fm.title || ''),
       tags: parseYamlArray(fm.tags),
@@ -109,6 +110,8 @@ export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatte
       category: (fm.category || 'reference') as WikiPageFrontmatter['category'],
       confidence: (fm.confidence || 'medium') as WikiPageFrontmatter['confidence'],
       schemaVersion: Number(fm.schemaVersion) || WIKI_SCHEMA_VERSION,
+      ...(ttlVal ? { ttl: ttlVal } : {}),
+      ...(fm.expiresAt ? { expiresAt: String(fm.expiresAt) } : {}),
     };
     return { frontmatter, content };
   } catch {
@@ -158,7 +161,7 @@ function escapeYaml(s: string): string {
  */
 export function serializePage(page: WikiPage): string {
   const fm = page.frontmatter;
-  const yaml = [
+  const lines = [
     `title: "${escapeYaml(fm.title)}"`,
     `tags: [${fm.tags.map(t => `"${escapeYaml(t)}"`).join(', ')}]`,
     `created: ${fm.created}`,
@@ -168,9 +171,12 @@ export function serializePage(page: WikiPage): string {
     `category: ${fm.category}`,
     `confidence: ${fm.confidence}`,
     `schemaVersion: ${fm.schemaVersion}`,
-  ].join('\n');
+  ];
 
-  return `---\n${yaml}\n---\n${page.content}`;
+  if (fm.ttl) lines.push(`ttl: ${fm.ttl}`);
+  if (fm.expiresAt) lines.push(`expiresAt: ${fm.expiresAt}`);
+
+  return `---\n${lines.join('\n')}\n---\n${page.content}`;
 }
 
 // ============================================================================
@@ -362,6 +368,45 @@ export function appendLog(root: string, entry: WikiLogEntry): void {
   withWikiLock(root, () => {
     appendLogUnsafe(root, entry);
   });
+}
+
+// ============================================================================
+// TTL & Garbage Collection
+// ============================================================================
+
+/** Check if a wiki page has expired based on its expiresAt timestamp. */
+export function isPageExpired(page: WikiPage): boolean {
+  if (!page.frontmatter.expiresAt) return false;
+  return new Date(page.frontmatter.expiresAt).getTime() <= Date.now();
+}
+
+/**
+ * Remove expired pages from the wiki.
+ * Returns filenames of removed pages.
+ */
+export function cleanupExpiredPages(root: string): { removed: number; filenames: string[] } {
+  const removed: string[] = [];
+
+  withWikiLock(root, () => {
+    const pages = readAllPages(root);
+    for (const page of pages) {
+      if (isPageExpired(page)) {
+        deletePageUnsafe(root, page.filename);
+        removed.push(page.filename);
+      }
+    }
+    if (removed.length > 0) {
+      updateIndexUnsafe(root);
+      appendLogUnsafe(root, {
+        timestamp: new Date().toISOString(),
+        operation: 'delete',
+        pagesAffected: removed,
+        summary: `Auto-GC: removed ${removed.length} expired page(s)`,
+      });
+    }
+  });
+
+  return { removed: removed.length, filenames: removed };
 }
 
 // ============================================================================

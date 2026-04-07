@@ -11,6 +11,7 @@ import {
   type WikiPage,
   type WikiPageFrontmatter,
   WIKI_SCHEMA_VERSION,
+  CATEGORY_DEFAULT_TTL,
 } from './types.js';
 import {
   withWikiLock,
@@ -70,6 +71,10 @@ export function ingestKnowledge(root: string, input: WikiIngestInput): WikiInges
 
 /** Create a new wiki page from ingest input. */
 function createPage(slug: string, input: WikiIngestInput, now: string): WikiPage {
+  // Resolve TTL: explicit > category default > none
+  const ttl = input.ttl ?? CATEGORY_DEFAULT_TTL[input.category];
+  const expiresAt = ttl ? new Date(Date.now() + ttl * 1000).toISOString() : undefined;
+
   const frontmatter: WikiPageFrontmatter = {
     title: input.title,
     tags: [...new Set(input.tags)],
@@ -80,6 +85,8 @@ function createPage(slug: string, input: WikiIngestInput, now: string): WikiPage
     category: input.category,
     confidence: input.confidence || 'medium',
     schemaVersion: WIKI_SCHEMA_VERSION,
+    ...(ttl ? { ttl } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
   };
 
   return {

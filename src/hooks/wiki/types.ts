@@ -33,6 +33,10 @@ export interface WikiPageFrontmatter {
   confidence: 'high' | 'medium' | 'low';
   /** Schema version for future migration support */
   schemaVersion: number;
+  /** Time-to-live in seconds. 0 or omitted means no expiry. */
+  ttl?: number;
+  /** ISO timestamp when this page expires (computed from ttl on write). */
+  expiresAt?: string;
 }
 
 /** Supported page categories. */
@@ -45,6 +49,14 @@ export type WikiCategory =
   | 'session-log'
   | 'reference'
   | 'convention';
+
+/**
+ * Default TTL (in seconds) per category.
+ * Categories not listed here have no automatic expiry.
+ */
+export const CATEGORY_DEFAULT_TTL: Partial<Record<WikiCategory, number>> = {
+  'session-log': 7 * 24 * 60 * 60, // 7 days
+};
 
 /** A wiki page: frontmatter + markdown content + filename. */
 export interface WikiPage {
@@ -86,6 +98,8 @@ export interface WikiIngestInput {
   sources?: string[];
   /** Confidence level */
   confidence?: 'high' | 'medium' | 'low';
+  /** Custom TTL in seconds (overrides category default) */
+  ttl?: number;
 }
 
 /** Result of an ingest operation. */
