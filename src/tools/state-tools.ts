@@ -612,7 +612,7 @@ export const stateClearTool: ToolDefinition<{
           source: 'state_clear' as const,
         };
         // Write to legacy path (checked by stop hook fallback)
-        const legacySignalPath = join(root, 'state', 'cancel-signal-state.json');
+        const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
         try { atomicWriteJsonSync(legacySignalPath, cancelSignalPayload); } catch { /* best-effort */ }
         // Write to each session path (checked by stop hook primary check)
         for (const sid of listSessionIds(root)) {
