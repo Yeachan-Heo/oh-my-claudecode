@@ -42,29 +42,49 @@ resolve_active_plugin_root() {
   # Scan sibling version directories for the latest (mirrors run.cjs).
   # When installed_plugins.json is stale (e.g. after /plugin update),
   # the cached version may be newer than the JSON path — use whichever is higher.
+  # cache_base is derived from $SCRIPT_PLUGIN_ROOT (the running script's location).
+  # json_root may live in a different directory tree (e.g. a custom installPath).
+  # When both are semver, the higher version wins regardless of tree; if json_root
+  # wins we emit its original path to preserve any custom location.
   local cache_base
   cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
   local sorted_latest=""
   if [ -d "$cache_base" ]; then
-    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+    # Anchor pattern with $ to exclude pre-release dirs like 4.9.0-beta.1
+    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
   fi
 
   if [ -n "$json_root" ] && [ -n "$sorted_latest" ] && [ -d "${cache_base}/${sorted_latest}" ]; then
     # Compare JSON path version against the latest cached version
     local json_version
     json_version="$(basename "$json_root")"
-    if printf '%s' "$json_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+    if printf '%s' "$json_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+      # Explicit equality check avoids relying on sort stability across platforms
+      if [ "$json_version" = "$sorted_latest" ]; then
+        echo "$json_root"
+        return 0
+      fi
       local higher
       higher=$(printf '%s\n%s' "$json_version" "$sorted_latest" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
       if [ "$higher" = "$json_version" ]; then
         echo "$json_root"
-      else
+      elif [ -f "${cache_base}/${higher}/docs/CLAUDE.md" ]; then
         echo "${cache_base}/${higher}"
+      else
+        # Cache dir exists but docs/CLAUDE.md is absent (incomplete install).
+        # Fall back to json_root; downstream CANONICAL_CLAUDE_MD check handles
+        # any further completeness issues via its own fallback chain (line ~254).
+        echo "$json_root"
       fi
       return 0
     fi
-    # json_root is not a semver path; prefer the latest cached version
-    echo "${cache_base}/${sorted_latest}"
+    # json_root basename is not a release semver (e.g. dev, latest); prefer the latest cached release
+    # if complete; otherwise fall back to json_root (incomplete cache is worse than known json path).
+    if [ -f "${cache_base}/${sorted_latest}/docs/CLAUDE.md" ]; then
+      echo "${cache_base}/${sorted_latest}"
+    else
+      echo "$json_root"
+    fi
     return 0
   fi
 
@@ -73,7 +93,7 @@ resolve_active_plugin_root() {
     return 0
   fi
 
-  if [ -n "$sorted_latest" ] && [ -d "${cache_base}/${sorted_latest}" ]; then
+  if [ -n "$sorted_latest" ] && [ -f "${cache_base}/${sorted_latest}/docs/CLAUDE.md" ]; then
     echo "${cache_base}/${sorted_latest}"
     return 0
   fi
