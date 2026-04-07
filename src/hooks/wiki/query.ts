@@ -29,8 +29,8 @@ export function tokenize(text: string): string[] {
   const lower = text.toLowerCase();
   const tokens: string[] = [];
 
-  // Latin/numeric tokens
-  const latinMatches = lower.match(/[a-z0-9]+/g);
+  // Latin/numeric tokens (including accented Latin: café, naïve, etc.)
+  const latinMatches = lower.match(/[a-z0-9\u00C0-\u024F]+/g);
   if (latinMatches) tokens.push(...latinMatches);
 
   // CJK segments (Hiragana + Katakana + CJK Unified Ideographs + Hangul)
@@ -49,11 +49,12 @@ export function tokenize(text: string): string[] {
 
   // Fallback: other scripts (Cyrillic, Arabic, Thai, Devanagari, etc.)
   // Remove already-matched Latin and CJK, then whitespace-split the remainder
+  // Filter out pure-punctuation tokens to avoid false-positive matches.
   const remaining = lower
-    .replace(/[a-z0-9]+/g, ' ')
+    .replace(/[a-z0-9\u00C0-\u024F]+/g, ' ')
     .replace(cjkPattern, ' ')
     .split(/\s+/)
-    .filter(Boolean);
+    .filter(t => t.length > 0 && /\p{L}/u.test(t));
   if (remaining.length > 0) tokens.push(...remaining);
 
   return tokens;

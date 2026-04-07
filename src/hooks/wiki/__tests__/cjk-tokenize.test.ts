@@ -97,6 +97,24 @@ describe('tokenize', () => {
     expect(tokens).not.toContain('「テ');
     expect(tokens).not.toContain('ト」');
   });
+
+  it('should preserve accented Latin words as single tokens', () => {
+    const tokens = tokenize('café naïve résumé');
+    expect(tokens).toContain('café');
+    expect(tokens).toContain('naïve');
+    expect(tokens).toContain('résumé');
+  });
+
+  it('should not emit punctuation-only tokens', () => {
+    const tokens = tokenize('jwt-based foo.bar C++');
+    expect(tokens).toContain('jwt');
+    expect(tokens).toContain('based');
+    expect(tokens).toContain('foo');
+    expect(tokens).toContain('bar');
+    expect(tokens).not.toContain('-');
+    expect(tokens).not.toContain('.');
+    expect(tokens).not.toContain('++');
+  });
 });
 
 describe('queryWiki with CJK content', () => {
