@@ -470,8 +470,18 @@ async function checkRalphLoop(
     return null;
   }
 
-  // Strict session isolation: only process state for matching session
-  if (state.session_id !== sessionId) {
+  // Session isolation. `readRalphState()` already enforces the lenient form
+  // ("only reject when BOTH sides have defined session_ids that differ"),
+  // so by the time we get here, the state file is either explicitly bound
+  // to this session or has no session_id at all (legacy/unbound state).
+  //
+  // The previous strict check `state.session_id !== sessionId` rejected the
+  // legitimate case where one side is undefined and the other is a UUID,
+  // which broke iteration counting on every Ralph loop where the state file
+  // lacked a session_id (or the Stop hook lost it). Symptom: ralph:1/100
+  // stuck forever in the HUD even on multi-hour sessions where the Stop
+  // hook fired many times.
+  if (state.session_id && sessionId && state.session_id !== sessionId) {
     return null;
   }
 
@@ -1026,8 +1036,11 @@ async function checkUltrawork(
     return null;
   }
 
-  // Strict session isolation: only process state for matching session
-  if (state.session_id !== sessionId) {
+  // Session isolation. `readUltraworkState()` already enforces the lenient
+  // form ("only reject when BOTH sides have defined session_ids that
+  // differ"). The previous strict check rejected legitimate cases where
+  // one side was undefined — same root cause as the ralph counter bug.
+  if (state.session_id && sessionId && state.session_id !== sessionId) {
     return null;
   }
 
