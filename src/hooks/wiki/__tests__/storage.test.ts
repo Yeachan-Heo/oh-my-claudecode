@@ -151,6 +151,23 @@ schemaVersion: 1
     it('should return null for missing --- delimiters', () => {
       expect(parseFrontmatter('---\ntitle: test')).toBeNull();
     });
+
+    it('should parse frontmatter with CRLF line endings', () => {
+      const raw = '---\r\ntitle: "CRLF Page"\r\ntags: []\r\ncreated: 2025-01-01T00:00:00.000Z\r\nupdated: 2025-01-01T00:00:00.000Z\r\nsources: []\r\nlinks: []\r\ncategory: reference\r\nconfidence: medium\r\nschemaVersion: 1\r\n---\r\n# CRLF content';
+
+      const result = parseFrontmatter(raw);
+      expect(result).not.toBeNull();
+      expect(result!.frontmatter.title).toBe('CRLF Page');
+      expect(result!.content).toBe('# CRLF content');
+    });
+
+    it('should parse frontmatter without trailing newline after closing ---', () => {
+      const raw = '---\ntitle: "No Trailing"\ntags: []\ncreated: 2025-01-01T00:00:00.000Z\nupdated: 2025-01-01T00:00:00.000Z\nsources: []\nlinks: []\ncategory: reference\nconfidence: medium\nschemaVersion: 1\n---';
+
+      const result = parseFrontmatter(raw);
+      expect(result).not.toBeNull();
+      expect(result!.frontmatter.title).toBe('No Trailing');
+    });
   });
 
   describe('serializePage + parseFrontmatter roundtrip', () => {
@@ -249,6 +266,15 @@ schemaVersion: 1
 
       const pages = readAllPages(tempDir);
       expect(pages.length).toBe(2);
+    });
+
+    it('should exclude reserved files (index.md, log.md, environment.md)', () => {
+      writePage(tempDir, makePage({ filename: 'user-page.md' }));
+      writePage(tempDir, makePage({ filename: 'environment.md', frontmatter: { ...makePage().frontmatter, title: 'Environment' } }));
+
+      const pages = readAllPages(tempDir);
+      expect(pages.length).toBe(1);
+      expect(pages[0].filename).toBe('user-page.md');
     });
   });
 
