@@ -123,7 +123,7 @@ export function stringWidth(str) {
 export function stripAnsi(str) {
     // ANSI escape code pattern: ESC [ ... m (SGR sequences)
     // Also handles other common sequences
-    return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/g, "");
+    return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 }
 /**
  * Truncate a string to fit within a maximum visual width.

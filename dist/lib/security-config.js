@@ -81,7 +81,7 @@ export function getSecurityConfig() {
             disableAutoUpdate: base.disableAutoUpdate || (fileOverrides.disableAutoUpdate ?? false),
             disableRemoteMcp: base.disableRemoteMcp || (fileOverrides.disableRemoteMcp ?? false),
             disableExternalLLM: base.disableExternalLLM || (fileOverrides.disableExternalLLM ?? false),
-            hardMaxIterations: Math.min(base.hardMaxIterations, fileOverrides.hardMaxIterations ?? base.hardMaxIterations),
+            hardMaxIterations: Math.min(base.hardMaxIterations, (typeof fileOverrides.hardMaxIterations === "number" && fileOverrides.hardMaxIterations > 0) ? fileOverrides.hardMaxIterations : base.hardMaxIterations),
         };
     }
     else {

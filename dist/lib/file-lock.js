@@ -70,11 +70,21 @@ function tryAcquireSync(lockPath, staleLockMs) {
     ensureDirSync(path.dirname(lockPath));
     try {
         const fd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
-        const payload = JSON.stringify({
-            pid: process.pid,
-            timestamp: Date.now(),
-        });
-        writeSync(fd, payload, null, "utf-8");
+        try {
+            const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+            writeSync(fd, payload, null, "utf-8");
+        }
+        catch (writeErr) {
+            try {
+                closeSync(fd);
+            }
+            catch { /* already closed */ }
+            try {
+                unlinkSync(lockPath);
+            }
+            catch { /* best effort */ }
+            throw writeErr;
+        }
         return { fd, path: lockPath };
     }
     catch (err) {
@@ -93,11 +103,21 @@ function tryAcquireSync(lockPath, staleLockMs) {
                 // Immediately retry a single time after reaping stale lock
                 try {
                     const fd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
-                    const payload = JSON.stringify({
-                        pid: process.pid,
-                        timestamp: Date.now(),
-                    });
-                    writeSync(fd, payload, null, "utf-8");
+                    try {
+                        const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+                        writeSync(fd, payload, null, "utf-8");
+                    }
+                    catch (writeErr) {
+                        try {
+                            closeSync(fd);
+                        }
+                        catch { /* already closed */ }
+                        try {
+                            unlinkSync(lockPath);
+                        }
+                        catch { /* best effort */ }
+                        throw writeErr;
+                    }
                     return { fd, path: lockPath };
                 }
                 catch {

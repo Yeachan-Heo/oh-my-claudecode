@@ -7,7 +7,7 @@
  */
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { getClaudeConfigDir } from '../utils/paths.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { sanitizeName } from './tmux-session.js';
 import { atomicWriteJson, validateResolvedPath } from './fs-utils.js';
 import { withFileLockSync } from '../lib/file-lock.js';
@@ -88,18 +88,26 @@ function registerInConfig(teamName, member) {
     const filePath = configPath(teamName);
     if (!existsSync(filePath))
         return; // No config.json to write to
+    const lockPath = filePath + '.lock';
     try {
-        const raw = readFileSync(filePath, 'utf-8');
-        const config = JSON.parse(raw);
-        const members = Array.isArray(config.members) ? config.members : [];
-        // Remove existing entry for this worker if present
-        const filtered = members.filter((m) => m.name !== member.name);
-        filtered.push(member);
-        config.members = filtered;
-        atomicWriteJson(filePath, config);
+        withFileLockSync(lockPath, () => {
+            try {
+                const raw = readFileSync(filePath, 'utf-8');
+                const config = JSON.parse(raw);
+                const members = Array.isArray(config.members) ? config.members : [];
+                // Remove existing entry for this worker if present
+                const filtered = members.filter((m) => m.name !== member.name);
+                filtered.push(member);
+                config.members = filtered;
+                atomicWriteJson(filePath, config);
+            }
+            catch {
+                // Config write failure is non-fatal — shadow registry is backup
+            }
+        });
     }
     catch {
-        // Config write failure is non-fatal — shadow registry is backup
+        // Lock acquisition failure is non-fatal — shadow registry is backup
     }
 }
 function registerInShadow(workingDirectory, teamName, member) {
@@ -144,13 +152,20 @@ export function unregisterMcpWorker(teamName, workerName, workingDirectory) {
     }
     // Remove from shadow registry
     const shadowFile = shadowRegistryPath(workingDirectory);
-    if (existsSync(shadowFile)) {
-        try {
-            const registry = JSON.parse(readFileSync(shadowFile, 'utf-8'));
-            registry.workers = (registry.workers || []).filter(w => w.name !== workerName);
-            atomicWriteJson(shadowFile, registry);
-        }
-        catch { /* ignore */ }
+    try {
+        withFileLockSync(shadowFile + '.lock', () => {
+            if (existsSync(shadowFile)) {
+                try {
+                    const registry = JSON.parse(readFileSync(shadowFile, 'utf-8'));
+                    registry.workers = (registry.workers || []).filter(w => w.name !== workerName);
+                    atomicWriteJson(shadowFile, registry);
+                }
+                catch { /* ignore */ }
+            }
+        });
+    }
+    catch {
+        // Lock contention during unregister is non-fatal — best-effort cleanup
     }
 }
 /** Check if a member entry is an MCP worker */

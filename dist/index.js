@@ -31,7 +31,7 @@ export {
 REPO_OWNER, REPO_NAME, GITHUB_API_URL, CLAUDE_CONFIG_DIR, VERSION_FILE, 
 // Auto-update functions
 getInstalledVersion, saveVersionMetadata, checkForUpdates, performUpdate, formatUpdateNotification, shouldCheckForUpdates, backgroundUpdateCheck, compareVersions } from './features/auto-update.js';
-export * from './shared/types.js';
+export * from './shared/index.js';
 // Hooks module exports
 export * from './hooks/index.js';
 // Features module exports (boulder-state, context-injector)

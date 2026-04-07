@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { ConcurrencyManager } from './concurrency.js';
 /** Default task timeout: 30 minutes */
 const DEFAULT_TASK_TTL_MS = 30 * 60 * 1000;

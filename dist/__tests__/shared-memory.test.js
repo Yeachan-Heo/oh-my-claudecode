@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { basename, join } from 'path';
+import { homedir, tmpdir } from 'os';
 // Mock getOmcRoot to use our test directory
 const mockGetOmcRoot = vi.fn();
 vi.mock('../lib/worktree-paths.js', async (importOriginal) => {
@@ -14,17 +14,30 @@ vi.mock('../lib/worktree-paths.js', async (importOriginal) => {
 });
 import { writeEntry, readEntry, listEntries, deleteEntry, cleanupExpired, listNamespaces, isSharedMemoryEnabled, } from '../lib/shared-memory.js';
 describe('Shared Memory', () => {
+    const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
     let testDir;
     let omcDir;
+    let tildeConfigDir;
     beforeEach(() => {
         testDir = join(tmpdir(), `shared-memory-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         omcDir = join(testDir, '.omc');
+        tildeConfigDir = join(homedir(), `.omc-test-shared-memory-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         mkdirSync(omcDir, { recursive: true });
         mockGetOmcRoot.mockReturnValue(omcDir);
+        delete process.env.CLAUDE_CONFIG_DIR;
     });
     afterEach(() => {
+        if (originalConfigDir === undefined) {
+            delete process.env.CLAUDE_CONFIG_DIR;
+        }
+        else {
+            process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+        }
         if (existsSync(testDir)) {
             rmSync(testDir, { recursive: true, force: true });
+        }
+        if (existsSync(tildeConfigDir)) {
+            rmSync(tildeConfigDir, { recursive: true, force: true });
         }
         vi.restoreAllMocks();
     });
@@ -296,6 +309,31 @@ describe('Shared Memory', () => {
     describe('isSharedMemoryEnabled', () => {
         it('should return true by default (no config file)', () => {
             expect(isSharedMemoryEnabled()).toBe(true);
+        });
+        it('should read config from the active CLAUDE_CONFIG_DIR', () => {
+            const claudeConfigDir = join(testDir, 'claude-config');
+            mkdirSync(claudeConfigDir, { recursive: true });
+            writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify({
+                agents: {
+                    sharedMemory: {
+                        enabled: false,
+                    },
+                },
+            }));
+            process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+            expect(isSharedMemoryEnabled()).toBe(false);
+        });
+        it('should expand ~-prefixed CLAUDE_CONFIG_DIR values', () => {
+            mkdirSync(tildeConfigDir, { recursive: true });
+            writeFileSync(join(tildeConfigDir, '.omc-config.json'), JSON.stringify({
+                agents: {
+                    sharedMemory: {
+                        enabled: false,
+                    },
+                },
+            }));
+            process.env.CLAUDE_CONFIG_DIR = `~/${basename(tildeConfigDir)}`;
+            expect(isSharedMemoryEnabled()).toBe(false);
         });
     });
     // =========================================================================

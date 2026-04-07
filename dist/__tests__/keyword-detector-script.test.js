@@ -50,5 +50,24 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
         expect(context).toContain('name: ralplan');
     });
+    it('ignores HTML comments that mention ralph and autopilot during normal review text', () => {
+        const output = runKeywordDetector(`Please review this draft document for tone and clarity:
+
+<!-- ralph: rewrite intro section with more urgency -->
+<!-- autopilot note: Why Artificially Inflating GitHub Star Counts Is Harmful:
+popularity without merit misleads developers, distorts discovery, unfairly rewards dishonest projects, and erodes trust in GitHub stars as a community signal. -->
+
+Final draft:
+
+Why Artificially Inflating GitHub Star Counts Is Harmful
+=========================================================
+
+This article argues that fake popularity signals damage trust in open source.`);
+        const context = output.hookSpecificOutput?.additionalContext ?? '';
+        expect(output.continue).toBe(true);
+        expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+        expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+        expect(context).toBe('');
+    });
 });
 //# sourceMappingURL=keyword-detector-script.test.js.map

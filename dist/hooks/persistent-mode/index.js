@@ -13,7 +13,8 @@ import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, clo
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
 import { getHardMaxIterations } from '../../lib/security-config.js';
-import { getClaudeConfigDir, getGlobalOmcConfigCandidates } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { readUltraworkState, writeUltraworkState, incrementReinforcement, deactivateUltrawork, getUltraworkPersistenceMessage } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { readModeState } from '../../lib/mode-state-io.js';
@@ -37,14 +38,18 @@ export function shouldWriteStateBack(statePath) {
  * Used to prevent stop-hook re-enforcement races during /cancel.
  */
 function isSessionCancelInProgress(directory, sessionId) {
-    if (!sessionId)
-        return false;
     let cancelSignalPath;
-    try {
-        cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
+    if (sessionId) {
+        try {
+            cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
+        }
+        catch {
+            // fall through to legacy path
+        }
     }
-    catch {
-        return false;
+    // Fallback: check legacy (non-session-scoped) cancel signal
+    if (!cancelSignalPath) {
+        cancelSignalPath = join(getOmcRoot(directory), 'state', 'cancel-signal-state.json');
     }
     if (!existsSync(cancelSignalPath)) {
         return false;
@@ -287,10 +292,26 @@ function isCriticalContextStop(stopContext) {
     const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
     return estimateTranscriptContextPercent(transcriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT;
 }
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 function isAwaitingConfirmation(state) {
-    return Boolean(state &&
-        typeof state === 'object' &&
-        state.awaiting_confirmation === true);
+    if (!state || typeof state !== 'object') {
+        return false;
+    }
+    const stateRecord = state;
+    if (stateRecord.awaiting_confirmation !== true) {
+        return false;
+    }
+    const setAt = (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
+        (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+        null;
+    if (!setAt) {
+        return false;
+    }
+    const setAtMs = new Date(setAt).getTime();
+    if (!Number.isFinite(setAtMs)) {
+        return false;
+    }
+    return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 /**
  * Check for architect approval in session transcript
@@ -356,8 +377,18 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     if (!state || !state.active) {
         return null;
     }
-    // Strict session isolation: only process state for matching session
-    if (state.session_id !== sessionId) {
+    // Session isolation. `readRalphState()` already enforces the lenient form
+    // ("only reject when BOTH sides have defined session_ids that differ"),
+    // so by the time we get here, the state file is either explicitly bound
+    // to this session or has no session_id at all (legacy/unbound state).
+    //
+    // The previous strict check `state.session_id !== sessionId` rejected the
+    // legitimate case where one side is undefined and the other is a UUID,
+    // which broke iteration counting on every Ralph loop where the state file
+    // lacked a session_id (or the Stop hook lost it). Symptom: ralph:1/100
+    // stuck forever in the HUD even on multi-hour sessions where the Stop
+    // hook fired many times.
+    if (state.session_id && sessionId && state.session_id !== sessionId) {
         return null;
     }
     if (isAwaitingConfirmation(state)) {
@@ -501,29 +532,31 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
             }
         };
     }
-    // Check max iterations (cancel already checked at function entry via cached flag)
-    if (state.iteration >= state.max_iterations) {
-        const hardMax = getHardMaxIterations();
-        if (hardMax > 0 && state.max_iterations >= hardMax) {
-            // Hard limit reached — auto-disable to prevent unbounded execution
-            state.active = false;
-            if (!shouldWriteStateBack(ralphStatePath)) {
-                return {
-                    shouldBlock: false,
-                    message: '',
-                    mode: 'none'
-                };
-            }
-            writeRalphState(workingDir, state, sessionId);
+    // Hard max: check iteration count directly against the security limit,
+    // independent of max_iterations, so it cannot be bypassed by a high
+    // initial max_iterations value.
+    const hardMax = getHardMaxIterations();
+    if (hardMax > 0 && state.iteration >= hardMax) {
+        // Hard limit reached — auto-disable to prevent unbounded execution
+        state.active = false;
+        if (!shouldWriteStateBack(ralphStatePath)) {
             return {
-                shouldBlock: true,
-                message: `[RALPH - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
-                mode: 'ralph',
-                metadata: { iteration: state.iteration, maxIterations: state.max_iterations }
+                shouldBlock: false,
+                message: '',
+                mode: 'none'
             };
         }
-        // Extend the limit and continue enforcement so user-visible cancellation
-        // remains the only explicit termination path.
+        writeRalphState(workingDir, state, sessionId);
+        return {
+            shouldBlock: true,
+            message: `[RALPH - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+            mode: 'ralph',
+            metadata: { iteration: state.iteration, maxIterations: state.max_iterations }
+        };
+    }
+    // Check max iterations — extend limit so user-visible cancellation
+    // remains the only explicit termination path.
+    if (state.iteration >= state.max_iterations) {
         state.max_iterations += 10;
         if (!shouldWriteStateBack(ralphStatePath)) {
             return {
@@ -827,8 +860,11 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
     if (!state || !state.active) {
         return null;
     }
-    // Strict session isolation: only process state for matching session
-    if (state.session_id !== sessionId) {
+    // Session isolation. `readUltraworkState()` already enforces the lenient
+    // form ("only reject when BOTH sides have defined session_ids that
+    // differ"). The previous strict check rejected legitimate cases where
+    // one side was undefined — same root cause as the ralph counter bug.
+    if (state.session_id && sessionId && state.session_id !== sessionId) {
         return null;
     }
     if (isAwaitingConfirmation(state)) {
@@ -840,6 +876,17 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
             shouldBlock: false,
             message: '',
             mode: 'none'
+        };
+    }
+    // Enforce hard max iterations for ultrawork (mirrors ralph enforcement).
+    const hardMax = getHardMaxIterations();
+    if (hardMax > 0 && state.reinforcement_count >= hardMax) {
+        deactivateUltrawork(workingDir, sessionId);
+        return {
+            shouldBlock: true,
+            message: '[ULTRAWORK - HARD LIMIT] Reached hard max iterations (' + hardMax + '). Mode auto-disabled. Restart with /oh-my-claudecode:ultrawork if needed.',
+            mode: 'ultrawork',
+            metadata: { reinforcementCount: state.reinforcement_count }
         };
     }
     // Reinforce ultrawork mode - ALWAYS continue while active.

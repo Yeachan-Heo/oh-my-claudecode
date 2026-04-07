@@ -13,7 +13,7 @@ export const ALLOWED_PATH_PREFIX = '.omc/';
 export const ALLOWED_PATH_PATTERNS = [
     /^\.omc\//, // .omc/**
     /^\.claude\//, // .claude/** (local)
-    /^~?\/\.claude\//, // ~/.claude/** (global)
+    /^~?\/\.claude\//, // legacy ~/.claude/** references
     /\/\.claude\//, // any /.claude/ path
     /CLAUDE\.md$/, // **/CLAUDE.md
     /AGENTS\.md$/, // **/AGENTS.md
@@ -97,7 +97,7 @@ As an ORCHESTRATOR, you MUST:
 
 **ALLOWED direct file operations:**
 - Files inside \`.omc/\` (plans, notepads, drafts)
-- Files inside \`~/.claude/\` (global config)
+- Files inside \`[$CLAUDE_CONFIG_DIR|~/.claude]/\`
 - \`CLAUDE.md\` and \`AGENTS.md\` files
 - Reading files for verification
 - Running diagnostics/tests

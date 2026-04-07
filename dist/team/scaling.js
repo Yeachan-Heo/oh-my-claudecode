@@ -82,15 +82,26 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
                 catch { /* best-effort pane cleanup */ }
             }
             config.worker_count = config.workers.length;
-            config.next_worker_index = initialNextIndex;
+            config.next_worker_index = nextIndex;
             await saveTeamConfig(config, leaderCwd);
             return { ok: false, error };
         };
         for (let i = 0; i < count; i++) {
+            // Skip past any colliding worker names so stale next_worker_index
+            // values self-heal instead of causing a permanent failure loop.
+            const maxSkip = config.workers.length + count;
+            let skipped = 0;
+            while (config.workers.some((w) => w.name === `worker-${nextIndex}`) && skipped < maxSkip) {
+                nextIndex++;
+                skipped++;
+            }
             const workerIndex = nextIndex;
             nextIndex++;
             const workerName = `worker-${workerIndex}`;
             if (config.workers.some((worker) => worker.name === workerName)) {
+                // Persist the advanced index so the next call does not repeat.
+                config.next_worker_index = nextIndex;
+                await saveTeamConfig(config, leaderCwd);
                 await teamAppendEvent(sanitized, {
                     type: 'team_leader_nudge',
                     worker: 'leader-fixed',

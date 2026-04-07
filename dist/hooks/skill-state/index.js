@@ -16,7 +16,7 @@
  * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1033
  */
 import { writeModeState, readModeState, clearModeStateFile } from '../../lib/mode-state-io.js';
-import { getActiveAgentCount } from '../subagent-tracker/index.js';
+import { readTrackingState, getStaleAgents } from '../subagent-tracker/index.js';
 // ---------------------------------------------------------------------------
 // Protection configuration per level
 // ---------------------------------------------------------------------------
@@ -225,7 +225,22 @@ export function checkSkillActiveState(directory, sessionId) {
     // Orchestrators are allowed to go idle while delegated work is still active.
     // Do not consume a reinforcement here; the skill is still active and should
     // resume enforcement only after the running subagents finish.
-    if (getActiveAgentCount(directory) > 0) {
+    // Read tracking state and exclude stale agents (>5 min without updates)
+    // to prevent phantom "running" entries from blocking enforcement.
+    // Uses read-only filtering instead of cleanupStaleAgents() to avoid
+    // destructively marking legitimate long-running agents as failed.
+    const trackingState = readTrackingState(directory);
+    const staleIds = new Set(getStaleAgents(trackingState).map(a => a.agent_id));
+    const nonStaleRunning = trackingState.agents.filter(a => a.status === 'running' && !staleIds.has(a.agent_id));
+    if (nonStaleRunning.length > 0) {
+        // Reset reinforcement counter so accumulations during brief idle gaps
+        // don't cause premature skill-active clearance.
+        // Mirrors ralplan's writeStopBreaker(0) at persistent-mode/index.ts:984.
+        if (state.reinforcement_count > 0) {
+            state.reinforcement_count = 0;
+            state.last_checked_at = new Date().toISOString();
+            writeModeState('skill-active', state, directory, sessionId);
+        }
         return { shouldBlock: false, message: '', skillName: state.skill_name };
     }
     // Block the stop and increment reinforcement count

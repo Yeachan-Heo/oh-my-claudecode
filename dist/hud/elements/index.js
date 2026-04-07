@@ -16,11 +16,12 @@ export { renderThinking } from './thinking.js';
 export { renderSession } from './session.js';
 export { renderAutopilot, renderAutopilotCompact } from './autopilot.js';
 export { renderCwd } from './cwd.js';
-export { renderGitRepo, renderGitBranch, getGitRepoName, getGitBranch } from './git.js';
+export { renderGitRepo, renderGitBranch, renderGitStatus, getGitRepoName, getGitBranch, getGitStatusCounts } from './git.js';
 export { renderModel, formatModelName } from './model.js';
 export { renderPromptTime } from './prompt-time.js';
 export { detectApiKeySource, renderApiKeySource } from './api-key-source.js';
 export { renderMissionBoard } from './mission-board.js';
 export { renderSessionSummary } from './session-summary.js';
 export { renderLastTool } from './last-tool.js';
+export { renderHostname } from './hostname.js';
 //# sourceMappingURL=index.js.map

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 const DEFAULT_CONFIG = {
     enabled: true,

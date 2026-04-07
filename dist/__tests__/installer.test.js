@@ -3,7 +3,6 @@ import { VERSION, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS
 import { getRuntimePackageVersion } from '../lib/version.js';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { homedir } from 'os';
 import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 /**
@@ -302,12 +301,10 @@ describe('Installer Constants', () => {
     });
     describe('File Paths', () => {
         it('should define valid directory paths', () => {
-            const expectedBase = join(homedir(), '.claude');
-            expect(CLAUDE_CONFIG_DIR).toBe(expectedBase);
-            expect(AGENTS_DIR).toBe(join(expectedBase, 'agents'));
-            expect(COMMANDS_DIR).toBe(join(expectedBase, 'commands'));
-            expect(SKILLS_DIR).toBe(join(expectedBase, 'skills'));
-            expect(HOOKS_DIR).toBe(join(expectedBase, 'hooks'));
+            expect(AGENTS_DIR).toBe(join(CLAUDE_CONFIG_DIR, 'agents'));
+            expect(COMMANDS_DIR).toBe(join(CLAUDE_CONFIG_DIR, 'commands'));
+            expect(SKILLS_DIR).toBe(join(CLAUDE_CONFIG_DIR, 'skills'));
+            expect(HOOKS_DIR).toBe(join(CLAUDE_CONFIG_DIR, 'hooks'));
         });
         it('should use absolute paths', () => {
             const paths = [
@@ -441,7 +438,7 @@ describe('Installer Constants', () => {
         });
         it('should return false for global plugin installation', () => {
             // Global plugins are under ~/.claude/plugins/
-            process.env.CLAUDE_PLUGIN_ROOT = join(homedir(), '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode', '3.9.0');
+            process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '3.9.0');
             expect(isProjectScopedPlugin()).toBe(false);
         });
         it('should return true for project-scoped plugin installation', () => {
@@ -460,7 +457,7 @@ describe('Installer Constants', () => {
             expect(isProjectScopedPlugin()).toBe(true);
         });
         it('should handle trailing slashes in paths', () => {
-            process.env.CLAUDE_PLUGIN_ROOT = join(homedir(), '.claude', 'plugins', 'cache', 'omc') + '/';
+            process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc') + '/';
             expect(isProjectScopedPlugin()).toBe(false);
         });
     });
@@ -511,6 +508,33 @@ describe('Installer Constants', () => {
                 for (const line of lines) {
                     expect(line).toMatch(/^[a-zA-Z]+:\s+.+/);
                 }
+            }
+        });
+    });
+    describe('Hook Scripts Installation (#2185 regression)', () => {
+        it('should have all required lib files in templates/hooks/lib', () => {
+            const templatesLibDir = join(getPackageDir(), 'templates', 'hooks', 'lib');
+            expect(existsSync(templatesLibDir)).toBe(true);
+            const libFiles = readdirSync(templatesLibDir);
+            // Required lib files that must be present
+            const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs'];
+            for (const file of requiredFiles) {
+                expect(libFiles).toContain(file);
+            }
+        });
+        it('should have all standalone hook template files present', () => {
+            const templatesDir = join(getPackageDir(), 'templates', 'hooks');
+            const hookFiles = [
+                'keyword-detector.mjs',
+                'session-start.mjs',
+                'pre-tool-use.mjs',
+                'post-tool-use.mjs',
+                'post-tool-use-failure.mjs',
+                'persistent-mode.mjs',
+                'code-simplifier.mjs',
+            ];
+            for (const file of hookFiles) {
+                expect(existsSync(join(templatesDir, file))).toBe(true);
             }
         });
     });

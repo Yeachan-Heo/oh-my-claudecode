@@ -39,7 +39,7 @@ import { getBackgroundBashPermissionFallback, getBackgroundTaskPermissionFallbac
 import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
-const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+(split-window|new-session|new-window|join-pane|send-keys)\b/i;
+const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+/i;
 const WORKER_BLOCKED_TEAM_CLI_PATTERN = /\bom[cx]\s+team\b(?!\s+api\b)/i;
 const WORKER_BLOCKED_SKILL_PATTERN = /\$(team|ultrawork|autopilot|ralph)\b/i;
 const TEAM_TERMINAL_VALUES = new Set([
@@ -138,9 +138,11 @@ function updateModeAwaitingConfirmation(directory, modeName, sessionId, awaiting
             }
             if (awaitingConfirmation) {
                 state.awaiting_confirmation = true;
+                state.awaiting_confirmation_set_at = new Date().toISOString();
             }
             else if (state.awaiting_confirmation === true) {
                 delete state.awaiting_confirmation;
+                delete state.awaiting_confirmation_set_at;
             }
             else {
                 continue;
@@ -388,6 +390,41 @@ function validateHookInput(input, requiredFields, hookType) {
         return false;
     }
     return true;
+}
+function hasInjectableText(value) {
+    return typeof value === "string" && value.trim().length > 0;
+}
+/**
+ * Strip empty hook text fields before serializing to Claude Code.
+ *
+ * Some hook handlers use empty strings as internal sentinels. Passing those
+ * through to the shell hook protocol can create empty system-message/context
+ * injections on the next turn, which is especially risky after Task/Agent
+ * completion when Claude is deciding whether to continue.
+ */
+export function sanitizeHookOutputForSerialization(output) {
+    const sanitized = { ...output };
+    if (!hasInjectableText(sanitized.message)) {
+        delete sanitized.message;
+    }
+    if (!hasInjectableText(sanitized.systemMessage)) {
+        delete sanitized.systemMessage;
+    }
+    const hookSpecificOutput = sanitized.hookSpecificOutput;
+    if (hookSpecificOutput && typeof hookSpecificOutput === "object") {
+        const nextHookSpecificOutput = { ...hookSpecificOutput };
+        if (!hasInjectableText(nextHookSpecificOutput.additionalContext)) {
+            delete nextHookSpecificOutput.additionalContext;
+        }
+        sanitized.hookSpecificOutput =
+            Object.keys(nextHookSpecificOutput).length > 0
+                ? nextHookSpecificOutput
+                : undefined;
+        if (!sanitized.hookSpecificOutput) {
+            delete sanitized.hookSpecificOutput;
+        }
+    }
+    return sanitized;
 }
 function isDelegationToolName(toolName) {
     const normalizedToolName = (toolName || "").toLowerCase();
@@ -1061,10 +1098,9 @@ function processPreToolUse(input) {
         ? [enforcementResult.message]
         : [];
     let modifiedToolInput;
-    const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(directory, input.sessionId, input.toolName, input.toolInput);
-    if (promptPrerequisiteProgress?.isComplete) {
-        preToolMessages.push("[PROMPT PREREQUISITES COMPLETE] Required context tools/files were read. Editing and agent delegation are unblocked.");
-    }
+    // Check blocking BEFORE recording progress — otherwise a denied tool
+    // (e.g. Edit) that also matches a prerequisite would have its progress
+    // persisted even though the tool never actually executed.
     const promptPrerequisiteState = readPromptPrerequisiteState(directory, input.sessionId);
     if (promptPrerequisiteState?.active
         && isPromptPrerequisiteBlockingTool(input.toolName, promptPrerequisiteConfig)) {
@@ -1076,6 +1112,10 @@ function processPreToolUse(input) {
                 permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
             },
         };
+    }
+    const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(directory, input.sessionId, input.toolName, input.toolInput);
+    if (promptPrerequisiteProgress?.isComplete) {
+        preToolMessages.push("[PROMPT PREREQUISITES COMPLETE] Required context tools/files were read. Editing and agent delegation are unblocked.");
     }
     // Force-inherit: deny Task/Agent calls that carry a `model` parameter when
     // forceInherit is enabled (Bedrock, Vertex, CC Switch, etc.).
@@ -1710,7 +1750,7 @@ export async function main() {
     // Process hook
     const output = await processHook(hookType, input);
     // Write output to stdout
-    console.log(JSON.stringify(output));
+    console.log(JSON.stringify(sanitizeHookOutputForSerialization(output)));
 }
 // Run if called directly (works in both ESM and bundled CJS)
 // In CJS bundle, check if this is the main module by comparing with process.argv[1]

@@ -6,7 +6,7 @@
  */
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { getClaudeConfigDir } from "../utils/paths.js";
+import { getClaudeConfigDir } from "../utils/config-dir.js";
 import { getHookConfig, mergeHookConfigIntoNotificationConfig, } from "./hook-config.js";
 const CONFIG_FILE = join(getClaudeConfigDir(), ".omc-config.json");
 const DEFAULT_TMUX_TAIL_LINES = 15;

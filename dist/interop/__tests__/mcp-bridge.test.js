@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { canUseOmxDirectWriteBridge, getInteropMode, interopSendOmxMessageTool } from '../mcp-bridge.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { canUseOmxDirectWriteBridge, getInteropMode, interopReadMessagesTool, interopReadResultsTool, interopSendMessageTool, interopSendOmxMessageTool, interopSendTaskTool, } from '../mcp-bridge.js';
+import { initInteropSession, readSharedMessages, readSharedTasks, updateSharedTask } from '../shared-state.js';
 describe('interop mcp bridge gating', () => {
     it('getInteropMode normalizes invalid values to off', () => {
         expect(getInteropMode({ OMX_OMC_INTEROP_MODE: 'ACTIVE' })).toBe('active');
@@ -55,6 +59,59 @@ describe('interop mcp bridge gating', () => {
             else
                 process.env.OMC_INTEROP_TOOLS_ENABLED = savedTools;
         }
+    });
+});
+describe('interop mcp bridge artifact surfacing', () => {
+    let tempDir;
+    beforeEach(() => {
+        tempDir = mkdtempSync(join(tmpdir(), 'mcp-bridge-artifacts-'));
+        initInteropSession('session-1', tempDir);
+    });
+    afterEach(() => {
+        rmSync(tempDir, { recursive: true, force: true });
+    });
+    it('reports artifact-backed task descriptions and results', async () => {
+        const description = 'describe ' + 'x'.repeat(5000);
+        const sendResponse = await interopSendTaskTool.handler({
+            target: 'omx',
+            type: 'implement',
+            description,
+            workingDirectory: tempDir,
+        });
+        const sendText = sendResponse.content[0]?.text ?? '';
+        expect(sendText).toContain('Description artifact:');
+        const [task] = readSharedTasks(tempDir);
+        expect(task.descriptionArtifact?.path).toBeTruthy();
+        updateSharedTask(tempDir, task.id, {
+            status: 'completed',
+            result: 'result ' + 'y'.repeat(5000),
+        });
+        const readResponse = await interopReadResultsTool.handler({
+            status: 'completed',
+            workingDirectory: tempDir,
+        });
+        const readText = readResponse.content[0]?.text ?? '';
+        expect(readText).toContain('Description artifact:');
+        expect(readText).toContain('Result artifact:');
+        expect(readText).toContain('.omc/state/interop/artifacts/task-description/');
+        expect(readText).toContain('.omc/state/interop/artifacts/task-result/');
+    });
+    it('reports artifact-backed shared messages', async () => {
+        const sendResponse = await interopSendMessageTool.handler({
+            target: 'omx',
+            content: 'message ' + 'z'.repeat(5000),
+            workingDirectory: tempDir,
+        });
+        const sendText = sendResponse.content[0]?.text ?? '';
+        expect(sendText).toContain('Content artifact:');
+        const [message] = readSharedMessages(tempDir);
+        expect(message.contentArtifact?.path).toBeTruthy();
+        const readResponse = await interopReadMessagesTool.handler({
+            workingDirectory: tempDir,
+        });
+        const readText = readResponse.content[0]?.text ?? '';
+        expect(readText).toContain('Content artifact:');
+        expect(readText).toContain('.omc/state/interop/artifacts/message-content/');
     });
 });
 //# sourceMappingURL=mcp-bridge.test.js.map

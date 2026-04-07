@@ -1,14 +1,11 @@
 import { execSync } from 'child_process';
 import { createReadStream, existsSync, readdirSync, statSync } from 'fs';
-import { homedir } from 'os';
 import { dirname, join, normalize, resolve } from 'path';
 import { createInterface } from 'readline';
 import { resolveToWorktreeRoot, validateSessionId, validateWorkingDirectory, getOmcRoot, } from '../../lib/worktree-paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CONTEXT_CHARS = 120;
-function getClaudeConfigDir() {
-    return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-}
 function compactWhitespace(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
@@ -39,7 +36,7 @@ function parseSinceSpec(since) {
     return Number.isNaN(parsed) ? undefined : parsed;
 }
 function encodeProjectPath(projectPath) {
-    return projectPath.replace(/[\\/]/g, '-');
+    return projectPath.replace(/[/\\.]/g, '-');
 }
 function getMainRepoRoot(projectRoot) {
     try {

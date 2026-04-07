@@ -13,7 +13,7 @@ vi.mock('fs', async () => {
     };
 });
 vi.mock('../utils/config-dir.js', () => ({
-    getConfigDir: vi.fn(() => '/mock/.claude'),
+    getClaudeConfigDir: vi.fn(() => '/mock/.claude'),
 }));
 import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'fs';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';

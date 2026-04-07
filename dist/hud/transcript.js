@@ -13,7 +13,11 @@ import { createReadStream, existsSync, statSync, openSync, readSync, closeSync, 
 import { createInterface } from "readline";
 import { basename } from "path";
 // Performance constants
-const MAX_TAIL_BYTES = 512 * 1024; // 500KB - enough for recent activity
+// 4MB tail window: enough to catch the full tool_use → tool_result → task-notification
+// chain for agent-heavy sessions (typically ~30-50KB per agent call, so 4MB covers
+// ~80-130 agents). The previous 512KB window lost completion signals for older
+// agents in long sessions, leaving them stuck as "running" in the HUD.
+const MAX_TAIL_BYTES = 4 * 1024 * 1024;
 const MAX_AGENT_MAP_SIZE = 100; // Cap agent tracking
 const _MIN_RUNNING_AGENTS_THRESHOLD = 10; // Early termination threshold
 /**
@@ -256,17 +260,28 @@ function extractBackgroundAgentId(content) {
     return match ? match[1] : null;
 }
 /**
- * Parse TaskOutput result for completion status
+ * Parse TaskOutput result for completion status.
+ *
+ * Claude Code emits completion as a `<task-notification>` block with
+ * hyphen-cased tags (`<task-id>`, `<tool-use-id>`, `<status>`). Accept
+ * both hyphen and underscore variants for defence in depth.
  */
 function parseTaskOutputResult(content) {
     const text = typeof content === "string"
         ? content
         : content.find((c) => c.type === "text")?.text || "";
-    // Extract task_id and status from XML-like format
-    const taskIdMatch = text.match(/<task_id>([^<]+)<\/task_id>/);
+    // Hyphen variant (real Claude Code format) first, underscore fallback second.
+    const taskIdMatch = text.match(/<task-id>([^<]+)<\/task-id>/) ||
+        text.match(/<task_id>([^<]+)<\/task_id>/);
     const statusMatch = text.match(/<status>([^<]+)<\/status>/);
+    const toolUseIdMatch = text.match(/<tool-use-id>([^<]+)<\/tool-use-id>/) ||
+        text.match(/<tool_use_id>([^<]+)<\/tool_use_id>/);
     if (taskIdMatch && statusMatch) {
-        return { taskId: taskIdMatch[1], status: statusMatch[1] };
+        return {
+            taskId: taskIdMatch[1],
+            toolUseId: toolUseIdMatch ? toolUseIdMatch[1] : null,
+            status: statusMatch[1],
+        };
     }
     return null;
 }
@@ -317,6 +332,37 @@ function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50
         result.sessionStart = timestamp;
     }
     const content = entry.message?.content;
+    // Claude Code emits background-agent completion as a user-role message with
+    // string-shaped content: `<task-notification>...<tool-use-id>...</tool-use-id>
+    // ...<status>completed</status>...</task-notification>`. The block-based
+    // parser below only handles array-shaped content, so we handle the string
+    // case up front — otherwise background agents (subagents launched with
+    // run_in_background, Explore/Plan/general-purpose, etc.) never transition
+    // from "running" to "completed" in the HUD.
+    if (typeof content === "string") {
+        if (content.includes("<task-notification>") || content.includes("<task_id>") || content.includes("<task-id>")) {
+            const taskOutput = parseTaskOutputResult(content);
+            if (taskOutput && taskOutput.status === "completed") {
+                // Prefer direct tool-use-id lookup (skips the backgroundAgentMap
+                // indirection). Fall back to the legacy agentId → tool_use_id mapping.
+                let toolUseId;
+                if (taskOutput.toolUseId) {
+                    toolUseId = taskOutput.toolUseId;
+                }
+                else if (backgroundAgentMap) {
+                    toolUseId = backgroundAgentMap.get(taskOutput.taskId);
+                }
+                if (toolUseId) {
+                    const agent = agentMap.get(toolUseId);
+                    if (agent && agent.status === "running") {
+                        agent.status = "completed";
+                        agent.endTime = timestamp;
+                    }
+                }
+            }
+        }
+        return;
+    }
     if (!content || !Array.isArray(content))
         return;
     for (const block of content) {
@@ -402,11 +448,28 @@ function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50
             const agent = agentMap.get(block.tool_use_id);
             if (agent) {
                 const blockContent = block.content;
-                // Check if this is a background agent launch result
+                // Check if this is a background agent launch result.
+                //
+                // The real "Async agent launched successfully" notification is a
+                // short (~400B), standalone tool_result whose text STARTS with the
+                // exact phrase. A completed foreground agent result can easily
+                // contain the same phrase quoted elsewhere (e.g. an investigation
+                // report that cites a previous launch message), so a naive
+                // `.includes()` check misclassifies legitimate completions as
+                // background launches and leaves them stuck as "running" in the HUD.
+                //
+                // Require the text to START WITH "Async agent launched" (after
+                // trimming leading whitespace) — nothing else qualifies.
+                const ASYNC_LAUNCH_PREFIX = "Async agent launched";
+                const startsWithAsyncLaunch = (text) => !!text && text.trimStart().startsWith(ASYNC_LAUNCH_PREFIX);
                 const isBackgroundLaunch = typeof blockContent === "string"
-                    ? blockContent.includes("Async agent launched")
+                    ? startsWithAsyncLaunch(blockContent)
                     : Array.isArray(blockContent) &&
-                        blockContent.some((c) => c.type === "text" && c.text?.includes("Async agent launched"));
+                        blockContent.length > 0 &&
+                        typeof blockContent[0] === "object" &&
+                        blockContent[0] !== null &&
+                        blockContent[0].type === "text" &&
+                        startsWithAsyncLaunch(blockContent[0].text);
                 if (isBackgroundLaunch) {
                     // Extract and store the background agent ID mapping
                     if (backgroundAgentMap && blockContent) {
@@ -424,11 +487,17 @@ function processEntry(entry, agentMap, latestTodos, result, maxAgentMapSize = 50
                 }
             }
             // Check if this is a TaskOutput result showing completion
-            if (backgroundAgentMap && block.content) {
+            if (block.content) {
                 const taskOutput = parseTaskOutputResult(block.content);
                 if (taskOutput && taskOutput.status === "completed") {
-                    // Find the original agent by background agent ID
-                    const toolUseId = backgroundAgentMap.get(taskOutput.taskId);
+                    // Prefer direct tool-use-id lookup; fall back to the legacy agentId mapping.
+                    let toolUseId;
+                    if (taskOutput.toolUseId) {
+                        toolUseId = taskOutput.toolUseId;
+                    }
+                    else if (backgroundAgentMap) {
+                        toolUseId = backgroundAgentMap.get(taskOutput.taskId);
+                    }
                     if (toolUseId) {
                         const bgAgent = agentMap.get(toolUseId);
                         if (bgAgent && bgAgent.status === "running") {

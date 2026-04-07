@@ -1,3 +1,4 @@
+import { isAbsolute, relative } from "node:path";
 import { clearModeStateFile, readModeState, writeModeState } from "../../lib/mode-state-io.js";
 const STATE_MODE = "prompt-prerequisites";
 const DEFAULT_SECTION_NAMES = {
@@ -33,7 +34,14 @@ function isLikelyPath(value) {
         return false;
     if (value.includes("://"))
         return false;
-    return value.includes("/") || value.startsWith("./") || value.startsWith("../");
+    // Require an explicit path prefix to avoid false positives on
+    // slash-separated English words like "read/write", "input/output".
+    if (value.startsWith("./") || value.startsWith("../") || value.startsWith("/"))
+        return true;
+    // For bare relative paths (e.g. "src/foo.ts"), require a recognisable
+    // file extension in the last segment to distinguish from natural language.
+    const lastSegment = value.split("/").pop() || "";
+    return /\.[a-z0-9]{1,10}$/i.test(lastSegment);
 }
 export function getPromptPrerequisiteConfig(config) {
     const raw = config?.promptPrerequisites;
@@ -216,7 +224,9 @@ export function recordPromptPrerequisiteProgress(directory, sessionId, toolName,
     const readPath = extractReadFilePath(toolName, toolInput);
     if (readPath) {
         for (const requiredPath of state.required_file_paths) {
-            if (!state.completed_file_paths.includes(requiredPath) && normalizePath(readPath) === requiredPath) {
+            const normalizedRead = normalizePath(readPath);
+            const relativeRead = isAbsolute(normalizedRead) ? relative(directory, normalizedRead) : normalizedRead;
+            if (!state.completed_file_paths.includes(requiredPath) && (relativeRead === requiredPath || normalizedRead === requiredPath)) {
                 state.completed_file_paths = dedupe([...state.completed_file_paths, requiredPath]);
                 fileSatisfied = requiredPath;
             }

@@ -1,22 +1,34 @@
-import { execSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.unmock('child_process');
+vi.unmock('node:child_process');
+import { execFileSync } from 'child_process';
+// @ts-expect-error Local hook helper is a JS module loaded directly by the tests.
+import { evaluateAgentHeavyPreflight } from '../../scripts/lib/pre-tool-enforcer-preflight.mjs';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'pre-tool-enforcer.mjs');
 function runPreToolEnforcer(input) {
     return runPreToolEnforcerWithEnv(input);
 }
 function runPreToolEnforcerWithEnv(input, env = {}) {
-    const stdout = execSync(`node "${SCRIPT_PATH}"`, {
+    const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+    const homeDir = join(cwd, '.test-home');
+    const stdout = execFileSync(process.execPath, [SCRIPT_PATH], {
+        cwd,
         input: JSON.stringify(input),
         encoding: 'utf-8',
         timeout: 5000,
         env: {
             ...process.env,
+            HOME: homeDir,
+            CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
             NODE_ENV: 'test',
+            DISABLE_OMC: '',
+            OMC_SKIP_HOOKS: '',
             // Reset Bedrock/routing env vars so tests are isolated from the host environment.
             // Tests that exercise Bedrock model-routing behaviour set these explicitly via `env`.
+            OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '',
             OMC_ROUTING_FORCE_INHERIT: '',
             OMC_SUBAGENT_MODEL: '',
             CLAUDE_MODEL: '',
@@ -271,19 +283,27 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     it('blocks agent-heavy Task preflight when transcript context budget is exhausted', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');
         writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
-        const output = runPreToolEnforcer({
-            tool_name: 'Task',
-            toolInput: {
-                subagent_type: 'oh-my-claudecode:executor',
-                description: 'High fan-out execution',
-            },
-            cwd: tempDir,
-            transcript_path: transcriptPath,
-            session_id: 'session-1373',
+        const output = evaluateAgentHeavyPreflight({
+            toolName: 'Task',
+            transcriptPath,
         });
-        expect(output.decision).toBe('block');
-        expect(String(output.reason)).toContain('Preflight context guard');
-        expect(String(output.reason)).toContain('Safe recovery');
+        expect(output?.decision).toBe('block');
+        expect(String(output?.reason)).toContain('Preflight context guard');
+        expect(String(output?.reason)).toContain('Safe recovery');
+    });
+    it('falls back to the default preflight threshold when the env value is invalid', () => {
+        const transcriptPath = join(tempDir, 'transcript.jsonl');
+        writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+        const output = evaluateAgentHeavyPreflight({
+            toolName: 'Task',
+            transcriptPath,
+            env: {
+                ...process.env,
+                OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc',
+            },
+        });
+        expect(output?.decision).toBe('block');
+        expect(String(output?.reason)).toContain('threshold: 72%');
     });
     it('allows non-agent-heavy tools even when transcript context is high', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');
@@ -685,6 +705,34 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
         });
         expect(output.continue).toBe(true);
         expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+    });
+    it('strips UTF-8 BOM before frontmatter parsing so agent-definition model check still fires', () => {
+        const pluginRoot = join(tempDir, 'fake-plugin-bom');
+        const agentsDir = join(pluginRoot, 'agents');
+        mkdirSync(agentsDir, { recursive: true });
+        // Write agent file with BOM prefix (\uFEFF)
+        writeFileSync(join(agentsDir, 'bom-agent.md'), '\uFEFF---\nname: bom-agent\nmodel: claude-opus-4-6\n---\nAgent body with BOM.');
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: {
+                subagent_type: 'oh-my-claudecode:bom-agent',
+                description: 'BOM test',
+                prompt: 'Test BOM handling',
+            },
+            cwd: tempDir,
+            session_id: 'session-bom-test',
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: 'true',
+            OMC_SUBAGENT_MODEL: 'global.anthropic.claude-sonnet-4-6',
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+        });
+        // BOM must be stripped so the frontmatter regex matches and the bare
+        // Anthropic model ID triggers a deny — not silently bypassed.
+        const hookOutput = output.hookSpecificOutput;
+        expect(output.continue).toBe(true);
+        expect(hookOutput.permissionDecision).toBe('deny');
+        expect(hookOutput.permissionDecisionReason).toContain('[MODEL ROUTING]');
+        expect(hookOutput.permissionDecisionReason).toContain('bom-agent');
     });
     it('does NOT deny Agent call without subagent_type in forceInherit mode (normal inheritance unchanged)', () => {
         const output = runPreToolEnforcerWithEnv({

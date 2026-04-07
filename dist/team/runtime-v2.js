@@ -311,24 +311,13 @@ async function spawnV2Worker(opts) {
         };
     }
     if (opts.agentType === 'claude') {
-        const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
+        const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, 6);
         if (!settled) {
-            const renotified = await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
-            if (!renotified.ok) {
-                return {
-                    paneId,
-                    startupAssigned: false,
-                    startupFailureReason: `${renotified.reason}:startup_evidence_missing`,
-                };
-            }
-            const settledAfterRetry = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
-            if (!settledAfterRetry) {
-                return {
-                    paneId,
-                    startupAssigned: false,
-                    startupFailureReason: 'claude_startup_evidence_missing',
-                };
-            }
+            return {
+                paneId,
+                startupAssigned: false,
+                startupFailureReason: 'claude_startup_evidence_missing',
+            };
         }
     }
     if (usePromptMode) {
@@ -542,22 +531,24 @@ export async function startTeamV2(config) {
             }
         }
         if (workerLaunch.startupFailureReason) {
-            await appendTeamEvent(sanitized, {
+            const logEventFailure = createSwallowedErrorLogger('team.runtime-v2.startTeamV2 appendTeamEvent failed');
+            appendTeamEvent(sanitized, {
                 type: 'team_leader_nudge',
                 worker: 'leader-fixed',
                 reason: `startup_manual_intervention_required:${wName}:${workerLaunch.startupFailureReason}`,
-            }, leaderCwd);
+            }, leaderCwd).catch(logEventFailure);
         }
     }
     // Persist config with pane IDs
     teamConfig.workers = workersInfo;
     await saveTeamConfig(teamConfig, leaderCwd);
+    const logEventFailure = createSwallowedErrorLogger('team.runtime-v2.startTeamV2 appendTeamEvent failed');
     // Emit start event — NO watchdog, leader drives via monitorTeamV2()
-    await appendTeamEvent(sanitized, {
+    appendTeamEvent(sanitized, {
         type: 'team_leader_nudge',
         worker: 'leader-fixed',
         reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`,
-    }, leaderCwd);
+    }, leaderCwd).catch(logEventFailure);
     return {
         teamName: sanitized,
         sanitizedName: sanitized,

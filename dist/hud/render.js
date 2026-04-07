@@ -21,7 +21,8 @@ import { renderTokenUsage } from "./elements/token-usage.js";
 import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
-import { renderGitRepo, renderGitBranch } from "./elements/git.js";
+import { renderHostname } from "./elements/hostname.js";
+import { renderGitRepo, renderGitBranch, renderGitStatus } from "./elements/git.js";
 import { renderModel } from "./elements/model.js";
 import { renderApiKeySource } from "./elements/api-key-source.js";
 import { renderCallCounts } from "./elements/call-counts.js";
@@ -33,7 +34,7 @@ import { renderLastTool } from "./elements/last-tool.js";
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
  * Used to skip escape codes when measuring/truncating visible width.
  */
-const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/;
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
 const PLAIN_SEPARATOR = " | ";
 const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
 /**
@@ -171,6 +172,11 @@ export async function render(context, config) {
     const rendered = new Map();
     const renderedDetail = new Map();
     // -- line1-group elements (default: git info line) --
+    if (enabledElements.hostname) {
+        const hostnameElement = renderHostname();
+        if (hostnameElement)
+            rendered.set("hostname", hostnameElement);
+    }
     if (enabledElements.cwd) {
         const cwdElement = renderCwd(context.cwd, enabledElements.cwdFormat || "relative", enabledElements.useHyperlinks ?? false);
         if (cwdElement)
@@ -185,6 +191,11 @@ export async function render(context, config) {
         const gitBranchElement = renderGitBranch(context.cwd);
         if (gitBranchElement)
             rendered.set("gitBranch", gitBranchElement);
+    }
+    if (enabledElements.gitStatus) {
+        const gitStatusElement = renderGitStatus(context.cwd);
+        if (gitStatusElement)
+            rendered.set("gitStatus", gitStatusElement);
     }
     if (enabledElements.model && context.modelName) {
         const modelElement = renderModel(context.modelName, enabledElements.modelFormat);

@@ -47,6 +47,7 @@ export interface InstallOptions {
     forceHooks?: boolean;
     refreshHooksInPlugin?: boolean;
     skipHud?: boolean;
+    noPlugin?: boolean;
 }
 /**
  * Read hudEnabled from .omc-config.json without importing auto-update
@@ -120,6 +121,8 @@ export declare function getInstalledOmcPluginRoots(): string[];
  * markdown files, so the legacy ~/.claude/agents copy can be skipped.
  */
 export declare function hasPluginProvidedAgentFiles(): boolean;
+export declare function hasPluginProvidedSkillFiles(): boolean;
+export declare function hasEnabledOmcPlugin(): boolean;
 export declare function getRuntimePackageRoot(): string;
 /**
  * Extract the embedded OMC version from a CLAUDE.md file.

@@ -7,10 +7,12 @@ import { checkShutdownSignal, writeShutdownSignal, appendOutbox } from '../inbox
 import { writeHeartbeat, readHeartbeat } from '../heartbeat.js';
 import { sanitizeName } from '../tmux-session.js';
 import { logAuditEvent, readAuditLog } from '../audit-log.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 const TEST_TEAM = 'test-bridge-int';
 // Task files now live in the canonical .omc/state/team path (relative to WORK_DIR)
-const TEAMS_DIR = join(homedir(), '.claude', 'teams', TEST_TEAM);
-const WORK_DIR = join(tmpdir(), '__test_bridge_work__');
+const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', TEST_TEAM);
+// Resolve symlinks (macOS /var -> /private/var) so validateResolvedPath matches
+const WORK_DIR = join(realpathSync(tmpdir()), '__test_bridge_work__');
 // Canonical tasks dir for this team
 const TASKS_DIR = join(WORK_DIR, '.omc', 'state', 'team', TEST_TEAM, 'tasks');
 function writeTask(task) {
@@ -281,7 +283,7 @@ describe('validateBridgeWorkingDirectory logic', () => {
         }
     });
     it('accepts a valid directory under home', () => {
-        const testDir = join(homedir(), '.claude', '__bridge_validate_test__');
+        const testDir = join(getClaudeConfigDir(), '__bridge_validate_test__');
         mkdirSync(testDir, { recursive: true });
         try {
             expect(() => validateBridgeWorkingDirectory(testDir)).not.toThrow();

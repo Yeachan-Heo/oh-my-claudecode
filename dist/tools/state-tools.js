@@ -516,7 +516,7 @@ export const stateClearTool = {
                     source: 'state_clear',
                 };
                 // Write to legacy path (checked by stop hook fallback)
-                const legacySignalPath = join(root, 'state', 'cancel-signal-state.json');
+                const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
                 try {
                     atomicWriteJsonSync(legacySignalPath, cancelSignalPayload);
                 }

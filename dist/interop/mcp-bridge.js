@@ -20,6 +20,36 @@ export function canUseOmxDirectWriteBridge(env = process.env) {
     const mode = getInteropMode(env);
     return interopEnabled && toolsEnabled && mode === 'active';
 }
+function resolveWorkingDirectory(workingDirectory) {
+    return workingDirectory || process.cwd();
+}
+function getInteropSource(target) {
+    return target === 'omc' ? 'omx' : 'omc';
+}
+function formatToolError(action, error) {
+    return {
+        content: [{
+                type: 'text',
+                text: `Error ${action}: ${error instanceof Error ? error.message : String(error)}`,
+            }],
+        isError: true,
+    };
+}
+function truncatePreview(text, maxChars) {
+    return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
+}
+function formatArtifactDescriptorLines(label, descriptor) {
+    if (!descriptor)
+        return [];
+    const lines = [`- **${label} artifact:** \`${descriptor.path}\``];
+    if (descriptor.sizeBytes !== undefined) {
+        lines.push(`- **${label} size:** ${descriptor.sizeBytes} bytes`);
+    }
+    if (descriptor.contentHash) {
+        lines.push(`- **${label} hash:** \`${descriptor.contentHash.slice(0, 16)}…\``);
+    }
+    return lines;
+}
 // ============================================================================
 // interop_send_task - Send a task to the other tool
 // ============================================================================
@@ -37,9 +67,8 @@ export const interopSendTaskTool = {
     handler: async (args) => {
         const { target, type, description, context, files, workingDirectory } = args;
         try {
-            const cwd = workingDirectory || process.cwd();
-            // Determine source (opposite of target)
-            const source = target === 'omc' ? 'omx' : 'omc';
+            const cwd = resolveWorkingDirectory(workingDirectory);
+            const source = getInteropSource(target);
             const task = addSharedTask(cwd, {
                 source,
                 target,
@@ -55,6 +84,7 @@ export const interopSendTaskTool = {
                             `**Task ID:** ${task.id}\n` +
                             `**Type:** ${task.type}\n` +
                             `**Description:** ${task.description}\n` +
+                            (task.descriptionArtifact ? `**Description artifact:** ${task.descriptionArtifact.path}\n` : '') +
                             `**Status:** ${task.status}\n` +
                             `**Created:** ${task.createdAt}\n\n` +
                             (task.files ? `**Files:** ${task.files.join(', ')}\n\n` : '') +
@@ -63,13 +93,7 @@ export const interopSendTaskTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error sending task: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('sending task', error);
         }
     }
 };
@@ -88,7 +112,7 @@ export const interopReadResultsTool = {
     handler: async (args) => {
         const { source, status, limit = 10, workingDirectory } = args;
         try {
-            const cwd = workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(workingDirectory);
             const tasks = readSharedTasks(cwd, {
                 source: source,
                 status: status,
@@ -115,12 +139,14 @@ export const interopReadResultsTool = {
                 lines.push(`- **Status:** ${task.status}`);
                 lines.push(`- **Description:** ${task.description}`);
                 lines.push(`- **Created:** ${task.createdAt}`);
+                lines.push(...formatArtifactDescriptorLines('Description', task.descriptionArtifact));
                 if (task.files && task.files.length > 0) {
                     lines.push(`- **Files:** ${task.files.join(', ')}`);
                 }
                 if (task.result) {
-                    lines.push(`- **Result:** ${task.result.slice(0, 200)}${task.result.length > 200 ? '...' : ''}`);
+                    lines.push(`- **Result:** ${truncatePreview(task.result, 200)}`);
                 }
+                lines.push(...formatArtifactDescriptorLines('Result', task.resultArtifact));
                 if (task.error) {
                     lines.push(`- **Error:** ${task.error}`);
                 }
@@ -137,13 +163,7 @@ export const interopReadResultsTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error reading tasks: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('reading tasks', error);
         }
     }
 };
@@ -162,9 +182,8 @@ export const interopSendMessageTool = {
     handler: async (args) => {
         const { target, content, metadata, workingDirectory } = args;
         try {
-            const cwd = workingDirectory || process.cwd();
-            // Determine source (opposite of target)
-            const source = target === 'omc' ? 'omx' : 'omc';
+            const cwd = resolveWorkingDirectory(workingDirectory);
+            const source = getInteropSource(target);
             const message = addSharedMessage(cwd, {
                 source,
                 target,
@@ -177,19 +196,14 @@ export const interopSendMessageTool = {
                         text: `## Message Sent to ${target.toUpperCase()}\n\n` +
                             `**Message ID:** ${message.id}\n` +
                             `**Content:** ${message.content}\n` +
+                            (message.contentArtifact ? `**Content artifact:** ${message.contentArtifact.path}\n` : '') +
                             `**Timestamp:** ${message.timestamp}\n\n` +
                             `The message has been queued for ${target.toUpperCase()}.`
                     }]
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error sending message: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('sending message', error);
         }
     }
 };
@@ -209,7 +223,7 @@ export const interopReadMessagesTool = {
     handler: async (args) => {
         const { source, unreadOnly = false, limit = 10, markAsRead = false, workingDirectory } = args;
         try {
-            const cwd = workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(workingDirectory);
             const messages = readSharedMessages(cwd, {
                 source: source,
                 unreadOnly,
@@ -239,6 +253,7 @@ export const interopReadMessagesTool = {
                 lines.push(`- **Content:** ${message.content}`);
                 lines.push(`- **Timestamp:** ${message.timestamp}`);
                 lines.push(`- **Read:** ${message.read ? 'Yes' : 'No'}`);
+                lines.push(...formatArtifactDescriptorLines('Content', message.contentArtifact));
                 if (message.metadata) {
                     lines.push(`- **Metadata:** ${JSON.stringify(message.metadata)}`);
                 }
@@ -255,13 +270,7 @@ export const interopReadMessagesTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error reading messages: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('reading messages', error);
         }
     }
 };
@@ -276,7 +285,7 @@ export const interopListOmxTeamsTool = {
     },
     handler: async (args) => {
         try {
-            const cwd = args.workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(args.workingDirectory);
             const teamNames = await listOmxTeams(cwd);
             if (teamNames.length === 0) {
                 return {
@@ -309,13 +318,7 @@ export const interopListOmxTeamsTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error listing OMX teams: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('listing OMX teams', error);
         }
     }
 };
@@ -344,7 +347,7 @@ export const interopSendOmxMessageTool = {
                     isError: true
                 };
             }
-            const cwd = args.workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(args.workingDirectory);
             if (args.broadcast) {
                 const messages = await broadcastOmxMessage(args.teamName, args.fromWorker, args.body, cwd);
                 return {
@@ -373,13 +376,7 @@ export const interopSendOmxMessageTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error sending OMX message: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('sending OMX message', error);
         }
     }
 };
@@ -397,7 +394,7 @@ export const interopReadOmxMessagesTool = {
     },
     handler: async (args) => {
         try {
-            const cwd = args.workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(args.workingDirectory);
             const limit = args.limit ?? 20;
             const messages = await listOmxMailboxMessages(args.teamName, args.workerName, cwd);
             if (messages.length === 0) {
@@ -417,7 +414,7 @@ export const interopReadOmxMessagesTool = {
                 lines.push(`### ${deliveredIcon} ${msg.message_id}`);
                 lines.push(`- **From:** ${msg.from_worker}`);
                 lines.push(`- **To:** ${msg.to_worker}`);
-                lines.push(`- **Body:** ${msg.body.slice(0, 300)}${msg.body.length > 300 ? '...' : ''}`);
+                lines.push(`- **Body:** ${truncatePreview(msg.body, 300)}`);
                 lines.push(`- **Created:** ${msg.created_at}`);
                 if (msg.delivered_at)
                     lines.push(`- **Delivered:** ${msg.delivered_at}`);
@@ -431,13 +428,7 @@ export const interopReadOmxMessagesTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error reading OMX messages: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('reading OMX messages', error);
         }
     }
 };
@@ -455,7 +446,7 @@ export const interopReadOmxTasksTool = {
     },
     handler: async (args) => {
         try {
-            const cwd = args.workingDirectory || process.cwd();
+            const cwd = resolveWorkingDirectory(args.workingDirectory);
             const limit = args.limit ?? 20;
             let tasks = await listOmxTasks(args.teamName, cwd);
             if (args.status) {
@@ -482,10 +473,10 @@ export const interopReadOmxTasksTool = {
                 lines.push(`- **Status:** ${task.status}`);
                 if (task.owner)
                     lines.push(`- **Owner:** ${task.owner}`);
-                lines.push(`- **Description:** ${task.description.slice(0, 200)}${task.description.length > 200 ? '...' : ''}`);
+                lines.push(`- **Description:** ${truncatePreview(task.description, 200)}`);
                 lines.push(`- **Created:** ${task.created_at}`);
                 if (task.result)
-                    lines.push(`- **Result:** ${task.result.slice(0, 200)}${task.result.length > 200 ? '...' : ''}`);
+                    lines.push(`- **Result:** ${truncatePreview(task.result, 200)}`);
                 if (task.error)
                     lines.push(`- **Error:** ${task.error}`);
                 if (task.completed_at)
@@ -500,13 +491,7 @@ export const interopReadOmxTasksTool = {
             };
         }
         catch (error) {
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Error reading OMX tasks: ${error instanceof Error ? error.message : String(error)}`
-                    }],
-                isError: true
-            };
+            return formatToolError('reading OMX tasks', error);
         }
     }
 };

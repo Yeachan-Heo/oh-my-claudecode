@@ -9,7 +9,7 @@ import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
  * Used as fallback when no layout is configured.
  */
 export const DEFAULT_ELEMENT_ORDER = {
-    line1: ['cwd', 'gitRepo', 'gitBranch', 'model', 'apiKeySource', 'profile'],
+    line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'model', 'apiKeySource', 'profile'],
     main: [
         'omcLabel', 'rateLimits', 'customBuckets', 'permission', 'thinking',
         'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
@@ -27,6 +27,7 @@ export const DEFAULT_HUD_CONFIG = {
         useHyperlinks: false,
         gitRepo: false, // Disabled by default for backward compatibility
         gitBranch: false, // Disabled by default for backward compatibility
+        gitStatus: false, // Disabled by default for backward compatibility
         gitInfoPosition: 'above', // Git info above main HUD line (backward compatible)
         model: false, // Disabled by default for backward compatibility
         modelFormat: 'short', // Short names by default for backward compatibility
@@ -47,6 +48,7 @@ export const DEFAULT_HUD_CONFIG = {
         thinking: true,
         thinkingFormat: 'text', // Text format for backward compatibility
         apiKeySource: false, // Disabled by default
+        hostname: false,
         profile: true, // Show profile name when CLAUDE_CONFIG_DIR is set
         missionBoard: false, // Opt-in mission board for whole-run progress tracking
         promptTime: true, // Show last prompt time by default
@@ -68,7 +70,7 @@ export const DEFAULT_HUD_CONFIG = {
         contextCritical: 85,
         ralphWarning: 7,
     },
-    staleTaskThresholdMinutes: 30,
+    staleTaskThresholdMinutes: 10,
     contextLimitWarning: {
         threshold: 80,
         autoCompact: false,
@@ -84,6 +86,7 @@ export const PRESET_CONFIGS = {
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: false,
+        gitStatus: false,
         gitInfoPosition: 'above',
         model: false,
         modelFormat: 'short',
@@ -104,6 +107,7 @@ export const PRESET_CONFIGS = {
         thinking: false,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: false,
@@ -124,6 +128,7 @@ export const PRESET_CONFIGS = {
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: 'above',
         model: false,
         modelFormat: 'short',
@@ -144,6 +149,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -164,6 +170,7 @@ export const PRESET_CONFIGS = {
         useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: 'above',
         model: false,
         modelFormat: 'short',
@@ -184,6 +191,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: true,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -204,6 +212,7 @@ export const PRESET_CONFIGS = {
         useHyperlinks: false,
         gitRepo: false,
         gitBranch: true,
+        gitStatus: false,
         gitInfoPosition: 'above',
         model: false,
         modelFormat: 'short',
@@ -224,6 +233,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: false,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,
@@ -244,6 +254,7 @@ export const PRESET_CONFIGS = {
         useHyperlinks: false,
         gitRepo: true,
         gitBranch: true,
+        gitStatus: true,
         gitInfoPosition: 'above',
         model: false,
         modelFormat: 'short',
@@ -264,6 +275,7 @@ export const PRESET_CONFIGS = {
         thinking: true,
         thinkingFormat: 'text',
         apiKeySource: true,
+        hostname: false,
         profile: true,
         missionBoard: false,
         promptTime: true,

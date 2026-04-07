@@ -229,7 +229,7 @@ export declare function resolveToWorktreeRoot(directory?: string): string;
  * But the actual transcript lives at the original project's path:
  *   ~/.claude/projects/-path-to-project/<session>.jsonl
  *
- * Claude Code encodes `/` as `-` (dots are preserved). The `.claude/worktrees/`
+ * Claude Code encodes `/` and `.` as `-`. The `.claude/worktrees/`
  * segment becomes `-claude-worktrees-`, preceded by a `-` from the path
  * separator, yielding the distinctive `--claude-worktrees-` pattern in the
  * encoded directory name.

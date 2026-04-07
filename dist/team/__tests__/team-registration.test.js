@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
-import { tmpdir, homedir } from 'os';
+import { tmpdir } from 'os';
 import { readProbeResult, writeProbeResult, getRegistrationStrategy, registerMcpWorker, unregisterMcpWorker, isMcpWorker, listMcpWorkers } from '../team-registration.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 const TEST_DIR = join(tmpdir(), '__test_team_reg__');
 const TEST_TEAM = 'test-team-reg-team';
-const CONFIG_DIR = join(homedir(), '.claude', 'teams', TEST_TEAM);
+const CONFIG_DIR = join(getClaudeConfigDir(), 'teams', TEST_TEAM);
 beforeEach(() => {
     mkdirSync(TEST_DIR, { recursive: true });
     mkdirSync(join(TEST_DIR, '.omc', 'state'), { recursive: true });

@@ -93,6 +93,7 @@ export function canonicalizeTeamConfigWorkers(config) {
     return {
         ...config,
         workers,
+        worker_count: workers.length,
     };
 }
 //# sourceMappingURL=worker-canonicalization.js.map

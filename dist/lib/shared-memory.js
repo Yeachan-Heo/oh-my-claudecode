@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdir
 import { join } from 'path';
 import { getOmcRoot } from './worktree-paths.js';
 import { withFileLockSync } from './file-lock.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -28,13 +29,14 @@ const CONFIG_FILE_NAME = '.omc-config.json';
 /**
  * Check if shared memory is enabled via config.
  *
- * Reads `agents.sharedMemory.enabled` from ~/.claude/.omc-config.json.
+ * Reads `agents.sharedMemory.enabled` from
+ * `[$CLAUDE_CONFIG_DIR|~/.claude]/.omc-config.json`.
  * Defaults to true when the config key is absent (opt-out rather than opt-in
  * once the feature ships, but tools check this gate).
  */
 export function isSharedMemoryEnabled() {
     try {
-        const configPath = join(process.env.HOME || process.env.USERPROFILE || '', '.claude', CONFIG_FILE_NAME);
+        const configPath = join(getClaudeConfigDir(), CONFIG_FILE_NAME);
         if (!existsSync(configPath))
             return true; // default enabled
         const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -152,7 +154,7 @@ export function writeEntry(namespace, key, value, ttl, worktreeRoot) {
     };
     // Try with lock; fall back to unlocked if lock fails (best-effort)
     try {
-        return withFileLockSync(lockPath, doWrite);
+        return withFileLockSync(lockPath, doWrite, { timeoutMs: 500, retryDelayMs: 25 });
     }
     catch {
         return doWrite();

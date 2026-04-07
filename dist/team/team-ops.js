@@ -264,19 +264,31 @@ export async function teamListTasks(teamName, cwd) {
     });
 }
 export async function teamUpdateTask(teamName, taskId, updates, cwd) {
-    const existing = await teamReadTask(teamName, taskId, cwd);
-    if (!existing)
-        return null;
-    const merged = {
-        ...normalizeTask(existing),
-        ...updates,
-        id: existing.id,
-        created_at: existing.created_at,
-        version: Math.max(1, existing.version ?? 1) + 1,
-    };
-    const p = canonicalTaskFilePath(teamName, taskId, cwd);
-    await writeAtomic(p, JSON.stringify(merged, null, 2));
-    return merged;
+    const timeoutMs = 5_000;
+    const deadline = Date.now() + timeoutMs;
+    let delayMs = 20;
+    while (Date.now() < deadline) {
+        const result = await withTaskClaimLock(teamName, taskId, cwd, async () => {
+            const existing = await teamReadTask(teamName, taskId, cwd);
+            if (!existing)
+                return null;
+            const merged = {
+                ...normalizeTask(existing),
+                ...updates,
+                id: existing.id,
+                created_at: existing.created_at,
+                version: Math.max(1, existing.version ?? 1) + 1,
+            };
+            const p = canonicalTaskFilePath(teamName, taskId, cwd);
+            await writeAtomic(p, JSON.stringify(merged, null, 2));
+            return merged;
+        });
+        if (result.ok)
+            return result.value;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, 200);
+    }
+    throw new Error(`Failed to acquire task update lock for task ${taskId} in team ${teamName} after ${timeoutMs}ms`);
 }
 export async function teamClaimTask(teamName, taskId, workerName, expectedVersion, cwd) {
     const manifest = await teamReadManifest(teamName, cwd);

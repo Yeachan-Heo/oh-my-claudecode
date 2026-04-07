@@ -65,7 +65,14 @@ function ensureRegistryDir() {
  * Synchronous sleep helper used while waiting for lock acquisition.
  */
 function sleepMs(ms) {
-    Atomics.wait(SLEEP_ARRAY, 0, 0, ms);
+    try {
+        Atomics.wait(SLEEP_ARRAY, 0, 0, ms);
+    }
+    catch {
+        // Main thread: Atomics.wait throws on Node <22
+        const waitUntil = Date.now() + ms;
+        while (Date.now() < waitUntil) { /* spin */ }
+    }
 }
 /**
  * Read/parse lock snapshot.

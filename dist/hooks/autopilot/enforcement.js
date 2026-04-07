@@ -8,7 +8,8 @@
  */
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getClaudeConfigDir } from "../../utils/paths.js";
+import { getClaudeConfigDir } from "../../utils/config-dir.js";
+import { getHardMaxIterations } from "../../lib/security-config.js";
 import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../../config/plan-output.js";
 import { readAutopilotState, writeAutopilotState, transitionPhase, transitionRalphToUltraQA, transitionUltraQAToValidation, transitionToComplete, } from "./state.js";
 import { getPhasePrompt } from "./prompts.js";
@@ -91,10 +92,26 @@ export function detectAnySignal(sessionId) {
 // ============================================================================
 // ENFORCEMENT
 // ============================================================================
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 function isAwaitingConfirmation(state) {
-    return Boolean(state &&
-        typeof state === 'object' &&
-        state.awaiting_confirmation === true);
+    if (!state || typeof state !== 'object') {
+        return false;
+    }
+    const stateRecord = state;
+    if (stateRecord.awaiting_confirmation !== true) {
+        return false;
+    }
+    const setAt = (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
+        (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+        null;
+    if (!setAt) {
+        return false;
+    }
+    const setAtMs = new Date(setAt).getTime();
+    if (!Number.isFinite(setAtMs)) {
+        return false;
+    }
+    return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 /**
  * Get the next phase after current phase
@@ -131,6 +148,16 @@ export async function checkAutopilot(sessionId, directory) {
     }
     if (isAwaitingConfirmation(state)) {
         return null;
+    }
+    // Check hard max iterations (global security limit)
+    const hardMax = getHardMaxIterations();
+    if (hardMax > 0 && state.iteration >= hardMax) {
+        transitionPhase(workingDir, "failed", sessionId);
+        return {
+            shouldBlock: false,
+            message: `[AUTOPILOT STOPPED] Hard max iterations (${hardMax}) reached. Security limit enforced.`,
+            phase: "failed",
+        };
     }
     // Check max iterations (safety limit)
     if (state.iteration >= state.max_iterations) {

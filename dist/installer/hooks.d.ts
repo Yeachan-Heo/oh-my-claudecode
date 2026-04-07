@@ -12,8 +12,6 @@
 export declare const MIN_NODE_VERSION = 20;
 /** Check if running on Windows */
 export declare function isWindows(): boolean;
-/** Get the Claude config directory path (cross-platform) */
-export declare function getClaudeConfigDir(): string;
 /** Get the hooks directory path */
 export declare function getHooksDir(): string;
 /**

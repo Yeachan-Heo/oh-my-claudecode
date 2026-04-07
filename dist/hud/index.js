@@ -25,7 +25,7 @@ import { homedir } from "os";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
-import { getClaudeConfigDir } from "../utils/paths.js";
+import { getClaudeConfigDir } from "../utils/config-dir.js";
 /**
  * Extract session ID (UUID) from a transcript path.
  */
@@ -217,7 +217,7 @@ async function main(watchMode = false, skipInit = false) {
                 0;
             if (cols > 0) {
                 config.maxWidth = cols;
-                if (!config.wrapMode)
+                if (config.wrapMode === "truncate")
                     config.wrapMode = "wrap";
             }
         }

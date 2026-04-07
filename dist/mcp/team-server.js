@@ -6,6 +6,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
@@ -211,7 +212,7 @@ async function handleStart(args) {
     }
     const input = startSchema.parse(args);
     validateTeamName(input.teamName);
-    const jobId = `omc-${Date.now().toString(36)}`;
+    const jobId = `omc-${Date.now().toString(36)}${randomUUID().slice(0, 8)}`;
     const runtimeCliPath = join(__ownDir, 'runtime-cli.cjs');
     const job = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
     omcTeamJobs.set(jobId, job);
