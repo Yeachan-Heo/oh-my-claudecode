@@ -76,6 +76,27 @@ describe('tokenize', () => {
   it('should return empty for empty string', () => {
     expect(tokenize('')).toEqual([]);
   });
+
+  it('should tokenize Cyrillic text by whitespace', () => {
+    const tokens = tokenize('привет мир');
+    expect(tokens).toContain('привет');
+    expect(tokens).toContain('мир');
+  });
+
+  it('should tokenize Arabic text by whitespace', () => {
+    const tokens = tokenize('مرحبا بالعالم');
+    expect(tokens).toContain('مرحبا');
+    expect(tokens).toContain('بالعالم');
+  });
+
+  it('should not produce bi-grams from CJK punctuation', () => {
+    const tokens = tokenize('「テスト」');
+    // Should contain Katakana bi-grams but not punctuation bi-grams
+    expect(tokens).toContain('テス');
+    expect(tokens).toContain('スト');
+    expect(tokens).not.toContain('「テ');
+    expect(tokens).not.toContain('ト」');
+  });
 });
 
 describe('queryWiki with CJK content', () => {

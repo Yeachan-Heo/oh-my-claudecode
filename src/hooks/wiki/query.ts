@@ -23,6 +23,7 @@ import {
  * Latin/numeric words: split on whitespace.
  * CJK characters (Han, Hangul, Kana): bi-grams (2-char sliding window)
  * plus individual characters for single-char query support.
+ * Other scripts (Cyrillic, Arabic, Thai, etc.): whitespace split (fallback).
  */
 export function tokenize(text: string): string[] {
   const lower = text.toLowerCase();
@@ -32,8 +33,9 @@ export function tokenize(text: string): string[] {
   const latinMatches = lower.match(/[a-z0-9]+/g);
   if (latinMatches) tokens.push(...latinMatches);
 
-  // CJK segments (Han + Hangul + Katakana + Hiragana)
-  const cjkMatches = lower.match(/[\u3000-\u9FFF\uAC00-\uD7AF\u3040-\u30FF]+/g);
+  // CJK segments (Hiragana + Katakana + CJK Unified Ideographs + Hangul)
+  const cjkPattern = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]+/g;
+  const cjkMatches = lower.match(cjkPattern);
   if (cjkMatches) {
     for (const segment of cjkMatches) {
       for (let i = 0; i < segment.length; i++) {
@@ -44,6 +46,15 @@ export function tokenize(text: string): string[] {
       }
     }
   }
+
+  // Fallback: other scripts (Cyrillic, Arabic, Thai, Devanagari, etc.)
+  // Remove already-matched Latin and CJK, then whitespace-split the remainder
+  const remaining = lower
+    .replace(/[a-z0-9]+/g, ' ')
+    .replace(cjkPattern, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (remaining.length > 0) tokens.push(...remaining);
 
   return tokens;
 }
