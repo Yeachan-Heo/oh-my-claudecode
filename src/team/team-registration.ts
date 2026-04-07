@@ -109,22 +109,25 @@ function registerInConfig(teamName: string, member: McpWorkerMember): void {
   const filePath = configPath(teamName);
   if (!existsSync(filePath)) return; // No config.json to write to
 
-  try {
-    const raw = readFileSync(filePath, 'utf-8');
-    const config = JSON.parse(raw) as Record<string, unknown>;
-    const members = Array.isArray(config.members) ? config.members as Record<string, unknown>[] : [];
+  const lockPath = filePath + '.lock';
+  withFileLockSync(lockPath, () => {
+    try {
+      const raw = readFileSync(filePath, 'utf-8');
+      const config = JSON.parse(raw) as Record<string, unknown>;
+      const members = Array.isArray(config.members) ? config.members as Record<string, unknown>[] : [];
 
-    // Remove existing entry for this worker if present
-    const filtered = members.filter(
-      (m) => m.name !== member.name
-    );
-    filtered.push(member as unknown as Record<string, unknown>);
-    config.members = filtered;
+      // Remove existing entry for this worker if present
+      const filtered = members.filter(
+        (m) => m.name !== member.name
+      );
+      filtered.push(member as unknown as Record<string, unknown>);
+      config.members = filtered;
 
-    atomicWriteJson(filePath, config);
-  } catch {
-    // Config write failure is non-fatal — shadow registry is backup
-  }
+      atomicWriteJson(filePath, config);
+    } catch {
+      // Config write failure is non-fatal — shadow registry is backup
+    }
+  });
 }
 
 function registerInShadow(workingDirectory: string, teamName: string, member: McpWorkerMember): void {
@@ -176,16 +179,18 @@ export function unregisterMcpWorker(
 
   // Remove from shadow registry
   const shadowFile = shadowRegistryPath(workingDirectory);
-  if (existsSync(shadowFile)) {
-    try {
-      const registry = JSON.parse(readFileSync(shadowFile, 'utf-8')) as {
-        teamName: string;
-        workers: McpWorkerMember[];
-      };
-      registry.workers = (registry.workers || []).filter(w => w.name !== workerName);
-      atomicWriteJson(shadowFile, registry);
-    } catch { /* ignore */ }
-  }
+  withFileLockSync(shadowFile + '.lock', () => {
+    if (existsSync(shadowFile)) {
+      try {
+        const registry = JSON.parse(readFileSync(shadowFile, 'utf-8')) as {
+          teamName: string;
+          workers: McpWorkerMember[];
+        };
+        registry.workers = (registry.workers || []).filter(w => w.name !== workerName);
+        atomicWriteJson(shadowFile, registry);
+      } catch { /* ignore */ }
+    }
+  });
 }
 
 /** Check if a member entry is an MCP worker */
