@@ -348,6 +348,58 @@ Use the real docs file.
     expect(readFileSync(join(configDir, 'CLAUDE-omc.md'), 'utf-8')).toContain('<!-- OMC:VERSION:9.9.9 -->');
   });
 
+  it('cleans up orphaned companion file when switching from preserve to overwrite mode', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+
+    const env = {
+      ...process.env,
+      HOME: fixture.homeRoot,
+      CLAUDE_CONFIG_DIR: configDir,
+    };
+
+    // Run 1: preserve mode — creates companion + import block
+    const first = spawnSync('bash', [fixture.scriptPath, 'global', 'preserve'], {
+      cwd: fixture.projectRoot,
+      env,
+      encoding: 'utf-8',
+    });
+    expect(first.status).toBe(0);
+    expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(true);
+    expect(readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8')).toContain('<!-- OMC:IMPORT:START -->');
+
+    // Run 2: overwrite mode (default) — must clean up companion and import block
+    const second = spawnSync('bash', [fixture.scriptPath, 'global', 'overwrite'], {
+      cwd: fixture.projectRoot,
+      env,
+      encoding: 'utf-8',
+    });
+    expect(second.status).toBe(0);
+
+    // Companion file must be removed
+    expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
+
+    // CLAUDE.md must have OMC markers inline, not an import block
+    const baseClaude = readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8');
+    expect(baseClaude).toContain('<!-- OMC:START -->');
+    expect(baseClaude).toContain('<!-- OMC:END -->');
+    expect(baseClaude).not.toContain('<!-- OMC:IMPORT:START -->');
+    expect(baseClaude).not.toContain('@CLAUDE-omc.md');
+
+    // User content should be preserved
+    expect(baseClaude).toContain('# User CLAUDE');
+  });
+
   it('refuses preserve mode when the companion path is a symlink', () => {
     const fixture = createPluginFixture(`<!-- OMC:START -->
 <!-- OMC:VERSION:9.9.9 -->
