@@ -43,7 +43,7 @@ export interface DetectedKeyword {
  */
 const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   cancel: /\b(cancelomc|stopomc)\b/i,
-  ralph: /\b(ralph)\b(?!-)|(랄프)/i,
+  ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)/i,
   autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)/i,
   ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)/i,
   // Team keyword detection disabled — team mode is now explicit-only via /team skill.
@@ -118,7 +118,7 @@ export function sanitizeForKeywordDetection(text: string): string {
 
 const INFORMATIONAL_INTENT_PATTERNS: RegExp[] = [
   /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
-  /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
+  /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
   /(?:とは|って何|使い方|説明)/u,
   /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
 ];
