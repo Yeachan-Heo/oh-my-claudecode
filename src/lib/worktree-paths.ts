@@ -158,11 +158,16 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
     }).trim();
-    // --git-common-dir returns the .git directory (or .git/worktrees/X for
-    // linked worktrees). The primary repo root is its parent.
-    const resolved = dirname(commonDir);
-    if (resolved && resolved !== root) {
-      primaryRoot = resolved;
+    // --git-common-dir returns the .git directory for the primary repo
+    // (even from linked worktrees). Its parent is the primary repo root.
+    // In submodules, it returns <super>/.git/modules/<name> instead, so
+    // skip resolution when the path contains .git/modules to avoid
+    // deriving a wrong root.
+    if (!commonDir.includes(`${sep}.git${sep}modules`)) {
+      const resolved = dirname(commonDir);
+      if (resolved && resolved !== root) {
+        primaryRoot = resolved;
+      }
     }
   } catch {
     // Not a git repo or command failed — fall back to worktree root

@@ -437,6 +437,44 @@ describe('worktree-paths', () => {
         rmSync(worktreeDir, { recursive: true, force: true });
       }
     });
+
+    it('should not change identifier for submodules (avoid .git/modules resolution)', () => {
+      const parentDir = mkdtempSync('/tmp/worktree-paths-submod-parent-');
+      const subDir = mkdtempSync('/tmp/worktree-paths-submod-child-');
+      try {
+        // Create a repo to use as the submodule source
+        execSync('git init', { cwd: subDir, stdio: 'pipe' });
+        execSync('git commit --allow-empty -m "sub init"', {
+          cwd: subDir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+        });
+
+        // Create the parent repo and add the submodule
+        execSync('git init', { cwd: parentDir, stdio: 'pipe' });
+        execSync('git commit --allow-empty -m "init"', {
+          cwd: parentDir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+        });
+        execSync(`git -c protocol.file.allow=always submodule add "${subDir}" mysub`, {
+          cwd: parentDir,
+          stdio: 'pipe',
+        });
+        clearWorktreeCache();
+
+        const submodulePath = `${parentDir}/mysub`;
+        const id = getProjectIdentifier(submodulePath);
+
+        // The identifier should use the submodule's own basename, not the
+        // parent's .git/modules directory
+        expect(id).toContain('mysub-');
+        expect(id).not.toContain('modules');
+      } finally {
+        rmSync(parentDir, { recursive: true, force: true });
+        rmSync(subDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('getOmcRoot with OMC_STATE_DIR (Issue #1014)', () => {
