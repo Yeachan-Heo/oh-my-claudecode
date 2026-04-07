@@ -173,12 +173,19 @@ export function unregisterMcpWorker(
   const configFile = configPath(teamName);
   if (existsSync(configFile)) {
     try {
-      const raw = readFileSync(configFile, 'utf-8');
-      const config = JSON.parse(raw) as Record<string, unknown>;
-      const members = Array.isArray(config.members) ? config.members as Record<string, unknown>[] : [];
-      config.members = members.filter(m => m.name !== workerName);
-      atomicWriteJson(configFile, config);
-    } catch { /* ignore */ }
+      const configLockPath = configFile + '.lock';
+      withFileLockSync(configLockPath, () => {
+        try {
+          const raw = readFileSync(configFile, 'utf-8');
+          const config = JSON.parse(raw) as Record<string, unknown>;
+          const members = Array.isArray(config.members) ? config.members as Record<string, unknown>[] : [];
+          config.members = members.filter(m => m.name !== workerName);
+          atomicWriteJson(configFile, config);
+        } catch { /* ignore */ }
+      });
+    } catch {
+      // Lock contention during unregister is non-fatal — shadow registry is backup
+    }
   }
 
   // Remove from shadow registry

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -91,6 +91,17 @@ describe('registerMcpWorker / unregisterMcpWorker', () => {
     registerMcpWorker(TEST_TEAM, 'w1', 'codex', 'gpt-5', 'sess1', '/cwd', TEST_DIR);
     unregisterMcpWorker(TEST_TEAM, 'w2', TEST_DIR);
     expect(listMcpWorkers(TEST_TEAM, TEST_DIR)).toHaveLength(1);
+  });
+
+  it('uses a config lock for unregister config.json updates', () => {
+    const sourcePath = join(__dirname, '..', 'team-registration.ts');
+    const source = readFileSync(sourcePath, 'utf-8');
+
+    const fnStart = source.indexOf('export function unregisterMcpWorker');
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = source.slice(fnStart, fnStart + 1200);
+
+    expect(fnBody).toContain('withFileLockSync(configLockPath');
   });
 });
 
