@@ -24,6 +24,7 @@ resolve_active_plugin_root() {
   config_dir="$(resolve_claude_config_dir)"
   local installed_plugins="${config_dir}/plugins/installed_plugins.json"
 
+  local json_root=""
   if [ -f "$installed_plugins" ] && command -v jq >/dev/null 2>&1; then
     local active_path
     active_path=$(jq -r '
@@ -34,21 +35,38 @@ resolve_active_plugin_root() {
     ' "$installed_plugins" 2>/dev/null)
 
     if [ -n "$active_path" ] && [ -d "$active_path" ]; then
-      echo "$active_path"
-      return 0
+      json_root="$active_path"
     fi
   fi
 
-  # Fallback: scan sibling version directories for the latest (mirrors run.cjs)
+  # Scan sibling version directories for the latest (mirrors run.cjs).
+  # When installed_plugins.json is stale (e.g. after /plugin update),
+  # the cached version may be newer than the JSON path — use whichever is higher.
   local cache_base
   cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
+  local sorted_latest=""
   if [ -d "$cache_base" ]; then
-    local latest
-    latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
-    if [ -n "$latest" ] && [ -d "${cache_base}/${latest}" ]; then
-      echo "${cache_base}/${latest}"
-      return 0
-    fi
+    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+  fi
+
+  if [ -n "$json_root" ] && [ -n "$sorted_latest" ] && [ -d "${cache_base}/${sorted_latest}" ]; then
+    # Compare JSON path version against the latest cached version
+    local json_version
+    json_version="$(basename "$json_root")"
+    local higher
+    higher=$(printf '%s\n%s\n' "$json_version" "$sorted_latest" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+    echo "${cache_base}/${higher}"
+    return 0
+  fi
+
+  if [ -n "$json_root" ]; then
+    echo "$json_root"
+    return 0
+  fi
+
+  if [ -n "$sorted_latest" ] && [ -d "${cache_base}/${sorted_latest}" ]; then
+    echo "${cache_base}/${sorted_latest}"
+    return 0
   fi
 
   echo "$SCRIPT_PLUGIN_ROOT"
