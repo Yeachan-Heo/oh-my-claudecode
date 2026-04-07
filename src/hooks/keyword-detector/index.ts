@@ -101,8 +101,10 @@ export const NON_LATIN_SCRIPT_PATTERN =
  * Strips XML tags, URLs, file paths, and code blocks.
  */
 export function sanitizeForKeywordDetection(text: string): string {
+  // Remove HTML/markdown comments before XML stripping
+  let result = text.replace(/<!--[\s\S]*?-->/g, '');
   // Remove XML tag blocks (opening + content + closing; tag names must match)
-  let result = text.replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, '');
+  result = result.replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, '');
   // Remove self-closing XML tags
   result = result.replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '');
   // Remove URLs

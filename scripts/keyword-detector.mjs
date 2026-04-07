@@ -149,6 +149,8 @@ function isAntiSlopCleanupRequest(text) {
 
 function sanitizeForKeywordDetection(text) {
   return text
+    // 0. Strip HTML/markdown comments before XML stripping to avoid keyword leaks
+    .replace(/<!--[\s\S]*?-->/g, '')
     // 1. Strip XML-style tag blocks: <tag-name ...>...</tag-name> (multi-line, greedy on tag name)
     .replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, '')
     // 2. Strip self-closing XML tags: <tag-name />, <tag-name attr="val" />

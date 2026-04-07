@@ -4,6 +4,18 @@ import { join } from 'node:path';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
 const NODE = process.execPath;
+const HTML_COMMENT_REPRO = `Please review this draft document for tone and clarity:
+
+<!-- ralph: rewrite intro section with more urgency -->
+<!-- autopilot note: Why Artificially Inflating GitHub Star Counts Is Harmful:
+popularity without merit misleads developers, distorts discovery, unfairly rewards dishonest projects, and erodes trust in GitHub stars as a community signal. -->
+
+Final draft:
+
+Why Artificially Inflating GitHub Star Counts Is Harmful
+=========================================================
+
+This article argues that fake popularity signals damage trust in open source.`;
 
 function runKeywordDetector(prompt: string) {
   const raw = execFileSync(NODE, [SCRIPT_PATH], {
@@ -65,5 +77,15 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
 
     expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
     expect(context).toContain('name: ralplan');
+  });
+
+  it('does not trigger on keywords inside HTML comments', () => {
+    const output = runKeywordDetector(HTML_COMMENT_REPRO);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD:');
+    expect(context).not.toContain('<ralph-mode>');
+    expect(context).not.toContain('<autopilot-mode>');
   });
 });

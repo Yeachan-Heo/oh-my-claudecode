@@ -20,6 +20,18 @@ vi.mock('../../../features/auto-update.js', () => ({
 
 import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
+const HTML_COMMENT_REPRO = `Please review this draft document for tone and clarity:
+
+<!-- ralph: rewrite intro section with more urgency -->
+<!-- autopilot note: Why Artificially Inflating GitHub Star Counts Is Harmful:
+popularity without merit misleads developers, distorts discovery, unfairly rewards dishonest projects, and erodes trust in GitHub stars as a community signal. -->
+
+Final draft:
+
+Why Artificially Inflating GitHub Star Counts Is Harmful
+=========================================================
+
+This article argues that fake popularity signals damage trust in open source.`;
 
 describe('keyword-detector', () => {
   describe('removeCodeBlocks', () => {
@@ -86,6 +98,13 @@ World`);
     it('should strip self-closing XML tags', () => {
       const result = sanitizeForKeywordDetection('text <br /> more');
       expect(result).not.toContain('<br');
+    });
+
+    it('should strip HTML comments containing keywords', () => {
+      const result = sanitizeForKeywordDetection(HTML_COMMENT_REPRO);
+      expect(result).not.toContain('ralph');
+      expect(result).not.toContain('autopilot');
+      expect(result).toContain('Why Artificially Inflating GitHub Star Counts Is Harmful');
     });
 
     it('should strip URLs', () => {
@@ -156,6 +175,11 @@ World`);
       // "file.txt" alone (no path separator) should be kept
       const result = sanitizeForKeywordDetection('rename codex.config');
       expect(result).toContain('codex');
+    });
+
+    it('should not detect keywords when they only appear inside HTML comments', () => {
+      expect(detectKeywordsWithType(HTML_COMMENT_REPRO)).toEqual([]);
+      expect(hasKeyword(HTML_COMMENT_REPRO)).toBe(false);
     });
   });
 
