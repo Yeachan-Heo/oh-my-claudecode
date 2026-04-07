@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import {
   getWikiDir,
   readIndex,
@@ -31,10 +32,10 @@ import type { WikiConfig } from './types.js';
 function loadWikiConfig(root: string): WikiConfig {
   try {
     const configPath = join(getOmcRoot(root), '.omc-config.json');
-    // Try user home config too
-    const homeConfigPath = join(process.env.HOME || '', '.claude', '.omc-config.json');
+    // Try active Claude config too
+    const activeConfigPath = join(getClaudeConfigDir(), '.omc-config.json');
 
-    for (const path of [configPath, homeConfigPath]) {
+    for (const path of [configPath, activeConfigPath]) {
       if (existsSync(path)) {
         const raw = JSON.parse(readFileSync(path, 'utf-8'));
         if (raw?.wiki) {
