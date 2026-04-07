@@ -116,6 +116,30 @@ try {
             continue;
           }
 
+          // Self-healing: if hooks.json already contains an absolute node path
+          // from a previous patch (possibly on a different machine, e.g. the
+          // GitHub Actions runner at publish time — see issue #2348), and that
+          // path is either missing on this machine or differs from the current
+          // node binary, rewrite it to the current `nodeBin`.  Without this
+          // users who install a tarball that was accidentally published with a
+          // stale absolute path (e.g. /opt/hostedtoolcache/node/.../bin/node)
+          // can never self-heal, because the bare-`node` branch above no longer
+          // matches.
+          const absNodeMatch = hook.command.match(
+            /^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+.*\/scripts\/run\.cjs/,
+          );
+          if (absNodeMatch) {
+            const currentBin = absNodeMatch[1];
+            if (currentBin !== nodeBin && (!existsSync(currentBin) || currentBin.includes('/hostedtoolcache/'))) {
+              hook.command = hook.command.replace(
+                /^"[^"]*"/,
+                `"${nodeBin}"`,
+              );
+              patched = true;
+            }
+            continue;
+          }
+
           // Old find-node.sh format — migrate to run.cjs + absolute path (Windows only)
           if (process.platform === 'win32') {
             const m2 = hook.command.match(findNodePattern);

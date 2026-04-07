@@ -31,6 +31,15 @@ jobs:
       - name: Run tests
         run: npm test -- --run
 
+      # Some tests execute scripts/plugin-setup.mjs against the real
+      # hooks/hooks.json and rewrite bare `node` to the absolute node binary
+      # path of the runner (e.g. /opt/hostedtoolcache/node/.../bin/node). If we
+      # let that mutated file ship, every end user inherits a node path that
+      # does not exist on their machine. Restore the file to its committed
+      # state before publishing. See issue #2348.
+      - name: Restore hooks.json before publish
+        run: git checkout -- hooks/hooks.json
+
       - name: Publish to npm
         run: |
           VERSION=$(node -p "require('./package.json').version")
