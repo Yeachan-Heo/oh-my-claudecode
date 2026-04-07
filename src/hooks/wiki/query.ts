@@ -18,6 +18,37 @@ import {
 } from './storage.js';
 
 /**
+ * Tokenize text for search, with CJK bi-gram support.
+ *
+ * Latin/numeric words: split on whitespace.
+ * CJK characters (Han, Hangul, Kana): bi-grams (2-char sliding window)
+ * plus individual characters for single-char query support.
+ */
+export function tokenize(text: string): string[] {
+  const lower = text.toLowerCase();
+  const tokens: string[] = [];
+
+  // Latin/numeric tokens
+  const latinMatches = lower.match(/[a-z0-9]+/g);
+  if (latinMatches) tokens.push(...latinMatches);
+
+  // CJK segments (Han + Hangul + Katakana + Hiragana)
+  const cjkMatches = lower.match(/[\u3000-\u9FFF\uAC00-\uD7AF\u3040-\u30FF]+/g);
+  if (cjkMatches) {
+    for (const segment of cjkMatches) {
+      for (let i = 0; i < segment.length; i++) {
+        tokens.push(segment[i]);
+      }
+      for (let i = 0; i < segment.length - 1; i++) {
+        tokens.push(segment.slice(i, i + 2));
+      }
+    }
+  }
+
+  return tokens;
+}
+
+/**
  * Search wiki pages by keyword and/or tags.
  *
  * Matching strategy:
@@ -40,7 +71,7 @@ export function queryWiki(
   const { tags: filterTags, category, limit = 20 } = options;
   const pages = readAllPages(root);
   const queryLower = queryText.toLowerCase();
-  const queryTerms = queryLower.split(/\s+/).filter(Boolean);
+  const queryTerms = tokenize(queryText);
 
   const matches: WikiQueryMatch[] = [];
 

@@ -47,5 +47,5 @@ export {
 
 // Operations
 export { ingestKnowledge } from './ingest.js';
-export { queryWiki } from './query.js';
+export { queryWiki, tokenize } from './query.js';
 export { lintWiki } from './lint.js';
