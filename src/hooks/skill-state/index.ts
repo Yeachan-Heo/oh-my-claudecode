@@ -288,9 +288,9 @@ export function checkSkillActiveState(
   // Orchestrators are allowed to go idle while delegated work is still active.
   // Do not consume a reinforcement here; the skill is still active and should
   // resume enforcement only after the running subagents finish.
-  // Use a recency window to avoid trusting stale tracking data (same pattern
-  // as RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS in persistent-mode/index.ts).
-  const ACTIVE_AGENT_RECENCY_MS = 5_000;
+  // Use a recency window to avoid trusting stale tracking data.
+  // 60s covers typical subagent durations; cleanupStaleAgents handles 5min+.
+  const ACTIVE_AGENT_RECENCY_MS = 60_000;
   const agentSnapshot = getActiveAgentSnapshot(directory);
   const agentStateAge = agentSnapshot.lastUpdatedAt
     ? Date.now() - new Date(agentSnapshot.lastUpdatedAt).getTime()
