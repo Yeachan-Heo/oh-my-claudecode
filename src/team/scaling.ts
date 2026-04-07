@@ -138,7 +138,7 @@ export async function scaleUp(
       }
 
       config.worker_count = config.workers.length;
-      config.next_worker_index = initialNextIndex;
+      config.next_worker_index = nextIndex;
       await saveTeamConfig(config, leaderCwd);
 
       return { ok: false, error };
