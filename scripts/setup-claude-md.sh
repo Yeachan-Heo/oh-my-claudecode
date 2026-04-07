@@ -52,7 +52,7 @@ resolve_active_plugin_root() {
   local sorted_latest=""
   if [ -d "$cache_base" ]; then
     # Anchor pattern with $ to exclude pre-release dirs like 4.9.0-beta.1
-    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1 || true)
   fi
 
   if [ -n "$json_root" ] && [ -f "${json_root}/docs/CLAUDE.md" ]; then
