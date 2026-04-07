@@ -642,7 +642,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).not.toContain('<!-- OMC:VERSION:4.10.0-beta.1 -->');
   });
 
-  it('prefers stable version over newer prerelease when both are present in cache and installed_plugins.json is unavailable', () => {
+  it('prefers higher version (prerelease) over lower stable when both are present in cache and installed_plugins.json is unavailable', () => {
     const root = mkdtempSync(join(tmpdir(), 'omc-stable-over-prerelease-'));
     tempRoots.push(root);
 
@@ -703,9 +703,9 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(result.status).toBe(0);
 
     const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
-    // Stable 4.10.0 wins over prerelease 4.11.0-beta.1
-    expect(installed).toContain('<!-- OMC:VERSION:4.10.0 -->');
-    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0-beta.1 -->');
+    // 4.11.0-beta.1 wins over 4.10.0: higher numeric minor version wins, mirroring run.cjs resolveTarget()
+    expect(installed).toContain('<!-- OMC:VERSION:4.11.0-beta.1 -->');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.10.0 -->');
   });
 
   it('returns json_root when json_version equals the latest cached version (tie-breaking)', () => {

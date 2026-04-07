@@ -51,13 +51,9 @@ resolve_active_plugin_root() {
   cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
   local sorted_latest=""
   if [ -d "$cache_base" ]; then
-    # Two-pass version resolution: prefer stable releases, fall back to prerelease.
-    # Pass 1: exact semver (x.y.z — no suffix)
-    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1 || true)
-    # Pass 2: prerelease versions (e.g. 4.11.0-beta.1, 4.11.0-rc.2) — used only when no stable found
-    if [ -z "$sorted_latest" ]; then
-      sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1 || true)
-    fi
+    # Mirror run.cjs resolveTarget(): prefix-match all version dirs (stable and prerelease),
+    # then pick the highest by numeric major.minor.patch — same sort key as run.cjs.
+    sorted_latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1 || true)
   fi
 
   if [ -n "$json_root" ] && [ -f "${json_root}/docs/CLAUDE.md" ]; then
