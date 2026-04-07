@@ -23,6 +23,8 @@ import {
   type WikiPageFrontmatter,
   type WikiLogEntry,
   WIKI_SCHEMA_VERSION,
+  COMPACTION_THRESHOLD,
+  COMPACTION_KEEP_RECENT,
 } from './types.js';
 
 // ============================================================================
@@ -362,6 +364,83 @@ export function appendLog(root: string, entry: WikiLogEntry): void {
   withWikiLock(root, () => {
     appendLogUnsafe(root, entry);
   });
+}
+
+// ============================================================================
+// Compaction
+// ============================================================================
+
+/**
+ * Count the number of append sections in a page's content.
+ * Sections are delimited by the `---\n\n## Update (` pattern produced by ingest merge.
+ */
+export function countAppendSections(content: string): number {
+  const matches = content.match(/\n---\n\n## Update \(/g);
+  return matches ? matches.length : 0;
+}
+
+/**
+ * Compact a page by keeping only the most recent append sections.
+ * Older sections are replaced with a summary line.
+ *
+ * Returns the compacted page, or null if no compaction needed.
+ */
+export function compactPage(page: WikiPage): WikiPage | null {
+  const sectionCount = countAppendSections(page.content);
+  if (sectionCount < COMPACTION_THRESHOLD) return null;
+
+  const sectionPattern = /\n---\n\n## Update \(/;
+  const parts = page.content.split(sectionPattern);
+
+  // parts[0] = original content, parts[1..] = append sections
+  const originalContent = parts[0];
+  const appendSections = parts.slice(1);
+
+  const sectionsToRemove = appendSections.length - COMPACTION_KEEP_RECENT;
+  if (sectionsToRemove <= 0) return null;
+
+  const keptSections = appendSections.slice(sectionsToRemove);
+  const now = new Date().toISOString();
+
+  const compactedContent = originalContent.trimEnd() +
+    `\n\n---\n\n> **Compacted:** ${sectionsToRemove} older section(s) removed on ${now}\n` +
+    keptSections.map(s => `\n---\n\n## Update (${s}`).join('');
+
+  return {
+    filename: page.filename,
+    frontmatter: { ...page.frontmatter, updated: now },
+    content: compactedContent,
+  };
+}
+
+/**
+ * Run compaction on all pages in the wiki.
+ * Returns filenames of compacted pages.
+ */
+export function compactAllPages(root: string): { compacted: number; filenames: string[] } {
+  const compacted: string[] = [];
+
+  withWikiLock(root, () => {
+    const pages = readAllPages(root);
+    for (const page of pages) {
+      const result = compactPage(page);
+      if (result) {
+        writePageUnsafe(root, result);
+        compacted.push(page.filename);
+      }
+    }
+    if (compacted.length > 0) {
+      updateIndexUnsafe(root);
+      appendLogUnsafe(root, {
+        timestamp: new Date().toISOString(),
+        operation: 'ingest',
+        pagesAffected: compacted,
+        summary: `Auto-compaction: compacted ${compacted.length} page(s)`,
+      });
+    }
+  });
+
+  return { compacted: compacted.length, filenames: compacted };
 }
 
 // ============================================================================

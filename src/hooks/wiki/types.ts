@@ -46,6 +46,12 @@ export type WikiCategory =
   | 'reference'
   | 'convention';
 
+/** Maximum number of append sections before compaction triggers. */
+export const COMPACTION_THRESHOLD = 5;
+
+/** Number of most-recent sections to keep during compaction. */
+export const COMPACTION_KEEP_RECENT = 3;
+
 /** A wiki page: frontmatter + markdown content + filename. */
 export interface WikiPage {
   /** Filename without path (e.g., "auth-architecture.md") */
