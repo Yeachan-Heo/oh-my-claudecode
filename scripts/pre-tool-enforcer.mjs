@@ -398,6 +398,7 @@ const SKILL_PROTECTION_MAP = {
 
   // === Heavy protection (long-running, 10 reinforcements) ===
   deepinit: 'heavy',
+  'self-improve': 'heavy',
 };
 
 function getSkillProtectionLevel(skillName, rawSkillName) {
