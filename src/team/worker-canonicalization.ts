@@ -108,5 +108,6 @@ export function canonicalizeTeamConfigWorkers(config: TeamConfig): TeamConfig {
   return {
     ...config,
     workers,
+    worker_count: workers.length,
   };
 }
