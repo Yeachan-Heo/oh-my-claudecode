@@ -53,9 +53,18 @@ resolve_active_plugin_root() {
     # Compare JSON path version against the latest cached version
     local json_version
     json_version="$(basename "$json_root")"
-    local higher
-    higher=$(printf '%s\n%s\n' "$json_version" "$sorted_latest" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
-    echo "${cache_base}/${higher}"
+    if printf '%s' "$json_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+      local higher
+      higher=$(printf '%s\n%s' "$json_version" "$sorted_latest" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+      if [ "$higher" = "$json_version" ]; then
+        echo "$json_root"
+      else
+        echo "${cache_base}/${higher}"
+      fi
+      return 0
+    fi
+    # json_root is not a semver path; prefer the latest cached version
+    echo "${cache_base}/${sorted_latest}"
     return 0
   fi
 
