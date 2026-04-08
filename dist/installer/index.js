@@ -19,6 +19,7 @@ import { resolveNodeBinary } from '../utils/resolve-node.js';
 import { parseFrontmatter } from '../utils/frontmatter.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
+import { healHardcodedHookNodePaths, pruneOrphanStandaloneSkills, } from './plugin-cache-heal.js';
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -921,6 +922,41 @@ export function install(options = {}) {
         }
         else if (runningAsPlugin) {
             log('Skipping bundled skill installation (managed by plugin system)');
+        }
+        // Heal regressions in installed plugin cache copies (#2252, #2348).
+        // These are best-effort and never block install:
+        //   1. Rewrite hardcoded `/opt/hostedtoolcache/...` node paths shipped in
+        //      4.11.x hooks.json to the local node binary so hooks stop erroring.
+        //   2. Remove orphan standalone skills under ~/.claude/skills/<name>/ when
+        //      the plugin already provides <name> — fixes the duplicate slash
+        //      command listing for users who ever ran `omc setup` in the past.
+        if (!options.noPlugin && enabledOmcPlugin && pluginProvidesSkillFiles) {
+            const pluginRoots = getInstalledOmcPluginRoots();
+            try {
+                const healResult = healHardcodedHookNodePaths(pluginRoots, {
+                    nodeBin: process.execPath,
+                    log,
+                });
+                if (healResult.rewritten.length > 0) {
+                    log(`Healed ${healResult.rewritten.length} plugin cache hooks.json file(s)`);
+                }
+            }
+            catch {
+                // Best-effort: never block install on heal failure
+            }
+            try {
+                const pruneResult = pruneOrphanStandaloneSkills({
+                    skillsDir: SKILLS_DIR,
+                    pluginRoots,
+                    log,
+                });
+                if (pruneResult.removed.length > 0) {
+                    log(`Removed ${pruneResult.removed.length} orphan standalone skill(s): ${pruneResult.removed.join(', ')}`);
+                }
+            }
+            catch {
+                // Best-effort: never block install on prune failure
+            }
         }
         // Install CLAUDE.md with merge support.
         // This runs regardless of plugin context so that `omc update` (which re-execs
