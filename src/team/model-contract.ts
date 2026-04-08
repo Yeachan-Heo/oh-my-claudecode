@@ -2,7 +2,12 @@ import { spawnSync } from 'child_process';
 import { isAbsolute, normalize, win32 as win32Path } from 'path';
 import { validateTeamName } from './team-name.js';
 import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
-import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
+import {
+  isBedrock,
+  isVertexAI,
+  isProviderSpecificModelId,
+  isNonClaudeProvider,
+} from "../config/models.js";
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
 export type CliAgentType = 'claude' | 'codex' | 'gemini';
@@ -376,31 +381,32 @@ export function isPromptModeAgent(agentType: CliAgentType): boolean {
 }
 
 /**
- * Resolve the active model for Claude team workers on Bedrock/Vertex.
+ * Resolve the active model for Claude team workers on non-Claude providers.
  *
- * When running on a non-standard provider (Bedrock, Vertex), workers need
- * the provider-specific model ID passed explicitly via --model. Without it,
- * Claude Code falls back to its built-in default (claude-sonnet-4-6) which
- * is invalid on these providers.
+ * When running on a non-standard provider (Bedrock, Vertex, DashScope, LiteLLM, etc.),
+ * workers need the provider-specific model ID passed explicitly via --model. Without it,
+ * Claude Code falls back to its built-in default (claude-sonnet-4-6) which is invalid
+ * on these providers.
  *
  * Resolution order:
  *   1. ANTHROPIC_MODEL / CLAUDE_MODEL env vars (user's explicit setting)
  *   2. Provider tier-specific env vars (CLAUDE_CODE_BEDROCK_SONNET_MODEL, etc.)
- *   3. undefined — let Claude Code handle its own default
+ *   3. OMC tier env vars (OMC_MODEL_MEDIUM, etc.)
+ *   4. undefined — let Claude Code handle its own default
  *
- * Returns undefined when not on Bedrock/Vertex (standard Anthropic API
- * handles bare aliases fine).
+ * Returns undefined when using standard Anthropic API (handles bare aliases fine).
  */
 export function resolveClaudeWorkerModel(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  // Only needed for non-standard providers
-  if (!isBedrock() && !isVertexAI()) {
+  // Check all non-Claude providers: Bedrock, Vertex, DashScope, LiteLLM, etc.
+  // Uses the same detection logic as delegation-enforcer for consistency.
+  if (!isNonClaudeProvider()) {
     return undefined;
   }
 
   // Direct model env vars — highest priority
-  const directModel = env.ANTHROPIC_MODEL || env.CLAUDE_MODEL || '';
+  const directModel = env.ANTHROPIC_MODEL || env.CLAUDE_MODEL || "";
   if (directModel) {
     return directModel;
   }
@@ -409,13 +415,13 @@ export function resolveClaudeWorkerModel(
   const bedrockModel =
     env.CLAUDE_CODE_BEDROCK_SONNET_MODEL ||
     env.ANTHROPIC_DEFAULT_SONNET_MODEL ||
-    '';
+    "";
   if (bedrockModel) {
     return bedrockModel;
   }
 
   // OMC tier env vars
-  const omcModel = env.OMC_MODEL_MEDIUM || '';
+  const omcModel = env.OMC_MODEL_MEDIUM || "";
   if (omcModel) {
     return omcModel;
   }
