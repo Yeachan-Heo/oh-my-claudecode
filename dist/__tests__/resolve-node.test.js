@@ -1,16 +1,40 @@
-/**
- * Tests for src/utils/resolve-node.ts
- *
- * Covers resolveNodeBinary() priority logic and pickLatestVersion() helper.
- * Issue #892: Node.js not in PATH for nvm/fnm users causes hook errors.
- */
-import { describe, it, expect } from 'vitest';
-import { existsSync } from 'fs';
-// We test the pure helper directly without mocking the filesystem
-import { pickLatestVersion } from '../utils/resolve-node.js';
-// -------------------------------------------------------------------------
-// pickLatestVersion — pure logic, no I/O
-// -------------------------------------------------------------------------
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+vi.mock('fs', async () => {
+    const actual = await vi.importActual('fs');
+    return {
+        ...actual,
+        existsSync: vi.fn(),
+        readdirSync: vi.fn(),
+    };
+});
+vi.mock('child_process', async () => {
+    const actual = await vi.importActual('child_process');
+    return {
+        ...actual,
+        execSync: vi.fn(),
+    };
+});
+vi.mock('os', async () => {
+    const actual = await vi.importActual('os');
+    return {
+        ...actual,
+        homedir: vi.fn(() => '/home/tester'),
+    };
+});
+import { existsSync, readdirSync } from 'fs';
+import { execSync } from 'child_process';
+import { pickLatestVersion, resolveNodeBinary } from '../utils/resolve-node.js';
+const mockedExistsSync = vi.mocked(existsSync);
+const mockedReaddirSync = vi.mocked(readdirSync);
+const mockedExecSync = vi.mocked(execSync);
+const originalExecPath = process.execPath;
+function setExecPath(value) {
+    Object.defineProperty(process, 'execPath', {
+        value,
+        configurable: true,
+        writable: true,
+    });
+}
 describe('pickLatestVersion', () => {
     it('returns the highest semver from a list', () => {
         expect(pickLatestVersion(['v18.0.0', 'v20.11.0', 'v16.20.0'])).toBe('v20.11.0');
@@ -34,32 +58,65 @@ describe('pickLatestVersion', () => {
         expect(pickLatestVersion(['v20.1.0', 'v20.9.0', 'v20.10.0'])).toBe('v20.10.0');
     });
 });
-// -------------------------------------------------------------------------
-// resolveNodeBinary — integration-style: the current process.execPath must
-// be returned as the highest-priority result.
-// -------------------------------------------------------------------------
 describe('resolveNodeBinary', () => {
-    it('returns process.execPath when it exists (priority 1)', async () => {
-        // process.execPath is always set in any Node.js process, so this
-        // test verifies the happy path without any mocking.
-        const { resolveNodeBinary } = await import('../utils/resolve-node.js');
-        const result = resolveNodeBinary();
-        // Must be an absolute path (not bare 'node') in a real Node.js process
-        expect(result).toBe(process.execPath);
-        expect(result.length).toBeGreaterThan(4); // not empty / not just 'node'
+    beforeEach(() => {
+        vi.clearAllMocks();
+        setExecPath(originalExecPath);
+        mockedExistsSync.mockReturnValue(false);
+        mockedReaddirSync.mockReturnValue([]);
+        mockedExecSync.mockImplementation(() => {
+            throw new Error('node not on PATH');
+        });
     });
-    it('returns a string (never throws)', async () => {
-        const { resolveNodeBinary } = await import('../utils/resolve-node.js');
-        expect(() => resolveNodeBinary()).not.toThrow();
-        expect(typeof resolveNodeBinary()).toBe('string');
+    afterEach(() => {
+        setExecPath(originalExecPath);
     });
-    it('returned path points to an existing binary', async () => {
-        const { resolveNodeBinary } = await import('../utils/resolve-node.js');
+    it('reproduces the prior bug: process.execPath would beat PATH node', () => {
+        setExecPath('/opt/homebrew/Cellar/node/25.8.1_1/bin/node');
+        mockedExecSync.mockReturnValue('/opt/homebrew/bin/node\n');
+        mockedExistsSync.mockImplementation((pathLike) => {
+            const path = String(pathLike);
+            return path === '/opt/homebrew/Cellar/node/25.8.1_1/bin/node' || path === '/opt/homebrew/bin/node';
+        });
         const result = resolveNodeBinary();
-        // When resolveNodeBinary returns a non-fallback path it must exist
-        if (result !== 'node') {
-            expect(existsSync(result)).toBe(true);
-        }
+        expect(result).toBe('/opt/homebrew/bin/node');
+    });
+    it('prefers PATH node over a Homebrew Cellar versioned process.execPath', () => {
+        setExecPath('/opt/homebrew/Cellar/node/25.8.1_1/bin/node');
+        mockedExecSync.mockReturnValue('/opt/homebrew/bin/node\n');
+        mockedExistsSync.mockImplementation((pathLike) => {
+            const path = String(pathLike);
+            return path === '/opt/homebrew/Cellar/node/25.8.1_1/bin/node' || path === '/opt/homebrew/bin/node';
+        });
+        expect(resolveNodeBinary()).toBe('/opt/homebrew/bin/node');
+        expect(mockedExecSync).toHaveBeenCalledWith('which node', { encoding: 'utf-8', stdio: 'pipe' });
+    });
+    it('prefers PATH node over a CI-only hostedtoolcache process.execPath', () => {
+        setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');
+        mockedExecSync.mockReturnValue('/usr/local/bin/node\n');
+        mockedExistsSync.mockImplementation((pathLike) => {
+            const path = String(pathLike);
+            return path === '/opt/hostedtoolcache/node/20.20.2/x64/bin/node' || path === '/usr/local/bin/node';
+        });
+        expect(resolveNodeBinary()).toBe('/usr/local/bin/node');
+    });
+    it('falls back to process.execPath when PATH node is unavailable and execPath is usable', () => {
+        setExecPath('/Users/tester/.nvm/versions/node/v22.0.0/bin/node');
+        mockedExistsSync.mockImplementation((pathLike) => String(pathLike) === '/Users/tester/.nvm/versions/node/v22.0.0/bin/node');
+        expect(resolveNodeBinary()).toBe('/Users/tester/.nvm/versions/node/v22.0.0/bin/node');
+    });
+    it('falls back to the latest nvm version when PATH node and process.execPath are unusable', () => {
+        setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');
+        mockedExistsSync.mockImplementation((pathLike) => {
+            const path = String(pathLike);
+            return path === '/home/tester/.nvm/versions/node' || path === '/home/tester/.nvm/versions/node/v22.3.0/bin/node';
+        });
+        mockedReaddirSync.mockReturnValue(['v20.11.0', 'v22.3.0']);
+        expect(resolveNodeBinary()).toBe('/home/tester/.nvm/versions/node/v22.3.0/bin/node');
+    });
+    it('returns bare node as a last resort', () => {
+        setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');
+        expect(resolveNodeBinary()).toBe('node');
     });
 });
 //# sourceMappingURL=resolve-node.test.js.map
