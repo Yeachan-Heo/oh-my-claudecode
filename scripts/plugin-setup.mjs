@@ -5,11 +5,11 @@
  * Configures HUD statusline when plugin is installed.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, copyFileSync, realpathSync } from 'node:fs';
 import { execFileSync, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 
@@ -267,54 +267,160 @@ try {
 // Patch hooks.json to use the absolute node binary path so hooks work on all
 // platforms: Windows (no `sh`), nvm/fnm users (node not on PATH in hooks), etc.
 //
-// The source hooks.json uses shell-expanded `$CLAUDE_PLUGIN_ROOT` path segments
-// so bash preserves spaces in Windows profile paths; this step only substitutes
-// the real process.execPath so Claude Code always invokes the same Node binary
-// that ran this setup script.
+// IMPORTANT: We must NEVER write to the package source `<packageRoot>/hooks/hooks.json`.
+// Doing so causes the CI runner's absolute node path (e.g.
+// `/opt/hostedtoolcache/node/20.20.2/x64/bin/node`) to be baked into the source
+// during test runs and shipped to every user via `npm publish`. See #2348.
+//
+// Patching targets are limited to installed plugin cache copies under
+// ~/.claude/plugins/cache/omc/oh-my-claudecode/<version>/hooks/hooks.json. The
+// source file in the package directory is left untouched.
 //
 // Two patterns are handled:
 //  1. New format  – node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ... (all platforms)
 //  2. Old format  – sh  "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" ... (Windows
 //     backward-compat: migrates old installs to the new run.cjs chain)
 //
-// Fixes issues #909, #899, #892, #869.
-try {
-  const hooksJsonPath = join(__dirname, '..', 'hooks', 'hooks.json');
-  if (existsSync(hooksJsonPath)) {
-    const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-    let patched = false;
+// Self-heal: also rewrites any pre-existing absolute node path that does not
+// exist on disk (e.g. CI runner paths shipped via 4.11.1) back to the local
+// process.execPath. See issue #2348.
+//
+// Fixes issues #909, #899, #892, #869, #2348.
+function patchHookCommandsInPlace(data, nodeBinForRewrite) {
+  let patched = false;
+  const findNodePattern =
+    /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
+  // Matches a quoted absolute node path leading a run.cjs invocation
+  // e.g. "/opt/hostedtoolcache/node/20.20.2/x64/bin/node" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ...
+  const absoluteNodePattern = /^"([^"]+)"\s+("?\$(?:\{)?CLAUDE_PLUGIN_ROOT.*scripts\/run\.cjs\b.*)$/;
 
-    // Pattern 2 (old, Windows backward-compat): sh find-node.sh <target> [args]
-    const findNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
+  for (const groups of Object.values(data.hooks ?? {})) {
+    for (const group of groups) {
+      for (const hook of (group.hooks ?? [])) {
+        if (typeof hook.command !== 'string') continue;
 
-    for (const groups of Object.values(data.hooks ?? {})) {
-      for (const group of groups) {
-        for (const hook of (group.hooks ?? [])) {
-          if (typeof hook.command !== 'string') continue;
+        // New run.cjs format — replace bare `node` with absolute path (all platforms)
+        if (hook.command.startsWith('node ') && hook.command.includes('/scripts/run.cjs')) {
+          hook.command = hook.command.replace(/^node\b/, `"${nodeBinForRewrite}"`);
+          patched = true;
+          continue;
+        }
 
-          // New run.cjs format — replace bare `node` with absolute path (all platforms)
-          if (hook.command.startsWith('node ') && hook.command.includes('/scripts/run.cjs')) {
-            hook.command = hook.command.replace(/^node\b/, `"${nodeBin}"`);
+        // Self-heal: existing absolute node path that does not point at a real binary
+        // (the CI runner path baked in by #2348, or a stale dev path) — rewrite to
+        // the local process.execPath. We never touch a path that does exist on disk.
+        const absMatch = hook.command.match(absoluteNodePattern);
+        if (absMatch) {
+          const existingNode = absMatch[1];
+          const tail = absMatch[2];
+          if (existingNode !== nodeBinForRewrite && !existsSync(existingNode)) {
+            hook.command = `"${nodeBinForRewrite}" ${tail}`;
             patched = true;
             continue;
           }
+        }
 
-          // Old find-node.sh format — migrate to run.cjs + absolute path (Windows only)
-          if (process.platform === 'win32') {
-            const m2 = hook.command.match(findNodePattern);
-            if (m2) {
-              hook.command = `"${nodeBin}" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m2[1]}${m2[2]}`;
-              patched = true;
-            }
+        // Old find-node.sh format — migrate to run.cjs + absolute path (Windows only)
+        if (process.platform === 'win32') {
+          const m2 = hook.command.match(findNodePattern);
+          if (m2) {
+            hook.command = `"${nodeBinForRewrite}" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m2[1]}${m2[2]}`;
+            patched = true;
           }
         }
       }
     }
+  }
 
-    if (patched) {
-      writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-      console.log(`[OMC] Patched hooks.json with absolute node path (${nodeBin}), fixes issues #909, #899, #892`);
+  return patched;
+}
+
+function getOmcPluginCacheRoots() {
+  const roots = [];
+  try {
+    const cacheBase = join(CLAUDE_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    if (!existsSync(cacheBase)) return roots;
+    for (const entry of readdirSync(cacheBase, { withFileTypes: true })) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const root = join(cacheBase, entry.name);
+      const hooksPath = join(root, 'hooks', 'hooks.json');
+      if (existsSync(hooksPath)) {
+        roots.push(root);
+      }
+    }
+  } catch {
+    // Best-effort discovery
+  }
+  return roots;
+}
+
+const PACKAGE_ROOT_ABS = resolve(join(__dirname, '..'));
+
+function safeRealpath(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+const PACKAGE_ROOT_REAL = safeRealpath(PACKAGE_ROOT_ABS);
+
+function isInsidePackageSource(targetPath) {
+  // Resolve to canonical absolute path AND follow symlinks on both sides so
+  // a `~/.claude/plugins/cache/.../oh-my-claudecode/<v>` symlink that points
+  // back into the dev repo cannot bypass the source-mutation guard. The pure
+  // string-based `resolve()` form is symlink-blind and would let the write
+  // through. See #2348 architect review.
+  try {
+    const sep = process.platform === 'win32' ? '\\' : '/';
+    // Resolve the target's directory via realpath (the file itself may not
+    // exist yet). Then re-attach the basename so we compare on the same path
+    // shape as PACKAGE_ROOT_REAL.
+    const targetAbs = resolve(targetPath);
+    const parent = safeRealpath(join(targetAbs, '..'));
+    const targetReal = join(parent, basename(targetAbs));
+
+    for (const root of [PACKAGE_ROOT_ABS, PACKAGE_ROOT_REAL]) {
+      const rootWithSep = root.endsWith(sep) ? root : root + sep;
+      if (targetReal === root || targetReal.startsWith(rootWithSep)) {
+        return true;
+      }
+      if (targetAbs === root || targetAbs.startsWith(rootWithSep)) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    // On any error, fail closed: refuse to write rather than risk corrupting
+    // the source.
+    return true;
+  }
+}
+
+try {
+  // Discover every installed plugin cache copy and patch it. Never touch the
+  // package source — see #2348 for the regression we are guarding against.
+  const targets = [];
+  for (const pluginRoot of getOmcPluginCacheRoots()) {
+    const candidate = join(pluginRoot, 'hooks', 'hooks.json');
+    if (isInsidePackageSource(candidate)) {
+      // Defensive: refuse to patch any path that resolves into the package source.
+      continue;
+    }
+    targets.push(candidate);
+  }
+
+  for (const hooksJsonPath of targets) {
+    try {
+      const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
+      const patched = patchHookCommandsInPlace(data, nodeBin);
+      if (patched) {
+        writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
+        console.log(`[OMC] Patched plugin cache hooks.json (${hooksJsonPath}) with absolute node path (${nodeBin})`);
+      }
+    } catch (e) {
+      console.log(`[OMC] Warning: Could not patch ${hooksJsonPath}: ${e.message}`);
     }
   }
 } catch (e) {
