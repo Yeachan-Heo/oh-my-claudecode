@@ -432,7 +432,7 @@ describe('spawnAutoresearchSetupTmux', () => {
       expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
         'tmux',
         ['send-keys', '-t', '%42', '-l', buildAutoresearchSetupSlashCommand()],
-        { stdio: 'ignore' },
+        expect.objectContaining({ stdio: 'ignore' }),
       );
       expect(logSpy).toHaveBeenCalledWith('\nAutoresearch setup launched in background Claude session.');
       expect(logSpy).toHaveBeenCalledWith('  Attach:   tmux attach -t omc-autoresearch-setup-kf12oi');
