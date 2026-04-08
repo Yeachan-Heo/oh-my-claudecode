@@ -248,7 +248,7 @@ Supported entrypoints: direct start (`omc team [N:agent] "<task>"`), `status`, `
 
 Topology behavior:
 - inside classic tmux (`$TMUX` set): reuse the current tmux surface for split-pane or `--new-window` layouts
-- inside cmux (`CMUX_SURFACE_ID` without `$TMUX`): launch a detached tmux session for team workers
+- inside cmux (`CMUX_SURFACE_ID` without `$TMUX`, cmux ≥ 0.61): spawn workers as native cmux surfaces (vertical tabs by default). Set `OMC_CMUX_LAYOUT` to control placement: `tab` (default), `split-right`, `split-down`, `split-left`, `split-up`. Falls back to detached tmux if cmux CLI is unavailable or too old.
 - plain terminal: launch a detached tmux session for team workers
 
 ### `omc session search`

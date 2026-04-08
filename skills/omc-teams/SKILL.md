@@ -53,8 +53,8 @@ command -v tmux >/dev/null 2>&1
 
 - If this fails, report that **tmux is not installed** and stop.
 - If `$TMUX` is set, `omc team` can reuse the current tmux window/panes directly.
-- If `$TMUX` is empty but `CMUX_SURFACE_ID` is set, report that the user is running inside **cmux**. Do **not** say tmux is missing or that they are "not inside tmux"; `omc team` will launch a **detached tmux session** for workers instead of splitting the cmux surface.
-- If neither `$TMUX` nor `CMUX_SURFACE_ID` is set, report that the user is in a **plain terminal**. `omc team` can still launch a **detached tmux session**, but if they specifically want in-place pane/window topology they should start from a classic tmux session first.
+- If `$TMUX` is empty but `CMUX_SURFACE_ID` is set, report that the user is running inside **cmux**. Workers will spawn as **native cmux surfaces** (vertical tabs) when cmux ≥ 0.61 is detected. The layout is controlled by `OMC_CMUX_LAYOUT`: `tab` (default — new sidebar tabs), `split-right`, `split-down`, `split-left`, or `split-up`. If the cmux CLI is unavailable or too old, OMC falls back to a detached tmux session automatically.
+- If neither `$TMUX` nor `CMUX_SURFACE_ID` is set, report that the user is in a **plain terminal**. `omc team` can still launch a **detached tmux session**, but if they specifically want in-place pane/window topology they should start from a classic tmux session or cmux first.
 - If you need to confirm the active tmux session, use:
 
 ```bash

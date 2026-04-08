@@ -13,10 +13,31 @@ import { join, basename, isAbsolute, win32 } from 'path';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
+import {
+  detectCmux,
+  resolveLeader as cmuxResolveLeader,
+  spawnWorker as cmuxSpawnWorker,
+  sendCommand as cmuxSendCommand,
+  captureSurface as cmuxCaptureSurface,
+  focusLeader as cmuxFocusLeader,
+  cmuxSessionName,
+  CmuxUnsupportedError,
+  type CmuxWorkerHandle,
+} from './multiplexer/index.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 const TMUX_SESSION_PREFIX = 'omc-team';
+
+/** True when the session name was produced by the cmux driver. */
+export function isCmuxSession(sessionName: string): boolean {
+  return sessionName.startsWith('cmux:');
+}
+
+/** True when a pane/surface ID looks like a cmux surface ref. */
+function isCmuxSurfaceRef(paneId: string): boolean {
+  return /^surface:\d+$/.test(paneId);
+}
 
 const promisifiedExec = promisify(exec);
 const promisifiedExecFile = promisify(execFile);
@@ -81,7 +102,7 @@ export async function applyMainVerticalLayout(teamTarget: string): Promise<void>
   }
 }
 
-export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
+export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session' | 'cmux-tab' | 'cmux-split';
 
 export interface TeamSession {
   sessionName: string;
@@ -512,10 +533,45 @@ export async function createTeamSession(
   let sessionMode: TeamSessionMode = inTmux ? 'split-pane' : 'detached-session';
 
   if (!inTmux) {
+    // Try cmux native driver when running inside a cmux surface.
+    if (multiplexerContext === 'cmux') {
+      try {
+        await detectCmux();
+        const leader = await cmuxResolveLeader();
+        const cmuxWorkerPaneIds: string[] = [];
+
+        for (let i = 0; i < workerCount; i++) {
+          const label = `${sanitizeName(teamName)}/worker-${i + 1}`;
+          const worker = await cmuxSpawnWorker(leader, label);
+          cmuxWorkerPaneIds.push(worker.surfaceRef);
+        }
+
+        // Return focus to the leader surface
+        await cmuxFocusLeader(leader);
+        await new Promise(r => setTimeout(r, 300));
+
+        const cmuxMode: TeamSessionMode = leader.layout === 'tab' ? 'cmux-tab' : 'cmux-split';
+        return {
+          sessionName: cmuxSessionName(leader),
+          leaderPaneId: leader.identity.surfaceRef,
+          workerPaneIds: cmuxWorkerPaneIds,
+          sessionMode: cmuxMode,
+        };
+      } catch (err) {
+        const reason = err instanceof CmuxUnsupportedError
+          ? err.message
+          : (err as Error).message;
+        console.warn(
+          `[tmux-session] cmux detected but driver failed: ${reason}. ` +
+          `Falling back to detached tmux session.`,
+        );
+        // Fall through to detached tmux below
+      }
+    }
+
     // Backward-compatible fallback: create an isolated detached tmux session
-    // so workflows can run when launched outside an attached tmux client. This
-    // also covers cmux, which exposes its own surface metadata without a tmux
-    // pane/window that OMC can split directly.
+    // so workflows can run when launched outside an attached tmux client, or
+    // when the cmux driver is unavailable.
     const detachedSessionName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${Date.now().toString(36)}`;
     const detachedResult = await execFileAsync('tmux', [
       'new-session', '-d', '-P', '-F', '#S:0 #{pane_id}',
@@ -634,12 +690,19 @@ export async function spawnWorkerInPane(
   paneId: string,
   config: WorkerPaneConfig
 ): Promise<void> {
+  validateTeamName(config.teamName);
+  const startCmd = buildWorkerStartCommand(config);
+
+  // cmux surfaces: use cmux send instead of tmux send-keys
+  if (isCmuxSurfaceRef(paneId)) {
+    const worker: CmuxWorkerHandle = { kind: 'cmux', surfaceRef: paneId, label: '' };
+    await cmuxSendCommand(worker, startCmd);
+    return;
+  }
+
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
-
-  validateTeamName(config.teamName);
-  const startCmd = buildWorkerStartCommand(config);
 
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string
   await execFileAsync('tmux', [
@@ -653,6 +716,10 @@ function normalizeTmuxCapture(value: string): string {
 }
 
 async function capturePaneAsync(paneId: string, execFileAsync: (cmd: string, args: string[]) => Promise<{ stdout: string }>): Promise<string> {
+  // cmux surfaces: delegate to cmux capture-pane
+  if (isCmuxSurfaceRef(paneId)) {
+    return cmuxCaptureSurface(paneId, 80);
+  }
   try {
     const result = await execFileAsync('tmux', ['capture-pane', '-t', paneId, '-p', '-S', '-80']);
     return result.stdout;
@@ -748,6 +815,8 @@ function paneTailContainsLiteralLine(captured: string, text: string): boolean {
 async function paneInCopyMode(
   paneId: string,
 ): Promise<boolean> {
+  // cmux surfaces don't have tmux copy mode
+  if (isCmuxSurfaceRef(paneId)) return false;
   try {
     const result = await tmuxAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
     return result.stdout.trim() === '1';
@@ -790,6 +859,18 @@ export async function sendToWorker(
     console.warn(`[tmux-session] sendToWorker: message rejected (${message.length} chars exceeds 200 char limit)`);
     return false;
   }
+
+  // cmux surfaces: simple send, no retry complexity needed
+  if (isCmuxSurfaceRef(paneId)) {
+    try {
+      const worker: CmuxWorkerHandle = { kind: 'cmux', surfaceRef: paneId, label: '' };
+      await cmuxSendCommand(worker, message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
@@ -917,6 +998,11 @@ export async function injectToLeaderPane(
 ): Promise<boolean> {
   const prefixed = `[OMC_TMUX_INJECT] ${message}`.slice(0, 200);
 
+  // cmux surfaces: simple send, skip the tmux copy-mode / active-task checks
+  if (isCmuxSurfaceRef(leaderPaneId)) {
+    return sendToWorker(sessionName, leaderPaneId, prefixed);
+  }
+
   // If the leader is running a blocking tool (e.g. omc_run_team_wait shows
   // "esc to interrupt"), send C-c first so the message is not queued in the
   // stdin buffer behind the blocked process.
@@ -942,6 +1028,15 @@ export async function injectToLeaderPane(
  * Uses pane ID for stable targeting (not pane index).
  */
 export async function isWorkerAlive(paneId: string): Promise<boolean> {
+  // cmux surfaces: attempt a capture — if the surface responds, it's alive
+  if (isCmuxSurfaceRef(paneId)) {
+    try {
+      const content = await cmuxCaptureSurface(paneId, 1);
+      return content !== '';
+    } catch {
+      return false;
+    }
+  }
   try {
     const result = await tmuxAsync([
       'display-message', '-t', paneId, '-p', '#{pane_dead}'
@@ -978,15 +1073,25 @@ export async function killWorkerPanes(opts: {
     }
   } catch { /* sentinel write failure is non-fatal */ }
 
-  // 2. Force-kill each worker pane, guarding leader
+  // 2. Force-kill each worker pane/surface, guarding leader
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
 
   for (const paneId of paneIds) {
     if (paneId === leaderPaneId) continue;   // GUARD — never kill leader
-    try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); }
-    catch { /* pane already gone — OK */ }
+    if (isCmuxSurfaceRef(paneId)) {
+      try {
+        const cmuxBin = (await import('./multiplexer/cmux-driver.js')).resolveCmuxBinary();
+        await execFileAsync(cmuxBin, ['close-surface', '--surface', paneId], {
+          timeout: 5000,
+          env: { ...process.env, CMUX_CLI_SENTRY_DISABLED: '1' },
+        });
+      } catch { /* surface already gone — OK */ }
+    } else {
+      try { await execFileAsync('tmux', ['kill-pane', '-t', paneId]); }
+      catch { /* pane already gone — OK */ }
+    }
   }
 }
 
@@ -1010,6 +1115,12 @@ export async function resolveSplitPaneWorkerPaneIds(
   recordedPaneIds?: string[],
   leaderPaneId?: string,
 ): Promise<string[]> {
+  // cmux sessions: surface refs are already stable, no tmux discovery needed
+  if (isCmuxSession(sessionName)) {
+    return (recordedPaneIds ?? []).filter(
+      id => isCmuxSurfaceRef(id) && id !== leaderPaneId,
+    );
+  }
   const resolved = dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
   if (!sessionName.includes(':')) return resolved;
 
@@ -1044,6 +1155,24 @@ export async function killTeamSession(
 
   const sessionMode = options.sessionMode
     ?? (sessionName.includes(':') ? 'split-pane' : 'detached-session');
+
+  // cmux sessions: close worker surfaces, never kill the workspace
+  if (sessionMode === 'cmux-tab' || sessionMode === 'cmux-split') {
+    if (!workerPaneIds?.length) return;
+    for (const id of workerPaneIds) {
+      if (id === leaderPaneId) continue;
+      if (isCmuxSurfaceRef(id)) {
+        try {
+          const cmuxBin = (await import('./multiplexer/cmux-driver.js')).resolveCmuxBinary();
+          await execFileAsync(cmuxBin, ['close-surface', '--surface', id], {
+            timeout: 5000,
+            env: { ...process.env, CMUX_CLI_SENTRY_DISABLED: '1' },
+          });
+        } catch { /* surface already gone */ }
+      }
+    }
+    return;
+  }
 
   if (sessionMode === 'split-pane') {
     if (!workerPaneIds?.length) return;

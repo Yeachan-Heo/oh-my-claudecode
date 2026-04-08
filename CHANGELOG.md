@@ -1,5 +1,11 @@
 # oh-my-claudecode v4.11.1: add gitStatus working-tree, add hostname element, cwd folder format
 
+## Unreleased
+
+### New Features
+
+- **feat(team): native cmux driver for team worker spawning** — when running inside cmux 0.61+, `omc team` workers now spawn as native cmux surfaces (vertical tabs) or splits instead of a detached tmux session. Controlled by `OMC_CMUX_LAYOUT` env var: `tab` (default), `split-right`, `split-down`, `split-left`, `split-up`. Falls back gracefully to detached tmux when cmux CLI is unavailable or too old.
+
 ## Release Notes
 
 Release with **3 new features**, **8 security improvements**, **33 bug fixes**, **1 other change** across **45 merged PRs**.
