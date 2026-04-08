@@ -145,10 +145,18 @@ function sanitizeForKeywordDetection(text) {
 }
 
 const INFORMATIONAL_INTENT_PATTERNS = [
+  // English: questions and explanations
   /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
-  /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
-  /(?:とは|って何|使い方|説明)/u,
-  /(?:什么是|什麼是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
+  // English: diagnostic / bug-report / troubleshooting context
+  /\b(?:bug|issue|problem|broken|error|fix(?:ing)?|debug(?:ging)?|diagnose|investigate|keeps?\s+(?:re)?(?:running|looping|triggering|firing|starting)|stuck|loops?|regression|wrong|incorrect|unexpected|malfunction)\b/i,
+  // Korean: questions and explanations
+  /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탄|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
+  // Korean: diagnostic / bug-report / troubleshooting context
+  /(?:문제(?:가|야|인데|있|생)?|버그|오류|에러|안\s?됨|안\s?돼|고장|점검|잘못|재실행|반복|오작동|따라다니|계속\s?(?:실행|재실행|뜨|나타|발생))/u,
+  // Japanese: questions + diagnostic
+  /(?:とは|って何|使い方|説明|バグ|エラー|問題|不具合|直して|修正|調べて)/u,
+  // Chinese: questions + diagnostic
+  /(?:什么是|什麼是|怎(?:么|樣)用|如何使用|解释|說明|说明|错误|問題|问题|修复|修復|调查|調查)/u,
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 
