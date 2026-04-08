@@ -7,12 +7,13 @@
  * Sessions are named "omc-team-{teamName}-{workerName}".
  */
 
-import { exec, execFile, execSync, execFileSync } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { join, basename, isAbsolute, win32 } from 'path';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
+import { tmuxExec, tmuxShell } from '../cli/tmux-utils.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -366,7 +367,7 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
 /** Validate tmux is available. Throws with install instructions if not. */
 export function validateTmux(): void {
   try {
-    execSync('tmux -V', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
+    tmuxShell('-V', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
   } catch {
     throw new Error(
       'tmux is not available. Install it:\n' +
@@ -404,7 +405,7 @@ export function createSession(teamName: string, workerName: string, workingDirec
 
   // Kill existing session if present (stale from previous run)
   try {
-    execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
+    tmuxExec(['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
   } catch { /* ignore — session may not exist */ }
 
   // Create detached session with reasonable terminal size
@@ -412,7 +413,7 @@ export function createSession(teamName: string, workerName: string, workingDirec
   if (workingDirectory) {
     args.push('-c', workingDirectory);
   }
-  execFileSync('tmux', args, { stdio: 'pipe', timeout: 5000 });
+  tmuxExec(args, { stdio: 'pipe', timeout: 5000 });
 
   return name;
 }
@@ -422,7 +423,7 @@ export function createSession(teamName: string, workerName: string, workingDirec
 export function killSession(teamName: string, workerName: string): void {
   const name = sessionName(teamName, workerName);
   try {
-    execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
+    tmuxExec(['kill-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
   } catch { /* ignore — session may not exist */ }
 }
 
@@ -431,7 +432,7 @@ export function killSession(teamName: string, workerName: string): void {
 export function isSessionAlive(teamName: string, workerName: string): boolean {
   const name = sessionName(teamName, workerName);
   try {
-    execFileSync('tmux', ['has-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
+    tmuxExec(['has-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
     return true;
   } catch {
     return false;
@@ -445,7 +446,7 @@ export function listActiveSessions(teamName: string): string[] {
     // Use shell execution for format strings containing #{} to prevent
     // MSYS2/Git Bash from stripping curly braces in execFileSync args.
     // All arguments here are hardcoded constants, not user input.
-    const output = execSync("tmux list-sessions -F '#{session_name}'", {
+    const output = tmuxShell("list-sessions -F '#{session_name}'", {
       encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
     }) as string;
     return output.trim().split('\n')
@@ -469,7 +470,7 @@ export function spawnBridgeInSession(
   configFilePath: string
 ): void {
   const cmd = `node "${bridgeScriptPath}" --config "${configFilePath}"`;
-  execFileSync('tmux', ['send-keys', '-t', tmuxSession, cmd, 'Enter'], { stdio: 'pipe', timeout: 5000 });
+  tmuxExec(['send-keys', '-t', tmuxSession, cmd, 'Enter'], { stdio: 'pipe', timeout: 5000 });
 }
 
 

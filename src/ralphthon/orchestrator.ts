@@ -8,7 +8,7 @@
  * Terminates after N consecutive hardening waves with no new issues.
  */
 
-import { execFileSync } from 'child_process';
+import { tmuxExec } from '../cli/tmux-utils.js';
 import {
   writeModeState,
   readModeState,
@@ -85,8 +85,8 @@ export function clearRalphthonState(
  */
 export function isPaneIdle(paneId: string): boolean {
   try {
-    const output = execFileSync(
-      'tmux', ['display-message', '-t', paneId, '-p', '#{pane_current_command}'],
+    const output = tmuxExec(
+      ['display-message', '-t', paneId, '-p', '#{pane_current_command}'],
       { encoding: 'utf-8', timeout: 5000 },
     ).trim();
 
@@ -102,7 +102,7 @@ export function isPaneIdle(paneId: string): boolean {
  */
 export function paneExists(paneId: string): boolean {
   try {
-    execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
+    tmuxExec(['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -114,7 +114,7 @@ export function paneExists(paneId: string): boolean {
  */
 export function sendKeysToPane(paneId: string, text: string): boolean {
   try {
-    execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
+    tmuxExec(['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
     return true;
   } catch {
     return false;
@@ -126,8 +126,8 @@ export function sendKeysToPane(paneId: string, text: string): boolean {
  */
 export function capturePaneContent(paneId: string, lines = 50): string {
   try {
-    return execFileSync(
-      'tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`],
+    return tmuxExec(
+      ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`],
       { encoding: 'utf-8', timeout: 5000 },
     ).trim();
   } catch {

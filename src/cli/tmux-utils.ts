@@ -3,10 +3,78 @@
  * Adapted from oh-my-codex patterns for omc
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync, spawnSync, type ExecFileSyncOptions, type ExecSyncOptions, type SpawnSyncOptions } from 'child_process';
 import { basename } from 'path';
 
 export type ClaudeLaunchPolicy = 'inside-tmux' | 'outside-tmux' | 'direct';
+
+/**
+ * Return process.env with TMUX stripped.
+ *
+ * When running inside a nested tmux session (e.g. worktree managers that use
+ * `tmux -L <server>`), the TMUX env var causes tmux commands to target the
+ * nested server instead of the default one. All tmux wrappers below use this
+ * so callers never need to remember to strip it manually.
+ */
+export function tmuxEnv(): NodeJS.ProcessEnv {
+  const { TMUX: _, ...env } = process.env;
+  return env;
+}
+
+/**
+ * Execute a tmux command synchronously. Always strips TMUX from the
+ * environment to prevent nested-server targeting.
+ *
+ * Use this instead of `execFileSync('tmux', ...)` everywhere.
+ */
+export function tmuxExec(
+  args: string[],
+  opts: Omit<ExecFileSyncOptions, 'env'> & { encoding: BufferEncoding },
+): string;
+export function tmuxExec(
+  args: string[],
+  opts?: Omit<ExecFileSyncOptions, 'env'>,
+): string | Buffer;
+export function tmuxExec(
+  args: string[],
+  opts?: Omit<ExecFileSyncOptions, 'env'>,
+): string | Buffer {
+  return execFileSync('tmux', args, { ...opts, env: tmuxEnv() });
+}
+
+/**
+ * Execute a tmux shell command synchronously (for cases needing shell
+ * interpolation like `#{...}` format strings). Always strips TMUX.
+ *
+ * Use this instead of `execSync('tmux ...')` everywhere.
+ */
+export function tmuxShell(
+  cmdSuffix: string,
+  opts?: Omit<ExecSyncOptions, 'env'>,
+): string | Buffer {
+  return execSync(`tmux ${cmdSuffix}`, { ...opts, env: tmuxEnv() });
+}
+
+/**
+ * Spawn a tmux command synchronously with full result access (stdout, stderr,
+ * status). Always strips TMUX.
+ *
+ * Use this instead of `spawnSync('tmux', ...)` everywhere.
+ */
+export function tmuxSpawn(
+  args: string[],
+  opts: Omit<SpawnSyncOptions, 'env'> & { encoding: BufferEncoding },
+): import('child_process').SpawnSyncReturns<string>;
+export function tmuxSpawn(
+  args: string[],
+  opts?: Omit<SpawnSyncOptions, 'env'>,
+): import('child_process').SpawnSyncReturns<string | Buffer>;
+export function tmuxSpawn(
+  args: string[],
+  opts?: Omit<SpawnSyncOptions, 'env'>,
+) {
+  return spawnSync('tmux', args, { ...opts, env: tmuxEnv() });
+}
 
 export interface TmuxPaneSnapshot {
   paneId: string;
@@ -19,7 +87,7 @@ export interface TmuxPaneSnapshot {
  */
 export function isTmuxAvailable(): boolean {
   try {
-    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+    tmuxExec(['-V'], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -191,10 +259,9 @@ export function findHudWatchPaneIds(panes: TmuxPaneSnapshot[], currentPaneId?: s
  */
 export function listHudWatchPaneIdsInCurrentWindow(currentPaneId?: string): string[] {
   try {
-    const output = execFileSync(
-      'tmux',
+    const output = tmuxExec(
       ['list-panes', '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_start_command}'],
-      { encoding: 'utf-8' }
+      { encoding: 'utf-8' },
     );
     return findHudWatchPaneIds(parseTmuxPaneSnapshot(output), currentPaneId);
   } catch {
@@ -209,10 +276,9 @@ export function listHudWatchPaneIdsInCurrentWindow(currentPaneId?: string): stri
 export function createHudWatchPane(cwd: string, hudCmd: string): string | null {
   try {
     const wrappedCmd = wrapWithLoginShell(hudCmd);
-    const output = execFileSync(
-      'tmux',
+    const output = tmuxExec(
       ['split-window', '-v', '-l', '4', '-d', '-c', cwd, '-P', '-F', '#{pane_id}', wrappedCmd],
-      { encoding: 'utf-8' }
+      { encoding: 'utf-8' },
     );
     const paneId = output.split('\n')[0]?.trim() || '';
     return paneId.startsWith('%') ? paneId : null;
@@ -227,7 +293,7 @@ export function createHudWatchPane(cwd: string, hudCmd: string): string | null {
 export function killTmuxPane(paneId: string): void {
   if (!paneId.startsWith('%')) return;
   try {
-    execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'ignore' });
+    tmuxExec(['kill-pane', '-t', paneId], { stdio: 'ignore' });
   } catch {
     // Pane may already be gone; ignore
   }

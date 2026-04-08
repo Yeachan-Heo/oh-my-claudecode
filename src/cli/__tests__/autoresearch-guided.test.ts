@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseSandboxContract } from '../../autoresearch/contracts.js';
 
-const { tmuxAvailableMock, buildTmuxShellCommandMock, wrapWithLoginShellMock, quoteShellArgMock } = vi.hoisted(() => ({
+const { tmuxAvailableMock, buildTmuxShellCommandMock, wrapWithLoginShellMock, quoteShellArgMock, tmuxExecMock } = vi.hoisted(() => ({
   tmuxAvailableMock: vi.fn(),
   buildTmuxShellCommandMock: vi.fn((cmd: string, args: string[]) => `${cmd} ${args.join(' ')}`),
   wrapWithLoginShellMock: vi.fn((cmd: string) => `wrapped:${cmd}`),
   quoteShellArgMock: vi.fn((value: string) => `'${value}'`),
+  tmuxExecMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -25,6 +26,7 @@ vi.mock('../tmux-utils.js', () => ({
   buildTmuxShellCommand: buildTmuxShellCommandMock,
   wrapWithLoginShell: wrapWithLoginShellMock,
   quoteShellArg: quoteShellArgMock,
+  tmuxExec: tmuxExecMock,
 }));
 
 import {
@@ -310,6 +312,10 @@ describe('spawnAutoresearchTmux', () => {
     tmuxAvailableMock.mockReset();
     buildTmuxShellCommandMock.mockClear();
     wrapWithLoginShellMock.mockClear();
+    tmuxExecMock.mockReset();
+    tmuxExecMock.mockImplementation((args: string[], opts?: Record<string, unknown>) => {
+      return vi.mocked(execFileSync)('tmux', args, opts);
+    });
     logSpy.mockClear();
   });
 
@@ -387,6 +393,10 @@ describe('spawnAutoresearchSetupTmux', () => {
     tmuxAvailableMock.mockReset();
     buildTmuxShellCommandMock.mockClear();
     wrapWithLoginShellMock.mockClear();
+    tmuxExecMock.mockReset();
+    tmuxExecMock.mockImplementation((args: string[], opts?: Record<string, unknown>) => {
+      return vi.mocked(execFileSync)('tmux', args, opts);
+    });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1234567890);
   });
