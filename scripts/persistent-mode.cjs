@@ -847,6 +847,14 @@ async function main() {
         const breakerCount = readStopBreaker(stateDir, "ralplan", sessionId, RALPLAN_STOP_BLOCKER_TTL_MS) + 1;
         if (breakerCount > RALPLAN_STOP_BLOCKER_MAX) {
           writeStopBreaker(stateDir, "ralplan", 0, sessionId);
+
+          // Deactivate the stale ralplan state so a later Stop event cannot
+          // start a brand-new reinforcement cycle (30/30 -> 1/30) after the
+          // workflow has already exhausted its breaker budget.
+          ralplan.state.active = false;
+          ralplan.state.deactivated_reason = "stop_breaker_exhausted";
+          ralplan.state.completed_at = new Date().toISOString();
+          writeJsonFile(ralplan.path, ralplan.state);
           // Circuit breaker tripped — allow stop
         } else {
           writeStopBreaker(stateDir, "ralplan", breakerCount, sessionId);

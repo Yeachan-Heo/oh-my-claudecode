@@ -25,7 +25,7 @@ import {
   type UltraworkState
 } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
-import { readModeState } from '../../lib/mode-state-io.js';
+import { readModeState, writeModeState } from '../../lib/mode-state-io.js';
 import {
   readRalphState,
   writeRalphState,
@@ -1002,9 +1002,18 @@ async function checkRalplan(
   const breakerCount = readStopBreaker(workingDir, 'ralplan', sessionId, RALPLAN_STOP_BLOCKER_TTL_MS) + 1;
   if (breakerCount > RALPLAN_STOP_BLOCKER_MAX) {
     writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
+
+    // Deactivate the stale ralplan state so a later Stop event cannot start a
+    // brand-new reinforcement cycle (30/30 -> 1/30) after the workflow has
+    // already exhausted its breaker budget.
+    (state as unknown as Record<string, unknown>).active = false;
+    (state as unknown as Record<string, unknown>).deactivated_reason = 'stop_breaker_exhausted';
+    (state as unknown as Record<string, unknown>).completed_at = new Date().toISOString();
+    writeModeState('ralplan', state as unknown as Record<string, unknown>, workingDir, sessionId);
+
     return {
       shouldBlock: false,
-      message: `[RALPLAN CIRCUIT BREAKER] Stop enforcement exceeded ${RALPLAN_STOP_BLOCKER_MAX} reinforcements. Allowing stop to prevent infinite blocking.`,
+      message: `[RALPLAN CIRCUIT BREAKER] Stop enforcement exceeded ${RALPLAN_STOP_BLOCKER_MAX} reinforcements. Allowing stop and deactivating stale ralplan state to prevent infinite restart loops.`,
       mode: 'ralplan'
     };
   }

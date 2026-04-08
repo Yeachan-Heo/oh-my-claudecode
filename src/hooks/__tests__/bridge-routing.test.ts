@@ -482,6 +482,55 @@ Read src/hooks/bridge.ts first.`,
       }
     });
 
+    it('deactivates ralplan state when the consensus planning skill completes', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-complete-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const sessionId = 'ralplan-complete-session';
+
+        await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Skill',
+          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          directory: tempDir,
+        });
+
+        const postResult = await processHook('post-tool-use', {
+          sessionId,
+          toolName: 'Skill',
+          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          toolOutput: { ok: true },
+          directory: tempDir,
+        });
+
+        expect(postResult.continue).toBe(true);
+
+        const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+        const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8')) as {
+          active?: boolean;
+          current_phase?: string;
+          deactivated_reason?: string;
+          completed_at?: string;
+        };
+
+        expect(ralplanState.active).toBe(false);
+        expect(ralplanState.current_phase).toBe('complete');
+        expect(ralplanState.deactivated_reason).toBe('skill_completed');
+        expect(typeof ralplanState.completed_at).toBe('string');
+
+        const stopResult = await processHook('persistent-mode', {
+          sessionId,
+          directory: tempDir,
+          stop_reason: 'end_turn',
+        } as HookInput);
+
+        expect(stopResult.continue).toBe(true);
+        expect(stopResult.message).toBeUndefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should handle session-start and return continue:true', async () => {
       const input: HookInput = {
         sessionId: 'test-session',

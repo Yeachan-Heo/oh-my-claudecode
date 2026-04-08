@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import process from 'process';
 import { detectBashFailure, detectWriteFailure, isNonZeroExitWithOutput, summarizeAgentResult } from '../../scripts/post-tool-verifier.mjs';
@@ -45,6 +45,10 @@ function legacySkillStatePath(tempDir) {
   return join(tempDir, '.omc', 'state', 'skill-active-state.json');
 }
 
+function ralplanStatePath(tempDir, sessionId) {
+  return join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+}
+
 function writeSkillStateFixtures(tempDir, sessionId, skillName = 'plan') {
   mkdirSync(join(tempDir, '.omc', 'state', 'sessions', sessionId), { recursive: true });
   writeFileSync(
@@ -66,6 +70,20 @@ function writeSkillStateFixtures(tempDir, sessionId, skillName = 'plan') {
     JSON.stringify({
       active: true,
       skill_name: skillName,
+    }),
+  );
+}
+
+function writeRalplanStateFixture(tempDir, sessionId, overrides = {}) {
+  mkdirSync(join(tempDir, '.omc', 'state', 'sessions', sessionId), { recursive: true });
+  writeFileSync(
+    ralplanStatePath(tempDir, sessionId),
+    JSON.stringify({
+      active: true,
+      session_id: sessionId,
+      current_phase: 'ralplan',
+      started_at: '2026-04-01T00:00:00.000Z',
+      ...overrides,
     }),
   );
 }
@@ -496,6 +514,55 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
       expect(out).toEqual({ continue: true, suppressOutput: true });
       expect(existsSync(skillStatePath(tempDir, sessionId))).toBe(false);
       expect(existsSync(legacySkillStatePath(tempDir))).toBe(false);
+    });
+  });
+
+  it('deactivates ralplan state when the ralplan skill completes in post-tool-verifier', () => {
+    withTempDir((tempDir) => {
+      const sessionId = 'ralplan-complete-script';
+      writeRalplanStateFixture(tempDir, sessionId);
+
+      const out = runPostToolVerifier({
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:ralplan' },
+        tool_response: { ok: true },
+        session_id: sessionId,
+        cwd: tempDir,
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+
+      const state = JSON.parse(readFileSync(ralplanStatePath(tempDir, sessionId), 'utf-8'));
+      expect(state.active).toBe(false);
+      expect(state.current_phase).toBe('complete');
+      expect(state.deactivated_reason).toBe('skill_completed');
+      expect(typeof state.completed_at).toBe('string');
+    });
+  });
+
+  it('deactivates ralplan state when the consensus plan alias completes in the template hook path', () => {
+    withTempDir((tempDir) => {
+      const sessionId = 'ralplan-complete-template';
+      writeRalplanStateFixture(tempDir, sessionId);
+
+      const out = runHookScript(TEMPLATE_HOOK_PATH, {
+        tool_name: 'Skill',
+        tool_input: {
+          skill: 'oh-my-claudecode:plan',
+          args: '--consensus issue #2368',
+        },
+        tool_response: { ok: true },
+        session_id: sessionId,
+        cwd: tempDir,
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+
+      const state = JSON.parse(readFileSync(ralplanStatePath(tempDir, sessionId), 'utf-8'));
+      expect(state.active).toBe(false);
+      expect(state.current_phase).toBe('complete');
+      expect(state.deactivated_reason).toBe('skill_completed');
+      expect(typeof state.completed_at).toBe('string');
     });
   });
 });

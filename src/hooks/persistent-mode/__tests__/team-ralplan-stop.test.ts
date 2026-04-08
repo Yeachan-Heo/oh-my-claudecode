@@ -625,6 +625,33 @@ describe('ralplan standalone stop enforcement', () => {
     }
   });
 
+  it('deactivates stale ralplan state after the circuit breaker trips so stop does not restart at 1/30', async () => {
+    const sessionId = 'session-ralplan-breaker-no-restart';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId);
+      writeStopBreaker(tempDir, sessionId, 'ralplan', 30);
+
+      const firstResult = await checkPersistentModes(sessionId, tempDir);
+      expect(firstResult.shouldBlock).toBe(false);
+      expect(firstResult.mode).toBe('ralplan');
+      expect(firstResult.message).toContain('deactivating stale ralplan state');
+
+      const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+      const persistedState = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
+      expect(persistedState.active).toBe(false);
+      expect(persistedState.deactivated_reason).toBe('stop_breaker_exhausted');
+
+      const secondResult = await checkPersistentModes(sessionId, tempDir);
+      expect(secondResult.shouldBlock).toBe(false);
+      expect(secondResult.mode).toBe('none');
+      expect(secondResult.message).toBe('');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('allows orchestrator idle when ralplan is active but delegated subagents are still running', async () => {
     const sessionId = 'session-ralplan-active-subagents';
     const tempDir = makeTempProject();
