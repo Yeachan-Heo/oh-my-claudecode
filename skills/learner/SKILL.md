@@ -1,6 +1,7 @@
 ---
 name: learner
 description: Extract a learned skill from the current conversation
+category: utility
 level: 7
 ---
 

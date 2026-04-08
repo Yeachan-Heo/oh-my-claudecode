@@ -1,6 +1,7 @@
 ---
 name: self-improve
 description: Autonomous evolutionary code improvement engine with tournament selection
+category: execution
 level: 4
 ---
 

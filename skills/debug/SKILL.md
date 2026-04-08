@@ -1,6 +1,7 @@
 ---
 name: debug
 description: Diagnose the current OMC session or repo state using logs, traces, state, and focused reproduction
+category: debugging
 ---
 
 # Debug

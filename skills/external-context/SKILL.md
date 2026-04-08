@@ -1,6 +1,7 @@
 ---
 name: external-context
 description: Invoke parallel document-specialist agents for external web searches and documentation lookup
+category: research
 argument-hint: <search query or topic>
 level: 4
 ---

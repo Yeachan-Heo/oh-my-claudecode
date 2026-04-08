@@ -1,6 +1,7 @@
 ---
 name: verify
 description: Verify that a change really works before you claim completion
+category: qa
 ---
 
 # Verify

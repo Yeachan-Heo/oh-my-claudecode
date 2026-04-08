@@ -1,6 +1,7 @@
 ---
 name: ask
 description: Process-first advisor routing for Claude, Codex, or Gemini via `omc ask`, with artifact capture and no raw CLI assembly
+category: research
 ---
 
 # Ask

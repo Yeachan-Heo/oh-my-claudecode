@@ -1,6 +1,7 @@
 ---
 name: trace
 description: Evidence-driven tracing lane that orchestrates competing tracer hypotheses in Claude built-in team mode
+category: debugging
 argument-hint: "<observation to trace>"
 agent: tracer
 level: 2

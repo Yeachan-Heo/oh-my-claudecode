@@ -1,6 +1,7 @@
 ---
 name: visual-verdict
 description: Structured visual QA verdict for screenshot-to-reference comparisons
+category: qa
 level: 2
 ---
 
