@@ -381,24 +381,30 @@ export function isPromptModeAgent(agentType: CliAgentType): boolean {
 }
 
 /**
- * Resolve the active model for Claude team workers on non-Claude providers.
+ * Resolve the model ID to pass to a Claude worker subprocess.
  *
- * When running on a non-standard provider (Bedrock, Vertex, DashScope, LiteLLM, etc.),
- * workers need the provider-specific model ID passed explicitly via --model. Without it,
- * Claude Code falls back to its built-in default (claude-sonnet-4-6) which is invalid
- * on these providers.
+ * Returns the model when running on non-Claude provider backends that need
+ * full model IDs (Bedrock, Vertex, LiteLLM, CC Switch, custom proxies).
  *
- * Resolution order:
- *   1. ANTHROPIC_MODEL / CLAUDE_MODEL env vars (user's explicit setting)
- *   2. Provider tier-specific env vars (CLAUDE_CODE_BEDROCK_SONNET_MODEL, etc.)
- *   3. OMC tier env vars (OMC_MODEL_MEDIUM, etc.)
- *   4. undefined — let Claude Code handle its own default
+ * Returns undefined in these cases (worker uses Claude Code's default/inherit):
+ *   1. Standard Anthropic API — aliases work fine
+ *   2. OMC_ROUTING_FORCE_INHERIT=true — user wants model inheritance
+ *   3. No model env vars configured on provider backend
  *
- * Returns undefined when using standard Anthropic API (handles bare aliases fine).
+ * When forceInherit is true, we must NOT return the model ID, because
+ * buildLaunchArgs() would normalize it (e.g. 'claude-sonnet-4-5' -> 'sonnet'),
+ * which changes the effective model instead of preserving the inherited one.
  */
 export function resolveClaudeWorkerModel(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
+  // When forceInherit is enabled, return undefined so worker inherits parent model
+  // without any normalization. The user explicitly wants inheritance, not a
+  // converted alias like 'sonnet' from 'claude-sonnet-4-5'. (PR #2378 regression)
+  if (env.OMC_ROUTING_FORCE_INHERIT === "true") {
+    return undefined;
+  }
+
   // Check all non-Claude providers: Bedrock, Vertex, DashScope, LiteLLM, etc.
   // Uses the same detection logic as delegation-enforcer for consistency.
   if (!isNonClaudeProvider()) {

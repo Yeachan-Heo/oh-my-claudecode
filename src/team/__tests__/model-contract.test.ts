@@ -402,6 +402,8 @@ describe('model-contract', () => {
       vi.stubEnv('CLAUDE_CODE_USE_VERTEX', '');
       vi.stubEnv('ANTHROPIC_MODEL', '');
       vi.stubEnv('CLAUDE_MODEL', '');
+      vi.stubEnv('ANTHROPIC_BASE_URL', '');
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', '');
       expect(resolveClaudeWorkerModel()).toBeUndefined();
       vi.unstubAllEnvs();
     });
@@ -468,6 +470,46 @@ describe('model-contract', () => {
       vi.stubEnv('CLAUDE_MODEL', '');
       // isBedrock() detects Bedrock from the model ID pattern
       expect(resolveClaudeWorkerModel()).toBe('us.anthropic.claude-sonnet-4-5-20250929-v1:0');
+      vi.unstubAllEnvs();
+    });
+  });
+
+  describe('resolveClaudeWorkerModel forceInherit regression (PR #2378)', () => {
+    it('returns undefined when OMC_ROUTING_FORCE_INHERIT=true even with model set', () => {
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', 'true');
+      vi.stubEnv('CLAUDE_MODEL', 'claude-sonnet-4-5');
+      vi.stubEnv('CLAUDE_CODE_USE_BEDROCK', '');
+      vi.stubEnv('CLAUDE_CODE_USE_VERTEX', '');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+
+      // Must return undefined so worker inherits without normalization
+      expect(resolveClaudeWorkerModel()).toBeUndefined();
+
+      vi.unstubAllEnvs();
+    });
+
+    it('returns undefined when OMC_ROUTING_FORCE_INHERIT=true on Bedrock', () => {
+      // Edge case: forceInherit + Bedrock should still return undefined
+      // User explicitly wants inheritance, not Bedrock model ID
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', 'true');
+      vi.stubEnv('CLAUDE_CODE_USE_BEDROCK', '1');
+      vi.stubEnv('CLAUDE_MODEL', 'us.anthropic.claude-sonnet-4-6-v1:0');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+
+      expect(resolveClaudeWorkerModel()).toBeUndefined();
+
+      vi.unstubAllEnvs();
+    });
+
+    it('returns model ID on LiteLLM proxy without forceInherit', () => {
+      // Ensure actual proxy scenarios still work (PR #2378 intent)
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', '');
+      vi.stubEnv('ANTHROPIC_BASE_URL', 'https://litellm.example.com/v1');
+      vi.stubEnv('CLAUDE_MODEL', 'claude-sonnet-4-5');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+
+      expect(resolveClaudeWorkerModel()).toBe('claude-sonnet-4-5');
+
       vi.unstubAllEnvs();
     });
   });
