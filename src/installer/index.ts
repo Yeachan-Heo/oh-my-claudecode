@@ -26,6 +26,7 @@ import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
+import { pruneOrphanStandaloneSkills } from './plugin-cache-heal.js';
 
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -1121,6 +1122,33 @@ export function install(options: InstallOptions = {}): InstallResult {
       log('Skipping bundled skill installation (plugin-provided skills are available). Use --no-plugin to force local skill sync.');
     } else if (runningAsPlugin) {
       log('Skipping bundled skill installation (managed by plugin system)');
+    }
+
+    // Prune orphan standalone skills (#2252).
+    // When an enabled OMC plugin already provides skills under its own
+    // namespace, any ~/.claude/skills/<name>/ directory whose SKILL.md
+    // content hashes match the plugin's copy is a leftover from a prior
+    // standalone `omc setup` and causes every slash command to appear
+    // twice in Claude Code. Prune only exact content matches — user-
+    // authored skills with colliding names (e.g. a personal `plan/`)
+    // are always preserved. Removed directories are first moved to
+    // ~/.claude/skills/.omc-trash/<name>.<timestamp>/ so false positives
+    // are recoverable. See src/installer/plugin-cache-heal.ts for the
+    // safety model.
+    if (!options.noPlugin && enabledOmcPlugin && pluginProvidesSkillFiles) {
+      try {
+        const pluginRoots = getInstalledOmcPluginRoots();
+        const pruneResult = pruneOrphanStandaloneSkills({
+          skillsDir: SKILLS_DIR,
+          pluginRoots,
+          log,
+        });
+        if (pruneResult.removed.length > 0) {
+          log(`Removed ${pruneResult.removed.length} orphan standalone skill(s): ${pruneResult.removed.join(', ')}`);
+        }
+      } catch {
+        // Best-effort: never block install on prune failure
+      }
     }
 
     // Install CLAUDE.md with merge support.
