@@ -141,6 +141,7 @@ async function sendStopNotification(modeName, stateData, sessionId, directory) {
  * from causing the stop hook to malfunction in new sessions.
  */
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CANCEL_COMPLETED_TTL_MS = 30 * 60 * 1000; // 30 min — outlives session-restore zombie re-creation
 
 // Stop breaker constants for first-class mode enforcement
 const TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
@@ -316,6 +317,60 @@ function isSessionCancelInProgress(stateDir, sessionId) {
   // Fall back to legacy path
   const legacySignalPath = join(stateDir, 'cancel-signal-state.json');
   return isActiveSignal(legacySignalPath);
+}
+
+/**
+ * Write a persistent cancel-completed marker for modes active when cancel fires.
+ * Survives longer than the 30-second cancel signal to prevent the hook from
+ * re-blocking modes that the LLM re-creates from session-restore context.
+ * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/2380
+ */
+function writeCancelCompletedMarker(stateDir, sessionId, modes) {
+  if (!modes || modes.length === 0) return;
+  const markerPath = sessionId
+    ? join(stateDir, "sessions", sessionId, "cancel-completed.json")
+    : join(stateDir, "cancel-completed.json");
+  const existing = readJsonFile(markerPath) || { cancelled_modes: {} };
+  const now = new Date().toISOString();
+  for (const mode of modes) {
+    existing.cancelled_modes[mode] = { cancelled_at: now };
+  }
+  writeJsonFile(markerPath, existing);
+}
+
+/**
+ * Check if a mode was recently cancelled in this session (within CANCEL_COMPLETED_TTL_MS).
+ */
+function wasModeCancelledRecently(stateDir, sessionId, modeName) {
+  const paths = [];
+  if (sessionId) {
+    paths.push(join(stateDir, "sessions", sessionId, "cancel-completed.json"));
+  }
+  paths.push(join(stateDir, "cancel-completed.json"));
+  for (const markerPath of paths) {
+    const marker = readJsonFile(markerPath);
+    if (!marker?.cancelled_modes?.[modeName]) continue;
+    const cancelledAt = new Date(marker.cancelled_modes[modeName].cancelled_at).getTime();
+    if (!Number.isFinite(cancelledAt)) continue;
+    if ((Date.now() - cancelledAt) < CANCEL_COMPLETED_TTL_MS) return true;
+  }
+  return false;
+}
+
+/**
+ * Remove zombie state files re-created from session-restore context after cancel.
+ * For each mode recently cancelled, deletes its state file and clears the
+ * in-memory reference so subsequent checks treat it as inactive.
+ */
+function cleanupZombieStates(stateDir, sessionId, modeRefs) {
+  for (const { name, ref } of modeRefs) {
+    if (ref.state?.active && wasModeCancelledRecently(stateDir, sessionId, name)) {
+      try {
+        if (ref.path && existsSync(ref.path)) unlinkSync(ref.path);
+      } catch { /* best effort */ }
+      ref.state = null;
+    }
+  }
 }
 
 /**
@@ -692,9 +747,34 @@ async function main() {
     // Cache the result to pass to sub-checks (avoids TOCTOU re-reads, issue #1058)
     const cancelInProgress = isSessionCancelInProgress(stateDir, sessionId);
     if (cancelInProgress) {
+      // Write persistent marker so zombie state from session-restore gets ignored
+      const activeModes = [];
+      if (ralph.state?.active) activeModes.push("ralph");
+      if (autopilot.state?.active) activeModes.push("autopilot");
+      if (ultrapilot.state?.active) activeModes.push("ultrapilot");
+      if (ultrawork.state?.active) activeModes.push("ultrawork");
+      if (ultraqa.state?.active) activeModes.push("ultraqa");
+      if (pipeline.state?.active) activeModes.push("pipeline");
+      if (team.state?.active) activeModes.push("team");
+      if (ralplan.state?.active) activeModes.push("ralplan");
+      if (omcTeams.state?.active) activeModes.push("omc-teams");
+      writeCancelCompletedMarker(stateDir, sessionId, activeModes);
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
+
+    // Clean up zombie states re-created from session-restore context (issue #2380)
+    cleanupZombieStates(stateDir, sessionId, [
+      { name: "ralph", ref: ralph },
+      { name: "autopilot", ref: autopilot },
+      { name: "ultrapilot", ref: ultrapilot },
+      { name: "ultrawork", ref: ultrawork },
+      { name: "ultraqa", ref: ultraqa },
+      { name: "pipeline", ref: pipeline },
+      { name: "team", ref: team },
+      { name: "ralplan", ref: ralplan },
+      { name: "omc-teams", ref: omcTeams },
+    ]);
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
