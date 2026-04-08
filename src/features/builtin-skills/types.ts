@@ -33,6 +33,10 @@ export interface BuiltinSkill {
   deprecatedAlias?: boolean;
   /** Human-readable deprecation guidance */
   deprecationMessage?: string;
+  /** Lifecycle status: active (default), deprecated, or experimental */
+  status?: 'active' | 'deprecated' | 'experimental';
+  /** Skill that supersedes this one when status is deprecated */
+  supersededBy?: string;
   /** Short description of the skill */
   description: string;
   /** Full template content for the skill */

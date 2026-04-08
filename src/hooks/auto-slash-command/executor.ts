@@ -149,8 +149,12 @@ function discoverSkillsFromDir(skillsDir: string): CommandInfo[] {
         const agent = getFrontmatterString(fm, 'agent');
         const pipeline = parseSkillPipelineMetadata(fm);
 
+        const status = getFrontmatterString(fm, 'status') as CommandMetadata['status'] || undefined;
+        const supersededBy = getFrontmatterString(fm, 'superseded-by');
+
         for (const commandName of commandNames) {
           const isAlias = commandName !== canonicalName;
+          const isDeprecated = status === 'deprecated';
           const metadata: CommandMetadata = {
             name: commandName,
             description,
@@ -160,10 +164,14 @@ function discoverSkillsFromDir(skillsDir: string): CommandInfo[] {
             pipeline: isAlias ? undefined : pipeline,
             aliases: isAlias ? undefined : aliases,
             aliasOf: isAlias ? canonicalName : undefined,
-            deprecatedAlias: isAlias || undefined,
-            deprecationMessage: isAlias
-              ? `Alias "/${commandName}" is deprecated. Use "/${canonicalName}" instead.`
+            deprecatedAlias: (isAlias && isDeprecated) || undefined,
+            deprecationMessage: isDeprecated
+              ? supersededBy
+                ? `"/${commandName}" is deprecated. Use "/${supersededBy}" instead.`
+                : `"/${commandName}" is deprecated.`
               : undefined,
+            status,
+            supersededBy: supersededBy || undefined,
           };
 
           skillCommands.push({

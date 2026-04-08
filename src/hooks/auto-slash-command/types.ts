@@ -64,6 +64,10 @@ export interface CommandMetadata {
   aliasOf?: string;
   deprecatedAlias?: boolean;
   deprecationMessage?: string;
+  /** Lifecycle status: active (default), deprecated, or experimental */
+  status?: 'active' | 'deprecated' | 'experimental';
+  /** Skill that supersedes this one when status is deprecated */
+  supersededBy?: string;
 }
 
 /**

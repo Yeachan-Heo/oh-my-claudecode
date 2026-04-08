@@ -184,17 +184,24 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
       if (seen.has(key)) continue;
       seen.add(key);
 
+      const fmStatus = (metadata.status as BuiltinSkill['status']) || undefined;
+      const fmSupersededBy = (metadata['superseded-by'] as string) || undefined;
+      const isFmDeprecated = fmStatus === 'deprecated';
+
       skillEntries.push({
         name,
         aliases: name === safePrimaryName ? safeAliases : undefined,
         aliasOf: name === safePrimaryName ? undefined : safePrimaryName,
-        deprecatedAlias: name === safePrimaryName ? undefined : true,
-        deprecationMessage: name === safePrimaryName
-          ? undefined
-          : `Skill alias "${name}" is deprecated. Use "${safePrimaryName}" instead.`,
+        deprecatedAlias: (name !== safePrimaryName && isFmDeprecated) || undefined,
+        deprecationMessage: isFmDeprecated
+          ? (fmSupersededBy
+              ? `"${name}" is deprecated. Use "${fmSupersededBy}" instead.`
+              : `"${name}" is deprecated.`)
+          : undefined,
+        status: fmStatus,
+        supersededBy: fmSupersededBy,
         description: metadata.description || '',
         template,
-        // Optional fields from frontmatter
         model: metadata.model,
         agent: metadata.agent,
         argumentHint: metadata['argument-hint'],
