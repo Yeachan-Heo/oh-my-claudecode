@@ -23,6 +23,7 @@ import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../u
 import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from '../../features/builtin-skills/runtime-guidance.js';
 import { getSkillsDir } from '../../features/builtin-skills/skills.js';
+import { logEvent } from '../../lib/event-logger.js';
 
 /** Claude config directory */
 const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -313,6 +314,13 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
   }
 
   sections.push('---\n');
+
+  logEvent('skill:execute', 'auto-slash-command', {
+    skill: cmd.name,
+    scope: cmd.scope,
+    args: displayArgs || undefined,
+    status: cmd.metadata.status,
+  });
 
   // Resolve arguments in content, then execute any live-data commands
   const resolvedContent = resolveArguments(cmd.content || '', displayArgs);

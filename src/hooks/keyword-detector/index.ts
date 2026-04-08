@@ -13,6 +13,7 @@ import {
   type TaskSizeResult,
   type TaskSizeThresholds,
 } from '../task-size-detector/index.js';
+import { logEvent } from '../../lib/event-logger.js';
 
 export type KeywordType =
   | 'cancel'      // Priority 1
@@ -193,6 +194,10 @@ export function detectKeywordsWithType(
       detected.push({
         ...match,
         type,
+      });
+      logEvent('keyword:detect', 'keyword-detector', {
+        keyword: type,
+        position: match.position,
       });
     }
   }
