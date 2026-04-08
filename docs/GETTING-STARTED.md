@@ -359,3 +359,9 @@ OMC's default behavior is also configured via `CLAUDE.md` files. Running `/oh-my
 - After an OMC update (to apply the latest configuration)
 - When switching to a different machine
 - When starting a new project (use the `--local` option)
+
+---
+
+## Next Steps
+
+Now that you have OMC running, see the [Practical Workflows](./WORKFLOWS.md) guide for real-world scenarios like implementing issues, debugging bugs, and reviewing PRs.
