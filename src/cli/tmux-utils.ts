@@ -15,6 +15,19 @@ export interface TmuxPaneSnapshot {
 }
 
 /**
+ * Return a copy of process.env with TMUX stripped.
+ *
+ * When running inside a nested tmux session (e.g. worktree managers that use
+ * `tmux -L <server>`), the TMUX env var causes tmux commands to target the
+ * nested server instead of the default one. Stripping it ensures sessions are
+ * always created on and queried from the default tmux server.
+ */
+export function tmuxEnv(): NodeJS.ProcessEnv {
+  const { TMUX: _, ...env } = process.env;
+  return env;
+}
+
+/**
  * Check if tmux is available on the system
  */
 export function isTmuxAvailable(): boolean {
@@ -227,7 +240,7 @@ export function createHudWatchPane(cwd: string, hudCmd: string): string | null {
 export function killTmuxPane(paneId: string): void {
   if (!paneId.startsWith('%')) return;
   try {
-    execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'ignore' });
+    execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'ignore', env: tmuxEnv() });
   } catch {
     // Pane may already be gone; ignore
   }

@@ -7,7 +7,7 @@
 
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { isTmuxAvailable, isClaudeAvailable } from './tmux-utils.js';
+import { isTmuxAvailable, isClaudeAvailable, tmuxEnv } from './tmux-utils.js';
 import { initInteropSession } from '../interop/shared-state.js';
 
 export type InteropMode = 'off' | 'observe' | 'active';
@@ -111,6 +111,7 @@ export function launchInteropSession(cwd: string = process.cwd()): void {
   try {
     const output = execFileSync('tmux', ['display-message', '-p', '#{pane_id}'], {
       encoding: 'utf-8',
+      env: tmuxEnv(),
     });
     currentPaneId = output.trim();
   } catch (_error) {
@@ -135,10 +136,10 @@ export function launchInteropSession(cwd: string = process.cwd()): void {
         '-c', cwd,
         '-t', currentPaneId,
         'codex',
-      ], { stdio: 'inherit' });
+      ], { stdio: 'inherit', env: tmuxEnv() });
 
       // Select left pane (original/current)
-      execFileSync('tmux', ['select-pane', '-t', currentPaneId], { stdio: 'ignore' });
+      execFileSync('tmux', ['select-pane', '-t', currentPaneId], { stdio: 'ignore', env: tmuxEnv() });
 
       console.log('\nInterop session ready!');
       console.log('- Left pane: Claude Code (this terminal)');

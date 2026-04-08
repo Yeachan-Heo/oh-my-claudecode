@@ -21,7 +21,7 @@ import {
   runAutoresearchSetupSession,
   type AutoresearchSetupSessionInput,
 } from './autoresearch-setup-session.js';
-import { buildTmuxShellCommand, isTmuxAvailable, quoteShellArg, wrapWithLoginShell } from './tmux-utils.js';
+import { buildTmuxShellCommand, isTmuxAvailable, quoteShellArg, wrapWithLoginShell, tmuxEnv } from './tmux-utils.js';
 
 const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
 const AUTORESEARCH_SETUP_SLASH_COMMAND = '/deep-interview --autoresearch';
@@ -315,7 +315,7 @@ function resolveMissionRepoRoot(missionDir: string): string {
 
 function assertTmuxSessionAvailable(sessionName: string): void {
   try {
-    execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
+    execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore', env: tmuxEnv() });
   } catch {
     throw new Error(
       `tmux session "${sessionName}" did not stay available after launch. `
@@ -332,7 +332,7 @@ export function spawnAutoresearchTmux(missionDir: string, slug: string): void {
   const sessionName = `omc-autoresearch-${slug}`;
 
   try {
-    execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
+    execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore', env: tmuxEnv() });
     throw new Error(
       `tmux session "${sessionName}" already exists.\n`
       + `  Attach: tmux attach -t ${sessionName}\n`
@@ -350,7 +350,7 @@ export function spawnAutoresearchTmux(missionDir: string, slug: string): void {
   const command = buildTmuxShellCommand(process.execPath, [omcPath, 'autoresearch', missionDir]);
   const wrappedCommand = wrapWithLoginShell(command);
 
-  execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', repoRoot, wrappedCommand], { stdio: 'ignore' });
+  execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', repoRoot, wrappedCommand], { stdio: 'ignore', env: tmuxEnv() });
   assertTmuxSessionAvailable(sessionName);
 
   console.log('\nAutoresearch launched in background tmux session.');
@@ -410,14 +410,14 @@ export function spawnAutoresearchSetupTmux(repoRoot: string): void {
   const paneId = execFileSync(
     'tmux',
     ['new-session', '-d', '-P', '-F', '#{pane_id}', '-s', sessionName, '-c', repoRoot, wrappedClaudeCommand],
-    { encoding: 'utf-8' },
+    { encoding: 'utf-8', env: tmuxEnv() },
   ).trim();
 
   assertTmuxSessionAvailable(sessionName);
 
   if (paneId) {
-    execFileSync('tmux', ['send-keys', '-t', paneId, '-l', buildAutoresearchSetupSlashCommand()], { stdio: 'ignore' });
-    execFileSync('tmux', ['send-keys', '-t', paneId, 'Enter'], { stdio: 'ignore' });
+    execFileSync('tmux', ['send-keys', '-t', paneId, '-l', buildAutoresearchSetupSlashCommand()], { stdio: 'ignore', env: tmuxEnv() });
+    execFileSync('tmux', ['send-keys', '-t', paneId, 'Enter'], { stdio: 'ignore', env: tmuxEnv() });
   }
 
   console.log('\nAutoresearch setup launched in background Claude session.');

@@ -24,6 +24,7 @@ import {
   wrapWithLoginShell,
   isClaudeAvailable,
   quoteShellArg,
+  tmuxEnv,
 } from './tmux-utils.js';
 
 // Flag mapping
@@ -381,7 +382,7 @@ export function runClaude(cwd: string, args: string[], sessionId: string): void 
 function runClaudeInsideTmux(cwd: string, args: string[]): void {
   // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
   try {
-    execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
+    execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore', env: tmuxEnv() });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
   // Launch Claude in current pane
@@ -444,26 +445,26 @@ function runClaudeOutsideTmux(cwd: string, args: string[], _sessionId: string): 
   const sessionName = buildTmuxSessionName(cwd);
 
   try {
-    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stdio: 'inherit' });
+    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stdio: 'inherit', env: tmuxEnv() });
   } catch {
     runClaudeDirect(cwd, args);
     return;
   }
 
   try {
-    execFileSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+    execFileSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore', env: tmuxEnv() });
   } catch {
     /* non-fatal — user's tmux may not support these options */
   }
 
   try {
-    execFileSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
+    execFileSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit', env: tmuxEnv() });
   } catch {
     // If the detached session still exists, preserve it so interrupted
     // attach paths (SSH disconnect, terminal drop, etc.) do not kill or
     // duplicate a valid Claude session.
     try {
-      execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
+      execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore', env: tmuxEnv() });
       return;
     } catch {
       runClaudeDirect(cwd, args);

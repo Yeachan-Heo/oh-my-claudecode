@@ -10,6 +10,7 @@
  */
 
 import { execFileSync, spawnSync } from 'child_process';
+import { tmuxEnv } from '../../cli/tmux-utils.js';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
 
 /**
@@ -105,6 +106,7 @@ export function listTmuxPanes(): TmuxPane[] {
     const result = execFileSync('tmux', ['list-panes', '-a', '-F', format], {
       encoding: 'utf-8',
       timeout: 5000,
+      env: tmuxEnv(),
     });
 
     const panes: TmuxPane[] = [];
@@ -162,6 +164,7 @@ export function capturePaneContent(paneId: string, lines = 15): string {
     const result = execFileSync('tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`], {
       encoding: 'utf-8',
       timeout: 5000,
+      env: tmuxEnv(),
     });
     return result;
   } catch (error) {
@@ -278,6 +281,7 @@ export function sendResumeSequence(paneId: string): boolean {
     // Send "1" to select the first option (typically "Continue" or similar)
     execFileSync('tmux', ['send-keys', '-t', paneId, '1', 'Enter'], {
       timeout: 2000,
+      env: tmuxEnv(),
     });
 
     // Wait a moment for the response
@@ -308,11 +312,13 @@ export function sendToPane(paneId: string, text: string, pressEnter = true): boo
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
     execFileSync('tmux', ['send-keys', '-t', paneId, '-l', sanitizedText], {
       timeout: 2000,
+      env: tmuxEnv(),
     });
     // Send Enter as a separate command so it is interpreted as a key press
     if (pressEnter) {
       execFileSync('tmux', ['send-keys', '-t', paneId, 'Enter'], {
         timeout: 2000,
+        env: tmuxEnv(),
       });
     }
     return true;

@@ -9,6 +9,7 @@
  */
 
 import { execFileSync } from 'child_process';
+import { tmuxEnv } from '../cli/tmux-utils.js';
 import {
   writeModeState,
   readModeState,
@@ -87,7 +88,7 @@ export function isPaneIdle(paneId: string): boolean {
   try {
     const output = execFileSync(
       'tmux', ['display-message', '-t', paneId, '-p', '#{pane_current_command}'],
-      { encoding: 'utf-8', timeout: 5000 },
+      { encoding: 'utf-8', timeout: 5000, env: tmuxEnv() },
     ).trim();
 
     const shellNames = ['bash', 'zsh', 'fish', 'sh', 'dash'];
@@ -102,7 +103,7 @@ export function isPaneIdle(paneId: string): boolean {
  */
 export function paneExists(paneId: string): boolean {
   try {
-    execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
+    execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe', env: tmuxEnv() });
     return true;
   } catch {
     return false;
@@ -114,7 +115,7 @@ export function paneExists(paneId: string): boolean {
  */
 export function sendKeysToPane(paneId: string, text: string): boolean {
   try {
-    execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
+    execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000, env: tmuxEnv() });
     return true;
   } catch {
     return false;
@@ -128,7 +129,7 @@ export function capturePaneContent(paneId: string, lines = 50): string {
   try {
     return execFileSync(
       'tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`],
-      { encoding: 'utf-8', timeout: 5000 },
+      { encoding: 'utf-8', timeout: 5000, env: tmuxEnv() },
     ).trim();
   } catch {
     return '';
