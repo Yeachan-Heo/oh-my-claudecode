@@ -8,7 +8,7 @@
  * Bash hook scripts were removed in v3.9.0.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -529,6 +529,106 @@ function mergeHookGroups(
     log(`  ${eventType} hook already configured, skipping`);
   }
   return existingGroups;
+}
+
+/**
+ * Remove stale OMC-created agent files from the config agents directory.
+ *
+ * When OMC drops an agent definition in a new version, the old .md file
+ * lingers in ~/.claude/agents/. This function compares the installed files
+ * against the current package's agent definitions and removes any that:
+ *   1. Are .md files (OMC agent naming convention)
+ *   2. Were previously shipped by OMC (match the frontmatter `name:` pattern)
+ *   3. No longer exist in the current package's agents/ directory
+ *
+ * User-created files (those whose filename does not match any historically
+ * known OMC agent) are preserved.
+ */
+export function cleanupStaleAgents(log: (msg: string) => void): string[] {
+  if (!existsSync(AGENTS_DIR)) return [];
+
+  const currentAgentFiles = new Set(
+    Object.keys(loadAgentDefinitions()),
+  );
+
+  const removed: string[] = [];
+  for (const file of readdirSync(AGENTS_DIR)) {
+    if (!file.endsWith('.md')) continue;
+    if (file === 'AGENTS.md') continue;
+    if (currentAgentFiles.has(file)) continue;
+
+    // Check if this looks like an OMC-created agent (kebab-case .md with frontmatter)
+    const filepath = join(AGENTS_DIR, file);
+    try {
+      const content = readFileSync(filepath, 'utf-8');
+      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+        unlinkSync(filepath);
+        removed.push(file);
+        log(`  Removed stale agent: ${file}`);
+      }
+    } catch {
+      // Skip files that can't be read
+    }
+  }
+
+  return removed;
+}
+
+/**
+ * Remove stale OMC-created skill directories from the config skills directory.
+ *
+ * Similar to cleanupStaleAgents but for skill directories. Removes directories
+ * that contain a SKILL.md with OMC frontmatter but are no longer shipped by
+ * the current package version. User-created skills are preserved.
+ */
+export function cleanupStaleSkills(log: (msg: string) => void): string[] {
+  if (!existsSync(SKILLS_DIR)) return [];
+
+  const packageSkillsDir = join(getPackageDir(), 'skills');
+  const currentSkillNames = new Set<string>();
+
+  if (existsSync(packageSkillsDir)) {
+    for (const entry of readdirSync(packageSkillsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        currentSkillNames.add(entry.name);
+        // Also add the safe standalone name variant
+        const skillMdPath = join(packageSkillsDir, entry.name, 'SKILL.md');
+        if (existsSync(skillMdPath)) {
+          const content = readFileSync(skillMdPath, 'utf-8');
+          const { metadata } = parseFrontmatter(content);
+          if (typeof metadata.name === 'string' && metadata.name.trim().length > 0) {
+            currentSkillNames.add(toSafeStandaloneSkillName(metadata.name));
+          }
+        }
+      }
+    }
+  }
+
+  const removed: string[] = [];
+  for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (currentSkillNames.has(entry.name)) continue;
+
+    const skillMdPath = join(SKILLS_DIR, entry.name, 'SKILL.md');
+    if (!existsSync(skillMdPath)) continue;
+
+    // Check if this looks like an OMC-created skill (has standard frontmatter)
+    try {
+      const content = readFileSync(skillMdPath, 'utf-8');
+      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+        // Skip user-learned skills (these are user-created)
+        if (entry.name === 'omc-learned') continue;
+
+        rmSync(join(SKILLS_DIR, entry.name), { recursive: true, force: true });
+        removed.push(entry.name);
+        log(`  Removed stale skill: ${entry.name}/`);
+      }
+    } catch {
+      // Skip directories that can't be read
+    }
+  }
+
+  return removed;
 }
 
 function directoryHasMarkdownFiles(directory: string): boolean {
@@ -1065,6 +1165,14 @@ export function install(options: InstallOptions = {}): InstallResult {
         log('Skipping legacy agent file installation (plugin-provided agents are available)');
       }
 
+      // Clean up stale OMC-created agents from previous versions
+      if (existsSync(AGENTS_DIR)) {
+        const removedAgents = cleanupStaleAgents(log);
+        if (removedAgents.length > 0) {
+          log(`Cleaned up ${removedAgents.length} stale agent(s)`);
+        }
+      }
+
       // Skip command installation - all commands are now plugin-scoped skills
       // Commands are accessible via the plugin system (${CLAUDE_PLUGIN_ROOT}/commands/)
       // and are managed by Claude Code's skill discovery mechanism.
@@ -1121,6 +1229,14 @@ export function install(options: InstallOptions = {}): InstallResult {
       log('Skipping bundled skill installation (plugin-provided skills are available). Use --no-plugin to force local skill sync.');
     } else if (runningAsPlugin) {
       log('Skipping bundled skill installation (managed by plugin system)');
+    }
+
+    // Clean up stale OMC-created skills from previous versions
+    if (existsSync(SKILLS_DIR)) {
+      const removedSkills = cleanupStaleSkills(log);
+      if (removedSkills.length > 0) {
+        log(`Cleaned up ${removedSkills.length} stale skill(s)`);
+      }
     }
 
     // Install CLAUDE.md with merge support.
