@@ -24,7 +24,6 @@ _Don't learn Claude Code. Just use OMC._
 | Role | Name | GitHub |
 | --- | --- | --- |
 | Creator & Lead | Yeachan Heo | [@Yeachan-Heo](https://github.com/Yeachan-Heo) |
-| Maintainer | HaD0Yun | [@HaD0Yun](https://github.com/HaD0Yun) |
 
 ## Ambassadors
 
@@ -34,13 +33,13 @@ _Don't learn Claude Code. Just use OMC._
 
 ## Top Collaborators
 
-| Name | GitHub |
-| --- | --- |
-| riftzen-bit | [@riftzen-bit](https://github.com/riftzen-bit) |
-| Seunggwan Song | [@nathan-song](https://github.com/nathan-song) |
-| JunghwanNA | [@shaun0927](https://github.com/shaun0927) |
-| Junho Yeo | [@junhoyeo](https://github.com/junhoyeo) |
-| Alex Urevick-Ackelsberg | [@AlexUrevick](https://github.com/AlexUrevick) |
+| Name | GitHub | Commits |
+| --- | --- | --- |
+| JunghwanNA | [@shaun0927](https://github.com/shaun0927) | 65 |
+| riftzen-bit | [@riftzen-bit](https://github.com/riftzen-bit) | 52 |
+| Seunggwan Song | [@Nathan-Song](https://github.com/Nathan-Song) | 20 |
+| BLUE | [@blue-int](https://github.com/blue-int) | 20 |
+| Junho Yeo | [@junhoyeo](https://github.com/junhoyeo) | 15 |
 
 ## Quick Start
 
