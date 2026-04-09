@@ -25,6 +25,7 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 describe('Contract 7: hook command portability (#2084, #2348)', () => {
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalPlatform = process.platform;
 
   afterEach(() => {
     if (originalConfigDir === undefined) {
@@ -32,6 +33,7 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
     } else {
       process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
     }
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
     vi.resetModules();
   });
 
@@ -142,6 +144,30 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
     // With custom config dir, commands should reference the custom path
     for (const cmd of commands) {
       expect(cmd).toContain('/tmp/custom-claude-test-config/hooks/');
+    }
+  });
+
+  it('Windows default config: avoids CMD-only %USERPROFILE% and keeps portable bash-style expansion', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    delete process.env.CLAUDE_CONFIG_DIR;
+    vi.resetModules();
+
+    const { getHooksSettingsConfig } = await import('../../installer/hooks.js');
+    const config = getHooksSettingsConfig();
+
+    const commands: string[] = [];
+    for (const eventHooks of Object.values(config.hooks)) {
+      for (const hookGroup of eventHooks as Array<{ hooks: Array<{ command: string }> }>) {
+        for (const hook of hookGroup.hooks) {
+          commands.push(hook.command);
+        }
+      }
+    }
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const cmd of commands) {
+      expect(cmd).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
+      expect(cmd).not.toContain('%USERPROFILE%');
     }
   });
 });

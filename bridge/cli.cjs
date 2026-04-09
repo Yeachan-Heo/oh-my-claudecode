@@ -7607,9 +7607,9 @@ function quoteCommandPath(path22) {
 function buildHookCommand(filename) {
   if (isWindows()) {
     if (isDefaultClaudeConfigDir()) {
-      return `node "%USERPROFILE%\\\\.claude\\\\hooks\\\\${filename}"`;
+      return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
     }
-    return `node ${quoteCommandPath((0, import_path44.join)(getClaudeConfigDir(), "hooks", filename))}`;
+    return `node ${quoteCommandPath((0, import_path44.join)(getClaudeConfigDir(), "hooks", filename).replace(/\\/g, "/"))}`;
   }
   if (isDefaultClaudeConfigDir()) {
     return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
