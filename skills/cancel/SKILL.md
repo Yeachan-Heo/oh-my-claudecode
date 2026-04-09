@@ -82,10 +82,11 @@ fi
 MODE="ralplan"  # <-- replace with the target mode
 
 # Clear session-scoped state for the specific mode
+# Use existence check before rm to support trash aliases (which lack -f no-error-on-missing)
 if [ -n "$SESSION_ID" ] && [ -d "$OMC_STATE/sessions/$SESSION_ID" ]; then
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-state.json"
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-stop-breaker.json"
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/skill-active-state.json"
+  [ -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-state.json" ] && rm "$OMC_STATE/sessions/$SESSION_ID/${MODE}-state.json"
+  [ -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-stop-breaker.json" ] && rm "$OMC_STATE/sessions/$SESSION_ID/${MODE}-stop-breaker.json"
+  [ -f "$OMC_STATE/sessions/$SESSION_ID/skill-active-state.json" ] && rm "$OMC_STATE/sessions/$SESSION_ID/skill-active-state.json"
   # Write cancel signal so stop hook detects cancellation in progress
   NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   EXPIRES_ISO="$(date -u -d "+30 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || python3 - <<'PY'\nfrom datetime import datetime, timedelta, timezone\nprint((datetime.now(timezone.utc) + timedelta(seconds=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))\nPY\n)"
@@ -95,7 +96,7 @@ fi
 
 # Clear legacy state only if no session ID (avoid clearing another session's state)
 if [ -z "$SESSION_ID" ]; then
-  rm -f "$OMC_STATE/${MODE}-state.json"
+  [ -f "$OMC_STATE/${MODE}-state.json" ] && rm "$OMC_STATE/${MODE}-state.json"
 fi
 ```
 
@@ -380,8 +381,8 @@ When cancelling modes that may have spawned MCP workers (team bridge daemons), t
 
 When `--force` is used, also clean up:
 ```bash
-rm -rf .omc/state/team-bridge/       # Heartbeat files
-rm -f .omc/state/team-mcp-workers.json  # Shadow registry
+[ -d .omc/state/team-bridge/ ] && rm -rf .omc/state/team-bridge/       # Heartbeat files
+[ -f .omc/state/team-mcp-workers.json ] && rm .omc/state/team-mcp-workers.json  # Shadow registry
 # Kill all omc-team-* tmux sessions
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^omc-team-' | while read s; do tmux kill-session -t "$s" 2>/dev/null; done
 ```
