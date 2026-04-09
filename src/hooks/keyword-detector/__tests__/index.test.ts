@@ -249,6 +249,11 @@ Final draft.`);
         expect(detectKeywordsWithType('How do I use autopilot?')).toEqual([]);
       });
 
+      it('should detect explicit activation even when a nearby help question exists', () => {
+        const result = detectKeywordsWithType('Use autopilot to fix bug in payments. What is the expected output?');
+        expect(result.find((r) => r.type === 'autopilot')).toBeDefined();
+      });
+
       it('should NOT detect informational Japanese questions about ralplan', () => {
         const result = detectKeywordsWithType('ralplan とは？ 使い方を教えて');
         expect(result).toEqual([]);

@@ -132,6 +132,16 @@ function hasActivationIntentNearKeyword(context: string, keyword: string): boole
   const escaped = escapeRegExp(keyword.trim());
   if (!escaped) return false;
 
+  // Help-question phrasing like "How do I use autopilot?" should not be
+  // treated as activation intent.
+  const helpQuestionPatterns = [
+    new RegExp(`\bhow\s+do\s+i\s+use\b[^\n]{0,40}\b${escaped}\b`, 'i'),
+    new RegExp(`\bwhat(?:'s|\s+is)\b[^\n]{0,40}\b${escaped}\b[^\n]{0,40}\bhow\s+to\s+use\b`, 'i'),
+  ];
+  if (helpQuestionPatterns.some((pattern) => pattern.test(context))) {
+    return false;
+  }
+
   const patterns = [
     new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, 'i'),
     new RegExp(`\\b(?:fix|debug|investigate|resolve|handle|patch|address)\\b[^\\n]{0,28}\\b(?:issue|bug|problem|error)\\b[^\\n]{0,12}\\b(?:with|in)\\s+\\b${escaped}\\b`, 'i'),
@@ -162,13 +172,22 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
   const hasStrongHelpQueryIntent = /\?|？|\b(?:how\s+(?:to|do\s+i)\s+use|what(?:'s|\s+is)|explain|describe|tell\s+me\s+about)\b|(?:사용법|使い方|什么是|怎么用|如何使用)/iu.test(context);
 
   if (keywordText) {
+    const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
+    const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
+
+    // Explicit command + execution intent should remain actionable even if the
+    // surrounding message also contains a help question.
+    if (hasActivationIntent && hasExecutionDirective) {
+      return false;
+    }
+
     // Help-style informational queries must not activate execution modes,
     // even when they contain phrases like "use <keyword>".
     if (hasInformationalIntent && hasStrongHelpQueryIntent) {
       return true;
     }
 
-    if (hasActivationIntentNearKeyword(context, keywordText)) {
+    if (hasActivationIntent) {
       return false;
     }
 
