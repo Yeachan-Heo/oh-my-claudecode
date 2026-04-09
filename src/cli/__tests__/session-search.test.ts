@@ -8,7 +8,7 @@ import {
 } from '../commands/session-search.js';
 
 function encodeProjectPath(projectPath: string): string {
-  return projectPath.replace(/[\\/]/g, '-');
+  return projectPath.replace(/[/\\.]/g, '-');
 }
 
 function writeTranscript(filePath: string, entries: Array<Record<string, unknown>>): void {
