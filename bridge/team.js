@@ -3771,6 +3771,9 @@ function isPromptModeAgent(agentType) {
   return !!contract.supportsPromptMode;
 }
 function resolveClaudeWorkerModel(env = process.env) {
+  if (env.OMC_ROUTING_FORCE_INHERIT === "true") {
+    return void 0;
+  }
   if (!isBedrock() && !isVertexAI()) {
     return void 0;
   }

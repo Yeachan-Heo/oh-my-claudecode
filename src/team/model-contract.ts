@@ -394,6 +394,12 @@ export function isPromptModeAgent(agentType: CliAgentType): boolean {
 export function resolveClaudeWorkerModel(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
+  // When force-inherit routing is enabled, do not resolve/override worker model.
+  // This preserves parent model inheritance and avoids alias normalization drift.
+  if (env.OMC_ROUTING_FORCE_INHERIT === 'true') {
+    return undefined;
+  }
+
   // Only needed for non-standard providers
   if (!isBedrock() && !isVertexAI()) {
     return undefined;
