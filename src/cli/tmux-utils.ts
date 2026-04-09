@@ -14,11 +14,8 @@ import {
   type SpawnSyncOptionsWithStringEncoding,
   type SpawnSyncReturns,
 } from 'child_process';
-import { basename } from 'path';
+import { basename, isAbsolute, win32 as win32Path } from 'path';
 import { promisify } from 'util';
-
-const promisifiedExec = promisify(exec);
-const promisifiedExecFile = promisify(execFile);
 
 // ── tmux environment & execution wrappers ────────────────────────────────────
 
@@ -51,7 +48,7 @@ export async function tmuxExecAsync(
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  return promisifiedExecFile('tmux', args, {
+  return promisify(execFile)('tmux', args, {
     encoding: 'utf-8', env: resolveEnv(opts),
     ...(timeout !== undefined ? { timeout } : {}), ...rest,
   });
@@ -70,7 +67,7 @@ export async function tmuxShellAsync(
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  return promisifiedExec(`tmux ${command}`, {
+  return promisify(exec)(`tmux ${command}`, {
     encoding: 'utf-8', env: resolveEnv(opts),
     ...(timeout !== undefined ? { timeout } : {}), ...rest,
   });
@@ -103,11 +100,50 @@ export interface TmuxPaneSnapshot {
   startCommand: string;
 }
 
+function resolveTmuxBinaryPath(): string {
+  if (process.platform !== 'win32') {
+    return 'tmux';
+  }
+
+  try {
+    const result = spawnSync('where', ['tmux'], {
+      timeout: 5000,
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) return 'tmux';
+
+    const candidates = result.stdout
+      ?.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean) ?? [];
+    const first = candidates[0];
+    if (first && (isAbsolute(first) || win32Path.isAbsolute(first))) {
+      return first;
+    }
+  } catch {
+    // Fall back to plain tmux lookup below.
+  }
+
+  return 'tmux';
+}
+
 /**
  * Check if tmux is available on the system
  */
 export function isTmuxAvailable(): boolean {
   try {
+    const resolvedBinary = resolveTmuxBinaryPath();
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
+      const result = spawnSync(comspec, ['/d', '/s', '/c', `"${resolvedBinary}" -V`], { timeout: 5000 });
+      return result.status === 0;
+    }
+
+    if (process.platform === 'win32') {
+      const result = spawnSync(resolvedBinary, ['-V'], { timeout: 5000, shell: true });
+      return result.status === 0;
+    }
+
     tmuxExec(['-V'], { stripTmux: true, stdio: 'ignore' });
     return true;
   } catch {

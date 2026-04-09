@@ -9,13 +9,14 @@
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
     ...actual,
     execFileSync: vi.fn(),
+    spawnSync: vi.fn(),
   };
 });
 
@@ -27,6 +28,7 @@ import {
 } from '../tmux-utils.js';
 
 const mockedExecFileSync = vi.mocked(execFileSync);
+const mockedSpawnSync = vi.mocked(spawnSync);
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -78,6 +80,40 @@ describe('resolveLaunchPolicy', () => {
       throw new Error('tmux not found');
     });
     expect(resolveLaunchPolicy({})).toBe('direct');
+  });
+
+  it('detects tmux.cmd via COMSPEC on win32', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    mockedSpawnSync
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: 'C:\\Program Files\\psmux\\tmux.cmd\r\n',
+        stderr: '',
+        pid: 0,
+        output: [],
+        signal: null,
+      } as ReturnType<typeof spawnSync>)
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: '',
+        stderr: '',
+        pid: 0,
+        output: [],
+        signal: null,
+      } as ReturnType<typeof spawnSync>);
+
+    expect(resolveLaunchPolicy({})).toBe('outside-tmux');
+    expect(mockedSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['tmux'], { timeout: 5000, encoding: 'utf8' });
+    expect(mockedSpawnSync).toHaveBeenNthCalledWith(
+      2,
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', '"C:\\Program Files\\psmux\\tmux.cmd" -V'],
+      { timeout: 5000 }
+    );
+
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 });
 
