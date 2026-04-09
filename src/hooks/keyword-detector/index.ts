@@ -158,17 +158,26 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
   const context = text.slice(start, end);
+  const hasInformationalIntent = INFORMATIONAL_INTENT_PATTERNS.some(pattern => pattern.test(context));
+  const hasStrongHelpQueryIntent = /\?|？|\b(?:how\s+(?:to|do\s+i)\s+use|what(?:'s|\s+is)|explain|describe|tell\s+me\s+about)\b|(?:사용법|使い方|什么是|怎么用|如何使用)/iu.test(context);
 
   if (keywordText) {
+    // Help-style informational queries must not activate execution modes,
+    // even when they contain phrases like "use <keyword>".
+    if (hasInformationalIntent && hasStrongHelpQueryIntent) {
+      return true;
+    }
+
     if (hasActivationIntentNearKeyword(context, keywordText)) {
       return false;
     }
+
     if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
       return true;
     }
   }
 
-  return INFORMATIONAL_INTENT_PATTERNS.some(pattern => pattern.test(context));
+  return hasInformationalIntent;
 }
 
 function findActionableKeywordMatch(

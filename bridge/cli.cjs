@@ -73260,7 +73260,12 @@ function isInformationalKeywordContext2(text, position, keywordLength, keywordTe
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
   const context = text.slice(start, end);
+  const hasInformationalIntent = INFORMATIONAL_INTENT_PATTERNS2.some((pattern) => pattern.test(context));
+  const hasStrongHelpQueryIntent = /\?|？|\b(?:how\s+(?:to|do\s+i)\s+use|what(?:'s|\s+is)|explain|describe|tell\s+me\s+about)\b|(?:사용법|使い方|什么是|怎么用|如何使用)/iu.test(context);
   if (keywordText) {
+    if (hasInformationalIntent && hasStrongHelpQueryIntent) {
+      return true;
+    }
     if (hasActivationIntentNearKeyword(context, keywordText)) {
       return false;
     }
@@ -73268,7 +73273,7 @@ function isInformationalKeywordContext2(text, position, keywordLength, keywordTe
       return true;
     }
   }
-  return INFORMATIONAL_INTENT_PATTERNS2.some((pattern) => pattern.test(context));
+  return hasInformationalIntent;
 }
 function findActionableKeywordMatch(text, pattern) {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
