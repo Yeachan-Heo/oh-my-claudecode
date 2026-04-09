@@ -80,7 +80,7 @@ export function getHooksDir(): string {
  * Returns the appropriate syntax for the current platform.
  */
 export function getHomeEnvVar(): string {
-  return isWindows() ? "%USERPROFILE%" : "$HOME";
+  return isWindows() ? "$USERPROFILE" : "$HOME";
 }
 
 function normalizePath(value: string): string {
@@ -98,10 +98,10 @@ function quoteCommandPath(path: string): string {
 function buildHookCommand(filename: string): string {
   if (isWindows()) {
     if (isDefaultClaudeConfigDir()) {
-      return `node "%USERPROFILE%\\\\.claude\\\\hooks\\\\${filename}"`;
+      return `node "$USERPROFILE/.claude/hooks/${filename}"`;
     }
 
-    return `node ${quoteCommandPath(join(getClaudeConfigDir(), 'hooks', filename))}`;
+    return `node ${quoteCommandPath(join(getClaudeConfigDir(), 'hooks', filename).replace(/\\/g, '/'))}`;
   }
 
   if (isDefaultClaudeConfigDir()) {
