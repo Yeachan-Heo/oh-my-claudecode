@@ -37,6 +37,26 @@ function writeTranscript(
   return transcriptPath;
 }
 
+function writeTranscriptWithoutContextWindow(
+  dir: string,
+  inputTokens: number,
+): string {
+  const transcriptPath = join(dir, 'transcript.jsonl');
+  writeFileSync(
+    transcriptPath,
+    `${JSON.stringify({
+      message: {
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: 10,
+        },
+      },
+    })}\n`,
+    'utf-8',
+  );
+  return transcriptPath;
+}
+
 function runPostToolVerifier(
   input: Record<string, unknown>,
   env: NodeJS.ProcessEnv = {},
@@ -229,6 +249,75 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
         hookEventName: 'PostToolUse',
         additionalContext:
           '[OMC CRITICAL] Context at 91% (critical threshold: 90%). Run /compact now before continuing with more tools or agent fan-out.',
+      },
+    });
+  });
+
+  it('falls back to hook input context_window when transcript lacks context_window fields', () => {
+    const dir = makeTempDir();
+    const transcriptPath = writeTranscriptWithoutContextWindow(dir, 10);
+
+    const result = runPostToolVerifier(
+      {
+        cwd: dir,
+        transcript_path: transcriptPath,
+        tool_name: 'Read',
+        session_id: 'preemptive-fallback-used-percent-test',
+        tool_response: 'read output',
+        context_window: {
+          used_percentage: 72,
+        },
+      },
+      {
+        OMC_QUIET: '2',
+        OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '70',
+        OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '90',
+      },
+    );
+
+    expect(result).toEqual({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          '[OMC WARNING] Context at 72% (warning threshold: 70%). Plan a /compact soon to preserve room for the next large tool output.',
+      },
+    });
+  });
+
+  it('calculates fallback context percent from context_window.current_usage when used_percentage is absent', () => {
+    const dir = makeTempDir();
+    const transcriptPath = writeTranscriptWithoutContextWindow(dir, 10);
+
+    const result = runPostToolVerifier(
+      {
+        cwd: dir,
+        transcript_path: transcriptPath,
+        tool_name: 'Read',
+        session_id: 'preemptive-fallback-current-usage-test',
+        tool_response: 'read output',
+        context_window: {
+          context_window_size: 100,
+          current_usage: {
+            input_tokens: 60,
+            cache_creation_input_tokens: 5,
+            cache_read_input_tokens: 7,
+          },
+        },
+      },
+      {
+        OMC_QUIET: '2',
+        OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '70',
+        OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '90',
+      },
+    );
+
+    expect(result).toEqual({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          '[OMC WARNING] Context at 72% (warning threshold: 70%). Plan a /compact soon to preserve room for the next large tool output.',
       },
     });
   });
