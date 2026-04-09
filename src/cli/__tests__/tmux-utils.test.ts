@@ -22,6 +22,8 @@ vi.mock('child_process', async (importOriginal) => {
 
 import {
   resolveLaunchPolicy,
+  tmuxExec,
+  tmuxSpawn,
   wrapWithLoginShell,
   quoteShellArg,
   sanitizeTmuxToken,
@@ -111,6 +113,71 @@ describe('resolveLaunchPolicy', () => {
       'C:\\Windows\\System32\\cmd.exe',
       ['/d', '/s', '/c', '"C:\\Program Files\\psmux\\tmux.cmd" -V'],
       { timeout: 5000 }
+    );
+
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+});
+
+describe('tmux command execution parity on Windows', () => {
+  it('routes tmuxExec through COMSPEC when where resolves tmux.cmd', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    mockedSpawnSync.mockClear();
+    mockedExecFileSync.mockClear();
+    mockedSpawnSync.mockReturnValueOnce({
+      status: 0,
+      stdout: 'C:\\Program Files\\psmux\\tmux.cmd\r\n',
+      stderr: '',
+      pid: 0,
+      output: [],
+      signal: null,
+    } as ReturnType<typeof spawnSync>);
+    mockedExecFileSync.mockReturnValue('ok' as any);
+
+    tmuxExec(['list-sessions']);
+
+    expect(mockedExecFileSync).toHaveBeenLastCalledWith(
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', '"C:\\Program Files\\psmux\\tmux.cmd" list-sessions'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+
+  it('routes tmuxSpawn through COMSPEC when where resolves tmux.cmd', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    mockedSpawnSync.mockClear();
+    mockedSpawnSync
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: 'C:\\Program Files\\psmux\\tmux.cmd\r\n',
+        stderr: '',
+        pid: 0,
+        output: [],
+        signal: null,
+      } as ReturnType<typeof spawnSync>)
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: '',
+        stderr: '',
+        pid: 0,
+        output: [],
+        signal: null,
+      } as ReturnType<typeof spawnSync>);
+
+    tmuxSpawn(['list-panes']);
+
+    expect(mockedSpawnSync).toHaveBeenLastCalledWith(
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', '"C:\\Program Files\\psmux\\tmux.cmd" list-panes'],
+      expect.objectContaining({ encoding: 'utf-8' }),
     );
 
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
