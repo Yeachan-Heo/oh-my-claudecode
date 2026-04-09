@@ -248,6 +248,37 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
     expect(result.stdout).not.toContain('FROM_RC_2');
   });
 
+  it('case 8: cache step falls back to older built version when latest built version fails to import', () => {
+    const s = staged!;
+    const configDir = join(s.dir, 'isolated-config-cache-fallback');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+
+    const latestBrokenDir = join(cacheBase, '4.11.3', 'dist', 'hud');
+    const olderWorkingDir = join(cacheBase, '4.11.2', 'dist', 'hud');
+    mkdirSync(latestBrokenDir, { recursive: true });
+    mkdirSync(olderWorkingDir, { recursive: true });
+
+    writeFileSync(
+      join(latestBrokenDir, 'index.js'),
+      'throw new Error("BROKEN_4_11_3");\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(olderWorkingDir, 'index.js'),
+      'process.stdout.write("FROM_OLDER_WORKING_VERSION\\n");\n',
+      'utf8',
+    );
+
+    const result = runWrapper(s.wrapperPath, scrubbedEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      // OMC_PLUGIN_ROOT intentionally omitted → cache step fires
+    }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('FROM_OLDER_WORKING_VERSION');
+    expect(result.stderr ?? '').not.toMatch(/Error|throw/i);
+  });
+
   it('case 5: symmetry — installer source and plugin-setup.mjs both produce identical wrapper text', async () => {
     // Both consumers must read the same byte-for-byte template body.
     const txt = readFileSync(TEMPLATE_TXT, 'utf8');
