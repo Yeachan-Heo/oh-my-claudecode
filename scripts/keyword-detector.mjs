@@ -174,10 +174,49 @@ const INFORMATIONAL_INTENT_PATTERNS = [
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 
-function isInformationalKeywordContext(text, position, keywordLength) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasActivationIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp((keyword || '').trim());
+  if (!escaped) return false;
+
+  const patterns = [
+    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, 'i'),
+  ];
+
+  return patterns.some((pattern) => pattern.test(context));
+}
+
+function hasDiagnosticIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp((keyword || '').trim());
+  if (!escaped) return false;
+
+  const patterns = [
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, 'i'),
+    new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, 'i'),
+    new RegExp(`${escaped}.{0,14}(?:자꾸|계속).{0,14}(?:재실행|반복|루프|멈추)`, 'u'),
+  ];
+
+  return patterns.some((pattern) => pattern.test(context));
+}
+
+function isInformationalKeywordContext(text, position, keywordLength, keywordText) {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
   const context = text.slice(start, end);
+
+  if (keywordText) {
+    if (hasActivationIntentNearKeyword(context, keywordText)) {
+      return false;
+    }
+    if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
+      return true;
+    }
+  }
+
   return INFORMATIONAL_INTENT_PATTERNS.some((pattern) => pattern.test(context));
 }
 
@@ -190,7 +229,7 @@ function hasActionableKeyword(text, pattern) {
       continue;
     }
 
-    if (isInformationalKeywordContext(text, match.index, match[0].length)) {
+    if (isInformationalKeywordContext(text, match.index, match[0].length, match[0])) {
       continue;
     }
 

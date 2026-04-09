@@ -277,6 +277,21 @@ Final draft.`);
         expect(ralphResult.find((r) => r.type === 'ralph')).toBeDefined();
       });
 
+      it('should NOT detect diagnostic mentions of keywords as activation requests', () => {
+        expect(detectKeywordsWithType('ralph keeps looping, investigate')).toEqual([]);
+        expect(detectKeywordsWithType("there's an issue with ultrawork")).toEqual([]);
+        expect(detectKeywordsWithType('autopilot has a bug in this repo')).toEqual([]);
+        expect(detectKeywordsWithType('ralph-loop이 자꾸 재실행되는 문제가 있어. 점검해줘')).toEqual([]);
+      });
+
+      it('should still detect explicit activation requests that mention bug/issue context', () => {
+        const autopilot = detectKeywordsWithType('use autopilot to fix bug in payments');
+        expect(autopilot.find((r) => r.type === 'autopilot')).toBeDefined();
+
+        const ralph = detectKeywordsWithType('run ralph on issue in parser module');
+        expect(ralph.find((r) => r.type === 'ralph')).toBeDefined();
+      });
+
       it('should NOT detect "don\'t stop" phrase', () => {
         const result = detectKeywordsWithType("Don't stop until done");
         const ralphMatch = result.find((r) => r.type === 'ralph');
