@@ -512,5 +512,36 @@ describe('model-contract', () => {
 
       vi.unstubAllEnvs();
     });
+
+    it('ignores OMC_MODEL_MEDIUM when forceInherit=true (user intent: inheritance)', () => {
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', 'true');
+      vi.stubEnv('OMC_MODEL_MEDIUM', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0');
+      vi.stubEnv('CLAUDE_CODE_USE_BEDROCK', '');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+      vi.stubEnv('ANTHROPIC_BASE_URL', '');
+      expect(resolveClaudeWorkerModel()).toBeUndefined();
+      vi.unstubAllEnvs();
+    });
+
+    it('returns undefined when forceInherit=true on Vertex', () => {
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', 'true');
+      vi.stubEnv('CLAUDE_CODE_USE_VERTEX', '1');
+      vi.stubEnv('CLAUDE_MODEL', 'vertex_ai/claude-sonnet-4-6');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+      vi.stubEnv('ANTHROPIC_BASE_URL', '');
+      expect(resolveClaudeWorkerModel()).toBeUndefined();
+      vi.unstubAllEnvs();
+    });
+
+    it('ignores ANTHROPIC_DEFAULT_SONNET_MODEL when forceInherit=true', () => {
+      vi.stubEnv('OMC_ROUTING_FORCE_INHERIT', 'true');
+      vi.stubEnv('ANTHROPIC_DEFAULT_SONNET_MODEL', 'us.anthropic.claude-sonnet-4-6-v1:0');
+      vi.stubEnv('CLAUDE_CODE_USE_BEDROCK', '');
+      vi.stubEnv('CLAUDE_MODEL', '');
+      vi.stubEnv('ANTHROPIC_MODEL', '');
+      vi.stubEnv('ANTHROPIC_BASE_URL', '');
+      expect(resolveClaudeWorkerModel()).toBeUndefined();
+      vi.unstubAllEnvs();
+    });
   });
 });

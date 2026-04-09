@@ -278,6 +278,13 @@ export function isVertexAI(): boolean {
  * - A non-Claude model ID is detected (CC Switch, LiteLLM, etc.)
  * - A custom ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
  */
+// FIXME(issue #XXXX): This function conflates two orthogonal concepts:
+//   1. User intent (forceInherit=true means "inherit without modification")
+//   2. Infrastructure detection (Bedrock/Vertex/proxy backend)
+//   When refactoring, split into:
+//   - shouldInheritModel(): user intent check
+//   - getProviderBackend(): infrastructure detection
+//   See: Architect review PR #2394, Critic evaluation, PR #2378 regression
 export function isNonClaudeProvider(): boolean {
   // Explicit opt-in: user has already set forceInherit via env var
   if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') {

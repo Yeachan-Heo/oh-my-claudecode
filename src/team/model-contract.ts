@@ -395,6 +395,8 @@ export function isPromptModeAgent(agentType: CliAgentType): boolean {
  * buildLaunchArgs() would normalize it (e.g. 'claude-sonnet-4-5' -> 'sonnet'),
  * which changes the effective model instead of preserving the inherited one.
  */
+// NOTE: This early return for forceInherit is intentional (PR #2378 regression fix).
+// The semantic debt is tracked in isNonClaudeProvider() (see FIXME in src/config/models.ts).
 export function resolveClaudeWorkerModel(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
