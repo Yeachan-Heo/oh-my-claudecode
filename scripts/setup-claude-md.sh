@@ -23,6 +23,8 @@ resolve_active_plugin_root() {
   local config_dir
   config_dir="$(resolve_claude_config_dir)"
   local installed_plugins="${config_dir}/plugins/installed_plugins.json"
+  local cache_base
+  cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
 
   if [ -f "$installed_plugins" ] && command -v jq >/dev/null 2>&1; then
     local active_path
@@ -34,14 +36,28 @@ resolve_active_plugin_root() {
     ' "$installed_plugins" 2>/dev/null)
 
     if [ -n "$active_path" ] && [ -d "$active_path" ]; then
+      # Guard against stale installed_plugins.json after plugin update:
+      # if cache contains a newer valid version, prefer it.
+      if [ -d "$cache_base" ]; then
+        local active_version latest_cache_version preferred_version
+        active_version="$(basename "$active_path")"
+        latest_cache_version=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+
+        if [ -n "$latest_cache_version" ] && [ -d "${cache_base}/${latest_cache_version}" ]; then
+          preferred_version=$(printf '%s\n%s\n' "$active_version" "$latest_cache_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+          if [ "$preferred_version" = "$latest_cache_version" ] && [ "$latest_cache_version" != "$active_version" ]; then
+            echo "${cache_base}/${latest_cache_version}"
+            return 0
+          fi
+        fi
+      fi
+
       echo "$active_path"
       return 0
     fi
   fi
 
   # Fallback: scan sibling version directories for the latest (mirrors run.cjs)
-  local cache_base
-  cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
   if [ -d "$cache_base" ]; then
     local latest
     latest=$(ls -1 "$cache_base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
