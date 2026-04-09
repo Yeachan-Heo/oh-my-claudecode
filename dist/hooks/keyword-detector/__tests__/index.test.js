@@ -198,6 +198,18 @@ Final draft.`);
                 const result = detectKeywordsWithType('ralph 是什么？怎么用？');
                 expect(result).toEqual([]);
             });
+            it('should NOT detect informational Japanese question about autopilot', () => {
+                const result = detectKeywordsWithType('オートパイロットって何？');
+                expect(result).toEqual([]);
+            });
+            it('should NOT detect informational Chinese question about autopilot', () => {
+                const result = detectKeywordsWithType('autopilot 是什么？');
+                expect(result).toEqual([]);
+            });
+            it('should NOT detect informational Chinese question about ultrawork', () => {
+                const result = detectKeywordsWithType('ultrawork 怎么用？');
+                expect(result).toEqual([]);
+            });
             it('Korean informational prompt does not trigger keyword', () => {
                 // "알려줘" (tell me about) is informational
                 expect(detectKeywordsWithType('오토파일럿 기능 알려줘')).toHaveLength(0);
@@ -226,12 +238,18 @@ Final draft.`);
                 expect(detectKeywordsWithType("there's an issue with ultrawork")).toEqual([]);
                 expect(detectKeywordsWithType('autopilot has a bug in this repo')).toEqual([]);
                 expect(detectKeywordsWithType('ralph-loop이 자꾸 재실행되는 문제가 있어. 점검해줘')).toEqual([]);
+                expect(detectKeywordsWithType('autopilot がループしてる、調査して')).toEqual([]);
+                expect(detectKeywordsWithType('ralph 一直循环，有问题')).toEqual([]);
             });
             it('should still detect explicit activation requests that mention bug/issue context', () => {
                 const autopilot = detectKeywordsWithType('use autopilot to fix bug in payments');
                 expect(autopilot.find((r) => r.type === 'autopilot')).toBeDefined();
                 const ralph = detectKeywordsWithType('run ralph on issue in parser module');
                 expect(ralph.find((r) => r.type === 'ralph')).toBeDefined();
+                const autopilotJa = detectKeywordsWithType('autopilotでバグを修正して');
+                expect(autopilotJa.find((r) => r.type === 'autopilot')).toBeDefined();
+                const autopilotZh = detectKeywordsWithType('用 autopilot 修复这个 bug');
+                expect(autopilotZh.find((r) => r.type === 'autopilot')).toBeDefined();
             });
             it('should NOT detect "don\'t stop" phrase', () => {
                 const result = detectKeywordsWithType("Don't stop until done");

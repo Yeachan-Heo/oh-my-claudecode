@@ -73228,7 +73228,7 @@ var INFORMATIONAL_INTENT_PATTERNS2 = [
   /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
   /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
   /(?:とは|って何|使い方|説明)/u,
-  /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u
+  /(?:什么是|什麼是|是什么|是什麼|怎(?:么|樣)用|如何使用|解释|說明|说明)/u
 ];
 var INFORMATIONAL_CONTEXT_WINDOW2 = 80;
 function escapeRegExp2(value) {
@@ -73241,7 +73241,9 @@ function hasActivationIntentNearKeyword(context, keyword) {
     new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i"),
     new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, "i"),
     new RegExp(`${escaped}(?:\\s*\uBAA8\uB4DC)?\\s*\uD574\uC918`, "u"),
-    new RegExp(`${escaped}.{0,10}(?:\uC2E4\uD589|\uC2DC\uC791|\uCF1C|\uC0AC\uC6A9\uD574)`, "u")
+    new RegExp(`${escaped}.{0,10}(?:\uC2E4\uD589|\uC2DC\uC791|\uCF1C|\uC0AC\uC6A9\uD574)`, "u"),
+    new RegExp(`${escaped}.{0,10}(?:\u3067|\u3092\u4F7F\u3063\u3066).{0,12}(?:\u4FEE\u6B63|\u4FEE\u5FA9|\u5B9F\u884C|\u8D77\u52D5|\u958B\u59CB|\u76F4\u3057\u3066)`, "u"),
+    new RegExp(`(?:\u7528|\u4F7F\u7528).{0,6}${escaped}.{0,12}(?:\u4FEE\u590D|\u4FEE\u5FA9|\u5904\u7406|\u8655\u7406|\u6267\u884C|\u57F7\u884C|\u8FD0\u884C|\u904B\u884C|\u542F\u52A8|\u555F\u52D5)`, "u")
   ];
   return patterns.some((pattern) => pattern.test(context));
 }
@@ -73252,7 +73254,9 @@ function hasDiagnosticIntentNearKeyword(context, keyword) {
     new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, "i"),
     new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i"),
     new RegExp(`${escaped}.{0,14}(?:\uC790\uAFB8|\uACC4\uC18D).{0,14}(?:\uC7AC\uC2E4\uD589|\uBC18\uBCF5|\uB8E8\uD504|\uBA48\uCD94)`, "u"),
-    new RegExp(`${escaped}.{0,14}(?:\uBB38\uC81C|\uBC84\uADF8|\uC624\uB958|\uC5D0\uB7EC|\uACE0\uC7A5|\uC624\uC791\uB3D9).{0,12}(?:\uC788|\uC0DD\uAE30|\uB098\uC694|\uC784|\uC785\uB2C8\uB2E4|\uAC19)`, "u")
+    new RegExp(`${escaped}.{0,14}(?:\uBB38\uC81C|\uBC84\uADF8|\uC624\uB958|\uC5D0\uB7EC|\uACE0\uC7A5|\uC624\uC791\uB3D9).{0,12}(?:\uC788|\uC0DD\uAE30|\uB098\uC694|\uC784|\uC785\uB2C8\uB2E4|\uAC19)`, "u"),
+    new RegExp(`${escaped}.{0,16}(?:\u30D0\u30B0|\u30A8\u30E9\u30FC|\u554F\u984C|\u4E0D\u5177\u5408|\u30EB\u30FC\u30D7|\u518D\u5B9F\u884C|\u7E70\u308A\u8FD4).{0,12}(?:\u3042\u308B|\u3067\u3059|\u3057\u3066\u308B|\u3057\u3066\u3044\u308B|\u8ABF\u67FB|\u78BA\u8A8D|\u4E0D\u5B89\u5B9A)`, "u"),
+    new RegExp(`${escaped}.{0,16}(?:\u9519\u8BEF|\u932F\u8AA4|\u95EE\u9898|\u554F\u984C|\u6545\u969C|\u5FAA\u73AF|\u5FAA\u74B0|\u91CD\u8DD1|\u91CD\u8907\u6267\u884C).{0,12}(?:\u8C03\u67E5|\u8ABF\u67E5|\u6392\u67E5|\u6709|\u51FA\u73B0|\u51FA\u73FE|\u4E00\u76F4|\u53CD\u590D|\u53CD\u8986)`, "u")
   ];
   return patterns.some((pattern) => pattern.test(context));
 }

@@ -148,7 +148,7 @@ const INFORMATIONAL_INTENT_PATTERNS = [
   /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
   /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
   /(?:とは|って何|使い方|説明)/u,
-  /(?:什么是|什麼是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
+  /(?:什么是|什麼是|是什么|是什麼|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 
@@ -165,6 +165,8 @@ function hasActivationIntentNearKeyword(context, keyword) {
     new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, 'i'),
     new RegExp(`${escaped}(?:\\s*모드)?\\s*해줘`, 'u'),
     new RegExp(`${escaped}.{0,10}(?:실행|시작|켜|사용해)`, 'u'),
+    new RegExp(`${escaped}.{0,10}(?:で|を使って).{0,12}(?:修正|修復|実行|起動|開始|直して)`, 'u'),
+    new RegExp(`(?:用|使用).{0,6}${escaped}.{0,12}(?:修复|修復|处理|處理|执行|執行|运行|運行|启动|啟動)`, 'u'),
   ];
 
   return patterns.some((pattern) => pattern.test(context));
@@ -179,6 +181,8 @@ function hasDiagnosticIntentNearKeyword(context, keyword) {
     new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, 'i'),
     new RegExp(`${escaped}.{0,14}(?:자꾸|계속).{0,14}(?:재실행|반복|루프|멈추)`, 'u'),
     new RegExp(`${escaped}.{0,14}(?:문제|버그|오류|에러|고장|오작동).{0,12}(?:있|생기|나요|임|입니다|같)`, 'u'),
+    new RegExp(`${escaped}.{0,16}(?:バグ|エラー|問題|不具合|ループ|再実行|繰り返).{0,12}(?:ある|です|してる|している|調査|確認|不安定)`, 'u'),
+    new RegExp(`${escaped}.{0,16}(?:错误|錯誤|问题|問題|故障|循环|循環|重跑|重複执行).{0,12}(?:调查|調查|排查|有|出现|出現|一直|反复|反覆)`, 'u'),
   ];
 
   return patterns.some((pattern) => pattern.test(context));

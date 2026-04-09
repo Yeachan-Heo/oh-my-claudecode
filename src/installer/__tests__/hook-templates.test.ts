@@ -138,10 +138,20 @@ describe('keyword-detector packaged artifacts', () => {
       'ralph 와 ralplan 은 뭐야?',
       'ralplan とは？ 使い方を教えて',
       'ralph 是什么？怎么用？',
+      'オートパイロットって何？',
+      'autopilot 是什么？',
+      'ultrawork 怎么用？',
       'ralph keeps looping, investigate',
       "there's an issue with ultrawork",
       'autopilot has a bug in this repo',
       'ralph-loop이 자꾸 재실행되는 문제가 있어. 점검해줘',
+      'autopilot がループしてる、調査して',
+      'ralph 一直循环，有问题',
+      "Don't stop until done",
+      'build me a web app',
+      'run in autonomous mode',
+      'think hard about this problem',
+      'search code for errors',
     ]) {
       expect(runKeywordHook(templatePath, prompt)).toEqual({ continue: true, suppressOutput: true });
       expect(runKeywordHook(pluginPath, prompt)).toEqual({ continue: true, suppressOutput: true });
@@ -161,5 +171,15 @@ describe('keyword-detector packaged artifacts', () => {
     const pluginRalph = runKeywordHook(pluginPath, 'run ralph on issue in parser module');
     expect(JSON.stringify(templateRalph)).toContain('[MAGIC KEYWORD: RALPH]');
     expect(JSON.stringify(pluginRalph)).toContain('[MAGIC KEYWORD: RALPH]');
+
+    const templateAutopilotJa = runKeywordHook(templatePath, 'autopilotでバグを修正して');
+    const pluginAutopilotJa = runKeywordHook(pluginPath, 'autopilotでバグを修正して');
+    expect(JSON.stringify(templateAutopilotJa)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(JSON.stringify(pluginAutopilotJa)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+
+    const templateAutopilotZh = runKeywordHook(templatePath, '用 autopilot 修复这个 bug');
+    const pluginAutopilotZh = runKeywordHook(pluginPath, '用 autopilot 修复这个 bug');
+    expect(JSON.stringify(templateAutopilotZh)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(JSON.stringify(pluginAutopilotZh)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
   });
 });
