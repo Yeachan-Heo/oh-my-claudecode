@@ -138,6 +138,10 @@ describe('keyword-detector packaged artifacts', () => {
       'ralph 와 ralplan 은 뭐야?',
       'ralplan とは？ 使い方を教えて',
       'ralph 是什么？怎么用？',
+      'ralph keeps looping, investigate',
+      "there's an issue with ultrawork",
+      'autopilot has a bug in this repo',
+      'ralph-loop이 자꾸 재실행되는 문제가 있어. 점검해줘',
     ]) {
       expect(runKeywordHook(templatePath, prompt)).toEqual({ continue: true, suppressOutput: true });
       expect(runKeywordHook(pluginPath, prompt)).toEqual({ continue: true, suppressOutput: true });
