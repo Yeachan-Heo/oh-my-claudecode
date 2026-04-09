@@ -326,6 +326,39 @@ function readTranscriptUsage(transcriptPath) {
   }
 }
 
+function readContextUsageFromHookInput(data) {
+  const contextWindow = data?.context_window;
+  if (!contextWindow || typeof contextWindow !== 'object') {
+    return null;
+  }
+
+  const usedPercentage = contextWindow.used_percentage;
+  if (Number.isFinite(usedPercentage) && usedPercentage >= 0) {
+    return Math.min(100, Math.max(0, Math.round(usedPercentage)));
+  }
+
+  const size = contextWindow.context_window_size;
+  if (!Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+
+  const usage = contextWindow.current_usage;
+  if (!usage || typeof usage !== 'object') {
+    return null;
+  }
+
+  const inputTokens = Number(usage.input_tokens || 0);
+  const cacheCreationTokens = Number(usage.cache_creation_input_tokens || 0);
+  const cacheReadTokens = Number(usage.cache_read_input_tokens || 0);
+
+  const totalTokens = inputTokens + cacheCreationTokens + cacheReadTokens;
+  if (!Number.isFinite(totalTokens) || totalTokens < 0) {
+    return null;
+  }
+
+  return Math.min(100, Math.max(0, Math.round((totalTokens / size) * 100)));
+}
+
 function getPreemptiveCooldownFilePath(directory, sessionId) {
   const cooldownScope =
     sessionId && sessionId !== 'unknown'
@@ -381,9 +414,11 @@ function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) {
     return '';
   }
 
-  const percentUsed = readTranscriptUsage(
+  const percentFromTranscript = readTranscriptUsage(
     resolveTranscriptPath(data.transcript_path || data.transcriptPath, directory),
   );
+  const percentUsed =
+    percentFromTranscript ?? readContextUsageFromHookInput(data);
   const warningThreshold = getPreemptiveWarningThreshold();
   const criticalThreshold = getPreemptiveCriticalThreshold();
 
