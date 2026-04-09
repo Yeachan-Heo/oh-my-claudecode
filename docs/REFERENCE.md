@@ -761,7 +761,7 @@ stopomc
 | `lsp_servers`               | ✅ Implemented | List available language servers             |
 | `lsp_diagnostics_directory` | ✅ Implemented | Project-level type checking                 |
 
-> **Note**: LSP tools require language servers to be installed (typescript-language-server, pylsp, rust-analyzer, gopls, etc.). Use `lsp_servers` to check installation status.
+> **Note**: LSP tools require language servers to be installed (typescript-language-server, ty, rust-analyzer, gopls, etc.). Use `lsp_servers` to check installation status.
 
 ### AST Tools (ast-grep Integration)
 

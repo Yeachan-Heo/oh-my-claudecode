@@ -333,7 +333,7 @@ project_memory_add_note("tsconfig paths settings need to be kept in sync with je
 
 LSP tools provide Language Server Protocol-based code intelligence: type information, go-to-definition, find references, error diagnostics, symbol search, and renaming.
 
-A language server must be installed (e.g., `typescript-language-server`, `pylsp`, `rust-analyzer`, `gopls`). Use `lsp_servers()` to check installation status.
+A language server must be installed (e.g., `typescript-language-server`, `ty`, `rust-analyzer`, `gopls`). Use `lsp_servers()` to check installation status.
 
 ### Tools
 

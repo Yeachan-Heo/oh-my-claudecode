@@ -233,7 +233,7 @@ async function withLspClient(filePath, operation, fn) {
 | Language | Server | Install |
 |----------|--------|---------|
 | TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server typescript` |
-| Python | pylsp | `pip install python-lsp-server` |
+| Python | ty | `Install ty from https://github.com/astral-sh/ty` |
 | Rust | rust-analyzer | `rustup component add rust-analyzer` |
 | Go | gopls | `go install golang.org/x/tools/gopls@latest` |
 | C/C++ | clangd | System package manager |

@@ -118,7 +118,7 @@ npm test -- --grep "lsp"
 | Language | Server | Command | Extensions |
 |----------|--------|---------|------------|
 | TypeScript/JS | typescript-language-server | `typescript-language-server` | .ts, .tsx, .js, .jsx |
-| Python | pylsp | `pylsp` | .py, .pyw |
+| Python | ty | `ty server` | .py, .pyw |
 | Rust | rust-analyzer | `rust-analyzer` | .rs |
 | Go | gopls | `gopls` | .go |
 | C/C++ | clangd | `clangd` | .c, .h, .cpp, .cc, .hpp |
