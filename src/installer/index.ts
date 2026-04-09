@@ -1373,36 +1373,30 @@ export function install(options: InstallOptions = {}): InstallResult {
     // Skipped only for project-scoped plugins to avoid mutating global config.
     if (!projectScoped) {
       const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
-      const homeMdPath = join(homedir(), 'CLAUDE.md');
+      const omcContent = loadClaudeMdContent();
 
-      if (!existsSync(homeMdPath)) {
-        const omcContent = loadClaudeMdContent();
+      // Read existing content if it exists
+      let existingContent: string | null = null;
+      if (existsSync(claudeMdPath)) {
+        existingContent = readFileSync(claudeMdPath, 'utf-8');
+      }
 
-        // Read existing content if it exists
-        let existingContent: string | null = null;
-        if (existsSync(claudeMdPath)) {
-          existingContent = readFileSync(claudeMdPath, 'utf-8');
-        }
+      // Always create backup before modification (if file exists)
+      if (existingContent !== null) {
+        const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
+        const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
+        writeFileSync(backupPath, existingContent);
+        log(`Backed up existing CLAUDE.md to ${backupPath}`);
+      }
 
-        // Always create backup before modification (if file exists)
-        if (existingContent !== null) {
-          const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
-          const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
-          writeFileSync(backupPath, existingContent);
-          log(`Backed up existing CLAUDE.md to ${backupPath}`);
-        }
+      // Merge OMC content with existing content
+      const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
+      writeFileSync(claudeMdPath, mergedContent);
 
-        // Merge OMC content with existing content
-        const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
-        writeFileSync(claudeMdPath, mergedContent);
-
-        if (existingContent) {
-          log('Updated CLAUDE.md (merged with existing content)');
-        } else {
-          log('Created CLAUDE.md');
-        }
+      if (existingContent) {
+        log('Updated CLAUDE.md (merged with existing content)');
       } else {
-        log('CLAUDE.md exists in home directory, skipping');
+        log('Created CLAUDE.md');
       }
     }
 
