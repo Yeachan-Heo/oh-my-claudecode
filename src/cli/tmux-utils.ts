@@ -35,12 +35,41 @@ function resolveEnv(opts?: TmuxExecOptions): NodeJS.ProcessEnv {
   return opts?.stripTmux ? tmuxEnv() : process.env;
 }
 
+interface TmuxCommandInvocation {
+  command: string;
+  args: string[];
+}
+
+function quoteForCmd(arg: string): string {
+  if (arg.length === 0) return '""';
+  if (!/[\s"%^&|<>()]/.test(arg)) return arg;
+  return `"${arg.replace(/(["%])/g, '$1$1')}"`;
+}
+
+function resolveTmuxInvocation(args: string[]): TmuxCommandInvocation {
+  const resolvedBinary = resolveTmuxBinaryPath();
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+    const comspec = process.env.COMSPEC || 'cmd.exe';
+    const commandLine = [quoteForCmd(resolvedBinary), ...args.map(quoteForCmd)].join(' ');
+    return {
+      command: comspec,
+      args: ['/d', '/s', '/c', commandLine],
+    };
+  }
+
+  return {
+    command: resolvedBinary,
+    args,
+  };
+}
+
 export function tmuxExec(
   args: string[],
   opts?: TmuxExecOptions & Omit<ExecFileSyncOptionsWithStringEncoding, 'env' | 'encoding'> & { encoding?: BufferEncoding },
 ): string {
   const { stripTmux: _, ...execOpts } = opts ?? {};
-  return execFileSync('tmux', args, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
+  const invocation = resolveTmuxInvocation(args);
+  return execFileSync(invocation.command, invocation.args, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
 }
 
 export async function tmuxExecAsync(
@@ -48,7 +77,8 @@ export async function tmuxExecAsync(
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  return promisify(execFile)('tmux', args, {
+  const invocation = resolveTmuxInvocation(args);
+  return promisify(execFile)(invocation.command, invocation.args, {
     encoding: 'utf-8', env: resolveEnv(opts),
     ...(timeout !== undefined ? { timeout } : {}), ...rest,
   });
@@ -78,7 +108,8 @@ export function tmuxSpawn(
   opts?: TmuxExecOptions & Omit<SpawnSyncOptionsWithStringEncoding, 'env' | 'encoding'> & { encoding?: BufferEncoding },
 ): SpawnSyncReturns<string> {
   const { stripTmux: _, ...spawnOpts } = opts ?? {};
-  return spawnSync('tmux', args, { encoding: 'utf-8', ...spawnOpts, env: resolveEnv(opts) });
+  const invocation = resolveTmuxInvocation(args);
+  return spawnSync(invocation.command, invocation.args, { encoding: 'utf-8', ...spawnOpts, env: resolveEnv(opts) });
 }
 
 export async function tmuxCmdAsync(
