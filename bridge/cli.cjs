@@ -24506,6 +24506,9 @@ function isPromptModeAgent(agentType) {
   return !!contract.supportsPromptMode;
 }
 function resolveClaudeWorkerModel(env2 = process.env) {
+  if (env2.OMC_ROUTING_FORCE_INHERIT === "true") {
+    return void 0;
+  }
   if (!isBedrock() && !isVertexAI()) {
     return void 0;
   }
