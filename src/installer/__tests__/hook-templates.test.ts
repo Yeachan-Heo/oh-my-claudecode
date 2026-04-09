@@ -147,4 +147,19 @@ describe('keyword-detector packaged artifacts', () => {
       expect(runKeywordHook(pluginPath, prompt)).toEqual({ continue: true, suppressOutput: true });
     }
   });
+
+  it('still triggers for explicit activation requests in bug-fix context', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+
+    const templateAutopilot = runKeywordHook(templatePath, 'use autopilot to fix bug in payments');
+    const pluginAutopilot = runKeywordHook(pluginPath, 'use autopilot to fix bug in payments');
+    expect(JSON.stringify(templateAutopilot)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(JSON.stringify(pluginAutopilot)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+
+    const templateRalph = runKeywordHook(templatePath, 'run ralph on issue in parser module');
+    const pluginRalph = runKeywordHook(pluginPath, 'run ralph on issue in parser module');
+    expect(JSON.stringify(templateRalph)).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(JSON.stringify(pluginRalph)).toContain('[MAGIC KEYWORD: RALPH]');
+  });
 });

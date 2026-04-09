@@ -118,22 +118,58 @@ export function sanitizeForKeywordDetection(text: string): string {
 
 const INFORMATIONAL_INTENT_PATTERNS: RegExp[] = [
   /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
-  /\b(?:issue|bug|problem|error)\s+(?:with|in)\b/i,
-  /\b(?:has|have|keeps?|is)\s+(?:\w+\s+){0,3}(?:loop(?:ing)?|re-?running|stuck|broken|failing|crashing|bugs?|issues?|problems?|errors?)\b/i,
   /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
-  /(?:자꾸|계속).{0,12}(?:재실행|반복|루프|멈추)/u,
-  /(?:문제|버그|오류|에러|고장|오작동).{0,12}(?:있|생기|나요|임|입니다|같)/u,
   /(?:とは|って何|使い方|説明)/u,
-  /(?:バグ|エラー|問題|不具合).{0,8}(?:ある|です|調べ)/u,
   /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
-  /(?:错误|錯誤|问题|問題|故障).{0,8}(?:调查|調查|一直|循环|循環)/u,
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 
-function isInformationalKeywordContext(text: string, position: number, keywordLength: number): boolean {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasActivationIntentNearKeyword(context: string, keyword: string): boolean {
+  const escaped = escapeRegExp(keyword.trim());
+  if (!escaped) return false;
+
+  const patterns = [
+    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, 'i'),
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, 'i'),
+    new RegExp(`${escaped}(?:\\s*모드)?\\s*해줘`, 'u'),
+    new RegExp(`${escaped}.{0,10}(?:실행|시작|켜|사용해)`, 'u'),
+  ];
+
+  return patterns.some((pattern) => pattern.test(context));
+}
+
+function hasDiagnosticIntentNearKeyword(context: string, keyword: string): boolean {
+  const escaped = escapeRegExp(keyword.trim());
+  if (!escaped) return false;
+
+  const patterns = [
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, 'i'),
+    new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, 'i'),
+    new RegExp(`${escaped}.{0,14}(?:자꾸|계속).{0,14}(?:재실행|반복|루프|멈추)`, 'u'),
+    new RegExp(`${escaped}.{0,14}(?:문제|버그|오류|에러|고장|오작동).{0,12}(?:있|생기|나요|임|입니다|같)`, 'u'),
+  ];
+
+  return patterns.some((pattern) => pattern.test(context));
+}
+
+function isInformationalKeywordContext(text: string, position: number, keywordLength: number, keywordText?: string): boolean {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
   const context = text.slice(start, end);
+
+  if (keywordText) {
+    if (hasActivationIntentNearKeyword(context, keywordText)) {
+      return false;
+    }
+    if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
+      return true;
+    }
+  }
+
   return INFORMATIONAL_INTENT_PATTERNS.some(pattern => pattern.test(context));
 }
 
@@ -150,7 +186,7 @@ function findActionableKeywordMatch(
     }
 
     const keyword = match[0];
-    if (isInformationalKeywordContext(text, match.index, keyword.length)) {
+    if (isInformationalKeywordContext(text, match.index, keyword.length, keyword)) {
       continue;
     }
 

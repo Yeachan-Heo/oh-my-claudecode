@@ -73231,10 +73231,43 @@ var INFORMATIONAL_INTENT_PATTERNS2 = [
   /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u
 ];
 var INFORMATIONAL_CONTEXT_WINDOW2 = 80;
-function isInformationalKeywordContext2(text, position, keywordLength) {
+function escapeRegExp2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function hasActivationIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp2(keyword.trim());
+  if (!escaped) return false;
+  const patterns = [
+    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i"),
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, "i"),
+    new RegExp(`${escaped}(?:\\s*\uBAA8\uB4DC)?\\s*\uD574\uC918`, "u"),
+    new RegExp(`${escaped}.{0,10}(?:\uC2E4\uD589|\uC2DC\uC791|\uCF1C|\uC0AC\uC6A9\uD574)`, "u")
+  ];
+  return patterns.some((pattern) => pattern.test(context));
+}
+function hasDiagnosticIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp2(keyword.trim());
+  if (!escaped) return false;
+  const patterns = [
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, "i"),
+    new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i"),
+    new RegExp(`${escaped}.{0,14}(?:\uC790\uAFB8|\uACC4\uC18D).{0,14}(?:\uC7AC\uC2E4\uD589|\uBC18\uBCF5|\uB8E8\uD504|\uBA48\uCD94)`, "u"),
+    new RegExp(`${escaped}.{0,14}(?:\uBB38\uC81C|\uBC84\uADF8|\uC624\uB958|\uC5D0\uB7EC|\uACE0\uC7A5|\uC624\uC791\uB3D9).{0,12}(?:\uC788|\uC0DD\uAE30|\uB098\uC694|\uC784|\uC785\uB2C8\uB2E4|\uAC19)`, "u")
+  ];
+  return patterns.some((pattern) => pattern.test(context));
+}
+function isInformationalKeywordContext2(text, position, keywordLength, keywordText) {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
   const context = text.slice(start, end);
+  if (keywordText) {
+    if (hasActivationIntentNearKeyword(context, keywordText)) {
+      return false;
+    }
+    if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
+      return true;
+    }
+  }
   return INFORMATIONAL_INTENT_PATTERNS2.some((pattern) => pattern.test(context));
 }
 function findActionableKeywordMatch(text, pattern) {
@@ -73245,7 +73278,7 @@ function findActionableKeywordMatch(text, pattern) {
       continue;
     }
     const keyword = match[0];
-    if (isInformationalKeywordContext2(text, match.index, keyword.length)) {
+    if (isInformationalKeywordContext2(text, match.index, keyword.length, keyword)) {
       continue;
     }
     return {
