@@ -134,6 +134,14 @@ describe('keyword-detector packaged artifacts', () => {
         const pluginRalph = runKeywordHook(pluginPath, 'run ralph on issue in parser module');
         expect(JSON.stringify(templateRalph)).toContain('[MAGIC KEYWORD: RALPH]');
         expect(JSON.stringify(pluginRalph)).toContain('[MAGIC KEYWORD: RALPH]');
+        const templateAutopilotIssue = runKeywordHook(templatePath, 'fix issue with autopilot in parser module');
+        const pluginAutopilotIssue = runKeywordHook(pluginPath, 'fix issue with autopilot in parser module');
+        expect(JSON.stringify(templateAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+        expect(JSON.stringify(pluginAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+        const templateRalphProblem = runKeywordHook(templatePath, 'investigate problem with ralph state');
+        const pluginRalphProblem = runKeywordHook(pluginPath, 'investigate problem with ralph state');
+        expect(JSON.stringify(templateRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
+        expect(JSON.stringify(pluginRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
     });
 });
 //# sourceMappingURL=hook-templates.test.js.map

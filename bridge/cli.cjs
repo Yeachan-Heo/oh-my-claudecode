@@ -73238,7 +73238,8 @@ function hasActivationIntentNearKeyword(context, keyword) {
   const escaped = escapeRegExp2(keyword.trim());
   if (!escaped) return false;
   const patterns = [
-    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i")
+    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i"),
+    new RegExp(`\\b(?:fix|debug|investigate|resolve|handle|patch|address)\\b[^\\n]{0,28}\\b(?:issue|bug|problem|error)\\b[^\\n]{0,12}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i")
   ];
   return patterns.some((pattern) => pattern.test(context));
 }

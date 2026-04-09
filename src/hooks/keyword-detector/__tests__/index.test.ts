@@ -295,6 +295,12 @@ Final draft.`);
 
         const ralph = detectKeywordsWithType('run ralph on issue in parser module');
         expect(ralph.find((r) => r.type === 'ralph')).toBeDefined();
+
+        const autopilotIssue = detectKeywordsWithType('fix issue with autopilot in parser module');
+        expect(autopilotIssue.find((r) => r.type === 'autopilot')).toBeDefined();
+
+        const ralphProblem = detectKeywordsWithType('investigate problem with ralph state');
+        expect(ralphProblem.find((r) => r.type === 'ralph')).toBeDefined();
       });
 
       it('should NOT detect "don\'t stop" phrase', () => {
