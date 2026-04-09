@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -88,6 +88,7 @@ async function importHudPackage(hudPackage) {
 async function main() {
   let pluginCacheVersion = null;
   let pluginCacheDir = null;
+  let lastHudLoadError = null;
 
   // 1. OMC_PLUGIN_ROOT — highest priority (set by `omc --plugin-dir <path>`)
   try {
@@ -153,12 +154,27 @@ async function main() {
         });
 
         if (builtVersions.length > 0) {
-          const latestVersion = builtVersions[0];
-          pluginCacheVersion = latestVersion;
-          pluginCacheDir = join(pluginCacheBase, latestVersion);
-          const pluginPath = join(pluginCacheDir, "dist/hud/index.js");
-          await import(pathToFileURL(pluginPath).href);
-          return;
+          const attemptedTargets = new Set();
+          for (const version of builtVersions) {
+            pluginCacheVersion = version;
+            pluginCacheDir = join(pluginCacheBase, version);
+            const pluginPath = join(pluginCacheDir, "dist/hud/index.js");
+            let dedupeKey = resolve(pluginPath);
+            try {
+              dedupeKey = realpathSync(pluginPath);
+            } catch { /* continue with resolved path fallback */ }
+
+            if (attemptedTargets.has(dedupeKey)) continue;
+            attemptedTargets.add(dedupeKey);
+
+            try {
+              await import(pathToFileURL(pluginPath).href);
+              return;
+            } catch (error) {
+              lastHudLoadError = error;
+              // continue trying older built versions
+            }
+          }
         }
       }
     } catch { /* continue */ }
@@ -170,7 +186,10 @@ async function main() {
     try {
       await import(pathToFileURL(marketplaceHudPath).href);
       return;
-    } catch { /* continue */ }
+    } catch (error) {
+      lastHudLoadError = error;
+      /* continue */
+    }
   }
 
   // 4. npm package (current project, global install, or branded fallback)
@@ -190,7 +209,10 @@ async function main() {
     if (!existsSync(distDir)) {
       console.log(`[OMC HUD] Plugin installed but not built. Run: cd "${pluginCacheDir}" && npm install && npm run build`);
     } else {
-      console.log(`[OMC HUD] Plugin HUD load failed. Run: cd "${pluginCacheDir}" && npm install && npm run build`);
+      const detail = lastHudLoadError && typeof lastHudLoadError.message === "string"
+        ? ` (${lastHudLoadError.message})`
+        : "";
+      console.log(`[OMC HUD] Plugin HUD load failed${detail}. Run: cd "${pluginCacheDir}" && npm install && npm run build`);
     }
   } else if (existsSync(pluginCacheBase)) {
     console.log(`[OMC HUD] Plugin cache found but no versions installed. Run: /oh-my-claudecode:omc-setup`);
