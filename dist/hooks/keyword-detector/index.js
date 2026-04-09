@@ -93,7 +93,6 @@ function hasActivationIntentNearKeyword(context, keyword) {
         return false;
     const patterns = [
         new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, 'i'),
-        new RegExp(`\\b${escaped}\\b[^\\n]{0,20}\\b(?:mode|now|please)\\b`, 'i'),
     ];
     return patterns.some((pattern) => pattern.test(context));
 }

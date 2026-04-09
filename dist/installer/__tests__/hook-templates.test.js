@@ -112,6 +112,8 @@ describe('keyword-detector packaged artifacts', () => {
             'ralph 와 ralplan 은 뭐야?',
             'ralplan とは？ 使い方を教えて',
             'ralph 是什么？怎么用？',
+            'What is autopilot mode now?',
+            'what is ralph mode now?',
             'ralph keeps looping, investigate',
             "there's an issue with ultrawork",
             'autopilot has a bug in this repo',

@@ -190,6 +190,10 @@ Final draft.`);
                 const result = detectKeywordsWithType('What is ralph and how do I use it?');
                 expect(result).toEqual([]);
             });
+            it('should NOT detect informational mode/now phrasing', () => {
+                expect(detectKeywordsWithType('What is autopilot mode now?')).toEqual([]);
+                expect(detectKeywordsWithType('what is ralph mode now?')).toEqual([]);
+            });
             it('should NOT detect informational Japanese questions about ralplan', () => {
                 const result = detectKeywordsWithType('ralplan とは？ 使い方を教えて');
                 expect(result).toEqual([]);
