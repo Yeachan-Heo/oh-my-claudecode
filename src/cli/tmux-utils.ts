@@ -42,7 +42,7 @@ interface TmuxCommandInvocation {
 
 function quoteForCmd(arg: string): string {
   if (arg.length === 0) return '""';
-  if (!/[\s"%^&|<>]/.test(arg)) return arg;
+  if (!/[\s"%^&|<>()]/.test(arg)) return arg;
   return `"${arg.replace(/(["%])/g, '$1$1')}"`;
 }
 

@@ -182,6 +182,34 @@ describe('tmux command execution parity on Windows', () => {
 
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
+
+  it('quotes parenthesized tmux arguments when invoking through COMSPEC', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    mockedSpawnSync.mockClear();
+    mockedExecFileSync.mockClear();
+    mockedSpawnSync.mockReturnValueOnce({
+      status: 0,
+      stdout: 'C:\\Program Files\\psmux\\tmux.cmd\r\n',
+      stderr: '',
+      pid: 0,
+      output: [],
+      signal: null,
+    } as ReturnType<typeof spawnSync>);
+    mockedExecFileSync.mockReturnValue('ok' as any);
+
+    tmuxExec(['send-keys', 'foo(bar)']);
+
+    expect(mockedExecFileSync).toHaveBeenLastCalledWith(
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', '"C:\\Program Files\\psmux\\tmux.cmd" send-keys "foo(bar)"'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
