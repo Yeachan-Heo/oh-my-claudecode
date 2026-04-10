@@ -163,6 +163,33 @@ describe('persistent-mode skill-state stop integration (issue #1033)', () => {
     }
   });
 
+  it('ignores stale legacy skill-active state when session id is unavailable', async () => {
+    const tempDir = makeTempProject();
+
+    try {
+      const stateDir = join(tempDir, '.omc', 'state');
+      mkdirSync(stateDir, { recursive: true });
+      const past = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      writeFileSync(
+        join(stateDir, 'skill-active-state.json'),
+        JSON.stringify({
+          active: true,
+          skill_name: 'blocker-skill',
+          started_at: past,
+          last_checked_at: past,
+          reinforcement_count: 0,
+          max_reinforcements: 5,
+          stale_ttl_ms: 5 * 60 * 1000,
+        }, null, 2)
+      );
+
+      const result = await checkPersistentModes(undefined, tempDir);
+      expect(result.shouldBlock).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('respects session isolation for skill state', async () => {
     const sessionId = 'session-skill-1033-iso-a';
     const tempDir = makeTempProject();

@@ -43,6 +43,16 @@ function writeSubagentTrackingState(
   );
 }
 
+function writeLegacyModeState(
+  tempDir: string,
+  fileName: string,
+  state: Record<string, unknown>,
+): void {
+  const stateDir = join(tempDir, ".omc", "state");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, fileName), JSON.stringify(state, null, 2));
+}
+
 describe("Stop Hook Blocking Contract", () => {
   describe("createHookOutput", () => {
     it("returns continue: false when shouldBlock is true", () => {
@@ -429,6 +439,22 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.message).toContain("RALPH");
     });
 
+    it("ignores stale legacy ralph state when no session is provided", async () => {
+      const staleAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      writeLegacyModeState(tempDir, "ralph-state.json", {
+        active: true,
+        iteration: 1,
+        max_iterations: 50,
+        started_at: staleAt,
+        last_checked_at: staleAt,
+        prompt: "Stale legacy ralph task",
+      });
+
+      const result = await checkPersistentModes(undefined, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe("none");
+    });
+
     it("blocks stop for active skill state", async () => {
       const sessionId = "test-skill-block";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -552,6 +578,21 @@ describe("Stop Hook Blocking Contract", () => {
 
       const output = runScript({ directory: tempDir, sessionId });
       expect(output.decision).toBe("block");
+    });
+
+    it("returns continue: true for stale legacy ultrawork state without a session", () => {
+      const staleAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      writeLegacyModeState(tempDir, "ultrawork-state.json", {
+        active: true,
+        started_at: staleAt,
+        original_prompt: "Stale legacy ultrawork task",
+        reinforcement_count: 0,
+        last_checked_at: staleAt,
+      });
+
+      const output = runScript({ directory: tempDir });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
     });
 
     it("returns continue: true for context limit stop", () => {
