@@ -32,6 +32,26 @@ function writeTeamPipelineState(tempDir, sessionId, overrides = {}) {
         ...overrides,
     }, null, 2));
 }
+function writeCanonicalTeamState(tempDir, sessionId, teamName, currentPhase) {
+    const teamDir = join(tempDir, '.omc', 'state', 'team', teamName);
+    mkdirSync(teamDir, { recursive: true });
+    writeFileSync(join(teamDir, 'manifest.json'), JSON.stringify({
+        name: teamName,
+        task: `${teamName} task`,
+        leader: {
+            session_id: sessionId,
+            worker_id: 'leader-fixed',
+            role: 'leader',
+        },
+        created_at: new Date().toISOString(),
+        leader_cwd: tempDir,
+        team_state_root: join(tempDir, '.omc', 'state'),
+    }, null, 2));
+    writeFileSync(join(teamDir, 'phase-state.json'), JSON.stringify({
+        current_phase: currentPhase,
+        updated_at: new Date().toISOString(),
+    }, null, 2));
+}
 function writeRalplanState(tempDir, sessionId, overrides = {}) {
     const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
     mkdirSync(stateDir, { recursive: true });
@@ -101,6 +121,21 @@ describe('team pipeline standalone stop enforcement', () => {
                 phase: undefined,
                 current_phase: 'team-exec',
             });
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(true);
+            expect(result.mode).toBe('team');
+            expect(result.message).toContain('team-pipeline-continuation');
+            expect(result.message).toContain('team-exec');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it('blocks stop when canonical team state remains live after coarse state drifts away', async () => {
+        const sessionId = 'session-team-canonical-fallback-1';
+        const tempDir = makeTempProject();
+        try {
+            writeCanonicalTeamState(tempDir, sessionId, 'canonical-team', 'executing');
             const result = await checkPersistentModes(sessionId, tempDir);
             expect(result.shouldBlock).toBe(true);
             expect(result.mode).toBe('team');
@@ -477,6 +512,41 @@ describe('ralplan standalone stop enforcement', () => {
         const tempDir = makeTempProject();
         try {
             writeRalplanState(tempDir, sessionId, { current_phase: 'cancelled' });
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(false);
+            expect(result.mode).toBe('ralplan');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it.each([
+        ['aborted'],
+        ['terminated'],
+        ['canceled'],
+        ['handoff'],
+    ])('allows stop when ralplan current_phase is %s', async (phase) => {
+        const sessionId = `session-ralplan-terminal-${phase}`;
+        const tempDir = makeTempProject();
+        try {
+            writeRalplanState(tempDir, sessionId, { current_phase: phase });
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(false);
+            expect(result.mode).toBe('ralplan');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it.each([
+        [{ current_phase: undefined, phase: 'aborted' }, 'aborted'],
+        [{ current_phase: undefined, status: 'terminated' }, 'terminated'],
+        [{ current_phase: undefined, phase: 'handoff:ralph' }, 'handoff:ralph'],
+    ])('allows stop when ralplan terminal state is written via aliases: %s', async (overrides, _label) => {
+        const sessionId = 'session-ralplan-terminal-alias';
+        const tempDir = makeTempProject();
+        try {
+            writeRalplanState(tempDir, sessionId, overrides);
             const result = await checkPersistentModes(sessionId, tempDir);
             expect(result.shouldBlock).toBe(false);
             expect(result.mode).toBe('ralplan');

@@ -12,6 +12,26 @@ import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { processHook, resetSkipHooksCache, requiredKeysForHook, } from '../bridge.js';
 import { flushPendingWrites } from '../subagent-tracker/index.js';
+function writeCanonicalTeamState(tempDir, sessionId, teamName, phase) {
+    const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', teamName);
+    mkdirSync(canonicalTeamDir, { recursive: true });
+    writeFileSync(join(canonicalTeamDir, 'manifest.json'), JSON.stringify({
+        name: teamName,
+        task: `${teamName} task`,
+        leader: {
+            session_id: sessionId,
+            worker_id: 'leader-fixed',
+            role: 'leader',
+        },
+        created_at: new Date().toISOString(),
+        leader_cwd: tempDir,
+        team_state_root: join(tempDir, '.omc', 'state'),
+    }, null, 2));
+    writeFileSync(join(canonicalTeamDir, 'phase-state.json'), JSON.stringify({
+        current_phase: phase,
+        updated_at: new Date().toISOString(),
+    }, null, 2));
+}
 // ============================================================================
 // Hook Routing Tests
 // ============================================================================
@@ -423,6 +443,24 @@ Read src/hooks/bridge.ts first.`,
             };
             const result = await processHook('session-start', input);
             expect(result.continue).toBe(true);
+        });
+        it('should restore canonical team context when coarse team-state drifts away', async () => {
+            const tempDir = process.cwd();
+            const sessionId = 'canonical-team-session';
+            const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', 'canonical-team');
+            try {
+                writeCanonicalTeamState(tempDir, sessionId, 'canonical-team', 'executing');
+                const result = await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[TEAM MODE RESTORED]');
+                expect(result.message).toContain('canonical-team');
+            }
+            finally {
+                rmSync(canonicalTeamDir, { recursive: true, force: true });
+            }
         });
         it('should handle stop-continuation and always return continue:true', async () => {
             const input = {

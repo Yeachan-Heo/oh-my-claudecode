@@ -27,6 +27,7 @@ import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 import { readModeState, writeModeState } from "../lib/mode-state-io.js";
 import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
 import { createSwallowedErrorLogger } from "../lib/swallowed-error.js";
+import { readCanonicalTeamStateCandidate } from "./team-canonical-state.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import {
@@ -381,6 +382,7 @@ function readTeamStagedState(
       ]
     : [join(stateDir, "team-state.json")];
 
+  let coarseState: TeamStagedState | null = null;
   for (const statePath of statePaths) {
     if (!existsSync(statePath)) {
       continue;
@@ -399,13 +401,34 @@ function readTeamStagedState(
         continue;
       }
 
-      return parsed;
+      coarseState = parsed;
+      if (parsed.active === true && !isTeamStateTerminal(parsed)) {
+        return parsed;
+      }
     } catch {
       continue;
     }
   }
 
-  return null;
+  const canonical = readCanonicalTeamStateCandidate(directory, sessionId);
+  if (canonical) {
+    return {
+      active: canonical.active,
+      session_id: canonical.sessionId,
+      team_name: canonical.teamName,
+      stage: canonical.stage,
+      current_stage: canonical.stage,
+      current_phase: canonical.stage,
+      phase: canonical.stage,
+      status: canonical.stage,
+      task: canonical.task,
+      started_at: canonical.startedAt,
+      last_checked_at: canonical.updatedAt,
+      reinforcement_count: 0,
+    };
+  }
+
+  return coarseState;
 }
 
 function getTeamStage(state: TeamStagedState): string {

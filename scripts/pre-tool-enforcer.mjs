@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -269,13 +269,80 @@ function hasActiveMode(directory, sessionId) {
   );
 }
 
+function mapCanonicalTeamPhaseToStage(rawPhase) {
+  const phase = typeof rawPhase === 'string' ? rawPhase.trim().toLowerCase() : '';
+  switch (phase) {
+    case 'initializing':
+    case 'planning':
+      return 'team-plan';
+    case 'executing':
+      return 'team-exec';
+    case 'fixing':
+      return 'team-fix';
+    case 'completed':
+      return 'complete';
+    case 'failed':
+      return 'failed';
+    default:
+      return '';
+  }
+}
+
+function readCanonicalActiveTeamState(directory, sessionId) {
+  if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) {
+    return null;
+  }
+
+  const teamRoot = join(directory, '.omc', 'state', 'team');
+  if (!existsSync(teamRoot)) {
+    return null;
+  }
+
+  const entries = readdirSync(teamRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const teamName of entries) {
+    const teamDir = join(teamRoot, teamName);
+    const manifest = readJsonFile(join(teamDir, 'manifest.json'));
+    const phaseState = readJsonFile(join(teamDir, 'phase-state.json'));
+    const ownerSessionId = typeof manifest?.leader?.session_id === 'string'
+      ? manifest.leader.session_id.trim()
+      : '';
+    if (!ownerSessionId || ownerSessionId !== sessionId) {
+      continue;
+    }
+
+    const stage = mapCanonicalTeamPhaseToStage(phaseState?.current_phase);
+    if (!stage) {
+      continue;
+    }
+
+    return {
+      active: stage !== 'complete' && stage !== 'failed',
+      session_id: sessionId,
+      team_name: teamName,
+      teamName,
+      phase: stage,
+      current_phase: stage,
+      task: typeof manifest?.task === 'string' ? manifest.task : teamName,
+      started_at: typeof manifest?.created_at === 'string' ? manifest.created_at : undefined,
+      last_checked_at: typeof phaseState?.updated_at === 'string' ? phaseState.updated_at : undefined,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Check if team mode is active for the given directory/session.
- * Reads team-state.json from session-scoped or legacy paths.
- * Returns the team state object if active, null otherwise.
+ * Reads team-state.json from session-scoped or legacy paths and falls back
+ * to canonical team state when the coarse file drifts or disappears.
  */
 function getActiveTeamState(directory, sessionId) {
   const paths = [];
+  let coarseState = null;
 
   // Session-scoped path (preferred)
   if (sessionId && SESSION_ID_PATTERN.test(sessionId)) {
@@ -287,15 +354,24 @@ function getActiveTeamState(directory, sessionId) {
 
   for (const statePath of paths) {
     const state = readJsonFile(statePath);
-    if (state && state.active === true) {
-      // Respect session isolation: skip state tagged to a different session
-      if (sessionId && state.session_id && state.session_id !== sessionId) {
-        continue;
-      }
+    if (!state) {
+      continue;
+    }
+    if (sessionId && state.session_id && state.session_id !== sessionId) {
+      continue;
+    }
+    coarseState = state;
+    if (state.active === true) {
       return state;
     }
   }
-  return null;
+
+  const canonical = readCanonicalActiveTeamState(directory, sessionId);
+  if (canonical && canonical.active === true) {
+    return canonical;
+  }
+
+  return coarseState && coarseState.active === true ? coarseState : null;
 }
 
 // Generate agent spawn message with metadata

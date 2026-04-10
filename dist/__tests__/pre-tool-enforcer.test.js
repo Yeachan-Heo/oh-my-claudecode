@@ -190,6 +190,40 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
         expect(hookSpecificOutput.additionalContext).toContain('TEAM ROUTING REQUIRED');
         expect(hookSpecificOutput.additionalContext).toContain('legacy-team');
     });
+    it('routes Task calls from canonical team state when coarse team-state drifts away', () => {
+        const sessionId = 'session-canonical-team';
+        const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', 'canonical-team');
+        writeJson(join(canonicalTeamDir, 'manifest.json'), {
+            name: 'canonical-team',
+            task: 'Canonical team task',
+            leader: {
+                session_id: sessionId,
+                worker_id: 'leader-fixed',
+                role: 'leader',
+            },
+            created_at: new Date().toISOString(),
+            leader_cwd: tempDir,
+            team_state_root: join(tempDir, '.omc', 'state'),
+        });
+        writeJson(join(canonicalTeamDir, 'phase-state.json'), {
+            current_phase: 'executing',
+            updated_at: new Date().toISOString(),
+        });
+        const output = runPreToolEnforcer({
+            tool_name: 'Task',
+            toolInput: {
+                subagent_type: 'oh-my-claudecode:executor',
+                description: 'Fix type errors',
+                prompt: 'Fix all type errors in src/auth/',
+            },
+            cwd: tempDir,
+            session_id: sessionId,
+        });
+        const hookSpecificOutput = output.hookSpecificOutput;
+        expect(output.continue).toBe(true);
+        expect(hookSpecificOutput.additionalContext).toContain('TEAM ROUTING REQUIRED');
+        expect(hookSpecificOutput.additionalContext).toContain('canonical-team');
+    });
     it('respects session isolation — ignores team state from different session', () => {
         writeJson(join(tempDir, '.omc', 'state', 'sessions', 'other-session', 'team-state.json'), {
             active: true,

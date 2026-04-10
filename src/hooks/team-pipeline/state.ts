@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { ensureSessionStateDir, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { readCanonicalTeamStateCandidate } from '../team-canonical-state.js';
 import type {
   TeamPipelineState,
   TeamPipelinePhase,
@@ -18,6 +19,56 @@ function getTeamStatePath(directory: string, sessionId?: string): string {
     return `${directory}/.omc/state/team-state.json`;
   }
   return resolveSessionStatePath('team', sessionId, directory);
+}
+
+function isTerminalTeamPipelineState(state: TeamPipelineState): boolean {
+  return state.phase === 'complete' || state.phase === 'failed' || state.phase === 'cancelled';
+}
+
+function synthesizeCanonicalTeamPipelineState(
+  directory: string,
+  candidate: NonNullable<ReturnType<typeof readCanonicalTeamStateCandidate>>,
+): TeamPipelineState {
+  const now = candidate.updatedAt || candidate.startedAt || new Date().toISOString();
+  return {
+    schema_version: TEAM_PIPELINE_SCHEMA_VERSION,
+    mode: 'team',
+    active: candidate.active,
+    session_id: candidate.sessionId,
+    project_path: candidate.leaderCwd ?? directory,
+    phase: candidate.stage,
+    phase_history: [{
+      phase: candidate.stage,
+      entered_at: candidate.startedAt || now,
+    }],
+    iteration: 1,
+    max_iterations: 25,
+    artifacts: {
+      plan_path: null,
+      prd_path: null,
+      verify_report_path: null,
+    },
+    execution: {
+      workers_total: 0,
+      workers_active: 0,
+      tasks_total: 0,
+      tasks_completed: 0,
+      tasks_failed: 0,
+    },
+    fix_loop: {
+      attempt: 0,
+      max_attempts: 3,
+      last_failure_reason: null,
+    },
+    cancel: {
+      requested: false,
+      requested_at: null,
+      preserve_for_resume: false,
+    },
+    started_at: candidate.startedAt || now,
+    updated_at: candidate.updatedAt || now,
+    completed_at: candidate.active ? null : (candidate.updatedAt || now),
+  };
 }
 
 export function initTeamPipelineState(
@@ -69,20 +120,29 @@ export function readTeamPipelineState(directory: string, sessionId?: string): Te
     return null;
   }
 
+  let coarseState: TeamPipelineState | null = null;
   const statePath = getTeamStatePath(directory, sessionId);
-  if (!existsSync(statePath)) {
-    return null;
+  if (existsSync(statePath)) {
+    try {
+      const content = readFileSync(statePath, 'utf-8');
+      const state = JSON.parse(content) as TeamPipelineState;
+      if (state && typeof state === 'object' && (!state.session_id || state.session_id === sessionId)) {
+        coarseState = state;
+        if (state.active === true && !isTerminalTeamPipelineState(state)) {
+          return state;
+        }
+      }
+    } catch {
+      // fall through to canonical fallback
+    }
   }
 
-  try {
-    const content = readFileSync(statePath, 'utf-8');
-    const state = JSON.parse(content) as TeamPipelineState;
-    if (!state || typeof state !== 'object') return null;
-    if (state.session_id && state.session_id !== sessionId) return null;
-    return state;
-  } catch {
-    return null;
+  const canonical = readCanonicalTeamStateCandidate(directory, sessionId);
+  if (canonical) {
+    return synthesizeCanonicalTeamPipelineState(directory, canonical);
   }
+
+  return coarseState;
 }
 
 export function writeTeamPipelineState(directory: string, state: TeamPipelineState, sessionId?: string): boolean {

@@ -19,6 +19,7 @@ import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 import { readModeState, writeModeState } from "../lib/mode-state-io.js";
 import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
 import { createSwallowedErrorLogger } from "../lib/swallowed-error.js";
+import { readCanonicalTeamStateCandidate } from "./team-canonical-state.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN, } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool, } from "./omc-orchestrator/index.js";
@@ -239,6 +240,7 @@ function readTeamStagedState(directory, sessionId) {
             join(stateDir, "team-state.json"),
         ]
         : [join(stateDir, "team-state.json")];
+    let coarseState = null;
     for (const statePath of statePaths) {
         if (!existsSync(statePath)) {
             continue;
@@ -252,13 +254,33 @@ function readTeamStagedState(directory, sessionId) {
             if (sessionId && stateSessionId && stateSessionId !== sessionId) {
                 continue;
             }
-            return parsed;
+            coarseState = parsed;
+            if (parsed.active === true && !isTeamStateTerminal(parsed)) {
+                return parsed;
+            }
         }
         catch {
             continue;
         }
     }
-    return null;
+    const canonical = readCanonicalTeamStateCandidate(directory, sessionId);
+    if (canonical) {
+        return {
+            active: canonical.active,
+            session_id: canonical.sessionId,
+            team_name: canonical.teamName,
+            stage: canonical.stage,
+            current_stage: canonical.stage,
+            current_phase: canonical.stage,
+            phase: canonical.stage,
+            status: canonical.stage,
+            task: canonical.task,
+            started_at: canonical.startedAt,
+            last_checked_at: canonical.updatedAt,
+            reinforcement_count: 0,
+        };
+    }
+    return coarseState;
 }
 function getTeamStage(state) {
     return (state.stage ||
@@ -498,13 +520,13 @@ async function processKeywordDetector(input) {
     const messages = [];
     // Record prompt submission time in HUD state
     try {
-        const hudState = readHudState(directory) || {
+        const hudState = readHudState(directory, input.sessionId) || {
             timestamp: new Date().toISOString(),
             backgroundTasks: [],
         };
         hudState.lastPromptTimestamp = new Date().toISOString();
         hudState.timestamp = new Date().toISOString();
-        writeHudState(hudState, directory);
+        writeHudState(hudState, directory, input.sessionId);
     }
     catch {
         // Silent failure - don't break keyword detection
@@ -1294,7 +1316,7 @@ function processPreToolUse(input) {
         if (toolInput?.run_in_background) {
             const config = loadConfig();
             const maxBgTasks = config.permissions?.maxBackgroundTasks ?? 5;
-            const runningCount = getRunningTaskCount(directory);
+            const runningCount = getRunningTaskCount(directory, input.sessionId);
             if (runningCount >= maxBgTasks) {
                 return {
                     continue: false,
@@ -1311,7 +1333,7 @@ function processPreToolUse(input) {
         if (toolInput?.description) {
             const taskId = getHookToolUseId(input)
                 ?? `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            addBackgroundTask(taskId, toolInput.description, toolInput.subagent_type, directory);
+            addBackgroundTask(taskId, toolInput.description, toolInput.subagent_type, directory, input.sessionId);
         }
     }
     // Track file ownership for Edit/Write tools
@@ -1467,19 +1489,19 @@ async function processPostToolUse(input) {
         const agentType = toolInput?.subagent_type;
         if (asyncAgentId) {
             if (toolUseId) {
-                remapBackgroundTaskId(toolUseId, asyncAgentId, directory);
+                remapBackgroundTaskId(toolUseId, asyncAgentId, directory, input.sessionId);
             }
             else if (description) {
-                remapMostRecentMatchingBackgroundTaskId(description, asyncAgentId, directory, agentType);
+                remapMostRecentMatchingBackgroundTaskId(description, asyncAgentId, directory, agentType, input.sessionId);
             }
         }
         else {
             const failed = taskLaunchDidFail(input.toolOutput);
             if (toolUseId) {
-                completeBackgroundTask(toolUseId, directory, failed);
+                completeBackgroundTask(toolUseId, directory, failed, input.sessionId);
             }
             else if (description) {
-                completeMostRecentMatchingBackgroundTask(description, directory, failed, agentType);
+                completeMostRecentMatchingBackgroundTask(description, directory, failed, agentType, input.sessionId);
             }
         }
     }
@@ -1493,7 +1515,7 @@ async function processPostToolUse(input) {
     if (input.toolName === "TaskOutput") {
         const taskOutput = parseTaskOutputLifecycle(input.toolOutput);
         if (taskOutput) {
-            completeBackgroundTask(taskOutput.taskId, directory, taskOutputDidFail(taskOutput.status));
+            completeBackgroundTask(taskOutput.taskId, directory, taskOutputDidFail(taskOutput.status), input.sessionId);
         }
     }
     // Wake OpenClaw gateway for post-tool-use (non-blocking, fires for all tools).

@@ -47,6 +47,48 @@ function writeTeamPipelineState(
   );
 }
 
+function writeCanonicalTeamState(
+  tempDir: string,
+  sessionId: string,
+  teamName: string,
+  currentPhase: string,
+): void {
+  const teamDir = join(tempDir, '.omc', 'state', 'team', teamName);
+  mkdirSync(teamDir, { recursive: true });
+
+  writeFileSync(
+    join(teamDir, 'manifest.json'),
+    JSON.stringify(
+      {
+        name: teamName,
+        task: `${teamName} task`,
+        leader: {
+          session_id: sessionId,
+          worker_id: 'leader-fixed',
+          role: 'leader',
+        },
+        created_at: new Date().toISOString(),
+        leader_cwd: tempDir,
+        team_state_root: join(tempDir, '.omc', 'state'),
+      },
+      null,
+      2,
+    ),
+  );
+
+  writeFileSync(
+    join(teamDir, 'phase-state.json'),
+    JSON.stringify(
+      {
+        current_phase: currentPhase,
+        updated_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 function writeRalplanState(
   tempDir: string,
   sessionId: string,
@@ -166,6 +208,23 @@ describe('team pipeline standalone stop enforcement', () => {
         phase: undefined,
         current_phase: 'team-exec',
       });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(true);
+      expect(result.mode).toBe('team');
+      expect(result.message).toContain('team-pipeline-continuation');
+      expect(result.message).toContain('team-exec');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks stop when canonical team state remains live after coarse state drifts away', async () => {
+    const sessionId = 'session-team-canonical-fallback-1';
+    const tempDir = makeTempProject();
+
+    try {
+      writeCanonicalTeamState(tempDir, sessionId, 'canonical-team', 'executing');
 
       const result = await checkPersistentModes(sessionId, tempDir);
       expect(result.shouldBlock).toBe(true);
