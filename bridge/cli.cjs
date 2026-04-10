@@ -82145,7 +82145,7 @@ function ensureMirroredPath(sourcePath, targetPath) {
     (0, import_fs95.copyFileSync)(sourcePath, targetPath);
   }
 }
-function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CONFIG_DIR || (0, import_path115.join)((0, import_os20.homedir)(), ".claude")) {
+function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
   const companionPath = (0, import_path115.join)(baseConfigDir, "CLAUDE-omc.md");
   if (!hasOmcMarkers(companionPath)) {
     return baseConfigDir;
@@ -82188,6 +82188,9 @@ function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CONFIG_DIR
     JSON.stringify({ sourceConfigDir: baseConfigDir, sourceClaudeMd: companionPath }, null, 2)
   );
   return runtimeConfigDir;
+}
+function isDefaultClaudeConfigDirPath(configDir) {
+  return configDir === (0, import_path115.join)((0, import_os20.homedir)(), ".claude");
 }
 function extractNotifyFlag(args) {
   let notifyEnabled = true;
@@ -82486,7 +82489,12 @@ async function launchCommand(args) {
     console.error("  npm install -g @anthropic-ai/claude-code");
     process.exit(1);
   }
-  process.env.CLAUDE_CONFIG_DIR = prepareOmcLaunchConfigDir();
+  const launchConfigDir = prepareOmcLaunchConfigDir();
+  if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  } else {
+    process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
+  }
   const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWebhook);
   const sessionId = `omc-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
   try {

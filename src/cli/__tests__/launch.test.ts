@@ -844,6 +844,7 @@ describe('launchCommand — env var propagation', () => {
 
 describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () => {
   const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalHome = process.env.HOME;
   let tempRoot: string | null = null;
 
   const originalClaudecode = process.env.CLAUDECODE;
@@ -852,6 +853,7 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     vi.resetAllMocks();
     delete process.env.CLAUDECODE;
     tempRoot = mkdtempSync(join(tmpdir(), 'omc-launch-profile-'));
+    process.env.HOME = join(tempRoot, 'home');
     (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
     (resolveLaunchPolicy as ReturnType<typeof vi.fn>).mockReturnValue('direct');
     // Clear CLAUDECODE to avoid "already inside CC session" exit
@@ -862,6 +864,11 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     if (tempRoot) {
       rmSync(tempRoot, { recursive: true, force: true });
       tempRoot = null;
+    }
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
     }
     if (originalClaudeConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
@@ -944,6 +951,28 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
 
     expect(prepareOmcLaunchConfigDir(configDir)).toBe(configDir);
     expect(existsSync(join(configDir, '.omc-launch'))).toBe(false);
+  });
+
+  it('does not keep CLAUDE_CONFIG_DIR set when it resolves to the default ~/.claude path', async () => {
+    const configDir = join(tempRoot!, 'home', '.claude');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE.md'), '# User config\n');
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+
+    await launchCommand(['--print']);
+
+    expect(process.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+  });
+
+  it('preserves explicit non-default CLAUDE_CONFIG_DIR values when no companion exists', async () => {
+    const configDir = join(tempRoot!, 'custom-claude');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE.md'), '# Custom user config\n');
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+
+    await launchCommand(['--print']);
+
+    expect(process.env.CLAUDE_CONFIG_DIR).toBe(configDir);
   });
 });
 

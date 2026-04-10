@@ -8,6 +8,7 @@ import { homedir } from 'os';
 import { basename, join } from 'path';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
 import { stripRetiredTeamMcpServers } from '../installer/mcp-registry.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, wrapWithLoginShell, isClaudeAvailable, quoteShellArg, } from './tmux-utils.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
@@ -56,7 +57,7 @@ function ensureMirroredPath(sourcePath, targetPath) {
         copyFileSync(sourcePath, targetPath);
     }
 }
-export function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')) {
+export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
     const companionPath = join(baseConfigDir, 'CLAUDE-omc.md');
     if (!hasOmcMarkers(companionPath)) {
         return baseConfigDir;
@@ -99,6 +100,9 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CON
     }
     writeFileSync(join(runtimeConfigDir, '.omc-launch-profile.json'), JSON.stringify({ sourceConfigDir: baseConfigDir, sourceClaudeMd: companionPath }, null, 2));
     return runtimeConfigDir;
+}
+function isDefaultClaudeConfigDirPath(configDir) {
+    return configDir === join(homedir(), '.claude');
 }
 /**
  * Extract the OMC-specific --notify flag from launch args.
@@ -571,7 +575,13 @@ export async function launchCommand(args) {
         console.error('  npm install -g @anthropic-ai/claude-code');
         process.exit(1);
     }
-    process.env.CLAUDE_CONFIG_DIR = prepareOmcLaunchConfigDir();
+    const launchConfigDir = prepareOmcLaunchConfigDir();
+    if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+    }
+    else {
+        process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
+    }
     const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWebhook);
     const sessionId = `omc-${Date.now()}-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
     // Phase 1: preLaunch

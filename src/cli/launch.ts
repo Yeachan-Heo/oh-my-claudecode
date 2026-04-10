@@ -19,6 +19,7 @@ import { homedir } from 'os';
 import { basename, join } from 'path';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
 import { stripRetiredTeamMcpServers } from '../installer/mcp-registry.js';
+import { getClaudeConfigDir } from '../utils/config-dir.js';
 import {
   resolveLaunchPolicy,
   buildTmuxSessionName,
@@ -79,7 +80,7 @@ function ensureMirroredPath(sourcePath: string, targetPath: string): void {
   }
 }
 
-export function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')): string {
+export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()): string {
   const companionPath = join(baseConfigDir, 'CLAUDE-omc.md');
   if (!hasOmcMarkers(companionPath)) {
     return baseConfigDir;
@@ -129,6 +130,10 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = process.env.CLAUDE_CON
   );
 
   return runtimeConfigDir;
+}
+
+function isDefaultClaudeConfigDirPath(configDir: string): boolean {
+  return configDir === join(homedir(), '.claude');
 }
 
 /**
@@ -619,7 +624,12 @@ export async function launchCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  process.env.CLAUDE_CONFIG_DIR = prepareOmcLaunchConfigDir();
+  const launchConfigDir = prepareOmcLaunchConfigDir();
+  if (isDefaultClaudeConfigDirPath(launchConfigDir)) {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  } else {
+    process.env.CLAUDE_CONFIG_DIR = launchConfigDir;
+  }
 
   const normalizedArgs = normalizeClaudeLaunchArgs(argsAfterWebhook);
   const sessionId = `omc-${Date.now()}-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
