@@ -669,6 +669,38 @@ function paneHasTrustPrompt(captured: string): boolean {
   return hasQuestion && hasChoices;
 }
 
+function paneHasBypassPermissionsPrompt(captured: string): boolean {
+  const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
+  const tail = lines.slice(-15);
+  return tail.some(l => /Bypass Permissions mode/i.test(l)) &&
+         tail.some(l => /No,\s*exit/i.test(l));
+}
+
+/**
+ * Detect and auto-dismiss Claude Code's bypass-permissions confirmation prompt.
+ * When `--dangerously-skip-permissions` is passed, Claude Code shows an interactive
+ * select widget with "1. No, exit" pre-selected. In non-interactive tmux panes this
+ * causes workers to immediately exit. This function sends Down+Enter to select
+ * "2. Yes, I accept" instead.
+ * Returns true if the prompt was detected and dismissed, false otherwise.
+ */
+export async function dismissBypassPermissionsPrompt(paneId: string): Promise<boolean> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+  const captured = await capturePaneAsync(paneId, execFileAsync as Parameters<typeof capturePaneAsync>[1]);
+  if (!paneHasBypassPermissionsPrompt(captured)) {
+    return false;
+  }
+  const sendKey = async (key: string) => {
+    await execFileAsync('tmux', ['send-keys', '-t', paneId, key]);
+  };
+  await sendKey('Down');
+  await new Promise(r => setTimeout(r, 150));
+  await sendKey('C-m');
+  return true;
+}
+
 function paneIsBootstrapping(captured: string): boolean {
   const lines = captured
     .split('\n')

@@ -7,6 +7,7 @@ import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
   isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout,
+  dismissBypassPermissionsPrompt,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
@@ -787,6 +788,18 @@ export async function spawnWorkerForTask(
       await killWorkerPane(runtime, workerNameValue, paneId);
       await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
       throw new Error(`worker_pane_not_ready:${workerNameValue}`);
+    }
+
+    if (agentType === 'claude') {
+      const dismissed = await dismissBypassPermissionsPrompt(paneId);
+      if (dismissed) {
+        const readyAfterBypass = await waitForPaneReady(paneId, { timeoutMs: 30_000 });
+        if (!readyAfterBypass) {
+          await killWorkerPane(runtime, workerNameValue, paneId);
+          await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
+          throw new Error(`worker_pane_not_ready_after_bypass:${workerNameValue}`);
+        }
+      }
     }
 
     if (agentType === 'gemini') {

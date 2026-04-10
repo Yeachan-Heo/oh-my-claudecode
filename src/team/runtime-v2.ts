@@ -62,7 +62,8 @@ import {
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, type WorkerPaneConfig,
+  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout,
+  dismissBypassPermissionsPrompt, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -502,6 +503,15 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     notify: async (_target, triggerMessage) => {
       if (usePromptMode) {
         return { ok: true, transport: 'prompt_stdin', reason: 'prompt_mode_launch_args' };
+      }
+      if (opts.agentType === 'claude') {
+        const dismissed = await dismissBypassPermissionsPrompt(paneId);
+        if (dismissed) {
+          const readyAfterBypass = await waitForPaneReady(paneId, { timeoutMs: 30_000 });
+          if (!readyAfterBypass) {
+            return { ok: false, transport: 'tmux_send_keys', reason: 'worker_notify_failed:bypass-confirm' };
+          }
+        }
       }
       if (opts.agentType === 'gemini') {
         const confirmed = await notifyPaneWithRetry(opts.sessionName, paneId, '1');
