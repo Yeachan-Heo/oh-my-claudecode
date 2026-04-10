@@ -160,7 +160,13 @@ export interface TodoContinuationHook {
  * - user_cancel, user_interrupt: Likely user-initiated via UI
  * - ctrl_c: Terminal interrupt (Ctrl+C)
  * - manual_stop: Explicit stop button
- * - abort, cancel, interrupt: Generic abort patterns
+ * - abort, cancel: Generic abort patterns
+ *
+ * Plain `interrupt` is intentionally NOT treated as an explicit user abort.
+ * In practice it can also describe a turn interruption caused by a new user
+ * message arriving during long-running tool execution (issue #2478). Those
+ * interrupted turns should still allow Ralph/persistent-mode resume on the
+ * next stop-hook opportunity unless stronger explicit-cancel signals exist.
  *
  * NOTE: Per official Anthropic docs, the Stop hook "Does not run if
  * the stoppage occurred due to a user interrupt." This means this
@@ -178,7 +184,7 @@ export function isUserAbort(context?: StopContext): boolean {
 
   // Check stop_reason patterns indicating user abort
   // Exact-match patterns: short generic words that cause false positives with .includes()
-  const exactPatterns = ['aborted', 'abort', 'cancel', 'interrupt'];
+  const exactPatterns = ['aborted', 'abort', 'cancel'];
   // Substring patterns: compound words safe for .includes() matching
   const substringPatterns = ['user_cancel', 'user_interrupt', 'ctrl_c', 'manual_stop'];
 

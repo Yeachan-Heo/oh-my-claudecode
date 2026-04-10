@@ -439,6 +439,34 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.message).toContain("RALPH");
     });
 
+    it("keeps blocking active ralph loop when stop reason is interrupt", async () => {
+      const sessionId = "test-ralph-interrupt";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ralph-state.json"),
+        JSON.stringify({
+          active: true,
+          iteration: 1,
+          max_iterations: 50,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          prompt: "Test ralph task",
+        })
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir, {
+        stop_reason: "interrupt",
+      });
+      expect(result.shouldBlock).toBe(true);
+      expect(result.mode).toBe("ralph");
+
+      const output = createHookOutput(result);
+      expect(output.continue).toBe(false);
+      expect(output.message).toContain("RALPH");
+    });
+
     it("ignores stale legacy ralph state when no session is provided", async () => {
       const staleAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
       writeLegacyModeState(tempDir, "ralph-state.json", {
