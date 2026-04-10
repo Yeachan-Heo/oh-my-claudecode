@@ -1357,22 +1357,22 @@ export async function checkPersistentModes(
     }
   }
 
-  // Priority 1.7: Team Pipeline (standalone team mode)
-  // When team runs without ralph, this provides stop-hook blocking.
-  // When team runs with ralph, checkRalphLoop() handles it (Priority 1).
-  // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
-  const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
-  if (teamResult) {
-    return teamResult;
-  }
-
-  // Priority 1.8: Ralplan (standalone consensus planning)
+  // Priority 1.7: Ralplan (standalone consensus planning)
   // Ralplan consensus loops (Planner/Architect/Critic) need hard-blocking.
   // When ralplan runs under ralph, checkRalphLoop() handles it (Priority 1).
   // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
   const ralplanResult = await checkRalplan(sessionId, workingDir, cancelInProgress);
   if (ralplanResult) {
     return ralplanResult;
+  }
+
+  // Priority 1.8: Team Pipeline (standalone team mode)
+  // When team runs without ralph, this provides stop-hook blocking.
+  // When team runs with ralph, checkRalphLoop() handles it (Priority 1).
+  // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
+  const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
+  if (teamResult) {
+    return teamResult;
   }
 
   // Priority 2: Ultrawork Mode (performance mode with persistence)
