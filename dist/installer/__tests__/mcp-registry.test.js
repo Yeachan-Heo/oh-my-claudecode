@@ -97,6 +97,31 @@ describe('unified MCP registry sync', () => {
         expect(codexConfig).toContain('[mcp_servers.gitnexus]');
         expect(codexConfig).not.toContain('team-mcp.cjs');
     });
+    it('backfills launcher-backed MCP startup timeouts and stays idempotent', () => {
+        const settings = {
+            mcpServers: {
+                filesystem: {
+                    command: 'npx',
+                    args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+                },
+            },
+        };
+        const first = syncUnifiedMcpRegistryTargets(settings);
+        const second = syncUnifiedMcpRegistryTargets(settings);
+        expect(first.result.codexChanged).toBe(true);
+        expect(first.settings).toEqual({});
+        expect(JSON.parse(readFileSync(getUnifiedMcpRegistryPath(), 'utf-8'))).toEqual({
+            filesystem: {
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+                timeout: 15,
+            },
+        });
+        const codexConfig = readFileSync(getCodexConfigPath(), 'utf-8');
+        expect(codexConfig).toContain('[mcp_servers.filesystem]');
+        expect(codexConfig).toContain('startup_timeout_sec = 15');
+        expect(second.result.codexChanged).toBe(false);
+    });
     it('round-trips URL-based remote MCP entries through the unified registry sync', () => {
         const settings = {
             mcpServers: {
@@ -119,6 +144,39 @@ describe('unified MCP registry sync', () => {
         expect(codexConfig).toContain('[mcp_servers.remoteOmc]');
         expect(codexConfig).toContain('url = "https://lab.example.com/mcp"');
         expect(codexConfig).toContain('startup_timeout_sec = 30');
+    });
+    it('preserves explicit launcher timeouts and leaves custom MCP servers untouched', () => {
+        const settings = {
+            mcpServers: {
+                launchable: {
+                    command: 'uvx',
+                    args: ['mcp-server-example'],
+                    timeout: 22,
+                },
+                custom: {
+                    command: 'custom-mcp',
+                    args: ['serve'],
+                },
+            },
+        };
+        const { settings: syncedSettings } = syncUnifiedMcpRegistryTargets(settings);
+        expect(syncedSettings).toEqual({});
+        expect(JSON.parse(readFileSync(getUnifiedMcpRegistryPath(), 'utf-8'))).toEqual({
+            custom: {
+                command: 'custom-mcp',
+                args: ['serve'],
+            },
+            launchable: {
+                command: 'uvx',
+                args: ['mcp-server-example'],
+                timeout: 22,
+            },
+        });
+        const codexConfig = readFileSync(getCodexConfigPath(), 'utf-8');
+        expect(codexConfig).toContain('[mcp_servers.launchable]');
+        expect(codexConfig).toContain('startup_timeout_sec = 22');
+        expect(codexConfig).toContain('[mcp_servers.custom]');
+        expect(codexConfig).not.toContain('startup_timeout_sec = 15');
     });
     it('removes legacy mcpServers from settings.json while preserving unrelated Claude settings', () => {
         const existingSettings = {

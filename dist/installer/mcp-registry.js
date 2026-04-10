@@ -5,6 +5,7 @@ import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { getGlobalOmcConfigPath, getGlobalOmcConfigCandidates, getGlobalOmcStatePath, getGlobalOmcStateCandidates, } from '../utils/paths.js';
 const MANAGED_START = '# BEGIN OMC MANAGED MCP REGISTRY';
 const MANAGED_END = '# END OMC MANAGED MCP REGISTRY';
+const DEFAULT_LAUNCHER_MCP_STARTUP_TIMEOUT_SEC = 15;
 export function getUnifiedMcpRegistryPath() {
     return process.env.OMC_MCP_REGISTRY_PATH?.trim() || getGlobalOmcConfigPath('mcp-registry.json');
 }
@@ -47,6 +48,16 @@ function isRetiredTeamMcpEntry(value) {
         : [];
     return args.some(arg => RETIRED_TEAM_MCP_PATH_PATTERN.test(arg));
 }
+function launcherCommandBasename(command) {
+    return command.replace(/\\/g, '/').trim().split('/').pop()?.toLowerCase() ?? '';
+}
+function isLauncherBackedMcpCommand(command, args) {
+    const base = launcherCommandBasename(command);
+    if (base === 'npx' || base === 'uvx') {
+        return true;
+    }
+    return base === 'npm' && args[0]?.toLowerCase() === 'exec';
+}
 function normalizeRegistryEntry(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null;
@@ -66,17 +77,18 @@ function normalizeRegistryEntry(value) {
     }
     const args = Array.isArray(raw.args) && raw.args.every(item => typeof item === 'string')
         ? [...raw.args]
-        : undefined;
+        : [];
     const env = isStringRecord(raw.env) ? { ...raw.env } : undefined;
     const timeout = typeof raw.timeout === 'number' && Number.isFinite(raw.timeout) && raw.timeout > 0
         ? raw.timeout
         : undefined;
+    const effectiveTimeout = timeout ?? (command && isLauncherBackedMcpCommand(command, args) ? DEFAULT_LAUNCHER_MCP_STARTUP_TIMEOUT_SEC : undefined);
     return {
         ...(command ? { command } : {}),
-        ...(args && args.length > 0 ? { args } : {}),
+        ...(args.length > 0 ? { args } : {}),
         ...(env && Object.keys(env).length > 0 ? { env } : {}),
         ...(url ? { url } : {}),
-        ...(timeout ? { timeout } : {}),
+        ...(effectiveTimeout ? { timeout: effectiveTimeout } : {}),
     };
 }
 function normalizeRegistry(value) {
