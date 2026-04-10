@@ -13674,44 +13674,68 @@ function readJsonSafe2(path22) {
 function getTaskDependencyIds(task) {
   return task.depends_on ?? task.blocked_by ?? [];
 }
+function getTeamNamesForRuntimeInsight(directory, sessionId) {
+  const teamRoot = (0, import_path59.join)(getOmcRoot(directory), "state", "team");
+  if (!(0, import_fs49.existsSync)(teamRoot)) {
+    return [];
+  }
+  const teamNames = (0, import_fs49.readdirSync)(teamRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  if (!sessionId) {
+    return teamNames;
+  }
+  const scopedTeamNames = /* @__PURE__ */ new Set();
+  const teamState = readJsonSafe2(
+    resolveSessionStatePath("team", sessionId, directory)
+  );
+  const activeTeamName = teamState?.team_name ?? teamState?.teamName;
+  if (typeof activeTeamName === "string" && activeTeamName.trim().length > 0) {
+    scopedTeamNames.add(activeTeamName.trim());
+  }
+  for (const teamName of teamNames) {
+    const manifest = readJsonSafe2(
+      (0, import_path59.join)(teamRoot, teamName, "manifest.json")
+    );
+    if (manifest?.leader?.session_id === sessionId) {
+      scopedTeamNames.add(teamName);
+    }
+  }
+  return teamNames.filter((teamName) => scopedTeamNames.has(teamName));
+}
 function collectRuntimeInsight(directory, sessionId) {
-  const omcRoot = getOmcRoot(directory);
-  const teamRoot = (0, import_path59.join)(omcRoot, "state", "team");
   const missingDependencyIssues = [];
   const workerIssues = [];
-  if ((0, import_fs49.existsSync)(teamRoot)) {
-    for (const teamName of (0, import_fs49.readdirSync)(teamRoot)) {
-      const teamDir3 = (0, import_path59.join)(teamRoot, teamName);
-      const tasksDir = (0, import_path59.join)(teamDir3, "tasks");
-      const workersDir = (0, import_path59.join)(teamDir3, "workers");
-      const tasks = (0, import_fs49.existsSync)(tasksDir) ? (0, import_fs49.readdirSync)(tasksDir).filter((entry) => entry.endsWith(".json")).map((entry) => readJsonSafe2((0, import_path59.join)(tasksDir, entry))).filter((task) => Boolean(task)) : [];
-      const taskById = new Map(tasks.map((task) => [task.id, task]));
-      for (const task of tasks) {
-        const missingDependencyIds = getTaskDependencyIds(task).filter((dependencyId) => !taskById.has(dependencyId));
-        if (missingDependencyIds.length > 0) {
-          missingDependencyIssues.push({
-            teamName,
-            taskId: task.id,
-            missingDependencyIds
-          });
-        }
+  const teamRoot = (0, import_path59.join)(getOmcRoot(directory), "state", "team");
+  for (const teamName of getTeamNamesForRuntimeInsight(directory, sessionId)) {
+    const teamDir3 = (0, import_path59.join)(teamRoot, teamName);
+    const tasksDir = (0, import_path59.join)(teamDir3, "tasks");
+    const workersDir = (0, import_path59.join)(teamDir3, "workers");
+    const tasks = (0, import_fs49.existsSync)(tasksDir) ? (0, import_fs49.readdirSync)(tasksDir).filter((entry) => entry.endsWith(".json")).map((entry) => readJsonSafe2((0, import_path59.join)(tasksDir, entry))).filter((task) => Boolean(task)) : [];
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    for (const task of tasks) {
+      const missingDependencyIds = getTaskDependencyIds(task).filter((dependencyId) => !taskById.has(dependencyId));
+      if (missingDependencyIds.length > 0) {
+        missingDependencyIssues.push({
+          teamName,
+          taskId: task.id,
+          missingDependencyIds
+        });
       }
-      if ((0, import_fs49.existsSync)(workersDir)) {
-        for (const workerName2 of (0, import_fs49.readdirSync)(workersDir)) {
-          const status = readJsonSafe2((0, import_path59.join)(workersDir, workerName2, "status.json"));
-          if (!status || typeof status.reason !== "string" || status.reason.trim().length === 0) {
-            continue;
-          }
-          if (status.state !== "blocked" && status.state !== "failed") {
-            continue;
-          }
-          workerIssues.push({
-            teamName,
-            workerName: workerName2,
-            state: status.state,
-            reason: status.reason.trim()
-          });
+    }
+    if ((0, import_fs49.existsSync)(workersDir)) {
+      for (const workerName2 of (0, import_fs49.readdirSync)(workersDir)) {
+        const status = readJsonSafe2((0, import_path59.join)(workersDir, workerName2, "status.json"));
+        if (!status || typeof status.reason !== "string" || status.reason.trim().length === 0) {
+          continue;
         }
+        if (status.state !== "blocked" && status.state !== "failed") {
+          continue;
+        }
+        workerIssues.push({
+          teamName,
+          workerName: workerName2,
+          state: status.state,
+          reason: status.reason.trim()
+        });
       }
     }
   }

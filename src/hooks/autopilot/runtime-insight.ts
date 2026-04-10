@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { getOmcRoot, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import { readHudState } from '../../hud/state.js';
 import type { BackgroundTask } from '../../hud/types.js';
 import type { TeamTask, WorkerStatus } from '../../team/types.js';
@@ -40,54 +40,86 @@ function getTaskDependencyIds(task: TeamTask): string[] {
   return task.depends_on ?? task.blocked_by ?? [];
 }
 
+function getTeamNamesForRuntimeInsight(directory: string, sessionId?: string): string[] {
+  const teamRoot = join(getOmcRoot(directory), 'state', 'team');
+  if (!existsSync(teamRoot)) {
+    return [];
+  }
+
+  const teamNames = readdirSync(teamRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  if (!sessionId) {
+    return teamNames;
+  }
+
+  const scopedTeamNames = new Set<string>();
+  const teamState = readJsonSafe<Record<string, unknown>>(
+    resolveSessionStatePath('team', sessionId, directory),
+  );
+  const activeTeamName = teamState?.team_name ?? teamState?.teamName;
+  if (typeof activeTeamName === 'string' && activeTeamName.trim().length > 0) {
+    scopedTeamNames.add(activeTeamName.trim());
+  }
+
+  for (const teamName of teamNames) {
+    const manifest = readJsonSafe<{ leader?: { session_id?: unknown } }>(
+      join(teamRoot, teamName, 'manifest.json'),
+    );
+    if (manifest?.leader?.session_id === sessionId) {
+      scopedTeamNames.add(teamName);
+    }
+  }
+
+  return teamNames.filter((teamName) => scopedTeamNames.has(teamName));
+}
+
 function collectRuntimeInsight(directory: string, sessionId?: string): RuntimeInsightSnapshot {
-  const omcRoot = getOmcRoot(directory);
-  const teamRoot = join(omcRoot, 'state', 'team');
   const missingDependencyIssues: MissingDependencyIssue[] = [];
   const workerIssues: WorkerIssue[] = [];
 
-  if (existsSync(teamRoot)) {
-    for (const teamName of readdirSync(teamRoot)) {
-      const teamDir = join(teamRoot, teamName);
-      const tasksDir = join(teamDir, 'tasks');
-      const workersDir = join(teamDir, 'workers');
+  const teamRoot = join(getOmcRoot(directory), 'state', 'team');
+  for (const teamName of getTeamNamesForRuntimeInsight(directory, sessionId)) {
+    const teamDir = join(teamRoot, teamName);
+    const tasksDir = join(teamDir, 'tasks');
+    const workersDir = join(teamDir, 'workers');
 
-      const tasks: TeamTask[] = existsSync(tasksDir)
-        ? readdirSync(tasksDir)
-            .filter((entry) => entry.endsWith('.json'))
-            .map((entry) => readJsonSafe<TeamTask>(join(tasksDir, entry)))
-            .filter((task): task is TeamTask => Boolean(task))
-        : [];
+    const tasks: TeamTask[] = existsSync(tasksDir)
+      ? readdirSync(tasksDir)
+          .filter((entry) => entry.endsWith('.json'))
+          .map((entry) => readJsonSafe<TeamTask>(join(tasksDir, entry)))
+          .filter((task): task is TeamTask => Boolean(task))
+      : [];
 
-      const taskById = new Map(tasks.map((task) => [task.id, task] as const));
-      for (const task of tasks) {
-        const missingDependencyIds = getTaskDependencyIds(task)
-          .filter((dependencyId) => !taskById.has(dependencyId));
-        if (missingDependencyIds.length > 0) {
-          missingDependencyIssues.push({
-            teamName,
-            taskId: task.id,
-            missingDependencyIds,
-          });
-        }
+    const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+    for (const task of tasks) {
+      const missingDependencyIds = getTaskDependencyIds(task)
+        .filter((dependencyId) => !taskById.has(dependencyId));
+      if (missingDependencyIds.length > 0) {
+        missingDependencyIssues.push({
+          teamName,
+          taskId: task.id,
+          missingDependencyIds,
+        });
       }
+    }
 
-      if (existsSync(workersDir)) {
-        for (const workerName of readdirSync(workersDir)) {
-          const status = readJsonSafe<WorkerStatus>(join(workersDir, workerName, 'status.json'));
-          if (!status || typeof status.reason !== 'string' || status.reason.trim().length === 0) {
-            continue;
-          }
-          if (status.state !== 'blocked' && status.state !== 'failed') {
-            continue;
-          }
-          workerIssues.push({
-            teamName,
-            workerName,
-            state: status.state,
-            reason: status.reason.trim(),
-          });
+    if (existsSync(workersDir)) {
+      for (const workerName of readdirSync(workersDir)) {
+        const status = readJsonSafe<WorkerStatus>(join(workersDir, workerName, 'status.json'));
+        if (!status || typeof status.reason !== 'string' || status.reason.trim().length === 0) {
+          continue;
         }
+        if (status.state !== 'blocked' && status.state !== 'failed') {
+          continue;
+        }
+        workerIssues.push({
+          teamName,
+          workerName,
+          state: status.state,
+          reason: status.reason.trim(),
+        });
       }
     }
   }
