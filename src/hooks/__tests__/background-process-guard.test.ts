@@ -101,6 +101,7 @@ describe('Background Process Guard (issue #302)', () => {
         'test task',
         'executor',
         resolvedDirectory,
+        'test-session',
       );
     });
 
@@ -165,6 +166,7 @@ describe('Background Process Guard (issue #302)', () => {
         'test task',
         'executor',
         resolvedDirectory,
+        'test-session',
       );
     });
 
@@ -190,6 +192,7 @@ describe('Background Process Guard (issue #302)', () => {
         'inspect code',
         'explore',
         resolvedDirectory,
+        'test-session',
       );
     });
 
@@ -274,6 +277,7 @@ describe('Background Process Guard (issue #302)', () => {
         'background executor task',
         'executor',
         resolvedDirectory,
+        'test-session',
       );
     });
 
@@ -296,6 +300,7 @@ describe('Background Process Guard (issue #302)', () => {
         'foreground task',
         'executor',
         resolvedDirectory,
+        'test-session',
       );
     });
 
@@ -318,6 +323,7 @@ describe('Background Process Guard (issue #302)', () => {
         'tool-use-bg-2',
         'a8de3dd',
         resolvedDirectory,
+        'test-session',
       );
       expect(mockedCompleteBackgroundTask).not.toHaveBeenCalled();
       expect(mockedRemapMostRecentMatchingBackgroundTaskId).not.toHaveBeenCalled();
@@ -342,6 +348,7 @@ describe('Background Process Guard (issue #302)', () => {
         'tool-use-bg-3',
         resolvedDirectory,
         true,
+        'test-session',
       );
     });
 
@@ -359,6 +366,7 @@ describe('Background Process Guard (issue #302)', () => {
         'a8de3dd',
         resolvedDirectory,
         false,
+        'test-session',
       );
     });
 
@@ -376,6 +384,7 @@ describe('Background Process Guard (issue #302)', () => {
         'a8de3dd',
         resolvedDirectory,
         true,
+        'test-session',
       );
     });
 
@@ -398,6 +407,7 @@ describe('Background Process Guard (issue #302)', () => {
         resolvedDirectory,
         false,
         'executor',
+        'test-session',
       );
     });
   });
