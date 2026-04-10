@@ -185,14 +185,15 @@ function countDistinctModeReferences(text: string): number {
 function looksLikeReferenceContent(text: string): boolean {
   const hasReferenceMeta = REFERENCE_META_PATTERNS.some((pattern) => pattern.test(text));
   const hasExplanationShape = REFERENCE_EXPLANATION_PATTERNS.some((pattern) => pattern.test(text));
+  const hasAnyModeMention = countDistinctModeReferences(text) >= 1;
   const hasMultipleModeMentions = countDistinctModeReferences(text) >= 2;
   const hasQuestionOutsideQuotes = QUESTION_FOLLOWUP_PATTERNS.some((pattern) =>
     pattern.test(stripQuotedSpans(text)),
   );
 
   return (
-    (hasReferenceMeta && (hasExplanationShape || hasMultipleModeMentions || hasQuestionOutsideQuotes)) ||
-    (hasExplanationShape && hasMultipleModeMentions) ||
+    (hasReferenceMeta && (hasExplanationShape || hasAnyModeMention || hasQuestionOutsideQuotes)) ||
+    (hasExplanationShape && (hasMultipleModeMentions || hasQuestionOutsideQuotes)) ||
     (hasMultipleModeMentions && hasQuestionOutsideQuotes)
   );
 }

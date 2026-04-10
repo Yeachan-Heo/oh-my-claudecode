@@ -337,6 +337,37 @@ Read src/hooks/bridge.ts first.`,
       }
     });
 
+    it('does not activate ultrawork state for explanatory reference follow-up prose', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-reference-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const sessionId = 'keyword-reference-session';
+
+        const keywordResult = await processHook('keyword-detector', {
+          sessionId,
+          prompt: 'OMC Ultrawork = "special ops". how much would it cost?',
+          directory: tempDir,
+        });
+
+        expect(keywordResult.continue).toBe(true);
+        expect(keywordResult.message).toBeUndefined();
+
+        const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+        expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+
+        const stopResult = await processHook('persistent-mode', {
+          sessionId,
+          directory: tempDir,
+          stop_reason: 'end_turn',
+        } as HookInput);
+
+        expect(stopResult.continue).toBe(true);
+        expect(stopResult.message).toBeUndefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should activate ralph and linked ultrawork when Skill tool invokes ralph', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralph-'));
       try {

@@ -426,6 +426,18 @@ OMC Ultrawork = "특수부대 작전 반"
         expect(result).toEqual([]);
       });
 
+      it('should NOT detect single-mode explanatory definitions followed by an unrelated question', () => {
+        const result = detectKeywordsWithType('OMC Ultrawork = "special ops". how much would it cost?');
+        expect(result).toEqual([]);
+      });
+
+      it('should still detect explicit activation after a single-mode explanatory definition', () => {
+        const result = detectKeywordsWithType(
+          'OMC Ultrawork = "special ops". then use ultrawork on issue #2474 in src/hooks/keyword-detector/index.ts',
+        );
+        expect(result.find((r) => r.type === 'ultrawork')).toBeDefined();
+      });
+
       it('should still detect explicit activation after comparison text', () => {
         const result = detectKeywordsWithType(
           'Compare DeerFlow vs ultrawork, then use ultrawork on issue #2474 in src/hooks/keyword-detector/index.ts',

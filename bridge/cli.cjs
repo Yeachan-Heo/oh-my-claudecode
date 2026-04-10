@@ -74573,11 +74573,12 @@ function countDistinctModeReferences(text) {
 function looksLikeReferenceContent(text) {
   const hasReferenceMeta = REFERENCE_META_PATTERNS.some((pattern) => pattern.test(text));
   const hasExplanationShape = REFERENCE_EXPLANATION_PATTERNS.some((pattern) => pattern.test(text));
+  const hasAnyModeMention = countDistinctModeReferences(text) >= 1;
   const hasMultipleModeMentions = countDistinctModeReferences(text) >= 2;
   const hasQuestionOutsideQuotes = QUESTION_FOLLOWUP_PATTERNS.some(
     (pattern) => pattern.test(stripQuotedSpans(text))
   );
-  return hasReferenceMeta && (hasExplanationShape || hasMultipleModeMentions || hasQuestionOutsideQuotes) || hasExplanationShape && hasMultipleModeMentions || hasMultipleModeMentions && hasQuestionOutsideQuotes;
+  return hasReferenceMeta && (hasExplanationShape || hasAnyModeMention || hasQuestionOutsideQuotes) || hasExplanationShape && (hasMultipleModeMentions || hasQuestionOutsideQuotes) || hasMultipleModeMentions && hasQuestionOutsideQuotes;
 }
 function hasActivationIntentNearKeyword(context, keyword) {
   const escaped = escapeRegExp2(keyword.trim());

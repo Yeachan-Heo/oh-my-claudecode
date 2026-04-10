@@ -270,6 +270,32 @@ Read src/hooks/bridge.ts first.`,
                 rmSync(tempDir, { recursive: true, force: true });
             }
         });
+        it('does not activate ultrawork state for explanatory reference follow-up prose', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-reference-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-reference-session';
+                const keywordResult = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: 'OMC Ultrawork = "special ops". how much would it cost?',
+                    directory: tempDir,
+                });
+                expect(keywordResult.continue).toBe(true);
+                expect(keywordResult.message).toBeUndefined();
+                const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+                expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+                const stopResult = await processHook('persistent-mode', {
+                    sessionId,
+                    directory: tempDir,
+                    stop_reason: 'end_turn',
+                });
+                expect(stopResult.continue).toBe(true);
+                expect(stopResult.message).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
         it('should activate ralph and linked ultrawork when Skill tool invokes ralph', async () => {
             const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralph-'));
             try {
@@ -879,6 +905,45 @@ Read src/hooks/bridge.ts first.`,
             const result = await processHook('autopilot', input);
             expect(result.continue).toBe(true);
             spy.mockRestore();
+        });
+        it('surfaces blocker details in autopilot hook output', async () => {
+            const testDir = process.cwd();
+            try {
+                const sessionId = 'autopilot-blockers-session';
+                const sessionDir = join(testDir, '.omc', 'state', 'sessions', sessionId);
+                const teamRoot = join(testDir, '.omc', 'state', 'team', 'bridge-autopilot-demo-team');
+                mkdirSync(sessionDir, { recursive: true });
+                mkdirSync(join(teamRoot, 'tasks'), { recursive: true });
+                writeFileSync(join(sessionDir, 'autopilot-state.json'), JSON.stringify({
+                    active: true,
+                    phase: 'planning',
+                    session_id: sessionId,
+                    originalIdea: 'demo task',
+                    expansion: { spec_path: null },
+                    planning: { plan_path: null },
+                }, null, 2));
+                writeFileSync(join(teamRoot, 'tasks', '1.json'), JSON.stringify({
+                    id: '1',
+                    subject: 'Blocked task',
+                    description: 'Depends on missing task 13',
+                    status: 'pending',
+                    owner: 'worker-1',
+                    blocked_by: ['13'],
+                    depends_on: ['13'],
+                    created_at: new Date().toISOString(),
+                }, null, 2));
+                const result = await processHook('autopilot', {
+                    sessionId,
+                    directory: testDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[AUTOPILOT - Phase: PLANNING]');
+                expect(result.message).toContain('[bridge-autopilot-demo-team] task-1 depends on missing task ids [13]');
+            }
+            finally {
+                rmSync(join(testDir, '.omc', 'state', 'sessions', 'autopilot-blockers-session'), { recursive: true, force: true });
+                rmSync(join(testDir, '.omc', 'state', 'team', 'bridge-autopilot-demo-team'), { recursive: true, force: true });
+            }
         });
     });
     // --------------------------------------------------------------------------
