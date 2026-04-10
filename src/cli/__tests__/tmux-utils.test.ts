@@ -64,6 +64,13 @@ describe('resolveLaunchPolicy', () => {
     expect(resolveLaunchPolicy({ CMUX_SURFACE_ID: 'C0D4B400-6C27-4957-BD01-32735B2251CD' })).toBe('direct');
   });
 
+  it('keeps inside-tmux authoritative even when tmux availability probing fails', () => {
+    mockedExecFileSync.mockImplementation(() => {
+      throw new Error('tmux not found');
+    });
+    expect(resolveLaunchPolicy({ TMUX: '/tmp/tmux-501/default,1234,0' })).toBe('inside-tmux');
+  });
+
   it('prefers inside-tmux over cmux when both TMUX and CMUX_SURFACE_ID are set', () => {
     mockedExecFileSync.mockReturnValue('tmux 3.6a' as any);
     expect(resolveLaunchPolicy({
