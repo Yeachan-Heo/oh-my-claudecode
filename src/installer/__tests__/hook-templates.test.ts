@@ -157,6 +157,13 @@ describe('keyword-detector packaged artifacts', () => {
       "there's an issue with ultrawork",
       'autopilot has a bug in this repo',
       'ralph-loop이 자꾸 재실행되는 문제가 있어. 점검해줘',
+      `🦌 DeerFlow vs ⚡ OMC Ultrawork - 완전 비교!
+...
+OMC Ultrawork = "특수부대 작전 반"
+...
+결론: "순식간에 많은 작업" → OMC Ultrawork ⚡
+이런대화가 한번이라면 몇번할수있을까 오픈라우터 20달러 결제기준 api로`,
+      'The article said "OMC Ultrawork", but why is the answer the same?',
     ]) {
       expect(runKeywordHook(templatePath, prompt)).toEqual({ continue: true, suppressOutput: true });
       expect(runKeywordHook(pluginPath, prompt)).toEqual({ continue: true, suppressOutput: true });

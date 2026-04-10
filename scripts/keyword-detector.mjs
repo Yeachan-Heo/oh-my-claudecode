@@ -157,6 +157,10 @@ function sanitizeForKeywordDetection(text) {
     .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
     // 3. Strip URLs: http://... or https://... up to whitespace
     .replace(/https?:\/\/[^\s)>\]]+/g, '')
+    // 3.5 Strip block quotes and markdown table rows - these are usually reference content
+    .replace(/^\s*>\s.*$/gm, '')
+    .replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '')
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '')
     // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it)
     // The TypeScript version (index.ts) uses capture group + $1 replacement for broader compat
     .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '')
@@ -173,9 +177,74 @@ const INFORMATIONAL_INTENT_PATTERNS = [
   /(?:什么是|什麼是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
+const QUOTED_SPAN_PATTERN =
+  /"[^"\n]{1,400}"|'[^'\n]{1,400}'|“[^”\n]{1,400}”|‘[^’\n]{1,400}’/g;
+const REFERENCE_META_PATTERNS = [
+  /\b(?:vs\.?|versus|compared\s+to|comparison|compare|article|blog\s+post|documentation|docs?|reference)\b/i,
+  /(?:비교|차이|설명|정리|문서|자료|가이드|이\s*(?:글|비교|문서)는|블로그)/u,
+  /\b(?:this\s+(?:article|comparison|guide|documentation|doc)|quoted|quote(?:d)?)\b/i,
+];
+const REFERENCE_EXPLANATION_PATTERNS = [
+  /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
+  /\b(?:summary|conclusion|key\s+points?|example|examples|pros|cons|overview)\s*:/i,
+  /[^\n]{1,80}=\s*["“]/,
+  /[→⇒]/,
+];
+const QUESTION_FOLLOWUP_PATTERNS = [
+  /\b(?:how\s+many|how\s+much|why|what\s+happened|what\s+went\s+wrong|token\s+budget|cost|pricing)\b/i,
+  /(?:왜|얼마|몇\s*번|몇번|토큰|가격|비용|질문)/u,
+];
+const MODE_REFERENCE_PATTERN =
+  /\b(?:ralph|autopilot|auto[\s-]?pilot|ultrawork|ulw|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|ccg|claude-codex-gemini|deerflow)\b/gi;
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getLineBounds(text, position) {
+  const start = text.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+  const nextNewline = text.indexOf('\n', position);
+  const end = nextNewline === -1 ? text.length : nextNewline;
+  return { start, end };
+}
+
+function isWithinQuotedSpan(text, position) {
+  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
+    if (match.index === undefined) continue;
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position >= start && position < end) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function stripQuotedSpans(text) {
+  return text.replace(QUOTED_SPAN_PATTERN, ' ');
+}
+
+function countDistinctModeReferences(text) {
+  const matches = text.match(MODE_REFERENCE_PATTERN) ?? [];
+  const normalized = new Set(
+    matches.map((match) => match.toLowerCase().replace(/\s+/g, '').replace(/-/g, '')),
+  );
+  return normalized.size;
+}
+
+function looksLikeReferenceContent(text) {
+  const hasReferenceMeta = REFERENCE_META_PATTERNS.some((pattern) => pattern.test(text));
+  const hasExplanationShape = REFERENCE_EXPLANATION_PATTERNS.some((pattern) => pattern.test(text));
+  const hasMultipleModeMentions = countDistinctModeReferences(text) >= 2;
+  const hasQuestionOutsideQuotes = QUESTION_FOLLOWUP_PATTERNS.some((pattern) =>
+    pattern.test(stripQuotedSpans(text)),
+  );
+
+  return (
+    (hasReferenceMeta && (hasExplanationShape || hasMultipleModeMentions || hasQuestionOutsideQuotes)) ||
+    (hasExplanationShape && hasMultipleModeMentions) ||
+    (hasMultipleModeMentions && hasQuestionOutsideQuotes)
+  );
 }
 
 function hasActivationIntentNearKeyword(context, keyword) {
@@ -208,6 +277,10 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
   const context = text.slice(start, end);
+  const lineBounds = getLineBounds(text, position);
+  const line = text.slice(lineBounds.start, lineBounds.end);
+  const questionOutsideQuotes = stripQuotedSpans(text);
+  const keywordInsideQuotes = isWithinQuotedSpan(text, position);
 
   if (keywordText) {
     if (hasActivationIntentNearKeyword(context, keywordText)) {
@@ -216,6 +289,18 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
     if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
       return true;
     }
+  }
+
+  if (/^\s*>\s/.test(line) || /^\s*\|(?:[^|\n]*\|){2,}\s*$/.test(line)) {
+    return true;
+  }
+
+  if (keywordInsideQuotes && QUESTION_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(questionOutsideQuotes))) {
+    return true;
+  }
+
+  if (looksLikeReferenceContent(text)) {
+    return true;
   }
 
   return INFORMATIONAL_INTENT_PATTERNS.some((pattern) => pattern.test(context));

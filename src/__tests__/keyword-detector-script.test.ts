@@ -87,4 +87,27 @@ This article argues that fake popularity signals damage trust in open source.`);
     expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
     expect(context).toBe('');
   });
+
+  it('does not activate ultrawork for issue #2474 explanatory comparison text', () => {
+    const output = runKeywordDetector(`🦌 DeerFlow vs ⚡ OMC Ultrawork - 완전 비교!
+...
+OMC Ultrawork = "특수부대 작전 반"
+...
+결론: "순식간에 많은 작업" → OMC Ultrawork ⚡
+이런대화가 한번이라면 몇번할수있을까 오픈라우터 20달러 결제기준 api로`);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(context).toBe('');
+  });
+
+  it('does not re-trigger on quoted follow-up references to ultrawork', () => {
+    const output = runKeywordDetector('The article said "OMC Ultrawork", but why is the answer the same?');
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(context).toBe('');
+  });
 });
