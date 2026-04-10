@@ -74584,11 +74584,8 @@ function hasActivationIntentNearKeyword(context, keyword) {
   const escaped = escapeRegExp2(keyword.trim());
   if (!escaped) return false;
   const helpQuestionPatterns = [
-    new RegExp(`\bhows+dos+is+use\b[^
-]{0,40}\b${escaped}\b`, "i"),
-    new RegExp(`\bwhat(?:'s|s+is)\b[^
-]{0,40}\b${escaped}\b[^
-]{0,40}\bhows+tos+use\b`, "i")
+    new RegExp(`\\bhow\\s+do\\s+i\\s+use\\b[^\\n]{0,40}\\b${escaped}\\b`, "i"),
+    new RegExp(`\\bwhat(?:'s|\\s+is)\\b[^\\n]{0,40}\\b${escaped}\\b[^\\n]{0,40}\\bhow\\s+to\\s+use\\b`, "i")
   ];
   if (helpQuestionPatterns.some((pattern) => pattern.test(context))) {
     return false;

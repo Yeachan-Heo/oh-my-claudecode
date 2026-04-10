@@ -205,8 +205,8 @@ function hasActivationIntentNearKeyword(context: string, keyword: string): boole
   // Help-question phrasing like "How do I use autopilot?" should not be
   // treated as activation intent.
   const helpQuestionPatterns = [
-    new RegExp(`\bhow\s+do\s+i\s+use\b[^\n]{0,40}\b${escaped}\b`, 'i'),
-    new RegExp(`\bwhat(?:'s|\s+is)\b[^\n]{0,40}\b${escaped}\b[^\n]{0,40}\bhow\s+to\s+use\b`, 'i'),
+    new RegExp(`\\bhow\\s+do\\s+i\\s+use\\b[^\\n]{0,40}\\b${escaped}\\b`, 'i'),
+    new RegExp(`\\bwhat(?:'s|\\s+is)\\b[^\\n]{0,40}\\b${escaped}\\b[^\\n]{0,40}\\bhow\\s+to\\s+use\\b`, 'i'),
   ];
   if (helpQuestionPatterns.some((pattern) => pattern.test(context))) {
     return false;
