@@ -90,6 +90,21 @@ All TypeScript and bundling steps are handled. The output goes to `dist/` and `b
 
 Once built, you need to tell Claude Code to use your local checkout. Here are three flows:
 
+### Bootstrap: make the `omc` command available
+
+All three flows below use the `omc` CLI. If you don't have it installed globally (via `npm i -g oh-my-claude-sisyphus`), create a symlink from your checkout:
+
+```bash
+# Create ~/.local/bin if it doesn't exist
+mkdir -p ~/.local/bin
+
+# Symlink omc to the checkout's bridge entry point
+ln -sf "$PWD/bridge/cli.cjs" ~/.local/bin/omc
+
+# Verify (you may need ~/.local/bin on your PATH)
+omc --version
+```
+
 ### Flow A: `omc --plugin-dir` + `omc setup --plugin-dir-mode` (recommended — lowest friction)
 
 **Advantages**: Single command, automatic env var handling, matches the OMC philosophy.
@@ -100,6 +115,16 @@ omc --plugin-dir "$PWD" setup --plugin-dir-mode
 ```
 
 Then launch Claude Code normally — it will use your local checkout.
+
+**Disable the `.mcp.json` server conflict**: The repo ships `.mcp.json` with an MCP server named `"t"` (the OMC bridge). When using `--plugin-dir`, the plugin also registers its own `"t"` server, causing a name collision. To resolve this, add to your `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`):
+
+```json
+{
+  "disabledMcpjsonServers": ["t"]
+}
+```
+
+This tells Claude Code to ignore the repo's `.mcp.json` entry and use the plugin's version instead.
 
 **Inside Claude Code**:
 ```bash
