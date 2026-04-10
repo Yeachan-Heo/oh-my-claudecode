@@ -112,6 +112,50 @@ describe('HUD marketplace resolution', () => {
     expect(readFileSync(sentinelPath, 'utf-8')).toBe('marketplace-loaded');
   });
 
+  it('omc-hud.mjs surfaces dynamic import errors from OMC_PLUGIN_ROOT HUD paths', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-import-error-'));
+    tempDirs.push(configDir);
+
+    const fakeHome = join(configDir, 'home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+      },
+      stdio: 'pipe',
+    });
+
+    const pluginRoot = join(configDir, 'broken-plugin-root');
+    const pluginHudDir = join(pluginRoot, 'dist', 'hud');
+    mkdirSync(pluginHudDir, { recursive: true });
+    writeFileSync(join(pluginRoot, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(
+      join(pluginHudDir, 'index.js'),
+      "import '../platform/index.js';\n",
+    );
+
+    const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+    const output = execFileSync(process.execPath, [hudScriptPath], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: configDir,
+        HOME: fakeHome,
+        OMC_PLUGIN_ROOT: pluginRoot,
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const normalized = output.replace(/\\/g, '/');
+    expect(normalized).toContain('[OMC HUD] HUD import failed from');
+    expect(normalized).toContain('/broken-plugin-root/dist/hud/index.js');
+  });
+
   it('omc-hud.mjs loads a global npm install outside a Node project via npm prefix resolution', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-global-prefix-'));
     tempDirs.push(configDir);

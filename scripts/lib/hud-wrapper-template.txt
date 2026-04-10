@@ -89,6 +89,7 @@ async function main() {
   let pluginCacheVersion = null;
   let pluginCacheDir = null;
   let lastHudLoadError = null;
+  let lastHudLoadTarget = null;
 
   // 1. OMC_PLUGIN_ROOT — highest priority (set by `omc --plugin-dir <path>`)
   try {
@@ -96,8 +97,13 @@ async function main() {
     if (pluginRootEnv && pluginRootEnv.trim().length > 0) {
       const envHudPath = join(pluginRootEnv, "dist/hud/index.js");
       if (existsSync(envHudPath)) {
-        await import(pathToFileURL(envHudPath).href);
-        return;
+        try {
+          await import(pathToFileURL(envHudPath).href);
+          return;
+        } catch (error) {
+          lastHudLoadError = error;
+          lastHudLoadTarget = envHudPath;
+        }
       }
     }
   } catch { /* fall through to next resolution step */ }
@@ -172,6 +178,7 @@ async function main() {
               return;
             } catch (error) {
               lastHudLoadError = error;
+              lastHudLoadTarget = pluginPath;
               // continue trying older built versions
             }
           }
@@ -188,6 +195,7 @@ async function main() {
       return;
     } catch (error) {
       lastHudLoadError = error;
+      lastHudLoadTarget = marketplaceHudPath;
       /* continue */
     }
   }
@@ -204,6 +212,14 @@ async function main() {
   }
 
   // 5. Fallback: provide detailed error message with fix instructions
+  if (lastHudLoadError) {
+    const detail = typeof lastHudLoadError?.message === "string"
+      ? lastHudLoadError.message
+      : String(lastHudLoadError);
+    const targetDetail = lastHudLoadTarget ? ` from ${lastHudLoadTarget}` : "";
+    console.log(`[OMC HUD] HUD import failed${targetDetail}: ${detail}`);
+  }
+
   if (pluginCacheDir && existsSync(pluginCacheDir)) {
     const distDir = join(pluginCacheDir, "dist");
     if (!existsSync(distDir)) {
