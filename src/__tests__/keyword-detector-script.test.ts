@@ -110,4 +110,13 @@ OMC Ultrawork = "특수부대 작전 반"
     expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
     expect(context).toBe('');
   });
+
+  it('does not activate ultrawork for single-mode explanatory definitions followed by a budget question', () => {
+    const output = runKeywordDetector('OMC Ultrawork = "special ops". how much would it cost?');
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(context).toBe('');
+  });
 });
