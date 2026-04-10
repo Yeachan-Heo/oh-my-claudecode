@@ -1018,6 +1018,30 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.continue).toBe(true);
     });
 
+    it.each([
+      [{ current_phase: "aborted" }, "ralplan-aborted-cjs"],
+      [{ phase: "terminated" }, "ralplan-terminated-phase-cjs"],
+      [{ status: "handoff:ralph" }, "ralplan-handoff-status-cjs"],
+    ])("allows stop for terminal ralplan state in cjs script: %s", (overrides, sessionId) => {
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ralplan-state.json"),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          ...overrides,
+        })
+      );
+
+      const output = runScript({
+        directory: tempDir,
+        sessionId,
+      });
+      expect(output.continue).toBe(true);
+    });
+
     it("deactivates ultrawork state when max reinforcements reached", () => {
       const sessionId = "ulw-max-reinforce-cjs";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);

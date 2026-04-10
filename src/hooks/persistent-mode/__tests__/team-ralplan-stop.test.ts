@@ -609,6 +609,45 @@ describe('ralplan standalone stop enforcement', () => {
     }
   });
 
+  it.each([
+    ['aborted'],
+    ['terminated'],
+    ['canceled'],
+    ['handoff'],
+  ])('allows stop when ralplan current_phase is %s', async (phase) => {
+    const sessionId = `session-ralplan-terminal-${phase}`;
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, { current_phase: phase });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [{ current_phase: undefined, phase: 'aborted' }, 'aborted'],
+    [{ current_phase: undefined, status: 'terminated' }, 'terminated'],
+    [{ current_phase: undefined, phase: 'handoff:ralph' }, 'handoff:ralph'],
+  ])('allows stop when ralplan terminal state is written via aliases: %s', async (overrides, _label) => {
+    const sessionId = 'session-ralplan-terminal-alias';
+    const tempDir = makeTempProject();
+
+    try {
+      writeRalplanState(tempDir, sessionId, overrides);
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe('ralplan');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns mode=ralplan on circuit breaker path', async () => {
     const sessionId = 'session-ralplan-breaker-mode';
     const tempDir = makeTempProject();

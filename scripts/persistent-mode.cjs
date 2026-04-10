@@ -157,6 +157,17 @@ const TEAM_TERMINAL_PHASES = new Set([
   "terminated",
   "done",
 ]);
+const RALPLAN_TERMINAL_PHASES = new Set([
+  "completed",
+  "complete",
+  "failed",
+  "cancelled",
+  "canceled",
+  "aborted",
+  "terminated",
+  "done",
+  "handoff",
+]);
 const TEAM_ACTIVE_PHASES = new Set([
   "team-plan",
   "team-prd",
@@ -200,6 +211,22 @@ function normalizeTeamPhase(state) {
   const phase = rawPhase.trim().toLowerCase();
   if (!phase || TEAM_TERMINAL_PHASES.has(phase)) return null;
   return TEAM_ACTIVE_PHASES.has(phase) ? phase : null;
+}
+
+function normalizeRalplanPhase(state) {
+  if (!state || typeof state !== "object") return null;
+
+  const rawPhase = state.current_phase ?? state.phase ?? state.status;
+  if (typeof rawPhase !== "string") return null;
+
+  const phase = rawPhase.trim().toLowerCase();
+  if (!phase) return null;
+
+  if (phase === "handoff" || phase.startsWith("handoff:") || phase.startsWith("handoff-")) {
+    return "handoff";
+  }
+
+  return phase;
 }
 
 function getSafeReinforcementCount(value) {
@@ -832,14 +859,10 @@ async function main() {
     // Priority 2.6: Ralplan (standalone consensus planning — first-class enforcement)
     if (ralplan.state?.active && !isAwaitingConfirmation(ralplan.state) && !isStaleState(ralplan.state) && isSessionMatch(ralplan.state, sessionId)) {
       // Terminal phase detection
-      const currentPhase = ralplan.state.current_phase;
-      let ralplanTerminal = false;
-      if (typeof currentPhase === "string") {
-        const terminal = ["complete", "completed", "failed", "cancelled", "canceled", "done"];
-        if (terminal.includes(currentPhase.toLowerCase())) {
-          writeStopBreaker(stateDir, "ralplan", 0, sessionId);
-          ralplanTerminal = true;
-        }
+      const currentPhase = normalizeRalplanPhase(ralplan.state);
+      const ralplanTerminal = currentPhase ? RALPLAN_TERMINAL_PHASES.has(currentPhase) : false;
+      if (ralplanTerminal) {
+        writeStopBreaker(stateDir, "ralplan", 0, sessionId);
       }
 
       if (!ralplanTerminal && !cancelInProgress) {

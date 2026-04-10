@@ -316,6 +316,17 @@ export function recordIdleNotificationSent(stateDir: string, sessionId?: string)
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
 const CRITICAL_CONTEXT_STOP_PERCENT = 95;
+const RALPLAN_TERMINAL_PHASES = new Set([
+  'completed',
+  'complete',
+  'failed',
+  'cancelled',
+  'canceled',
+  'aborted',
+  'terminated',
+  'done',
+  'handoff',
+]);
 
 /**
  * Read the tail of a potentially large transcript file.
@@ -930,12 +941,37 @@ const RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS = 5_000;
 interface RalplanState {
   active: boolean;
   session_id?: string;
+  current_phase?: string;
+  phase?: string;
+  status?: string;
+}
+
+function getNormalizedRalplanPhase(state: Record<string, unknown> | null | undefined): string | null {
+  if (!state || typeof state !== 'object') {
+    return null;
+  }
+
+  const rawPhase = state.current_phase ?? state.phase ?? state.status;
+  if (typeof rawPhase !== 'string') {
+    return null;
+  }
+
+  const phase = rawPhase.trim().toLowerCase();
+  if (!phase) {
+    return null;
+  }
+
+  if (phase === 'handoff' || phase.startsWith('handoff:') || phase.startsWith('handoff-')) {
+    return 'handoff';
+  }
+
+  return phase;
 }
 
 /**
  * Check Ralplan state for standalone ralplan mode enforcement.
  * Ralplan state is written by the MCP state_write tool.
- * Only `active` and `session_id` are used for blocking decisions.
+ * `active`, `session_id`, and the normalized phase/status fields are used for blocking decisions.
  */
 async function checkRalplan(
   sessionId?: string,
@@ -959,13 +995,10 @@ async function checkRalplan(
   }
 
   // Terminal phase detection — allow stop when ralplan has completed
-  const currentPhase = (state as unknown as Record<string, unknown>).current_phase;
-  if (typeof currentPhase === 'string') {
-    const terminal = ['complete', 'completed', 'failed', 'cancelled', 'done'];
-    if (terminal.includes(currentPhase.toLowerCase())) {
-      writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
-      return { shouldBlock: false, message: '', mode: 'ralplan' };
-    }
+  const currentPhase = getNormalizedRalplanPhase(state as unknown as Record<string, unknown>);
+  if (currentPhase && RALPLAN_TERMINAL_PHASES.has(currentPhase)) {
+    writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
+    return { shouldBlock: false, message: '', mode: 'ralplan' };
   }
 
 
