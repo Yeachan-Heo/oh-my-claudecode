@@ -701,7 +701,7 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
  *
  * Returns the list of absolute paths that were removed.
  */
-function prunePluginDuplicateHooks(log: (msg: string) => void): string[] {
+export function prunePluginDuplicateHooks(log: (msg: string) => void): string[] {
   const removed: string[] = [];
   if (!existsSync(HOOKS_DIR)) return removed;
 
@@ -761,6 +761,94 @@ function prunePluginDuplicateHooks(log: (msg: string) => void): string[] {
   } catch { /* ignore */ }
 
   return removed;
+}
+
+/**
+ * When a Claude Code plugin is active (marketplace OR --plugin-dir-mode),
+ * the plugin delivers agents/skills/hooks at runtime from its own root,
+ * so any standalone copies under $CONFIG_DIR/ are redundant and can cause
+ * duplicate loading / duplicate hook invocations.
+ *
+ * This helper runs the three prune helpers when their corresponding
+ * plugin-provided-files check returns true, and strips OMC-owned hook
+ * entries from settings.json when the plugin provides hooks.json.
+ *
+ * Safe to call multiple times — every prune helper is idempotent and
+ * gated on ownership checks (plugin basename list for agents, sentinel
+ * file check for skills, OMC_HOOK_FILENAMES list for hooks).
+ *
+ * Returns a summary of what was pruned. Empty arrays when nothing
+ * needed cleanup.
+ */
+export function pruneStandaloneDuplicatesForPluginMode(
+  log: (msg: string) => void,
+  opts?: { configDir?: string },
+): {
+  prunedAgents: string[];
+  prunedSkills: string[];
+  prunedHooks: string[];
+  settingsStripped: boolean;
+} {
+  const result = {
+    prunedAgents: [] as string[],
+    prunedSkills: [] as string[],
+    prunedHooks: [] as string[],
+    settingsStripped: false,
+  };
+
+  if (hasPluginProvidedAgentFiles()) {
+    result.prunedAgents = prunePluginDuplicateAgents(log);
+  }
+
+  if (hasPluginProvidedSkillFiles()) {
+    result.prunedSkills = prunePluginDuplicateSkills(log);
+  }
+
+  if (hasPluginProvidedHookFiles()) {
+    result.prunedHooks = prunePluginDuplicateHooks(log);
+
+    // Strip OMC hook entries from settings.json so they don't duplicate
+    // the plugin's hooks.json delivery.
+    const settingsPath = opts?.configDir
+      ? join(opts.configDir, 'settings.json')
+      : SETTINGS_FILE;
+    if (existsSync(settingsPath)) {
+      try {
+        const raw = readFileSync(settingsPath, 'utf-8');
+        const settings = JSON.parse(raw) as Record<string, unknown>;
+        const existingHooks = settings.hooks as Record<string, HookGroup[]> | undefined;
+        if (existingHooks && typeof existingHooks === 'object') {
+          let changed = false;
+          const newHooks: Record<string, HookGroup[]> = {};
+          for (const [eventType, groups] of Object.entries(existingHooks)) {
+            if (!Array.isArray(groups)) continue;
+            const nonOmcGroups = groups.filter((group: HookGroup) =>
+              !group.hooks.every((h: HookEntry) =>
+                h.type === 'command' && isOmcHook(h.command)
+              )
+            );
+            if (nonOmcGroups.length !== groups.length) changed = true;
+            if (nonOmcGroups.length > 0) newHooks[eventType] = nonOmcGroups;
+          }
+          if (changed) {
+            const updated = { ...settings };
+            if (Object.keys(newHooks).length > 0) {
+              updated.hooks = newHooks;
+            } else {
+              delete updated.hooks;
+            }
+            writeFileSync(settingsPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf-8');
+            result.settingsStripped = true;
+            log(`Pruned OMC hook entries from ${settingsPath}`);
+          }
+        }
+      } catch (err) {
+        log(`Warning: could not strip OMC hooks from settings.json: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  return result;
 }
 
 function directoryHasMarkdownFiles(directory: string): boolean {
