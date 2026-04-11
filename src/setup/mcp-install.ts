@@ -28,6 +28,12 @@ import type { Prompter } from './prompts.js';
 export interface McpInstallResult {
   installed: string[];
   skippedDueToMissingCreds: string[];
+  /**
+   * Servers installed WITHOUT credentials under `install-without-auth`
+   * mode. They are visible in `claude mcp list` but will fail at runtime
+   * until credentials are added. A subset of `installed`.
+   */
+  installedWithoutAuth: string[];
   failed: Array<{ name: string; error: string }>;
 }
 
@@ -39,7 +45,16 @@ export type ExecFileFn = (
 
 export interface McpInstallOptions {
   interactive: boolean;
-  onMissingCredentials: 'skip' | 'error';
+  /**
+   * Policy when a credentialed MCP server has no credential available:
+   *   - 'skip'                : leave it out of config entirely.
+   *   - 'error'               : throw McpCredentialMissingError.
+   *   - 'install-without-auth': install the server WITHOUT the `-e` flag
+   *       so it's visible-but-broken in `claude mcp list`. For servers that
+   *       need no credentials (context7, filesystem), this is equivalent to
+   *       normal install.
+   */
+  onMissingCredentials: 'skip' | 'error' | 'install-without-auth';
   scope: 'local' | 'user' | 'project';
   prompter?: Prompter;
   execFile?: ExecFileFn;
@@ -73,6 +88,7 @@ export async function installMcpServers(
   const result: McpInstallResult = {
     installed: [],
     skippedDueToMissingCreds: [],
+    installedWithoutAuth: [],
     failed: [],
   };
 
@@ -99,7 +115,15 @@ export async function installMcpServers(
       }
       runClaudeMcpAdd(runExec, action.args, scope);
       result.installed.push(entryName);
-      log(`[mcp] installed ${entryName}`);
+      if (action.withoutAuth) {
+        result.installedWithoutAuth.push(entryName);
+        log(
+          `[mcp] installed ${entryName} WITHOUT credentials — visible in `
+          + '`claude mcp list` but will fail at runtime until credentials are configured',
+        );
+      } else {
+        log(`[mcp] installed ${entryName}`);
+      }
     } catch (err) {
       if (err instanceof McpCredentialMissingError) {
         throw err;
@@ -121,6 +145,12 @@ interface PlanInstall {
   kind: 'install';
   /** Args after `claude mcp add` and before the scope flag. */
   args: string[];
+  /**
+   * True when the plan was produced for `install-without-auth` mode on a
+   * credentialed server whose credential was missing. The `-e` flag is
+   * omitted so `claude mcp add` doesn't reject an empty env value.
+   */
+  withoutAuth?: boolean;
 }
 interface PlanSkip {
   kind: 'skip';
@@ -150,6 +180,19 @@ async function planInstall(
       opts,
     );
     if (!key) {
+      if (opts.onMissingCredentials === 'install-without-auth') {
+        return {
+          kind: 'install',
+          withoutAuth: true,
+          args: [
+            'exa',
+            '--',
+            'npx',
+            '-y',
+            'exa-mcp-server',
+          ],
+        };
+      }
       return { kind: 'skip', reason: 'EXA_API_KEY not provided' };
     }
     return {
@@ -221,21 +264,49 @@ async function planInstall(
         ],
       };
     }
+    if (opts.onMissingCredentials === 'install-without-auth') {
+      return {
+        kind: 'install',
+        withoutAuth: true,
+        args: [
+          'github',
+          '--',
+          'docker',
+          'run',
+          '-i',
+          '--rm',
+          '-e',
+          'GITHUB_PERSONAL_ACCESS_TOKEN',
+          'ghcr.io/github/github-mcp-server',
+        ],
+      };
+    }
     return { kind: 'skip', reason: 'GitHub token not provided' };
   }
 
   // Custom server spec
-  return planCustom(entry);
+  return planCustom(entry, opts);
 }
 
-function planCustom(entry: { name: string; spec: McpCustomSpec }): Plan {
+function planCustom(
+  entry: { name: string; spec: McpCustomSpec },
+  opts: McpInstallOptions,
+): Plan {
   const spec = entry.spec;
   const args: string[] = [];
+  let withoutAuth = false;
 
-  // Env vars. Reject empty values per blocker finding.
+  // Env vars. Reject empty values per blocker finding — UNLESS
+  // `install-without-auth` mode is active, in which case we omit the empty
+  // pair entirely so `claude mcp add` receives a valid argv and the server
+  // appears in `claude mcp list` but fails at runtime.
   if (spec.env) {
     for (const [k, v] of Object.entries(spec.env)) {
       if (v === undefined || v === null || v === '') {
+        if (opts.onMissingCredentials === 'install-without-auth') {
+          withoutAuth = true;
+          continue;
+        }
         return {
           kind: 'skip',
           reason: `env var ${k} is empty — refusing to pass -e ${k}= to claude mcp add`,
@@ -265,7 +336,7 @@ function planCustom(entry: { name: string; spec: McpCustomSpec }): Plan {
       return { kind: 'skip', reason: `custom HTTP server "${spec.name}" missing url` };
     }
     args.push(spec.url);
-    return { kind: 'install', args };
+    return { kind: 'install', args, withoutAuth };
   }
 
   // stdio (default)
@@ -274,7 +345,7 @@ function planCustom(entry: { name: string; spec: McpCustomSpec }): Plan {
     return { kind: 'skip', reason: `custom stdio server "${spec.name}" missing command` };
   }
   args.push('--', spec.command, ...(spec.args ?? []));
-  return { kind: 'install', args };
+  return { kind: 'install', args, withoutAuth };
 }
 
 // ---------------------------------------------------------------------------
