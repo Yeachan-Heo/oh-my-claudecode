@@ -232,12 +232,7 @@ cmd_review() {
             # Launch Claude Code with review context so it starts on the PR task
             if [[ "$no_claude" != "true" ]]; then
                 log_info "Launching Claude Code..."
-<<<<<<< HEAD
                 psm_launch_claude "$session_name" "$context_rel"
-=======
-                local review_prompt="Review PR #${pr_number}: \"${pr_title}\" by @${pr_author} (${head_branch} → ${base_branch}). URL: ${pr_url}. Read the diff, check for issues, and leave review comments via: gh pr review ${pr_number} --repo ${repo}"
-                psm_launch_claude "$session_name" "$review_prompt"
->>>>>>> 1ee0409d (fix(psm): launch trusted sessions with initial prompt)
             fi
         fi
     fi
@@ -398,12 +393,7 @@ cmd_fix() {
     psm_create_tmux_session "$session_name" "$worktree_path"
 
     if [[ "$no_claude" != "true" ]]; then
-<<<<<<< HEAD
         psm_launch_claude "$session_name" "$fix_context_rel"
-=======
-        local fix_prompt="Fix issue #${issue_number}: \"${issue_title}\". URL: ${issue_url}. Working branch: ${branch_name}. Implement the fix and open a PR when done: gh pr create --title \"fix: \" --body \"Fixes #${issue_number}\""
-        psm_launch_claude "$session_name" "$fix_prompt"
->>>>>>> 1ee0409d (fix(psm): launch trusted sessions with initial prompt)
     fi
 
     # Create metadata

@@ -57,18 +57,18 @@ describe('PSM launch trust fix (issue #2508)', () => {
     beforeAll(() => { source = readScript(PSM_SH); });
 
     it('cmd_review passes the rendered review context file to psm_launch_claude', () => {
-      expect(source).toMatch(/context_rel="\\.psm\/review\.md"/);
-      expect(source).toMatch(/psm_launch_claude "\$session_name" "\$context_rel"/);
+      expect(source).toContain('local context_rel=".psm/review.md"');
+      expect(source).toContain('psm_launch_claude "$session_name" "$context_rel"');
     });
 
     it('cmd_fix passes the rendered issue context file to psm_launch_claude', () => {
-      expect(source).toMatch(/fix_context_rel="\\.psm\/fix\.md"/);
-      expect(source).toMatch(/psm_launch_claude "\$session_name" "\$fix_context_rel"/);
+      expect(source).toContain('local fix_context_rel=".psm/fix.md"');
+      expect(source).toContain('psm_launch_claude "$session_name" "$fix_context_rel"');
     });
 
     it('cmd_feature still passes a literal feature prompt to psm_launch_claude', () => {
       expect(source).toMatch(/feature_prompt=.*feature_name/s);
-      expect(source).toMatch(/psm_launch_claude "\$session_name" "\$feature_prompt"/);
+      expect(source).toContain('psm_launch_claude "$session_name" "$feature_prompt"');
     });
 
     it('no command calls psm_launch_claude with only a session name (no task context)', () => {
