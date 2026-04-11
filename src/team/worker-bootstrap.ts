@@ -29,6 +29,15 @@ export function generateTriggerMessage(
   return `Read ${inboxPath}, start work now, report concrete progress (not ACK-only), and keep executing your assigned or next feasible work.`;
 }
 
+export function generatePromptModeStartupPrompt(
+  teamName: string,
+  workerName: string,
+  teamStateRoot = '.omc/state',
+): string {
+  const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
+  return `Open ${inboxPath}. Follow it and begin the assigned work.`;
+}
+
 export function generateMailboxTriggerMessage(
   teamName: string,
   workerName: string,

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
-import { generateMailboxTriggerMessage, generateTriggerMessage, generateWorkerOverlay, getWorkerEnv } from '../worker-bootstrap.js';
+import {
+  generateMailboxTriggerMessage,
+  generatePromptModeStartupPrompt,
+  generateTriggerMessage,
+  generateWorkerOverlay,
+  getWorkerEnv,
+} from '../worker-bootstrap.js';
 
 describe('worker-bootstrap', () => {
   const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
@@ -62,6 +68,15 @@ describe('worker-bootstrap', () => {
         .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/mailbox/worker-1.json');
       expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
         .toContain('report progress');
+    });
+
+    it('uses a short prompt-mode startup pointer instead of lifecycle/task text', () => {
+      const prompt = generatePromptModeStartupPrompt('test-team', 'worker-1');
+      expect(prompt).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+      expect(prompt).toContain('Open');
+      expect(prompt).not.toContain('claim-task');
+      expect(prompt).not.toContain('transition-task-status');
+      expect(prompt).not.toContain('blocked');
     });
 
     it('includes sentinel file write instruction first', () => {

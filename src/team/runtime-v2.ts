@@ -69,6 +69,7 @@ import {
   ensureWorkerStateDir,
   writeWorkerOverlay,
   generateTriggerMessage,
+  generatePromptModeStartupPrompt,
 } from './worker-bootstrap.js';
 import { queueInboxInstruction, type DispatchOutcome } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
@@ -425,6 +426,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     opts.teamName, opts.workerName, opts.task, opts.taskId,
   );
   const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName);
+  const promptModeStartupPrompt = generatePromptModeStartupPrompt(opts.teamName, opts.workerName);
   if (usePromptMode) {
     await composeInitialInbox(opts.teamName, opts.workerName, instruction, opts.cwd);
   }
@@ -464,9 +466,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     model: modelForAgent,
   });
 
-  // For prompt-mode agents (codex, gemini), pass instruction via CLI flag
+  // For prompt-mode agents (codex, gemini), keep the full instruction in
+  // inbox.md and pass only a short file-pointer prompt via CLI args. This
+  // avoids echoing reviewer/seed prompt text into tmux scrollback.
   if (usePromptMode) {
-    launchArgs.push(...getPromptModeArgs(opts.agentType, instruction));
+    launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
   }
 
   const paneConfig: WorkerPaneConfig = {
