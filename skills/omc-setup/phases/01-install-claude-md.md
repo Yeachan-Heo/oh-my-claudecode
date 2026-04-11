@@ -11,11 +11,11 @@ Otherwise (initial setup wizard), use AskUserQuestion to prompt:
 
 **Options:**
 1. **Local (this project)** - Creates `.claude/CLAUDE.md` in current project directory. Best for project-specific configurations.
-2. **Global (all projects)** - Creates `~/.claude/CLAUDE.md` for all Claude Code sessions. Best for consistent behavior everywhere.
+2. **Global (all projects)** - Creates `CONFIG_DIR/CLAUDE.md` for all Claude Code sessions. Best for consistent behavior everywhere.
 
 Set `CONFIG_TARGET` to `local` or `global` based on user's choice.
 
-If `CONFIG_TARGET=global` and `~/.claude/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
+If `CONFIG_TARGET=global` and `CONFIG_DIR/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
 
 **Question:** "Global setup will change your base Claude config. Which behavior do you want?"
 
@@ -71,8 +71,8 @@ Note: This configuration is project-specific and won't affect other projects or 
 If `CONFIG_TARGET` is `global`:
 ```
 OMC Global Configuration Complete
-- CLAUDE.md: Updated at ~/.claude/CLAUDE.md, or preserved with explicit preserve mode
-- Companion: May install ~/.claude/CLAUDE-omc.md when preserve mode is chosen
+- CLAUDE.md: Updated at CONFIG_DIR/CLAUDE.md, or preserved with explicit preserve mode
+- Companion: May install CONFIG_DIR/CLAUDE-omc.md when preserve mode is chosen
 - Backup: Previous CLAUDE.md backed up (if existed)
 - Scope: GLOBAL - applies to all Claude Code sessions
 - Hooks: Provided by plugin (no manual installation needed)

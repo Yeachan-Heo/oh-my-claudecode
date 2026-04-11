@@ -39,7 +39,7 @@ Use AskUserQuestion:
 
 #### 3.3.1: Enable Agent Teams in settings.json
 
-**CRITICAL**: Agent teams require `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` to be set in `~/.claude/settings.json`. This must be done carefully to preserve existing user settings.
+**CRITICAL**: Agent teams require `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` to be set in `CONFIG_DIR/settings.json`. This must be done carefully to preserve existing user settings.
 
 First, read the current settings.json:
 
@@ -54,7 +54,7 @@ else
 fi
 ```
 
-Then use the Read tool to read `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (if it exists). Use the Edit tool to merge the teams configuration while preserving ALL existing settings.
+Then use the Read tool to read `CONFIG_DIR/settings.json` (if it exists). Use the Edit tool to merge the teams configuration while preserving ALL existing settings.
 
 Use jq to safely merge without overwriting existing settings:
 
@@ -120,7 +120,7 @@ Use AskUserQuestion with multiple questions:
 2. **debugger** - Specialized for build/type error fixing and debugging
 3. **designer** - Specialized for UI/frontend work
 
-Store the team configuration in `~/.claude/.omc-config.json`:
+Store the team configuration in `CONFIG_DIR/.omc-config.json`:
 
 ```bash
 CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
@@ -173,7 +173,7 @@ jq '.' "$SETTINGS_FILE"
 
 ### If User Chooses NO:
 
-Skip this step. Agent teams will remain disabled. User can enable later by adding to `~/.claude/settings.json`:
+Skip this step. Agent teams will remain disabled. User can enable later by adding to `CONFIG_DIR/settings.json`:
 ```json
 {
   "env": {
