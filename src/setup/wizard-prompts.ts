@@ -48,6 +48,17 @@ export interface WizardOptions {
    * free of escape sequences.
    */
   colorEnabled?: boolean;
+  /**
+   * Skip the `installCli` question entirely and resolve it as `false`
+   * (i.e. do not install the CLI). Wire this to `true` when the wizard
+   * is being launched FROM the `omc` CLI itself — the user clearly
+   * already has the CLI on PATH, so asking whether to install it is a
+   * non-sequitur. The `/oh-my-claudecode:omc-setup` skill path runs
+   * inside a Claude Code session where the standalone CLI may or may
+   * not be installed, so the skill leaves this flag at its default
+   * (`false`) and still shows the question.
+   */
+  skipInstallCliQuestion?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,9 +316,15 @@ export async function runInteractiveWizard(
   const executionModeLabel = await askQuestion(prompter, 'executionMode');
   const executionMode = mapExecutionMode(executionModeLabel);
 
-  // Q4: installCli
-  const installCliLabel = await askQuestion(prompter, 'installCli');
-  const installCli = mapInstallCli(installCliLabel);
+  // Q4: installCli — skipped when launched from the `omc` CLI itself,
+  // because the user obviously already has the CLI installed and asking
+  // them to re-install it via `npm i -g` is noise. The default value
+  // when skipped is `false` (don't install; we're already installed).
+  let installCli = false;
+  if (!opts.skipInstallCliQuestion) {
+    const installCliLabel = await askQuestion(prompter, 'installCli');
+    installCli = mapInstallCli(installCliLabel);
+  }
 
   // Q5: taskTool
   const taskToolLabel = await askQuestion(prompter, 'taskTool');

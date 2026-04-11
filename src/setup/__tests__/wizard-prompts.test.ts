@@ -288,6 +288,60 @@ describe('runInteractiveWizard', () => {
     expect(secretCalls.length).toBe(0);
   });
 
+  it('skipInstallCliQuestion=true: installCli question omitted, resolved as false', async () => {
+    const { prompter, calls } = makeFakePrompter({
+      select: [
+        { match: 'Where should I configure', label: 'Local (this project)' },
+        { match: 'parallel execution mode', label: 'ultrawork (maximum capability) (Recommended)' },
+        // NO rule for 'install the OMC CLI globally' — the question must
+        // not be asked at all when skipInstallCliQuestion=true.
+        { match: 'task management tool', label: 'Built-in Tasks (default)' },
+        { match: 'configure MCP servers', label: 'No, skip' },
+        { match: 'enable agent teams', label: 'No, skip' },
+        { match: 'support the project', label: 'No thanks' },
+      ],
+    });
+
+    const answers = await runInteractiveWizard(prompter, {
+      skipInstallCliQuestion: true,
+    });
+
+    // Resolved as false (don't install; user already has it).
+    expect(answers.installCli).toBe(false);
+
+    // The question itself must not appear in the call log.
+    const installCliAsked = calls.some((c) =>
+      c.question.includes('install the OMC CLI globally'),
+    );
+    expect(installCliAsked).toBe(false);
+  });
+
+  it('defaults: mcpEnabled + teamsEnabled + starRepo all default to true (Yes)', async () => {
+    // Drive the wizard with NO rules for these three questions so the
+    // fake prompter falls back to `defaultValue`. The QUESTION_METADATA
+    // defaults should have the wizard mark Yes as the default label,
+    // which the fake prompter returns verbatim.
+    const { prompter } = makeFakePrompter({
+      select: [
+        { match: 'Where should I configure', label: 'Local (this project)' },
+        { match: 'parallel execution mode', label: 'ultrawork (maximum capability) (Recommended)' },
+        { match: 'task management tool', label: 'Built-in Tasks (default)' },
+        // No rules for mcpEnabled, teamsEnabled, starRepo → wizard uses
+        // the QUESTION_METADATA.default label. Team sub-questions use
+        // their own defaults (auto/3/executor) since teamsEnabled=true.
+      ],
+      secrets: ['', ''], // mcpEnabled=true → askSecret twice; leave blank.
+    });
+
+    const answers = await runInteractiveWizard(prompter, {
+      skipInstallCliQuestion: true,
+    });
+
+    expect(answers.mcp?.enabled).toBe(true);
+    expect(answers.teams?.enabled).toBe(true);
+    expect(answers.starRepo).toBe(true);
+  });
+
   it('executionMode "No default" → undefined so buildPreset leaves it unset', async () => {
     const { prompter } = makeFakePrompter({
       select: [

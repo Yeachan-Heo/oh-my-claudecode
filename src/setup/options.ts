@@ -271,13 +271,13 @@ export const QUESTION_METADATA: Record<string, QuestionSpec> = {
       'Would you like to configure MCP servers for enhanced capabilities? (Context7, Exa search, GitHub, etc.)',
     options: [
       {
-        label: 'Yes, configure MCP servers',
+        label: 'Yes, configure MCP servers (Recommended)',
         description:
           'Invoke the mcp-setup skill to add Context7, Exa, GitHub, or custom servers.',
       },
       { label: 'No, skip', description: 'Leave MCP unconfigured (can add later).' },
     ],
-    default: false,
+    default: true,
   },
   teamsEnabled: {
     question:
@@ -292,7 +292,7 @@ export const QUESTION_METADATA: Record<string, QuestionSpec> = {
         description: 'Leave teams disabled (can enable later)',
       },
     ],
-    default: false,
+    default: true,
   },
   teamsDisplayMode: {
     question: 'How should teammates be displayed?',
@@ -355,11 +355,11 @@ export const QUESTION_METADATA: Record<string, QuestionSpec> = {
     question:
       "If you're enjoying oh-my-claudecode, would you like to support the project by starring it on GitHub?",
     options: [
-      { label: 'Yes, star it!', description: 'Star the repository' },
+      { label: 'Yes, star it! (Recommended)', description: 'Star the repository' },
       { label: 'No thanks', description: 'Skip without further prompts' },
       { label: 'Maybe later', description: 'Skip without further prompts' },
     ],
-    default: false,
+    default: true,
   },
 };
 

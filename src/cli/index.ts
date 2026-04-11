@@ -1606,6 +1606,10 @@ export async function runSetupCommand(
         // Only ask the installStyle question when the user will land on a
         // base CLAUDE.md that does NOT already contain OMC markers.
         detectInstallStyleNeeded: () => hasNonOmcBaseClaudeMd(),
+        // Skip the installCli question: if the user is already running
+        // `omc setup`, the CLI is obviously already installed on PATH.
+        // The `/oh-my-claudecode:omc-setup` skill path still asks it.
+        skipInstallCliQuestion: true,
       });
       const wizardOptions = buildPreset(answers);
       presetPartial = wizardOptionsAsPartial(wizardOptions);
