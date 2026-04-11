@@ -116,6 +116,21 @@ describe('cleanupStaleAgents', () => {
     expect(existsSync(join(agentsDir, 'my-custom-agent.md'))).toBe(true);
   });
 
+  it('preserves user-created agent files that have frontmatter but no source: omc marker', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+
+    // User-created agent with standard frontmatter (name: field) but no `source: omc`
+    writeFileSync(join(agentsDir, 'my-custom-agent.md'), `---\nname: my-custom-agent\ndescription: User-created agent\nmodel: claude-sonnet-4-6\n---\n\n# My Agent\nUser content.\n`);
+
+    const removed = cleanup(log);
+
+    expect(removed).not.toContain('my-custom-agent.md');
+    expect(existsSync(join(agentsDir, 'my-custom-agent.md'))).toBe(true);
+  });
+
   it('preserves AGENTS.md even though it is not a current agent definition', async () => {
     vi.resetModules();
     const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
@@ -433,5 +448,100 @@ describe('prunePluginDuplicateAgents', () => {
   it('returns empty when agents directory does not exist', () => {
     const removed = prunePluginDuplicateAgents(log);
     expect(removed).toEqual([]);
+  });
+});
+
+// ── source: omc Stamping ────────────────────────────────────────────────────
+
+describe('source: omc stamping', () => {
+  let tempDir: string;
+  let originalConfigDir: string | undefined;
+  const log = vi.fn();
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-stamp-'));
+    originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = tempDir;
+    log.mockClear();
+  });
+
+  afterEach(() => {
+    if (originalConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('install() stamps agents with source: omc when installing legacy agents', async () => {
+    vi.resetModules();
+    const { install, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    // Run install with force to ensure agents are written
+    install({ force: true, verbose: false, skipClaudeCheck: true, noPlugin: true });
+
+    // Check that at least one installed agent has source: omc
+    if (existsSync(agentsDir)) {
+      const agents = readdirSync(agentsDir).filter(f => f.endsWith('.md') && f !== 'AGENTS.md');
+      if (agents.length > 0) {
+        const content = readFileSync(join(agentsDir, agents[0]), 'utf-8');
+        expect(content).toContain('source: omc');
+      }
+    }
+  });
+
+  it('install() stamps skills with source: omc when syncing bundled skills', async () => {
+    vi.resetModules();
+    const { install, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    // Run install with noPlugin to force bundled skill sync
+    install({ force: true, verbose: false, skipClaudeCheck: true, noPlugin: true });
+
+    // Check that at least one installed skill has source: omc
+    if (existsSync(skillsDir)) {
+      const skills = readdirSync(skillsDir).filter(d => {
+        const skillMd = join(skillsDir, d, 'SKILL.md');
+        return existsSync(skillMd);
+      });
+      if (skills.length > 0) {
+        const content = readFileSync(join(skillsDir, skills[0], 'SKILL.md'), 'utf-8');
+        expect(content).toContain('source: omc');
+      }
+    }
+  });
+
+  it('stamped skills are correctly removed by cleanupStaleSkills when no longer in package', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    // Create a skill with source: omc marker (simulating a previously installed OMC skill)
+    const skillDir = join(skillsDir, 'old-omc-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), `---\nsource: omc\nname: old-omc-skill\ndescription: Was in previous OMC version\n---\n\nOld content.\n`);
+
+    const removed = cleanup(log);
+
+    expect(removed).toContain('old-omc-skill');
+    expect(existsSync(skillDir)).toBe(false);
+  });
+
+  it('non-stamped skills survive cleanup even with identical structure', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    // Create a skill that looks like OMC but has no source: omc marker
+    const skillDir = join(skillsDir, 'third-party-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: third-party-skill\ndescription: Installed by gstack or user\nlevel: 2\n---\n\nContent.\n`);
+
+    const removed = cleanup(log);
+
+    expect(removed).not.toContain('third-party-skill');
+    expect(existsSync(skillDir)).toBe(true);
   });
 });
