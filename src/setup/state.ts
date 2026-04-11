@@ -9,13 +9,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
-  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 

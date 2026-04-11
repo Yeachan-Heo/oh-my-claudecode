@@ -158,24 +158,6 @@ if (process.platform === 'win32') {
   }
 
   /**
-   * Returns true iff the current controlled PATH has NO real `omc` on it.
-   * The shim-matrix tests that exercise the bridge/dist fallback branches
-   * assume no host `omc` binary is visible. If one is, we skip those tests.
-   */
-  function hasRealOmc(pathValue: string): boolean {
-    for (const dir of pathValue.split(':').filter(Boolean)) {
-      try {
-        const candidate = join(dir, 'omc');
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        if (require('node:fs').existsSync(candidate)) return true;
-      } catch {
-        /* ignore */
-      }
-    }
-    return false;
-  }
-
-  /**
    * Invoke a bash shim under the vendored plugin root and return
    * { stdout, stderr, exitCode }.
    */

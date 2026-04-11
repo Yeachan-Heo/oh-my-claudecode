@@ -13,10 +13,6 @@ function makeTmpDir(): string {
   return dir;
 }
 
-function readJson(path: string): unknown {
-  return JSON.parse(require('node:fs').readFileSync(path, 'utf8'));
-}
-
 describe('state.ts', () => {
   let cwd: string;
   let configDir: string;
