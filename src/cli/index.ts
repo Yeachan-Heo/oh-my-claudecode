@@ -40,6 +40,7 @@ import {
   isRunningAsPlugin,
   getInstalledOmcPluginRoots
 } from '../installer/index.js';
+import { uninstall as runUninstall } from '../installer/uninstall.js';
 import { runSetup } from '../setup/index.js';
 import {
   mapSetupCommanderOpts,
@@ -1862,6 +1863,141 @@ Credential hygiene:
     const opts = this.opts();
     const exitCode = await runSetupCommand(opts);
     if (exitCode !== 0) process.exit(exitCode);
+  });
+
+/**
+ * Uninstall command — reverse of `omc setup`.
+ *
+ * Removes agents, skills, hooks, HUD bundle, OMC state files, and cleans up
+ * CLAUDE.md and settings.json hook entries. User content outside the OMC
+ * markers in CLAUDE.md is preserved by default (use --no-preserve to skip).
+ *
+ * Requires explicit confirmation unless --yes or --dry-run is supplied.
+ * Exits with code 1 on non-interactive stdin without --yes (never acts
+ * destructively without confirmation).
+ */
+program
+  .command('uninstall')
+  .description('Remove all OMC-installed files and configuration from the config directory')
+  .option('--dry-run', 'List what would be removed without actually removing anything')
+  .option('--no-preserve', 'Delete CLAUDE.md entirely instead of preserving user content')
+  .option('-y, --yes', 'Skip the confirmation prompt')
+  .option('-q, --quiet', 'Suppress non-warning output')
+  .addHelpText('after', `
+Components removed:
+  - Agents in <configDir>/agents/       (OMC-owned .md files only)
+  - Skills in <configDir>/skills/       (OMC-owned skill dirs only)
+  - Hooks in <configDir>/hooks/         (known OMC hook scripts)
+  - HUD bundle in <configDir>/hud/      (if OMC-owned)
+  - State files (.omc-*.json, CLAUDE-omc.md)
+  - OMC block in CLAUDE.md              (user content preserved unless --no-preserve)
+  - OMC hook entries in settings.json
+
+Examples:
+  $ omc uninstall --dry-run             Preview what would be removed
+  $ omc uninstall -y                    Remove without prompting
+  $ omc uninstall --no-preserve         Remove CLAUDE.md entirely (even if it has user content)
+  $ omc uninstall -y --quiet            Silent removal for scripts`)
+  .action(async function uninstallAction(this: Command) {
+    const opts = this.opts() as {
+      dryRun?: boolean;
+      preserve?: boolean;
+      yes?: boolean;
+      quiet?: boolean;
+    };
+
+    const dryRun = opts.dryRun === true;
+    // Commander --no-preserve sets opts.preserve = false
+    const preserveUserContent = opts.preserve !== false;
+    const skipConfirm = opts.yes === true || dryRun;
+    const quiet = opts.quiet === true;
+
+    const configDir = getClaudeConfigDir();
+
+    const stderr = (line: string): void => { process.stderr.write(`${line}\n`); };
+    const stdout = (line: string): void => {
+      if (!quiet) process.stdout.write(`${line}\n`);
+    };
+
+    // ── Confirmation ──────────────────────────────────────────────────────────
+    if (!skipConfirm) {
+      const isTty = Boolean(process.stdin.isTTY);
+      if (!isTty) {
+        stderr('omc uninstall: non-interactive stdin detected. Pass --yes to proceed without a prompt.');
+        process.exit(1);
+      }
+
+      // Interactive confirmation
+      process.stdout.write(
+        `omc uninstall will remove the following from:\n` +
+        `  ${configDir}\n\n` +
+        `Components that will be affected:\n` +
+        `  - Agents in ${configDir}/agents/\n` +
+        `  - Skills in ${configDir}/skills/\n` +
+        `  - Hooks in ${configDir}/hooks/\n` +
+        `  - HUD bundle in ${configDir}/hud/\n` +
+        `  - State files (.omc-*.json, CLAUDE-omc.md)\n` +
+        `  - OMC block in CLAUDE.md (user content ${preserveUserContent ? 'preserved' : 'deleted'} ${preserveUserContent ? '' : '(--no-preserve)'})\n` +
+        `  - OMC hook entries in settings.json\n\n` +
+        `Continue? (y/N) `,
+      );
+
+      const { createInterface } = await import('node:readline');
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.once('line', (line) => {
+          rl.close();
+          resolve(line.trim().toLowerCase());
+        });
+        rl.once('close', () => resolve(''));
+      });
+
+      if (answer !== 'y' && answer !== 'yes') {
+        stdout('Uninstall cancelled.');
+        process.exit(1);
+      }
+    }
+
+    // ── Run uninstall ─────────────────────────────────────────────────────────
+    try {
+      const logger = quiet
+        ? (msg: string): void => {
+            // In quiet mode, still emit warnings to stderr
+            if (msg.startsWith('[dry-run] Warning:') || msg.startsWith('Warning:')) {
+              stderr(msg);
+            }
+          }
+        : (msg: string): void => { stdout(msg); };
+
+      const result = runUninstall({
+        configDir,
+        dryRun,
+        preserveUserContent,
+        logger,
+      });
+
+      if (dryRun) {
+        stdout(`\n[dry-run] Would remove ${result.removed.length} item(s), preserve ${result.preserved.length}, skip ${result.skipped.length}.`);
+      } else {
+        stdout(`\nUninstall complete. Removed ${result.removed.length} item(s).`);
+        if (result.preserved.length > 0) {
+          stdout(`Preserved ${result.preserved.length} file(s) with user content.`);
+        }
+      }
+
+      if (result.warnings.length > 0) {
+        for (const w of result.warnings) {
+          stderr(`Warning: ${w}`);
+        }
+      }
+
+      process.exit(0);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      stderr(`omc uninstall: unexpected error: ${msg}`);
+      process.exit(2);
+    }
   });
 
 /**
