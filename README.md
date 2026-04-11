@@ -71,6 +71,8 @@ npm i -g oh-my-claude-sisyphus@latest
 omc setup
 ```
 
+> **What does setup do?** It syncs CLAUDE.md, hooks, and (if needed) standalone skill/agent files. If you installed via **plugin** (Step 1 recommended path), skills and agents are already served from the plugin cache — `omc setup` detects this and skips copying standalone files. If you installed via **npm only**, setup copies them into `~/.claude/skills/` and `~/.claude/agents/`.
+
 If you run OMC via `omc --plugin-dir <path>` or `claude --plugin-dir <path>`, add `--plugin-dir-mode` to `omc setup` (or export `OMC_PLUGIN_ROOT` before running it) so the installer doesn't duplicate skills/agents that the plugin already provides at runtime. See the [Plugin directory flags section in REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags) for a complete decision matrix and all available flags.
 
 **Step 3: Build something**
