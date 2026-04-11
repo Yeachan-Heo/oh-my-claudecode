@@ -13,8 +13,8 @@ Use the Skill tool to invoke: `hud` with args: `setup`
 Do not generate, normalize, or patch `statusLine` paths inline in this phase. This is especially important on Windows, where backslash path handling must stay inside the `hud` skill.
 
 This will:
-1. Install the HUD wrapper script to `~/.claude/hud/omc-hud.mjs`
-2. Configure `statusLine` in `~/.claude/settings.json`
+1. Install the HUD wrapper script to `CONFIG_DIR/hud/omc-hud.mjs`
+2. Configure `statusLine` in `CONFIG_DIR/settings.json`
 3. Report status and prompt to restart if needed
 
 After HUD setup completes, save progress:
@@ -75,9 +75,10 @@ Use the AskUserQuestion tool to prompt the user:
 **Question:** "Which parallel execution mode should be your default when you say 'fast' or 'parallel'?"
 
 **Options:**
-1. **ultrawork (maximum capability)** - Uses all agent tiers including Opus for complex tasks. Best for challenging work where quality matters most. (Recommended)
+1. **ultrawork (maximum capability) (Recommended)** - Uses all agent tiers including Opus for complex tasks. Best for challenging work where quality matters most.
+2. **No default** - Don't set a default execution mode. You'll specify explicitly each time.
 
-Store the preference in `~/.claude/.omc-config.json`:
+Store the preference in `CONFIG_DIR/.omc-config.json`:
 
 ```bash
 CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
