@@ -36,6 +36,40 @@
 import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 
+// ---------------------------------------------------------------------------
+// ANSI color helpers (gated on NO_COLOR + explicit colorEnabled flag)
+// ---------------------------------------------------------------------------
+// The wizard banner needs to paint the profile line in red so it stands out
+// as the most load-bearing piece of information (users switching between
+// multiple profiles must not overwrite the wrong CLAUDE.md). Gating on the
+// NO_COLOR convention (https://no-color.org/) lets accessibility users and
+// non-ANSI terminals opt out. Tests pass `colorEnabled: false` explicitly
+// so the fixture strings stay stable.
+// ---------------------------------------------------------------------------
+
+const ANSI_RED = '\x1b[31m';
+const ANSI_BOLD = '\x1b[1m';
+const ANSI_RESET = '\x1b[0m';
+
+/**
+ * Auto-detect whether ANSI color should be emitted. Honours the
+ * `NO_COLOR` environment variable (any value disables color) and only
+ * enables color when stdout is a TTY. Tests should pass explicit
+ * `colorEnabled: false` / `true` rather than relying on this helper.
+ */
+export function isColorEnabled(): boolean {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== '') {
+    return false;
+  }
+  return Boolean(process.stdout.isTTY);
+}
+
+/** Wrap `text` in bold-red ANSI sequences when `colorEnabled`. */
+function red(text: string, colorEnabled: boolean): string {
+  if (!colorEnabled) return text;
+  return `${ANSI_BOLD}${ANSI_RED}${text}${ANSI_RESET}`;
+}
+
 export interface ConfigContextOptions {
   /** Override the current working directory (tests). */
   cwd?: string;
@@ -135,33 +169,41 @@ export function resolveConfigContext(
  * Example output (CLAUDE_CONFIG_DIR set):
  *
  *   ━━━ omc setup ━━━
- *   Config profile: /Users/peter/.claude-personal  (from CLAUDE_CONFIG_DIR)
- *   Project dir:    /Users/peter/_Git/_Claude/oh-my-claudecode
+ *   Config profile: $HOME/.claude-alt  (from CLAUDE_CONFIG_DIR)
+ *   Project dir:    $HOME/src/example-project
  *
  *   Files that will be modified depending on your answer to Q1:
  *
  *     If you pick LOCAL (this project):
- *       - /Users/peter/_Git/_Claude/oh-my-claudecode/.claude/CLAUDE.md
- *       - /Users/peter/_Git/_Claude/oh-my-claudecode/.git/info/exclude
- *       - /Users/peter/_Git/_Claude/oh-my-claudecode/.claude/skills/omc-reference/SKILL.md
+ *       - $HOME/src/example-project/.claude/CLAUDE.md
+ *       - $HOME/src/example-project/.git/info/exclude
+ *       - $HOME/src/example-project/.claude/skills/omc-reference/SKILL.md
  *
  *     If you pick GLOBAL (all projects in this profile):
- *       - /Users/peter/.claude-personal/CLAUDE.md
- *       - /Users/peter/.claude-personal/.omc-config.json
- *       - /Users/peter/.claude-personal/settings.json
- *       (+ /Users/peter/.claude-personal/CLAUDE-omc.md in --preserve mode)
+ *       - $HOME/.claude-alt/CLAUDE.md
+ *       - $HOME/.claude-alt/.omc-config.json
+ *       - $HOME/.claude-alt/settings.json
+ *       (+ $HOME/.claude-alt/CLAUDE-omc.md in --preserve mode)
  *
  *   Ctrl-C to abort if this is the wrong profile.
  *   ━━━━━━━━━━━━━━━━
  */
-export function formatConfigBanner(ctx: ConfigContext): string {
+export function formatConfigBanner(
+  ctx: ConfigContext,
+  opts: { colorEnabled?: boolean } = {},
+): string {
+  const colorEnabled = opts.colorEnabled ?? isColorEnabled();
   const lines: string[] = [];
   lines.push('━━━ omc setup ━━━');
 
+  // The profile line is the highest-priority signal — show it first and
+  // (when color is enabled) paint it red so users can't miss it if they
+  // launched setup against the wrong profile.
   const profileSuffix = ctx.envVarSet
     ? '  (from CLAUDE_CONFIG_DIR)'
     : '  (default — CLAUDE_CONFIG_DIR not set)';
-  lines.push(`Config profile: ${ctx.configDir}${profileSuffix}`);
+  const profileLine = `Config profile: ${ctx.configDir}${profileSuffix}`;
+  lines.push(red(profileLine, colorEnabled));
   lines.push(`Project dir:    ${ctx.projectDir}`);
   lines.push('');
   lines.push('Files that will be modified depending on your answer to Q1:');
@@ -212,4 +254,35 @@ export function describeTargetOption(
     ? ` (CLAUDE_CONFIG_DIR profile: ${ctx.configDir})`
     : '';
   return `Creates ${path}${profileHint} — applies to all Claude Code sessions in this profile.`;
+}
+
+/**
+ * Describe the "Overwrite" or "Keep base (preserve)" option in the Q2
+ * (installStyle) question using paths resolved against the active config
+ * context. Returned string replaces the static description in
+ * QUESTION_METADATA when the wizard renders the Q2 options so the user
+ * sees concrete absolute paths for the base file AND the companion file.
+ *
+ * This is load-bearing for multi-profile users: the static description
+ * just says "CLAUDE.md" and "CLAUDE-omc.md" without any path anchor, so
+ * a user with two profiles cannot tell WHICH CLAUDE.md is about to be
+ * overwritten by picking "Overwrite".
+ *
+ * Q2 is only shown for `target=global`, so all paths come from
+ * `ctx.globalFiles` / `ctx.globalFilesPreserve`.
+ */
+export function describeInstallStyleOption(
+  ctx: ConfigContext,
+  kind: 'overwrite' | 'preserve',
+): string {
+  const basePath = ctx.globalFiles[0]; // <configDir>/CLAUDE.md
+  if (kind === 'overwrite') {
+    return `plain \`claude\` and \`omc\` both use OMC globally. Overwrites ${basePath}.`;
+  }
+  // Preserve mode: the companion file is the only entry in
+  // globalFilesPreserve that is NOT in globalFiles.
+  const companion = ctx.globalFilesPreserve.find(
+    (f) => !ctx.globalFiles.includes(f),
+  ) ?? `${ctx.configDir}/CLAUDE-omc.md`;
+  return `preserves ${basePath}, installs OMC into ${companion}, and lets \`omc\` force-load that companion at launch.`;
 }

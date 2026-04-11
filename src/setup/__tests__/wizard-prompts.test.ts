@@ -49,8 +49,17 @@ function makeFakePrompter(script: ScriptedAnswers): {
     ): Promise<T> {
       const rule = script.select?.find((r) => question.includes(r.match));
       const label = rule?.label ?? defaultValue;
-      // Ensure the label actually exists in `options` so we mimic real askSelect.
-      const hit = options.find((o) => o.label === label);
+      // Match the option by exact label OR by first-word prefix. First-word
+      // matching is what lets existing tests pass rules like
+      // `label: 'Global (all projects)'` even when the live wizard renders
+      // labels as `'Global → /fixture/…/CLAUDE.md'`: both labels start with
+      // the word 'Global', so the test rule stays robust against runtime
+      // label rewrites that inject resolved paths.
+      const firstWord = (s: string): string =>
+        s.split(/[\s(—→]/).filter((p) => p.length > 0)[0] ?? s;
+      const hit = options.find(
+        (o) => o.label === label || firstWord(o.label) === firstWord(label),
+      );
       const returned = (hit?.label ?? defaultValue) as T;
       calls.push({
         kind: 'select',
@@ -321,11 +330,12 @@ describe('runInteractiveWizard', () => {
 
       await runInteractiveWizard(prompter, {
         detectInstallStyleNeeded: () => false,
+        colorEnabled: false,
         configContext: {
-          configDir: '/Users/peter/.claude-personal',
+          configDir: '/fixture/home/.claude-alt',
           isDefault: false,
           envVarSet: true,
-          envVarValue: '/Users/peter/.claude-personal',
+          envVarValue: '/fixture/home/.claude-alt',
           projectDir: '/repo',
           localFiles: [
             '/repo/.claude/CLAUDE.md',
@@ -333,15 +343,15 @@ describe('runInteractiveWizard', () => {
             '/repo/.claude/skills/omc-reference/SKILL.md',
           ],
           globalFiles: [
-            '/Users/peter/.claude-personal/CLAUDE.md',
-            '/Users/peter/.claude-personal/.omc-config.json',
-            '/Users/peter/.claude-personal/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
           ],
           globalFilesPreserve: [
-            '/Users/peter/.claude-personal/CLAUDE.md',
-            '/Users/peter/.claude-personal/.omc-config.json',
-            '/Users/peter/.claude-personal/settings.json',
-            '/Users/peter/.claude-personal/CLAUDE-omc.md',
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE-omc.md',
           ],
         },
       });
@@ -350,10 +360,10 @@ describe('runInteractiveWizard', () => {
       expect(writes.length).toBeGreaterThanOrEqual(1);
       const banner = writes[0];
       expect(banner).toContain('omc setup');
-      expect(banner).toContain('/Users/peter/.claude-personal');
+      expect(banner).toContain('/fixture/home/.claude-alt');
       expect(banner).toContain('CLAUDE_CONFIG_DIR');
       expect(banner).toContain('/repo/.claude/CLAUDE.md');
-      expect(banner).toContain('/Users/peter/.claude-personal/CLAUDE.md');
+      expect(banner).toContain('/fixture/home/.claude-alt/CLAUDE.md');
 
       // Ordering check: the write call must come BEFORE the first askSelect.
       const firstWriteIdx = calls.findIndex((c) => c.kind === 'write');
@@ -367,11 +377,12 @@ describe('runInteractiveWizard', () => {
 
       await runInteractiveWizard(prompter, {
         detectInstallStyleNeeded: () => false,
+        colorEnabled: false,
         configContext: {
-          configDir: '/Users/peter/.claude-personal',
+          configDir: '/fixture/home/.claude-alt',
           isDefault: false,
           envVarSet: true,
-          envVarValue: '/Users/peter/.claude-personal',
+          envVarValue: '/fixture/home/.claude-alt',
           projectDir: '/repo',
           localFiles: [
             '/repo/.claude/CLAUDE.md',
@@ -379,15 +390,15 @@ describe('runInteractiveWizard', () => {
             '/repo/.claude/skills/omc-reference/SKILL.md',
           ],
           globalFiles: [
-            '/Users/peter/.claude-personal/CLAUDE.md',
-            '/Users/peter/.claude-personal/.omc-config.json',
-            '/Users/peter/.claude-personal/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
           ],
           globalFilesPreserve: [
-            '/Users/peter/.claude-personal/CLAUDE.md',
-            '/Users/peter/.claude-personal/.omc-config.json',
-            '/Users/peter/.claude-personal/settings.json',
-            '/Users/peter/.claude-personal/CLAUDE-omc.md',
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE-omc.md',
           ],
         },
       });
@@ -401,13 +412,116 @@ describe('runInteractiveWizard', () => {
       const localOpt = options.find((o) => o.label.startsWith('Local'));
       const globalOpt = options.find((o) => o.label.startsWith('Global'));
 
-      // Local option must show the concrete local path.
-      expect(localOpt?.description).toContain('/repo/.claude/CLAUDE.md');
-      expect(localOpt?.description).toContain('project-scoped');
+      // Paths are embedded in the LABEL (not just description) so they
+      // show as the most prominent text on each menu line.
+      expect(localOpt?.label).toContain('/repo/.claude/CLAUDE.md');
+      expect(globalOpt?.label).toContain('/fixture/home/.claude-alt/CLAUDE.md');
 
-      // Global option must show the resolved configDir AND flag the env var.
-      expect(globalOpt?.description).toContain('/Users/peter/.claude-personal/CLAUDE.md');
+      // Description carries the profile context.
       expect(globalOpt?.description).toContain('CLAUDE_CONFIG_DIR profile');
+    });
+
+    it('Q2 installStyle options show resolved CLAUDE.md + companion paths', async () => {
+      const { prompter, calls } = makeFakePrompter({
+        select: [
+          { match: 'Where should I configure', label: 'Global (all projects)' },
+          // Q2 is only shown when detectInstallStyleNeeded=true.
+          { match: 'will change your base Claude config', label: 'Overwrite base CLAUDE.md (Recommended)' },
+          { match: 'parallel execution mode', label: 'ultrawork (maximum capability) (Recommended)' },
+          { match: 'install the OMC CLI globally', label: 'Yes (Recommended)' },
+          { match: 'task management tool', label: 'Built-in Tasks (default)' },
+          { match: 'configure MCP servers', label: 'No, skip' },
+          { match: 'enable agent teams', label: 'No, skip' },
+          { match: 'support the project', label: 'No thanks' },
+        ],
+      });
+
+      await runInteractiveWizard(prompter, {
+        // Force Q2 on: user picked global AND a non-OMC base CLAUDE.md exists.
+        detectInstallStyleNeeded: () => true,
+        colorEnabled: false,
+        configContext: {
+          configDir: '/fixture/home/.claude-alt',
+          isDefault: false,
+          envVarSet: true,
+          envVarValue: '/fixture/home/.claude-alt',
+          projectDir: '/repo',
+          localFiles: [
+            '/repo/.claude/CLAUDE.md',
+            '/repo/.git/info/exclude',
+            '/repo/.claude/skills/omc-reference/SKILL.md',
+          ],
+          globalFiles: [
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+          ],
+          globalFilesPreserve: [
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE-omc.md',
+          ],
+        },
+      });
+
+      // Q2 question text is now dynamic (includes resolved base path).
+      const q2Call = calls.find(
+        (c) =>
+          c.kind === 'select'
+          && c.question.includes('Global setup will modify'),
+      );
+      expect(q2Call?.options).toBeDefined();
+      expect(q2Call?.question).toContain('/fixture/home/.claude-alt/CLAUDE.md');
+
+      const options = q2Call?.options ?? [];
+      const overwriteOpt = options.find((o) => o.label.startsWith('Overwrite'));
+      const preserveOpt = options.find((o) => o.label.startsWith('Keep'));
+
+      // Overwrite LABEL must name the base path.
+      expect(overwriteOpt?.label).toContain(
+        '/fixture/home/.claude-alt/CLAUDE.md',
+      );
+
+      // Preserve LABEL must name BOTH base + companion paths.
+      expect(preserveOpt?.label).toContain(
+        '/fixture/home/.claude-alt/CLAUDE.md',
+      );
+      expect(preserveOpt?.label).toContain(
+        '/fixture/home/.claude-alt/CLAUDE-omc.md',
+      );
+    });
+
+    it('colorEnabled=true emits ANSI red escape sequences in banner write', async () => {
+      const { prompter, writes } = makeFakePrompter(baseScript());
+
+      await runInteractiveWizard(prompter, {
+        detectInstallStyleNeeded: () => false,
+        colorEnabled: true,
+        configContext: {
+          configDir: '/fixture/home/.claude-alt',
+          isDefault: false,
+          envVarSet: true,
+          envVarValue: '/fixture/home/.claude-alt',
+          projectDir: '/repo',
+          localFiles: ['/repo/.claude/CLAUDE.md'],
+          globalFiles: [
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+          ],
+          globalFilesPreserve: [
+            '/fixture/home/.claude-alt/CLAUDE.md',
+            '/fixture/home/.claude-alt/.omc-config.json',
+            '/fixture/home/.claude-alt/settings.json',
+            '/fixture/home/.claude-alt/CLAUDE-omc.md',
+          ],
+        },
+      });
+
+      expect(writes.length).toBeGreaterThanOrEqual(1);
+      expect(writes[0]).toContain('\x1b[31m');
+      expect(writes[0]).toContain('\x1b[0m');
     });
 
     it('Q1 target options omit CLAUDE_CONFIG_DIR hint when env var is not set', async () => {
@@ -415,8 +529,9 @@ describe('runInteractiveWizard', () => {
 
       await runInteractiveWizard(prompter, {
         detectInstallStyleNeeded: () => false,
+        colorEnabled: false,
         configContext: {
-          configDir: '/Users/alice/.claude',
+          configDir: '/fixture/home/.claude-default',
           isDefault: true,
           envVarSet: false,
           envVarValue: undefined,
@@ -427,15 +542,15 @@ describe('runInteractiveWizard', () => {
             '/repo/.claude/skills/omc-reference/SKILL.md',
           ],
           globalFiles: [
-            '/Users/alice/.claude/CLAUDE.md',
-            '/Users/alice/.claude/.omc-config.json',
-            '/Users/alice/.claude/settings.json',
+            '/fixture/home/.claude-default/CLAUDE.md',
+            '/fixture/home/.claude-default/.omc-config.json',
+            '/fixture/home/.claude-default/settings.json',
           ],
           globalFilesPreserve: [
-            '/Users/alice/.claude/CLAUDE.md',
-            '/Users/alice/.claude/.omc-config.json',
-            '/Users/alice/.claude/settings.json',
-            '/Users/alice/.claude/CLAUDE-omc.md',
+            '/fixture/home/.claude-default/CLAUDE.md',
+            '/fixture/home/.claude-default/.omc-config.json',
+            '/fixture/home/.claude-default/settings.json',
+            '/fixture/home/.claude-default/CLAUDE-omc.md',
           ],
         },
       });
@@ -446,9 +561,9 @@ describe('runInteractiveWizard', () => {
       const options = targetCall?.options ?? [];
       const globalOpt = options.find((o) => o.label.startsWith('Global'));
 
-      // Default profile: no `CLAUDE_CONFIG_DIR profile: ...` parenthetical.
-      expect(globalOpt?.description).toContain('/Users/alice/.claude/CLAUDE.md');
-      expect(globalOpt?.description).not.toContain('CLAUDE_CONFIG_DIR profile');
+      // Default profile: path in label, no CLAUDE_CONFIG_DIR hint in description.
+      expect(globalOpt?.label).toContain('/fixture/home/.claude-default/CLAUDE.md');
+      expect(globalOpt?.description).not.toContain('CLAUDE_CONFIG_DIR');
     });
   });
 });

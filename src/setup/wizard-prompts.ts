@@ -23,7 +23,6 @@ import { QUESTION_METADATA } from './options.js';
 import type { AnswersFile } from './preset-builder.js';
 import type { Prompter, PrompterSelectOption } from './prompts.js';
 import {
-  describeTargetOption,
   formatConfigBanner,
   resolveConfigContext,
   type ConfigContext,
@@ -43,6 +42,12 @@ export interface WizardOptions {
    * content without mutating `process.env` or `process.cwd`.
    */
   configContext?: ConfigContext;
+  /**
+   * Override ANSI color emission for the banner (default: auto-detect
+   * via `isColorEnabled()`). Tests pass `false` so fixture strings stay
+   * free of escape sequences.
+   */
+  colorEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,32 +231,73 @@ export async function runInteractiveWizard(
   // Critical for users with multiple profiles (e.g. `~/.claude` vs
   // `~/.claude-personal`) — prevents silently overwriting the wrong file.
   const configContext = opts.configContext ?? resolveConfigContext();
-  prompter.write(formatConfigBanner(configContext));
+  prompter.write(
+    formatConfigBanner(configContext, { colorEnabled: opts.colorEnabled }),
+  );
 
-  // Q1: target (local | global). Swap the static option descriptions for
-  // concrete, absolute paths resolved against the active config context.
-  // Look up the canonical labels from QUESTION_METADATA (which stores them
-  // as "Local (this project)" and "Global (all projects)") rather than
-  // hardcoding strings here — keeps the override map in sync with the spec.
-  const targetSpec = QUESTION_METADATA.target;
-  const localLabel = targetSpec.options.find((o) => o.label.startsWith('Local'))?.label
-    ?? 'Local (this project)';
-  const globalLabel = targetSpec.options.find((o) => o.label.startsWith('Global'))?.label
-    ?? 'Global (all projects)';
-  const targetOverrides: Record<string, string> = {
-    [localLabel]: describeTargetOption(configContext, 'local'),
-    [globalLabel]: describeTargetOption(configContext, 'global'),
-  };
-  const targetLabel = await askQuestion(prompter, 'target', targetOverrides);
+  // Q1: target (local | global). Build fully-custom option labels that
+  // embed the resolved absolute path in the LABEL (not just the
+  // description) so the user sees exactly which file would be touched
+  // as the most prominent piece of text on each line. The decoder still
+  // uses `startsWith('Local')` / `startsWith('Global')` so the mapping
+  // helper doesn't need to know about the runtime label format.
+  const localPath = configContext.localFiles[0];
+  const globalPath = configContext.globalFiles[0];
+  const targetOptions = [
+    {
+      label: `Local → ${localPath}`,
+      description: 'project-scoped; only affects this working directory.',
+    },
+    {
+      label: `Global → ${globalPath}`,
+      description: configContext.envVarSet
+        ? `CLAUDE_CONFIG_DIR profile (${configContext.configDir}); affects all Claude Code sessions on this profile.`
+        : 'default profile; affects all Claude Code sessions.',
+    },
+  ];
+  const targetDefaultLabel = targetOptions[0].label; // Local is the default
+  const targetLabel = await prompter.askSelect(
+    QUESTION_METADATA.target.question,
+    targetOptions,
+    targetDefaultLabel,
+  );
   const target = mapTarget(targetLabel);
 
   // Q2: installStyle — only when target=global AND a non-OMC base CLAUDE.md
   // already exists (caller decides via detectInstallStyleNeeded).
+  // Same treatment as Q1: build fully-custom labels with the resolved
+  // paths baked in so the user sees exactly which base/companion files
+  // each choice will modify, and inject the resolved base path into the
+  // question text itself for a third independent visibility point.
   let installStyle: 'overwrite' | 'preserve' = 'overwrite';
   const needInstallStyle =
     target === 'global' && (opts.detectInstallStyleNeeded?.() ?? false);
   if (needInstallStyle) {
-    const installStyleLabel = await askQuestion(prompter, 'installStyle');
+    const basePath = configContext.globalFiles[0];
+    const companionPath =
+      configContext.globalFilesPreserve.find(
+        (f) => !configContext.globalFiles.includes(f),
+      ) ?? `${configContext.configDir}/CLAUDE-omc.md`;
+    const installStyleQuestion =
+      `Global setup will modify ${basePath}. Which behavior do you want?`;
+    const installStyleOptions = [
+      {
+        label: `Overwrite ${basePath} (Recommended)`,
+        description:
+          'plain `claude` and `omc` both load OMC globally from the base file.',
+      },
+      {
+        label: `Keep base ${basePath}; install companion ${companionPath}`,
+        description:
+          "preserves user's base file; `omc` launcher force-loads the companion at launch.",
+      },
+    ];
+    const installStyleDefaultLabel = installStyleOptions[0].label; // Overwrite
+    const installStyleLabel = await prompter.askSelect(
+      installStyleQuestion,
+      installStyleOptions,
+      installStyleDefaultLabel,
+    );
     installStyle = mapInstallStyle(installStyleLabel);
   }
 
