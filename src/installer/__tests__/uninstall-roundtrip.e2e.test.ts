@@ -16,6 +16,7 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -261,5 +262,184 @@ describe('uninstall round-trip e2e', () => {
       const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
       expect(agentFiles.length, 'agents still exist in dry-run').toBeGreaterThan(0);
     }
+  });
+
+  // ── Test 9: preserve-mode uninstall (CLAUDE-omc.md + OMC:IMPORT block) ────
+  it('Test 9: uninstall reverses preserve-mode state — removes companion + strips IMPORT block + preserves user base', async () => {
+    await doInstall();
+
+    // Simulate preserve-mode filesystem state AFTER a `--preserve` install:
+    //   - base CLAUDE.md: user content only, followed by an OMC:IMPORT block
+    //     pointing at the companion.
+    //   - CLAUDE-omc.md: the full OMC block wrapped in OMC:START/END markers.
+    //
+    // The uninstaller does not care HOW this state got there — it only
+    // cares that the on-disk shape matches preserve-mode invariants.
+    const claudeMdPath = join(tmpConfigDir, 'CLAUDE.md');
+    const companionPath = join(tmpConfigDir, 'CLAUDE-omc.md');
+
+    // Move the installed OMC block into the companion file.
+    const installedOmcContent = readFileSync(claudeMdPath, 'utf8');
+    writeFileSync(companionPath, installedOmcContent, 'utf8');
+
+    // Rewrite base CLAUDE.md as user content + OMC:IMPORT block
+    const userBase =
+      '# My personal Claude.md\n\nUser customizations here.\n\n'
+      + '<!-- OMC:IMPORT:START -->\n'
+      + '@CLAUDE-omc.md\n'
+      + '<!-- OMC:IMPORT:END -->\n';
+    writeFileSync(claudeMdPath, userBase, 'utf8');
+
+    // Sanity: both files exist before uninstall
+    expect(existsSync(companionPath)).toBe(true);
+    expect(readFileSync(claudeMdPath, 'utf8')).toContain('<!-- OMC:IMPORT:START -->');
+
+    const result = await doUninstall({ preserveUserContent: true });
+
+    // Companion file removed
+    expect(existsSync(companionPath), 'CLAUDE-omc.md should be removed').toBe(false);
+
+    // Base CLAUDE.md still exists with user content
+    expect(existsSync(claudeMdPath), 'base CLAUDE.md should survive').toBe(true);
+    const after = readFileSync(claudeMdPath, 'utf8');
+
+    // User content preserved
+    expect(after).toContain('# My personal Claude.md');
+    expect(after).toContain('User customizations here.');
+
+    // OMC:IMPORT block stripped
+    expect(after, 'OMC:IMPORT:START should be stripped').not.toContain('<!-- OMC:IMPORT:START -->');
+    expect(after, 'OMC:IMPORT:END should be stripped').not.toContain('<!-- OMC:IMPORT:END -->');
+    expect(after, '@CLAUDE-omc.md reference should be stripped').not.toContain('@CLAUDE-omc.md');
+
+    // preserved includes the base path
+    expect(result.preserved).toContain(claudeMdPath);
+  });
+
+  // ── Test 10: --no-preserve deletes CLAUDE.md even with user content ───────
+  it('Test 10: preserveUserContent=false deletes CLAUDE.md even when user content is present', async () => {
+    await doInstall();
+
+    // Append user content that would normally be preserved
+    const claudeMdPath = join(tmpConfigDir, 'CLAUDE.md');
+    const existing = readFileSync(claudeMdPath, 'utf8');
+    writeFileSync(claudeMdPath, existing + '\n\n# User notes\nImportant stuff\n', 'utf8');
+
+    // Explicit opt-out of preservation
+    const result = await doUninstall({ preserveUserContent: false });
+
+    // CLAUDE.md fully deleted regardless of user content
+    expect(existsSync(claudeMdPath), 'CLAUDE.md should be deleted with --no-preserve').toBe(false);
+
+    // `preserved` must NOT list it
+    expect(result.preserved, 'preserved should not list CLAUDE.md when --no-preserve').not.toContain(claudeMdPath);
+  });
+
+  // ── Test 11: user's own agents/my-custom.md survives uninstall ────────────
+  it('Test 11: user agent file outside plugin list is preserved', async () => {
+    await doInstall();
+
+    // Drop a user-authored agent file next to the OMC ones.
+    // Name chosen to NOT collide with any OMC agent basename.
+    const agentsDir = join(tmpConfigDir, 'agents');
+    const userAgentPath = join(agentsDir, 'my-custom-user-agent.md');
+    const userAgentContent =
+      '---\n'
+      + 'name: my-custom-user-agent\n'
+      + 'description: A user-authored agent, not shipped by OMC\n'
+      + '---\n\n'
+      + '# My custom agent\n\nUser content.\n';
+    writeFileSync(userAgentPath, userAgentContent, 'utf8');
+    expect(existsSync(userAgentPath)).toBe(true);
+
+    await doUninstall();
+
+    // User agent file still exists, content intact
+    expect(existsSync(userAgentPath), 'user agent file should survive uninstall').toBe(true);
+    expect(readFileSync(userAgentPath, 'utf8')).toBe(userAgentContent);
+
+    // And the parent dir must still exist (not rm -rf'd)
+    expect(existsSync(agentsDir), 'agents/ dir should not be wiped').toBe(true);
+  });
+
+  // ── Test 12: user's own skills/my-skill/ survives uninstall ───────────────
+  it('Test 12: user skill dir without OMC sentinel is preserved', async () => {
+    await doInstall();
+
+    // Create a user skill dir with a SKILL.md that lacks the OMC frontmatter
+    // sentinel (no `---\n` prefix). This is an unusual but valid shape.
+    // The test documents: if a user skill has NO frontmatter, it survives.
+    // If it has the standard Claude Code frontmatter, the current sentinel
+    // check is weak and may false-positive match — tracked in follow-up.
+    const skillsDir = join(tmpConfigDir, 'skills');
+    const userSkillDir = join(skillsDir, 'my-private-skill');
+    const userSkillMd = join(userSkillDir, 'SKILL.md');
+    mkdirSync(userSkillDir, { recursive: true });
+    const userSkillContent =
+      '# My private skill\n\n'
+      + 'No frontmatter — not an OMC skill, not a standard Claude Code skill either.\n'
+      + 'Uninstall must leave this alone.\n';
+    writeFileSync(userSkillMd, userSkillContent, 'utf8');
+    expect(existsSync(userSkillMd)).toBe(true);
+
+    await doUninstall();
+
+    // User skill dir + file intact
+    expect(existsSync(userSkillDir), 'user skill dir should survive').toBe(true);
+    expect(existsSync(userSkillMd), 'user SKILL.md should survive').toBe(true);
+    expect(readFileSync(userSkillMd, 'utf8')).toBe(userSkillContent);
+  });
+
+  // ── Test 13: user hook entry in settings.json survives uninstall ──────────
+  it('Test 13: user hook in settings.json is preserved while OMC hooks are removed', async () => {
+    await doInstall();
+
+    const settingsPath = join(tmpConfigDir, 'settings.json');
+    expect(existsSync(settingsPath), 'install should have written settings.json').toBe(true);
+
+    // Read installed settings.json + append a user-authored hook entry
+    // that does NOT reference any OMC paths.
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+      hooks?: Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>>;
+    };
+
+    // Ensure hooks section exists and add a user hook group
+    settings.hooks = settings.hooks ?? {};
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse ?? [];
+    const userHookCommand = '/usr/local/bin/my-personal-audit-logger.sh';
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [{ type: 'command', command: userHookCommand }],
+    });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+
+    await doUninstall();
+
+    // settings.json must still exist (user has non-OMC content in it)
+    expect(existsSync(settingsPath), 'settings.json should survive').toBe(true);
+
+    const after = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+      hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+
+    // User hook still present by command substring match
+    const allCommands: string[] = [];
+    for (const group of Object.values(after.hooks ?? {})) {
+      for (const entry of group) {
+        for (const h of entry.hooks ?? []) {
+          allCommands.push(h.command);
+        }
+      }
+    }
+    expect(
+      allCommands.some((c) => c.includes('my-personal-audit-logger')),
+      'user hook should survive',
+    ).toBe(true);
+
+    // And no OMC hooks remain
+    const omcHookRemains = allCommands.some(
+      (c) => c.includes('omc') || c.includes('keyword-detector') || c.includes('stop-continuation'),
+    );
+    expect(omcHookRemains, 'no OMC hooks should remain after uninstall').toBe(false);
   });
 });
