@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { getClaudeConfigDir } from '../utils/config-dir.js';
-import { install, VERSION, type InstallOptions } from '../installer/index.js';
+import { install, VERSION, type InstallOptions, type InstallResult } from '../installer/index.js';
 import {
   acquireLock,
   LockHeldError,
@@ -69,6 +69,12 @@ export interface RunSetupResult {
   exitCode: number;
   /** True when phase 0b short-circuited because setup was already configured. */
   alreadyConfigured?: boolean;
+  /**
+   * Raw install() result surfaced for the bare-infra path so the CLI can
+   * print today's summary (agent/command/skill counts, hook conflicts).
+   * Only populated when the phases={'infra'} backward-compat branch runs.
+   */
+  installResult?: InstallResult;
 }
 
 export type StateJsonOutput =
@@ -408,9 +414,25 @@ export async function runSetup(
         phasesRun.push('infra');
         if (!result.success) {
           errors.push(...result.errors);
-          return { success: false, phasesRun, phaseResults, warnings, errors, exitCode: 1 };
+          return {
+            success: false,
+            phasesRun,
+            phaseResults,
+            warnings,
+            errors,
+            exitCode: 1,
+            installResult: result,
+          };
         }
-        return { success: true, phasesRun, phaseResults, warnings, errors, exitCode: 0 };
+        return {
+          success: true,
+          phasesRun,
+          phaseResults,
+          warnings,
+          errors,
+          exitCode: 0,
+          installResult: result,
+        };
       } finally {
         prompter.close();
       }
