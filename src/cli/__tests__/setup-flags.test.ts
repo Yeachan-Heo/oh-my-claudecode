@@ -80,6 +80,7 @@ vi.mock('../../features/auto-update.js', async () => {
 // ---------------------------------------------------------------------------
 
 const ORIG_ISTTY = process.stdin.isTTY;
+const ORIG_STDOUT_ISTTY = process.stdout.isTTY;
 const ORIG_OMC_TARGET = process.env.OMC_SETUP_TARGET;
 
 let logSpy: ReturnType<typeof vi.spyOn>;
@@ -125,12 +126,23 @@ beforeEach(() => {
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   // Pretend we have a TTY so --wizard/--interactive don't trip X3/X4.
+  // `resolveOptions` reads `process.stdin.isTTY` while the new bare-path
+  // dispatcher in runSetupCommand reads `process.stdout.isTTY` via
+  // `isNonInteractive()` — both must be truthy for the "TTY" branch to fire.
   (process.stdin as unknown as { isTTY?: boolean }).isTTY = true;
+  (process.stdout as unknown as { isTTY?: boolean }).isTTY = true;
   delete process.env.OMC_SETUP_TARGET;
+  // `isNonInteractive()` also returns true when CI/CLAUDE_CODE_RUN are set.
+  // Clear them so these tests exercise the "bare on TTY" branch cleanly.
+  delete process.env.CI;
+  delete process.env.CLAUDE_CODE_RUN;
+  delete process.env.CLAUDE_CODE_NON_INTERACTIVE;
+  delete process.env.GITHUB_ACTIONS;
 });
 
 afterEach(() => {
   (process.stdin as unknown as { isTTY?: boolean }).isTTY = ORIG_ISTTY;
+  (process.stdout as unknown as { isTTY?: boolean }).isTTY = ORIG_STDOUT_ISTTY;
   if (ORIG_OMC_TARGET === undefined) {
     delete process.env.OMC_SETUP_TARGET;
   } else {
@@ -254,6 +266,81 @@ describe('omc setup: mode-control flags', () => {
   it('--non-interactive sets interactive=false', async () => {
     await driveParse(['--non-interactive', '--quiet']);
     expect(lastCallOptions().interactive).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bare-path dispatch (wizard vs. safe-defaults vs. errors)
+// ---------------------------------------------------------------------------
+
+describe('omc setup: bare-path dispatch (wizard/safe-defaults branching)', () => {
+  it('bare + non-TTY → safe-defaults (no wizard, runSetup called with SAFE_DEFAULTS preset)', async () => {
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = false;
+    (process.stdin as unknown as { isTTY?: boolean }).isTTY = false;
+    await driveParse([]);
+
+    // runSetup called; phases match SAFE_DEFAULTS.
+    const opts = lastCallOptions();
+    const phases = Array.from(opts.phases).sort();
+    expect(phases).toEqual(['claude-md', 'infra', 'integrations', 'welcome'].sort());
+    expect(opts.mcp.enabled).toBe(true);
+    expect(opts.teams.enabled).toBe(true);
+  });
+
+  it('--non-interactive on TTY → safe-defaults (forces non-interactive even on TTY)', async () => {
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = true;
+    (process.stdin as unknown as { isTTY?: boolean }).isTTY = true;
+    await driveParse(['--non-interactive']);
+
+    const opts = lastCallOptions();
+    const phases = Array.from(opts.phases).sort();
+    expect(phases).toEqual(['claude-md', 'infra', 'integrations', 'welcome'].sort());
+    expect(opts.interactive).toBe(false);
+  });
+
+  it('--quiet on TTY → safe-defaults (quiet is implicit non-interactive)', async () => {
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = true;
+    (process.stdin as unknown as { isTTY?: boolean }).isTTY = true;
+    await driveParse(['--quiet']);
+
+    const opts = lastCallOptions();
+    const phases = Array.from(opts.phases).sort();
+    expect(phases).toEqual(['claude-md', 'infra', 'integrations', 'welcome'].sort());
+    expect(opts.quiet).toBe(true);
+  });
+
+  it('--interactive --non-interactive → exit 2 (mutex)', async () => {
+    const stderr = new CaptureStderr();
+    const code = await callRunSetupCommand(
+      baseOpts({ interactive: true, nonInteractive: true }),
+      stderr as unknown as NodeJS.WritableStream,
+    );
+    expect(code).toBe(2);
+    expect(stderr.output).toMatch(/mutually exclusive/);
+  });
+
+  it('bare + --interactive + non-TTY → exit 2 (bare-path X4 check with clear message)', async () => {
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = false;
+    (process.stdin as unknown as { isTTY?: boolean }).isTTY = false;
+    const stderr = new CaptureStderr();
+    const code = await callRunSetupCommand(
+      baseOpts({ interactive: true }),
+      stderr as unknown as NodeJS.WritableStream,
+    );
+    expect(code).toBe(2);
+    expect(stderr.output).toMatch(/--interactive requires a TTY/);
+  });
+
+  it('--infra-only on non-TTY → direct install (escape hatch, NOT safe-defaults)', async () => {
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = false;
+    (process.stdin as unknown as { isTTY?: boolean }).isTTY = false;
+    await driveParse(['--infra-only', '--quiet']);
+
+    const opts = lastCallOptions();
+    const phases = Array.from(opts.phases);
+    // --infra-only pins phases=['infra'] — SAFE_DEFAULTS is NOT applied.
+    expect(phases).toEqual(['infra']);
+    expect(opts.mcp.enabled).toBe(false);
   });
 });
 
@@ -528,6 +615,7 @@ describe('omc setup: illegal combinations X1–X12', () => {
 
   it('X3: --wizard + non-TTY + no --preset → exit 2', async () => {
     (process.stdin as unknown as { isTTY?: boolean }).isTTY = false;
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = false;
     const stderr = new CaptureStderr();
     const code = await callRunSetupCommand(
       baseOpts({ wizard: true }),
@@ -539,6 +627,7 @@ describe('omc setup: illegal combinations X1–X12', () => {
 
   it('X4: --interactive + non-TTY → exit 2', async () => {
     (process.stdin as unknown as { isTTY?: boolean }).isTTY = false;
+    (process.stdout as unknown as { isTTY?: boolean }).isTTY = false;
     const stderr = new CaptureStderr();
     const code = await callRunSetupCommand(
       baseOpts({ interactive: true }),
