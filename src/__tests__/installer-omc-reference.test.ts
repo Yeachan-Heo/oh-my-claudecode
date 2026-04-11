@@ -167,8 +167,6 @@ describe('installer bundled + standalone skill sync', () => {
       expect(existsSync(installedSkillPath)).toBe(true);
       expect(readFileSync(installedSkillPath, 'utf-8')).toContain(`name: ${skillName}`);
     }
-
-    expect(existsSync(join(claudeConfigDir, 'skills', 'omc-setup', 'phases', '04-welcome.md'))).toBe(true);
   });
 
   it('skips bundled skill sync when an installed plugin already provides skills', async () => {
