@@ -38,10 +38,11 @@ import {
   isInstalled,
   getInstallInfo,
   isRunningAsPlugin,
-  getInstalledOmcPluginRoots
+  getInstalledOmcPluginRoots,
+  pruneStandaloneDuplicatesForPluginMode,
 } from '../installer/index.js';
 import { uninstall as runUninstall } from '../installer/uninstall.js';
-import { runSetup } from '../setup/index.js';
+import { runSetup, readAlreadyConfigured } from '../setup/index.js';
 import {
   mapSetupCommanderOpts,
   loadPreset,
@@ -1591,6 +1592,42 @@ export async function runSetupCommand(
         return 2;
       }
       throw err;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Pre-wizard already-configured gate: check state FIRST so we don't
+  // waste the user's time answering 11 questions only to be told "OMC
+  // is already configured" after they submit. If alreadyConfigured and
+  // not --force, also run the plugin-duplicate cleanup and exit.
+  // ------------------------------------------------------------------
+  if (runWizardBeforeSetup && !presetPartial && !flagsPartial.force) {
+    const ac = readAlreadyConfigured(getClaudeConfigDir());
+    if (ac.alreadyConfigured) {
+      const pruneResult = pruneStandaloneDuplicatesForPluginMode(
+        (msg) => process.stdout.write(`${msg}\n`),
+      );
+      const totalPruned =
+        pruneResult.prunedAgents.length
+        + pruneResult.prunedSkills.length
+        + pruneResult.prunedHooks.length;
+      if (totalPruned > 0 || pruneResult.settingsStripped) {
+        process.stdout.write(chalk.green(
+          `Cleaned up plugin-duplicate leftovers: `
+          + `${pruneResult.prunedAgents.length} agent(s), `
+          + `${pruneResult.prunedSkills.length} skill(s), `
+          + `${pruneResult.prunedHooks.length} hook(s)`
+          + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
+          + '\n',
+        ));
+      }
+
+      process.stdout.write(chalk.yellow(
+        `OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
+        + 'Re-run with --force to bypass this check, or use --claude-md-only '
+        + 'for a quick CLAUDE.md refresh.\n',
+      ));
+      return 0;
     }
   }
 

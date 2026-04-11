@@ -290,3 +290,92 @@ describe('install() — plugin active prunes leftover standalone hooks', () => {
     expect(allCommands.some((c) => c.includes('my-audit.sh'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 7d: pruneStandaloneDuplicatesForPluginMode composite helper
+// ---------------------------------------------------------------------------
+
+describe('pruneStandaloneDuplicatesForPluginMode — already-configured path', () => {
+  it('runs all three prunes + settings.json strip when called directly', async () => {
+    // Fake plugin root with all three delivery surfaces
+    mkdirSync(join(tmpPluginRoot, 'agents'), { recursive: true });
+    writeFileSync(join(tmpPluginRoot, 'agents', 'executor.md'), '---\nname: executor\n---\n', 'utf8');
+    mkdirSync(join(tmpPluginRoot, 'skills', 'ralph'), { recursive: true });
+    writeFileSync(join(tmpPluginRoot, 'skills', 'ralph', 'SKILL.md'), '---\nname: ralph\n---\n', 'utf8');
+    // hooks/hooks.json already created in the beforeEach
+
+    // Seed installed_plugins.json pointing at the fake plugin
+    mkdirSync(join(tmpConfigDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(tmpConfigDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        plugins: {
+          'oh-my-claudecode@4.11.4': [{ installPath: tmpPluginRoot }],
+        },
+      }),
+      'utf8',
+    );
+
+    // Seed leftover standalone agents — content must have OMC frontmatter so
+    // the ownership check inside prunePluginDuplicateAgents accepts it.
+    mkdirSync(join(tmpConfigDir, 'agents'), { recursive: true });
+    writeFileSync(join(tmpConfigDir, 'agents', 'executor.md'), '---\nname: executor\n---\nstale content\n', 'utf8');
+
+    // Seed leftover standalone skills
+    mkdirSync(join(tmpConfigDir, 'skills', 'ralph'), { recursive: true });
+    writeFileSync(
+      join(tmpConfigDir, 'skills', 'ralph', 'SKILL.md'),
+      '---\nname: ralph\n---\n',
+      'utf8',
+    );
+
+    // Seed leftover standalone hook
+    mkdirSync(join(tmpConfigDir, 'hooks'), { recursive: true });
+    writeFileSync(join(tmpConfigDir, 'hooks', 'keyword-detector.mjs'), '// stale\n', 'utf8');
+
+    // Seed settings.json with an OMC hook entry
+    writeFileSync(
+      join(tmpConfigDir, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: `node ${tmpConfigDir}/hooks/keyword-detector.mjs` }],
+          }],
+        },
+      }),
+      'utf8',
+    );
+
+    vi.resetModules();
+    const { pruneStandaloneDuplicatesForPluginMode } = await import('../index.js');
+    const result = pruneStandaloneDuplicatesForPluginMode(() => {});
+
+    expect(result.prunedAgents.length, 'should prune at least 1 agent').toBeGreaterThanOrEqual(1);
+    expect(result.prunedSkills.length, 'should prune at least 1 skill').toBeGreaterThanOrEqual(1);
+    expect(result.prunedHooks.length, 'should prune at least 1 hook').toBeGreaterThanOrEqual(1);
+    expect(result.settingsStripped, 'settings.json OMC hooks should be stripped').toBe(true);
+
+    // Verify filesystem
+    expect(existsSync(join(tmpConfigDir, 'agents', 'executor.md')), 'agent pruned').toBe(false);
+    expect(existsSync(join(tmpConfigDir, 'skills', 'ralph', 'SKILL.md')), 'skill pruned').toBe(false);
+    expect(existsSync(join(tmpConfigDir, 'hooks', 'keyword-detector.mjs')), 'hook pruned').toBe(false);
+
+    const settingsAfter = JSON.parse(readFileSync(join(tmpConfigDir, 'settings.json'), 'utf8')) as {
+      hooks?: Record<string, unknown>;
+    };
+    expect(settingsAfter.hooks === undefined || Object.keys(settingsAfter.hooks).length === 0).toBe(true);
+  });
+
+  it('is a no-op when no plugin is active', async () => {
+    // No installed_plugins.json, no OMC_PLUGIN_ROOT, no plugin files
+    vi.resetModules();
+    const { pruneStandaloneDuplicatesForPluginMode } = await import('../index.js');
+    const result = pruneStandaloneDuplicatesForPluginMode(() => {});
+
+    expect(result.prunedAgents).toHaveLength(0);
+    expect(result.prunedSkills).toHaveLength(0);
+    expect(result.prunedHooks).toHaveLength(0);
+    expect(result.settingsStripped).toBe(false);
+  });
+});

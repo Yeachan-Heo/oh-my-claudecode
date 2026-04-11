@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { getClaudeConfigDir } from '../utils/config-dir.js';
-import { install, VERSION, type InstallOptions, type InstallResult } from '../installer/index.js';
+import { install, pruneStandaloneDuplicatesForPluginMode, VERSION, type InstallOptions, type InstallResult } from '../installer/index.js';
 import {
   acquireLock,
   LockHeldError,
@@ -154,7 +154,7 @@ function makeLoggers(quiet: boolean): LoggerPair {
  * Read `setupCompleted` / `setupVersion` from `.omc-config.json`.
  * Used by the phase 0b already-configured check.
  */
-function readAlreadyConfigured(configDir: string): {
+export function readAlreadyConfigured(configDir: string): {
   alreadyConfigured: boolean;
   setupVersion?: string;
 } {
@@ -323,6 +323,28 @@ export async function runSetup(
     if (wizardRun && !options.force) {
       const ac = readAlreadyConfigured(configDir);
       if (ac.alreadyConfigured) {
+        // Plugin-mode leftover cleanup runs even when setup would otherwise
+        // short-circuit. A user who installed OMC standalone pre-plugin and
+        // then switched to plugin delivery still has stale $CONFIG_DIR/hooks
+        // etc — this prune is fast, idempotent, and ownership-gated.
+        const pruneResult = pruneStandaloneDuplicatesForPluginMode(
+          (msg) => log.info(msg),
+          { configDir },
+        );
+        const totalPruned =
+          pruneResult.prunedAgents.length
+          + pruneResult.prunedSkills.length
+          + pruneResult.prunedHooks.length;
+        if (totalPruned > 0 || pruneResult.settingsStripped) {
+          log.info(
+            `Cleaned up plugin-duplicate leftovers: `
+            + `${pruneResult.prunedAgents.length} agent(s), `
+            + `${pruneResult.prunedSkills.length} skill(s), `
+            + `${pruneResult.prunedHooks.length} hook(s)`
+            + (pruneResult.settingsStripped ? ', settings.json stripped' : ''),
+          );
+        }
+
         log.info(
           `OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
           + 'Re-run with --force to bypass this check, or use --claude-md-only '
