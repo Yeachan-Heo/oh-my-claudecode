@@ -557,11 +557,13 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
     if (file === 'AGENTS.md') continue;
     if (currentAgentFiles.has(file)) continue;
 
-    // Check if this looks like an OMC-created agent (kebab-case .md with frontmatter)
+    // Check if this is an OMC-installed agent (has `source: omc` frontmatter marker).
+    // Agents without this marker are user-created and must never be deleted.
     const filepath = join(AGENTS_DIR, file);
     try {
       const content = readFileSync(filepath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+      const { metadata } = parseFrontmatter(content);
+      if (metadata.source === 'omc') {
         unlinkSync(filepath);
         removed.push(file);
         log(`  Removed stale agent: ${file}`);
@@ -650,10 +652,12 @@ export function cleanupStaleSkills(log: (msg: string) => void): string[] {
     const skillMdPath = join(SKILLS_DIR, entry.name, 'SKILL.md');
     if (!existsSync(skillMdPath)) continue;
 
-    // Check if this looks like an OMC-created skill (has standard frontmatter)
+    // Check if this is an OMC-installed skill (has `source: omc` frontmatter marker).
+    // Skills without this marker are user-created and must never be deleted.
     try {
       const content = readFileSync(skillMdPath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+      const { metadata } = parseFrontmatter(content);
+      if (metadata.source === 'omc') {
         // Skip user-learned skills (these are user-created)
         if (entry.name === 'omc-learned') continue;
 
@@ -723,7 +727,8 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
       // copy (or looks like standard OMC frontmatter). This preserves user-authored
       // skills that happen to share a name with a plugin skill.
       const pluginContent = pluginSkillHashes.get(entry.name);
-      const isOmcCreated = standaloneContent.startsWith('---\n') && /^name:\s+\S+/m.test(standaloneContent);
+      const { metadata: standaloneMeta } = parseFrontmatter(standaloneContent);
+      const isOmcCreated = standaloneMeta.source === 'omc';
 
       if (pluginContent === standaloneContent || isOmcCreated) {
         rmSync(join(SKILLS_DIR, entry.name), { recursive: true, force: true });
@@ -991,6 +996,18 @@ function syncBundledSkillDefinitions(log: (msg: string) => void, options?: { saf
     const relativePath = join(targetDirName, 'SKILL.md');
     const targetDir = join(SKILLS_DIR, targetDirName);
     cpSync(sourceDir, targetDir, { recursive: true, force: true });
+
+    // Stamp installed skills with `source: omc` so cleanupStaleSkills() can
+    // distinguish OMC-managed skills from user-created ones.
+    const targetSkillPath = join(targetDir, 'SKILL.md');
+    if (existsSync(targetSkillPath)) {
+      const skillContent = readFileSync(targetSkillPath, 'utf-8');
+      if (!skillContent.includes('source: omc')) {
+        const stamped = skillContent.replace(/^---\n/, '---\nsource: omc\n');
+        writeFileSync(targetSkillPath, stamped, 'utf-8');
+      }
+    }
+
     installedSkills.push(relativePath.replace(/\\/g, '/'));
     log(`  Synced ${relativePath}`);
   }
@@ -1273,7 +1290,12 @@ export function install(options: InstallOptions = {}): InstallResult {
           if (existsSync(filepath) && !options.force) {
             log(`  Skipping ${filename} (already exists)`);
           } else {
-            writeFileSync(filepath, content);
+            // Stamp installed agents with `source: omc` so cleanupStaleAgents() can
+          // distinguish OMC-managed agents from user-created ones.
+          const stampedContent = content.startsWith('---\n') && !content.includes('source: omc')
+            ? content.replace(/^---\n/, '---\nsource: omc\n')
+            : content;
+          writeFileSync(filepath, stampedContent);
             result.installedAgents.push(filename);
             log(`  Installed ${filename}`);
           }
