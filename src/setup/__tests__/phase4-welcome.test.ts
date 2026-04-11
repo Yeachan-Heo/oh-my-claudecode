@@ -11,20 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULTS } from '../options.js';
-import type { SetupOptions } from '../options.js';
 import { detectIsUpgrade, runPhase4 } from '../phases/phase4-welcome.js';
-
-function makeOptions(overrides: Partial<SetupOptions> = {}): SetupOptions {
-  return {
-    ...DEFAULTS,
-    phases: new Set(DEFAULTS.phases),
-    mcp: { ...DEFAULTS.mcp, credentials: {}, servers: [] },
-    teams: { ...DEFAULTS.teams },
-    installerOptions: {},
-    ...overrides,
-  };
-}
+import { makeOptions } from './test-helpers.js';
 
 describe('detectIsUpgrade', () => {
   let configDir: string;

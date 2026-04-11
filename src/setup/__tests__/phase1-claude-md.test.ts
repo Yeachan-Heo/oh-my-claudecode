@@ -9,20 +9,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { InstallClaudeMdOptions, InstallClaudeMdResult } from '../claude-md.js';
-import { DEFAULTS } from '../options.js';
-import type { SetupOptions } from '../options.js';
 import { runPhase1 } from '../phases/phase1-claude-md.js';
-
-function makeOptions(overrides: Partial<SetupOptions> = {}): SetupOptions {
-  return {
-    ...DEFAULTS,
-    phases: new Set(DEFAULTS.phases),
-    mcp: { ...DEFAULTS.mcp, credentials: {}, servers: [] },
-    teams: { ...DEFAULTS.teams },
-    installerOptions: {},
-    ...overrides,
-  };
-}
+import { makeOptions } from './test-helpers.js';
 
 function fakeResult(overrides: Partial<InstallClaudeMdResult> = {}): InstallClaudeMdResult {
   return {

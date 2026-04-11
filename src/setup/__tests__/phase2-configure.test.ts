@@ -12,20 +12,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { InstallOptions, InstallResult } from '../../installer/index.js';
-import { DEFAULTS } from '../options.js';
-import type { SetupOptions } from '../options.js';
 import { runPhase2 } from '../phases/phase2-configure.js';
-
-function makeOptions(overrides: Partial<SetupOptions> = {}): SetupOptions {
-  return {
-    ...DEFAULTS,
-    phases: new Set(DEFAULTS.phases),
-    mcp: { ...DEFAULTS.mcp, credentials: {}, servers: [] },
-    teams: { ...DEFAULTS.teams },
-    installerOptions: {},
-    ...overrides,
-  };
-}
+import { makeOptions } from './test-helpers.js';
 
 function successResult(message = 'install ok'): InstallResult {
   return {
