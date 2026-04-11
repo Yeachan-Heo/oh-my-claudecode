@@ -39,6 +39,13 @@ export interface Prompter {
   askConfirm(question: string, defaultValue: boolean): Promise<boolean>;
   askText(question: string, defaultValue?: string): Promise<string>;
   askSecret(question: string): Promise<string>;
+  /**
+   * Emit a non-prompt message to the prompter's output sink (e.g. a
+   * pre-wizard banner showing the active config profile). Implementations
+   * must be synchronous and side-effect only: no newline injection, no
+   * transformation of the payload. Callers own the newline convention.
+   */
+  write(message: string): void;
   close(): void;
 }
 
@@ -179,6 +186,10 @@ export function createReadlinePrompter(opts: ReadlinePrompterOptions = {}): Prom
     }
   }
 
+  function write(message: string): void {
+    output.write(message);
+  }
+
   function close(): void {
     rl.off('SIGINT', sigintHandler);
     try {
@@ -188,7 +199,7 @@ export function createReadlinePrompter(opts: ReadlinePrompterOptions = {}): Prom
     }
   }
 
-  return { askSelect, askConfirm, askText, askSecret, close };
+  return { askSelect, askConfirm, askText, askSecret, write, close };
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +219,11 @@ export function createNullPrompter(): Prompter {
     },
     async askSecret(question: string): Promise<string> {
       throw new NullPrompterError(question);
+    },
+    write(_message: string): void {
+      // Non-interactive setup: drop banner output. The caller (runSetup
+      // in non-interactive mode) does not need the wizard banner because
+      // there's no prompt to contextualise.
     },
     close(): void {
       // no-op
