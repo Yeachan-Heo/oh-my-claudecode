@@ -714,6 +714,21 @@ function readKeyFile(path: string, label: string): string {
   }
 }
 
+/**
+ * Convert commander-parsed setup options into a Partial<SetupOptions>.
+ *
+ * Used by the CLI action handler (which has already let commander parse
+ * the outer argv) to skip the double-parse that `parseFlagsToPartial()`
+ * would otherwise do. Callers pass `cmd.opts()` directly. Commander
+ * normalizes negated flags like `--no-plugin` into `{ plugin: false }`,
+ * so the caller's opts object is morphologically identical to `RawFlags`
+ * (with the extra `plugin`/`mcp`/`teams`/`installCli`/`starRepo` boolean
+ * keys that commander synthesizes for the `--no-*` pairs).
+ */
+export function mapSetupCommanderOpts(opts: unknown): Partial<SetupOptions> {
+  return flagsToPartial(opts as RawFlags);
+}
+
 function flagsToPartial(flags: RawFlags): Partial<SetupOptions> {
   const out: Partial<SetupOptions> = {};
   const installerOptions: InstallOptions = {};
