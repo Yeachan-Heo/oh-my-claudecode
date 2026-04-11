@@ -432,6 +432,21 @@ describe('prunePluginDuplicateAgents', () => {
     expect(existsSync(join(agentsDir, 'my-custom-agent.md'))).toBe(true);
   });
 
+  it('preserves user-created agents with frontmatter but no source: omc even if name matches plugin', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+
+    // User-created agent whose name matches a plugin agent but lacks source: omc
+    writeFileSync(join(agentsDir, 'architect.md'), `---\nname: architect\ndescription: My custom architect\nmodel: claude-opus-4-6\n---\n\nCustom content.\n`);
+
+    const removed = prune(log);
+
+    expect(removed).not.toContain('architect.md');
+    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
+  });
+
   it('preserves AGENTS.md documentation file', async () => {
     vi.resetModules();
     const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');

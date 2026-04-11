@@ -725,7 +725,7 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
       const standaloneContent = readFileSync(skillMdPath, 'utf-8').trim();
 
       // Safety check: only remove if the standalone content matches the plugin's
-      // copy (or looks like standard OMC frontmatter). This preserves user-authored
+      // copy (or has `source: omc` marker). This preserves user-authored
       // skills that happen to share a name with a plugin skill.
       const pluginContent = pluginSkillHashes.get(entry.name);
       const { metadata: standaloneMeta } = parseFrontmatter(standaloneContent);
