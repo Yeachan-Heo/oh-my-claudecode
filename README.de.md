@@ -32,6 +32,8 @@ _Lernen Sie nicht Claude Code. Nutzen Sie einfach OMC._
 /oh-my-claudecode:omc-setup
 ```
 
+Standardmäßig startet `omc setup` in einem TTY einen interaktiven Assistenten ("interactive wizard") mit ca. 11 Readline-Fragen (gleicher Ablauf wie der In-Session-Skill `/omc-setup`). In Nicht-TTY-Kontexten (CI, weitergeleitetes stdin) fällt es automatisch auf `SAFE_DEFAULTS` zurück — eine opinionated globale Installation mit Ultrawork-Modus, allen MCP-Servern, Teams und HUD-Konfiguration. Für das byteidentische alte Verhalten (stilles Infra-Only), verwenden Sie `omc setup --infra-only`. Für expliziten nicht-interaktiven Modus überall verwenden Sie `omc setup --non-interactive`. Siehe die [vollständige Referenz der Setup-Flags](./docs/REFERENCE.md#omc-setup-flags) für alle verfügbaren Optionen.
+
 Wenn Sie OMC über `omc --plugin-dir <path>` oder `claude --plugin-dir <path>` ausführen, fügen Sie `--plugin-dir-mode` zu `omc setup` hinzu (oder exportieren Sie `OMC_PLUGIN_ROOT` vorher), um zu vermeiden, dass Fähigkeiten/Agenten dupliziert werden, die das Plugin bereits zur Laufzeit bereitstellt. Siehe [Plugin directory flags Abschnitt in REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags) für eine vollständige Entscheidungsmatrix und alle verfügbaren Flags.
 
 <!-- TODO(i18n): verify translation -->

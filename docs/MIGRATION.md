@@ -6,12 +6,101 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Setup Flow Unification](#unreleased-setup-flow-unification)
 - [Unreleased: Team MCP Runtime Deprecation (CLI-Only)](#unreleased-team-mcp-runtime-deprecation-cli-only)
 - [v3.5.3 → v3.5.5: Test Fixes & Cleanup](#v353--v355-test-fixes--cleanup)
 - [v3.5.2 → v3.5.3: Skill Consolidation](#v352--v353-skill-consolidation)
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
 - [v3.0 → v3.1: Notepad Wisdom & Enhanced Features](#v30--v31-notepad-wisdom--enhanced-features)
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
+
+---
+
+## Unreleased: Setup Flow Unification
+
+### TL;DR
+
+`omc setup` now launches an interactive wizard on a TTY and falls back to **SAFE_DEFAULTS** in non-interactive environments. Use `omc setup --infra-only` to get the pre-refactor silent behavior. Use `omc setup --non-interactive` to run SAFE_DEFAULTS explicitly in CI.
+
+### Who Is Affected
+
+- **Terminal users** running `omc setup` directly. Plugin-installed systems are unchanged. Bare-metal CLI installs now see the 11-question interactive wizard instead of a silent infra-only install.
+- **CI / automation** running `omc setup` non-interactively. The command now auto-detects the non-TTY environment and runs SAFE_DEFAULTS (global CLAUDE.md overwrite, `ultrawork` execution mode, all 4 MCP servers, teams enabled). Evaluate whether this is the behavior you want.
+- **Scripts that passed `--skip-hooks`**. This flag was previously a no-op — hook installation happened regardless. It is now wired through correctly. If your script passed `--skip-hooks` expecting hooks to be skipped, your intent is now honored (behavior fixed). If your script passed it without expectation, behavior is unchanged.
+- **Out-of-tree callers with hardcoded paths** to `scripts/setup-claude-md.sh` or `scripts/setup-progress.sh`. These scripts still exist but are now thin `exec` shims; they continue to work but are effectively deprecated.
+
+### Migration Actions
+
+#### Preserve old silent infra-only behavior
+
+```bash
+# Before
+omc setup
+
+# After (byte-identical to pre-refactor behavior)
+omc setup --infra-only
+```
+
+#### Explicit non-interactive full install in CI
+
+```bash
+# Before (relied on TTY auto-detect or CI env var)
+omc setup
+
+# After (self-documenting; avoids relying on TTY detection)
+omc setup --non-interactive
+```
+
+#### MCP servers: skip when credentials are missing
+
+The new default is `install-without-auth` — servers are registered even without credentials so they appear in `claude mcp list`. To restore the old skip behavior:
+
+```bash
+# Before (implicit skip on missing credentials)
+omc setup
+
+# After (explicit skip)
+omc setup --mcp-on-missing-creds=skip
+
+# Strict CI — fail if credentials are absent
+omc setup --mcp-on-missing-creds=error
+```
+
+#### MCP scope: project-scoped servers
+
+OMC now passes `--scope user` by default (global to the machine), matching the old `/mcp-setup` skill behavior. Raw `claude mcp add` defaults to `--scope local` (per-project). To restore project-scoped registration:
+
+```bash
+# Before (relied on claude mcp add default of --scope local)
+omc setup
+
+# After (explicit project scope)
+omc setup --mcp-scope=local
+```
+
+#### `--skip-hooks` is now functional
+
+```bash
+# Before (flag declared but silently ignored — hooks were always installed)
+omc setup --skip-hooks
+
+# After (hooks are genuinely skipped; a stderr advisory is printed on first use per day)
+omc setup --skip-hooks
+```
+
+If your script passed `--skip-hooks` intending to skip hooks, no change is needed — it now does what you meant. If your script depends on hooks being installed when `--skip-hooks` is present, remove the flag.
+
+### New Capabilities
+
+- **CLI interactive wizard**: `omc setup` on a TTY runs the same 11-question flow as the `/oh-my-claudecode:omc-setup` in-session skill.
+- **Skills gain non-interactive mode**: `/oh-my-claudecode:omc-setup` and `/oh-my-claudecode:mcp-setup` now accept a `--preset` path for fully unattended runs.
+- **Unified flag surface**: `--wizard`, `--claude-md-only`, `--mcp-only`, `--state-*`, `--check-state`, `--build-preset`, `--preset`, `--dump-safe-defaults`. See [REFERENCE.md#omc-setup-flags](./REFERENCE.md#omc-setup-flags) for the full catalog.
+
+### Non-Regressions
+
+- `omc setup --infra-only` is byte-identical to the pre-refactor bare `omc setup`. This invariant is pinned by `src/installer/__tests__/cli-setup-backward-compat.test.ts`.
+- All pre-existing flags (`-f/--force`, `-q/--quiet`, `--no-plugin`, `--plugin-dir-mode`, `--force-hooks`) retain their exact semantics.
+- `scripts/setup-claude-md.sh` and `scripts/setup-progress.sh` continue to work as thin `exec` shims.
 
 ---
 

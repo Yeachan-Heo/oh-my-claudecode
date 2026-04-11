@@ -309,6 +309,169 @@ claude --plugin-dir /path/to/oh-my-claudecode
 
 ---
 
+## omc setup flags
+
+`omc setup` is the unified CLI entry point for installing and configuring oh-my-claudecode. Since the setup-unification refactor, bare `omc setup` behavior depends on whether the process is attached to a TTY.
+
+### UX modes
+
+| Invocation | Context | Behavior |
+|---|---|---|
+| `omc setup` | TTY (terminal) | Interactive wizard — 11 readline questions |
+| `omc setup` | Non-TTY (CI, piped) | SAFE_DEFAULTS: opinionated full install (global CLAUDE.md, overwrite, ultrawork, builtin task tool, all 4 MCP servers with `install-without-auth`, teams 3×executor, HUD with branch+status+cwd+sessionHealth) |
+| `omc setup --wizard` | TTY | Force interactive wizard |
+| `omc setup --wizard` | Non-TTY | Error: `--wizard requires TTY or --preset` |
+| `omc setup --non-interactive` | Anywhere | Force SAFE_DEFAULTS explicitly |
+| `omc setup --interactive` | TTY | Same as `--wizard` |
+| `omc setup --interactive` | Non-TTY | Error: `--interactive requires TTY` |
+| `omc setup --preset <file>` | Anywhere | Non-interactive install from JSON preset file |
+| `omc setup --infra-only` | Anywhere | Direct `install()` call — byte-identical to pre-refactor bare `omc setup`. Use for CI that relied on the old silent behavior. |
+
+> **Pre-refactor note**: bare `omc setup` previously called `install()` directly (infra-only, silent, idempotent). Use `--infra-only` to restore that exact behavior in automation.
+
+---
+
+### Phase selector flags
+
+These flags restrict or alter which phases run.
+
+| Flag | Description |
+|---|---|
+| `--wizard` | Alias for `--interactive`. Forces the interactive readline wizard. |
+| `--infra-only` | Escape hatch: calls `install()` directly. Byte-identical to pre-refactor bare `omc setup`. No wizard, no SAFE_DEFAULTS, no plugin check. |
+| `--claude-md-only --target=<local\|global>` | Run only Phase 1 (CLAUDE.md merge). Replaces `scripts/setup-claude-md.sh` direct invocations. |
+| `--mcp-only --preset=<file>` | Run only Phase 3 (MCP install). Used by the `mcp-setup` skill. |
+| `--state-save <step>` | State machine: save progress at step N. Use with `--state-config-type <type>`. |
+| `--state-config-type <type>` | Config type label for `--state-save`. |
+| `--state-clear` | State machine: clear saved progress. |
+| `--state-resume` | State machine: print resume info as JSON to stdout. |
+| `--state-complete <version>` | State machine: mark setup complete; merges `setupCompleted` into `.omc-config.json`. |
+| `--check-state` | Read-only: print `{alreadyConfigured, setupVersion, resumeStep}` as JSON. Does not mutate state. |
+| `--build-preset` | (internal) Decision-tree helper used by the `/omc-setup` skill to validate answers and produce a preset. Use with `--answers <file>` and `--out <file>`. |
+| `--dump-safe-defaults` | Print the SAFE_DEFAULTS preset as JSON to stdout and exit. Copy and tweak as a custom preset file. |
+
+---
+
+### Mode and phase option flags
+
+#### Phase 1 — CLAUDE.md
+
+| Flag | Description |
+|---|---|
+| `--local` | Target: local project (`.claude/CLAUDE.md`). |
+| `--global` | Target: global user config (`~/.claude/CLAUDE.md`). Default in SAFE_DEFAULTS. |
+| `--preserve` | Install style: preserve existing CLAUDE.md; builds a companion `CLAUDE-omc.md` (requires `--global`). |
+| `--overwrite` | Install style: overwrite existing CLAUDE.md. Default in SAFE_DEFAULTS. |
+
+#### Phase 2 — Configure
+
+| Flag | Description |
+|---|---|
+| `--execution-mode <mode>` | Default execution mode: `ultrawork` \| `ralph` \| `autopilot`. SAFE_DEFAULTS: `ultrawork`. |
+| `--task-tool <tool>` | Task management tool: `builtin` \| `bd` \| `br`. SAFE_DEFAULTS: `builtin`. |
+| `--install-cli` | Install the `oh-my-claude-sisyphus` CLI globally. |
+| `--no-install-cli` | Do not install the CLI globally. SAFE_DEFAULTS: `false`. |
+
+#### Phase 3 — Integrations (MCP + teams)
+
+| Flag | Description |
+|---|---|
+| `--configure-mcp` | Enable MCP server configuration. |
+| `--no-mcp` | Disable MCP server configuration. |
+| `--mcp-servers <list>` | Comma-separated list of MCP servers to install. SAFE_DEFAULTS: `context7,exa,filesystem,github`. |
+| `--exa-key <key>` | Exa API key. **Warning**: exposes the secret in `argv` and process listings. Prefer `--exa-key-file` or the `EXA_API_KEY` env var. |
+| `--exa-key-file <path>` | Path to a file containing the Exa API key (recommended over `--exa-key`). |
+| `--github-token <token>` | GitHub token. **Warning**: exposes the secret in `argv`. Prefer `--github-token-file` or the `GITHUB_TOKEN` env var. |
+| `--github-token-file <path>` | Path to a file containing the GitHub token (recommended over `--github-token`). |
+| `--mcp-on-missing-creds <mode>` | Policy when MCP credentials are missing: `skip` \| `error` \| `install-without-auth`. Default (SAFE_DEFAULTS): `install-without-auth` — registers the server without credentials so it appears in `claude mcp list` and can be fixed later. `skip` omits the server entirely; `error` aborts setup. |
+| `--mcp-scope <scope>` | MCP registration scope: `local` \| `user` \| `project`. Default (SAFE_DEFAULTS): `user` (global to this machine). Note: `claude mcp add` defaults to `local` (per-project) — OMC explicitly passes `user`. |
+| `--enable-teams` | Enable agent teams configuration. |
+| `--no-teams` | Disable agent teams. |
+| `--team-agents <n>` | Number of team agents: `2` \| `3` \| `5`. SAFE_DEFAULTS: `3`. |
+| `--team-type <type>` | Team agent type: `executor` \| `debugger` \| `designer`. SAFE_DEFAULTS: `executor`. |
+| `--teammate-display <mode>` | Teammate display mode: `auto` \| `in-process` \| `tmux`. SAFE_DEFAULTS: `auto`. |
+
+#### Phase 4 — Welcome
+
+| Flag | Description |
+|---|---|
+| `--star-repo` | Prompt to star the repo on GitHub after setup completes. SAFE_DEFAULTS: enabled. |
+| `--no-star-repo` | Do not prompt to star the repo. |
+
+---
+
+### Inherited flags (unchanged semantics)
+
+These flags existed before the unification refactor and retain their original meaning.
+
+| Flag | Description |
+|---|---|
+| `-f`, `--force` | Bypass the already-configured check. |
+| `-q`, `--quiet` | Suppress non-error stdout. |
+| `--no-plugin` | Bundle skills into `~/.claude/` even when a plugin provides them. |
+| `--plugin-dir-mode` | Dev mode: skip agent/skill copy; HUD, hooks, and CLAUDE.md still install. See [Plugin directory flags](#plugin-directory-flags) above. |
+| `--skip-hooks` | Skip hook installation. **Bug fix**: previously silently did nothing; now actually skips hook installation. A deprecation advisory is emitted on first use per day. |
+| `--force-hooks` | Force re-merge of hooks even when they are already present. |
+
+---
+
+### Preset file format
+
+A preset file is a JSON object whose keys match `SetupOptions` fields. Pass it with `--preset <file>` or generate one from the current defaults with `omc setup --dump-safe-defaults > my-preset.json`.
+
+**Minimal preset** (CLAUDE.md only, global, overwrite):
+
+```json
+{
+  "phases": ["claude-md", "infra"],
+  "target": "global",
+  "installStyle": "overwrite",
+  "force": false,
+  "quiet": false
+}
+```
+
+**Full preset** (all phases, MCP, teams, HUD):
+
+```json
+{
+  "phases": ["claude-md", "infra", "integrations", "welcome"],
+  "target": "global",
+  "installStyle": "overwrite",
+  "executionMode": "ultrawork",
+  "taskTool": "builtin",
+  "installCli": false,
+  "mcp": {
+    "enabled": true,
+    "servers": ["context7", "exa", "filesystem", "github"],
+    "credentials": {},
+    "onMissingCredentials": "install-without-auth",
+    "scope": "user"
+  },
+  "teams": {
+    "enabled": true,
+    "displayMode": "auto",
+    "agentCount": 3,
+    "agentType": "executor"
+  },
+  "starRepo": true,
+  "hud": {
+    "elements": {
+      "cwd": true,
+      "gitBranch": true,
+      "gitStatus": true,
+      "sessionHealth": true,
+      "useBars": false,
+      "contextBar": false
+    }
+  }
+}
+```
+
+Use `omc setup --dump-safe-defaults` to always get the current canonical SAFE_DEFAULTS as a starting point.
+
+---
+
 ## CLI Commands: ask/team/session
 
 ### `omc ask`

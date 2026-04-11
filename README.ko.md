@@ -32,6 +32,8 @@
 /omc-setup
 ```
 
+기본적으로 TTY에서 `omc setup`을 실행하면 약 11개의 readline 질문을 포함하는 대화형 마법사("interactive wizard")가 시작됩니다(세션 내 `/omc-setup` 스킬과 동일한 흐름). 비 TTY 환경(CI, 파이프된 stdin)에서는 자동으로 `SAFE_DEFAULTS`로 대체됩니다 — ultrawork 모드, 모든 MCP 서버, teams, HUD 설정을 포함하는 의견이 반영된 전역 설치입니다. 바이트 동일한 이전 동작(자동 인프라 전용)을 원하시면 `omc setup --infra-only`를 사용하세요. 어디서든 명시적 비대화형 모드를 사용하려면 `omc setup --non-interactive`를 사용하세요. 모든 사용 가능한 옵션은 [setup 플래그 전체 참조](./docs/REFERENCE.md#omc-setup-flags)를 확인하세요.
+
 `omc --plugin-dir <path>` 또는 `claude --plugin-dir <path>`를 통해 OMC를 실행하는 경우 `omc setup`에 `--plugin-dir-mode`를 추가합니다(또는 미리 `OMC_PLUGIN_ROOT` 내보내기). 이렇게 하면 플러그인이 이미 런타임에 제공하는 스킬/에이전트가 중복되지 않습니다. 완전한 결정 매트릭스 및 사용 가능한 모든 플래그는 [REFERENCE.md의 Plugin directory flags 섹션](./docs/REFERENCE.md#plugin-directory-flags)을 참조하세요.
 
 <!-- TODO(i18n): verify translation -->

@@ -32,6 +32,8 @@
 /omc-setup
 ```
 
+Theo mặc định, `omc setup` trên TTY khởi chạy trình hướng dẫn tương tác ("interactive wizard") với khoảng 11 câu hỏi readline (cùng quy trình với skill trong phiên `/omc-setup`). Trong các ngữ cảnh không có TTY (CI, stdin được dẫn qua pipe), nó tự động chuyển về `SAFE_DEFAULTS` — cài đặt toàn cục có chủ kiến với chế độ ultrawork, tất cả máy chủ MCP, teams và cấu hình HUD. Để có hành vi cũ giống byte (chỉ hạ tầng, im lặng), hãy dùng `omc setup --infra-only`. Để bật chế độ không tương tác rõ ràng ở bất kỳ đâu, hãy dùng `omc setup --non-interactive`. Xem [tài liệu tham chiếu đầy đủ về các cờ setup](./docs/REFERENCE.md#omc-setup-flags) để biết tất cả các tùy chọn có sẵn.
+
 Nếu bạn chạy OMC qua `omc --plugin-dir <path>` hoặc `claude --plugin-dir <path>`, hãy thêm `--plugin-dir-mode` vào `omc setup` (hoặc xuất `OMC_PLUGIN_ROOT` trước) để tránh trùng lặp các kỹ năng/tác nhân mà plugin đã cung cấp trong thời gian chạy. Để xem ma trận quyết định đầy đủ và tất cả các cờ có sẵn, hãy xem [phần Plugin directory flags trong REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags).
 
 <!-- TODO(i18n): verify translation -->

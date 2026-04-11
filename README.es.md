@@ -32,6 +32,8 @@
 /omc-setup
 ```
 
+De forma predeterminada, `omc setup` en una TTY lanza un asistente interactivo ("interactive wizard") con ~11 preguntas readline (el mismo flujo que el skill en sesión `/omc-setup`). En contextos sin TTY (CI, stdin por tubería), vuelve automáticamente a `SAFE_DEFAULTS` — una instalación global con opinión que incluye el modo ultrawork, todos los servidores MCP, teams y configuración HUD. Para el comportamiento anterior idéntico al byte (infra-only silencioso), use `omc setup --infra-only`. Para el modo no interactivo explícito en cualquier lugar, use `omc setup --non-interactive`. Consulte la [referencia completa de flags de setup](./docs/REFERENCE.md#omc-setup-flags) para todas las opciones disponibles.
+
 Si ejecuta OMC mediante `omc --plugin-dir <path>` o `claude --plugin-dir <path>`, agregue `--plugin-dir-mode` a `omc setup` (o exporte `OMC_PLUGIN_ROOT` antes) para evitar duplicar habilidades/agentes que el complemento ya proporciona en tiempo de ejecución. Consulte la [sección Plugin directory flags en REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags) para una matriz de decisión completa y todos los indicadores disponibles.
 
 <!-- TODO(i18n): verify translation -->

@@ -32,6 +32,8 @@
 /omc-setup
 ```
 
+デフォルトでは、TTY 上の `omc setup` は約 11 個の readline 質問を含むインタラクティブウィザード（"interactive wizard"）を起動します（セッション内スキル `/omc-setup` と同じフロー）。非 TTY コンテキスト（CI、パイプされた stdin）では、自動的に `SAFE_DEFAULTS` にフォールバックします — ultrawork モード、すべての MCP サーバー、teams、HUD 設定を含む opinionated なグローバルインストールです。バイト同一の旧動作（静音インフラのみ）に戻すには `omc setup --infra-only` を使用してください。どこでも明示的な非インタラクティブモードを使用するには `omc setup --non-interactive` を使用してください。すべての利用可能なオプションについては [setup フラグの完全リファレンス](./docs/REFERENCE.md#omc-setup-flags) を参照してください。
+
 `omc --plugin-dir <path>` または `claude --plugin-dir <path>` 経由で OMC を実行する場合、`omc setup` に `--plugin-dir-mode` を追加します (または事前に `OMC_PLUGIN_ROOT` をエクスポート) ので、プラグインが既に実行時に提供するスキル/エージェントが重複しません。完全な決定マトリックスと利用可能なすべてのフラグについては、[REFERENCE.md の Plugin directory flags セクション](./docs/REFERENCE.md#plugin-directory-flags) を参照してください。
 
 <!-- TODO(i18n): verify translation -->

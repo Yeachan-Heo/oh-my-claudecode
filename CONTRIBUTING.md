@@ -134,8 +134,10 @@ This tells Claude Code to ignore the repo's `.mcp.json` entry and use the plugin
 **Rebuilding**: After code changes:
 ```bash
 npm run build
-omc setup --plugin-dir-mode  # or just re-run build and restart Claude Code
+omc setup --plugin-dir-mode --infra-only  # Silent, idempotent reinstall for tight iteration
 ```
+
+Use `--infra-only` when iterating rapidly — it bypasses the interactive wizard and SAFE_DEFAULTS fallback. See [Silent iteration with --infra-only](#silent-iteration-with---infra-only) below.
 
 ### Flow B: Marketplace lifecycle (if you prefer plugin system isolation)
 
@@ -177,6 +179,25 @@ This skips the plugin system entirely and installs agents/skills to your home di
 | **A (recommended)** | `omc --plugin-dir "$PWD" setup --plugin-dir-mode` | Yes, via `--plugin-dir` | Live from checkout | Low (no copy on rebuild) | Developing OMC itself |
 | **B** | `claude plugin marketplace add` + `install` | Yes, full marketplace | Plugin cache | Medium (marketplace update) | Testing plugin isolation |
 | **C** | `omc setup --no-plugin` | No | `~/.claude/skills/` | Low (direct copy) | Fallback / troubleshooting |
+
+### Silent iteration with `--infra-only`
+
+When iterating rapidly on agent/skill changes in Flow A or C, use the `--infra-only` flag to skip wizard detection and SAFE_DEFAULTS fallback:
+
+```bash
+omc setup --plugin-dir-mode --infra-only
+```
+
+The `--infra-only` flag is the CI/dev escape hatch that preserves pre-refactor `omc setup` semantics: infra-only, silent, idempotent, no prompts. It bypasses:
+- Interactive wizard (even on TTY)
+- SAFE_DEFAULTS auto-fallback (even in non-TTY)
+- Plugin check
+
+This is byte-identical to the bare `omc setup` behavior before the setup-unification refactor. Use it when you want predictable, silent reinstalls that copy agents/skills without prompting.
+
+Compatible with `--plugin-dir-mode` and `--no-plugin` for all workflows.
+
+For the full flag reference, see [docs/REFERENCE.md#omc-setup-flags](./docs/REFERENCE.md#omc-setup-flags).
 
 ---
 
