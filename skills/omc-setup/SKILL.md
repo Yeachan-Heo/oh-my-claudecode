@@ -6,183 +6,239 @@ level: 2
 
 # OMC Setup
 
-This is the **only command you need to learn**. After running this, everything else is automatic.
+This skill is a **thin wrapper around `omc setup`**. It collects user
+choices via AskUserQuestion, writes them to a temporary JSON file, asks
+the CLI to materialize a validated preset, and then executes that preset.
+
+All setup decision logic (phase ordering, validation, idempotency, state
+machine) lives in the TypeScript CLI at `src/cli/index.ts` and
+`src/setup/*.ts`. **Do not reimplement any of it here.**
 
 **When this skill is invoked, immediately execute the workflow below. Do not only restate or summarize these instructions back to the user.**
 
-**Path convention**: This guide uses `CONFIG_DIR` to refer to the Claude config directory. Before presenting any path to the user, resolve it once by running `echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"`. Use the resolved value in all user-facing text — never display the literal `~/.claude` unless that is the actual resolved path.
+**Path convention**: This guide uses `CONFIG_DIR` to refer to the Claude
+config directory. Before presenting any path to the user, resolve it once
+by running `echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"`. Use the resolved
+value in all user-facing text — never display the literal `~/.claude`
+unless that is the actual resolved path.
 
 ## Best-Fit Use
 
-Choose this setup flow when the user wants to **install, refresh, or repair OMC itself**.
+Choose this setup flow when the user wants to **install, refresh, or
+repair OMC itself**.
 
 - Marketplace/plugin install users should land here after `/plugin install oh-my-claudecode`
 - npm users should land here after `npm i -g oh-my-claude-sisyphus@latest`
-- local-dev and worktree users should land here after updating the checked-out repo and rerunning setup
+- local-dev and worktree users should land here after updating the
+  checked-out repo and rerunning setup
 
-## Flag Parsing
+## Step 1: Parse Flags
 
 Check for flags in the user's invocation:
-- `--help` → Show Help Text (below) and stop
-- `--local` → Phase 1 only (target=local), then stop
-- `--global` → Phase 1 only (target=global), then stop
-- `--force` → Skip Pre-Setup Check, run full setup (Phase 1 → 2 → 3 → 4)
-- No flags → Run Pre-Setup Check, then full setup if needed
+
+| Flag                | Behavior                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `--help`            | Show the Help Text (below) and stop.                                                            |
+| `--preset <file>`   | Skip the wizard entirely. Run `omc setup --preset <file>` and report the result.                |
+| `--local`           | Phase 1 only, local target. Run `omc setup --claude-md-only --local --overwrite`.               |
+| `--global`          | Phase 1 only, global target. Run `omc setup --claude-md-only --global --overwrite`.             |
+| `--force`           | Skip the "already configured" check and run the full wizard flow described in Step 3.          |
+| (none)              | Run the full wizard flow described in Step 3.                                                   |
 
 ## Help Text
 
 When user runs with `--help`, display this and stop:
 
 ```
-OMC Setup - Configure oh-my-claudecode
+OMC Setup — Configure oh-my-claudecode (thin wrapper around `omc setup`)
 
 USAGE:
-  /oh-my-claudecode:omc-setup           Run initial setup wizard (or update if already configured)
-  /oh-my-claudecode:omc-setup --local   Configure local project (.claude/CLAUDE.md)
-  /oh-my-claudecode:omc-setup --global  Configure global settings (CONFIG_DIR/CLAUDE.md)
-  /oh-my-claudecode:omc-setup --force   Force full setup wizard even if already configured
-  /oh-my-claudecode:omc-setup --help    Show this help
+  /oh-my-claudecode:omc-setup                     Run interactive wizard (or update if already configured)
+  /oh-my-claudecode:omc-setup --local             Configure local project (.claude/CLAUDE.md)
+  /oh-my-claudecode:omc-setup --global            Configure global settings (CONFIG_DIR/CLAUDE.md)
+  /oh-my-claudecode:omc-setup --force             Skip the "already configured" gate and run the full wizard
+  /oh-my-claudecode:omc-setup --preset <file>     Drive setup from a preset file (no prompts)
+  /oh-my-claudecode:omc-setup --help              Show this help
 
-MODES:
-  Initial Setup (no flags)
-    - Interactive wizard for first-time setup
-    - Configures CLAUDE.md (local or global)
-    - Sets up HUD statusline
-    - Checks for updates
-    - Offers MCP server configuration
-    - Configures team mode defaults (agent count, type, model)
-    - If already configured, offers quick update option
-
-  Local Configuration (--local)
-    - Downloads fresh CLAUDE.md to ./.claude/
-    - Backs up existing CLAUDE.md to .claude/CLAUDE.md.backup.YYYY-MM-DD
-    - Project-specific settings
-    - Use this to update project config after OMC upgrades
-
-  Global Configuration (--global)
-    - Downloads fresh CLAUDE.md to CONFIG_DIR/
-    - Backs up existing CLAUDE.md to CONFIG_DIR/CLAUDE.md.backup.YYYY-MM-DD
-    - Default: explicitly overwrites CONFIG_DIR/CLAUDE.md so plain `claude` also uses OMC
-    - Optional preserve mode keeps the user's base `CLAUDE.md` and installs OMC into `CLAUDE-omc.md` for `omc` launches
-    - Applies to all Claude Code sessions
-    - Cleans up legacy hooks
-    - Use this to update global config after OMC upgrades
-
-  Force Full Setup (--force)
-    - Bypasses the "already configured" check
-    - Runs the complete setup wizard from scratch
-    - Use when you want to reconfigure preferences
-
-EXAMPLES:
-  /oh-my-claudecode:omc-setup           # First time setup (or update CLAUDE.md if configured)
-  /oh-my-claudecode:omc-setup --local   # Update this project
-  /oh-my-claudecode:omc-setup --global  # Update all projects
-  /oh-my-claudecode:omc-setup --force   # Re-run full setup wizard
+All heavy lifting is delegated to the `omc setup` CLI. The skill only
+collects answers via AskUserQuestion and hands them off as a JSON file.
 
 For more info: https://github.com/Yeachan-Heo/oh-my-claudecode
 ```
 
-## Pre-Setup Check: Already Configured?
+## Step 2: Flag-Only Short-Circuits
 
-**CRITICAL**: Before doing anything else, check if setup has already been completed. This prevents users from having to re-run the full setup wizard after every update.
+Handle these three cases **before** any wizard prompting:
+
+### `--preset <file>`
+
+Run via the Bash tool:
 
 ```bash
-# Check if setup was already completed
-CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
-
-if [ -f "$CONFIG_FILE" ]; then
-  SETUP_COMPLETED=$(jq -r '.setupCompleted // empty' "$CONFIG_FILE" 2>/dev/null)
-  SETUP_VERSION=$(jq -r '.setupVersion // empty' "$CONFIG_FILE" 2>/dev/null)
-
-  if [ -n "$SETUP_COMPLETED" ] && [ "$SETUP_COMPLETED" != "null" ]; then
-    echo "OMC setup was already completed on: $SETUP_COMPLETED"
-    [ -n "$SETUP_VERSION" ] && echo "Setup version: $SETUP_VERSION"
-    ALREADY_CONFIGURED="true"
-  fi
-fi
+omc setup --preset "<file>"
 ```
 
-### If Already Configured (and no --force flag)
+Report the exit code and any stderr to the user. **Stop.**
 
-If `ALREADY_CONFIGURED` is true AND the user did NOT pass `--force`, `--local`, or `--global` flags:
+### `--local`
 
-Use AskUserQuestion to prompt:
+Run:
 
-**Question:** "OMC is already configured. What would you like to do?"
+```bash
+omc setup --claude-md-only --local --overwrite
+```
+
+Report the result. **Stop.**
+
+### `--global`
+
+Run:
+
+```bash
+omc setup --claude-md-only --global --overwrite
+```
+
+Report the result. **Stop.**
+
+## Step 3: Wizard Flow
+
+This path is taken when no flags (or only `--force`) were provided.
+
+### 3.1 Check Setup State
+
+Run:
+
+```bash
+omc setup --check-state
+```
+
+Parse the JSON output (one line on stdout). Fields:
+
+- `alreadyConfigured: boolean`
+- `setupVersion?: string` — present if config file exists
+- `resumeStep?: number` — present if a previous run was interrupted
+
+### 3.2 Already-Configured Gate
+
+If `alreadyConfigured === true` **and** `--force` was NOT passed, use
+AskUserQuestion:
+
+**Question:** "OMC is already configured (version
+`<setupVersion ?? 'unknown'>`). What would you like to do?"
 
 **Options:**
-1. **Update CLAUDE.md only** - Download latest CLAUDE.md without re-running full setup
-2. **Run full setup again** - Go through the complete setup wizard
-3. **Cancel** - Exit without changes
+1. **Update CLAUDE.md only** — Run `omc setup --claude-md-only --global --overwrite` and stop.
+2. **Run full setup again** — Continue to 3.3.
+3. **Cancel** — Exit without changes.
 
-**If user chooses "Update CLAUDE.md only":**
-- Detect if local (.claude/CLAUDE.md) or global (CONFIG_DIR/CLAUDE.md) config exists
-- If local exists, run: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-claude-md.sh" local`
-- If only global exists, run: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-claude-md.sh" global`
-- Skip all other steps
-- Report success and exit
+### 3.3 Resume Detection
 
-**If user chooses "Run full setup again":**
-- Continue with Resume Detection below
+If `resumeStep` was present in the `--check-state` output, use
+AskUserQuestion:
 
-**If user chooses "Cancel":**
-- Exit without any changes
-
-### Force Flag Override
-
-If user passes `--force` flag, skip this check and proceed directly to setup.
-
-## Resume Detection
-
-Before starting any phase, check for existing state:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-progress.sh" resume
-```
-
-If state exists (output is not "fresh"), use AskUserQuestion to prompt:
-
-**Question:** "Found a previous setup session. Would you like to resume or start fresh?"
+**Question:** "Found a previous setup session at step
+`<resumeStep>`. Resume or start fresh?"
 
 **Options:**
-1. **Resume from step $LAST_STEP** - Continue where you left off
-2. **Start fresh** - Begin from the beginning (clears saved state)
+1. **Resume from step `<resumeStep>`** — Just continue to 3.4 (the CLI
+   will pick up the saved state automatically).
+2. **Start fresh** — First run `omc setup --state-clear`, then continue
+   to 3.4.
 
-If user chooses "Start fresh":
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-progress.sh" clear
+### 3.4 Collect Answers
+
+Walk the user through AskUserQuestion prompts — **one question per
+field**. The canonical source of question text + options is
+`QUESTION_METADATA` in `src/setup/options.ts`. Use the field IDs listed
+here; copy the question text and option labels from `QUESTION_METADATA`
+verbatim so text stays in sync with the TypeScript source.
+
+Collect these fields (in order):
+
+1. `target` — `local` | `global`
+2. `installStyle` — `overwrite` | `preserve` (only if `target === 'global'`)
+3. `executionMode` — `ultrawork` | `No default` (stored as `ultrawork` or omitted)
+4. `installCli` — `true` | `false`
+5. `taskTool` — `builtin` | `bd` | `br`
+6. `mcpEnabled` — `true` | `false` (just the gate — MCP credential collection is the `mcp-setup` skill's job)
+7. `teamsEnabled` — `true` | `false`
+8. `teamsDisplayMode` — `auto` | `in-process` | `tmux` (only if `teamsEnabled`)
+9. `teamsAgentCount` — `2` | `3` | `5` (only if `teamsEnabled`)
+10. `teamsAgentType` — `executor` | `debugger` | `designer` (only if `teamsEnabled`)
+11. `starRepo` — `true` | `false`
+
+### 3.5 Write Answers File
+
+Build an `AnswersFile` JSON object (schema lives in
+`src/setup/preset-builder.ts`):
+
+```json
+{
+  "target": "local",
+  "installStyle": "overwrite",
+  "executionMode": "ultrawork",
+  "installCli": true,
+  "taskTool": "builtin",
+  "mcp": { "enabled": false },
+  "teams": { "enabled": true, "displayMode": "auto", "agentCount": 3, "agentType": "executor" },
+  "starRepo": false
+}
 ```
 
-## Phase Execution
+Write it to a temporary file:
 
-### For `--local` or `--global` flags:
-Read the file at `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/01-install-claude-md.md` and follow its instructions.
-(The phase file handles early exit for flag mode.)
+```bash
+ANSWERS_FILE="$(mktemp -t omc-answers.XXXXXX.json)"
+PRESET_FILE="$(mktemp -t omc-preset.XXXXXX.json)"
+chmod 0600 "$ANSWERS_FILE" "$PRESET_FILE"
+# …write the JSON to $ANSWERS_FILE…
+```
 
-### For full setup (default or --force):
-Execute phases sequentially. For each phase, read the corresponding file and follow its instructions:
+> **Cleanup is mandatory.** Always remove `$ANSWERS_FILE` and
+> `$PRESET_FILE` after the run completes, whether it succeeded or
+> failed. Use `trap` or an equivalent finally-style block so the temp
+> files never leak.
 
-1. **Phase 1 - Install CLAUDE.md**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/01-install-claude-md.md` and follow its instructions.
+### 3.6 Build the Preset
 
-2. **Phase 2 - Environment Configuration**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/02-configure.md` and follow its instructions. Phase 2 must delegate HUD/statusLine setup to the `hud` skill; do not generate or patch `statusLine` paths inline here.
+```bash
+omc setup --build-preset --answers "$ANSWERS_FILE" --out "$PRESET_FILE"
+```
 
-3. **Phase 3 - Integration Setup**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/03-integrations.md` and follow its instructions.
+This validates the answers, expands them into a full `SetupOptions`, and
+writes the preset JSON to `$PRESET_FILE`. Any validation failure (e.g.
+`teams.agentCount` not in `{2,3,5}`) exits non-zero with a red error on
+stderr — surface that error to the user and stop.
 
-4. **Phase 4 - Completion**: Read `${CLAUDE_PLUGIN_ROOT}/skills/omc-setup/phases/04-welcome.md` and follow its instructions.
+### 3.7 Run the Preset
+
+```bash
+omc setup --preset "$PRESET_FILE"
+```
+
+This executes every phase the preset requests (claude-md, infra,
+integrations, welcome — and, when applicable, the mcp-only sub-phase).
+Surface stdout/stderr and the exit code to the user.
+
+### 3.8 Cleanup
+
+```bash
+rm -f "$ANSWERS_FILE" "$PRESET_FILE"
+```
+
+Run cleanup **on both success and failure** paths.
 
 ## Graceful Interrupt Handling
 
-**IMPORTANT**: This setup process saves progress after each phase via `${CLAUDE_PLUGIN_ROOT}/scripts/setup-progress.sh`. If interrupted (Ctrl+C or connection loss), the setup can resume from where it left off.
+If the `omc setup --preset` run is interrupted, the CLI's own state
+machine persists progress via `omc setup --state-save <step>`. The next
+invocation of this skill will detect it in Step 3.1 and offer a resume.
 
 ## Keeping Up to Date
 
 After installing oh-my-claudecode updates (via npm or plugin update):
 
-**Automatic**: Just run `/oh-my-claudecode:omc-setup` - it will detect you've already configured and offer a quick "Update CLAUDE.md only" option that skips the full wizard.
-
-**Manual options**:
-- `/oh-my-claudecode:omc-setup --local` to update project config only
-- `/oh-my-claudecode:omc-setup --global` to update global config only
-- `/oh-my-claudecode:omc-setup --force` to re-run the full wizard (reconfigure preferences)
-
-This ensures you have the newest features and agent configurations without the token cost of repeating the full setup.
+- Re-run `/oh-my-claudecode:omc-setup` — the "already configured" gate
+  offers a one-click CLAUDE.md update without re-running the wizard.
+- Or jump straight to the targeted flag: `--local`, `--global`, or
+  `--force`.
