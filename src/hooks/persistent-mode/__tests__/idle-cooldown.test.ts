@@ -352,6 +352,40 @@ describe('shouldSendIdleNotification', () => {
     expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID)).toBe(false);
   });
 
+  it('suppresses repeated zero-backlog nudges across follow-up sessions when the global repo snapshot is unchanged', () => {
+    const oldTimestamp = new Date(Date.now() - 90_000).toISOString();
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: string) => p === COOLDOWN_PATH);
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === COOLDOWN_PATH) {
+        return JSON.stringify({
+          lastSentAt: oldTimestamp,
+          repoSignature: zeroBacklogState.signature,
+          backlogZero: true,
+        });
+      }
+      throw new Error('not found');
+    });
+
+    expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID, zeroBacklogState)).toBe(false);
+  });
+
+  it('re-enables zero-backlog nudges across follow-up sessions when the repo snapshot changes', () => {
+    const recentTimestamp = new Date(Date.now() - 5_000).toISOString();
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: string) => p === COOLDOWN_PATH);
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === COOLDOWN_PATH) {
+        return JSON.stringify({
+          lastSentAt: recentTimestamp,
+          repoSignature: zeroBacklogState.signature,
+          backlogZero: true,
+        });
+      }
+      throw new Error('not found');
+    });
+
+    expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID, changedBacklogState)).toBe(true);
+  });
+
   it('blocks notification when within custom shorter cooldown', () => {
     const recentTimestamp = new Date(Date.now() - 10_000).toISOString(); // 10s ago
     (existsSync as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
@@ -461,6 +495,28 @@ describe('recordIdleNotificationSent', () => {
     expect(atomicWriteJsonSync).toHaveBeenCalledOnce();
     const [calledPath] = (atomicWriteJsonSync as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(calledPath).toBe(SESSION_COOLDOWN_PATH);
+  });
+
+  it('mirrors zero-backlog metadata to the global cooldown file for follow-up sessions', () => {
+    recordIdleNotificationSent(TEST_STATE_DIR, TEST_SESSION_ID, zeroBacklogState);
+
+    expect(atomicWriteJsonSync).toHaveBeenCalledTimes(2);
+    expect(atomicWriteJsonSync).toHaveBeenCalledWith(
+      SESSION_COOLDOWN_PATH,
+      expect.objectContaining({
+        lastSentAt: expect.any(String),
+        repoSignature: zeroBacklogState.signature,
+        backlogZero: true,
+      })
+    );
+    expect(atomicWriteJsonSync).toHaveBeenCalledWith(
+      COOLDOWN_PATH,
+      expect.objectContaining({
+        lastSentAt: expect.any(String),
+        repoSignature: zeroBacklogState.signature,
+        backlogZero: true,
+      })
+    );
   });
 
   it('creates state directory if it does not exist', () => {

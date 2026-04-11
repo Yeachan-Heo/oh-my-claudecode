@@ -305,12 +305,37 @@ interface IdleNotificationCooldownRecord {
   backlogZero?: boolean;
 }
 
+function getGlobalIdleNotificationCooldownPath(stateDir: string): string {
+  return join(stateDir, 'idle-notif-cooldown.json');
+}
+
 function getIdleNotificationCooldownPath(stateDir: string, sessionId?: string): string {
   // Keep session segments filesystem-safe; fall back to legacy global path otherwise.
   if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
     return join(stateDir, 'sessions', sessionId, 'idle-notif-cooldown.json');
   }
-  return join(stateDir, 'idle-notif-cooldown.json');
+  return getGlobalIdleNotificationCooldownPath(stateDir);
+}
+
+function readIdleNotificationCooldownRecord(cooldownPath: string): IdleNotificationCooldownRecord | null {
+  try {
+    if (!existsSync(cooldownPath)) return null;
+    return JSON.parse(readFileSync(cooldownPath, 'utf-8')) as IdleNotificationCooldownRecord;
+  } catch {
+    return null;
+  }
+}
+
+function isRepeatedZeroBacklogCooldown(
+  record: IdleNotificationCooldownRecord | null,
+  repoState?: IdleNotificationRepoState | null,
+): boolean {
+  return Boolean(
+    repoState?.backlogZero &&
+    record?.backlogZero === true &&
+    typeof record.repoSignature === 'string' &&
+    record.repoSignature === repoState.signature,
+  );
 }
 
 /**
@@ -323,28 +348,34 @@ export function shouldSendIdleNotification(
   repoState?: IdleNotificationRepoState | null,
 ): boolean {
   const cooldownSecs = getIdleNotificationCooldownSeconds();
-
   const cooldownPath = getIdleNotificationCooldownPath(stateDir, sessionId);
-  try {
-    if (!existsSync(cooldownPath)) return true;
-    const data = JSON.parse(readFileSync(cooldownPath, 'utf-8')) as IdleNotificationCooldownRecord;
-    if (repoState && typeof data.repoSignature === 'string') {
-      if (data.repoSignature !== repoState.signature) {
-        return true;
-      }
-      if (data.backlogZero === true && repoState.backlogZero) {
-        return false;
-      }
-    }
+  const cooldownRecord = readIdleNotificationCooldownRecord(cooldownPath);
 
-    if (cooldownSecs === 0) return true; // cooldown disabled
+  if (isRepeatedZeroBacklogCooldown(cooldownRecord, repoState)) {
+    return false;
+  }
 
-    if (typeof data.lastSentAt === 'string') {
-      const elapsed = (Date.now() - new Date(data.lastSentAt).getTime()) / 1000;
-      if (Number.isFinite(elapsed) && elapsed < cooldownSecs) return false;
+  // Back off unchanged zero-backlog nudges across follow-up sessions too.
+  // Session-scoped cooldown should not keep rearming identical "all clear"
+  // alerts for brand-new session ids when the repo state has not changed.
+  if (cooldownPath !== getGlobalIdleNotificationCooldownPath(stateDir)) {
+    const globalRecord = readIdleNotificationCooldownRecord(getGlobalIdleNotificationCooldownPath(stateDir));
+    if (isRepeatedZeroBacklogCooldown(globalRecord, repoState)) {
+      return false;
     }
-  } catch {
-    // ignore — treat as no cooldown file
+  }
+
+  if (repoState && typeof cooldownRecord?.repoSignature === 'string') {
+    if (cooldownRecord.repoSignature !== repoState.signature) {
+      return true;
+    }
+  }
+
+  if (cooldownSecs === 0) return true; // cooldown disabled
+
+  if (typeof cooldownRecord?.lastSentAt === 'string') {
+    const elapsed = (Date.now() - new Date(cooldownRecord.lastSentAt).getTime()) / 1000;
+    if (Number.isFinite(elapsed) && elapsed < cooldownSecs) return false;
   }
   return true;
 }
@@ -367,6 +398,9 @@ export function recordIdleNotificationSent(
       record.backlogZero = repoState.backlogZero;
     }
     atomicWriteJsonSync(cooldownPath, record);
+    if (repoState?.backlogZero && cooldownPath !== getGlobalIdleNotificationCooldownPath(stateDir)) {
+      atomicWriteJsonSync(getGlobalIdleNotificationCooldownPath(stateDir), record);
+    }
   } catch {
     // ignore write errors
   }

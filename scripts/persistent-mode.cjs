@@ -21,6 +21,8 @@ const {
   renameSync,
   statSync,
 } = require("fs");
+const { execFileSync } = require("child_process");
+const { homedir } = require("os");
 const { join, dirname, resolve, normalize } = require("path");
 const { getClaudeConfigDir } = require("./lib/config-dir.cjs");
 
@@ -79,16 +81,139 @@ function getIdleCooldownSeconds() {
   return 60;
 }
 
+const COMMAND_TIMEOUT_MS = 10_000;
+const MAX_LIST_RESULTS = 100;
+const FAILURE_CONCLUSIONS = new Set([
+  'failure',
+  'timed_out',
+  'cancelled',
+  'action_required',
+  'startup_failure',
+]);
+
+function runCommand(command, args, cwd) {
+  try {
+    return execFileSync(command, args, {
+      cwd,
+      encoding: 'utf-8',
+      timeout: COMMAND_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function runJsonCommand(command, args, cwd) {
+  const raw = runCommand(command, args, cwd);
+  if (raw === null) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function parseGitHubRemote(remoteUrl) {
+  const normalized = remoteUrl.trim();
+  const patterns = [
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/,
+    /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/,
+    /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      return { owner: match[1], repo: match[2] };
+    }
+  }
+
+  return null;
+}
+
+function toSortedNumbers(values) {
+  return values
+    .filter((value) => Number.isInteger(value))
+    .sort((left, right) => left - right);
+}
+
+function getIdleNotificationRepoState(directory) {
+  const remoteUrl = runCommand('git', ['remote', 'get-url', 'origin'], directory);
+  if (!remoteUrl) return null;
+
+  const remote = parseGitHubRemote(remoteUrl);
+  if (!remote) return null;
+
+  const repo = `${remote.owner}/${remote.repo}`;
+  const headSha = runCommand('git', ['rev-parse', 'HEAD'], directory);
+  const porcelainStatus = runCommand('git', ['status', '--porcelain'], directory);
+  if (!headSha || porcelainStatus === null) return null;
+
+  const openPrs = runJsonCommand('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(MAX_LIST_RESULTS), '--json', 'number'], directory);
+  if (!openPrs) return null;
+
+  const openIssues = runJsonCommand('gh', ['issue', 'list', '--repo', repo, '--state', 'open', '--limit', String(MAX_LIST_RESULTS), '--json', 'number'], directory);
+  if (!openIssues) return null;
+
+  const runs = runJsonCommand('gh', ['run', 'list', '--repo', repo, '--limit', String(MAX_LIST_RESULTS), '--json', 'databaseId,conclusion'], directory);
+  if (!runs) return null;
+
+  const failingRunIds = toSortedNumbers(
+    runs
+      .filter((run) => FAILURE_CONCLUSIONS.has(((run.conclusion || '') + '').toLowerCase()))
+      .map((run) => run.databaseId),
+  );
+  const openPrNumbers = toSortedNumbers(openPrs.map((entry) => entry.number));
+  const openIssueNumbers = toSortedNumbers(openIssues.map((entry) => entry.number));
+
+  const snapshot = {
+    repo,
+    headSha,
+    dirty: porcelainStatus.length > 0,
+    openPrNumbers,
+    openIssueNumbers,
+    failingRunIds,
+  };
+
+  return {
+    signature: JSON.stringify(snapshot),
+    backlogZero:
+      openPrNumbers.length === 0 &&
+      openIssueNumbers.length === 0 &&
+      failingRunIds.length === 0,
+  };
+}
+
+function isRepeatedZeroBacklog(record, repoState) {
+  return Boolean(
+    repoState?.backlogZero &&
+    record?.backlogZero === true &&
+    typeof record.repoSignature === 'string' &&
+    record.repoSignature === repoState.signature,
+  );
+}
+
 /**
  * Check whether the session-idle cooldown has elapsed.
  * Returns true if the notification should be sent.
  */
-function shouldSendIdleNotification(stateDir) {
+function shouldSendIdleNotification(stateDir, repoState) {
   const cooldownSecs = getIdleCooldownSeconds();
-  if (cooldownSecs === 0) return true; // cooldown disabled
-
   const cooldownPath = join(stateDir, 'idle-notif-cooldown.json');
   const data = readJsonFile(cooldownPath);
+
+  if (isRepeatedZeroBacklog(data, repoState)) {
+    return false;
+  }
+
+  if (repoState && typeof data?.repoSignature === 'string' && data.repoSignature !== repoState.signature) {
+    return true;
+  }
+
+  if (cooldownSecs === 0) return true; // cooldown disabled
+
   if (data?.lastSentAt) {
     const elapsed = (Date.now() - new Date(data.lastSentAt).getTime()) / 1000;
     if (Number.isFinite(elapsed) && elapsed < cooldownSecs) return false;
@@ -99,9 +224,14 @@ function shouldSendIdleNotification(stateDir) {
 /**
  * Record that the session-idle notification was sent.
  */
-function recordIdleNotificationSent(stateDir) {
+function recordIdleNotificationSent(stateDir, repoState) {
   const cooldownPath = join(stateDir, 'idle-notif-cooldown.json');
-  writeJsonFile(cooldownPath, { lastSentAt: new Date().toISOString() });
+  const record = { lastSentAt: new Date().toISOString() };
+  if (repoState) {
+    record.repoSignature = repoState.signature;
+    record.backlogZero = repoState.backlogZero;
+  }
+  writeJsonFile(cooldownPath, record);
 }
 
 /**
@@ -1157,8 +1287,9 @@ async function main() {
     // No blocking needed — Claude is truly idle.
     // Send session-idle notification (fire-and-forget) so external integrations
     // (Telegram, Discord) know the session went idle without any active mode.
-    // Per-session cooldown prevents notification spam when the session idles repeatedly.
-    if (sessionId && shouldSendIdleNotification(stateDir)) {
+    // Back off repeated zero-backlog nudges until repo state changes.
+    const idleRepoState = getIdleNotificationRepoState(directory);
+    if (sessionId && shouldSendIdleNotification(stateDir, idleRepoState)) {
       try {
         const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
         if (pluginRoot) {
@@ -1171,7 +1302,7 @@ async function main() {
               }).catch(() => {})
             )
             .catch(() => {});
-          recordIdleNotificationSent(stateDir);
+          recordIdleNotificationSent(stateDir, idleRepoState);
         }
       } catch {
         // Notification module not available, skip silently
