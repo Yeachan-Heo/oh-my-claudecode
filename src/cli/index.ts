@@ -1471,6 +1471,72 @@ async function askYesNo(prompt: string, defaultYes: boolean): Promise<boolean> {
   }
 }
 
+/**
+ * Run the plugin-duplicate leftover cleanup flow. Safe to call
+ * unconditionally — it's a no-op when no plugin is active OR no
+ * leftovers exist.
+ *
+ * Behavior:
+ *   - TTY + hasWork → render preview, prompt Y/n, execute on confirm
+ *   - non-TTY + hasWork → silent auto-prune, log summary
+ *   - hasWork === false → immediate return (no preview, no prompt)
+ *
+ * Returns the final `StandaloneDuplicatesPreview` — either the
+ * execute result (on TTY confirm or non-TTY auto-prune) or the
+ * preview result (on TTY decline). Caller can inspect `hasWork`
+ * + per-kind arrays if downstream code needs to know what was
+ * touched.
+ */
+export async function runLeftoverCleanupFlow(opts: {
+  isTty: boolean;
+  stdout: NodeJS.WritableStream;
+}): Promise<StandaloneDuplicatesPreview> {
+  const preview = previewStandaloneDuplicatesForPluginMode();
+  if (!preview.hasWork) {
+    return preview; // no leftovers, no plugin — nothing to do
+  }
+
+  if (opts.isTty) {
+    // TTY: render + prompt
+    renderLeftoverPreview(preview, opts.stdout);
+    const confirmed = await askYesNo(
+      `\nRemove these ${preview.totalPruneCount} leftover file(s)? (Y/n) `,
+      true,
+    );
+    if (!confirmed) {
+      opts.stdout.write(chalk.gray('Leftover cleanup skipped.\n'));
+      return preview; // return preview (not execute) so caller knows nothing happened
+    }
+    const executeResult = pruneStandaloneDuplicatesForPluginMode(
+      (msg) => opts.stdout.write(`${msg}\n`),
+    );
+    opts.stdout.write(chalk.green(
+      `Cleaned up ${executeResult.prunedAgents.length} agent(s), `
+      + `${executeResult.prunedSkills.length} skill(s), `
+      + `${executeResult.prunedHooks.length} hook(s)`
+      + (executeResult.settingsStripped ? ', settings.json stripped' : '')
+      + '\n',
+    ));
+    return executeResult;
+  }
+
+  // Non-TTY: silent auto-prune (no prompt)
+  const executeResult = pruneStandaloneDuplicatesForPluginMode(
+    (msg) => opts.stdout.write(`${msg}\n`),
+  );
+  if (executeResult.totalPruneCount > 0 || executeResult.settingsStripped) {
+    opts.stdout.write(chalk.green(
+      `Cleaned up plugin-duplicate leftovers: `
+      + `${executeResult.prunedAgents.length} agent(s), `
+      + `${executeResult.prunedSkills.length} skill(s), `
+      + `${executeResult.prunedHooks.length} hook(s)`
+      + (executeResult.settingsStripped ? ', settings.json stripped' : '')
+      + '\n',
+    ));
+  }
+  return executeResult;
+}
+
 export async function runSetupCommand(
   commanderOpts: Record<string, unknown>,
   stderr: NodeJS.WritableStream = process.stderr,
@@ -1646,57 +1712,35 @@ export async function runSetupCommand(
   }
 
   // ------------------------------------------------------------------
-  // Pre-wizard already-configured gate: check state FIRST so we don't
-  // waste the user's time answering 11 questions only to be told "OMC
-  // is already configured" after they submit. If alreadyConfigured and
-  // not --force, also run the plugin-duplicate cleanup and exit.
+  // Plugin-duplicate leftover cleanup — runs BEFORE any alreadyConfigured
+  // check so users always see (and can act on) stale standalone files
+  // regardless of whether their profile was previously wizard-configured.
+  // No-op when no plugin is active OR no leftovers exist.
+  // ------------------------------------------------------------------
+  if (
+    runWizardBeforeSetup
+    && !presetPartial
+    && !flagsPartial.force
+    && !rawFlags.infraOnly
+    && !rawFlags.claudeMdOnly
+    && !rawFlags.checkState
+    && rawFlags.stateSave === undefined
+    && !rawFlags.stateClear
+    && !rawFlags.stateResume
+    && rawFlags.stateComplete === undefined
+  ) {
+    const isTty = Boolean(process.stdin.isTTY);
+    await runLeftoverCleanupFlow({ isTty, stdout: process.stdout });
+  }
+
+  // ------------------------------------------------------------------
+  // Pre-wizard already-configured gate: AFTER the leftover cleanup
+  // (so the cleanup runs for non-alreadyConfigured profiles too), check
+  // whether the profile was wizard-configured and exit with a hint if so.
   // ------------------------------------------------------------------
   if (runWizardBeforeSetup && !presetPartial && !flagsPartial.force) {
     const ac = readAlreadyConfigured(getClaudeConfigDir());
     if (ac.alreadyConfigured) {
-      const isTty = Boolean(process.stdin.isTTY);
-
-      if (isTty) {
-        // TTY: show preview and prompt before any filesystem mutation.
-        const preview = previewStandaloneDuplicatesForPluginMode();
-        if (preview.hasWork) {
-          renderLeftoverPreview(preview, process.stdout);
-          const confirmed = await askYesNo(
-            `\nRemove these ${preview.totalPruneCount} leftover file(s)? (Y/n) `,
-            true,
-          );
-          if (confirmed) {
-            const pruneResult = pruneStandaloneDuplicatesForPluginMode(
-              (msg) => process.stdout.write(`${msg}\n`),
-            );
-            process.stdout.write(chalk.green(
-              `Cleaned up ${pruneResult.prunedAgents.length} agent(s), `
-              + `${pruneResult.prunedSkills.length} skill(s), `
-              + `${pruneResult.prunedHooks.length} hook(s)`
-              + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
-              + '\n',
-            ));
-          } else {
-            process.stdout.write(chalk.gray('Leftover cleanup skipped.\n'));
-          }
-        }
-      } else {
-        // Non-TTY: silent auto-prune (existing behavior).
-        const pruneResult = pruneStandaloneDuplicatesForPluginMode(
-          (msg) => process.stdout.write(`${msg}\n`),
-        );
-        if (pruneResult.totalPruneCount > 0 || pruneResult.settingsStripped) {
-          process.stdout.write(chalk.green(
-            `Cleaned up plugin-duplicate leftovers: `
-            + `${pruneResult.prunedAgents.length} agent(s), `
-            + `${pruneResult.prunedSkills.length} skill(s), `
-            + `${pruneResult.prunedHooks.length} hook(s)`
-            + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
-            + '\n',
-          ));
-        }
-      }
-
       process.stdout.write(chalk.yellow(
         `OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
         + 'Re-run with --force to bypass this check, or use --claude-md-only '
