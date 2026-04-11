@@ -582,6 +582,105 @@ describe('runSetup — dispatch + lockfile', () => {
 });
 
 // ---------------------------------------------------------------------------
+// pluginLeftoverBehavior: 'ask' — preview returned without filesystem mutation
+// ---------------------------------------------------------------------------
+
+describe("runSetup — pluginLeftoverBehavior: 'ask'", () => {
+  let tmp: ReturnType<typeof makeTmp>;
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    tmp = makeTmp();
+    savedEnv = {};
+    for (const key of ['CLAUDE_CONFIG_DIR', 'CLAUDE_PLUGIN_ROOT', 'OMC_PLUGIN_ROOT']) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    process.env.CLAUDE_CONFIG_DIR = tmp.configDir;
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) { delete process.env[key]; } else { process.env[key] = val; }
+    }
+    rmSync(tmp.root, { recursive: true, force: true });
+  });
+
+  it('returns pluginLeftoverPreview without mutating when behavior=ask and leftovers exist', async () => {
+    // Seed .omc-config.json to trigger alreadyConfigured
+    writeFileSync(
+      join(tmp.configDir, '.omc-config.json'),
+      JSON.stringify({ setupCompleted: '2026-01-01T00:00:00Z', setupVersion: '1.2.3' }),
+    );
+
+    // Set up a fake plugin root with hooks/hooks.json so hasPluginProvidedHookFiles() returns true.
+    // Use CLAUDE_PLUGIN_ROOT env var — getInstalledOmcPluginRoots() reads it dynamically
+    // so this works without vi.resetModules().
+    const pluginRoot = join(tmp.root, 'fake-plugin');
+    mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }), 'utf8');
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+
+    // Seed a leftover standalone hook file under configDir/hooks/
+    mkdirSync(join(tmp.configDir, 'hooks'), { recursive: true });
+    const leftoverPath = join(tmp.configDir, 'hooks', 'keyword-detector.mjs');
+    writeFileSync(leftoverPath, '// stale omc hook\n', 'utf8');
+
+    const tracker: string[] = [];
+    const { deps } = makePhasesDeps(tracker);
+
+    const result = await runSetup(
+      makeOptions({ phases: new Set<SetupPhase>(['claude-md', 'infra', 'integrations', 'welcome']) }),
+      {
+        ...deps,
+        lockPath: tmp.lockPath,
+        configDir: tmp.configDir,
+        cwd: tmp.cwd,
+        prompter: makeStubPrompter(),
+        pluginLeftoverBehavior: 'ask',
+      },
+    );
+
+    expect(result.alreadyConfigured).toBe(true);
+    expect(result.pluginLeftoverPreview).toBeDefined();
+    expect(result.pluginLeftoverPreview!.hasWork).toBe(true);
+    expect(result.pluginLeftoverPreview!.prunedHooks).toContain(leftoverPath);
+
+    // CRITICAL: the leftover file must still exist — preview was dry-run
+    expect(existsSync(leftoverPath), 'behavior=ask must not delete files').toBe(true);
+
+    // No phases ran
+    expect(tracker).toEqual([]);
+  });
+
+  it('returns undefined pluginLeftoverPreview when no leftovers exist', async () => {
+    // Seed .omc-config.json to trigger alreadyConfigured
+    writeFileSync(
+      join(tmp.configDir, '.omc-config.json'),
+      JSON.stringify({ setupCompleted: '2026-01-01T00:00:00Z', setupVersion: '1.2.3' }),
+    );
+    // No plugin active, no leftovers
+    const tracker: string[] = [];
+    const { deps } = makePhasesDeps(tracker);
+
+    const result = await runSetup(
+      makeOptions({ phases: new Set<SetupPhase>(['claude-md', 'infra', 'integrations', 'welcome']) }),
+      {
+        ...deps,
+        lockPath: tmp.lockPath,
+        configDir: tmp.configDir,
+        cwd: tmp.cwd,
+        prompter: makeStubPrompter(),
+        pluginLeftoverBehavior: 'ask',
+      },
+    );
+
+    expect(result.alreadyConfigured).toBe(true);
+    expect(result.pluginLeftoverPreview).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Stub prompter — never called in mock-phase tests but required by the API.
 // ---------------------------------------------------------------------------
 function makeStubPrompter(): Prompter {

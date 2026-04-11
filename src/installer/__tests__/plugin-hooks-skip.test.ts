@@ -292,6 +292,86 @@ describe('install() — plugin active prunes leftover standalone hooks', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Test 7e: previewStandaloneDuplicatesForPluginMode — dry-run preview
+// ---------------------------------------------------------------------------
+
+describe('previewStandaloneDuplicatesForPluginMode', () => {
+  it('returns hasWork=true with exact paths when leftovers exist', async () => {
+    // Seed installed_plugins.json pointing at the fake plugin
+    mkdirSync(join(tmpConfigDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(tmpConfigDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        plugins: {
+          'oh-my-claudecode@4.11.4': [{ installPath: tmpPluginRoot }],
+        },
+      }),
+      'utf8',
+    );
+
+    // Seed leftover standalone hook
+    mkdirSync(join(tmpConfigDir, 'hooks'), { recursive: true });
+    const leftoverPath = join(tmpConfigDir, 'hooks', 'keyword-detector.mjs');
+    writeFileSync(leftoverPath, '// stale omc hook\n', 'utf8');
+
+    vi.resetModules();
+    const { previewStandaloneDuplicatesForPluginMode: preview } = await import('../index.js');
+    const result = preview();
+
+    expect(result.hasWork).toBe(true);
+    expect(result.prunedHooks).toContain(leftoverPath);
+    expect(result.totalPruneCount).toBe(result.prunedAgents.length + result.prunedSkills.length + result.prunedHooks.length);
+
+    // CRITICAL: filesystem must be UNCHANGED — preview must not delete anything
+    expect(existsSync(leftoverPath), 'preview must not delete leftover hook').toBe(true);
+  });
+
+  it('returns hasWork=false when no plugin is active', async () => {
+    // No installed_plugins.json, no plugin env vars, no plugin files
+    vi.resetModules();
+    const { previewStandaloneDuplicatesForPluginMode: preview } = await import('../index.js');
+    const result = preview();
+
+    expect(result.hasWork).toBe(false);
+    expect(result.prunedAgents).toHaveLength(0);
+    expect(result.prunedSkills).toHaveLength(0);
+    expect(result.prunedHooks).toHaveLength(0);
+    expect(result.settingsStripped).toBe(false);
+    expect(result.totalPruneCount).toBe(0);
+  });
+
+  it('returns hasWork=false after prune has been executed', async () => {
+    // Seed plugin + leftovers
+    mkdirSync(join(tmpConfigDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(tmpConfigDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        plugins: {
+          'oh-my-claudecode@4.11.4': [{ installPath: tmpPluginRoot }],
+        },
+      }),
+      'utf8',
+    );
+    mkdirSync(join(tmpConfigDir, 'hooks'), { recursive: true });
+    writeFileSync(join(tmpConfigDir, 'hooks', 'keyword-detector.mjs'), '// stale\n', 'utf8');
+
+    vi.resetModules();
+    const mod = await import('../index.js');
+
+    // Execute prune
+    mod.pruneStandaloneDuplicatesForPluginMode(() => {});
+
+    // Preview after prune should report no work
+    vi.resetModules();
+    const { previewStandaloneDuplicatesForPluginMode: preview } = await import('../index.js');
+    const result = preview();
+
+    expect(result.hasWork).toBe(false);
+    expect(result.totalPruneCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Test 7d: pruneStandaloneDuplicatesForPluginMode composite helper
 // ---------------------------------------------------------------------------
 

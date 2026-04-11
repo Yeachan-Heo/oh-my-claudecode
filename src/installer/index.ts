@@ -767,6 +767,169 @@ export function prunePluginDuplicateHooks(log: (msg: string) => void): string[] 
 }
 
 /**
+ * Result shape shared by both the preview and execute paths for plugin-mode
+ * leftover cleanup.
+ */
+export interface StandaloneDuplicatesPreview {
+  /** Absolute paths of agent files that were (or would be) removed. */
+  prunedAgents: string[];
+  /** Names of skill directories that were (or would be) removed. */
+  prunedSkills: string[];
+  /** Absolute paths of hook files that were (or would be) removed. */
+  prunedHooks: string[];
+  /** Whether settings.json was (or would be) mutated to strip OMC entries. */
+  settingsStripped: boolean;
+  /** Sum of prunedAgents + prunedSkills + prunedHooks lengths. */
+  totalPruneCount: number;
+  /** True when any cleanup work exists (prune OR settings strip). */
+  hasWork: boolean;
+}
+
+/**
+ * Shared settings-strip detection logic (read-only).
+ *
+ * Returns `{ changed: true, newHooks }` when OMC entries would be removed,
+ * `{ changed: false }` otherwise. Never writes anything.
+ */
+function detectSettingsStripChanges(settingsPath: string): {
+  changed: boolean;
+  newHooks?: Record<string, HookGroup[]>;
+} {
+  if (!existsSync(settingsPath)) return { changed: false };
+  try {
+    const raw = readFileSync(settingsPath, 'utf-8');
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const existingHooks = settings.hooks as Record<string, HookGroup[]> | undefined;
+    if (!existingHooks || typeof existingHooks !== 'object') return { changed: false };
+
+    let changed = false;
+    const newHooks: Record<string, HookGroup[]> = {};
+    for (const [eventType, groups] of Object.entries(existingHooks)) {
+      if (!Array.isArray(groups)) continue;
+      const nonOmcGroups = groups.filter((group: HookGroup) =>
+        !group.hooks.every((h: HookEntry) =>
+          h.type === 'command' && isOmcHook(h.command)
+        )
+      );
+      if (nonOmcGroups.length !== groups.length) changed = true;
+      if (nonOmcGroups.length > 0) newHooks[eventType] = nonOmcGroups;
+    }
+    return changed ? { changed: true, newHooks } : { changed: false };
+  } catch {
+    return { changed: false };
+  }
+}
+
+/**
+ * Preview what `pruneStandaloneDuplicatesForPluginMode` would do without
+ * mutating the filesystem. Safe to call at any time.
+ */
+export function previewStandaloneDuplicatesForPluginMode(
+  opts?: { configDir?: string },
+): StandaloneDuplicatesPreview {
+  const prunedAgents: string[] = [];
+  const prunedSkills: string[] = [];
+  const prunedHooks: string[] = [];
+  let settingsStripped = false;
+
+  // Resolve directories from opts.configDir when provided, otherwise fall back
+  // to the module-level constants (which reflect the process's CLAUDE_CONFIG_DIR).
+  const agentsDir = opts?.configDir ? join(opts.configDir, 'agents') : AGENTS_DIR;
+  const skillsDir = opts?.configDir ? join(opts.configDir, 'skills') : SKILLS_DIR;
+  const hooksDir = opts?.configDir ? join(opts.configDir, 'hooks') : HOOKS_DIR;
+  const settingsPath = opts?.configDir ? join(opts.configDir, 'settings.json') : SETTINGS_FILE;
+
+  if (hasPluginProvidedAgentFiles()) {
+    // Walk the same logic as prunePluginDuplicateAgents but without unlinkSync
+    if (existsSync(agentsDir)) {
+      const currentAgentFiles = new Set(Object.keys(loadAgentDefinitions()));
+      for (const file of readdirSync(agentsDir)) {
+        if (!file.endsWith('.md') || file === 'AGENTS.md') continue;
+        if (!currentAgentFiles.has(file)) continue;
+        const filepath = join(agentsDir, file);
+        try {
+          const content = readFileSync(filepath, 'utf-8');
+          if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+            prunedAgents.push(filepath);
+          }
+        } catch { /* skip unreadable */ }
+      }
+    }
+  }
+
+  if (hasPluginProvidedSkillFiles()) {
+    // Walk the same logic as prunePluginDuplicateSkills but without rmSync
+    if (existsSync(skillsDir)) {
+      const packageSkillsDir = join(getPackageDir(), 'skills');
+      if (existsSync(packageSkillsDir)) {
+        const pluginSkillNames = new Set<string>();
+        const pluginSkillHashes = new Map<string, string>();
+        for (const entry of readdirSync(packageSkillsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          pluginSkillNames.add(entry.name);
+          const skillMdPath = join(packageSkillsDir, entry.name, 'SKILL.md');
+          if (existsSync(skillMdPath)) {
+            const content = readFileSync(skillMdPath, 'utf-8');
+            const { metadata } = parseFrontmatter(content);
+            if (typeof metadata.name === 'string' && metadata.name.trim().length > 0) {
+              pluginSkillNames.add(toSafeStandaloneSkillName(metadata.name));
+            }
+            pluginSkillHashes.set(entry.name, content.trim());
+          }
+        }
+        for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          if (entry.name === 'omc-learned' || entry.name === '.omc-trash') continue;
+          if (!pluginSkillNames.has(entry.name)) continue;
+          const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
+          if (!existsSync(skillMdPath)) continue;
+          try {
+            const standaloneContent = readFileSync(skillMdPath, 'utf-8').trim();
+            const pluginContent = pluginSkillHashes.get(entry.name);
+            const isOmcCreated = standaloneContent.startsWith('---\n') && /^name:\s+\S+/m.test(standaloneContent);
+            if (pluginContent === standaloneContent || isOmcCreated) {
+              prunedSkills.push(entry.name);
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+  }
+
+  if (hasPluginProvidedHookFiles()) {
+    // Walk the same logic as prunePluginDuplicateHooks but without unlinkSync
+    if (existsSync(hooksDir)) {
+      for (const filename of OMC_HOOK_FILENAMES) {
+        const targetPath = join(hooksDir, filename);
+        if (existsSync(targetPath)) prunedHooks.push(targetPath);
+      }
+      const hooksLibDir = join(hooksDir, 'lib');
+      if (existsSync(hooksLibDir)) {
+        for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'stdin.mjs']) {
+          const targetPath = join(hooksLibDir, filename);
+          if (existsSync(targetPath)) prunedHooks.push(targetPath);
+        }
+      }
+      const findNodePath = join(hooksDir, 'find-node.sh');
+      if (existsSync(findNodePath)) prunedHooks.push(findNodePath);
+    }
+
+    const detection = detectSettingsStripChanges(settingsPath);
+    if (detection.changed) settingsStripped = true;
+  }
+
+  const totalPruneCount = prunedAgents.length + prunedSkills.length + prunedHooks.length;
+  return {
+    prunedAgents,
+    prunedSkills,
+    prunedHooks,
+    settingsStripped,
+    totalPruneCount,
+    hasWork: totalPruneCount > 0 || settingsStripped,
+  };
+}
+
+/**
  * When a Claude Code plugin is active (marketplace OR --plugin-dir-mode),
  * the plugin delivers agents/skills/hooks at runtime from its own root,
  * so any standalone copies under $CONFIG_DIR/ are redundant and can cause
@@ -786,17 +949,14 @@ export function prunePluginDuplicateHooks(log: (msg: string) => void): string[] 
 export function pruneStandaloneDuplicatesForPluginMode(
   log: (msg: string) => void,
   opts?: { configDir?: string },
-): {
-  prunedAgents: string[];
-  prunedSkills: string[];
-  prunedHooks: string[];
-  settingsStripped: boolean;
-} {
-  const result = {
-    prunedAgents: [] as string[],
-    prunedSkills: [] as string[],
-    prunedHooks: [] as string[],
+): StandaloneDuplicatesPreview {
+  const result: StandaloneDuplicatesPreview = {
+    prunedAgents: [],
+    prunedSkills: [],
+    prunedHooks: [],
     settingsStripped: false,
+    totalPruneCount: 0,
+    hasWork: false,
   };
 
   if (hasPluginProvidedAgentFiles()) {
@@ -817,33 +977,19 @@ export function pruneStandaloneDuplicatesForPluginMode(
       : SETTINGS_FILE;
     if (existsSync(settingsPath)) {
       try {
-        const raw = readFileSync(settingsPath, 'utf-8');
-        const settings = JSON.parse(raw) as Record<string, unknown>;
-        const existingHooks = settings.hooks as Record<string, HookGroup[]> | undefined;
-        if (existingHooks && typeof existingHooks === 'object') {
-          let changed = false;
-          const newHooks: Record<string, HookGroup[]> = {};
-          for (const [eventType, groups] of Object.entries(existingHooks)) {
-            if (!Array.isArray(groups)) continue;
-            const nonOmcGroups = groups.filter((group: HookGroup) =>
-              !group.hooks.every((h: HookEntry) =>
-                h.type === 'command' && isOmcHook(h.command)
-              )
-            );
-            if (nonOmcGroups.length !== groups.length) changed = true;
-            if (nonOmcGroups.length > 0) newHooks[eventType] = nonOmcGroups;
+        const detection = detectSettingsStripChanges(settingsPath);
+        if (detection.changed && detection.newHooks !== undefined) {
+          const raw = readFileSync(settingsPath, 'utf-8');
+          const settings = JSON.parse(raw) as Record<string, unknown>;
+          const updated = { ...settings };
+          if (Object.keys(detection.newHooks).length > 0) {
+            updated.hooks = detection.newHooks;
+          } else {
+            delete updated.hooks;
           }
-          if (changed) {
-            const updated = { ...settings };
-            if (Object.keys(newHooks).length > 0) {
-              updated.hooks = newHooks;
-            } else {
-              delete updated.hooks;
-            }
-            writeFileSync(settingsPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf-8');
-            result.settingsStripped = true;
-            log(`Pruned OMC hook entries from ${settingsPath}`);
-          }
+          writeFileSync(settingsPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf-8');
+          result.settingsStripped = true;
+          log(`Pruned OMC hook entries from ${settingsPath}`);
         }
       } catch (err) {
         log(`Warning: could not strip OMC hooks from settings.json: ${(err as Error).message}`);
@@ -851,6 +997,9 @@ export function pruneStandaloneDuplicatesForPluginMode(
     }
   }
 
+  result.totalPruneCount =
+    result.prunedAgents.length + result.prunedSkills.length + result.prunedHooks.length;
+  result.hasWork = result.totalPruneCount > 0 || result.settingsStripped;
   return result;
 }
 

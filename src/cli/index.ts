@@ -40,6 +40,8 @@ import {
   isRunningAsPlugin,
   getInstalledOmcPluginRoots,
   pruneStandaloneDuplicatesForPluginMode,
+  previewStandaloneDuplicatesForPluginMode,
+  type StandaloneDuplicatesPreview,
 } from '../installer/index.js';
 import { uninstall as runUninstall } from '../installer/uninstall.js';
 import { runSetup, readAlreadyConfigured } from '../setup/index.js';
@@ -1421,6 +1423,54 @@ function safeDefaultsAsPartial(): Partial<SetupOptions> {
  * Tests may construct the `commanderOpts` bag directly; production code
  * passes `cmd.opts()` from the commander action handler.
  */
+
+/**
+ * Render a grouped preview of plugin-duplicate leftovers to `out`.
+ * Mirrors the uninstall preview format for visual consistency.
+ */
+function renderLeftoverPreview(preview: StandaloneDuplicatesPreview, out: NodeJS.WritableStream): void {
+  out.write(chalk.yellow('\nomc setup detected plugin-duplicate leftovers:\n\n'));
+  if (preview.prunedAgents.length > 0) {
+    out.write(`  Agents to remove (${preview.prunedAgents.length}):\n`);
+    for (const p of preview.prunedAgents) out.write(`    - ${p}\n`);
+    out.write('\n');
+  }
+  if (preview.prunedSkills.length > 0) {
+    out.write(`  Skills to remove (${preview.prunedSkills.length}):\n`);
+    for (const p of preview.prunedSkills) out.write(`    - ${p}\n`);
+    out.write('\n');
+  }
+  if (preview.prunedHooks.length > 0) {
+    out.write(`  Hooks to remove (${preview.prunedHooks.length}):\n`);
+    for (const p of preview.prunedHooks) out.write(`    - ${p}\n`);
+    out.write('\n');
+  }
+  if (preview.settingsStripped) {
+    out.write(`  settings.json: OMC hook entries will be stripped (user hooks preserved)\n\n`);
+  }
+  out.write(chalk.gray('These files duplicate content the plugin delivers via $CLAUDE_PLUGIN_ROOT.\n'));
+}
+
+/**
+ * Prompt the user with a yes/no question on stdin/stdout.
+ * Returns `defaultYes` when the user presses Enter without typing.
+ * Only call this on TTY — non-TTY should never block waiting for input.
+ */
+async function askYesNo(prompt: string, defaultYes: boolean): Promise<boolean> {
+  const { createInterface } = await import('node:readline');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(prompt, resolve);
+    });
+    const trimmed = answer.trim().toLowerCase();
+    if (trimmed === '') return defaultYes;
+    return trimmed === 'y' || trimmed === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
 export async function runSetupCommand(
   commanderOpts: Record<string, unknown>,
   stderr: NodeJS.WritableStream = process.stderr,
@@ -1604,22 +1654,47 @@ export async function runSetupCommand(
   if (runWizardBeforeSetup && !presetPartial && !flagsPartial.force) {
     const ac = readAlreadyConfigured(getClaudeConfigDir());
     if (ac.alreadyConfigured) {
-      const pruneResult = pruneStandaloneDuplicatesForPluginMode(
-        (msg) => process.stdout.write(`${msg}\n`),
-      );
-      const totalPruned =
-        pruneResult.prunedAgents.length
-        + pruneResult.prunedSkills.length
-        + pruneResult.prunedHooks.length;
-      if (totalPruned > 0 || pruneResult.settingsStripped) {
-        process.stdout.write(chalk.green(
-          `Cleaned up plugin-duplicate leftovers: `
-          + `${pruneResult.prunedAgents.length} agent(s), `
-          + `${pruneResult.prunedSkills.length} skill(s), `
-          + `${pruneResult.prunedHooks.length} hook(s)`
-          + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
-          + '\n',
-        ));
+      const isTty = Boolean(process.stdin.isTTY);
+
+      if (isTty) {
+        // TTY: show preview and prompt before any filesystem mutation.
+        const preview = previewStandaloneDuplicatesForPluginMode();
+        if (preview.hasWork) {
+          renderLeftoverPreview(preview, process.stdout);
+          const confirmed = await askYesNo(
+            `\nRemove these ${preview.totalPruneCount} leftover file(s)? (Y/n) `,
+            true,
+          );
+          if (confirmed) {
+            const pruneResult = pruneStandaloneDuplicatesForPluginMode(
+              (msg) => process.stdout.write(`${msg}\n`),
+            );
+            process.stdout.write(chalk.green(
+              `Cleaned up ${pruneResult.prunedAgents.length} agent(s), `
+              + `${pruneResult.prunedSkills.length} skill(s), `
+              + `${pruneResult.prunedHooks.length} hook(s)`
+              + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
+              + '\n',
+            ));
+          } else {
+            process.stdout.write(chalk.gray('Leftover cleanup skipped.\n'));
+          }
+        }
+      } else {
+        // Non-TTY: silent auto-prune (existing behavior).
+        const pruneResult = pruneStandaloneDuplicatesForPluginMode(
+          (msg) => process.stdout.write(`${msg}\n`),
+        );
+        if (pruneResult.totalPruneCount > 0 || pruneResult.settingsStripped) {
+          process.stdout.write(chalk.green(
+            `Cleaned up plugin-duplicate leftovers: `
+            + `${pruneResult.prunedAgents.length} agent(s), `
+            + `${pruneResult.prunedSkills.length} skill(s), `
+            + `${pruneResult.prunedHooks.length} hook(s)`
+            + (pruneResult.settingsStripped ? ', settings.json stripped' : '')
+            + '\n',
+          ));
+        }
       }
 
       process.stdout.write(chalk.yellow(
