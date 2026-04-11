@@ -40,7 +40,7 @@ import {
 } from '../installer/index.js';
 import { runSetup } from '../setup/index.js';
 import {
-  parseFlagsToPartial,
+  mapSetupCommanderOpts,
   loadPreset,
   resolveOptions,
   InvalidOptionsError,
@@ -1216,23 +1216,6 @@ Examples:
  */
 
 /**
- * Extract the argv slice AFTER the `setup` subcommand token.
- *
- * commander parses process.argv internally; by the time the action
- * handler runs we want the user-level args to pass to
- * `parseFlagsToPartial()` which runs its own commander instance with
- * `{ from: 'user' }`. Use the rightmost occurrence of `setup` so things
- * like `omc --plugin-dir setup ...` still find the correct boundary.
- */
-export function extractSetupArgv(processArgv: readonly string[]): string[] {
-  // Skip `node <script>` (positions 0 and 1) then find `setup`.
-  for (let i = 2; i < processArgv.length; i++) {
-    if (processArgv[i] === 'setup') return processArgv.slice(i + 1);
-  }
-  return [];
-}
-
-/**
  * Emit a one-shot stderr advisory for `--skip-hooks` (non-regression #2).
  *
  * The flag now actually skips hook installation (previously a no-op),
@@ -1326,25 +1309,28 @@ export function runBuildPreset(
 
 /**
  * Main `omc setup` action handler, broken out of the commander `.action(...)`
- * closure so tests can invoke it directly with a synthetic argv.
+ * closure so tests can invoke it directly with a synthetic option bag.
  *
  * Responsibilities:
- *   1. Parse raw argv via `parseFlagsToPartial()` (delegates to commander
- *      with `{ from: 'user' }`).
+ *   1. Map commander-parsed opts into a Partial<SetupOptions> via
+ *      `mapSetupCommanderOpts()`.
  *   2. If `--build-preset` is set, dispatch to `runBuildPreset()` and return.
  *   3. Otherwise, load optional preset, call `resolveOptions()`, honor the
  *      legacy `OMC_PLUGIN_ROOT_ENV` auto-detection + conflict resolution,
  *      emit the skipHooks advisory on first use, call `runSetup()`, and
  *      print today's summary for the bare-infra path.
  *   4. Return the process exit code (never calls process.exit directly).
+ *
+ * Tests may construct the `commanderOpts` bag directly; production code
+ * passes `cmd.opts()` from the commander action handler.
  */
 export async function runSetupCommand(
-  argv: string[],
+  commanderOpts: Record<string, unknown>,
   stderr: NodeJS.WritableStream = process.stderr,
 ): Promise<number> {
   let flagsPartial: Partial<SetupOptions>;
   try {
-    flagsPartial = parseFlagsToPartial(argv);
+    flagsPartial = mapSetupCommanderOpts(commanderOpts);
   } catch (err) {
     if (err instanceof InvalidOptionsError) {
       stderr.write(chalk.red(`setup: ${err.message}\n`));
@@ -1419,6 +1405,20 @@ export async function runSetupCommand(
   if (options.installerOptions.pluginDirMode && !options.quiet) {
     console.log(chalk.gray('Dev plugin-dir mode: skipping agent/skill sync (plugin provides them via --plugin-dir)'));
   }
+
+  // ------------------------------------------------------------------
+  // Backfill legacy boolean defaults so the install() call shape is
+  // identical to today's (which always passed these booleans explicitly).
+  // The backward-compat test inspects the exact InstallOptions that
+  // install() receives — keep the six known keys present even when
+  // their value is `false`.
+  // ------------------------------------------------------------------
+  options.installerOptions.force ??= false;
+  options.installerOptions.verbose ??= !options.quiet;
+  options.installerOptions.skipClaudeCheck ??= true;
+  options.installerOptions.forceHooks ??= false;
+  options.installerOptions.noPlugin ??= false;
+  options.installerOptions.pluginDirMode ??= false;
 
   // ------------------------------------------------------------------
   // Deprecation advisory for --skip-hooks (first use per day).
@@ -1581,15 +1581,10 @@ Credential hygiene:
   env vars, or a preset file with chmod 0600.`)
   .allowUnknownOption(false)
   .action(async function setupAction(this: Command) {
-    // Extract raw argv AFTER `setup` subcommand. Commander already parsed
-    // it to populate its own flag state, but parseFlagsToPartial() also runs
-    // commander internally (with the same flag set) for consistent error
-    // messages and validation. Double-parse cost is negligible.
-    const argv = (this as unknown as { args?: string[] }).args ?? [];
-    // commander .args holds positionals, not flags. Use process.argv instead.
-    const allArgs = extractSetupArgv(process.argv);
-
-    const exitCode = await runSetupCommand(allArgs);
+    // Commander has already parsed the outer argv; pull the parsed opts
+    // directly to avoid double-parsing through parseFlagsToPartial().
+    const opts = this.opts();
+    const exitCode = await runSetupCommand(opts);
     if (exitCode !== 0) process.exit(exitCode);
   });
 
