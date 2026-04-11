@@ -28,33 +28,44 @@ Present the user with available MCP server options using AskUserQuestion:
 
 ## Step 2: Gather Required Information
 
+Use AskUserQuestion for each server that needs configuration. Every question MUST have at least 2 options (AskUserQuestion rejects single-option questions).
+
 ### For Context7:
-No API key required. Ready to use immediately.
+No API key required. Ready to use immediately. Skip to Step 3.
 
 ### For Exa Web Search:
-Ask for API key:
-```
-Do you have an Exa API key?
-- Get one at: https://exa.ai
-- Enter your API key, or type 'skip' to configure later
-```
+Use AskUserQuestion:
+
+**Question:** "Do you have an Exa API key? (Get one at https://exa.ai)"
+
+**Options:**
+1. **I have a key** - Enter the API key via the "Other" free-text option
+2. **Skip for now** - Configure Exa later with: `claude mcp add -e EXA_API_KEY=<key> exa -- npx -y exa-mcp-server`
+
+If user chooses "I have a key" or provides a key via "Other", use it in Step 3. If "Skip for now", skip Exa in Step 3.
 
 ### For Filesystem:
-Ask for allowed directories:
-```
-Which directories should the filesystem MCP have access to?
-Default: Current working directory
-Enter comma-separated paths, or press Enter for default
-```
+Use AskUserQuestion:
+
+**Question:** "Which directories should the filesystem MCP have access to?"
+
+**Options:**
+1. **Current working directory (Recommended)** - Grant access to the current project directory
+2. **Home directory** - Grant access to the entire home directory
+
+If user chooses "Other", use the provided comma-separated paths in Step 3.
 
 ### For GitHub:
-Ask for token:
-```
-Do you have a GitHub Personal Access Token?
-- Create one at: https://github.com/settings/tokens
-- Recommended scopes: repo, read:org
-- Enter your token, or type 'skip' to configure later
-```
+Use AskUserQuestion:
+
+**Question:** "How would you like to configure GitHub MCP?"
+
+**Options:**
+1. **HTTP transport (Recommended)** - Connect via api.githubcopilot.com. No token or Docker needed.
+2. **Docker with PAT** - Requires a GitHub Personal Access Token and Docker installed.
+3. **Skip for now** - Configure GitHub MCP later.
+
+If user chooses "Docker with PAT", ask for the token via a follow-up AskUserQuestion with "Other" for free-text input.
 
 ## Step 3: Add MCP Servers Using CLI
 
