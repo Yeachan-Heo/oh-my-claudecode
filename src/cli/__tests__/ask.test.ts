@@ -589,6 +589,72 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
+  it('pipes multiline codex prompts over stdin on non-Windows shells', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-multiline-stdin-'));
+    const multilinePrompt = 'line one\nline two\nline three';
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', multilinePrompt],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toMatchObject({
+        command: 'codex',
+        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        options: { shell: true, encoding: 'utf8', stdio: null, input: multilinePrompt },
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('pipes long gemini prompts over stdin on non-Windows shells', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gemini-long-stdin-'));
+    const longPrompt = `prefix ${'x'.repeat(520)}`;
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['gemini', '--prompt', longPrompt],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toMatchObject({
+        command: 'gemini',
+        args: ['--yolo'],
+        options: { shell: true, encoding: 'utf8', stdio: null, input: longPrompt },
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
   it('shows install guidance when a Windows codex binary is missing under shell:true', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-win32-missing-'));
     try {

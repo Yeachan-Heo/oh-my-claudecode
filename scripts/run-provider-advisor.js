@@ -27,8 +27,16 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
   return ['-p', prompt];
 }
 
-function shouldPipePromptViaStdin(provider) {
-  return SHOULD_USE_WINDOWS_SHELL && (provider === 'codex' || provider === 'gemini');
+function shouldPipePromptViaStdin(provider, prompt) {
+  if (provider !== 'codex' && provider !== 'gemini') {
+    return false;
+  }
+
+  if (typeof prompt === 'string' && (prompt.includes('\n') || prompt.length > 500)) {
+    return true;
+  }
+
+  return SHOULD_USE_WINDOWS_SHELL;
 }
 
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
@@ -220,7 +228,7 @@ async function main() {
 
   ensureBinary(provider, binary);
 
-  const pipePromptViaStdin = shouldPipePromptViaStdin(provider);
+  const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
   const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
   const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
