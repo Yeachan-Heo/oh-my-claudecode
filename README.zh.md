@@ -32,6 +32,8 @@
 /omc-setup
 ```
 
+默认情况下，`omc setup` 在 TTY 上会启动一个包含约 11 个 readline 问题的交互式向导（"interactive wizard"，与会话内 `/omc-setup` 技能流程相同）。在非 TTY 环境（CI、管道 stdin）中，会自动回退至 `SAFE_DEFAULTS`——一个有主张的全局安装，包含 ultrawork 模式、所有 MCP 服务器、teams 及 HUD 配置。要获得与旧版完全相同的行为（静默、仅基础设施），请使用 `omc setup --infra-only`。要在任意环境下强制非交互模式，请使用 `omc setup --non-interactive`。所有可用选项请参阅 [setup 标志完整参考](./docs/REFERENCE.md#omc-setup-flags)。
+
 如果你通过 `omc --plugin-dir <path>` 或 `claude --plugin-dir <path>` 运行 OMC，请在 `omc setup` 中添加 `--plugin-dir-mode`（或提前导出 `OMC_PLUGIN_ROOT`），以避免复制插件在运行时已经提供的技能/代理。有关完整的决策矩阵和所有可用标志，请参阅 [REFERENCE.md 中的 Plugin directory flags 部分](./docs/REFERENCE.md#plugin-directory-flags)。
 
 <!-- TODO(i18n): verify translation -->

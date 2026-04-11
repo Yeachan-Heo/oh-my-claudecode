@@ -32,6 +32,8 @@ _Claude Code'u öğrenmeyin. Sadece OMC kullanın._
 /oh-my-claudecode:omc-setup
 ```
 
+Varsayılan olarak, bir TTY'de `omc setup` yaklaşık 11 readline sorusuyla etkileşimli bir sihirbaz ("interactive wizard") başlatır (oturum içi `/omc-setup` skiliyle aynı akış). TTY olmayan bağlamlarda (CI, yönlendirilmiş stdin), otomatik olarak `SAFE_DEFAULTS`'a geri döner — ultrawork modu, tüm MCP sunucuları, teams ve HUD yapılandırmasıyla kapsamlı bir global kurulum. Bayt özdeş eski davranış (sessiz, yalnızca altyapı) için `omc setup --infra-only` kullanın. Her yerde açık etkileşimsiz mod için `omc setup --non-interactive` kullanın. Mevcut tüm seçenekler için [setup flags tam referansına](./docs/REFERENCE.md#omc-setup-flags) bakın.
+
 OMC'yi `omc --plugin-dir <path>` veya `claude --plugin-dir <path>` aracılığıyla çalıştırıyorsanız, `omc setup`'a `--plugin-dir-mode` ekleyin (veya `OMC_PLUGIN_ROOT`'u önceden dışa aktarın) böylece plugin zaten çalışma zamanında sağlayan beceri/ajanları duplike etmez. Tam karar matrisi ve mevcut tüm bayraklar için [REFERENCE.md'deki Plugin directory flags bölümüne](./docs/REFERENCE.md#plugin-directory-flags) bakın.
 
 <!-- TODO(i18n): verify translation -->

@@ -69,6 +69,8 @@ npm i -g oh-my-claude-sisyphus@latest
 omc setup
 ```
 
+By default, `omc setup` on a TTY launches an interactive wizard with ~11 readline questions (same flow as the in-session `/omc-setup` skill). In non-TTY contexts (CI, piped stdin), it auto-falls back to `SAFE_DEFAULTS` — an opinionated global install with ultrawork mode, all MCP servers, teams, and HUD config. For byte-identical old behavior (silent infra-only), use `omc setup --infra-only`. For explicit non-interactive mode anywhere, use `omc setup --non-interactive`. See the [full setup flags reference](./docs/REFERENCE.md#omc-setup-flags) for all available options.
+
 If you run OMC via `omc --plugin-dir <path>` or `claude --plugin-dir <path>`, add `--plugin-dir-mode` to `omc setup` (or export `OMC_PLUGIN_ROOT` before running it) so the installer doesn't duplicate skills/agents that the plugin already provides at runtime. See the [Plugin directory flags section in REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags) for a complete decision matrix and all available flags.
 
 **Step 3: Build something**

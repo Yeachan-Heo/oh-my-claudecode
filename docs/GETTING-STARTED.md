@@ -72,6 +72,47 @@ setup omc
 /oh-my-claudecode:omc-setup
 ```
 
+### Setup modes
+
+`omc setup` automatically detects your environment and chooses a setup mode:
+
+| Mode | When | Behavior |
+|------|------|----------|
+| **Interactive wizard** | Running on a TTY (interactive terminal) | Displays 11 readline questions for custom configuration |
+| **SAFE_DEFAULTS** | Running on non-TTY (CI, automation) or with `--non-interactive` | Opinionated full install: global CLAUDE.md overwrite, ultrawork mode enabled, all MCP servers installed, teams configured, HUD enabled |
+| **Infra-only** | With `--infra-only` flag | Escape hatch for CI/automation; byte-identical to pre-refactor behavior; skips all configuration |
+
+#### Forcing a specific mode
+
+```bash
+# Force interactive wizard (errors cleanly on non-TTY)
+omc setup --interactive
+
+# Force SAFE_DEFAULTS on any environment
+omc setup --non-interactive
+
+# Force old infra-only behavior (no config, silent)
+omc setup --infra-only
+
+# Load custom configuration from JSON preset (non-interactive)
+omc setup --preset /path/to/preset.json
+```
+
+For the complete flag reference, see [Setup flags in REFERENCE.md](./REFERENCE.md#omc-setup-flags).
+
+#### CI and automation caveat
+
+When running `omc setup` in CI or automated environments, use `--non-interactive` or `--infra-only` explicitly to avoid TTY detection edge cases:
+
+```bash
+# Recommended for CI: opinionated setup with full configuration
+npm i -g oh-my-claude-sisyphus@latest
+omc setup --non-interactive
+
+# Alternative for CI: infra-only (no configuration, old behavior)
+omc setup --infra-only
+```
+
 ### Prerequisites summary
 
 | Item | Requirement |
