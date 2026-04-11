@@ -26,6 +26,8 @@ import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
+import { mergeClaudeMd } from '../setup/claude-md.js';
+export { mergeClaudeMd };
 
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -139,38 +141,6 @@ function getNewestInstalledVersionHint(): string | null {
   );
 }
 
-/**
- * Find a marker that appears at the start of a line (line-anchored).
- * This prevents matching markers inside code blocks.
- * @param content - The content to search in
- * @param marker - The marker string to find
- * @param fromEnd - If true, finds the LAST occurrence instead of first
- * @returns The index of the marker, or -1 if not found
- */
-function findLineAnchoredMarker(content: string, marker: string, fromEnd: boolean = false): number {
-  // Escape special regex characters in marker
-  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`^${escapedMarker}$`, 'gm');
-
-  if (fromEnd) {
-    // Find the last occurrence
-    let lastIndex = -1;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      lastIndex = match.index;
-    }
-    return lastIndex;
-  } else {
-    // Find the first occurrence
-    const match = regex.exec(content);
-    return match ? match.index : -1;
-  }
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '');
 }
@@ -202,28 +172,6 @@ function buildStatusLineCommand(nodeBin: string, hudScriptPath: string, findNode
   }
 
   return `node ${quoteShellArg(normalizedHudScriptPath)}`;
-}
-
-function createLineAnchoredMarkerRegex(marker: string, flags: string = 'gm'): RegExp {
-  return new RegExp(`^${escapeRegex(marker)}$`, flags);
-}
-
-function stripGeneratedUserCustomizationHeaders(content: string): string {
-  return content.replace(
-    /^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm,
-    ''
-  );
-}
-
-function trimClaudeUserContent(content: string): string {
-  if (content.trim().length === 0) {
-    return '';
-  }
-
-  return content
-    .replace(/^(?:[ \t]*\r?\n)+/, '')
-    .replace(/(?:\r?\n[ \t]*)+$/, '')
-    .replace(/(?:\r?\n){3,}/g, '\n\n');
 }
 
 /** Installation result */
@@ -1090,72 +1038,6 @@ export function syncPersistedSetupVersion(options?: {
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({ ...config, setupVersion: normalizedVersion }, null, 2));
   return true;
-}
-
-/**
- * Merge OMC content into existing CLAUDE.md using markers
- * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
- * @param omcContent - New OMC content to inject
- * @returns Merged content with markers
- */
-export function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string {
-  const START_MARKER = '<!-- OMC:START -->';
-  const END_MARKER = '<!-- OMC:END -->';
-  const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-  const OMC_BLOCK_PATTERN = new RegExp(
-    `^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`,
-    'gm'
-  );
-  const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
-  const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
-
-  // Idempotency guard: strip markers from omcContent if already present
-  // This handles the case where docs/CLAUDE.md ships with markers
-  let cleanOmcContent = omcContent;
-  const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
-  const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
-  if (omcStartIdx !== -1 && omcEndIdx !== -1 && omcStartIdx < omcEndIdx) {
-    // Extract content between markers, trimming any surrounding whitespace
-    cleanOmcContent = omcContent
-      .substring(omcStartIdx + START_MARKER.length, omcEndIdx)
-      .trim();
-  }
-
-  // Strip any existing version marker from content and inject current version
-  cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
-  const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
-
-  // Case 1: No existing content - wrap omcContent in markers
-  if (!existingContent) {
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
-  }
-
-  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
-  const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
-  const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
-
-  // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
-  if (hasResidualStartMarker || hasResidualEndMarker) {
-    // Handle corrupted state - backup will be created by caller
-    // Strip unmatched OMC markers from recovered content to prevent unbounded
-    // growth on repeated calls (each call would re-detect corruption and append again)
-    const recoveredContent = strippedExistingContent
-      .replace(markerStartRegex, '')
-      .replace(markerEndRegex, '')
-      .trim();
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
-  }
-
-  const preservedUserContent = trimClaudeUserContent(
-    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
-  );
-
-  if (!preservedUserContent) {
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
-  }
-
-  // Case 3: Preserve only user-authored content that lives outside OMC markers
-  return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${preservedUserContent}`;
 }
 
 /**
