@@ -433,6 +433,142 @@ describe('installMcpServers — idempotence & failure isolation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// install-without-auth mode
+// ---------------------------------------------------------------------------
+
+describe('installMcpServers — install-without-auth mode', () => {
+  it('context7 (no creds required) installs normally with NO -e flag', async () => {
+    const rec = recorder();
+    const result = await installMcpServers(
+      ['context7'],
+      {},
+      opts({ execFile: rec.execFile, onMissingCredentials: 'install-without-auth' }),
+    );
+    expect(result.installed).toEqual(['context7']);
+    expect(result.installedWithoutAuth).toEqual([]); // not marked, creds not needed
+    const call = rec.calls[0]!;
+    expect(call.filter((a) => a === '-e')).toHaveLength(0);
+  });
+
+  it('filesystem (no creds required) installs normally with NO -e flag', async () => {
+    const rec = recorder();
+    const result = await installMcpServers(
+      ['filesystem'],
+      {},
+      opts({ execFile: rec.execFile, onMissingCredentials: 'install-without-auth' }),
+    );
+    expect(result.installed).toEqual(['filesystem']);
+    expect(result.installedWithoutAuth).toEqual([]);
+    const call = rec.calls[0]!;
+    expect(call.filter((a) => a === '-e')).toHaveLength(0);
+  });
+
+  it('exa with missing key installs WITHOUT -e EXA_API_KEY and is marked', async () => {
+    const rec = recorder();
+    const logged: string[] = [];
+    const result = await installMcpServers(
+      ['exa'],
+      {},
+      opts({
+        execFile: rec.execFile,
+        onMissingCredentials: 'install-without-auth',
+        logger: (m) => logged.push(m),
+      }),
+    );
+    expect(result.installed).toEqual(['exa']);
+    expect(result.installedWithoutAuth).toEqual(['exa']);
+    expect(result.skippedDueToMissingCreds).toEqual([]);
+
+    const call = rec.calls[0]!;
+    // CRITICAL: never `-e EXA_API_KEY=` (empty env value breaks claude mcp add).
+    expect(call.some((a) => a === '-e')).toBe(false);
+    expect(call.some((a) => a.startsWith('EXA_API_KEY'))).toBe(false);
+    // Still contains the server name and exa-mcp-server command.
+    expect(call).toContain('exa');
+    expect(call).toContain('exa-mcp-server');
+
+    // Warning log mentions install-without-auth semantics.
+    expect(logged.some((l) => l.includes('WITHOUT credentials'))).toBe(true);
+  });
+
+  it('exa with provided key still installs WITH -e even in install-without-auth mode', async () => {
+    const rec = recorder();
+    const result = await installMcpServers(
+      ['exa'],
+      { exa: 'secret' },
+      opts({ execFile: rec.execFile, onMissingCredentials: 'install-without-auth' }),
+    );
+    expect(result.installed).toEqual(['exa']);
+    expect(result.installedWithoutAuth).toEqual([]);
+    const call = rec.calls[0]!;
+    expect(call).toContain('-e');
+    expect(call).toContain('EXA_API_KEY=secret');
+  });
+
+  it('github with missing token installs WITHOUT claude -e (visible but broken)', async () => {
+    const rec = recorder();
+    const logged: string[] = [];
+    const result = await installMcpServers(
+      ['github'],
+      {},
+      opts({
+        execFile: rec.execFile,
+        onMissingCredentials: 'install-without-auth',
+        logger: (m) => logged.push(m),
+      }),
+    );
+    expect(result.installed).toEqual(['github']);
+    expect(result.installedWithoutAuth).toEqual(['github']);
+
+    const call = rec.calls[0]!;
+    // No `-e GITHUB_PERSONAL_ACCESS_TOKEN=` (empty value) after the claude
+    // mcp add prefix, but docker's `-e GITHUB_PERSONAL_ACCESS_TOKEN` (bare,
+    // no value) for env forwarding IS present.
+    expect(call.some((a) => a === 'GITHUB_PERSONAL_ACCESS_TOKEN=')).toBe(false);
+    expect(call).toContain('docker');
+    expect(call).toContain('ghcr.io/github/github-mcp-server');
+    expect(logged.some((l) => l.includes('WITHOUT credentials'))).toBe(true);
+  });
+
+  it('custom spec with empty env installs with empty env omitted', async () => {
+    const rec = recorder();
+    const spec: McpCustomSpec = {
+      name: 'viz',
+      command: 'node',
+      args: ['server.js'],
+      env: { API_KEY: '' },
+    };
+    const result = await installMcpServers(
+      [{ name: 'viz', spec }],
+      {},
+      opts({ execFile: rec.execFile, onMissingCredentials: 'install-without-auth' }),
+    );
+    expect(result.installed).toEqual(['viz']);
+    expect(result.installedWithoutAuth).toEqual(['viz']);
+    const call = rec.calls[0]!;
+    // No -e flag pair emitted for the empty env var.
+    expect(call.some((a) => a === '-e')).toBe(false);
+    expect(call.some((a) => a === 'API_KEY=')).toBe(false);
+    // Still contains the server name and command.
+    expect(call).toContain('viz');
+    expect(call).toContain('node');
+    expect(call).toContain('server.js');
+  });
+
+  it('install-without-auth + error throws is not compatible (skip-equivalent for missing creds)', async () => {
+    // 'install-without-auth' is an alternative to 'skip'/'error', never raises.
+    const rec = recorder();
+    const result = await installMcpServers(
+      ['exa'],
+      {},
+      opts({ execFile: rec.execFile, onMissingCredentials: 'install-without-auth' }),
+    );
+    expect(result.failed).toEqual([]);
+    expect(result.installed).toEqual(['exa']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Logger contract
 // ---------------------------------------------------------------------------
 

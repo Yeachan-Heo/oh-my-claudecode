@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'fs';
 import { Command } from 'commander';
 import { z } from 'zod';
 import type { InstallOptions } from '../installer/index.js';
+import type { HudElementConfig } from '../hud/types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,7 +76,17 @@ export interface SetupOptions {
     enabled: boolean;
     servers: McpServerEntry[];
     credentials: { exa?: string; github?: string; filesystem?: string[] };
-    onMissingCredentials: 'skip' | 'error';
+    /**
+     * Policy when a credentialed MCP server (exa, github, custom with `-e`)
+     * has no credentials available:
+     *   - 'skip'                : leave the server out of config entirely.
+     *   - 'error'               : throw McpCredentialMissingError.
+     *   - 'install-without-auth': install the server WITHOUT the `-e` flag
+     *       so it's visible-but-broken via `claude mcp list` and can be
+     *       fixed later by adding credentials. Servers with no credentials
+     *       required (context7, filesystem) behave identically to normal.
+     */
+    onMissingCredentials: 'skip' | 'error' | 'install-without-auth';
     scope: 'local' | 'user' | 'project';
   };
   teams: {
@@ -87,6 +98,16 @@ export interface SetupOptions {
 
   // Phase 4
   starRepo: boolean;
+
+  /**
+   * Optional HUD element config patch. When present, phase4 shallow-merges
+   * `hud.elements` into `<configDir>/.omc-config.json` under the
+   * `hud.elements` key. Only the keys supplied are written — unknown keys
+   * in the file are preserved. Omit entirely to skip HUD configuration.
+   */
+  hud?: {
+    elements: Partial<HudElementConfig>;
+  };
 
   // State machine (used when phases includes 'state')
   stateAction?: StateAction;
@@ -386,7 +407,9 @@ const presetSchema = z
             filesystem: z.array(z.string()).optional(),
           })
           .optional(),
-        onMissingCredentials: z.enum(['skip', 'error']).optional(),
+        onMissingCredentials: z
+          .enum(['skip', 'error', 'install-without-auth'])
+          .optional(),
         scope: z.enum(['local', 'user', 'project']).optional(),
       })
       .optional(),
@@ -490,7 +513,9 @@ export function readEnvPartial(env: NodeJS.ProcessEnv = process.env): Partial<Se
   if (sr !== undefined) out.starRepo = sr;
 
   const omc = env.OMC_SETUP_MCP_ON_MISSING_CREDS;
-  if (omc === 'skip' || omc === 'error') mcp.onMissingCredentials = omc;
+  if (omc === 'skip' || omc === 'error' || omc === 'install-without-auth') {
+    mcp.onMissingCredentials = omc;
+  }
 
   const ms = env.OMC_SETUP_MCP_SCOPE;
   if (ms === 'local' || ms === 'user' || ms === 'project') mcp.scope = ms;
@@ -613,6 +638,10 @@ interface RawFlags {
   buildPreset?: boolean;
   answers?: string;
   out?: string;
+  /** Escape hatch: restore pre-safe-defaults bare `omc setup` behavior. */
+  infraOnly?: boolean;
+  /** Print SAFE_DEFAULTS as JSON and exit (handled in cli). */
+  dumpSafeDefaults?: boolean;
 }
 
 /**
@@ -675,7 +704,9 @@ export function parseFlagsToPartial(argv: string[]): Partial<SetupOptions> {
     .option('--check-state')
     .option('--build-preset')
     .option('--answers <file>')
-    .option('--out <file>');
+    .option('--out <file>')
+    .option('--infra-only')
+    .option('--dump-safe-defaults');
 
   try {
     program.parse(argv, { from: 'user' });
@@ -813,9 +844,13 @@ function flagsToPartial(flags: RawFlags): Partial<SetupOptions> {
     mcp.credentials = creds;
   }
   if (flags.mcpOnMissingCreds !== undefined) {
-    if (flags.mcpOnMissingCreds !== 'skip' && flags.mcpOnMissingCreds !== 'error') {
+    if (
+      flags.mcpOnMissingCreds !== 'skip' &&
+      flags.mcpOnMissingCreds !== 'error' &&
+      flags.mcpOnMissingCreds !== 'install-without-auth'
+    ) {
       throw new InvalidOptionsError(
-        `invalid --mcp-on-missing-creds: ${flags.mcpOnMissingCreds} (expected skip|error)`,
+        `invalid --mcp-on-missing-creds: ${flags.mcpOnMissingCreds} (expected skip|error|install-without-auth)`,
       );
     }
     mcp.onMissingCredentials = flags.mcpOnMissingCreds;
@@ -1079,7 +1114,9 @@ function derivePhases(flags: RawFlags): Set<SetupPhase> {
     return new Set(['state']);
   }
   if (flags.local || flags.global) return new Set(['claude-md']);
-  // Default: bare `omc setup` → infra only, matches today's behavior.
+  if (flags.infraOnly) return new Set(['infra']);
+  // Default: programmatic callers get infra-only (matches DEFAULTS). The
+  // CLI handler replaces this with SAFE_DEFAULTS for bare `omc setup`.
   return new Set(['infra']);
 }
 
