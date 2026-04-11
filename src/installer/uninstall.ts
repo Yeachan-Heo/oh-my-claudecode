@@ -440,7 +440,10 @@ export function uninstall(opts: UninstallOptions = {}): UninstallResult {
     if (!preserveUserContent) {
       // Delete entire CLAUDE.md regardless of content
       removeFile(claudeMdPath);
-    } else if (content.includes(OMC_START)) {
+    } else if (content.includes(OMC_START) || content.includes(IMPORT_START)) {
+      // Either overwrite-mode (OMC:START/END block) OR preserve-mode
+      // (OMC:IMPORT:START/END block pointing at the companion file) —
+      // both shapes need the strip path.
       const userContent = stripOmcBlockFromClaudeMd(content);
       if (userContent === null) {
         // Pure OMC content — delete
