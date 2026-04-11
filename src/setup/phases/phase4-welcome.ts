@@ -27,6 +27,8 @@ import { join } from 'node:path';
 import { completeSetup as realCompleteSetup } from '../state.js';
 import { VERSION } from '../../installer/index.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { writeHudConfig as realWriteHudConfig } from '../hud-config-writer.js';
+import type { HudElementConfig } from '../../hud/types.js';
 import type { SetupOptions } from '../options.js';
 import type { Phase1Result } from './phase1-claude-md.js';
 
@@ -48,6 +50,11 @@ export interface Phase4Deps {
     args: readonly string[],
     options?: { stdio?: 'inherit' | 'pipe' | 'ignore' },
   ) => Buffer | string;
+  /** Test seam: replace the HUD element config writer. */
+  writeHudConfig?: (
+    elements: Partial<HudElementConfig>,
+    opts?: { configDir?: string },
+  ) => void;
   /** Override the config directory. */
   configDir?: string;
   /** Override cwd. */
@@ -104,12 +111,25 @@ export async function runPhase4(
 ): Promise<void> {
   const complete = deps.completeSetup ?? realCompleteSetup;
   const execFn = deps.execFileSync ?? realExecFileSync;
+  const hudWriter = deps.writeHudConfig ?? realWriteHudConfig;
   const configDir = deps.configDir ?? getClaudeConfigDir();
   const cwd = deps.cwd ?? process.cwd();
   const version = deps.version ?? VERSION ?? 'unknown';
 
   const isUpgrade =
     context.isUpgrade !== undefined ? context.isUpgrade : detectIsUpgrade(configDir);
+
+  // Optional HUD element config — only runs when the caller supplied
+  // `options.hud.elements` (SAFE_DEFAULTS does, bare DEFAULTS does not).
+  if (options.hud?.elements) {
+    try {
+      hudWriter(options.hud.elements, { configDir });
+    } catch (err) {
+      // Non-fatal: HUD config is cosmetic, never block setup completion.
+      const msg = err instanceof Error ? err.message : String(err);
+      logger(`[phase4] warning: failed to write HUD config: ${msg}`);
+    }
+  }
 
   logMultiline(logger, isUpgrade ? UPGRADE_WELCOME_MESSAGE : NEW_WELCOME_MESSAGE);
 
