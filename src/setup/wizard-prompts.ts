@@ -266,7 +266,14 @@ export async function runInteractiveWizard(
         : 'default profile; affects all Claude Code sessions.',
     },
   ];
-  const targetDefaultLabel = targetOptions[0].label; // Local is the default
+  // Default derived from QUESTION_METADATA.target.default (the wizard's
+  // single source of truth for per-question defaults). Labels are
+  // rewritten at runtime with resolved paths, so match by first word
+  // against the canonical default string ('local' / 'global').
+  const targetDefaultCanon = String(QUESTION_METADATA.target.default).toLowerCase();
+  const targetDefaultLabel =
+    targetOptions.find((o) => o.label.toLowerCase().startsWith(targetDefaultCanon))
+      ?.label ?? targetOptions[0].label;
   const targetLabel = await prompter.askSelect(
     QUESTION_METADATA.target.question,
     targetOptions,
