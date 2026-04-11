@@ -601,7 +601,8 @@ export function prunePluginDuplicateAgents(log: (msg: string) => void): string[]
     const filepath = join(AGENTS_DIR, file);
     try {
       const content = readFileSync(filepath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+      const { metadata } = parseFrontmatter(content);
+      if (metadata.source === 'omc') {
         unlinkSync(filepath);
         removed.push(file);
         log(`  Pruned plugin-duplicate agent: ${file}`);
@@ -1291,11 +1292,11 @@ export function install(options: InstallOptions = {}): InstallResult {
             log(`  Skipping ${filename} (already exists)`);
           } else {
             // Stamp installed agents with `source: omc` so cleanupStaleAgents() can
-          // distinguish OMC-managed agents from user-created ones.
-          const stampedContent = content.startsWith('---\n') && !content.includes('source: omc')
-            ? content.replace(/^---\n/, '---\nsource: omc\n')
-            : content;
-          writeFileSync(filepath, stampedContent);
+            // distinguish OMC-managed agents from user-created ones.
+            const stampedContent = content.startsWith('---\n') && !content.includes('source: omc')
+              ? content.replace(/^---\n/, '---\nsource: omc\n')
+              : content;
+            writeFileSync(filepath, stampedContent);
             result.installedAgents.push(filename);
             log(`  Installed ${filename}`);
           }
