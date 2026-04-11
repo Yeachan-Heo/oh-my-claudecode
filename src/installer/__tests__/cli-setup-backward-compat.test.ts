@@ -1,24 +1,23 @@
 /**
- * Non-regression #1 for the setup unification refactor:
+ * Backward-compat / safe-defaults flip for the setup-unification PR6:
  *
- *   Bare `omc setup` (no extra flags) MUST behave byte-identically to
- *   today's `installOmc()` call. The new `runSetup()` entry point routes
- *   `phases={'infra'}` directly through `install()` and MUST NOT:
+ * Originally (PR1-PR5) bare `omc setup --force` routed phases={'infra'} only
+ * and pinned the exact install() call shape — the "infra-only non-regression
+ * #1" contract. In PR6 we INTENTIONALLY flip the bare path to run the
+ * SAFE_DEFAULTS preset (claude-md + infra + integrations + welcome), and
+ * move the old contract behind the explicit `--infra-only` escape flag.
  *
- *     - touch CLAUDE.md (phase 1)
- *     - write preferences to `.omc-config.json` (phase 2 tail)
- *     - run any prompter
- *     - run phase 3 (integrations) or phase 4 (welcome)
- *     - install `oh-my-claude-sisyphus` globally
+ * This test file now pins BOTH contracts:
+ *   - `--infra-only` path: phases={'infra'}, install() called with today's
+ *     six-key shape, NO phase2/3/4 helpers invoked, NO CLAUDE.md touched.
+ *     This keeps the pre-safe-defaults behavior available for CI /
+ *     provisioning / automation that historically relied on bare-is-minimal.
+ *   - Safe-defaults path: phases matches SAFE_DEFAULTS (claude-md, infra,
+ *     integrations, welcome), runSetup is called with a fully-resolved
+ *     SetupOptions whose nested fields match the SAFE_DEFAULTS constant.
  *
- * This test pins the contract at the `runSetup()` level — it is not a
- * CLI-argument parser test (that lives alongside PR3 when the CLI is
- * rewired). It asserts that given the InstallOptions shape today's CLI
- * constructs, `runSetup()` delegates exactly once to `install()` and
- * returns without any other side-effect.
- *
- * Plan ref: `replicated-mixing-wren.md` — "Risks table row: install() +
- * runSetup double-write", "non-regression #1 bare `omc setup`".
+ * Plan ref: user request "make bare omc setup run the best result out of
+ * the box, keep --infra-only as escape hatch".
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +27,7 @@ import { tmpdir } from 'node:os';
 
 import { runSetup, type RunSetupDeps } from '../../setup/index.js';
 import { DEFAULTS } from '../../setup/options.js';
+import { SAFE_DEFAULTS } from '../../setup/safe-defaults.js';
 import type { SetupOptions, SetupPhase } from '../../setup/options.js';
 import type { InstallOptions, InstallResult } from '../index.js';
 
@@ -51,6 +51,23 @@ function clonedDefaults(): SetupOptions {
   return base;
 }
 
+function clonedSafeDefaults(): SetupOptions {
+  return {
+    ...SAFE_DEFAULTS,
+    phases: new Set(SAFE_DEFAULTS.phases),
+    mcp: {
+      ...SAFE_DEFAULTS.mcp,
+      credentials: { ...SAFE_DEFAULTS.mcp.credentials },
+      servers: [...SAFE_DEFAULTS.mcp.servers],
+    },
+    teams: { ...SAFE_DEFAULTS.teams },
+    installerOptions: { ...SAFE_DEFAULTS.installerOptions },
+    hud: SAFE_DEFAULTS.hud
+      ? { elements: { ...SAFE_DEFAULTS.hud.elements } }
+      : undefined,
+  };
+}
+
 function okInstall(): InstallResult {
   return {
     success: true,
@@ -64,7 +81,11 @@ function okInstall(): InstallResult {
   };
 }
 
-describe('CLI setup backward-compat (non-regression #1)', () => {
+// ---------------------------------------------------------------------------
+// --infra-only escape hatch (preserves pre-safe-defaults bare contract)
+// ---------------------------------------------------------------------------
+
+describe('CLI setup --infra-only escape hatch (pre-safe-defaults bare contract)', () => {
   let tmp: ReturnType<typeof makeTmp>;
 
   beforeEach(() => {
@@ -75,22 +96,18 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     rmSync(tmp.root, { recursive: true, force: true });
   });
 
-  // -------------------------------------------------------------------------
-  // A1 — bare `omc setup --force` → single install() call, phases={'infra'},
-  //      NO phase 2/3/4 run, NO CLAUDE.md touched.
-  // -------------------------------------------------------------------------
-  it('A1: bare `omc setup --force` → phases={infra}, install() called exactly once with force:true', async () => {
+  it('B1: --infra-only + --force → phases={infra}, install() called exactly once with force:true', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const phase1 = vi.fn();
     const phase2 = vi.fn();
     const phase3 = vi.fn();
     const phase4 = vi.fn();
 
-    // Today's CLI (src/cli/index.ts `.command('setup').action(...)` line 1259)
-    // constructs the following InstallOptions from bare `--force`:
+    // The CLI handler, when given `--infra-only --force`, constructs this
+    // exact InstallOptions shape (matches the pre-safe-defaults contract).
     const cliInstallOptions: InstallOptions = {
       force: true,
-      verbose: true,             // !options.quiet
+      verbose: true,
       skipClaudeCheck: true,
       forceHooks: false,
       noPlugin: false,
@@ -116,17 +133,15 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
       skipSignalHandlers: true,
     });
 
-    // install() called exactly once with the CLI's InstallOptions shape.
     expect(installFn).toHaveBeenCalledOnce();
     expect(installFn).toHaveBeenCalledWith(cliInstallOptions);
 
-    // Phase helpers NEVER invoked — this is the "infra-only" contract.
+    // Phase helpers NEVER invoked — this is the infra-only contract.
     expect(phase1).not.toHaveBeenCalled();
     expect(phase2).not.toHaveBeenCalled();
     expect(phase3).not.toHaveBeenCalled();
     expect(phase4).not.toHaveBeenCalled();
 
-    // Result is success with only infra in phasesRun.
     expect(result.success).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.phasesRun).toEqual(['infra']);
@@ -134,17 +149,9 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     // NO CLAUDE.md written to the isolated cwd.
     expect(existsSync(join(tmp.cwd, 'CLAUDE.md'))).toBe(false);
     expect(existsSync(join(tmp.configDir, 'CLAUDE.md'))).toBe(false);
-
-    // NO .omc-config.json written by phase2 (install() may or may not
-    // touch it — that's install()'s business, but phase2 tail must not).
-    // We verify phase2 wasn't called, which is the contract.
   });
 
-  // -------------------------------------------------------------------------
-  // A2 — bare `omc setup` (no --force, no --quiet) → verbose:true,
-  //      force:false, exit 0.
-  // -------------------------------------------------------------------------
-  it('A2: bare `omc setup` (no force) forwards verbose:true, force:false', async () => {
+  it('B2: --infra-only (no force) forwards verbose:true, force:false', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const options: SetupOptions = {
       ...clonedDefaults(),
@@ -175,14 +182,10 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     expect(call.skipClaudeCheck).toBe(true);
   });
 
-  // -------------------------------------------------------------------------
-  // A3 — `omc setup --quiet` → verbose:false, no output from wrapper.
-  // -------------------------------------------------------------------------
-  it('A3: --quiet forwards verbose:false and suppresses wrapper output', async () => {
+  it('B3: --infra-only --quiet forwards verbose:false and suppresses wrapper output', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const stdoutLines: string[] = [];
     const origWrite = process.stdout.write.bind(process.stdout);
-    // Capture any stdout the wrapper emits — should be zero when quiet.
     process.stdout.write = ((chunk: unknown): boolean => {
       if (typeof chunk === 'string') stdoutLines.push(chunk);
       return true;
@@ -219,17 +222,10 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
       process.stdout.write = origWrite;
     }
 
-    // Wrapper should NOT have written anything when quiet=true.
-    // (install()'s own output is mocked out via the vi.fn, so any output
-    // we see here came from runSetup itself.)
     expect(stdoutLines.join('')).toBe('');
   });
 
-  // -------------------------------------------------------------------------
-  // A35 — `--skip-hooks` forwards through to InstallOptions (future flag
-  //       wired in PR3). Today's test pins the pass-through.
-  // -------------------------------------------------------------------------
-  it('A35: --skip-hooks / --force-hooks flags pass through to install()', async () => {
+  it('B4: --skip-hooks / --force-hooks flags pass through to install()', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const options: SetupOptions = {
       ...clonedDefaults(),
@@ -238,7 +234,7 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
         force: false,
         verbose: true,
         skipClaudeCheck: true,
-        forceHooks: true, // --force-hooks
+        forceHooks: true,
         noPlugin: false,
         pluginDirMode: false,
       },
@@ -257,10 +253,7 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     expect(call.forceHooks).toBe(true);
   });
 
-  // -------------------------------------------------------------------------
-  // A36 — `--plugin-dir-mode` forwards.
-  // -------------------------------------------------------------------------
-  it('A36: --plugin-dir-mode forwards to install()', async () => {
+  it('B5: --plugin-dir-mode forwards to install()', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const options: SetupOptions = {
       ...clonedDefaults(),
@@ -288,10 +281,7 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     expect(call.pluginDirMode).toBe(true);
   });
 
-  // -------------------------------------------------------------------------
-  // A37 — install() failure bubbles up as exit 1 with errors array.
-  // -------------------------------------------------------------------------
-  it('A37: install() failure surfaces as non-zero exit with errors', async () => {
+  it('B6: install() failure surfaces as non-zero exit with errors', async () => {
     const installFn = vi.fn((): InstallResult => ({
       success: false,
       message: 'setup failed',
@@ -326,13 +316,7 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     expect(result.errors).toEqual(['boom1', 'boom2']);
   });
 
-  // -------------------------------------------------------------------------
-  // Anti-regression: adding a second phase MUST break out of the bare-infra
-  // path and NOT call install() via the direct backward-compat branch. This
-  // test guards against "someone adds 'claude-md' to the default set without
-  // noticing" — a drive-by change that would silently break `omc setup`.
-  // -------------------------------------------------------------------------
-  it('adding a second phase routes through runPhase2 (NOT the bare-infra shortcut)', async () => {
+  it('B7: adding a second phase routes through runPhase2 (NOT the bare-infra shortcut)', async () => {
     const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
     const phase1 = vi.fn(async () => ({
       mode: 'overwrite' as const,
@@ -347,7 +331,7 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     const options: SetupOptions = {
       ...clonedDefaults(),
       phases: new Set<SetupPhase>(['claude-md', 'infra']),
-      force: true, // bypass already-configured check
+      force: true,
       installerOptions: {
         force: true,
         verbose: true,
@@ -378,5 +362,110 @@ describe('CLI setup backward-compat (non-regression #1)', () => {
     expect(installFn).not.toHaveBeenCalled();
     expect(phase1).toHaveBeenCalledOnce();
     expect(phase2).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Safe-defaults bare contract (new)
+// ---------------------------------------------------------------------------
+
+describe('CLI setup safe-defaults bare contract', () => {
+  let tmp: ReturnType<typeof makeTmp>;
+
+  beforeEach(() => {
+    tmp = makeTmp();
+  });
+
+  afterEach(() => {
+    rmSync(tmp.root, { recursive: true, force: true });
+  });
+
+  it('S1: safe-defaults SetupOptions routes through phase1..phase4 (NOT install-shortcut)', async () => {
+    const installFn = vi.fn<(opts?: InstallOptions) => InstallResult>(okInstall);
+    const phase1 = vi.fn(async () => ({
+      mode: 'overwrite' as const,
+      installStyle: 'overwrite' as const,
+      targetPath: '/tmp/CLAUDE.md',
+      backupPath: undefined,
+      oldVersion: undefined,
+      newVersion: '1.0.0',
+    }));
+    const phase2 = vi.fn(async () => undefined);
+    const phase3 = vi.fn(async () => ({
+      pluginVerified: true,
+      mcpInstalled: [] as string[],
+      mcpSkipped: [] as string[],
+      teamsConfigured: false,
+    }));
+    const phase4 = vi.fn(async () => undefined);
+
+    const options = clonedSafeDefaults();
+    // Bypass the already-configured check for a deterministic run.
+    options.force = true;
+
+    const result = await runSetup(options, {
+      install: installFn as unknown as RunSetupDeps['install'],
+      phase1: phase1 as unknown as RunSetupDeps['phase1'],
+      phase2: phase2 as unknown as RunSetupDeps['phase2'],
+      phase3: phase3 as unknown as RunSetupDeps['phase3'],
+      phase4: phase4 as unknown as RunSetupDeps['phase4'],
+      lockPath: tmp.lockPath,
+      configDir: tmp.configDir,
+      cwd: tmp.cwd,
+      skipSignalHandlers: true,
+      prompter: {
+        askSelect: vi.fn(),
+        askConfirm: vi.fn(),
+        askText: vi.fn(),
+        askSecret: vi.fn(),
+        close: vi.fn(),
+      },
+    });
+
+    expect(installFn).not.toHaveBeenCalled();
+    expect(phase1).toHaveBeenCalledOnce();
+    expect(phase2).toHaveBeenCalledOnce();
+    expect(phase3).toHaveBeenCalledOnce();
+    expect(phase4).toHaveBeenCalledOnce();
+
+    expect(result.success).toBe(true);
+    expect(result.phasesRun).toEqual(['claude-md', 'infra', 'integrations', 'welcome']);
+  });
+
+  it('S2: SAFE_DEFAULTS pins exact phase set', () => {
+    expect(Array.from(SAFE_DEFAULTS.phases).sort()).toEqual(
+      ['claude-md', 'infra', 'integrations', 'welcome'].sort(),
+    );
+  });
+
+  it('S3: SAFE_DEFAULTS pins target, installStyle, executionMode', () => {
+    expect(SAFE_DEFAULTS.target).toBe('global');
+    expect(SAFE_DEFAULTS.installStyle).toBe('overwrite');
+    expect(SAFE_DEFAULTS.executionMode).toBe('ultrawork');
+  });
+
+  it('S4: SAFE_DEFAULTS pins MCP curated server list and install-without-auth policy', () => {
+    expect(SAFE_DEFAULTS.mcp.enabled).toBe(true);
+    expect(SAFE_DEFAULTS.mcp.servers).toEqual(['context7', 'exa', 'filesystem', 'github']);
+    expect(SAFE_DEFAULTS.mcp.onMissingCredentials).toBe('install-without-auth');
+    expect(SAFE_DEFAULTS.mcp.scope).toBe('user');
+  });
+
+  it('S5: SAFE_DEFAULTS pins teams enabled with 3:executor auto', () => {
+    expect(SAFE_DEFAULTS.teams.enabled).toBe(true);
+    expect(SAFE_DEFAULTS.teams.agentCount).toBe(3);
+    expect(SAFE_DEFAULTS.teams.agentType).toBe('executor');
+    expect(SAFE_DEFAULTS.teams.displayMode).toBe('auto');
+  });
+
+  it('S6: SAFE_DEFAULTS pins HUD element overrides (cwd, git, session health; no bars)', () => {
+    expect(SAFE_DEFAULTS.hud?.elements).toMatchObject({
+      cwd: true,
+      gitBranch: true,
+      gitStatus: true,
+      sessionHealth: true,
+      useBars: false,
+      contextBar: false,
+    });
   });
 });
