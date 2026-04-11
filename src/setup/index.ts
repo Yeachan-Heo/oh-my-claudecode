@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { getClaudeConfigDir } from '../utils/config-dir.js';
-import { install, pruneStandaloneDuplicatesForPluginMode, VERSION, type InstallOptions, type InstallResult } from '../installer/index.js';
+import { install, pruneStandaloneDuplicatesForPluginMode, previewStandaloneDuplicatesForPluginMode, VERSION, type InstallOptions, type InstallResult, type StandaloneDuplicatesPreview } from '../installer/index.js';
 import {
   acquireLock,
   LockHeldError,
@@ -75,6 +75,13 @@ export interface RunSetupResult {
    * Only populated when the phases={'infra'} backward-compat branch runs.
    */
   installResult?: InstallResult;
+  /**
+   * Populated when `pluginLeftoverBehavior: 'ask'` is used and leftovers
+   * were detected. The caller should render a preview, prompt, then call
+   * `pruneStandaloneDuplicatesForPluginMode` if the user confirms.
+   * Undefined when no leftovers exist or behavior is not 'ask'.
+   */
+  pluginLeftoverPreview?: StandaloneDuplicatesPreview;
 }
 
 export type StateJsonOutput =
@@ -107,6 +114,16 @@ export interface RunSetupDeps {
   stdout?: (line: string) => void;
   /** Test seam: skip signal handler registration (prevents test pollution). */
   skipSignalHandlers?: boolean;
+  /**
+   * Controls how plugin-duplicate leftovers are handled when `alreadyConfigured`
+   * is detected in phase 0b (wizard runs only):
+   *   - 'auto' (default) — silently prune + log summary. Safe for non-TTY
+   *     and library consumers.
+   *   - 'ask' — run preview only; return `pluginLeftoverPreview` in the result
+   *     so the caller can render a diff + prompt. No filesystem mutations.
+   *   - 'skip' — do nothing with leftovers, just exit with alreadyConfigured.
+   */
+  pluginLeftoverBehavior?: 'auto' | 'ask' | 'skip';
 }
 
 // ---------------------------------------------------------------------------
@@ -323,27 +340,48 @@ export async function runSetup(
     if (wizardRun && !options.force) {
       const ac = readAlreadyConfigured(configDir);
       if (ac.alreadyConfigured) {
-        // Plugin-mode leftover cleanup runs even when setup would otherwise
-        // short-circuit. A user who installed OMC standalone pre-plugin and
-        // then switched to plugin delivery still has stale $CONFIG_DIR/hooks
-        // etc — this prune is fast, idempotent, and ownership-gated.
-        const pruneResult = pruneStandaloneDuplicatesForPluginMode(
-          (msg) => log.info(msg),
-          { configDir },
-        );
-        const totalPruned =
-          pruneResult.prunedAgents.length
-          + pruneResult.prunedSkills.length
-          + pruneResult.prunedHooks.length;
-        if (totalPruned > 0 || pruneResult.settingsStripped) {
+        const behavior = deps.pluginLeftoverBehavior ?? 'auto';
+
+        if (behavior === 'ask') {
+          // Preview only — caller handles prompting + optional execute.
+          const preview = previewStandaloneDuplicatesForPluginMode({ configDir });
           log.info(
-            `Cleaned up plugin-duplicate leftovers: `
-            + `${pruneResult.prunedAgents.length} agent(s), `
-            + `${pruneResult.prunedSkills.length} skill(s), `
-            + `${pruneResult.prunedHooks.length} hook(s)`
-            + (pruneResult.settingsStripped ? ', settings.json stripped' : ''),
+            `OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
+            + 'Re-run with --force to bypass this check, or use --claude-md-only '
+            + 'for a quick CLAUDE.md refresh.',
           );
+          return {
+            success: true,
+            phasesRun,
+            phaseResults,
+            warnings,
+            errors,
+            exitCode: 0,
+            alreadyConfigured: true,
+            pluginLeftoverPreview: preview.hasWork ? preview : undefined,
+          };
         }
+
+        if (behavior === 'auto') {
+          // Plugin-mode leftover cleanup runs even when setup would otherwise
+          // short-circuit. A user who installed OMC standalone pre-plugin and
+          // then switched to plugin delivery still has stale $CONFIG_DIR/hooks
+          // etc — this prune is fast, idempotent, and ownership-gated.
+          const pruneResult = pruneStandaloneDuplicatesForPluginMode(
+            (msg) => log.info(msg),
+            { configDir },
+          );
+          if (pruneResult.totalPruneCount > 0 || pruneResult.settingsStripped) {
+            log.info(
+              `Cleaned up plugin-duplicate leftovers: `
+              + `${pruneResult.prunedAgents.length} agent(s), `
+              + `${pruneResult.prunedSkills.length} skill(s), `
+              + `${pruneResult.prunedHooks.length} hook(s)`
+              + (pruneResult.settingsStripped ? ', settings.json stripped' : ''),
+            );
+          }
+        }
+        // behavior === 'skip' — do nothing with leftovers
 
         log.info(
           `OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
