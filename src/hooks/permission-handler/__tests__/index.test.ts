@@ -39,6 +39,11 @@ describe('permission-handler', () => {
         'ls "my folder"',
         'ls \'my folder\'',
         'git diff "src/file with spaces.ts"',
+        'gh issue list',
+        'gh issue view 2508',
+        'gh issue status',
+        'gh pr view 2510',
+        'gh pr list --state open',
       ];
 
       safeCases.forEach((cmd) => {

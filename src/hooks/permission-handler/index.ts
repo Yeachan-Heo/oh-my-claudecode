@@ -36,6 +36,7 @@ const SAFE_PATTERNS = [
   /^pnpm (test|run (test|lint|build|check|typecheck))/,
   /^yarn (test|run (test|lint|build|check|typecheck))/,
   /^tsc( |$)/,
+  /^gh (issue|pr) (view|list|status)\b/,
   /^eslint /,
   /^prettier /,
   /^cargo (test|check|clippy|build)/,
