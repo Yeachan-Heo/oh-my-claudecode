@@ -208,21 +208,37 @@ export function isNonZeroExitWithOutput(output) {
 
 // Detect failures in Bash output
 export function detectBashFailure(output) {
+  if (!output) return false;
+
   const cleaned = stripClaudeTempCwdErrors(output);
-  const errorPatterns = [
-    /error:/i,
-    /failed/i,
-    /cannot/i,
-    /permission denied/i,
-    /command not found/i,
-    /no such file/i,
-    /exit code: [1-9]/i,
-    /exit status [1-9]/i,
-    /fatal:/i,
-    /abort/i,
+
+  const explicitExitPatterns = [
+    /(^|\n)Error: Exit code [1-9]\d*(\n|$)/i,
+    /(^|\n).*\bexit code:\s*[1-9]\d*\b/i,
+    /(^|\n).*\bexit status\s+[1-9]\d*\b/i,
   ];
 
-  return errorPatterns.some(pattern => pattern.test(cleaned));
+  if (explicitExitPatterns.some(pattern => pattern.test(cleaned))) {
+    return true;
+  }
+
+  const linePatterns = [
+    /^error:\s+/i,
+    /^(?:bash|zsh|sh): .*command not found/i,
+    /^(?:bash|zsh|sh): .*no such file/i,
+    /^(?:bash|zsh|sh): .*permission denied/i,
+    /^(?:rm|cp|mv|cat|chmod|chown|git|node|npm|pnpm|yarn|python|python3|pip|pip3|cargo|go|rustc|docker|ffmpeg): .*permission denied/i,
+    /^(?:rm|cp|mv|cat|git|node|npm|pnpm|yarn|python|python3|pip|pip3|cargo|go|rustc|docker|ffmpeg): .*no such file/i,
+    /^fatal:\s+/i,
+    /^abort(?:ed)?\b/i,
+    /^(?:build|command|task|operation) failed\b/i,
+  ];
+
+  return cleaned
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .some(line => linePatterns.some(pattern => pattern.test(line)));
 }
 
 // Detect background operation

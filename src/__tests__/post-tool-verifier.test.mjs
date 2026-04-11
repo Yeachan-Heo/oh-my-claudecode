@@ -133,7 +133,7 @@ describe('detectBashFailure', () => {
       expect(detectBashFailure('error: file not found')).toBe(true);
     });
 
-    it('should detect "failed" pattern', () => {
+    it('should detect "failed" pattern when it is a failure summary line', () => {
       expect(detectBashFailure('Build failed')).toBe(true);
     });
 
@@ -141,12 +141,39 @@ describe('detectBashFailure', () => {
       expect(detectBashFailure('zsh: command not found: foo')).toBe(true);
     });
 
-    it('should detect exit code failures', () => {
+    it('should detect Claude exit code failures', () => {
+      expect(detectBashFailure('Error: Exit code 1')).toBe(true);
+    });
+
+    it('should detect textual exit code failures', () => {
       expect(detectBashFailure('exit code: 1')).toBe(true);
     });
 
     it('should detect "fatal:" pattern', () => {
       expect(detectBashFailure('fatal: not a git repository')).toBe(true);
+    });
+
+    it('should not flag successful pytest output containing failure words', () => {
+      const output = [
+        'tests/test_render.py::TestRender::test_ffmpeg_failure_raises PASSED',
+        'tests/test_render.py::TestRender::test_qa_failure_propagates PASSED',
+        '80 passed in 0.24s',
+      ].join('\n');
+      expect(detectBashFailure(output)).toBe(false);
+    });
+
+    it('should not flag successful grep output containing "Command failed" text', () => {
+      const output = 'scripts/post-tool-verifier.mjs:683:        message = \'Command failed. Please investigate the error and fix before continuing.\'';
+      expect(detectBashFailure(output)).toBe(false);
+    });
+
+    it('should not flag successful output when the word "error" appears mid-line', () => {
+      const output = [
+        'frame=   15 fps=0.0 q=-0.0 size=       0kB time=00:00:00.50 bitrate=   0.8kbits/s speed=5.6x',
+        'codec-side-data: some harmless error metric label',
+        'video:4kB audio:0kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: 0.000000%',
+      ].join('\n');
+      expect(detectBashFailure(output)).toBe(false);
     });
 
     it('should return false for clean output', () => {
