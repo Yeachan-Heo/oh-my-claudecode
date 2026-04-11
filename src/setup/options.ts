@@ -190,12 +190,12 @@ export const QUESTION_METADATA: Record<string, QuestionSpec> = {
           'Creates `.claude/CLAUDE.md` in current project directory. Best for project-specific configurations.',
       },
       {
-        label: 'Global (all projects)',
+        label: 'Global (all projects) (Recommended)',
         description:
           'Creates CLAUDE.md in your active Claude Code config directory (honours CLAUDE_CONFIG_DIR). Best for consistent behavior everywhere.',
       },
     ],
-    default: 'local',
+    default: 'global',
   },
   installStyle: {
     question:

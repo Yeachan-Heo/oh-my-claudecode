@@ -316,6 +316,30 @@ describe('runInteractiveWizard', () => {
     expect(installCliAsked).toBe(false);
   });
 
+  it('defaults: target defaults to global (user can accept without picking)', async () => {
+    // Drive the wizard with NO rule for the target question so the fake
+    // prompter falls back to defaultValue — which must be the Global
+    // option when QUESTION_METADATA.target.default === 'global'.
+    const { prompter } = makeFakePrompter({
+      select: [
+        // No rule for target → wizard picks default = Global
+        { match: 'parallel execution mode', label: 'ultrawork (maximum capability) (Recommended)' },
+        { match: 'task management tool', label: 'Built-in Tasks (default)' },
+        { match: 'configure MCP servers', label: 'No, skip' },
+        { match: 'enable agent teams', label: 'No, skip' },
+        { match: 'support the project', label: 'No thanks' },
+      ],
+    });
+
+    const answers = await runInteractiveWizard(prompter, {
+      // Skip installStyle — we don't want the happy path here.
+      detectInstallStyleNeeded: () => false,
+      skipInstallCliQuestion: true,
+    });
+
+    expect(answers.target).toBe('global');
+  });
+
   it('defaults: mcpEnabled + teamsEnabled + starRepo all default to true (Yes)', async () => {
     // Drive the wizard with NO rules for these three questions so the
     // fake prompter falls back to `defaultValue`. The QUESTION_METADATA
