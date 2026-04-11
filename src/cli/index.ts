@@ -1927,20 +1927,120 @@ Examples:
         process.exit(1);
       }
 
-      // Interactive confirmation
-      process.stdout.write(
-        `omc uninstall will remove the following from:\n` +
-        `  ${configDir}\n\n` +
-        `Components that will be affected:\n` +
-        `  - Agents in ${configDir}/agents/\n` +
-        `  - Skills in ${configDir}/skills/\n` +
-        `  - Hooks in ${configDir}/hooks/\n` +
-        `  - HUD bundle in ${configDir}/hud/\n` +
-        `  - State files (.omc-*.json, CLAUDE-omc.md)\n` +
-        `  - OMC block in CLAUDE.md (user content ${preserveUserContent ? 'preserved' : 'deleted'} ${preserveUserContent ? '' : '(--no-preserve)'})\n` +
-        `  - OMC hook entries in settings.json\n\n` +
-        `Continue? (y/N) `,
+      // Dry-run preview: run the uninstaller with dryRun=true and a silent
+      // logger to collect the EXACT list of files that would be touched.
+      // This lets the confirmation prompt show resolved paths grouped by
+      // kind instead of a vague "agents/skills/hooks..." component list.
+      const preview = runUninstall({
+        configDir,
+        dryRun: true,
+        preserveUserContent,
+        logger: () => { /* silent — we render the preview ourselves */ },
+      });
+
+      // Bucket preview paths by kind for a readable confirmation screen.
+      const buckets: {
+        agents: string[];
+        skills: string[];
+        hooks: string[];
+        hud: string[];
+        stateFiles: string[];
+        claudeMd: string[];
+        settings: string[];
+        other: string[];
+      } = {
+        agents: [],
+        skills: [],
+        hooks: [],
+        hud: [],
+        stateFiles: [],
+        claudeMd: [],
+        settings: [],
+        other: [],
+      };
+
+      const agentsPrefix = `${configDir}/agents/`;
+      const skillsPrefix = `${configDir}/skills/`;
+      const hooksPrefix = `${configDir}/hooks/`;
+      const hudPrefix = `${configDir}/hud`;
+      const stateFileNames = new Set([
+        '.omc-version.json',
+        '.omc-silent-update.json',
+        '.omc-update.log',
+        '.omc-config.json',
+        'CLAUDE-omc.md',
+      ]);
+      const claudeMdPath = `${configDir}/CLAUDE.md`;
+      const settingsPath = `${configDir}/settings.json`;
+
+      for (const p of preview.removed) {
+        const rel = p.startsWith(`${configDir}/`) ? p.slice(configDir.length + 1) : p;
+        const base = rel.split('/').pop() ?? rel;
+
+        if (p.startsWith(agentsPrefix)) buckets.agents.push(p);
+        else if (p.startsWith(skillsPrefix)) buckets.skills.push(p);
+        else if (p.startsWith(hooksPrefix)) buckets.hooks.push(p);
+        else if (p === hudPrefix || p.startsWith(`${hudPrefix}/`)) buckets.hud.push(p);
+        else if (p === claudeMdPath) buckets.claudeMd.push(p);
+        else if (p === settingsPath) buckets.settings.push(p);
+        else if (stateFileNames.has(base) || base.startsWith('CLAUDE.md.backup.')) {
+          buckets.stateFiles.push(p);
+        } else {
+          buckets.other.push(p);
+        }
+      }
+
+      const totalRemoved = preview.removed.length;
+      const totalPreserved = preview.preserved.length;
+
+      const lines: string[] = [];
+      lines.push(`omc uninstall will modify the following in:`);
+      lines.push(`  ${configDir}`);
+      lines.push('');
+      lines.push(
+        `Summary: ${totalRemoved} file(s)/dir(s) to remove, `
+        + `${totalPreserved} file(s) to preserve user content.`,
       );
+      lines.push('');
+
+      const section = (title: string, items: string[]): void => {
+        if (items.length === 0) return;
+        lines.push(`${title} (${items.length}):`);
+        for (const p of items) lines.push(`  - ${p}`);
+        lines.push('');
+      };
+
+      section('Agents to remove', buckets.agents);
+      section('Skills to remove', buckets.skills);
+      section('Hooks to remove', buckets.hooks);
+      section('HUD bundle to remove', buckets.hud);
+      section('State files to remove', buckets.stateFiles);
+      section('CLAUDE.md to delete', buckets.claudeMd);
+      section('settings.json cleanup', buckets.settings);
+      section('Other', buckets.other);
+
+      if (totalPreserved > 0) {
+        lines.push(`Files with user content to be preserved in place:`);
+        for (const p of preview.preserved) lines.push(`  - ${p}`);
+        lines.push('');
+      }
+
+      if (totalRemoved === 0 && totalPreserved === 0) {
+        lines.push('Nothing to uninstall — config directory is already clean.');
+        lines.push('');
+        process.stdout.write(lines.join('\n'));
+        process.exit(0);
+      }
+
+      lines.push(
+        preserveUserContent
+          ? 'CLAUDE.md user content outside OMC markers will be preserved.'
+          : 'CLAUDE.md will be DELETED entirely (--no-preserve).',
+      );
+      lines.push('');
+      lines.push('Continue? (y/N) ');
+
+      process.stdout.write(lines.join('\n'));
 
       const { createInterface } = await import('node:readline');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
