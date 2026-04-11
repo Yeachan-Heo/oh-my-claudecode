@@ -1437,7 +1437,7 @@ export async function runSetupCommand(
     options.checkState === true ||
     (options.phases.has('state') && options.stateAction !== undefined);
 
-  if (isBareInfra && !options.quiet) {
+  if (isBareInfra && !isStateOrCheck && !options.quiet) {
     console.log(chalk.blue('Oh-My-ClaudeCode Setup\n'));
     console.log(chalk.gray('Syncing OMC components...'));
   }

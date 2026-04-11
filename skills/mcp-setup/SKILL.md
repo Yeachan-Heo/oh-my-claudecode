@@ -6,112 +6,148 @@ level: 2
 
 # MCP Setup
 
-Configure Model Context Protocol (MCP) servers to extend Claude Code's capabilities with external tools like web search, file system access, and GitHub integration.
+Configure Model Context Protocol (MCP) servers to extend Claude Code's
+capabilities with external tools like web search, file system access,
+and GitHub integration.
 
-## Overview
+This skill is a **thin wrapper around `omc setup --mcp-only`**. It
+collects server choices and credentials via AskUserQuestion, writes them
+to a temporary answers JSON file, asks the CLI to materialize a preset,
+then executes the preset. All server registration, credential
+validation, and `claude mcp add` invocation is done by the TypeScript
+CLI — **do not reimplement it here**.
 
-MCP servers provide additional tools that Claude Code agents can use. This skill helps you configure popular MCP servers using the `claude mcp add` command-line interface.
+**When this skill is invoked, immediately execute the workflow below.**
 
-## Step 1: Show Available MCP Servers
+## Step 1: Choose Servers
 
-Present the user with available MCP server options using AskUserQuestion:
+Use AskUserQuestion:
 
-**Question:** "Which MCP server would you like to configure?"
+**Question:** "Which MCP server(s) would you like to configure?"
 
 **Options:**
-1. **Context7** - Documentation and code context from popular libraries
-2. **Exa Web Search** - Enhanced web search (replaces built-in websearch)
-3. **Filesystem** - Extended file system access with additional capabilities
-4. **GitHub** - GitHub API integration for issues, PRs, and repository management
-5. **All of the above** - Configure all recommended MCP servers
-6. **Custom** - Add a custom MCP server
+1. **Context7** — Documentation and code context from popular libraries
+2. **Exa Web Search** — Enhanced web search (requires an Exa API key)
+3. **Filesystem** — Extended file system access
+4. **GitHub** — GitHub API integration (issues, PRs, repos)
+5. **All of the above** — Configure all four
+6. **Custom** — Add a custom MCP server
 
-## Step 2: Gather Required Information
+Record the selection as `selectedServers`. Every AskUserQuestion call
+MUST have ≥2 options — do not collapse this into a single-option
+question.
 
-Use AskUserQuestion for each server that needs configuration. Every question MUST have at least 2 options (AskUserQuestion rejects single-option questions).
+## Step 2: Collect Per-Server Credentials
 
-### For Context7:
-No API key required. Ready to use immediately. Skip to Step 3.
+Walk through the selected servers in order. For each one, use
+AskUserQuestion to collect whatever the server needs. Do **not** run
+`claude mcp add` yourself — just store the answers.
 
-### For Exa Web Search:
-Use AskUserQuestion:
+### Context7
+No credentials needed. Nothing to collect.
+
+### Exa Web Search
 
 **Question:** "Do you have an Exa API key? (Get one at https://exa.ai)"
 
 **Options:**
-1. **I have a key** - Enter the API key via the "Other" free-text option
-2. **Skip for now** - Configure Exa later with: `claude mcp add -e EXA_API_KEY=<key> exa -- npx -y exa-mcp-server`
+1. **I have a key** — Enter the API key via the "Other" free-text option.
+2. **Skip for now** — Drop Exa from the selection.
 
-If user chooses "I have a key" or provides a key via "Other", use it in Step 3. If "Skip for now", skip Exa in Step 3.
-
-### For Filesystem:
-Use AskUserQuestion:
+### Filesystem
 
 **Question:** "Which directories should the filesystem MCP have access to?"
 
 **Options:**
-1. **Current working directory (Recommended)** - Grant access to the current project directory
-2. **Home directory** - Grant access to the entire home directory
+1. **Current working directory (Recommended)**
+2. **Home directory**
+3. **Custom paths** — Enter comma-separated paths via "Other".
 
-If user chooses "Other", use the provided comma-separated paths in Step 3.
-
-### For GitHub:
-Use AskUserQuestion:
+### GitHub
 
 **Question:** "How would you like to configure GitHub MCP?"
 
 **Options:**
-1. **HTTP transport (Recommended)** - Connect via api.githubcopilot.com. No token or Docker needed.
-2. **Docker with PAT** - Requires a GitHub Personal Access Token and Docker installed.
-3. **Skip for now** - Configure GitHub MCP later.
+1. **HTTP transport (Recommended)** — No token required.
+2. **Docker with PAT** — Requires a GitHub Personal Access Token. Ask for the token via a follow-up AskUserQuestion with "Other" free-text.
+3. **Skip for now** — Drop GitHub from the selection.
 
-If user chooses "Docker with PAT", ask for the token via a follow-up AskUserQuestion with "Other" for free-text input.
+### Custom
 
-## Step 3: Add MCP Servers Using CLI
+Ask for name, transport (`stdio` | `http`), command or URL, optional
+environment variables, and optional HTTP headers. Build the
+`McpCustomSpec` object described in `src/setup/options.ts`.
 
-Use the `claude mcp add` command to configure each MCP server. The CLI automatically handles settings.json updates and merging.
+## Step 3: Build the Answers File
 
-### Context7 Configuration:
-```bash
-claude mcp add context7 -- npx -y @upstash/context7-mcp
+Shape the collected answers as the `mcp` section of `AnswersFile`
+(schema: `src/setup/preset-builder.ts`):
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "servers": [
+      "context7",
+      "exa",
+      "filesystem",
+      "github"
+    ],
+    "credentials": {
+      "exa": "<key>",
+      "github": "<token>",
+      "filesystem": ["/abs/path/1", "/abs/path/2"]
+    },
+    "onMissingCredentials": "skip"
+  }
+}
 ```
 
-### Exa Web Search Configuration:
+Custom servers are added to `servers` as `{ "name": "...", "spec": { ... } }`
+objects rather than plain strings.
+
+Write to a temp file:
+
 ```bash
-claude mcp add -e EXA_API_KEY=<user-provided-key> exa -- npx -y exa-mcp-server
+ANSWERS_FILE="$(mktemp -t omc-mcp-answers.XXXXXX.json)"
+PRESET_FILE="$(mktemp -t omc-mcp-preset.XXXXXX.json)"
+chmod 0600 "$ANSWERS_FILE" "$PRESET_FILE"
+# …write the JSON to $ANSWERS_FILE…
 ```
 
-### Filesystem Configuration:
+## Step 4: Build the Preset
+
 ```bash
-claude mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem <allowed-directories>
+omc setup --mcp-only --build-preset --answers "$ANSWERS_FILE" --out "$PRESET_FILE"
 ```
 
-### GitHub Configuration:
+Validation failures exit non-zero with a red message on stderr — surface
+the error to the user and stop.
 
-**Option 1: Docker (local)**
+## Step 5: Run the Preset
+
 ```bash
-claude mcp add -e GITHUB_PERSONAL_ACCESS_TOKEN=<user-provided-token> github -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server
+omc setup --preset "$PRESET_FILE"
 ```
 
-**Option 2: HTTP (remote)**
+The CLI runs the `mcp-only` sub-phase, which calls `claude mcp add` for
+each selected server with the credentials you collected.
+
+## Step 6: Cleanup
+
 ```bash
-claude mcp add --transport http github https://api.githubcopilot.com/mcp/
+rm -f "$ANSWERS_FILE" "$PRESET_FILE"
 ```
 
-> Note: Docker option requires Docker installed. HTTP option is simpler but may have different capabilities.
+Run cleanup on **both** success and failure paths.
 
-## Step 4: Verify Installation
-
-After configuration, verify the MCP servers are properly set up:
+## Step 7: Verify Installation
 
 ```bash
-# List configured MCP servers
 claude mcp list
 ```
 
-This will display all configured MCP servers and their status.
-
-## Step 5: Show Completion Message
+## Step 8: Show Completion Message
 
 ```
 MCP Server Configuration Complete!
@@ -124,74 +160,29 @@ NEXT STEPS:
 2. The configured MCP tools will be available to all agents
 3. Run `claude mcp list` to verify configuration
 
-USAGE TIPS:
-- Context7: Ask about library documentation (e.g., "How do I use React hooks?")
-- Exa: Use for web searches (e.g., "Search the web for latest TypeScript features")
-- Filesystem: Extended file operations beyond the working directory
-- GitHub: Interact with GitHub repos, issues, and PRs
-
 TROUBLESHOOTING:
-- If MCP servers don't appear, run `claude mcp list` to check status
-- Ensure you have Node.js 18+ installed for npx-based servers
+- Run `claude mcp list` to check status
+- Ensure Node.js 18+ is installed for npx-based servers
 - For GitHub Docker option, ensure Docker is installed and running
 - Run /oh-my-claudecode:omc-doctor to diagnose issues
 
 MANAGING MCP SERVERS:
-- Add more servers: /oh-my-claudecode:mcp-setup or `claude mcp add ...`
-- List servers: `claude mcp list`
-- Remove a server: `claude mcp remove <server-name>`
-```
-
-## Custom MCP Server
-
-If user selects "Custom":
-
-Ask for:
-1. Server name (identifier)
-2. Transport type: `stdio` (default) or `http`
-3. For stdio: Command and arguments (e.g., `npx my-mcp-server`)
-4. For http: URL (e.g., `https://example.com/mcp`)
-5. Environment variables (optional, key=value pairs)
-6. HTTP headers (optional, for http transport only)
-
-Then construct and run the appropriate `claude mcp add` command:
-
-**For stdio servers:**
-```bash
-# Without environment variables
-claude mcp add <server-name> -- <command> [args...]
-
-# With environment variables
-claude mcp add -e KEY1=value1 -e KEY2=value2 <server-name> -- <command> [args...]
-```
-
-**For HTTP servers:**
-```bash
-# Basic HTTP server
-claude mcp add --transport http <server-name> <url>
-
-# HTTP server with headers
-claude mcp add --transport http --header "Authorization: Bearer <token>" <server-name> <url>
+- Add more: /oh-my-claudecode:mcp-setup
+- List: `claude mcp list`
+- Remove: `claude mcp remove <server-name>`
 ```
 
 ## Common Issues
 
 ### MCP Server Not Loading
-- Ensure Node.js 18+ is installed
-- Check that npx is available in PATH
-- Run `claude mcp list` to verify server status
-- Check server logs for errors
+- Ensure Node.js 18+ is installed and `npx` is on PATH.
+- Run `claude mcp list` to verify server status.
 
 ### API Key Issues
 - Exa: Verify key at https://dashboard.exa.ai
-- GitHub: Ensure token has required scopes (repo, read:org)
-- Re-run `claude mcp add` with correct credentials if needed
+- GitHub: Ensure token has required scopes (`repo`, `read:org`)
+- Re-run this skill with the correct credentials.
 
 ### Agents Still Using Built-in Tools
-- Restart Claude Code after configuration
-- The built-in websearch will be deprioritized when exa is configured
-- Run `claude mcp list` to confirm servers are active
-
-### Removing or Updating a Server
-- Remove: `claude mcp remove <server-name>`
-- Update: Remove the old server, then add it again with new configuration
+- Restart Claude Code after configuration.
+- The built-in websearch is deprioritized when Exa is configured.
