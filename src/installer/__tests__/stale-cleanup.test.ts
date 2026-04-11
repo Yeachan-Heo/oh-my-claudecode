@@ -19,13 +19,20 @@ import { cleanupStaleAgents, cleanupStaleSkills, prunePluginDuplicateSkills, pru
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 function createAgentFile(dir: string, filename: string, name: string): void {
-  writeFileSync(join(dir, filename), `---\nname: ${name}\ndescription: Test agent\nmodel: claude-sonnet-4-6\n---\n\n# ${name}\nTest content.\n`);
+  writeFileSync(join(dir, filename), `---\nsource: omc\nname: ${name}\ndescription: Test agent\nmodel: claude-sonnet-4-6\n---\n\n# ${name}\nTest content.\n`);
 }
 
 function createSkillDir(dir: string, skillName: string, name: string): void {
   const skillDir = join(dir, skillName);
   mkdirSync(skillDir, { recursive: true });
-  writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: ${name}\ndescription: Test skill\n---\n\n# ${name}\nTest content.\n`);
+  writeFileSync(join(skillDir, 'SKILL.md'), `---\nsource: omc\nname: ${name}\ndescription: Test skill\n---\n\n# ${name}\nTest content.\n`);
+}
+
+function createUserSkillDirWithFrontmatter(dir: string, skillName: string, name: string): void {
+  const skillDir = join(dir, skillName);
+  mkdirSync(skillDir, { recursive: true });
+  // User-created skill WITH standard frontmatter but WITHOUT `source: omc`
+  writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: ${name}\ndescription: User-created skill\n---\n\n# ${name}\nUser content.\n`);
 }
 
 function createUserFile(dir: string, filename: string): void {
@@ -214,6 +221,21 @@ describe('cleanupStaleSkills', () => {
   it('returns empty array when skills directory does not exist', () => {
     const removed = cleanupStaleSkills(log);
     expect(removed).toEqual([]);
+  });
+
+  it('preserves user-created skill directories that have frontmatter but no source: omc marker', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    // User-created skill with standard frontmatter (name: field) but no `source: omc`
+    createUserSkillDirWithFrontmatter(skillsDir, 'my-gstack-skill', 'my-gstack-skill');
+
+    const removed = cleanup(log);
+
+    expect(removed).not.toContain('my-gstack-skill');
+    expect(existsSync(join(skillsDir, 'my-gstack-skill'))).toBe(true);
   });
 
   it('does not remove directories without SKILL.md', async () => {
