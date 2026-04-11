@@ -58,6 +58,8 @@ If you prefer the npm CLI/runtime path instead of the marketplace flow:
 npm i -g oh-my-claude-sisyphus@latest
 ```
 
+> **Plugin vs CLI:** The plugin path loads skills/agents from the plugin cache automatically. The npm CLI path copies them into `~/.claude/skills/` and `~/.claude/agents/` as standalone files. If you use both, OMC deduplicates automatically. Each installed file is stamped with `source: omc` so that user-created and third-party skills are never touched during cleanup. See [How Skills & Agents Are Installed](#how-skills--agents-are-installed) for details.
+
 **Step 2: Setup**
 
 ```bash
