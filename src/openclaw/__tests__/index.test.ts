@@ -9,6 +9,11 @@ vi.mock("../../notifications/tmux.js", () => ({
   getCurrentTmuxSession: () => mockGetCurrentTmuxSession(),
 }));
 
+const mockCapturePaneContent = vi.fn<(paneId: string, lines?: number) => string>(() => "");
+vi.mock("../../features/rate-limit-wait/tmux-detector.js", () => ({
+  capturePaneContent: (paneId: string, lines?: number) => mockCapturePaneContent(paneId, lines),
+}));
+
 // Mock config and dispatcher modules
 vi.mock("../config.js", () => ({
   getOpenClawConfig: vi.fn(),
@@ -65,6 +70,7 @@ describe("wakeOpenClaw", () => {
       statusCode: 200,
     });
     mockGetCurrentTmuxSession.mockReturnValue(null);
+    mockCapturePaneContent.mockReturnValue("");
   });
 
   afterEach(() => {
@@ -104,6 +110,35 @@ describe("wakeOpenClaw", () => {
     const payload = call[2];
     expect(payload.event).toBe("session-start");
     expect(payload.instruction).toContain("myproject"); // interpolated
+  });
+
+  it("sanitizes tmux tail before sending stop payloads", async () => {
+    mockCapturePaneContent.mockReturnValue([
+      "Review PR #2498 and reply with exactly one verdict:",
+      "- approve",
+      "- request-changes",
+      "- follow-up-fix",
+      "- BLOCKED",
+      "Traceback (most recent call last):",
+      "RuntimeError: boom",
+      "BLOCKED: runtime failure",
+    ].join("\n"));
+    vi.stubEnv("TMUX", "/tmp/tmux-1000/default,123,0");
+    vi.stubEnv("TMUX_PANE", "%7");
+
+    await wakeOpenClaw("stop", {
+      sessionId: "sid-stop",
+      projectPath: "/home/user/myproject",
+    });
+
+    expect(mockCapturePaneContent).toHaveBeenCalledWith("%7", 15);
+    const payload = vi.mocked(wakeGateway).mock.calls[0]?.[2];
+    expect(payload.tmuxTail).toBe(
+      "Traceback (most recent call last):\nRuntimeError: boom\nBLOCKED: runtime failure",
+    );
+    expect(payload.tmuxTail).not.toContain("approve");
+    expect(payload.tmuxTail).not.toContain("request-changes");
+    expect(payload.tmuxTail).not.toContain("follow-up-fix");
   });
 
   it("uses a single timestamp in both template variables and payload", async () => {

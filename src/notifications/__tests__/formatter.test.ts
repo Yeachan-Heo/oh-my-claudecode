@@ -321,6 +321,45 @@ describe("parseTmuxTail noise filters", () => {
     ].join("\n");
     expect(parseTmuxTail(input)).toBe("Build complete\nTests passed: 42");
   });
+
+  it("drops seeded PR review outcome instructions that would trip keyword alerts", () => {
+    const input = [
+      "Review PR #2498 and reply with exactly one verdict:",
+      "- approve",
+      "- request-changes",
+      "- follow-up-fix",
+      "- BLOCKED",
+    ].join("\n");
+
+    expect(parseTmuxTail(input)).toBe("");
+  });
+
+  it("prefers later runtime output over seeded PR review instructions", () => {
+    const input = [
+      "Review PR #2498 and reply with exactly one verdict:",
+      "- approve",
+      "- request-changes",
+      "- follow-up-fix",
+      "- BLOCKED",
+      "Traceback (most recent call last):",
+      "ValueError: boom",
+      "BLOCKED: evaluator crashed at runtime",
+    ].join("\n");
+
+    expect(parseTmuxTail(input)).toBe(
+      "Traceback (most recent call last):\nValueError: boom\nBLOCKED: evaluator crashed at runtime",
+    );
+  });
+
+  it("preserves real runtime blocked output when no seeded review prefix exists", () => {
+    const input = [
+      "BLOCKED: missing baseline snapshot",
+      "Traceback (most recent call last):",
+      "RuntimeError: boom",
+    ].join("\n");
+
+    expect(parseTmuxTail(input)).toBe(input);
+  });
 });
 
 describe("tmuxTail in formatters", () => {

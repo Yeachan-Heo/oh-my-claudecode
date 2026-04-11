@@ -50,6 +50,7 @@ export {
   formatSessionIdle,
   formatAskUserQuestion,
   formatAgentCall,
+  parseTmuxTail,
 } from "./formatter.js";
 export {
   getCurrentTmuxSession,
@@ -106,7 +107,7 @@ import {
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
-import { formatNotification } from "./formatter.js";
+import { formatNotification, parseTmuxTail } from "./formatter.js";
 import { dispatchNotifications } from "./dispatcher.js";
 import { getCurrentTmuxSession } from "./tmux.js";
 import { getHookConfig, resolveEventTemplate } from "./hook-config.js";
@@ -188,7 +189,10 @@ export async function notify(
           "../features/rate-limit-wait/tmux-detector.js"
         );
         const tailLines = getTmuxTailLines(config);
-        const tail = capturePaneContent(payload.tmuxPaneId, tailLines);
+        const tail = parseTmuxTail(
+          capturePaneContent(payload.tmuxPaneId, tailLines),
+          tailLines,
+        );
         if (tail) {
           payload.tmuxTail = tail;
           payload.maxTailLines = tailLines;

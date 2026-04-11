@@ -33,6 +33,7 @@ import { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGatew
 import { buildOpenClawSignal } from "./signal.js";
 import { shouldCollapseOpenClawBurst } from "./dedupe.js";
 import { basename } from "path";
+import { parseTmuxTail } from "../notifications/formatter.js";
 import { getCurrentTmuxSession } from "../notifications/tmux.js";
 
 /** Whether debug logging is enabled */
@@ -118,7 +119,8 @@ export async function wakeOpenClaw(
         const { capturePaneContent } = await import("../features/rate-limit-wait/tmux-detector.js");
         const paneId = process.env.TMUX_PANE;
         if (paneId) {
-          tmuxTail = capturePaneContent(paneId, 15) ?? undefined;
+          const captured = capturePaneContent(paneId, 15);
+          tmuxTail = parseTmuxTail(captured, 15) || undefined;
         }
       } catch {
         // Non-blocking: tmux capture is best-effort

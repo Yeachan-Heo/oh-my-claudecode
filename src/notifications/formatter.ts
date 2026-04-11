@@ -192,9 +192,64 @@ const BARE_PROMPT_RE = /^[❯>$%#]+$/;
 /** Minimum ratio of alphanumeric characters for a line to be "meaningful". */
 const MIN_ALNUM_RATIO = 0.15;
 
+/** Review-session seed prompt outcome keywords that cause tmux alert noise. */
+const REVIEW_SEED_OUTCOME_PATTERNS = [
+  { key: "approve", pattern: /\bapprove\b/i },
+  { key: "request-changes", pattern: /\brequest[- ]changes\b/i },
+  { key: "follow-up-fix", pattern: /\bfollow[- ]up[- ]fix\b/i },
+  { key: "blocked", pattern: /\bblocked\b/i },
+] as const;
+
+/** Instructional phrasing commonly found in seeded review prompts. */
+const REVIEW_SEED_CUE_RE =
+  /\b(review|verdict|respond|reply|return|output|classification|classify|decision|choose|label)\b/i;
+
+/** Continuation markers for bullets / enumerated option lines in seeded prompts. */
+const REVIEW_SEED_LIST_RE = /^(?:[-*•]|\d+[.)]|[A-Z][A-Z_-]+:|\([a-z0-9]+\))/;
+
 /** Default maximum number of meaningful lines to include in a notification.
  * Matches DEFAULT_TMUX_TAIL_LINES in config.ts. */
 const DEFAULT_MAX_TAIL_LINES = 15;
+
+function extractReviewSeedOutcomeKeys(line: string): string[] {
+  return REVIEW_SEED_OUTCOME_PATTERNS
+    .filter(({ pattern }) => pattern.test(line))
+    .map(({ key }) => key);
+}
+
+function trimReviewSeedPrefix(lines: string[]): string[] {
+  if (lines.length === 0) return lines;
+
+  const prefix = lines.slice(0, 10);
+  const distinctOutcomes = new Set<string>();
+  let hasCue = false;
+  let candidateEnd = -1;
+
+  for (let index = 0; index < prefix.length; index += 1) {
+    const line = prefix[index]!;
+    const outcomeKeys = extractReviewSeedOutcomeKeys(line);
+    const isCueLine = REVIEW_SEED_CUE_RE.test(line);
+    const isSeedLine =
+      outcomeKeys.length > 0 ||
+      isCueLine ||
+      (candidateEnd >= 0 && REVIEW_SEED_LIST_RE.test(line));
+
+    outcomeKeys.forEach((key) => distinctOutcomes.add(key));
+    if (isCueLine) hasCue = true;
+    if (isSeedLine) {
+      candidateEnd = index;
+      continue;
+    }
+    if (candidateEnd >= 0) break;
+  }
+
+  const qualifies =
+    candidateEnd >= 0 &&
+    (distinctOutcomes.size >= 3 || (distinctOutcomes.size >= 2 && hasCue));
+
+  if (!qualifies) return lines;
+  return lines.slice(candidateEnd + 1);
+}
 
 /**
  * Parse raw tmux output into clean, human-readable lines.
@@ -225,7 +280,8 @@ export function parseTmuxTail(raw: string, maxLines: number = DEFAULT_MAX_TAIL_L
     meaningful.push(stripped.trimEnd());
   }
 
-  return meaningful.slice(-maxLines).join("\n");
+  const trimmed = trimReviewSeedPrefix(meaningful);
+  return trimmed.slice(-maxLines).join("\n");
 }
 
 /**
