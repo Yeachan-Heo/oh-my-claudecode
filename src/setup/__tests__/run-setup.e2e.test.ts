@@ -590,6 +590,7 @@ function makeStubPrompter(): Prompter {
     askConfirm: vi.fn(async () => { throw new Error('stub prompter: askConfirm called'); }),
     askText: vi.fn(async () => { throw new Error('stub prompter: askText called'); }),
     askSecret: vi.fn(async () => { throw new Error('stub prompter: askSecret called'); }),
+    write: vi.fn(() => undefined),
     close: vi.fn(() => undefined),
   };
 }

@@ -25,16 +25,20 @@ interface ScriptedAnswers {
 }
 
 interface RecordedCall {
-  kind: 'select' | 'secret';
+  kind: 'select' | 'secret' | 'write';
   question: string;
   returned: string;
+  /** For `select` calls, the options array passed to askSelect. */
+  options?: PrompterSelectOption<string>[];
 }
 
 function makeFakePrompter(script: ScriptedAnswers): {
   prompter: Prompter;
   calls: RecordedCall[];
+  writes: string[];
 } {
   const calls: RecordedCall[] = [];
+  const writes: string[] = [];
   const secrets = [...(script.secrets ?? [])];
 
   const prompter: Prompter = {
@@ -48,7 +52,12 @@ function makeFakePrompter(script: ScriptedAnswers): {
       // Ensure the label actually exists in `options` so we mimic real askSelect.
       const hit = options.find((o) => o.label === label);
       const returned = (hit?.label ?? defaultValue) as T;
-      calls.push({ kind: 'select', question, returned });
+      calls.push({
+        kind: 'select',
+        question,
+        returned,
+        options: options as PrompterSelectOption<string>[],
+      });
       return returned;
     },
     async askConfirm(question: string, defaultValue: boolean): Promise<boolean> {
@@ -64,12 +73,16 @@ function makeFakePrompter(script: ScriptedAnswers): {
       calls.push({ kind: 'secret', question, returned: value });
       return value;
     },
+    write(message: string): void {
+      writes.push(message);
+      calls.push({ kind: 'write', question: message, returned: '' });
+    },
     close(): void {
       // no-op
     },
   };
 
-  return { prompter, calls };
+  return { prompter, calls, writes };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,5 +297,158 @@ describe('runInteractiveWizard', () => {
 
     const options = buildPreset(answers);
     expect(options.executionMode).toBeUndefined();
+  });
+
+  // --- Config-context banner (CLAUDE_CONFIG_DIR awareness) ----------------
+
+  describe('CLAUDE_CONFIG_DIR awareness', () => {
+    function baseScript(): ScriptedAnswers {
+      return {
+        select: [
+          { match: 'Where should I configure', label: 'Global (all projects)' },
+          { match: 'parallel execution mode', label: 'ultrawork (maximum capability) (Recommended)' },
+          { match: 'install the OMC CLI globally', label: 'Yes (Recommended)' },
+          { match: 'task management tool', label: 'Built-in Tasks (default)' },
+          { match: 'configure MCP servers', label: 'No, skip' },
+          { match: 'enable agent teams', label: 'No, skip' },
+          { match: 'support the project', label: 'No thanks' },
+        ],
+      };
+    }
+
+    it('prints the config banner BEFORE the first askSelect call', async () => {
+      const { prompter, calls, writes } = makeFakePrompter(baseScript());
+
+      await runInteractiveWizard(prompter, {
+        detectInstallStyleNeeded: () => false,
+        configContext: {
+          configDir: '/Users/peter/.claude-personal',
+          isDefault: false,
+          envVarSet: true,
+          envVarValue: '/Users/peter/.claude-personal',
+          projectDir: '/repo',
+          localFiles: [
+            '/repo/.claude/CLAUDE.md',
+            '/repo/.git/info/exclude',
+            '/repo/.claude/skills/omc-reference/SKILL.md',
+          ],
+          globalFiles: [
+            '/Users/peter/.claude-personal/CLAUDE.md',
+            '/Users/peter/.claude-personal/.omc-config.json',
+            '/Users/peter/.claude-personal/settings.json',
+          ],
+          globalFilesPreserve: [
+            '/Users/peter/.claude-personal/CLAUDE.md',
+            '/Users/peter/.claude-personal/.omc-config.json',
+            '/Users/peter/.claude-personal/settings.json',
+            '/Users/peter/.claude-personal/CLAUDE-omc.md',
+          ],
+        },
+      });
+
+      // Banner must be emitted at least once.
+      expect(writes.length).toBeGreaterThanOrEqual(1);
+      const banner = writes[0];
+      expect(banner).toContain('omc setup');
+      expect(banner).toContain('/Users/peter/.claude-personal');
+      expect(banner).toContain('CLAUDE_CONFIG_DIR');
+      expect(banner).toContain('/repo/.claude/CLAUDE.md');
+      expect(banner).toContain('/Users/peter/.claude-personal/CLAUDE.md');
+
+      // Ordering check: the write call must come BEFORE the first askSelect.
+      const firstWriteIdx = calls.findIndex((c) => c.kind === 'write');
+      const firstSelectIdx = calls.findIndex((c) => c.kind === 'select');
+      expect(firstWriteIdx).toBeGreaterThanOrEqual(0);
+      expect(firstSelectIdx).toBeGreaterThan(firstWriteIdx);
+    });
+
+    it('Q1 target options show resolved absolute paths (CLAUDE_CONFIG_DIR set)', async () => {
+      const { prompter, calls } = makeFakePrompter(baseScript());
+
+      await runInteractiveWizard(prompter, {
+        detectInstallStyleNeeded: () => false,
+        configContext: {
+          configDir: '/Users/peter/.claude-personal',
+          isDefault: false,
+          envVarSet: true,
+          envVarValue: '/Users/peter/.claude-personal',
+          projectDir: '/repo',
+          localFiles: [
+            '/repo/.claude/CLAUDE.md',
+            '/repo/.git/info/exclude',
+            '/repo/.claude/skills/omc-reference/SKILL.md',
+          ],
+          globalFiles: [
+            '/Users/peter/.claude-personal/CLAUDE.md',
+            '/Users/peter/.claude-personal/.omc-config.json',
+            '/Users/peter/.claude-personal/settings.json',
+          ],
+          globalFilesPreserve: [
+            '/Users/peter/.claude-personal/CLAUDE.md',
+            '/Users/peter/.claude-personal/.omc-config.json',
+            '/Users/peter/.claude-personal/settings.json',
+            '/Users/peter/.claude-personal/CLAUDE-omc.md',
+          ],
+        },
+      });
+
+      const targetCall = calls.find(
+        (c) => c.kind === 'select' && c.question.includes('Where should I configure'),
+      );
+      expect(targetCall?.options).toBeDefined();
+      const options = targetCall?.options ?? [];
+
+      const localOpt = options.find((o) => o.label.startsWith('Local'));
+      const globalOpt = options.find((o) => o.label.startsWith('Global'));
+
+      // Local option must show the concrete local path.
+      expect(localOpt?.description).toContain('/repo/.claude/CLAUDE.md');
+      expect(localOpt?.description).toContain('project-scoped');
+
+      // Global option must show the resolved configDir AND flag the env var.
+      expect(globalOpt?.description).toContain('/Users/peter/.claude-personal/CLAUDE.md');
+      expect(globalOpt?.description).toContain('CLAUDE_CONFIG_DIR profile');
+    });
+
+    it('Q1 target options omit CLAUDE_CONFIG_DIR hint when env var is not set', async () => {
+      const { prompter, calls } = makeFakePrompter(baseScript());
+
+      await runInteractiveWizard(prompter, {
+        detectInstallStyleNeeded: () => false,
+        configContext: {
+          configDir: '/Users/alice/.claude',
+          isDefault: true,
+          envVarSet: false,
+          envVarValue: undefined,
+          projectDir: '/repo',
+          localFiles: [
+            '/repo/.claude/CLAUDE.md',
+            '/repo/.git/info/exclude',
+            '/repo/.claude/skills/omc-reference/SKILL.md',
+          ],
+          globalFiles: [
+            '/Users/alice/.claude/CLAUDE.md',
+            '/Users/alice/.claude/.omc-config.json',
+            '/Users/alice/.claude/settings.json',
+          ],
+          globalFilesPreserve: [
+            '/Users/alice/.claude/CLAUDE.md',
+            '/Users/alice/.claude/.omc-config.json',
+            '/Users/alice/.claude/settings.json',
+            '/Users/alice/.claude/CLAUDE-omc.md',
+          ],
+        },
+      });
+
+      const targetCall = calls.find(
+        (c) => c.kind === 'select' && c.question.includes('Where should I configure'),
+      );
+      const options = targetCall?.options ?? [];
+      const globalOpt = options.find((o) => o.label.startsWith('Global'));
+
+      // Default profile: no `CLAUDE_CONFIG_DIR profile: ...` parenthetical.
+      expect(globalOpt?.description).toContain('/Users/alice/.claude/CLAUDE.md');
+      expect(globalOpt?.description).not.toContain('CLAUDE_CONFIG_DIR profile');
+    });
   });
 });

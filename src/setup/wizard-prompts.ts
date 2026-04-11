@@ -22,6 +22,12 @@
 import { QUESTION_METADATA } from './options.js';
 import type { AnswersFile } from './preset-builder.js';
 import type { Prompter, PrompterSelectOption } from './prompts.js';
+import {
+  describeTargetOption,
+  formatConfigBanner,
+  resolveConfigContext,
+  type ConfigContext,
+} from './config-context.js';
 
 export interface WizardOptions {
   /**
@@ -31,6 +37,12 @@ export interface WizardOptions {
    * skips the prompt entirely.
    */
   detectInstallStyleNeeded?: () => boolean;
+  /**
+   * Pre-resolved config context (default: `resolveConfigContext()`). Tests
+   * pass a fixture context so they can assert on exact paths and banner
+   * content without mutating `process.env` or `process.cwd`.
+   */
+  configContext?: ConfigContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,20 +176,34 @@ function defaultLabelFor(
  * Convert a QuestionSpec's options into the `PrompterSelectOption<string>[]`
  * shape `askSelect` expects (labels as the generic parameter, descriptions
  * forwarded verbatim).
+ *
+ * When `descriptionOverrides` is supplied, each entry replaces the static
+ * description for the matching option label. This is how we inject
+ * CLAUDE_CONFIG_DIR-aware paths into the `target` question at runtime
+ * without having to store per-profile strings in QUESTION_METADATA.
  */
 function specOptions(
   spec: (typeof QUESTION_METADATA)[keyof typeof QUESTION_METADATA],
+  descriptionOverrides: Record<string, string> = {},
 ): PrompterSelectOption<string>[] {
-  return spec.options.map((o) => ({ label: o.label, description: o.description }));
+  return spec.options.map((o) => ({
+    label: o.label,
+    description: descriptionOverrides[o.label] ?? o.description,
+  }));
 }
 
 async function askQuestion(
   prompter: Prompter,
   key: keyof typeof QUESTION_METADATA,
+  descriptionOverrides?: Record<string, string>,
 ): Promise<string> {
   const spec = QUESTION_METADATA[key];
   const defaultLabel = defaultLabelFor(key);
-  return prompter.askSelect(spec.question, specOptions(spec), defaultLabel);
+  return prompter.askSelect(
+    spec.question,
+    specOptions(spec, descriptionOverrides),
+    defaultLabel,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +221,28 @@ export async function runInteractiveWizard(
   prompter: Prompter,
   opts: WizardOptions = {},
 ): Promise<AnswersFile> {
-  // Q1: target (local | global)
-  const targetLabel = await askQuestion(prompter, 'target');
+  // Pre-Q1: print the CLAUDE_CONFIG_DIR-aware banner so the user can see
+  // which profile the wizard is targeting BEFORE committing to an answer.
+  // Critical for users with multiple profiles (e.g. `~/.claude` vs
+  // `~/.claude-personal`) — prevents silently overwriting the wrong file.
+  const configContext = opts.configContext ?? resolveConfigContext();
+  prompter.write(formatConfigBanner(configContext));
+
+  // Q1: target (local | global). Swap the static option descriptions for
+  // concrete, absolute paths resolved against the active config context.
+  // Look up the canonical labels from QUESTION_METADATA (which stores them
+  // as "Local (this project)" and "Global (all projects)") rather than
+  // hardcoding strings here — keeps the override map in sync with the spec.
+  const targetSpec = QUESTION_METADATA.target;
+  const localLabel = targetSpec.options.find((o) => o.label.startsWith('Local'))?.label
+    ?? 'Local (this project)';
+  const globalLabel = targetSpec.options.find((o) => o.label.startsWith('Global'))?.label
+    ?? 'Global (all projects)';
+  const targetOverrides: Record<string, string> = {
+    [localLabel]: describeTargetOption(configContext, 'local'),
+    [globalLabel]: describeTargetOption(configContext, 'global'),
+  };
+  const targetLabel = await askQuestion(prompter, 'target', targetOverrides);
   const target = mapTarget(targetLabel);
 
   // Q2: installStyle — only when target=global AND a non-OMC base CLAUDE.md

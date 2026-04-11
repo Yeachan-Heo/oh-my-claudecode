@@ -71,6 +71,7 @@ function scriptedPrompter(secrets: Record<string, string>): Prompter {
       }
       return '';
     },
+    write: () => {},
     close: () => {},
   };
 }

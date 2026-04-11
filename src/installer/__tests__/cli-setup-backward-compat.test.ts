@@ -352,6 +352,7 @@ describe('CLI setup --infra-only escape hatch (pre-safe-defaults bare contract)'
         askConfirm: vi.fn(),
         askText: vi.fn(),
         askSecret: vi.fn(),
+        write: vi.fn(),
         close: vi.fn(),
       },
     });
@@ -418,6 +419,7 @@ describe('CLI setup safe-defaults bare contract', () => {
         askConfirm: vi.fn(),
         askText: vi.fn(),
         askSecret: vi.fn(),
+        write: vi.fn(),
         close: vi.fn(),
       },
     });
