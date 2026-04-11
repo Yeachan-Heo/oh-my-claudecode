@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +25,8 @@ const ALL_KEYS = [
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "OMC_DELEGATION_ROUTING_ENABLED",
+  "OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -249,6 +251,69 @@ describe("plan output configuration", () => {
         directory: "docs/plans",
         filenameTemplate: "plan-{{name}}.md",
       });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("delegation routing deprecation warnings", () => {
+  let saved: Record<string, string | undefined>;
+  let originalCwd: string;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    saved = saveAndClear(ALL_KEYS);
+    originalCwd = process.cwd();
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    consoleWarnSpy.mockRestore();
+    restore(saved);
+  });
+
+  it("warns when env delegation default provider is deprecated", () => {
+    process.env.OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER = "gemini";
+
+    loadConfig();
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("delegationRouting to Codex/Gemini is deprecated"),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Use /team for Codex/Gemini CLI workers instead."),
+    );
+  });
+
+  it("warns when project config uses deprecated delegation role provider", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omc-delegation-routing-warning-"));
+
+    try {
+      const claudeDir = join(tempDir, ".claude");
+      require("node:fs").mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(
+        join(claudeDir, "omc.jsonc"),
+        JSON.stringify({
+          delegationRouting: {
+            enabled: true,
+            roles: {
+              explore: {
+                provider: "codex",
+                tool: "Task",
+              },
+            },
+          },
+        }),
+      );
+
+      process.chdir(tempDir);
+      loadConfig();
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("delegationRouting to Codex/Gemini is deprecated"),
+      );
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

@@ -9,7 +9,11 @@
 
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
-import type { PluginConfig, ExternalModelsConfig } from "../shared/types.js";
+import type {
+  PluginConfig,
+  ExternalModelsConfig,
+  DelegationProvider,
+} from "../shared/types.js";
 import { getConfigDir } from "../utils/paths.js";
 import { parseJsonc } from "../utils/jsonc.js";
 import {
@@ -411,6 +415,30 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 /**
  * Load and merge all configuration sources
  */
+function warnOnDeprecatedDelegationRouting(config: PluginConfig): void {
+  const deprecatedProviders = new Set<DelegationProvider>();
+  const defaultProvider = config.delegationRouting?.defaultProvider;
+  if (defaultProvider === "codex" || defaultProvider === "gemini") {
+    deprecatedProviders.add(defaultProvider);
+  }
+
+  const roles = config.delegationRouting?.roles ?? {};
+  for (const route of Object.values(roles)) {
+    const provider = route?.provider;
+    if (provider === "codex" || provider === "gemini") {
+      deprecatedProviders.add(provider);
+    }
+  }
+
+  if (deprecatedProviders.size === 0) {
+    return;
+  }
+
+  console.warn(
+    "[OMC] delegationRouting to Codex/Gemini is deprecated and falls back to Claude Task. Use /team for Codex/Gemini CLI workers instead.",
+  );
+}
+
 export function loadConfig(): PluginConfig {
   const paths = getConfigPaths();
 
@@ -449,6 +477,8 @@ export function loadConfig(): PluginConfig {
       forceInherit: true,
     };
   }
+
+  warnOnDeprecatedDelegationRouting(config);
 
   return config;
 }
