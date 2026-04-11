@@ -14,7 +14,7 @@ English | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](READM
 
 *Don't learn Claude Code. Just use OMC.*
 
-[Get Started](#quick-start) • [Documentation](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Migration Guide](docs/MIGRATION.md)
+[Get Started](#quick-start) • [Documentation](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Migration Guide](docs/MIGRATION.md) • [Official X](https://x.com/bloatedaislop?s=21)
 
 ---
 
