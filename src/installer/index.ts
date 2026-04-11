@@ -8,7 +8,7 @@
  * Bash hook scripts were removed in v3.9.0.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, rmdirSync, cpSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -696,6 +696,76 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
   return removed;
 }
 
+/**
+ * Remove standalone hook files under $CONFIG_DIR/hooks/ that duplicate the
+ * plugin's hooks/hooks.json delivery. Invoked ONLY when a plugin is active
+ * AND user opted into cleanup. Ownership check: filename must be in
+ * OMC_HOOK_FILENAMES so we never touch user-authored hooks.
+ *
+ * Returns the list of absolute paths that were removed.
+ */
+function prunePluginDuplicateHooks(log: (msg: string) => void): string[] {
+  const removed: string[] = [];
+  if (!existsSync(HOOKS_DIR)) return removed;
+
+  for (const filename of OMC_HOOK_FILENAMES) {
+    const targetPath = join(HOOKS_DIR, filename);
+    if (existsSync(targetPath)) {
+      try {
+        unlinkSync(targetPath);
+        removed.push(targetPath);
+        log(`  Pruned duplicate hook: ${filename}`);
+      } catch (err) {
+        log(`  Failed to prune ${filename}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // Also prune hooks/lib/ files that were installed by ensureStandaloneHookScripts
+  const hooksLibDir = join(HOOKS_DIR, 'lib');
+  if (existsSync(hooksLibDir)) {
+    const libFilenames = [
+      'atomic-write.mjs',
+      'config-dir.mjs',
+      'config-dir.sh',
+      'stdin.mjs',
+    ];
+    for (const filename of libFilenames) {
+      const targetPath = join(hooksLibDir, filename);
+      if (existsSync(targetPath)) {
+        try {
+          unlinkSync(targetPath);
+          removed.push(targetPath);
+        } catch { /* ignore */ }
+      }
+    }
+    // Remove hooks/lib/ dir if empty
+    try {
+      if (readdirSync(hooksLibDir).length === 0) {
+        rmdirSync(hooksLibDir);
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Prune find-node.sh if present
+  const findNodePath = join(HOOKS_DIR, 'find-node.sh');
+  if (existsSync(findNodePath)) {
+    try {
+      unlinkSync(findNodePath);
+      removed.push(findNodePath);
+    } catch { /* ignore */ }
+  }
+
+  // Remove HOOKS_DIR if empty
+  try {
+    if (existsSync(HOOKS_DIR) && readdirSync(HOOKS_DIR).length === 0) {
+      rmdirSync(HOOKS_DIR);
+    }
+  } catch { /* ignore */ }
+
+  return removed;
+}
+
 function directoryHasMarkdownFiles(directory: string): boolean {
   if (!existsSync(directory)) {
     return false;
@@ -772,6 +842,18 @@ export function hasPluginProvidedAgentFiles(): boolean {
 export function hasPluginProvidedSkillFiles(): boolean {
   return getInstalledOmcPluginRoots().some(pluginRoot =>
     directoryHasSkillDefinitions(join(pluginRoot, 'skills'))
+  );
+}
+
+/**
+ * Detect whether an installed Claude Code plugin ships `hooks/hooks.json`.
+ * Claude Code loads plugin hooks.json automatically, referencing scripts
+ * under `$CLAUDE_PLUGIN_ROOT/scripts/*.mjs` — so `$CONFIG_DIR/hooks/`
+ * standalone copies are redundant and cause duplicate hook invocations.
+ */
+export function hasPluginProvidedHookFiles(): boolean {
+  return getInstalledOmcPluginRoots().some((pluginRoot) =>
+    existsSync(join(pluginRoot, 'hooks', 'hooks.json'))
   );
 }
 
@@ -1103,6 +1185,14 @@ export function install(options: InstallOptions = {}): InstallResult {
   const shouldInstallLegacyAgents = !runningAsPlugin && !pluginProvidesAgentFiles && !pluginDirMode;
   const shouldInstallBundledSkills =
     !pluginDirMode && (options.noPlugin === true || !enabledOmcPlugin || !pluginProvidesSkillFiles);
+  const pluginProvidesHookFiles = hasPluginProvidedHookFiles();
+  const shouldInstallStandaloneHooks =
+    !options.skipHooks
+    && !runningAsPlugin
+    && !pluginProvidesHookFiles;
+  if (!shouldInstallStandaloneHooks && !options.skipHooks && !runningAsPlugin) {
+    log('Skipping standalone hook scripts (plugin provides hooks/hooks.json via $CLAUDE_PLUGIN_ROOT)');
+  }
   const allowPluginHookRefresh = runningAsPlugin && options.refreshHooksInPlugin && !projectScoped;
   if (runningAsPlugin) {
     log('Detected Claude Code plugin context - skipping agent/command file installation');
@@ -1228,15 +1318,33 @@ export function install(options: InstallOptions = {}): InstallResult {
       // When --skip-hooks is active we deliberately skip both the script
       // materialization and the settings.json hook merge (see below). This
       // restores the documented intent of the flag (non-regression #2).
-      if (!options.skipHooks) {
+      if (shouldInstallStandaloneHooks) {
         ensureStandaloneHookScripts(log);
         result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
-      } else {
+      } else if (options.skipHooks) {
         log('Skipping hook script materialization (--skip-hooks)');
+        result.hooksConfigured = false;
+      } else {
+        // Plugin provides hooks/hooks.json — no standalone scripts needed.
+        // Clean up any leftover standalone hooks that would duplicate the
+        // plugin's delivery. Safe because ownership is gated on the
+        // OMC_HOOK_FILENAMES constant, never touching user files.
+        const prunedHooks = prunePluginDuplicateHooks(log);
+        if (prunedHooks.length > 0) {
+          log(`Pruned ${prunedHooks.length} duplicate standalone hook file(s)`);
+        }
         result.hooksConfigured = false;
       }
     } else {
       log('Skipping agent/command/hook files (managed by plugin system)');
+      // Even in runningAsPlugin mode, prune leftover standalone hook files
+      // that duplicate what the plugin's hooks/hooks.json already delivers.
+      if (pluginProvidesHookFiles) {
+        const prunedHooks = prunePluginDuplicateHooks(log);
+        if (prunedHooks.length > 0) {
+          log(`Pruned ${prunedHooks.length} duplicate standalone hook file(s)`);
+        }
+      }
     }
 
     if (shouldInstallBundledSkills) {
@@ -1379,7 +1487,9 @@ export function install(options: InstallOptions = {}): InstallResult {
           log(`  Cleaned up ${legacyRemoved} legacy hook entries from settings.json`);
         }
 
-        const shouldConfigureSettingsHooks = !options.skipHooks && (!runningAsPlugin || allowPluginHookRefresh);
+        const shouldConfigureSettingsHooks =
+          shouldInstallStandaloneHooks
+          || (runningAsPlugin && allowPluginHookRefresh);
         if (options.skipHooks) {
           log('  Skipping hook merge in settings.json (--skip-hooks)');
         }
@@ -1396,6 +1506,30 @@ export function install(options: InstallOptions = {}): InstallResult {
               log,
               result,
             );
+          }
+        }
+
+        // When plugin provides hooks and we're not skip-hooks, strip any
+        // existing OMC hook entries from settings.json so they don't
+        // duplicate what the plugin's hooks/hooks.json already delivers.
+        if (!shouldConfigureSettingsHooks && !options.skipHooks && pluginProvidesHookFiles) {
+          let strippedCount = 0;
+          for (const [eventType, groups] of Object.entries(existingHooks)) {
+            const groupList = groups as HookGroup[];
+            const nonOmcGroups = groupList.filter((group: HookGroup) =>
+              !group.hooks.every((h: HookEntry) => h.type === 'command' && isOmcHook(h.command))
+            );
+            if (nonOmcGroups.length !== groupList.length) {
+              strippedCount += groupList.length - nonOmcGroups.length;
+            }
+            if (nonOmcGroups.length === 0) {
+              delete existingHooks[eventType];
+            } else {
+              existingHooks[eventType] = nonOmcGroups;
+            }
+          }
+          if (strippedCount > 0) {
+            log(`  Stripped ${strippedCount} OMC hook group(s) from settings.json (plugin provides hooks)`);
           }
         }
 
