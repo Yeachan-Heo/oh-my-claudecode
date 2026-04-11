@@ -197,6 +197,16 @@ export interface InstallOptions {
   skipHud?: boolean;
   noPlugin?: boolean;
   /**
+   * Skip hook installation entirely: no standalone hook scripts written
+   * and no hook merge into `settings.json`. Exposed via the `--skip-hooks`
+   * CLI flag; prior to the setup unification this flag was silently
+   * ignored (non-regression #2 / plan: skipHooks bug fix).
+   *
+   * Deprecated: flag is kept for two release cycles with a stderr advisory
+   * on first use (see CLI).
+   */
+  skipHooks?: boolean;
+  /**
    * Dev plugin-dir mode: skip copying agents and bundled skills into
    * `<configDir>` because the user is launching OMC via
    * `claude --plugin-dir <path>` (or `omc --plugin-dir <path>`) and the
@@ -1224,8 +1234,17 @@ export function install(options: InstallOptions = {}): InstallResult {
       // Standalone installs still need ~/.claude/hooks/* scripts because their
       // settings.json hook entries execute those local paths directly. Plugin installs
       // keep using hooks/hooks.json + scripts/ under CLAUDE_PLUGIN_ROOT.
-      ensureStandaloneHookScripts(log);
-      result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+      //
+      // When --skip-hooks is active we deliberately skip both the script
+      // materialization and the settings.json hook merge (see below). This
+      // restores the documented intent of the flag (non-regression #2).
+      if (!options.skipHooks) {
+        ensureStandaloneHookScripts(log);
+        result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+      } else {
+        log('Skipping hook script materialization (--skip-hooks)');
+        result.hooksConfigured = false;
+      }
     } else {
       log('Skipping agent/command/hook files (managed by plugin system)');
     }
@@ -1370,7 +1389,10 @@ export function install(options: InstallOptions = {}): InstallResult {
           log(`  Cleaned up ${legacyRemoved} legacy hook entries from settings.json`);
         }
 
-        const shouldConfigureSettingsHooks = !runningAsPlugin || allowPluginHookRefresh;
+        const shouldConfigureSettingsHooks = !options.skipHooks && (!runningAsPlugin || allowPluginHookRefresh);
+        if (options.skipHooks) {
+          log('  Skipping hook merge in settings.json (--skip-hooks)');
+        }
         if (shouldConfigureSettingsHooks) {
           const desiredHooks = getHooksSettingsConfig().hooks as Record<string, HookGroup[]>;
 
@@ -1388,7 +1410,7 @@ export function install(options: InstallOptions = {}): InstallResult {
         }
 
         existingSettings.hooks = Object.keys(existingHooks).length > 0 ? existingHooks : undefined;
-        result.hooksConfigured = true;
+        result.hooksConfigured = !options.skipHooks;
       }
 
       // 2. Configure statusLine (always, even in plugin mode)
