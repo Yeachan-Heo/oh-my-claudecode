@@ -278,6 +278,31 @@ Wrap handler at server.py:42 in try/except ClientDisconnectedError...
 
 [Full feature list →](docs/REFERENCE.md)
 
+### How Skills & Agents Are Installed
+
+OMC can deliver skills and agents through two paths. Understanding which is active prevents confusion when files appear (or disappear) from your config directory.
+
+| Path | Installed by | Location | Loaded by |
+|------|-------------|----------|-----------|
+| **Plugin** | `/plugin install oh-my-claudecode` | `~/.claude/plugins/cache/omc/oh-my-claudecode/<version>/` | Claude Code plugin system (automatic) |
+| **Standalone** | `omc setup` (CLI) | `~/.claude/skills/`, `~/.claude/agents/` | Claude Code directly |
+
+If both paths are active, the same skill appears twice. OMC automatically removes standalone copies when a plugin is present (`prunePluginDuplicate*` functions).
+
+**Ownership marker — `source: omc`**
+
+When OMC installs skills or agents, it stamps the YAML frontmatter with `source: omc`:
+
+```yaml
+---
+source: omc        # ← OMC-installed marker
+name: autopilot
+description: Full autonomous execution
+---
+```
+
+Only files with this marker are eligible for cleanup or pruning. **User-created and third-party skills are never deleted**, even if they use the same frontmatter format.
+
 ---
 
 ## In-session shortcuts
