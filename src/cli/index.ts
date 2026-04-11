@@ -51,6 +51,9 @@ import {
 } from '../setup/options.js';
 import { SAFE_DEFAULTS, dumpSafeDefaultsAsJson } from '../setup/safe-defaults.js';
 import { buildPreset, type AnswersFile } from '../setup/preset-builder.js';
+import { createReadlinePrompter } from '../setup/prompts.js';
+import { runInteractiveWizard } from '../setup/wizard-prompts.js';
+import { isNonInteractive } from '../hooks/non-interactive-env/detector.js';
 import {
   waitCommand,
   waitStatusCommand,
@@ -1317,6 +1320,60 @@ export function runBuildPreset(
  * `teams`, `installerOptions`, `hud`, and `phases` fields to prevent callers
  * from mutating the frozen top-level constant.
  */
+/**
+ * Check whether the global base CLAUDE.md at `$CLAUDE_CONFIG_DIR/CLAUDE.md`
+ * exists and is missing OMC markers. Used by the interactive wizard to
+ * decide whether to ask the `installStyle` question (overwrite vs. preserve
+ * into `CLAUDE-omc.md`). Returns `false` when:
+ *   - the file doesn't exist (nothing to preserve)
+ *   - the file already contains `<!-- OMC:BEGIN -->` (already an OMC file)
+ *   - filesystem / encoding errors (fail safe: don't prompt)
+ */
+function hasNonOmcBaseClaudeMd(): boolean {
+  try {
+    const basePath = join(getClaudeConfigDir(), 'CLAUDE.md');
+    if (!existsSync(basePath)) return false;
+    const contents = readFileSync(basePath, 'utf-8');
+    // OMC-installed files carry this sentinel at the top of the managed block.
+    if (contents.includes('<!-- OMC:BEGIN -->')) return false;
+    return contents.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert a fully-resolved `SetupOptions` (e.g. from `buildPreset(answers)`)
+ * into a `Partial<SetupOptions>` suitable for the preset layer of
+ * `resolveOptions` precedence. Strips the `phases` Set — phases are always
+ * re-derived by `resolveOptions` from the flag combination + preset contents.
+ * Deep-clones `mcp`, `teams`, `installerOptions` so callers can't mutate
+ * the wizard's returned value.
+ */
+function wizardOptionsAsPartial(opts: SetupOptions): Partial<SetupOptions> {
+  return {
+    phases: new Set<SetupPhase>(opts.phases),
+    interactive: opts.interactive,
+    force: opts.force,
+    quiet: opts.quiet,
+    target: opts.target,
+    installStyle: opts.installStyle,
+    installCli: opts.installCli,
+    executionMode: opts.executionMode,
+    taskTool: opts.taskTool,
+    skipHud: opts.skipHud,
+    mcp: {
+      ...opts.mcp,
+      credentials: { ...opts.mcp.credentials },
+      servers: [...opts.mcp.servers],
+    },
+    teams: { ...opts.teams },
+    starRepo: opts.starRepo,
+    installerOptions: { ...opts.installerOptions },
+    hud: opts.hud ? { elements: { ...opts.hud.elements } } : undefined,
+  };
+}
+
 function safeDefaultsAsPartial(): Partial<SetupOptions> {
   return {
     phases: new Set<SetupPhase>(SAFE_DEFAULTS.phases),
@@ -1403,11 +1460,21 @@ export async function runSetupCommand(
   }
 
   // ------------------------------------------------------------------
-  // Detect the "bare" safe-defaults path: no opt-in phase/mode flags.
-  // When the user types `omc setup` (or just `--force` / `--quiet`),
-  // we replace the minimal defaults with the opinionated SAFE_DEFAULTS
-  // preset. `--infra-only` is the explicit escape hatch for callers that
-  // want the pre-safe-defaults bare-setup behavior (CI, provisioning).
+  // Detect the "bare" path: no opt-in phase/mode flags. Bare `omc setup`
+  // dispatches to ONE of three branches:
+  //
+  //   1. TTY + no --non-interactive          → interactive wizard (11 qs)
+  //   2. non-TTY, or --non-interactive       → SAFE_DEFAULTS preset
+  //   3. --interactive (explicit)            → interactive wizard, errors
+  //                                            clearly on non-TTY
+  //
+  // `--infra-only` is the explicit escape hatch for callers that want the
+  // pre-safe-defaults bare-setup behavior (CI, provisioning, tests).
+  //
+  // Note: `--interactive` / `--non-interactive` are MODE overrides for the
+  // bare path — they don't count as "opt-in phase flags" themselves, so we
+  // exclude them from `optInPhaseFlags`. They still reach `resolveOptions`
+  // via `rawFlags` for downstream validation (X4, X5).
   // ------------------------------------------------------------------
   const optInPhaseFlags = Boolean(
     rawFlags.wizard
@@ -1419,13 +1486,58 @@ export async function runSetupCommand(
       || rawFlags.stateResume
       || rawFlags.stateComplete !== undefined
       || rawFlags.checkState
-      || rawFlags.interactive
-      || rawFlags.nonInteractive
       || rawFlags.local
       || rawFlags.global
       || rawFlags.infraOnly,
   );
-  const useSafeDefaults = !optInPhaseFlags;
+
+  // TTY / non-interactive detection for wizard dispatch. `isNonInteractive`
+  // is the canonical detector (CI, CLAUDE_CODE_RUN, non-TTY stdout, etc.).
+  const isTTY = !isNonInteractive();
+  const forceInteractive = Boolean(rawFlags.interactive);
+  const forceNonInteractive = Boolean(rawFlags.nonInteractive);
+  // `--quiet` is an implicit non-interactive signal: scripted callers that
+  // pass `omc setup --quiet` (or `--force --quiet`) expect silent operation
+  // and should NOT be surprised by an interactive wizard even on a TTY.
+  // This is a wizard-dispatch-only override — it does NOT count as an
+  // explicit `--non-interactive` for the mutex check with `--interactive`.
+  const quietImpliesNonInteractive = Boolean(rawFlags.quiet);
+
+  // X0 (new): --interactive + --non-interactive are mutually exclusive.
+  if (forceInteractive && forceNonInteractive) {
+    stderr.write(chalk.red('setup: --interactive and --non-interactive are mutually exclusive\n'));
+    return 2;
+  }
+
+  // X4 (explicit): --interactive on a non-TTY environment is a hard error
+  // on the bare path. When --interactive is combined with other phase
+  // flags (e.g. --claude-md-only), resolveOptions's existing X4 check
+  // surfaces the error with the same exit code and a more specific message,
+  // so we scope the new CLI-level check to the bare path.
+  if (forceInteractive && !isTTY && !optInPhaseFlags) {
+    stderr.write(
+      chalk.red(
+        'setup: --interactive requires a TTY. Run in a real terminal, or drop the flag to fall back to --non-interactive safe-defaults.\n',
+      ),
+    );
+    return 2;
+  }
+
+  // Wizard fires on bare + TTY + no forced non-interactive (and no --quiet).
+  // `--interactive` on the bare path forces the wizard; when `--interactive`
+  // is combined with explicit phase flags (e.g. `--claude-md-only`), the
+  // existing per-phase prompter pipeline inside runSetup handles
+  // interactivity and the pre-phase wizard is skipped.
+  const runWizardBeforeSetup =
+    !optInPhaseFlags
+    && isTTY
+    && !forceNonInteractive
+    && !quietImpliesNonInteractive;
+
+  // Safe-defaults fires on bare + (non-TTY OR explicit --non-interactive OR
+  // --quiet). When the wizard path is taken, safe-defaults is NOT applied —
+  // the wizard's own answers produce the full SetupOptions via buildPreset.
+  const useSafeDefaults = !optInPhaseFlags && !runWizardBeforeSetup;
 
   // ------------------------------------------------------------------
   // Plugin-presence check. Gate on the bare-safe-defaults path and the
@@ -1446,7 +1558,7 @@ export async function runSetupCommand(
     && !rawFlags.stateResume
     && rawFlags.stateComplete === undefined
     && !noPluginFlag
-    && (useSafeDefaults || Boolean(rawFlags.wizard));
+    && (useSafeDefaults || runWizardBeforeSetup || Boolean(rawFlags.wizard));
 
   if (requiresPluginCheck) {
     const pluginOk =
@@ -1478,6 +1590,31 @@ export async function runSetupCommand(
         return 2;
       }
       throw err;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Interactive wizard branch (bare + TTY, or explicit --interactive).
+  // Collect 11 answers via the readline prompter, run buildPreset() to
+  // produce a full SetupOptions, then convert to Partial for the preset
+  // layer so user flags (--force, --quiet) still win via resolveOptions.
+  // ------------------------------------------------------------------
+  if (runWizardBeforeSetup && !presetPartial) {
+    const prompter = createReadlinePrompter();
+    try {
+      const answers = await runInteractiveWizard(prompter, {
+        // Only ask the installStyle question when the user will land on a
+        // base CLAUDE.md that does NOT already contain OMC markers.
+        detectInstallStyleNeeded: () => hasNonOmcBaseClaudeMd(),
+      });
+      const wizardOptions = buildPreset(answers);
+      presetPartial = wizardOptionsAsPartial(wizardOptions);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      stderr.write(chalk.red(`setup: interactive wizard failed: ${msg}\n`));
+      return 2;
+    } finally {
+      prompter.close();
     }
   }
 
@@ -1685,13 +1822,24 @@ program
   .option('--infra-only', 'Escape hatch: restore pre-safe-defaults bare-setup behavior (phases=infra only, no plugin check)')
   .option('--dump-safe-defaults', 'Print the SAFE_DEFAULTS preset JSON to stdout and exit (copy + tweak as a preset file)')
   .addHelpText('after', `
+Dispatch for bare \`omc setup\`:
+  - TTY (real terminal)    → interactive wizard (11 questions, like /omc-setup)
+  - non-TTY (pipe, CI)     → falls back to --non-interactive safe-defaults
+  - --non-interactive      → explicit safe-defaults flow (works anywhere)
+  - --interactive          → forces the wizard; errors clearly on non-TTY
+  - --infra-only           → escape hatch: direct install(), no wizard, no safe-defaults
+  - --preset <file>        → non-interactive from preset (unchanged)
+  - --wizard               → preserved alias for the in-phase wizard flow
+
 Examples:
-  $ omc setup                          Run safe-defaults: CLAUDE.md + infra + MCP + welcome (recommended out-of-box)
-  $ omc setup --infra-only             Legacy bare behavior: sync components only (escape hatch for CI/automation)
-  $ omc setup --force                  Force-rerun the safe-defaults flow
+  $ omc setup                          Interactive wizard on TTY; safe-defaults on non-TTY
+  $ omc setup --non-interactive        Force SAFE_DEFAULTS (CLAUDE.md + infra + MCP + welcome)
+  $ omc setup --interactive            Force interactive wizard (requires a TTY)
+  $ omc setup --infra-only             Legacy bare behavior: sync components only (CI/automation escape)
+  $ omc setup --force                  Force-rerun with current dispatch (wizard / safe-defaults)
   $ omc setup --dump-safe-defaults     Print safe-defaults preset JSON (pipe to a file, then tweak)
   $ omc setup --quiet                  Silent setup for scripts
-  $ omc setup --wizard                 Run the full interactive wizard (all 4 phases)
+  $ omc setup --wizard                 Run the legacy in-phase wizard (phase-router, not pre-phase prompts)
   $ omc setup --preset ./preset.json   Non-interactive: drive setup from a preset file
   $ omc setup --claude-md-only --global --overwrite
                                        Replaces scripts/setup-claude-md.sh direct calls

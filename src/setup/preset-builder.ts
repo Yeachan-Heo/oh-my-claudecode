@@ -29,7 +29,7 @@ export interface AnswersFile {
     enabled: boolean;
     servers?: Array<string | { name: string; spec: McpCustomSpec }>;
     credentials?: { exa?: string; github?: string; filesystem?: string[] };
-    onMissingCredentials?: 'skip' | 'error';
+    onMissingCredentials?: 'skip' | 'error' | 'install-without-auth';
   };
   teams?: {
     enabled: boolean;
@@ -147,9 +147,13 @@ export function buildPreset(answers: AnswersFile): SetupOptions {
   const mcpServers: McpServerEntry[] = (answers.mcp?.servers ?? []).map(validateMcpServer);
   const mcpCredentials = { ...(answers.mcp?.credentials ?? {}) };
   const mcpOnMissing = answers.mcp?.onMissingCredentials ?? DEFAULTS.mcp.onMissingCredentials;
-  if (mcpOnMissing !== 'skip' && mcpOnMissing !== 'error') {
+  if (
+    mcpOnMissing !== 'skip'
+    && mcpOnMissing !== 'error'
+    && mcpOnMissing !== 'install-without-auth'
+  ) {
     throw new InvalidOptionsError(
-      `invalid mcp.onMissingCredentials: ${String(mcpOnMissing)} (expected skip|error)`,
+      `invalid mcp.onMissingCredentials: ${String(mcpOnMissing)} (expected skip|error|install-without-auth)`,
     );
   }
 
