@@ -55,7 +55,7 @@ OMC Setup — Configure oh-my-claudecode (thin wrapper around `omc setup`)
 USAGE:
   /oh-my-claudecode:omc-setup                     Run interactive wizard (or update if already configured)
   /oh-my-claudecode:omc-setup --local             Configure local project (.claude/CLAUDE.md)
-  /oh-my-claudecode:omc-setup --global            Configure global settings (CONFIG_DIR/CLAUDE.md)
+  /oh-my-claudecode:omc-setup --global            Configure global settings (CLAUDE.md in $CLAUDE_CONFIG_DIR or ~/.claude)
   /oh-my-claudecode:omc-setup --force             Skip the "already configured" gate and run the full wizard
   /oh-my-claudecode:omc-setup --preset <file>     Drive setup from a preset file (no prompts)
   /oh-my-claudecode:omc-setup --help              Show this help

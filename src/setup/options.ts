@@ -192,7 +192,7 @@ export const QUESTION_METADATA: Record<string, QuestionSpec> = {
       {
         label: 'Global (all projects)',
         description:
-          'Creates `CONFIG_DIR/CLAUDE.md` for all Claude Code sessions. Best for consistent behavior everywhere.',
+          'Creates CLAUDE.md in your active Claude Code config directory (honours CLAUDE_CONFIG_DIR). Best for consistent behavior everywhere.',
       },
     ],
     default: 'local',
