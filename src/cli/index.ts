@@ -36,7 +36,9 @@ import {
 import {
   install as installOmc,
   isInstalled,
-  getInstallInfo
+  getInstallInfo,
+  isRunningAsPlugin,
+  getInstalledOmcPluginRoots
 } from '../installer/index.js';
 import { runSetup } from '../setup/index.js';
 import {
@@ -45,7 +47,9 @@ import {
   resolveOptions,
   InvalidOptionsError,
   type SetupOptions,
+  type SetupPhase,
 } from '../setup/options.js';
+import { SAFE_DEFAULTS, dumpSafeDefaultsAsJson } from '../setup/safe-defaults.js';
 import { buildPreset, type AnswersFile } from '../setup/preset-builder.js';
 import {
   waitCommand,
@@ -1308,6 +1312,38 @@ export function runBuildPreset(
 }
 
 /**
+ * Convert `SAFE_DEFAULTS` into a `Partial<SetupOptions>` so `resolveOptions`
+ * can merge it as a preset-equivalent base layer. Deep-clones the `mcp`,
+ * `teams`, `installerOptions`, `hud`, and `phases` fields to prevent callers
+ * from mutating the frozen top-level constant.
+ */
+function safeDefaultsAsPartial(): Partial<SetupOptions> {
+  return {
+    phases: new Set<SetupPhase>(SAFE_DEFAULTS.phases),
+    interactive: SAFE_DEFAULTS.interactive,
+    force: SAFE_DEFAULTS.force,
+    quiet: SAFE_DEFAULTS.quiet,
+    target: SAFE_DEFAULTS.target,
+    installStyle: SAFE_DEFAULTS.installStyle,
+    installCli: SAFE_DEFAULTS.installCli,
+    executionMode: SAFE_DEFAULTS.executionMode,
+    taskTool: SAFE_DEFAULTS.taskTool,
+    skipHud: SAFE_DEFAULTS.skipHud,
+    mcp: {
+      ...SAFE_DEFAULTS.mcp,
+      credentials: { ...SAFE_DEFAULTS.mcp.credentials },
+      servers: [...SAFE_DEFAULTS.mcp.servers],
+    },
+    teams: { ...SAFE_DEFAULTS.teams },
+    starRepo: SAFE_DEFAULTS.starRepo,
+    installerOptions: { ...SAFE_DEFAULTS.installerOptions },
+    hud: SAFE_DEFAULTS.hud
+      ? { elements: { ...SAFE_DEFAULTS.hud.elements } }
+      : undefined,
+  };
+}
+
+/**
  * Main `omc setup` action handler, broken out of the commander `.action(...)`
  * closure so tests can invoke it directly with a synthetic option bag.
  *
@@ -1319,7 +1355,9 @@ export function runBuildPreset(
  *      legacy `OMC_PLUGIN_ROOT_ENV` auto-detection + conflict resolution,
  *      emit the skipHooks advisory on first use, call `runSetup()`, and
  *      print today's summary for the bare-infra path.
- *   4. Return the process exit code (never calls process.exit directly).
+ *   4. Bare `omc setup` (no opt-in phase flags) runs the safe-defaults flow;
+ *      `--infra-only` is the escape hatch for pre-safe-defaults behavior.
+ *   5. Return the process exit code (never calls process.exit directly).
  *
  * Tests may construct the `commanderOpts` bag directly; production code
  * passes `cmd.opts()` from the commander action handler.
@@ -1356,6 +1394,78 @@ export async function runSetupCommand(
   }
 
   // ------------------------------------------------------------------
+  // --dump-safe-defaults: print SAFE_DEFAULTS preset JSON and exit.
+  // Users can redirect stdout to a file and tweak it for a custom preset.
+  // ------------------------------------------------------------------
+  if (rawFlags.dumpSafeDefaults) {
+    process.stdout.write(dumpSafeDefaultsAsJson());
+    return 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Detect the "bare" safe-defaults path: no opt-in phase/mode flags.
+  // When the user types `omc setup` (or just `--force` / `--quiet`),
+  // we replace the minimal defaults with the opinionated SAFE_DEFAULTS
+  // preset. `--infra-only` is the explicit escape hatch for callers that
+  // want the pre-safe-defaults bare-setup behavior (CI, provisioning).
+  // ------------------------------------------------------------------
+  const optInPhaseFlags = Boolean(
+    rawFlags.wizard
+      || rawFlags.preset
+      || rawFlags.claudeMdOnly
+      || rawFlags.mcpOnly
+      || rawFlags.stateSave !== undefined
+      || rawFlags.stateClear
+      || rawFlags.stateResume
+      || rawFlags.stateComplete !== undefined
+      || rawFlags.checkState
+      || rawFlags.interactive
+      || rawFlags.nonInteractive
+      || rawFlags.local
+      || rawFlags.global
+      || rawFlags.infraOnly,
+  );
+  const useSafeDefaults = !optInPhaseFlags;
+
+  // ------------------------------------------------------------------
+  // Plugin-presence check. Gate on the bare-safe-defaults path and the
+  // explicit `--wizard` path only — `--infra-only`, state ops, check-state,
+  // claude-md-only, and `--no-plugin` have no plugin requirement today and
+  // must stay that way to preserve scripted-caller contracts.
+  // ------------------------------------------------------------------
+  const noPluginFlag = Boolean(
+    (rawFlags as { plugin?: boolean }).plugin === false
+      || (rawFlags as { noPlugin?: boolean }).noPlugin,
+  );
+  const requiresPluginCheck =
+    !rawFlags.infraOnly
+    && !rawFlags.claudeMdOnly
+    && !rawFlags.checkState
+    && rawFlags.stateSave === undefined
+    && !rawFlags.stateClear
+    && !rawFlags.stateResume
+    && rawFlags.stateComplete === undefined
+    && !noPluginFlag
+    && (useSafeDefaults || Boolean(rawFlags.wizard));
+
+  if (requiresPluginCheck) {
+    const pluginOk =
+      isRunningAsPlugin()
+      || getInstalledOmcPluginRoots().length > 0
+      || Boolean(process.env.CLAUDE_PLUGIN_ROOT)
+      || Boolean(process.env[OMC_PLUGIN_ROOT_ENV]);
+    if (!pluginOk) {
+      stderr.write(chalk.red('ERROR: oh-my-claudecode plugin installation not detected.\n\n'));
+      stderr.write('Suggestions:\n');
+      stderr.write('  \u2022 Install the plugin:     claude /plugin install oh-my-claudecode\n');
+      stderr.write('  \u2022 Use plugin-dir mode:    omc setup --plugin-dir-mode (for dev checkouts)\n');
+      stderr.write('  \u2022 Use bundled skills:     omc setup --no-plugin (copies bundled skills globally)\n');
+      stderr.write('  \u2022 Escape to infra-only:   omc setup --infra-only (minimal install, pre-safe-defaults behavior)\n');
+      return 1;
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Load preset file if provided
   // ------------------------------------------------------------------
   let presetPartial: Partial<SetupOptions> | undefined;
@@ -1369,6 +1479,15 @@ export async function runSetupCommand(
       }
       throw err;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // For the bare safe-defaults path, merge SAFE_DEFAULTS as a preset-
+  // equivalent base layer. User flags (e.g. `--force`, `--quiet`) still
+  // win via resolveOptions precedence. `--infra-only` bypasses this.
+  // ------------------------------------------------------------------
+  if (useSafeDefaults && !presetPartial) {
+    presetPartial = safeDefaultsAsPartial();
   }
 
   // ------------------------------------------------------------------
@@ -1562,10 +1681,15 @@ program
   .option('--build-preset', '(internal) Build a preset from a skill answers file (unstable)')
   .option('--answers <file>', '(internal) Path to the skill answers JSON (use with --build-preset)')
   .option('--out <file>', '(internal) Output path for the generated preset (use with --build-preset)')
+  // ---- safe-defaults escape hatches ----
+  .option('--infra-only', 'Escape hatch: restore pre-safe-defaults bare-setup behavior (phases=infra only, no plugin check)')
+  .option('--dump-safe-defaults', 'Print the SAFE_DEFAULTS preset JSON to stdout and exit (copy + tweak as a preset file)')
   .addHelpText('after', `
 Examples:
-  $ omc setup                          Sync OMC components (infra-only, byte-identical to prior behavior)
-  $ omc setup --force                  Force reinstall infra components
+  $ omc setup                          Run safe-defaults: CLAUDE.md + infra + MCP + welcome (recommended out-of-box)
+  $ omc setup --infra-only             Legacy bare behavior: sync components only (escape hatch for CI/automation)
+  $ omc setup --force                  Force-rerun the safe-defaults flow
+  $ omc setup --dump-safe-defaults     Print safe-defaults preset JSON (pipe to a file, then tweak)
   $ omc setup --quiet                  Silent setup for scripts
   $ omc setup --wizard                 Run the full interactive wizard (all 4 phases)
   $ omc setup --preset ./preset.json   Non-interactive: drive setup from a preset file
