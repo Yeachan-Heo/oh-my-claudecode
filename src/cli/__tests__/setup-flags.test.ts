@@ -62,6 +62,8 @@ vi.mock('../../installer/index.js', async () => {
     install: hoisted.installMock,
     isInstalled: () => true,
     getInstallInfo: () => ({ installed: true, version: 'test' }),
+    isRunningAsPlugin: () => true,
+    getInstalledOmcPluginRoots: () => ['/mocked/plugin/root'],
   };
 });
 
