@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -78,5 +78,20 @@ describe('resolveActivePluginRoot', () => {
     const result = resolveActivePluginRoot({ configDir, scriptDir });
 
     expect(result).toBe(scriptDir);
+  });
+
+  // ── P1 regression (Codex, PR #2529 commit 726faed2) ──────────────────────
+  // DEFAULT_SCRIPT_PLUGIN_ROOT used to be `dirname(dirname(fileURLToPath))`
+  // which resolves to `src/` (dev) or `dist/` (built) — neither holds the
+  // canonical `docs/CLAUDE.md`. phase 1 then fell through to the network
+  // download path. The fix walks up until it finds `docs/CLAUDE.md`, so
+  // `resolveActivePluginRoot()` with no scriptDir override must now land on
+  // a directory that actually contains the marker asset.
+  it('default plugin-root (no scriptDir override) lands on a dir containing docs/CLAUDE.md', () => {
+    // Empty configDir → installed_plugins.json is missing → fall-through
+    // uses DEFAULT_SCRIPT_PLUGIN_ROOT. No cache sibling scan can rescue the
+    // wrong default, so this assertion pins the new walk-up behavior.
+    const result = resolveActivePluginRoot({ configDir });
+    expect(existsSync(join(result, 'docs', 'CLAUDE.md'))).toBe(true);
   });
 });
