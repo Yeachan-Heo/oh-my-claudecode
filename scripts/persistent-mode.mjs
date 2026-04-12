@@ -25,6 +25,7 @@ import { join, dirname, resolve, normalize } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import { getClaudeConfigDir } from "./lib/config-dir.mjs";
+import { resolveOmcStateRoot } from "./lib/state-root.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -630,7 +631,8 @@ async function main() {
     const sessionIdRaw = data.sessionId || data.session_id || data.sessionid || "";
     const sessionId = sanitizeSessionId(sessionIdRaw);
     const hasValidSessionId = isValidSessionId(sessionIdRaw);
-    const stateDir = join(directory, ".omc", "state");
+    const omcRoot = await resolveOmcStateRoot(directory);
+    const stateDir = join(omcRoot, "state");
     const globalStateDir = join(homedir(), ".omc", "state");
 
     // CRITICAL: Never block context-limit stops.
