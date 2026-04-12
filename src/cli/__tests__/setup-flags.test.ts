@@ -62,6 +62,15 @@ vi.mock('../../installer/index.js', async () => {
     install: hoisted.installMock,
     isInstalled: () => true,
     getInstallInfo: () => ({ installed: true, version: 'test' }),
+    // Stub plugin-presence detection so the plugin-check at the top of
+    // runSetupCommand always passes. These tests target flag plumbing, not
+    // plugin discovery (which has its own dedicated suite in
+    // src/setup/__tests__/plugin-check.test.ts). Without this stub, CI
+    // environments with no installed OMC plugin trip the check at
+    // src/cli/index.ts:1681 and every --wizard / bare-safe-defaults test
+    // fails with exit 1 before it can reach the real code path under test.
+    isRunningAsPlugin: () => true,
+    getInstalledOmcPluginRoots: () => ['/mocked/plugin/root'],
   };
 });
 
