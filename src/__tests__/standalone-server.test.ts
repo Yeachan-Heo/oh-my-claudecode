@@ -12,8 +12,8 @@ import { wikiTools } from '../tools/wiki-tools.js';
 import { skillsTools } from '../tools/skills-tools.js';
 
 describe('standalone-server tool composition', () => {
-  // These are the exact same tool arrays that standalone-server.ts imports
-  // This test validates our expectations about tool counts
+  // These are the raw tool arrays aggregated by tool-registry.ts into allTools.
+  // This test validates per-array counts; for the live MCP surface use standalone-listtools.test.ts.
 
   const expectedTools = [
     ...lspTools,
