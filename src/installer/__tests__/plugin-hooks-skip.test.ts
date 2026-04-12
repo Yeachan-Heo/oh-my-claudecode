@@ -458,6 +458,116 @@ describe('pruneStandaloneDuplicatesForPluginMode — already-configured path', (
     expect(result.prunedHooks).toHaveLength(0);
     expect(result.settingsStripped).toBe(false);
   });
+
+  it('strips settings.json OMC hook entries even when hook files are already absent on disk', async () => {
+    // Regression test for user-reported bug: after a partial cleanup cycle
+    // (hook .mjs files removed by a prior prune OR never written), the
+    // settings.json `hooks` section still references the dead paths.
+    // plugin-dir-mode setup must detect the dangling entries and strip them
+    // EVEN THOUGH there are no leftover .mjs files to prune on disk.
+    //
+    // Ownership: the settings strip runs inside the
+    // `hasPluginProvidedHookFiles()` branch, so a plugin must be active.
+
+    // Fake plugin root with hooks/hooks.json only (no agents/ no skills/)
+    // so plugin is detected as providing hooks. beforeEach already wrote it.
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+
+    // DO NOT seed any leftover .mjs files under $CONFIG_DIR/hooks/.
+    // The point of this test is that hook-file prune has nothing to do, but
+    // settings strip still has work.
+
+    // Seed settings.json with stale OMC hook entries pointing at .mjs files
+    // that will never exist. Include a user-authored hook alongside that
+    // MUST survive.
+    const settingsPath = join(tmpConfigDir, 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: `node ${tmpConfigDir}/hooks/keyword-detector.mjs` }],
+          }],
+          SessionStart: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: `node ${tmpConfigDir}/hooks/session-start.mjs` }],
+          }],
+          Stop: [
+            {
+              matcher: '*',
+              hooks: [{ type: 'command', command: `node ${tmpConfigDir}/hooks/code-simplifier.mjs` }],
+            },
+            {
+              matcher: '*',
+              hooks: [{ type: 'command', command: '/usr/local/bin/my-audit-logger.sh' }],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    // PREVIEW must report settingsStripped: true even though no disk files exist
+    vi.resetModules();
+    const { previewStandaloneDuplicatesForPluginMode } = await import('../index.js');
+    const preview = previewStandaloneDuplicatesForPluginMode();
+
+    expect(preview.hasWork, 'preview must detect settings-only leftovers').toBe(true);
+    expect(preview.prunedHooks, 'no disk files to prune').toHaveLength(0);
+    expect(preview.settingsStripped, 'settings.json OMC entries detected').toBe(true);
+
+    // EXECUTE must actually strip
+    vi.resetModules();
+    const { pruneStandaloneDuplicatesForPluginMode } = await import('../index.js');
+    const result = pruneStandaloneDuplicatesForPluginMode(() => {});
+
+    expect(result.settingsStripped).toBe(true);
+
+    // Verify settings.json on disk
+    const settingsAfter = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+      hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+
+    // OMC hook groups (UserPromptSubmit, SessionStart) removed entirely
+    expect(settingsAfter.hooks?.UserPromptSubmit).toBeUndefined();
+    expect(settingsAfter.hooks?.SessionStart).toBeUndefined();
+
+    // Stop group: the OMC entry is gone, user hook survives
+    expect(settingsAfter.hooks?.Stop).toBeDefined();
+    const stopCommands = (settingsAfter.hooks?.Stop ?? [])
+      .flatMap((g) => g.hooks.map((h) => h.command));
+    expect(stopCommands.some((c) => c.includes('code-simplifier'))).toBe(false);
+    expect(stopCommands.some((c) => c.includes('my-audit-logger'))).toBe(true);
+  });
+
+  it('preview detects settings-only leftovers without mutating settings.json', async () => {
+    // Same fixture as above, but only call preview (not execute). Assert
+    // that settings.json is UNTOUCHED on disk — preview is a dry-run.
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+
+    const settingsPath = join(tmpConfigDir, 'settings.json');
+    const originalContent = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: `node ${tmpConfigDir}/hooks/keyword-detector.mjs` }],
+        }],
+      },
+    });
+    writeFileSync(settingsPath, originalContent, 'utf8');
+
+    vi.resetModules();
+    const { previewStandaloneDuplicatesForPluginMode } = await import('../index.js');
+    const preview = previewStandaloneDuplicatesForPluginMode();
+
+    expect(preview.settingsStripped, 'preview reports settings strip would run').toBe(true);
+    expect(preview.hasWork).toBe(true);
+
+    // Critical: file on disk unchanged
+    const after = readFileSync(settingsPath, 'utf8');
+    expect(JSON.parse(after)).toEqual(JSON.parse(originalContent));
+  });
 });
 
 // ---------------------------------------------------------------------------
