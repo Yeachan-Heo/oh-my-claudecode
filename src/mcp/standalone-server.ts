@@ -25,6 +25,10 @@ import { stateTools } from '../tools/state-tools.js';
 import { notepadTools } from '../tools/notepad-tools.js';
 import { memoryTools } from '../tools/memory-tools.js';
 import { traceTools } from '../tools/trace-tools.js';
+import { sharedMemoryTools } from '../tools/shared-memory-tools.js';
+import { deepinitManifestTool } from '../tools/deepinit-manifest.js';
+import { wikiTools } from '../tools/wiki-tools.js';
+import { skillsTools } from '../tools/skills-tools.js';
 import { registerStandaloneShutdownHandlers } from './standalone-shutdown.js';
 import { cleanupOwnedBridgeSessions } from '../tools/python-repl/bridge-manager.js';
 import { z } from 'zod';
@@ -58,6 +62,10 @@ const allTools: ToolDef[] = [
   ...(notepadTools as unknown as ToolDef[]),
   ...(memoryTools as unknown as ToolDef[]),
   ...(traceTools as unknown as ToolDef[]),
+  ...(sharedMemoryTools as unknown as ToolDef[]),
+  deepinitManifestTool as unknown as ToolDef,
+  ...(wikiTools as unknown as ToolDef[]),
+  ...(skillsTools as unknown as ToolDef[]),
 ];
 
 // Convert Zod schema to JSON Schema for MCP
