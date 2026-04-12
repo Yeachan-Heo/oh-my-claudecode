@@ -8,25 +8,57 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, parse as parsePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_CONFIG_DIR } from '../installer/index.js';
 
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
+ * Walk up from `start` until we find a directory containing the canonical
+ * plugin-root marker (`docs/CLAUDE.md`), or return `null` when we hit the
+ * filesystem root. Used by the default script plugin-root initializer below.
+ */
+function findPluginRootAncestor(start: string): string | null {
+  let current = start;
+  const { root: fsRoot } = parsePath(current);
+  for (let i = 0; i < 32; i++) {
+    if (existsSync(join(current, 'docs', 'CLAUDE.md'))) return current;
+    if (current === fsRoot) return null;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return null;
+}
+
+/**
  * Default plugin root used when no `scriptDir` override is provided.
- * Resolves to two directories up from this file — equivalent to the bash
- * `SCRIPT_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"`:
- *   - dev  : `src/setup/plugin-root.ts` → repo root
- *   - dist : `dist/setup/plugin-root.js` → repo root
+ *
+ * Walks up from this file's own location to find the nearest ancestor that
+ * contains `docs/CLAUDE.md`. This correctly resolves all three shapes:
+ *   - dev checkout      : `src/setup/plugin-root.ts` → repo root
+ *   - built package     : `dist/setup/plugin-root.js` → package root
+ *   - bundled CLI (cjs) : `bridge/cli.cjs`          → package root
+ *
+ * Previously the fallback was a naive `dirname(dirname(...))` which only
+ * climbed two levels, landing on `src/` (dev) or `dist/` (built) — neither
+ * contains the canonical assets (`docs/CLAUDE.md`, `skills/omc-reference/`)
+ * and phase 1 would fall through to the network download path. See Codex
+ * P1 review on PR #2529 for the regression context.
  */
 const DEFAULT_SCRIPT_PLUGIN_ROOT: string = (() => {
+  // Preferred: resolve from this module's own URL. Works in ESM and in
+  // CJS output when esbuild rewrites `import.meta.url` during bundling.
+  let start: string;
   try {
-    return dirname(dirname(fileURLToPath(import.meta.url)));
+    start = dirname(fileURLToPath(import.meta.url));
   } catch {
-    return process.cwd();
+    // Fallback for unusual runtimes where `import.meta.url` throws: walk
+    // from cwd, which is the only other meaningful hint we have.
+    start = process.cwd();
   }
+  return findPluginRootAncestor(start) ?? start;
 })();
 
 function isValidPluginRoot(candidate: string): boolean {

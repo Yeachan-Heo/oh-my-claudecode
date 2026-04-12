@@ -8590,6 +8590,18 @@ var init_hud_wrapper_template = __esm({
 });
 
 // src/setup/plugin-root.ts
+function findPluginRootAncestor(start) {
+  let current = start;
+  const { root: fsRoot } = (0, import_node_path3.parse)(current);
+  for (let i = 0; i < 32; i++) {
+    if ((0, import_node_fs3.existsSync)((0, import_node_path3.join)(current, "docs", "CLAUDE.md"))) return current;
+    if (current === fsRoot) return null;
+    const parent = (0, import_node_path3.dirname)(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return null;
+}
 function isValidPluginRoot(candidate) {
   try {
     return (0, import_node_fs3.existsSync)(candidate) && (0, import_node_fs3.existsSync)((0, import_node_path3.join)(candidate, "docs", "CLAUDE.md"));
@@ -8689,11 +8701,13 @@ var init_plugin_root = __esm({
     init_installer();
     SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
     DEFAULT_SCRIPT_PLUGIN_ROOT = (() => {
+      let start;
       try {
-        return (0, import_node_path3.dirname)((0, import_node_path3.dirname)((0, import_node_url.fileURLToPath)(importMetaUrl)));
+        start = (0, import_node_path3.dirname)((0, import_node_url.fileURLToPath)(importMetaUrl));
       } catch {
-        return process.cwd();
+        start = process.cwd();
       }
+      return findPluginRootAncestor(start) ?? start;
     })();
   }
 });
