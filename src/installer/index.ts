@@ -36,6 +36,7 @@ export const HOOKS_DIR = join(CLAUDE_CONFIG_DIR, 'hooks');
 export const HUD_DIR = join(CLAUDE_CONFIG_DIR, 'hud');
 export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
+const OMC_MANAGED_SKILL_MARKER = '.omc-managed';
 
 /**
  * Core commands - DISABLED for v3.0+
@@ -646,23 +647,19 @@ export function cleanupStaleSkills(log: (msg: string) => void): string[] {
   for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (currentSkillNames.has(entry.name)) continue;
+    if (entry.name === 'omc-learned') continue;
 
-    const skillMdPath = join(SKILLS_DIR, entry.name, 'SKILL.md');
+    const skillDir = join(SKILLS_DIR, entry.name);
+    const skillMdPath = join(skillDir, 'SKILL.md');
     if (!existsSync(skillMdPath)) continue;
+    if (!isOmcManagedSkillDir(skillDir)) continue;
 
-    // Check if this looks like an OMC-created skill (has standard frontmatter)
     try {
-      const content = readFileSync(skillMdPath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
-        // Skip user-learned skills (these are user-created)
-        if (entry.name === 'omc-learned') continue;
-
-        rmSync(join(SKILLS_DIR, entry.name), { recursive: true, force: true });
-        removed.push(entry.name);
-        log(`  Removed stale skill: ${entry.name}/`);
-      }
+      rmSync(skillDir, { recursive: true, force: true });
+      removed.push(entry.name);
+      log(`  Removed stale skill: ${entry.name}/`);
     } catch {
-      // Skip directories that can't be read
+      // Skip directories that can't be removed
     }
   }
 
@@ -954,6 +951,18 @@ function toSafeStandaloneSkillName(name: string): string {
     : normalized;
 }
 
+function getManagedSkillMarkerPath(skillDir: string): string {
+  return join(skillDir, OMC_MANAGED_SKILL_MARKER);
+}
+
+function markSkillAsOmcManaged(skillDir: string): void {
+  writeFileSync(getManagedSkillMarkerPath(skillDir), 'omc-managed\n');
+}
+
+function isOmcManagedSkillDir(skillDir: string): boolean {
+  return existsSync(getManagedSkillMarkerPath(skillDir));
+}
+
 function syncBundledSkillDefinitions(log: (msg: string) => void, options?: { safeStandaloneNames?: boolean }): string[] {
   const skillsDir = join(getPackageDir(), 'skills');
   const installedSkills: string[] = [];
@@ -991,6 +1000,7 @@ function syncBundledSkillDefinitions(log: (msg: string) => void, options?: { saf
     const relativePath = join(targetDirName, 'SKILL.md');
     const targetDir = join(SKILLS_DIR, targetDirName);
     cpSync(sourceDir, targetDir, { recursive: true, force: true });
+    markSkillAsOmcManaged(targetDir);
     installedSkills.push(relativePath.replace(/\\/g, '/'));
     log(`  Synced ${relativePath}`);
   }

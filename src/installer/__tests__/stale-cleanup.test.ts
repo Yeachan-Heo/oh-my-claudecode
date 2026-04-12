@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -38,6 +38,10 @@ function createUserSkillDir(dir: string, skillName: string): void {
   mkdirSync(skillDir, { recursive: true });
   // No frontmatter — just user prose
   writeFileSync(join(skillDir, 'SKILL.md'), `# My Custom Skill\n\nThis is a user-created skill.\n`);
+}
+
+function createManagedSkillMarker(dir: string, skillName: string): void {
+  writeFileSync(join(dir, skillName, '.omc-managed'), 'omc-managed\n');
 }
 
 // ── Stale Agent Cleanup ──────────────────────────────────────────────────────
@@ -152,14 +156,14 @@ describe('cleanupStaleSkills', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('removes skill directories that have OMC frontmatter but are no longer in the package', async () => {
+  it('removes stale skills only when OMC ownership is explicitly marked', async () => {
     vi.resetModules();
     const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
 
     mkdirSync(skillsDir, { recursive: true });
 
-    // Create a fake stale skill
     createSkillDir(skillsDir, 'removed-skill', 'removed-skill');
+    createManagedSkillMarker(skillsDir, 'removed-skill');
 
     const removed = cleanup(log);
 
@@ -194,6 +198,40 @@ describe('cleanupStaleSkills', () => {
 
     expect(removed).not.toContain('my-custom-skill');
     expect(existsSync(join(skillsDir, 'my-custom-skill'))).toBe(true);
+  });
+
+  it('preserves third-party skills with standard frontmatter when no OMC marker is present', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+    createSkillDir(skillsDir, 'gstack', 'gstack');
+
+    const removed = cleanup(log);
+
+    expect(removed).not.toContain('gstack');
+    expect(existsSync(join(skillsDir, 'gstack'))).toBe(true);
+  });
+
+  it('preserves symlinked skill directories without an OMC marker', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    const externalRoot = mkdtempSync(join(tmpdir(), 'omc-third-party-skill-'));
+    const externalSkillDir = join(externalRoot, 'linked-skill');
+    mkdirSync(externalSkillDir, { recursive: true });
+    writeFileSync(join(externalSkillDir, 'SKILL.md'), '---\nname: linked-skill\ndescription: external\n---\n\n# linked-skill\n');
+    symlinkSync(externalSkillDir, join(skillsDir, 'linked-skill'), 'dir');
+
+    try {
+      const removed = cleanup(log);
+      expect(removed).not.toContain('linked-skill');
+      expect(existsSync(join(skillsDir, 'linked-skill'))).toBe(true);
+    } finally {
+      rmSync(externalRoot, { recursive: true, force: true });
+    }
   });
 
   it('preserves omc-learned directory (user-created skills)', async () => {
