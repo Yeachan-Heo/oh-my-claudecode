@@ -80202,8 +80202,11 @@ function atomicWriteJson4(filePath, data) {
     throw err;
   }
 }
+var NOOP_LOGGER = () => {
+};
 function saveState(step, configType, opts) {
   const cwd2 = opts?.cwd ?? process.cwd();
+  const log3 = opts?.logger ?? NOOP_LOGGER;
   const stateFile = (0, import_node_path15.join)(cwd2, STATE_SUBPATH);
   const state = {
     lastCompletedStep: step,
@@ -80211,18 +80214,20 @@ function saveState(step, configType, opts) {
     configType
   };
   atomicWriteJson4(stateFile, state);
-  console.log(`Progress saved: step ${step} (${configType})`);
+  log3(`Progress saved: step ${step} (${configType})`);
 }
 function clearState2(opts) {
   const cwd2 = opts?.cwd ?? process.cwd();
+  const log3 = opts?.logger ?? NOOP_LOGGER;
   const stateFile = (0, import_node_path15.join)(cwd2, STATE_SUBPATH);
   if ((0, import_node_fs12.existsSync)(stateFile)) {
     (0, import_node_fs12.unlinkSync)(stateFile);
   }
-  console.log("Setup state cleared.");
+  log3("Setup state cleared.");
 }
 function resumeState(opts) {
   const cwd2 = opts?.cwd ?? process.cwd();
+  const log3 = opts?.logger ?? NOOP_LOGGER;
   const stateFile = (0, import_node_path15.join)(cwd2, STATE_SUBPATH);
   if (!(0, import_node_fs12.existsSync)(stateFile)) {
     return { status: "fresh" };
@@ -80245,13 +80250,13 @@ function resumeState(opts) {
   }
   const ageMs = Date.now() - savedTime;
   if (ageMs > TTL_MS) {
-    console.log("Previous setup state is more than 24 hours old. Starting fresh.");
+    log3("Previous setup state is more than 24 hours old. Starting fresh.");
     (0, import_node_fs12.unlinkSync)(stateFile);
     return { status: "fresh" };
   }
   const lastStep = parsed.lastCompletedStep ?? 0;
   const configType = parsed.configType ?? "unknown";
-  console.log(
+  log3(
     `Found previous setup session (Step ${lastStep} completed at ${parsed.timestamp}, configType=${configType})`
   );
   return {
@@ -80292,6 +80297,7 @@ function findFiles2(dir, name) {
 function completeSetup(version3, opts) {
   const cwd2 = opts?.cwd ?? process.cwd();
   const configDir = opts?.configDir ?? getClaudeConfigDir();
+  const log3 = opts?.logger ?? NOOP_LOGGER;
   const stateFile = (0, import_node_path15.join)(cwd2, STATE_SUBPATH);
   if ((0, import_node_fs12.existsSync)(stateFile)) {
     (0, import_node_fs12.unlinkSync)(stateFile);
@@ -80337,8 +80343,8 @@ function completeSetup(version3, opts) {
   };
   (0, import_node_fs12.mkdirSync)((0, import_node_path15.dirname)(configFile), { recursive: true });
   atomicWriteJson4(configFile, updated);
-  console.log("Setup completed successfully!");
-  console.log("Note: Future updates will only refresh CLAUDE.md, not the full setup wizard.");
+  log3("Setup completed successfully!");
+  log3("Note: Future updates will only refresh CLAUDE.md, not the full setup wizard.");
 }
 
 // src/setup/prompts.ts
@@ -80893,10 +80899,8 @@ async function runPhase3(options, logger, deps = {}) {
       {
         interactive: options.interactive,
         onMissingCredentials: options.mcp.onMissingCredentials,
-        // Plan: "every `claude mcp add` invocation MUST pass `--scope user`"
-        // Intentionally hard-coded here — not taken from `options.mcp.scope`,
-        // which is reserved for a future `--mcp-scope` CLI flag.
-        scope: "user",
+        // Honor --mcp-scope (default 'user' is set at the options layer).
+        scope: options.mcp.scope,
         logger
       }
     );
@@ -80911,8 +80915,9 @@ async function runPhase3(options, logger, deps = {}) {
   }
   let teamsConfigured = false;
   if (options.teams.enabled) {
+    const existingEnv = readExistingSettingsEnv(settingsPath);
     const settingsPatch = {
-      env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" }
+      env: { ...existingEnv, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" }
     };
     if (options.teams.displayMode !== "auto") {
       settingsPatch["teammateMode"] = options.teams.displayMode;
@@ -80933,6 +80938,23 @@ async function runPhase3(options, logger, deps = {}) {
     logger("Enabled agent teams (experimental)");
   }
   return { pluginVerified, mcpInstalled, mcpSkipped, teamsConfigured };
+}
+function readExistingSettingsEnv(settingsPath) {
+  if (!(0, import_node_fs13.existsSync)(settingsPath)) return {};
+  try {
+    const raw = (0, import_node_fs13.readFileSync)(settingsPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const env2 = parsed["env"];
+    if (env2 && typeof env2 === "object" && !Array.isArray(env2)) {
+      const out = {};
+      for (const [k, v] of Object.entries(env2)) {
+        out[k] = typeof v === "string" ? v : String(v);
+      }
+      return out;
+    }
+  } catch {
+  }
+  return {};
 }
 
 // src/setup/phases/phase4-welcome.ts
@@ -81005,7 +81027,7 @@ async function runPhase4(options, logger, context = {}, deps = {}) {
     } catch {
     }
   }
-  complete(version3, { cwd: cwd2, configDir });
+  complete(version3, { cwd: cwd2, configDir, logger });
 }
 var NEW_WELCOME_MESSAGE = `
 OMC Setup Complete!
@@ -81277,7 +81299,8 @@ async function runSetup(options, deps = {}) {
         const result = await installFn(options.mcp.servers, options.mcp.credentials, {
           interactive: options.interactive,
           onMissingCredentials: options.mcp.onMissingCredentials,
-          scope: "user",
+          // Honor --mcp-scope (default 'user' is set at the options layer).
+          scope: options.mcp.scope,
           prompter,
           logger: log3.info
         });
@@ -81341,18 +81364,18 @@ async function runSetup(options, deps = {}) {
         const result = await phase1Fn(options, log3.info, { configDir, cwd: cwd2 });
         phaseResults.phase1 = result;
         phasesRun.push("claude-md");
-        saveState(1, options.target, { cwd: cwd2 });
+        saveState(1, options.target, { cwd: cwd2, logger: log3.info });
       }
       if (options.phases.has("infra") && resumeFromStep < 2) {
         await phase2Fn(options, log3.info, { configDir, cwd: cwd2 });
         phasesRun.push("infra");
-        saveState(2, options.target, { cwd: cwd2 });
+        saveState(2, options.target, { cwd: cwd2, logger: log3.info });
       }
       if (options.phases.has("integrations") && resumeFromStep < 3) {
         const result = await phase3Fn(options, log3.info, { configDir, cwd: cwd2 });
         phaseResults.phase3 = result;
         phasesRun.push("integrations");
-        saveState(3, options.target, { cwd: cwd2 });
+        saveState(3, options.target, { cwd: cwd2, logger: log3.info });
       }
       if (options.phases.has("welcome") && resumeFromStep < 4) {
         await phase4Fn(
@@ -81362,7 +81385,7 @@ async function runSetup(options, deps = {}) {
           { configDir, cwd: cwd2, version: VERSION ?? "unknown" }
         );
         phasesRun.push("welcome");
-        saveState(4, options.target, { cwd: cwd2 });
+        saveState(4, options.target, { cwd: cwd2, logger: log3.info });
       }
       return { success: true, phasesRun, phaseResults, warnings, errors, exitCode: 0 };
     } catch (err) {

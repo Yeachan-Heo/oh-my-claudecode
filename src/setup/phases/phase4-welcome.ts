@@ -43,7 +43,14 @@ export interface Phase4Context {
 
 export interface Phase4Deps {
   /** Test seam: replace the completeSetup state helper. */
-  completeSetup?: (version: string, opts?: { cwd?: string; configDir?: string }) => void;
+  completeSetup?: (
+    version: string,
+    opts?: {
+      cwd?: string;
+      configDir?: string;
+      logger?: (msg: string) => void;
+    },
+  ) => void;
   /** Test seam: replace `execFileSync` (used for `gh repo star ...`). */
   execFileSync?: (
     file: string,
@@ -143,7 +150,7 @@ export async function runPhase4(
     }
   }
 
-  complete(version, { cwd, configDir });
+  complete(version, { cwd, configDir, logger });
 }
 
 // ─────────────────────── welcome message templates ──────────────────────

@@ -188,4 +188,56 @@ describe('state.ts', () => {
     const result = resumeState({ cwd });
     expect(result.status).toBe('fresh');
   });
+
+  // ── S1: state ops emit nothing to stdout when no logger is supplied ──────
+  // Regression for Codex P2: `--check-state` / `--state-resume` are JSON-
+  // producing machine interfaces; a stray `console.log` from resumeState
+  // corrupts a caller that parses stdout as a single JSON document.
+  it('S1: state ops are silent when no logger is supplied', () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    saveState(3, 'global', { cwd });
+    const res = resumeState({ cwd });
+    expect(res.status).toBe('resume');
+    clearState({ cwd });
+    completeSetup('4.11.5', { cwd, configDir });
+
+    // Neither stdout nor console.log should have been touched by the
+    // state helpers themselves.
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+
+    stdoutSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
+
+  // ── S2: state ops route through the injected logger when provided ───────
+  // Regression for Codex P2: saveState() used to bypass `--quiet` via a
+  // hard-coded console.log. Callers now pass a quiet-aware logger and the
+  // default remains silent.
+  it('S2: state ops call the injected logger instead of stdout when provided', () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const lines: string[] = [];
+    const logger = (line: string): void => { lines.push(line); };
+
+    saveState(2, 'local', { cwd, logger });
+    resumeState({ cwd, logger });
+    clearState({ cwd, logger });
+    completeSetup('4.11.5', { cwd, configDir, logger });
+
+    expect(lines).toContain('Progress saved: step 2 (local)');
+    expect(lines.some((l) => l.startsWith('Found previous setup session'))).toBe(true);
+    expect(lines).toContain('Setup state cleared.');
+    expect(lines).toContain('Setup completed successfully!');
+
+    // Still no direct stdout / console.log writes from the helpers.
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+
+    stdoutSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
 });

@@ -430,7 +430,8 @@ export async function runSetup(
         const result = await installFn(options.mcp.servers, options.mcp.credentials, {
           interactive: options.interactive,
           onMissingCredentials: options.mcp.onMissingCredentials,
-          scope: 'user',
+          // Honor --mcp-scope (default 'user' is set at the options layer).
+          scope: options.mcp.scope,
           prompter,
           logger: log.info,
         });
@@ -516,14 +517,14 @@ export async function runSetup(
         const result = await phase1Fn(options, log.info, { configDir, cwd });
         phaseResults.phase1 = result;
         phasesRun.push('claude-md');
-        saveState(1, options.target, { cwd });
+        saveState(1, options.target, { cwd, logger: log.info });
       }
 
       // Phase 2 — infra + preference writes.
       if (options.phases.has('infra') && resumeFromStep < 2) {
         await phase2Fn(options, log.info, { configDir, cwd });
         phasesRun.push('infra');
-        saveState(2, options.target, { cwd });
+        saveState(2, options.target, { cwd, logger: log.info });
       }
 
       // Phase 3 — integrations (MCP + teams).
@@ -531,7 +532,7 @@ export async function runSetup(
         const result = await phase3Fn(options, log.info, { configDir, cwd });
         phaseResults.phase3 = result;
         phasesRun.push('integrations');
-        saveState(3, options.target, { cwd });
+        saveState(3, options.target, { cwd, logger: log.info });
       }
 
       // Phase 4 — welcome + gh star + completion marker.
@@ -543,7 +544,7 @@ export async function runSetup(
           { configDir, cwd, version: VERSION ?? 'unknown' },
         );
         phasesRun.push('welcome');
-        saveState(4, options.target, { cwd });
+        saveState(4, options.target, { cwd, logger: log.info });
       }
 
       return { success: true, phasesRun, phaseResults, warnings, errors, exitCode: 0 };
