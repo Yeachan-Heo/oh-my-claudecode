@@ -100,10 +100,8 @@ export async function runPhase3(
       {
         interactive: options.interactive,
         onMissingCredentials: options.mcp.onMissingCredentials,
-        // Plan: "every `claude mcp add` invocation MUST pass `--scope user`"
-        // Intentionally hard-coded here — not taken from `options.mcp.scope`,
-        // which is reserved for a future `--mcp-scope` CLI flag.
-        scope: 'user',
+        // Honor --mcp-scope (default 'user' is set at the options layer).
+        scope: options.mcp.scope,
         logger,
       },
     );
@@ -120,8 +118,14 @@ export async function runPhase3(
   // 3. Teams config (opt-in).
   let teamsConfigured = false;
   if (options.teams.enabled) {
+    // Deep-merge the env patch by hand: `mergeSettingsJson` is a shallow
+    // top-level merge, so passing `{ env: { OUR_KEY: '1' } }` would replace
+    // any existing `settings.json.env` (proxy/model/API vars) wholesale.
+    // Read current env first, combine, then hand the already-merged object
+    // to the shallow writer.
+    const existingEnv = readExistingSettingsEnv(settingsPath);
     const settingsPatch: Record<string, unknown> = {
-      env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' },
+      env: { ...existingEnv, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' },
     };
     if (options.teams.displayMode !== 'auto') {
       settingsPatch['teammateMode'] = options.teams.displayMode;
@@ -145,4 +149,32 @@ export async function runPhase3(
   }
 
   return { pluginVerified, mcpInstalled, mcpSkipped, teamsConfigured };
+}
+
+/**
+ * Read `settings.json.env` as a plain object, returning `{}` when the file
+ * is missing, unreadable, invalid JSON, or has a non-object `env`. Used to
+ * guard against `mergeSettingsJson`'s shallow top-level merge wiping user
+ * proxy/model/API env vars when the teams patch is written.
+ */
+function readExistingSettingsEnv(settingsPath: string): Record<string, string> {
+  if (!existsSync(settingsPath)) return {};
+  try {
+    const raw = readFileSync(settingsPath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const env = parsed['env'];
+    if (env && typeof env === 'object' && !Array.isArray(env)) {
+      // Stringify non-string values defensively — `settings.json.env` should
+      // only contain strings, but we never want to crash the setup pipeline
+      // on a user-authored file that strays from the schema.
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+        out[k] = typeof v === 'string' ? v : String(v);
+      }
+      return out;
+    }
+  } catch {
+    /* fall through → empty */
+  }
+  return {};
 }

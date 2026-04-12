@@ -89,7 +89,10 @@ describe('runPhase4', () => {
     expect(lines.some((l) => l.includes('Upgraded from 2.x'))).toBe(false);
     expect(lines.some((l) => l.includes('Your existing commands still work'))).toBe(false);
 
-    expect(complete).toHaveBeenCalledWith('4.12.0', { cwd, configDir });
+    expect(complete).toHaveBeenCalledWith(
+      '4.12.0',
+      expect.objectContaining({ cwd, configDir }),
+    );
   });
 
   it('logs the upgrade welcome message when context.isUpgrade=true', async () => {
@@ -184,6 +187,9 @@ describe('runPhase4', () => {
       { isUpgrade: false },
       { completeSetup: complete, execFileSync: vi.fn(), configDir, cwd, version: '9.9.9-test' },
     );
-    expect(complete).toHaveBeenCalledWith('9.9.9-test', { cwd, configDir });
+    expect(complete).toHaveBeenCalledWith(
+      '9.9.9-test',
+      expect.objectContaining({ cwd, configDir }),
+    );
   });
 });

@@ -56,15 +56,26 @@ function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
+ * Optional human-readable side-band logger. Defaults to silent so
+ * machine-parseable callers (`--check-state`, `--state-resume`, …) can
+ * emit only the JSON payload they produce. Callers that want progress
+ * lines (e.g. the interactive wizard between phases) pass a quiet-aware
+ * logger (`log.info`) from `runSetup`.
+ */
+type StateLogger = (msg: string) => void;
+const NOOP_LOGGER: StateLogger = () => {};
+
+/**
  * Save setup progress to .omc/state/setup-state.json.
  * Creates the directory recursively if missing.
  */
 export function saveState(
   step: number,
   configType: string,
-  opts?: { cwd?: string },
+  opts?: { cwd?: string; logger?: StateLogger },
 ): void {
   const cwd = opts?.cwd ?? process.cwd();
+  const log = opts?.logger ?? NOOP_LOGGER;
   const stateFile = join(cwd, STATE_SUBPATH);
 
   const state: StateFile = {
@@ -74,20 +85,21 @@ export function saveState(
   };
 
   atomicWriteJson(stateFile, state);
-  console.log(`Progress saved: step ${step} (${configType})`);
+  log(`Progress saved: step ${step} (${configType})`);
 }
 
 /**
  * Remove .omc/state/setup-state.json if it exists. Silent no-op if missing.
  */
-export function clearState(opts?: { cwd?: string }): void {
+export function clearState(opts?: { cwd?: string; logger?: StateLogger }): void {
   const cwd = opts?.cwd ?? process.cwd();
+  const log = opts?.logger ?? NOOP_LOGGER;
   const stateFile = join(cwd, STATE_SUBPATH);
 
   if (existsSync(stateFile)) {
     unlinkSync(stateFile);
   }
-  console.log('Setup state cleared.');
+  log('Setup state cleared.');
 }
 
 /**
@@ -95,8 +107,9 @@ export function clearState(opts?: { cwd?: string }): void {
  * Returns fresh if missing, corrupted, stale (>24h), or missing timestamp.
  * Returns resume data if valid and within TTL.
  */
-export function resumeState(opts?: { cwd?: string }): ResumeResult {
+export function resumeState(opts?: { cwd?: string; logger?: StateLogger }): ResumeResult {
   const cwd = opts?.cwd ?? process.cwd();
+  const log = opts?.logger ?? NOOP_LOGGER;
   const stateFile = join(cwd, STATE_SUBPATH);
 
   if (!existsSync(stateFile)) {
@@ -126,14 +139,14 @@ export function resumeState(opts?: { cwd?: string }): ResumeResult {
 
   const ageMs = Date.now() - savedTime;
   if (ageMs > TTL_MS) {
-    console.log('Previous setup state is more than 24 hours old. Starting fresh.');
+    log('Previous setup state is more than 24 hours old. Starting fresh.');
     unlinkSync(stateFile);
     return { status: 'fresh' };
   }
 
   const lastStep = parsed.lastCompletedStep ?? 0;
   const configType = parsed.configType ?? 'unknown';
-  console.log(
+  log(
     `Found previous setup session (Step ${lastStep} completed at ${parsed.timestamp}, configType=${configType})`,
   );
 
@@ -187,10 +200,11 @@ function findFiles(dir: string, name: string): string[] {
  */
 export function completeSetup(
   version: string,
-  opts?: { cwd?: string; configDir?: string },
+  opts?: { cwd?: string; configDir?: string; logger?: StateLogger },
 ): void {
   const cwd = opts?.cwd ?? process.cwd();
   const configDir = opts?.configDir ?? getClaudeConfigDir();
+  const log = opts?.logger ?? NOOP_LOGGER;
   const stateFile = join(cwd, STATE_SUBPATH);
 
   // Delete the in-progress state file
@@ -250,6 +264,6 @@ export function completeSetup(
   mkdirSync(dirname(configFile), { recursive: true });
   atomicWriteJson(configFile, updated);
 
-  console.log('Setup completed successfully!');
-  console.log('Note: Future updates will only refresh CLAUDE.md, not the full setup wizard.');
+  log('Setup completed successfully!');
+  log('Note: Future updates will only refresh CLAUDE.md, not the full setup wizard.');
 }
