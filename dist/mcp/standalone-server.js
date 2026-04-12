@@ -10,108 +10,9 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
-import { lspTools } from '../tools/lsp-tools.js';
-import { astTools } from '../tools/ast-tools.js';
-// IMPORTANT: Import from tool.js, NOT index.js!
-// tool.js exports pythonReplTool with wrapped handler returning { content: [...] }
-// index.js exports pythonReplTool with raw handler returning string
-import { pythonReplTool } from '../tools/python-repl/tool.js';
-import { stateTools } from '../tools/state-tools.js';
-import { notepadTools } from '../tools/notepad-tools.js';
-import { memoryTools } from '../tools/memory-tools.js';
-import { traceTools } from '../tools/trace-tools.js';
 import { registerStandaloneShutdownHandlers } from './standalone-shutdown.js';
 import { cleanupOwnedBridgeSessions } from '../tools/python-repl/bridge-manager.js';
-import { z } from 'zod';
-// Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
-// Team runtime tools (omc_run_team_start, omc_run_team_status) live in the
-// separate "team" MCP server (bridge/team-mcp.cjs) registered in .mcp.json.
-const allTools = [
-    ...lspTools,
-    ...astTools,
-    pythonReplTool,
-    ...stateTools,
-    ...notepadTools,
-    ...memoryTools,
-    ...traceTools,
-];
-// Convert Zod schema to JSON Schema for MCP
-function zodToJsonSchema(schema) {
-    // Handle both ZodObject and raw shape
-    const rawShape = schema instanceof z.ZodObject ? schema.shape : schema;
-    const properties = {};
-    const required = [];
-    for (const [key, value] of Object.entries(rawShape)) {
-        const zodType = value;
-        properties[key] = zodTypeToJsonSchema(zodType);
-        // Check if required (not optional) - with safety check
-        const isOptional = zodType && typeof zodType.isOptional === 'function' && zodType.isOptional();
-        if (!isOptional) {
-            required.push(key);
-        }
-    }
-    return {
-        type: 'object',
-        properties,
-        required
-    };
-}
-function zodTypeToJsonSchema(zodType) {
-    const result = {};
-    // Safety check for undefined zodType
-    if (!zodType || !zodType._def) {
-        return { type: 'string' };
-    }
-    // Handle optional wrapper
-    if (zodType instanceof z.ZodOptional) {
-        return zodTypeToJsonSchema(zodType._def.innerType);
-    }
-    // Handle default wrapper
-    if (zodType instanceof z.ZodDefault) {
-        const inner = zodTypeToJsonSchema(zodType._def.innerType);
-        inner.default = zodType._def.defaultValue();
-        return inner;
-    }
-    // Get description if available
-    const description = zodType._def?.description;
-    if (description) {
-        result.description = description;
-    }
-    // Handle basic types
-    if (zodType instanceof z.ZodString) {
-        result.type = 'string';
-    }
-    else if (zodType instanceof z.ZodNumber) {
-        result.type = zodType._def?.checks?.some((c) => c.kind === 'int')
-            ? 'integer'
-            : 'number';
-    }
-    else if (zodType instanceof z.ZodBoolean) {
-        result.type = 'boolean';
-    }
-    else if (zodType instanceof z.ZodArray) {
-        result.type = 'array';
-        result.items = zodType._def?.type ? zodTypeToJsonSchema(zodType._def.type) : { type: 'string' };
-    }
-    else if (zodType instanceof z.ZodEnum) {
-        result.type = 'string';
-        result.enum = zodType._def?.values;
-    }
-    else if (zodType instanceof z.ZodObject) {
-        return zodToJsonSchema(zodType.shape);
-    }
-    else if (zodType instanceof z.ZodRecord) {
-        // Handle z.record() - maps to JSON object with additionalProperties
-        result.type = 'object';
-        if (zodType._def?.valueType) {
-            result.additionalProperties = zodTypeToJsonSchema(zodType._def.valueType);
-        }
-    }
-    else {
-        result.type = 'string';
-    }
-    return result;
-}
+import { allTools, buildListToolsResponse } from './tool-registry.js';
 // Create the MCP server
 const server = new Server({
     name: 't',
@@ -121,17 +22,8 @@ const server = new Server({
         tools: {},
     },
 });
-// List available tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-        tools: allTools.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: zodToJsonSchema(tool.schema),
-            ...(tool.annotations ? { annotations: tool.annotations } : {}),
-        })),
-    };
-});
+// List available tools — delegates to tool-registry so tests exercise the same path.
+server.setRequestHandler(ListToolsRequestSchema, async () => buildListToolsResponse());
 // Handle tool calls
 const setStandaloneCallToolRequestHandler = server.setRequestHandler.bind(server);
 setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {

@@ -15,32 +15,9 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { lspTools } from '../tools/lsp-tools.js';
-import { astTools } from '../tools/ast-tools.js';
-// IMPORTANT: Import from tool.js, NOT index.js!
-// tool.js exports pythonReplTool with wrapped handler returning { content: [...] }
-// index.js exports pythonReplTool with raw handler returning string
-import { pythonReplTool } from '../tools/python-repl/tool.js';
-import { stateTools } from '../tools/state-tools.js';
-import { notepadTools } from '../tools/notepad-tools.js';
-import { memoryTools } from '../tools/memory-tools.js';
-import { traceTools } from '../tools/trace-tools.js';
-import { sharedMemoryTools } from '../tools/shared-memory-tools.js';
-import { deepinitManifestTool } from '../tools/deepinit-manifest.js';
-import { wikiTools } from '../tools/wiki-tools.js';
-import { skillsTools } from '../tools/skills-tools.js';
 import { registerStandaloneShutdownHandlers } from './standalone-shutdown.js';
 import { cleanupOwnedBridgeSessions } from '../tools/python-repl/bridge-manager.js';
-import { z } from 'zod';
-
-// Tool interface matching our tool definitions
-interface ToolDef {
-  name: string;
-  description: string;
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
-  schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>;
-  handler: (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
-}
+import { allTools, buildListToolsResponse } from './tool-registry.js';
 
 type StandaloneCallToolHandler = (
   request: CallToolRequest,
@@ -50,109 +27,6 @@ type StandaloneCallToolRequestRegistrar = (
   schema: typeof CallToolRequestSchema,
   handler: StandaloneCallToolHandler,
 ) => void;
-
-// Aggregate all tools - AST tools gracefully degrade if @ast-grep/napi is unavailable
-// Team runtime tools (omc_run_team_start, omc_run_team_status) live in the
-// separate "team" MCP server (bridge/team-mcp.cjs) registered in .mcp.json.
-const allTools: ToolDef[] = [
-  ...(lspTools as unknown as ToolDef[]),
-  ...(astTools as unknown as ToolDef[]),
-  pythonReplTool as unknown as ToolDef,
-  ...(stateTools as unknown as ToolDef[]),
-  ...(notepadTools as unknown as ToolDef[]),
-  ...(memoryTools as unknown as ToolDef[]),
-  ...(traceTools as unknown as ToolDef[]),
-  ...(sharedMemoryTools as unknown as ToolDef[]),
-  deepinitManifestTool as unknown as ToolDef,
-  ...(wikiTools as unknown as ToolDef[]),
-  ...(skillsTools as unknown as ToolDef[]),
-];
-
-// Convert Zod schema to JSON Schema for MCP
-function zodToJsonSchema(schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>): {
-  type: 'object';
-  properties: Record<string, unknown>;
-  required: string[];
-} {
-  // Handle both ZodObject and raw shape
-  const rawShape = schema instanceof z.ZodObject ? schema.shape : schema;
-
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-
-  for (const [key, value] of Object.entries(rawShape)) {
-    const zodType = value as z.ZodTypeAny;
-    properties[key] = zodTypeToJsonSchema(zodType);
-
-    // Check if required (not optional) - with safety check
-    const isOptional = zodType && typeof zodType.isOptional === 'function' && zodType.isOptional();
-    if (!isOptional) {
-      required.push(key);
-    }
-  }
-
-  return {
-    type: 'object',
-    properties,
-    required
-  };
-}
-
-function zodTypeToJsonSchema(zodType: z.ZodTypeAny): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  // Safety check for undefined zodType
-  if (!zodType || !zodType._def) {
-    return { type: 'string' };
-  }
-
-  // Handle optional wrapper
-  if (zodType instanceof z.ZodOptional) {
-    return zodTypeToJsonSchema(zodType._def.innerType);
-  }
-
-  // Handle default wrapper
-  if (zodType instanceof z.ZodDefault) {
-    const inner = zodTypeToJsonSchema(zodType._def.innerType);
-    inner.default = zodType._def.defaultValue();
-    return inner;
-  }
-
-  // Get description if available
-  const description = zodType._def?.description;
-  if (description) {
-    result.description = description;
-  }
-
-  // Handle basic types
-  if (zodType instanceof z.ZodString) {
-    result.type = 'string';
-  } else if (zodType instanceof z.ZodNumber) {
-    result.type = zodType._def?.checks?.some((c: { kind: string }) => c.kind === 'int')
-      ? 'integer'
-      : 'number';
-  } else if (zodType instanceof z.ZodBoolean) {
-    result.type = 'boolean';
-  } else if (zodType instanceof z.ZodArray) {
-    result.type = 'array';
-    result.items = zodType._def?.type ? zodTypeToJsonSchema(zodType._def.type) : { type: 'string' };
-  } else if (zodType instanceof z.ZodEnum) {
-    result.type = 'string';
-    result.enum = zodType._def?.values;
-  } else if (zodType instanceof z.ZodObject) {
-    return zodToJsonSchema(zodType.shape);
-  } else if (zodType instanceof z.ZodRecord) {
-    // Handle z.record() - maps to JSON object with additionalProperties
-    result.type = 'object';
-    if (zodType._def?.valueType) {
-      result.additionalProperties = zodTypeToJsonSchema(zodType._def.valueType);
-    }
-  } else {
-    result.type = 'string';
-  }
-
-  return result;
-}
 
 // Create the MCP server
 const server = new Server(
@@ -167,17 +41,8 @@ const server = new Server(
   }
 );
 
-// List available tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: allTools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: zodToJsonSchema(tool.schema),
-      ...(tool.annotations ? { annotations: tool.annotations } : {}),
-    })),
-  };
-});
+// List available tools — delegates to tool-registry so tests exercise the same path.
+server.setRequestHandler(ListToolsRequestSchema, async () => buildListToolsResponse());
 
 // Handle tool calls
 const setStandaloneCallToolRequestHandler =
