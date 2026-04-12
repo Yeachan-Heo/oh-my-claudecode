@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+const originalOmcPluginRoot = process.env.OMC_PLUGIN_ROOT;
 const originalHome = process.env.HOME;
 
 let testClaudeDir: string;
@@ -24,6 +25,7 @@ describe('install() standalone hook reconciliation', () => {
     process.env.CLAUDE_CONFIG_DIR = testClaudeDir;
     process.env.HOME = testHomeDir;
     delete process.env.CLAUDE_PLUGIN_ROOT;
+    delete process.env.OMC_PLUGIN_ROOT;
   });
 
   afterEach(() => {
@@ -38,6 +40,11 @@ describe('install() standalone hook reconciliation', () => {
       process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
     } else {
       delete process.env.CLAUDE_PLUGIN_ROOT;
+    }
+    if (originalOmcPluginRoot !== undefined) {
+      process.env.OMC_PLUGIN_ROOT = originalOmcPluginRoot;
+    } else {
+      delete process.env.OMC_PLUGIN_ROOT;
     }
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;

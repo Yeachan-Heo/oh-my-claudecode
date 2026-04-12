@@ -61,6 +61,8 @@ function mockPlatform(platform: NodeJS.Platform): void {
 describe('auto-update reconciliation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.OMC_PLUGIN_ROOT;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
     mockedCpSync.mockImplementation(() => undefined);
     mockedExistsSync.mockReturnValue(true);
     mockedIsProjectScopedPlugin.mockReturnValue(false);
@@ -95,6 +97,7 @@ describe('auto-update reconciliation', () => {
     vi.unstubAllGlobals();
     delete process.env.OMC_UPDATE_RECONCILE;
     delete process.env.CLAUDE_PLUGIN_ROOT;
+    delete process.env.OMC_PLUGIN_ROOT;
     if (originalPlatformDescriptor) {
       Object.defineProperty(process, 'platform', originalPlatformDescriptor);
     }

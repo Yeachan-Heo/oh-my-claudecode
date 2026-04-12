@@ -55,6 +55,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
   let homeDir: string;
   let claudeConfigDir: string;
   let originalClaudeConfigDir: string | undefined;
+  let originalOmcPluginRoot: string | undefined;
   let originalHome: string | undefined;
 
   beforeEach(() => {
@@ -65,7 +66,9 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     mkdirSync(claudeConfigDir, { recursive: true });
 
     originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    originalOmcPluginRoot = process.env.OMC_PLUGIN_ROOT;
     originalHome = process.env.HOME;
+    delete process.env.OMC_PLUGIN_ROOT;
   });
 
   afterEach(() => {
@@ -73,6 +76,12 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
       delete process.env.CLAUDE_CONFIG_DIR;
     } else {
       process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+
+    if (originalOmcPluginRoot === undefined) {
+      delete process.env.OMC_PLUGIN_ROOT;
+    } else {
+      process.env.OMC_PLUGIN_ROOT = originalOmcPluginRoot;
     }
 
     if (originalHome === undefined) {
