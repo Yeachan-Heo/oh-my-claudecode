@@ -135,6 +135,7 @@ OMC Ultrawork = "특수부대 작전 반"
 결론: "순식간에 많은 작업" → OMC Ultrawork ⚡
 이런대화가 한번이라면 몇번할수있을까 오픈라우터 20달러 결제기준 api로`,
             'The article said "OMC Ultrawork", but why is the answer the same?',
+            'OMC Ultrawork = "special ops". how much would it cost?',
         ]) {
             expect(runKeywordHook(templatePath, prompt)).toEqual({ continue: true, suppressOutput: true });
             expect(runKeywordHook(pluginPath, prompt)).toEqual({ continue: true, suppressOutput: true });

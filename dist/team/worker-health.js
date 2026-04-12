@@ -2,12 +2,12 @@
 import { listMcpWorkers } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
 import { isSessionAlive, sanitizeName } from './tmux-session.js';
-import { execFileSync } from 'child_process';
+import { tmuxExec } from '../cli/tmux-utils.js';
 /** Check if the shared split-pane session 'omc-team-{teamName}' exists (new tmux model). */
 function isSharedSessionAlive(teamName) {
     const name = `omc-team-${sanitizeName(teamName)}`;
     try {
-        execFileSync('tmux', ['has-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
+        tmuxExec(['has-session', '-t', name], { stdio: 'pipe', timeout: 5000 });
         return true;
     }
     catch {

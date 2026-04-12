@@ -3,12 +3,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analyzePaneContent, isTmuxAvailable, listTmuxPanes, capturePaneContent, formatBlockedPanesSummary, } from '../../features/rate-limit-wait/tmux-detector.js';
-// Mock child_process
-vi.mock('child_process', () => ({
-    execFileSync: vi.fn(),
-    spawnSync: vi.fn(),
-}));
-import { execFileSync, spawnSync } from 'child_process';
+// Mock tmux-utils wrappers
+vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return { ...actual, tmuxExec: vi.fn(), tmuxSpawn: vi.fn() };
+});
+import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 describe('tmux-detector', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -103,7 +103,7 @@ describe('tmux-detector', () => {
     });
     describe('isTmuxAvailable', () => {
         it('should return true when tmux is installed', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 0,
                 stdout: '/usr/bin/tmux\n',
                 stderr: '',
@@ -114,7 +114,7 @@ describe('tmux-detector', () => {
             expect(isTmuxAvailable()).toBe(true);
         });
         it('should return false when tmux is not installed', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 1,
                 stdout: '',
                 stderr: '',
@@ -125,7 +125,7 @@ describe('tmux-detector', () => {
             expect(isTmuxAvailable()).toBe(false);
         });
         it('should return false when spawnSync throws', () => {
-            vi.mocked(spawnSync).mockImplementation(() => {
+            vi.mocked(tmuxSpawn).mockImplementation(() => {
                 throw new Error('Command not found');
             });
             expect(isTmuxAvailable()).toBe(false);
@@ -133,7 +133,7 @@ describe('tmux-detector', () => {
     });
     describe('listTmuxPanes', () => {
         it('should parse tmux pane list correctly', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 0,
                 stdout: '/usr/bin/tmux',
                 stderr: '',
@@ -141,7 +141,7 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execFileSync).mockReturnValue('main:0.0 %0 1 dev Claude\nmain:0.1 %1 0 dev Other\n');
+            vi.mocked(tmuxExec).mockReturnValue('main:0.0 %0 1 dev Claude\nmain:0.1 %1 0 dev Other\n');
             const panes = listTmuxPanes();
             expect(panes).toHaveLength(2);
             expect(panes[0]).toEqual({
@@ -164,7 +164,7 @@ describe('tmux-detector', () => {
             });
         });
         it('should return empty array when tmux not available', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 1,
                 stdout: '',
                 stderr: '',
@@ -178,7 +178,7 @@ describe('tmux-detector', () => {
     });
     describe('capturePaneContent', () => {
         it('should capture pane content', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 0,
                 stdout: '/usr/bin/tmux',
                 stderr: '',
@@ -186,13 +186,13 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execFileSync).mockReturnValue('Line 1\nLine 2\nLine 3\n');
+            vi.mocked(tmuxExec).mockReturnValue('Line 1\nLine 2\nLine 3\n');
             const content = capturePaneContent('%0', 3);
             expect(content).toBe('Line 1\nLine 2\nLine 3\n');
-            expect(execFileSync).toHaveBeenCalledWith('tmux', ['capture-pane', '-t', '%0', '-p', '-S', '-3'], expect.any(Object));
+            expect(tmuxExec).toHaveBeenCalledWith(['capture-pane', '-t', '%0', '-p', '-S', '-3'], expect.any(Object));
         });
         it('should return empty string when tmux not available', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 1,
                 stdout: '',
                 stderr: '',
@@ -206,7 +206,7 @@ describe('tmux-detector', () => {
     });
     describe('security: input validation', () => {
         it('should reject invalid pane IDs in capturePaneContent', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 0,
                 stdout: '/usr/bin/tmux',
                 stderr: '',
@@ -215,7 +215,7 @@ describe('tmux-detector', () => {
                 output: [],
             });
             // Valid pane ID should work
-            vi.mocked(execFileSync).mockReturnValue('content');
+            vi.mocked(tmuxExec).mockReturnValue('content');
             const validResult = capturePaneContent('%0');
             expect(validResult).toBe('content');
             // Invalid pane IDs should return empty string (not execute command)
@@ -229,13 +229,13 @@ describe('tmux-detector', () => {
                 'abc',
             ];
             for (const invalidId of invalidIds) {
-                vi.mocked(execFileSync).mockClear();
+                vi.mocked(tmuxExec).mockClear();
                 const result = capturePaneContent(invalidId);
                 expect(result).toBe('');
             }
         });
         it('should validate lines parameter bounds', () => {
-            vi.mocked(spawnSync).mockReturnValue({
+            vi.mocked(tmuxSpawn).mockReturnValue({
                 status: 0,
                 stdout: '/usr/bin/tmux',
                 stderr: '',
@@ -243,14 +243,14 @@ describe('tmux-detector', () => {
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execFileSync).mockReturnValue('content');
+            vi.mocked(tmuxExec).mockReturnValue('content');
             // Should clamp negative to 1
             capturePaneContent('%0', -5);
-            expect(execFileSync).toHaveBeenCalledWith('tmux', expect.arrayContaining(['-S', '-1']), expect.any(Object));
+            expect(tmuxExec).toHaveBeenCalledWith(expect.arrayContaining(['-S', '-1']), expect.any(Object));
             // Should clamp excessive values to 100
-            vi.mocked(execFileSync).mockClear();
+            vi.mocked(tmuxExec).mockClear();
             capturePaneContent('%0', 1000);
-            expect(execFileSync).toHaveBeenCalledWith('tmux', expect.arrayContaining(['-S', '-100']), expect.any(Object));
+            expect(tmuxExec).toHaveBeenCalledWith(expect.arrayContaining(['-S', '-100']), expect.any(Object));
         });
     });
     describe('formatBlockedPanesSummary', () => {

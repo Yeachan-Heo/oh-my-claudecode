@@ -11,14 +11,23 @@
  */
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { join } from 'path';
-import { writeFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { writeFileSync, existsSync, readFileSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { loadConfig, getConfigPaths, } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
 import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
-import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
+import { install as installOmc, isInstalled, getInstallInfo, isRunningAsPlugin, getInstalledOmcPluginRoots, pruneStandaloneDuplicatesForPluginMode, previewStandaloneDuplicatesForPluginMode, } from '../installer/index.js';
+import { uninstall as runUninstall } from '../installer/uninstall.js';
+import { runSetup, readAlreadyConfigured } from '../setup/index.js';
+import { mapSetupCommanderOpts, loadPreset, resolveOptions, InvalidOptionsError, } from '../setup/options.js';
+import { SAFE_DEFAULTS, dumpSafeDefaultsAsJson } from '../setup/safe-defaults.js';
+import { buildPreset } from '../setup/preset-builder.js';
+import { createReadlinePrompter } from '../setup/prompts.js';
+import { runInteractiveWizard } from '../setup/wizard-prompts.js';
+import { isNonInteractive } from '../hooks/non-interactive-env/detector.js';
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 import { sessionSearchCommand } from './commands/session-search.js';
@@ -1092,90 +1101,616 @@ Examples:
  * - Reconciles runtime state after updates
  * - Shows clear summary of what was installed/updated
  */
-program
-    .command('setup')
-    .description('Run OMC setup to sync all components (hooks, agents, skills)')
-    .option('-f, --force', 'Force reinstall even if already up to date')
-    .option('-q, --quiet', 'Suppress output except for errors')
-    .option('--no-plugin', 'Install bundled skills from the current package instead of relying on plugin-provided skills')
-    .option('--plugin-dir-mode', 'Treat OMC as launched via --plugin-dir at runtime (skip agent/skill copy; HUD + hooks + CLAUDE.md still installed)')
-    .option('--skip-hooks', 'Skip hook installation')
-    .option('--force-hooks', 'Force reinstall hooks even if unchanged')
-    .addHelpText('after', `
-Examples:
-  $ omc setup                     Sync all OMC components
-  $ omc setup --force             Force reinstall everything
-  $ omc setup --no-plugin         Force local bundled skill installation
-  $ omc setup --plugin-dir-mode   Skip agent/skill copy (used with claude --plugin-dir)
-  $ omc setup --quiet             Silent setup for scripts
-  $ omc setup --skip-hooks        Install without hooks
-  $ omc setup --force-hooks       Force reinstall hooks`)
-    .action(async (options) => {
-    if (!options.quiet) {
-        console.log(chalk.blue('Oh-My-ClaudeCode Setup\n'));
+/**
+ * Emit a one-shot stderr advisory for `--skip-hooks` (non-regression #2).
+ *
+ * The flag now actually skips hook installation (previously a no-op),
+ * so we warn scripts that silently relied on the old behavior. Suppressed
+ * on repeat invocations via a daily sentinel under
+ * `$XDG_STATE_HOME/omc/` (fallback: `$HOME/.omc/state/`) — don't spam
+ * `omc setup --skip-hooks` in a tight loop.
+ */
+export function emitSkipHooksAdvisory(stderr = process.stderr) {
+    try {
+        const stateDir = process.env.XDG_STATE_HOME
+            ? join(process.env.XDG_STATE_HOME, 'omc')
+            : join(homedir(), '.omc', 'state');
+        const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const sentinel = join(stateDir, `skip-hooks-advised-${today}`);
+        if (existsSync(sentinel))
+            return;
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(sentinel, '', 'utf-8');
     }
-    // Step 1: Run installation (which handles hooks, agents, skills)
-    if (!options.quiet) {
-        console.log(chalk.gray('Syncing OMC components...'));
+    catch {
+        // Sentinel write best-effort: if it fails we just re-emit the advisory.
     }
-    // Commander exposes negated flags like `--no-plugin` as `options.plugin === false`
-    // rather than `options.noPlugin`. Keep the installer API explicit.
-    const useLocalBundledSkills = options.plugin === false;
-    // Dev plugin-dir mode: skip agent/skill copy because the plugin already
-    // provides them at runtime via `claude --plugin-dir <path>` (or `omc --plugin-dir`).
-    // Auto-detected from OMC_PLUGIN_ROOT (set by `omc --plugin-dir` in src/cli/launch.ts).
-    let pluginDirMode = !!options.pluginDirMode;
-    if (!pluginDirMode && process.env[OMC_PLUGIN_ROOT_ENV]) {
-        pluginDirMode = true;
+    stderr.write(chalk.yellow('warning: --skip-hooks is now honored (previously a no-op). ' +
+        'This flag is deprecated and will be removed in a future release. ' +
+        'Hooks will NOT be installed for this run.\n'));
+}
+/**
+ * `--build-preset` internal subcommand implementation.
+ *
+ * Reads `--answers <file>` as JSON, runs `buildPreset()` to produce a
+ * validated `SetupOptions`, serializes to JSON, and writes to `--out`.
+ * Exit 0 on success, non-zero on invalid answers / IO errors.
+ *
+ * This mirrors the skill's contract: skill collects answers → writes
+ * JSON to tmp file → invokes `omc setup --build-preset` → invokes
+ * `omc setup --preset <out>`. All decision logic lives in the pure
+ * `buildPreset()` function which is exhaustively unit-tested.
+ */
+export function runBuildPreset(answersPath, outPath, stderr = process.stderr) {
+    if (!existsSync(answersPath)) {
+        stderr.write(chalk.red(`--build-preset: answers file not found: ${answersPath}\n`));
+        return 1;
+    }
+    let answers;
+    try {
+        const raw = readFileSync(answersPath, 'utf-8');
+        answers = JSON.parse(raw);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        stderr.write(chalk.red(`--build-preset: could not parse ${answersPath}: ${msg}\n`));
+        return 1;
+    }
+    let resolved;
+    try {
+        resolved = buildPreset(answers);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        stderr.write(chalk.red(`--build-preset: ${msg}\n`));
+        return 2;
+    }
+    // Serialize. `SetupOptions.phases` is a Set — convert to an array for
+    // the preset schema, which loadPreset() re-inflates via presetToPartial.
+    const serializable = {
+        ...resolved,
+        phases: Array.from(resolved.phases),
+    };
+    try {
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, JSON.stringify(serializable, null, 2), 'utf-8');
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        stderr.write(chalk.red(`--build-preset: could not write ${outPath}: ${msg}\n`));
+        return 1;
+    }
+    // Echo the output path on stdout so wrappers can pipe it.
+    process.stdout.write(`${outPath}\n`);
+    return 0;
+}
+/**
+ * Convert `SAFE_DEFAULTS` into a `Partial<SetupOptions>` so `resolveOptions`
+ * can merge it as a preset-equivalent base layer. Deep-clones the `mcp`,
+ * `teams`, `installerOptions`, `hud`, and `phases` fields to prevent callers
+ * from mutating the frozen top-level constant.
+ */
+/**
+ * Check whether the global base CLAUDE.md at `$CLAUDE_CONFIG_DIR/CLAUDE.md`
+ * exists and is missing OMC markers. Used by the interactive wizard to
+ * decide whether to ask the `installStyle` question (overwrite vs. preserve
+ * into `CLAUDE-omc.md`). Returns `false` when:
+ *   - the file doesn't exist (nothing to preserve)
+ *   - the file already contains `<!-- OMC:BEGIN -->` (already an OMC file)
+ *   - filesystem / encoding errors (fail safe: don't prompt)
+ */
+function hasNonOmcBaseClaudeMd() {
+    try {
+        const basePath = join(getClaudeConfigDir(), 'CLAUDE.md');
+        if (!existsSync(basePath))
+            return false;
+        const contents = readFileSync(basePath, 'utf-8');
+        // OMC-installed files carry this sentinel at the top of the managed block.
+        if (contents.includes('<!-- OMC:BEGIN -->'))
+            return false;
+        return contents.trim().length > 0;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Convert a fully-resolved `SetupOptions` (e.g. from `buildPreset(answers)`)
+ * into a `Partial<SetupOptions>` suitable for the preset layer of
+ * `resolveOptions` precedence. Strips the `phases` Set — phases are always
+ * re-derived by `resolveOptions` from the flag combination + preset contents.
+ * Deep-clones `mcp`, `teams`, `installerOptions` so callers can't mutate
+ * the wizard's returned value.
+ */
+function wizardOptionsAsPartial(opts) {
+    return {
+        phases: new Set(opts.phases),
+        interactive: opts.interactive,
+        force: opts.force,
+        quiet: opts.quiet,
+        target: opts.target,
+        installStyle: opts.installStyle,
+        installCli: opts.installCli,
+        executionMode: opts.executionMode,
+        taskTool: opts.taskTool,
+        skipHud: opts.skipHud,
+        mcp: {
+            ...opts.mcp,
+            credentials: { ...opts.mcp.credentials },
+            servers: [...opts.mcp.servers],
+        },
+        teams: { ...opts.teams },
+        starRepo: opts.starRepo,
+        installerOptions: { ...opts.installerOptions },
+        hud: opts.hud ? { elements: { ...opts.hud.elements } } : undefined,
+    };
+}
+function safeDefaultsAsPartial() {
+    return {
+        phases: new Set(SAFE_DEFAULTS.phases),
+        interactive: SAFE_DEFAULTS.interactive,
+        force: SAFE_DEFAULTS.force,
+        quiet: SAFE_DEFAULTS.quiet,
+        target: SAFE_DEFAULTS.target,
+        installStyle: SAFE_DEFAULTS.installStyle,
+        installCli: SAFE_DEFAULTS.installCli,
+        executionMode: SAFE_DEFAULTS.executionMode,
+        taskTool: SAFE_DEFAULTS.taskTool,
+        skipHud: SAFE_DEFAULTS.skipHud,
+        mcp: {
+            ...SAFE_DEFAULTS.mcp,
+            credentials: { ...SAFE_DEFAULTS.mcp.credentials },
+            servers: [...SAFE_DEFAULTS.mcp.servers],
+        },
+        teams: { ...SAFE_DEFAULTS.teams },
+        starRepo: SAFE_DEFAULTS.starRepo,
+        installerOptions: { ...SAFE_DEFAULTS.installerOptions },
+        hud: SAFE_DEFAULTS.hud
+            ? { elements: { ...SAFE_DEFAULTS.hud.elements } }
+            : undefined,
+    };
+}
+/**
+ * Main `omc setup` action handler, broken out of the commander `.action(...)`
+ * closure so tests can invoke it directly with a synthetic option bag.
+ *
+ * Responsibilities:
+ *   1. Map commander-parsed opts into a Partial<SetupOptions> via
+ *      `mapSetupCommanderOpts()`.
+ *   2. If `--build-preset` is set, dispatch to `runBuildPreset()` and return.
+ *   3. Otherwise, load optional preset, call `resolveOptions()`, honor the
+ *      legacy `OMC_PLUGIN_ROOT_ENV` auto-detection + conflict resolution,
+ *      emit the skipHooks advisory on first use, call `runSetup()`, and
+ *      print today's summary for the bare-infra path.
+ *   4. Bare `omc setup` (no opt-in phase flags) runs the safe-defaults flow;
+ *      `--infra-only` is the escape hatch for pre-safe-defaults behavior.
+ *   5. Return the process exit code (never calls process.exit directly).
+ *
+ * Tests may construct the `commanderOpts` bag directly; production code
+ * passes `cmd.opts()` from the commander action handler.
+ */
+/**
+ * Render a grouped preview of plugin-duplicate leftovers to `out`.
+ * Mirrors the uninstall preview format for visual consistency.
+ */
+function renderLeftoverPreview(preview, out) {
+    out.write(chalk.yellow('\nomc setup detected plugin-duplicate leftovers:\n\n'));
+    if (preview.prunedAgents.length > 0) {
+        out.write(`  Agents to remove (${preview.prunedAgents.length}):\n`);
+        for (const p of preview.prunedAgents)
+            out.write(`    - ${p}\n`);
+        out.write('\n');
+    }
+    if (preview.prunedSkills.length > 0) {
+        out.write(`  Skills to remove (${preview.prunedSkills.length}):\n`);
+        for (const p of preview.prunedSkills)
+            out.write(`    - ${p}\n`);
+        out.write('\n');
+    }
+    if (preview.prunedHooks.length > 0) {
+        out.write(`  Hooks to remove (${preview.prunedHooks.length}):\n`);
+        for (const p of preview.prunedHooks)
+            out.write(`    - ${p}\n`);
+        out.write('\n');
+    }
+    if (preview.settingsStripped) {
+        out.write(`  settings.json: OMC hook entries will be stripped (user hooks preserved)\n\n`);
+    }
+    out.write(chalk.gray('These files duplicate content the plugin delivers via $CLAUDE_PLUGIN_ROOT.\n'));
+}
+/**
+ * Prompt the user with a yes/no question on stdin/stdout.
+ * Returns `defaultYes` when the user presses Enter without typing.
+ * Only call this on TTY — non-TTY should never block waiting for input.
+ */
+async function askYesNo(prompt, defaultYes) {
+    const { createInterface } = await import('node:readline');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+        const answer = await new Promise((resolve) => {
+            rl.question(prompt, resolve);
+        });
+        const trimmed = answer.trim().toLowerCase();
+        if (trimmed === '')
+            return defaultYes;
+        return trimmed === 'y' || trimmed === 'yes';
+    }
+    finally {
+        rl.close();
+    }
+}
+/**
+ * Run the plugin-duplicate leftover cleanup flow. Safe to call
+ * unconditionally — it's a no-op when no plugin is active OR no
+ * leftovers exist.
+ *
+ * Behavior:
+ *   - TTY + hasWork → render preview, prompt Y/n, execute on confirm
+ *   - non-TTY + hasWork → silent auto-prune, log summary
+ *   - hasWork === false → immediate return (no preview, no prompt)
+ *
+ * Returns the final `StandaloneDuplicatesPreview` — either the
+ * execute result (on TTY confirm or non-TTY auto-prune) or the
+ * preview result (on TTY decline). Caller can inspect `hasWork`
+ * + per-kind arrays if downstream code needs to know what was
+ * touched.
+ */
+export async function runLeftoverCleanupFlow(opts) {
+    const preview = previewStandaloneDuplicatesForPluginMode();
+    if (!preview.hasWork) {
+        return preview; // no leftovers, no plugin — nothing to do
+    }
+    if (opts.isTty) {
+        // TTY: render + prompt
+        renderLeftoverPreview(preview, opts.stdout);
+        const confirmed = await askYesNo(`\nRemove these ${preview.totalPruneCount} leftover file(s)? (Y/n) `, true);
+        if (!confirmed) {
+            opts.stdout.write(chalk.gray('Leftover cleanup skipped.\n'));
+            return preview; // return preview (not execute) so caller knows nothing happened
+        }
+        const executeResult = pruneStandaloneDuplicatesForPluginMode((msg) => opts.stdout.write(`${msg}\n`));
+        opts.stdout.write(chalk.green(`Cleaned up ${executeResult.prunedAgents.length} agent(s), `
+            + `${executeResult.prunedSkills.length} skill(s), `
+            + `${executeResult.prunedHooks.length} hook(s)`
+            + (executeResult.settingsStripped ? ', settings.json stripped' : '')
+            + '\n'));
+        return executeResult;
+    }
+    // Non-TTY: silent auto-prune (no prompt)
+    const executeResult = pruneStandaloneDuplicatesForPluginMode((msg) => opts.stdout.write(`${msg}\n`));
+    if (executeResult.totalPruneCount > 0 || executeResult.settingsStripped) {
+        opts.stdout.write(chalk.green(`Cleaned up plugin-duplicate leftovers: `
+            + `${executeResult.prunedAgents.length} agent(s), `
+            + `${executeResult.prunedSkills.length} skill(s), `
+            + `${executeResult.prunedHooks.length} hook(s)`
+            + (executeResult.settingsStripped ? ', settings.json stripped' : '')
+            + '\n'));
+    }
+    return executeResult;
+}
+export async function runSetupCommand(commanderOpts, stderr = process.stderr) {
+    let flagsPartial;
+    try {
+        flagsPartial = mapSetupCommanderOpts(commanderOpts);
+    }
+    catch (err) {
+        if (err instanceof InvalidOptionsError) {
+            stderr.write(chalk.red(`setup: ${err.message}\n`));
+            return 2;
+        }
+        throw err;
+    }
+    // ------------------------------------------------------------------
+    // --build-preset internal subcommand
+    // ------------------------------------------------------------------
+    const rawFlags = flagsPartial.__rawFlags ?? {};
+    if (rawFlags.buildPreset) {
+        if (!rawFlags.answers || typeof rawFlags.answers !== 'string') {
+            stderr.write(chalk.red('--build-preset requires --answers <file>\n'));
+            return 2;
+        }
+        if (!rawFlags.out || typeof rawFlags.out !== 'string') {
+            stderr.write(chalk.red('--build-preset requires --out <file>\n'));
+            return 2;
+        }
+        return runBuildPreset(rawFlags.answers, rawFlags.out, stderr);
+    }
+    // ------------------------------------------------------------------
+    // --dump-safe-defaults: print SAFE_DEFAULTS preset JSON and exit.
+    // Users can redirect stdout to a file and tweak it for a custom preset.
+    // ------------------------------------------------------------------
+    if (rawFlags.dumpSafeDefaults) {
+        process.stdout.write(dumpSafeDefaultsAsJson());
+        return 0;
+    }
+    // ------------------------------------------------------------------
+    // Detect the "bare" path: no opt-in phase/mode flags. Bare `omc setup`
+    // dispatches to ONE of three branches:
+    //
+    //   1. TTY + no --non-interactive          → interactive wizard (11 qs)
+    //   2. non-TTY, or --non-interactive       → SAFE_DEFAULTS preset
+    //   3. --interactive (explicit)            → interactive wizard, errors
+    //                                            clearly on non-TTY
+    //
+    // `--infra-only` is the explicit escape hatch for callers that want the
+    // pre-safe-defaults bare-setup behavior (CI, provisioning, tests).
+    //
+    // Note: `--interactive` / `--non-interactive` are MODE overrides for the
+    // bare path — they don't count as "opt-in phase flags" themselves, so we
+    // exclude them from `optInPhaseFlags`. They still reach `resolveOptions`
+    // via `rawFlags` for downstream validation (X4, X5).
+    // ------------------------------------------------------------------
+    const optInPhaseFlags = Boolean(rawFlags.wizard
+        || rawFlags.preset
+        || rawFlags.claudeMdOnly
+        || rawFlags.mcpOnly
+        || rawFlags.stateSave !== undefined
+        || rawFlags.stateClear
+        || rawFlags.stateResume
+        || rawFlags.stateComplete !== undefined
+        || rawFlags.checkState
+        || rawFlags.local
+        || rawFlags.global
+        || rawFlags.infraOnly);
+    // TTY / non-interactive detection for wizard dispatch. `isNonInteractive`
+    // is the canonical detector (CI, CLAUDE_CODE_RUN, non-TTY stdout, etc.).
+    const isTTY = !isNonInteractive();
+    const forceInteractive = Boolean(rawFlags.interactive);
+    const forceNonInteractive = Boolean(rawFlags.nonInteractive);
+    // `--quiet` is an implicit non-interactive signal: scripted callers that
+    // pass `omc setup --quiet` (or `--force --quiet`) expect silent operation
+    // and should NOT be surprised by an interactive wizard even on a TTY.
+    // This is a wizard-dispatch-only override — it does NOT count as an
+    // explicit `--non-interactive` for the mutex check with `--interactive`.
+    const quietImpliesNonInteractive = Boolean(rawFlags.quiet);
+    // X0 (new): --interactive + --non-interactive are mutually exclusive.
+    if (forceInteractive && forceNonInteractive) {
+        stderr.write(chalk.red('setup: --interactive and --non-interactive are mutually exclusive\n'));
+        return 2;
+    }
+    // X4 (explicit): --interactive on a non-TTY environment is a hard error
+    // on the bare path. When --interactive is combined with other phase
+    // flags (e.g. --claude-md-only), resolveOptions's existing X4 check
+    // surfaces the error with the same exit code and a more specific message,
+    // so we scope the new CLI-level check to the bare path.
+    if (forceInteractive && !isTTY && !optInPhaseFlags) {
+        stderr.write(chalk.red('setup: --interactive requires a TTY. Run in a real terminal, or drop the flag to fall back to --non-interactive safe-defaults.\n'));
+        return 2;
+    }
+    // Wizard fires on bare + TTY + no forced non-interactive (and no --quiet).
+    // `--interactive` on the bare path forces the wizard; when `--interactive`
+    // is combined with explicit phase flags (e.g. `--claude-md-only`), the
+    // existing per-phase prompter pipeline inside runSetup handles
+    // interactivity and the pre-phase wizard is skipped.
+    const runWizardBeforeSetup = !optInPhaseFlags
+        && isTTY
+        && !forceNonInteractive
+        && !quietImpliesNonInteractive;
+    // Safe-defaults fires on bare + (non-TTY OR explicit --non-interactive OR
+    // --quiet). When the wizard path is taken, safe-defaults is NOT applied —
+    // the wizard's own answers produce the full SetupOptions via buildPreset.
+    const useSafeDefaults = !optInPhaseFlags && !runWizardBeforeSetup;
+    // ------------------------------------------------------------------
+    // Plugin-presence check. Gate on the bare-safe-defaults path and the
+    // explicit `--wizard` path only — `--infra-only`, state ops, check-state,
+    // claude-md-only, and `--no-plugin` have no plugin requirement today and
+    // must stay that way to preserve scripted-caller contracts.
+    // ------------------------------------------------------------------
+    const noPluginFlag = Boolean(rawFlags.plugin === false
+        || rawFlags.noPlugin);
+    const requiresPluginCheck = !rawFlags.infraOnly
+        && !rawFlags.claudeMdOnly
+        && !rawFlags.checkState
+        && rawFlags.stateSave === undefined
+        && !rawFlags.stateClear
+        && !rawFlags.stateResume
+        && rawFlags.stateComplete === undefined
+        && !noPluginFlag
+        && (useSafeDefaults || runWizardBeforeSetup || Boolean(rawFlags.wizard));
+    if (requiresPluginCheck) {
+        const pluginOk = isRunningAsPlugin()
+            || getInstalledOmcPluginRoots().length > 0
+            || Boolean(process.env.CLAUDE_PLUGIN_ROOT)
+            || Boolean(process.env[OMC_PLUGIN_ROOT_ENV]);
+        if (!pluginOk) {
+            stderr.write(chalk.red('ERROR: oh-my-claudecode plugin installation not detected.\n\n'));
+            stderr.write('Suggestions:\n');
+            stderr.write('  \u2022 Install the plugin:     claude /plugin install oh-my-claudecode\n');
+            stderr.write('  \u2022 Use plugin-dir mode:    omc setup --plugin-dir-mode (for dev checkouts)\n');
+            stderr.write('  \u2022 Use bundled skills:     omc setup --no-plugin (copies bundled skills globally)\n');
+            stderr.write('  \u2022 Escape to infra-only:   omc setup --infra-only (minimal install, pre-safe-defaults behavior)\n');
+            return 1;
+        }
+    }
+    // ------------------------------------------------------------------
+    // Load preset file if provided
+    // ------------------------------------------------------------------
+    let presetPartial;
+    if (flagsPartial.presetFile) {
+        try {
+            presetPartial = loadPreset(flagsPartial.presetFile);
+        }
+        catch (err) {
+            if (err instanceof InvalidOptionsError) {
+                stderr.write(chalk.red(`setup: ${err.message}\n`));
+                return 2;
+            }
+            throw err;
+        }
+    }
+    // ------------------------------------------------------------------
+    // Plugin-duplicate leftover cleanup — runs BEFORE any alreadyConfigured
+    // check so users always see (and can act on) stale standalone files
+    // regardless of whether their profile was previously wizard-configured.
+    // No-op when no plugin is active OR no leftovers exist.
+    // ------------------------------------------------------------------
+    if (runWizardBeforeSetup
+        && !presetPartial
+        && !rawFlags.infraOnly
+        && !rawFlags.claudeMdOnly
+        && !rawFlags.checkState
+        && rawFlags.stateSave === undefined
+        && !rawFlags.stateClear
+        && !rawFlags.stateResume
+        && rawFlags.stateComplete === undefined) {
+        const isTty = Boolean(process.stdin.isTTY);
+        await runLeftoverCleanupFlow({ isTty, stdout: process.stdout });
+    }
+    // ------------------------------------------------------------------
+    // Pre-wizard already-configured gate: AFTER the leftover cleanup
+    // (so the cleanup runs for non-alreadyConfigured profiles too), check
+    // whether the profile was wizard-configured and exit with a hint if so.
+    // ------------------------------------------------------------------
+    if (runWizardBeforeSetup && !presetPartial && !flagsPartial.force) {
+        const ac = readAlreadyConfigured(getClaudeConfigDir());
+        if (ac.alreadyConfigured) {
+            process.stdout.write(chalk.yellow(`OMC is already configured (version ${ac.setupVersion ?? 'unknown'}). `
+                + 'Re-run with --force to bypass this check, or use --claude-md-only '
+                + 'for a quick CLAUDE.md refresh.\n'));
+            return 0;
+        }
+    }
+    // ------------------------------------------------------------------
+    // Interactive wizard branch (bare + TTY, or explicit --interactive).
+    // Collect 11 answers via the readline prompter, run buildPreset() to
+    // produce a full SetupOptions, then convert to Partial for the preset
+    // layer so user flags (--force, --quiet) still win via resolveOptions.
+    // ------------------------------------------------------------------
+    if (runWizardBeforeSetup && !presetPartial) {
+        const prompter = createReadlinePrompter();
+        try {
+            const answers = await runInteractiveWizard(prompter, {
+                // Only ask the installStyle question when the user will land on a
+                // base CLAUDE.md that does NOT already contain OMC markers.
+                detectInstallStyleNeeded: () => hasNonOmcBaseClaudeMd(),
+                // Skip the installCli question: if the user is already running
+                // `omc setup`, the CLI is obviously already installed on PATH.
+                // The `/oh-my-claudecode:omc-setup` skill path still asks it.
+                skipInstallCliQuestion: true,
+            });
+            const wizardOptions = buildPreset(answers);
+            presetPartial = wizardOptionsAsPartial(wizardOptions);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            stderr.write(chalk.red(`setup: interactive wizard failed: ${msg}\n`));
+            return 2;
+        }
+        finally {
+            prompter.close();
+        }
+    }
+    // ------------------------------------------------------------------
+    // For the bare safe-defaults path, merge SAFE_DEFAULTS as a preset-
+    // equivalent base layer. User flags (e.g. `--force`, `--quiet`) still
+    // win via resolveOptions precedence. `--infra-only` bypasses this.
+    // ------------------------------------------------------------------
+    if (useSafeDefaults && !presetPartial) {
+        presetPartial = safeDefaultsAsPartial();
+    }
+    // ------------------------------------------------------------------
+    // Resolve into a full SetupOptions
+    // ------------------------------------------------------------------
+    let options;
+    try {
+        options = resolveOptions(flagsPartial, presetPartial);
+    }
+    catch (err) {
+        if (err instanceof InvalidOptionsError) {
+            stderr.write(chalk.red(`setup: ${err.message}\n`));
+            return 2;
+        }
+        throw err;
+    }
+    // ------------------------------------------------------------------
+    // Preserve today's OMC_PLUGIN_ROOT auto-detection + conflict handling.
+    // Only meaningful for the bare-infra path (no explicit phase flags),
+    // but harmless to apply universally since the installer honors it.
+    // ------------------------------------------------------------------
+    if (!options.installerOptions.pluginDirMode && process.env[OMC_PLUGIN_ROOT_ENV]) {
+        options.installerOptions.pluginDirMode = true;
         if (!options.quiet) {
             console.log(chalk.gray(`Detected ${OMC_PLUGIN_ROOT_ENV} — entering dev plugin-dir mode`));
         }
     }
-    if (pluginDirMode && useLocalBundledSkills) {
+    if (options.installerOptions.pluginDirMode && options.installerOptions.noPlugin) {
         if (!options.quiet) {
             console.log(chalk.yellow('Warning: --plugin-dir-mode and --no-plugin conflict; --no-plugin takes precedence'));
         }
-        pluginDirMode = false;
+        options.installerOptions.pluginDirMode = false;
     }
-    if (pluginDirMode && !options.quiet) {
+    if (options.installerOptions.pluginDirMode && !options.quiet) {
         console.log(chalk.gray('Dev plugin-dir mode: skipping agent/skill sync (plugin provides them via --plugin-dir)'));
     }
-    const result = installOmc({
-        force: !!options.force,
-        verbose: !options.quiet,
-        skipClaudeCheck: true,
-        forceHooks: !!options.forceHooks,
-        noPlugin: useLocalBundledSkills,
-        pluginDirMode,
-    });
-    if (!result.success) {
-        console.error(chalk.red(`Setup failed: ${result.message}`));
-        if (result.errors.length > 0) {
-            result.errors.forEach(err => console.error(chalk.red(`  - ${err}`)));
-        }
-        process.exit(1);
+    // ------------------------------------------------------------------
+    // Backfill legacy boolean defaults so the install() call shape is
+    // identical to today's (which always passed these booleans explicitly).
+    // The backward-compat test inspects the exact InstallOptions that
+    // install() receives — keep the six known keys present even when
+    // their value is `false`.
+    // ------------------------------------------------------------------
+    options.installerOptions.force ??= false;
+    options.installerOptions.verbose ??= !options.quiet;
+    options.installerOptions.skipClaudeCheck ??= true;
+    options.installerOptions.forceHooks ??= false;
+    options.installerOptions.noPlugin ??= false;
+    options.installerOptions.pluginDirMode ??= false;
+    // ------------------------------------------------------------------
+    // Deprecation advisory for --skip-hooks (first use per day).
+    // ------------------------------------------------------------------
+    if (options.installerOptions.skipHooks) {
+        emitSkipHooksAdvisory(stderr);
     }
-    // Step 2: Show summary
-    if (!options.quiet) {
+    // ------------------------------------------------------------------
+    // For the bare-infra path, preserve today's header + summary output.
+    // For other paths (wizard, state machine, check-state, mcp-only),
+    // runSetup handles its own output and we only need to print errors.
+    // ------------------------------------------------------------------
+    const isBareInfra = options.phases.size === 1 && options.phases.has('infra');
+    const isStateOrCheck = options.checkState === true ||
+        (options.phases.has('state') && options.stateAction !== undefined);
+    if (isBareInfra && !isStateOrCheck && !options.quiet) {
+        console.log(chalk.blue('Oh-My-ClaudeCode Setup\n'));
+        console.log(chalk.gray('Syncing OMC components...'));
+    }
+    const result = await runSetup(options);
+    // Print errors even for quiet mode
+    if (!result.success) {
+        if (result.errors.length > 0) {
+            for (const err of result.errors) {
+                stderr.write(chalk.red(`  - ${err}\n`));
+            }
+        }
+        else if (!options.quiet) {
+            stderr.write(chalk.red('Setup failed\n'));
+        }
+        return result.exitCode || 1;
+    }
+    // Summary printing for the bare-infra backward-compat path only.
+    if (isBareInfra && !options.quiet && result.installResult) {
+        const installResult = result.installResult;
         console.log('');
         console.log(chalk.green('Setup complete!'));
         console.log('');
-        if (result.installedAgents.length > 0) {
-            console.log(chalk.gray(`  Agents:   ${result.installedAgents.length} synced`));
+        if (installResult.installedAgents.length > 0) {
+            console.log(chalk.gray(`  Agents:   ${installResult.installedAgents.length} synced`));
         }
-        if (result.installedCommands.length > 0) {
-            console.log(chalk.gray(`  Commands: ${result.installedCommands.length} synced`));
+        if (installResult.installedCommands.length > 0) {
+            console.log(chalk.gray(`  Commands: ${installResult.installedCommands.length} synced`));
         }
-        if (result.installedSkills.length > 0) {
-            console.log(chalk.gray(`  Skills:   ${result.installedSkills.length} synced`));
+        if (installResult.installedSkills.length > 0) {
+            console.log(chalk.gray(`  Skills:   ${installResult.installedSkills.length} synced`));
         }
-        if (result.hooksConfigured) {
+        if (installResult.hooksConfigured) {
             console.log(chalk.gray('  Hooks:    configured'));
         }
-        if (result.hookConflicts.length > 0) {
+        else if (options.installerOptions.skipHooks) {
+            console.log(chalk.gray('  Hooks:    skipped (--skip-hooks)'));
+        }
+        if (installResult.hookConflicts.length > 0) {
             console.log('');
             console.log(chalk.yellow('  Hook conflicts detected:'));
-            result.hookConflicts.forEach(c => {
+            installResult.hookConflicts.forEach(c => {
                 console.log(chalk.yellow(`    - ${c.eventType}: ${c.existingCommand}`));
             });
         }
@@ -1187,6 +1722,315 @@ Examples:
             console.log(chalk.gray(`CLI package version: ${version}`));
         }
         console.log(chalk.gray('Start Claude Code and use /oh-my-claudecode:omc-setup for interactive setup.'));
+    }
+    // --check-state / state-machine phases already wrote their JSON line
+    // via runSetup's stdout callback — nothing more to do here.
+    void isStateOrCheck;
+    return 0;
+}
+program
+    .command('setup')
+    .description('Run OMC setup — sync components, configure integrations, merge CLAUDE.md, or run the full wizard')
+    // ---- existing 6 flags (unchanged) ----
+    .option('-f, --force', 'Force reinstall even if already up to date')
+    .option('-q, --quiet', 'Suppress output except for errors')
+    .option('--no-plugin', 'Install bundled skills from the current package instead of relying on plugin-provided skills')
+    .option('--plugin-dir-mode', 'Treat OMC as launched via --plugin-dir at runtime (skip agent/skill copy; HUD + hooks + CLAUDE.md still installed)')
+    .option('--skip-hooks', 'Skip hook installation (deprecated — prints advisory on first use)')
+    .option('--force-hooks', 'Force reinstall hooks even if unchanged')
+    // ---- new flags: mode control ----
+    .option('--preset <file>', 'Load preset JSON file (triggers multi-phase flow per preset contents)')
+    .option('--wizard', 'Run the full wizard (all four phases)')
+    .option('--interactive', 'Force interactive prompts (requires a TTY)')
+    .option('--non-interactive', 'Disable interactive prompts (require flags/preset for all fields)')
+    // ---- Phase 1: CLAUDE.md ----
+    .option('--local', 'Phase 1 target: local project (.claude/CLAUDE.md)')
+    .option('--global', 'Phase 1 target: global user config')
+    .option('--preserve', 'Install style: preserve existing CLAUDE.md (requires --global)')
+    .option('--overwrite', 'Install style: overwrite existing CLAUDE.md')
+    // ---- Phase 2: configure ----
+    .option('--execution-mode <mode>', 'Default execution mode: ultrawork | ralph | autopilot')
+    .option('--task-tool <tool>', 'Task management tool: builtin | bd | br')
+    .option('--install-cli', 'Install the oh-my-claude-sisyphus CLI globally')
+    .option('--no-install-cli', 'Do not install the CLI globally')
+    // ---- Phase 3: MCP ----
+    .option('--configure-mcp', 'Enable MCP server configuration')
+    .option('--no-mcp', 'Disable MCP server configuration')
+    .option('--mcp-servers <list>', 'Comma-separated list of MCP servers to install')
+    .option('--exa-key <key>', '(credential leak via argv) Exa API key')
+    .option('--exa-key-file <path>', 'Path to file containing the Exa API key')
+    .option('--github-token <token>', '(credential leak via argv) GitHub token')
+    .option('--github-token-file <path>', 'Path to file containing the GitHub token')
+    .option('--mcp-on-missing-creds <mode>', 'What to do if MCP credentials are missing: skip | error')
+    .option('--mcp-scope <scope>', 'MCP scope: local | user | project')
+    // ---- Phase 3: Teams ----
+    .option('--enable-teams', 'Enable agent teams')
+    .option('--no-teams', 'Disable agent teams')
+    .option('--team-agents <n>', 'Number of team agents: 2 | 3 | 5')
+    .option('--team-type <type>', 'Team agent type: executor | debugger | designer')
+    .option('--teammate-display <mode>', 'Teammate display mode: auto | in-process | tmux')
+    // ---- Phase 4 ----
+    .option('--star-repo', 'Star the repo on GitHub after setup completes')
+    .option('--no-star-repo', 'Do not star the repo')
+    // ---- phase routing ----
+    .option('--claude-md-only', 'Run only Phase 1 (CLAUDE.md merge)')
+    .option('--mcp-only', 'Run only the MCP install sub-phase (used by mcp-setup skill)')
+    // ---- state machine (bash shim forwarding) ----
+    .option('--state-save <step>', 'State machine: save progress at step N')
+    .option('--state-clear', 'State machine: clear saved progress')
+    .option('--state-resume', 'State machine: print resume info as JSON')
+    .option('--state-complete <version>', 'State machine: mark setup complete with version')
+    .option('--state-config-type <type>', 'State machine: config type label for --state-save')
+    // ---- read-only state inspection ----
+    .option('--check-state', 'Read-only: print {alreadyConfigured, setupVersion, resumeStep} as JSON')
+    // ---- internal: preset builder from skill answers ----
+    .option('--build-preset', '(internal) Build a preset from a skill answers file (unstable)')
+    .option('--answers <file>', '(internal) Path to the skill answers JSON (use with --build-preset)')
+    .option('--out <file>', '(internal) Output path for the generated preset (use with --build-preset)')
+    // ---- safe-defaults escape hatches ----
+    .option('--infra-only', 'Escape hatch: restore pre-safe-defaults bare-setup behavior (phases=infra only, no plugin check)')
+    .option('--dump-safe-defaults', 'Print the SAFE_DEFAULTS preset JSON to stdout and exit (copy + tweak as a preset file)')
+    .addHelpText('after', `
+Dispatch for bare \`omc setup\`:
+  - TTY (real terminal)    → interactive wizard (11 questions, like /omc-setup)
+  - non-TTY (pipe, CI)     → falls back to --non-interactive safe-defaults
+  - --non-interactive      → explicit safe-defaults flow (works anywhere)
+  - --interactive          → forces the wizard; errors clearly on non-TTY
+  - --infra-only           → escape hatch: direct install(), no wizard, no safe-defaults
+  - --preset <file>        → non-interactive from preset (unchanged)
+  - --wizard               → preserved alias for the in-phase wizard flow
+
+Examples:
+  $ omc setup                          Interactive wizard on TTY; safe-defaults on non-TTY
+  $ omc setup --non-interactive        Force SAFE_DEFAULTS (CLAUDE.md + infra + MCP + welcome)
+  $ omc setup --interactive            Force interactive wizard (requires a TTY)
+  $ omc setup --infra-only             Legacy bare behavior: sync components only (CI/automation escape)
+  $ omc setup --force                  Force-rerun with current dispatch (wizard / safe-defaults)
+  $ omc setup --dump-safe-defaults     Print safe-defaults preset JSON (pipe to a file, then tweak)
+  $ omc setup --quiet                  Silent setup for scripts
+  $ omc setup --wizard                 Run the legacy in-phase wizard (phase-router, not pre-phase prompts)
+  $ omc setup --preset ./preset.json   Non-interactive: drive setup from a preset file
+  $ omc setup --claude-md-only --global --overwrite
+                                       Replaces scripts/setup-claude-md.sh direct calls
+  $ omc setup --mcp-only --mcp-servers=context7,exa --exa-key-file ~/.exa
+                                       MCP-only install (used by mcp-setup skill)
+  $ omc setup --check-state            Print alreadyConfigured/resumeStep as JSON
+
+Credential hygiene:
+  --exa-key / --github-token expose secrets via process argv (visible in 'ps').
+  Prefer --exa-key-file / --github-token-file, the EXA_API_KEY / GITHUB_TOKEN
+  env vars, or a preset file with chmod 0600.`)
+    .allowUnknownOption(false)
+    .action(async function setupAction() {
+    // Commander has already parsed the outer argv; pull the parsed opts
+    // directly to avoid double-parsing through parseFlagsToPartial().
+    const opts = this.opts();
+    const exitCode = await runSetupCommand(opts);
+    if (exitCode !== 0)
+        process.exit(exitCode);
+});
+/**
+ * Uninstall command — reverse of `omc setup`.
+ *
+ * Removes agents, skills, hooks, HUD bundle, OMC state files, and cleans up
+ * CLAUDE.md and settings.json hook entries. User content outside the OMC
+ * markers in CLAUDE.md is preserved by default (use --no-preserve to skip).
+ *
+ * Requires explicit confirmation unless --yes or --dry-run is supplied.
+ * Exits with code 1 on non-interactive stdin without --yes (never acts
+ * destructively without confirmation).
+ */
+program
+    .command('uninstall')
+    .description('Remove all OMC-installed files and configuration from the config directory')
+    .option('--dry-run', 'List what would be removed without actually removing anything')
+    .option('--no-preserve', 'Delete CLAUDE.md entirely instead of preserving user content')
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .option('-q, --quiet', 'Suppress non-warning output')
+    .addHelpText('after', `
+Components removed:
+  - Agents in <configDir>/agents/       (OMC-owned .md files only)
+  - Skills in <configDir>/skills/       (OMC-owned skill dirs only)
+  - Hooks in <configDir>/hooks/         (known OMC hook scripts)
+  - HUD bundle in <configDir>/hud/      (if OMC-owned)
+  - State files (.omc-*.json, CLAUDE-omc.md)
+  - OMC block in CLAUDE.md              (user content preserved unless --no-preserve)
+  - OMC hook entries in settings.json
+
+Examples:
+  $ omc uninstall --dry-run             Preview what would be removed
+  $ omc uninstall -y                    Remove without prompting
+  $ omc uninstall --no-preserve         Remove CLAUDE.md entirely (even if it has user content)
+  $ omc uninstall -y --quiet            Silent removal for scripts`)
+    .action(async function uninstallAction() {
+    const opts = this.opts();
+    const dryRun = opts.dryRun === true;
+    // Commander --no-preserve sets opts.preserve = false
+    const preserveUserContent = opts.preserve !== false;
+    const skipConfirm = opts.yes === true || dryRun;
+    const quiet = opts.quiet === true;
+    const configDir = getClaudeConfigDir();
+    const stderr = (line) => { process.stderr.write(`${line}\n`); };
+    const stdout = (line) => {
+        if (!quiet)
+            process.stdout.write(`${line}\n`);
+    };
+    // ── Confirmation ──────────────────────────────────────────────────────────
+    if (!skipConfirm) {
+        const isTty = Boolean(process.stdin.isTTY);
+        if (!isTty) {
+            stderr('omc uninstall: non-interactive stdin detected. Pass --yes to proceed without a prompt.');
+            process.exit(1);
+        }
+        // Dry-run preview: run the uninstaller with dryRun=true and a silent
+        // logger to collect the EXACT list of files that would be touched.
+        // This lets the confirmation prompt show resolved paths grouped by
+        // kind instead of a vague "agents/skills/hooks..." component list.
+        const preview = runUninstall({
+            configDir,
+            dryRun: true,
+            preserveUserContent,
+            logger: () => { },
+        });
+        // Bucket preview paths by kind for a readable confirmation screen.
+        const buckets = {
+            agents: [],
+            skills: [],
+            hooks: [],
+            hud: [],
+            stateFiles: [],
+            claudeMd: [],
+            settings: [],
+            other: [],
+        };
+        const agentsPrefix = `${configDir}/agents/`;
+        const skillsPrefix = `${configDir}/skills/`;
+        const hooksPrefix = `${configDir}/hooks/`;
+        const hudPrefix = `${configDir}/hud`;
+        const stateFileNames = new Set([
+            '.omc-version.json',
+            '.omc-silent-update.json',
+            '.omc-update.log',
+            '.omc-config.json',
+            'CLAUDE-omc.md',
+        ]);
+        const claudeMdPath = `${configDir}/CLAUDE.md`;
+        const settingsPath = `${configDir}/settings.json`;
+        for (const p of preview.removed) {
+            const rel = p.startsWith(`${configDir}/`) ? p.slice(configDir.length + 1) : p;
+            const base = rel.split('/').pop() ?? rel;
+            if (p.startsWith(agentsPrefix))
+                buckets.agents.push(p);
+            else if (p.startsWith(skillsPrefix))
+                buckets.skills.push(p);
+            else if (p.startsWith(hooksPrefix))
+                buckets.hooks.push(p);
+            else if (p === hudPrefix || p.startsWith(`${hudPrefix}/`))
+                buckets.hud.push(p);
+            else if (p === claudeMdPath)
+                buckets.claudeMd.push(p);
+            else if (p === settingsPath)
+                buckets.settings.push(p);
+            else if (stateFileNames.has(base) || base.startsWith('CLAUDE.md.backup.')) {
+                buckets.stateFiles.push(p);
+            }
+            else {
+                buckets.other.push(p);
+            }
+        }
+        const totalRemoved = preview.removed.length;
+        const totalPreserved = preview.preserved.length;
+        const lines = [];
+        lines.push(`omc uninstall will modify the following in:`);
+        lines.push(`  ${configDir}`);
+        lines.push('');
+        lines.push(`Summary: ${totalRemoved} file(s)/dir(s) to remove, `
+            + `${totalPreserved} file(s) to preserve user content.`);
+        lines.push('');
+        const section = (title, items) => {
+            if (items.length === 0)
+                return;
+            lines.push(`${title} (${items.length}):`);
+            for (const p of items)
+                lines.push(`  - ${p}`);
+            lines.push('');
+        };
+        section('Agents to remove', buckets.agents);
+        section('Skills to remove', buckets.skills);
+        section('Hooks to remove', buckets.hooks);
+        section('HUD bundle to remove', buckets.hud);
+        section('State files to remove', buckets.stateFiles);
+        section('CLAUDE.md to delete', buckets.claudeMd);
+        section('settings.json cleanup', buckets.settings);
+        section('Other', buckets.other);
+        if (totalPreserved > 0) {
+            lines.push(`Files with user content to be preserved in place:`);
+            for (const p of preview.preserved)
+                lines.push(`  - ${p}`);
+            lines.push('');
+        }
+        if (totalRemoved === 0 && totalPreserved === 0) {
+            lines.push('Nothing to uninstall — config directory is already clean.');
+            lines.push('');
+            process.stdout.write(lines.join('\n'));
+            process.exit(0);
+        }
+        lines.push(preserveUserContent
+            ? 'CLAUDE.md user content outside OMC markers will be preserved.'
+            : 'CLAUDE.md will be DELETED entirely (--no-preserve).');
+        lines.push('');
+        lines.push('Continue? (y/N) ');
+        process.stdout.write(lines.join('\n'));
+        const { createInterface } = await import('node:readline');
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise((resolve) => {
+            rl.once('line', (line) => {
+                rl.close();
+                resolve(line.trim().toLowerCase());
+            });
+            rl.once('close', () => resolve(''));
+        });
+        if (answer !== 'y' && answer !== 'yes') {
+            stdout('Uninstall cancelled.');
+            process.exit(1);
+        }
+    }
+    // ── Run uninstall ─────────────────────────────────────────────────────────
+    try {
+        const logger = quiet
+            ? (msg) => {
+                // In quiet mode, still emit warnings to stderr
+                if (msg.startsWith('[dry-run] Warning:') || msg.startsWith('Warning:')) {
+                    stderr(msg);
+                }
+            }
+            : (msg) => { stdout(msg); };
+        const result = runUninstall({
+            configDir,
+            dryRun,
+            preserveUserContent,
+            logger,
+        });
+        if (dryRun) {
+            stdout(`\n[dry-run] Would remove ${result.removed.length} item(s), preserve ${result.preserved.length}, skip ${result.skipped.length}.`);
+        }
+        else {
+            stdout(`\nUninstall complete. Removed ${result.removed.length} item(s).`);
+            if (result.preserved.length > 0) {
+                stdout(`Preserved ${result.preserved.length} file(s) with user content.`);
+            }
+        }
+        if (result.warnings.length > 0) {
+            for (const w of result.warnings) {
+                stderr(`Warning: ${w}`);
+            }
+        }
+        process.exit(0);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        stderr(`omc uninstall: unexpected error: ${msg}`);
+        process.exit(2);
     }
 });
 /**

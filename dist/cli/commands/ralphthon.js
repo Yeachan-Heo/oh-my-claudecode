@@ -9,7 +9,7 @@
  *   omc ralphthon --poll-interval 60      Set poll interval in seconds
  */
 import chalk from "chalk";
-import { execSync } from "child_process";
+import { tmuxShell } from "../../cli/tmux-utils.js";
 import { existsSync } from "fs";
 import { readRalphthonPrd, readRalphthonState, writeRalphthonState, clearRalphthonState, initOrchestrator, startOrchestratorLoop, formatRalphthonStatus, getRalphthonPrdPath, initRalphthonPrd, sendKeysToPane, } from "../../ralphthon/index.js";
 import { RALPHTHON_DEFAULTS } from "../../ralphthon/types.js";
@@ -199,8 +199,7 @@ function createEventLogger() {
 // ============================================================================
 function getCurrentTmuxSession() {
     try {
-        return execSync("tmux display-message -p '#S'", {
-            encoding: "utf-8",
+        return tmuxShell("display-message -p '#S'", {
             timeout: 5000,
         }).trim();
     }
@@ -210,8 +209,7 @@ function getCurrentTmuxSession() {
 }
 function getCurrentTmuxPane() {
     try {
-        return execSync("tmux display-message -p '#{pane_id}'", {
-            encoding: "utf-8",
+        return tmuxShell("display-message -p '#{pane_id}'", {
             timeout: 5000,
         }).trim();
     }

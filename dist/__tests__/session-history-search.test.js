@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import { parseSinceSpec, searchSessionHistory, } from '../features/session-history-search/index.js';
 function encodeProjectPath(projectPath) {
-    return projectPath.replace(/[\\/]/g, '-');
+    return projectPath.replace(/[/\\.]/g, '-');
 }
 function writeTranscript(filePath, entries) {
     mkdirSync(join(filePath, '..'), { recursive: true });

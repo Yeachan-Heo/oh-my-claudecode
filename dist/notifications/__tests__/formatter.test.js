@@ -258,6 +258,52 @@ describe("parseTmuxTail noise filters", () => {
         ].join("\n");
         expect(parseTmuxTail(input)).toBe("Build complete\nTests passed: 42");
     });
+    it("drops seeded PR review outcome instructions that would trip keyword alerts", () => {
+        const input = [
+            "Review PR #2498 and reply with exactly one verdict:",
+            "- approve",
+            "- request-changes",
+            "- follow-up-fix",
+            "- BLOCKED",
+        ].join("\n");
+        expect(parseTmuxTail(input)).toBe("");
+    });
+    it("prefers later runtime output over seeded PR review instructions", () => {
+        const input = [
+            "Review PR #2498 and reply with exactly one verdict:",
+            "- approve",
+            "- request-changes",
+            "- follow-up-fix",
+            "- BLOCKED",
+            "Traceback (most recent call last):",
+            "ValueError: boom",
+            "BLOCKED: evaluator crashed at runtime",
+        ].join("\n");
+        expect(parseTmuxTail(input)).toBe("Traceback (most recent call last):\nValueError: boom\nBLOCKED: evaluator crashed at runtime");
+    });
+    it("preserves real runtime blocked output when no seeded review prefix exists", () => {
+        const input = [
+            "BLOCKED: missing baseline snapshot",
+            "Traceback (most recent call last):",
+            "RuntimeError: boom",
+        ].join("\n");
+        expect(parseTmuxTail(input)).toBe(input);
+    });
+    it("drops grep/source lines that only contain static error markers", () => {
+        const input = [
+            'skills/project-session-manager/lib/tmux.sh:16:        echo "error|tmux not found"',
+            'skills/project-session-manager/lib/tmux.sh:28:        echo "error|Failed to create tmux session"',
+        ].join("\n");
+        expect(parseTmuxTail(input)).toBe("");
+    });
+    it("drops usage/help source text that would otherwise trip error alerts", () => {
+        const input = [
+            'Usage: psm review <ref>',
+            'if [[ "$tmux_status" == "error" ]]; then',
+            'log_error "Usage: psm fix <ref>"',
+        ].join("\n");
+        expect(parseTmuxTail(input)).toBe("");
+    });
 });
 describe("tmuxTail in formatters", () => {
     it("should include tmux tail in formatSessionIdle when present", () => {

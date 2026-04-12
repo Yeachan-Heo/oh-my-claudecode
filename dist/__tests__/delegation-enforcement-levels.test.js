@@ -508,7 +508,7 @@ describe('delegation-enforcement-levels', () => {
                 directory: '/tmp/test-project',
             });
             expect(result.continue).toBe(true);
-            expect(mockAddTask).toHaveBeenCalledWith(expect.stringContaining('task-'), 'Test task', 'executor', process.cwd());
+            expect(mockAddTask).toHaveBeenCalledWith(expect.stringContaining('task-'), 'Test task', 'executor', process.cwd(), undefined);
         });
     });
     // ─── Helper function unit tests ───

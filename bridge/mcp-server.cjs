@@ -18109,11 +18109,11 @@ var LSP_SERVERS = {
     installHint: "npm install -g typescript-language-server typescript"
   },
   python: {
-    name: "Python Language Server (pylsp)",
-    command: "pylsp",
-    args: [],
+    name: "Python Language Server (ty)",
+    command: "ty",
+    args: ["server"],
     extensions: [".py", ".pyw"],
-    installHint: "pip install python-lsp-server"
+    installHint: "Install ty from https://github.com/astral-sh/ty"
   },
   rust: {
     name: "Rust Analyzer",

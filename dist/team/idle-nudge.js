@@ -10,7 +10,7 @@
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
-import { execFile } from 'child_process';
+import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import { paneLooksReady, paneHasActiveTask, sendToWorker } from './tmux-session.js';
 export const DEFAULT_NUDGE_CONFIG = {
     delayMs: 30_000,
@@ -21,15 +21,14 @@ export const DEFAULT_NUDGE_CONFIG = {
 // Pane capture + idle detection
 // ---------------------------------------------------------------------------
 /** Capture the last 80 lines of a tmux pane. Returns '' on error. */
-export function capturePane(paneId) {
-    return new Promise((resolve) => {
-        execFile('tmux', ['capture-pane', '-t', paneId, '-p', '-S', '-80'], (err, stdout) => {
-            if (err)
-                resolve('');
-            else
-                resolve(stdout ?? '');
-        });
-    });
+export async function capturePane(paneId) {
+    try {
+        const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
+        return result.stdout ?? '';
+    }
+    catch {
+        return '';
+    }
 }
 /**
  * A pane is idle when it shows a prompt (ready for input) but has no

@@ -20,8 +20,8 @@ describe('isUserAbort', () => {
     it('should return true for exact "aborted" stop reason', () => {
         expect(isUserAbort({ stop_reason: 'aborted' })).toBe(true);
     });
-    it('should return true for exact "interrupt" stop reason', () => {
-        expect(isUserAbort({ stop_reason: 'interrupt' })).toBe(true);
+    it('should return false for exact "interrupt" stop reason', () => {
+        expect(isUserAbort({ stop_reason: 'interrupt' })).toBe(false);
     });
     // Compound substring patterns (user_cancel, ctrl_c, manual_stop should still match)
     it('should return true for "user_cancel" stop reason', () => {

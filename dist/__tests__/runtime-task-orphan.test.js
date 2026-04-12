@@ -8,12 +8,10 @@ import { tmpdir } from 'os';
  * instead of leaving it orphaned.
  */
 // --- Mocks ---
-const mockExecFileAsync = vi.fn();
-vi.mock('child_process', () => {
-    const execFile = Object.assign(vi.fn(), {
-        [Symbol.for('nodejs.util.promisify.custom')]: mockExecFileAsync,
-    });
-    return { execFile };
+const mockTmuxExecAsync = vi.fn();
+vi.mock('../cli/tmux-utils.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return { ...actual, tmuxExecAsync: mockTmuxExecAsync };
 });
 vi.mock('../team/model-contract.js', () => ({
     buildWorkerArgv: vi.fn(() => ['/usr/bin/claude', '--flag']),
@@ -50,7 +48,7 @@ describe('spawnWorkerForTask task orphan prevention', () => {
     let tmpDir;
     beforeEach(() => {
         tmpDir = mkdtempSync(join(tmpdir(), 'runtime-task-orphan-'));
-        mockExecFileAsync.mockReset();
+        mockTmuxExecAsync.mockReset();
     });
     afterEach(() => {
         rmSync(tmpDir, { recursive: true, force: true });
@@ -73,7 +71,7 @@ describe('spawnWorkerForTask task orphan prevention', () => {
             createdAt: new Date().toISOString(),
         }));
         // Mock tmux split-window to return empty stdout (pane creation failure)
-        mockExecFileAsync.mockResolvedValue({ stdout: '\n', stderr: '' });
+        mockTmuxExecAsync.mockResolvedValue({ stdout: '\n', stderr: '' });
         const runtime = {
             teamName,
             sessionName: 'test-session',

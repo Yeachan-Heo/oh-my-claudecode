@@ -10,6 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 import { StopContext } from '../todo-continuation/index.js';
+import type { IdleNotificationRepoState } from './idle-repo-state.js';
 export interface ToolErrorState {
     tool_name: string;
     tool_input_preview?: string;
@@ -65,11 +66,11 @@ export declare function getIdleNotificationCooldownSeconds(): number;
  * Check whether the session-idle notification cooldown has elapsed.
  * Returns true if the notification should be sent.
  */
-export declare function shouldSendIdleNotification(stateDir: string, sessionId?: string): boolean;
+export declare function shouldSendIdleNotification(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): boolean;
 /**
  * Record that the session-idle notification was sent at the current timestamp.
  */
-export declare function recordIdleNotificationSent(stateDir: string, sessionId?: string): void;
+export declare function recordIdleNotificationSent(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): void;
 /**
  * Main persistent mode checker
  * Checks all persistent modes in priority order and returns appropriate action

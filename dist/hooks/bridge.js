@@ -29,6 +29,7 @@ import { readHudState, writeHudState } from "../hud/state.js";
 import { compactOmcStartupGuidance, loadConfig } from "../config/loader.js";
 import { activatePromptPrerequisiteState, buildPromptPrerequisiteDenyReason, buildPromptPrerequisiteReminder, clearPromptPrerequisiteState, getPromptPrerequisiteConfig, isPromptPrerequisiteBlockingTool, parsePromptPrerequisiteSections, readPromptPrerequisiteState, recordPromptPrerequisiteProgress, shouldEnforcePromptPrerequisites, } from "./prompt-prerequisites/index.js";
 import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../config/plan-output.js";
+import { formatAutopilotRuntimeInsight } from "./autopilot/runtime-insight.js";
 import { writeSkillActiveState } from "./skill-state/index.js";
 import { ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
 // Agent dashboard is used in pre/post-tool-use hot path
@@ -776,8 +777,10 @@ async function processPersistentMode(input) {
                 // Per-session cooldown: prevent notification spam when the session idles repeatedly.
                 // Uses session-scoped state so one session does not suppress another.
                 const stateDir = join(getOmcRoot(directory), "state");
-                if (shouldSendIdleNotification(stateDir, sessionId)) {
-                    recordIdleNotificationSent(stateDir, sessionId);
+                const { getIdleNotificationRepoState } = await import("./persistent-mode/idle-repo-state.js");
+                const idleRepoState = getIdleNotificationRepoState(directory);
+                if (shouldSendIdleNotification(stateDir, sessionId, idleRepoState)) {
+                    recordIdleNotificationSent(stateDir, sessionId, idleRepoState);
                     const logSessionIdleNotifyFailure = createSwallowedErrorLogger('hooks.bridge session-idle notification failed');
                     import("../notifications/index.js")
                         .then(({ notify }) => notify("session-idle", {
@@ -1558,10 +1561,12 @@ async function processAutopilot(input) {
         openQuestionsPath: resolveOpenQuestionsPlanPath(config),
     };
     const phasePrompt = getPhasePrompt(state.phase, context);
-    if (phasePrompt) {
+    const runtimeInsight = formatAutopilotRuntimeInsight(directory, input.sessionId);
+    if (phasePrompt || runtimeInsight) {
+        const detailParts = [runtimeInsight, phasePrompt].filter(Boolean);
         return {
             continue: true,
-            message: `[AUTOPILOT - Phase: ${state.phase.toUpperCase()}]\n\n${phasePrompt}`,
+            message: `[AUTOPILOT - Phase: ${state.phase.toUpperCase()}]\n\n${detailParts.join("\n\n")}`,
         };
     }
     return { continue: true };

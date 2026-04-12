@@ -90,14 +90,28 @@ describe('getIdleNotificationCooldownSeconds', () => {
         expect(readFileSync).toHaveBeenCalledWith(configPath, 'utf-8');
     });
     it('falls back to legacy ~/.omc config when XDG config is absent', () => {
-        const [, legacyConfigPath] = getConfigPaths();
-        existsSync.mockImplementation((p) => p === legacyConfigPath);
-        readFileSync.mockImplementation((p) => {
-            if (p === legacyConfigPath) {
-                return JSON.stringify({ notificationCooldown: { sessionIdleSeconds: 45 } });
-            }
-            throw new Error('not found');
-        });
+        const candidates = getConfigPaths();
+        // On macOS, XDG primary and legacy resolve to the same path, so
+        // dedupePaths collapses them to a single entry. Use the last candidate
+        // (which is always the legacy path or its deduplicated equivalent).
+        const legacyConfigPath = candidates[candidates.length - 1];
+        if (candidates.length < 2) {
+            // Only one candidate (macOS) — XDG and legacy are identical.
+            // Verify the single path is read and returns the configured value.
+            existsSync.mockImplementation((p) => p === legacyConfigPath);
+            readFileSync.mockReturnValue(JSON.stringify({ notificationCooldown: { sessionIdleSeconds: 45 } }));
+        }
+        else {
+            // Two distinct candidates (Linux) — first is XDG, second is legacy.
+            // Mock XDG as absent, legacy as present with the configured value.
+            existsSync.mockImplementation((p) => p === legacyConfigPath);
+            readFileSync.mockImplementation((p) => {
+                if (p === legacyConfigPath) {
+                    return JSON.stringify({ notificationCooldown: { sessionIdleSeconds: 45 } });
+                }
+                throw new Error('not found');
+            });
+        }
         expect(getIdleNotificationCooldownSeconds()).toBe(45);
         expect(readFileSync).toHaveBeenCalledWith(legacyConfigPath, 'utf-8');
     });
@@ -151,6 +165,8 @@ describe('getIdleNotificationCooldownSeconds', () => {
     });
 });
 describe('shouldSendIdleNotification', () => {
+    const zeroBacklogState = { signature: 'repo-zero', backlogZero: true };
+    const changedBacklogState = { signature: 'repo-new', backlogZero: true };
     beforeEach(() => {
         vi.clearAllMocks();
     });
@@ -282,6 +298,36 @@ describe('shouldSendIdleNotification', () => {
         });
         expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID)).toBe(false);
     });
+    it('suppresses repeated zero-backlog nudges across follow-up sessions when the global repo snapshot is unchanged', () => {
+        const oldTimestamp = new Date(Date.now() - 90_000).toISOString();
+        existsSync.mockImplementation((p) => p === COOLDOWN_PATH);
+        readFileSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH) {
+                return JSON.stringify({
+                    lastSentAt: oldTimestamp,
+                    repoSignature: zeroBacklogState.signature,
+                    backlogZero: true,
+                });
+            }
+            throw new Error('not found');
+        });
+        expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID, zeroBacklogState)).toBe(false);
+    });
+    it('re-enables zero-backlog nudges across follow-up sessions when the repo snapshot changes', () => {
+        const recentTimestamp = new Date(Date.now() - 5_000).toISOString();
+        existsSync.mockImplementation((p) => p === COOLDOWN_PATH);
+        readFileSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH) {
+                return JSON.stringify({
+                    lastSentAt: recentTimestamp,
+                    repoSignature: zeroBacklogState.signature,
+                    backlogZero: true,
+                });
+            }
+            throw new Error('not found');
+        });
+        expect(shouldSendIdleNotification(TEST_STATE_DIR, TEST_SESSION_ID, changedBacklogState)).toBe(true);
+    });
     it('blocks notification when within custom shorter cooldown', () => {
         const recentTimestamp = new Date(Date.now() - 10_000).toISOString(); // 10s ago
         existsSync.mockImplementation((p) => {
@@ -324,8 +370,47 @@ describe('shouldSendIdleNotification', () => {
         // Negative cooldown clamped to 0 → treated as disabled → should send
         expect(shouldSendIdleNotification(TEST_STATE_DIR)).toBe(true);
     });
+    it('suppresses repeated zero-backlog nudges even after cooldown expires when repo state is unchanged', () => {
+        const oldTimestamp = new Date(Date.now() - 90_000).toISOString();
+        existsSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH)
+                return true;
+            return false;
+        });
+        readFileSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH) {
+                return JSON.stringify({
+                    lastSentAt: oldTimestamp,
+                    repoSignature: zeroBacklogState.signature,
+                    backlogZero: true,
+                });
+            }
+            throw new Error('not found');
+        });
+        expect(shouldSendIdleNotification(TEST_STATE_DIR, undefined, zeroBacklogState)).toBe(false);
+    });
+    it('allows immediate idle notification when repo state changes even inside cooldown', () => {
+        const recentTimestamp = new Date(Date.now() - 5_000).toISOString();
+        existsSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH)
+                return true;
+            return false;
+        });
+        readFileSync.mockImplementation((p) => {
+            if (p === COOLDOWN_PATH) {
+                return JSON.stringify({
+                    lastSentAt: recentTimestamp,
+                    repoSignature: zeroBacklogState.signature,
+                    backlogZero: true,
+                });
+            }
+            throw new Error('not found');
+        });
+        expect(shouldSendIdleNotification(TEST_STATE_DIR, undefined, changedBacklogState)).toBe(true);
+    });
 });
 describe('recordIdleNotificationSent', () => {
+    const zeroBacklogState = { signature: 'repo-zero', backlogZero: true };
     beforeEach(() => {
         vi.clearAllMocks();
     });
@@ -347,11 +432,33 @@ describe('recordIdleNotificationSent', () => {
         const [calledPath] = atomicWriteJsonSync.mock.calls[0];
         expect(calledPath).toBe(SESSION_COOLDOWN_PATH);
     });
+    it('mirrors zero-backlog metadata to the global cooldown file for follow-up sessions', () => {
+        recordIdleNotificationSent(TEST_STATE_DIR, TEST_SESSION_ID, zeroBacklogState);
+        expect(atomicWriteJsonSync).toHaveBeenCalledTimes(2);
+        expect(atomicWriteJsonSync).toHaveBeenCalledWith(SESSION_COOLDOWN_PATH, expect.objectContaining({
+            lastSentAt: expect.any(String),
+            repoSignature: zeroBacklogState.signature,
+            backlogZero: true,
+        }));
+        expect(atomicWriteJsonSync).toHaveBeenCalledWith(COOLDOWN_PATH, expect.objectContaining({
+            lastSentAt: expect.any(String),
+            repoSignature: zeroBacklogState.signature,
+            backlogZero: true,
+        }));
+    });
     it('creates state directory if it does not exist', () => {
         recordIdleNotificationSent(TEST_STATE_DIR);
         expect(atomicWriteJsonSync).toHaveBeenCalledOnce();
         const [calledPath] = atomicWriteJsonSync.mock.calls[0];
         expect(calledPath).toBe(COOLDOWN_PATH);
+    });
+    it('persists repo signature metadata when repo state is provided', () => {
+        recordIdleNotificationSent(TEST_STATE_DIR, undefined, zeroBacklogState);
+        expect(atomicWriteJsonSync).toHaveBeenCalledWith(COOLDOWN_PATH, expect.objectContaining({
+            lastSentAt: expect.any(String),
+            repoSignature: zeroBacklogState.signature,
+            backlogZero: true,
+        }));
     });
     it('does not throw when atomicWriteJsonSync fails', () => {
         atomicWriteJsonSync.mockImplementation(() => {

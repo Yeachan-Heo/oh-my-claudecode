@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -46,6 +46,17 @@ describe('git-worktree', () => {
             const info2 = createWorkerWorktree(teamName, 'worker1', repoDir);
             expect(existsSync(info2.path)).toBe(true);
             expect(info2.path).toBe(info1.path);
+        });
+        it('cleans up a stale plain directory before creating the worktree', () => {
+            const stalePath = join(repoDir, '.omc', 'worktrees', teamName, 'worker-stale');
+            // Create a directory that is not registered as a git worktree.
+            rmSync(stalePath, { recursive: true, force: true });
+            mkdirSync(stalePath, { recursive: true });
+            writeFileSync(join(stalePath, 'orphan.txt'), 'orphaned state');
+            const info = createWorkerWorktree(teamName, 'worker-stale', repoDir);
+            expect(info.path).toBe(stalePath);
+            expect(existsSync(join(stalePath, 'orphan.txt'))).toBe(false);
+            expect(existsSync(info.path)).toBe(true);
         });
     });
     describe('removeWorkerWorktree', () => {

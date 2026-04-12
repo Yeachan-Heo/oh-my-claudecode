@@ -7,6 +7,8 @@
  * Cross-platform support via Node.js-based hook scripts (.mjs).
  * Bash hook scripts were removed in v3.9.0.
  */
+import { mergeClaudeMd } from '../setup/claude-md.js';
+export { mergeClaudeMd };
 /** Claude Code configuration directory */
 export declare const CLAUDE_CONFIG_DIR: string;
 export declare const AGENTS_DIR: string;
@@ -48,6 +50,16 @@ export interface InstallOptions {
     refreshHooksInPlugin?: boolean;
     skipHud?: boolean;
     noPlugin?: boolean;
+    /**
+     * Skip hook installation entirely: no standalone hook scripts written
+     * and no hook merge into `settings.json`. Exposed via the `--skip-hooks`
+     * CLI flag; prior to the setup unification this flag was silently
+     * ignored (non-regression #2 / plan: skipHooks bug fix).
+     *
+     * Deprecated: flag is kept for two release cycles with a stderr advisory
+     * on first use (see CLI).
+     */
+    skipHooks?: boolean;
     /**
      * Dev plugin-dir mode: skip copying agents and bundled skills into
      * `<configDir>` because the user is launching OMC via
@@ -165,6 +177,60 @@ export declare function cleanupStaleSkills(log: (msg: string) => void): string[]
  * skills that happen to share a name.
  */
 export declare function prunePluginDuplicateSkills(log: (msg: string) => void): string[];
+/**
+ * Remove standalone hook files under $CONFIG_DIR/hooks/ that duplicate the
+ * plugin's hooks/hooks.json delivery. Invoked ONLY when a plugin is active
+ * AND user opted into cleanup. Ownership check: filename must be in
+ * OMC_HOOK_FILENAMES so we never touch user-authored hooks.
+ *
+ * Returns the list of absolute paths that were removed.
+ */
+export declare function prunePluginDuplicateHooks(log: (msg: string) => void): string[];
+/**
+ * Result shape shared by both the preview and execute paths for plugin-mode
+ * leftover cleanup.
+ */
+export interface StandaloneDuplicatesPreview {
+    /** Absolute paths of agent files that were (or would be) removed. */
+    prunedAgents: string[];
+    /** Names of skill directories that were (or would be) removed. */
+    prunedSkills: string[];
+    /** Absolute paths of hook files that were (or would be) removed. */
+    prunedHooks: string[];
+    /** Whether settings.json was (or would be) mutated to strip OMC entries. */
+    settingsStripped: boolean;
+    /** Sum of prunedAgents + prunedSkills + prunedHooks lengths. */
+    totalPruneCount: number;
+    /** True when any cleanup work exists (prune OR settings strip). */
+    hasWork: boolean;
+}
+/**
+ * Preview what `pruneStandaloneDuplicatesForPluginMode` would do without
+ * mutating the filesystem. Safe to call at any time.
+ */
+export declare function previewStandaloneDuplicatesForPluginMode(opts?: {
+    configDir?: string;
+}): StandaloneDuplicatesPreview;
+/**
+ * When a Claude Code plugin is active (marketplace OR --plugin-dir-mode),
+ * the plugin delivers agents/skills/hooks at runtime from its own root,
+ * so any standalone copies under $CONFIG_DIR/ are redundant and can cause
+ * duplicate loading / duplicate hook invocations.
+ *
+ * This helper runs the three prune helpers when their corresponding
+ * plugin-provided-files check returns true, and strips OMC-owned hook
+ * entries from settings.json when the plugin provides hooks.json.
+ *
+ * Safe to call multiple times — every prune helper is idempotent and
+ * gated on ownership checks (plugin basename list for agents, sentinel
+ * file check for skills, OMC_HOOK_FILENAMES list for hooks).
+ *
+ * Returns a summary of what was pruned. Empty arrays when nothing
+ * needed cleanup.
+ */
+export declare function pruneStandaloneDuplicatesForPluginMode(log: (msg: string) => void, opts?: {
+    configDir?: string;
+}): StandaloneDuplicatesPreview;
 export declare function getInstalledOmcPluginRoots(): string[];
 /**
  * Detect whether an installed Claude Code plugin already provides OMC agent
@@ -172,6 +238,13 @@ export declare function getInstalledOmcPluginRoots(): string[];
  */
 export declare function hasPluginProvidedAgentFiles(): boolean;
 export declare function hasPluginProvidedSkillFiles(): boolean;
+/**
+ * Detect whether an installed Claude Code plugin ships `hooks/hooks.json`.
+ * Claude Code loads plugin hooks.json automatically, referencing scripts
+ * under `$CLAUDE_PLUGIN_ROOT/scripts/*.mjs` — so `$CONFIG_DIR/hooks/`
+ * standalone copies are redundant and cause duplicate hook invocations.
+ */
+export declare function hasPluginProvidedHookFiles(): boolean;
 export declare function hasEnabledOmcPlugin(): boolean;
 export declare function getRuntimePackageRoot(): string;
 /**
@@ -194,13 +267,6 @@ export declare function syncPersistedSetupVersion(options?: {
     version?: string;
     onlyIfConfigured?: boolean;
 }): boolean;
-/**
- * Merge OMC content into existing CLAUDE.md using markers
- * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
- * @param omcContent - New OMC content to inject
- * @returns Merged content with markers
- */
-export declare function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string;
 /**
  * Install OMC agents, commands, skills, and hooks
  */

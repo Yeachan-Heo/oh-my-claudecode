@@ -29,6 +29,8 @@ async function loadInstallerWithEnv(claudeConfigDir, homeDir, codexHome, omcHome
     process.env.OMC_HOME = omcHome;
     delete process.env.CLAUDE_MCP_CONFIG_PATH;
     delete process.env.OMC_MCP_REGISTRY_PATH;
+    delete process.env.OMC_PLUGIN_ROOT;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
     return import('../installer/index.js');
 }
 describe('installer MCP config ownership (issue #1802)', () => {

@@ -6,7 +6,7 @@
  * Affected files: skills/omc-setup/SKILL.md, skills/hud/SKILL.md
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 /**
@@ -64,24 +64,12 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
             expect(violations.length).toBe(0);
         });
     });
-    describe('skills/omc-setup (SKILL.md + phases)', () => {
-        const setupDir = join(REPO_ROOT, 'skills', 'omc-setup');
-        const filesToScan = [
-            join(setupDir, 'SKILL.md'),
-            ...readdirSync(join(setupDir, 'phases')).map(f => join(setupDir, 'phases', f)),
-        ].filter(f => f.endsWith('.md'));
-        const allScripts = [];
-        const allContent = [];
-        for (const f of filesToScan) {
-            const c = readFileSync(f, 'utf-8');
-            allContent.push(c);
-            allScripts.push(...extractNodeEScripts(c));
-        }
-        it('has at least one node -e script across setup files', () => {
-            expect(allScripts.length).toBeGreaterThan(0);
-        });
+    describe('skills/omc-setup/SKILL.md', () => {
+        const filePath = join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md');
+        const content = readFileSync(filePath, 'utf-8');
+        const scripts = extractNodeEScripts(content);
         it('has no "!" in any node -e script body (MINGW64 safe)', () => {
-            const violations = findBangViolations(allScripts, 'omc-setup/*');
+            const violations = findBangViolations(scripts, 'omc-setup/SKILL.md');
             if (violations.length > 0) {
                 expect.fail('Found "!" in node -e scripts (breaks MINGW64/Git Bash):\n' +
                     violations.map(v => `  • ${v}`).join('\n'));
@@ -111,39 +99,19 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
             expect(content).not.toContain('"command": "node /home/username/.claude/hud/omc-hud.mjs"');
             expect(content).not.toContain('The command must use an absolute path, not `~`');
         });
-        it("omc-setup version-detect script uses v==='' not !v", () => {
-            const setupDir = join(REPO_ROOT, 'skills', 'omc-setup');
-            const files = [
-                join(setupDir, 'SKILL.md'),
-                ...readdirSync(join(setupDir, 'phases')).map(f => join(setupDir, 'phases', f)),
-            ].filter(f => f.endsWith('.md'));
-            const combined = files.map(f => readFileSync(f, 'utf-8')).join('\n');
-            expect(combined).toContain("if(v==='')");
-            expect(combined).not.toContain('if(!v)');
-        });
-        it('omc-setup extracts CLAUDE.md version from OMC marker', () => {
-            const setupDir = join(REPO_ROOT, 'skills', 'omc-setup');
-            const files = [
-                join(setupDir, 'SKILL.md'),
-                ...readdirSync(join(setupDir, 'phases')).map(f => join(setupDir, 'phases', f)),
-                join(REPO_ROOT, 'scripts', 'setup-claude-md.sh'),
-            ].filter(f => f.endsWith('.md') || f.endsWith('.sh'));
-            const combined = files.map(f => readFileSync(f, 'utf-8')).join('\n');
-            expect(combined).toContain("grep -m1 'OMC:VERSION:'");
-            expect(combined).not.toContain('grep -m1 "^# oh-my-claudecode"');
+        it('hud SKILL.md cleanup step removes only the legacy HUD wrapper filename', () => {
+            const content = readFileSync(join(REPO_ROOT, 'skills', 'hud', 'SKILL.md'), 'utf-8');
+            const cleanupLine = content
+                .split('\n')
+                .find(l => l.includes('Removed legacy omc-hud.js') && l.startsWith('node -e'));
+            expect(cleanupLine).toBeDefined();
+            expect(cleanupLine).toContain("t=p.join(d,'hud','omc-hud.js')");
+            expect(cleanupLine).not.toContain("t=p.join(d,'hud','omc-hud.mjs')");
         });
         it('omc-setup SKILL.md explicitly tells the agent to execute immediately', () => {
             const content = readFileSync(join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md'), 'utf-8');
             expect(content).toContain('immediately execute the workflow below');
             expect(content).toContain('Do not only restate or summarize');
-        });
-        it('omc-setup phase 2 delegates HUD setup instead of inlining statusLine formatting', () => {
-            const content = readFileSync(join(REPO_ROOT, 'skills', 'omc-setup', 'phases', '02-configure.md'), 'utf-8');
-            expect(content).toContain('Use the Skill tool to invoke: `hud` with args: `setup`');
-            expect(content).toContain('Configure `statusLine` in `~/.claude/settings.json`');
-            expect(content).not.toContain('Read `~/.claude/settings.json`, then update/add the `statusLine` field.');
-            expect(content).not.toContain('"statusLine": {');
-            expect(content).not.toContain('C:\\Users');
         });
     });
 });

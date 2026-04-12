@@ -15,7 +15,7 @@
  * Architecture mirrors runtime.ts: startTeam, monitorTeam, shutdownTeam,
  * assignTask, resumeTeam as discrete operations driven by the caller.
  */
-import { execFile } from 'child_process';
+import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
@@ -29,7 +29,7 @@ import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, } from './model-contract.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, } from './tmux-session.js';
-import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
+import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
@@ -71,14 +71,13 @@ async function isWorkerPaneAlive(paneId) {
 async function captureWorkerPane(paneId) {
     if (!paneId)
         return '';
-    return await new Promise((resolve) => {
-        execFile('tmux', ['capture-pane', '-t', paneId, '-p', '-S', '-80'], (err, stdout) => {
-            if (err)
-                resolve('');
-            else
-                resolve(stdout ?? '');
-        });
-    });
+    try {
+        const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
+        return result.stdout ?? '';
+    }
+    catch {
+        return '';
+    }
 }
 function isFreshTimestamp(value, maxAgeMs = MONITOR_SIGNAL_STALE_MS) {
     if (!value)
@@ -99,6 +98,12 @@ function findOutstandingWorkerTask(worker, taskById, inProgressByOwner) {
     }
     const owned = inProgressByOwner.get(worker.name) ?? [];
     return owned[0] ?? null;
+}
+function getTaskDependencyIds(task) {
+    return task.depends_on ?? task.blocked_by ?? [];
+}
+function getMissingDependencyIds(task, taskById) {
+    return getTaskDependencyIds(task).filter((dependencyId) => !taskById.has(dependencyId));
 }
 // ---------------------------------------------------------------------------
 // V2 task instruction builder — CLI API lifecycle, NO done.json
@@ -193,15 +198,12 @@ async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd, a
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
 async function spawnV2Worker(opts) {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
     // Split new pane off the last existing pane (or leader if first worker)
     const splitTarget = opts.existingWorkerPaneIds.length === 0
         ? opts.leaderPaneId
         : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
     const splitType = opts.existingWorkerPaneIds.length === 0 ? '-h' : '-v';
-    const splitResult = await execFileAsync('tmux', [
+    const splitResult = await tmuxExecAsync([
         'split-window', splitType, '-t', splitTarget,
         '-d', '-P', '-F', '#{pane_id}',
         '-c', opts.cwd,
@@ -214,6 +216,7 @@ async function spawnV2Worker(opts) {
     // Build v2 task instruction (CLI API, NO done.json)
     const instruction = buildV2TaskInstruction(opts.teamName, opts.workerName, opts.task, opts.taskId);
     const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName);
+    const promptModeStartupPrompt = generatePromptModeStartupPrompt(opts.teamName, opts.workerName);
     if (usePromptMode) {
         await composeInitialInbox(opts.teamName, opts.workerName, instruction, opts.cwd);
     }
@@ -249,9 +252,11 @@ async function spawnV2Worker(opts) {
         resolvedBinaryPath,
         model: modelForAgent,
     });
-    // For prompt-mode agents (codex, gemini), pass instruction via CLI flag
+    // For prompt-mode agents (codex, gemini), keep the full instruction in
+    // inbox.md and pass only a short file-pointer prompt via CLI args. This
+    // avoids echoing reviewer/seed prompt text into tmux scrollback.
     if (usePromptMode) {
-        launchArgs.push(...getPromptModeArgs(opts.agentType, instruction));
+        launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
     }
     const paneConfig = {
         teamName: opts.teamName,
@@ -744,8 +749,14 @@ export async function monitorTeamV2(teamName, cwd) {
         const statusFresh = isFreshTimestamp(status.updated_at);
         const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
         const hasWorkStartEvidence = expectedTaskId !== '' && hasWorkerStatusProgress(status, expectedTaskId);
+        const missingDependencyIds = outstandingTask
+            ? getMissingDependencyIds(outstandingTask, taskById)
+            : [];
         let stallReason = null;
-        if (paneSuggestsIdle && expectedTaskId !== '' && !hasWorkStartEvidence) {
+        if (paneSuggestsIdle && missingDependencyIds.length > 0) {
+            stallReason = 'missing_dependency';
+        }
+        else if (paneSuggestsIdle && expectedTaskId !== '' && !hasWorkStartEvidence) {
             stallReason = 'no_work_start_evidence';
         }
         else if (paneSuggestsIdle && expectedTaskId !== '' && (!statusFresh || !heartbeatFresh)) {
@@ -756,7 +767,10 @@ export async function monitorTeamV2(teamName, cwd) {
         }
         if (stallReason) {
             nonReportingWorkers.push(w.name);
-            if (stallReason === 'no_work_start_evidence') {
+            if (stallReason === 'missing_dependency') {
+                recommendations.push(`Investigate ${w.name}: task-${outstandingTask?.id ?? expectedTaskId} is blocked by missing task ids [${missingDependencyIds.join(', ')}]; pane is idle at prompt`);
+            }
+            else if (stallReason === 'no_work_start_evidence') {
                 recommendations.push(`Investigate ${w.name}: assigned work but no work-start evidence; pane is idle at prompt`);
             }
             else if (stallReason === 'stale_or_missing_worker_reports') {
@@ -777,6 +791,13 @@ export async function monitorTeamV2(teamName, cwd) {
         failed: allTasks.filter((t) => t.status === 'failed').length,
     };
     const allTasksTerminal = taskCounts.pending === 0 && taskCounts.blocked === 0 && taskCounts.in_progress === 0;
+    for (const task of allTasks) {
+        const missingDependencyIds = getMissingDependencyIds(task, taskById);
+        if (missingDependencyIds.length === 0) {
+            continue;
+        }
+        recommendations.push(`Investigate task-${task.id}: depends on missing task ids [${missingDependencyIds.join(', ')}]`);
+    }
     // Infer phase from task distribution
     const phase = inferPhase(allTasks.map((t) => ({
         status: t.status,
@@ -998,11 +1019,8 @@ export async function resumeTeamV2(teamName, cwd) {
         return null;
     // Verify tmux session is alive
     try {
-        const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
-        const execFileAsync = promisify(execFile);
         const sessionName = config.tmux_session || `omc-team-${sanitized}`;
-        await execFileAsync('tmux', ['has-session', '-t', sessionName.split(':')[0]]);
+        await tmuxExecAsync(['has-session', '-t', sessionName.split(':')[0]]);
         return {
             teamName: sanitized,
             sanitizedName: sanitized,

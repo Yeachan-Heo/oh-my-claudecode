@@ -28,6 +28,7 @@ import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map();
 export function shouldWriteStateBack(statePath) {
@@ -70,6 +71,27 @@ function isSessionCancelInProgress(directory, sessionId) {
     catch {
         return false;
     }
+}
+/**
+ * Treat mode state as stale if it has not been refreshed recently.
+ * Stale files are ignored so they cannot falsely block new sessions.
+ * Uses the freshest of last_checked_at, updated_at, or started_at.
+ */
+function isStaleState(state) {
+    if (!state || typeof state !== 'object') {
+        return true;
+    }
+    const stateRecord = state;
+    const timestamps = [stateRecord.last_checked_at, stateRecord.updated_at, stateRecord.started_at]
+        .filter((value) => typeof value === 'string' && value.length > 0);
+    const mostRecent = timestamps.reduce((max, value) => {
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) && parsed > max ? parsed : max;
+    }, 0);
+    if (mostRecent === 0) {
+        return true;
+    }
+    return Date.now() - mostRecent > STALE_STATE_THRESHOLD_MS;
 }
 /**
  * Read last tool error from state directory.
@@ -194,44 +216,83 @@ export function getIdleNotificationCooldownSeconds() {
     }
     return 60;
 }
+function getGlobalIdleNotificationCooldownPath(stateDir) {
+    return join(stateDir, 'idle-notif-cooldown.json');
+}
 function getIdleNotificationCooldownPath(stateDir, sessionId) {
     // Keep session segments filesystem-safe; fall back to legacy global path otherwise.
     if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
         return join(stateDir, 'sessions', sessionId, 'idle-notif-cooldown.json');
     }
-    return join(stateDir, 'idle-notif-cooldown.json');
+    return getGlobalIdleNotificationCooldownPath(stateDir);
+}
+function readIdleNotificationCooldownRecord(cooldownPath) {
+    try {
+        if (!existsSync(cooldownPath))
+            return null;
+        return JSON.parse(readFileSync(cooldownPath, 'utf-8'));
+    }
+    catch {
+        return null;
+    }
+}
+function isRepeatedZeroBacklogCooldown(record, repoState) {
+    return Boolean(repoState?.backlogZero &&
+        record?.backlogZero === true &&
+        typeof record.repoSignature === 'string' &&
+        record.repoSignature === repoState.signature);
 }
 /**
  * Check whether the session-idle notification cooldown has elapsed.
  * Returns true if the notification should be sent.
  */
-export function shouldSendIdleNotification(stateDir, sessionId) {
+export function shouldSendIdleNotification(stateDir, sessionId, repoState) {
     const cooldownSecs = getIdleNotificationCooldownSeconds();
-    if (cooldownSecs === 0)
-        return true; // cooldown disabled
     const cooldownPath = getIdleNotificationCooldownPath(stateDir, sessionId);
-    try {
-        if (!existsSync(cooldownPath))
-            return true;
-        const data = JSON.parse(readFileSync(cooldownPath, 'utf-8'));
-        if (data?.lastSentAt && typeof data.lastSentAt === 'string') {
-            const elapsed = (Date.now() - new Date(data.lastSentAt).getTime()) / 1000;
-            if (Number.isFinite(elapsed) && elapsed < cooldownSecs)
-                return false;
+    const cooldownRecord = readIdleNotificationCooldownRecord(cooldownPath);
+    if (isRepeatedZeroBacklogCooldown(cooldownRecord, repoState)) {
+        return false;
+    }
+    // Back off unchanged zero-backlog nudges across follow-up sessions too.
+    // Session-scoped cooldown should not keep rearming identical "all clear"
+    // alerts for brand-new session ids when the repo state has not changed.
+    if (cooldownPath !== getGlobalIdleNotificationCooldownPath(stateDir)) {
+        const globalRecord = readIdleNotificationCooldownRecord(getGlobalIdleNotificationCooldownPath(stateDir));
+        if (isRepeatedZeroBacklogCooldown(globalRecord, repoState)) {
+            return false;
         }
     }
-    catch {
-        // ignore — treat as no cooldown file
+    if (repoState && typeof cooldownRecord?.repoSignature === 'string') {
+        if (cooldownRecord.repoSignature !== repoState.signature) {
+            return true;
+        }
+    }
+    if (cooldownSecs === 0)
+        return true; // cooldown disabled
+    if (typeof cooldownRecord?.lastSentAt === 'string') {
+        const elapsed = (Date.now() - new Date(cooldownRecord.lastSentAt).getTime()) / 1000;
+        if (Number.isFinite(elapsed) && elapsed < cooldownSecs)
+            return false;
     }
     return true;
 }
 /**
  * Record that the session-idle notification was sent at the current timestamp.
  */
-export function recordIdleNotificationSent(stateDir, sessionId) {
+export function recordIdleNotificationSent(stateDir, sessionId, repoState) {
     const cooldownPath = getIdleNotificationCooldownPath(stateDir, sessionId);
     try {
-        atomicWriteJsonSync(cooldownPath, { lastSentAt: new Date().toISOString() });
+        const record = {
+            lastSentAt: new Date().toISOString(),
+        };
+        if (repoState) {
+            record.repoSignature = repoState.signature;
+            record.backlogZero = repoState.backlogZero;
+        }
+        atomicWriteJsonSync(cooldownPath, record);
+        if (repoState?.backlogZero && cooldownPath !== getGlobalIdleNotificationCooldownPath(stateDir)) {
+            atomicWriteJsonSync(getGlobalIdleNotificationCooldownPath(stateDir), record);
+        }
     }
     catch {
         // ignore write errors
@@ -240,6 +301,17 @@ export function recordIdleNotificationSent(stateDir, sessionId) {
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
 const CRITICAL_CONTEXT_STOP_PERCENT = 95;
+const RALPLAN_TERMINAL_PHASES = new Set([
+    'completed',
+    'complete',
+    'failed',
+    'cancelled',
+    'canceled',
+    'aborted',
+    'terminated',
+    'done',
+    'handoff',
+]);
 /**
  * Read the tail of a potentially large transcript file.
  * Architect approval/rejection markers appear near the end of the conversation,
@@ -374,7 +446,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     const ralphStatePath = sessionId
         ? resolveSessionStatePath('ralph', sessionId, workingDir)
         : resolveStatePath('ralph', workingDir);
-    if (!state || !state.active) {
+    if (!state || !state.active || isStaleState(state)) {
         return null;
     }
     // Session isolation. `readRalphState()` already enforces the lenient form
@@ -425,7 +497,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     // Check team pipeline state coordination
     // When team mode is active alongside ralph, respect team phase transitions
     const teamState = readTeamPipelineState(workingDir, sessionId);
-    if (teamState && teamState.active !== undefined) {
+    if (teamState && teamState.active !== undefined && !isStaleState(teamState)) {
         const teamPhase = teamState.phase;
         // If team pipeline reached a terminal state, ralph should also complete
         if (teamPhase === 'complete') {
@@ -770,15 +842,37 @@ When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
 const RALPLAN_STOP_BLOCKER_MAX = 30;
 const RALPLAN_STOP_BLOCKER_TTL_MS = 45 * 60 * 1000; // 45 min
 const RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS = 5_000;
+function getNormalizedRalplanPhase(state) {
+    if (!state || typeof state !== 'object') {
+        return null;
+    }
+    const rawPhase = state.current_phase ?? state.phase ?? state.status;
+    if (typeof rawPhase !== 'string') {
+        return null;
+    }
+    const phase = rawPhase.trim().toLowerCase();
+    if (!phase) {
+        return null;
+    }
+    if (phase === 'handoff' || phase.startsWith('handoff:') || phase.startsWith('handoff-')) {
+        return 'handoff';
+    }
+    return phase;
+}
 /**
  * Check Ralplan state for standalone ralplan mode enforcement.
  * Ralplan state is written by the MCP state_write tool.
- * Only `active` and `session_id` are used for blocking decisions.
+ * `active`, `session_id`, and the normalized phase/status fields are used for blocking decisions.
  */
 async function checkRalplan(sessionId, directory, cancelInProgress) {
     const workingDir = resolveToWorktreeRoot(directory);
     const state = readModeState('ralplan', workingDir, sessionId);
-    if (!state || !state.active) {
+    const stateRecord = state;
+    const hasTimestampFields = Boolean(stateRecord &&
+        ['last_checked_at', 'updated_at', 'started_at'].some((key) => typeof stateRecord[key] === 'string' && String(stateRecord[key]).length > 0));
+    // Session-scoped ralplan state can legitimately omit timestamps in CI.
+    // Only apply stale-state suppression when a freshness timestamp exists.
+    if (!state || !state.active || (hasTimestampFields && isStaleState(state))) {
         return null;
     }
     // Session isolation
@@ -789,13 +883,10 @@ async function checkRalplan(sessionId, directory, cancelInProgress) {
         return null;
     }
     // Terminal phase detection — allow stop when ralplan has completed
-    const currentPhase = state.current_phase;
-    if (typeof currentPhase === 'string') {
-        const terminal = ['complete', 'completed', 'failed', 'cancelled', 'done'];
-        if (terminal.includes(currentPhase.toLowerCase())) {
-            writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
-            return { shouldBlock: false, message: '', mode: 'ralplan' };
-        }
+    const currentPhase = getNormalizedRalplanPhase(state);
+    if (currentPhase && RALPLAN_TERMINAL_PHASES.has(currentPhase)) {
+        writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
+        return { shouldBlock: false, message: '', mode: 'ralplan' };
     }
     // Cancel-in-progress bypass
     if (cancelInProgress) {
@@ -864,7 +955,7 @@ When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
 async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelInProgress) {
     const workingDir = resolveToWorktreeRoot(directory);
     const state = readUltraworkState(workingDir, sessionId);
-    if (!state || !state.active) {
+    if (!state || !state.active || isStaleState(state)) {
         return null;
     }
     // Session isolation. `readUltraworkState()` already enforces the lenient
@@ -885,6 +976,17 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
             mode: 'none'
         };
     }
+    // If all tracked work is complete, auto-deactivate ultrawork and allow exit.
+    // Issue #2419: otherwise the Stop hook can keep blocking even after task
+    // completion, leaving ultrawork active until manual /cancel or session-end.
+    if (!_hasIncompleteTodos) {
+        deactivateUltrawork(workingDir, sessionId);
+        return {
+            shouldBlock: false,
+            message: '[ULTRAWORK COMPLETE] No incomplete tasks remain. Ultrawork state cleared.',
+            mode: 'none'
+        };
+    }
     // Enforce hard max iterations for ultrawork (mirrors ralph enforcement).
     const hardMax = getHardMaxIterations();
     if (hardMax > 0 && state.reinforcement_count >= hardMax) {
@@ -896,8 +998,8 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
             metadata: { reinforcementCount: state.reinforcement_count }
         };
     }
-    // Reinforce ultrawork mode - ALWAYS continue while active.
-    // This prevents false stops from bash errors, transient failures, etc.
+    // Reinforce ultrawork mode while incomplete work remains.
+    // This prevents false stops from bash errors or transient failures mid-task.
     const newState = incrementReinforcement(workingDir, sessionId);
     if (!newState) {
         return null;
@@ -1066,15 +1168,7 @@ export async function checkPersistentModes(sessionId, directory, stopContext // 
             };
         }
     }
-    // Priority 1.7: Team Pipeline (standalone team mode)
-    // When team runs without ralph, this provides stop-hook blocking.
-    // When team runs with ralph, checkRalphLoop() handles it (Priority 1).
-    // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
-    const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
-    if (teamResult) {
-        return teamResult;
-    }
-    // Priority 1.8: Ralplan (standalone consensus planning)
+    // Priority 1.7: Ralplan (standalone consensus planning)
     // Ralplan consensus loops (Planner/Architect/Critic) need hard-blocking.
     // When ralplan runs under ralph, checkRalphLoop() handles it (Priority 1).
     // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
@@ -1082,9 +1176,17 @@ export async function checkPersistentModes(sessionId, directory, stopContext // 
     if (ralplanResult) {
         return ralplanResult;
     }
+    // Priority 1.8: Team Pipeline (standalone team mode)
+    // When team runs without ralph, this provides stop-hook blocking.
+    // When team runs with ralph, checkRalphLoop() handles it (Priority 1).
+    // Return ANY non-null result (including circuit breaker shouldBlock=false with message).
+    const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
+    if (teamResult) {
+        return teamResult;
+    }
     // Priority 2: Ultrawork Mode (performance mode with persistence)
     const ultraworkResult = await checkUltrawork(sessionId, workingDir, hasIncompleteTodos, cancelInProgress);
-    if (ultraworkResult?.shouldBlock) {
+    if (ultraworkResult) {
         return ultraworkResult;
     }
     // Priority 3: Skill Active State (issue #1033)

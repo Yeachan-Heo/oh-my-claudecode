@@ -11,13 +11,15 @@
  */
 import { resolve } from 'path';
 import { mkdir } from 'fs/promises';
-import { execFileSync, spawnSync } from 'child_process';
+import { tmuxExec, tmuxSpawn } from '../cli/tmux-utils.js';
+import { buildWorkerArgv, getWorkerEnv as getModelWorkerEnv, } from './model-contract.js';
 import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, writeAtomic, } from './team-ops.js';
 import { withScalingLock, saveTeamConfig } from './monitor.js';
 import { sanitizeName, isWorkerAlive, killWorkerPanes, buildWorkerStartCommand, waitForPaneReady, } from './tmux-session.js';
 import { TeamPaths, absPath } from './state-paths.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
+const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 export function isScalingEnabled(env = process.env) {
     const raw = env[OMC_TEAM_SCALING_ENABLED_ENV];
     if (!raw)
@@ -30,6 +32,12 @@ function assertScalingEnabled(env = process.env) {
         throw new Error(`Dynamic scaling is disabled. Set ${OMC_TEAM_SCALING_ENABLED_ENV}=1 to enable.`);
     }
 }
+function asCliAgentType(agentType) {
+    if (CLI_AGENT_TYPES.has(agentType)) {
+        return agentType;
+    }
+    throw new Error(`Unknown agent type: ${agentType}. Supported: ${Array.from(CLI_AGENT_TYPES).join(', ')}`);
+}
 // ── Scale Up ──────────────────────────────────────────────────────────────────
 /**
  * Add workers to a running team mid-session.
@@ -39,6 +47,7 @@ function assertScalingEnabled(env = process.env) {
  */
 export async function scaleUp(teamName, count, agentType, tasks, cwd, env = process.env) {
     assertScalingEnabled(env);
+    const cliAgentType = asCliAgentType(agentType);
     if (!Number.isInteger(count) || count < 1) {
         return { ok: false, error: `count must be a positive integer (got ${count})` };
     }
@@ -60,7 +69,6 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
         const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state`;
         // Resolve the monotonic worker index counter
         let nextIndex = config.next_worker_index ?? (currentCount + 1);
-        const initialNextIndex = nextIndex;
         const addedWorkers = [];
         const rollbackScaleUp = async (error, paneId) => {
             for (const w of addedWorkers) {
@@ -70,14 +78,14 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
                 }
                 try {
                     if (w.pane_id) {
-                        execFileSync('tmux', ['kill-pane', '-t', w.pane_id], { stdio: 'pipe' });
+                        tmuxExec(['kill-pane', '-t', w.pane_id], { stdio: 'pipe' });
                     }
                 }
                 catch { /* best-effort pane cleanup */ }
             }
             if (paneId) {
                 try {
-                    execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'pipe' });
+                    tmuxExec(['kill-pane', '-t', paneId], { stdio: 'pipe' });
                 }
                 catch { /* best-effort pane cleanup */ }
             }
@@ -117,27 +125,38 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
             await mkdir(workerDirPath, { recursive: true });
             // Build startup command and create tmux pane
             const extraEnv = {
+                ...getModelWorkerEnv(sanitized, workerName, cliAgentType, env),
                 OMC_TEAM_STATE_ROOT: teamStateRoot,
                 OMC_TEAM_LEADER_CWD: leaderCwd,
-                OMC_TEAM_WORKER: `${sanitized}/${workerName}`,
             };
-            const cmd = buildWorkerStartCommand({
-                teamName: sanitized,
-                workerName,
-                envVars: extraEnv,
-                launchArgs: [],
-                launchBinary: 'claude',
-                launchCmd: '',
-                cwd: leaderCwd,
-            });
+            let cmd;
+            try {
+                const [launchBinary, ...launchArgs] = buildWorkerArgv(cliAgentType, {
+                    teamName: sanitized,
+                    workerName,
+                    cwd: leaderCwd,
+                });
+                cmd = buildWorkerStartCommand({
+                    teamName: sanitized,
+                    workerName,
+                    envVars: extraEnv,
+                    launchArgs,
+                    launchBinary,
+                    cwd: leaderCwd,
+                });
+            }
+            catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                return await rollbackScaleUp(`Failed to resolve worker launch config for ${workerName}: ${reason}`);
+            }
             // Split from the rightmost worker pane or the leader pane
             const splitTarget = config.workers.length > 0
                 ? (config.workers[config.workers.length - 1]?.pane_id ?? config.leader_pane_id ?? '')
                 : (config.leader_pane_id ?? '');
             const splitDirection = splitTarget === (config.leader_pane_id ?? '') ? '-h' : '-v';
-            const result = spawnSync('tmux', [
+            const result = tmuxSpawn([
                 'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', leaderCwd, cmd,
-            ], { encoding: 'utf-8' });
+            ]);
             if (result.status !== 0) {
                 return await rollbackScaleUp(`Failed to create tmux pane for ${workerName}: ${(result.stderr || '').trim()}`);
             }
@@ -148,7 +167,7 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
             // Get PID
             let panePid;
             try {
-                const pidResult = spawnSync('tmux', ['display-message', '-t', paneId, '-p', '#{pane_pid}'], { encoding: 'utf-8' });
+                const pidResult = tmuxSpawn(['display-message', '-t', paneId, '-p', '#{pane_pid}']);
                 const pidStr = (pidResult.stdout || '').trim();
                 const parsed = Number.parseInt(pidStr, 10);
                 if (Number.isFinite(parsed))

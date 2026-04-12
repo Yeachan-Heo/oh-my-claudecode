@@ -922,6 +922,13 @@ Read src/hooks/bridge.ts first.`,
                     expansion: { spec_path: null },
                     planning: { plan_path: null },
                 }, null, 2));
+                writeFileSync(join(sessionDir, 'team-state.json'), JSON.stringify({
+                    active: true,
+                    session_id: sessionId,
+                    team_name: 'bridge-autopilot-demo-team',
+                    current_phase: 'team-exec',
+                }, null, 2));
+                writeCanonicalTeamState(testDir, sessionId, 'bridge-autopilot-demo-team', 'executing');
                 writeFileSync(join(teamRoot, 'tasks', '1.json'), JSON.stringify({
                     id: '1',
                     subject: 'Blocked task',

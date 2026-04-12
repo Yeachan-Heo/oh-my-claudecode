@@ -64,6 +64,7 @@ describe('installer bundled + standalone skill sync', () => {
     let homeDir;
     let claudeConfigDir;
     let originalClaudeConfigDir;
+    let originalOmcPluginRoot;
     let originalHome;
     beforeEach(() => {
         tempRoot = mkdtempSync(join(tmpdir(), 'omc-installer-omc-reference-'));
@@ -72,7 +73,9 @@ describe('installer bundled + standalone skill sync', () => {
         mkdirSync(homeDir, { recursive: true });
         mkdirSync(claudeConfigDir, { recursive: true });
         originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        originalOmcPluginRoot = process.env.OMC_PLUGIN_ROOT;
         originalHome = process.env.HOME;
+        delete process.env.OMC_PLUGIN_ROOT;
     });
     afterEach(() => {
         if (originalClaudeConfigDir === undefined) {
@@ -80,6 +83,12 @@ describe('installer bundled + standalone skill sync', () => {
         }
         else {
             process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+        }
+        if (originalOmcPluginRoot === undefined) {
+            delete process.env.OMC_PLUGIN_ROOT;
+        }
+        else {
+            process.env.OMC_PLUGIN_ROOT = originalOmcPluginRoot;
         }
         if (originalHome === undefined) {
             delete process.env.HOME;
@@ -134,7 +143,6 @@ describe('installer bundled + standalone skill sync', () => {
             expect(existsSync(installedSkillPath)).toBe(true);
             expect(readFileSync(installedSkillPath, 'utf-8')).toContain(`name: ${skillName}`);
         }
-        expect(existsSync(join(claudeConfigDir, 'skills', 'omc-setup', 'phases', '04-welcome.md'))).toBe(true);
     });
     it('skips bundled skill sync when an installed plugin already provides skills', async () => {
         const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');

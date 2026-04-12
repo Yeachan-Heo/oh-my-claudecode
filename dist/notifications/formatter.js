@@ -146,9 +146,60 @@ const BYPASS_PERM_RE = /^⏵/;
 const BARE_PROMPT_RE = /^[❯>$%#]+$/;
 /** Minimum ratio of alphanumeric characters for a line to be "meaningful". */
 const MIN_ALNUM_RATIO = 0.15;
+/** Review-session seed prompt outcome keywords that cause tmux alert noise. */
+const REVIEW_SEED_OUTCOME_PATTERNS = [
+    { key: "approve", pattern: /\bapprove\b/i },
+    { key: "request-changes", pattern: /\brequest[- ]changes\b/i },
+    { key: "follow-up-fix", pattern: /\bfollow[- ]up[- ]fix\b/i },
+    { key: "blocked", pattern: /\bblocked\b/i },
+];
+/** Instructional phrasing commonly found in seeded review prompts. */
+const REVIEW_SEED_CUE_RE = /\b(review|verdict|respond|reply|return|output|classification|classify|decision|choose|label)\b/i;
+/** Continuation markers for bullets / enumerated option lines in seeded prompts. */
+const REVIEW_SEED_LIST_RE = /^(?:[-*•]|\d+[.)]|[A-Z][A-Z_-]+:|\([a-z0-9]+\))/;
+/** Static source/grep output lines that often trip keyword alerts without representing runtime failure. */
+const SOURCE_PATH_LINE_RE = /^(?:\.\/)?[A-Za-z0-9_./-]+:\d+:/;
+const STATIC_CODE_ALERT_RE = /(?:\blog_error\b|\becho\b).*?(?:"error\||"Usage:)|==\s*"error"/;
+const HELP_USAGE_LINE_RE = /^(?:Usage|Examples?|Commands?|Options?|Flags?):/i;
+const STATIC_HELP_CODE_RE = /^(?:log_error\s+"Usage:|if\s+\[\[.*==\s*"error".*\]\];?\s*then$)/;
 /** Default maximum number of meaningful lines to include in a notification.
  * Matches DEFAULT_TMUX_TAIL_LINES in config.ts. */
 const DEFAULT_MAX_TAIL_LINES = 15;
+function extractReviewSeedOutcomeKeys(line) {
+    return REVIEW_SEED_OUTCOME_PATTERNS
+        .filter(({ pattern }) => pattern.test(line))
+        .map(({ key }) => key);
+}
+function trimReviewSeedPrefix(lines) {
+    if (lines.length === 0)
+        return lines;
+    const prefix = lines.slice(0, 10);
+    const distinctOutcomes = new Set();
+    let hasCue = false;
+    let candidateEnd = -1;
+    for (let index = 0; index < prefix.length; index += 1) {
+        const line = prefix[index];
+        const outcomeKeys = extractReviewSeedOutcomeKeys(line);
+        const isCueLine = REVIEW_SEED_CUE_RE.test(line);
+        const isSeedLine = outcomeKeys.length > 0 ||
+            isCueLine ||
+            (candidateEnd >= 0 && REVIEW_SEED_LIST_RE.test(line));
+        outcomeKeys.forEach((key) => distinctOutcomes.add(key));
+        if (isCueLine)
+            hasCue = true;
+        if (isSeedLine) {
+            candidateEnd = index;
+            continue;
+        }
+        if (candidateEnd >= 0)
+            break;
+    }
+    const qualifies = candidateEnd >= 0 &&
+        (distinctOutcomes.size >= 3 || (distinctOutcomes.size >= 2 && hasCue));
+    if (!qualifies)
+        return lines;
+    return lines.slice(candidateEnd + 1);
+}
 /**
  * Parse raw tmux output into clean, human-readable lines.
  * - Strips ANSI escape codes
@@ -175,13 +226,20 @@ export function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
             continue;
         if (BARE_PROMPT_RE.test(trimmed))
             continue;
+        if (HELP_USAGE_LINE_RE.test(trimmed))
+            continue;
+        if (STATIC_HELP_CODE_RE.test(trimmed))
+            continue;
+        if (SOURCE_PATH_LINE_RE.test(trimmed) && STATIC_CODE_ALERT_RE.test(trimmed))
+            continue;
         // Alphanumeric density check: drop lines mostly composed of special characters
         const alnumCount = (trimmed.match(/[a-zA-Z0-9]/g) || []).length;
         if (trimmed.length >= 8 && alnumCount / trimmed.length < MIN_ALNUM_RATIO)
             continue;
         meaningful.push(stripped.trimEnd());
     }
-    return meaningful.slice(-maxLines).join("\n");
+    const trimmed = trimReviewSeedPrefix(meaningful);
+    return trimmed.slice(-maxLines).join("\n");
 }
 /**
  * Append tmux tail content to a message if present in the payload.

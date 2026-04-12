@@ -7,7 +7,7 @@
  * Cross-platform support via Node.js-based hook scripts (.mjs).
  * Bash hook scripts were removed in v3.9.0.
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, rmdirSync, cpSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -20,7 +20,10 @@ import { parseFrontmatter } from '../utils/frontmatter.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
+import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
+import { mergeClaudeMd } from '../setup/claude-md.js';
+export { mergeClaudeMd };
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -118,36 +121,6 @@ function getNewestInstalledVersionHint() {
     }
     return candidates.reduce((highest, candidate) => compareVersions(candidate, highest) > 0 ? candidate : highest);
 }
-/**
- * Find a marker that appears at the start of a line (line-anchored).
- * This prevents matching markers inside code blocks.
- * @param content - The content to search in
- * @param marker - The marker string to find
- * @param fromEnd - If true, finds the LAST occurrence instead of first
- * @returns The index of the marker, or -1 if not found
- */
-function findLineAnchoredMarker(content, marker, fromEnd = false) {
-    // Escape special regex characters in marker
-    const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`^${escapedMarker}$`, 'gm');
-    if (fromEnd) {
-        // Find the last occurrence
-        let lastIndex = -1;
-        let match;
-        while ((match = regex.exec(content)) !== null) {
-            lastIndex = match.index;
-        }
-        return lastIndex;
-    }
-    else {
-        // Find the first occurrence
-        const match = regex.exec(content);
-        return match ? match.index : -1;
-    }
-}
-function escapeRegex(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 function normalizePath(value) {
     return value.replace(/\\/g, '/').replace(/\/+$/, '');
 }
@@ -172,21 +145,6 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath) {
         return `sh ${quoteShellArg(findNodePath.replace(/\\/g, '/'))} ${quoteShellArg(normalizedHudScriptPath)}`;
     }
     return `node ${quoteShellArg(normalizedHudScriptPath)}`;
-}
-function createLineAnchoredMarkerRegex(marker, flags = 'gm') {
-    return new RegExp(`^${escapeRegex(marker)}$`, flags);
-}
-function stripGeneratedUserCustomizationHeaders(content) {
-    return content.replace(/^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm, '');
-}
-function trimClaudeUserContent(content) {
-    if (content.trim().length === 0) {
-        return '';
-    }
-    return content
-        .replace(/^(?:[ \t]*\r?\n)+/, '')
-        .replace(/(?:\r?\n[ \t]*)+$/, '')
-        .replace(/(?:\r?\n){3,}/g, '\n\n');
 }
 /**
  * Read hudEnabled from .omc-config.json without importing auto-update
@@ -629,6 +587,288 @@ export function prunePluginDuplicateSkills(log) {
     }
     return removed;
 }
+/**
+ * Remove standalone hook files under $CONFIG_DIR/hooks/ that duplicate the
+ * plugin's hooks/hooks.json delivery. Invoked ONLY when a plugin is active
+ * AND user opted into cleanup. Ownership check: filename must be in
+ * OMC_HOOK_FILENAMES so we never touch user-authored hooks.
+ *
+ * Returns the list of absolute paths that were removed.
+ */
+export function prunePluginDuplicateHooks(log) {
+    const removed = [];
+    if (!existsSync(HOOKS_DIR))
+        return removed;
+    for (const filename of OMC_HOOK_FILENAMES) {
+        const targetPath = join(HOOKS_DIR, filename);
+        if (existsSync(targetPath)) {
+            try {
+                unlinkSync(targetPath);
+                removed.push(targetPath);
+                log(`  Pruned duplicate hook: ${filename}`);
+            }
+            catch (err) {
+                log(`  Failed to prune ${filename}: ${err.message}`);
+            }
+        }
+    }
+    // Also prune hooks/lib/ files that were installed by ensureStandaloneHookScripts
+    const hooksLibDir = join(HOOKS_DIR, 'lib');
+    if (existsSync(hooksLibDir)) {
+        const libFilenames = [
+            'atomic-write.mjs',
+            'config-dir.mjs',
+            'config-dir.sh',
+            'stdin.mjs',
+        ];
+        for (const filename of libFilenames) {
+            const targetPath = join(hooksLibDir, filename);
+            if (existsSync(targetPath)) {
+                try {
+                    unlinkSync(targetPath);
+                    removed.push(targetPath);
+                }
+                catch { /* ignore */ }
+            }
+        }
+        // Remove hooks/lib/ dir if empty
+        try {
+            if (readdirSync(hooksLibDir).length === 0) {
+                rmdirSync(hooksLibDir);
+            }
+        }
+        catch { /* ignore */ }
+    }
+    // Prune find-node.sh if present
+    const findNodePath = join(HOOKS_DIR, 'find-node.sh');
+    if (existsSync(findNodePath)) {
+        try {
+            unlinkSync(findNodePath);
+            removed.push(findNodePath);
+        }
+        catch { /* ignore */ }
+    }
+    // Remove HOOKS_DIR if empty
+    try {
+        if (existsSync(HOOKS_DIR) && readdirSync(HOOKS_DIR).length === 0) {
+            rmdirSync(HOOKS_DIR);
+        }
+    }
+    catch { /* ignore */ }
+    return removed;
+}
+/**
+ * Shared settings-strip detection logic (read-only).
+ *
+ * Returns `{ changed: true, newHooks }` when OMC entries would be removed,
+ * `{ changed: false }` otherwise. Never writes anything.
+ */
+function detectSettingsStripChanges(settingsPath) {
+    if (!existsSync(settingsPath))
+        return { changed: false };
+    try {
+        const raw = readFileSync(settingsPath, 'utf-8');
+        const settings = JSON.parse(raw);
+        const existingHooks = settings.hooks;
+        if (!existingHooks || typeof existingHooks !== 'object')
+            return { changed: false };
+        let changed = false;
+        const newHooks = {};
+        for (const [eventType, groups] of Object.entries(existingHooks)) {
+            if (!Array.isArray(groups))
+                continue;
+            const nonOmcGroups = groups.filter((group) => !group.hooks.every((h) => h.type === 'command' && isOmcHook(h.command)));
+            if (nonOmcGroups.length !== groups.length)
+                changed = true;
+            if (nonOmcGroups.length > 0)
+                newHooks[eventType] = nonOmcGroups;
+        }
+        return changed ? { changed: true, newHooks } : { changed: false };
+    }
+    catch {
+        return { changed: false };
+    }
+}
+/**
+ * Preview what `pruneStandaloneDuplicatesForPluginMode` would do without
+ * mutating the filesystem. Safe to call at any time.
+ */
+export function previewStandaloneDuplicatesForPluginMode(opts) {
+    const prunedAgents = [];
+    const prunedSkills = [];
+    const prunedHooks = [];
+    let settingsStripped = false;
+    // Resolve directories from opts.configDir when provided, otherwise fall back
+    // to the module-level constants (which reflect the process's CLAUDE_CONFIG_DIR).
+    const agentsDir = opts?.configDir ? join(opts.configDir, 'agents') : AGENTS_DIR;
+    const skillsDir = opts?.configDir ? join(opts.configDir, 'skills') : SKILLS_DIR;
+    const hooksDir = opts?.configDir ? join(opts.configDir, 'hooks') : HOOKS_DIR;
+    const settingsPath = opts?.configDir ? join(opts.configDir, 'settings.json') : SETTINGS_FILE;
+    if (hasPluginProvidedAgentFiles()) {
+        // Walk the same logic as prunePluginDuplicateAgents but without unlinkSync
+        if (existsSync(agentsDir)) {
+            const currentAgentFiles = new Set(Object.keys(loadAgentDefinitions()));
+            for (const file of readdirSync(agentsDir)) {
+                if (!file.endsWith('.md') || file === 'AGENTS.md')
+                    continue;
+                if (!currentAgentFiles.has(file))
+                    continue;
+                const filepath = join(agentsDir, file);
+                try {
+                    const content = readFileSync(filepath, 'utf-8');
+                    if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+                        prunedAgents.push(filepath);
+                    }
+                }
+                catch { /* skip unreadable */ }
+            }
+        }
+    }
+    if (hasPluginProvidedSkillFiles()) {
+        // Walk the same logic as prunePluginDuplicateSkills but without rmSync
+        if (existsSync(skillsDir)) {
+            const packageSkillsDir = join(getPackageDir(), 'skills');
+            if (existsSync(packageSkillsDir)) {
+                const pluginSkillNames = new Set();
+                const pluginSkillHashes = new Map();
+                for (const entry of readdirSync(packageSkillsDir, { withFileTypes: true })) {
+                    if (!entry.isDirectory())
+                        continue;
+                    pluginSkillNames.add(entry.name);
+                    const skillMdPath = join(packageSkillsDir, entry.name, 'SKILL.md');
+                    if (existsSync(skillMdPath)) {
+                        const content = readFileSync(skillMdPath, 'utf-8');
+                        const { metadata } = parseFrontmatter(content);
+                        if (typeof metadata.name === 'string' && metadata.name.trim().length > 0) {
+                            pluginSkillNames.add(toSafeStandaloneSkillName(metadata.name));
+                        }
+                        pluginSkillHashes.set(entry.name, content.trim());
+                    }
+                }
+                for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+                    if (!entry.isDirectory())
+                        continue;
+                    if (entry.name === 'omc-learned' || entry.name === '.omc-trash')
+                        continue;
+                    if (!pluginSkillNames.has(entry.name))
+                        continue;
+                    const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
+                    if (!existsSync(skillMdPath))
+                        continue;
+                    try {
+                        const standaloneContent = readFileSync(skillMdPath, 'utf-8').trim();
+                        const pluginContent = pluginSkillHashes.get(entry.name);
+                        const isOmcCreated = standaloneContent.startsWith('---\n') && /^name:\s+\S+/m.test(standaloneContent);
+                        if (pluginContent === standaloneContent || isOmcCreated) {
+                            prunedSkills.push(entry.name);
+                        }
+                    }
+                    catch { /* skip */ }
+                }
+            }
+        }
+    }
+    if (hasPluginProvidedHookFiles()) {
+        // Walk the same logic as prunePluginDuplicateHooks but without unlinkSync
+        if (existsSync(hooksDir)) {
+            for (const filename of OMC_HOOK_FILENAMES) {
+                const targetPath = join(hooksDir, filename);
+                if (existsSync(targetPath))
+                    prunedHooks.push(targetPath);
+            }
+            const hooksLibDir = join(hooksDir, 'lib');
+            if (existsSync(hooksLibDir)) {
+                for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'stdin.mjs']) {
+                    const targetPath = join(hooksLibDir, filename);
+                    if (existsSync(targetPath))
+                        prunedHooks.push(targetPath);
+                }
+            }
+            const findNodePath = join(hooksDir, 'find-node.sh');
+            if (existsSync(findNodePath))
+                prunedHooks.push(findNodePath);
+        }
+        const detection = detectSettingsStripChanges(settingsPath);
+        if (detection.changed)
+            settingsStripped = true;
+    }
+    const totalPruneCount = prunedAgents.length + prunedSkills.length + prunedHooks.length;
+    return {
+        prunedAgents,
+        prunedSkills,
+        prunedHooks,
+        settingsStripped,
+        totalPruneCount,
+        hasWork: totalPruneCount > 0 || settingsStripped,
+    };
+}
+/**
+ * When a Claude Code plugin is active (marketplace OR --plugin-dir-mode),
+ * the plugin delivers agents/skills/hooks at runtime from its own root,
+ * so any standalone copies under $CONFIG_DIR/ are redundant and can cause
+ * duplicate loading / duplicate hook invocations.
+ *
+ * This helper runs the three prune helpers when their corresponding
+ * plugin-provided-files check returns true, and strips OMC-owned hook
+ * entries from settings.json when the plugin provides hooks.json.
+ *
+ * Safe to call multiple times — every prune helper is idempotent and
+ * gated on ownership checks (plugin basename list for agents, sentinel
+ * file check for skills, OMC_HOOK_FILENAMES list for hooks).
+ *
+ * Returns a summary of what was pruned. Empty arrays when nothing
+ * needed cleanup.
+ */
+export function pruneStandaloneDuplicatesForPluginMode(log, opts) {
+    const result = {
+        prunedAgents: [],
+        prunedSkills: [],
+        prunedHooks: [],
+        settingsStripped: false,
+        totalPruneCount: 0,
+        hasWork: false,
+    };
+    if (hasPluginProvidedAgentFiles()) {
+        result.prunedAgents = prunePluginDuplicateAgents(log);
+    }
+    if (hasPluginProvidedSkillFiles()) {
+        result.prunedSkills = prunePluginDuplicateSkills(log);
+    }
+    if (hasPluginProvidedHookFiles()) {
+        result.prunedHooks = prunePluginDuplicateHooks(log);
+        // Strip OMC hook entries from settings.json so they don't duplicate
+        // the plugin's hooks.json delivery.
+        const settingsPath = opts?.configDir
+            ? join(opts.configDir, 'settings.json')
+            : SETTINGS_FILE;
+        if (existsSync(settingsPath)) {
+            try {
+                const detection = detectSettingsStripChanges(settingsPath);
+                if (detection.changed && detection.newHooks !== undefined) {
+                    const raw = readFileSync(settingsPath, 'utf-8');
+                    const settings = JSON.parse(raw);
+                    const updated = { ...settings };
+                    if (Object.keys(detection.newHooks).length > 0) {
+                        updated.hooks = detection.newHooks;
+                    }
+                    else {
+                        delete updated.hooks;
+                    }
+                    writeFileSync(settingsPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf-8');
+                    result.settingsStripped = true;
+                    log(`Pruned OMC hook entries from ${settingsPath}`);
+                }
+            }
+            catch (err) {
+                log(`Warning: could not strip OMC hooks from settings.json: ${err.message}`);
+            }
+        }
+    }
+    result.totalPruneCount =
+        result.prunedAgents.length + result.prunedSkills.length + result.prunedHooks.length;
+    result.hasWork = result.totalPruneCount > 0 || result.settingsStripped;
+    return result;
+}
 function directoryHasMarkdownFiles(directory) {
     if (!existsSync(directory)) {
         return false;
@@ -653,9 +893,15 @@ function directoryHasSkillDefinitions(directory) {
 }
 export function getInstalledOmcPluginRoots() {
     const pluginRoots = new Set();
-    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
-    if (pluginRoot) {
-        pluginRoots.add(pluginRoot);
+    // Claude Code plugin runtime sets this when loading a plugin
+    const claudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
+    if (claudePluginRoot) {
+        pluginRoots.add(claudePluginRoot);
+    }
+    // `omc --plugin-dir <path>` launcher sets this
+    const omcPluginRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim();
+    if (omcPluginRoot) {
+        pluginRoots.add(omcPluginRoot);
     }
     const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
     if (!existsSync(installedPluginsPath)) {
@@ -689,6 +935,15 @@ export function hasPluginProvidedAgentFiles() {
 }
 export function hasPluginProvidedSkillFiles() {
     return getInstalledOmcPluginRoots().some(pluginRoot => directoryHasSkillDefinitions(join(pluginRoot, 'skills')));
+}
+/**
+ * Detect whether an installed Claude Code plugin ships `hooks/hooks.json`.
+ * Claude Code loads plugin hooks.json automatically, referencing scripts
+ * under `$CLAUDE_PLUGIN_ROOT/scripts/*.mjs` — so `$CONFIG_DIR/hooks/`
+ * standalone copies are redundant and cause duplicate hook invocations.
+ */
+export function hasPluginProvidedHookFiles() {
+    return getInstalledOmcPluginRoots().some((pluginRoot) => existsSync(join(pluginRoot, 'hooks', 'hooks.json')));
 }
 export function hasEnabledOmcPlugin() {
     if (process.env.CLAUDE_PLUGIN_ROOT?.trim()) {
@@ -906,58 +1161,6 @@ export function syncPersistedSetupVersion(options) {
     return true;
 }
 /**
- * Merge OMC content into existing CLAUDE.md using markers
- * @param existingContent - Existing CLAUDE.md content (null if file doesn't exist)
- * @param omcContent - New OMC content to inject
- * @returns Merged content with markers
- */
-export function mergeClaudeMd(existingContent, omcContent, version) {
-    const START_MARKER = '<!-- OMC:START -->';
-    const END_MARKER = '<!-- OMC:END -->';
-    const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-    const OMC_BLOCK_PATTERN = new RegExp(`^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`, 'gm');
-    const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
-    const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
-    // Idempotency guard: strip markers from omcContent if already present
-    // This handles the case where docs/CLAUDE.md ships with markers
-    let cleanOmcContent = omcContent;
-    const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
-    const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
-    if (omcStartIdx !== -1 && omcEndIdx !== -1 && omcStartIdx < omcEndIdx) {
-        // Extract content between markers, trimming any surrounding whitespace
-        cleanOmcContent = omcContent
-            .substring(omcStartIdx + START_MARKER.length, omcEndIdx)
-            .trim();
-    }
-    // Strip any existing version marker from content and inject current version
-    cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
-    const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
-    // Case 1: No existing content - wrap omcContent in markers
-    if (!existingContent) {
-        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
-    }
-    const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
-    const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
-    const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
-    // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
-    if (hasResidualStartMarker || hasResidualEndMarker) {
-        // Handle corrupted state - backup will be created by caller
-        // Strip unmatched OMC markers from recovered content to prevent unbounded
-        // growth on repeated calls (each call would re-detect corruption and append again)
-        const recoveredContent = strippedExistingContent
-            .replace(markerStartRegex, '')
-            .replace(markerEndRegex, '')
-            .trim();
-        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
-    }
-    const preservedUserContent = trimClaudeUserContent(stripGeneratedUserCustomizationHeaders(strippedExistingContent));
-    if (!preservedUserContent) {
-        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
-    }
-    // Case 3: Preserve only user-authored content that lives outside OMC markers
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${preservedUserContent}`;
-}
-/**
  * Install OMC agents, commands, skills, and hooks
  */
 export function install(options = {}) {
@@ -1013,6 +1216,14 @@ export function install(options = {}) {
     }
     const shouldInstallLegacyAgents = !runningAsPlugin && !pluginProvidesAgentFiles && !pluginDirMode;
     const shouldInstallBundledSkills = !pluginDirMode && (options.noPlugin === true || !enabledOmcPlugin || !pluginProvidesSkillFiles);
+    const pluginProvidesHookFiles = hasPluginProvidedHookFiles();
+    const shouldInstallStandaloneHooks = !options.skipHooks
+        && !runningAsPlugin
+        && !pluginDirMode
+        && !pluginProvidesHookFiles;
+    if (!shouldInstallStandaloneHooks && !options.skipHooks && !runningAsPlugin) {
+        log('Skipping standalone hook scripts (plugin provides hooks/hooks.json via $CLAUDE_PLUGIN_ROOT)');
+    }
     const allowPluginHookRefresh = runningAsPlugin && options.refreshHooksInPlugin && !projectScoped;
     if (runningAsPlugin) {
         log('Detected Claude Code plugin context - skipping agent/command file installation');
@@ -1128,11 +1339,40 @@ export function install(options = {}) {
             // Standalone installs still need ~/.claude/hooks/* scripts because their
             // settings.json hook entries execute those local paths directly. Plugin installs
             // keep using hooks/hooks.json + scripts/ under CLAUDE_PLUGIN_ROOT.
-            ensureStandaloneHookScripts(log);
-            result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+            //
+            // When --skip-hooks is active we deliberately skip both the script
+            // materialization and the settings.json hook merge (see below). This
+            // restores the documented intent of the flag (non-regression #2).
+            if (shouldInstallStandaloneHooks) {
+                ensureStandaloneHookScripts(log);
+                result.hooksConfigured = true; // Will be set properly after consolidated settings.json write
+            }
+            else if (options.skipHooks) {
+                log('Skipping hook script materialization (--skip-hooks)');
+                result.hooksConfigured = false;
+            }
+            else {
+                // Plugin provides hooks/hooks.json — no standalone scripts needed.
+                // Clean up any leftover standalone hooks that would duplicate the
+                // plugin's delivery. Safe because ownership is gated on the
+                // OMC_HOOK_FILENAMES constant, never touching user files.
+                const prunedHooks = prunePluginDuplicateHooks(log);
+                if (prunedHooks.length > 0) {
+                    log(`Pruned ${prunedHooks.length} duplicate standalone hook file(s)`);
+                }
+                result.hooksConfigured = false;
+            }
         }
         else {
             log('Skipping agent/command/hook files (managed by plugin system)');
+            // Even in runningAsPlugin mode, prune leftover standalone hook files
+            // that duplicate what the plugin's hooks/hooks.json already delivers.
+            if (pluginProvidesHookFiles) {
+                const prunedHooks = prunePluginDuplicateHooks(log);
+                if (prunedHooks.length > 0) {
+                    log(`Pruned ${prunedHooks.length} duplicate standalone hook file(s)`);
+                }
+            }
         }
         if (shouldInstallBundledSkills) {
             log(options.noPlugin
@@ -1169,33 +1409,27 @@ export function install(options = {}) {
         // Skipped only for project-scoped plugins to avoid mutating global config.
         if (!projectScoped) {
             const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
-            const homeMdPath = join(homedir(), 'CLAUDE.md');
-            if (!existsSync(homeMdPath)) {
-                const omcContent = loadClaudeMdContent();
-                // Read existing content if it exists
-                let existingContent = null;
-                if (existsSync(claudeMdPath)) {
-                    existingContent = readFileSync(claudeMdPath, 'utf-8');
-                }
-                // Always create backup before modification (if file exists)
-                if (existingContent !== null) {
-                    const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
-                    const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
-                    writeFileSync(backupPath, existingContent);
-                    log(`Backed up existing CLAUDE.md to ${backupPath}`);
-                }
-                // Merge OMC content with existing content
-                const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
-                writeFileSync(claudeMdPath, mergedContent);
-                if (existingContent) {
-                    log('Updated CLAUDE.md (merged with existing content)');
-                }
-                else {
-                    log('Created CLAUDE.md');
-                }
+            const omcContent = loadClaudeMdContent();
+            // Read existing content if it exists
+            let existingContent = null;
+            if (existsSync(claudeMdPath)) {
+                existingContent = readFileSync(claudeMdPath, 'utf-8');
+            }
+            // Always create backup before modification (if file exists)
+            if (existingContent !== null) {
+                const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
+                const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
+                writeFileSync(backupPath, existingContent);
+                log(`Backed up existing CLAUDE.md to ${backupPath}`);
+            }
+            // Merge OMC content with existing content
+            const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
+            writeFileSync(claudeMdPath, mergedContent);
+            if (existingContent) {
+                log('Updated CLAUDE.md (merged with existing content)');
             }
             else {
-                log('CLAUDE.md exists in home directory, skipping');
+                log('Created CLAUDE.md');
             }
         }
         // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)
@@ -1276,7 +1510,11 @@ export function install(options = {}) {
                     if (legacyRemoved > 0) {
                         log(`  Cleaned up ${legacyRemoved} legacy hook entries from settings.json`);
                     }
-                    const shouldConfigureSettingsHooks = !runningAsPlugin || allowPluginHookRefresh;
+                    const shouldConfigureSettingsHooks = shouldInstallStandaloneHooks
+                        || (runningAsPlugin && allowPluginHookRefresh);
+                    if (options.skipHooks) {
+                        log('  Skipping hook merge in settings.json (--skip-hooks)');
+                    }
                     if (shouldConfigureSettingsHooks) {
                         const desiredHooks = getHooksSettingsConfig().hooks;
                         for (const [eventType, newOmcGroups] of Object.entries(desiredHooks)) {
@@ -1284,8 +1522,30 @@ export function install(options = {}) {
                             existingHooks[eventType] = mergeHookGroups(eventType, currentGroups, newOmcGroups, options, log, result);
                         }
                     }
+                    // When plugin provides hooks and we're not skip-hooks, strip any
+                    // existing OMC hook entries from settings.json so they don't
+                    // duplicate what the plugin's hooks/hooks.json already delivers.
+                    if (!shouldConfigureSettingsHooks && !options.skipHooks && pluginProvidesHookFiles) {
+                        let strippedCount = 0;
+                        for (const [eventType, groups] of Object.entries(existingHooks)) {
+                            const groupList = groups;
+                            const nonOmcGroups = groupList.filter((group) => !group.hooks.every((h) => h.type === 'command' && isOmcHook(h.command)));
+                            if (nonOmcGroups.length !== groupList.length) {
+                                strippedCount += groupList.length - nonOmcGroups.length;
+                            }
+                            if (nonOmcGroups.length === 0) {
+                                delete existingHooks[eventType];
+                            }
+                            else {
+                                existingHooks[eventType] = nonOmcGroups;
+                            }
+                        }
+                        if (strippedCount > 0) {
+                            log(`  Stripped ${strippedCount} OMC hook group(s) from settings.json (plugin provides hooks)`);
+                        }
+                    }
                     existingSettings.hooks = Object.keys(existingHooks).length > 0 ? existingHooks : undefined;
-                    result.hooksConfigured = true;
+                    result.hooksConfigured = !options.skipHooks;
                 }
                 // 2. Configure statusLine (always, even in plugin mode)
                 if (hudScriptPath) {

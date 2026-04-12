@@ -431,9 +431,16 @@ export async function checkForUpdates() {
  */
 export function reconcileUpdateRuntime(options) {
     const errors = [];
-    const runningAsPlugin = isRunningAsPlugin();
     const projectScopedPlugin = isProjectScopedPlugin();
-    const shouldRefreshPluginHooks = runningAsPlugin && !projectScopedPlugin;
+    // Plugin installs execute hooks from <pluginRoot>/hooks/hooks.json. Re-running
+    // the standalone settings.json hook merge during `omc update` re-injects the
+    // legacy ~/.claude/hooks/* entries and causes duplicate hook execution.
+    //
+    // Reconciliation should still refresh shared installer artifacts (CLAUDE.md,
+    // HUD, MCP registry, statusLine, etc.), but it must leave settings.json hook
+    // ownership alone for plugin installs so the plugin hook manifest remains the
+    // single source of truth.
+    const shouldRefreshPluginHooks = false;
     if (!projectScopedPlugin) {
         try {
             if (!existsSync(HOOKS_DIR)) {

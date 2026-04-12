@@ -91,25 +91,31 @@ function lastInstallOptions() {
 function loggedText() {
     return logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
 }
+// These tests pin the pluginDirMode precedence logic against the direct-install
+// path that bare `omc setup` used BEFORE safe-defaults landed. With safe-defaults
+// as the new default, that direct-install path now lives behind `--infra-only`,
+// which is the documented escape hatch for callers (CI, provisioning, tests)
+// that need the pre-safe-defaults contract. All tests pass `--infra-only` so
+// they exercise the direct-install route and assert on the install() mock.
 describe('omc setup commander pipeline — pluginDirMode precedence', () => {
     it('1. --plugin-dir-mode flag → pluginDirMode=true', async () => {
-        await runSetup(['--plugin-dir-mode', '--quiet']);
+        await runSetup(['--infra-only', '--plugin-dir-mode', '--quiet']);
         expect(lastInstallOptions().pluginDirMode).toBe(true);
         expect(lastInstallOptions().noPlugin).toBe(false);
     });
     it('2. OMC_PLUGIN_ROOT env, no flag → pluginDirMode auto-enabled with detection log', async () => {
         process.env[OMC_PLUGIN_ROOT_ENV] = '/tmp/foo';
-        await runSetup([]);
+        await runSetup(['--infra-only']);
         expect(lastInstallOptions().pluginDirMode).toBe(true);
         expect(loggedText()).toMatch(/Detected OMC_PLUGIN_ROOT/);
     });
     it('3. neither flag nor env → pluginDirMode=false', async () => {
-        await runSetup(['--quiet']);
+        await runSetup(['--infra-only', '--quiet']);
         expect(lastInstallOptions().pluginDirMode).toBe(false);
         expect(lastInstallOptions().noPlugin).toBe(false);
     });
     it('4. --plugin-dir-mode --no-plugin → noPlugin wins, conflict warning logged', async () => {
-        await runSetup(['--plugin-dir-mode', '--no-plugin']);
+        await runSetup(['--infra-only', '--plugin-dir-mode', '--no-plugin']);
         const opts = lastInstallOptions();
         expect(opts.pluginDirMode).toBe(false);
         expect(opts.noPlugin).toBe(true);
@@ -117,14 +123,14 @@ describe('omc setup commander pipeline — pluginDirMode precedence', () => {
     });
     it('5. OMC_PLUGIN_ROOT env + --no-plugin → noPlugin wins, conflict warning logged', async () => {
         process.env[OMC_PLUGIN_ROOT_ENV] = '/tmp/bar';
-        await runSetup(['--no-plugin']);
+        await runSetup(['--infra-only', '--no-plugin']);
         const opts = lastInstallOptions();
         expect(opts.pluginDirMode).toBe(false);
         expect(opts.noPlugin).toBe(true);
         expect(loggedText()).toMatch(/conflict/i);
     });
     it('6. --plugin-dir-mode --force → pluginDirMode=true, force=true', async () => {
-        await runSetup(['--plugin-dir-mode', '--force', '--quiet']);
+        await runSetup(['--infra-only', '--plugin-dir-mode', '--force', '--quiet']);
         const opts = lastInstallOptions();
         expect(opts.pluginDirMode).toBe(true);
         expect(opts.force).toBe(true);

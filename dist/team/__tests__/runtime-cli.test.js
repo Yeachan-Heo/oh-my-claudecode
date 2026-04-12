@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { checkWatchdogFailedMarker, getTerminalStatus, writeResultArtifact, } from '../runtime-cli.js';
+import { buildTerminalCliResult, checkWatchdogFailedMarker, getTerminalStatus, writeResultArtifact, } from '../runtime-cli.js';
 describe('runtime-cli terminal status helper', () => {
     it('returns null when there is still active work', () => {
         expect(getTerminalStatus({ pending: 1, inProgress: 0, completed: 0, failed: 0 }, 1)).toBeNull();
@@ -153,6 +153,70 @@ describe('runtime-cli result artifact writer', () => {
         }
         finally {
             rmSync(jobsDir, { recursive: true, force: true });
+        }
+    });
+});
+describe('runtime-cli terminal preservation helper', () => {
+    it('preserves team state for completed terminal output', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-terminal-complete-'));
+        try {
+            const teamName = 'runtime-cli-preserve-complete';
+            const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
+            const tasksDir = join(stateRoot, 'tasks');
+            mkdirSync(tasksDir, { recursive: true });
+            writeFileSync(join(tasksDir, '1.json'), JSON.stringify({
+                id: '1',
+                status: 'completed',
+                result: 'PASS: complete without shutdown',
+            }), 'utf-8');
+            const result = buildTerminalCliResult(stateRoot, teamName, 'complete', 1, Date.now() - 1_000);
+            expect(existsSync(stateRoot)).toBe(true);
+            expect(result.exitCode).toBe(0);
+            expect(result.output.status).toBe('completed');
+            expect(result.output.teamName).toBe(teamName);
+            expect(result.output.taskResults).toEqual([
+                {
+                    taskId: '1',
+                    status: 'completed',
+                    summary: 'PASS: complete without shutdown',
+                },
+            ]);
+            expect(result.notice).toContain('preserving team state');
+            expect(result.notice).toContain(`omc team shutdown ${teamName}`);
+        }
+        finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+    it('reports cancelled terminal phases without deleting team state', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-terminal-cancelled-'));
+        try {
+            const teamName = 'runtime-cli-preserve-cancelled';
+            const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
+            const tasksDir = join(stateRoot, 'tasks');
+            mkdirSync(tasksDir, { recursive: true });
+            writeFileSync(join(tasksDir, '1.json'), JSON.stringify({
+                id: '1',
+                status: 'blocked',
+                summary: 'team stopped for inspection',
+            }), 'utf-8');
+            const result = buildTerminalCliResult(stateRoot, teamName, 'cancelled', 1, Date.now() - 1_000);
+            expect(existsSync(stateRoot)).toBe(true);
+            expect(result.exitCode).toBe(1);
+            expect(result.output.status).toBe('failed');
+            expect(result.output.teamName).toBe(teamName);
+            expect(result.output.taskResults).toEqual([
+                {
+                    taskId: '1',
+                    status: 'blocked',
+                    summary: 'team stopped for inspection',
+                },
+            ]);
+            expect(result.notice).toContain('phase=cancelled');
+            expect(result.notice).toContain(`omc team shutdown ${teamName}`);
+        }
+        finally {
+            rmSync(cwd, { recursive: true, force: true });
         }
     });
 });

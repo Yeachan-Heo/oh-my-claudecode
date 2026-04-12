@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,29 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const root = join(__dirname, '..', '..');
+// scripts/plugin-setup.mjs writes `hooks/hooks.json` via `join(__dirname, '..', 'hooks', 'hooks.json')`
+// which resolves relative to the script's location, not the `cwd` or `CLAUDE_CONFIG_DIR`. When this
+// test invokes plugin-setup.mjs against the real repo root (to exercise the HUD wrapper generation
+// code path), the script rewrites the committed `hooks/hooks.json` to use the absolute node binary
+// path (e.g. `/opt/homebrew/Cellar/node/XX.Y.Z/bin/node`). That pollution then trips
+// `setup-contracts-regression::Contract 9 — no absolute node binary paths in hooks.json` whenever
+// vitest parallelism schedules that test after this one in the same run.
+//
+// Fix: snapshot `hooks/hooks.json` before this suite runs and restore the original bytes afterwards.
+// This keeps the test's existing behavior (exercise plugin-setup.mjs against the real plugin sources)
+// while preventing side effects from leaking into other tests.
+const HOOKS_JSON_PATH = join(root, 'hooks', 'hooks.json');
+let hooksJsonSnapshot = null;
+beforeAll(() => {
+    if (existsSync(HOOKS_JSON_PATH)) {
+        hooksJsonSnapshot = readFileSync(HOOKS_JSON_PATH);
+    }
+});
+afterAll(() => {
+    if (hooksJsonSnapshot !== null) {
+        writeFileSync(HOOKS_JSON_PATH, hooksJsonSnapshot);
+    }
+});
 const tempDirs = [];
 let savedPluginRoot;
 beforeEach(() => {
@@ -19,6 +42,11 @@ afterEach(() => {
         delete process.env[OMC_PLUGIN_ROOT_ENV];
     else
         process.env[OMC_PLUGIN_ROOT_ENV] = savedPluginRoot;
+    // Also restore hooks/hooks.json after every `it` so a polluted state can't bleed into
+    // the NEXT `it` within this same suite either (defense in depth for parallel test-case execution).
+    if (hooksJsonSnapshot !== null) {
+        writeFileSync(HOOKS_JSON_PATH, hooksJsonSnapshot);
+    }
 });
 afterEach(() => {
     while (tempDirs.length > 0) {
@@ -90,6 +118,42 @@ describe('HUD marketplace resolution', () => {
             stdio: 'pipe',
         });
         expect(readFileSync(sentinelPath, 'utf-8')).toBe('marketplace-loaded');
+    });
+    it('omc-hud.mjs surfaces dynamic import errors from OMC_PLUGIN_ROOT HUD paths', () => {
+        const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-import-error-'));
+        tempDirs.push(configDir);
+        const fakeHome = join(configDir, 'home');
+        mkdirSync(fakeHome, { recursive: true });
+        execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+            cwd: root,
+            env: {
+                ...process.env,
+                CLAUDE_CONFIG_DIR: configDir,
+                HOME: fakeHome,
+            },
+            stdio: 'pipe',
+        });
+        const pluginRoot = join(configDir, 'broken-plugin-root');
+        const pluginHudDir = join(pluginRoot, 'dist', 'hud');
+        mkdirSync(pluginHudDir, { recursive: true });
+        writeFileSync(join(pluginRoot, 'package.json'), '{"type":"module"}\n');
+        writeFileSync(join(pluginHudDir, 'index.js'), "import '../platform/index.js';\n");
+        const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+        const output = execFileSync(process.execPath, [hudScriptPath], {
+            cwd: root,
+            env: {
+                ...process.env,
+                CLAUDE_CONFIG_DIR: configDir,
+                HOME: fakeHome,
+                OMC_PLUGIN_ROOT: pluginRoot,
+                OMC_HUD_DISABLE_NPM_FALLBACK: '1',
+            },
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        const normalized = output.replace(/\\/g, '/');
+        expect(normalized).toContain('[OMC HUD] HUD import failed from');
+        expect(normalized).toContain('/broken-plugin-root/dist/hud/index.js');
     });
     it('omc-hud.mjs loads a global npm install outside a Node project via npm prefix resolution', () => {
         const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-global-prefix-'));
