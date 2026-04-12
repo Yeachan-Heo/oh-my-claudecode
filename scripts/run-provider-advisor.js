@@ -235,7 +235,7 @@ async function main() {
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
-    ...(pipePromptViaStdin ? { input: prompt } : {}),
+    ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
   });
 
   const stdout = run.stdout || '';
