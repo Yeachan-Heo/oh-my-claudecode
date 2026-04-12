@@ -1073,6 +1073,7 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
   const {
     checkPersistentModes,
     createHookOutput,
+    shouldWakeOpenClawOnStop,
     shouldSendIdleNotification,
     recordIdleNotificationSent,
   } = await import("./persistent-mode/index.js");
@@ -1142,14 +1143,14 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
         stopContext.stop_reason === "context_limit" ||
         stopContext.stopReason === "context_limit";
       if (!isAbort && !isContextLimit) {
-        // Always wake OpenClaw on stop — cooldown only applies to user-facing notifications
-        _openclaw.wake("stop", { sessionId, projectPath: directory });
-
         // Per-session cooldown: prevent notification spam when the session idles repeatedly.
         // Uses session-scoped state so one session does not suppress another.
         const stateDir = join(getOmcRoot(directory), "state");
         const { getIdleNotificationRepoState } = await import("./persistent-mode/idle-repo-state.js");
         const idleRepoState = getIdleNotificationRepoState(directory);
+        if (shouldWakeOpenClawOnStop(stateDir, sessionId, idleRepoState)) {
+          _openclaw.wake("stop", { sessionId, projectPath: directory });
+        }
         if (shouldSendIdleNotification(stateDir, sessionId, idleRepoState)) {
           recordIdleNotificationSent(stateDir, sessionId, idleRepoState);
           const logSessionIdleNotifyFailure = createSwallowedErrorLogger(

@@ -8,6 +8,7 @@ import * as path from "path";
 vi.mock("../persistent-mode/index.js", () => ({
   checkPersistentModes: vi.fn().mockResolvedValue({ mode: "none", message: "" }),
   createHookOutput: vi.fn().mockReturnValue({ continue: true }),
+  shouldWakeOpenClawOnStop: vi.fn().mockReturnValue(true),
   shouldSendIdleNotification: vi.fn().mockReturnValue(false), // cooldown ACTIVE — gate closed
   recordIdleNotificationSent: vi.fn(),
   getIdleNotificationCooldownSeconds: vi.fn().mockReturnValue(60),
@@ -19,6 +20,7 @@ vi.mock("../todo-continuation/index.js", () => ({
 }));
 
 import { _openclaw, processHook, resetSkipHooksCache, type HookInput } from "../bridge.js";
+import * as persistentMode from "../persistent-mode/index.js";
 
 describe("stop hook OpenClaw cooldown bypass (issue #1120)", () => {
   let tmpDir: string;
@@ -28,6 +30,7 @@ describe("stop hook OpenClaw cooldown bypass (issue #1120)", () => {
     // git init so resolveToWorktreeRoot returns this directory
     execSync("git init", { cwd: tmpDir, stdio: "ignore" });
     resetSkipHooksCache();
+    vi.mocked(persistentMode.shouldWakeOpenClawOnStop).mockReturnValue(true);
     delete process.env.DISABLE_OMC;
     delete process.env.OMC_SKIP_HOOKS;
   });
@@ -75,7 +78,25 @@ describe("stop hook OpenClaw cooldown bypass (issue #1120)", () => {
     await processHook("persistent-mode", input);
 
     // OpenClaw stop should NOT fire for user aborts
-    const stopCall = wakeSpy.mock.calls.find((call) => call[0] === "stop");
+    const stopCall = wakeSpy.mock.calls.find((call: unknown[]) => call[0] === "stop");
+    expect(stopCall).toBeUndefined();
+
+    wakeSpy.mockRestore();
+  });
+
+  it("suppresses _openclaw.wake('stop') for unchanged zero-backlog repo state even when idle notification cooldown is bypassed", async () => {
+    process.env.OMC_OPENCLAW = "1";
+    vi.mocked(persistentMode.shouldWakeOpenClawOnStop).mockReturnValue(false);
+    const wakeSpy = vi.spyOn(_openclaw, "wake");
+
+    const input: HookInput = {
+      sessionId: "test-session-789",
+      directory: tmpDir,
+    };
+
+    await processHook("persistent-mode", input);
+
+    const stopCall = wakeSpy.mock.calls.find((call: unknown[]) => call[0] === "stop");
     expect(stopCall).toBeUndefined();
 
     wakeSpy.mockRestore();
