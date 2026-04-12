@@ -1720,7 +1720,6 @@ export async function runSetupCommand(
   if (
     runWizardBeforeSetup
     && !presetPartial
-    && !flagsPartial.force
     && !rawFlags.infraOnly
     && !rawFlags.claudeMdOnly
     && !rawFlags.checkState

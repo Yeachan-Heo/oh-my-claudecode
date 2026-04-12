@@ -459,3 +459,94 @@ describe('pruneStandaloneDuplicatesForPluginMode — already-configured path', (
     expect(result.settingsStripped).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bug 2: getInstalledOmcPluginRoots reads OMC_PLUGIN_ROOT
+// ---------------------------------------------------------------------------
+
+describe('getInstalledOmcPluginRoots — OMC_PLUGIN_ROOT support', () => {
+  it('returns the OMC_PLUGIN_ROOT env var path when set (CLAUDE_PLUGIN_ROOT absent)', async () => {
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+
+    vi.resetModules();
+    const { getInstalledOmcPluginRoots } = await import('../index.js');
+    const roots = getInstalledOmcPluginRoots();
+
+    expect(roots).toContain(tmpPluginRoot);
+  });
+
+  it('reads BOTH CLAUDE_PLUGIN_ROOT and OMC_PLUGIN_ROOT when both are set', async () => {
+    const { mkdtempSync: mdt, rmSync: rm, mkdirSync: mkdir, writeFileSync: wf } = await import('node:fs');
+    const { tmpdir: td } = await import('node:os');
+    const { join: j } = await import('node:path');
+    const secondRoot = mdt(j(td(), 'omc-plugin-second-'));
+    try {
+      process.env.CLAUDE_PLUGIN_ROOT = tmpPluginRoot;
+      process.env.OMC_PLUGIN_ROOT = secondRoot;
+
+      vi.resetModules();
+      const { getInstalledOmcPluginRoots } = await import('../index.js');
+      const roots = getInstalledOmcPluginRoots();
+
+      expect(roots).toContain(tmpPluginRoot);
+      expect(roots).toContain(secondRoot);
+    } finally {
+      rm(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('hasPluginProvidedHookFiles returns true when OMC_PLUGIN_ROOT points at a plugin with hooks.json', async () => {
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+    // tmpPluginRoot/hooks/hooks.json created in beforeEach
+
+    vi.resetModules();
+    const { hasPluginProvidedHookFiles } = await import('../index.js');
+    expect(hasPluginProvidedHookFiles()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 3: shouldInstallStandaloneHooks respects pluginDirMode
+// ---------------------------------------------------------------------------
+
+describe('install() — pluginDirMode skips standalone hook copying (Bug 3)', () => {
+  it('does NOT copy hooks when pluginDirMode=true AND OMC_PLUGIN_ROOT points at plugin with hooks.json', async () => {
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+
+    const { install } = await freshInstaller();
+    install({
+      verbose: false,
+      skipClaudeCheck: true,
+      force: true,
+      pluginDirMode: true,
+    });
+
+    const hooksDir = join(tmpConfigDir, 'hooks');
+    const files = getHooksInDir(hooksDir);
+    const omcFiles = files.filter((f) => OMC_HOOK_FILES.includes(f));
+    expect(omcFiles, 'OMC hook files must not be copied in pluginDirMode').toHaveLength(0);
+  });
+
+  it('does NOT copy hooks when pluginDirMode=true even if plugin does not ship hooks.json', async () => {
+    // Remove the fake plugin hooks.json so pluginProvidesHookFiles = false
+    const { rmSync: rm } = await import('node:fs');
+    rm(join(tmpPluginRoot, 'hooks', 'hooks.json'), { force: true });
+    process.env.OMC_PLUGIN_ROOT = tmpPluginRoot;
+
+    const { install } = await freshInstaller();
+    install({
+      verbose: false,
+      skipClaudeCheck: true,
+      force: true,
+      pluginDirMode: true,
+    });
+
+    // pluginDirMode is an explicit opt-out of standalone hooks regardless of hooks.json
+    const hooksDir = join(tmpConfigDir, 'hooks');
+    const files = getHooksInDir(hooksDir);
+    const omcFiles = files.filter((f) => OMC_HOOK_FILES.includes(f));
+    expect(omcFiles, '--plugin-dir-mode is an explicit opt-out of standalone hooks').toHaveLength(0);
+  });
+});
