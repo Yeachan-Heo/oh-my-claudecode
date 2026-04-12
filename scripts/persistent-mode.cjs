@@ -21,9 +21,10 @@ const {
   renameSync,
   statSync,
 } = require("fs");
+const { createHash } = require("crypto");
 const { execFileSync } = require("child_process");
 const { homedir } = require("os");
-const { join, dirname, resolve, normalize } = require("path");
+const { join, dirname, resolve, normalize, basename, sep } = require("path");
 const { getClaudeConfigDir } = require("./lib/config-dir.cjs");
 
 async function readStdin(timeoutMs = 2000) {
@@ -112,6 +113,45 @@ function runJsonCommand(command, args, cwd) {
     return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+function getProjectIdentifier(directory) {
+  const root = directory || process.cwd();
+  const source = runCommand("git", ["remote", "get-url", "origin"], root) || root;
+
+  let primaryRoot = root;
+  const commonDir = runCommand(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    root,
+  );
+  if (commonDir) {
+    const isGitDir = basename(commonDir) === ".git";
+    const isSubmodule = commonDir.includes(`${sep}.git${sep}modules`);
+    if (isGitDir && !isSubmodule) {
+      const resolved = dirname(commonDir);
+      if (resolved && resolved !== root) {
+        primaryRoot = resolved;
+      }
+    }
+  }
+
+  const hash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+  const dirName = basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${dirName}-${hash}`;
+}
+
+function resolveOmcStateDir(directory) {
+  const customDir = process.env.OMC_STATE_DIR;
+  if (!customDir) {
+    return join(directory, ".omc", "state");
+  }
+
+  try {
+    return join(customDir, getProjectIdentifier(directory), "state");
+  } catch {
+    return join(directory, ".omc", "state");
   }
 }
 
@@ -797,7 +837,7 @@ async function main() {
 
     const directory = data.cwd || data.directory || process.cwd();
     const sessionId = data.session_id || data.sessionId || "";
-    const stateDir = join(directory, ".omc", "state");
+    const stateDir = resolveOmcStateDir(directory);
 
     // CRITICAL: Never block context-limit stops.
     // Blocking these causes a deadlock where Claude Code cannot compact.

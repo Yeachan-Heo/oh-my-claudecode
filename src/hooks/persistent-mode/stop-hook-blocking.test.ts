@@ -9,6 +9,7 @@ import {
   type PersistentModeResult,
 } from "./index.js";
 import { activateUltrawork, deactivateUltrawork } from "../ultrawork/index.js";
+import { getOmcRoot } from "../../lib/worktree-paths.js";
 
 function writeTranscriptWithContext(filePath: string, contextWindow: number, inputTokens: number): void {
   writeFileSync(
@@ -43,6 +44,22 @@ function writeSubagentTrackingState(
   );
 }
 
+function writePendingTodo(tempDir: string, content: string): void {
+  mkdirSync(join(tempDir, ".claude"), { recursive: true });
+  writeFileSync(
+    join(tempDir, ".claude", "todos.json"),
+    JSON.stringify({
+      todos: [
+        {
+          content,
+          status: "pending",
+          priority: "high",
+        },
+      ],
+    }),
+  );
+}
+
 function writeLegacyModeState(
   tempDir: string,
   fileName: string,
@@ -51,6 +68,20 @@ function writeLegacyModeState(
   const stateDir = join(tempDir, ".omc", "state");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, fileName), JSON.stringify(state, null, 2));
+}
+
+function resolveCentralizedStateDir(directory: string, customStateDir: string): string {
+  const previous = process.env.OMC_STATE_DIR;
+  process.env.OMC_STATE_DIR = customStateDir;
+  try {
+    return join(getOmcRoot(directory), "state");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OMC_STATE_DIR;
+    } else {
+      process.env.OMC_STATE_DIR = previous;
+    }
+  }
 }
 
 describe("Stop Hook Blocking Contract", () => {
@@ -894,13 +925,16 @@ describe("Stop Hook Blocking Contract", () => {
     let tempDir: string;
     const scriptPath = join(process.cwd(), "scripts", "persistent-mode.cjs");
 
-    function runScript(input: Record<string, unknown>): Record<string, unknown> {
+    function runScript(
+      input: Record<string, unknown>,
+      envOverrides: Record<string, string | undefined> = {},
+    ): Record<string, unknown> {
       try {
         const result = execSync(`node "${scriptPath}"`, {
           encoding: "utf-8",
           timeout: 5000,
           input: JSON.stringify(input),
-          env: { ...process.env, NODE_ENV: "test" },
+          env: { ...process.env, NODE_ENV: "test", ...envOverrides },
         });
         const lines = result.trim().split("\n");
         return JSON.parse(lines[lines.length - 1]);
@@ -917,10 +951,66 @@ describe("Stop Hook Blocking Contract", () => {
     beforeEach(() => {
       tempDir = mkdtempSync(join(tmpdir(), "stop-hook-cjs-test-"));
       execSync("git init", { cwd: tempDir });
+      delete process.env.OMC_STATE_DIR;
     });
 
     afterEach(() => {
+      delete process.env.OMC_STATE_DIR;
       rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("reads centralized session state when OMC_STATE_DIR is set", () => {
+      const sessionId = "centralized-state-cjs";
+      const customStateDir = join(tempDir, "centralized-state");
+      const centralizedStateDir = resolveCentralizedStateDir(tempDir, customStateDir);
+      const sessionDir = join(centralizedStateDir, "sessions", sessionId);
+      writePendingTodo(tempDir, "Finish centralized task");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          original_prompt: "Centralized task",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        }),
+      );
+
+      const output = runScript(
+        { directory: tempDir, sessionId },
+        { OMC_STATE_DIR: customStateDir },
+      );
+
+      expect(output.decision).toBe("block");
+      expect(output.reason).toContain("ULTRAWORK");
+    });
+
+    it("ignores legacy local state when OMC_STATE_DIR is set", () => {
+      const sessionId = "legacy-local-cjs";
+      const localSessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writePendingTodo(tempDir, "Finish centralized-only task");
+      mkdirSync(localSessionDir, { recursive: true });
+      writeFileSync(
+        join(localSessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          original_prompt: "Stale local task",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        }),
+      );
+
+      const output = runScript(
+        { directory: tempDir, sessionId },
+        { OMC_STATE_DIR: join(tempDir, "centralized-state") },
+      );
+
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
     });
 
     it("returns continue: true for authentication error stop", () => {
