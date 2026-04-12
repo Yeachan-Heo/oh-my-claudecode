@@ -79,11 +79,10 @@ describe('install() — plugin-dir-mode end-to-end filesystem shape', () => {
     expect(claudeMdContent).toContain('<!-- OMC:START -->');
     expect(claudeMdContent).toContain('<!-- OMC:END -->');
 
-    // settings.json present with hooks
+    // settings.json present (may be written for statusLine / other config)
+    // hooks entries are NOT written in pluginDirMode — the plugin delivers them
     const settingsPath = join(testDir, 'settings.json');
     expect(existsSync(settingsPath)).toBe(true);
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    expect(settings.hooks).toBeDefined();
 
     // .omc-config.json present
     expect(existsSync(join(testDir, '.omc-config.json'))).toBe(true);

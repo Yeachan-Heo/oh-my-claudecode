@@ -25,6 +25,7 @@ import { parseFrontmatter } from '../utils/frontmatter.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
+import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
 import { mergeClaudeMd } from '../setup/claude-md.js';
 export { mergeClaudeMd };
@@ -1031,10 +1032,15 @@ function directoryHasSkillDefinitions(directory: string): boolean {
 
 export function getInstalledOmcPluginRoots(): string[] {
   const pluginRoots = new Set<string>();
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
-
-  if (pluginRoot) {
-    pluginRoots.add(pluginRoot);
+  // Claude Code plugin runtime sets this when loading a plugin
+  const claudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
+  if (claudePluginRoot) {
+    pluginRoots.add(claudePluginRoot);
+  }
+  // `omc --plugin-dir <path>` launcher sets this
+  const omcPluginRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim();
+  if (omcPluginRoot) {
+    pluginRoots.add(omcPluginRoot);
   }
 
   const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
@@ -1426,6 +1432,7 @@ export function install(options: InstallOptions = {}): InstallResult {
   const shouldInstallStandaloneHooks =
     !options.skipHooks
     && !runningAsPlugin
+    && !pluginDirMode
     && !pluginProvidesHookFiles;
   if (!shouldInstallStandaloneHooks && !options.skipHooks && !runningAsPlugin) {
     log('Skipping standalone hook scripts (plugin provides hooks/hooks.json via $CLAUDE_PLUGIN_ROOT)');
