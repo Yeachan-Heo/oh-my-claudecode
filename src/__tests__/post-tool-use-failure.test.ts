@@ -89,4 +89,46 @@ describe('post-tool-use-failure.mjs', () => {
     expect(errorState.error).toBe('Connection refused');
     expect(errorState.retry_count).toBe(1);
   });
+
+  it('suppresses broad AGENTS scan permission-denied noise for Bash', () => {
+    const cwd = makeRepoLocalTempDir();
+    const errorPath = join(cwd, '.omc', 'state', 'last-tool-error.json');
+
+    const result = runHook({
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'pwd && find .. -name AGENTS.md -print',
+      },
+      error: [
+        'find: ../systemd-private-123: Permission denied',
+        'find: ../snap-private-tmp: Permission denied',
+        'Command failed with exit code 1:',
+      ].join('\n'),
+      cwd,
+    });
+
+    expect(result).toEqual({ continue: true, suppressOutput: true });
+    expect(existsSync(errorPath)).toBe(false);
+  });
+
+  it('does not suppress Bash permission-denied errors with actionable non-scan content', () => {
+    const cwd = makeRepoLocalTempDir();
+    const errorPath = join(cwd, '.omc', 'state', 'last-tool-error.json');
+
+    const result = runHook({
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'find .. -name AGENTS.md -print',
+      },
+      error: [
+        'find: ../systemd-private-123: Permission denied',
+        'fatal: not a git repository (or any of the parent directories): .git',
+      ].join('\n'),
+      cwd,
+    });
+
+    expect(result.continue).toBe(true);
+    expect(result.suppressOutput).not.toBe(true);
+    expect(existsSync(errorPath)).toBe(true);
+  });
 });

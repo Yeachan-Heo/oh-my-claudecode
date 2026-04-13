@@ -20,6 +20,66 @@ const OPTIONAL_STARTUP_READ_TOOL_NAMES = new Set([
   'mcp__omx_memory__project_memory_read',
 ]);
 
+function getToolInputCommand(toolInput) {
+  if (typeof toolInput === 'string') {
+    return toolInput;
+  }
+  if (!toolInput || typeof toolInput !== 'object') {
+    return '';
+  }
+
+  const candidateKeys = ['command', 'cmd', 'bash_command', 'script', 'query'];
+  for (const key of candidateKeys) {
+    const value = toolInput[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function isPermissionDeniedScanLine(line) {
+  return /^(?:find|grep|rg): .*permission denied$/i.test(line.trim());
+}
+
+function shouldSuppressFilesystemScanPermissionNoise(toolName, toolInput, error) {
+  if (String(toolName || '').toLowerCase() !== 'bash') {
+    return false;
+  }
+
+  const command = getToolInputCommand(toolInput).trim();
+  if (!command) {
+    return false;
+  }
+
+  const looksLikeBroadScan =
+    /\bAGENTS\.md\b/i.test(command) ||
+    /\b(?:find|grep|rg)\b[\s\S]*?(?:\.\.|\/)/i.test(command);
+  if (!looksLikeBroadScan) {
+    return false;
+  }
+
+  const lines = String(error || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const permissionLines = lines.filter(isPermissionDeniedScanLine);
+  if (permissionLines.length === 0) {
+    return false;
+  }
+
+  const nonNoiseLines = lines.filter((line) => {
+    if (isPermissionDeniedScanLine(line)) return false;
+    if (/^(?:command failed with exit code \d+:|exit code \d+)$/i.test(line)) return false;
+    if (line === command) return false;
+    return true;
+  });
+
+  return nonNoiseLines.length === 0;
+}
+
 // Validate that targetPath is contained within basePath (prevent path traversal)
 function isPathContained(targetPath, basePath) {
   const normalizedTarget = resolve(targetPath);
@@ -150,6 +210,11 @@ async function main() {
     }
 
     if (shouldSuppressOptionalStartupMethodNotFound(toolName, error)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (shouldSuppressFilesystemScanPermissionNoise(toolName, toolInput, error)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }

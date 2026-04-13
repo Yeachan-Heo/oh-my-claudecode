@@ -228,6 +228,10 @@ const GENERIC_HOOK_FAILURE_PROSE_RE =
   /^The Bash output indicates (?:a )?(?:command\/setup|command|setup) failure\b/i;
 const ISSUE_PROMPT_NOISE_RE =
   /^(?:fix|review|investigate|analyze|search|find|look\s+for|debug|harden)\b.*\b(?:issue|pr)\s*#\d+\b.*\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts)\b/i;
+const PERMISSION_DENIED_SCAN_LINE_RE =
+  /^(?:find|grep|rg): .*permission denied$/i;
+const CLEAN_DIAGNOSTIC_QUERY_RE =
+  /^(?:[$❯>#]\s*)?(?:rg|ripgrep|grep)\b.*\b(?:severity\s*[:=]\s*["']?error["']?|diagnostic(?:s)?|lsp_diagnostics(?:_directory)?)\b/i;
 const JSONISH_LINE_RE =
   /^(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:)/;
 const REQUEST_RESPONSE_LITERAL_RE =
@@ -305,6 +309,31 @@ function looksLikeAlertRegexLiteral(line: string): boolean {
   return STRUCTURED_ALERT_KEYWORD_RE.test(trimmed) && ALERT_REGEX_LITERAL_RE.test(trimmed);
 }
 
+function isCommandBoilerplateLine(line: string): boolean {
+  return /^(?:command failed with exit code \d+:|exit code \d+)$/i.test(line.trim());
+}
+
+function stripLeadingNoisePrefix(lines: string[]): string[] {
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index]!.trim();
+    if (
+      PERMISSION_DENIED_SCAN_LINE_RE.test(line) ||
+      CLEAN_DIAGNOSTIC_QUERY_RE.test(line) ||
+      GENERIC_HOOK_FAILURE_PROSE_RE.test(line) ||
+      ISSUE_PROMPT_NOISE_RE.test(line) ||
+      ZERO_ALERT_SUMMARY_RE.test(line) ||
+      isCommandBoilerplateLine(line)
+    ) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+
+  return index > 0 ? lines.slice(index) : lines;
+}
+
 /**
  * Parse raw tmux output into clean, human-readable lines.
  * - Strips ANSI escape codes
@@ -334,6 +363,8 @@ export function parseTmuxTail(raw: string, maxLines: number = DEFAULT_MAX_TAIL_L
     if (ZERO_ALERT_SUMMARY_RE.test(trimmed)) continue;
     if (GENERIC_HOOK_FAILURE_PROSE_RE.test(trimmed)) continue;
     if (ISSUE_PROMPT_NOISE_RE.test(trimmed)) continue;
+    if (PERMISSION_DENIED_SCAN_LINE_RE.test(trimmed)) continue;
+    if (CLEAN_DIAGNOSTIC_QUERY_RE.test(trimmed)) continue;
     if (SOURCE_PATH_LINE_RE.test(trimmed) && STATIC_CODE_ALERT_RE.test(trimmed)) continue;
     if (SOURCE_PATH_LINE_RE.test(trimmed)) {
       const sourceContent = trimmed.replace(SOURCE_PATH_LINE_RE, "").trim();
@@ -350,7 +381,7 @@ export function parseTmuxTail(raw: string, maxLines: number = DEFAULT_MAX_TAIL_L
   }
 
   const trimmed = trimReviewSeedPrefix(meaningful);
-  return trimmed.slice(-maxLines).join("\n");
+  return stripLeadingNoisePrefix(trimmed).slice(-maxLines).join("\n");
 }
 
 /**
