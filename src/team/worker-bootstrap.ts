@@ -33,9 +33,11 @@ export function generatePromptModeStartupPrompt(
   teamName: string,
   workerName: string,
   teamStateRoot = '.omc/state',
+  cliOutputContract?: string,
 ): string {
   const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
-  return `Open ${inboxPath}. Follow it and begin the assigned work.`;
+  const base = `Open ${inboxPath}. Follow it and begin the assigned work.`;
+  return cliOutputContract ? `${base}\n${cliOutputContract}` : base;
 }
 
 export function generateMailboxTriggerMessage(
@@ -215,11 +217,15 @@ export async function composeInitialInbox(
   teamName: string,
   workerName: string,
   content: string,
-  cwd: string
+  cwd: string,
+  cliOutputContract?: string,
 ): Promise<void> {
   const inboxPath = join(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
   await mkdir(dirname(inboxPath), { recursive: true });
-  await writeFile(inboxPath, content, 'utf-8');
+  const finalContent = cliOutputContract && !content.includes(cliOutputContract)
+    ? `${content}\n${cliOutputContract}`
+    : content;
+  await writeFile(inboxPath, finalContent, 'utf-8');
 }
 
 /**
