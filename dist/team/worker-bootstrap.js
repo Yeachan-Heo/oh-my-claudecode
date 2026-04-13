@@ -10,7 +10,7 @@ export function generateTriggerMessage(teamName, workerName, teamStateRoot = '.o
     if (teamStateRoot !== '.omc/state') {
         return `Read ${inboxPath}, work now, report progress.`;
     }
-    return `Read ${inboxPath}, start work now, report concrete progress (not ACK-only), and keep executing your assigned or next feasible work.`;
+    return `Read ${inboxPath}, execute now, report concrete progress.`;
 }
 export function generatePromptModeStartupPrompt(teamName, workerName, teamStateRoot = '.omc/state') {
     const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
@@ -22,7 +22,7 @@ export function generateMailboxTriggerMessage(teamName, workerName, count = 1, t
     if (teamStateRoot !== '.omc/state') {
         return `${normalizedCount} new msg(s): check ${mailboxPath}, act and report progress.`;
     }
-    return `You have ${normalizedCount} new message(s). Check ${mailboxPath}, act now, reply with concrete progress (not ACK-only), and keep executing your assigned or next feasible work.`;
+    return `${normalizedCount} new msg(s). Read ${mailboxPath}, act now, report concrete progress.`;
 }
 function agentTypeGuidance(agentType) {
     const teamApiCommand = formatOmcCliInvocation('team api');
