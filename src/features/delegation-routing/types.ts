@@ -74,6 +74,8 @@ export const DEPRECATED_ROLE_ALIASES: Readonly<Record<string, string>> = {
   'deep-executor': 'executor',
   'build-fixer': 'debugger',
   'harsh-critic': 'critic',
+  // User-friendly short alias for /team role routing (plan AC-4)
+  reviewer: 'code-reviewer',
 };
 
 /**
