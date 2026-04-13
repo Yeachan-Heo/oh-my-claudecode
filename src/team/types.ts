@@ -9,6 +9,7 @@
 import type { TeamTaskStatus } from './contracts.js';
 import type { TeamPhase } from './phase-controller.js';
 import type { TeamLeaderNextAction } from './leader-nudge-guidance.js';
+import type { CanonicalTeamRole, RoleAssignment } from '../shared/types.js';
 
 /** Bridge daemon configuration — passed via --config file to bridge-entry.ts */
 export interface BridgeConfig {
@@ -252,7 +253,7 @@ export interface WorkerInfo {
   name: string;
   index: number;
   role: string;
-  worker_cli?: 'codex' | 'claude';
+  worker_cli?: 'codex' | 'claude' | 'gemini';
   assigned_tasks: string[];
   pid?: number;
   pane_id?: string;
@@ -261,6 +262,12 @@ export interface WorkerInfo {
   worktree_branch?: string;
   worktree_detached?: boolean;
   team_state_root?: string;
+  /**
+   * Verdict-output file path for CLI-worker output contract (AC-7).
+   * Set when the worker was spawned for a reviewer role on codex/gemini.
+   * Consumed by the worker-completion handler in runtime-v2.
+   */
+  output_file?: string;
 }
 
 /** Team configuration (V1 compat) */
@@ -287,6 +294,12 @@ export interface TeamConfig {
   resize_hook_name: string | null;
   resize_hook_target: string | null;
   next_worker_index?: number;
+  /**
+   * Per-team resolved routing snapshot (Option E).
+   * Populated at team creation by `buildResolvedRoutingSnapshot()`; read by
+   * `scaleUp`, worker restart, and spawn paths. Immutable for the team's lifetime.
+   */
+  resolved_routing?: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>;
 }
 
 /** Dispatch request kinds */

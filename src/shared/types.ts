@@ -130,6 +130,9 @@ export interface PluginConfig {
   // Delegation routing configuration
   delegationRouting?: DelegationRoutingConfig;
 
+  // /team role routing configuration (scoped to /team only; distinct from delegationRouting)
+  team?: TeamConfigBlock;
+
   // Plan output configuration (issue #1636)
   planOutput?: {
     /** Relative directory for generated plan artifacts. Default: .omc/plans */
@@ -377,4 +380,100 @@ export interface ResolveDelegationOptions {
   explicitTool?: DelegationTool;
   explicitModel?: string;
   config?: DelegationRoutingConfig;
+}
+
+// ---------------------------------------------------------------------------
+// /team role routing (Option E — /team-scoped per-role provider & model)
+// ---------------------------------------------------------------------------
+
+/** Canonical role names accepted in `team.roleRouting` (source of truth). */
+export const CANONICAL_TEAM_ROLES = [
+  'orchestrator',
+  'planner',
+  'analyst',
+  'architect',
+  'executor',
+  'debugger',
+  'critic',
+  'code-reviewer',
+  'security-reviewer',
+  'test-engineer',
+  'designer',
+  'writer',
+  'code-simplifier',
+  'explore',
+  'document-specialist',
+] as const;
+
+export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
+
+/** Provider for /team role routing. */
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini';
+
+/** Tier name accepted in role-assignment `model` field. */
+export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';
+
+/** Known agent names derived from `buildDefaultConfig().agents` keys in src/config/loader.ts. */
+export const KNOWN_AGENT_NAMES = [
+  'omc',
+  'explore',
+  'analyst',
+  'planner',
+  'architect',
+  'debugger',
+  'executor',
+  'verifier',
+  'securityReviewer',
+  'codeReviewer',
+  'testEngineer',
+  'designer',
+  'writer',
+  'qaTester',
+  'scientist',
+  'tracer',
+  'gitMaster',
+  'codeSimplifier',
+  'critic',
+  'documentSpecialist',
+] as const;
+
+export type KnownAgentName = typeof KNOWN_AGENT_NAMES[number];
+
+/** User-facing per-role spec in `team.roleRouting`. */
+export interface TeamRoleAssignmentSpec {
+  provider?: TeamRoleProvider;
+  /** Tier name ('HIGH' | 'MEDIUM' | 'LOW') or explicit model ID. */
+  model?: TeamRoleTier | string;
+  agent?: KnownAgentName;
+}
+
+/** Orchestrator is pinned to claude; only `model` is user-configurable. */
+export type OrchestratorSpec = Pick<TeamRoleAssignmentSpec, 'model'>;
+
+/** Cost mode reserved for future downgrade behavior (no implementation yet). */
+export type TeamCostMode = 'normal' | 'downgrade';
+
+/** Ops-level knobs for `/team`. */
+export interface TeamOpsConfig {
+  maxAgents?: number;
+  defaultAgentType?: string;
+  monitorIntervalMs?: number;
+  shutdownTimeoutMs?: number;
+  costMode?: TeamCostMode;
+}
+
+/** `team` config block in PluginConfig. */
+export interface TeamConfigBlock {
+  ops?: TeamOpsConfig;
+  roleRouting?: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> & {
+    orchestrator?: OrchestratorSpec;
+  };
+}
+
+/** Concrete resolved per-role assignment stored in `TeamConfig.resolved_routing`. */
+export interface RoleAssignment {
+  provider: TeamRoleProvider;
+  /** Resolved model ID (tier names expanded to explicit model strings). */
+  model: string;
+  agent: KnownAgentName;
 }
