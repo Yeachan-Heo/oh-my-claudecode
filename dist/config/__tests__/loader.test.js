@@ -204,6 +204,180 @@ describe("plan output configuration", () => {
         }
     });
 });
+describe("team.roleRouting (Option E)", () => {
+    let saved;
+    let originalCwd;
+    beforeEach(() => {
+        saved = saveAndClear([...ALL_KEYS, "OMC_TEAM_ROLE_OVERRIDES"]);
+        originalCwd = process.cwd();
+    });
+    afterEach(() => {
+        process.chdir(originalCwd);
+        restore(saved);
+    });
+    it("includes default empty team block in built config", () => {
+        const config = loadConfig();
+        expect(config.team).toBeDefined();
+        expect(config.team?.roleRouting).toEqual({});
+        expect(config.team?.ops).toEqual({});
+    });
+    it("merges per-role file overrides into team.roleRouting", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-routing-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        critic: { provider: "codex", model: "gpt-5.3-codex" },
+                        "code-reviewer": { provider: "gemini" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            const config = loadConfig();
+            expect(config.team?.roleRouting?.critic).toEqual({
+                provider: "codex",
+                model: "gpt-5.3-codex",
+            });
+            expect(config.team?.roleRouting?.["code-reviewer"]).toEqual({
+                provider: "gemini",
+            });
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("OMC_TEAM_ROLE_OVERRIDES env wins over file config", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-routing-env-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { roleRouting: { critic: { provider: "claude", model: "HIGH" } } },
+            }));
+            process.env.OMC_TEAM_ROLE_OVERRIDES = JSON.stringify({
+                critic: { provider: "codex" },
+            });
+            process.chdir(tempDir);
+            const config = loadConfig();
+            expect(config.team?.roleRouting?.critic?.provider).toBe("codex");
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("OMC_TEAM_ROLE_OVERRIDES with invalid JSON is ignored with warning", () => {
+        const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
+        try {
+            process.env.OMC_TEAM_ROLE_OVERRIDES = "{not valid json";
+            const config = loadConfig();
+            expect(config.team?.roleRouting).toEqual({});
+            expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("OMC_TEAM_ROLE_OVERRIDES"));
+        }
+        finally {
+            consoleWarnSpy.mockRestore();
+        }
+    });
+    it("rejects invalid provider value with descriptive error", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-provider-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { roleRouting: { critic: { provider: "openai" } } },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.critic\.provider/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects orchestrator.provider override (orchestrator is pinned to claude)", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-orch-pin-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: { orchestrator: { provider: "codex", model: "HIGH" } },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/orchestrator: key "provider" is not allowed/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects unknown agent name", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-agent-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { roleRouting: { executor: { agent: "nonExistentAgent" } } },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.agent/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("accepts 'reviewer' alias and preserves the raw key for later alias-aware resolution", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-alias-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { roleRouting: { reviewer: { provider: "codex" } } },
+            }));
+            process.chdir(tempDir);
+            // Should not throw — alias normalizes to code-reviewer canonical role.
+            const config = loadConfig();
+            expect(config.team?.roleRouting).toBeDefined();
+            // Validator preserves the user's key as-written; runtime/stage routing
+            // must therefore resolve aliases from the stored raw map too.
+            const r = config.team?.roleRouting;
+            expect(r["reviewer"]).toEqual({ provider: "codex" });
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects unsupported team.ops.defaultAgentType values", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-default-agent-type-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { ops: { defaultAgentType: "executor" } },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects unknown role with descriptive error", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-role-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: { roleRouting: { "totally-fake-role": { provider: "claude" } } },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/unknown role "totally-fake-role"/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+});
 describe("delegation routing deprecation warnings", () => {
     let saved;
     let originalCwd;

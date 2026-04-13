@@ -5,6 +5,7 @@
 ### New Features
 
 - **feat(team): per-role provider and model routing via `.claude/omc.jsonc` with resolved-routing snapshot** — declare which provider (`claude`/`codex`/`gemini`) and model tier backs each canonical role (critic, code-reviewer, executor, planner, etc.) in `team.roleRouting`. Routing resolves once at team creation, persists in `TeamConfig.resolved_routing`, and is reused across spawn/scale-up/restart. Env override via `OMC_TEAM_ROLE_OVERRIDES`. Missing CLIs fall back to Claude with a visible warning. See `skills/team/SKILL.md` § Per-Role Provider & Model Routing.
+- **fix(team): honor alias-keyed role routing and restrict `ops.defaultAgentType` to runtime-supported CLI providers** — accepted aliases like `reviewer` now affect resolved snapshot/stage routing, and `team.ops.defaultAgentType` now matches actual `/team` launcher semantics (`claude`/`codex`/`gemini` only).
 
 ---
 

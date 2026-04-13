@@ -39,6 +39,7 @@ export declare function deepMerge<T extends object>(target: T, source: Partial<T
  * Load configuration from environment variables
  */
 export declare function loadEnvConfig(): Partial<PluginConfig>;
+export declare function validateTeamConfig(config: PluginConfig): void;
 export declare function loadConfig(): PluginConfig;
 export declare function compactOmcStartupGuidance(content: string): string;
 /**

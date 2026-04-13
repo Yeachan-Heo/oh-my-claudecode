@@ -53,6 +53,7 @@ vi.mock('../tmux-session.js', () => ({
 }));
 describe('runtime v2 startup inbox dispatch', () => {
     let cwd;
+    const originalCwd = process.cwd();
     beforeEach(() => {
         vi.resetModules();
         mocks.createTeamSession.mockReset();
@@ -108,6 +109,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         });
     });
     afterEach(async () => {
+        process.chdir(originalCwd);
         if (cwd)
             await rm(cwd, { recursive: true, force: true });
     });
@@ -183,6 +185,28 @@ describe('runtime v2 startup inbox dispatch', () => {
         const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
         const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
         expect(persisted.workers.map((worker) => worker.role)).toEqual(['architect', 'writer']);
+    });
+    it('routes inferred review work through alias-keyed resolved snapshot entries', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-alias-routing-'));
+        await mkdir(join(cwd, '.claude'), { recursive: true });
+        await writeFile(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({
+            team: {
+                roleRouting: {
+                    reviewer: { provider: 'gemini' },
+                },
+            },
+        }), 'utf-8');
+        process.chdir(cwd);
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Review component naming', description: 'code review pass for PR' }],
+            cwd,
+        });
+        expect(runtime.config.resolved_routing?.['code-reviewer']?.primary.provider).toBe('gemini');
+        expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith('gemini', expect.any(Object));
     });
     it('passes through dedicated-window startup requests', async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-new-window-'));

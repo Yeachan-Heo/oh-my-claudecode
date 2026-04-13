@@ -78,7 +78,7 @@ import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
 import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { loadConfig } from '../config/loader.js';
-import { buildResolvedRoutingSnapshot } from './stage-router.js';
+import { buildResolvedRoutingSnapshot, getRoleRoutingSpec } from './stage-router.js';
 import { routeTaskToRole } from './role-router.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
 import {
@@ -211,7 +211,10 @@ function resolveTaskAssignment(
   // `team.roleRouting[<canonicalRole>]` in PluginConfig. This preserves the
   // pre-patch contract: `/team N:codex ...` stays on codex when config has no
   // per-role routing, even if the task text incidentally mentions "reviewer".
-  const hasConfigForRole = !!roleRoutingConfig?.[canonical];
+  const hasConfigForRole = !!getRoleRoutingSpec(
+    roleRoutingConfig as Record<string, TeamRoleAssignmentSpec | undefined> | undefined,
+    canonical,
+  );
   if (!hasExplicitRole && !hasConfigForRole) {
     return { agentType: fallbackAgent, model: '', role: canonical };
   }

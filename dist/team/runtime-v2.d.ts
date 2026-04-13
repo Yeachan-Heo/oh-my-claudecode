@@ -17,6 +17,8 @@
  */
 import type { TeamConfig, TeamTask, WorkerStatus, WorkerHeartbeat } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
+import type { PluginConfig } from '../shared/types.js';
+import { type CliWorkerOutputPayload } from './cli-worker-contract.js';
 export declare function isRuntimeV2Enabled(env?: NodeJS.ProcessEnv): boolean;
 export interface TeamRuntimeV2 {
     teamName: string;
@@ -71,12 +73,22 @@ export interface StartTeamV2Config {
         description: string;
         owner?: string;
         blocked_by?: string[];
+        role?: string;
     }>;
     cwd: string;
     newWindow?: boolean;
     workerRoles?: string[];
     roleName?: string;
     rolePrompt?: string;
+    /**
+     * Optional pre-loaded plugin config. When omitted, `loadConfig()` is called
+     * at startup. Exposed so callers (tests, bridges) can inject a config.
+     * The resolved routing snapshot derived from this config is persisted to
+     * `TeamConfig.resolved_routing` and is IMMUTABLE for the team's lifetime —
+     * subsequent edits to the on-disk config do NOT affect an already-started
+     * team (stickiness guarantee per plan AC-10 / R11).
+     */
+    pluginConfig?: PluginConfig;
 }
 /**
  * Start a team with the v2 event-driven runtime.
@@ -108,6 +120,30 @@ export declare class CircuitBreakerV2 {
  * task status back to pending so they can be claimed by other workers.
  */
 export declare function requeueDeadWorkerTasks(teamName: string, deadWorkerNames: string[], cwd: string): Promise<string[]>;
+export type CliWorkerVerdictStatus = 'completed' | 'failed' | 'file_missing' | 'parse_failed' | 'no_in_progress_task' | 'already_terminal' | 'skipped';
+export interface CliWorkerVerdictResult {
+    workerName: string;
+    taskId: string | null;
+    status: CliWorkerVerdictStatus;
+    verdict?: CliWorkerOutputPayload['verdict'];
+    reason?: string;
+}
+/**
+ * Post-exit handler for CLI workers that emitted a structured verdict
+ * (AC-7). Scans workers whose panes have exited and whose WorkerInfo
+ * carries `output_file`. For each:
+ *   - Reads + validates the JSON payload via `parseCliWorkerVerdict`.
+ *   - Locates the worker's in_progress task and writes a terminal status
+ *     (completed for `approve`, failed for `revise`/`reject`) plus verdict
+ *     metadata directly to the task file — the worker process is gone and
+ *     cannot re-enter `transitionTaskStatus` with its claim token.
+ *   - Renames `verdict.json` to `verdict.processed.json` so a subsequent
+ *     monitor cycle does not reprocess it.
+ *   - Emits a team event describing the outcome.
+ * On parse failure, emits a warning event and leaves the task untouched
+ * for human review (per plan AC-7).
+ */
+export declare function processCliWorkerVerdicts(teamName: string, cwd: string): Promise<CliWorkerVerdictResult[]>;
 /**
  * Take a single monitor snapshot of team state.
  * Caller drives the loop (e.g., runtime-cli poll interval or event trigger).

@@ -51,7 +51,7 @@ export interface ParsedTeamArgs {
 }
 export declare function assertTeamSpawnAllowed(cwd: string, env?: NodeJS.ProcessEnv): Promise<void>;
 /** @internal Exported for testing */
-export declare function parseTeamArgs(tokens: string[]): ParsedTeamArgs;
+export declare function parseTeamArgs(tokens: string[], defaultAgentType?: string): ParsedTeamArgs;
 export declare function buildStartupTasks(parsed: ParsedTeamArgs): Array<{
     subject: string;
     description: string;

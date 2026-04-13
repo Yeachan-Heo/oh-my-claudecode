@@ -4,6 +4,8 @@ import { CANONICAL_TEAM_ROLES } from '../../shared/types.js';
 import type { PluginConfig } from '../../shared/types.js';
 import { CLAUDE_FAMILY_DEFAULTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS } from '../../config/models.js';
 
+type TeamRoleRoutingConfig = NonNullable<NonNullable<PluginConfig['team']>['roleRouting']>;
+
 describe('buildResolvedRoutingSnapshot', () => {
   it('produces an entry for every canonical role', () => {
     const snap = buildResolvedRoutingSnapshot({});
@@ -96,5 +98,14 @@ describe('buildResolvedRoutingSnapshot', () => {
     const a = buildResolvedRoutingSnapshot(cfg);
     const b = buildResolvedRoutingSnapshot(cfg);
     expect(a).toEqual(b);
+  });
+
+  it('applies accepted alias keys when building the persisted snapshot', () => {
+    const cfg: PluginConfig = {
+      team: { roleRouting: { reviewer: { provider: 'gemini' } } as TeamRoleRoutingConfig },
+    };
+    const snap = buildResolvedRoutingSnapshot(cfg);
+    expect(snap['code-reviewer'].primary.provider).toBe('gemini');
+    expect(snap['code-reviewer'].fallback.provider).toBe('claude');
   });
 });

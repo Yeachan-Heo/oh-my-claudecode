@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { resolveRoleAssignment } from '../stage-router.js';
+import { resolveRoleAssignment, buildResolvedRoutingSnapshot } from '../stage-router.js';
 import { CANONICAL_TEAM_ROLES } from '../../shared/types.js';
 import type { CanonicalTeamRole, PluginConfig } from '../../shared/types.js';
 import { CLAUDE_FAMILY_DEFAULTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS } from '../../config/models.js';
+
+type TeamRoleRoutingConfig = NonNullable<NonNullable<PluginConfig['team']>['roleRouting']>;
 
 const EMPTY: PluginConfig = {};
 
@@ -107,11 +109,28 @@ describe('stage-router resolveRoleAssignment', () => {
   describe('alias normalization', () => {
     it('"reviewer" alias normalizes to code-reviewer (resolved as code-reviewer)', () => {
       const cfg: PluginConfig = {
-        team: { roleRouting: { 'code-reviewer': { provider: 'codex' } } },
+        team: { roleRouting: { reviewer: { provider: 'codex' } } as TeamRoleRoutingConfig },
       };
       const out = resolveRoleAssignment('reviewer' as CanonicalTeamRole, cfg);
       expect(out.provider).toBe('codex');
       expect(out.agent).toBe('codeReviewer');
+    });
+
+    it('canonical role lookup honors alias-keyed roleRouting entries', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { reviewer: { provider: 'gemini' } } as TeamRoleRoutingConfig },
+      };
+      const out = resolveRoleAssignment('code-reviewer', cfg);
+      expect(out.provider).toBe('gemini');
+      expect(out.agent).toBe('codeReviewer');
+    });
+
+    it('resolved snapshot uses alias-keyed routing entries for canonical stage roles', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { reviewer: { provider: 'codex' } } as TeamRoleRoutingConfig },
+      };
+      const snap = buildResolvedRoutingSnapshot(cfg);
+      expect(snap['code-reviewer'].primary.provider).toBe('codex');
     });
   });
 });

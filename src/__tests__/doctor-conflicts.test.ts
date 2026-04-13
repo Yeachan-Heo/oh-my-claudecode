@@ -583,8 +583,10 @@ describe('doctor-conflicts: config known fields (issue #1499)', () => {
         integrations: [],
       },
       team: {
-        maxAgents: 20,
-        defaultAgentType: 'executor',
+        ops: {
+          maxAgents: 20,
+          defaultAgentType: 'claude',
+        },
       },
     }, null, 2));
 

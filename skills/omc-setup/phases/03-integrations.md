@@ -113,12 +113,12 @@ Use AskUserQuestion with multiple questions:
 2. **5 agents (maximum)** - Maximum parallelism for large tasks
 3. **2 agents** - Conservative, for smaller projects
 
-**Question 2:** "Which agent type should teammates use by default?"
+**Question 2:** "Which CLI provider should teammates use by default?"
 
 **Options:**
-1. **executor (Recommended)** - General-purpose code implementation agent
-2. **debugger** - Specialized for build/type error fixing and debugging
-3. **designer** - Specialized for UI/frontend work
+1. **claude (Recommended)** - Default provider with the widest compatibility
+2. **codex** - Use Codex CLI workers by default when installed
+3. **gemini** - Use Gemini CLI workers by default when installed
 
 Store the team configuration in `~/.claude/.omc-config.json`:
 
@@ -136,11 +136,11 @@ fi
 echo "$EXISTING" | jq \
   --argjson maxAgents MAX_AGENTS \
   --arg agentType "AGENT_TYPE" \
-  '. + {team: {maxAgents: $maxAgents, defaultAgentType: $agentType, monitorIntervalMs: 30000, shutdownTimeoutMs: 15000}}' > "$CONFIG_FILE"
+  '. + {team: {ops: {maxAgents: $maxAgents, defaultAgentType: $agentType, monitorIntervalMs: 30000, shutdownTimeoutMs: 15000}}}' > "$CONFIG_FILE"
 
 echo "Team configuration saved:"
 echo "  Max agents: MAX_AGENTS"
-echo "  Default agent: AGENT_TYPE"
+echo "  Default provider: AGENT_TYPE"
 echo "  Model: teammates inherit your session model"
 ```
 

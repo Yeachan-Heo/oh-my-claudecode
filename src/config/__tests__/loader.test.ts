@@ -400,7 +400,7 @@ describe("team.roleRouting (Option E)", () => {
     }
   });
 
-  it("normalizes 'reviewer' alias to canonical 'code-reviewer' role", () => {
+  it("accepts 'reviewer' alias and preserves the raw key for later alias-aware resolution", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "omc-team-alias-"));
     try {
       const claudeDir = join(tempDir, ".claude");
@@ -415,10 +415,28 @@ describe("team.roleRouting (Option E)", () => {
       // Should not throw — alias normalizes to code-reviewer canonical role.
       const config = loadConfig();
       expect(config.team?.roleRouting).toBeDefined();
-      // Note: validator preserves the user's key as-written; only normalization
-      // is checked for canonicality. The raw key passes through to roleRouting.
+      // Validator preserves the user's key as-written; runtime/stage routing
+      // must therefore resolve aliases from the stored raw map too.
       const r = config.team?.roleRouting as Record<string, unknown>;
       expect(r["reviewer"]).toEqual({ provider: "codex" });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported team.ops.defaultAgentType values", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omc-team-default-agent-type-"));
+    try {
+      const claudeDir = join(tempDir, ".claude");
+      require("node:fs").mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(
+        join(claudeDir, "omc.jsonc"),
+        JSON.stringify({
+          team: { ops: { defaultAgentType: "executor" } },
+        }),
+      );
+      process.chdir(tempDir);
+      expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

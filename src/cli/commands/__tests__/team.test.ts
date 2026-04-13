@@ -309,6 +309,26 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.task).toBe('run all tests');
   });
 
+  it('uses configured CLI provider default when it is supported', () => {
+    const parsed = parseTeamArgs(['run all tests'], 'codex');
+    expect(parsed.agentTypes).toEqual(['codex', 'codex', 'codex']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'codex' },
+      { agentType: 'codex' },
+      { agentType: 'codex' },
+    ]);
+  });
+
+  it('falls back to claude when configured defaultAgentType is not a supported CLI provider', () => {
+    const parsed = parseTeamArgs(['run all tests'], 'executor');
+    expect(parsed.agentTypes).toEqual(['claude', 'claude', 'claude']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'claude' },
+      { agentType: 'claude' },
+      { agentType: 'claude' },
+    ]);
+  });
+
   it('parses single spec with role correctly', () => {
     const parsed = parseTeamArgs(['2:codex:architect', 'design auth']);
     expect(parsed.workerCount).toBe(2);

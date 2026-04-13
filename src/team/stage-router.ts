@@ -72,6 +72,32 @@ function isTier(value: string): value is TeamRoleTier {
 }
 
 /**
+ * Alias-aware lookup for a `/team` role-routing entry.
+ *
+ * `validateTeamConfig()` accepts user-friendly aliases like `reviewer`, so the
+ * resolver must honor those raw keys too even when callers hand-construct a
+ * PluginConfig or when the merged config preserves the user's spelling.
+ */
+export function getRoleRoutingSpec(
+  roleRouting: Record<string, TeamRoleAssignmentSpec | undefined> | undefined,
+  role: string,
+): TeamRoleAssignmentSpec | undefined {
+  if (!roleRouting) return undefined;
+
+  const normalizedRole = normalizeDelegationRole(role);
+  const direct = roleRouting[normalizedRole];
+  if (direct) return direct;
+
+  for (const [rawRole, spec] of Object.entries(roleRouting)) {
+    if (spec && normalizeDelegationRole(rawRole) === normalizedRole) {
+      return spec;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Resolve a tier name to an explicit model ID using (in precedence order):
  * 1. `cfg.routing.tierModels[tier]`
  * 2. env-derived defaults via `getDefaultTierModels()`
@@ -139,10 +165,10 @@ export function resolveRoleAssignment(
   const normalized = normalizeDelegationRole(role) as CanonicalTeamRole;
   const canonical: CanonicalTeamRole = isCanonicalRole(normalized) ? normalized : role;
 
-  const roleRouting = cfg.team?.roleRouting;
-  const spec: TeamRoleAssignmentSpec | undefined = roleRouting
-    ? (roleRouting as Record<string, TeamRoleAssignmentSpec | undefined>)[canonical]
-    : undefined;
+  const roleRouting = cfg.team?.roleRouting as
+    | Record<string, TeamRoleAssignmentSpec | undefined>
+    | undefined;
+  const spec = getRoleRoutingSpec(roleRouting, canonical);
 
   const isOrchestrator = canonical === 'orchestrator';
   const provider: TeamRoleProvider = isOrchestrator
@@ -185,7 +211,7 @@ export function buildResolvedRoutingSnapshot(
     // When primary is external and spec.model is an explicit non-tier id
     // (e.g., 'gpt-5.3-codex'), drop it for fallback so claude doesn't
     // receive an external model id; tier names always survive.
-    const spec = roleRouting?.[role];
+    const spec = getRoleRoutingSpec(roleRouting, role);
     const isExternalPrimary = primary.provider !== 'claude';
     const fallbackModelInput = isExternalPrimary && spec?.model && !isTier(spec.model)
       ? undefined

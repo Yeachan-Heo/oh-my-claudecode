@@ -21,6 +21,7 @@ const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
 const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
+const DEFAULT_TEAM_CLI_AGENT_TYPE: CliAgentType = 'claude';
 
 const TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] "<task description>"
@@ -323,6 +324,9 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   let workerSpecs: ParsedWorkerSpec[] = [];
   let json = false;
   let newWindow = false;
+  const normalizedDefaultAgentType = VALID_TEAM_CLI_AGENT_TYPES.has(defaultAgentType as CliAgentType)
+    ? defaultAgentType
+    : DEFAULT_TEAM_CLI_AGENT_TYPE;
 
   // Extract supported flags before parsing positional args
   const filteredArgs: string[] = [];
@@ -392,8 +396,8 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
 
   // Default: 3 workers with configured default agent type (falls back to claude)
   if (agentTypes.length === 0) {
-    agentTypes = Array.from({ length: workerCount }, () => defaultAgentType);
-    workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: defaultAgentType }));
+    agentTypes = Array.from({ length: workerCount }, () => normalizedDefaultAgentType);
+    workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: normalizedDefaultAgentType }));
   }
 
   const task = filteredArgs.join(' ').trim();
@@ -870,7 +874,7 @@ export async function teamCommand(args: string[]): Promise<void> {
   try {
     // Honor team.ops.defaultAgentType when user hasn't supplied N:agent-type.
     const cfg = loadConfig();
-    const defaultAgentType = cfg.team?.ops?.defaultAgentType ?? 'claude';
+    const defaultAgentType = cfg.team?.ops?.defaultAgentType ?? DEFAULT_TEAM_CLI_AGENT_TYPE;
     const parsed = parseTeamArgs(args, defaultAgentType);
     await handleTeamStart(parsed, cwd);
   } catch (error) {

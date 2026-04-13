@@ -456,7 +456,7 @@ export type TeamCostMode = 'normal' | 'downgrade';
 /** Ops-level knobs for `/team`. */
 export interface TeamOpsConfig {
   maxAgents?: number;
-  defaultAgentType?: string;
+  defaultAgentType?: TeamRoleProvider;
   monitorIntervalMs?: number;
   shutdownTimeoutMs?: number;
   costMode?: TeamCostMode;

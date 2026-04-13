@@ -879,7 +879,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
   "team": {
     "ops": {
       "maxAgents": 20,
-      "defaultAgentType": "executor",
+      "defaultAgentType": "claude",
       "monitorIntervalMs": 30000,
       "shutdownTimeoutMs": 15000
     }
@@ -888,7 +888,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
 ```
 
 - **ops.maxAgents** - Maximum teammates (default: 20)
-- **ops.defaultAgentType** - Agent type when a `/team` invocation does not specify one (default: `executor`)
+- **ops.defaultAgentType** - CLI provider when a `/team` invocation does not specify one (`claude` | `codex` | `gemini`, default: `claude`)
 - **ops.monitorIntervalMs** - How often to poll `TaskList` (default: 30s)
 - **ops.shutdownTimeoutMs** - How long to wait for shutdown responses (default: 15s)
 
@@ -933,7 +933,7 @@ Declare which provider (`claude`, `codex`, `gemini`) and which model tier should
 
 `orchestrator`, `planner`, `analyst`, `architect`, `executor`, `debugger`, `critic`, `code-reviewer`, `security-reviewer`, `test-engineer`, `designer`, `writer`, `code-simplifier`, `explore`, `document-specialist`.
 
-User-friendly aliases normalize via `normalizeDelegationRole()` — e.g. `reviewer` → `code-reviewer`, `quality-reviewer` → `code-reviewer`, `harsh-critic` → `critic`, `build-fixer` → `debugger`. Unknown roles fail validation at parse time.
+User-friendly aliases normalize via `normalizeDelegationRole()` — e.g. `reviewer` → `code-reviewer`, `quality-reviewer` → `code-reviewer`, `harsh-critic` → `critic`, `build-fixer` → `debugger`. Accepted alias keys are honored during resolved snapshot creation and later stage routing, not just validation. Unknown roles fail validation at parse time.
 
 ### Spec fields (`TeamRoleAssignmentSpec`)
 

@@ -481,6 +481,20 @@ export function validateTeamConfig(config: PluginConfig): void {
     | undefined;
   if (!team || typeof team !== "object") return;
 
+  const ops = team.ops as Record<string, unknown> | undefined;
+  if (ops && typeof ops === "object") {
+    if (ops.defaultAgentType !== undefined) {
+      if (
+        typeof ops.defaultAgentType !== "string" ||
+        !TEAM_ROLE_PROVIDERS.has(ops.defaultAgentType)
+      ) {
+        throw new Error(
+          `[OMC] team.ops.defaultAgentType: invalid value "${String(ops.defaultAgentType)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`,
+        );
+      }
+    }
+  }
+
   const roleRouting = team.roleRouting as Record<string, unknown> | undefined;
   if (!roleRouting || typeof roleRouting !== "object") return;
 
@@ -1011,6 +1025,38 @@ export function generateConfigSchema(): object {
                 fallback: { type: "array", items: { type: "string" } },
               },
               required: ["provider", "tool"],
+            },
+          },
+        },
+      },
+      team: {
+        type: "object",
+        description: "/team runtime configuration",
+        properties: {
+          ops: {
+            type: "object",
+            properties: {
+              maxAgents: { type: "integer", minimum: 1 },
+              defaultAgentType: {
+                type: "string",
+                enum: ["claude", "codex", "gemini"],
+                default: "claude",
+              },
+              monitorIntervalMs: { type: "integer", minimum: 1 },
+              shutdownTimeoutMs: { type: "integer", minimum: 1 },
+              costMode: { type: "string", enum: ["normal", "downgrade"] },
+            },
+          },
+          roleRouting: {
+            type: "object",
+            description: "Provider/model overrides for canonical /team roles",
+            additionalProperties: {
+              type: "object",
+              properties: {
+                provider: { type: "string", enum: ["claude", "codex", "gemini"] },
+                model: { type: "string" },
+                agent: { type: "string" },
+              },
             },
           },
         },
