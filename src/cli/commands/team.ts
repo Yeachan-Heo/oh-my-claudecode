@@ -15,6 +15,7 @@ import {
   type TeamApiOperation,
 } from '../../team/api-interop.js';
 import type { CliAgentType } from '../../team/model-contract.js';
+import { loadConfig } from '../../config/loader.js';
 
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
@@ -315,7 +316,7 @@ function normalizeWorkerSpecSegment(match: RegExpMatchArray): NormalizedWorkerSp
 }
 
 /** @internal Exported for testing */
-export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
+export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'claude'): ParsedTeamArgs {
   const args = [...tokens];
   let workerCount = 3;
   let agentTypes: string[] = [];
@@ -389,10 +390,10 @@ export function parseTeamArgs(tokens: string[]): ParsedTeamArgs {
     }
   }
 
-  // Default: 3 claude workers if no spec matched
+  // Default: 3 workers with configured default agent type (falls back to claude)
   if (agentTypes.length === 0) {
-    agentTypes = Array.from({ length: workerCount }, () => 'claude');
-    workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: 'claude' }));
+    agentTypes = Array.from({ length: workerCount }, () => defaultAgentType);
+    workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: defaultAgentType }));
   }
 
   const task = filteredArgs.join(' ').trim();
@@ -867,7 +868,10 @@ export async function teamCommand(args: string[]): Promise<void> {
 
   // Default: omc team [N:agent-type] "task" -> Start team
   try {
-    const parsed = parseTeamArgs(args);
+    // Honor team.ops.defaultAgentType when user hasn't supplied N:agent-type.
+    const cfg = loadConfig();
+    const defaultAgentType = cfg.team?.ops?.defaultAgentType ?? 'claude';
+    const parsed = parseTeamArgs(args, defaultAgentType);
     await handleTeamStart(parsed, cwd);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
