@@ -184,6 +184,23 @@ function stripQuotedSpans(output) {
   return output.replace(QUOTED_SPAN_PATTERN, ' ');
 }
 
+function isPytestRunOutput(output) {
+  if (!output) return false;
+
+  const cleaned = stripClaudeTempCwdErrors(output);
+  const hasPytestHeader =
+    /(^|\n)=+\s*test session starts\s*=+/i.test(cleaned) ||
+    /(^|\n).*pytest-\d/i.test(cleaned) ||
+    /(^|\n)collected\s+\d+\s+items?\b/i.test(cleaned);
+  const hasPytestBody =
+    /(^|\n)=+\s*short test summary info\s*=+/i.test(cleaned) ||
+    /(^|\n)=+\s*failures\s*=+/i.test(cleaned) ||
+    /(^|\n)(?:FAILED|ERROR)\s+.+::.+/m.test(cleaned) ||
+    /(^|\n)\S+\.py::\S+\s+(?:PASSED|FAILED|ERROR)\b/m.test(cleaned);
+
+  return hasPytestHeader && hasPytestBody;
+}
+
 function stripNonActionableErrorContext(output) {
   if (!output) return '';
   return output
@@ -236,6 +253,10 @@ export function detectBashFailure(output) {
   if (!output) return false;
 
   const cleaned = stripClaudeTempCwdErrors(output);
+
+  if (isPytestRunOutput(cleaned)) {
+    return false;
+  }
 
   const explicitExitPatterns = [
     /(^|\n)Error: Exit code [1-9]\d*(\n|$)/i,
@@ -667,7 +688,7 @@ function processRememberTags(output, directory) {
 // Patterns are tightened to tool-level failure phrases to avoid false positives
 // when edited file content contains error-handling code (issue #1005)
 export function detectWriteFailure(output) {
-  const cleaned = stripClaudeTempCwdErrors(output);
+  const cleaned = stripQuotedSpans(stripClaudeTempCwdErrors(output));
   const errorPatterns = [
     /\berror:/i,              // "error:" with word boundary — avoids "setError", "console.error"
     /\bfailed to\b/i,        // "failed to write" — avoids "failedOidc", UI strings
