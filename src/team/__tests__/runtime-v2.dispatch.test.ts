@@ -143,8 +143,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(requests[0]?.status).toBe('notified');
     expect(requests[0]?.inbox_correlation_key).toBe('startup:worker-1:1');
     expect(requests[0]?.trigger_message).toContain('.omc/state/team/dispatch-team/workers/worker-1/inbox.md');
-    expect(requests[0]?.trigger_message).toContain('start work now');
-    expect(requests[0]?.trigger_message).toContain('next feasible work');
+    expect(requests[0]?.trigger_message).toContain('execute now');
+    expect(requests[0]?.trigger_message).toContain('concrete progress');
 
     const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
     const inbox = await readFile(inboxPath, 'utf-8');
