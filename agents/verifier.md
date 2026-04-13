@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: Verification strategy, evidence-based completion checks, test adequacy
-model: claude-sonnet-4-6
+model: sonnet
 level: 3
 ---
 
