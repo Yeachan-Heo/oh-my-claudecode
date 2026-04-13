@@ -862,7 +862,7 @@ describe('parseMinimaxResponse', () => {
     expect(parseMinimaxResponse(response)).toBeNull();
   });
 
-  it('parses MiniMax-M* model usage as fiveHourPercent and weeklyPercent', () => {
+  it('parses MiniMax-M* remaining counts as used fiveHourPercent and weeklyPercent', () => {
     const endTime = Date.now() + 3600_000;
     const weeklyEndTime = Date.now() + 86400_000 * 3;
     const response = {
@@ -870,12 +870,12 @@ describe('parseMinimaxResponse', () => {
         {
           model_name: 'MiniMax-M2.7',
           current_interval_total_count: 1500,
-          current_interval_usage_count: 1416,
+          current_interval_usage_count: 84,
           start_time: Date.now(),
           end_time: endTime,
           remains_time: 3600_000,
           current_weekly_total_count: 15000,
-          current_weekly_usage_count: 14997,
+          current_weekly_usage_count: 3,
           weekly_start_time: Date.now(),
           weekly_end_time: weeklyEndTime,
           weekly_remains_time: 86400_000 * 3,
@@ -885,14 +885,39 @@ describe('parseMinimaxResponse', () => {
 
     const result = parseMinimaxResponse(response);
     expect(result).not.toBeNull();
-    // 1416/1500 * 100 = 94.4 (clamp does not round; rendering layer rounds)
+    // Remaining 84 of 1500 means 1416 used => 94.4%
     expect(result!.fiveHourPercent).toBeCloseTo(94.4, 1);
-    // 14997/15000 * 100 = 99.98
+    // Remaining 3 of 15000 means 14997 used => 99.98%
     expect(result!.weeklyPercent).toBeCloseTo(99.98, 1);
     expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
     expect(result!.fiveHourResetsAt!.getTime()).toBe(endTime);
     expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
     expect(result!.weeklyResetsAt!.getTime()).toBe(weeklyEndTime);
+  });
+
+  it('shows low usage when most MiniMax quota remains', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 1500,
+          current_interval_usage_count: 1495,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 15000,
+          current_weekly_usage_count: 14530,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBeCloseTo((5 / 1500) * 100, 3);
+    expect(result!.weeklyPercent).toBeCloseTo((470 / 15000) * 100, 3);
   });
 
   it('handles division by zero when total_count is 0', () => {
@@ -926,10 +951,10 @@ describe('parseMinimaxResponse', () => {
         {
           model_name: 'speech-hd',
           current_interval_total_count: 100,
-          current_interval_usage_count: 100,
+          current_interval_usage_count: 0,
           start_time: Date.now(), end_time: Date.now() + 3600_000,
           remains_time: 3600_000,
-          current_weekly_total_count: 700, current_weekly_usage_count: 700,
+          current_weekly_total_count: 700, current_weekly_usage_count: 0,
           weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
           weekly_remains_time: 86400_000,
         },
@@ -946,10 +971,10 @@ describe('parseMinimaxResponse', () => {
         {
           model_name: 'MiniMax-M1',
           current_interval_total_count: 1000,
-          current_interval_usage_count: 200,
+          current_interval_usage_count: 800,
           start_time: Date.now(), end_time: Date.now() + 3600_000,
           remains_time: 3600_000,
-          current_weekly_total_count: 10000, current_weekly_usage_count: 2000,
+          current_weekly_total_count: 10000, current_weekly_usage_count: 8000,
           weekly_start_time: Date.now(), weekly_end_time: Date.now() + 86400_000,
           weekly_remains_time: 86400_000,
         },
@@ -958,7 +983,7 @@ describe('parseMinimaxResponse', () => {
 
     const result = parseMinimaxResponse(response);
     expect(result).not.toBeNull();
-    // Should use MiniMax-M2.7 (first MiniMax-M* match): 750/1500 = 50%
+    // Should use MiniMax-M2.7 (first MiniMax-M* match): 750 used out of 1500 => 50%
     expect(result!.fiveHourPercent).toBe(50);
     expect(result!.weeklyPercent).toBe(50);
   });
@@ -1078,7 +1103,7 @@ describe('getUsage routing - minimax', () => {
               end_time: endTime,
               remains_time: 3600_000,
               current_weekly_total_count: 15000,
-              current_weekly_usage_count: 3000,
+              current_weekly_usage_count: 12000,
               weekly_start_time: Date.now(),
               weekly_end_time: weeklyEndTime,
               weekly_remains_time: 86400_000 * 3,
@@ -1094,8 +1119,8 @@ describe('getUsage routing - minimax', () => {
     const result = await getUsage();
 
     expect(result.rateLimits).not.toBeNull();
-    expect(result.rateLimits!.fiveHourPercent).toBe(50); // 750/1500
-    expect(result.rateLimits!.weeklyPercent).toBe(20);   // 3000/15000
+    expect(result.rateLimits!.fiveHourPercent).toBe(50); // (1500 - 750) / 1500
+    expect(result.rateLimits!.weeklyPercent).toBe(20);   // (15000 - 12000) / 15000
     expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
     expect(result.rateLimits!.fiveHourResetsAt!.getTime()).toBe(endTime);
     expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);

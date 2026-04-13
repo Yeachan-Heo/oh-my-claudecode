@@ -137,11 +137,13 @@ export function isMinimaxHost(urlString: string): boolean {
 interface MinimaxModelRemain {
   model_name: string;
   current_interval_total_count: number;
+  /** Remaining request count in the current 5-hour window */
   current_interval_usage_count: number;
   start_time: number;
   end_time: number;
   remains_time: number;
   current_weekly_total_count: number;
+  /** Remaining request count in the current weekly window */
   current_weekly_usage_count: number;
   weekly_start_time: number;
   weekly_end_time: number;
@@ -960,14 +962,15 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
     return null;
   }
 
-  // Calculate interval usage percentage (avoid division by zero)
+  // MiniMax's "remains" endpoint reports remaining quota, not consumed quota.
+  // Convert remaining-count fields to used percentages for the HUD.
   const intervalTotal = codingModel.current_interval_total_count;
-  const intervalUsed = codingModel.current_interval_usage_count;
+  const intervalUsed = intervalTotal - codingModel.current_interval_usage_count;
   const intervalPercent = intervalTotal > 0 ? (intervalUsed / intervalTotal) * 100 : 0;
 
-  // Calculate weekly usage percentage
+  // Calculate weekly usage percentage from remaining weekly quota
   const weeklyTotal = codingModel.current_weekly_total_count;
-  const weeklyUsed = codingModel.current_weekly_usage_count;
+  const weeklyUsed = weeklyTotal - codingModel.current_weekly_usage_count;
   const weeklyPercent = weeklyTotal > 0 ? (weeklyUsed / weeklyTotal) * 100 : 0;
 
   // Parse reset times from Unix ms timestamps
