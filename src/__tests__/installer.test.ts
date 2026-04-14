@@ -127,19 +127,19 @@ describe('Installer Constants', () => {
 
     it('should have consistent model assignments', () => {
       const modelExpectations: Record<string, string> = {
-        'architect.md': 'claude-opus-4-6',
-        'executor.md': 'claude-sonnet-4-6',
-        'designer.md': 'claude-sonnet-4-6',
-        'writer.md': 'claude-haiku-4-5',
-        'critic.md': 'claude-opus-4-6',
-        'analyst.md': 'claude-opus-4-6',
-        'planner.md': 'claude-opus-4-6',
-        'qa-tester.md': 'claude-sonnet-4-6',
-        'debugger.md': 'claude-sonnet-4-6',
-        'verifier.md': 'claude-sonnet-4-6',
-        'test-engineer.md': 'claude-sonnet-4-6',
-        'security-reviewer.md': 'claude-opus-4-6',
-        'git-master.md': 'claude-sonnet-4-6',
+        'architect.md': 'opus',
+        'executor.md': 'sonnet',
+        'designer.md': 'sonnet',
+        'writer.md': 'haiku',
+        'critic.md': 'opus',
+        'analyst.md': 'opus',
+        'planner.md': 'opus',
+        'qa-tester.md': 'sonnet',
+        'debugger.md': 'sonnet',
+        'verifier.md': 'sonnet',
+        'test-engineer.md': 'sonnet',
+        'security-reviewer.md': 'opus',
+        'git-master.md': 'sonnet',
       };
 
       for (const [filename, expectedModel] of Object.entries(modelExpectations)) {
