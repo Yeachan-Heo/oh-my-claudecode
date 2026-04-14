@@ -1556,6 +1556,15 @@ This article argues that fake popularity signals damage trust in open source.`;
       expect(detectKeywordsWithType('ralplan fix issue #2053')).toEqual([
         expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
       ]);
+      expect(detectKeywordsWithType('please ralplan this issue')).toEqual([
+        expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+      ]);
+      expect(detectKeywordsWithType("let's ralplan the auth redesign")).toEqual([
+        expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+      ]);
+      expect(detectKeywordsWithType('I want a ralplan for this issue')).toEqual([
+        expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+      ]);
       expect(detectKeywordsWithType('please use ralplan to plan issue #2053')).toEqual([
         expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
       ]);

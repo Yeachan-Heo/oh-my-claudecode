@@ -534,6 +534,75 @@ Read src/hooks/bridge.ts first.`,
       }
     });
 
+    it('does not arm ralplan stop enforcement for informational mentions, but does for natural-language invocation phrasing', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-keyword-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+
+        const informationalSessionId = 'ralplan-mention-session';
+        const informationalResult = await processHook('keyword-detector', {
+          sessionId: informationalSessionId,
+          prompt: 'What happens if someone mentions ralplan in a question?',
+          directory: tempDir,
+        });
+
+        expect(informationalResult.continue).toBe(true);
+        expect(informationalResult.message).toBeUndefined();
+
+        const informationalStatePath = join(
+          tempDir,
+          '.omc',
+          'state',
+          'sessions',
+          informationalSessionId,
+          'ralplan-state.json',
+        );
+        expect(existsSync(informationalStatePath)).toBe(false);
+
+        const informationalStop = await processHook('persistent-mode', {
+          sessionId: informationalSessionId,
+          directory: tempDir,
+          stop_reason: 'end_turn',
+        } as HookInput);
+
+        expect(informationalStop.continue).toBe(true);
+        expect(informationalStop.message).toBeUndefined();
+
+        const invocationSessionId = 'ralplan-invocation-session';
+        const invocationPrompt =
+          'please ralplan this issue by comparing the current auth redesign goals, outlining tradeoffs, listing acceptance criteria, and proposing a test shape before we decide whether to implement anything';
+        const invocationResult = await processHook('keyword-detector', {
+          sessionId: invocationSessionId,
+          prompt: invocationPrompt,
+          directory: tempDir,
+        });
+
+        expect(invocationResult.continue).toBe(true);
+        expect(invocationResult.message).toContain('[MODE: RALPLAN]');
+
+        const invocationStatePath = join(
+          tempDir,
+          '.omc',
+          'state',
+          'sessions',
+          invocationSessionId,
+          'ralplan-state.json',
+        );
+        expect(existsSync(invocationStatePath)).toBe(false);
+
+        const invocationStop = await processHook('persistent-mode', {
+          sessionId: invocationSessionId,
+          directory: tempDir,
+          stop_reason: 'end_turn',
+        } as HookInput);
+
+        expect(invocationStop.continue).toBe(true);
+        expect(invocationStop.message).toBeUndefined();
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('activates ralplan state when Skill tool invokes omc-plan in consensus mode', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-plan-consensus-skill-'));
       try {
