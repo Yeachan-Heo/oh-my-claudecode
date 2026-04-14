@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 
@@ -565,8 +565,9 @@ ${cleanContent}
     // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
     try {
       const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      let versions = [];
       if (existsSync(cacheBase)) {
-        const versions = readdirSync(cacheBase)
+        versions = readdirSync(cacheBase)
           .filter(v => /^\d+\.\d+\.\d+/.test(v))
           .sort(semverCompare)
           .reverse();
@@ -621,6 +622,33 @@ ${cleanContent}
               // lstatSync / rmSync / unlinkSync failure — leave old directory as-is.
             }
           }
+        }
+      }
+
+      // Guard against CLAUDE_PLUGIN_ROOT pointing to a stale/deleted version.
+      // When an old version directory is removed during upgrade but a running
+      // session still has the old CLAUDE_PLUGIN_ROOT in its environment, the
+      // directory won't exist. Create a symlink so subsequent hook invocations
+      // via run.cjs resolve correctly.
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      if (pluginRoot && !existsSync(pluginRoot)) {
+        const pluginRootVersion = basename(pluginRoot);
+        if (/^\d+\.\d+\.\d+/.test(pluginRootVersion) && versions.length > 0) {
+          const latest = versions[0];
+          const stalePath = pluginRoot;
+          const isWin = process.platform === 'win32';
+          const symlinkTarget = isWin ? join(cacheBase, latest) : latest;
+          try {
+            // Atomic: create temp symlink then rename over stale path
+            const tmpLink = stalePath + '.tmp.' + process.pid;
+            symlinkSync(symlinkTarget, tmpLink, isWin ? 'junction' : undefined);
+            try {
+              renameSync(tmpLink, stalePath);
+            } catch {
+              try { unlinkSync(tmpLink); } catch {}
+              symlinkSync(symlinkTarget, stalePath, isWin ? 'junction' : undefined);
+            }
+          } catch {}
         }
       }
     } catch {}
