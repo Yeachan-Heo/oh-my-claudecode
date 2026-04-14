@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
 const NODE = process.execPath;
-function runKeywordDetector(prompt) {
+function runKeywordDetector(prompt, cwd = process.cwd(), sessionId = 'session-2053') {
     const raw = execFileSync(NODE, [SCRIPT_PATH], {
         input: JSON.stringify({
             hook_event_name: 'UserPromptSubmit',
-            cwd: process.cwd(),
-            session_id: 'session-2053',
+            cwd,
+            session_id: sessionId,
             prompt,
         }),
         encoding: 'utf-8',
@@ -49,6 +51,29 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         const context = output.hookSpecificOutput?.additionalContext ?? '';
         expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
         expect(context).toContain('name: ralplan');
+    });
+    it('initializes ralplan startup state and init context for explicit /ralplan slash invoke', () => {
+        const tempDir = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-slash-'));
+        try {
+            const sessionId = 'slash-ralplan-session';
+            const output = runKeywordDetector('/oh-my-claudecode:ralplan issue #2622', tempDir, sessionId);
+            const context = output.hookSpecificOutput?.additionalContext ?? '';
+            expect(output.continue).toBe(true);
+            expect(output.hookSpecificOutput?.hookEventName).toBe('UserPromptSubmit');
+            expect(context).toContain('[RALPLAN INIT]');
+            expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
+            const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+            expect(existsSync(statePath)).toBe(true);
+            const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+            expect(state.active).toBe(true);
+            expect(state.current_phase).toBe('ralplan');
+            expect(state.awaiting_confirmation).toBe(true);
+            expect(typeof state.awaiting_confirmation_set_at).toBe('string');
+            expect(state.original_prompt).toBe('/oh-my-claudecode:ralplan issue #2622');
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
     });
     it('ignores HTML comments that mention ralph and autopilot during normal review text', () => {
         const output = runKeywordDetector(`Please review this draft document for tone and clarity:

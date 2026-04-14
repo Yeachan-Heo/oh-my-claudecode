@@ -775,6 +775,28 @@ function getPromptText(input: HookInput): string {
   return "";
 }
 
+function isExplicitRalplanSlashInvocation(promptText: string): boolean {
+  return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(promptText);
+}
+
+function activateRalplanStartupState(directory: string, sessionId?: string): void {
+  const now = new Date().toISOString();
+  writeModeState(
+    "ralplan",
+    {
+      active: true,
+      session_id: sessionId,
+      current_phase: "ralplan",
+      started_at: now,
+      awaiting_confirmation: true,
+      awaiting_confirmation_set_at: now,
+      last_checked_at: now,
+    },
+    directory,
+    sessionId,
+  );
+}
+
 /**
  * Process keyword detection hook
  * Detects magic keywords and returns injection message
@@ -798,6 +820,19 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
   const directory = resolveToWorktreeRoot(input.directory);
   const messages: string[] = [];
+  const explicitRalplanSlashInvocation =
+    isExplicitRalplanSlashInvocation(promptText);
+
+  if (explicitRalplanSlashInvocation) {
+    activateRalplanStartupState(directory, sessionId);
+    return {
+      continue: true,
+      message:
+        `[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
+        `ralplan state is armed for startup and marked awaiting confirmation, so the stop hook will not block this initialization path.\n` +
+        `Proceed immediately with the consensus planning workflow for:\n${promptText}`,
+    };
+  }
 
   // Record prompt submission time in HUD state
   try {

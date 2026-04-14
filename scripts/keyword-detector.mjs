@@ -137,6 +137,10 @@ function extractPrompt(input) {
   }
 }
 
+function isExplicitRalplanSlashInvocation(prompt) {
+  return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(prompt);
+}
+
 // Sanitize text to prevent false positives from code blocks, XML tags, URLs, and file paths
 const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-]?slop)\b/i;
 const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
@@ -406,6 +410,36 @@ function activateState(directory, prompt, stateName, sessionId) {
   try { writeFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
 }
 
+function activateRalplanStartupState(directory, prompt, sessionId) {
+  const now = new Date().toISOString();
+  const state = {
+    active: true,
+    started_at: now,
+    current_phase: 'ralplan',
+    original_prompt: prompt,
+    session_id: sessionId || undefined,
+    project_path: directory,
+    awaiting_confirmation: true,
+    awaiting_confirmation_set_at: now,
+    last_checked_at: now
+  };
+
+  if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
+    const sessionDir = join(directory, '.omc', 'state', 'sessions', sessionId);
+    if (!existsSync(sessionDir)) {
+      try { mkdirSync(sessionDir, { recursive: true }); } catch {}
+    }
+    try { writeFileSync(join(sessionDir, 'ralplan-state.json'), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
+    return;
+  }
+
+  const localDir = join(directory, '.omc', 'state');
+  if (!existsSync(localDir)) {
+    try { mkdirSync(localDir, { recursive: true }); } catch {}
+  }
+  try { writeFileSync(join(localDir, 'ralplan-state.json'), JSON.stringify(state, null, 2), { mode: 0o600 }); } catch {}
+}
+
 /**
  * Clear state files for cancel operation
  */
@@ -620,6 +654,17 @@ async function main() {
     const prompt = extractPrompt(input);
     if (!prompt) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (isExplicitRalplanSlashInvocation(prompt)) {
+      activateRalplanStartupState(directory, prompt, sessionId);
+      console.log(JSON.stringify(createHookOutput(
+        `[RALPLAN INIT]\n` +
+        `Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
+        `ralplan state has been initialized immediately and marked awaiting confirmation so the stop hook will not block this startup path.\n\n` +
+        createSkillInvocation('ralplan', prompt)
+      )));
       return;
     }
 
