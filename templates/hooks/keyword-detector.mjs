@@ -261,6 +261,22 @@ function hasActivationIntentNearKeyword(context, keyword) {
   return patterns.some((pattern) => pattern.test(context));
 }
 
+function hasDirectInvocationPrefix(text, position) {
+  const prefix = text.slice(0, position);
+  return /^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)?$/i.test(prefix);
+}
+
+function hasExplicitInvocationContext(text, position, keywordLength, keywordText) {
+  if (hasDirectInvocationPrefix(text, position)) {
+    return true;
+  }
+
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const context = text.slice(start, end);
+  return hasActivationIntentNearKeyword(context, keywordText);
+}
+
 function hasDiagnosticIntentNearKeyword(context, keyword) {
   const escaped = escapeRegExp((keyword || '').trim());
   if (!escaped) return false;
@@ -317,6 +333,29 @@ function hasActionableKeyword(text, pattern) {
     }
 
     if (isInformationalKeywordContext(text, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+function hasActionableRalplanKeyword(text, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+
+  for (const match of text.matchAll(globalPattern)) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    if (isInformationalKeywordContext(text, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    if (!hasExplicitInvocationContext(text, match.index, match[0].length, match[0])) {
       continue;
     }
 
@@ -612,7 +651,7 @@ async function main() {
     }
 
     // Ralplan keyword
-    if (hasActionableKeyword(cleanPrompt, /\b(ralplan)\b|(랄플랜)/i)) {
+    if (hasActionableRalplanKeyword(cleanPrompt, /\b(ralplan)\b|(랄플랜)/i)) {
       matches.push({ name: 'ralplan', args: '' });
     }
 

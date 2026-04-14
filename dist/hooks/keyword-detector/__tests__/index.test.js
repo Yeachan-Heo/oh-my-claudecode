@@ -1263,6 +1263,27 @@ This article argues that fake popularity signals damage trust in open source.`;
             expect(gateResult.keywords).not.toContain('ralph');
         });
     });
+    describe('ralplan invocation-vs-mention detection', () => {
+        it('does not detect ralplan for informational questions or mention-only prose', () => {
+            expect(detectKeywordsWithType('does ralplan stop after planning?')).toEqual([]);
+            expect(detectKeywordsWithType('When does ralplan activate?')).toEqual([]);
+            expect(detectKeywordsWithType('Is ralplan a planning mode?')).toEqual([]);
+            expect(detectKeywordsWithType('I am asking about the ralplan keyword, not invoking it.')).toEqual([]);
+            expect(detectKeywordsWithType('What happens if someone mentions ralplan in a question?')).toEqual([]);
+            expect(detectKeywordsWithType('Please document ralplan in the README.')).toEqual([]);
+        });
+        it('still detects direct or explicit-invocation ralplan requests', () => {
+            expect(detectKeywordsWithType('ralplan fix issue #2053')).toEqual([
+                expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+            ]);
+            expect(detectKeywordsWithType('please use ralplan to plan issue #2053')).toEqual([
+                expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+            ]);
+            expect(detectKeywordsWithType('$ralplan fix issue #2053')).toEqual([
+                expect.objectContaining({ type: 'ralplan', keyword: 'ralplan' }),
+            ]);
+        });
+    });
     describe('non-ASCII prompt translation detection', () => {
         describe('NON_LATIN_SCRIPT_PATTERN - should trigger', () => {
             it('detects Japanese hiragana', () => {

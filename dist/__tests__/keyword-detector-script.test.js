@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
 const NODE = process.execPath;
-function runKeywordDetector(prompt) {
+function runKeywordDetector(prompt, cwd = process.cwd(), sessionId = 'session-2053') {
     const raw = execFileSync(NODE, [SCRIPT_PATH], {
         input: JSON.stringify({
             hook_event_name: 'UserPromptSubmit',
-            cwd: process.cwd(),
-            session_id: 'session-2053',
+            cwd,
+            session_id: sessionId,
             prompt,
         }),
         encoding: 'utf-8',
@@ -20,6 +22,9 @@ function runKeywordDetector(prompt) {
         timeout: 15000,
     }).trim();
     return JSON.parse(raw);
+}
+function getRalplanStatePath(cwd, sessionId) {
+    return join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
 }
 describe('keyword-detector.mjs mode-message dispatch', () => {
     it('injects search mode for deepsearch without emitting a magic skill invocation', () => {
@@ -49,6 +54,29 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         const context = output.hookSpecificOutput?.additionalContext ?? '';
         expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
         expect(context).toContain('name: ralplan');
+    });
+    it('does not emit or activate ralplan for informational/question mentions', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-info-'));
+        const sessionId = 'session-2619-info';
+        const output = runKeywordDetector('Verify the actual UserPromptSubmit/stop-hook path that activates ralplan state, reproduce the false activation on non-task keyword mention.', cwd, sessionId);
+        const context = output.hookSpecificOutput?.additionalContext ?? '';
+        const ralplanStatePath = getRalplanStatePath(cwd, sessionId);
+        expect(output.continue).toBe(true);
+        expect(context).not.toContain('[MAGIC KEYWORD: RALPLAN]');
+        expect(existsSync(ralplanStatePath)).toBe(false);
+    });
+    it('still activates ralplan state for a true ralplan task invocation', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-task-'));
+        const sessionId = 'session-2619-task';
+        const output = runKeywordDetector('please use ralplan to plan issue #2053', cwd, sessionId);
+        const context = output.hookSpecificOutput?.additionalContext ?? '';
+        const ralplanStatePath = getRalplanStatePath(cwd, sessionId);
+        expect(output.continue).toBe(true);
+        expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
+        expect(existsSync(ralplanStatePath)).toBe(true);
+        const state = JSON.parse(readFileSync(ralplanStatePath, 'utf-8'));
+        expect(state.active).toBe(true);
+        expect(state.awaiting_confirmation).toBe(true);
     });
     it('ignores HTML comments that mention ralph and autopilot during normal review text', () => {
         const output = runKeywordDetector(`Please review this draft document for tone and clarity:
