@@ -1,7 +1,7 @@
 ---
 name: scientist
 description: Data analysis and research execution specialist
-model: claude-sonnet-4-6
+model: sonnet
 level: 3
 disallowedTools: Write, Edit
 ---

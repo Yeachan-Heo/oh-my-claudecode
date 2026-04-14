@@ -153,6 +153,28 @@ describe('Agent Registry Validation', () => {
     expect(agents.executor?.model).not.toBe('claude-3-7-session-parent');
   });
 
+  test('agent .md frontmatter uses tier aliases not full model IDs (Bedrock/Vertex compat)', () => {
+    // Full Anthropic API model IDs (e.g. claude-sonnet-4-6) in .md frontmatter
+    // cause 400 errors on Bedrock/Vertex because Claude Code's plugin system
+    // passes them directly without env var resolution.
+    // Tier aliases (sonnet/opus/haiku) are resolved correctly on all providers.
+    const agentsDir = path.join(__dirname, '../../agents');
+    const mdFiles = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.md') && f !== 'AGENTS.md');
+    const validAliases = ['sonnet', 'opus', 'haiku'];
+
+    for (const file of mdFiles) {
+      const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
+      const modelMatch = content.match(/^model:\s*(.+)$/m);
+      if (modelMatch) {
+        const model = modelMatch[1].trim();
+        expect(
+          validAliases.includes(model),
+          `${file}: frontmatter model "${model}" is a full model ID — use tier alias (${validAliases.join('/')}) instead for Bedrock/Vertex compatibility`
+        ).toBe(true);
+      }
+    }
+  });
+
   test('no hardcoded prompts in base agent .ts files', () => {
     const baseAgents = ['architect', 'executor', 'explore', 'designer', 'document-specialist',
                         'writer', 'planner', 'critic', 'analyst', 'scientist', 'qa-tester'];

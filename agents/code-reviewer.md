@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Expert code review specialist with severity-rated feedback, logic defect detection, SOLID principle checks, style, performance, and quality strategy
-model: claude-opus-4-6
+model: opus
 level: 3
 disallowedTools: Write, Edit
 ---
