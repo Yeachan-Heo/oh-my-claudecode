@@ -630,7 +630,7 @@ ${cleanContent}
       // session still has the old CLAUDE_PLUGIN_ROOT in its environment, the
       // directory won't exist. Create a symlink so subsequent hook invocations
       // via run.cjs resolve correctly.
-      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.replace(/[\/\\]+$/, ''); // strip trailing separators
       if (pluginRoot && !existsSync(pluginRoot)) {
         const pluginRootVersion = basename(pluginRoot);
         if (/^\d+\.\d+\.\d+/.test(pluginRootVersion) && versions.length > 0) {
