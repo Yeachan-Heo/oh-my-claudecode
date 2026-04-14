@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
@@ -167,8 +168,8 @@ function extractJsonField(input, field, defaultValue = '') {
 }
 
 // Get agent tracking info from state file
-function getAgentTrackingInfo(directory) {
-  const trackingFile = join(directory, '.omc', 'state', 'subagent-tracking.json');
+function getAgentTrackingInfo(stateDir) {
+  const trackingFile = join(stateDir, 'subagent-tracking.json');
   try {
     if (existsSync(trackingFile)) {
       const data = JSON.parse(readFileSync(trackingFile, 'utf-8'));
@@ -252,9 +253,7 @@ function hasActiveSwarmMode(stateDir, { allowSessionTagged = false } = {}) {
   return true;
 }
 
-function hasActiveMode(directory, sessionId) {
-  const stateDir = join(directory, '.omc', 'state');
-
+function hasActiveMode(stateDir, sessionId) {
   if (isValidSessionId(sessionId)) {
     const sessionStateDir = join(stateDir, 'sessions', sessionId);
     return (
@@ -288,12 +287,12 @@ function mapCanonicalTeamPhaseToStage(rawPhase) {
   }
 }
 
-function readCanonicalActiveTeamState(directory, sessionId) {
+function readCanonicalActiveTeamState(stateDir, sessionId) {
   if (!sessionId || !SESSION_ID_PATTERN.test(sessionId)) {
     return null;
   }
 
-  const teamRoot = join(directory, '.omc', 'state', 'team');
+  const teamRoot = join(stateDir, 'team');
   if (!existsSync(teamRoot)) {
     return null;
   }
@@ -340,17 +339,17 @@ function readCanonicalActiveTeamState(directory, sessionId) {
  * Reads team-state.json from session-scoped or legacy paths and falls back
  * to canonical team state when the coarse file drifts or disappears.
  */
-function getActiveTeamState(directory, sessionId) {
+function getActiveTeamState(stateDir, sessionId) {
   const paths = [];
   let coarseState = null;
 
   // Session-scoped path (preferred)
   if (sessionId && SESSION_ID_PATTERN.test(sessionId)) {
-    paths.push(join(directory, '.omc', 'state', 'sessions', sessionId, 'team-state.json'));
+    paths.push(join(stateDir, 'sessions', sessionId, 'team-state.json'));
   }
 
   // Legacy path
-  paths.push(join(directory, '.omc', 'state', 'team-state.json'));
+  paths.push(join(stateDir, 'team-state.json'));
 
   for (const statePath of paths) {
     const state = readJsonFile(statePath);
@@ -366,7 +365,7 @@ function getActiveTeamState(directory, sessionId) {
     }
   }
 
-  const canonical = readCanonicalActiveTeamState(directory, sessionId);
+  const canonical = readCanonicalActiveTeamState(stateDir, sessionId);
   if (canonical && canonical.active === true) {
     return canonical;
   }
@@ -375,7 +374,7 @@ function getActiveTeamState(directory, sessionId) {
 }
 
 // Generate agent spawn message with metadata
-function generateAgentSpawnMessage(toolInput, directory, todoStatus, sessionId) {
+function generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId) {
   if (!toolInput || typeof toolInput !== 'object') {
     if (QUIET_LEVEL >= 2) return '';
     return `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`;
@@ -385,12 +384,12 @@ function generateAgentSpawnMessage(toolInput, directory, todoStatus, sessionId) 
   const model = toolInput.model || 'inherit';
   const desc = toolInput.description || '';
   const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
-  const tracking = getAgentTrackingInfo(directory);
+  const tracking = getAgentTrackingInfo(stateDir);
 
   // Team-routing enforcement (issue #1006):
   // When team state is active and Task is called WITHOUT team_name,
   // inject a redirect message to use team agents instead of subagents.
-  const teamState = getActiveTeamState(directory, sessionId);
+  const teamState = getActiveTeamState(stateDir, sessionId);
   if (teamState && !toolInput.team_name) {
     const teamName = teamState.team_name || teamState.teamName || 'team';
     return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning a regular subagent ` +
@@ -519,7 +518,7 @@ function extractSkillName(toolInput) {
   return normalized.includes(':') ? normalized.split(':').at(-1).toLowerCase() : normalized.toLowerCase();
 }
 
-function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
+function writeSkillActiveState(stateDir, skillName, sessionId, rawSkillName) {
   const protection = getSkillProtectionLevel(skillName, rawSkillName);
   if (protection === 'none') return;
 
@@ -527,7 +526,6 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
   const now = new Date().toISOString();
   const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
 
-  const stateDir = join(directory, '.omc', 'state');
   const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
   const targetDir = safeSessionId
     ? join(stateDir, 'sessions', safeSessionId)
@@ -582,8 +580,7 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
 }
 
 
-function clearAwaitingConfirmationFlag(directory, stateName, sessionId) {
-  const stateDir = join(directory, '.omc', 'state');
+function clearAwaitingConfirmationFlag(stateDir, stateName, sessionId) {
   const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
   const paths = [
     safeSessionId ? join(stateDir, 'sessions', safeSessionId, `${stateName}-state.json`) : null,
@@ -605,20 +602,20 @@ function clearAwaitingConfirmationFlag(directory, stateName, sessionId) {
   }
 }
 
-function confirmSkillModeStates(directory, skillName, sessionId) {
+function confirmSkillModeStates(stateDir, skillName, sessionId) {
   switch (skillName) {
     case 'ralph':
-      clearAwaitingConfirmationFlag(directory, 'ralph', sessionId);
-      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      clearAwaitingConfirmationFlag(stateDir, 'ralph', sessionId);
+      clearAwaitingConfirmationFlag(stateDir, 'ultrawork', sessionId);
       break;
     case 'ultrawork':
-      clearAwaitingConfirmationFlag(directory, 'ultrawork', sessionId);
+      clearAwaitingConfirmationFlag(stateDir, 'ultrawork', sessionId);
       break;
     case 'autopilot':
-      clearAwaitingConfirmationFlag(directory, 'autopilot', sessionId);
+      clearAwaitingConfirmationFlag(stateDir, 'autopilot', sessionId);
       break;
     case 'ralplan':
-      clearAwaitingConfirmationFlag(directory, 'ralplan', sessionId);
+      clearAwaitingConfirmationFlag(stateDir, 'ralplan', sessionId);
       break;
     default:
       break;
@@ -656,6 +653,12 @@ async function main() {
     const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
     const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
 
+    // Resolve the .omc state root once, honoring OMC_STATE_DIR.
+    // All helpers receive stateDir so they stay in sync with the centralized
+    // resolver used by session-start.mjs and persistent-mode (issue #2518, PR #2532).
+    const omcRoot = await resolveOmcStateRoot(directory);
+    const stateDir = join(omcRoot, 'state');
+
     // Record Skill invocations to flow trace
     let data = {};
     try { data = JSON.parse(input); } catch {}
@@ -673,8 +676,8 @@ async function main() {
         // Pass rawSkillName to distinguish OMC skills from project custom skills (issue #1581)
         const rawSkill = toolInput.skill || toolInput.skill_name || toolInput.skillName || toolInput.command || '';
         const rawSkillName = typeof rawSkill === 'string' && rawSkill.trim() ? rawSkill.trim() : undefined;
-        writeSkillActiveState(directory, skillName, sid, rawSkillName);
-        confirmSkillModeStates(directory, skillName, sid);
+        writeSkillActiveState(stateDir, skillName, sid, rawSkillName);
+        confirmSkillModeStates(stateDir, skillName, sid);
       }
     }
 
@@ -684,7 +687,7 @@ async function main() {
         : typeof data.sessionId === 'string'
           ? data.sessionId
           : '';
-    const modeActive = hasActiveMode(directory, sessionId);
+    const modeActive = hasActiveMode(stateDir, sessionId);
 
     // Force-inherit check: deny Task/Agent calls with invalid model param when forceInherit is
     // enabled (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201, #1767, #1868
@@ -836,7 +839,7 @@ async function main() {
     let message;
     if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
       const toolInput = data.toolInput || data.tool_input || null;
-      message = generateAgentSpawnMessage(toolInput, directory, todoStatus, sessionId);
+      message = generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId);
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
