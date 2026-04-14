@@ -77722,10 +77722,13 @@ async function processKeywordDetector(input) {
     activateRalplanStartupState(directory, sessionId);
     return {
       continue: true,
-      message: `[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: `[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.
 ralplan state is armed for startup and marked awaiting confirmation, so the stop hook will not block this initialization path.
 Proceed immediately with the consensus planning workflow for:
 ${promptText}`
+      }
     };
   }
   try {

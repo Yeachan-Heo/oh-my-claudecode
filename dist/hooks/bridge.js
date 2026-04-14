@@ -539,9 +539,12 @@ async function processKeywordDetector(input) {
         activateRalplanStartupState(directory, sessionId);
         return {
             continue: true,
-            message: `[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
-                `ralplan state is armed for startup and marked awaiting confirmation, so the stop hook will not block this initialization path.\n` +
-                `Proceed immediately with the consensus planning workflow for:\n${promptText}`,
+            hookSpecificOutput: {
+                hookEventName: "UserPromptSubmit",
+                additionalContext: `[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
+                    `ralplan state is armed for startup and marked awaiting confirmation, so the stop hook will not block this initialization path.\n` +
+                    `Proceed immediately with the consensus planning workflow for:\n${promptText}`,
+            },
         };
     }
     // Record prompt submission time in HUD state

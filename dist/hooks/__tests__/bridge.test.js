@@ -336,6 +336,25 @@ describe('processHook - Environment Kill-Switches', () => {
                 },
             });
         });
+        it('preserves explicit /ralplan startup additionalContext under hookSpecificOutput', () => {
+            expect(sanitizeHookOutputForSerialization({
+                continue: true,
+                hookSpecificOutput: {
+                    hookEventName: 'UserPromptSubmit',
+                    additionalContext: '[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.\n' +
+                        'Proceed immediately with the consensus planning workflow for:\n' +
+                        '/oh-my-claudecode:ralplan issue #2622',
+                },
+            })).toEqual({
+                continue: true,
+                hookSpecificOutput: {
+                    hookEventName: 'UserPromptSubmit',
+                    additionalContext: '[RALPLAN INIT] Explicit /ralplan invoke detected during UserPromptSubmit.\n' +
+                        'Proceed immediately with the consensus planning workflow for:\n' +
+                        '/oh-my-claudecode:ralplan issue #2622',
+                },
+            });
+        });
     });
 });
 //# sourceMappingURL=bridge.test.js.map

@@ -547,8 +547,12 @@ Read src/hooks/bridge.ts first.`,
         });
 
         expect(result.continue).toBe(true);
-        expect(result.message).toContain('[RALPLAN INIT]');
-        expect(result.message).toContain('/oh-my-claudecode:ralplan issue #2622');
+        const hookSpecificOutput = (result as unknown as Record<string, unknown>)
+          .hookSpecificOutput as Record<string, unknown>;
+        expect(result.message).toBeUndefined();
+        expect(hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
+        expect(hookSpecificOutput.additionalContext).toContain('[RALPLAN INIT]');
+        expect(hookSpecificOutput.additionalContext).toContain('/oh-my-claudecode:ralplan issue #2622');
 
         const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
         expect(existsSync(ralplanPath)).toBe(true);
