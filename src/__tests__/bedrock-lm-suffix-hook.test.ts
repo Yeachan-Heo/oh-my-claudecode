@@ -202,7 +202,22 @@ function runHook(
   const result = spawnSync('node', [HOOK_PATH], {
     input: stdin,
     encoding: 'utf8',
-    env: { ...process.env, ...env, OMC_ROUTING_FORCE_INHERIT: 'true' },
+    env: {
+      ...process.env,
+      // Reset tier-resolution chain so host env doesn't leak into tests.
+      OMC_SUBAGENT_MODEL: '',
+      OMC_MODEL_LOW: '',
+      OMC_MODEL_MEDIUM: '',
+      OMC_MODEL_HIGH: '',
+      CLAUDE_CODE_BEDROCK_HAIKU_MODEL: '',
+      CLAUDE_CODE_BEDROCK_SONNET_MODEL: '',
+      CLAUDE_CODE_BEDROCK_OPUS_MODEL: '',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+      ...env,
+      OMC_ROUTING_FORCE_INHERIT: 'true',
+    },
     timeout: 10000,
   });
   const lines = (result.stdout || '').split('\n').filter(Boolean);
@@ -250,7 +265,20 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.reason).toMatch(/global\.anthropic\.claude-sonnet-4-6\[1m\]/);
   });
 
-  it('derives tier alias from OMC_SUBAGENT_MODEL when set', () => {
+  it('derives tier alias from session model when ANTHROPIC_DEFAULT_SONNET_MODEL is set', () => {
+    const result = runHook(
+      {},
+      {
+        ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6[1m]',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      },
+    );
+    expect(result.denied).toBe(true);
+    // normalizeToCcAlias(sessionModel) → 'sonnet'; resolvedSafe is truthy
+    expect(result.reason).toMatch(/model="sonnet"/);
+  });
+
+  it('derives tier alias from OMC_SUBAGENT_MODEL when set (backward compat)', () => {
     const result = runHook(
       {},
       {
@@ -259,7 +287,6 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
       },
     );
     expect(result.denied).toBe(true);
-    // normalizeToCcAlias('us.anthropic.claude-sonnet-4-5-...') → 'sonnet'
     expect(result.reason).toMatch(/model="sonnet"/);
   });
 
@@ -288,16 +315,16 @@ describe('hook integration — force-inherit + [1m] scenarios', () => {
     expect(result.reason).toMatch(/claude-sonnet-4-6\[1m\]/);
   });
 
-  it('derives tier alias from OMC_SUBAGENT_MODEL for guidance in [1m] deny', () => {
-    // normalizeToCcAlias('us.anthropic.claude-sonnet-4-5-20250929-v1:0') → 'sonnet'
+  it('derives tier alias from ANTHROPIC_DEFAULT_SONNET_MODEL for guidance in [1m] deny', () => {
     const result = runHook(
       {},
       {
         ANTHROPIC_MODEL: 'claude-sonnet-4-6[1m]',
-        OMC_SUBAGENT_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
       },
     );
     expect(result.denied).toBe(true);
+    // normalizeToCcAlias('claude-sonnet-4-6[1m]') → 'sonnet'; resolvedSafe is truthy
     expect(result.reason).toMatch(/model="sonnet"/);
   });
 
