@@ -207,9 +207,10 @@ export function sanitizePromptContent(content: string | undefined | null, maxLen
       sanitized = sanitized.slice(0, -1);
     }
   }
-  // Escape ALL XML-like tags to prevent prompt injection via structurally
-  // significant tags (system-instructions, system-reminder, etc.)
-  sanitized = sanitized.replace(/<(\/?[A-Za-z][A-Za-z0-9_-]*)[^>]*>/g, '[$1]');
+  // Escape XML-like tags that match prompt structural delimiters.
+  // Uses an explicit allowlist to avoid mangling legitimate code content
+  // (HTML tags, TypeScript generics like Promise<Result<T>>, etc.)
+  sanitized = sanitized.replace(/<(\/?)(TASK_SUBJECT|TASK_DESCRIPTION|INBOX_MESSAGE|INSTRUCTIONS|SYSTEM|system-instructions|system-reminder|system|role|context)[^>]*>/gi, '[$1$2]');
   return sanitized;
 }
 
