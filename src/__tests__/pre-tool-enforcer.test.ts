@@ -599,7 +599,13 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
-  it('skips ANTHROPIC_DEFAULT_*_MODEL with [1m] suffix and falls through to deny', () => {
+  it('accepts ANTHROPIC_DEFAULT_*_MODEL with [1m] suffix — CC handles [1m] correctly for explicit tier alias calls', () => {
+    // Live-tested 2026-04-16: `claude -p --model sonnet` succeeds when
+    // ANTHROPIC_DEFAULT_SONNET_MODEL=global.anthropic.claude-sonnet-4-6[1m].
+    // CC resolves [1m]-suffixed values correctly for explicit model= calls;
+    // only the inheritance path (stripping [1m] from session model) is broken.
+    // resolveTierAliasToSafeModel uses isProviderSpecificModelId (not isSubagentSafeModelId)
+    // so [1m]-suffixed provider IDs are valid routing targets.
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
@@ -614,8 +620,8 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       },
     );
 
-    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
-    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
+    expect(output.continue).toBe(true);
+    expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
   it('resolves via CLAUDE_CODE_BEDROCK_SONNET_MODEL as sole configured env var', () => {
@@ -637,7 +643,9 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
-  it('resolves via OMC_MODEL_MEDIUM when ANTHROPIC_DEFAULT is [1m]-suffixed', () => {
+  it('OMC_MODEL_MEDIUM takes priority over ANTHROPIC_DEFAULT_*_MODEL (earlier in resolution chain)', () => {
+    // Resolution chain: OMC_SUBAGENT_MODEL → OMC_MODEL_MEDIUM → CLAUDE_CODE_BEDROCK_* → ANTHROPIC_DEFAULT_*
+    // OMC_MODEL_MEDIUM resolves first regardless of what ANTHROPIC_DEFAULT_SONNET_MODEL contains.
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',

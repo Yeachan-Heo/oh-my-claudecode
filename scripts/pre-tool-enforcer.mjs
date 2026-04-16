@@ -47,7 +47,13 @@ function resolveTierAliasToSafeModel(tierAlias) {
   if (!keys) return '';
   for (const key of keys) {
     const value = (process.env[key] || '').trim();
-    if (value && isSubagentSafeModelId(value)) return value;
+    // CC-native vars (ANTHROPIC_DEFAULT_* and CLAUDE_CODE_BEDROCK_*) are read by CC's own
+    // model resolution, which handles [1m] suffixes correctly for explicit model= calls.
+    // OMC-internal vars (OMC_SUBAGENT_MODEL, OMC_MODEL_*) are not read by CC, so a [1m]
+    // value there is not a valid routing proof — keep the stricter isSubagentSafeModelId check.
+    const isNativeCcVar = key.startsWith('ANTHROPIC_DEFAULT_') || key.startsWith('CLAUDE_CODE_BEDROCK_');
+    const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
+    if (value && validator(value)) return value;
   }
   return '';
 }
