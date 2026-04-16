@@ -39,6 +39,8 @@ Verify the implementation against the specification using the Ralph verification
 
 Spawn parallel verification reviewers:
 
+Each reviewer must return ONLY a concise review summary under 100 words covering verdict, evidence highlights, files checked, and blockers. Avoid dumping long logs or transcripts into the main session.
+
 \`\`\`
 // Functional Completeness Review
 Task(

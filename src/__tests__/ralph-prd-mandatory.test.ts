@@ -320,6 +320,7 @@ describe('Ralph PRD-Mandatory', () => {
       expect(prompt).toContain('Are ALL requirements from the original task met?');
       expect(prompt).toContain('Is the implementation complete, not partial?');
       expect(prompt).not.toContain('Verify EACH acceptance criterion');
+      expect(prompt).toContain('concise review summary under 100 words');
     });
 
     it('should fall back to generic prompt when story is undefined', () => {

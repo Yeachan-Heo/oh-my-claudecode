@@ -49,6 +49,10 @@ Use the Team orchestrator to execute tasks in parallel:
 4. **Monitor progress** as teammates complete tasks
 5. **Coordinate** dependencies between tasks
 
+### Output Contract
+
+Every teammate response must stay concise: return ONLY a short execution summary under 100 words covering what changed, files touched, verification status, and blockers. Store bulky logs/details in files or artifacts and reference them briefly.
+
 ### Agent Selection
 
 Match agent types to task complexity:
@@ -91,6 +95,10 @@ Execute tasks sequentially (or with limited parallelism via background agents):
 2. Execute tasks in dependency order
 3. Use executor agents for independent tasks that can run in parallel
 4. Track progress in the TODO list
+
+### Output Contract
+
+Every spawned executor response must return ONLY a short execution summary under 100 words covering what changed, files touched, verification status, and blockers. Store bulky logs/details in files or artifacts and reference them briefly.
 
 ### Agent Spawning
 

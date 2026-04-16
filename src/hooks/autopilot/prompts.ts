@@ -214,6 +214,7 @@ Ralph and Ultrawork are now active. Execute tasks in parallel where possible.
 - Spawn multiple executor agents for parallel work
 - Track progress in the TODO list
 - Use appropriate agent tiers based on task complexity
+- Every spawned agent must return ONLY a concise execution summary under 100 words covering: what changed, files touched, verification status, and blockers. Do not paste long logs inline; write bulky output to files/artifacts and reference them briefly.
 
 ### Agent Spawning Pattern
 
@@ -315,6 +316,8 @@ Spawn parallel validation architects for comprehensive review.
 ### Parallel Validation Spawns
 
 Spawn all three architects in parallel:
+
+Each reviewer must return ONLY a concise review summary under 100 words with verdict, evidence highlights, files checked, and blockers. Do not paste long transcripts or logs into the main session.
 
 \`\`\`
 // Functional Completeness Review
