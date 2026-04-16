@@ -22,6 +22,7 @@ import https from 'https';
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 import {
   DEFAULT_HUD_USAGE_POLL_INTERVAL_MS,
+  type StatuslineStdin,
   type RateLimits,
   type UsageResult,
   type UsageErrorReason,
@@ -1097,6 +1098,24 @@ async function fetchAndCacheUsage<T>(opts: {
   const usage = parseFn(result.data);
   writeCache({ data: usage, error: !usage, source, lastSuccessAt: Date.now() });
   return { rateLimits: usage };
+}
+
+/**
+ * Parse rate limit data provided directly via Claude Code's stdin JSON.
+ * Available since Claude Code v2.1.80 — avoids the OAuth API call entirely.
+ */
+export function parseStdinRateLimits(rl: StatuslineStdin['rate_limits']): RateLimits | null {
+  const fiveHour = rl?.five_hour?.used_percentage;
+  const sevenDay = rl?.seven_day?.used_percentage;
+  if (fiveHour == null && sevenDay == null) return null;
+  const toDate = (unixSecs?: number): Date | null =>
+    unixSecs ? new Date(unixSecs * 1000) : null;
+  return {
+    fiveHourPercent: fiveHour != null ? clamp(fiveHour) : 0,
+    weeklyPercent: sevenDay != null ? clamp(sevenDay) : undefined,
+    fiveHourResetsAt: toDate(rl?.five_hour?.resets_at),
+    weeklyResetsAt: toDate(rl?.seven_day?.resets_at),
+  };
 }
 
 /**

@@ -28,7 +28,7 @@ import {
   readPrdStateForHud,
   readAutopilotStateForHud,
 } from "./omc-state.js";
-import { getUsage } from "./usage-api.js";
+import { getUsage, parseStdinRateLimits } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { detectApiKeySource } from "./elements/api-key-source.js";
@@ -339,9 +339,15 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       writeHudState(stateToWrite, cwd, currentSessionId ?? undefined);
     }
 
-    // Fetch rate limits from OAuth API (if available)
-    const rateLimitsResult =
-      config.elements.rateLimits !== false ? await getUsage() : null;
+    // Use stdin rate_limits if available (Claude Code >= 2.1.80) — no API call needed.
+    // Fall back to OAuth API for older versions or when stdin data is absent.
+    const stdinRateLimits = stdin.rate_limits
+      ? parseStdinRateLimits(stdin.rate_limits)
+      : null;
+
+    const rateLimitsResult = stdinRateLimits
+      ? { rateLimits: stdinRateLimits } as import("./types.js").UsageResult
+      : (config.elements.rateLimits !== false ? await getUsage() : null);
 
     // Fetch custom rate limit buckets (if configured)
     const customBuckets =
