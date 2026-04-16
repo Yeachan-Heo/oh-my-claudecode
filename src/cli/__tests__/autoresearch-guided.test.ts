@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { parseSandboxContract } from '../../autoresearch/contracts.js';
+
+// Package root resolved relative to this test file — avoids process.cwd() sensitivity
+// when tests are executed from a parent directory (e.g. a monorepo harness workspace).
+const packageRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
 const { tmuxAvailableMock, buildTmuxShellCommandMock, wrapWithLoginShellMock, quoteShellArgMock } = vi.hoisted(() => ({
   tmuxAvailableMock: vi.fn(),
@@ -349,7 +354,7 @@ describe('spawnAutoresearchTmux', () => {
       }
       if (args[0] === 'new-session') {
         expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'omc-autoresearch-demo', '-c', '/repo']);
-        expect(args[6]).toBe('wrapped:' + `${process.execPath} ${process.cwd()}/bin/omc.js autoresearch /repo/missions/demo`);
+        expect(args[6]).toBe('wrapped:' + `${process.execPath} ${packageRoot}/bin/omc.js autoresearch /repo/missions/demo`);
         return '';
       }
       throw new Error(`unexpected tmuxExec call: ${String(args)}`);
@@ -358,7 +363,7 @@ describe('spawnAutoresearchTmux', () => {
     spawnAutoresearchTmux('/repo/missions/demo', 'demo');
 
     expect(buildTmuxShellCommandMock).toHaveBeenCalledWith(process.execPath, [expect.stringMatching(/bin\/omc\.js$/), 'autoresearch', '/repo/missions/demo']);
-    expect(wrapWithLoginShellMock).toHaveBeenCalledWith(`${process.execPath} ${process.cwd()}/bin/omc.js autoresearch /repo/missions/demo`);
+    expect(wrapWithLoginShellMock).toHaveBeenCalledWith(`${process.execPath} ${packageRoot}/bin/omc.js autoresearch /repo/missions/demo`);
     expect(logSpy).toHaveBeenCalledWith('\nAutoresearch launched in background tmux session.');
     expect(logSpy).toHaveBeenCalledWith('  Attach:   tmux attach -t omc-autoresearch-demo');
   });
