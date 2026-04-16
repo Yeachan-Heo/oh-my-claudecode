@@ -740,8 +740,9 @@ async function main() {
             // fall through to continue — tier alias resolves to a safe provider-specific ID
           } else if (!isSubagentSafeModelId(toolModel)) {
             const tierUpper = isTierAlias(toolModel) ? toolModel.toUpperCase() : '';
-            const guidance = tierUpper
-              ? `Set ANTHROPIC_DEFAULT_${tierUpper}_MODEL=<valid-bedrock-id> in settings.json env, or set OMC_SUBAGENT_MODEL as a global override.`
+            const derivedTier = tierUpper || (normalizeToCcAlias(toolModel) || '').toUpperCase();
+            const guidance = derivedTier
+              ? `Set ANTHROPIC_DEFAULT_${derivedTier}_MODEL=<valid-bedrock-id> in settings.json env, or set OMC_SUBAGENT_MODEL as a global override.`
               : `Remove the \`model\` parameter, or set ANTHROPIC_DEFAULT_SONNET_MODEL=<valid-bedrock-id> in settings.json env.`;
             console.log(JSON.stringify({
               continue: true,
@@ -786,10 +787,10 @@ async function main() {
           // Without a routing target the tier-alias escape hatch doesn't exist, so blocking
           // would strand Claude in a retry loop with no viable path forward.
           const defTierAlias = agentDefModel ? normalizeToCcAlias(agentDefModel) : null;
-          const hasSafeRouting = defTierAlias ? !!resolveTierAliasToSafeModel(defTierAlias) : false;
+          const resolvedModel = defTierAlias ? resolveTierAliasToSafeModel(defTierAlias) : '';
+          const hasSafeRouting = !!resolvedModel;
           if (agentDefModel && !isSubagentSafeModelId(agentDefModel) && !isTierAlias(agentDefModel)
               && hasSafeRouting) {
-            const resolvedModel = resolveTierAliasToSafeModel(defTierAlias);
             const guidance = `Add model="${defTierAlias}" to this ${toolName} call — tier aliases resolve to configured provider models (${resolvedModel}).`;
             const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
             console.log(JSON.stringify({
