@@ -6,6 +6,7 @@
  */
 
 import type { NotificationPayload, NotificationEvent } from "./types.js";
+import { parseTmuxTail } from "./formatter.js";
 import { basename } from "path";
 
 /** Set of known template variables for validation */
@@ -73,11 +74,9 @@ function buildFooterText(payload: NotificationPayload): string {
  */
 function buildTmuxTailBlock(payload: NotificationPayload): string {
   if (!payload.tmuxTail) return "";
-  // payload.tmuxTail is already parsed by notify() — use directly to
-  // avoid re-filtering that silently drops lines on the second pass
-  const tail = payload.tmuxTail.trim();
-  if (!tail) return "";
-  return `\n\n**Recent output:**\n\`\`\`\n${tail}\n\`\`\``;
+  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
+  if (!parsed) return "";
+  return `\n\n**Recent output:**\n\`\`\`\n${parsed}\n\`\`\``;
 }
 
 /**

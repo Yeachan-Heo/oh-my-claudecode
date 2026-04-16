@@ -195,9 +195,8 @@ export async function notify(
         const rawTail = payload.projectPath
           ? getNewPaneTail(payload.tmuxPaneId, join(payload.projectPath, ".omc", "state"), tailLines)
           : capturePaneContent(payload.tmuxPaneId, tailLines);
-        const tail = parseTmuxTail(rawTail, tailLines);
-        if (tail) {
-          payload.tmuxTail = tail;
+        if (rawTail) {
+          payload.tmuxTail = rawTail;
           payload.maxTailLines = tailLines;
         }
       } catch {

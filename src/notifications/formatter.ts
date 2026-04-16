@@ -358,14 +358,12 @@ export function parseTmuxTail(raw: string, maxLines: number = DEFAULT_MAX_TAIL_L
  */
 function appendTmuxTail(lines: string[], payload: NotificationPayload): void {
   if (payload.tmuxTail) {
-    // payload.tmuxTail is already parsed by notify() — use directly to
-    // avoid re-filtering that silently drops lines on the second pass
-    const tail = payload.tmuxTail.trim();
-    if (tail) {
+    const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
+    if (parsed) {
       lines.push("");
       lines.push("**Recent output:**");
       lines.push("```");
-      lines.push(tail);
+      lines.push(parsed);
       lines.push("```");
     }
   }
