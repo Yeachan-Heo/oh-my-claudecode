@@ -221,11 +221,9 @@ export function sanitizePromptContent(
       sanitized = sanitized.slice(0, -1);
     }
   }
-  // Escape XML-like tags that match our prompt delimiters (including tags with attributes)
-  sanitized = sanitized.replace(/<(\/?)(TASK_SUBJECT)[^>]*>/gi, "[$1$2]");
-  sanitized = sanitized.replace(/<(\/?)(TASK_DESCRIPTION)[^>]*>/gi, "[$1$2]");
-  sanitized = sanitized.replace(/<(\/?)(INBOX_MESSAGE)[^>]*>/gi, "[$1$2]");
-  sanitized = sanitized.replace(/<(\/?)(INSTRUCTIONS)[^>]*>/gi, "[$1$2]");
+  // Escape ALL XML-like tags to prevent prompt injection via structurally
+  // significant tags (system-instructions, system-reminder, etc.)
+  sanitized = sanitized.replace(/<(\/?[A-Za-z][A-Za-z0-9_-]*)[^>]*>/g, '[$1]');
   return sanitized;
 }
 
