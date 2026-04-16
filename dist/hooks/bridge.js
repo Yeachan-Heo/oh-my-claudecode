@@ -574,6 +574,9 @@ function getPromptText(input) {
 function isExplicitRalplanSlashInvocation(promptText) {
     return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(promptText);
 }
+function isExplicitAskSlashInvocation(promptText) {
+    return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini)\b/i.test(promptText);
+}
 function activateRalplanStartupState(directory, sessionId) {
     const now = new Date().toISOString();
     writeModeState("ralplan", {
@@ -599,6 +602,12 @@ async function processKeywordDetector(input) {
     }
     const promptText = getPromptText(input);
     if (!promptText) {
+        return { continue: true };
+    }
+    // `/ask <provider> ...` delegates the remainder of the prompt to an
+    // external advisor. Do not interpret magic keywords inside that payload as
+    // instructions for the current Claude Code session.
+    if (isExplicitAskSlashInvocation(promptText)) {
         return { continue: true };
     }
     // Remove code blocks to prevent false positives

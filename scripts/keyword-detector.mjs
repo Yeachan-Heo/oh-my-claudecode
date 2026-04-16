@@ -141,6 +141,10 @@ function isExplicitRalplanSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(prompt);
 }
 
+function isExplicitAskSlashInvocation(prompt) {
+  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini)\b/i.test(prompt);
+}
+
 // Sanitize text to prevent false positives from code blocks, XML tags, URLs, and file paths
 const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-]?slop)\b/i;
 const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
@@ -817,6 +821,14 @@ async function main() {
 
     const prompt = extractPrompt(input);
     if (!prompt) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // `/ask <provider> ...` delegates the remainder of the prompt to an
+    // advisor process. Magic keywords inside that delegated payload must not
+    // activate modes in the current Claude Code session.
+    if (isExplicitAskSlashInvocation(prompt)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }

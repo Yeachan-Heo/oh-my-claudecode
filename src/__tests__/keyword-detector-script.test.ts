@@ -108,6 +108,26 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(state.awaiting_confirmation).toBe(true);
   });
 
+  it('does not activate ralplan from a delegated /ask codex payload', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'keyword-detector-ask-codex-'));
+
+    try {
+      const sessionId = 'ask-codex-session';
+      const output = runKeywordDetector(
+        '/ask codex 지금까지 논의한걸 ralplan으로 계획서 작성해줘',
+        tempDir,
+        sessionId,
+      );
+
+      expect(output.continue).toBe(true);
+      expect(output.suppressOutput).toBe(true);
+      expect(output.hookSpecificOutput).toBeUndefined();
+      expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json'))).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('initializes ralplan startup state and init context for explicit /ralplan slash invoke', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-slash-'));
 

@@ -864,6 +864,10 @@ function isExplicitRalplanSlashInvocation(promptText: string): boolean {
   return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(promptText);
 }
 
+function isExplicitAskSlashInvocation(promptText: string): boolean {
+  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini)\b/i.test(promptText);
+}
+
 function activateRalplanStartupState(directory: string, sessionId?: string): void {
   const now = new Date().toISOString();
   writeModeState(
@@ -896,6 +900,13 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 
   const promptText = getPromptText(input);
   if (!promptText) {
+    return { continue: true };
+  }
+
+  // `/ask <provider> ...` delegates the remainder of the prompt to an
+  // external advisor. Do not interpret magic keywords inside that payload as
+  // instructions for the current Claude Code session.
+  if (isExplicitAskSlashInvocation(promptText)) {
     return { continue: true };
   }
 
