@@ -28,7 +28,7 @@ const TIER_ENV_KEYS: Record<ModelTier, readonly string[]> = {
 export const CLAUDE_FAMILY_DEFAULTS: Record<ClaudeModelFamily, string> = {
   HAIKU: 'claude-haiku-4-5',
   SONNET: 'claude-sonnet-4-6',
-  OPUS: 'claude-opus-4-6',
+  OPUS: 'claude-opus-4-7',
 };
 
 /** Canonical tier->model mapping used as built-in defaults */

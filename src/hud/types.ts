@@ -419,8 +419,8 @@ export type CwdFormat = 'relative' | 'absolute' | 'folder';
 /**
  * Model name format options:
  * - short: 'Opus', 'Sonnet', 'Haiku'
- * - versioned: 'Opus 4.6', 'Sonnet 4.5', 'Haiku 4.5'
- * - full: raw model ID like 'claude-opus-4-6-20260205'
+ * - versioned: 'Opus 4.7', 'Sonnet 4.5', 'Haiku 4.5'
+ * - full: raw model ID like 'claude-opus-4-7-20260416'
  */
 export type ModelFormat = 'short' | 'versioned' | 'full';
 

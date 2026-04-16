@@ -40,7 +40,7 @@ This document defines the behavioral differences between agent tiers (LOW/MEDIUM
 ```
 
 ## HIGH Tier (Opus)
-**Model**: claude-opus-4-6
+**Model**: claude-opus-4-7
 **Focus**: Correctness and quality for complex tasks
 
 ```markdown

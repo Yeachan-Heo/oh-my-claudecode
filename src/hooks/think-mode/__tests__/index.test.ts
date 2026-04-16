@@ -194,8 +194,8 @@ World`);
         expect(getHighVariant('claude-sonnet-4-6')).toBe('claude-sonnet-4-6-high');
       });
 
-      it('should return high variant for claude-opus-4-6', () => {
-        expect(getHighVariant('claude-opus-4-6')).toBe('claude-opus-4-6-high');
+      it('should return high variant for claude-opus-4-7', () => {
+        expect(getHighVariant('claude-opus-4-7')).toBe('claude-opus-4-7-high');
       });
 
       it('should return high variant for claude-3-5-sonnet', () => {
@@ -203,7 +203,7 @@ World`);
       });
 
       it('should return high variant for claude-3-opus', () => {
-        expect(getHighVariant('claude-3-opus')).toBe('claude-opus-4-6-high');
+        expect(getHighVariant('claude-3-opus')).toBe('claude-opus-4-7-high');
       });
 
       it('should handle version with dot notation', () => {

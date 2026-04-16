@@ -56,14 +56,14 @@ describe('Type Tests', () => {
       const config: PluginConfig = {
         agents: {
           omc: { model: 'claude-sonnet-4-6' },
-          architect: { model: 'claude-opus-4-6' },
+          architect: { model: 'claude-opus-4-7' },
           explore: { model: 'claude-haiku-4-5' },
           documentSpecialist: { model: 'claude-haiku-4-5' },
         },
       };
 
       expect(config.agents?.omc?.model).toBe('claude-sonnet-4-6');
-      expect(config.agents?.architect?.model).toBe('claude-opus-4-6');
+      expect(config.agents?.architect?.model).toBe('claude-opus-4-7');
     });
 
     it('should support routing configuration', () => {
@@ -76,14 +76,14 @@ describe('Type Tests', () => {
           tierModels: {
             LOW: 'claude-haiku-4',
             MEDIUM: 'claude-sonnet-4-6',
-            HIGH: 'claude-opus-4-6',
+            HIGH: 'claude-opus-4-7',
           },
         },
       };
 
       expect(config.routing?.enabled).toBe(true);
       expect(config.routing?.defaultTier).toBe('MEDIUM');
-      expect(config.routing?.tierModels?.HIGH).toBe('claude-opus-4-6');
+      expect(config.routing?.tierModels?.HIGH).toBe('claude-opus-4-7');
     });
   });
 });
