@@ -643,9 +643,10 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
   });
 
-  it('OMC_MODEL_MEDIUM takes priority over ANTHROPIC_DEFAULT_*_MODEL (earlier in resolution chain)', () => {
-    // Resolution chain: OMC_SUBAGENT_MODEL → OMC_MODEL_MEDIUM → CLAUDE_CODE_BEDROCK_* → ANTHROPIC_DEFAULT_*
-    // OMC_MODEL_MEDIUM resolves first regardless of what ANTHROPIC_DEFAULT_SONNET_MODEL contains.
+  it('OMC_MODEL_MEDIUM is not used as routing proof; ANTHROPIC_DEFAULT_SONNET_MODEL resolves the alias', () => {
+    // OMC_MODEL_* is excluded from the resolution chain because CC itself does not read it
+    // for tier-alias routing. ANTHROPIC_DEFAULT_SONNET_MODEL (even with [1m]) is accepted
+    // since CC handles that suffix correctly for explicit model= calls.
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
@@ -663,6 +664,30 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
 
     expect(output.continue).toBe(true);
     expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+  });
+
+  it('blocks tier alias when only OMC_MODEL_* is set (not a CC-side routing proof)', () => {
+    // OMC_MODEL_* proves OMC-bridge routing, not CC model resolution. Without a CC-native
+    // var (ANTHROPIC_DEFAULT_* or CLAUDE_CODE_BEDROCK_*), CC cannot route the tier alias
+    // and the downstream Agent/Task call would fail — so the hook must deny.
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Agent',
+        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+        cwd: tempDir,
+        session_id: 'session-tier-omc-model-only',
+      },
+      {
+        OMC_ROUTING_FORCE_INHERIT: 'true',
+        OMC_SUBAGENT_MODEL: '',
+        OMC_MODEL_MEDIUM: 'global.anthropic.claude-sonnet-4-6',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+        CLAUDE_CODE_BEDROCK_SONNET_MODEL: '',
+      },
+    );
+
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecisionReason as string).toContain('MODEL ROUTING');
   });
 
   it('blocks tier alias when NO safe model env is configured at all', () => {
