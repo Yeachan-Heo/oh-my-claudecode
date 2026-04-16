@@ -296,6 +296,9 @@ function mergeWithDefaults(config) {
         missionBoard,
         usageApiPollIntervalMs: config.usageApiPollIntervalMs ??
             DEFAULT_HUD_CONFIG.usageApiPollIntervalMs,
+        ...(config.elementOrder !== undefined
+            ? { elementOrder: config.elementOrder }
+            : {}),
         wrapMode: config.wrapMode ?? DEFAULT_HUD_CONFIG.wrapMode,
         ...(config.rateLimitsProvider
             ? { rateLimitsProvider: config.rateLimitsProvider }

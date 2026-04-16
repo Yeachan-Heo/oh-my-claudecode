@@ -283,6 +283,20 @@ describe("layout config round-trip", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
+    it("readHudConfig preserves elementOrder from settings.json", () => {
+        mockExistsSync.mockImplementation((path) => String(path).endsWith("settings.json"));
+        mockReadFileSync.mockReturnValue(JSON.stringify({
+            omcHud: {
+                elementOrder: ["contextBar", "omcLabel", "session"],
+            },
+        }));
+        const config = readHudConfig();
+        expect(config.elementOrder).toEqual([
+            "contextBar",
+            "omcLabel",
+            "session",
+        ]);
+    });
     it("readHudConfig preserves layout from settings.json", () => {
         mockExistsSync.mockImplementation((path) => String(path).endsWith("settings.json"));
         mockReadFileSync.mockReturnValue(JSON.stringify({
@@ -326,6 +340,22 @@ describe("layout config round-trip", () => {
         expect(written.omcHud.layout).toEqual({
             main: ["contextBar", "omcLabel", "ralph"],
         });
+    });
+    it("writeHudConfig persists elementOrder to settings.json", () => {
+        mockExistsSync.mockImplementation((path) => String(path).endsWith("settings.json"));
+        mockReadFileSync.mockReturnValue(JSON.stringify({}));
+        const ok = writeHudConfig({
+            ...DEFAULT_HUD_CONFIG,
+            elementOrder: ["contextBar", "omcLabel", "session"],
+        });
+        expect(ok).toBe(true);
+        const [, raw] = mockAtomicWriteFileSync.mock.calls[0];
+        const written = JSON.parse(raw);
+        expect(written.omcHud.elementOrder).toEqual([
+            "contextBar",
+            "omcLabel",
+            "session",
+        ]);
     });
 });
 //# sourceMappingURL=state.test.js.map

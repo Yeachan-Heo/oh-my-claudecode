@@ -413,6 +413,8 @@ export interface HudConfig {
     usageApiPollIntervalMs: number;
     /** Optional custom rate limit provider; omit to use built-in Anthropic/z.ai */
     rateLimitsProvider?: RateLimitsProviderConfig;
+    /** Optional main HUD element ordering convenience setting. */
+    elementOrder?: string[];
     /** Optional maximum width (columns) for statusline output. */
     maxWidth?: number;
     /** Controls maxWidth behavior: truncate with ellipsis (default) or wrap at " | " HUD element boundaries. */

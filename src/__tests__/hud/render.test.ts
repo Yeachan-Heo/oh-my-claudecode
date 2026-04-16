@@ -600,6 +600,11 @@ describe('layout element ordering', () => {
     layout,
   });
 
+  const createElementOrderConfig = (elementOrder?: string[]): HudConfig => ({
+    ...createLayoutConfig(),
+    elementOrder,
+  });
+
   it('uses DEFAULT_ELEMENT_ORDER when no layout is configured', async () => {
     const context = createMockContext();
     const config = createLayoutConfig(); // no layout
@@ -715,6 +720,51 @@ describe('layout element ordering', () => {
     const ctxIdx = mainLine!.indexOf('ctx:');
     const omcIdx = mainLine!.indexOf('[OMC');
     expect(ctxIdx).toBeLessThan(omcIdx);
+  });
+
+  it('reorders main elements according to elementOrder and appends unspecified defaults', async () => {
+    const context = createMockContext();
+    const config = createElementOrderConfig(['contextBar', 'omcLabel']);
+
+    const result = await render(context, config);
+    const lines = result.split('\n');
+    const mainLine = lines.find(l => l.includes('[OMC'));
+
+    expect(mainLine).toBeDefined();
+    expect(mainLine!).toContain('ctx:');
+    expect(mainLine!).toContain('session:');
+    expect(mainLine!).toMatch(/(?:🔧5|T:5)/);
+    expect(mainLine!.indexOf('ctx:')).toBeLessThan(mainLine!.indexOf('[OMC'));
+    expect(mainLine!.indexOf('[OMC')).toBeLessThan(mainLine!.indexOf('session:'));
+  });
+
+  it('ignores unknown names in elementOrder silently', async () => {
+    const context = createMockContext();
+    const config = createElementOrderConfig(['unknownElement', 'contextBar', 'omcLabel']);
+
+    const result = await render(context, config);
+    const lines = result.split('\n');
+    const mainLine = lines.find(l => l.includes('[OMC'));
+
+    expect(mainLine).toBeDefined();
+    expect(mainLine!.indexOf('ctx:')).toBeLessThan(mainLine!.indexOf('[OMC'));
+  });
+
+  it('lets layout.main override elementOrder when both are present', async () => {
+    const context = createMockContext();
+    const config: HudConfig = {
+      ...createElementOrderConfig(['contextBar', 'omcLabel']),
+      layout: {
+        main: ['omcLabel', 'contextBar'],
+      },
+    };
+
+    const result = await render(context, config);
+    const lines = result.split('\n');
+    const mainLine = lines.find(l => l.includes('[OMC'));
+
+    expect(mainLine).toBeDefined();
+    expect(mainLine!.indexOf('[OMC')).toBeLessThan(mainLine!.indexOf('ctx:'));
   });
 });
 

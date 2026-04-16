@@ -37,6 +37,22 @@ import { renderLastTool } from "./elements/last-tool.js";
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
 const PLAIN_SEPARATOR = " | ";
 const DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
+function buildMainElementOrder(elementOrder) {
+    if (!Array.isArray(elementOrder) || elementOrder.length === 0) {
+        return DEFAULT_ELEMENT_ORDER.main;
+    }
+    const known = new Set(DEFAULT_ELEMENT_ORDER.main);
+    const seen = new Set();
+    const configured = elementOrder.filter((name) => {
+        if (!known.has(name) || seen.has(name)) {
+            return false;
+        }
+        seen.add(name);
+        return true;
+    });
+    const remaining = DEFAULT_ELEMENT_ORDER.main.filter((name) => !configured.includes(name));
+    return [...configured, ...remaining];
+}
 /**
  * Truncate a single line to a maximum visual width, preserving ANSI escape codes.
  * When the visible content exceeds maxWidth columns, it is truncated with an ellipsis.
@@ -360,7 +376,9 @@ export async function render(context, config) {
     const safeArray = (v, fallback) => Array.isArray(v) ? v : fallback;
     const effectiveLayout = {
         line1: safeArray(config.layout?.line1, DEFAULT_ELEMENT_ORDER.line1),
-        main: safeArray(config.layout?.main, DEFAULT_ELEMENT_ORDER.main),
+        // `layout.main` remains the advanced authoritative layout control.
+        // `elementOrder` is a narrow convenience alias for the main HUD line only.
+        main: safeArray(config.layout?.main, buildMainElementOrder(config.elementOrder)),
         detail: safeArray(config.layout?.detail, DEFAULT_ELEMENT_ORDER.detail),
     };
     /** Collect inline elements in layout order.
