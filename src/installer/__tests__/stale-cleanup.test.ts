@@ -10,8 +10,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+
+// Resolve the package root relative to this test file so the tests pass regardless
+// of the working directory (e.g. when run from a monorepo harness workspace).
+const packageRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
 // We test the exported cleanup functions directly
 import { cleanupStaleAgents, cleanupStaleSkills, prunePluginDuplicateSkills, prunePluginDuplicateAgents } from '../index.js';
@@ -357,7 +362,7 @@ describe('prunePluginDuplicateSkills', () => {
 
     mkdirSync(skillsDir, { recursive: true });
 
-    const packagePlanSkill = readFileSync(join(process.cwd(), 'skills', 'plan', 'SKILL.md'), 'utf-8');
+    const packagePlanSkill = readFileSync(join(packageRoot, 'skills', 'plan', 'SKILL.md'), 'utf-8');
     const aliasSkillDir = join(skillsDir, 'omc-plan');
     mkdirSync(aliasSkillDir, { recursive: true });
     writeFileSync(join(aliasSkillDir, 'SKILL.md'), packagePlanSkill);
