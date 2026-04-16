@@ -52,6 +52,38 @@ const FILE_MODIFY_PATTERNS = [
 // Source file pattern for command inspection
 const SOURCE_EXT_PATTERN = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyw|go|rs|java|kt|scala|c|cpp|cc|h|hpp|rb|php|svelte|vue|graphql|gql|sh|bash|zsh)/i;
 
+// SSH patterns for tmux reminder
+const SSH_COMMAND_PATTERN = /\bssh\b/;
+const TMUX_SCREEN_PATTERN = /\b(tmux|screen)\b/;
+const SSH_SHORT_SINGLE_QUOTED = /^ssh\s+\S+\s+'[^']{0,80}'$/;
+const SSH_SHORT_DOUBLE_QUOTED = /^ssh\s+\S+\s+"[^"]{0,80}"$/;
+const SSH_HIGH_RISK_PATTERN = /pip install|podman pull|docker pull|wget|curl\s+.*-[oO]|git clone|huggingface|safetensors|gguf|model.*download|apt.get|yum install|make.*install|npm install|cargo build/i;
+
+function checkSshCommand(command) {
+  if (!SSH_COMMAND_PATTERN.test(command)) return null;
+  if (TMUX_SCREEN_PATTERN.test(command)) return null;
+
+  const isHighRisk = SSH_HIGH_RISK_PATTERN.test(command);
+
+  // Skip short, safe commands — but never skip high-risk ones
+  if (!isHighRisk) {
+    if (SSH_SHORT_SINGLE_QUOTED.test(command.trim())) return null;
+    if (SSH_SHORT_DOUBLE_QUOTED.test(command.trim())) return null;
+  }
+
+  let msg = `[SSH TMUX REMINDER] SSH command detected without tmux/screen.
+
+Long-running remote operations (downloads, installs, builds) will die if SSH disconnects.
+Wrap in tmux to survive disconnections:
+
+  ssh <host> -t 'tmux new-session -A -s work'`;
+
+  if (isHighRisk) {
+    msg += `\n\n⚠ This command includes a long-running operation — tmux is strongly recommended.`;
+  }
+  return msg;
+}
+
 function checkBashCommand(command) {
   // Check if command might modify files
   const mayModify = FILE_MODIFY_PATTERNS.some(pattern => pattern.test(command));
@@ -88,13 +120,20 @@ async function main() {
   // Extract tool name (handle both cases)
   const toolName = data.tool_name || data.toolName || '';
 
-  // Handle Bash tool separately - check for file modification patterns
+  // Handle Bash tool separately - check for SSH and file modification patterns
   if (toolName === 'Bash' || toolName === 'bash') {
     const toolInput = data.tool_input || data.toolInput || {};
     const command = toolInput.command || '';
-    const warning = checkBashCommand(command);
-    if (warning) {
-      console.log(JSON.stringify({ continue: true, message: warning }));
+    const messages = [];
+
+    const sshWarning = checkSshCommand(command);
+    if (sshWarning) messages.push(sshWarning);
+
+    const delegationWarning = checkBashCommand(command);
+    if (delegationWarning) messages.push(delegationWarning);
+
+    if (messages.length > 0) {
+      console.log(JSON.stringify({ continue: true, message: messages.join('\n\n') }));
     } else {
       console.log(JSON.stringify({ continue: true }));
     }
