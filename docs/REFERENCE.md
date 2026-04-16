@@ -541,7 +541,7 @@ Each installed skill is exposed as `/oh-my-claudecode:<skill-name>`. The skills 
 | Command                                     | Description                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `/oh-my-claudecode:ai-slop-cleaner <target>`    | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                    |
-| `/oh-my-claudecode:ask <claude|codex|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact         |
+| `/oh-my-claudecode:ask <claude\|codex\|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact         |
 | `/oh-my-claudecode:autopilot <task>`            | Full autonomous execution                                                                  |
 | `/oh-my-claudecode:configure-notifications`     | Configure notification integrations                                                       |
 | `/oh-my-claudecode:deep-dive <problem>`         | Run the trace → deep-interview pipeline                                                   |
