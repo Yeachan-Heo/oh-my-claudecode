@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { StatuslineStdin } from '../../hud/types.js';
-import { getContextPercent, getModelName, stabilizeContextPercent } from '../../hud/stdin.js';
+import { getContextPercent, getModelName, getRateLimitsFromStdin, stabilizeContextPercent } from '../../hud/stdin.js';
 
 function makeStdin(overrides: Partial<StatuslineStdin> = {}): StatuslineStdin {
   return {
@@ -116,5 +116,51 @@ describe('HUD stdin model display', () => {
 
   it('returns Unknown when stdin omits the model block', () => {
     expect(getModelName(makeStdin({ model: undefined }))).toBe('Unknown');
+  });
+});
+
+describe('HUD stdin rate limits', () => {
+  it('parses stdin rate_limits into the existing RateLimits shape', () => {
+    const result = getRateLimitsFromStdin(makeStdin({
+      rate_limits: {
+        five_hour: {
+          used_percentage: 11,
+          resets_at: 1776348000,
+        },
+        seven_day: {
+          used_percentage: 2,
+          resets_at: '2026-04-22T00:00:00.000Z',
+        },
+      },
+    }));
+
+    expect(result).toEqual({
+      fiveHourPercent: 11,
+      weeklyPercent: 2,
+      fiveHourResetsAt: new Date(1776348000 * 1000),
+      weeklyResetsAt: new Date('2026-04-22T00:00:00.000Z'),
+    });
+  });
+
+  it('returns null when stdin omits rate limits', () => {
+    expect(getRateLimitsFromStdin(makeStdin())).toBeNull();
+  });
+
+  it('tolerates invalid reset values without breaking the result', () => {
+    const result = getRateLimitsFromStdin(makeStdin({
+      rate_limits: {
+        five_hour: {
+          used_percentage: 140,
+          resets_at: 'not-a-date',
+        },
+      },
+    }));
+
+    expect(result).toEqual({
+      fiveHourPercent: 100,
+      weeklyPercent: undefined,
+      fiveHourResetsAt: null,
+      weeklyResetsAt: null,
+    });
   });
 });

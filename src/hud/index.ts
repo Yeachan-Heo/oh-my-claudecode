@@ -12,6 +12,7 @@ import {
   readStdinCache,
   getContextPercent,
   getModelName,
+  getRateLimitsFromStdin,
   stabilizeContextPercent,
 } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
@@ -339,9 +340,14 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       writeHudState(stateToWrite, cwd, currentSessionId ?? undefined);
     }
 
-    // Fetch rate limits from OAuth API (if available)
+    // Prefer Claude Code stdin rate limits when available to avoid cold-start API fetches.
+    const stdinRateLimits = getRateLimitsFromStdin(stdin);
     const rateLimitsResult =
-      config.elements.rateLimits !== false ? await getUsage() : null;
+      config.elements.rateLimits === false
+        ? null
+        : stdinRateLimits
+          ? { rateLimits: stdinRateLimits }
+          : await getUsage();
 
     // Fetch custom rate limit buckets (if configured)
     const customBuckets =

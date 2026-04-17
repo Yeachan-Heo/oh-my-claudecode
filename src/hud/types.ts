@@ -66,6 +66,18 @@ export interface StatuslineStdin {
       cache_read_input_tokens?: number;
     };
   };
+
+  /** Rate limits from Claude Code statusline stdin */
+  rate_limits?: {
+    five_hour?: {
+      used_percentage?: number;
+      resets_at?: number | string;
+    };
+    seven_day?: {
+      used_percentage?: number;
+      resets_at?: number | string;
+    };
+  };
 }
 
 // ============================================================================
