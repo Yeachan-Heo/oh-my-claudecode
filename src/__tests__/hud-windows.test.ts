@@ -225,4 +225,25 @@ describe('HUD Windows Compatibility', () => {
       expect(content).toContain("'plugins', 'oh-my-claudecode', `.usage-cache-${source}.json`");
     });
   });
+
+  describe('npm root -g discovery (#2715)', () => {
+    // Node 20.12+ / 18.20+ / 21.7+ on Windows requires `shell: true` to spawn
+    // .cmd/.bat via spawnSync/execFileSync (CVE-2024-27980). Without it, the
+    // `npm root -g` discovery throws EINVAL, silently falls through to
+    // "Plugin not installed" for users whose npm prefix is non-standard.
+    it('execFileSync("npm.cmd", …) must pass shell:true on Windows', () => {
+      const templatePath = join(packageRoot, 'scripts', 'lib', 'hud-wrapper-template.txt');
+      const content = readFileSync(templatePath, 'utf-8');
+      // The discovery block spawns npm.cmd — must include shell flag driven by platform.
+      expect(content).toMatch(/execFileSync\(npmCommand,\s*\["root",\s*"-g"\]/);
+      expect(content).toContain('shell: isWin');
+    });
+
+    it('shell-flag comment should reference the CVE and issue for future readers', () => {
+      const templatePath = join(packageRoot, 'scripts', 'lib', 'hud-wrapper-template.txt');
+      const content = readFileSync(templatePath, 'utf-8');
+      expect(content).toContain('CVE-2024-27980');
+      expect(content).toContain('#2715');
+    });
+  });
 });

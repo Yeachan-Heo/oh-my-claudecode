@@ -46,11 +46,16 @@ function getGlobalNodeModuleRoots() {
   }
 
   try {
-    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+    const isWin = process.platform === "win32";
+    const npmCommand = isWin ? "npm.cmd" : "npm";
     const npmRoot = String(execFileSync(npmCommand, ["root", "-g"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500,
+      // Required on Windows since Node 20.12 / CVE-2024-27980: spawning .cmd
+      // via execFileSync without shell:true throws EINVAL, silently breaking
+      // npm-root discovery for installs under a non-standard npm prefix. #2715
+      shell: isWin,
     })).trim();
     if (npmRoot) roots.unshift(npmRoot);
   } catch { /* continue */ }
