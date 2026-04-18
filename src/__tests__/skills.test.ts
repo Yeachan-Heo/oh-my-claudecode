@@ -335,7 +335,7 @@ describe('Builtin Skills', () => {
       const skill = getBuiltinSkill('deep-interview');
       expect(skill).toBeDefined();
       expect(skill?.template).toContain('Load runtime settings');
-      expect(skill?.template).toContain('ambiguityThreshold = 0.12');
+      expect(skill?.template).toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `0.12`');
       expect(skill?.template).toContain('"threshold": 0.12,');
       expect(skill?.template).toContain('drops below 12%.');
       expect(skill?.template?.indexOf('Load runtime settings')).toBeLessThan(
@@ -356,7 +356,7 @@ describe('Builtin Skills', () => {
       );
 
       const first = getBuiltinSkill('deep-interview');
-      expect(first?.template).toContain('ambiguityThreshold = 0.12');
+      expect(first?.template).toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `0.12`');
       expect(first?.template).toContain('"threshold": 0.12,');
 
       writeFileSync(
@@ -365,9 +365,9 @@ describe('Builtin Skills', () => {
       );
 
       const second = getBuiltinSkill('deep-interview');
-      expect(second?.template).toContain('ambiguityThreshold = 0.33');
+      expect(second?.template).toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `0.33`');
       expect(second?.template).toContain('"threshold": 0.33,');
-      expect(second?.template).not.toContain('ambiguityThreshold = 0.12');
+      expect(second?.template).not.toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `0.12`');
       expect(second?.template).not.toContain('"threshold": 0.12,');
     });
 
@@ -409,7 +409,7 @@ describe('Builtin Skills', () => {
     it('ships a config-aware deep-interview SKILL.md for native skill-loader paths (issue #2723)', () => {
       const raw = readFileSync(join(originalCwd, 'skills', 'deep-interview', 'SKILL.md'), 'utf-8');
       expect(raw).toContain('Load runtime settings');
-      expect(raw).toContain('Read `~/.claude/settings.json` and `./.claude/settings.json`');
+      expect(raw).toContain('Read `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` and `./.claude/settings.json`');
       expect(raw).toContain('"threshold": <resolvedThreshold>,');
       expect(raw).toContain('ambiguity drops below <resolvedThresholdPercent>');
       expect(raw).toContain('Gate: ≤<resolvedThresholdPercent> ambiguity');

@@ -71,7 +71,7 @@ When arguments include `--autoresearch`, Deep Interview becomes the zero-learnin
    - Otherwise: **greenfield**
 3. **For brownfield**: Run `explore` agent to map relevant codebase areas, store as `codebase_context`
 3.5. **Load runtime settings**:
-   - Read `~/.claude/settings.json` and `./.claude/settings.json` (project overrides user)
+   - Read `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` and `./.claude/settings.json` (project overrides user)
    - Resolve `omc.deepInterview.ambiguityThreshold` into `<resolvedThreshold>`; if it is undefined, use `0.2`
    - Derive `<resolvedThresholdPercent>` from `<resolvedThreshold>` and substitute both placeholders throughout the remaining instructions before continuing
 4. **Initialize state** via `state_write(mode="deep-interview")`:
