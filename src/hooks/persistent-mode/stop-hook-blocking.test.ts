@@ -255,6 +255,68 @@ describe("Stop Hook Blocking Contract", () => {
     });
 
 
+    it("blocks stop when autoresearch only exists on the legacy shared path", async () => {
+      const sessionId = "autoresearch-legacy-active";
+      writeLegacyModeState(tempDir, "autoresearch-state.json", {
+        active: true,
+        mission_slug: "legacy-demo",
+        current_phase: "running",
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+        iteration: 4,
+      });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(true);
+      expect(result.mode).toBe("autoresearch");
+      expect(result.message).toContain("AUTORESEARCH - STATEFUL MISSION ACTIVE");
+      expect(result.message).toContain("legacy-demo");
+    });
+
+    it("does not leak foreign-session legacy autoresearch state", async () => {
+      const sessionId = "autoresearch-session-a";
+      writeLegacyModeState(tempDir, "autoresearch-state.json", {
+        active: true,
+        session_id: "autoresearch-session-b",
+        mission_slug: "foreign-demo",
+        current_phase: "running",
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+        iteration: 1,
+      });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe("none");
+    });
+
+    it("releases expired autoresearch discovered through the legacy shared bridge", async () => {
+      const sessionId = "autoresearch-legacy-expired";
+      const statePath = join(tempDir, ".omc", "state", "autoresearch-state.json");
+      writeLegacyModeState(tempDir, "autoresearch-state.json", {
+        active: true,
+        mission_slug: "legacy-expired",
+        current_phase: "running",
+        started_at: new Date(Date.now() - 120_000).toISOString(),
+        updated_at: new Date().toISOString(),
+        deadline_at: new Date(Date.now() - 1_000).toISOString(),
+        iteration: 5,
+      });
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+      expect(result.mode).toBe("autoresearch");
+      expect(result.message).toContain("Max-runtime ceiling reached");
+
+      const updated = JSON.parse(readFileSync(statePath, 'utf-8')) as { active: boolean; current_phase: string; stop_reason: string };
+      expect(updated.active).toBe(false);
+      expect(updated.current_phase).toBe('stopped');
+      expect(updated.stop_reason).toBe('max-runtime ceiling reached');
+    });
+
+
     it("stale awaiting_confirmation does not suppress ultrawork enforcement", async () => {
       const sessionId = "ultrawork-stale-awaiting-confirmation";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);

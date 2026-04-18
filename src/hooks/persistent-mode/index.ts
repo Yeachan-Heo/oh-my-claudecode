@@ -1306,7 +1306,19 @@ async function checkAutoresearch(
   cancelInProgress?: boolean
 ): Promise<PersistentModeResult | null> {
   const workingDir = resolveToWorktreeRoot(directory);
-  const state = readModeState<AutoresearchStopState>('autoresearch', workingDir, sessionId);
+  let stateSourceSessionId = sessionId;
+  let state = readModeState<AutoresearchStopState>('autoresearch', workingDir, sessionId);
+
+  // Autoresearch predates session-scoped state files. Preserve strict sessioned reads
+  // first, then allow a narrow legacy/shared bridge only for matching or unbound state.
+  if (!state && sessionId) {
+    const legacyState = readModeState<AutoresearchStopState>('autoresearch', workingDir);
+    if (!legacyState?.session_id || legacyState.session_id === sessionId) {
+      state = legacyState;
+      stateSourceSessionId = undefined;
+    }
+  }
+
   const stateRecord = state as Record<string, unknown> | null;
   const hasTimestampFields = Boolean(
     stateRecord
@@ -1350,7 +1362,7 @@ async function checkAutoresearch(
       current_phase: 'stopped',
       completed_at: new Date().toISOString(),
       stop_reason: 'max-runtime ceiling reached',
-    }, workingDir, sessionId);
+    }, workingDir, stateSourceSessionId);
 
     return {
       shouldBlock: false,

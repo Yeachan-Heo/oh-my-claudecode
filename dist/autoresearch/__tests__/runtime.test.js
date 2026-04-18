@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { assertResetSafeWorktree, buildAutoresearchInstructions, getAutoresearchMissionArtifactLayout, loadAutoresearchRunManifest, materializeAutoresearchMissionToWorktree, prepareAutoresearchRuntime, processAutoresearchCandidate, } from '../runtime.js';
-import { readModeState } from '../../lib/mode-state-io.js';
+import { assertModeStartAllowed, assertResetSafeWorktree, buildAutoresearchInstructions, getAutoresearchMissionArtifactLayout, loadAutoresearchRunManifest, materializeAutoresearchMissionToWorktree, prepareAutoresearchRuntime, processAutoresearchCandidate, } from '../runtime.js';
+import { readModeState, writeModeState } from '../../lib/mode-state-io.js';
 async function initRepo() {
     const cwd = await mkdtemp(join(tmpdir(), 'omc-autoresearch-runtime-'));
     execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
@@ -240,6 +240,28 @@ describe('autoresearch parity decisions', () => {
             const evaluationOne = JSON.parse(await readFile(join(repo, '.omc', 'autoresearch', 'missions-demo', 'runs', runtime.runId, 'evaluations', 'iteration-0001.json'), 'utf-8'));
             expect(evaluationOne.pass).toBe(true);
             expect(evaluationOne.score).toBe(2);
+        }
+        finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+});
+describe('autoresearch startup exclusivity', () => {
+    it('blocks startup when a session-scoped ralph state is active', async () => {
+        const repo = await initRepo();
+        try {
+            expect(writeModeState('ralph', { active: true }, repo, 'session-a')).toBe(true);
+            await expect(assertModeStartAllowed('autoresearch', repo)).rejects.toThrow('Cannot start autoresearch: ralph is already active');
+        }
+        finally {
+            await rm(repo, { recursive: true, force: true });
+        }
+    });
+    it('blocks startup when legacy shared exclusive-mode state is active', async () => {
+        const repo = await initRepo();
+        try {
+            expect(writeModeState('autopilot', { active: true }, repo)).toBe(true);
+            await expect(assertModeStartAllowed('autoresearch', repo)).rejects.toThrow('Cannot start autoresearch: autopilot is already active');
         }
         finally {
             await rm(repo, { recursive: true, force: true });

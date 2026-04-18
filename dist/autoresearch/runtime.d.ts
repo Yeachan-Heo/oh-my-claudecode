@@ -1,3 +1,4 @@
+import type { ExecutionMode } from '../hooks/mode-registry/types.js';
 import { type AutoresearchKeepPolicy, type AutoresearchMissionContract } from './contracts.js';
 export type AutoresearchCandidateStatus = 'candidate' | 'noop' | 'abort' | 'interrupted';
 export type AutoresearchDecisionStatus = 'baseline' | 'keep' | 'discard' | 'ambiguous' | 'noop' | 'abort' | 'interrupted' | 'error';
@@ -114,7 +115,7 @@ export declare function assertResetSafeWorktree(worktreePath: string, allowedDir
  * Assert no exclusive mode is already active (ralph, ultrawork, autopilot).
  * Mirrors OMX assertModeStartAllowed semantics using OMC mode-state-io.
  */
-export declare function assertModeStartAllowed(mode: string, projectRoot: string): Promise<void>;
+export declare function assertModeStartAllowed(mode: ExecutionMode, projectRoot: string): Promise<void>;
 export declare function countTrailingAutoresearchNoops(ledgerFile: string): Promise<number>;
 export declare function runAutoresearchEvaluator(contract: AutoresearchMissionContract, worktreePath: string, ledgerFile?: string, latestEvaluatorFile?: string): Promise<AutoresearchEvaluationRecord>;
 export declare function decideAutoresearchOutcome(manifest: Pick<AutoresearchRunManifest, 'keep_policy' | 'last_kept_score'>, candidate: AutoresearchCandidateArtifact, evaluation: AutoresearchEvaluationRecord | null): AutoresearchDecision;

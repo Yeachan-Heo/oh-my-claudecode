@@ -18094,7 +18094,15 @@ function getAutoresearchDeadlineMs(state) {
 }
 async function checkAutoresearch(sessionId, directory, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
-  const state = readModeState("autoresearch", workingDir, sessionId);
+  let stateSourceSessionId = sessionId;
+  let state = readModeState("autoresearch", workingDir, sessionId);
+  if (!state && sessionId) {
+    const legacyState = readModeState("autoresearch", workingDir);
+    if (!legacyState?.session_id || legacyState.session_id === sessionId) {
+      state = legacyState;
+      stateSourceSessionId = void 0;
+    }
+  }
   const stateRecord = state;
   const hasTimestampFields = Boolean(
     stateRecord && ["updated_at", "started_at"].some(
@@ -18130,7 +18138,7 @@ async function checkAutoresearch(sessionId, directory, cancelInProgress) {
       current_phase: "stopped",
       completed_at: (/* @__PURE__ */ new Date()).toISOString(),
       stop_reason: "max-runtime ceiling reached"
-    }, workingDir, sessionId);
+    }, workingDir, stateSourceSessionId);
     return {
       shouldBlock: false,
       message: "[AUTORESEARCH COMPLETE] Max-runtime ceiling reached. Stop hook released the stateful autoresearch run.",

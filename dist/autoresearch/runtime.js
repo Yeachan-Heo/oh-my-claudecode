@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { mkdir, readFile, symlink, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { readModeState, writeModeState, } from '../lib/mode-state-io.js';
+import { isModeActiveInAnySession } from '../hooks/mode-registry/index.js';
 import { parseEvaluatorResult, } from './contracts.js';
 const AUTORESEARCH_RESULTS_HEADER = 'iteration\tcommit\tpass\tscore\tstatus\tdescription\n';
 const AUTORESEARCH_WORKTREE_EXCLUDES = ['results.tsv', 'run.log', 'node_modules', '.omc/'];
@@ -216,8 +217,7 @@ export async function assertModeStartAllowed(mode, projectRoot) {
     for (const other of EXCLUSIVE_MODES) {
         if (other === mode)
             continue;
-        const state = readModeState(other, projectRoot);
-        if (state && state.active) {
+        if (isModeActiveInAnySession(other, projectRoot)) {
             throw new Error(`Cannot start ${mode}: ${other} is already active`);
         }
     }

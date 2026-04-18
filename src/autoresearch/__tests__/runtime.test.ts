@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AutoresearchMissionContract } from '../contracts.js';
 import {
+  assertModeStartAllowed,
   assertResetSafeWorktree,
   buildAutoresearchInstructions,
   getAutoresearchMissionArtifactLayout,
@@ -14,7 +15,7 @@ import {
   prepareAutoresearchRuntime,
   processAutoresearchCandidate,
 } from '../runtime.js';
-import { readModeState } from '../../lib/mode-state-io.js';
+import { readModeState, writeModeState } from '../../lib/mode-state-io.js';
 
 async function initRepo(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), 'omc-autoresearch-runtime-'));
@@ -282,6 +283,35 @@ describe('autoresearch parity decisions', () => {
       )) as Record<string, unknown>;
       expect(evaluationOne.pass).toBe(true);
       expect(evaluationOne.score).toBe(2);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('autoresearch startup exclusivity', () => {
+  it('blocks startup when a session-scoped ralph state is active', async () => {
+    const repo = await initRepo();
+    try {
+      expect(writeModeState('ralph', { active: true }, repo, 'session-a')).toBe(true);
+
+      await expect(assertModeStartAllowed('autoresearch', repo)).rejects.toThrow(
+        'Cannot start autoresearch: ralph is already active',
+      );
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks startup when legacy shared exclusive-mode state is active', async () => {
+    const repo = await initRepo();
+    try {
+      expect(writeModeState('autopilot', { active: true }, repo)).toBe(true);
+
+      await expect(assertModeStartAllowed('autoresearch', repo)).rejects.toThrow(
+        'Cannot start autoresearch: autopilot is already active',
+      );
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

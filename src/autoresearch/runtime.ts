@@ -6,6 +6,8 @@ import {
   readModeState,
   writeModeState,
 } from '../lib/mode-state-io.js';
+import { isModeActiveInAnySession } from '../hooks/mode-registry/index.js';
+import type { ExecutionMode } from '../hooks/mode-registry/types.js';
 import {
   parseEvaluatorResult,
   type AutoresearchKeepPolicy,
@@ -145,7 +147,7 @@ const AUTORESEARCH_RESULTS_HEADER = 'iteration\tcommit\tpass\tscore\tstatus\tdes
 const AUTORESEARCH_WORKTREE_EXCLUDES = ['results.tsv', 'run.log', 'node_modules', '.omc/'];
 
 // Exclusive modes that cannot run concurrently with autoresearch
-const EXCLUSIVE_MODES = ['ralph', 'ultrawork', 'autopilot', 'autoresearch'];
+const EXCLUSIVE_MODES: ExecutionMode[] = ['ralph', 'ultrawork', 'autopilot', 'autoresearch'];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -399,11 +401,10 @@ async function assertAutoresearchLockAvailable(projectRoot: string): Promise<voi
  * Assert no exclusive mode is already active (ralph, ultrawork, autopilot).
  * Mirrors OMX assertModeStartAllowed semantics using OMC mode-state-io.
  */
-export async function assertModeStartAllowed(mode: string, projectRoot: string): Promise<void> {
+export async function assertModeStartAllowed(mode: ExecutionMode, projectRoot: string): Promise<void> {
   for (const other of EXCLUSIVE_MODES) {
     if (other === mode) continue;
-    const state = readModeState<Record<string, unknown>>(other, projectRoot);
-    if (state && state.active) {
+    if (isModeActiveInAnySession(other, projectRoot)) {
       throw new Error(`Cannot start ${mode}: ${other} is already active`);
     }
   }
