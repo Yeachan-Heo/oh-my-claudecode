@@ -83,9 +83,10 @@ Always validate user input with Zod schemas.
   console.log('Example 4: MCP Servers');
 
   const mcpServers = getDefaultMcpServers({
-    enableExa: true,
-    exaApiKey: process.env.EXA_API_KEY,
-    enableContext7: true,
+    enableLinkup: true,
+    linkupApiKey: process.env.LINKUP_API_KEY,
+    enableRef: true,
+    refApiKey: process.env.REF_API_KEY,
     enablePlaywright: false, // Disable browser automation
     enableMemory: true // Enable persistent memory
   });

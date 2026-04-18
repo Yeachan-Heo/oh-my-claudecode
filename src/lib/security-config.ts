@@ -30,7 +30,7 @@ export interface SecurityConfig {
   disableAutoUpdate: boolean;
   /** Hard max iterations for persistent modes (0 = unlimited) */
   hardMaxIterations: number;
-  /** Disable remote MCP servers (Exa, Context7) */
+  /** Disable remote MCP servers (Linkup, Ref) */
   disableRemoteMcp: boolean;
   /** Disable external LLM providers (Codex, Gemini) in team mode */
   disableExternalLLM: boolean;

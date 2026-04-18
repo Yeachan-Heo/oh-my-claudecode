@@ -3699,8 +3699,8 @@ function buildDefaultConfig() {
       autoContextInjection: true
     },
     mcpServers: {
-      exa: { enabled: true },
-      context7: { enabled: true }
+      linkup: { enabled: true },
+      ref: { enabled: true }
     },
     companyContext: {
       onError: "warn"
@@ -3863,10 +3863,10 @@ function deepMerge(target, source) {
 }
 function loadEnvConfig() {
   const config2 = {};
-  if (process.env.EXA_API_KEY) {
+  if (process.env.LINKUP_API_KEY) {
     config2.mcpServers = {
       ...config2.mcpServers,
-      exa: { enabled: true, apiKey: process.env.EXA_API_KEY }
+      linkup: { enabled: true, apiKey: process.env.LINKUP_API_KEY }
     };
   }
   if (process.env.OMC_PARALLEL_EXECUTION !== void 0) {
@@ -43817,17 +43817,19 @@ init_loader();
 init_definitions();
 
 // src/mcp/servers.ts
-function createExaServer(apiKey) {
+function createLinkupServer(apiKey) {
   return {
     command: "npx",
-    args: ["-y", "exa-mcp-server"],
-    env: apiKey ? { EXA_API_KEY: apiKey } : void 0
+    args: apiKey
+      ? ["-y", "linkup-mcp-server", `apiKey=${apiKey}`]
+      : ["-y", "linkup-mcp-server"]
   };
 }
-function createContext7Server() {
+function createRefServer(apiKey) {
   return {
     command: "npx",
-    args: ["-y", "@upstash/context7-mcp"]
+    args: ["-y", "ref-tools-mcp@latest"],
+    env: apiKey ? { REF_API_KEY: apiKey } : void 0
   };
 }
 function createPlaywrightServer() {
@@ -43844,11 +43846,11 @@ function createMemoryServer() {
 }
 function getDefaultMcpServers(options) {
   const servers = {};
-  if (options?.enableExa !== false) {
-    servers.exa = createExaServer(options?.exaApiKey);
+  if (options?.enableLinkup !== false) {
+    servers.linkup = createLinkupServer(options?.linkupApiKey);
   }
-  if (options?.enableContext7 !== false) {
-    servers.context7 = createContext7Server();
+  if (options?.enableRef !== false) {
+    servers.ref = createRefServer(options?.refApiKey);
   }
   if (options?.enablePlaywright) {
     servers.playwright = createPlaywrightServer();
@@ -81668,9 +81670,10 @@ ${options.customSystemPrompt}`;
   }
   const agents = getAgentDefinitions({ config: config2 });
   const externalMcpServers = getDefaultMcpServers({
-    exaApiKey: config2.mcpServers?.exa?.apiKey,
-    enableExa: config2.mcpServers?.exa?.enabled,
-    enableContext7: config2.mcpServers?.context7?.enabled
+    linkupApiKey: config2.mcpServers?.linkup?.apiKey,
+    refApiKey: config2.mcpServers?.ref?.apiKey,
+    enableLinkup: config2.mcpServers?.linkup?.enabled,
+    enableRef: config2.mcpServers?.ref?.enabled
   });
   const allowedTools = [
     "Read",
@@ -88772,8 +88775,8 @@ Examples:
     if (!process.env.ANTHROPIC_API_KEY) {
       warnings.push("ANTHROPIC_API_KEY environment variable not set");
     }
-    if (config2.mcpServers?.exa?.enabled && !process.env.EXA_API_KEY && !config2.mcpServers.exa.apiKey) {
-      warnings.push("Exa is enabled but EXA_API_KEY is not set");
+    if (config2.mcpServers?.linkup?.enabled && !process.env.LINKUP_API_KEY && !config2.mcpServers.linkup.apiKey) {
+      warnings.push("Linkup is enabled but LINKUP_API_KEY is not set");
     }
     if (errors.length > 0) {
       console.log(source_default.red("Errors:"));

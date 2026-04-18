@@ -59,8 +59,8 @@ export interface PluginConfig {
 
   // MCP server configurations
   mcpServers?: {
-    exa?: { enabled?: boolean; apiKey?: string };
-    context7?: { enabled?: boolean };
+    linkup?: { enabled?: boolean; apiKey?: string };
+    ref?: { enabled?: boolean; apiKey?: string };
   };
 
   // Prompt-level company context MCP contract

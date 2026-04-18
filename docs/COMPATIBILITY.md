@@ -81,7 +81,7 @@ Integrates external tools with OMC's permission system:
 - Determines delegation targets for tool execution
 
 **Safe patterns:**
-- Built-in patterns for common MCP tools (filesystem read, context7 queries)
+- Built-in patterns for common MCP tools (filesystem read, ref queries)
 - Plugin-contributed patterns from manifests
 - Custom patterns can be registered at runtime
 
@@ -323,7 +323,7 @@ Tools use a namespaced format:
 Examples:
 - my-plugin:search
 - filesystem:read_file
-- context7:query-docs
+- ref:query-docs
 ```
 
 Short names also work:
@@ -363,9 +363,9 @@ const result = checkPermission('mcp__filesystem__read_file');
 
 Built-in safe patterns cover:
 
-- **Context7** - Documentation queries (read-only)
+- **Ref** - Documentation queries (read-only)
 - **Filesystem** - Read operations only
-- **Exa** - Web search (read-only, external)
+- **Linkup** - Web search (read-only, external)
 
 ### Permission Check Flow
 

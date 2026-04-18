@@ -2,8 +2,8 @@
  * MCP Server Configurations
  *
  * Predefined MCP server configurations for common integrations:
- * - Exa: AI-powered web search
- * - Context7: Official documentation lookup
+ * - Linkup: AI-powered web search
+ * - Ref: Official documentation lookup
  * - Playwright: Browser automation
  * - Filesystem: Sandboxed file system access
  * - Memory: Persistent knowledge graph
@@ -16,25 +16,27 @@ export interface McpServerConfig {
 }
 
 /**
- * Exa MCP Server - AI-powered web search
- * Requires: EXA_API_KEY environment variable
+ * Linkup MCP Server - AI-powered web search
+ * Requires: LINKUP_API_KEY (passed as arg)
  */
-export function createExaServer(apiKey?: string): McpServerConfig {
+export function createLinkupServer(apiKey?: string): McpServerConfig {
   return {
     command: 'npx',
-    args: ['-y', 'exa-mcp-server'],
-    env: apiKey ? { EXA_API_KEY: apiKey } : undefined
+    args: apiKey
+      ? ['-y', 'linkup-mcp-server', `apiKey=${apiKey}`]
+      : ['-y', 'linkup-mcp-server']
   };
 }
 
 /**
- * Context7 MCP Server - Official documentation lookup
+ * Ref MCP Server - Official documentation lookup
  * Provides access to official docs for popular libraries
  */
-export function createContext7Server(): McpServerConfig {
+export function createRefServer(apiKey?: string): McpServerConfig {
   return {
     command: 'npx',
-    args: ['-y', '@upstash/context7-mcp']
+    args: ['-y', 'ref-tools-mcp@latest'],
+    env: apiKey ? { REF_API_KEY: apiKey } : undefined
   };
 }
 
@@ -75,27 +77,28 @@ export function createMemoryServer(): McpServerConfig {
  * Get all default MCP servers for the OMC system
  */
 export interface McpServersConfig {
-  exa?: McpServerConfig;
-  context7?: McpServerConfig;
+  linkup?: McpServerConfig;
+  ref?: McpServerConfig;
   playwright?: McpServerConfig;
   memory?: McpServerConfig;
 }
 
 export function getDefaultMcpServers(options?: {
-  exaApiKey?: string;
-  enableExa?: boolean;
-  enableContext7?: boolean;
+  linkupApiKey?: string;
+  refApiKey?: string;
+  enableLinkup?: boolean;
+  enableRef?: boolean;
   enablePlaywright?: boolean;
   enableMemory?: boolean;
 }): McpServersConfig {
   const servers: McpServersConfig = {};
 
-  if (options?.enableExa !== false) {
-    servers.exa = createExaServer(options?.exaApiKey);
+  if (options?.enableLinkup !== false) {
+    servers.linkup = createLinkupServer(options?.linkupApiKey);
   }
 
-  if (options?.enableContext7 !== false) {
-    servers.context7 = createContext7Server();
+  if (options?.enableRef !== false) {
+    servers.ref = createRefServer(options?.refApiKey);
   }
 
   if (options?.enablePlaywright) {

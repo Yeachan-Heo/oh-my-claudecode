@@ -13,7 +13,7 @@ export OMC_SECURITY=strict
 This enables:
 - Tool path restriction (AST tools confined to project root)
 - Python REPL sandbox (dangerous modules/builtins blocked)
-- Remote MCP server disable (Exa, Context7 not started)
+- Remote MCP server disable (Linkup, Ref not started)
 - External LLM disable (Codex, Gemini workers blocked in team mode)
 - Auto-update disable (prevents unverified version installs)
 - Hard max iterations for persistent modes (200 cap)
@@ -67,7 +67,7 @@ Blocks dangerous modules and builtins in the Python REPL:
 
 ### Remote MCP Disable (`disableRemoteMcp`)
 
-Prevents Exa (web search) and Context7 (external documentation) MCP servers from starting. No queries are sent to external servers when enabled.
+Prevents Linkup (web search) and Ref (external documentation) MCP servers from starting. No queries are sent to external servers when enabled.
 
 ### External LLM Disable (`disableExternalLLM`)
 

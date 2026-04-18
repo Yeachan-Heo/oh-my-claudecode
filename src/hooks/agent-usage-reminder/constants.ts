@@ -23,10 +23,10 @@ export const TARGET_TOOLS = new Set([
   'glob',
   'safe_glob',
   'webfetch',
-  'context7_resolve-library-id',
-  'context7_query-docs',
-  'websearch_web_search_exa',
-  'context7_get-library-docs',
+  'ref_resolve-library-id',
+  'ref_query-docs',
+  'websearch_web_search_linkup',
+  'ref_get-library-docs',
 ]);
 
 /** Agent tools that indicate agent usage */

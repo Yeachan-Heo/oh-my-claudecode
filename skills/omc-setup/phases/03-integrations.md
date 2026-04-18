@@ -12,7 +12,7 @@ grep -q "oh-my-claudecode" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" &
 
 MCP servers extend Claude Code with additional tools (web search, GitHub, etc.).
 
-Use AskUserQuestion: "Would you like to configure MCP servers for enhanced capabilities? (Context7, Exa search, GitHub, etc.)"
+Use AskUserQuestion: "Would you like to configure MCP servers for enhanced capabilities? (Ref, Linkup search, GitHub, etc.)"
 
 If yes, invoke the mcp-setup skill:
 ```

@@ -32,9 +32,9 @@ Ask a follow-up **AskUserQuestion**:
 **Question:** "Which recommended MCP bundle should I configure?"
 
 **Options:**
-1. **Context7 only (Recommended)** - Zero-config docs/context server
-2. **Context7 + Exa** - Docs/context plus enhanced web search
-3. **Full recommended bundle** - Context7, Exa, Filesystem, and GitHub
+1. **Ref only (Recommended)** - Documentation/context server (requires Ref API key)
+2. **Ref + Linkup** - Docs/context plus enhanced web search
+3. **Full recommended bundle** - Ref, Linkup, Filesystem, and GitHub
 
 Map that choice to the server list you will configure.
 
@@ -45,8 +45,8 @@ Ask a follow-up **AskUserQuestion**:
 **Question:** "Which server should I configure first?"
 
 **Options:**
-1. **Context7 (Recommended)** - Documentation and code context from popular libraries
-2. **Exa Web Search** - Enhanced web search (replaces built-in websearch)
+1. **Ref (Recommended)** - Documentation and code context from popular libraries
+2. **Linkup Web Search** - Enhanced web search (replaces built-in websearch)
 3. **More server choices** - Filesystem, GitHub, or the full recommended bundle
 
 If the user chooses **More server choices**, ask one more **AskUserQuestion**:
@@ -56,7 +56,7 @@ If the user chooses **More server choices**, ask one more **AskUserQuestion**:
 **Options:**
 1. **Filesystem (Recommended)** - Extended file system access with additional capabilities
 2. **GitHub** - GitHub API integration for issues, PRs, and repository management
-3. **Full recommended bundle** - Configure Context7, Exa, Filesystem, and GitHub together
+3. **Full recommended bundle** - Configure Ref, Linkup, Filesystem, and GitHub together
 
 ### Step 1.4: If the user chooses "Custom server"
 
@@ -64,15 +64,20 @@ Skip directly to the **Custom MCP Server** section below.
 
 ## Step 2: Gather Required Information
 
-### For Context7:
-No API key required. Ready to use immediately.
-
-### For Exa Web Search:
+### For Ref:
 Ask for API key:
 ```
-Do you have an Exa API key?
-- Get one at: https://exa.ai
-- Enter your API key, or type 'skip' to configure later
+Do you have a Ref API key?
+- Get one at: https://ref.tools
+- Enter your Ref API key, or type 'skip' to configure later
+```
+
+### For Linkup Web Search:
+Ask for API key:
+```
+Do you have a Linkup API key?
+- Get one at: https://app.linkup.so
+- Enter your Linkup API key, or type 'skip' to configure later
 ```
 
 ### For Filesystem:
@@ -96,14 +101,14 @@ Do you have a GitHub Personal Access Token?
 
 Use the `claude mcp add` command to configure each MCP server. The CLI automatically handles settings.json updates and merging.
 
-### Context7 Configuration:
+### Ref Configuration:
 ```bash
-claude mcp add context7 -- npx -y @upstash/context7-mcp
+claude mcp add -e REF_API_KEY=<YOUR_REF_API_KEY> ref -- npx -y ref-tools-mcp@latest
 ```
 
-### Exa Web Search Configuration:
+### Linkup Web Search Configuration:
 ```bash
-claude mcp add -e EXA_API_KEY=<user-provided-key> exa -- npx -y exa-mcp-server
+claude mcp add linkup -- npx -y linkup-mcp-server apiKey=<YOUR_LINKUP_API_KEY>
 ```
 
 ### Filesystem Configuration:
@@ -150,8 +155,8 @@ NEXT STEPS:
 3. Run `claude mcp list` to verify configuration
 
 USAGE TIPS:
-- Context7: Ask about library documentation (e.g., "How do I use React hooks?")
-- Exa: Use for web searches (e.g., "Search the web for latest TypeScript features")
+- Ref: Ask about library documentation (e.g., "How do I use React hooks?")
+- Linkup: Use for web searches (e.g., "Search the web for latest TypeScript features")
 - Filesystem: Extended file operations beyond the working directory
 - GitHub: Interact with GitHub repos, issues, and PRs
 
@@ -231,13 +236,14 @@ This remains advisory prompt context, not runtime enforcement.
 - Check server logs for errors
 
 ### API Key Issues
-- Exa: Verify key at https://dashboard.exa.ai
+- Ref: Verify key at https://ref.tools
+- Linkup: Verify key at https://app.linkup.so
 - GitHub: Ensure token has required scopes (repo, read:org)
 - Re-run `claude mcp add` with correct credentials if needed
 
 ### Agents Still Using Built-in Tools
 - Restart Claude Code after configuration
-- The built-in websearch will be deprioritized when exa is configured
+- The built-in websearch will be deprioritized when linkup is configured
 - Run `claude mcp list` to confirm servers are active
 
 ### Removing or Updating a Server

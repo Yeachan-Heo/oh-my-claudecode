@@ -218,8 +218,8 @@ Examples:
         warnings.push('ANTHROPIC_API_KEY environment variable not set');
       }
 
-      if (config.mcpServers?.exa?.enabled && !process.env.EXA_API_KEY && !config.mcpServers.exa.apiKey) {
-        warnings.push('Exa is enabled but EXA_API_KEY is not set');
+      if (config.mcpServers?.linkup?.enabled && !process.env.LINKUP_API_KEY && !config.mcpServers.linkup.apiKey) {
+        warnings.push('Linkup is enabled but LINKUP_API_KEY is not set');
       }
 
       if (errors.length > 0) {

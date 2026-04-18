@@ -919,7 +919,7 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
           command: 'node',
           args: ['${CLAUDE_PLUGIN_ROOT}/bridge/team-mcp.cjs'],
         },
-        exa: {
+        linkup: {
           command: 'node',
           args: ['${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs'],
         },
@@ -935,7 +935,7 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect(runtimeSettings.theme).toBe('dark');
     expect(runtimeSettings.mcpServers).toBeDefined();
     expect(runtimeSettings.mcpServers?.team).toBeUndefined();
-    expect(runtimeSettings.mcpServers?.exa).toBeDefined();
+    expect(runtimeSettings.mcpServers?.linkup).toBeDefined();
   });
 
   it('mirrors keybindings.json and rules/ into the runtime config dir', () => {

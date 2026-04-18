@@ -29,7 +29,7 @@ import {
 import type { PluginConfig, SessionState } from './shared/types.js';
 
 export { loadConfig, getAgentDefinitions, omcSystemPrompt };
-export { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
+export { getDefaultMcpServers, toSdkMcpFormat, createLinkupServer, createRefServer } from './mcp/servers.js';
 export { lspTools, astTools, allCustomTools } from './tools/index.js';
 export { omcToolsServer, omcToolNames, getOmcToolNames } from './mcp/omc-tools-server.js';
 export { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
@@ -302,9 +302,10 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
 
   // Build MCP servers configuration
   const externalMcpServers = getDefaultMcpServers({
-    exaApiKey: config.mcpServers?.exa?.apiKey,
-    enableExa: config.mcpServers?.exa?.enabled,
-    enableContext7: config.mcpServers?.context7?.enabled
+    linkupApiKey: config.mcpServers?.linkup?.apiKey,
+    refApiKey: config.mcpServers?.ref?.apiKey,
+    enableLinkup: config.mcpServers?.linkup?.enabled,
+    enableRef: config.mcpServers?.ref?.enabled
   });
 
   // Build allowed tools list

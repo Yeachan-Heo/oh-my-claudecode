@@ -1638,8 +1638,8 @@ function buildDefaultConfig() {
       autoContextInjection: true
     },
     mcpServers: {
-      exa: { enabled: true },
-      context7: { enabled: true }
+      linkup: { enabled: true },
+      ref: { enabled: true }
     },
     companyContext: {
       onError: "warn"
@@ -1803,10 +1803,10 @@ function deepMerge(target, source) {
 }
 function loadEnvConfig() {
   const config = {};
-  if (process.env.EXA_API_KEY) {
+  if (process.env.LINKUP_API_KEY) {
     config.mcpServers = {
       ...config.mcpServers,
-      exa: { enabled: true, apiKey: process.env.EXA_API_KEY }
+      linkup: { enabled: true, apiKey: process.env.LINKUP_API_KEY }
     };
   }
   if (process.env.OMC_PARALLEL_EXECUTION !== void 0) {
