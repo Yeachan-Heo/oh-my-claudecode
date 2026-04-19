@@ -15,6 +15,7 @@ import { join } from 'path';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { validateResolvedPath, writeFileWithMode, atomicWriteJson, ensureDirWithMode } from './fs-utils.js';
 import { sanitizeName } from './tmux-session.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 import type { OutboxMessage } from './types.js';
 
 /** Outbox cursor stored alongside outbox files */
@@ -24,8 +25,14 @@ export interface OutboxCursor {
 
 const MAX_OUTBOX_READ_SIZE = 10 * 1024 * 1024; // 10MB cap per read
 
-function teamsDir(): string {
+/** Base teams root (worktree-scoped via OMC_TEAM_SCOPE_TOKEN or cwd). */
+function teamsRoot(): string {
   return join(getClaudeConfigDir(), 'teams');
+}
+
+/** Scoped team directory: ~/.claude/teams/<scope>/<team>/. */
+function scopedTeamDir(safeName: string): string {
+  return join(teamsRoot(), getWorktreeScopeToken(), safeName);
 }
 
 /**
@@ -38,11 +45,11 @@ export function readNewOutboxMessages(
 ): OutboxMessage[] {
   const safeName = sanitizeName(teamName);
   const safeWorker = sanitizeName(workerName);
-  const outboxPath = join(teamsDir(), safeName, 'outbox', `${safeWorker}.jsonl`);
-  const cursorPath = join(teamsDir(), safeName, 'outbox', `${safeWorker}.outbox-offset`);
+  const outboxPath = join(scopedTeamDir(safeName), 'outbox', `${safeWorker}.jsonl`);
+  const cursorPath = join(scopedTeamDir(safeName), 'outbox', `${safeWorker}.outbox-offset`);
 
-  validateResolvedPath(outboxPath, teamsDir());
-  validateResolvedPath(cursorPath, teamsDir());
+  validateResolvedPath(outboxPath, teamsRoot());
+  validateResolvedPath(cursorPath, teamsRoot());
 
   if (!existsSync(outboxPath)) return [];
 
@@ -97,7 +104,7 @@ export function readNewOutboxMessages(
 
   // Update cursor atomically to prevent corruption on crash
   const newCursor: OutboxCursor = { bytesRead: cursor.bytesRead + consumed };
-  const cursorDir = join(teamsDir(), safeName, 'outbox');
+  const cursorDir = join(scopedTeamDir(safeName), 'outbox');
   ensureDirWithMode(cursorDir);
   atomicWriteJson(cursorPath, newCursor);
 
@@ -111,7 +118,7 @@ export function readAllTeamOutboxMessages(
   teamName: string
 ): { workerName: string; messages: OutboxMessage[] }[] {
   const safeName = sanitizeName(teamName);
-  const outboxDir = join(teamsDir(), safeName, 'outbox');
+  const outboxDir = join(scopedTeamDir(safeName), 'outbox');
 
   if (!existsSync(outboxDir)) return [];
 
@@ -138,9 +145,9 @@ export function resetOutboxCursor(
 ): void {
   const safeName = sanitizeName(teamName);
   const safeWorker = sanitizeName(workerName);
-  const cursorPath = join(teamsDir(), safeName, 'outbox', `${safeWorker}.outbox-offset`);
-  validateResolvedPath(cursorPath, teamsDir());
-  const cursorDir = join(teamsDir(), safeName, 'outbox');
+  const cursorPath = join(scopedTeamDir(safeName), 'outbox', `${safeWorker}.outbox-offset`);
+  validateResolvedPath(cursorPath, teamsRoot());
+  const cursorDir = join(scopedTeamDir(safeName), 'outbox');
   ensureDirWithMode(cursorDir);
   writeFileWithMode(cursorPath, JSON.stringify({ bytesRead: 0 }));
 }

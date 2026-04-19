@@ -7,6 +7,7 @@ import { atomicWriteJson } from '../fs-utils.js';
 import { appendOutbox } from '../inbox-outbox.js';
 import { recordTaskUsage } from '../usage-tracker.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 import type { HeartbeatData, TaskFile, OutboxMessage, McpWorkerMember } from '../types.js';
 
 const TEST_TEAM = 'test-team-status';
@@ -23,9 +24,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Clean up outbox files written to ~/.claude/teams/<scope>/ by appendOutbox.
+  // Scope is derived from cwd via OMC_TEAM_SCOPE_TOKEN / getWorktreeRoot().
+  rmSync(join(getClaudeConfigDir(), 'teams', getWorktreeScopeToken(), TEST_TEAM), { recursive: true, force: true });
   rmSync(WORK_DIR, { recursive: true, force: true });
-  // Clean up outbox files written to ~/.claude/teams/ by appendOutbox
-  rmSync(join(getClaudeConfigDir(), 'teams', TEST_TEAM), { recursive: true, force: true });
 });
 
 function writeWorkerRegistry(workers: McpWorkerMember[]): void {

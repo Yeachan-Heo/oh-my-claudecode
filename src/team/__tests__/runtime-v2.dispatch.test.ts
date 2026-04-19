@@ -165,6 +165,9 @@ describe('runtime v2 startup inbox dispatch', () => {
           OMC_TEAM_WORKER: 'dispatch-team/worker-1',
           OMC_TEAM_STATE_ROOT: join(cwd, '.omc', 'state', 'team', 'dispatch-team'),
           OMC_TEAM_LEADER_CWD: cwd,
+          // Worker must inherit the lead's worktree-scope token so team-scoped
+          // paths resolve to the same namespace on both sides of the bridge.
+          OMC_TEAM_SCOPE_TOKEN: expect.stringMatching(/^[0-9a-f]{8}$/),
         }),
       }),
     );

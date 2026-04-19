@@ -12,6 +12,7 @@ import { join, basename, isAbsolute, win32 } from 'path';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -372,9 +373,13 @@ export function sanitizeName(name: string): string {
   return sanitized.slice(0, 50);
 }
 
-/** Build session name: "omc-team-{teamName}-{workerName}" */
-export function sessionName(teamName: string, workerName: string): string {
-  return `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${sanitizeName(workerName)}`;
+/**
+ * Build session name: "omc-team-{scope}-{teamName}-{workerName}".
+ * The scope token isolates same-named teams across sibling worktrees.
+ */
+export function sessionName(teamName: string, workerName: string, workingDirectory?: string): string {
+  const scope = getWorktreeScopeToken(workingDirectory);
+  return `${TMUX_SESSION_PREFIX}-${scope}-${sanitizeName(teamName)}-${sanitizeName(workerName)}`;
 }
 
 /** @deprecated Use createTeamSession() instead for split-pane topology */
@@ -418,9 +423,10 @@ export function isSessionAlive(teamName: string, workerName: string): boolean {
   }
 }
 
-/** List all active worker sessions for a team */
-export function listActiveSessions(teamName: string): string[] {
-  const prefix = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-`;
+/** List all active worker sessions for a team in the current worktree scope */
+export function listActiveSessions(teamName: string, workingDirectory?: string): string[] {
+  const scope = getWorktreeScopeToken(workingDirectory);
+  const prefix = `${TMUX_SESSION_PREFIX}-${scope}-${sanitizeName(teamName)}-`;
   try {
     // Use shell execution for format strings containing #{} to prevent
     // MSYS2/Git Bash from stripping curly braces in execFileSync args.
@@ -495,7 +501,8 @@ export async function createTeamSession(
     // so workflows can run when launched outside an attached tmux client. This
     // also covers cmux, which exposes its own surface metadata without a tmux
     // pane/window that OMC can split directly.
-    const detachedSessionName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${Date.now().toString(36)}`;
+    const detachedScope = getWorktreeScopeToken(cwd);
+    const detachedSessionName = `${TMUX_SESSION_PREFIX}-${detachedScope}-${sanitizeName(teamName)}-${Date.now().toString(36)}`;
     const detachedResult = await tmuxExecAsync([
       'new-session', '-d', '-P', '-F', '#S:0 #{pane_id}',
       '-s', detachedSessionName,

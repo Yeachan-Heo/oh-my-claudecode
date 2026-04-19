@@ -7,10 +7,12 @@ import {
   resetOutboxCursor,
 } from '../outbox-reader.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 import type { OutboxMessage } from '../types.js';
 
 const TEST_TEAM = 'test-team-outbox-reader';
-const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', TEST_TEAM);
+const SCOPE = getWorktreeScopeToken();
+const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', SCOPE, TEST_TEAM);
 
 beforeEach(() => {
   mkdirSync(join(TEAMS_DIR, 'outbox'), { recursive: true });

@@ -11,10 +11,12 @@ import {
 import { sanitizeName } from '../tmux-session.js';
 import { validateResolvedPath } from '../fs-utils.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 import type { OutboxMessage, InboxMessage } from '../types.js';
 
 const TEST_TEAM = 'test-team-io';
-const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', TEST_TEAM);
+const SCOPE = getWorktreeScopeToken();
+const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', SCOPE, TEST_TEAM);
 
 beforeEach(() => {
   mkdirSync(join(TEAMS_DIR, 'inbox'), { recursive: true });

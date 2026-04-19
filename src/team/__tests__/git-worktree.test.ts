@@ -9,6 +9,7 @@ import {
   listTeamWorktrees,
   cleanupTeamWorktrees,
 } from '../git-worktree.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 
 describe('git-worktree', () => {
   let repoDir: string;
@@ -36,9 +37,10 @@ describe('git-worktree', () => {
   describe('createWorkerWorktree', () => {
     it('creates worktree at correct path', () => {
       const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const scope = getWorktreeScopeToken(repoDir);
 
       expect(info.path).toContain('.omc/worktrees');
-      expect(info.branch).toBe(`omc-team/${teamName}/worker1`);
+      expect(info.branch).toBe(`omc-team/${scope}/${teamName}/worker1`);
       expect(info.workerName).toBe('worker1');
       expect(info.teamName).toBe(teamName);
       expect(existsSync(info.path)).toBe(true);
@@ -61,7 +63,8 @@ describe('git-worktree', () => {
     });
 
     it('cleans up a stale plain directory before creating the worktree', () => {
-      const stalePath = join(repoDir, '.omc', 'worktrees', teamName, 'worker-stale');
+      const scope = getWorktreeScopeToken(repoDir);
+      const stalePath = join(repoDir, '.omc', 'worktrees', scope, teamName, 'worker-stale');
       // Create a directory that is not registered as a git worktree.
       rmSync(stalePath, { recursive: true, force: true });
       mkdirSync(stalePath, { recursive: true });

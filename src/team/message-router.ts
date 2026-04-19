@@ -13,7 +13,18 @@ import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { appendFileWithMode, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
 import { getTeamMembers } from './unified-team.js';
 import { sanitizeName } from './tmux-session.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 import type { InboxMessage } from './types.js';
+
+function scopedInboxDir(teamName: string, workingDirectory: string): string {
+  return join(
+    getClaudeConfigDir(),
+    'teams',
+    getWorktreeScopeToken(workingDirectory),
+    sanitizeName(teamName),
+    'inbox',
+  );
+}
 
 export interface RouteResult {
   method: 'native' | 'inbox';
@@ -53,9 +64,9 @@ export function routeMessage(
     };
   }
 
-  // MCP worker: write to inbox
+  // MCP worker: write to inbox (scope-isolated per worktree)
   const teamsBase = join(getClaudeConfigDir(), 'teams');
-  const inboxDir = join(teamsBase, sanitizeName(teamName), 'inbox');
+  const inboxDir = scopedInboxDir(teamName, workingDirectory);
   ensureDirWithMode(inboxDir);
   const inboxPath = join(inboxDir, `${sanitizeName(recipientName)}.jsonl`);
   validateResolvedPath(inboxPath, teamsBase);
@@ -92,9 +103,9 @@ export function broadcastToTeam(
     if (member.backend === 'claude-native') {
       nativeRecipients.push(member.name);
     } else {
-      // Write to each MCP worker's inbox
+      // Write to each MCP worker's inbox (scope-isolated per worktree)
       const teamsBase = join(getClaudeConfigDir(), 'teams');
-      const inboxDir = join(teamsBase, sanitizeName(teamName), 'inbox');
+      const inboxDir = scopedInboxDir(teamName, workingDirectory);
       ensureDirWithMode(inboxDir);
       const inboxPath = join(inboxDir, `${sanitizeName(member.name)}.jsonl`);
       validateResolvedPath(inboxPath, teamsBase);

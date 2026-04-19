@@ -14,11 +14,13 @@ import type { McpWorkerMember, ConfigProbeResult } from './types.js';
 import { sanitizeName } from './tmux-session.js';
 import { atomicWriteJson, validateResolvedPath } from './fs-utils.js';
 import { withFileLockSync } from '../lib/file-lock.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 
 // --- Config paths ---
 
-function configPath(teamName: string): string {
-  const result = join(getClaudeConfigDir(), 'teams', sanitizeName(teamName), 'config.json');
+function configPath(teamName: string, workingDirectory?: string): string {
+  const scope = getWorktreeScopeToken(workingDirectory);
+  const result = join(getClaudeConfigDir(), 'teams', scope, sanitizeName(teamName), 'config.json');
   validateResolvedPath(result, join(getClaudeConfigDir(), 'teams'));
   return result;
 }
@@ -98,15 +100,15 @@ export function registerMcpWorker(
   const strategy = getRegistrationStrategy(workingDirectory);
 
   if (strategy === 'config') {
-    registerInConfig(teamName, member);
+    registerInConfig(teamName, member, workingDirectory);
   }
 
   // Always write to shadow registry (as backup or primary)
   registerInShadow(workingDirectory, teamName, member);
 }
 
-function registerInConfig(teamName: string, member: McpWorkerMember): void {
-  const filePath = configPath(teamName);
+function registerInConfig(teamName: string, member: McpWorkerMember, workingDirectory: string): void {
+  const filePath = configPath(teamName, workingDirectory);
   if (!existsSync(filePath)) return; // No config.json to write to
 
   const lockPath = filePath + '.lock';
@@ -170,7 +172,7 @@ export function unregisterMcpWorker(
   workingDirectory: string
 ): void {
   // Remove from config.json
-  const configFile = configPath(teamName);
+  const configFile = configPath(teamName, workingDirectory);
   if (existsSync(configFile)) {
     try {
       const raw = readFileSync(configFile, 'utf-8');
@@ -211,7 +213,7 @@ export function listMcpWorkers(teamName: string, workingDirectory: string): McpW
   const workers = new Map<string, McpWorkerMember>();
 
   // Read from config.json
-  const configFile = configPath(teamName);
+  const configFile = configPath(teamName, workingDirectory);
   if (existsSync(configFile)) {
     try {
       const raw = readFileSync(configFile, 'utf-8');

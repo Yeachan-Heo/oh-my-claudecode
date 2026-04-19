@@ -10,6 +10,7 @@ import {
   getDefaultShell,
   buildWorkerStartCommand,
 } from '../tmux-session.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -49,11 +50,13 @@ describe('sanitizeName', () => {
 
 describe('sessionName', () => {
   it('builds correct session name', () => {
-    expect(sessionName('myteam', 'codex1')).toBe('omc-team-myteam-codex1');
+    const scope = getWorktreeScopeToken();
+    expect(sessionName('myteam', 'codex1')).toBe(`omc-team-${scope}-myteam-codex1`);
   });
 
   it('sanitizes both parts', () => {
-    expect(sessionName('my team!', 'work@er')).toBe('omc-team-myteam-worker');
+    const scope = getWorktreeScopeToken();
+    expect(sessionName('my team!', 'work@er')).toBe(`omc-team-${scope}-myteam-worker`);
   });
 });
 
@@ -343,14 +346,16 @@ describe.skipIf(!hasTmux())('createSession with workingDirectory', () => {
 
   it('accepts optional workingDirectory param', () => {
     // Should not throw — workingDirectory is optional
+    const scope = getWorktreeScopeToken();
     const name = createSession('tmuxtest', 'wdtest', '/tmp');
-    expect(name).toBe('omc-team-tmuxtest-wdtest');
+    expect(name).toBe(`omc-team-${scope}-tmuxtest-wdtest`);
     killSession('tmuxtest', 'wdtest');
   });
 
   it('works without workingDirectory param', () => {
+    const scope = getWorktreeScopeToken();
     const name = createSession('tmuxtest', 'nowd');
-    expect(name).toBe('omc-team-tmuxtest-nowd');
+    expect(name).toBe(`omc-team-${scope}-tmuxtest-nowd`);
     killSession('tmuxtest', 'nowd');
   });
 });

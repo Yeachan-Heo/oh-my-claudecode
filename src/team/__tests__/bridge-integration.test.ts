@@ -9,10 +9,12 @@ import { writeHeartbeat, readHeartbeat } from '../heartbeat.js';
 import { sanitizeName } from '../tmux-session.js';
 import { logAuditEvent, readAuditLog } from '../audit-log.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 
 const TEST_TEAM = 'test-bridge-int';
+const SCOPE = getWorktreeScopeToken();
 // Task files now live in the canonical .omc/state/team path (relative to WORK_DIR)
-const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', TEST_TEAM);
+const TEAMS_DIR = join(getClaudeConfigDir(), 'teams', SCOPE, TEST_TEAM);
 // Resolve symlinks (macOS /var -> /private/var) so validateResolvedPath matches
 const WORK_DIR = join(realpathSync(tmpdir()), '__test_bridge_work__');
 // Canonical tasks dir for this team

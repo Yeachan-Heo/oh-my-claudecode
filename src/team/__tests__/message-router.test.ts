@@ -6,6 +6,7 @@ import { routeMessage, broadcastToTeam } from '../message-router.js';
 import { registerMcpWorker } from '../team-registration.js';
 import { writeHeartbeat } from '../heartbeat.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getWorktreeScopeToken } from '../team-scope.js';
 
 describe('message-router', () => {
   let testDir: string;
@@ -16,12 +17,13 @@ describe('message-router', () => {
   });
 
   afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
-    // Clean up inbox files that may have been created
+    // Clean up inbox files that may have been created (scope derived from testDir)
     try {
-      const inboxDir = join(getClaudeConfigDir(), 'teams', teamName, 'inbox');
-      rmSync(inboxDir, { recursive: true, force: true });
+      const scope = getWorktreeScopeToken(testDir);
+      const teamDir = join(getClaudeConfigDir(), 'teams', scope, teamName);
+      rmSync(teamDir, { recursive: true, force: true });
     } catch { /* ignore */ }
+    rmSync(testDir, { recursive: true, force: true });
   });
 
   function registerWorker(name: string, agentType: string = 'mcp-codex') {
@@ -48,7 +50,8 @@ describe('message-router', () => {
       expect(result.details).toContain('inbox');
 
       // Verify inbox file was written
-      const inboxPath = join(getClaudeConfigDir(), 'teams', teamName, 'inbox', 'codex-1.jsonl');
+      const scope = getWorktreeScopeToken(testDir);
+      const inboxPath = join(getClaudeConfigDir(), 'teams', scope, teamName, 'inbox', 'codex-1.jsonl');
       expect(existsSync(inboxPath)).toBe(true);
       const content = readFileSync(inboxPath, 'utf-8').trim();
       const msg = JSON.parse(content);
@@ -74,8 +77,9 @@ describe('message-router', () => {
       expect(result.nativeRecipients).toEqual([]);
 
       // Verify both inbox files were written
-      const inbox1 = join(getClaudeConfigDir(), 'teams', teamName, 'inbox', 'worker1.jsonl');
-      const inbox2 = join(getClaudeConfigDir(), 'teams', teamName, 'inbox', 'worker2.jsonl');
+      const scope = getWorktreeScopeToken(testDir);
+      const inbox1 = join(getClaudeConfigDir(), 'teams', scope, teamName, 'inbox', 'worker1.jsonl');
+      const inbox2 = join(getClaudeConfigDir(), 'teams', scope, teamName, 'inbox', 'worker2.jsonl');
       expect(existsSync(inbox1)).toBe(true);
       expect(existsSync(inbox2)).toBe(true);
     });

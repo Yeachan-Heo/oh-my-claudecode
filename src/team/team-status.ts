@@ -14,6 +14,7 @@ import { listMcpWorkers } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
 import { listTaskIds, readTask } from './task-file-ops.js';
 import { sanitizeName } from './tmux-session.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 import type { HeartbeatData, TaskFile, OutboxMessage } from './types.js';
 import { generateUsageReport } from './usage-tracker.js';
 
@@ -37,7 +38,7 @@ function peekRecentOutboxMessages(
 ): OutboxMessage[] {
   const safeName = sanitizeName(teamName);
   const safeWorker = sanitizeName(workerName);
-  const outboxPath = join(getClaudeConfigDir(), 'teams', safeName, 'outbox', `${safeWorker}.jsonl`);
+  const outboxPath = join(getClaudeConfigDir(), 'teams', getWorktreeScopeToken(), safeName, 'outbox', `${safeWorker}.jsonl`);
 
   if (!existsSync(outboxPath)) return [];
 

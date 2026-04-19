@@ -54,6 +54,7 @@ import type {
 } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
+import { getWorktreeScopeToken, SCOPE_ENV_VAR } from './team-scope.js';
 import type { CliAgentType } from './model-contract.js';
 import {
   buildWorkerArgv, getContract, resolveValidatedBinaryPath,
@@ -569,6 +570,10 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
     OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
     OMC_TEAM_LEADER_CWD: opts.cwd,
+    // Pin worktree-scope token so the worker shares the lead's namespace,
+    // even though the worker runs inside a per-worker git worktree where
+    // getWorktreeRoot() would otherwise resolve to a different path.
+    [SCOPE_ENV_VAR]: getWorktreeScopeToken(opts.cwd),
   };
   const resolvedBinaryPath = opts.resolvedBinaryPaths[opts.agentType]
     ?? resolveValidatedBinaryPath(opts.agentType);

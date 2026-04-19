@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { atomicWriteJson, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
 import { sanitizeName } from './tmux-session.js';
 import { withFileLockSync } from '../lib/file-lock.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 
 export interface WorktreeInfo {
   path: string;
@@ -23,14 +24,22 @@ export interface WorktreeInfo {
   createdAt: string;
 }
 
-/** Get worktree path for a worker */
+/** Get worktree path for a worker (scope-isolated for sibling worktrees) */
 function getWorktreePath(repoRoot: string, teamName: string, workerName: string): string {
-  return join(repoRoot, '.omc', 'worktrees', sanitizeName(teamName), sanitizeName(workerName));
+  const scope = getWorktreeScopeToken(repoRoot);
+  return join(repoRoot, '.omc', 'worktrees', scope, sanitizeName(teamName), sanitizeName(workerName));
 }
 
-/** Get branch name for a worker */
-function getBranchName(teamName: string, workerName: string): string {
-  return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
+/**
+ * Get git branch name for a worker.
+ *
+ * Git branches are shared across all linked worktrees of the same repository,
+ * so the scope token is mandatory here — otherwise two sibling worktrees
+ * spawning the same `<team>/<worker>` would collide on `git worktree add -b`.
+ */
+function getBranchName(repoRoot: string, teamName: string, workerName: string): string {
+  const scope = getWorktreeScopeToken(repoRoot);
+  return `omc-team/${scope}/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
 }
 
 function isRegisteredWorktreePath(repoRoot: string, wtPath: string): boolean {
@@ -53,9 +62,10 @@ function isRegisteredWorktreePath(repoRoot: string, wtPath: string): boolean {
   return false;
 }
 
-/** Get worktree metadata path */
+/** Get worktree metadata path (scope-isolated for sibling worktrees) */
 function getMetadataPath(repoRoot: string, teamName: string): string {
-  return join(repoRoot, '.omc', 'state', 'team-bridge', sanitizeName(teamName), 'worktrees.json');
+  const scope = getWorktreeScopeToken(repoRoot);
+  return join(repoRoot, '.omc', 'state', 'team-bridge', scope, sanitizeName(teamName), 'worktrees.json');
 }
 
 /** Read worktree metadata */
@@ -76,7 +86,8 @@ function readMetadata(repoRoot: string, teamName: string): WorktreeInfo[] {
 function writeMetadata(repoRoot: string, teamName: string, entries: WorktreeInfo[]): void {
   const metaPath = getMetadataPath(repoRoot, teamName);
   validateResolvedPath(metaPath, repoRoot);
-  const dir = join(repoRoot, '.omc', 'state', 'team-bridge', sanitizeName(teamName));
+  const scope = getWorktreeScopeToken(repoRoot);
+  const dir = join(repoRoot, '.omc', 'state', 'team-bridge', scope, sanitizeName(teamName));
   ensureDirWithMode(dir);
   atomicWriteJson(metaPath, entries);
 }
@@ -93,7 +104,7 @@ export function createWorkerWorktree(
   baseBranch?: string
 ): WorktreeInfo {
   const wtPath = getWorktreePath(repoRoot, teamName, workerName);
-  const branch = getBranchName(teamName, workerName);
+  const branch = getBranchName(repoRoot, teamName, workerName);
 
   validateResolvedPath(wtPath, repoRoot);
 
@@ -122,8 +133,9 @@ export function createWorkerWorktree(
     execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
   } catch { /* branch doesn't exist, fine */ }
 
-  // Create worktree directory
-  const wtDir = join(repoRoot, '.omc', 'worktrees', sanitizeName(teamName));
+  // Create worktree directory (scope-isolated parent)
+  const scope = getWorktreeScopeToken(repoRoot);
+  const wtDir = join(repoRoot, '.omc', 'worktrees', scope, sanitizeName(teamName));
   ensureDirWithMode(wtDir);
 
   // Create worktree with new branch
@@ -160,7 +172,7 @@ export function removeWorkerWorktree(
   repoRoot: string
 ): void {
   const wtPath = getWorktreePath(repoRoot, teamName, workerName);
-  const branch = getBranchName(teamName, workerName);
+  const branch = getBranchName(repoRoot, teamName, workerName);
 
   // Remove worktree
   try {

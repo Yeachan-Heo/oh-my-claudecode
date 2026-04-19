@@ -17,6 +17,7 @@ import { getClaudeConfigDir } from '../utils/config-dir.js';
 import type { InboxMessage, OutboxMessage, ShutdownSignal, DrainSignal, InboxCursor } from './types.js';
 import { sanitizeName } from './tmux-session.js';
 import { appendFileWithMode, writeFileWithMode, atomicWriteJson, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 
 /** Maximum bytes to read from inbox in a single call (10 MB) */
 const MAX_INBOX_READ_SIZE = 10 * 1024 * 1024;
@@ -24,7 +25,11 @@ const MAX_INBOX_READ_SIZE = 10 * 1024 * 1024;
 // --- Path helpers ---
 
 function teamsDir(teamName: string): string {
-  const result = join(getClaudeConfigDir(), 'teams', sanitizeName(teamName));
+  // Scope segment isolates same-named teams across sibling worktrees of the
+  // same repo. The scope token is read from OMC_TEAM_SCOPE_TOKEN (set by the
+  // lead at worker spawn time) or derived from the current worktree path.
+  const scope = getWorktreeScopeToken();
+  const result = join(getClaudeConfigDir(), 'teams', scope, sanitizeName(teamName));
   validateResolvedPath(result, join(getClaudeConfigDir(), 'teams'));
   return result;
 }

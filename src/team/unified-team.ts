@@ -14,6 +14,7 @@ import type { WorkerBackend, WorkerCapability } from './types.js';
 import { listMcpWorkers } from './team-registration.js';
 import { readHeartbeat, isWorkerAlive } from './heartbeat.js';
 import { getDefaultCapabilities } from './capabilities.js';
+import { getWorktreeScopeToken } from './team-scope.js';
 
 export interface UnifiedTeamMember {
   name: string;
@@ -37,7 +38,7 @@ export function getTeamMembers(
 
   // 1. Read Claude native members from config.json
   try {
-    const configPath = join(getClaudeConfigDir(), 'teams', teamName, 'config.json');
+    const configPath = join(getClaudeConfigDir(), 'teams', getWorktreeScopeToken(workingDirectory), teamName, 'config.json');
     if (existsSync(configPath)) {
       const config = JSON.parse(readFileSync(configPath, 'utf-8'));
       if (Array.isArray(config.members)) {
