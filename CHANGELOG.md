@@ -1,3 +1,84 @@
+# oh-my-claudecode v4.15.1: Conversational brand-steward + Anti-commodity brand system
+
+## Release Notes
+
+Patch release fixing the brand-steward interaction UX and encoding the anti-commodity writing/design philosophy into brand-architect, campaign-composer, and creative-director. No new agents or skills; existing ones materially improved.
+
+### brand-steward — conversational mode
+
+**Problem fixed:** Previous brand-steward produced long multi-section discovery messages ("Блок 1 — Миссия / Вопрос 1. / Вопрос 2. ..."), language-selection pre-menus, and meta-instructions to the user. Questions got buried in preamble; user experience felt like filling a form, not a discovery interview.
+
+**Changes:**
+- `agents/brand-steward.md` Investigation_Protocol fully rewritten as a **conversation protocol**: ≤80 words first message, ONE question per turn, no numbered blocks, no pre-menus, no context narration, synthesis only at end.
+- Discrete choices (language preference, bilingual, etc.) now asked in dialogue at the moment they become relevant — never as selection screens.
+- Competitor-specific references in anti-goal questions ("Ravelry is community-first social — deliberately not-that?") replace abstract questioning.
+- Per-turn reply ≤120 words; reflect user's answer in ≤2 sentences, then ONE next question.
+- Terminal synthesis message ≤500 words of actual content, asking for corrections on specific lines — not more open-ended questions.
+- `skills/brand-steward/SKILL.md` simplified: removed Phase 1 context narration, removed pre-menus, enforced direct Task invocation (not teammate/SendMessage relay that produced the "I'll relay your reply" proxy-UX).
+- New Failure_Modes_To_Avoid explicitly flag batching questions, numbered blocks, long preamble, pre-menu language selection, narrating context reads, and meta-instructions as anti-patterns.
+
+### Anti-commodity brand system (brand-architect + campaign-composer + creative-director)
+
+**Problem addressed:** Brand expressions in v4.15.0 were grammar-coherent but could still drift into generic SaaS phrasing and shallow single-meaning pieces — the "soulless polish" problem. User's philosophical stance encoded explicitly: new is inspired by old, indirect > direct, complexity > template, every piece carries a specific soul marker.
+
+**Changes:**
+
+- `agents/brand-architect.md`:
+  - **New Phase 2.5 — Inspiration Sources Library**. Discovery phase collects 5–10 concrete sources (are.na boards, books, films, artworks, cultural moments, architectural movements) with fields: name, citation URL, axis (visual/verbal/structural/atmospheric/narrative), `why_it_inspires`, `what_to_extract`, `what_NOT_to_copy`. Writes `.omc/brand/inspiration.md` with status `seed | growing | curated`.
+  - **New grammar invariants** (anti-commodity foundation):
+    - `anti_template.forbidden_patterns`: list of 15–25 generic SaaS phrasings (e.g., "empower your X", "the smart way to Y", "reimagine Z"). Test: "if a sentence could appear unchanged on 10+ competitor landing pages, it violates." Enforcement: HARD STOP at both composer (pre-screen) and director (post-review).
+    - `indirectness_minimum`: scale 1–5, primary 4, per-context drift ranges. Directness only allowed for user-safety messages.
+    - `semantic_layering`: minimum 2 layers per significant piece — every headline/tagline carries surface + deeper meaning.
+    - `soul_marker`: required true; every piece must have an un-template-able element (specific cultural reference, named cadence, idiosyncratic image).
+    - `inspiration_traceability`: every campaign variation must cite ≥1 source from `.omc/brand/inspiration.md` with specific `extracted_quality`.
+  - **New variables**: `inspiration_source` (enum from library, ≥3 distinct across N variations, no same-source in consecutive), `semantic_layer_count` (2/3/4, distributed across set).
+
+- `skills/brand-architect/SKILL.md`:
+  - New `--inspiration` flag runs only Phase 2.5 of the agent (appends sources to library without full rediscovery).
+  - Integrates with `--discovery` and `--refine` flows.
+
+- `agents/campaign-composer.md`:
+  - **Mandatory pre-screen** against forbidden_patterns BEFORE emitting any variation (not emit-and-wait-for-director).
+  - Every variation spec includes new **Anti-Commodity Self-Check** section: forbidden-pattern scan result, cited inspiration source with specific extracted quality and anti-plagiarism boundary, indirectness value with surface + deeper meanings, soul_marker named concretely.
+  - Phase 4 Variance Gate expanded to Variance + Anti-Commodity Gate: checks inspiration diversity (≥3 sources), semantic layer distribution (not all layer_count=2), soul_marker presence and specificity.
+  - REQUIRES `.omc/brand/inspiration.md` with ≥3 sources — HARD STOP if missing.
+
+- `agents/creative-director.md`:
+  - **New Phase 4.5 — Commodification Drift Detection (MANDATORY)** with six sub-checks:
+    - 4.5a: Anti-template forbidden_patterns scan — any match → CRITICAL REJECT.
+    - 4.5b: Inspiration source citation verification (specific extracted_quality, ≥8 words, concrete descriptors).
+    - 4.5c: Semantic layer verification (surface + layer-2 both substantively different).
+    - 4.5d: Soul marker specificity (no "has personality" vagueness).
+    - 4.5e: Cross-variation inspiration diversity (≥3 sources, no consecutive-same).
+    - 4.5f: Indirectness distribution (within per-context drift range).
+  - Every verdict cites the grammar file:line for the violated invariant.
+  - New Failure_Modes explicitly flag downgrading forbidden-pattern matches as unacceptable.
+
+### Marketplace description
+
+Updated in v4.15.0; unchanged in v4.15.1 — still 32 agents, 44 skills (no new agents/skills in this patch).
+
+### Migration notes for existing users
+
+- Existing `.omc/constitution.md` files continue to work. The conversational brand-steward will respect `status: complete` and confirm before modifying.
+- Existing `.omc/brand/core.md` + `grammar.md` files continue to work. To gain the anti-commodity invariants, re-run `/brand-architect --refine` and the agent will add the new invariants to grammar.md (with archive of prior version per the standard supersession protocol).
+- `/brand-architect --inspiration` is a lightweight way to seed `.omc/brand/inspiration.md` without regenerating the core or grammar.
+- campaign-composer will HARD STOP on missing `.omc/brand/inspiration.md`; run `/brand-architect --inspiration` first on upgrade.
+
+### Registry updates
+
+No agent or skill count changes; no test count changes.
+
+All 49 tests in `agent-registry.test.ts` + `skills.test.ts` pass.
+
+### Known limitations
+
+- Forbidden_patterns list is a starting point of 15 common SaaS phrasings; brand-specific additions should happen during discovery.
+- Inspiration library quality depends on the user's actual cultural inputs; agent cannot invent sources — it collects them via conversation.
+- Semantic layer detection relies on composer's self-declaration; director verifies plausibility but can be fooled by a well-structured-looking-but-actually-flat piece. A future LLM-judge pass may be added.
+
+---
+
 # oh-my-claudecode v4.15.0: Brand System + Framework Sustainability
 
 ## Release Notes

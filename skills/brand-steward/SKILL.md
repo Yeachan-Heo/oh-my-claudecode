@@ -1,109 +1,101 @@
 ---
 name: brand-steward
-description: Slash-wrapper for the brand-steward agent — runs strategic foundation interview (mission, target user, anti-goals, scope boundaries, tone-of-voice hints) producing/refining .omc/constitution.md. Reads competitors data if present to inform anti-goals
+description: Slash-wrapper for the brand-steward agent — invokes strategic discovery interview for mission, target user, anti-goals, scope boundaries, tone hints. Conversational mode (one question per turn, no pre-menus, no numbered blocks). Minimal wrapper — delegates to agent immediately
 argument-hint: "[--session1 | --session2 | --refine]"
 level: 4
 ---
 
 # Brand Steward Skill
 
-Thin wrapper that invokes the `brand-steward` agent as a slash command. brand-steward is the strategic foundation counterpart to brand-architect: brand-steward owns mission/anti-goals/scope (strategic), brand-architect owns archetype/metaphor/grammar (expressive). Both write in stages; both can read competitor and research data when available.
+Minimal slash-wrapper for the `brand-steward` agent. The wrapper does NO narration of context, NO pre-menus, NO teammate/SendMessage relay. It reads session state silently and hands off to the agent via a direct Task invocation with a session-mode directive. All interaction is between the user and the agent directly — in a conversational loop, one question per turn.
 
 ## Usage
 
 ```
 /oh-my-claudecode:brand-steward                      # auto-detect session
-/brand-steward --session1                            # first pass (draft constitution)
-/brand-steward --session2                            # refinement pass (after accumulated data)
+/brand-steward --session1                            # first pass
+/brand-steward --session2                            # refinement pass
 /brand-steward --refine                              # open-ended refinement
 ```
 
-### Examples
-
-```
-/brand-steward                                        # first run → session 1 interview
-/brand-steward --session2                            # after 2 weeks of scout + ideate + partner data
-```
-
 <Purpose>
-Invokes `brand-steward` agent to conduct the strategic discovery interview. Handles session state (first pass vs refinement) and ensures competitor and research context is read when available so anti-goals can be formulated oppositionally.
+Single command that invokes `brand-steward` agent to conduct conversational brand discovery. Wrapper is intentionally thin: it detects the session mode and invokes the agent — no pre-amble, no context narration, no menus. The agent owns the dialogue start-to-finish.
 </Purpose>
 
 <Use_When>
 - First day of product — need constitution foundation.
 - After 10–14 days of scout + ideate + partner data — refine anti-goals with accumulated evidence.
-- Material market shift (new competitor, regulatory change) that may invalidate prior anti-goals.
+- Material market shift (new competitor, regulatory change) that may invalidate anti-goals.
 - Product strategy pivot.
 </Use_When>
 
 <Do_Not_Use_When>
-- You need archetype/visual system — use `/brand-architect` (different concern).
+- You need archetype / visual system / grammar — use `/brand-architect` (different concern).
 - You need specific copy polish — use copywriter agent directly.
-- Single feature evaluation — use `/product-strategist`.
+- Single-feature evaluation — use `/product-strategist`.
 </Do_Not_Use_When>
 
 <Protocol>
 
-## Phase 0 — Session Detection
+## Phase 0 — Silent Session Detection
 
-1. Read `.omc/constitution.md` if exists — note status (draft / partial / complete / absent).
-2. Read `.omc/competitors/` — note landscape availability.
-3. Read `.omc/research/` — note accumulated user evidence.
+Read silently (no output to user):
+1. `.omc/constitution.md` if exists — note `status` field.
+2. Presence of `.omc/competitors/` and count of dossiers.
+3. Presence of `.omc/research/` and count of synthesis artifacts.
 
-Decide session type:
-- Absent constitution OR `--session1` → session 1 (mission, values, anti-goals from internal conviction + available competitor landscape).
-- `status: partial` AND sufficient downstream data (competitors ≥3, research ≥1) OR `--session2` → session 2 (lock anti-goals, refine scope).
-- `--refine` — open-ended.
+Determine session mode:
+- `--session1` flag OR constitution absent OR `status: draft` with no fills → session 1.
+- `--session2` flag OR (`status: partial` AND competitors≥3 AND research≥1) → session 2.
+- `--refine` → open-ended refinement.
 
-## Phase 1 — Context Surface
+Prerequisites check: Phase 0 does NOT gate on absent context. If competitors are missing for session 2, brand-steward itself will ask the user whether to proceed or run competitor-scout first. The wrapper does not over-validate.
 
-Read and summarize to user:
-- Current constitution status.
-- Competitor archetypes if `.omc/brand/core.md` exists (useful for anti-goal formulation).
-- Top 3 user pain points from `.omc/research/` if present.
-- Recent ideate shortlists if present (reveals where anti-goals are actively tested).
+## Phase 1 — Direct Invocation
 
-## Phase 2 — Invoke Agent
+Invoke `oh-my-claudecode:brand-steward` agent via Task tool (NOT as a teammate, NOT via SendMessage, NOT via TeamCreate). The agent runs in a direct conversational channel with the user.
 
-Invoke `oh-my-claudecode:brand-steward` agent with directive:
+Invocation directive:
 - Session mode: 1 | 2 | refine.
-- Context reads: constitution, competitors (especially landscape/*.md), research.
-- Focus for session 1: mission, principles, target user, INITIAL anti-goals (tagged tentative).
-- Focus for session 2: LOCK anti-goals citing specific competitor moves, refine scope, calibrate tone hints.
-- Output: `.omc/constitution.md` with explicit `status: draft | partial | complete` header.
+- Available context paths (agent reads them directly in its Phase A): constitution, competitors, research, brand.
+- Enforcement: conversational discipline per agent Investigation_Protocol (≤80 words first message, one question per turn, no pre-menus, no numbered blocks).
 
-## Phase 3 — Post-Invocation Summary
+The wrapper produces NO user-facing output between invocation and agent's first message. Do not announce context, do not narrate setup, do not pre-menu language choices — the agent handles all of this in dialogue.
 
-Report:
-- Session produced constitution at `status: X`.
-- Key anti-goals (top 3) with their competitor/evidence citation.
-- Gaps remaining → recommended next steps.
-- If session 1 → recommend running `/brand-architect` next, then scheduling session 2 in 10–14 days.
+## Phase 2 — Post-Completion (optional)
+
+After the agent completes (constitution written + terminal message delivered), the wrapper itself produces NO additional output. The agent's terminal message is the summary.
+
+If the user needs a reminder of next steps, they can ask; the wrapper does not proactively narrate.
 
 </Protocol>
 
 <Input_Contract>
 Optional flags:
 - `--session1` — force first-pass interview
-- `--session2` — force refinement pass (requires `.omc/competitors/` and `.omc/research/`)
+- `--session2` — force refinement pass
 - `--refine` — open-ended refinement
 
-No positional args — agent reads context.
+No positional args. The agent reads context from `.omc/` in its own Phase A.
 </Input_Contract>
 
 <Output>
-- `.omc/constitution.md` — updated with new session data, status field advanced if appropriate.
-- `.omc/brand/steward-sessions/YYYY-MM-DD-<session-id>.md` — session record.
+- `.omc/constitution.md` — updated by agent; `status` field advanced when evidence supports promotion.
+- Agent's in-conversation synthesis message (no wrapper-generated summary).
 </Output>
 
 <Failure_Modes_To_Avoid>
-- Running session 2 without competitor or research context — defeats the purpose of refinement.
-- Locking anti-goals in session 1 when they should be tentative.
-- Silently overwriting constitution (must advance status explicitly).
+- **Narrating Phase 0 context ingestion to the user.** "I've read your competitors and research — here's what I found" is exactly the pre-amble that buries the agent's first question. Silent reads only.
+- **Pre-menu for language choice.** Language preference is a dialogue question the agent asks when relevant, not a wrapper-side selection.
+- **Invoking brand-steward as a teammate (TeamCreate + SendMessage relay).** That creates a proxy-UX where the user talks to a middleman. Use direct Task invocation only.
+- **Announcing session mode to the user.** Session detection is internal. The agent knows the mode from the directive.
+- **Adding post-completion summary.** The agent's terminal message is the summary. Anything from the wrapper on top is noise.
+- **Validating prerequisites too aggressively.** Session 2 without competitors is fine — the agent will flag it in conversation, not fail at wrapper level.
 </Failure_Modes_To_Avoid>
 
 <Integration_Notes>
-- Delegates to `oh-my-claudecode:brand-steward` agent.
+- Delegates to `oh-my-claudecode:brand-steward` agent via direct Task invocation.
 - Recommended sequence: `/competitor-scout --new-only` → `/brand-steward --session1` → `/brand-architect` → (2 weeks of product work) → `/brand-steward --session2`.
-- Related: `/brand-architect` (expressive counterpart), `/product-strategist` (per-feature gate using anti-goals this produces).
+- Related: `/brand-architect` (expressive counterpart — archetype + grammar), `/product-strategist` (per-feature gate using anti-goals this produces).
+- The conversational discipline is enforced in the AGENT prompt, not in this wrapper. Wrapper stays minimal so future changes to conversation shape happen in one place.
 </Integration_Notes>

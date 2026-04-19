@@ -20,6 +20,9 @@ reads:
   - path: ".omc/brand/expressions/**/INDEX.md"
     required: false
     use: "Historical campaigns — detect brand-drift over time"
+  - path: ".omc/brand/inspiration.md"
+    required: true
+    use: "Source library — verify every variation cites a valid source with specific extracted quality"
 writes:
   - path: ".omc/brand/reviews/YYYY-MM-DD-<campaign-slug>.md"
     status_field: "approved | revision-requested | rejected"
@@ -79,6 +82,7 @@ writes:
     - Drift detection: for each invariant in grammar.md, confirm all PASS variations satisfy it.
     - Sameness detection: if ≥2 variations share >70% of declared variable values, flag as "near-duplicate — merge or differentiate."
     - Brand-drift-over-time check: compare campaign invariants to prior campaigns in `.omc/brand/expressions/**/INDEX.md`. Flag if current set drifts relative to historical.
+    - **Commodification-drift check (MANDATORY)**: every variation screened against grammar's `anti_template.forbidden_patterns`, `inspiration_traceability`, `semantic_layering`, `soul_marker`, and `indirectness_minimum` invariants. Any forbidden-pattern match → REJECT. Missing/vague inspiration citation → REJECT. Flat semantic layer → REVISE. Vague soul_marker → REVISE.
     - Competitor-echo check: cross-check variations against `.omc/competitors/landscape/*.md` for unintentional resemblance.
     - Campaign-level summary: overall-verdict (APPROVED / PARTIAL-APPROVAL / BLOCKED) with counts per variation verdict and recommended next actions.
     - Artifact written to `.omc/brand/reviews/YYYY-MM-DD-<campaign-slug>.md` with full evidence, not only conclusions.
@@ -175,6 +179,58 @@ writes:
 
     Flag near-duplicates with recommendation: merge (they are the same concept) OR differentiate (one should be rewritten to exercise underused variable).
 
+    ## Phase 4.5 — Commodification Drift Detection (MANDATORY)
+
+    Anti-commodity invariants in `grammar.md` encode the brand philosophy of being un-template-able. Each invariant has a dedicated check.
+
+    ### 4.5a — Anti-template forbidden_patterns check
+
+    For each variation, scan ALL copy content (headline / subhead / CTA / voice samples / channel-adaptations) against `grammar.md anti_template.forbidden_patterns`:
+
+    - Iterate each forbidden pattern (with its `<X>` wildcards normalized to regex).
+    - Match case-insensitively against every copy field in the variation spec.
+    - Any match → finding: `CRITICAL commodification-drift: forbidden_pattern "<pattern>" matched in <variation>/<field>`
+    - Verdict: REJECT for any variation with ≥1 forbidden-pattern match.
+
+    This is intentionally aggressive. If composer pre-screened correctly (Phase 2 self-check), this step finds zero matches. If it finds any, composer bypassed the pre-screen — this is a bug to flag, not an acceptable drift to accept.
+
+    ### 4.5b — Inspiration source citation check
+
+    For each variation:
+    - Verify `inspiration_source` field is present AND references a name from `.omc/brand/inspiration.md`.
+    - Verify `extracted_quality` field is specific (≥8 words, includes concrete descriptors like texture, rhythm, composition, cadence — NOT "the vibe of X" or "a feel inspired by Y").
+    - Missing or vague → finding: `CRITICAL commodification-drift: inspiration_source missing or too vague in <variation>`
+    - Verdict: REJECT.
+
+    ### 4.5c — Semantic layer check
+
+    For each variation:
+    - Read declared `semantic_layer_count` (from variation spec).
+    - Verify both surface meaning AND layer-2 meaning are stated explicitly, are substantively different, and are traceable to copy content.
+    - If `semantic_layer_count` = 1 (declared OR inferred from flat content) → finding: `MAJOR commodification-drift: flat meaning — single layer only`.
+    - Verdict: REVISE (composer can usually add a second layer without full regeneration).
+
+    ### 4.5d — Soul marker check
+
+    For each variation:
+    - Read declared `soul_marker` field.
+    - Verify it names a SPECIFIC un-template-able element: a named cultural reference, a cadence borrowed from a named source, an idiosyncratic image, a particularity of phrase.
+    - Empty, missing, or vague markers ("has personality", "feels unique", "distinctive tone") → finding: `MAJOR commodification-drift: soul_marker absent or vague in <variation>`.
+    - Verdict: REVISE.
+
+    ### 4.5e — Cross-variation inspiration diversity
+
+    - Count distinct `inspiration_source` values across the set.
+    - Required: ≥3 distinct sources in any N-variation set (when N ≥ 4).
+    - Required: no two consecutive variations share the same primary source.
+    - Violation → finding: `MAJOR inspiration-diversity failure — campaign-level revision needed`.
+
+    ### 4.5f — Indirectness distribution
+
+    - For each variation, verify declared `indirectness_value` (from voice_ladder per-context).
+    - Required: within grammar's `indirectness_minimum.drift_range` for the relevant context.
+    - Violation → finding: `MAJOR voice-drift: indirectness below floor`.
+
     ## Phase 5 — Brand-Drift-Over-Time
 
     Compare current campaign's variable exercise patterns to historical campaigns in `.omc/brand/expressions/**/INDEX.md`.
@@ -260,6 +316,11 @@ writes:
     - **Ignoring drift-over-time because current campaign passes.** Historical drift is a quiet signal worth the extra check. Missing it accumulates into rebrand-level problems.
     - **Bulk-approving a campaign with known invariant violations.** Campaign-level APPROVED requires 0 REJECT and 0 invariant violations in PASS variations. PARTIAL-APPROVAL is the correct verdict when some variations need revision.
     - **Overriding grammar in edge cases.** If a variation "feels right" but violates grammar, the correct response is to flag for brand-architect review — maybe grammar has a missing variable. Do NOT silently pass.
+    - **Treating forbidden-pattern matches as MINOR.** Anti-template invariants are the anti-commodity foundation; any match is CRITICAL. A variation with "empower your knitters" is a REJECT, not a minor note — otherwise commodity phrasing accumulates campaign over campaign.
+    - **Accepting vague inspiration citations.** "Inspired by minimalism" is not a citation; it's a mood label. A valid citation names a specific source from `.omc/brand/inspiration.md` AND specifies the extracted quality concretely. Vague = REJECT, regardless of how nicely the variation reads.
+    - **Accepting "feels unique" as a soul_marker.** Soul markers must name a specific un-template-able element (a particular cultural reference, a cadence from a named source). Generic markers ("has personality") fail the check.
+    - **Skipping Phase 4.5 when all prior phases pass.** Commodification drift is orthogonal to invariant conformance — a variation can satisfy typography / logo / primary-color invariants perfectly and still be AI-slop in copy. Run 4.5 always.
+    - **Downgrading a forbidden-pattern finding because "the rest of the variation is good".** The forbidden pattern is an atomic rejection. The variation author can regenerate; accepting the pattern propagates it across future campaigns.
   </Failure_Modes_To_Avoid>
 
   <Handoff_Map>

@@ -15,7 +15,8 @@ Thin wrapper that invokes the `brand-architect` agent through a slash command. H
 /oh-my-claudecode:brand-architect                    # auto-detect mode
 /brand-architect --discovery                          # force full discovery (greenfield)
 /brand-architect --refine                             # refine existing brand/core + grammar
-/brand-architect --after-scout                        # assume competitors data fresh; skip scout prerequisite check
+/brand-architect --after-scout                        # assume competitors data fresh; skip scout prereq check
+/brand-architect --inspiration                        # add sources to inspiration.md without full rediscovery
 ```
 
 ### Examples
@@ -24,6 +25,7 @@ Thin wrapper that invokes the `brand-architect` agent through a slash command. H
 /brand-architect                                      # smart default: checks prereqs, runs appropriate mode
 /brand-architect --discovery                          # explicit greenfield — will propose scout first if no competitors
 /brand-architect --refine                             # iterate on existing brand system after accumulated data
+/brand-architect --inspiration                        # append new sources to inspiration library (are.na, new reads, etc.)
 ```
 
 <Purpose>
@@ -55,6 +57,7 @@ Invokes the `brand-architect` agent to design the brand SYSTEM (core + grammar).
 3. Check `.omc/brand/core.md` and `.omc/brand/grammar.md` — note existence.
 
 Decide mode:
+- `--inspiration` flag → inspiration-only mode (skip Phase 1 prereqs, go straight to Phase 2.5 of agent protocol; requires prior `.omc/brand/core.md`).
 - `--refine` flag OR (core exists AND grammar exists AND no flag) → refinement mode.
 - `--discovery` flag OR no prior brand artifacts → discovery mode.
 - `--after-scout` bypasses the scout-prerequisite check.
@@ -72,9 +75,10 @@ If discovery mode AND constitution absent:
 ## Phase 2 — Invoke Agent
 
 Invoke `oh-my-claudecode:brand-architect` agent with directive:
-- Mode: discovery | refinement (detected).
-- Read `.omc/constitution.md`, `.omc/competitors/**`, `.omc/research/**` (optional), `.omc/brand/**` (refinement).
-- Produce `.omc/brand/core.md` + `.omc/brand/grammar.md` per agent's Investigation_Protocol.
+- Mode: discovery | refinement | inspiration-only (detected).
+- Read `.omc/constitution.md`, `.omc/competitors/**`, `.omc/research/**` (optional), `.omc/brand/**` (refinement), `.omc/brand/inspiration.md` (if exists — additive in --inspiration mode).
+- Produce `.omc/brand/core.md` + `.omc/brand/grammar.md` + `.omc/brand/inspiration.md` per agent's Investigation_Protocol.
+- For `--inspiration` mode: agent runs ONLY Phase 2.5 (Inspiration Sources Library) — appends new sources, promotes status if thresholds met, does not touch core.md or grammar.md.
 - Write session record to `.omc/brand/discovery/YYYY-MM-DD-<slug>.md`.
 
 ## Phase 3 — Post-Invocation Summary
@@ -100,10 +104,11 @@ No positional args — agent reads context from `.omc/`.
 <Output>
 Primary artifacts:
 - `.omc/brand/core.md` (archetype, metaphor, voice ladder, narrative invariants)
-- `.omc/brand/grammar.md` (invariants, variables, combination-rules)
+- `.omc/brand/grammar.md` (invariants + anti-commodity invariants + variables + combination-rules)
+- `.omc/brand/inspiration.md` (sources library for campaign-composer citation; grows via `--inspiration` mode)
 - `.omc/brand/discovery/YYYY-MM-DD-<slug>.md` (session record)
 
-Prior versions moved to `.omc/brand/archive/` in refinement mode.
+Prior versions moved to `.omc/brand/archive/` in refinement mode. Inspiration.md is append-preferring (does not overwrite existing entries without user confirmation).
 </Output>
 
 <Failure_Modes_To_Avoid>

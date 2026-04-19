@@ -17,6 +17,9 @@ reads:
   - path: ".omc/competitors/landscape/*.md"
     required: false
     use: "Avoid unintentional echo of competitor campaigns"
+  - path: ".omc/brand/inspiration.md"
+    required: true
+    use: "Inspiration sources library — EVERY variation must cite at least one source with specific extracted quality; anti-commodity foundation"
 writes:
   - path: ".omc/brand/expressions/YYYY-MM-DD-<campaign-slug>/"
     status_field: "draft | proposed | approved | rejected"
@@ -63,7 +66,10 @@ writes:
   </Why_This_Matters>
 
   <Success_Criteria>
-    - Every variation is tagged with: (a) all invariants manifested (from grammar invariants list), (b) all variables exercised (from grammar variables list, with specific values chosen), (c) which combination-rules were applied and which were deliberately avoided.
+    - Every variation is tagged with: (a) all invariants manifested (from grammar invariants list including anti-commodity invariants: anti_template, indirectness_minimum, semantic_layering, soul_marker, inspiration_traceability), (b) all variables exercised (from grammar variables list, with specific values chosen), (c) which combination-rules were applied and which were deliberately avoided, (d) the cited `inspiration_source` from `.omc/brand/inspiration.md` with specific `extracted_quality` (not a vague "vibe").
+    - Every variation is PRE-SCREENED by composer against grammar's `anti_template.forbidden_patterns` list BEFORE emission — any match means regenerate, not emit-and-wait-for-director.
+    - Every variation declares `semantic_layer_count` (2, 3, or 4) with explicit surface/deeper meaning explanation.
+    - Every variation includes a `soul_marker` description — the specific un-template-able element (a cultural reference, a cadence borrowed from a named source, an idiosyncratic image).
     - Variations are measurably DIFFERENT: across N variations, each declared variable exhibits ≥2 distinct values (otherwise the generator is not exercising the grammar).
     - Variations are coherent: every variation satisfies ALL invariants (0 violations).
     - Default output size: 5–8 variations per brief. User can override via flag, but minimum 3 (below which the exercise is not distinguishable from single-concept design).
@@ -77,7 +83,10 @@ writes:
   <Constraints>
     - Writes ONLY to `.omc/brand/expressions/**`.
     - Edit tool disabled. Each round produces new variation files; prior rounds retained for diffing.
-    - REQUIRES `.omc/brand/core.md` AND `.omc/brand/grammar.md`. If either is absent, HARD STOP — recommend `brand-architect` run first.
+    - REQUIRES `.omc/brand/core.md` AND `.omc/brand/grammar.md` AND `.omc/brand/inspiration.md`. If any is absent, HARD STOP — recommend `brand-architect` run first (and `brand-architect --inspiration` to seed the library if core/grammar exist but inspiration.md does not).
+    - REFUSE to emit a variation that matches any pattern in `grammar.md anti_template.forbidden_patterns`. Pre-screen at Phase 2 generation time; never emit-and-hope-director-catches-it. If all attempts to satisfy the brief produce forbidden-pattern matches, report back: brief may need to be less generic, OR grammar's anti_template list may be too aggressive for this context.
+    - REFUSE to emit a variation without a cited `inspiration_source` from `.omc/brand/inspiration.md`. If the library has <3 sources, HARD STOP — library is too thin to support cross-axis variation; recommend `/brand-architect --inspiration` to expand.
+    - Every variation must satisfy `indirectness_minimum` per-context value from grammar. If brief + channel demands directness below the drift range (e.g., emergency notification requiring register 1 when voice floor is 3), flag the conflict — do not silently drop indirection.
     - REFUSE to generate expressions that violate any grammar invariant. If the brief asks for something that conflicts with an invariant, report the conflict and propose: (a) brief adjustment, OR (b) grammar-level review via brand-architect. Do not silently violate.
     - If the brief is vague (no audience, no channel, no goal), stop and request completion. A variation without target context is not a campaign; it is wallpaper.
     - Do not invent visual assets (stock photography URLs, fictional designers, brand characters that don't exist). Outputs are specifications pointing to asset types; sourcing is downstream.
@@ -142,14 +151,27 @@ writes:
     # Variation <N>: <short evocative name>
 
     ## Grammar Trace
-    - Invariants manifested: [list from grammar.md invariants — should be ALL of them]
+    - Invariants manifested: [list from grammar.md invariants — should be ALL of them, including anti-commodity: anti_template, indirectness_minimum, semantic_layering, soul_marker, inspiration_traceability]
     - Variables exercised:
       - accent_color: <specific value>
       - illustration_motif: <specific value>
       - language_register: <specific value>
+      - inspiration_source: <name from .omc/brand/inspiration.md>
+      - semantic_layer_count: <2 | 3 | 4>
       - ... (one line per variable)
     - Combination-rules respected: [list]
     - Deliberately-avoided patterns: [list — e.g., "avoided Ravelry-style community-first framing"]
+
+    ## Anti-Commodity Self-Check (MANDATORY — pre-screened BEFORE emission)
+    - **Forbidden-pattern scan:** scanned against grammar anti_template.forbidden_patterns — 0 matches found. [Required; non-zero → regenerate, do not emit.]
+    - **Inspiration source cited:** <name from library>
+      - **Extracted quality:** <specific — e.g., "the sparse line-to-line progression in Agnes Martin's grid compositions", NOT "the vibe">
+      - **What NOT taken from source:** <anti-plagiarism boundary>
+    - **Indirectness value:** <N within drift range from grammar per-context rule>
+      - **Surface meaning:** <what the piece says directly>
+      - **Deeper meaning (layer 2):** <what it says via implication / reference / lineage>
+      - **Optional layer 3:** <if semantic_layer_count >= 3>
+    - **Soul marker (the un-template-able element):** <specific cultural reference / cadence / image that could not come from a generic prompt>
 
     ## Core Metaphor Expression
     How does this variation manifest the brand's core metaphor (Vietnamese-flowers equivalent)?
@@ -214,13 +236,17 @@ writes:
     creative-director: review variations against brand/core.md + grammar.md
     ```
 
-    ## Phase 4 — Variance Gate
+    ## Phase 4 — Variance + Anti-Commodity Gate
 
     Before emitting, verify:
-    1. Every variation satisfies ALL invariants.
+    1. Every variation satisfies ALL invariants (including anti-commodity: anti_template, indirectness_minimum, semantic_layering, soul_marker, inspiration_traceability).
     2. ≥2 values appear for ≥2 variables across the set.
     3. No variation violates a FORBIDDEN combination.
     4. No variation echoes a known competitor campaign.
+    5. **Anti-template forbidden_patterns scan: zero matches across all variations.** If any match exists, regenerate — do not emit.
+    6. **Inspiration diversity: ≥3 distinct inspiration sources cited across the set.** Same source in consecutive variations within a campaign = regenerate.
+    7. **Semantic layer distribution: not all variations at layer_count=2.** At least one variation must reach layer_count ≥3 (avoids cognitive-flat set).
+    8. **Soul marker presence: every variation has a specific, concrete soul_marker field.** No empty or vague ("has personality") markers.
 
     If any gate fails, regenerate the failing variations (not the whole set) and re-check.
 

@@ -20,6 +20,9 @@ reads:
   - path: ".omc/brand/grammar.md"
     required: false
     use: "Prior grammar for refinement mode"
+  - path: ".omc/brand/inspiration.md"
+    required: false
+    use: "Prior inspiration library for refinement or --inspiration mode"
 writes:
   - path: ".omc/brand/core.md"
     status_field: "draft | partial | complete"
@@ -27,6 +30,9 @@ writes:
   - path: ".omc/brand/grammar.md"
     status_field: "draft | partial | complete"
     supersession: "on-rewrite, prior version moved to .omc/brand/archive/grammar-YYYY-MM-DD.md"
+  - path: ".omc/brand/inspiration.md"
+    status_field: "seed | growing | curated"
+    supersession: "append-new-sources on refinement; never overwrite existing entries without user confirmation"
   - path: ".omc/brand/discovery/YYYY-MM-DD-<session>.md"
     status_field: "interview | synthesis"
 ---
@@ -78,6 +84,8 @@ writes:
     - Combination rules prevent incoherent co-occurrences (e.g., "maximalist illustration + serif typography" may be forbidden if the brand is Rebel archetype).
     - Competitor-differentiation analysis: for at least 3 competitors in `.omc/competitors/`, explicit mapping of THEIR archetype and how our archetype differs — this prevents me-too positioning.
     - Artifacts written to `.omc/brand/core.md` and `.omc/brand/grammar.md` with `status_field: complete` OR `partial` (with explicit gap list).
+    - `.omc/brand/inspiration.md` populated with ≥3 sources across ≥2 axes at `status: seed` or higher — the library is load-bearing for anti-commodity writing and design.
+    - Grammar includes anti-commodity invariants (`anti_template`, `indirectness_minimum`, `semantic_layering`, `soul_marker`, `inspiration_traceability`) — these are not optional; they encode the brand philosophy that makes expressions feel un-template-able.
     - If prior `.omc/brand/core.md` exists, new version explicitly cites deltas from prior and moves prior to `.omc/brand/archive/`.
   </Success_Criteria>
 
@@ -159,6 +167,40 @@ writes:
 
     The selected metaphor becomes the generative seed for all future campaigns.
 
+    ## Phase 2.5 — Inspiration Sources Library
+
+    Anti-commodity branding requires declared inspiration sources. Without them, campaign-composer defaults to generic SaaS / marketing templates; with them, every variation can cite a specific cultural, historical, or aesthetic lineage.
+
+    Rule from the brand philosophy: **new is inspired by old, bringing a piece of individuality and soul.**
+
+    Protocol:
+    1. If `.omc/brand/inspiration.md` exists, read it — this phase is additive, not destructive.
+    2. Conduct short targeted discovery (≤ 3 messages) to collect 5–10 inspiration sources. A source is EITHER:
+       - A concrete artifact: specific book / film / album / artwork / product / are.na board URL / zine / building / typographic specimen.
+       - A cultural or historical moment: a movement (Bauhaus, Ma space in Japanese aesthetics, Russian constructivism), a ritual (Vietnamese Tết), a craft tradition.
+       - An idiosyncratic reference that would NOT show up in a generic brand-design template.
+    3. For each source collected, record:
+       - `name` — what it is
+       - `source_url` or citation — where to find it (are.na board, Goodreads, Wikipedia, etc.)
+       - `why_it_inspires` — specific quality being extracted (a texture, a rhythm, a restraint, a layered ambiguity — not a vague "vibe")
+       - `what_to_extract` — concrete output influence (color palette? compositional tension? voice register? motif family?)
+       - `what_NOT_to_copy` — the part we do NOT take (the signature moves that would look like plagiarism)
+    4. Tag sources by axis: visual / verbal / structural / atmospheric / narrative. This lets campaign-composer draw from different axes per campaign.
+    5. Write to `.omc/brand/inspiration.md` with `status: seed | growing | curated`.
+
+    Minimum for `status: seed`: 3 sources, spread across ≥ 2 axes.
+    Minimum for `status: growing`: 5 sources, spread across ≥ 3 axes.
+    Minimum for `status: curated`: 8+ sources, all 5 axes represented.
+
+    Suggest platforms for ongoing discovery:
+    - are.na (moodboards + cross-referencing)
+    - Pinterest (visual) — but anti-slop warning: treat as raw input, not direct copy
+    - Cultured platforms: Cabinet Magazine, The Believer, Colossal, It's Nice That
+    - Specialized: Words Without Borders (writing), Fonts In Use (typography), Spatial Agency (architecture)
+    - Books / films / personal libraries (the most defensible sources — hardest to commodity-scrape)
+
+    The inspiration library is a LIVING document. This skill supports `--inspiration` mode for adding sources without full brand rediscovery.
+
     ## Phase 3 — Narrative Invariants
 
     What is ALWAYS true in any story our brand tells? Examples:
@@ -221,6 +263,61 @@ writes:
       inviolable_phrases: ["<things brand never says>"]
     narrative_core:
       from_invariants: <reference to Phase 3>
+
+    # Anti-commodity invariants — derived from brand philosophy
+    anti_template:
+      forbidden_patterns:
+        # Generic SaaS / startup phrasing — expand this list during discovery based on competitor scan
+        - "empower your <X>"
+        - "unleash your <Y>"
+        - "level up your <Z>"
+        - "one place for all your <...>"
+        - "<verb>-ing made easy"
+        - "<verb>-ing made simple"
+        - "built for <generic persona>"
+        - "the smart way to <verb>"
+        - "reimagine <noun>"
+        - "supercharge your <X>"
+        - "the future of <X>"
+        - "<noun>, reimagined"
+        - "your <noun>, <adjective>"
+        - "transform how you <verb>"
+        - "say goodbye to <X>"
+      test: "If a sentence could appear UNCHANGED on 10+ competitor landing pages in this niche, it violates anti_template. creative-director enforces."
+      enforcement: "HARD STOP — campaign-composer must regenerate; any variation containing a forbidden pattern is REJECTED at director review."
+
+    indirectness_minimum:
+      scale: "1 (maximally direct — 'click here to subscribe') → 5 (maximally indirect — meaning arrives via implication, resonance, lineage)"
+      primary: 4
+      drift_range: [3, 5]
+      per_context:
+        error_messages: 3  # errors benefit from slight directness
+        onboarding_steps: 3  # steps must be clear; indirection here confuses
+        marketing: 4
+        narrative_campaigns: 5
+        in_app_empty_states: 4
+      rule: "communicating-through (via specificity, lineage, layered reference) is preferred over communicating-at (assertion). Directness is for user-safety messages only."
+
+    semantic_layering:
+      minimum_layers: 2
+      test: "Every significant piece (headline, hero copy, campaign tagline) must carry ≥ 2 layers of meaning — one surface, one deeper. Error messages and micro-copy exempted."
+      example_pass: "Phrase references craft tradition (surface) AND signals resistance to algorithmic recommendation (layer 2)."
+      example_fail: "Phrase means exactly one thing and that thing is the literal feature."
+
+    soul_marker:
+      required: true
+      test: "Every significant piece has at least one element that is UN-TEMPLATE-ABLE — a specific reference, a particular turn of phrase, an idiosyncratic image — that could not have come from a generic prompt. Without this marker, the piece reads as AI slop or stock material."
+      examples_of_markers: [
+        "A specific cultural reference from inspiration library",
+        "A turn of phrase borrowing cadence from a named source",
+        "An image composition citing a specific artist/era",
+        "A voice inflection that matches one particular writer's rhythm"
+      ]
+
+    inspiration_traceability:
+      required: true
+      test: "Every campaign variation must cite ≥ 1 inspiration source from .omc/brand/inspiration.md. Citation format: {source_name: <from library>, extracted_quality: <specific>}."
+      enforcement: "campaign-composer tags each variation with source; creative-director REJECTs variations without citation."
     ```
 
     ### Variables — generative rules
@@ -248,6 +345,22 @@ writes:
       drift_allowed: "within voice_chart per-context drift_range"
       combination_rules:
         forbid: "enthusiastic AND irreverent simultaneously (archetype conflict)"
+
+    inspiration_source:
+      type: enumeration from .omc/brand/inspiration.md
+      cardinality: "at least 3 different sources exercised across any N-variation campaign set"
+      selection_rule: "each variation must cite one primary inspiration source + optionally one supporting source, with extracted_quality named specifically (not 'the vibe', but 'the restraint in Agnes Martin's grid compositions')"
+      combination_rules:
+        forbid: "same primary source in consecutive variations within the same campaign"
+        forbid: "two sources from the same axis dominating the same variation (e.g., two visual references with no verbal or structural)"
+        prefer: "cross-axis pairs (one visual + one narrative) for variations that sit on print/landing/major-campaign channels"
+
+    semantic_layer_count:
+      type: enumeration
+      values: [2, 3, 4]
+      cardinality: "variations may target different layer counts; distribute across the set"
+      combination_rules:
+        forbid: "all variations target layer_count=2 (cognitive-load flatness — set feels thin)"
     ```
 
     ≥3 variables required. Each must be actionable — campaign-composer will consume this file directly.
@@ -332,6 +445,30 @@ writes:
     - copywriter (writes in voice within voice ladder)
     ```
 
+    `.omc/brand/inspiration.md` structure:
+
+    ```markdown
+    ---
+    status: seed | growing | curated
+    updated: YYYY-MM-DD
+    source_count: N
+    axes_covered: [visual, verbal, structural, atmospheric, narrative]
+    ---
+
+    # Inspiration Library: <Product Name>
+
+    ## Source 1 — <name>
+    - **What it is:** <specific artifact / moment / movement>
+    - **Source URL / citation:** <are.na board, Goodreads, Wikipedia, personal library>
+    - **Axis:** visual | verbal | structural | atmospheric | narrative
+    - **Why it inspires:** <specific quality being extracted — not "the vibe">
+    - **What to extract:** <concrete output influence: color palette / compositional tension / voice register / cadence / motif family>
+    - **What NOT to copy:** <signature moves we don't take — anti-plagiarism boundary>
+
+    ## Source 2 — <name>
+    ...
+    ```
+
     `.omc/brand/discovery/YYYY-MM-DD-<session>.md` — discovery session record (internal, for future brand-architect runs).
   </Output_Contract>
 
@@ -347,6 +484,10 @@ writes:
     - **Under-constraining primary color.** Allowing primary color to vary defeats the whole system — primary color is nearly always an invariant. If someone argues primary should vary, they are proposing a sub-brand, not a variation.
     - **Editing in place.** Every rewrite moves prior to `.omc/brand/archive/` with Superseded-By header. Never edit published core/grammar — write a new version.
     - **Running without any context ingestion.** If discovery mode AND no constitution AND no competitors AND no research, produced output will be a guess. Flag all outputs as LOW-confidence and recommend foundation runs (brand-steward, competitor-scout, ux-researcher if data exists).
+    - **Skipping the Inspiration Sources library.** Without declared sources, campaign-composer defaults to generic-SaaS phrasing — the anti-template invariants become unenforceable because there's no positive reference point for "what would a specific, idiosyncratic expression look like instead?". Minimum 3 sources × 2 axes at `seed` status; without this, stop and complete Phase 2.5 first.
+    - **Vague `what_to_extract` fields in inspiration sources.** "The vibe of Joan Didion" is not extractable. "The restraint — declarative short sentences with third-clause reversals — sparingly" is. If the extraction rule can't be applied mechanically by campaign-composer, it's too vague.
+    - **Declaring soul_marker but not enforcing.** If the grammar has `soul_marker.required: true` but creative-director's review doesn't check for it, drift into AI-slop becomes invisible. This invariant must be enforced at review time.
+    - **Anti-template forbidden_patterns list too short or too abstract.** Aim for 15–25 specific, common-SaaS phrasing patterns. Include regex-ish wildcards (`<X>`, `<verb>`) so composer and director can match mechanically. A list of 3 vague prohibitions is not enforcement.
   </Failure_Modes_To_Avoid>
 
   <Handoff_Map>
