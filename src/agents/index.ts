@@ -67,7 +67,10 @@ export {
   uxResearcherAgent,
   competitorScoutAgent,
   ideateAgent,
-  domainExpertReviewerAgent
+  domainExpertReviewerAgent,
+  brandArchitectAgent,
+  campaignComposerAgent,
+  creativeDirectorAgent
 } from './definitions.js';
 
 // Core exports (getAgentDefinitions and omcSystemPrompt)

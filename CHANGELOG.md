@@ -1,3 +1,61 @@
+# oh-my-claudecode v4.15.0: Brand System + Framework Sustainability
+
+## Release Notes
+
+Minor release adding the brand-system layer (three agents + one orchestrator skill), three slash-command wrappers for commonly-invoked agents, an artifact-lifecycle utility for ongoing `.omc/` hygiene, and the Context-Manifest standard for NEW agents. No forced retrofit of existing agents.
+
+### Highlights
+
+- **feat(agents): add brand-architect (opus)** — designs the brand SYSTEM (Jungian archetype + core metaphor + variation grammar with invariants and variables). Self-sufficient discovery even without prior constitution, with built-in competitor-whitespace analysis for archetype selection. Produces `.omc/brand/core.md` + `grammar.md`.
+- **feat(agents): add campaign-composer (sonnet)** — generates N grammar-coherent marketing/design/copy variations from a brief. Every variation tagged with invariants manifested and variables exercised. Enforces variance gate (≥2 variables must exhibit ≥2 distinct values).
+- **feat(agents): add creative-director (opus, read-only)** — brand-variation guardrail. Reviews campaign variations against brand core + grammar; detects drift (out-of-grammar) and sameness (insufficient variation). Per-variation PASS/REVISE/REJECT verdict with file:line evidence from grammar.md.
+- **feat(skills): add brand-variations-generate** — orchestrator composer→director pipeline for generating brand-coherent campaign variations.
+- **feat(skills): add brand-architect / brand-steward / product-strategist** — thin slash-command wrappers for commonly-invoked agents; handles prerequisite checks and session detection.
+- **feat(skills): add artifact-lifecycle** — framework-sustainability utility. Scans `.omc/**` for stale / superseded / abandoned / duplicate artifacts and produces a lifecycle report. Optional `--archive` mode moves flagged files to per-directory archive subdirectories with user confirmation. Never deletes.
+- **docs: add CONTEXT-MANIFEST standard** (`docs/CONTEXT-MANIFEST.md`) — convention for declaring `reads:` / `writes:` / `supersession:` in new agent frontmatter. Optional for existing agents; no forced retrofit.
+
+### Why this release matters
+
+The framework was accumulating three structural issues: (1) no brand system capable of scaled variation (marketing and design outputs drift without explicit grammar), (2) agents like brand-steward and product-strategist lacked slash-command wrappers (users had to invoke via natural language), (3) no lifecycle management for accumulated `.omc/` artifacts. v4.15.0 addresses all three without forcing cosmetic rework on existing agents.
+
+The brand-system design is inspired by archetypal branding (Jung), Blue Ocean differentiation (Kim & Mauborgne), and grammar-based generative systems. Core stays fixed (archetype, metaphor, narrative invariants); grammar defines axes of permitted variation with combination rules. Campaign-composer generates within the grammar; creative-director enforces. The result: infinite campaign variations that remain brand-coherent.
+
+### Registry updates
+
+- `src/agents/definitions.ts`: registered `brandArchitectAgent`, `campaignComposerAgent`, `creativeDirectorAgent`.
+- `src/agents/index.ts`: re-exports added.
+- `src/__tests__/agent-registry.test.ts`: bumped expected agent count 29 → 32.
+- `src/__tests__/skills.test.ts`: bumped skill counts 40→45 / 39→44 / 40→45; extended `expectedSkills` with `artifact-lifecycle`, `brand-architect`, `brand-steward`, `brand-variations-generate`, `product-strategist`.
+- `.claude-plugin/marketplace.json`: descriptions updated to reflect current counts (32 agents, 44 skills).
+
+All 49 tests in `agent-registry.test.ts` + `skills.test.ts` pass locally.
+
+### Context-Manifest standard (optional)
+
+New agents introduced in v4.15.0 follow a manifest convention in frontmatter:
+
+```yaml
+reads:
+  - path: ".omc/brand/core.md"
+    required: true
+    use: "Archetype, metaphor, voice ladder"
+writes:
+  - path: ".omc/brand/expressions/YYYY-MM-DD-{slug}/variation-{N}.md"
+    status_field: "draft | proposed | approved | rejected"
+    supersession: "new files per round; prior rounds retained for diffing"
+```
+
+See `docs/CONTEXT-MANIFEST.md` for the full specification. Existing agents continue to work unchanged; retrofit is opportunistic (when agents are modified for other reasons).
+
+### Known limitations
+
+- Context-Manifest is currently documentary — no runtime yet uses `reads:` / `writes:` declarations to filter context. Declaring honestly now prepares agents for future runtime optimization.
+- `artifact-lifecycle` uses best-effort metadata (filename date, frontmatter `updated:`, mtime fallback); agents following the standard produce richer signal but compliance is not a prerequisite.
+- `brand-architect` archetype selection has LOW confidence when `.omc/competitors/` is empty; skill wrapper prompts to run competitor-scout first.
+- `campaign-composer` produces specifications, not final assets — downstream designers/copywriters/executors turn specs into production.
+
+---
+
 # oh-my-claudecode v4.14.0: Product Development Framework
 
 ## Release Notes

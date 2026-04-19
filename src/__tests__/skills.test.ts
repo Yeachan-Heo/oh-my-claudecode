@@ -72,7 +72,7 @@ describe('Builtin Skills', () => {
     it('should return correct number of skills (33 canonical + 1 alias)', () => {
       const skills = createBuiltinSkills();
       // 34 entries: 33 canonical skills + 1 deprecated alias (psm)
-      expect(skills).toHaveLength(40);
+      expect(skills).toHaveLength(45);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -124,12 +124,17 @@ describe('Builtin Skills', () => {
       const expectedSkills = [
         'ask',
         'ai-slop-cleaner',
+        'artifact-lifecycle',
         'backend-pipeline',
+        'brand-architect',
+        'brand-steward',
+        'brand-variations-generate',
         'competitor-scout',
         'design-partner-manager',
         'ideate',
         'pre-launch-sprint',
         'product-pipeline',
+        'product-strategist',
         'autopilot',
         'cancel',
         'ccg',
@@ -524,7 +529,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(39);
+      expect(names).toHaveLength(44);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('ask');
       expect(names).toContain('autopilot');
@@ -558,7 +563,7 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131, psm still exists
-      expect(names).toHaveLength(40);
+      expect(names).toHaveLength(45);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('trace');
       expect(names).toContain('visual-verdict');

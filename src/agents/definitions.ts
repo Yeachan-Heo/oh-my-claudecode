@@ -245,6 +245,30 @@ export const domainExpertReviewerAgent: AgentConfig = {
   defaultModel: 'opus'
 };
 
+export const brandArchitectAgent: AgentConfig = {
+  name: 'brand-architect',
+  description: 'Designs the brand system (Jungian archetype, core metaphor, variation grammar) — self-sufficient discovery; produces .omc/brand/core.md + grammar.md (opus).',
+  prompt: loadAgentPrompt('brand-architect'),
+  model: 'opus',
+  defaultModel: 'opus'
+};
+
+export const campaignComposerAgent: AgentConfig = {
+  name: 'campaign-composer',
+  description: 'Generates N brand-coherent marketing/design/copy variations from grammar + brief, with grammar-traceability per variation (sonnet).',
+  prompt: loadAgentPrompt('campaign-composer'),
+  model: 'sonnet',
+  defaultModel: 'sonnet'
+};
+
+export const creativeDirectorAgent: AgentConfig = {
+  name: 'creative-director',
+  description: 'Brand-variation guardrail — enforces grammar invariants and variance gate on campaign variations; produces per-variation PASS/REVISE/REJECT verdict (opus, read-only).',
+  prompt: loadAgentPrompt('creative-director'),
+  model: 'opus',
+  defaultModel: 'opus'
+};
+
 // ============================================================
 // DEPRECATED ALIASES (Backward Compatibility)
 // ============================================================
@@ -369,6 +393,9 @@ export function getAgentDefinitions(options?: {
     'competitor-scout': competitorScoutAgent,
     ideate: ideateAgent,
     'domain-expert-reviewer': domainExpertReviewerAgent,
+    'brand-architect': brandArchitectAgent,
+    'campaign-composer': campaignComposerAgent,
+    'creative-director': creativeDirectorAgent,
 
     // ============================================================
     // BACKWARD COMPATIBILITY (Deprecated)
