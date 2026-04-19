@@ -94,8 +94,14 @@ describe('package dir resolution regression (#1322, #1324)', () => {
 
     expect(snippet).toContain('fileURLToPath(import.meta.url)');
     expect(snippet).toContain('currentDirName === "bridge"');
+    // esbuild renames repeated `join` imports with a numeric suffix that drifts
+    // whenever new modules add a `path.join` import. Match by shape, not literal
+    // suffix, so this regression check stays stable.
+    const joinReturnRe = /return join\d+\(__dirname2, "\.\.", "\.\."\)/;
+    const joinReturnMatch = snippet.match(joinReturnRe);
+    expect(joinReturnMatch).not.toBeNull();
     expect(snippet.indexOf('fileURLToPath(import.meta.url)')).toBeLessThan(
-      snippet.indexOf('return join7(__dirname2, "..", "..")'),
+      joinReturnMatch ? snippet.indexOf(joinReturnMatch[0]) : -1,
     );
   });
 
