@@ -7,12 +7,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/keyword-detector.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/keyword-detector.mjs",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/skill-injector.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/skill-injector.mjs",
             "timeout": 3
           }
         ]
@@ -24,17 +24,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/session-start.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/session-start.mjs",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-session.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-session.mjs",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-session-start.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-session-start.mjs",
             "timeout": 5
           }
         ]
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/setup-init.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/setup-init.mjs",
             "timeout": 30
           }
         ]
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/setup-maintenance.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/setup-maintenance.mjs",
             "timeout": 60
           }
         ]
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-tool-enforcer.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-tool-enforcer.mjs",
             "timeout": 3
           }
         ]
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/constitution-guard.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/constitution-guard.mjs",
             "timeout": 2
           }
         ]
@@ -88,7 +88,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/permission-handler.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/permission-handler.mjs",
             "timeout": 5
           }
         ]
@@ -100,17 +100,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-verifier.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-verifier.mjs",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-posttool.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-posttool.mjs",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-rules-injector.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-rules-injector.mjs",
             "timeout": 3
           }
         ]
@@ -122,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-use-failure.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-use-failure.mjs",
             "timeout": 3
           }
         ]
@@ -134,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/subagent-tracker.mjs start",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/subagent-tracker.mjs start",
             "timeout": 3
           }
         ]
@@ -146,12 +146,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/subagent-tracker.mjs stop",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/subagent-tracker.mjs stop",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/verify-deliverables.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/verify-deliverables.mjs",
             "timeout": 5
           }
         ]
@@ -163,17 +163,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-compact.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-compact.mjs",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-precompact.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/project-memory-precompact.mjs",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-pre-compact.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-pre-compact.mjs",
             "timeout": 3
           }
         ]
@@ -185,17 +185,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/context-guard-stop.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/context-guard-stop.mjs",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/persistent-mode.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/persistent-mode.mjs",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/code-simplifier.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/code-simplifier.mjs",
             "timeout": 5
           }
         ]
@@ -207,12 +207,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/session-end.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/session-end.mjs",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "\"/usr/local/bin/node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-session-end.mjs",
+            "command": "\"node\" \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-session-end.mjs",
             "timeout": 30
           }
         ]
