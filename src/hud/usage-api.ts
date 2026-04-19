@@ -52,7 +52,7 @@ interface UsageCache {
   /** Preserved error reason for accurate cache-hit reporting */
   errorReason?: UsageErrorReason;
   /** Provider that produced this cache entry */
-  source?: 'anthropic' | 'zai' | 'minimax';
+  source?: 'anthropic' | 'zai' | 'minimax' | 'bailian';
   /** Whether this cache entry was caused by a 429 rate limit response */
   rateLimited?: boolean;
   /** Consecutive 429 count for exponential backoff */
@@ -140,6 +140,20 @@ export function isMinimaxHost(urlString: string): boolean {
   }
 }
 
+/**
+ * Check if a URL points to Alibaba Cloud Bailian (百炼/dashscope).
+ * Matches dashscope.aliyuncs.com domains used by Bailian API endpoints.
+ */
+export function isBailianHost(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'dashscope.aliyuncs.com' || hostname.endsWith('.dashscope.aliyuncs.com');
+  } catch {
+    return false;
+  }
+}
+
 interface MinimaxModelRemain {
   model_name: string;
   current_interval_total_count: number;
@@ -174,7 +188,7 @@ function getLegacyCachePath(): string {
 /**
  * Get the provider-specific cache file path
  */
-function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
+function getCachePath(source: 'anthropic' | 'zai' | 'minimax' | 'bailian'): string {
   return join(getClaudeConfigDir(), 'plugins', 'oh-my-claudecode', `.usage-cache-${source}.json`);
 }
 
@@ -184,7 +198,7 @@ function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
  * and the legacy cache's source matches the current provider.
  * Does NOT delete the legacy file (rolling update safety).
  */
-function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
+function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax' | 'bailian'): void {
   try {
     const legacyPath = getLegacyCachePath();
     if (!existsSync(legacyPath)) return;
@@ -212,7 +226,7 @@ function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
 /**
  * Read cached usage data for a specific provider
  */
-function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
+function readCache(source: 'anthropic' | 'zai' | 'minimax' | 'bailian'): UsageCache | null {
   try {
     const cachePath = getCachePath(source);
     if (!existsSync(cachePath)) return null;
@@ -254,7 +268,7 @@ function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
 interface WriteCacheOptions {
   data: RateLimits | null;
   error?: boolean;
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: 'anthropic' | 'zai' | 'minimax' | 'bailian';
   rateLimited?: boolean;
   rateLimitedCount?: number;
   rateLimitedUntil?: number;
@@ -372,7 +386,7 @@ function getCachedUsageResult(cache: UsageCache): UsageResult {
 }
 
 function createRateLimitedCacheEntry(
-  source: 'anthropic' | 'zai' | 'minimax',
+  source: 'anthropic' | 'zai' | 'minimax' | 'bailian',
   data: RateLimits | null,
   pollIntervalMs: number,
   previousCount: number,
@@ -1048,7 +1062,7 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
  * Provider-specific pre-fetch logic (e.g., credential refresh) runs before calling this.
  */
 async function fetchAndCacheUsage<T>(opts: {
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: 'anthropic' | 'zai' | 'minimax' | 'bailian';
   fetchFn: () => Promise<FetchResult<T>>;
   parseFn: (data: T) => RateLimits | null;
   cache: UsageCache | null;
@@ -1115,9 +1129,10 @@ export async function getUsage(): Promise<UsageResult> {
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isMinimax = baseUrl != null && isMinimaxHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
+  const isBailian = baseUrl != null && isBailianHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const currentSource: 'anthropic' | 'zai' | 'minimax' =
-    isMinimax ? 'minimax' : isZai && authToken ? 'zai' : 'anthropic';
+  const currentSource: 'anthropic' | 'zai' | 'minimax' | 'bailian' =
+    isMinimax ? 'minimax' : isZai && authToken ? 'zai' : isBailian ? 'bailian' : 'anthropic';
   const pollIntervalMs = getUsagePollIntervalMs();
 
   // Migrate legacy single-file cache to provider-specific file (one-shot, best-effort)
@@ -1159,6 +1174,12 @@ export async function getUsage(): Promise<UsageResult> {
           cache,
           pollIntervalMs,
         });
+      }
+
+      // Bailian (百炼/dashscope) path: no standard Anthropic usage API
+      if (isBailian) {
+        writeCache({ data: null, error: true, source: 'bailian', errorReason: 'unsupported' });
+        return { rateLimits: null, error: 'unsupported' };
       }
 
       // Anthropic OAuth path (official Claude Code support)

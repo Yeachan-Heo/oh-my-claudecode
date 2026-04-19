@@ -39312,6 +39312,15 @@ function isMinimaxHost(urlString) {
     return false;
   }
 }
+function isBailianHost(urlString) {
+  try {
+    const url = new URL(urlString);
+    const hostname4 = url.hostname.toLowerCase();
+    return hostname4 === "dashscope.aliyuncs.com" || hostname4.endsWith(".dashscope.aliyuncs.com");
+  } catch {
+    return false;
+  }
+}
 function getLegacyCachePath() {
   return (0, import_path112.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".usage-cache.json");
 }
@@ -39991,8 +40000,9 @@ async function getUsage() {
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isMinimax = baseUrl != null && isMinimaxHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
+  const isBailian = baseUrl != null && isBailianHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const currentSource = isMinimax ? "minimax" : isZai && authToken ? "zai" : "anthropic";
+  const currentSource = isMinimax ? "minimax" : isZai && authToken ? "zai" : isBailian ? "bailian" : "anthropic";
   const pollIntervalMs = getUsagePollIntervalMs();
   migrateLegacyCache(currentSource);
   const initialCache = readCache(currentSource);
@@ -40026,6 +40036,10 @@ async function getUsage() {
           cache,
           pollIntervalMs
         });
+      }
+      if (isBailian) {
+        writeCache({ data: null, error: true, source: "bailian", errorReason: "unsupported" });
+        return { rateLimits: null, error: "unsupported" };
       }
       let creds = getCredentials();
       if (creds) {
@@ -41882,6 +41896,7 @@ function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
 function renderRateLimitsError(result) {
   if (!result?.error) return null;
   if (result.error === "no_credentials") return null;
+  if (result.error === "unsupported") return null;
   if (result.error === "rate_limited") {
     return result.rateLimits ? null : `${DIM4}[API 429]${RESET}`;
   }

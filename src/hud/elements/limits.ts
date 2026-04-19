@@ -301,10 +301,12 @@ export function renderRateLimitsWithBar(
  * - 'network': API timeout, HTTP error, or parse failure → [API err]
  * - 'auth': credentials expired, refresh failed → [API auth]
  * - 'no_credentials': no OAuth credentials (expected for API key users) → null (no display)
+ * - 'unsupported': provider has no standard Anthropic usage API (Bailian/dashscope) → null (no display)
  */
 export function renderRateLimitsError(result: UsageResult | null): string | null {
   if (!result?.error) return null;
   if (result.error === 'no_credentials') return null;
+  if (result.error === 'unsupported') return null;
   if (result.error === 'rate_limited') {
     // Prefer rendering stale usage percentages when available; only show the 429 badge
     // when there is no cached rate limit data to display.
