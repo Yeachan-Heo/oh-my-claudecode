@@ -66,7 +66,8 @@ export {
   uxArchitectAgent,
   uxResearcherAgent,
   competitorScoutAgent,
-  ideateAgent
+  ideateAgent,
+  domainExpertReviewerAgent
 } from './definitions.js';
 
 // Core exports (getAgentDefinitions and omcSystemPrompt)

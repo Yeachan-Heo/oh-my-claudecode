@@ -237,6 +237,14 @@ export const ideateAgent: AgentConfig = {
   defaultModel: 'opus'
 };
 
+export const domainExpertReviewerAgent: AgentConfig = {
+  name: 'domain-expert-reviewer',
+  description: 'Explicit proxy for domain-expert review — runs multi-persona pre-launch audit and produces a "questions for real expert" list (opus, read-only).',
+  prompt: loadAgentPrompt('domain-expert-reviewer'),
+  model: 'opus',
+  defaultModel: 'opus'
+};
+
 // ============================================================
 // DEPRECATED ALIASES (Backward Compatibility)
 // ============================================================
@@ -360,6 +368,7 @@ export function getAgentDefinitions(options?: {
     'ux-researcher': uxResearcherAgent,
     'competitor-scout': competitorScoutAgent,
     ideate: ideateAgent,
+    'domain-expert-reviewer': domainExpertReviewerAgent,
 
     // ============================================================
     // BACKWARD COMPATIBILITY (Deprecated)
