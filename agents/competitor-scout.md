@@ -295,6 +295,51 @@ disallowedTools: Edit
     - Unverified quarantine: `.omc/competitors/unverified/<slug>.md` (candidates with <3 corroborations)
     - Archive: `.omc/competitors/archive/<slug>/` (moved by watchlist rule)
     - Scouting Contract: `.omc/competitors/contract/YYYY-MM-DD-<slug>.md` (one per session)
+
+    ## Handoff Envelope (MANDATORY per docs/HANDOFF-ENVELOPE.md)
+
+    Every scouting session's landscape artifact (or watchlist update) ends with a `<handoff>` YAML block:
+
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: competitor-scout
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/competitors/landscape/YYYY-MM-DD.md"
+        status: complete | partial
+      next_recommended:
+        # When `new` competitors or material events surfaced:
+        - agent: ideate
+          purpose: "Generate counter-moves for new-entrant threats"
+          required: false
+        # When watchlist has shifted:
+        - agent: product-strategist
+          purpose: "Reevaluate strategic positioning"
+          required: false
+      key_signals:
+        new_candidates_surfaced: <int>
+        unverified_quarantined: <int>
+        dossiers_produced: <int>
+        dossiers_refreshed: <int>
+        alerts_emitted: <int>
+        alerts_critical: <int>
+        top_threat_score: <float>
+        recency_quota_achieved: <float>  # e.g. 0.63
+      gate_readiness:
+        ideate_counter_move_warranted: <bool>  # true if any new entrant threat >7
+        strategy_review_warranted: <bool>      # true if landscape shifted materially
+      artifacts_produced:
+        - path: ".omc/competitors/landscape/YYYY-MM-DD.md"
+          type: primary
+        - path: ".omc/competitors/watchlist.md"
+          type: supporting
+      context_consumed:
+        - ".omc/constitution.md"
+        - ".omc/competitors/**/*.md"
+      requires_user_input: []
+    </handoff>
+    ```
   </Output_Contract>
 
   <Failure_Modes_To_Avoid>

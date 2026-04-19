@@ -271,6 +271,49 @@ writes:
     forbidden_combinations_respected: true
     ---
     ```
+
+    ## Handoff Envelope (MANDATORY per docs/HANDOFF-ENVELOPE.md)
+
+    INDEX.md ends with:
+
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: campaign-composer
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/brand/expressions/YYYY-MM-DD-<campaign-slug>/INDEX.md"
+        status: complete | partial
+      next_recommended:
+        - agent: creative-director
+          purpose: "Grammar enforcement + Commodification Drift Detection"
+          required: true
+      key_signals:
+        variations_count: <int>
+        variables_exercised_count: <int>
+        variables_with_≥2_values: <int>
+        forbidden_pattern_matches_prescreen: 0  # must be 0 at emit time
+        inspiration_sources_distinct: <int>
+        semantic_layers_distribution: "layer2=X layer3=Y layer4=Z"
+        soul_marker_all_present: <bool>
+        competitor_echo_conflicts: <int>
+      gate_readiness:
+        director_review_needed: true
+        designer_ready: false  # true only after director PASS
+        copywriter_ready: false  # true only after director PASS
+      artifacts_produced:
+        - path: ".omc/brand/expressions/YYYY-MM-DD-<campaign-slug>/INDEX.md"
+          type: primary
+        - path: ".omc/brand/expressions/YYYY-MM-DD-<campaign-slug>/variation-*.md"
+          type: supporting
+      context_consumed:
+        - ".omc/brand/core.md"
+        - ".omc/brand/grammar.md"
+        - ".omc/brand/inspiration.md"
+        - ".omc/competitors/landscape/*.md"
+      requires_user_input: []
+    </handoff>
+    ```
   </Output_Contract>
 
   <Failure_Modes_To_Avoid>

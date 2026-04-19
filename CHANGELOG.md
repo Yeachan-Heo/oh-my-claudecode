@@ -1,3 +1,58 @@
+# oh-my-claudecode v4.16.0: Handoff Envelope + Digest System + Inspiration Fetch
+
+## Release Notes
+
+Minor release focused on framework-level efficiency and agent-interaction standardization. Adds three new skills, one standards document, and retrofits a handoff envelope into the seven agents introduced since v4.13.
+
+### New this release
+
+- **feat(docs): HANDOFF-ENVELOPE standard** (`docs/HANDOFF-ENVELOPE.md`) — schema for machine-readable `<handoff>` YAML blocks appended to every agent output. Downstream agents read ~200 tokens of envelope instead of ~5-10K tokens of prose to decide next step. Fields: `schema_version`, `produced_by`, `primary_artifact`, `next_recommended` (ordered), `key_signals` (quantitative only), `gate_readiness`, `artifacts_produced`, `context_consumed`, `requires_user_input`, `halt`.
+
+- **feat(skills): handoff-orchestrator** — follows envelope chains across agents/skills automatically. Reads latest artifact's envelope, invokes `next_recommended[0]`, loops until end-of-chain, halt, or blocking user input. Interactive by default (confirm between steps); `--auto` for unsupervised, `--max-steps=N` safety cap (default 10), `--stop-at=<agent>` checkpoint, `--dry-run` preview.
+
+- **feat(skills): digest-maintain** — framework efficiency utility. Generates and maintains `.omc/digests/` — short-form summaries of constitution (~300 tokens vs ~3K full), competitors landscape, research highlights, brand core, ideas shortlist, classification. Agents read digests by default; fall back to full artifact only when specifics needed. ~90% token reduction on repeat reads across agents in a session. Documents PostToolUse hook pattern for auto-refresh; hook config is opt-in (not force-installed).
+
+- **feat(skills): inspiration-fetch** — MCP-independent fetcher that parses public URLs (are.na boards, Figma public files, Unsplash collections, Pinterest public boards, GitHub repos, generic web pages) via WebFetch into draft inspiration entries for `.omc/brand/inspiration/drafts/`. User reviews and refines drafts, then `/brand-architect --inspiration` merges approved ones into the main library. Preferred path over community-MCP dependency to remain resilient to ecosystem churn. Supports optional `--prefer-mcp` mode for users who install Figma's official MCP.
+
+### Retrofitted
+
+Seven agents introduced in v4.13-4.15.1 now emit `<handoff>` envelopes at end of primary artifact:
+- `ideate` — envelope includes shortlist_count, convergent_cluster_count, anti_goal_watchlist_count, gate readiness (critic_needed, strategist_needed)
+- `competitor-scout` — envelope includes new_candidates_surfaced, alerts_critical, top_threat_score, gate readiness (ideate_counter_move_warranted)
+- `domain-expert-reviewer` — envelope includes personas_engaged, critical_findings_cited, launch_recommendation, gate readiness (real_expert_validation_required)
+- `brand-architect` — envelope includes archetype_primary, grammar_invariant_count, inspiration_source_count, gate readiness (campaign_composer_ready)
+- `brand-steward` — envelope includes session_number, anti_goals_competitor_cited count, gate readiness (brand_architect_ready)
+- `campaign-composer` — envelope includes variations_count, forbidden_pattern_matches_prescreen, inspiration_sources_distinct, gate readiness (director_review_needed)
+- `creative-director` — envelope includes variations_pass/revise/reject counts, commodification-drift signals, gate readiness (designer_ready, brand_architect_review_needed)
+
+- **feat(agents): brand-architect** also gains Phase 2.5 reference to the `inspiration-fetch` skill workflow: user provides URLs → `inspiration-fetch` produces drafts → user refines → `brand-architect --inspiration` merges.
+
+### Known limitations (honestly scoped out)
+
+- **Prompt caching with `cache_control`** was considered but deferred: OMC registers agent prompts as `prompt: string`, and the runtime that sends them to the Anthropic API is Claude Code's native agent-invocation layer — outside the plugin's control. Achieving prompt caching would require Claude Code SDK changes, not OMC changes.
+- **Runtime Context-Manifest enforcement** (filtering context based on agent `reads:` declarations) deferred to v4.17+ — requires middleware in the agent-invocation layer.
+- **Multi-model phase routing** (haiku for context-loading, opus for reasoning within same invocation) deferred indefinitely — infrastructure-heavy for modest relief.
+- **Auto-install of PostToolUse hook for digest-maintain** not forced in v4.16 — the skill documents the hook pattern; users opt in manually by editing `hooks/hooks.json`. This avoids surprising users with new automated behavior on upgrade.
+
+### Registry updates
+
+- No new agents in this release (envelope retrofit is content, not structural).
+- Three new skills: `handoff-orchestrator`, `digest-maintain`, `inspiration-fetch`.
+- `src/__tests__/skills.test.ts`: bumped counts 45→48 (createBuiltinSkills), 44→47 (canonical names), 45→48 (with aliases); extended expectedSkills.
+- No changes to `src/agents/definitions.ts` (no new agents registered).
+- `.claude-plugin/marketplace.json`: description updated to reflect current counts (32 agents, 47 skills).
+
+All 49 tests in `agent-registry.test.ts` + `skills.test.ts` pass.
+
+### Migration notes
+
+- Pre-v4.16 artifacts don't have handoff envelopes; `handoff-orchestrator` gracefully terminates chains at agents that don't emit envelopes (reports "chain terminated — <agent> did not emit envelope").
+- To get the digest efficiency benefit today, run `/digest-maintain --regenerate-all` once; thereafter, either run periodically (`/loop 24h /digest-maintain`) or enable the PostToolUse hook per `skills/digest-maintain/SKILL.md` Hook_Configuration section.
+- The `inspiration-fetch` skill does NOT require any MCP to be installed — works out of the box via WebFetch. Figma MCP is optional and used only with `--prefer-mcp` flag.
+- Existing brand-architect runs from v4.15 continue to work; run `/brand-architect --refine` to add the new inspiration library Phase 2.5 to your existing brand artifacts.
+
+---
+
 # oh-my-claudecode v4.15.1: Conversational brand-steward + Anti-commodity brand system
 
 ## Release Notes

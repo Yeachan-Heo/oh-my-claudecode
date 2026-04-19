@@ -263,6 +263,53 @@ disallowedTools: Edit
     Supporting artifacts:
     - `.omc/ideas/raw/YYYY-MM-DD-<method>-<slug>.md` (per method)
     - `.omc/ideas/clusters/YYYY-MM-DD-<slug>.md` (clustering working notes)
+
+    ## Handoff Envelope (MANDATORY per docs/HANDOFF-ENVELOPE.md)
+
+    Every primary artifact ends with a `<handoff>` YAML block. Schema:
+
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: ideate
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/ideas/YYYY-MM-DD-<slug>.md"
+        status: complete | partial | halted
+      next_recommended:
+        - agent: critic
+          purpose: "Red-team shortlist per Phase 6 protocol"
+          required: true
+        - agent: product-strategist
+          purpose: "Anti-goal gate shortlist after red-team"
+          required: true
+        - skill: priority-engine
+          purpose: "Rank shortlist against backlog"
+          required: false
+      key_signals:
+        shortlist_count: <int>
+        convergent_cluster_count: <int>
+        outliers_kept: <int>
+        requires_validation_count: <int>
+        anti_goal_watchlist_count: <int>
+        methods_run: <int>
+        diversity_ratio: <float>
+      gate_readiness:
+        critic_needed: true
+        strategist_needed: true
+        priority_engine_needed: <bool>
+      artifacts_produced:
+        - path: ".omc/ideas/YYYY-MM-DD-<slug>.md"
+          type: primary
+        - path: ".omc/ideas/clusters/YYYY-MM-DD-<slug>.md"
+          type: supporting
+      context_consumed:
+        - ".omc/constitution.md"
+        - ".omc/competitors/**/*.md"
+        - ".omc/research/**/*.md"
+      requires_user_input: []
+    </handoff>
+    ```
   </Output_Contract>
 
   <Failure_Modes_To_Avoid>

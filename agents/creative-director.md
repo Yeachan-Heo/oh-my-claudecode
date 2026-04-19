@@ -303,6 +303,64 @@ writes:
     - Campaign-level verdict + recommended next actions (Phase 8)
 
     Evidence format (mandatory): every finding cites grammar.md or core.md with line reference.
+
+    ## Handoff Envelope (MANDATORY per docs/HANDOFF-ENVELOPE.md)
+
+    Review artifact ends with:
+
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: creative-director
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/brand/reviews/YYYY-MM-DD-<campaign-slug>.md"
+        status: approved | partial-approval | blocked
+      next_recommended:
+        # For PASS variations:
+        - agent: designer
+          purpose: "Execute visual production for PASS variations"
+          required: false
+        - agent: copywriter
+          purpose: "Final copy polish for PASS variations"
+          required: false
+        # For REVISE variations:
+        - agent: campaign-composer
+          purpose: "Regenerate specific variations per review findings"
+          required: <true if any REVISE>
+        # If commodification-drift or brand-drift-over-time detected:
+        - agent: brand-architect
+          purpose: "Review grammar for under-variation or drift accumulation"
+          required: <true if drift>
+      key_signals:
+        variations_pass: <int>
+        variations_revise: <int>
+        variations_reject: <int>
+        forbidden_pattern_matches: <int>  # should be 0 for healthy pipeline
+        inspiration_citation_vague: <int>
+        semantic_layer_flat: <int>
+        soul_marker_vague: <int>
+        cross_variation_inspiration_diversity: <int>  # distinct sources across set
+        brand_drift_signals: <int>
+        competitor_echo_conflicts: <int>
+      gate_readiness:
+        designer_ready: <bool>        # true when ≥1 PASS
+        copywriter_ready: <bool>
+        composer_regenerate_needed: <bool>
+        brand_architect_review_needed: <bool>
+      artifacts_produced:
+        - path: ".omc/brand/reviews/YYYY-MM-DD-<campaign-slug>.md"
+          type: primary
+      context_consumed:
+        - ".omc/brand/core.md"
+        - ".omc/brand/grammar.md"
+        - ".omc/brand/inspiration.md"
+        - ".omc/brand/expressions/YYYY-MM-DD-<campaign-slug>/**"
+        - ".omc/competitors/landscape/*.md"
+        - ".omc/brand/expressions/**/INDEX.md"
+      requires_user_input: []
+    </handoff>
+    ```
   </Output_Contract>
 
   <Failure_Modes_To_Avoid>

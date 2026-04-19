@@ -260,6 +260,54 @@ disallowedTools: Edit
     ## Confidence Summary
     CITED: <n> | INFERRED: <n> | DOMAIN-KNOWLEDGE: <n>
     ```
+
+    ## Handoff Envelope (MANDATORY per docs/HANDOFF-ENVELOPE.md)
+
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: domain-expert-reviewer
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/expert-review/YYYY-MM-DD-<domain>-<slug>.md"
+        status: complete
+      next_recommended:
+        # If launch recommendation is HOLD or DO-NOT-LAUNCH:
+        - agent: product-strategist
+          purpose: "Scope revision in light of proxy review findings"
+          required: true
+        # If CRITICAL findings are CITED:
+        - agent: executor
+          purpose: "Remediate CITED CRITICAL findings"
+          required: true
+        # Always:
+        - agent: user
+          purpose: "Schedule real-expert validation sessions per Questions for Real Expert list"
+          required: true
+      key_signals:
+        personas_engaged: <int>
+        critical_findings_cited: <int>
+        critical_findings_domain_knowledge: <int>
+        major_findings: <int>
+        minor_findings: <int>
+        launch_recommendation: GO | GO-with-risk-register | HOLD | DO-NOT-LAUNCH
+        confidence_high_count: <int>
+        confidence_low_count: <int>
+      gate_readiness:
+        real_expert_validation_required: true
+        remediation_required: <bool>
+        constitution_update_warranted: <bool>
+      artifacts_produced:
+        - path: ".omc/expert-review/YYYY-MM-DD-<domain>-<slug>.md"
+          type: primary
+      context_consumed:
+        - ".omc/constitution.md"
+        - ".omc/research/**/*.md"
+      requires_user_input:
+        - question: "Schedule real-expert session for <persona-role>?"
+          blocking: false
+    </handoff>
+    ```
   </Output_Contract>
 
   <Failure_Modes_To_Avoid>

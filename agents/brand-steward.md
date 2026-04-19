@@ -119,22 +119,55 @@ level: 3
   </Execution_Policy>
 
   <Output_Format>
-    ## Brand Steward Report
+    Terminal synthesis message (Phase D) contains constitution draft for user review. After user confirms (Phase E), write `.omc/constitution.md` with `status` field + append `<handoff>` envelope per `docs/HANDOFF-ENVELOPE.md`.
 
-    **Constitution status:** [draft / partial / complete]
-    **Sections updated this session:** [list]
+    Constitution file ends with:
 
-    ### Changes Made
-    - [Section]: [before] -> [after] (or "created")
-
-    ### Internal Consistency Check
-    - [Any contradictions surfaced and how they were resolved]
-
-    ### Open Questions
-    - [ ] [Unresolved brand decision] -- [why it matters before implementation proceeds]
-
-    ### Handoffs
-    - [Agent]: [specific context to pass along]
+    ```yaml
+    <handoff>
+      schema_version: 1
+      produced_by: brand-steward
+      produced_at: YYYY-MM-DD
+      primary_artifact:
+        path: ".omc/constitution.md"
+        status: draft | partial | complete
+      next_recommended:
+        # After session 1:
+        - agent: brand-architect
+          purpose: "Design archetype + grammar from strategic foundation"
+          required: true
+        # If session 1 and constitution is partial, also:
+        - agent: brand-steward
+          purpose: "Session 2 refinement in 10-14 days after accumulated data"
+          required: false
+        # If anti-goals flagged for specific competitor reference:
+        - agent: competitor-scout
+          purpose: "Deep-dive on flagged competitors if not yet scouted"
+          required: false
+      key_signals:
+        session_number: 1 | 2 | refine
+        mission_filled: <bool>
+        target_user_filled: <bool>
+        anti_goals_count: <int>
+        anti_goals_competitor_cited: <int>  # how many cite a specific competitor
+        principles_count: <int>
+        tone_hints_filled: <bool>
+        scope_boundaries_filled: <bool>
+      gate_readiness:
+        product_strategist_ready: <bool>  # true when anti_goals_count >= 3 AND all competitor-cited
+        brand_architect_ready: <bool>     # true when mission + target_user + anti_goals present
+        refinement_recommended_at: "YYYY-MM-DD (≈10-14 days from now)"
+      artifacts_produced:
+        - path: ".omc/constitution.md"
+          type: primary
+      context_consumed:
+        - ".omc/competitors/**/*.md"
+        - ".omc/research/**/*.md"
+        - ".omc/brand/**/*.md"
+      requires_user_input:
+        # Populated with any Open Questions surfaced during discovery
+    </handoff>
+    ```
   </Output_Format>
 
   <Failure_Modes_To_Avoid>
