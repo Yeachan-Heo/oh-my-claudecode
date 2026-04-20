@@ -57,7 +57,14 @@ export function shouldInjectContract(
   provider: CliAgentType | null | undefined,
 ): boolean {
   if (!role || !provider) return false;
-  if (provider === 'claude') return false;
+  // Claude workers speak through the team messaging API directly.
+  // Cursor workers run as interactive REPLs — they cannot perform the
+  // write-verdict-and-exit dance the contract requires, so reviewer
+  // roles must not be assigned to cursor in the first place. The
+  // role-router and worker-bootstrap guidance both flag this; here we
+  // simply skip contract injection if a cursor worker somehow lands on
+  // a CONTRACT_ROLES role rather than emit instructions it cannot follow.
+  if (provider === 'claude' || provider === 'cursor') return false;
   return CONTRACT_ROLES.has(role);
 }
 

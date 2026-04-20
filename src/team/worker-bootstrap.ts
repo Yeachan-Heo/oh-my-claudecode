@@ -73,6 +73,13 @@ function agentTypeGuidance(agentType: CliAgentType): string {
         '- Keep commit-sized changes scoped to assigned files only; no broad refactors.',
         `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`,
       ].join('\n');
+    case 'cursor':
+      return [
+        '### Agent-Type Guidance (cursor)',
+        '- You are an interactive REPL (cursor-agent), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.',
+        `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT type \`/exit\` unless the leader sends an explicit shutdown.`,
+        '- Reviewer/critic/security-review roles are NOT supported for cursor workers — those require a verdict-file write-and-exit which the REPL does not perform. Take only executor-style tasks.',
+      ].join('\n');
     case 'claude':
     default:
       return [
