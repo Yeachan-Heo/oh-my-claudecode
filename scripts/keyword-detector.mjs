@@ -860,7 +860,11 @@ async function main() {
     }
 
     // Autopilot keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto pilot|auto-pilot|autonomous|full auto|fullsend)\b|(오토파일럿)/i) ||
+    // "autonomous" intentionally excluded — it is too common in technical and
+    // research prose (e.g. "autonomous driving", "autonomous agent") to be a
+    // reliable trigger. Aligns with src/hooks/keyword-detector/index.ts and
+    // templates/hooks/keyword-detector.mjs, which already exclude it.
+    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto pilot|auto-pilot|full auto|fullsend)\b|(오토파일럿)/i) ||
         hasActionableKeyword(cleanPrompt, /\b(build|create|make)\s+me\s+(an?\s+)?(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
         hasActionableKeyword(cleanPrompt, /\bi\s+want\s+a\s+/i) ||
         hasActionableKeyword(cleanPrompt, /\bi\s+want\s+an\s+/i) ||

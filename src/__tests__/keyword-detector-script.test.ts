@@ -356,4 +356,37 @@ diff --git a/a b/b
     expect(context).toContain('<code-review-mode>');
     expect(context).not.toContain('[MAGIC KEYWORD: CODE-REVIEW]');
   });
+
+  // Regression: "autonomous" appearing in technical / research prose must not
+  // trigger autopilot (false positive previously created spurious
+  // autopilot-state.json and a stop-hook loop). The TS source and the
+  // templates/hooks mjs already exclude the word; this test guards the
+  // deployed scripts/keyword-detector.mjs against drift.
+  it('does not activate autopilot when "autonomous" appears in technical prose', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autonomous-'));
+    const sessionId = 'session-autonomous-regression';
+    const output = runKeywordDetector(
+      'DriveVLA-W0: World Models Amplify Data Scaling Law in Autonomous Driving — please summarize this paper.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const autopilotStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(autopilotStatePath)).toBe(false);
+  });
+
+  it('still activates autopilot for an explicit autopilot invocation (positive control)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-positive-'));
+    const sessionId = 'session-autopilot-positive';
+    const output = runKeywordDetector('autopilot build a todo CLI', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const autopilotStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(autopilotStatePath)).toBe(true);
+  });
 });
