@@ -1,25 +1,25 @@
-# oh-my-claudecode v4.18.0: synthesis-first brand-steward +
+# oh-my-claudecode v4.18.1: Bug Fixes
 
 ## Release Notes
 
-Release with **1 new feature** across **0 merged PRs**.
+Release with **1 bug fix** across **0 merged PRs**.
 
 ### Highlights
 
-- **feat(agents,skills): synthesis-first brand-steward + research-aware analyst/planner**
+- **fix(agents,skills): correct vision-source paths in brand-steward gate**
 
-### New Features
+### Bug Fixes
 
-- **feat(agents,skills): synthesis-first brand-steward + research-aware analyst/planner**
+- **fix(agents,skills): correct vision-source paths in brand-steward gate**
 
 ### Stats
 
-- **0 PRs merged** | **1 new feature** | **0 bug fixes** | **0 security/hardening improvements** | **0 other changes**
+- **0 PRs merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **0 other changes**
 
 ### Install / Update
 
 ```bash
-npm install -g oh-my-claude-sisyphus@4.18.0
+npm install -g oh-my-claude-sisyphus@4.18.1
 ```
 
 Or reinstall the plugin:
@@ -27,4 +27,4 @@ Or reinstall the plugin:
 claude /install-plugin oh-my-claudecode
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.17.2...v4.18.0
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.18.0...v4.18.1
