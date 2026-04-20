@@ -1,4 +1,4 @@
-# oh-my-claudecode v4.17.0: add stack-provision for
+# oh-my-claudecode v4.17.1: add opt-in depth
 
 ## Release Notes
 
@@ -6,11 +6,11 @@ Release with **1 new feature** across **0 merged PRs**.
 
 ### Highlights
 
-- **feat(skills): add stack-provision for stack-driven skill derivation**
+- **feat(agents): add opt-in depth mode to brand-steward**
 
 ### New Features
 
-- **feat(skills): add stack-provision for stack-driven skill derivation**
+- **feat(agents): add opt-in depth mode to brand-steward**
 
 ### Stats
 
