@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/manifest.schema.json",
+  "title": "Stack Provision Install Manifest",
+  "type": "object",
+  "required": ["schema_version", "run_id", "status", "installed", "rollback"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["success", "partial", "failed", "rejected", "dry_run", "rolled_back"] },
+    "installed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "source", "target_path", "sha256"],
+        "properties": {
+          "slug": { "type": "string" },
+          "source": { "type": "string" },
+          "target_path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^sha256:" },
+          "backup_path": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "rollback": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "target_path"],
+        "properties": {
+          "operation": { "enum": ["remove", "restore_backup", "manual_plugin_uninstall"] },
+          "target_path": { "type": "string" },
+          "backup_path": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "pending_user_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "slug", "source", "command"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "slug": { "type": "string" },
+          "source": { "type": "string" },
+          "command": { "type": "string" },
+          "rollback": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -208,6 +208,16 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('`psm.sh`');
     });
 
+    it('should surface stack-provision contract resources', () => {
+      const skill = getBuiltinSkill('stack-provision');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('## Skill Resources');
+      expect(skill?.template).toContain('skills/stack-provision');
+      expect(skill?.template).toContain('`config/`');
+      expect(skill?.template).toContain('`schemas/`');
+      expect(skill?.template).toContain('`scripts/`');
+    });
+
     it('stages mcp-setup AskUserQuestion menus so each prompt stays within the current option limit', () => {
       const skill = getBuiltinSkill('mcp-setup');
       expect(skill).toBeDefined();

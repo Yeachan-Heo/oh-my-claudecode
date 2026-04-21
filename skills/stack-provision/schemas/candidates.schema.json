@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/candidates.schema.json",
+  "title": "Stack Provision Candidate Discovery",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_at", "sources", "warnings", "candidates"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "sources": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "source",
+          "title",
+          "slug",
+          "summary",
+          "covered_cells",
+          "risk_flags",
+          "sha256",
+          "score",
+          "install"
+        ],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "source": { "type": "string" },
+          "title": { "type": "string" },
+          "slug": { "type": "string" },
+          "summary": { "type": "string" },
+          "url": { "type": ["string", "null"] },
+          "path": { "type": ["string", "null"] },
+          "install_target": { "type": ["string", "null"] },
+          "covered_surface": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "covered_technology": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "covered_aspects": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "covered_cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["cell_id", "surface", "technology", "aspect", "score"],
+              "properties": {
+                "cell_id": { "type": "string" },
+                "surface": { "type": "string" },
+                "technology": { "type": "string" },
+                "aspect": { "type": "string" },
+                "score": { "type": "number" }
+              },
+              "additionalProperties": true
+            }
+          },
+          "risk_flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "sha256": { "type": "string", "pattern": "^sha256:" },
+          "score": { "type": "number" },
+          "install": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "enum": ["copy-skill", "download-skill", "plugin-install", "external-command"]
+              },
+              "source_path": { "type": "string" },
+              "source_url": { "type": "string" },
+              "target_slug": { "type": "string" },
+              "target": { "type": "string" },
+              "command": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

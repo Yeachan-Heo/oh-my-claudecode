@@ -1,0 +1,542 @@
+{
+  "schema_version": 2,
+  "surfaces": {
+    "backend": {
+      "description": "Server-side product capability: APIs, data, auth, integration boundaries, reliability, and security.",
+      "default_aspects": [
+        "api-design",
+        "database",
+        "auth",
+        "security",
+        "observability",
+        "testing",
+        "performance"
+      ],
+      "tech_match": [
+        "node",
+        "express",
+        "fastify",
+        "nestjs",
+        "fastapi",
+        "django",
+        "rails",
+        "spring",
+        "go",
+        "rust",
+        "postgres",
+        "mysql",
+        "redis",
+        "prisma",
+        "supabase",
+        "graphql",
+        "rest",
+        "queue",
+        "kafka"
+      ],
+      "capability_packs": [
+        "api-contracts",
+        "database-performance",
+        "auth-security",
+        "observability",
+        "backend-testing"
+      ]
+    },
+    "frontend-engineering": {
+      "description": "Client-side implementation capability: components, state, routing, forms, accessibility, performance, and test automation.",
+      "default_aspects": [
+        "component-architecture",
+        "state",
+        "routing",
+        "forms",
+        "accessibility",
+        "performance",
+        "testing",
+        "visual-regression"
+      ],
+      "tech_match": [
+        "react",
+        "next",
+        "next.js",
+        "remix",
+        "vue",
+        "nuxt",
+        "svelte",
+        "sveltekit",
+        "solid",
+        "tailwind",
+        "shadcn",
+        "storybook",
+        "vite",
+        "vitest",
+        "playwright",
+        "cypress"
+      ],
+      "capability_packs": [
+        "frontend-architecture",
+        "accessibility",
+        "frontend-performance",
+        "frontend-testing",
+        "visual-regression"
+      ]
+    },
+    "frontend-product": {
+      "description": "Product UX capability: flows, onboarding, empty/error states, copy, analytics, experiments, and user feedback loops.",
+      "default_aspects": [
+        "ux-patterns",
+        "flows",
+        "onboarding",
+        "empty-states",
+        "copy",
+        "analytics",
+        "experimentation"
+      ],
+      "tech_match": [
+        "product",
+        "ux",
+        "analytics",
+        "posthog",
+        "amplitude",
+        "segment",
+        "onboarding",
+        "forms"
+      ],
+      "capability_packs": [
+        "ux-architecture",
+        "copy-and-tone",
+        "product-analytics",
+        "research-synthesis"
+      ]
+    },
+    "visual-creative": {
+      "description": "Creative visual capability: art direction, visual language, inspiration synthesis, generated assets, typography, iconography, illustration, motion, and visual QA.",
+      "default_aspects": [
+        "art-direction",
+        "visual-language",
+        "inspiration-synthesis",
+        "image-generation",
+        "iconography",
+        "typography",
+        "illustration",
+        "motion",
+        "brand-assets",
+        "visual-qa"
+      ],
+      "tech_match": [
+        "figma",
+        "framer",
+        "framer-motion",
+        "motion",
+        "three",
+        "three.js",
+        "canvas",
+        "webgl",
+        "gsap",
+        "lottie",
+        "rive",
+        "svg",
+        "typography",
+        "font",
+        "illustration",
+        "icon",
+        "image",
+        "visual",
+        "brand"
+      ],
+      "capability_packs": [
+        "brand-system",
+        "creative-direction",
+        "inspiration-ledger",
+        "image-generation",
+        "motion-system",
+        "visual-qa",
+        "meaning-driven-ui"
+      ],
+      "required_context": [
+        ".omc/constitution.md",
+        ".omc/brand/index.md",
+        ".omc/brand/core.md",
+        ".omc/brand/grammar.md",
+        ".omc/brand/inspiration.md",
+        ".omc/brand/expressions/current.md",
+        ".omc/digests/competitors-landscape.md",
+        ".omc/ideas/current.md"
+      ]
+    },
+    "mobile": {
+      "description": "Native and cross-platform mobile capability: platform APIs, navigation, state, offline data, accessibility, release readiness.",
+      "default_aspects": [
+        "architecture",
+        "navigation",
+        "state",
+        "offline-data",
+        "platform-apis",
+        "accessibility",
+        "testing",
+        "performance"
+      ],
+      "tech_match": [
+        "flutter",
+        "dart",
+        "react-native",
+        "kotlin",
+        "swift",
+        "ios",
+        "android"
+      ],
+      "capability_packs": [
+        "mobile-architecture",
+        "mobile-testing",
+        "mobile-accessibility",
+        "mobile-performance"
+      ]
+    },
+    "infra-devops": {
+      "description": "Deployment and operational capability: CI/CD, containers, cloud infra, secrets, runtime monitoring, rollback.",
+      "default_aspects": [
+        "ci-cd",
+        "containers",
+        "infrastructure",
+        "secrets",
+        "monitoring",
+        "rollback",
+        "cost"
+      ],
+      "tech_match": [
+        "docker",
+        "kubernetes",
+        "terraform",
+        "pulumi",
+        "aws",
+        "gcp",
+        "azure",
+        "vercel",
+        "cloudflare",
+        "github-actions"
+      ],
+      "capability_packs": [
+        "deployment",
+        "infra-security",
+        "observability",
+        "release-engineering"
+      ]
+    },
+    "data-ai": {
+      "description": "Data and AI capability: pipelines, evaluation, model APIs, vector search, quality, observability, and cost controls.",
+      "default_aspects": [
+        "pipelines",
+        "data-quality",
+        "model-apis",
+        "evals",
+        "vector-search",
+        "observability",
+        "cost"
+      ],
+      "tech_match": [
+        "airflow",
+        "dbt",
+        "pandas",
+        "spark",
+        "openai",
+        "anthropic",
+        "langchain",
+        "llamaindex",
+        "pgvector",
+        "pinecone",
+        "weaviate",
+        "chromadb"
+      ],
+      "capability_packs": [
+        "data-pipelines",
+        "data-quality",
+        "ai-evals",
+        "vector-search",
+        "ai-cost-observability"
+      ]
+    }
+  },
+  "capability_packs": {
+    "brand-system": {
+      "agents": [
+        "brand-architect",
+        "brand-steward"
+      ],
+      "skills": [
+        "brand-architect",
+        "brand-steward",
+        "brand-variations-generate"
+      ]
+    },
+    "creative-direction": {
+      "agents": [
+        "creative-director",
+        "campaign-composer",
+        "designer"
+      ],
+      "skills": [
+        "brand-variations-generate",
+        "inspiration-fetch",
+        "visual-verdict"
+      ]
+    },
+    "inspiration-ledger": {
+      "agents": [
+        "competitor-scout",
+        "ideate",
+        "brand-architect"
+      ],
+      "skills": [
+        "competitor-scout",
+        "ideate",
+        "inspiration-fetch",
+        "digest-maintain"
+      ]
+    },
+    "image-generation": {
+      "agents": [
+        "designer",
+        "creative-director"
+      ],
+      "skills": [
+        "imagegen",
+        "meaning-driven-ui-builder",
+        "visual-verdict"
+      ],
+      "optional_external": true
+    },
+    "motion-system": {
+      "agents": [
+        "designer",
+        "performance-guardian",
+        "accessibility-auditor"
+      ],
+      "skills": [
+        "visual-verdict"
+      ]
+    },
+    "visual-qa": {
+      "agents": [
+        "designer",
+        "accessibility-auditor",
+        "performance-guardian"
+      ],
+      "skills": [
+        "visual-verdict"
+      ]
+    },
+    "meaning-driven-ui": {
+      "agents": [
+        "designer",
+        "ux-architect",
+        "creative-director"
+      ],
+      "skills": [
+        "meaning-driven-ui-builder"
+      ],
+      "optional_external": true
+    },
+    "frontend-architecture": {
+      "agents": [
+        "architect",
+        "designer",
+        "executor"
+      ],
+      "skills": []
+    },
+    "accessibility": {
+      "agents": [
+        "accessibility-auditor"
+      ],
+      "skills": []
+    },
+    "frontend-performance": {
+      "agents": [
+        "performance-guardian"
+      ],
+      "skills": []
+    },
+    "frontend-testing": {
+      "agents": [
+        "test-engineer"
+      ],
+      "skills": []
+    },
+    "visual-regression": {
+      "agents": [
+        "designer",
+        "test-engineer"
+      ],
+      "skills": [
+        "visual-verdict"
+      ]
+    },
+    "ux-architecture": {
+      "agents": [
+        "ux-architect",
+        "ux-researcher"
+      ],
+      "skills": []
+    },
+    "copy-and-tone": {
+      "agents": [
+        "copywriter",
+        "brand-steward"
+      ],
+      "skills": []
+    },
+    "product-analytics": {
+      "agents": [
+        "product-strategist",
+        "analyst"
+      ],
+      "skills": []
+    },
+    "research-synthesis": {
+      "agents": [
+        "ux-researcher",
+        "analyst"
+      ],
+      "skills": [
+        "design-partner-manager"
+      ]
+    },
+    "api-contracts": {
+      "agents": [
+        "architect",
+        "executor",
+        "code-reviewer"
+      ],
+      "skills": []
+    },
+    "database-performance": {
+      "agents": [
+        "architect",
+        "performance-guardian"
+      ],
+      "skills": [
+        "supabase-postgres-best-practices"
+      ],
+      "optional_external": true
+    },
+    "auth-security": {
+      "agents": [
+        "security-reviewer",
+        "architect"
+      ],
+      "skills": []
+    },
+    "observability": {
+      "agents": [
+        "performance-guardian",
+        "debugger"
+      ],
+      "skills": []
+    },
+    "backend-testing": {
+      "agents": [
+        "test-engineer"
+      ],
+      "skills": []
+    },
+    "mobile-architecture": {
+      "agents": [
+        "architect",
+        "executor"
+      ],
+      "skills": [
+        "flutter-architecting-apps",
+        "flutter-expert"
+      ],
+      "optional_external": true
+    },
+    "mobile-testing": {
+      "agents": [
+        "test-engineer"
+      ],
+      "skills": [
+        "flutter-testing",
+        "flutter-tester"
+      ],
+      "optional_external": true
+    },
+    "mobile-accessibility": {
+      "agents": [
+        "accessibility-auditor"
+      ],
+      "skills": [
+        "flutter-improving-accessibility"
+      ],
+      "optional_external": true
+    },
+    "mobile-performance": {
+      "agents": [
+        "performance-guardian"
+      ],
+      "skills": [
+        "flutter-reducing-app-size"
+      ],
+      "optional_external": true
+    },
+    "deployment": {
+      "agents": [
+        "architect",
+        "debugger"
+      ],
+      "skills": []
+    },
+    "infra-security": {
+      "agents": [
+        "security-reviewer"
+      ],
+      "skills": []
+    },
+    "release-engineering": {
+      "agents": [
+        "git-master",
+        "verifier"
+      ],
+      "skills": []
+    },
+    "data-pipelines": {
+      "agents": [
+        "architect",
+        "executor"
+      ],
+      "skills": [
+        "airflow-dag-patterns"
+      ],
+      "optional_external": true
+    },
+    "data-quality": {
+      "agents": [
+        "test-engineer",
+        "analyst"
+      ],
+      "skills": [
+        "data-quality-frameworks"
+      ],
+      "optional_external": true
+    },
+    "ai-evals": {
+      "agents": [
+        "analyst",
+        "test-engineer",
+        "critic"
+      ],
+      "skills": []
+    },
+    "vector-search": {
+      "agents": [
+        "architect",
+        "performance-guardian"
+      ],
+      "skills": []
+    },
+    "ai-cost-observability": {
+      "agents": [
+        "performance-guardian",
+        "analyst"
+      ],
+      "skills": []
+    }
+  }
+}

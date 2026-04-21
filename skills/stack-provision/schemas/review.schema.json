@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/review.schema.json",
+  "title": "Stack Provision Review Decision",
+  "type": "object",
+  "required": ["schema_version", "run_id", "install_plan_hash", "approved_items", "confirmation"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "install_plan_hash": { "type": "string", "pattern": "^sha256:" },
+    "approved_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "candidate_hash", "decision"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "candidate_hash": { "type": "string", "pattern": "^sha256:" },
+          "decision": { "enum": ["approve", "skip", "edit", "defer"] },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "required": ["approved", "approved_at"],
+      "properties": {
+        "approved": { "type": "boolean" },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "approved_by": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

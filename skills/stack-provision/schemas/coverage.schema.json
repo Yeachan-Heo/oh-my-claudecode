@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/coverage.schema.json",
+  "title": "Stack Provision Coverage Matrix",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_at", "summary", "cells"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "summary": {
+      "type": "object",
+      "required": ["total_cells", "covered_cells", "gap_cells", "coverage_ratio"],
+      "properties": {
+        "total_cells": { "type": "integer" },
+        "covered_cells": { "type": "integer" },
+        "gap_cells": { "type": "integer" },
+        "coverage_ratio": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cell_id", "surface", "technology", "aspect", "candidate_ids", "status"],
+        "properties": {
+          "cell_id": { "type": "string" },
+          "surface": { "type": "string" },
+          "technology": { "type": "string" },
+          "aspect": { "type": "string" },
+          "candidate_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "best_candidate_id": { "type": ["string", "null"] },
+          "status": { "enum": ["covered", "gap"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

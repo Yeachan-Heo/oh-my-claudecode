@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/config.schema.json",
+  "title": "Stack Provision Capability Config",
+  "type": "object",
+  "required": ["schema_version", "surfaces", "capability_packs"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 2 },
+    "surfaces": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description", "default_aspects", "tech_match", "capability_packs"],
+        "properties": {
+          "description": { "type": "string" },
+          "default_aspects": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "tech_match": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "capability_packs": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "required_context": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "capability_packs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "skills": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "optional_external": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

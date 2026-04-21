@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/capability-matrix.schema.json",
+  "title": "Stack Provision Capability Matrix",
+  "type": "object",
+  "required": ["schema_version", "run_id", "surfaces", "capability_packs", "cells"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "surfaces": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "capability_packs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["surface", "technology", "aspect", "capability_packs"],
+        "properties": {
+          "surface": { "type": "string" },
+          "technology": { "type": "string" },
+          "aspect": { "type": "string" },
+          "capability_packs": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

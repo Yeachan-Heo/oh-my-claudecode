@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/stack-provision/install-plan.schema.json",
+  "title": "Stack Provision Install Plan",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_at", "items", "hash"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "hash": { "type": "string", "pattern": "^sha256:" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "candidate_hash", "source", "slug", "title", "install"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "candidate_hash": { "type": "string", "pattern": "^sha256:" },
+          "source": { "type": "string" },
+          "slug": { "type": "string" },
+          "title": { "type": "string" },
+          "risk_flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "install": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
