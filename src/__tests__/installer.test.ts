@@ -615,19 +615,29 @@ describe('Installer Constants', () => {
     });
 
     it('should have proper markdown formatting in frontmatter', () => {
+      // YAML frontmatter can be: scalar key/value, a key that starts a nested
+      // block (list or mapping), list items, nested mapping keys, or quoted
+      // continuations. Keys may contain underscores/dashes (depends_on, disallowedTools).
+      const topLevelKeyValue = /^[a-zA-Z][a-zA-Z0-9_-]*:\s+.+$/;
+      const topLevelBlockStart = /^[a-zA-Z][a-zA-Z0-9_-]*:\s*$/;
+      const listItem = /^\s+-\s+.+$/;
+      const nestedKeyValue = /^\s+[a-zA-Z][a-zA-Z0-9_-]*:(?:\s+.+)?$/;
+
       for (const [filename, content] of Object.entries(AGENT_DEFINITIONS)) {
-        // Skip non-agent files
         if (filename === 'AGENTS.md') continue;
 
         const frontmatterMatch = (content as string).match(/^---\n([\s\S]*?)\n---/);
         expect(frontmatterMatch).toBeTruthy();
 
         const frontmatter = frontmatterMatch![1];
-
-        // Each line should be key: value format (allow camelCase keys like disallowedTools)
         const lines = frontmatter.split('\n').filter((line: string) => line.trim());
         for (const line of lines) {
-          expect(line).toMatch(/^[a-zA-Z]+:\s+.+/);
+          const ok =
+            topLevelKeyValue.test(line) ||
+            topLevelBlockStart.test(line) ||
+            listItem.test(line) ||
+            nestedKeyValue.test(line);
+          expect(ok, `Unexpected frontmatter line in ${filename}: ${JSON.stringify(line)}`).toBe(true);
         }
       }
     });
