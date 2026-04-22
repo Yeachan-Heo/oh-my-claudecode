@@ -11,14 +11,13 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJson, readJsonValidated, validateData, writeJson, writeJsonValidated } from './validation.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const skillDir = resolve(scriptDir, '..');
-const projectRoot = resolve(skillDir, '..', '..');
+const defaultProjectRoot = process.cwd();
 const defaultConfigPath = join(skillDir, 'config', 'default-capability-packs.json');
 const maxSkillFiles = 1500;
 const defaultTimeoutMs = 5000;
@@ -85,7 +84,7 @@ function parseArgs(argv) {
     network: false,
     timeoutMs: defaultTimeoutMs,
     configPath: defaultConfigPath,
-    projectRoot,
+    projectRoot: defaultProjectRoot,
     sources: [],
     installedRoots: [],
     bundledRoots: [],
@@ -93,6 +92,7 @@ function parseArgs(argv) {
     skillsShIndex: '',
     pluginMarketplaceIndex: '',
     githubIndex: '',
+    sourceIndexes: {},
     githubOrgs: [],
     limit: 250,
     approveIds: [],
@@ -169,6 +169,13 @@ function parseArgs(argv) {
     } else if (arg === '--github-index') {
       index += 1;
       options.githubIndex = requireValue(argv[index], '--github-index');
+    } else if (arg.startsWith('--source-index=')) {
+      const [sourceId, sourceIndex] = parseSourceIndexArg(arg.slice('--source-index='.length));
+      options.sourceIndexes[sourceId] = sourceIndex;
+    } else if (arg === '--source-index') {
+      index += 1;
+      const [sourceId, sourceIndex] = parseSourceIndexArg(requireValue(argv[index], '--source-index'));
+      options.sourceIndexes[sourceId] = sourceIndex;
     } else if (arg.startsWith('--github-org=')) {
       options.githubOrgs.push(arg.slice('--github-org='.length));
     } else if (arg === '--github-org') {
@@ -228,13 +235,33 @@ function parseArgs(argv) {
   return options;
 }
 
+function parseSourceIndexArg(value) {
+  const raw = String(value || '');
+  const separator = raw.indexOf('=');
+  if (separator <= 0 || separator === raw.length - 1) {
+    throw new Error('stack-provision: --source-index must be <source-id>=<json path or url>');
+  }
+  const sourceId = sanitizeSourceId(raw.slice(0, separator));
+  const sourceIndex = raw.slice(separator + 1).trim();
+  if (!sourceId || !sourceIndex) {
+    throw new Error('stack-provision: --source-index must be <source-id>=<json path or url>');
+  }
+  return [sourceId, sourceIndex];
+}
+
 async function discover(runDir, options) {
   const run = readRun(runDir);
   const config = readJsonValidated(resolve(options.configPath), 'config', options.configPath);
-  const selectedSources = options.sources.length > 0
-    ? options.sources
-    : config.discovery_policy?.default_source_order || ['skills-sh', 'plugin-marketplace', 'github', 'installed', 'bundled', 'plugin'];
+  const registrySources = skillSourceRegistryById(config);
   const warnings = [];
+  const selectedSources = expandSelectedSources(
+    options.sources.length > 0
+      ? options.sources
+      : config.discovery_policy?.default_source_order || ['skills-sh', 'plugin-marketplace', 'github', 'installed', 'bundled'],
+    options.sourceIndexes,
+    registrySources,
+    warnings,
+  );
   const allCandidates = [];
 
   for (const source of selectedSources) {
@@ -242,6 +269,7 @@ async function discover(runDir, options) {
       allCandidates.push(...discoverLocalSkills({
         source: 'installed-skill',
         roots: defaultInstalledRoots(options),
+        projectRoot: options.projectRoot,
         run,
         config,
         warnings,
@@ -251,24 +279,18 @@ async function discover(runDir, options) {
       allCandidates.push(...discoverLocalSkills({
         source: 'bundled-skill',
         roots: defaultBundledRoots(options),
+        projectRoot: options.projectRoot,
         run,
         config,
         warnings,
         maxDepth: 3,
       }));
     } else if (source === 'plugin') {
-      allCandidates.push(...discoverLocalSkills({
-        source: 'plugin-skill',
-        roots: defaultPluginRoots(options),
-        run,
-        config,
-        warnings,
-        maxDepth: 8,
-      }));
+      warnings.push('plugin skipped: local plugin skill caches are disabled for stack-provision discovery');
     } else if (source === 'skills-sh') {
       allCandidates.push(...await discoverIndexSource({
         source: 'skills-sh',
-        index: options.skillsShIndex,
+        index: options.skillsShIndex || options.sourceIndexes['skills-sh'] || '',
         run,
         config,
         warnings,
@@ -279,7 +301,7 @@ async function discover(runDir, options) {
     } else if (source === 'plugin-marketplace') {
       allCandidates.push(...await discoverIndexSource({
         source: 'plugin-marketplace',
-        index: options.pluginMarketplaceIndex,
+        index: options.pluginMarketplaceIndex || options.sourceIndexes['plugin-marketplace'] || '',
         run,
         config,
         warnings,
@@ -289,8 +311,19 @@ async function discover(runDir, options) {
       }));
     } else if (source === 'github') {
       allCandidates.push(...await discoverGithub({
-        index: options.githubIndex,
+        index: options.githubIndex || options.sourceIndexes.github || '',
         orgs: options.githubOrgs,
+        run,
+        config,
+        warnings,
+        network: options.network,
+        timeoutMs: options.timeoutMs,
+      }));
+    } else if (registrySources.has(source)) {
+      allCandidates.push(...await discoverRegistrySource({
+        source,
+        registry: registrySources.get(source),
+        index: options.sourceIndexes[source] || '',
         run,
         config,
         warnings,
@@ -351,7 +384,25 @@ async function discover(runDir, options) {
   };
 }
 
-function discoverLocalSkills({ source, roots, run, config, warnings, maxDepth }) {
+function expandSelectedSources(baseSources, sourceIndexes, registrySources, warnings) {
+  const selected = [...baseSources];
+  for (const sourceId of Object.keys(sourceIndexes || {})) {
+    const normalized = sanitizeSourceId(sourceId);
+    if (!normalized) {
+      continue;
+    }
+    if (!registrySources.has(normalized) && !['skills-sh', 'plugin-marketplace', 'github'].includes(normalized)) {
+      warnings.push(`source-index ignored for unknown source: ${sourceId}`);
+      continue;
+    }
+    if (!selected.includes(normalized)) {
+      selected.push(normalized);
+    }
+  }
+  return selected;
+}
+
+function discoverLocalSkills({ source, roots, projectRoot, run, config, warnings, maxDepth }) {
   const candidates = [];
   for (const root of roots) {
     if (!existsSync(root)) {
@@ -360,7 +411,7 @@ function discoverLocalSkills({ source, roots, run, config, warnings, maxDepth })
     }
 
     for (const skillFile of findSkillFiles(root, maxDepth)) {
-      const candidate = localSkillCandidate(source, root, skillFile, run, config);
+      const candidate = localSkillCandidate(source, root, skillFile, projectRoot, run, config);
       if (candidate) {
         candidates.push(candidate);
       }
@@ -369,7 +420,7 @@ function discoverLocalSkills({ source, roots, run, config, warnings, maxDepth })
   return candidates;
 }
 
-function localSkillCandidate(source, root, skillFile, run, config) {
+function localSkillCandidate(source, root, skillFile, projectRoot, run, config) {
   const content = readFileSync(skillFile, 'utf8');
   const metadata = parseFrontmatter(content);
   const slug = sanitizeSlug(metadata.name || basename(dirname(skillFile)));
@@ -383,7 +434,7 @@ function localSkillCandidate(source, root, skillFile, run, config) {
 
   const hash = sha256(content);
   const trust = localTrustMetadata(source);
-  const baseRiskFlags = localRiskFlags(source, skillFile);
+  const baseRiskFlags = localRiskFlags(source, skillFile, projectRoot);
   const strictGate = evaluateStrictGateForCandidate({
     source_trust: trust.source_trust,
     freshness_days: trust.freshness_days,
@@ -446,6 +497,121 @@ async function discoverIndexSource({ source, index, run, config, warnings, netwo
   return normalizeExternalEntries(source, entries, run, config);
 }
 
+async function discoverRegistrySource({ source, registry, index, run, config, warnings, network, timeoutMs }) {
+  const entries = [];
+  if (index) {
+    entries.push(...await readIndexEntries(index, timeoutMs));
+  }
+
+  if (registry.index_url && network) {
+    try {
+      entries.push(...await readIndexEntries(registry.index_url, timeoutMs));
+    } catch (error) {
+      warnings.push(`${source} registry index failed: ${errorMessage(error)}`);
+    }
+  }
+
+  if (registry.search_url_template && network) {
+    for (const query of discoveryQueries(run, config)) {
+      try {
+        entries.push(...await fetchJsonEntries(renderSearchUrl(registry.search_url_template, query), timeoutMs));
+      } catch (error) {
+        warnings.push(`${source} registry search failed for ${query}: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  entries.push(...staticRegistryEntries(registry));
+
+  if (entries.length === 0) {
+    const expected = [
+      `--source-index=${source}=<json path or url>`,
+      registry.index_url ? '--network for registry index' : '',
+      registry.search_url_template ? '--network for registry search' : '',
+    ].filter(Boolean).join(', ');
+    warnings.push(`${source} skipped: provide ${expected || 'a source registry index'}`);
+    return [];
+  }
+
+  return normalizeExternalEntries(
+    source,
+    entries.map((entry) => enrichRegistryEntry(entry, source, registry)),
+    run,
+    config,
+  );
+}
+
+function enrichRegistryEntry(entry, source, registry) {
+  const tags = unique([
+    ...toList(registry.tags),
+    ...entryValues(entry, 'tags', 'keywords'),
+  ]);
+  const installCommand = entry.install_cmd || entry.command || renderRegistryInstallCommand(registry.install_command_template, entry, source, registry);
+  return {
+    ...entry,
+    source,
+    source_registry_id: source,
+    tags,
+    ...(installCommand ? { install_cmd: installCommand } : {}),
+    registry_homepage: registry.homepage || registry.url || '',
+  };
+}
+
+function renderRegistryInstallCommand(template, entry, source, registry) {
+  if (!template) {
+    return '';
+  }
+  const slug = sanitizeSlug(entry.slug || entry.name || entry.title || entry.url || source);
+  const ref = registryInstallReference(entry, slug, registry);
+  const values = {
+    ref,
+    slug,
+    name: entry.name || entry.title || slug,
+    url: entry.url || registry.homepage || '',
+    source,
+  };
+  return String(template).replace(/\{(ref|slug|name|url|source)\}/g, (_, key) => values[key] || '');
+}
+
+function registryInstallReference(entry, fallbackSlug, registry) {
+  for (const field of toList(registry.install_reference_fields)) {
+    const value = String(entry[field] || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+  for (const field of ['ref', 'package', 'package_name', 'identifier', 'id']) {
+    const value = String(entry[field] || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+  return String(entry.slug || fallbackSlug || '').trim();
+}
+
+function staticRegistryEntries(registry) {
+  const entries = [];
+  for (const entry of toListOfObjects(registry.entries)) {
+    entries.push(entry);
+  }
+  for (const repo of toList(registry.github_repositories)) {
+    entries.push({
+      name: repo,
+      description: registry.description || `${repo} skill collection`,
+      url: `https://github.com/${repo}`,
+      tags: registry.tags || [],
+      source: registry.id,
+    });
+  }
+  return entries;
+}
+
+function renderSearchUrl(template, query) {
+  return String(template)
+    .replace(/\{query\}/g, encodeURIComponent(query))
+    .replace(/\{q\}/g, encodeURIComponent(query));
+}
+
 async function discoverGithub({ index, orgs, run, config, warnings, network, timeoutMs }) {
   if (index) {
     const entries = await readIndexEntries(index, timeoutMs);
@@ -485,7 +651,11 @@ async function discoverGithub({ index, orgs, run, config, warnings, network, tim
 
 function normalizeExternalEntries(source, entries, run, config) {
   const candidates = [];
-  for (const entry of entries) {
+  const registry = skillSourceRegistryById(config).get(source);
+  for (const rawEntry of entries) {
+    const entry = registry && !rawEntry.source_registry_id
+      ? enrichRegistryEntry(rawEntry, source, registry)
+      : rawEntry;
     const slug = sanitizeSlug(entry.slug || entry.name || entry.ref || entry.url || source);
     const description = String(entry.description || entry.summary || '');
     const profile = externalCandidateProfile(entry, slug, description, source, config);
@@ -602,6 +772,7 @@ function externalCandidateProfile(entry, slug, description, source, config) {
 function sourceQualityForCandidate(source, entry, config) {
   const policy = config.discovery_policy || {};
   const weights = policy.source_quality_weights || {};
+  const sourceRegistry = skillSourceRegistryById(config).get(source);
   const signals = [];
   let score = 0;
   const url = String(entry.url || entry.html_url || entry.skill_md_url || entry.source_url || '');
@@ -616,8 +787,11 @@ function sourceQualityForCandidate(source, entry, config) {
     score += weight;
   };
 
-  if (['skills-sh', 'plugin-marketplace', 'github'].includes(source)) {
+  if (!['installed-skill', 'bundled-skill', 'plugin-skill'].includes(source)) {
     addSignal('external-index', 'external_index');
+  }
+  if (sourceRegistry) {
+    addSignal('registered-marketplace', 'registered_marketplace');
   }
   if (source === 'installed-skill') {
     addSignal('installed-local', 'installed_local');
@@ -632,6 +806,12 @@ function sourceQualityForCandidate(source, entry, config) {
   const githubOrg = githubOrgFromUrl(url);
   if (githubOrg && includesNormalized(policy.trusted_github_orgs || [], githubOrg)) {
     addSignal('trusted-github-org', 'trusted_github_org');
+  }
+  if (numericEntryScore(entry, 'quality_score', 'qualityScore', 'quality') >= 80) {
+    addSignal('high-quality-score', 'high_quality_score');
+  }
+  if (numericEntryScore(entry, 'security_score', 'securityScore', 'security') >= 90) {
+    addSignal('high-security-score', 'high_security_score');
   }
 
   return { score, signals };
@@ -859,6 +1039,24 @@ function domainMatches(domain, configuredDomains) {
   });
 }
 
+function skillSourceRegistryById(config) {
+  const entries = Array.isArray(config.discovery_policy?.skill_source_registry)
+    ? config.discovery_policy.skill_source_registry
+    : [];
+  const byId = new Map();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const id = sanitizeSourceId(entry.id || entry.source || entry.name);
+    if (!id || byId.has(id)) {
+      continue;
+    }
+    byId.set(id, { ...entry, id });
+  }
+  return byId;
+}
+
 function githubOrgFromUrl(url) {
   if (!url) {
     return '';
@@ -901,6 +1099,23 @@ function entryValues(entry, ...keys) {
   return keys.flatMap((key) => toList(entry[key]));
 }
 
+function numericEntryScore(entry, ...keys) {
+  for (const key of keys) {
+    const value = entry?.[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = Number(value.score ?? value.value);
+      if (Number.isFinite(nested)) {
+        return nested;
+      }
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
 function toList(value) {
   if (value == null) {
     return [];
@@ -923,6 +1138,13 @@ function toList(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function toListOfObjects(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item) => item && typeof item === 'object' && !Array.isArray(item));
 }
 
 function normalizeList(values) {
@@ -1118,7 +1340,7 @@ async function promote(runDir, options) {
     throw new Error('stack-provision: install plan content changed after review');
   }
 
-  const skillRoot = options.skillRoot || join(homedir(), '.codex', 'skills', 'omc-provisioned');
+  const skillRoot = options.skillRoot || defaultPromoteSkillRoot(options);
   const candidateById = new Map((candidatesDoc.candidates || []).map((candidate) => [candidate.candidate_id, candidate]));
   const installed = [];
   const pendingUserActions = [];
@@ -1707,7 +1929,7 @@ function selectApprovals(candidates, options) {
 
   for (const candidate of candidates) {
     const selectedBySource = approvedSources.has(candidate.source);
-    const selectedByLocal = options.approveLocal && ['installed-skill', 'bundled-skill', 'plugin-skill'].includes(candidate.source);
+    const selectedByLocal = options.approveLocal && ['installed-skill', 'bundled-skill'].includes(candidate.source);
     if (!selectedBySource && !selectedByLocal) {
       continue;
     }
@@ -1763,7 +1985,7 @@ function renderReviewMarkdown(contract, candidatesDoc, installPlan, decision) {
     `Provisioning mode: ${contract.policy?.provisioning_mode || 'strict-gate'}`,
     `Strict gate thresholds: source_trust>=${strictPolicy.source_trust_min}, freshness<=${strictPolicy.freshness_days_max}d, checksum=${strictPolicy.checksum_required}, license_conflict_allowed=${strictPolicy.license_conflict_allowed}`,
     `Selection policy: ${formatSelectionPolicy(candidatesDoc)}`,
-    `Approval policy: source-level approval is allowed only for low-risk installed/bundled candidates; external, plugin-cache, generated, download, command, and warning/critical candidates require explicit candidate IDs.`,
+    `Approval policy: source-level approval is allowed only for low-risk installed/bundled candidates; external, generated, download, command, and warning/critical candidates require explicit candidate IDs.`,
     '',
     '## Candidates',
     '',
@@ -2001,10 +2223,8 @@ function defaultInstalledRoots(options) {
     return unique(options.installedRoots);
   }
   return unique([
-    ...splitPathList(process.env.STACK_PROVISION_INSTALLED_SKILL_ROOTS || ''),
-    join(homedir(), '.codex', 'skills'),
-    join(homedir(), '.agents', 'skills'),
-    join(homedir(), '.claude', 'skills'),
+    join(options.projectRoot, '.claude', 'skills'),
+    join(options.projectRoot, '.agents', 'skills'),
   ]);
 }
 
@@ -2021,39 +2241,44 @@ function defaultPluginRoots(options) {
   if (options.pluginRoots.length > 0) {
     return unique(options.pluginRoots);
   }
-  return unique([
-    ...splitPathList(process.env.STACK_PROVISION_PLUGIN_SKILL_ROOTS || ''),
-    join(homedir(), '.codex', 'plugins'),
-    join(homedir(), '.codex', 'plugins', 'cache'),
-    join(homedir(), '.claude', 'plugins'),
-  ]);
+  return [];
+}
+
+function defaultPromoteSkillRoot(options) {
+  return join(options.projectRoot, '.claude', 'skills', 'omc-provisioned');
 }
 
 async function readIndexEntries(index, timeoutMs) {
   const payload = isUrl(index)
     ? await fetchJson(index, timeoutMs)
     : readJson(resolve(index));
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (Array.isArray(payload.candidates)) {
-    return payload.candidates;
-  }
-  if (Array.isArray(payload.items)) {
-    return payload.items;
-  }
-  if (Array.isArray(payload.results)) {
-    return payload.results;
-  }
-  return [];
+  return entriesFromPayload(payload);
 }
 
 async function fetchJsonEntries(url, timeoutMs) {
   const payload = await fetchJson(url, timeoutMs);
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload.candidates)) return payload.candidates;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.results)) return payload.results;
+  return entriesFromPayload(payload);
+}
+
+function entriesFromPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+  for (const key of ['candidates', 'items', 'results', 'skills', 'data']) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+    if (value && typeof value === 'object') {
+      const nested = entriesFromPayload(value);
+      if (nested.length > 0) {
+        return nested;
+      }
+    }
+  }
   return [];
 }
 
@@ -2152,7 +2377,7 @@ function isGitHubApiUrl(url) {
   }
 }
 
-function localRiskFlags(source, skillFile) {
+function localRiskFlags(source, skillFile, projectRoot) {
   const flags = [];
   if (source === 'plugin-skill') {
     flags.push('plugin-cache-source');
@@ -2234,22 +2459,20 @@ function sanitizeSlug(value) {
     .slice(0, 96) || 'skill';
 }
 
+function sanitizeSourceId(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function splitList(value) {
   return unique(
     String(value)
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean),
-  );
-}
-
-function splitPathList(value) {
-  return unique(
-    String(value)
-      .split(':')
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item) => resolve(item)),
   );
 }
 
@@ -2298,11 +2521,12 @@ function usage() {
   return {
     json: true,
     usage: [
-      'node skills/stack-provision/scripts/provision.mjs discover <run-dir> [--sources=installed,bundled,plugin,skills-sh,plugin-marketplace,github]',
+      'node skills/stack-provision/scripts/provision.mjs discover <run-dir> [--sources=installed,bundled,skills-sh,plugin-marketplace,github,<registry-id>] [--source-index=<registry-id>=<json path or url>]',
       'node skills/stack-provision/scripts/provision.mjs review <run-dir> [--approve=<ids>|--approve-source=<source>|--approve-local|--reject|--critic-verdict=<approve|revise|rewind>|--research-ack]',
-      'node skills/stack-provision/scripts/provision.mjs promote <run-dir> --skill-root=<dir>',
+      'node skills/stack-provision/scripts/provision.mjs promote <run-dir> [--skill-root=<dir>]',
       'node skills/stack-provision/scripts/provision.mjs rollback <run-dir>',
       'node skills/stack-provision/scripts/provision.mjs verify <run-dir>',
+      'Registry sources come from discovery_policy.skill_source_registry; --source-index entries are added to discovery automatically. Local plugin skill cache discovery is disabled.',
     ],
   };
 }

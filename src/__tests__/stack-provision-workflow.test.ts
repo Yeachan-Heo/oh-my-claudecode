@@ -83,7 +83,6 @@ describe('stack-provision executable workflow', () => {
     const runRoot = join(tempDir, 'runs');
     const installedRoot = join(tempDir, 'installed-skills');
     const bundledRoot = join(tempDir, 'bundled-skills');
-    const pluginRoot = join(tempDir, 'plugin-cache');
     const targetSkillRoot = join(tempDir, 'target-skills');
 
     writeSkill(
@@ -100,14 +99,6 @@ describe('stack-provision executable workflow', () => {
       'Next.js React Tailwind component-architecture testing visual-regression plus visual-creative visual QA and image generation patterns.',
       'Covers Next.js component architecture, visual-regression, image-generation, typography, and motion.',
     );
-    writeSkill(
-      pluginRoot,
-      'visual-verdict',
-      'visual-verdict',
-      'Visual-creative visual QA screenshot verdict loop for generated assets.',
-      'Covers visual-creative, visual-qa, image-generation, illustration, iconography, and motion.',
-    );
-
     const githubSkill = join(tempDir, 'github-skill', 'SKILL.md');
     mkdirSync(join(tempDir, 'github-skill'), { recursive: true });
     writeFileSync(
@@ -179,13 +170,11 @@ describe('stack-provision executable workflow', () => {
     const discovery = run(provisionScript, [
       'discover',
       runDir,
-      '--sources=installed,bundled,plugin,skills-sh,plugin-marketplace,github',
+      '--sources=installed,bundled,skills-sh,plugin-marketplace,github',
       '--installed-root',
       installedRoot,
       '--bundled-root',
       bundledRoot,
-      '--plugin-root',
-      pluginRoot,
       '--skills-sh-index',
       skillsShIndex,
       '--plugin-marketplace-index',
@@ -195,14 +184,13 @@ describe('stack-provision executable workflow', () => {
       '--json',
     ]);
 
-    expect(discovery.candidates).toBeGreaterThanOrEqual(6);
+    expect(discovery.candidates).toBeGreaterThanOrEqual(5);
     expect(discovery.coverage_summary.covered_cells).toBeGreaterThan(0);
     const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
     expect(candidates.candidates.map((candidate: { source: string }) => candidate.source)).toEqual(
       expect.arrayContaining([
         'installed-skill',
         'bundled-skill',
-        'plugin-skill',
         'skills-sh',
         'plugin-marketplace',
         'github',
@@ -269,6 +257,234 @@ describe('stack-provision executable workflow', () => {
     for (const item of manifest.installed) {
       expect(existsSync(item.target_path)).toBe(false);
     }
+  });
+
+  it('defaults local discovery and promotion to the current project skill directories', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const projectRoot = join(tempDir, 'project');
+
+    writeSkill(
+      join(projectRoot, 'skills'),
+      'react-component-architecture',
+      'react-component-architecture',
+      'React component architecture skill for frontend-engineering components and design-system implementation.',
+      'Covers React component architecture, shadcn registry review, accessibility, and Storybook visual testing.',
+    );
+    writeSkill(
+      join(projectRoot, '.claude', 'skills'),
+      'current-project-frontend',
+      'current-project-frontend',
+      'React frontend-engineering component-architecture skill installed in the current project .claude skills directory.',
+      'Covers React frontend-engineering component-architecture, shadcn registry review, and accessibility.',
+    );
+
+    run(initScript, [
+      'react, shadcn',
+      '--surfaces=frontend-engineering',
+      '--aspects=component-architecture',
+      '--run-id=project-scoped-defaults',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'project-scoped-defaults');
+
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--project-root',
+      projectRoot,
+      '--sources=installed,bundled',
+      '--json',
+    ]);
+
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    expect(candidates.candidates.map((candidate: { source: string }) => candidate.source)).toEqual(
+      expect.arrayContaining(['installed-skill', 'bundled-skill']),
+    );
+    expect(candidates.candidates.every((candidate: { path: string | null }) =>
+      !candidate.path || candidate.path.startsWith(projectRoot),
+    )).toBe(true);
+
+    run(provisionScript, [
+      'review',
+      runDir,
+      '--approve-local',
+      '--critic-verdict=approve',
+      '--json',
+    ]);
+    run(provisionScript, [
+      'promote',
+      runDir,
+      '--project-root',
+      projectRoot,
+      '--json',
+    ]);
+
+    expect(
+      existsSync(join(projectRoot, '.claude', 'skills', 'omc-provisioned', 'react-component-architecture', 'SKILL.md')),
+    ).toBe(true);
+  });
+
+  it('does not parse local plugin skill caches even when plugin source is requested', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const pluginRoot = join(tempDir, 'plugin-cache');
+
+    writeSkill(
+      pluginRoot,
+      'visual-verdict',
+      'visual-verdict',
+      'Visual-creative visual QA screenshot verdict loop for generated assets.',
+      'Covers visual-creative, visual-qa, image-generation, illustration, iconography, and motion.',
+    );
+
+    run(initScript, [
+      'visual qa',
+      '--surfaces=visual-creative',
+      '--aspects=visual-qa',
+      '--run-id=plugin-source-disabled',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'plugin-source-disabled');
+
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--sources=plugin',
+      '--plugin-root',
+      pluginRoot,
+      '--json',
+    ]);
+
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    expect(candidates.candidates).toHaveLength(0);
+    expect(candidates.warnings).toEqual(
+      expect.arrayContaining([
+        'plugin skipped: local plugin skill caches are disabled for stack-provision discovery',
+      ]),
+    );
+  });
+
+  it('discovers configured marketplace registry sources from source indexes', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const agentskillIndex = join(tempDir, 'agentskill-sh.json');
+
+    writeFileSync(
+      agentskillIndex,
+      JSON.stringify([
+        {
+          name: 'agentskill-product-visual-system',
+          description: 'React shadcn Tailwind component architecture visual-creative visual-qa skill.',
+          url: 'https://agentskill.sh/skills/product-visual-system',
+          updated_at: fixedNow,
+          license: 'MIT',
+          quality_score: 92,
+          security_score: 97,
+          tags: ['react', 'shadcn', 'component-architecture', 'visual-creative', 'visual-qa'],
+        },
+      ]),
+      'utf8',
+    );
+
+    run(initScript, [
+      'react, shadcn, tailwind',
+      '--surfaces=frontend-engineering,visual-creative',
+      '--aspects=component-architecture,visual-qa',
+      '--run-id=registry-source-index',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'registry-source-index');
+
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--sources=agentskill-sh',
+      `--source-index=agentskill-sh=${agentskillIndex}`,
+      '--json',
+    ]);
+
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    const candidate = candidates.candidates.find((item: { slug: string }) =>
+      item.slug === 'agentskill-product-visual-system',
+    );
+    expect(candidate.source).toBe('agentskill-sh');
+    expect(candidate.source_quality.signals).toEqual(
+      expect.arrayContaining([
+        'external-index',
+        'registered-marketplace',
+        'specialized-platform',
+        'high-quality-score',
+        'high-security-score',
+      ]),
+    );
+    expect(candidate.install).toMatchObject({
+      kind: 'external-command',
+      command: '/learn agentskill-product-visual-system',
+    });
+    expect(candidate.covered_aspects).toEqual(
+      expect.arrayContaining(['component-architecture', 'visual-qa']),
+    );
+  });
+
+  it('adds indexed registry sources to the selected discovery sources', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const bundledRoot = join(tempDir, 'bundled-skills');
+    const agentskillIndex = join(tempDir, 'agentskill-sh.json');
+    mkdirSync(bundledRoot, { recursive: true });
+
+    writeFileSync(
+      agentskillIndex,
+      JSON.stringify([
+        {
+          ref: '@omc/product-visual-system',
+          name: 'Product Visual System',
+          description: 'React shadcn Tailwind component architecture visual-creative visual-qa skill.',
+          url: 'https://agentskill.sh/skills/product-visual-system',
+          updated_at: fixedNow,
+          license: 'MIT',
+          quality_score: 91,
+          security_score: 96,
+          tags: ['react', 'shadcn', 'component-architecture', 'visual-creative', 'visual-qa'],
+        },
+      ]),
+      'utf8',
+    );
+
+    run(initScript, [
+      'react, shadcn, tailwind',
+      '--surfaces=frontend-engineering,visual-creative',
+      '--aspects=component-architecture,visual-qa',
+      '--run-id=registry-source-auto-include',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'registry-source-auto-include');
+
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--sources=bundled',
+      '--bundled-root',
+      bundledRoot,
+      `--source-index=agentskill-sh=${agentskillIndex}`,
+      '--json',
+    ]);
+
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    expect(candidates.sources).toEqual(['bundled', 'agentskill-sh']);
+    const candidate = candidates.candidates.find((item: { source: string }) =>
+      item.source === 'agentskill-sh',
+    );
+    expect(candidate.install.command).toBe('/learn @omc/product-visual-system');
   });
 
   it('shortlists marketplace discovery and blocks download candidates without content checksums', () => {

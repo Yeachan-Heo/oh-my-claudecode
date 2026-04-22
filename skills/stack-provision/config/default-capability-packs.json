@@ -6,8 +6,7 @@
       "plugin-marketplace",
       "github",
       "installed",
-      "bundled",
-      "plugin"
+      "bundled"
     ],
     "selection_policy": {
       "max_candidates_per_run": 40,
@@ -27,6 +26,108 @@
         "duplicates of existing local skills unless they are clearly fresher or narrower"
       ]
     },
+    "skill_source_registry": [
+      {
+        "id": "skills-sh",
+        "type": "marketplace",
+        "homepage": "https://skills.sh",
+        "search_method": "Browse skills.sh or provide a skills CLI/API index payload.",
+        "search_url_template": "https://skills.sh/api/search?q={query}",
+        "install_command_template": "npx skills add {ref}",
+        "install_reference_fields": ["ref", "package", "repository", "slug", "name"],
+        "domains": ["skills.sh"],
+        "tags": ["claude-code", "codex", "skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "agentskill-sh",
+        "type": "marketplace",
+        "homepage": "https://agentskill.sh",
+        "search_method": "Install the learn plugin, then use /learn <query>, or provide an indexed agentskill.sh payload.",
+        "search_url_template": "https://agentskill.sh/api/search?q={query}",
+        "install_command_template": "/learn {ref}",
+        "install_reference_fields": ["ref", "slug", "name"],
+        "domains": ["agentskill.sh"],
+        "tags": ["claude-code", "codex", "cursor", "gemini", "skill.md"],
+        "quality_signals": ["quality_score", "security_score", "downloads", "updated_at"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "agent-skills-cc",
+        "type": "marketplace",
+        "homepage": "https://agent-skills.cc",
+        "search_url_template": "https://agent-skills.cc/api/search?q={query}",
+        "domains": ["agent-skills.cc"],
+        "tags": ["claude-code", "codex", "chatgpt", "skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "findskills",
+        "type": "marketplace",
+        "homepage": "https://findskills.co",
+        "search_url_template": "https://findskills.co/api/search?q={query}",
+        "domains": ["findskills.co"],
+        "tags": ["claude-code", "codex", "gemini", "cursor", "skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "llmskills",
+        "type": "marketplace",
+        "homepage": "https://llmskills.org",
+        "search_url_template": "https://llmskills.org/api/search?q={query}",
+        "domains": ["llmskills.org"],
+        "tags": ["claude", "codex", "skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "aiagentbase",
+        "type": "marketplace",
+        "homepage": "https://aiagentbase.app/skills",
+        "search_url_template": "https://aiagentbase.app/api/skills/search?q={query}",
+        "domains": ["aiagentbase.app"],
+        "tags": ["claude-code", "skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "skillsmd",
+        "type": "marketplace",
+        "homepage": "https://skillsmd.dev",
+        "search_url_template": "https://skillsmd.dev/api/search?q={query}",
+        "domains": ["skillsmd.dev", "skillsmd.co"],
+        "tags": ["skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "skillhq",
+        "type": "marketplace",
+        "homepage": "https://skillhq.dev",
+        "search_url_template": "https://skillhq.dev/api/search?q={query}",
+        "domains": ["skillhq.dev"],
+        "tags": ["skill.md"],
+        "install_policy": "explicit-review"
+      },
+      {
+        "id": "cskills-sh",
+        "type": "marketplace-index",
+        "homepage": "https://cskills.sh",
+        "domains": ["cskills.sh"],
+        "tags": ["skill.md"],
+        "install_policy": "explicit-review",
+        "notes": "No stable public search endpoint is assumed; provide --source-index=cskills-sh=<json path or url>."
+      },
+      {
+        "id": "github-skill-collections",
+        "type": "github-collections",
+        "homepage": "https://github.com",
+        "github_repositories": [
+          "alirezarezvani/claude-skills",
+          "daymade/claude-code-skills",
+          "mhattingpete/claude-skills-marketplace"
+        ],
+        "tags": ["claude-code", "codex", "skill.md", "github"],
+        "install_policy": "explicit-review"
+      }
+    ],
     "professional_source_domains": [
       "dart.dev",
       "flutter.dev",
@@ -69,6 +170,15 @@
       "tailwindcss.com",
       "ui.shadcn.com",
       "radix-ui.com",
+      "21st.dev",
+      "magicui.design",
+      "reactbits.dev",
+      "aceternity.com",
+      "shadcnblocks.com",
+      "components.build",
+      "tailwindui.com",
+      "flowbite.com",
+      "daisyui.com",
       "storybook.js.org",
       "motion.dev",
       "threejs.org",
@@ -88,10 +198,15 @@
       "github.com",
       "skills.sh",
       "agentskill.sh",
+      "agent-skills.cc",
+      "findskills.co",
+      "llmskills.org",
+      "aiagentbase.app",
       "skillsmd.dev",
       "skillsmd.co",
       "skillhq.dev",
       "agentskillsrepo.com",
+      "cskills.sh",
       "npmjs.com",
       "pkg.go.dev",
       "crates.io"
@@ -178,6 +293,11 @@
         "design system implementation",
         "accessible component primitives",
         "shadcn registry review",
+        "shadcn registry directory",
+        "21st.dev shadcn registry",
+        "Magic UI components",
+        "React Bits animated components",
+        "Aceternity UI components",
         "storybook visual testing",
         "frontend performance best practices"
       ],
@@ -197,12 +317,19 @@
         "iconography system",
         "motion design system",
         "generated asset workflow",
+        "Figma community UI kits",
+        "Magic UI motion components",
+        "React Bits animation inspiration",
+        "Aceternity UI interaction patterns",
         "visual qa"
       ],
       "design-system": [
         "component library architecture",
         "design tokens",
         "accessibility primitives",
+        "namespaced shadcn registries",
+        "Radix Themes",
+        "Tailwind UI patterns",
         "storybook documentation",
         "visual regression testing"
       ],
@@ -210,6 +337,9 @@
         "accessible component primitives",
         "radix ui primitives",
         "shadcn ui registry",
+        "shadcn registry security review",
+        "21st.dev component registry",
+        "components.build registry authoring",
         "design tokens",
         "component api design"
       ],
@@ -222,6 +352,10 @@
       ],
       "shadcn": [
         "shadcn registry",
+        "shadcn registry directory",
+        "npx shadcn add registry component",
+        "21st.dev registry",
+        "components.build registry",
         "shadcn component review",
         "radix primitives",
         "tailwind design system",
@@ -317,6 +451,9 @@
       "professional_domain": 8,
       "specialized_platform": 5,
       "trusted_github_org": 4,
+      "high_security_score": 6,
+      "high_quality_score": 5,
+      "registered_marketplace": 4,
       "external_index": 3,
       "installed_local": 1
     }

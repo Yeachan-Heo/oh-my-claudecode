@@ -35,6 +35,40 @@
         "source_quality_weights": {
           "type": "object",
           "additionalProperties": { "type": "number" }
+        },
+        "skill_source_registry": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" },
+              "homepage": { "type": "string" },
+              "index_url": { "type": "string" },
+              "search_method": { "type": "string" },
+              "search_url_template": { "type": "string" },
+              "install_command_template": { "type": "string" },
+              "install_reference_fields": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "domains": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "github_repositories": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "tags": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "install_policy": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true

@@ -126,7 +126,7 @@ Prefer existing local skills when available: `imagegen`, `meaning-driven-ui-buil
 The provisioner has six bounded phases.
 
 1. `contract`: Deterministically parse the stack and write `contract.json`, `capability-matrix.json`, `state.json`, and `review.md`.
-2. `discovery`: Search installed skills, bundled OMC skills, enabled plugin skills, skills.sh, plugin marketplaces, and whitelisted repositories for each matrix cell.
+2. `discovery`: Search installed skills, bundled OMC skills, configured marketplace registries, skills.sh, plugin marketplaces, and whitelisted repositories for each matrix cell. Local plugin skill caches are intentionally skipped.
 3. `gap-draft`: If generation is allowed, create draft skills only inside the run quarantine directory. Drafts are never auto-promoted.
 4. `review`: Present one install plan with candidate previews, provenance, risk flags, file targets, and hashes. Require explicit human approval.
 5. `promote`: Install only approved items, write `manifest.json`, and keep backups for overwritten files.
@@ -144,7 +144,8 @@ node skills/stack-provision/scripts/init.mjs "<ADR path or stack list>" [flags] 
 
 # Phase 1: discovery adapters
 node skills/stack-provision/scripts/provision.mjs discover .omc/provisioned/runs/<run-id> \
-  --sources=installed,bundled,plugin,skills-sh,plugin-marketplace,github \
+  --sources=installed,bundled,skills-sh,plugin-marketplace,github,agentskill-sh \
+  --source-index=agentskill-sh=<json-path-or-url> \
   --json
 
 # Phase 4: review decision and install-plan hash
@@ -153,7 +154,7 @@ node skills/stack-provision/scripts/provision.mjs review .omc/provisioned/runs/<
 
 # Phase 5: promote approved candidates only
 node skills/stack-provision/scripts/provision.mjs promote .omc/provisioned/runs/<run-id> \
-  --skill-root ~/.codex/skills/omc-provisioned --json
+  --skill-root .claude/skills/omc-provisioned --json
 
 # Phase 6: verify or rollback
 node skills/stack-provision/scripts/provision.mjs verify .omc/provisioned/runs/<run-id> --json
@@ -162,19 +163,35 @@ node skills/stack-provision/scripts/provision.mjs rollback .omc/provisioned/runs
 
 Discovery sources:
 
-- Default discovery is research-first: `skills-sh`, `plugin-marketplace`, and `github` are searched before installed/bundled/plugin-cache skills.
+- Default discovery is research-first: `skills-sh`, `plugin-marketplace`, and `github` are searched before installed/bundled skills. It does not crawl every registered marketplace by default.
+- Indexed marketplaces are opt-in but ergonomic: any registered source passed as `--source-index=<registry-id>=<json path or url>` is added to the selected source list automatically, even when `--sources` does not mention it.
 - `installed`: scans installed skill roots. Override with repeated `--installed-root=<path>`.
 - `bundled`: scans project bundled skills. Override with repeated `--bundled-root=<path>`.
-- `plugin`: scans local plugin skill caches. Override with repeated `--plugin-root=<path>`.
+- Local discovery defaults are project-scoped only: `.claude/skills`, `.agents/skills`, and `skills` under `--project-root`/the current working directory. User-level home skill roots are not scanned unless explicitly passed with `--installed-root`.
+- `plugin`: disabled. Local plugin skill caches are not parsed because they duplicate installed/bundled skills and can include stale marketplace snapshots.
 - `skills-sh`: reads `--skills-sh-index=<json path or url>`, or best-effort network search with `--network`.
 - `plugin-marketplace`: reads `--plugin-marketplace-index=<json path or url>`.
 - `github`: reads `--github-index=<json path or url>`, or best-effort GitHub repository search with `--network --github-org=<org>`.
+- Registry sources from `discovery_policy.skill_source_registry` can be selected by id, for example `agentskill-sh`, `agent-skills-cc`, `findskills`, `llmskills`, `aiagentbase`, `skillsmd`, `skillhq`, `cskills-sh`, or `github-skill-collections`. Provide `--source-index=<registry-id>=<json path or url>` for deterministic parsing, or use `--network` when that registry has a configured `search_url_template` or `index_url`.
+
+Primary marketplace handling:
+
+| Source | Search | Install/download handling |
+| --- | --- | --- |
+| `skills-sh` | Prefer `--skills-sh-index=<json path or url>` or `--source-index=skills-sh=<json path or url>`. With `--network`, query the configured search endpoint. | If the candidate includes `skill_md_url` and `sha256`/`content_sha256`, `promote` downloads and verifies the content hash. Otherwise the registry emits a pending `npx skills add {ref}` action, matching the skills.sh CLI docs. |
+| `agentskill-sh` | Prefer `--source-index=agentskill-sh=<json path or url>` for deterministic discovery. With `--network`, query the configured search endpoint; outside stack-provision, agentskill.sh also supports `/learn <query>` search after installing its learn plugin. | If the candidate includes `skill_md_url` and expected checksum, treat it as a verified download. Otherwise emit a pending `/learn {ref}` action; `/learn` performs the interactive install and security preview. |
+| `plugin-marketplace` | Read `--plugin-marketplace-index=<json path or url>` or `--source-index=plugin-marketplace=<json path or url>`. | Emit a pending `/plugin install ...` action. Local plugin caches are still skipped. |
+| `github` | Read `--github-index=<json path or url>` or `--source-index=github=<json path or url>`. With `--network`, use GitHub repository search and optional `--github-org=<org>`. | Prefer entries with previewable `content_path` or `skill_md_url` plus checksum. Repository-only matches stay as manual review actions. |
+
+Promotion defaults to the current project: without `--skill-root`, approved skills are installed into `.claude/skills/omc-provisioned` under `--project-root`/the current working directory.
+
+Frontend/UI discovery uses broader query hints, but it still provisions skills, not UI code directly. For frontend and visual surfaces, discovery expands toward shadcn registries, Radix primitives, Storybook, Tailwind design systems, Figma/community UI kits, Magic UI, 21st.dev-style registries, Aceternity/React Bits-style motion components, and visual QA. Component installs from those services should remain pending manual actions unless a reviewed skill packages a deterministic, checksum-verifiable workflow.
 
 Review is non-optional. `promote` refuses to run unless `review-decision.json` confirms approval and its `install_plan_hash` still matches `install-plan.json`.
 
 Strict gate is also mandatory before install: `source_trust >= 0.85`, `freshness <= 180 days`, valid checksum, and no license conflict. Network `download-skill` candidates must carry an expected `sha256`/`checksum_sha256`/`content_sha256`; the downloaded `SKILL.md` is hashed again before copy. Candidates failing strict gate stay in quarantine and require manual follow-up.
 
-Source-level approval is intentionally narrow. `--approve-source` and `--approve-local` may batch-approve only low-risk installed or bundled skill candidates. External, plugin-cache, generated, network-download, command-based, or warning/critical risk candidates require explicit `--approve=<candidate-id>` after reading the review bundle.
+Source-level approval is intentionally narrow. `--approve-source` and `--approve-local` may batch-approve only low-risk installed or bundled skill candidates. External, generated, network-download, command-based, or warning/critical risk candidates require explicit `--approve=<candidate-id>` after reading the review bundle.
 
 ## Discovery Rules
 
@@ -216,7 +233,7 @@ Discovery scoring uses structured metadata only: slug, frontmatter fields, index
 
 For external discovery, expand literal technologies into adjacent professional practices and methodology terms from `config/default-capability-packs.json`. For example, `dart` + `backend` searches can include Effective Dart, Dart package design, clean/hexagonal architecture, domain-driven design, API design, contract testing, OWASP API security, OpenTelemetry, and twelve-factor app guidance. Frontend and visual discovery expands into design systems, accessible primitives, shadcn/Radix/Storybook, Tailwind, Figma, Motion, Three.js, visual QA, and brand-system terms. Candidates from configured professional domains, specialized platforms, and trusted GitHub organizations receive source-quality scoring and are surfaced in `review.md`.
 
-Selection is intentionally bounded. Discovery shortlists at most the configured candidates per matrix cell and per run, then `review` requires explicit candidate ids for external, plugin, network, command-based, warning, or critical candidates. This keeps provisioning focused on missing capability cells instead of installing a marketplace dump.
+Selection is intentionally bounded. Discovery shortlists at most the configured candidates per matrix cell and per run, then `review` requires explicit candidate ids for external, network, command-based, warning, or critical candidates. This keeps provisioning focused on missing capability cells instead of installing a marketplace dump.
 
 Discovery writes:
 
