@@ -1,3 +1,9 @@
+---
+name: implementation-template
+description: Template for delegating code implementation, refactoring, or modification tasks to specialized agents
+model: sonnet
+---
+
 # Implementation Task Template
 
 Use this template when delegating code implementation, refactoring, or modification tasks.
