@@ -1,6 +1,6 @@
 ---
 name: backend-pipeline
-description: End-to-end backend/engine pipeline for a single feature — constitution check → strategic gate → requirements analysis → architecture → plan review → implementation → performance & security audits → verification
+description: End-to-end backend/engine pipeline for a single feature — constitution check → strategic gate → requirements analysis → conditional technology strategy/provisioning → architecture → plan review → implementation → performance & security audits → verification
 argument-hint: "<feature description>"
 level: 4
 ---
@@ -33,7 +33,7 @@ Backend/engine counterpart to `product-pipeline`. Orchestrates the full non-UX a
 - `--parallel-tests` — run test-engineer in parallel with executor (default sequential; parallel is faster but produces more coordination load).
 
 <Purpose>
-Single command that takes a backend feature request and runs it through constitution → strategic gate → requirements analysis → architecture → plan review → implementation with tests → security and performance audits → verification. Stops at any HARD STOP (anti-goal violation, unresolved critical trade-off, plan REJECTED by critic, security CRITICAL finding, performance budget breach, verifier REJECTED) and reports the reason and remediation path before proceeding.
+Single command that takes a backend feature request and runs it through constitution → strategic gate → requirements analysis → conditional technology strategy/provisioning → architecture → plan review → implementation with tests → security and performance audits → verification. Stops at any HARD STOP (anti-goal violation, stack incompatibility, unresolved critical trade-off, plan REJECTED by critic, security CRITICAL finding, performance budget breach, verifier REJECTED) and reports the reason and remediation path before proceeding.
 </Purpose>
 
 <Use_When>
@@ -111,6 +111,33 @@ This skill encodes the minimum backend quality chain as non-skippable stages wit
 **HARD STOP:** Open questions block implementability (analyst marks them HIGH-severity). User resolves before planning.
 
 **HARD STOP:** Acceptance criteria are not testable (vague NFRs like "should be fast"). Analyst must rewrite with measurable thresholds or HARD STOP.
+
+---
+
+## Stage 3.5 — Capability & Stack Preflight (Conditional)
+
+**Agents:** technology-strategist → document-specialist (conditional researcher) → critic → stack-provision (conditional)
+**Input:** Feature description + Stage 2 strategy report + Stage 3 requirements + `.omc/constitution.md` + current stack/provisioning context
+**Output:** `.omc/decisions/YYYY-MM-DD-technology-<slug>.md` + optional `.omc/provisioned/runs/<run-id>/manifest.json`
+
+**Skip condition:** skip only when an accepted technology ADR and verified provisioning manifest already cover every backend capability block introduced by the requirements. Coverage must include the relevant application blocks, operational practices, and surfaces, not only the framework names already in `package.json`.
+
+**Protocol:**
+1. Invoke `technology-strategist` with requirements, strategy artifact, known stack, and current provisioning manifest.
+2. Technology Strategist enumerates application blocks such as auth, authorization, background jobs, telemetry, analytics, billing, ledgers, integrations, data pipelines, search, caching/rate-limiting, and compliance triggers.
+3. It produces fixed-weight scorecards, pairwise compatibility report, risk register, and handoff-envelope v2.
+4. If `requirements_completeness < 0.75` or `unknown_critical_inputs >= 2`, route to `/deep-interview` or analyst clarification and pause before architecture.
+5. If `top2_score_gap < 8`, critical compatibility is `unknown`, or fresh external evidence is missing, route to `document-specialist` researcher before critic.
+6. Run critic on the technology ADR. Only `approve` may proceed. `revise` returns to technology-strategist; `rewind` hard-rewinds to capability-map and invalidates downstream artifacts.
+7. Run `stack-provision` in Strict Gate mode when the approved ADR introduces missing skills, new technologies, or new capability surfaces.
+
+**HARD STOP:** Any critical compatibility pair is `blocked`, including ABI/FFI conflict, runtime/toolchain mismatch, license conflict, or observability/deploy incompatibility.
+
+**HARD STOP:** Critic verdict is not `approve` after allowed revise/rewind cycles.
+
+**HARD STOP:** Strict Gate cannot approve required skills/professional guidance for a critical backend block.
+
+**Proceed:** ADR is approved and either existing provisioning covers the requirements or new provisioning is verified.
 
 ---
 
@@ -223,6 +250,7 @@ This skill encodes the minimum backend quality chain as non-skippable stages wit
 | 1. Foundation | Pass / Skipped / HARD STOP | `.omc/constitution.md` |
 | 2. Strategic Gate | APPROVED / APPROVED WITH RISKS / BLOCKED | `.omc/strategy/*.md` |
 | 3. Requirements | Complete / HARD STOP | `.omc/requirements/*.md` |
+| 3.5. Capability & Stack Preflight | Approved / Skipped / HARD STOP | `.omc/decisions/*.md` + `.omc/provisioned/**` |
 | 4. Architecture | Complete / HARD STOP | `.omc/architecture/*.md` |
 | 5. Plan Review | PASS / HARD STOP | `.omc/plans/*.md` |
 | 6. Implementation | Complete | [file list] |
@@ -253,6 +281,7 @@ This skill encodes the minimum backend quality chain as non-skippable stages wit
 - HARD STOPs halt the pipeline. Lead reports reason + verbatim quote of the violated constraint + required remediation. No stage advances past a HARD STOP.
 - Stages 6 and 7 use `/team` for coordination. Other stages are sequential single-agent invocations.
 - Handoff files in `.omc/handoffs/backend-pipeline-<stage>.md` enable resumption after a HARD STOP — re-invocation reads handoffs and resumes from the halted stage.
+- Stage 3.5 uses the Team pipeline strategy subphases for backend-pipeline profile: `intake -> capability-map -> weighted-ranking -> compatibility-check -> research(optional) -> critic-gate -> provision-plan -> provision-verify`.
 - Type-1 irreversible changes trigger mandatory rigor: ralplan in Stage 5, code-reviewer in Stage 8, explicit rollback plan in Stage 5 output.
 - Composable with `/oh-my-claudecode:ralph` for retry-on-transient-failure: `/ralph /backend-pipeline "..."`.
 - Composable with `/oh-my-claudecode:autopilot` downstream of ideate — pipe a shortlist backend-track idea directly into this pipeline after prioritization.
@@ -275,6 +304,8 @@ See Stage 9 Consolidated Report + stage-specific artifacts:
 
 - `.omc/strategy/YYYY-MM-DD-<slug>.md`
 - `.omc/requirements/YYYY-MM-DD-<slug>.md`
+- `.omc/decisions/YYYY-MM-DD-technology-<slug>.md`
+- `.omc/provisioned/runs/<run-id>/manifest.json` when new provisioning was required
 - `.omc/architecture/YYYY-MM-DD-<slug>.md`
 - `.omc/plans/YYYY-MM-DD-<slug>.md`
 - `.omc/handoffs/backend-pipeline-stage{N}.md`
@@ -285,6 +316,7 @@ See Stage 9 Consolidated Report + stage-specific artifacts:
 
 <Failure_Modes_To_Avoid>
 - **Skipping Stage 2 because "this is a backend change, constitution doesn't apply."** Anti-goals apply to backend too. A caching layer that stores user content violates a "we never store user content" anti-goal. The strategic gate is non-negotiable.
+- **Skipping Stage 3.5 when backend requirements introduce a new capability block.** Auth, payments, analytics, telemetry, data pipelines, queues, search, ledgers, or integrations have stack and skill implications. Architect should design against approved technology decisions, not invent them mid-plan.
 - **Skipping Stage 4 (architecture) and going straight from requirements to plan.** Plans that skip architecture lock in accidental design choices. Architect must produce ≥2 options with reversibility classes before planner commits to one.
 - **Using `--skip-ralplan` on a Type-1 irreversible change.** Silently ignored by the skill — Type-1 changes always get ralplan regardless of flag.
 - **Treating performance-guardian as UI-focused.** Explicit backend-budget invocation is mandatory (Stage 7 protocol). Without it, the agent defaults to Core Web Vitals and produces irrelevant output.
@@ -301,6 +333,7 @@ See Stage 9 Consolidated Report + stage-specific artifacts:
 - Reuses existing OMC agents: brand-steward, product-strategist, analyst, architect, planner, critic (via ralplan), executor, test-engineer, security-reviewer, performance-guardian, verifier, code-reviewer.
 - Reuses `/team` infrastructure for Stages 6 and 7 — see `skills/team/SKILL.md`.
 - Reuses `/oh-my-claudecode:ralplan` for Stage 5 consensus plan review.
+- Uses `technology-strategist` and `stack-provision` as a conditional pre-architecture gate. For a new product or major pivot, run `/product-foundation` first so this pipeline receives current market, constitution, ADR, and provisioning context.
 - Composes with `/oh-my-claudecode:ideate` upstream — shortlist ideas with `--track=backend` flow into this skill post-prioritization.
 - Composes with `/oh-my-claudecode:priority-engine` upstream — ranked backend items enter this pipeline in order.
 - Composes with `/oh-my-claudecode:autopilot` as an alternative for fully-autonomous mode once the plan is approved (Stage 5 handoff → autopilot executes Stages 6–8).

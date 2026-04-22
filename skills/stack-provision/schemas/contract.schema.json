@@ -44,6 +44,27 @@
       "uniqueItems": true
     },
     "creative_intent": { "type": "string" },
+    "weighted_scorecard": {
+      "type": "object",
+      "properties": {
+        "schema_version": { "type": "integer" },
+        "weights": { "type": "object" },
+        "items": { "type": "array" },
+        "summary": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "compatibility_report": {
+      "type": "object",
+      "properties": {
+        "schema_version": { "type": "integer" },
+        "key_blocks": { "type": "array", "items": { "type": "string" } },
+        "pairs": { "type": "array" },
+        "summary": { "type": "object" },
+        "overall_status": { "enum": ["compatible", "risky", "blocked", "unknown"] }
+      },
+      "additionalProperties": true
+    },
     "policy": {
       "type": "object",
       "required": ["human_gate_required", "quarantine_required", "allow_generated_install_by_default"],
@@ -51,6 +72,22 @@
         "human_gate_required": { "type": "boolean", "const": true },
         "quarantine_required": { "type": "boolean", "const": true },
         "allow_generated_install_by_default": { "type": "boolean" },
+        "provisioning_mode": { "enum": ["standard", "strict-gate"] },
+        "critic_required": { "type": "boolean" },
+        "hard_rewind": { "type": "boolean" },
+        "max_rewinds": { "type": "integer", "minimum": 1 },
+        "research_required": { "type": "boolean" },
+        "provisioning_blocked": { "type": "boolean" },
+        "strict_gate": {
+          "type": "object",
+          "properties": {
+            "source_trust_min": { "type": "number" },
+            "freshness_days_max": { "type": "number" },
+            "checksum_required": { "type": "boolean" },
+            "license_conflict_allowed": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
         "dry_run": { "type": "boolean" }
       },
       "additionalProperties": true

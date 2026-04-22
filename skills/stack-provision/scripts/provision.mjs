@@ -28,6 +28,12 @@ const criticalRiskFlags = new Set([
   'hidden-network-behavior',
   'hardcoded-secret',
 ]);
+const DEFAULT_STRICT_GATE = Object.freeze({
+  source_trust_min: 0.85,
+  freshness_days_max: 180,
+  checksum_required: true,
+  license_conflict_allowed: false,
+});
 
 try {
   const result = await run(process.argv.slice(2));
@@ -91,6 +97,8 @@ function parseArgs(argv) {
     approveSources: [],
     approveLocal: false,
     reject: false,
+    criticVerdict: '',
+    researchAck: false,
     approvedBy: process.env.USER || 'unknown',
     skillRoot: '',
     manifestPath: '',
@@ -178,6 +186,13 @@ function parseArgs(argv) {
       options.approveLocal = true;
     } else if (arg === '--reject') {
       options.reject = true;
+    } else if (arg.startsWith('--critic-verdict=')) {
+      options.criticVerdict = arg.slice('--critic-verdict='.length).trim();
+    } else if (arg === '--critic-verdict') {
+      index += 1;
+      options.criticVerdict = requireValue(argv[index], '--critic-verdict').trim();
+    } else if (arg === '--research-ack') {
+      options.researchAck = true;
     } else if (arg.startsWith('--approved-by=')) {
       options.approvedBy = arg.slice('--approved-by='.length);
     } else if (arg === '--approved-by') {
@@ -203,6 +218,9 @@ function parseArgs(argv) {
   }
   if (!Number.isFinite(options.limit) || options.limit < 1) {
     throw new Error('stack-provision: --limit must be a number >= 1');
+  }
+  if (options.criticVerdict && !['approve', 'revise', 'rewind'].includes(options.criticVerdict)) {
+    throw new Error('stack-provision: --critic-verdict must be one of approve, revise, rewind');
   }
 
   return options;
@@ -354,6 +372,17 @@ function localSkillCandidate(source, root, skillFile, run, config) {
   }
 
   const hash = sha256(content);
+  const trust = localTrustMetadata(source);
+  const baseRiskFlags = localRiskFlags(source, skillFile);
+  const strictGate = evaluateStrictGateForCandidate({
+    source_trust: trust.source_trust,
+    freshness_days: trust.freshness_days,
+    checksum_valid: true,
+    license_status: trust.license_status,
+    source,
+    risk_flags: baseRiskFlags,
+  }, strictGatePolicy(run.contract));
+  const riskFlags = mergeStrictGateRiskFlags(baseRiskFlags, strictGate);
   return {
     candidate_id: stableId(source, `${relative(root, skillFile)}:${hash}`),
     source,
@@ -367,8 +396,14 @@ function localSkillCandidate(source, root, skillFile, run, config) {
     covered_technology: unique(coverage.covered_cells.map((cell) => cell.technology)),
     covered_aspects: unique(coverage.covered_cells.map((cell) => cell.aspect)),
     covered_cells: coverage.covered_cells,
-    risk_flags: localRiskFlags(source, skillFile),
+    risk_flags: riskFlags,
     source_quality: profile.sourceQuality,
+    source_trust: strictGate.metrics.source_trust,
+    freshness_days: strictGate.metrics.freshness_days,
+    checksum_valid: strictGate.metrics.checksum_valid,
+    license_status: strictGate.metrics.license_status,
+    provenance: trust.provenance,
+    strict_gate: strictGate,
     sha256: hash,
     score: coverage.score,
     install: {
@@ -454,6 +489,17 @@ function normalizeExternalEntries(source, entries, run, config) {
     const candidateHash = install.kind === 'copy-skill' && install.source_path && existsSync(install.source_path)
       ? sha256(readFileSync(install.source_path, 'utf8'))
       : sha256(candidateBody);
+    const trust = externalTrustMetadata(source, entry, profile.sourceQuality);
+    const baseRiskFlags = externalRiskFlags(source, entry, install);
+    const strictGate = evaluateStrictGateForCandidate({
+      source_trust: trust.source_trust,
+      freshness_days: trust.freshness_days,
+      checksum_valid: true,
+      license_status: trust.license_status,
+      source,
+      risk_flags: baseRiskFlags,
+    }, strictGatePolicy(run.contract));
+    const riskFlags = mergeStrictGateRiskFlags(baseRiskFlags, strictGate);
     candidates.push({
       candidate_id: stableId(source, `${slug}:${candidateHash}`),
       source,
@@ -467,8 +513,14 @@ function normalizeExternalEntries(source, entries, run, config) {
       covered_technology: unique(coverage.covered_cells.map((cell) => cell.technology)),
       covered_aspects: unique(coverage.covered_cells.map((cell) => cell.aspect)),
       covered_cells: coverage.covered_cells,
-      risk_flags: externalRiskFlags(source, entry, install),
+      risk_flags: riskFlags,
       source_quality: profile.sourceQuality,
+      source_trust: strictGate.metrics.source_trust,
+      freshness_days: strictGate.metrics.freshness_days,
+      checksum_valid: strictGate.metrics.checksum_valid,
+      license_status: strictGate.metrics.license_status,
+      provenance: trust.provenance,
+      strict_gate: strictGate,
       sha256: candidateHash,
       score: coverage.score,
       install,
@@ -570,6 +622,133 @@ function sourceQualityForCandidate(source, entry, config) {
   }
 
   return { score, signals };
+}
+
+function strictGatePolicy(contract) {
+  return {
+    source_trust_min: Number(contract?.policy?.strict_gate?.source_trust_min ?? DEFAULT_STRICT_GATE.source_trust_min),
+    freshness_days_max: Number(contract?.policy?.strict_gate?.freshness_days_max ?? DEFAULT_STRICT_GATE.freshness_days_max),
+    checksum_required: contract?.policy?.strict_gate?.checksum_required ?? DEFAULT_STRICT_GATE.checksum_required,
+    license_conflict_allowed:
+      contract?.policy?.strict_gate?.license_conflict_allowed ?? DEFAULT_STRICT_GATE.license_conflict_allowed,
+  };
+}
+
+function localTrustMetadata(source) {
+  if (source === 'bundled-skill') {
+    return {
+      source_trust: 0.98,
+      freshness_days: 0,
+      license_status: 'no-conflict',
+      provenance: 'bundled-local',
+    };
+  }
+  if (source === 'installed-skill') {
+    return {
+      source_trust: 0.95,
+      freshness_days: 0,
+      license_status: 'no-conflict',
+      provenance: 'installed-local',
+    };
+  }
+  return {
+    source_trust: 0.88,
+    freshness_days: 0,
+    license_status: 'unknown',
+    provenance: 'plugin-cache',
+  };
+}
+
+function externalTrustMetadata(source, entry, sourceQuality) {
+  const freshness = freshnessDaysFromEntry(entry);
+  const stars = Number(entry.stars || entry.stargazers_count || 0);
+  let trust = source === 'github' ? 0.66 : 0.7;
+  trust += Math.min(0.2, Number(sourceQuality?.score || 0) / 40);
+  trust += stars >= 100 ? 0.12 : stars >= 25 ? 0.08 : stars >= 10 ? 0.05 : 0;
+  trust -= (freshness != null && freshness > 365) ? 0.1 : 0;
+  trust = clamp01(trust);
+  return {
+    source_trust: Number(trust.toFixed(3)),
+    freshness_days: freshness,
+    license_status: normalizeLicenseStatus(entry),
+    provenance: source === 'github' ? 'github-index' : `${source}-index`,
+  };
+}
+
+function freshnessDaysFromEntry(entry) {
+  const raw = entry.last_updated || entry.updated_at || entry.published_at || entry.lastUpdate;
+  if (!raw) {
+    return null;
+  }
+  const parsed = Date.parse(String(raw));
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  const deltaMs = Date.now() - parsed;
+  if (deltaMs < 0) {
+    return 0;
+  }
+  return Math.floor(deltaMs / (24 * 60 * 60 * 1000));
+}
+
+function normalizeLicenseStatus(entry) {
+  const raw = String(
+    entry.license || entry.license_id || entry.licenseName || entry.spdx || '',
+  ).toLowerCase();
+  if (!raw) {
+    return 'unknown';
+  }
+  if (/(gpl-3|agpl|non-commercial|proprietary|unknown-license-conflict)/.test(raw)) {
+    return 'conflict';
+  }
+  return 'no-conflict';
+}
+
+function evaluateStrictGateForCandidate(candidate, policy) {
+  const reasons = [];
+  const metrics = {
+    source_trust: Number(candidate.source_trust ?? 0),
+    freshness_days: candidate.freshness_days ?? null,
+    checksum_valid: candidate.checksum_valid !== false,
+    license_status: candidate.license_status || 'unknown',
+  };
+
+  if (metrics.source_trust < policy.source_trust_min) {
+    reasons.push(`source_trust<${policy.source_trust_min}`);
+  }
+
+  const isLocalCandidate = ['bundled-skill', 'installed-skill', 'plugin-skill'].includes(candidate.source);
+  if (metrics.freshness_days == null) {
+    if (!isLocalCandidate) {
+      reasons.push('freshness_unknown');
+    }
+  } else if (metrics.freshness_days > policy.freshness_days_max) {
+    reasons.push(`freshness>${policy.freshness_days_max}d`);
+  }
+
+  if (policy.checksum_required && !metrics.checksum_valid) {
+    reasons.push('checksum_invalid');
+  }
+  if (!policy.license_conflict_allowed && metrics.license_status === 'conflict') {
+    reasons.push('license_conflict');
+  }
+
+  return {
+    install_allowed: reasons.length === 0,
+    reasons,
+    metrics,
+  };
+}
+
+function mergeStrictGateRiskFlags(riskFlags, strictGate) {
+  const flags = new Set(riskFlags || []);
+  if (!strictGate.install_allowed) {
+    flags.add('strict-gate-failed');
+    for (const reason of strictGate.reasons) {
+      flags.add(`strict-gate:${reason}`);
+    }
+  }
+  return [...flags];
 }
 
 function discoveryQueries(run, config) {
@@ -782,6 +961,19 @@ function review(runDir, options) {
     title: candidate.title,
     install: candidate.install,
     risk_flags: candidate.risk_flags || [],
+    source_trust: candidate.source_trust ?? null,
+    freshness_days: candidate.freshness_days ?? null,
+    checksum_valid: candidate.checksum_valid !== false,
+    license_status: candidate.license_status || 'unknown',
+    provenance: candidate.provenance || null,
+    strict_gate: candidate.strict_gate || evaluateStrictGateForCandidate({
+      source_trust: candidate.source_trust ?? 0,
+      freshness_days: candidate.freshness_days ?? null,
+      checksum_valid: candidate.checksum_valid !== false,
+      license_status: candidate.license_status || 'unknown',
+      source: candidate.source,
+      risk_flags: candidate.risk_flags || [],
+    }, strictGatePolicy(run.contract)),
   }));
   const installPlan = {
     schema_version: 1,
@@ -802,6 +994,8 @@ function review(runDir, options) {
         decision: 'approve',
         reason: 'selected by stack-provision review command',
       }));
+  const criticVerdict = options.criticVerdict || (options.reject ? 'revise' : (approvedItems.length > 0 ? 'approve' : 'revise'));
+  const researchRequired = run.contract?.policy?.research_required === true;
   const decision = {
     schema_version: 1,
     run_id: run.contract.run_id,
@@ -811,6 +1005,8 @@ function review(runDir, options) {
       approved: approvedItems.length > 0 && !options.reject,
       approved_at: now(),
       approved_by: options.approvedBy,
+      critic_verdict: criticVerdict,
+      research_acknowledged: researchRequired ? options.researchAck : true,
     },
     approval_policy: approvalSelection.policy,
   };
@@ -854,8 +1050,18 @@ async function promote(runDir, options) {
   const installPlan = readJsonValidated(join(runDir, 'install-plan.json'), 'install-plan');
   const decision = readJsonValidated(join(runDir, 'review-decision.json'), 'review');
 
+  if (run.contract?.policy?.provisioning_blocked) {
+    throw new Error('stack-provision: compatibility report is blocked; resolve strategy conflicts before provisioning');
+  }
+
   if (!decision.confirmation?.approved) {
     throw new Error('stack-provision: review confirmation is not approved; promotion blocked');
+  }
+  if (decision.confirmation?.critic_verdict !== 'approve') {
+    throw new Error('stack-provision: critic verdict is not approve; promotion blocked');
+  }
+  if (run.contract?.policy?.research_required && decision.confirmation?.research_acknowledged !== true) {
+    throw new Error('stack-provision: research acknowledgement required before promotion');
   }
   if (installPlan.hash !== decision.install_plan_hash) {
     throw new Error('stack-provision: install plan hash mismatch; rerun review');
@@ -871,6 +1077,7 @@ async function promote(runDir, options) {
   const installed = [];
   const pendingUserActions = [];
   const rollbackOps = [];
+  const quarantined = [];
   const errors = [];
 
   for (const approved of decision.approved_items || []) {
@@ -881,6 +1088,20 @@ async function promote(runDir, options) {
     }
     if (candidate.sha256 !== approved.candidate_hash) {
       errors.push(`approved candidate hash mismatch: ${approved.candidate_id}`);
+      continue;
+    }
+    const strictGate = candidate.strict_gate || evaluateStrictGateForCandidate({
+      source_trust: candidate.source_trust ?? 0,
+      freshness_days: candidate.freshness_days ?? null,
+      checksum_valid: candidate.checksum_valid !== false,
+      license_status: candidate.license_status || 'unknown',
+      source: candidate.source,
+      risk_flags: candidate.risk_flags || [],
+    }, strictGatePolicy(run.contract));
+    if (!strictGate.install_allowed) {
+      const quarantine = quarantineCandidate(candidate, runDir, strictGate, options.dryRun);
+      quarantined.push(quarantine.quarantined);
+      pendingUserActions.push(quarantine.pending_user_action);
       continue;
     }
 
@@ -908,6 +1129,7 @@ async function promote(runDir, options) {
       ? (installed.length > 0 || pendingUserActions.length > 0 ? 'partial' : 'failed')
       : (options.dryRun ? 'dry_run' : 'success'),
     installed,
+    quarantined,
     pending_user_actions: pendingUserActions,
     rollback: rollbackOps,
     errors,
@@ -932,6 +1154,7 @@ async function promote(runDir, options) {
     run_id: run.contract.run_id,
     status: manifest.status,
     installed: installed.length,
+    quarantined: quarantined.length,
     pending_user_actions: pendingUserActions.length,
     errors,
     manifest: manifestPath,
@@ -1015,6 +1238,37 @@ function pendingAction(candidate, command) {
       operation: 'manual_plugin_uninstall',
       target_path: candidate.install?.target || candidate.slug,
       backup_path: null,
+    },
+  };
+}
+
+function quarantineCandidate(candidate, runDir, strictGate, dryRun = false) {
+  const quarantineDir = join(runDir, 'quarantine', sanitizeSlug(candidate.slug));
+  const quarantinePath = join(quarantineDir, `${sanitizeSlug(candidate.candidate_id)}.json`);
+  if (!dryRun) {
+    mkdirSync(quarantineDir, { recursive: true });
+    writeJson(quarantinePath, {
+      candidate_id: candidate.candidate_id,
+      slug: candidate.slug,
+      source: candidate.source,
+      strict_gate: strictGate,
+      created_at: now(),
+    });
+  }
+  return {
+    quarantined: {
+      candidate_id: candidate.candidate_id,
+      slug: candidate.slug,
+      source: candidate.source,
+      quarantine_path: quarantinePath,
+      reasons: strictGate.reasons,
+    },
+    pending_user_action: {
+      candidate_id: candidate.candidate_id,
+      slug: candidate.slug,
+      source: candidate.source,
+      command: `manual approve required after strict gate review: ${strictGate.reasons.join(', ')}`,
+      rollback: 'none (quarantined)',
     },
   };
 }
@@ -1390,12 +1644,17 @@ function selectApprovals(candidates, options) {
 }
 
 function renderReviewMarkdown(contract, candidatesDoc, installPlan, decision) {
+  const strictPolicy = strictGatePolicy(contract);
   const lines = [
     `# Stack Provision Review - ${contract.run_id}`,
     '',
     `Install plan hash: ${installPlan.hash}`,
     `Approved: ${decision.confirmation.approved ? 'yes' : 'no'}`,
     `Approved items: ${decision.approved_items.length}`,
+    `Critic verdict: ${decision.confirmation.critic_verdict || 'unknown'}`,
+    `Research acknowledged: ${decision.confirmation.research_acknowledged === true ? 'yes' : 'no'}`,
+    `Provisioning mode: ${contract.policy?.provisioning_mode || 'strict-gate'}`,
+    `Strict gate thresholds: source_trust>=${strictPolicy.source_trust_min}, freshness<=${strictPolicy.freshness_days_max}d, checksum=${strictPolicy.checksum_required}, license_conflict_allowed=${strictPolicy.license_conflict_allowed}`,
     `Approval policy: source-level approval is allowed only for low-risk installed/bundled candidates; external, plugin-cache, generated, download, command, and warning/critical candidates require explicit candidate IDs.`,
     '',
     '## Candidates',
@@ -1415,6 +1674,12 @@ function renderReviewMarkdown(contract, candidatesDoc, installPlan, decision) {
       `- Risk flags: ${(candidate.risk_flags || []).join(', ') || 'none'}`,
       `- Risk severity: ${formatRiskSeverities(candidate)}`,
       `- Source quality: ${formatSourceQuality(candidate)}`,
+      `- Source trust: ${formatSourceTrust(candidate)}`,
+      `- Freshness days: ${candidate.freshness_days ?? 'unknown'}`,
+      `- Checksum valid: ${candidate.checksum_valid !== false ? 'yes' : 'no'}`,
+      `- License status: ${candidate.license_status || 'unknown'}`,
+      `- Provenance: ${candidate.provenance || 'unknown'}`,
+      `- Strict gate: ${formatStrictGate(candidate)}`,
       `- Approval mode: ${requiresExplicitApproval(candidate) ? 'explicit candidate id required' : 'source-level eligible'}`,
       `- Covered surfaces: ${(candidate.covered_surface || []).join(', ')}`,
       `- Covered technologies: ${(candidate.covered_technology || []).join(', ')}`,
@@ -1447,6 +1712,20 @@ function formatSourceQuality(candidate) {
   const score = Number(candidate.source_quality?.score || 0);
   const signals = candidate.source_quality?.signals || [];
   return `${score}${signals.length > 0 ? ` (${signals.join(', ')})` : ''}`;
+}
+
+function formatSourceTrust(candidate) {
+  const score = Number(candidate.source_trust ?? 0);
+  return Number.isFinite(score) ? score.toFixed(3) : '0.000';
+}
+
+function formatStrictGate(candidate) {
+  const gate = candidate.strict_gate || {};
+  if (gate.install_allowed === true) {
+    return 'pass';
+  }
+  const reasons = Array.isArray(gate.reasons) ? gate.reasons : [];
+  return reasons.length > 0 ? `fail (${reasons.join(', ')})` : 'fail';
 }
 
 function approvalBlock(candidate) {
@@ -1792,6 +2071,15 @@ function compact(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function clamp01(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 function isInside(path, root) {
   const rel = relative(resolve(root), resolve(path));
   return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'));
@@ -1821,7 +2109,7 @@ function usage() {
     json: true,
     usage: [
       'node skills/stack-provision/scripts/provision.mjs discover <run-dir> [--sources=installed,bundled,plugin,skills-sh,plugin-marketplace,github]',
-      'node skills/stack-provision/scripts/provision.mjs review <run-dir> [--approve=<ids>|--approve-source=<source>|--approve-local|--reject]',
+      'node skills/stack-provision/scripts/provision.mjs review <run-dir> [--approve=<ids>|--approve-source=<source>|--approve-local|--reject|--critic-verdict=<approve|revise|rewind>|--research-ack]',
       'node skills/stack-provision/scripts/provision.mjs promote <run-dir> --skill-root=<dir>',
       'node skills/stack-provision/scripts/provision.mjs rollback <run-dir>',
       'node skills/stack-provision/scripts/provision.mjs verify <run-dir>',

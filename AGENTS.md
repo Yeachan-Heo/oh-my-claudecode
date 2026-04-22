@@ -172,6 +172,7 @@ Do not ask for confirmation — just read the skill file and follow its instruct
 | "tdd", "test first" | keyword mode | Inject TDD-mode guidance and favor test-first execution with `test-engineer` when appropriate |
 | "cleanup", "deslop", "anti-slop" | `$ai-slop-cleaner` | Read `~/.agents/skills/ai-slop-cleaner/SKILL.md`, plan and clean AI-generated slop with separate writer/reviewer passes |
 | "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `~/.agents/skills/web-clone/SKILL.md`, start website cloning pipeline |
+| "product-foundation", "new product", "start product" | `$product-foundation` | Read `~/.agents/skills/product-foundation/SKILL.md`, run market-to-stack foundation workflow before feature pipelines |
 
 Detection rules:
 - Keywords are case-insensitive and match anywhere in the user's message
@@ -203,6 +204,11 @@ Workflow Skills:
 - `deep-interview`: Socratic deep interview with Ouroboros-inspired mathematical ambiguity gating before execution
 - `ralplan`: Iterative consensus planning with RALPLAN-DR structured deliberation (planner + architect + critic); supports `--deliberate` for high-risk work
 - `ai-slop-cleaner`: Regression-safe cleanup workflow for duplicate code, dead code, needless abstractions, and boundary violations; supports `--review` for reviewer-only passes
+- `product-foundation`: Market-to-stack workflow for new products and major pivots; orchestrates product articulation, competitors, brand, product capability mapping, technology strategy, critic, and stack-provision
+- `product-strategist`: Feature strategy gate and Product Capability & Launch Map builder before technology strategy
+- `backend-pipeline`: Backend/engine feature pipeline with conditional technology strategy/provisioning preflight
+- `product-pipeline`: User-facing product/UI pipeline with conditional technology strategy/provisioning preflight
+- `stack-provision`: Strict Gate skill provisioning from approved technology ADRs
 
 Agent Shortcuts:
 - `analyze` -> debugger: Investigation and root-cause analysis

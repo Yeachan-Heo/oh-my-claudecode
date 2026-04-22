@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (33 canonical + 1 alias)', () => {
+    it('should return correct number of skills (49 canonical + 1 alias)', () => {
       const skills = createBuiltinSkills();
-      // 34 entries: 33 canonical skills + 1 deprecated alias (psm)
-      expect(skills).toHaveLength(49);
+      // 50 entries: 49 canonical skills + 1 deprecated alias (psm)
+      expect(skills).toHaveLength(50);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -136,6 +136,7 @@ describe('Builtin Skills', () => {
         'ideate',
         'inspiration-fetch',
         'pre-launch-sprint',
+        'product-foundation',
         'product-pipeline',
         'product-strategist',
         'autopilot',
@@ -543,7 +544,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(48);
+      expect(names).toHaveLength(49);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('ask');
       expect(names).toContain('autopilot');
@@ -559,6 +560,7 @@ describe('Builtin Skills', () => {
       expect(names).toContain('omc-doctor');
       expect(names).toContain('hud');
       expect(names).toContain('omc-setup');
+      expect(names).toContain('product-foundation');
       expect(names).toContain('setup');
       expect(names).toContain('trace');
       expect(names).toContain('visual-verdict');
@@ -577,9 +579,10 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131, psm still exists
-      expect(names).toHaveLength(49);
+      expect(names).toHaveLength(50);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('trace');
+      expect(names).toContain('product-foundation');
       expect(names).toContain('visual-verdict');
       expect(names).not.toContain('swarm');
       expect(names).toContain('psm');

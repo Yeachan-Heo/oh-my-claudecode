@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { initTeamPipelineState, markTeamPhase } from '../state.js';
-import { transitionTeamPhase, isNonNegativeFiniteInteger } from '../transitions.js';
+import {
+  transitionTeamPhase,
+  isNonNegativeFiniteInteger,
+  evaluateTeamRoutingDecision,
+  updateTeamStrategyMetrics,
+  applyTeamCriticVerdict,
+  transitionTeamSubphase,
+} from '../transitions.js';
 
 describe('team pipeline transitions', () => {
   it('allows canonical plan -> prd -> exec transitions', () => {
@@ -45,6 +52,15 @@ describe('team pipeline transitions', () => {
     expect(overflow.ok).toBe(false);
     expect(overflow.state.phase).toBe('failed');
     expect(overflow.reason).toContain('Fix loop exceeded');
+  });
+
+  it('initializes profile/subphase defaults for strategy control plane', () => {
+    const state = initTeamPipelineState('/tmp/project', 'sid-init');
+    expect(state.pipeline_profile).toBe('default');
+    expect(state.current_subphase).toBe('intake');
+    expect(state.max_rewinds).toBe(2);
+    expect(state.provisioning_mode).toBe('strict-gate');
+    expect(state.strategy_metrics.requirements_completeness).toBe(1);
   });
 });
 
@@ -177,5 +193,84 @@ describe('team-verify numeric guards', () => {
     const result = transitionTeamPhase(state, 'team-verify');
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('tasks_completed (7) < tasks_total (10)');
+  });
+});
+
+describe('strategy routing and critic rewind', () => {
+  it('routes to deep-interview when requirements are incomplete', () => {
+    const base = initTeamPipelineState('/tmp/project', 'sid-route-1', {
+      pipeline_profile: 'product-pipeline',
+    });
+    const state = updateTeamStrategyMetrics(base, {
+      requirements_completeness: 0.7,
+      unknown_critical_inputs: 2,
+    });
+    const decision = evaluateTeamRoutingDecision(state);
+    expect(decision.next_agent).toBe('deep-interview');
+    expect(decision.target_subphase).toBe('intake');
+  });
+
+  it('routes to researcher alias when score gap is narrow', () => {
+    const base = initTeamPipelineState('/tmp/project', 'sid-route-2', {
+      pipeline_profile: 'backend-pipeline',
+    });
+    const ranked = transitionTeamSubphase(base, 'compatibility-check');
+    expect(ranked.ok).toBe(true);
+    const state = updateTeamStrategyMetrics(ranked.state, {
+      top2_score_gap: 4,
+      has_fresh_external_validation: true,
+    });
+    const decision = evaluateTeamRoutingDecision(state);
+    expect(decision.next_agent).toBe('document-specialist');
+    expect(decision.target_subphase).toBe('research');
+  });
+
+  it('applies critic rewind and invalidates downstream artifacts', () => {
+    const base = initTeamPipelineState('/tmp/project', 'sid-critic-1', {
+      pipeline_profile: 'product-pipeline',
+    });
+    const prepared = {
+      ...base,
+      current_subphase: 'critic-gate' as const,
+      artifacts: {
+        ...base.artifacts,
+        scorecard_path: '.omc/scorecard.json',
+        compatibility_report_path: '.omc/compat.json',
+        verify_report_path: '.omc/verify.json',
+      },
+    };
+    const rewound = applyTeamCriticVerdict(prepared, 'rewind');
+    expect(rewound.ok).toBe(true);
+    expect(rewound.state.rewind_count).toBe(1);
+    expect(rewound.state.current_subphase).toBe('capability-map');
+    expect(rewound.state.artifacts.scorecard_path).toBeNull();
+    expect(rewound.state.artifacts.compatibility_report_path).toBeNull();
+    expect(rewound.state.artifacts.verify_report_path).toBeNull();
+  });
+
+  it('enforces hard rewind limit and requires human gate', () => {
+    const base = initTeamPipelineState('/tmp/project', 'sid-critic-2', {
+      pipeline_profile: 'backend-pipeline',
+    });
+    const exhausted = {
+      ...base,
+      current_subphase: 'critic-gate' as const,
+      rewind_count: 2,
+      max_rewinds: 2,
+    };
+    const blocked = applyTeamCriticVerdict(exhausted, 'rewind');
+    expect(blocked.ok).toBe(false);
+    expect(blocked.reason).toContain('deep-interview + human decision gate required');
+  });
+
+  it('moves to provision-plan on critic approval', () => {
+    const base = initTeamPipelineState('/tmp/project', 'sid-critic-3', {
+      pipeline_profile: 'product-pipeline',
+    });
+    const prepared = transitionTeamSubphase(base, 'critic-gate');
+    expect(prepared.ok).toBe(true);
+    const approved = applyTeamCriticVerdict(prepared.state, 'approve');
+    expect(approved.ok).toBe(true);
+    expect(approved.state.current_subphase).toBe('provision-plan');
   });
 });

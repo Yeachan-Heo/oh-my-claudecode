@@ -24,6 +24,22 @@
             "type": "array",
             "items": { "type": "string" }
           },
+          "source_trust": { "type": ["number", "null"] },
+          "freshness_days": { "type": ["integer", "null"] },
+          "checksum_valid": { "type": "boolean" },
+          "license_status": { "type": "string" },
+          "provenance": { "type": ["string", "null"] },
+          "strict_gate": {
+            "type": "object",
+            "properties": {
+              "install_allowed": { "type": "boolean" },
+              "reasons": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": true
+          },
           "install": {
             "type": "object",
             "required": ["kind"],

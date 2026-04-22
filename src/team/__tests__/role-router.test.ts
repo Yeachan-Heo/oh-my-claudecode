@@ -20,6 +20,21 @@ describe('role-router', () => {
       expect(inferLaneIntent('investigate root cause')).toBe('debug');
     });
 
+    it('detects strategy intent', () => {
+      expect(inferLaneIntent('technology strategy for auth')).toBe('strategy');
+      expect(inferLaneIntent('build compatibility matrix for stack decision')).toBe('strategy');
+    });
+
+    it('detects research intent', () => {
+      expect(inferLaneIntent('research official docs for telemetry')).toBe('research');
+      expect(inferLaneIntent('validate sources with fresh evidence')).toBe('research');
+    });
+
+    it('detects critique intent', () => {
+      expect(inferLaneIntent('critic should challenge the plan')).toBe('critique');
+      expect(inferLaneIntent('red-team this architecture')).toBe('critique');
+    });
+
     it('detects docs intent', () => {
       expect(inferLaneIntent('write documentation for the API')).toBe('docs');
       expect(inferLaneIntent('update README')).toBe('docs');
@@ -71,6 +86,24 @@ describe('role-router', () => {
     it('routes debug intent to debugger', () => {
       const result = routeTaskToRole('debug the crash', '', 'executor');
       expect(result.role).toBe('debugger');
+      expect(result.confidence).toBe('high');
+    });
+
+    it('routes strategy intent to technology-strategist', () => {
+      const result = routeTaskToRole('stack decision for telemetry and auth', '', 'executor');
+      expect(result.role).toBe('technology-strategist');
+      expect(result.confidence).toBe('high');
+    });
+
+    it('routes research intent to document-specialist', () => {
+      const result = routeTaskToRole('research official docs for ffi compatibility', '', 'executor');
+      expect(result.role).toBe('document-specialist');
+      expect(result.confidence).toBe('high');
+    });
+
+    it('routes critique intent to critic', () => {
+      const result = routeTaskToRole('red-team this proposal and rewind if needed', '', 'executor');
+      expect(result.role).toBe('critic');
       expect(result.confidence).toBe('high');
     });
 

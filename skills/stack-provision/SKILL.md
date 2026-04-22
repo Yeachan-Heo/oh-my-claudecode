@@ -9,7 +9,7 @@ level: 4
 
 Turn a chosen stack into a reviewed capability system: agents, skills, context files, discovery targets, generated drafts, install decisions, manifests, and rollback records. This skill is not only for backend packages. It covers backend, frontend engineering, product UX, visual creativity, mobile, infra/devops, data/AI, and application capability blocks such as authentication, product analytics, and financial transactions.
 
-If the stack itself is not yet chosen, use the `technology-strategist` agent first. That agent owns the decision of which technologies and application blocks belong in the stack ADR; `stack-provision` consumes that ADR or its handoff command and provisions the matching skills/guidelines.
+If the stack itself is not yet chosen, use the `technology-strategist` agent first. For a new product or major pivot, use `/product-foundation` before this skill so market, brand, competitor, technology ADR, critic verdict, and provisioning context are created in the right order. Technology Strategist owns the decision of which technologies and application blocks belong in the stack ADR; `stack-provision` consumes that ADR or its handoff command and provisions the matching skills/guidelines.
 
 The core contract is deterministic. Always initialize a run with the bundled helper before discovery or installation.
 
@@ -85,13 +85,14 @@ The generated contract is the source of truth for all later phases. Do not inven
 
 ## Technology Decision Contract
 
-Use `technology-strategist` before this skill when the user has product intent but the stack is incomplete or undecided. It should produce `.omc/decisions/YYYY-MM-DD-technology-<slug>.md` with:
+Use `product-foundation` for new-product foundation work and `technology-strategist` directly for focused feature preflight when the user has product intent but the stack is incomplete or undecided. Technology Strategist should produce `.omc/decisions/YYYY-MM-DD-technology-<slug>.md` with:
 
 - `stack`: concrete technologies already chosen or proposed.
 - `application_blocks`: product capability blocks such as `auth`, `product-analytics`, `finance-transactions`.
 - decision drivers and alternatives considered.
 - skill/guideline targets for each block.
 - a concrete `stack-provision` handoff command.
+- a critic verdict path or explicit critic verdict field; promotion is blocked unless critic verdict is `approve`.
 
 Stack technologies are not a fixed enum. Additions are expected. Prefer adding them through `technology-strategist` ADRs and, when needed, a project override config passed with `--config=<path>` that extends `tech_match`, `application_blocks`, `aspect_aliases`, and `query_expansions`.
 
@@ -148,7 +149,7 @@ node skills/stack-provision/scripts/provision.mjs discover .omc/provisioned/runs
 
 # Phase 4: review decision and install-plan hash
 node skills/stack-provision/scripts/provision.mjs review .omc/provisioned/runs/<run-id> \
-  --approve=<candidate-id,candidate-id> --approved-by=<name> --json
+  --approve=<candidate-id,candidate-id> --approved-by=<name> --critic-verdict=approve --json
 
 # Phase 5: promote approved candidates only
 node skills/stack-provision/scripts/provision.mjs promote .omc/provisioned/runs/<run-id> \
@@ -170,6 +171,8 @@ Discovery sources:
 - `github`: reads `--github-index=<json path or url>`, or best-effort GitHub repository search with `--network --github-org=<org>`.
 
 Review is non-optional. `promote` refuses to run unless `review-decision.json` confirms approval and its `install_plan_hash` still matches `install-plan.json`.
+
+Strict gate is also mandatory before install: `source_trust >= 0.85`, `freshness <= 180 days`, valid checksum, and no license conflict. Candidates failing strict gate stay in quarantine and require manual follow-up.
 
 Source-level approval is intentionally narrow. `--approve-source` and `--approve-local` may batch-approve only low-risk installed or bundled skill candidates. External, plugin-cache, generated, network-download, command-based, or warning/critical risk candidates require explicit `--approve=<candidate-id>` after reading the review bundle.
 

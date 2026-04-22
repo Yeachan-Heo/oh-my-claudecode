@@ -28,7 +28,9 @@
       "properties": {
         "approved": { "type": "boolean" },
         "approved_at": { "type": "string", "format": "date-time" },
-        "approved_by": { "type": "string" }
+        "approved_by": { "type": "string" },
+        "critic_verdict": { "enum": ["approve", "revise", "rewind"] },
+        "research_acknowledged": { "type": "boolean" }
       },
       "additionalProperties": true
     }

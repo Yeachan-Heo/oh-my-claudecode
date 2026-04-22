@@ -1,6 +1,6 @@
 ---
 name: product-pipeline
-description: End-to-end product-quality pipeline for a single feature request — constitution check → strategic gate → UX research → UX flow design → implementation → quality audit → verification
+description: End-to-end product-quality pipeline for a single feature request — constitution check → strategic gate → conditional technology strategy/provisioning → UX research → UX flow design → implementation → quality audit → verification
 argument-hint: "<feature description>"
 level: 4
 ---
@@ -25,7 +25,7 @@ Orchestrates the full product-quality agent chain for a single feature request. 
 ```
 
 <Purpose>
-Single command that takes a feature request and runs it through the full product-quality chain: constitution check → strategic gate → UX flow design → component implementation → quality audit. Stops at any HARD STOP (anti-goal violation, accessibility critical, performance budget breach) and reports back with the reason and the required remediation path before the user can proceed.
+Single command that takes a feature request and runs it through the full product-quality chain: constitution check → strategic gate → conditional technology strategy/provisioning → UX flow design → component implementation → quality audit. Stops at any HARD STOP (anti-goal violation, stack incompatibility, accessibility critical, performance budget breach) and reports back with the reason and the required remediation path before the user can proceed.
 </Purpose>
 
 <Use_When>
@@ -83,6 +83,32 @@ This skill makes every gate non-skippable. Each stage's output becomes the next 
 **HARD STOP:** If result is `NEEDS CLARIFICATION` with a blocking open question. Pipeline pauses until user resolves the question.
 
 **Proceed:** result is `APPROVED` or `APPROVED WITH RISKS` (risks are documented in the handoff, not a stop condition).
+
+---
+
+## Stage 2.5 — Capability & Stack Preflight (Conditional)
+
+**Agents:** technology-strategist → document-specialist (conditional researcher) → critic → stack-provision (conditional)
+**Input:** Feature description + Stage 2 strategy report + `.omc/constitution.md` + compact brand/competitor/research context + `.omc/provisioned/current.json` when present
+**Output:** `.omc/decisions/YYYY-MM-DD-technology-<slug>.md` + optional `.omc/provisioned/runs/<run-id>/manifest.json`
+
+**Skip condition:** skip only when a current technology ADR and provisioning manifest already cover every capability block introduced by this feature. Coverage must be explicit: matching stack technologies, application blocks, and capability surfaces. "The project already uses React" is not enough when the feature introduces analytics, telemetry, auth, billing, generated media, 3D, realtime, or domain-specific workflow blocks.
+
+**Protocol:**
+1. Invoke `technology-strategist` with the feature, strategy artifact path, current stack, brand/constitution context, and known provisioned manifest.
+2. Technology Strategist classifies the product/domain, maps application blocks, produces weighted scorecard, compatibility report, risk register, and handoff-envelope v2.
+3. If `requirements_completeness < 0.75` or `unknown_critical_inputs >= 2`, route to `/deep-interview` and pause this pipeline until the missing inputs are resolved.
+4. If `top2_score_gap < 8`, critical compatibility is `unknown`, or fresh external evidence is missing, route to `document-specialist` researcher before critic.
+5. Run critic on the technology ADR. Only `approve` may proceed. `revise` returns to technology-strategist; `rewind` hard-rewinds to capability-map and invalidates downstream stack/provision artifacts.
+6. If the approved ADR introduces new technologies, blocks, surfaces, or missing skills, run `stack-provision` in Strict Gate mode before Stage 3.
+
+**HARD STOP:** Compatibility status is `blocked` for any critical path pair.
+
+**HARD STOP:** Critic verdict is not `approve` after allowed revise/rewind cycles.
+
+**HARD STOP:** `stack-provision` Strict Gate rejects required external skills and no safe local/bundled/generated fallback is approved.
+
+**Proceed:** ADR is approved and either existing provisioning covers the feature or new provisioning is verified.
 
 ---
 
@@ -177,6 +203,7 @@ This skill makes every gate non-skippable. Each stage's output becomes the next 
 - HARD STOPs always halt the pipeline. The lead reports the stop reason, the specific violated constraint (quoted verbatim where applicable), and the required remediation path. No stage advances past a HARD STOP.
 - Pipeline runs as a `/team` session for Stage 5 coordination using the active OMC team runtime (`/team` or CLI-first `omc team ...`). All other stages run as sequential single-agent invocations.
 - Stage handoffs written to `.omc/handoffs/product-pipeline-<stage>.md` (stages 1–7) for resumability. If the pipeline is re-invoked after a HARD STOP, it reads the handoff files to resume from the halted stage rather than restarting.
+- Stage 2.5 uses the Team pipeline strategy subphases for product-pipeline profile: `intake -> capability-map -> weighted-ranking -> compatibility-check -> research(optional) -> critic-gate -> provision-plan -> provision-verify`.
 - On cancellation (user runs `/cancel` or `OMC_SKIP_HOOKS` is set): shut down active workers through the current team runtime, mark the current stage as cancelled in its handoff file, and preserve all completed handoffs for resumption.
 - Respects `OMC_SKIP_HOOKS` for testing and CI — when set, the pipeline skips brand-steward auto-interview and proceeds with constitution-draft warnings only.
 - Can be linked with `/ralph` for retry-on-failure persistence: `/ralph /product-pipeline "feature description"` wraps the pipeline in Ralph's loop so HARD STOPs that resolve on retry are automatically retried without user intervention.
@@ -208,6 +235,7 @@ Final pipeline report aggregating outputs from all completed stages:
 |---|---|---|
 | 1. Foundation Check | Pass / Skipped (partial) / HARD STOP | `.omc/constitution.md` |
 | 2. Strategic Gate | APPROVED / APPROVED WITH RISKS / BLOCKED | `.omc/strategy/YYYY-MM-DD-<slug>.md` |
+| 2.5. Capability & Stack Preflight | Approved / Skipped / HARD STOP | `.omc/decisions/*.md` + `.omc/provisioned/**` |
 | 3. UX Research | Completed / Skipped (no data) | `.omc/research/YYYY-MM-DD-<topic>.md` |
 | 4. Macro Flow Design | Complete / HARD STOP | `.omc/ux/YYYY-MM-DD-<feature>.md` |
 | 5. Implementation | Complete | [list of files] |
@@ -237,6 +265,7 @@ Final pipeline report aggregating outputs from all completed stages:
 
 <Failure_Modes_To_Avoid>
 - **Skipping the strategic gate to save time.** This is the most common pipeline misuse. The strategic gate exists because anti-goal violations discovered post-implementation cost orders of magnitude more to reverse. Stage 2 is never optional.
+- **Skipping Stage 2.5 when a feature introduces a new product block.** Product analytics, auth, telemetry, payments, retention mechanics, generated media, 3D, realtime, and visual-creative systems all change skill and technology requirements. Letting designer/executor choose these ad hoc breaks the stack governance model.
 - **Continuing past a HARD STOP because the user pushes back.** A HARD STOP is not a recommendation. If the user wants to override it, they must update the constitution via brand-steward (for anti-goal conflicts) or resolve the specific issue (for accessibility/performance). The pipeline does not advance until the condition is cleared.
 - **Running designer before ux-architect.** Skipping Stage 4 to reach Stage 5 faster produces components with no flow spec, no state inventory, and no error/unauthorized states. These gaps become production bugs.
 - **Marking pipeline complete when accessibility-auditor reported CRITICAL findings.** CRITICAL findings block task completion for real users with disabilities. They are not "follow-up items" — they are HARD STOPs.
@@ -248,6 +277,7 @@ Final pipeline report aggregating outputs from all completed stages:
 <Integration_Notes>
 - Uses the current `/team` infrastructure under the hood for Stage 5 — prefer the active slash-command surface or CLI-first `omc team ...` runtime exposed by the environment, not deprecated MCP runtime calls.
 - Reads constitution status before every stage and passes constitution path to all agents that require it.
+- Uses `technology-strategist` and `stack-provision` only as conditional preflight. For a greenfield product or major pivot, run `/product-foundation` first so this pipeline starts with current market/brand/stack artifacts.
 - Refuses to proceed past Stage 1 if `status: draft` AND no brand-steward interaction has occurred this session. Check session state via `state_read` before auto-blocking.
 - Respects `OMC_SKIP_HOOKS` for testing/CI — set this env var to skip the brand-steward auto-interview check and run the pipeline with draft-constitution warnings only.
 - Handoff files at `.omc/handoffs/product-pipeline-stage{N}.md` are the resume mechanism. If the pipeline is interrupted (user cancels, process dies, HARD STOP), these files record exactly which stage completed and what its outputs were.

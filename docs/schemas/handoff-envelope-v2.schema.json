@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-claudecode.local/schemas/handoff-envelope-v2.schema.json",
+  "title": "OMC Handoff Envelope v2",
+  "type": "object",
+  "required": [
+    "run_id",
+    "agent_role",
+    "inputs_digest",
+    "assumptions",
+    "scorecard",
+    "compatibility_report",
+    "risk_register",
+    "decision",
+    "requested_next_agent",
+    "permissions",
+    "response_template"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "agent_role": { "type": "string", "minLength": 1 },
+    "inputs_digest": { "type": "string", "minLength": 1 },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scorecard": {
+      "type": "object",
+      "required": ["weights", "top2_gap"],
+      "properties": {
+        "weights": {
+          "type": "object",
+          "required": [
+            "product_fit",
+            "operability",
+            "ecosystem_maturity",
+            "performance",
+            "security_compliance",
+            "cost_efficiency"
+          ],
+          "properties": {
+            "product_fit": { "type": "number" },
+            "operability": { "type": "number" },
+            "ecosystem_maturity": { "type": "number" },
+            "performance": { "type": "number" },
+            "security_compliance": { "type": "number" },
+            "cost_efficiency": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "top2_gap": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "compatibility_report": {
+      "type": "object",
+      "required": ["overall_status", "blocked_pairs", "unknown_pairs"],
+      "properties": {
+        "overall_status": { "enum": ["compatible", "risky", "blocked", "unknown"] },
+        "blocked_pairs": { "type": "integer", "minimum": 0 },
+        "unknown_pairs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "risk_register": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "mitigation"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "enum": ["low", "medium", "high", "critical"] },
+          "mitigation": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["verdict", "rationale"],
+      "properties": {
+        "verdict": { "enum": ["approve", "revise", "rewind"] },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "requested_next_agent": { "type": "string", "minLength": 1 },
+    "permissions": {
+      "type": "object",
+      "required": ["read_scope", "write_scope"],
+      "properties": {
+        "read_scope": { "type": "string" },
+        "write_scope": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "response_template": {
+      "type": "object",
+      "required": ["status", "evidence", "confidence", "blocking_issues", "next_action"],
+      "properties": {
+        "status": { "enum": ["ok", "needs-research", "blocked"] },
+        "evidence": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "blocking_issues": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "next_action": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

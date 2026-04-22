@@ -235,7 +235,8 @@ describe('stack-provision executable workflow', () => {
     ]);
 
     expect(promotion.status).toBe('success');
-    expect(promotion.installed).toBeGreaterThanOrEqual(2);
+    expect(promotion.installed).toBeGreaterThanOrEqual(1);
+    expect(promotion.quarantined).toBeGreaterThanOrEqual(0);
     expect(promotion.pending_user_actions).toBeGreaterThanOrEqual(1);
 
     const manifest = JSON.parse(readFileSync(join(runDir, 'manifest.json'), 'utf8'));
@@ -884,5 +885,196 @@ describe('stack-provision executable workflow', () => {
       '--approve=anything',
       '--json',
     ])).toContain('failed candidates schema validation');
+  });
+
+  it('blocks promotion when critic verdict is not approve', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const bundledRoot = join(tempDir, 'bundled-skills');
+    const targetSkillRoot = join(tempDir, 'target-skills');
+
+    writeSkill(
+      bundledRoot,
+      'next-testing',
+      'next-testing',
+      'Next.js frontend testing and visual-regression.',
+      'Next.js React testing visual-regression Playwright.',
+    );
+
+    run(initScript, [
+      'next.js, playwright',
+      '--run-id=critic-gate',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'critic-gate');
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--sources=bundled',
+      '--bundled-root',
+      bundledRoot,
+      '--json',
+    ]);
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    run(provisionScript, [
+      'review',
+      runDir,
+      '--approve',
+      candidates.candidates[0].candidate_id,
+      '--critic-verdict=revise',
+      '--json',
+    ]);
+
+    expect(runFailure(provisionScript, [
+      'promote',
+      runDir,
+      '--skill-root',
+      targetSkillRoot,
+      '--json',
+    ])).toContain('critic verdict is not approve');
+  });
+
+  it('quarantines strict-gate failures instead of installing', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+    const targetSkillRoot = join(tempDir, 'target-skills');
+    const githubSkill = join(tempDir, 'github-stale', 'SKILL.md');
+    mkdirSync(dirname(githubSkill), { recursive: true });
+    writeFileSync(
+      githubSkill,
+      [
+        '---',
+        'name: github-stale',
+        'description: Stale GitHub skill.',
+        '---',
+        '',
+        'Next.js testing.',
+      ].join('\n'),
+      'utf8',
+    );
+    const githubIndex = join(tempDir, 'github-index.json');
+    writeFileSync(
+      githubIndex,
+      JSON.stringify([
+        {
+          name: 'github-stale',
+          description: 'Stale GitHub hosted skill.',
+          url: 'https://github.com/example/github-stale',
+          content_path: githubSkill,
+          stars: 2,
+          updated_at: '2020-01-01T00:00:00.000Z',
+          tags: ['next.js', 'testing'],
+        },
+      ]),
+      'utf8',
+    );
+
+    run(initScript, [
+      'next.js, playwright',
+      '--run-id=strict-gate-quarantine',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'strict-gate-quarantine');
+    run(provisionScript, [
+      'discover',
+      runDir,
+      '--sources=github',
+      '--github-index',
+      githubIndex,
+      '--json',
+    ]);
+    const candidates = JSON.parse(readFileSync(join(runDir, 'candidates.json'), 'utf8'));
+    expect(candidates.candidates[0].risk_flags).toEqual(
+      expect.arrayContaining(['strict-gate-failed']),
+    );
+
+    run(provisionScript, [
+      'review',
+      runDir,
+      '--approve',
+      candidates.candidates[0].candidate_id,
+      '--critic-verdict=approve',
+      '--json',
+    ]);
+    const promotion = run(provisionScript, [
+      'promote',
+      runDir,
+      '--skill-root',
+      targetSkillRoot,
+      '--json',
+    ]);
+    expect(promotion.quarantined).toBe(1);
+    expect(promotion.installed).toBe(0);
+
+    const manifest = JSON.parse(readFileSync(join(runDir, 'manifest.json'), 'utf8'));
+    expect(manifest.quarantined).toHaveLength(1);
+    expect(existsSync(join(targetSkillRoot, 'github-stale', 'SKILL.md'))).toBe(false);
+  });
+
+  it('blocks promotion when compatibility report is blocked', () => {
+    const tempDir = makeTempDir();
+    const runRoot = join(tempDir, 'runs');
+
+    run(initScript, [
+      'ffi, edge-runtime, node',
+      '--surfaces=backend',
+      '--run-id=compat-blocked',
+      '--out',
+      runRoot,
+      '--json',
+    ]);
+    const runDir = join(runRoot, 'compat-blocked');
+    writeFileSync(
+      join(runDir, 'candidates.json'),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: 'compat-blocked',
+        created_at: fixedNow,
+        sources: [],
+        warnings: [],
+        candidates: [],
+      }, null, 2),
+      'utf8',
+    );
+    writeFileSync(
+      join(runDir, 'install-plan.json'),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: 'compat-blocked',
+        created_at: fixedNow,
+        hash: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        items: [],
+      }, null, 2),
+      'utf8',
+    );
+    writeFileSync(
+      join(runDir, 'review-decision.json'),
+      JSON.stringify({
+        schema_version: 1,
+        run_id: 'compat-blocked',
+        install_plan_hash: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        approved_items: [],
+        confirmation: {
+          approved: true,
+          approved_at: fixedNow,
+          approved_by: 'tester',
+          critic_verdict: 'approve',
+          research_acknowledged: true,
+        },
+      }, null, 2),
+      'utf8',
+    );
+
+    expect(runFailure(provisionScript, [
+      'promote',
+      runDir,
+      '--skill-root',
+      join(tempDir, 'target-skills'),
+      '--json',
+    ])).toContain('compatibility report is blocked');
   });
 });

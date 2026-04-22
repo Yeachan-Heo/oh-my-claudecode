@@ -50,6 +50,24 @@
         },
         "additionalProperties": true
       }
+    },
+    "quarantined": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "slug", "source", "quarantine_path"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "slug": { "type": "string" },
+          "source": { "type": "string" },
+          "quarantine_path": { "type": "string" },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
     }
   },
   "additionalProperties": true

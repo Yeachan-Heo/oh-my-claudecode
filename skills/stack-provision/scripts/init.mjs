@@ -9,6 +9,14 @@ import { readJsonValidated, validateData, writeJson, writeJsonValidated } from '
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultConfigPath = resolve(scriptDir, '..', 'config', 'default-capability-packs.json');
 const defaultOutRoot = '.omc/provisioned/runs';
+const WEIGHTED_SCORE_WEIGHTS = Object.freeze({
+  product_fit: 0.30,
+  operability: 0.20,
+  ecosystem_maturity: 0.20,
+  performance: 0.15,
+  security_compliance: 0.10,
+  cost_efficiency: 0.05,
+});
 
 try {
   const result = run(process.argv.slice(2));
@@ -53,6 +61,15 @@ function run(argv) {
   const runId = options.runId || makeRunId(stack, surfaces, createdAt);
   const aspectsBySurface = buildAspectsBySurface(surfaces, options.aspects, options.creativeIntent, config);
   const capabilityPacks = collectCapabilityPacks(surfaces, config);
+  const weightedScorecard = buildWeightedScorecard(stack, surfaces, applicationBlocks, config);
+  const compatibilityReport = buildCompatibilityReport({
+    stack,
+    surfaces,
+    applicationBlocks,
+  });
+  const researchRequired =
+    compatibilityReport.summary.critical_unknown_pairs > 0 ||
+    (compatibilityReport.overall_status === 'unknown' && weightedScorecard.summary.top2_gap < 8);
   const contract = {
     schema_version: 1,
     run_id: runId,
@@ -67,10 +84,24 @@ function run(argv) {
     creative_intent: options.creativeIntent,
     aspects_by_surface: aspectsBySurface,
     capability_packs: capabilityPacks,
+    weighted_scorecard: weightedScorecard,
+    compatibility_report: compatibilityReport,
     policy: {
       human_gate_required: true,
       quarantine_required: true,
       allow_generated_install_by_default: false,
+      provisioning_mode: 'strict-gate',
+      critic_required: true,
+      hard_rewind: true,
+      max_rewinds: 2,
+      research_required: researchRequired,
+      provisioning_blocked: compatibilityReport.overall_status === 'blocked',
+      strict_gate: {
+        source_trust_min: 0.85,
+        freshness_days_max: 180,
+        checksum_required: true,
+        license_conflict_allowed: false,
+      },
       dry_run: options.dryRun,
       no_generate: options.noGenerate,
     },
@@ -434,6 +465,198 @@ function capabilityPacksForAspect(definition, aspect) {
   return mapped.length > 0 ? mapped : (definition.capability_packs || []);
 }
 
+function buildWeightedScorecard(stack, surfaces, applicationBlocks, config) {
+  const maturityLeaders = new Set([
+    'node', 'react', 'next.js', 'postgres', 'mysql', 'redis', 'supabase',
+    'playwright', 'flutter', 'dart', 'go', 'rust', 'kafka', 'sentry',
+  ].map(compact));
+  const securityLeaders = new Set([
+    'clerk', 'auth0', 'keycloak', 'supabase-auth', 'oidc', 'oauth', 'postgres',
+    'stripe', 'sentry', 'opentelemetry',
+  ].map(compact));
+  const costHeavy = new Set([
+    'datadog', 'newrelic', 'auth0', 'launchdarkly', 'optimizely', 'snowflake',
+  ].map(compact));
+  const perfLeaders = new Set([
+    'rust', 'go', 'redis', 'kafka', 'postgres', 'flutter', 'node', 'fastify',
+  ].map(compact));
+
+  const cellsByTech = new Map();
+  for (const [surface, definition] of Object.entries(config.surfaces || {})) {
+    for (const matcher of definition.tech_match || []) {
+      const key = compact(matcher);
+      if (!cellsByTech.has(key)) {
+        cellsByTech.set(key, new Set());
+      }
+      cellsByTech.get(key).add(surface);
+    }
+  }
+
+  const items = stack.map((technology) => {
+    const normalized = compact(technology);
+    const matchedSurfaces = surfaces.filter((surface) =>
+      technologyMatchesSurface(technology, config.surfaces[surface] || {}),
+    );
+    const discoveredSurfaceCount = [...cellsByTech.entries()]
+      .filter(([matcher]) => matcher === normalized || normalized.startsWith(matcher) || matcher.startsWith(normalized))
+      .reduce((count, [, set]) => count + set.size, 0);
+    const productFit = clampScore(55 + matchedSurfaces.length * 15 + (applicationBlocks.length > 0 ? 5 : 0));
+    const operability = clampScore(50 + discoveredSurfaceCount * 8);
+    const ecosystemMaturity = maturityLeaders.has(normalized)
+      ? 90
+      : clampScore(58 + discoveredSurfaceCount * 7);
+    const performance = perfLeaders.has(normalized)
+      ? 88
+      : clampScore(62 + Math.min(18, matchedSurfaces.length * 6));
+    const securityCompliance = securityLeaders.has(normalized)
+      ? 88
+      : clampScore(64 + (applicationBlocks.includes('auth') || applicationBlocks.includes('finance-transactions') ? 8 : 0));
+    const costEfficiency = costHeavy.has(normalized) ? 52 : 74;
+    const weightedScore = Number(((
+      productFit * WEIGHTED_SCORE_WEIGHTS.product_fit +
+      operability * WEIGHTED_SCORE_WEIGHTS.operability +
+      ecosystemMaturity * WEIGHTED_SCORE_WEIGHTS.ecosystem_maturity +
+      performance * WEIGHTED_SCORE_WEIGHTS.performance +
+      securityCompliance * WEIGHTED_SCORE_WEIGHTS.security_compliance +
+      costEfficiency * WEIGHTED_SCORE_WEIGHTS.cost_efficiency
+    )).toFixed(3));
+
+    return {
+      technology,
+      criteria: {
+        product_fit: productFit,
+        operability,
+        ecosystem_maturity: ecosystemMaturity,
+        performance,
+        security_compliance: securityCompliance,
+        cost_efficiency: costEfficiency,
+      },
+      matched_surfaces: matchedSurfaces,
+      weighted_score: weightedScore,
+    };
+  }).sort((a, b) => b.weighted_score - a.weighted_score || a.technology.localeCompare(b.technology));
+
+  const top2Gap = items.length >= 2
+    ? Number((items[0].weighted_score - items[1].weighted_score).toFixed(3))
+    : 100;
+
+  return {
+    schema_version: 1,
+    weights: WEIGHTED_SCORE_WEIGHTS,
+    items,
+    summary: {
+      top_technology: items[0]?.technology || null,
+      top_score: items[0]?.weighted_score || 0,
+      top2_gap: top2Gap,
+    },
+  };
+}
+
+function buildCompatibilityReport({ stack, surfaces, applicationBlocks }) {
+  const normalizedStack = new Set(stack.map(compact));
+  const hasAny = (values) => values.some((value) => normalizedStack.has(compact(value)));
+  const blocks = [];
+  if (applicationBlocks.includes('auth')) blocks.push('auth');
+  if (applicationBlocks.includes('product-analytics')) blocks.push('analytics');
+  if (hasAny(['telemetry', 'opentelemetry', 'sentry', 'datadog', 'newrelic'])) blocks.push('telemetry');
+  if (surfaces.some((surface) => ['frontend-engineering', 'frontend-product', 'visual-creative'].includes(surface))) {
+    blocks.push('frontend-core');
+  }
+  if (surfaces.some((surface) => ['backend', 'auth-identity', 'product-analytics', 'finance-transactions', 'data-ai', 'mobile'].includes(surface))) {
+    blocks.push('backend-core');
+  }
+  if (hasAny(['graphql', 'rest', 'queue', 'kafka', 'webhook', 'gql', 'ffi', 'foreign-function-interface', 'edge-runtime', 'cloudflare-workers', 'workerd'])) {
+    blocks.push('integration-layer');
+  }
+
+  const keyBlocks = unique(blocks);
+  const pairs = [];
+  for (let left = 0; left < keyBlocks.length; left += 1) {
+    for (let right = left + 1; right < keyBlocks.length; right += 1) {
+      const a = keyBlocks[left];
+      const b = keyBlocks[right];
+      const reasons = [];
+      const blockers = [];
+      let status = 'compatible';
+
+      const hasFfi = hasAny(['ffi', 'foreign-function-interface']);
+      const edgeRuntime = hasAny(['edge-runtime', 'cloudflare-workers', 'workerd', 'deno-deploy']);
+      if (hasFfi && edgeRuntime) {
+        status = 'blocked';
+        blockers.push('abi-ffi-runtime-conflict');
+        reasons.push('FFI/ABI integration is incompatible with edge sandbox runtimes.');
+      }
+
+      const mixedNativeStacks = hasAny(['react-native']) && hasAny(['flutter']);
+      if (status !== 'blocked' && mixedNativeStacks && (a === 'frontend-core' || b === 'frontend-core')) {
+        status = 'blocked';
+        blockers.push('runtime-toolchain-conflict');
+        reasons.push('React Native and Flutter together introduce conflicting native runtime/toolchain requirements.');
+      }
+
+      const missingTelemetry = !hasAny(['opentelemetry', 'sentry', 'datadog', 'newrelic']);
+      if (status === 'compatible' && ((a === 'telemetry' && b === 'backend-core') || (b === 'telemetry' && a === 'backend-core')) && missingTelemetry) {
+        status = 'unknown';
+        reasons.push('Telemetry block exists without a concrete telemetry stack decision.');
+      }
+
+      if (status === 'compatible' && ((a === 'auth' && b === 'analytics') || (a === 'analytics' && b === 'auth'))) {
+        status = 'risky';
+        reasons.push('Auth and analytics require explicit privacy-safe instrumentation and consent boundaries.');
+      }
+
+      if (status === 'compatible' && hasFfi && !hasAny(['rust', 'c', 'cpp', 'node'])) {
+        status = 'unknown';
+        reasons.push('FFI is present without explicit runtime/toolchain pairing evidence.');
+      }
+
+      pairs.push({
+        left: a,
+        right: b,
+        status,
+        reasons,
+        blockers,
+      });
+    }
+  }
+
+  const summary = {
+    total_pairs: pairs.length,
+    compatible_pairs: pairs.filter((pair) => pair.status === 'compatible').length,
+    risky_pairs: pairs.filter((pair) => pair.status === 'risky').length,
+    blocked_pairs: pairs.filter((pair) => pair.status === 'blocked').length,
+    unknown_pairs: pairs.filter((pair) => pair.status === 'unknown').length,
+    critical_unknown_pairs: pairs.filter((pair) =>
+      pair.status === 'unknown' && (
+        pair.left === 'auth' || pair.right === 'auth' ||
+        pair.left === 'backend-core' || pair.right === 'backend-core' ||
+        pair.left === 'integration-layer' || pair.right === 'integration-layer'
+      )
+    ).length,
+  };
+
+  let overallStatus = 'compatible';
+  if (summary.blocked_pairs > 0) {
+    overallStatus = 'blocked';
+  } else if (summary.unknown_pairs > 0) {
+    overallStatus = 'unknown';
+  } else if (summary.risky_pairs > 0) {
+    overallStatus = 'risky';
+  }
+
+  return {
+    schema_version: 1,
+    key_blocks: keyBlocks,
+    pairs,
+    summary,
+    overall_status: overallStatus,
+  };
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Number(value)));
+}
+
 function technologyMatchesSurface(technology, definition) {
   return (definition.tech_match || []).some((matcher) => {
     return technologyMatches(technology, matcher);
@@ -460,6 +683,9 @@ function buildOutput(outRoot, runId, contract, capabilityMatrix, reviewMarkdown)
   const absoluteOutRoot = resolve(outRoot);
   const runDir = join(absoluteOutRoot, runId);
   const provisionRoot = dirname(absoluteOutRoot);
+  const pipelineProfile = inferPipelineProfile(contract.surfaces || []);
+  const compatibilityStatus = normalizeCompatibilityStatus(contract.compatibility_report?.overall_status);
+  const confidence = Number((((contract.weighted_scorecard?.summary?.top_score || 0) / 100)).toFixed(3));
   const artifacts = {
     run_dir: runDir,
     contract: join(runDir, 'contract.json'),
@@ -473,6 +699,16 @@ function buildOutput(outRoot, runId, contract, capabilityMatrix, reviewMarkdown)
     run_id: runId,
     status: contract.policy.dry_run ? 'dry_run' : 'initialized',
     current_phase: 'contract',
+    pipeline_profile: pipelineProfile,
+    current_subphase: 'intake',
+    strategy_iteration: 1,
+    rewind_count: 0,
+    max_rewinds: contract.policy.max_rewinds ?? 2,
+    risk_level: riskLevelFromCompatibility(compatibilityStatus),
+    confidence,
+    research_required: contract.policy.research_required === true,
+    compatibility_status: compatibilityStatus,
+    provisioning_mode: contract.policy.provisioning_mode || 'strict-gate',
     created_at: contract.created_at,
     artifacts,
   };
@@ -490,6 +726,35 @@ function buildOutput(outRoot, runId, contract, capabilityMatrix, reviewMarkdown)
       updated_at: contract.created_at,
     },
   };
+}
+
+function inferPipelineProfile(surfaces) {
+  const normalized = new Set((surfaces || []).map((surface) => String(surface).toLowerCase()));
+  if (
+    normalized.has('frontend-engineering') ||
+    normalized.has('frontend-product') ||
+    normalized.has('visual-creative')
+  ) {
+    return 'product-pipeline';
+  }
+  if (normalized.has('backend') || normalized.has('auth-identity') || normalized.has('finance-transactions')) {
+    return 'backend-pipeline';
+  }
+  return 'default';
+}
+
+function normalizeCompatibilityStatus(value) {
+  if (value === 'blocked' || value === 'unknown' || value === 'risky' || value === 'compatible') {
+    return value;
+  }
+  return 'unknown';
+}
+
+function riskLevelFromCompatibility(status) {
+  if (status === 'blocked') return 'critical';
+  if (status === 'unknown') return 'high';
+  if (status === 'risky') return 'medium';
+  return 'low';
 }
 
 function writeRun(output) {
@@ -525,6 +790,16 @@ function buildReviewMarkdown(contract, capabilityMatrix, config) {
       return `| ${block} | ${surface} |`;
     })
     .join('\n') || '| none | none |';
+  const scoreRows = (contract.weighted_scorecard?.items || [])
+    .map((item) => {
+      return `| ${item.technology} | ${item.criteria.product_fit} | ${item.criteria.operability} | ${item.criteria.ecosystem_maturity} | ${item.criteria.performance} | ${item.criteria.security_compliance} | ${item.criteria.cost_efficiency} | ${item.weighted_score} |`;
+    })
+    .join('\n') || '| none | 0 | 0 | 0 | 0 | 0 | 0 | 0 |';
+  const compatibilityRows = (contract.compatibility_report?.pairs || [])
+    .map((pair) => {
+      return `| ${pair.left} | ${pair.right} | ${pair.status} | ${(pair.reasons || []).join('; ') || 'none'} |`;
+    })
+    .join('\n') || '| none | none | compatible | none |';
 
   const visualSection = contract.surfaces.includes('visual-creative')
     ? `
@@ -545,6 +820,9 @@ ${(config.surfaces['visual-creative'].required_context || []).map((item) => `- $
 - ADR path: ${contract.input.adr_path || 'none'}
 - Dry run: ${String(contract.policy.dry_run)}
 - Generated installs allowed by default: ${String(contract.policy.allow_generated_install_by_default)}
+- Provisioning mode: ${contract.policy.provisioning_mode}
+- Critic verdict required: ${String(contract.policy.critic_required)}
+- Research required before provisioning: ${String(contract.policy.research_required)}
 
 ## Stack
 
@@ -567,6 +845,26 @@ ${blockRows}
 | Pack | Agents | Skills | Optional external |
 | --- | --- | --- | --- |
 ${packRows}
+## Weighted Scorecard
+
+Weights: Product Fit 30%, Operability 20%, Ecosystem Maturity 20%, Performance 15%, Security/Compliance 10%, Cost 5%.
+
+| Technology | Product Fit | Operability | Ecosystem | Performance | Security | Cost | Weighted |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+${scoreRows}
+
+Top-2 score gap: ${contract.weighted_scorecard?.summary?.top2_gap ?? 'n/a'}
+
+## Compatibility Report
+
+Overall status: ${contract.compatibility_report?.overall_status || 'unknown'}
+
+| Left block | Right block | Status | Notes |
+| --- | --- | --- | --- |
+${compatibilityRows}
+
+Critical unknown pairs: ${contract.compatibility_report?.summary?.critical_unknown_pairs ?? 0}
+
 ${visualSection}
 ## Matrix Summary
 
@@ -582,7 +880,8 @@ ${visualSection}
 2. Score candidates by source, provenance, freshness, maintenance, coverage, and prompt-injection risk.
 3. Write candidates and generated drafts only under this run directory.
 4. Present the install plan for explicit human approval.
-5. Promote approved items and write manifest.json only after approval.
+5. Promote approved items and write manifest.json only after critic-approved review.
+6. Enforce strict gate before install: source trust >= 0.85, freshness <= 180 days, checksum valid, no license conflict.
 `;
 }
 

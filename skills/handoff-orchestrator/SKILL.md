@@ -7,7 +7,7 @@ level: 4
 
 # Handoff Orchestrator Skill
 
-Thin orchestrator that follows handoff-envelope chains produced by OMC agents. Reads the latest artifact's `<handoff>` YAML block, invokes `next_recommended[0]`, loops. Stops at end-of-chain, user input required, or halt.
+Thin orchestrator that follows handoff-envelope chains produced by OMC agents. Reads the latest artifact's `<handoff>` YAML block, invokes `next_recommended[0]`, loops. For stack strategy/provisioning chains, it also accepts schema-first handoff-envelope v2 payloads and routes by `requested_next_agent`. Stops at end-of-chain, user input required, malformed schema, or halt.
 
 Enables token-efficient pipelines: each agent writes envelope + artifact; orchestrator routes based on envelope; downstream agents read only envelope by default.
 
@@ -37,11 +37,12 @@ Enables token-efficient pipelines: each agent writes envelope + artifact; orches
 - `--dry-run` — show the chain that would execute; don't invoke.
 
 <Purpose>
-Automates agent-to-agent handoffs without requiring users to manually invoke each step. Reads `<handoff>` envelopes per the `docs/HANDOFF-ENVELOPE.md` standard, extracts `next_recommended`, invokes, continues. Preserves user control via interactive default (confirm between steps), with `--auto` for trusted chains.
+Automates agent-to-agent handoffs without requiring users to manually invoke each step. Reads `<handoff>` envelopes per the `docs/HANDOFF-ENVELOPE.md` standard, extracts `next_recommended`, invokes, continues. For v2 stack envelopes, validates required fields and routes by `requested_next_agent` plus `decision.verdict`. Preserves user control via interactive default (confirm between steps), with `--auto` for trusted chains.
 </Purpose>
 
 <Use_When>
 - Agent produced an envelope with `next_recommended` items and you want to follow the chain without manual invocation per step.
+- Technology Strategist, researcher, critic, or stack-provision produced a handoff-envelope v2 payload and you need deterministic routing through Strict Gate.
 - Running a workflow like ideate → critic → product-strategist → priority-engine where each step consumes the previous.
 - Resuming a halted pipeline after remediation (envelope's `halt.resume_from` guides re-entry).
 - Running scheduled agent chains unsupervised.
@@ -71,11 +72,19 @@ HARD STOP if no artifact with envelope is found.
 
 Read the target artifact. Locate `<handoff>` and `</handoff>` markers (last occurrence if multiple). YAML-parse the contents.
 
-Validate required fields: `schema_version`, `produced_by`, `produced_at`, `primary_artifact`, `next_recommended`. Missing required field → warn and halt with "malformed envelope" message.
+Detect envelope version:
+- v1 when `schema_version` exists.
+- v2 when `run_id`, `agent_role`, `inputs_digest`, `decision`, `requested_next_agent`, and `response_template` exist.
+
+For v1, validate required fields: `schema_version`, `produced_by`, `produced_at`, `primary_artifact`, `next_recommended`.
+
+For v2, validate required fields from `docs/schemas/handoff-envelope-v2.schema.json`: `run_id`, `agent_role`, `inputs_digest`, `assumptions`, `scorecard`, `compatibility_report`, `risk_register`, `decision`, `requested_next_agent`, `permissions`, and `response_template`.
+
+Missing required field or incompatible type → reject the handoff and request a corrected envelope before moving to the next stage. Do not infer missing stack decisions from prose.
 
 ## Phase 2 — Decision
 
-Look at envelope's `primary_artifact.status` + `next_recommended`:
+For v1, look at envelope's `primary_artifact.status` + `next_recommended`:
 
 - `status: complete | approved` AND `next_recommended: []` → chain end. Report terminal summary and exit.
 - `status: halted` → surface `halt.reason` + `halt.remediation`. Do NOT auto-invoke anything; user must remediate first.
@@ -84,6 +93,21 @@ Look at envelope's `primary_artifact.status` + `next_recommended`:
 - `next_recommended[0]` populated AND `required: false` → invoke only if `--include-optional` flag present.
 
 Apply `--stop-at` if set: if `next_recommended[0].agent == <stop-at>`, report "stopping before <agent>"; exit without invoking.
+
+For v2 stack envelopes, route as follows:
+
+| Condition | Route |
+|---|---|
+| `compatibility_report.overall_status == blocked` | halt; provisioning is forbidden |
+| `decision.verdict == rewind` and rewind limit not exceeded | invoke `technology-strategist` with capability-map rewind directive |
+| `decision.verdict == rewind` and rewind limit exceeded | invoke `/deep-interview` then stop for human decision |
+| `decision.verdict == revise` | invoke `technology-strategist` with critic findings |
+| `decision.verdict == approve` and `requested_next_agent == document-specialist` | invoke researcher for evidence gap |
+| `decision.verdict == approve` and `requested_next_agent == critic` | invoke critic gate |
+| `decision.verdict == approve` and `requested_next_agent == stack-provision` | invoke stack-provision only after critic verdict is approve |
+| `response_template.status == blocked` | halt and surface `blocking_issues` |
+
+For v2, `requested_next_agent` must be one of the registered OMC roles/skills. Unknown agent names are malformed handoff failures, not free-form suggestions.
 
 ## Phase 3 — User Confirmation (unless --auto)
 
@@ -120,6 +144,16 @@ If you produce a new artifact, append a <handoff> envelope per docs/HANDOFF-ENVE
 ```
 
 Wait for completion. Detect new artifact written.
+
+For v2 stack envelopes, pass the v2 payload verbatim and include:
+
+```text
+Schema-first handoff v2.
+Validate the envelope before acting.
+Respect permissions.read_scope and permissions.write_scope.
+Do not write source code unless your role explicitly allows it.
+Return status, evidence, confidence, blocking_issues, and next_action.
+```
 
 ## Phase 5 — Loop
 
@@ -168,10 +202,12 @@ Flags:
 - **Re-reading full artifact body when only envelope is needed.** The whole token-saving point is envelope-first; only pass full body to the downstream agent when their directive explicitly requires it (e.g., critic needs the plan).
 - **Silent handling of malformed envelopes.** If the YAML block exists but fails to parse, surface the error — don't guess.
 - **Skipping `requires_user_input` blocking items.** These exist because an agent genuinely needs a user decision; auto-routing past them corrupts downstream work.
+- **Treating malformed v2 envelopes as prose.** v2 exists to make stack routing deterministic. Reject malformed schema; do not recover by guessing.
+- **Calling stack-provision before critic approval.** Strict Gate requires `critic=approve`; a strategist recommendation alone is not sufficient.
 </Failure_Modes_To_Avoid>
 
 <Integration_Notes>
-- Consumes envelopes per `docs/HANDOFF-ENVELOPE.md` (schema_version: 1).
+- Consumes envelopes per `docs/HANDOFF-ENVELOPE.md` (`schema_version: 1`) and strategy/provisioning handoff-envelope v2 (`docs/schemas/handoff-envelope-v2.schema.json`).
 - Writes audit log to `.omc/handoffs/orchestrator/` for replayability.
 - Composable with `/oh-my-claudecode:loop` for periodic chain continuation (e.g., after a design-partner session completes, resume).
 - Pre-v4.16 agents don't emit envelopes; when chain reaches them, it terminates gracefully with "chain terminated" rather than errors.

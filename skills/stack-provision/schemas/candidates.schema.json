@@ -83,6 +83,23 @@
             },
             "additionalProperties": true
           },
+          "source_trust": { "type": "number", "minimum": 0, "maximum": 1 },
+          "freshness_days": { "type": ["integer", "null"], "minimum": 0 },
+          "checksum_valid": { "type": "boolean" },
+          "license_status": { "enum": ["no-conflict", "unknown", "conflict"] },
+          "provenance": { "type": "string" },
+          "strict_gate": {
+            "type": "object",
+            "properties": {
+              "install_allowed": { "type": "boolean" },
+              "reasons": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "metrics": { "type": "object" }
+            },
+            "additionalProperties": true
+          },
           "sha256": { "type": "string", "pattern": "^sha256:" },
           "score": { "type": "number" },
           "install": {

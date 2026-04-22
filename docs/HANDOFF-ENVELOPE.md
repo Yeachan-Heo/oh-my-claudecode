@@ -84,6 +84,53 @@ Every agent appends a single `<handoff>` YAML block at the end of its primary ar
 </handoff>
 ```
 
+## Handoff Envelope v2 (Schema-First Strategy/Provisioning)
+
+For stack-strategy and provisioning orchestration, prefer the v2 machine envelope below. This payload is intentionally flat and deterministic so orchestrators can reject malformed handoffs early. Put the v2 payload inside the same `<handoff>...</handoff>` markers so `handoff-orchestrator` can locate it; version detection is based on the v2 required fields, not `schema_version`.
+
+```yaml
+<handoff>
+run_id: <string>
+agent_role: <technology-strategist|document-specialist|critic|stack-provision|orchestrator>
+inputs_digest: <stable digest>
+assumptions:
+  - <assumption>
+scorecard:
+  weights:
+    product_fit: 0.30
+    operability: 0.20
+    ecosystem_maturity: 0.20
+    performance: 0.15
+    security_compliance: 0.10
+    cost_efficiency: 0.05
+  top2_gap: <number>
+compatibility_report:
+  overall_status: compatible|risky|blocked|unknown
+  blocked_pairs: <integer>
+  unknown_pairs: <integer>
+risk_register:
+  - id: <risk-id>
+    severity: low|medium|high|critical
+    mitigation: <text>
+decision:
+  verdict: approve|revise|rewind
+  rationale: <text>
+requested_next_agent: <agent name>
+permissions:
+  read_scope: <globs>
+  write_scope: <globs>
+response_template:
+  status: <ok|needs-research|blocked>
+  evidence: <brief pointers>
+  confidence: <0..1>
+  blocking_issues:
+    - <issue>
+  next_action: <single step>
+</handoff>
+```
+
+If any required field is missing or has incompatible type, the orchestrator must reject the handoff and request a corrected envelope before moving to the next stage.
+
 ## Rules
 
 ### MUST

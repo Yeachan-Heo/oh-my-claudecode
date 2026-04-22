@@ -50,6 +50,10 @@ describe('stack-provision init helper', () => {
     expect(result.contract.policy.human_gate_required).toBe(true);
     expect(result.contract.policy.quarantine_required).toBe(true);
     expect(result.contract.policy.allow_generated_install_by_default).toBe(false);
+    expect(result.contract.policy.provisioning_mode).toBe('strict-gate');
+    expect(result.contract.policy.critic_required).toBe(true);
+    expect(result.contract.weighted_scorecard.summary.top2_gap).toBeTypeOf('number');
+    expect(result.contract.compatibility_report.overall_status).toMatch(/compatible|risky|unknown|blocked/);
     expect(result.contract.stack).toEqual(
       expect.arrayContaining(['next.js', 'react', 'tailwind', 'framer-motion', 'three.js', 'supabase', 'postgres']),
     );
@@ -121,8 +125,13 @@ describe('stack-provision init helper', () => {
     )).toBe(true);
     expect(state.current_phase).toBe('contract');
     expect(state.status).toBe('initialized');
+    expect(state.current_subphase).toBe('intake');
+    expect(state.provisioning_mode).toBe('strict-gate');
+    expect(state.pipeline_profile).toBe('product-pipeline');
     expect(current.run_id).toBe('test-write');
     expect(review).toContain('## Visual-Creative Contract');
+    expect(review).toContain('## Weighted Scorecard');
+    expect(review).toContain('## Compatibility Report');
     expect(review).toContain('Human review gate: required');
     expect(result.artifacts.review).toBe(reviewPath);
   });

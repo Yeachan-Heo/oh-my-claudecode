@@ -167,6 +167,8 @@ export {
   isCommandAllowed,
   formatPermissionInstructions,
   getDefaultPermissions,
+  getRoleScopedPermissions,
+  getEffectivePermissions,
 } from './permissions.js';
 
 export type { WorkerPermissions } from './permissions.js';
