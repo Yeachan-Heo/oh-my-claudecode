@@ -52,6 +52,20 @@ export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
 } as const;
 
 /**
+ * MiniMax model IDs supported via the Anthropic-compatible API.
+ *
+ * Base URL: https://api.minimax.io/anthropic
+ * API key:  MINIMAX_API_KEY environment variable
+ */
+export const MINIMAX_MODELS = {
+  default: 'MiniMax-M2.7',
+  highspeed: 'MiniMax-M2.7-highspeed',
+} as const;
+
+/** Hostname suffix used to detect MiniMax API endpoints */
+const MINIMAX_HOST_PATTERN = /minimax\.io$/i;
+
+/**
  * Centralized Model ID Constants
  *
  * All default model IDs are defined here so they can be overridden
@@ -268,6 +282,46 @@ export function isVertexAI(): boolean {
 }
 
 /**
+ * Detect whether Claude Code is routing through MiniMax.
+ *
+ * MiniMax provides an Anthropic-compatible endpoint at
+ * https://api.minimax.io/anthropic, so users configure it by setting
+ * ANTHROPIC_BASE_URL and either MINIMAX_API_KEY or ANTHROPIC_API_KEY.
+ *
+ * Detection signals (any one is sufficient):
+ * - ANTHROPIC_BASE_URL contains "minimax.io"
+ * - CLAUDE_MODEL or ANTHROPIC_MODEL starts with "MiniMax-" (case-insensitive)
+ * - MINIMAX_BASE_URL is explicitly set
+ */
+export function isMiniMax(): boolean {
+  // Explicit base URL override pointing to MiniMax
+  const minimaxBaseUrl = process.env.MINIMAX_BASE_URL || '';
+  if (minimaxBaseUrl) {
+    return true;
+  }
+
+  // ANTHROPIC_BASE_URL points to a MiniMax endpoint
+  const anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (anthropicBaseUrl) {
+    try {
+      if (MINIMAX_HOST_PATTERN.test(new URL(anthropicBaseUrl).hostname)) {
+        return true;
+      }
+    } catch {
+      // Malformed URL — ignore; isNonClaudeProvider will handle it via SSRF guard
+    }
+  }
+
+  // Model ID explicitly identifies a MiniMax model
+  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  if (modelId && /^minimax-/i.test(modelId)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Detect whether OMC should avoid passing Claude-specific model tier
  * names (sonnet/opus/haiku) to the Agent tool.
  *
@@ -275,6 +329,7 @@ export function isVertexAI(): boolean {
  * - User explicitly set OMC_ROUTING_FORCE_INHERIT=true
  * - Running on AWS Bedrock — needs full Bedrock model IDs, not bare tier names
  * - Running on Google Vertex AI — needs full Vertex model paths
+ * - Running through MiniMax Anthropic-compatible API
  * - A non-Claude model ID is detected (CC Switch, LiteLLM, etc.)
  * - A custom ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
  */
@@ -291,6 +346,11 @@ export function isNonClaudeProvider(): boolean {
 
   // Google Vertex AI: Claude via GCP, needs full Vertex model paths
   if (isVertexAI()) {
+    return true;
+  }
+
+  // MiniMax Anthropic-compatible API
+  if (isMiniMax()) {
     return true;
   }
 
