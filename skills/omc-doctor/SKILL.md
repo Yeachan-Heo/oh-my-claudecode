@@ -180,10 +180,28 @@ node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=pro
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
-Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`:
+Fetch latest from GitHub, show a diff, and ask for confirmation before writing:
+
+1. Fetch the content:
 ```
 WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
 ```
+
+2. If a local `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` exists, read it and display a short summary of what will change (e.g., lines added/removed, version marker difference).
+
+3. Ask the user for confirmation before writing:
+```
+I fetched the latest CLAUDE.md from GitHub (OMC:VERSION:<fetched-version>).
+Your current file is at <local-version> (or missing).
+
+Shall I overwrite ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md with the fetched content?
+This will replace any local customizations outside the OMC:START/OMC:END block.
+```
+
+4. Only write the fetched content if the user explicitly confirms.
+
+> **Note:** The fetch targets the `main` branch tip and is unauthenticated. If you need a specific version, you can pin the URL to a commit SHA:
+> `https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/<SHA>/docs/CLAUDE.md`
 
 ### Fix: Legacy Curl-Installed Content
 
