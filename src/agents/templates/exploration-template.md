@@ -1,3 +1,9 @@
+---
+name: exploration-template
+description: Template for delegating exploration, research, or search tasks to specialized agents
+model: haiku
+---
+
 # Exploration Task Template
 
 Use this template when delegating exploration, research, or search tasks.
