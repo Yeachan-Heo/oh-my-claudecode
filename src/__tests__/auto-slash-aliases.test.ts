@@ -299,7 +299,7 @@ Deep interview body`
       .toContain('Skill("oh-my-claudecode:autoresearch")');
   });
 
-  it('keeps /ccg advisor asks on omc ask inside an active Claude session', async () => {
+  it('routes /ccg advisor asks through the plugin bridge inside an active Claude session when CLAUDE_PLUGIN_ROOT is set', async () => {
     process.env.CLAUDE_PLUGIN_ROOT = '/plugin-root';
     process.env.PATH = '';
     process.env.CLAUDECODE = '1';
@@ -313,9 +313,9 @@ Deep interview body`
     });
 
     expect(result.success).toBe(true);
-    expect(result.replacementText).toContain('`omc ask codex "<codex prompt>"`');
-    expect(result.replacementText).toContain('`omc ask gemini "<gemini prompt>"`');
-    expect(result.replacementText).not.toContain('node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask codex');
-    expect(result.replacementText).not.toContain('node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask gemini');
+    expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask codex "<codex prompt>"`');
+    expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask gemini "<gemini prompt>"`');
+    expect(result.replacementText).not.toContain('`omc ask codex "<codex prompt>"`');
+    expect(result.replacementText).not.toContain('`omc ask gemini "<gemini prompt>"`');
   });
 });

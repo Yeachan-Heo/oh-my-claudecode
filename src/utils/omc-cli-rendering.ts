@@ -17,14 +17,6 @@ function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
   return result.status === 0;
 }
 
-function isClaudeSession(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(
-    env.CLAUDECODE?.trim()
-    || env.CLAUDE_SESSION_ID?.trim()
-    || env.CLAUDECODE_SESSION_ID?.trim(),
-  );
-}
-
 export function resolveOmcCliPrefix(options: OmcCliRenderOptions = {}): string {
   const env = options.env ?? process.env;
   const omcAvailable = options.omcAvailable ?? commandExists(OMC_CLI_BINARY, env);
@@ -44,15 +36,7 @@ function resolveInvocationPrefix(
   commandSuffix: string,
   options: OmcCliRenderOptions = {},
 ): string {
-  const env = options.env ?? process.env;
-  const normalizedSuffix = commandSuffix.trim();
-
-  // Ask flows are intentionally safe inside Claude Code and must not be
-  // rewritten to the bridge binary, which can re-enter the launch guard.
-  if (/^ask(?:\s|$)/.test(normalizedSuffix) && isClaudeSession(env)) {
-    return OMC_CLI_BINARY;
-  }
-
+  void commandSuffix;
   return resolveOmcCliPrefix(options);
 }
 
