@@ -92,7 +92,29 @@ Do you have a GitHub Personal Access Token?
 - Enter your token, or type 'skip' to configure later
 ```
 
-## Step 3: Add MCP Servers Using CLI
+## Step 3: Confirm Before Installing
+
+Before running `npx -y`, show the user what will be downloaded and executed:
+
+```
+I'm about to run the following commands to configure your MCP servers:
+
+  claude mcp add context7 -- npx -y @upstash/context7-mcp
+  (downloads and runs @upstash/context7-mcp at latest published version)
+
+  claude mcp add exa -- npx -y exa-mcp-server
+  (downloads and runs exa-mcp-server at latest published version)
+
+  claude mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem
+  (downloads and runs @modelcontextprotocol/server-filesystem at latest published version)
+
+npx -y will execute the latest version of these packages without further prompts.
+Shall I proceed?
+```
+
+Wait for explicit user confirmation before continuing. If the user declines, explain they can pin a specific version using `npx -y <package>@<version>` once they have verified the desired version at https://www.npmjs.com.
+
+## Step 4: Add MCP Servers Using CLI
 
 Use the `claude mcp add` command to configure each MCP server. The CLI automatically handles settings.json updates and merging.
 
@@ -125,7 +147,7 @@ claude mcp add --transport http github https://api.githubcopilot.com/mcp/
 
 > Note: Docker option requires Docker installed. HTTP option is simpler but may have different capabilities.
 
-## Step 4: Verify Installation
+## Step 5: Verify Installation
 
 After configuration, verify the MCP servers are properly set up:
 
@@ -136,7 +158,7 @@ claude mcp list
 
 This will display all configured MCP servers and their status.
 
-## Step 5: Show Completion Message
+## Step 6: Show Completion Message
 
 ```
 MCP Server Configuration Complete!
